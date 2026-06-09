@@ -14,6 +14,8 @@ import (
 	"github.com/ilijad1/simple-agents/internal/config"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/gateway"
+	"github.com/ilijad1/simple-agents/internal/reminder"
+	"github.com/ilijad1/simple-agents/internal/scheduler"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/ilijad1/simple-agents/web"
 	"github.com/urfave/cli/v3"
@@ -113,6 +115,13 @@ func serveCmd() *cli.Command {
 				}
 			}()
 			defer gwManager.StopAll()
+
+			// Start scheduler and reminder service.
+			sched := scheduler.New(database, runner)
+			go sched.Run(ctx)
+
+			reminderSvc := reminder.New(database, gwManager)
+			go reminderSvc.Run(ctx)
 
 			srv, err := web.NewServer(cfg, database, gwManager, runner)
 			if err != nil {

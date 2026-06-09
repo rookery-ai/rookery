@@ -1,0 +1,69 @@
+// Package reminder polls for due reminders and delivers them via the gateway.
+package reminder
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"time"
+
+	"github.com/ilijad1/simple-agents/internal/db"
+)
+
+const pollInterval = 60 * time.Second
+
+// Sender delivers a message to a user on their connected platform.
+type Sender interface {
+	// SendToUser looks up the user's connected platform and sends the message.
+	// It picks the first active platform gateway for the user.
+	SendToUser(userID, text string) error
+}
+
+// Service polls for due reminders and sends them.
+type Service struct {
+	db     *db.DB
+	sender Sender
+}
+
+// New creates a Service.
+func New(database *db.DB, sender Sender) *Service {
+	return &Service{db: database, sender: sender}
+}
+
+// Run starts the polling loop and blocks until ctx is cancelled.
+func (s *Service) Run(ctx context.Context) {
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	slog.Info("reminder service: started")
+
+	s.tick()
+
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("reminder service: stopped")
+			return
+		case <-ticker.C:
+			s.tick()
+		}
+	}
+}
+
+func (s *Service) tick() {
+	reminders, err := s.db.ListDueReminders(time.Now())
+	if err != nil {
+		slog.Error("reminder: list due", "err", err)
+		return
+	}
+
+	for _, r := range reminders {
+		if err := s.sender.SendToUser(r.UserID, fmt.Sprintf("Reminder: %s", r.Message)); err != nil {
+			slog.Error("reminder: send failed", "reminder_id", r.ID, "user_id", r.UserID, "err", err)
+			continue
+		}
+		if err := s.db.MarkReminderSent(r.ID); err != nil {
+			slog.Error("reminder: mark sent failed", "reminder_id", r.ID, "err", err)
+		}
+	}
+}

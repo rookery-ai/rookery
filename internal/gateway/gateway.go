@@ -127,6 +127,23 @@ func (m *GatewayManager) Send(platform, userID, platformUserID, text string) err
 	return gw.Send(platformUserID, text)
 }
 
+// SendToUser looks up the user's linked platform identity and sends a message.
+// It tries all known platforms in order; the first successful send wins.
+// Satisfies the reminder.Sender interface.
+func (m *GatewayManager) SendToUser(userID, text string) error {
+	// Find all platform identities for this user.
+	identities, err := m.db.ListPlatformIdentities(userID, "")
+	if err != nil || len(identities) == 0 {
+		return fmt.Errorf("no platform identity for user %s", userID)
+	}
+	for _, identity := range identities {
+		if err := m.Send(identity.Platform, userID, identity.PlatformUserID, text); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("failed to deliver message to user %s on any platform", userID)
+}
+
 // ─── Internal ─────────────────────────────────────────────────────────────────
 
 func (m *GatewayManager) start(ctx context.Context, conn *db.PlatformConnection) error {
