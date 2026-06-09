@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/ilijad1/simple-agents/internal/auth"
+	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/config"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/gateway"
@@ -76,7 +77,20 @@ func serveCmd() *cli.Command {
 				return fmt.Errorf("system key: %w", err)
 			}
 
-			router := gateway.NewRouter(database, nil, nil)
+			homesDir := filepath.Join(cfg.Data.Dir, "claude-homes")
+			coderSvc := coder.New(cfg.Coder.ClaudeBin, cfg.Coder.Timeout, homesDir)
+
+			textHandler := func(ctx context.Context, userID, text string, send func(string)) error {
+				result, err := coderSvc.Chat(ctx, userID, "", text)
+				if err != nil {
+					send("Sorry, I ran into an error: " + err.Error())
+					return nil
+				}
+				send(result.Text)
+				return nil
+			}
+
+			router := gateway.NewRouter(database, textHandler, nil)
 			gwManager := gateway.New(database, sysKey, router)
 
 			go func() {
