@@ -69,9 +69,9 @@ func (g *TelegramGateway) Send(platformUserID, text string) error {
 		return fmt.Errorf("invalid telegram chat id %q: %w", platformUserID, err)
 	}
 	chat := &telebot.Chat{ID: chatID}
-	_, err = g.bot.Send(chat, text, telebot.ModeMarkdown)
+	_, err = g.bot.Send(chat, text, telebot.ModeMarkdownV2)
 	if err != nil {
-		// Fall back to plain text if Markdown parsing fails.
+		// Fall back to plain text if MarkdownV2 parsing fails.
 		_, err = g.bot.Send(chat, text)
 	}
 	return err

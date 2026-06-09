@@ -177,7 +177,23 @@ func (m *GatewayManager) stop(userID, platform string) {
 }
 
 // dispatch is called by adapters when a message arrives.
+// It resolves the platform identity and enforces that only the linked user
+// can interact with the bot. Unlinked senders may only use /start.
 func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
+	identity, err := m.db.GetPlatformIdentity(msg.Platform, msg.PlatformUserID)
+	if err != nil {
+		// Sender is not linked. Only /start is permitted.
+		cmd, _ := ParseCommand(msg.Text)
+		if cmd != "start" {
+			_ = m.Send(msg.Platform, msg.UserID, msg.PlatformUserID,
+				"This is a private bot. Send /start to link your account.")
+			return
+		}
+		// For /start, keep msg.UserID = ownerUserID so the router can create the identity.
+	} else {
+		msg.UserID = identity.UserID
+	}
+
 	send := func(text string) {
 		if err := m.Send(msg.Platform, msg.UserID, msg.PlatformUserID, text); err != nil {
 			fmt.Printf("gateway: send error: %v\n", err)

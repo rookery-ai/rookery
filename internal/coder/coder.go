@@ -57,17 +57,13 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 
 	start := time.Now()
 
-	// --output-format json gives us a structured response we can parse.
-	// --max-turns 1 prevents multi-turn loops in non-interactive mode.
-	// --no-sandbox because we run the coder in a normal process; firejail
-	//   wraps the Python execution stage, not code generation.
+	// --output-format json gives structured output with is_error flag.
 	cmd := exec.CommandContext(ctx, c.bin,
 		"-p", prompt,
 		"--output-format", "json",
-		"--max-turns", "1",
-		"--no-sandbox",
 	)
-	cmd.Env = append(os.Environ(), "HOME="+homeDir)
+	// Do not override HOME — the subprocess uses the real ~/.claude for auth.
+	// Per-user HOME dirs are preserved as workdirs for context isolation.
 	cmd.Dir = homeDir
 
 	var stdout, stderr bytes.Buffer
@@ -81,10 +77,12 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 		return nil, fmt.Errorf("claude exited with error: %w\nstderr: %s", err, stderr.String())
 	}
 
-	text, err := extractText(stdout.Bytes())
+	text, isError, err := extractText(stdout.Bytes())
 	if err != nil {
 		// Fall back to raw stdout if JSON parsing fails.
 		text = strings.TrimSpace(stdout.String())
+	} else if isError {
+		return nil, fmt.Errorf("claude error: %s", text)
 	}
 
 	return &Result{Text: text, Duration: time.Since(start)}, nil
@@ -135,8 +133,8 @@ func (c *Coder) ensureUserHome(userID string) (string, error) {
 type claudeJSONResponse struct {
 	Type    string `json:"type"`
 	Subtype string `json:"subtype"`
+	IsError bool   `json:"is_error"`
 	Result  string `json:"result"`
-	// assistant messages are nested under messages
 	Messages []struct {
 		Role    string `json:"role"`
 		Content []struct {
@@ -146,31 +144,32 @@ type claudeJSONResponse struct {
 	} `json:"messages"`
 }
 
-func extractText(data []byte) (string, error) {
-	// claude --output-format json can return a single object or newline-delimited JSON.
-	// Try to find the last assistant message.
+// extractText parses claude's JSON output and returns (text, isError, err).
+// isError is true when the JSON contains is_error:true (e.g. auth failure).
+func extractText(data []byte) (text string, isError bool, err error) {
 	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
 
 	var lastText string
+	var lastIsError bool
 	for _, line := range lines {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
 			continue
 		}
 		var resp claudeJSONResponse
-		if err := json.Unmarshal(line, &resp); err != nil {
+		if json.Unmarshal(line, &resp) != nil {
 			continue
 		}
-		// result type with a direct result field (non-streaming)
 		if resp.Result != "" {
 			lastText = resp.Result
+			lastIsError = resp.IsError
 		}
-		// streaming: look in messages
 		for _, msg := range resp.Messages {
 			if msg.Role == "assistant" {
 				for _, part := range msg.Content {
 					if part.Type == "text" && part.Text != "" {
 						lastText = part.Text
+						lastIsError = false
 					}
 				}
 			}
@@ -178,9 +177,9 @@ func extractText(data []byte) (string, error) {
 	}
 
 	if lastText == "" {
-		return "", fmt.Errorf("no assistant text found in response")
+		return "", false, fmt.Errorf("no assistant text found in response")
 	}
-	return strings.TrimSpace(lastText), nil
+	return strings.TrimSpace(lastText), lastIsError, nil
 }
 
 // safeID strips characters that are unsafe in directory names.
