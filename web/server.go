@@ -15,6 +15,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/config"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
@@ -23,11 +24,12 @@ const sessionName = "sa_session"
 
 // Server is the HTTP server for the Simple Agents web UI.
 type Server struct {
-	echo    *echo.Echo
-	cfg     *config.Config
-	db      *db.DB
-	store   *sessions.CookieStore
-	audit   *audit.Writer
+	echo      *echo.Echo
+	cfg       *config.Config
+	db        *db.DB
+	store     *sessions.CookieStore
+	audit     *audit.Writer
+	systemKey []byte // 32-byte key for encrypting master passwords at rest
 }
 
 // NewServer wires up all routes and middleware.
@@ -46,12 +48,18 @@ func NewServer(cfg *config.Config, database *db.DB) (*Server, error) {
 		SameSite: http.SameSiteLaxMode,
 	}
 
+	sysKey, err := secrets.SystemKeyFromEnv()
+	if err != nil {
+		return nil, fmt.Errorf("system key: %w", err)
+	}
+
 	s := &Server{
-		echo:  echo.New(),
-		cfg:   cfg,
-		db:    database,
-		store: store,
-		audit: audit.New(database),
+		echo:      echo.New(),
+		cfg:       cfg,
+		db:        database,
+		store:     store,
+		audit:     audit.New(database),
+		systemKey: sysKey,
 	}
 
 	s.echo.HideBanner = true

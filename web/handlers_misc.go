@@ -1,11 +1,13 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
 )
 
@@ -148,8 +150,65 @@ func (s *Server) handleSaveSettings(c echo.Context) error {
 }
 
 func (s *Server) handleChangeMasterPassword(c echo.Context) error {
-	// Full implementation in Phase 2 (re-encrypt all secrets with new key).
+	u := c.Get("user").(*db.User)
+	oldPw := c.FormValue("old_master_password")
+	newPw := c.FormValue("new_master_password")
+	confirm := c.FormValue("confirm")
+
+	renderErr := func(msg string) error {
+		p := s.page(c, "Settings")
+		p.Error = msg
+		return c.Render(http.StatusBadRequest, "dashboard/settings.html", p)
+	}
+
+	if oldPw == "" || newPw == "" {
+		return renderErr("Old and new master passwords are required")
+	}
+	if len(newPw) < 8 {
+		return renderErr("New master password must be at least 8 characters")
+	}
+	if newPw != confirm {
+		return renderErr("New passwords do not match")
+	}
+	if u.SecretsSalt == "" {
+		return renderErr("Account setup not complete")
+	}
+
+	// Verify old password by attempting to decrypt an existing secret.
+	// If there are no secrets, trust the provided old password to avoid lockout.
+	ctx := context.Background()
+	names, _ := s.db.ListSecretNames(u.ID)
+	if len(names) > 0 {
+		oldSvc := secrets.New(s.db, u.ID, oldPw, u.SecretsSalt)
+		if _, err := oldSvc.Get(ctx, names[0]); err != nil {
+			return renderErr("Old master password is incorrect")
+		}
+	}
+
+	// Re-encrypt all secrets with the new key (same salt, new password → new derived key).
+	oldSvc := secrets.New(s.db, u.ID, oldPw, u.SecretsSalt)
+	newSvc := secrets.New(s.db, u.ID, newPw, u.SecretsSalt)
+	for _, name := range names {
+		val, err := oldSvc.Get(ctx, name)
+		if err != nil {
+			return renderErr("Failed to re-encrypt secrets: " + err.Error())
+		}
+		if err := newSvc.Set(ctx, name, val); err != nil {
+			return renderErr("Failed to re-encrypt secrets: " + err.Error())
+		}
+	}
+
+	// Update encrypted master password stored for scheduler.
+	encMasterPw, err := secrets.EncryptMasterPassword(newPw, s.systemKey)
+	if err != nil {
+		return err
+	}
+	if err := s.db.UpdateUserSetup(u.ID, encMasterPw, u.SecretsSalt); err != nil {
+		return err
+	}
+
+	s.audit.Log(u.ID, "change_master_password", "user:"+u.ID, "", c.RealIP())
 	p := s.page(c, "Settings")
-	p.Success = "Master password change will be available after secrets service integration"
+	p.Success = "Master password changed successfully"
 	return c.Render(http.StatusOK, "dashboard/settings.html", p)
 }

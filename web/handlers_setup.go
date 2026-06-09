@@ -1,11 +1,11 @@
 package web
 
 import (
-	"fmt"
 	"net/http"
 
 	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
 )
 
@@ -67,8 +67,8 @@ func (s *Server) handleSetupMasterPassword(c echo.Context, u *db.User) error {
 		return err
 	}
 
-	// Encrypt master password with system key for cron usage
-	encMasterPw, err := encryptMasterPassword(masterPw, salt)
+	// Encrypt master password with system key for cron-triggered agent runs.
+	encMasterPw, err := secrets.EncryptMasterPassword(masterPw, s.systemKey)
 	if err != nil {
 		return err
 	}
@@ -94,13 +94,3 @@ func setupStep(u *db.User) int {
 	return 3
 }
 
-// encryptMasterPassword is a lightweight wrapper; the real secrets service
-// handles this fully — this is just for the setup flow before secrets.Service exists.
-// We store it using a simple scheme: argon2id_derive(salt, systemKey) → AES-GCM(masterPw).
-// The actual implementation delegates to internal/secrets.
-func encryptMasterPassword(masterPw, salt string) (string, error) {
-	// Placeholder: return a marker that secrets.Service will re-encrypt properly.
-	// Real encryption is handled in Phase 2 (secrets service).
-	// During Phase 1, we store a bcrypt hash as a placeholder.
-	return fmt.Sprintf("__pending__%s", salt), nil
-}

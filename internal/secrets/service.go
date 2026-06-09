@@ -1,0 +1,274 @@
+// Package secrets provides per-user AES-256-GCM encrypted secret storage.
+// Key derivation uses Argon2id with a per-user salt stored in the users table.
+//
+// SECURITY INVARIANT: Proxy() resolves ${NAME} placeholders in-memory only.
+// Resolved values are NEVER written to disk, logs, or the DB.
+// Coder.Generate() must NEVER call Proxy() — only AgentRunner.Run() may do so.
+package secrets
+
+import (
+	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"os"
+	"regexp"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/ilijad1/simple-agents/internal/db"
+	"golang.org/x/crypto/argon2"
+)
+
+var ErrNotFound = db.ErrNotFound
+var ErrWrongPassword = errors.New("wrong master password")
+
+// argon2id parameters — tuned for interactive login latency (~100ms on modern hardware).
+const (
+	argonTime    = 3
+	argonMemory  = 64 * 1024 // 64 MB
+	argonThreads = 4
+	argonKeyLen  = 32 // 256-bit AES key
+)
+
+// placeholderRe matches ${SECRET_NAME} in agent code.
+var placeholderRe = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
+
+// Service manages per-user encrypted secrets.
+type Service struct {
+	db          *db.DB
+	userID      string
+	masterPw    string // plaintext master password (held in-memory only during operation)
+	salt        string // hex-encoded per-user Argon2id salt from users table
+	systemKey   []byte // 32-byte system key for encrypting master password at rest
+}
+
+// New creates a Service for a user with their plaintext master password.
+// The master password is used to derive the AES key for secret encryption.
+func New(database *db.DB, userID, masterPw, salt string) *Service {
+	return &Service{
+		db:       database,
+		userID:   userID,
+		masterPw: masterPw,
+		salt:     salt,
+	}
+}
+
+// WithSystemKey sets the system-wide key used to encrypt master passwords.
+// Call this before EncryptMasterPassword / DecryptMasterPassword.
+func (s *Service) WithSystemKey(key []byte) *Service {
+	s.systemKey = key
+	return s
+}
+
+// Set encrypts and persists a named secret for the user.
+func (s *Service) Set(ctx context.Context, name, value string) error {
+	key, err := s.deriveKey()
+	if err != nil {
+		return err
+	}
+
+	ciphertext, nonce, err := aesGCMEncrypt(key, []byte(value))
+	if err != nil {
+		return err
+	}
+
+	return s.db.UpsertSecret(&db.Secret{
+		ID:         uuid.New().String(),
+		UserID:     s.userID,
+		Name:       name,
+		Ciphertext: base64.StdEncoding.EncodeToString(ciphertext),
+		Nonce:      base64.StdEncoding.EncodeToString(nonce),
+	})
+}
+
+// Get decrypts and returns a named secret. Returns ErrNotFound if absent,
+// ErrWrongPassword if the master password is incorrect.
+func (s *Service) Get(ctx context.Context, name string) (string, error) {
+	row, err := s.db.GetSecret(s.userID, name)
+	if err != nil {
+		return "", err
+	}
+
+	key, err := s.deriveKey()
+	if err != nil {
+		return "", err
+	}
+
+	ciphertext, err := base64.StdEncoding.DecodeString(row.Ciphertext)
+	if err != nil {
+		return "", fmt.Errorf("decode ciphertext: %w", err)
+	}
+	nonce, err := base64.StdEncoding.DecodeString(row.Nonce)
+	if err != nil {
+		return "", fmt.Errorf("decode nonce: %w", err)
+	}
+
+	plaintext, err := aesGCMDecrypt(key, ciphertext, nonce)
+	if err != nil {
+		return "", ErrWrongPassword
+	}
+	return string(plaintext), nil
+}
+
+// List returns all secret names for the user. Values are never returned.
+func (s *Service) List(ctx context.Context) ([]string, error) {
+	return s.db.ListSecretNames(s.userID)
+}
+
+// Delete removes a named secret. Returns ErrNotFound if absent.
+func (s *Service) Delete(ctx context.Context, name string) error {
+	return s.db.DeleteSecret(s.userID, name)
+}
+
+// Proxy resolves ${NAME} placeholders in text using in-memory decrypted secret values.
+// The returned string MUST NOT be logged, stored, or sent to any external service.
+// Only AgentRunner.Run() should call this function.
+func (s *Service) Proxy(ctx context.Context, text string) (string, error) {
+	// Collect all unique placeholder names first to avoid redundant DB calls.
+	names := make(map[string]struct{})
+	for _, m := range placeholderRe.FindAllStringSubmatch(text, -1) {
+		names[m[1]] = struct{}{}
+	}
+	if len(names) == 0 {
+		return text, nil
+	}
+
+	// Resolve each name exactly once.
+	resolved := make(map[string]string, len(names))
+	for name := range names {
+		val, err := s.Get(ctx, name)
+		if errors.Is(err, ErrNotFound) {
+			// Leave unresolvable placeholders as-is rather than failing the whole run.
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("resolve secret %s: %w", name, err)
+		}
+		resolved[name] = val
+	}
+
+	// Replace placeholders — strings.ReplaceAll in a loop to avoid regex overhead.
+	result := text
+	for name, val := range resolved {
+		result = strings.ReplaceAll(result, "${"+name+"}", val)
+	}
+	return result, nil
+}
+
+// EncryptMasterPassword encrypts the user's master password using the system key
+// so it can be stored at rest and used for cron-triggered agent runs.
+// Returns a base64-encoded "nonce||ciphertext" string.
+func EncryptMasterPassword(masterPw string, systemKey []byte) (string, error) {
+	if len(systemKey) != 32 {
+		return "", fmt.Errorf("system key must be 32 bytes, got %d", len(systemKey))
+	}
+	ciphertext, nonce, err := aesGCMEncrypt(systemKey, []byte(masterPw))
+	if err != nil {
+		return "", err
+	}
+	combined := append(nonce, ciphertext...)
+	return base64.StdEncoding.EncodeToString(combined), nil
+}
+
+// DecryptMasterPassword decrypts the stored encrypted master password using the system key.
+func DecryptMasterPassword(encrypted string, systemKey []byte) (string, error) {
+	if len(systemKey) != 32 {
+		return "", fmt.Errorf("system key must be 32 bytes, got %d", len(systemKey))
+	}
+	combined, err := base64.StdEncoding.DecodeString(encrypted)
+	if err != nil {
+		return "", fmt.Errorf("decode encrypted master pw: %w", err)
+	}
+	if len(combined) < 12 {
+		return "", fmt.Errorf("encrypted master pw too short")
+	}
+	nonce := combined[:12]
+	ciphertext := combined[12:]
+	plaintext, err := aesGCMDecrypt(systemKey, ciphertext, nonce)
+	if err != nil {
+		return "", fmt.Errorf("decrypt master pw: %w", err)
+	}
+	return string(plaintext), nil
+}
+
+// SystemKeyFromEnv reads the system key from SA_SYSTEM_KEY env var (hex-encoded 32 bytes).
+// If not set, derives a fallback key from the hostname (DEV ONLY — not safe for production).
+func SystemKeyFromEnv() ([]byte, error) {
+	hex64 := os.Getenv("SA_SYSTEM_KEY")
+	if hex64 != "" {
+		key, err := hex.DecodeString(hex64)
+		if err != nil || len(key) != 32 {
+			return nil, fmt.Errorf("SA_SYSTEM_KEY must be 64 hex chars (32 bytes), got %d chars", len(hex64))
+		}
+		return key, nil
+	}
+	// Fallback: derive from hostname — only acceptable in development.
+	host, _ := os.Hostname()
+	key := argon2.IDKey([]byte(host), []byte("simple-agents-dev-key"), 1, 64*1024, 4, 32)
+	return key, nil
+}
+
+// NewGenerateSalt creates a new random 16-byte hex-encoded salt.
+func NewGenerateSalt() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+// ─── Internal ─────────────────────────────────────────────────────────────────
+
+// deriveKey derives a 32-byte AES key from the master password and salt using Argon2id.
+func (s *Service) deriveKey() ([]byte, error) {
+	saltBytes, err := hex.DecodeString(s.salt)
+	if err != nil {
+		return nil, fmt.Errorf("decode salt: %w", err)
+	}
+	key := argon2.IDKey(
+		[]byte(s.masterPw),
+		saltBytes,
+		argonTime,
+		argonMemory,
+		argonThreads,
+		argonKeyLen,
+	)
+	return key, nil
+}
+
+// aesGCMEncrypt encrypts plaintext using AES-256-GCM with a random 12-byte nonce.
+// Returns (ciphertext, nonce, error).
+func aesGCMEncrypt(key, plaintext []byte) ([]byte, []byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, nil, fmt.Errorf("new cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, nil, fmt.Errorf("new gcm: %w", err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, nil, fmt.Errorf("gen nonce: %w", err)
+	}
+	ciphertext := gcm.Seal(nil, nonce, plaintext, nil)
+	return ciphertext, nonce, nil
+}
+
+// aesGCMDecrypt decrypts ciphertext using AES-256-GCM with the given nonce.
+func aesGCMDecrypt(key, ciphertext, nonce []byte) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("new cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("new gcm: %w", err)
+	}
+	return gcm.Open(nil, nonce, ciphertext, nil)
+}
