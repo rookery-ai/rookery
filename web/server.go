@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/gorilla/sessions"
+	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/audit"
 	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/config"
@@ -30,13 +31,14 @@ type Server struct {
 	db        *db.DB
 	store     *sessions.CookieStore
 	audit     *audit.Writer
-	systemKey []byte                  // 32-byte key for encrypting master passwords at rest
-	gateway   *gateway.GatewayManager // may be nil in tests
+	systemKey []byte                   // 32-byte key for encrypting master passwords at rest
+	gateway   *gateway.GatewayManager  // may be nil in tests
+	runner    *agentrunner.Runner       // may be nil in tests
 }
 
 // NewServer wires up all routes and middleware.
-// gatewayManager may be nil; pass it after the gateway package is fully started.
-func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager) (*Server, error) {
+// gatewayManager and runner may be nil (e.g. in tests).
+func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner) (*Server, error) {
 	sessionKey := []byte(cfg.Server.SessionKey)
 	if len(sessionKey) == 0 {
 		// Use a fixed dev key if not configured; production MUST set SA_SESSION_KEY.
@@ -64,6 +66,7 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 		audit:     audit.New(database),
 		systemKey: sysKey,
 		gateway:   gatewayManager,
+		runner:    runner,
 	}
 
 	s.echo.HideBanner = true

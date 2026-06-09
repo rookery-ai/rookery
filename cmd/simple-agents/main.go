@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
+	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/config"
@@ -84,6 +85,7 @@ func serveCmd() *cli.Command {
 			agentsDir := filepath.Join(cfg.Data.Dir, "agents")
 			designer := agentdesigner.NewDesigner(database, agentsDir)
 			designFlow := agentdesigner.NewFlow(coderSvc, designer)
+			runner := agentrunner.New(database, sysKey, agentsDir)
 
 			textHandler := func(ctx context.Context, userID, text string, send func(string)) error {
 				result, err := coderSvc.Chat(ctx, userID, "", text)
@@ -95,7 +97,14 @@ func serveCmd() *cli.Command {
 				return nil
 			}
 
-			router := gateway.NewRouter(database, textHandler, nil, designFlow)
+			// AgentRunHandler: /run <name> from Telegram.
+			// MasterPw is empty here — agents without secret injection still run.
+			// Phase 7 adds a session-stored master password.
+			agentRunHandler := func(ctx context.Context, userID, agentName string, send func(string)) error {
+				return runner.RunByName(ctx, userID, agentName, "", send)
+			}
+
+			router := gateway.NewRouter(database, textHandler, agentRunHandler, designFlow)
 			gwManager := gateway.New(database, sysKey, router)
 
 			go func() {
@@ -105,7 +114,7 @@ func serveCmd() *cli.Command {
 			}()
 			defer gwManager.StopAll()
 
-			srv, err := web.NewServer(cfg, database, gwManager)
+			srv, err := web.NewServer(cfg, database, gwManager, runner)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}

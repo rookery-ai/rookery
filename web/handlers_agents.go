@@ -2,8 +2,10 @@ package web
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
+	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/labstack/echo/v4"
 )
@@ -108,20 +110,33 @@ func (s *Server) handleRunAgent(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
 
-	// Agent runner integration happens in Phase 6.
-	// For now, record a pending run and redirect.
-	run := &db.AgentRun{
-		ID:      uuid.New().String(),
-		AgentID: agent.ID,
-		UserID:  u.ID,
-		Trigger: "manual",
-	}
-	_ = s.db.CreateAgentRun(run)
-
 	s.audit.Log(u.ID, "run_agent", "agent:"+id, agent.Name, c.RealIP())
 
 	p := s.page(c, "Agent: "+agent.Name)
-	p.Success = "Agent run queued (runner not yet connected)"
+
+	if s.runner == nil {
+		p.Error = "Agent runner is not configured"
+	} else {
+		masterPw := c.FormValue("master_password")
+		var outputLines []string
+		send := func(msg string) { outputLines = append(outputLines, msg) }
+
+		runErr := s.runner.Run(c.Request().Context(), agentrunner.RunInput{
+			AgentID:    agent.ID,
+			UserID:     u.ID,
+			Trigger:    "manual",
+			MasterPw:   masterPw,
+			SendOutput: send,
+		})
+		if runErr != nil {
+			p.Error = "Run failed: " + runErr.Error()
+		} else if len(outputLines) > 0 {
+			p.Success = strings.Join(outputLines, "\n")
+		} else {
+			p.Success = "Agent completed with no output."
+		}
+	}
+
 	schedule, _ := s.db.GetScheduleForAgent(id)
 	runs, _ := s.db.ListAgentRuns(id, 10)
 	return c.Render(http.StatusOK, "dashboard/agent_detail.html", &agentDetailData{
@@ -131,3 +146,4 @@ func (s *Server) handleRunAgent(c echo.Context) error {
 		Runs:     runs,
 	})
 }
+
