@@ -1,0 +1,160 @@
+{{template "head" .}}
+{{template "navbar" .}}
+
+<div class="container mx-auto px-4 py-8 max-w-6xl">
+
+  {{template "alert" .}}
+
+  <!-- Welcome + quick actions -->
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold">Good to see you, {{.User.Username}}!</h1>
+      <p class="text-base-content/60">Here's what's happening with your agents.</p>
+    </div>
+    <a href="/dashboard/agents/new" class="btn btn-primary">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      New Agent
+    </a>
+  </div>
+
+  {{if not .HasConnector}}
+  <div role="alert" class="alert alert-info mb-6">
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="h-6 w-6 shrink-0 stroke-current"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+    <div>
+      <div class="font-bold">No chat app connected</div>
+      <div class="text-sm">Connect Telegram or Discord to interact with your agents from chat.</div>
+    </div>
+    <a href="/dashboard/connectors" class="btn btn-sm">Connect Now</a>
+  </div>
+  {{end}}
+
+  <!-- Stats row -->
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+    <div class="stat bg-base-100 rounded-box shadow">
+      <div class="stat-figure text-primary">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
+      </div>
+      <div class="stat-title">Agents</div>
+      <div class="stat-value text-primary">{{.AgentCount}}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow">
+      <div class="stat-figure text-secondary">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      </div>
+      <div class="stat-title">Reminders</div>
+      <div class="stat-value text-secondary">{{len .Reminders}}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow">
+      <div class="stat-figure text-accent">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      </div>
+      <div class="stat-title">Recent Runs</div>
+      <div class="stat-value text-accent">{{len .RecentRuns}}</div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow">
+      <div class="stat-figure text-success">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+      </div>
+      <div class="stat-title">Chat App</div>
+      <div class="stat-value text-success">{{if .HasConnector}}On{{else}}Off{{end}}</div>
+    </div>
+  </div>
+
+  <!-- Recent runs + Reminders -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Recent Runs -->
+    <div class="card bg-base-100 shadow">
+      <div class="card-body">
+        <h2 class="card-title">Recent Agent Runs</h2>
+        {{if .RecentRuns}}
+        <div class="overflow-x-auto">
+          <table class="table table-sm">
+            <thead><tr><th>Agent</th><th>Trigger</th><th>Status</th><th>Time</th></tr></thead>
+            <tbody>
+            {{range .RecentRuns}}
+            <tr>
+              <td class="font-mono text-xs">{{truncate .AgentID 8}}</td>
+              <td><span class="badge badge-ghost badge-sm">{{.Trigger}}</span></td>
+              <td>
+                {{if .ExitCode}}
+                  {{if eq (derefInt .ExitCode) 0}}<span class="badge badge-success badge-sm">OK</span>
+                  {{else}}<span class="badge badge-error badge-sm">Failed</span>{{end}}
+                {{else}}<span class="badge badge-warning badge-sm">Running</span>{{end}}
+              </td>
+              <td class="text-xs text-base-content/60">{{.StartedAt.Format "Jan 2 15:04"}}</td>
+            </tr>
+            {{end}}
+            </tbody>
+          </table>
+        </div>
+        {{else}}
+        <div class="text-center py-8 text-base-content/40">
+          <p>No runs yet.</p>
+          <a href="/dashboard/agents" class="link link-primary text-sm">Create an agent to get started</a>
+        </div>
+        {{end}}
+      </div>
+    </div>
+
+    <!-- Upcoming Reminders -->
+    <div class="card bg-base-100 shadow">
+      <div class="card-body">
+        <div class="flex items-center justify-between">
+          <h2 class="card-title">Upcoming Reminders</h2>
+          <a href="/dashboard/reminders" class="btn btn-ghost btn-xs">View all</a>
+        </div>
+        {{if .Reminders}}
+        <ul class="space-y-2 mt-2">
+          {{range .Reminders}}
+          {{if not .Sent}}
+          <li class="flex items-start gap-3 p-2 bg-base-200 rounded-lg">
+            <span class="text-lg mt-0.5">🔔</span>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium truncate">{{.Message}}</p>
+              <p class="text-xs text-base-content/50">{{.RemindAt.Format "Jan 2, 2006 at 15:04"}}</p>
+            </div>
+          </li>
+          {{end}}
+          {{end}}
+        </ul>
+        {{else}}
+        <div class="text-center py-8 text-base-content/40">
+          <p>No reminders set.</p>
+          <a href="/dashboard/reminders" class="link link-primary text-sm">Add a reminder</a>
+        </div>
+        {{end}}
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick actions -->
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
+    <a href="/dashboard/agents/new" class="card bg-primary text-primary-content hover:opacity-90 transition-opacity cursor-pointer">
+      <div class="card-body items-center text-center p-4">
+        <div class="text-3xl">🤖</div>
+        <p class="font-semibold text-sm">Create Agent</p>
+      </div>
+    </a>
+    <a href="/dashboard/secrets" class="card bg-secondary text-secondary-content hover:opacity-90 transition-opacity cursor-pointer">
+      <div class="card-body items-center text-center p-4">
+        <div class="text-3xl">🔑</div>
+        <p class="font-semibold text-sm">Manage Secrets</p>
+      </div>
+    </a>
+    <a href="/dashboard/connectors" class="card bg-accent text-accent-content hover:opacity-90 transition-opacity cursor-pointer">
+      <div class="card-body items-center text-center p-4">
+        <div class="text-3xl">📱</div>
+        <p class="font-semibold text-sm">Chat Connectors</p>
+      </div>
+    </a>
+    <a href="/dashboard/reminders" class="card bg-neutral hover:opacity-90 transition-opacity cursor-pointer">
+      <div class="card-body items-center text-center p-4">
+        <div class="text-3xl">⏰</div>
+        <p class="font-semibold text-sm">Set Reminder</p>
+      </div>
+    </a>
+  </div>
+
+</div>
+
+{{template "foot" .}}

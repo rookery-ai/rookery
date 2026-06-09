@@ -1,0 +1,38 @@
+{{template "head" .}}
+{{template "navbar" .}}
+
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+  {{template "alert" .}}
+
+  <h1 class="text-2xl font-bold mb-2">🧠 Memory</h1>
+  <p class="text-base-content/60 mb-6">
+    Persistent memory that helps your agents and the system understand you better over time.
+  </p>
+
+  <div class="card bg-base-100 shadow mb-6">
+    <div class="card-body">
+      <h2 class="card-title text-lg">Add Memory Entry</h2>
+      <form method="POST" action="/dashboard/memory" class="space-y-3">
+        <input type="hidden" name="action" value="add">
+        <textarea name="content" class="textarea textarea-bordered w-full h-24"
+          placeholder="Add something to your memory... e.g. 'I prefer Celsius for weather' or 'My GitHub username is @username'"
+          required></textarea>
+        <button type="submit" class="btn btn-primary">Add to Memory</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card bg-base-100 shadow">
+    <div class="card-body">
+      <h2 class="card-title text-lg">Memory Entries</h2>
+      <p class="text-base-content/40 text-sm">Memory integration available in Phase 7.</p>
+      <div class="text-center py-8 text-base-content/40">
+        <div class="text-4xl mb-3">🧠</div>
+        <p>Your memory store will appear here.</p>
+        <p class="text-xs mt-1">Agents and the system will use these entries to personalize responses.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+{{template "foot" .}}

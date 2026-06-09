@@ -1,0 +1,96 @@
+{{template "head" .}}
+{{template "navbar" .}}
+
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+  {{template "alert" .}}
+
+  <h1 class="text-2xl font-bold mb-2">📱 Chat Connectors</h1>
+  <p class="text-base-content/60 mb-6">
+    Connect your personal bot to interact with agents from Telegram, Discord, or other platforms.
+  </p>
+
+  <!-- Telegram card -->
+  <div class="card bg-base-100 shadow mb-4">
+    <div class="card-body">
+      <div class="flex items-center gap-3 mb-3">
+        <span class="text-3xl">📨</span>
+        <div>
+          <h2 class="card-title text-lg">Telegram</h2>
+          <p class="text-sm text-base-content/60">Chat with your agents via a personal Telegram bot</p>
+        </div>
+        {{range .Connections}}{{if eq .Platform "telegram"}}
+        <span class="badge {{if .Active}}badge-success{{else}}badge-warning{{end}} ml-auto">
+          {{if .Active}}Connected{{else}}Inactive{{end}}
+        </span>
+        {{end}}{{end}}
+      </div>
+
+      {{$hasTelegram := false}}
+      {{range .Connections}}{{if eq .Platform "telegram"}}{{$hasTelegram = true}}{{end}}{{end}}
+
+      {{if $hasTelegram}}
+      <div class="bg-base-200 rounded-lg p-3 mb-3 text-sm">
+        <p class="font-semibold">✅ Telegram bot connected</p>
+        <p class="text-base-content/60 text-xs mt-1">Send /help to your bot to get started.</p>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="testConnector('telegram')" class="btn btn-outline btn-sm">Test Connection</button>
+        <form method="POST" action="/dashboard/connectors/telegram/delete"
+          onsubmit="return confirm('Disconnect Telegram bot?')">
+          <button type="submit" class="btn btn-error btn-outline btn-sm">Disconnect</button>
+        </form>
+      </div>
+      {{else}}
+      <div class="space-y-3">
+        <div class="bg-base-200 rounded-lg p-3 text-sm">
+          <p class="font-semibold mb-1">How to get a bot token:</p>
+          <ol class="list-decimal list-inside space-y-1 text-base-content/70">
+            <li>Open Telegram and search for <strong>@BotFather</strong></li>
+            <li>Send <code>/newbot</code> and follow the instructions</li>
+            <li>Copy the token (looks like <code>123456789:AABBCCxxx</code>)</li>
+          </ol>
+        </div>
+        <form method="POST" action="/dashboard/connectors" class="flex gap-2">
+          <input type="hidden" name="platform" value="telegram">
+          <input type="text" name="token" placeholder="123456789:AABBCCxxx..."
+            class="input input-bordered input-sm flex-1" autocomplete="off" required>
+          <button type="submit" class="btn btn-primary btn-sm">Connect</button>
+        </form>
+      </div>
+      {{end}}
+    </div>
+  </div>
+
+  <!-- Discord card -->
+  <div class="card bg-base-100 shadow opacity-60">
+    <div class="card-body">
+      <div class="flex items-center gap-3">
+        <span class="text-3xl">🎮</span>
+        <div>
+          <h2 class="card-title text-lg">Discord <span class="badge badge-ghost badge-sm ml-2">Coming Soon</span></h2>
+          <p class="text-sm text-base-content/60">Discord bot support is in development</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+async function testConnector(platform) {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = 'Testing...';
+  try {
+    const res = await fetch(`/dashboard/connectors/${platform}/test`, {method: 'POST'});
+    const data = await res.json();
+    alert(data.status === 'ok' ? '✅ Connection successful!' : '❌ ' + data.message);
+  } catch(e) {
+    alert('❌ Test failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Test Connection';
+  }
+}
+</script>
+
+{{template "foot" .}}

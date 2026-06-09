@@ -1,0 +1,50 @@
+{{template "head" .}}
+{{template "admin_navbar" .}}
+
+<div class="container mx-auto px-4 py-8 max-w-6xl">
+  {{template "alert" .}}
+
+  <h1 class="text-2xl font-bold mb-6">⚡ Admin Dashboard</h1>
+
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+    <div class="stat bg-base-100 rounded-box shadow">
+      <div class="stat-title">Total Users</div>
+      <div class="stat-value text-primary">{{.UserCount}}</div>
+      <div class="stat-actions"><a href="/admin/users" class="btn btn-xs btn-ghost">Manage →</a></div>
+    </div>
+    <div class="stat bg-base-100 rounded-box shadow">
+      <div class="stat-title">Total Agents</div>
+      <div class="stat-value text-secondary">{{.AgentCount}}</div>
+    </div>
+  </div>
+
+  <div class="card bg-base-100 shadow">
+    <div class="card-body">
+      <div class="flex items-center justify-between">
+        <h2 class="card-title">Recent Audit Events</h2>
+        <a href="/admin/audit" class="btn btn-ghost btn-xs">View All</a>
+      </div>
+      {{if .AuditLogs}}
+      <div class="overflow-x-auto">
+        <table class="table table-sm">
+          <thead><tr><th>Action</th><th>Target</th><th>Detail</th><th>When</th></tr></thead>
+          <tbody>
+          {{range .AuditLogs}}
+          <tr>
+            <td><span class="badge badge-ghost badge-sm font-mono">{{.Action}}</span></td>
+            <td class="text-xs font-mono text-base-content/60">{{.Target}}</td>
+            <td class="text-xs text-base-content/60 max-w-xs truncate">{{.Detail}}</td>
+            <td class="text-xs text-base-content/50">{{.CreatedAt.Format "Jan 2 15:04"}}</td>
+          </tr>
+          {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <p class="text-base-content/40 text-sm">No audit events yet.</p>
+      {{end}}
+    </div>
+  </div>
+</div>
+
+{{template "foot" .}}

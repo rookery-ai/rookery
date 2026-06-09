@@ -1,0 +1,61 @@
+{{template "head" .}}
+{{template "admin_navbar" .}}
+
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+  {{template "alert" .}}
+
+  <h1 class="text-2xl font-bold mb-6">⚙️ System Settings</h1>
+
+  <div class="card bg-base-100 shadow mb-4">
+    <div class="card-body">
+      <h2 class="card-title text-lg">Coder Configuration</h2>
+      <form method="POST" action="/admin/settings" class="space-y-4">
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text">Claude Binary Path</span>
+            <span class="label-text-alt text-base-content/50">Path to the <code>claude</code> CLI</span>
+          </label>
+          <input type="text" name="claude_bin" placeholder="/usr/local/bin/claude or claude"
+            class="input input-bordered w-full font-mono" value="claude">
+        </div>
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text">Coder Timeout (seconds)</span>
+          </label>
+          <input type="number" name="coder_timeout" class="input input-bordered w-full" value="120" min="30" max="600">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Save Settings</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card bg-base-100 shadow mb-4">
+    <div class="card-body">
+      <h2 class="card-title text-lg">Sandbox Configuration</h2>
+      <form method="POST" action="/admin/settings" class="space-y-4">
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text">Firejail Binary Path</span>
+          </label>
+          <input type="text" name="firejail_bin" placeholder="/usr/bin/firejail or firejail"
+            class="input input-bordered w-full font-mono" value="firejail">
+        </div>
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text">Default Agent Timeout (seconds)</span>
+          </label>
+          <input type="number" name="agent_timeout" class="input input-bordered w-full" value="300" min="30" max="3600">
+        </div>
+        <div class="form-control">
+          <label class="label">
+            <span class="label-text">Default Memory Limit (MB)</span>
+          </label>
+          <input type="number" name="memory_mb" class="input input-bordered w-full" value="256" min="64" max="2048">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Save Settings</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+{{template "foot" .}}

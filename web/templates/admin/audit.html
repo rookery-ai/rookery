@@ -1,0 +1,45 @@
+{{template "head" .}}
+{{template "admin_navbar" .}}
+
+<div class="container mx-auto px-4 py-8 max-w-5xl">
+  {{template "alert" .}}
+
+  <h1 class="text-2xl font-bold mb-6">📋 Audit Log</h1>
+
+  <div class="card bg-base-100 shadow">
+    <div class="card-body">
+      {{if .Logs}}
+      <div class="overflow-x-auto">
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <th>Action</th>
+              <th>Target</th>
+              <th>Detail</th>
+              <th>IP</th>
+              <th>When</th>
+            </tr>
+          </thead>
+          <tbody>
+          {{range .Logs}}
+          <tr class="hover">
+            <td><span class="badge badge-ghost badge-sm font-mono">{{.Action}}</span></td>
+            <td class="text-xs font-mono text-base-content/60">{{.Target}}</td>
+            <td class="text-xs text-base-content/60 max-w-xs truncate">{{.Detail}}</td>
+            <td class="text-xs text-base-content/40">{{.IPAddress}}</td>
+            <td class="text-xs text-base-content/50 whitespace-nowrap">{{.CreatedAt.Format "Jan 2 15:04:05"}}</td>
+          </tr>
+          {{end}}
+          </tbody>
+        </table>
+      </div>
+      {{else}}
+      <div class="text-center py-12 text-base-content/40">
+        <p>No audit events yet.</p>
+      </div>
+      {{end}}
+    </div>
+  </div>
+</div>
+
+{{template "foot" .}}

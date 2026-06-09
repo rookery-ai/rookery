@@ -1,0 +1,36 @@
+package audit
+
+import (
+	"fmt"
+
+	"github.com/google/uuid"
+	"github.com/ilijad1/simple-agents/internal/db"
+)
+
+// Writer writes audit events to the database.
+type Writer struct {
+	db *db.DB
+}
+
+func New(database *db.DB) *Writer {
+	return &Writer{db: database}
+}
+
+// Log records an audit event. userID may be empty for system events.
+func (w *Writer) Log(userID, action, target, detail, ipAddress string) {
+	_ = w.db.WriteAuditLog(&db.AuditLog{
+		ID:        uuid.New().String(),
+		UserID:    nullStr(userID),
+		Action:    action,
+		Target:    target,
+		Detail:    fmt.Sprintf("%.2000s", detail), // truncate to 2000 chars
+		IPAddress: ipAddress,
+	})
+}
+
+func nullStr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}

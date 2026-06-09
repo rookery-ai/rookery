@@ -1,0 +1,88 @@
+{{define "head"}}
+<!DOCTYPE html>
+<html lang="en" data-theme="night">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{.Title}} — Simple Agents</title>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@5/dist/full.min.css" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-base-200">
+{{end}}
+
+{{define "foot"}}
+</body>
+</html>
+{{end}}
+
+{{define "alert"}}
+{{if .Error}}
+<div role="alert" class="alert alert-error mb-4">
+  <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+  <span>{{.Error}}</span>
+</div>
+{{end}}
+{{if .Success}}
+<div role="alert" class="alert alert-success mb-4">
+  <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+  <span>{{.Success}}</span>
+</div>
+{{end}}
+{{end}}
+
+{{define "navbar"}}
+<div class="navbar bg-base-100 shadow-sm">
+  <div class="navbar-start">
+    <a href="/dashboard" class="btn btn-ghost text-xl font-bold">⚡ Simple Agents</a>
+  </div>
+  <div class="navbar-center hidden lg:flex">
+    <ul class="menu menu-horizontal px-1">
+      <li><a href="/dashboard/agents">Agents</a></li>
+      <li><a href="/dashboard/secrets">Secrets</a></li>
+      <li><a href="/dashboard/connectors">Connectors</a></li>
+      <li><a href="/dashboard/sessions">Sessions</a></li>
+      <li><a href="/dashboard/reminders">Reminders</a></li>
+      <li><a href="/dashboard/memory">Memory</a></li>
+    </ul>
+  </div>
+  <div class="navbar-end">
+    {{if .User}}
+    <div class="dropdown dropdown-end">
+      <div tabindex="0" role="button" class="btn btn-ghost btn-circle avatar placeholder">
+        <div class="bg-neutral text-neutral-content rounded-full w-10">
+          <span class="text-xs">{{initials .User.Username}}</span>
+        </div>
+      </div>
+      <ul tabindex="0" class="menu menu-sm dropdown-content bg-base-100 rounded-box z-[1] mt-3 w-52 p-2 shadow">
+        <li class="menu-title"><span>{{.User.Username}}</span></li>
+        {{if eq .User.Role "admin"}}
+        <li><a href="/admin">Admin Panel</a></li>
+        {{end}}
+        <li><a href="/dashboard/settings">Settings</a></li>
+        <li><a href="/logout">Logout</a></li>
+      </ul>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+{{define "admin_navbar"}}
+<div class="navbar bg-base-100 shadow-sm">
+  <div class="navbar-start">
+    <a href="/admin" class="btn btn-ghost text-xl font-bold">⚡ Simple Agents <span class="badge badge-primary ml-2">Admin</span></a>
+  </div>
+  <div class="navbar-center hidden lg:flex">
+    <ul class="menu menu-horizontal px-1">
+      <li><a href="/admin/users">Users</a></li>
+      <li><a href="/admin/settings">Settings</a></li>
+      <li><a href="/admin/audit">Audit Log</a></li>
+    </ul>
+  </div>
+  <div class="navbar-end">
+    <a href="/dashboard" class="btn btn-ghost btn-sm">My Dashboard</a>
+    <a href="/logout" class="btn btn-ghost btn-sm">Logout</a>
+  </div>
+</div>
+{{end}}

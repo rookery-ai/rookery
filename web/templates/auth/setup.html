@@ -1,0 +1,107 @@
+{{template "head" .}}
+
+<div class="min-h-screen bg-base-200 py-12 px-4">
+  <div class="max-w-2xl mx-auto">
+    <div class="text-center mb-8">
+      <h1 class="text-3xl font-bold">⚡ Welcome to Simple Agents</h1>
+      <p class="text-base-content/60 mt-2">Let's get your account set up in a few steps</p>
+    </div>
+
+    <!-- Steps indicator -->
+    <ul class="steps steps-horizontal w-full mb-8">
+      <li class="step {{if ge .Step 1}}step-primary{{end}}">Password</li>
+      <li class="step {{if ge .Step 2}}step-primary{{end}}">Master Key</li>
+      <li class="step {{if ge .Step 3}}step-primary{{end}}">Chat App</li>
+      <li class="step {{if ge .Step 4}}step-primary{{end}}">Done</li>
+    </ul>
+
+    <div class="card bg-base-100 shadow-xl">
+      <div class="card-body">
+        {{template "alert" .}}
+
+        {{if eq .Step 1}}
+        <!-- Step 1: Already handled by /change-password, redirect there -->
+        <script>window.location="/change-password"</script>
+
+        {{else if eq .Step 2}}
+        <!-- Step 2: Set master password -->
+        <h2 class="card-title text-xl mb-2">🔐 Set Your Master Password</h2>
+        <p class="text-base-content/60 mb-4">
+          Your master password protects all your secrets. It is <strong>not</strong> your login password.
+          <br>This password is used to encrypt/decrypt your API keys and tokens.
+        </p>
+        <form method="POST" action="/setup" class="space-y-4">
+          <input type="hidden" name="action" value="master_password">
+          <div class="form-control">
+            <label class="label"><span class="label-text">Master Password</span></label>
+            <input type="password" name="master_password" placeholder="Strong password (min 8 chars)"
+              class="input input-bordered w-full" required minlength="8" autocomplete="new-password"
+              id="mp-input">
+            <label class="label">
+              <span class="label-text-alt text-base-content/50">
+                This password cannot be recovered — remember it!
+              </span>
+            </label>
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Confirm Master Password</span></label>
+            <input type="password" name="confirm" placeholder="Repeat master password"
+              class="input input-bordered w-full" required autocomplete="new-password">
+          </div>
+          <div class="flex gap-2">
+            <button type="submit" class="btn btn-primary flex-1">Set Master Password →</button>
+          </div>
+        </form>
+
+        {{else if eq .Step 3}}
+        <!-- Step 3: Connect chat app -->
+        <h2 class="card-title text-xl mb-2">📱 Connect Your Chat App</h2>
+        <p class="text-base-content/60 mb-4">
+          Connect a chat app so you can interact with your agents from Telegram, Discord, or other platforms.
+          You can skip this and set it up later from the dashboard.
+        </p>
+
+        <div class="card bg-base-200 mb-4">
+          <div class="card-body p-4">
+            <h3 class="font-semibold flex items-center gap-2">
+              <span class="text-blue-400">📨</span> Telegram
+            </h3>
+            <p class="text-sm text-base-content/60 mb-3">
+              Create a bot via <a href="https://t.me/BotFather" target="_blank" class="link link-primary">@BotFather</a>
+              and paste the token below.
+            </p>
+            <form method="POST" action="/dashboard/connectors" class="flex gap-2">
+              <input type="hidden" name="platform" value="telegram">
+              <input type="text" name="token" placeholder="123456789:AABBCCxxx..."
+                class="input input-bordered input-sm flex-1" autocomplete="off">
+              <button type="submit" class="btn btn-primary btn-sm">Connect</button>
+            </form>
+          </div>
+        </div>
+
+        <form method="POST" action="/setup">
+          <input type="hidden" name="action" value="skip_connector">
+          <button type="submit" class="btn btn-ghost btn-sm w-full">Skip for now →</button>
+        </form>
+
+        {{else if eq .Step 4}}
+        <!-- Step 4: Done -->
+        <div class="text-center py-8">
+          <div class="text-6xl mb-4">🎉</div>
+          <h2 class="text-2xl font-bold mb-2">You're all set!</h2>
+          <p class="text-base-content/60 mb-6">
+            Your account is configured. Head to the dashboard to create your first agent.
+          </p>
+          <form method="POST" action="/setup">
+            <input type="hidden" name="action" value="finish">
+            <button type="submit" class="btn btn-primary btn-lg">Go to Dashboard →</button>
+          </form>
+        </div>
+        {{end}}
+
+      </div>
+    </div>
+  </div>
+</div>
+
+{{template "foot" .}}

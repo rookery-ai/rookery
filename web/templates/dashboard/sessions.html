@@ -1,0 +1,60 @@
+{{template "head" .}}
+{{template "navbar" .}}
+
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+  {{template "alert" .}}
+
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold">💬 Chat Sessions</h1>
+      <p class="text-base-content/60 text-sm mt-1">Sessions auto-stop after 30 minutes of inactivity</p>
+    </div>
+    <form method="POST" action="/dashboard/sessions">
+      <input type="hidden" name="name" value="">
+      <button type="submit" class="btn btn-primary btn-sm">+ New Session</button>
+    </form>
+  </div>
+
+  {{if .Sessions}}
+  <div class="space-y-3">
+    {{range .Sessions}}
+    <div class="card bg-base-100 shadow">
+      <div class="card-body py-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <span>{{if .Active}}🟢{{else}}⚫{{end}}</span>
+            <div>
+              <p class="font-semibold">{{if .Name}}{{.Name}}{{else}}Unnamed Session{{end}}</p>
+              <p class="text-xs text-base-content/50">
+                {{.Platform}} · Last active {{.LastSeen.Format "Jan 2 at 15:04"}}
+              </p>
+            </div>
+          </div>
+          <div class="flex gap-2">
+            {{if .Active}}
+            <form method="POST" action="/dashboard/sessions/{{.ID}}/stop">
+              <button class="btn btn-warning btn-xs">Stop</button>
+            </form>
+            {{end}}
+            <form method="POST" action="/dashboard/sessions/{{.ID}}/delete"
+              onsubmit="return confirm('Delete this session?')">
+              <button class="btn btn-ghost btn-xs text-error">Delete</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+    {{end}}
+  </div>
+  {{else}}
+  <div class="card bg-base-100 shadow">
+    <div class="card-body items-center text-center py-12">
+      <div class="text-5xl mb-3">💬</div>
+      <h2 class="text-lg font-bold">No sessions yet</h2>
+      <p class="text-base-content/60 text-sm">Start a chat session from your connected bot with <code>/session start</code></p>
+    </div>
+  </div>
+  {{end}}
+</div>
+
+{{template "foot" .}}
