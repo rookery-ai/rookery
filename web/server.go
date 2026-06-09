@@ -15,6 +15,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/config"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/gateway"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -29,11 +30,13 @@ type Server struct {
 	db        *db.DB
 	store     *sessions.CookieStore
 	audit     *audit.Writer
-	systemKey []byte // 32-byte key for encrypting master passwords at rest
+	systemKey []byte                  // 32-byte key for encrypting master passwords at rest
+	gateway   *gateway.GatewayManager // may be nil in tests
 }
 
 // NewServer wires up all routes and middleware.
-func NewServer(cfg *config.Config, database *db.DB) (*Server, error) {
+// gatewayManager may be nil; pass it after the gateway package is fully started.
+func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager) (*Server, error) {
 	sessionKey := []byte(cfg.Server.SessionKey)
 	if len(sessionKey) == 0 {
 		// Use a fixed dev key if not configured; production MUST set SA_SESSION_KEY.
@@ -60,6 +63,7 @@ func NewServer(cfg *config.Config, database *db.DB) (*Server, error) {
 		store:     store,
 		audit:     audit.New(database),
 		systemKey: sysKey,
+		gateway:   gatewayManager,
 	}
 
 	s.echo.HideBanner = true

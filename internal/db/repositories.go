@@ -267,6 +267,26 @@ func (d *DB) GetPlatformIdentity(platform, platformUserID string) (*PlatformIden
 	return &i, nil
 }
 
+func (d *DB) ListPlatformIdentities(userID, platform string) ([]*PlatformIdentity, error) {
+	rows, err := d.Query(`SELECT id,user_id,platform,platform_user_id,linked_at
+		FROM platform_identities WHERE user_id=? AND platform=?`, userID, platform)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*PlatformIdentity
+	for rows.Next() {
+		var i PlatformIdentity
+		var linkedAt string
+		if err := rows.Scan(&i.ID, &i.UserID, &i.Platform, &i.PlatformUserID, &linkedAt); err != nil {
+			return nil, err
+		}
+		i.LinkedAt = scanTime(linkedAt)
+		out = append(out, &i)
+	}
+	return out, rows.Err()
+}
+
 // ── Agents ─────────────────────────────────────────────────────────────────
 
 func (d *DB) CreateAgent(a *Agent) error {

@@ -1,11 +1,15 @@
 package web
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/gateway"
 	"github.com/labstack/echo/v4"
 )
 
@@ -43,13 +47,18 @@ func (s *Server) handleSaveConnector(c echo.Context) error {
 		return s.renderConnectors(c, u, p)
 	}
 
-	// Token encryption happens in Phase 2 with secrets service.
-	// For now store as-is with a marker prefix.
+	encToken, err := gateway.EncryptToken(token, s.systemKey)
+	if err != nil {
+		p := s.page(c, "Chat Connectors")
+		p.Error = "Failed to encrypt token: " + err.Error()
+		return s.renderConnectors(c, u, p)
+	}
+
 	conn := &db.PlatformConnection{
 		ID:             uuid.New().String(),
 		UserID:         u.ID,
 		Platform:       platform,
-		EncryptedToken: fmt.Sprintf("__plain__%s", token),
+		EncryptedToken: encToken,
 		Active:         true,
 	}
 
@@ -59,18 +68,33 @@ func (s *Server) handleSaveConnector(c echo.Context) error {
 		return s.renderConnectors(c, u, p)
 	}
 
-	// Link platform identity (user registered their own bot, so they ARE the user)
-	// Real linking happens when the user sends their first message to the bot.
 	s.audit.Log(u.ID, "connect_platform", "platform:"+platform, "", c.RealIP())
 
+	// Start the gateway adapter for this user (if manager is available).
+	if s.gateway != nil {
+		if err := s.gateway.Reload(context.Background(), u.ID, platform); err != nil {
+			// Non-fatal: bot token may be valid but unreachable right now.
+			p := s.page(c, "Chat Connectors")
+			p.Error = "Connector saved but bot failed to start: " + err.Error()
+			return s.renderConnectors(c, u, p)
+		}
+	}
+
 	p := s.page(c, "Chat Connectors")
-	p.Success = "Connected to " + platform + " successfully!"
+	p.Success = "Connected to " + platform + " successfully! Send /start to your bot to link your account."
 	return s.renderConnectors(c, u, p)
 }
 
 func (s *Server) handleDeleteConnector(c echo.Context) error {
 	u := c.Get("user").(*db.User)
 	platform := c.Param("platform")
+
+	if s.gateway != nil {
+		if err := s.gateway.Reload(context.Background(), u.ID, platform); err != nil {
+			// Log but don't block deletion.
+			_ = err
+		}
+	}
 
 	if err := s.db.DeletePlatformConnection(u.ID, platform); err != nil {
 		return err
@@ -81,14 +105,60 @@ func (s *Server) handleDeleteConnector(c echo.Context) error {
 }
 
 func (s *Server) handleTestConnector(c echo.Context) error {
-	// In Phase 3 this will do a real bot.Me() ping.
-	// For now return a placeholder JSON response.
+	u := c.Get("user").(*db.User)
 	platform := c.Param("platform")
-	return c.JSON(http.StatusOK, map[string]string{
-		"status":   "ok",
-		"platform": platform,
-		"message":  "Connection test will be available after gateway integration",
-	})
+
+	conn, err := s.db.GetPlatformConnection(u.ID, platform)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"status": "error", "message": "connector not found"})
+	}
+
+	token, err := gateway.DecryptToken(conn.EncryptedToken, s.systemKey)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"status": "error", "message": "failed to decrypt token"})
+	}
+
+	switch platform {
+	case "telegram":
+		// Validate token by hitting the Telegram getMe endpoint.
+		botUser, err := testTelegramToken(token)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]string{"status": "error", "message": err.Error()})
+		}
+		return c.JSON(http.StatusOK, map[string]string{
+			"status":   "ok",
+			"platform": platform,
+			"bot":      "@" + botUser,
+		})
+	default:
+		return c.JSON(http.StatusBadRequest, map[string]string{"status": "error", "message": "unsupported platform"})
+	}
+}
+
+// testTelegramToken calls Telegram's getMe API to validate the bot token.
+// Returns the bot username on success.
+func testTelegramToken(token string) (string, error) {
+	resp, err := http.Get("https://api.telegram.org/bot" + token + "/getMe")
+	if err != nil {
+		return "", fmt.Errorf("telegram api unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	var result struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Username string `json:"username"`
+		} `json:"result"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("invalid response from telegram")
+	}
+	if !result.OK {
+		return "", fmt.Errorf("telegram rejected token: %s", result.Description)
+	}
+	return result.Result.Username, nil
 }
 
 func (s *Server) renderConnectors(c echo.Context, u *db.User, p *pageData) error {

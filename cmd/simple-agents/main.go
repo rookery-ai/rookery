@@ -10,6 +10,8 @@ import (
 	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/config"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/gateway"
+	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/ilijad1/simple-agents/web"
 	"github.com/urfave/cli/v3"
 )
@@ -69,7 +71,22 @@ func serveCmd() *cli.Command {
 
 			slog.Info("database ready", "path", cfg.Database.Path)
 
-			srv, err := web.NewServer(cfg, database)
+			sysKey, err := secrets.SystemKeyFromEnv()
+			if err != nil {
+				return fmt.Errorf("system key: %w", err)
+			}
+
+			router := gateway.NewRouter(database, nil, nil)
+			gwManager := gateway.New(database, sysKey, router)
+
+			go func() {
+				if err := gwManager.StartAll(ctx); err != nil {
+					slog.Error("gateway start error", "err", err)
+				}
+			}()
+			defer gwManager.StopAll()
+
+			srv, err := web.NewServer(cfg, database, gwManager)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
