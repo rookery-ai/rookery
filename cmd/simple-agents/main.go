@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/config"
@@ -80,6 +81,10 @@ func serveCmd() *cli.Command {
 			homesDir := filepath.Join(cfg.Data.Dir, "claude-homes")
 			coderSvc := coder.New(cfg.Coder.ClaudeBin, cfg.Coder.Timeout, homesDir)
 
+			agentsDir := filepath.Join(cfg.Data.Dir, "agents")
+			designer := agentdesigner.NewDesigner(database, agentsDir)
+			designFlow := agentdesigner.NewFlow(coderSvc, designer)
+
 			textHandler := func(ctx context.Context, userID, text string, send func(string)) error {
 				result, err := coderSvc.Chat(ctx, userID, "", text)
 				if err != nil {
@@ -90,7 +95,7 @@ func serveCmd() *cli.Command {
 				return nil
 			}
 
-			router := gateway.NewRouter(database, textHandler, nil)
+			router := gateway.NewRouter(database, textHandler, nil, designFlow)
 			gwManager := gateway.New(database, sysKey, router)
 
 			go func() {

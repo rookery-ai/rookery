@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/db"
 )
 
@@ -22,15 +23,17 @@ type Router struct {
 	db             *db.DB
 	onText         TextHandler
 	onAgentRun     AgentRunHandler
+	designFlow     *agentdesigner.Flow // may be nil until Phase 5 is wired
 }
 
-// NewRouter creates a Router. textHandler and agentRunHandler may be nil
-// until Phase 4/6 are wired in; the router will reply with a stub message.
-func NewRouter(database *db.DB, textHandler TextHandler, agentRunHandler AgentRunHandler) *Router {
+// NewRouter creates a Router. textHandler, agentRunHandler, and designFlow may be nil
+// until the corresponding phases are wired in; the router will reply with stub messages.
+func NewRouter(database *db.DB, textHandler TextHandler, agentRunHandler AgentRunHandler, flow *agentdesigner.Flow) *Router {
 	return &Router{
 		db:         database,
 		onText:     textHandler,
 		onAgentRun: agentRunHandler,
+		designFlow: flow,
 	}
 }
 
@@ -105,6 +108,10 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 	if len(parts) > 0 {
 		sub = strings.ToLower(parts[0])
 	}
+	rest := ""
+	if len(parts) > 1 {
+		rest = strings.Join(parts[1:], " ")
+	}
 
 	switch sub {
 	case "list", "":
@@ -113,7 +120,7 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 			return err
 		}
 		if len(agents) == 0 {
-			send("You have no agents yet\\. Create one at the web dashboard\\.")
+			send("You have no agents yet\\. Use /agent create \\<name\\> to build one\\.")
 			return nil
 		}
 		var b strings.Builder
@@ -129,10 +136,34 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 			}
 			b.WriteByte('\n')
 		}
-		b.WriteString("\n_Use /run \\<name\\> to run an agent_")
+		b.WriteString("\n_/run \\<name\\> to run · /agent create \\<name\\> to build a new one_")
 		send(b.String())
+
+	case "create":
+		if r.designFlow == nil {
+			send("Agent creation is not yet available\\.")
+			return nil
+		}
+		name := strings.TrimSpace(rest)
+		if name == "" {
+			send("Usage: /agent create \\<name\\>")
+			return nil
+		}
+		response, err := r.designFlow.Start(msg.UserID, name)
+		if err != nil {
+			send(escapeMarkdown(err.Error()))
+			return nil
+		}
+		send(response)
+
+	case "cancel":
+		if r.designFlow != nil {
+			r.designFlow.Cancel(msg.UserID)
+		}
+		send("Agent creation cancelled\\.")
+
 	default:
-		send("Usage: /agent list")
+		send("Usage: /agent list · /agent create \\<name\\> · /agent cancel")
 	}
 	return nil
 }
@@ -190,8 +221,20 @@ func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send
 }
 
 func (r *Router) handleText(ctx context.Context, msg Message, send func(string)) error {
+	// If the user has an active design session, route all text there.
+	if r.designFlow != nil && r.designFlow.GetSession(msg.UserID) != nil {
+		response, isDone, err := r.designFlow.Step(ctx, msg.UserID, msg.Text)
+		if err != nil {
+			send("Design session error: " + escapeMarkdown(err.Error()))
+			return nil
+		}
+		send(response)
+		_ = isDone
+		return nil
+	}
+
 	if r.onText == nil {
-		send("One\\-off chat is coming soon\\! For now, use /help to see what's available\\.")
+		send("Send /agent create \\<name\\> to build an agent, or /help for all commands\\.")
 		return nil
 	}
 	return r.onText(ctx, msg.UserID, msg.Text, send)
@@ -203,6 +246,8 @@ func helpText() string {
 	return `*Simple Agents — Commands*
 
 /agent list — list your agents
+/agent create \<name\> — build a new agent with AI wizard
+/agent cancel — cancel active agent creation
 /run \<name\> — run an agent
 /secret list — list stored secret names
 /remind — set a reminder \(coming soon\)
