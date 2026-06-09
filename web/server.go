@@ -17,6 +17,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/config"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/gateway"
+	"github.com/ilijad1/simple-agents/internal/memory"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -34,6 +35,7 @@ type Server struct {
 	systemKey []byte                   // 32-byte key for encrypting master passwords at rest
 	gateway   *gateway.GatewayManager  // may be nil in tests
 	runner    *agentrunner.Runner       // may be nil in tests
+	memory    *memory.Store             // may be nil in tests
 }
 
 // NewServer wires up all routes and middleware.
@@ -58,6 +60,9 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 		return nil, fmt.Errorf("system key: %w", err)
 	}
 
+	memDir := filepath.Join(cfg.Data.Dir, "memory")
+	memStore := memory.New(memDir)
+
 	s := &Server{
 		echo:      echo.New(),
 		cfg:       cfg,
@@ -67,6 +72,7 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 		systemKey: sysKey,
 		gateway:   gatewayManager,
 		runner:    runner,
+		memory:    memStore,
 	}
 
 	s.echo.HideBanner = true

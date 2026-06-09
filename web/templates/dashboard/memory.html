@@ -6,7 +6,7 @@
 
   <h1 class="text-2xl font-bold mb-2">🧠 Memory</h1>
   <p class="text-base-content/60 mb-6">
-    Persistent memory that helps your agents and the system understand you better over time.
+    Persistent facts and preferences. Agents can reference these when generating responses.
   </p>
 
   <div class="card bg-base-100 shadow mb-6">
@@ -15,22 +15,40 @@
       <form method="POST" action="/dashboard/memory" class="space-y-3">
         <input type="hidden" name="action" value="add">
         <textarea name="content" class="textarea textarea-bordered w-full h-24"
-          placeholder="Add something to your memory... e.g. 'I prefer Celsius for weather' or 'My GitHub username is @username'"
+          placeholder="e.g. 'I prefer temperatures in Celsius' or 'My GitHub username is @username'"
           required></textarea>
-        <button type="submit" class="btn btn-primary">Add to Memory</button>
+        <button type="submit" class="btn btn-primary btn-sm">Add to Memory</button>
       </form>
     </div>
   </div>
 
   <div class="card bg-base-100 shadow">
     <div class="card-body">
-      <h2 class="card-title text-lg">Memory Entries</h2>
-      <p class="text-base-content/40 text-sm">Memory integration available in Phase 7.</p>
+      <h2 class="card-title text-lg">Stored Entries</h2>
+      {{if .Entries}}
+      <ul class="space-y-2 mt-2">
+        {{range .Entries}}
+        <li class="flex items-start gap-3 p-3 bg-base-200 rounded-lg">
+          <div class="flex-1 min-w-0">
+            <p class="text-sm">{{.Content}}</p>
+            <p class="text-xs text-base-content/50 mt-1">{{.Date}}</p>
+          </div>
+          <form method="POST" action="/dashboard/memory">
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="entry_id" value="{{.ID}}">
+            <button type="submit" class="btn btn-ghost btn-xs text-error"
+              onclick="return confirm('Delete this memory entry?')">✕</button>
+          </form>
+        </li>
+        {{end}}
+      </ul>
+      {{else}}
       <div class="text-center py-8 text-base-content/40">
         <div class="text-4xl mb-3">🧠</div>
-        <p>Your memory store will appear here.</p>
-        <p class="text-xs mt-1">Agents and the system will use these entries to personalize responses.</p>
+        <p>No memory entries yet.</p>
+        <p class="text-xs mt-1">Add facts or preferences above to help your agents personalise responses.</p>
       </div>
+      {{end}}
     </div>
   </div>
 </div>

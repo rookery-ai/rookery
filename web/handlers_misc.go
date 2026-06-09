@@ -126,15 +126,66 @@ func (s *Server) handleDeleteReminder(c echo.Context) error {
 
 // ── Memory ─────────────────────────────────────────────────────────────────
 
+type memoryPageData struct {
+	*pageData
+	Entries []memoryEntry
+}
+
+type memoryEntry struct {
+	ID      string
+	Content string
+	Date    string
+}
+
 func (s *Server) showMemory(c echo.Context) error {
-	return c.Render(http.StatusOK, "dashboard/memory.html", s.page(c, "Memory"))
+	u := c.Get("user").(*db.User)
+	p := s.page(c, "Memory")
+	if s.memory == nil {
+		return c.Render(http.StatusOK, "dashboard/memory.html", &memoryPageData{pageData: p})
+	}
+	entries, _ := s.memory.List(u.ID)
+	var rows []memoryEntry
+	for _, e := range entries {
+		rows = append(rows, memoryEntry{
+			ID:      e.ID,
+			Content: e.Content,
+			Date:    e.CreatedAt.Format("Jan 2, 2006"),
+		})
+	}
+	return c.Render(http.StatusOK, "dashboard/memory.html", &memoryPageData{pageData: p, Entries: rows})
 }
 
 func (s *Server) handleUpdateMemory(c echo.Context) error {
-	// Full implementation in Phase 7 (MemoryStore).
+	u := c.Get("user").(*db.User)
+	content := c.FormValue("content")
+	action := c.FormValue("action")
+	entryID := c.FormValue("entry_id")
+
 	p := s.page(c, "Memory")
-	p.Success = "Memory update queued (memory service not yet connected)"
-	return c.Render(http.StatusOK, "dashboard/memory.html", p)
+
+	if action == "delete" && entryID != "" {
+		if s.memory != nil {
+			_ = s.memory.Delete(u.ID, entryID)
+		}
+		return c.Redirect(http.StatusFound, "/dashboard/memory")
+	}
+
+	if content == "" {
+		p.Error = "Memory content cannot be empty"
+	} else if s.memory != nil {
+		if _, err := s.memory.Append(u.ID, content); err != nil {
+			p.Error = "Failed to save: " + err.Error()
+		} else {
+			p.Success = "Memory saved"
+		}
+	}
+
+	entries, _ := s.memory.List(u.ID)
+	var rows []memoryEntry
+	for _, e := range entries {
+		rows = append(rows, memoryEntry{ID: e.ID, Content: e.Content, Date: e.CreatedAt.Format("Jan 2, 2006")})
+	}
+	return c.Render(http.StatusOK, "dashboard/memory.html", &memoryPageData{pageData: p, Entries: rows})
 }
 
 // ── Settings ───────────────────────────────────────────────────────────────
