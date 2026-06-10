@@ -85,7 +85,7 @@ func defaults() *Config {
 		},
 		Coder: CoderConfig{
 			ClaudeBin: "claude",
-			Timeout:   2 * time.Minute,
+			Timeout:   20 * time.Minute,
 		},
 		Sandbox: SandboxConfig{
 			FirejailBin:     "firejail",

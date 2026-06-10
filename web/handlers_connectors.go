@@ -47,6 +47,18 @@ func (s *Server) handleSaveConnector(c echo.Context) error {
 		return s.renderConnectors(c, u, p)
 	}
 
+	// Validate token before saving (fail early with a clear error message).
+	var botUsername string
+	if platform == "telegram" {
+		var valErr error
+		botUsername, valErr = testTelegramToken(token)
+		if valErr != nil {
+			p := s.page(c, "Chat Connectors")
+			p.Error = "Invalid bot token: " + valErr.Error()
+			return s.renderConnectors(c, u, p)
+		}
+	}
+
 	encToken, err := gateway.EncryptToken(token, s.systemKey)
 	if err != nil {
 		p := s.page(c, "Chat Connectors")
@@ -70,10 +82,15 @@ func (s *Server) handleSaveConnector(c echo.Context) error {
 
 	s.audit.Log(u.ID, "connect_platform", "platform:"+platform, "", c.RealIP())
 
+	// Store bot username for display in setup wizard step 4.
+	if botUsername != "" {
+		_ = s.db.SetSetting(u.ID, "telegram_bot_username", "@"+botUsername)
+	}
+
 	// Start the gateway adapter for this user (if manager is available).
 	if s.gateway != nil {
 		if err := s.gateway.Reload(context.Background(), u.ID, platform); err != nil {
-			// Non-fatal: bot token may be valid but unreachable right now.
+			// Non-fatal: token is valid but bot may be temporarily unreachable.
 			p := s.page(c, "Chat Connectors")
 			p.Error = "Connector saved but bot failed to start: " + err.Error()
 			return s.renderConnectors(c, u, p)
@@ -85,8 +102,16 @@ func (s *Server) handleSaveConnector(c echo.Context) error {
 		return c.Redirect(http.StatusFound, next)
 	}
 
+	botDisplay := ""
+	if botUsername != "" {
+		botDisplay = "@" + botUsername
+	}
 	p := s.page(c, "Chat Connectors")
-	p.Success = "Connected to " + platform + " successfully! Send /start to your bot to link your account."
+	if botDisplay != "" {
+		p.Success = "Bot " + botDisplay + " connected! Send /start to it in Telegram to link your account."
+	} else {
+		p.Success = "Connected to " + platform + " successfully! Send /start to your bot to link your account."
+	}
 	return s.renderConnectors(c, u, p)
 }
 

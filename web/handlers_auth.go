@@ -10,8 +10,10 @@ import (
 )
 
 func (s *Server) showLogin(c echo.Context) error {
-	_, ok := s.currentUser(c)
-	if ok {
+	if u, ok := s.currentUser(c); ok {
+		if u.Role == "admin" {
+			return c.Redirect(http.StatusFound, "/admin")
+		}
 		return c.Redirect(http.StatusFound, "/dashboard")
 	}
 	return c.Render(http.StatusOK, "auth/login.html", s.page(c, "Login"))
@@ -42,6 +44,9 @@ func (s *Server) handleLogin(c echo.Context) error {
 	}
 	if u.NeedsSetup {
 		return c.Redirect(http.StatusFound, "/setup")
+	}
+	if u.Role == "admin" {
+		return c.Redirect(http.StatusFound, "/admin")
 	}
 	return c.Redirect(http.StatusFound, "/dashboard")
 }
@@ -81,6 +86,9 @@ func (s *Server) handleChangePassword(c echo.Context) error {
 
 	if u.NeedsSetup {
 		return c.Redirect(http.StatusFound, "/setup")
+	}
+	if u.Role == "admin" {
+		return c.Redirect(http.StatusFound, "/admin")
 	}
 	return c.Redirect(http.StatusFound, "/dashboard")
 }

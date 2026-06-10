@@ -106,25 +106,52 @@ Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`,
 /login, /logout
 /setup                         # forced first-login wizard (change pw → master pw → connect platform)
 /change-password               # forced if must_change_password=1
-/dashboard                     # user home
+/dashboard                     # user home (regular users only — admin blocked)
 /dashboard/agents              # list agents
-/dashboard/agents/new          # create (calls GenerateAndSave via claude)
+/dashboard/agents/new          # create agent form (JS SSE progress, no blocking)
+/dashboard/agents/generate     # SSE endpoint: streams code generation progress
 /dashboard/agents/:id          # detail, run, edit code, save/delete schedule
 /dashboard/secrets             # list, create, delete (master-password gated)
 /dashboard/connectors          # connect/disconnect Telegram bot token
+/dashboard/sessions            # chat sessions (history) vs. one-time messages
+/dashboard/reminders           # natural language reminder creation
 /dashboard/memory              # view/add entries
 /dashboard/settings            # display name, change master password
+/admin                         # admin dashboard (admin only)
 /admin/users                   # create user, grant permissions, reset password
-/admin/users/:id               # user detail
+/admin/users/:id               # user detail + coder assignment
+/admin/users/:id/coder         # assign coder profile to user
+/admin/users/:id/coder/unassign
+/admin/coders                  # list + create coder profiles
+/admin/coders/:id              # edit/delete coder profile
 /admin/settings                # system settings (claude_bin, firejail_bin, timeouts)
 /admin/audit                   # audit log viewer
 ```
+
+### Admin vs. user separation
+
+- **Admin** (`role="admin"`): only `/admin/*` — manages users, coder profiles, settings, audit. No agents, secrets, reminders, or memory.
+- **Regular users**: only `/dashboard/*` — agents, secrets, connectors, sessions, reminders, memory.
+- `requireUserOnly` middleware on `/dashboard/*` redirects admins to `/admin`.
+- `requireAdmin` middleware on `/admin/*` rejects non-admins with 403.
+
+### Multi-coder system
+
+Admin creates named **Coder Profiles** (`coders` table) each with a `claude_bin` path and `timeout_s`. Users are assigned a coder via `users.coder_id` FK. `coderForUser(userID)` on the Server builds the right `*coder.Coder` per user, falling back to system defaults when unassigned.
+
+### Natural language reminders
+
+`internal/reminder/timeparser.go` — `ParseNaturalTime(text, now, loc)` parses expressions like `"in 10 minutes"`, `"tomorrow at 3pm"`, `"next Tuesday at noon"` using regex only (no external deps). Used by both the web UI (`handlers_misc.go`) and Telegram router (`gateway/router.go`). Telegram `/remind` syntax: `/remind in 10 minutes to check oven` (also `"me "` prefix stripped, old `30m` format still works).
+
+### Agent creation SSE
+
+`GET /dashboard/agents/generate?name=&description=` — streams SSE events (`status`, `done`, `error`) while `GenerateAndSave` runs. The `agent_new.html` form intercepts submit via JS, shows live progress, and auto-redirects on `done`. Falls back to the blocking `POST /dashboard/agents/new` if JS is disabled.
 
 ---
 
 ## Build Status
 
-All 8 implementation phases complete and committed. Build: **PASS**. `go vet`: **PASS**.
+Build: **PASS**. `go vet`: **PASS**.
 
 ### Committed phases
 
@@ -139,12 +166,12 @@ All 8 implementation phases complete and committed. Build: **PASS**. `go vet`: *
 | `0894420` | Phase 7 — scheduler (cron), reminders, sessions, memory |
 | `b572ff5` | Phase 8 — web UI: full user dashboard (DaisyUI/Tailwind) |
 | `50936af` | Polish — /remind, /session commands; web code editor; real settings persistence; RBAC |
+| `45f8cdc` | Docs — CLAUDE.md architecture, build status, known gaps |
+| (current) | UI overhaul (DaisyUI v4 fix), admin/user separation, coder profiles, SSE agent creation, NL reminders, connector bot instructions |
 
 ### Known gaps (not yet implemented)
 
 - **Tests** — only `internal/agentdesigner` and `internal/secrets` have test files; no integration or e2e coverage
 - **Discord adapter** — in the original plan; not implemented
-- **`/remind` list/delete commands** — only `/remind <dur> <msg>` exists; no list or cancel via Telegram
+- **`/remind` list/delete commands** — no list or cancel via Telegram (only create)
 - **`/memory` Telegram command** — memory store exists but no `/memory` chat command wired in Router
-- **Admin audit log template** — route exists; template may be stub
-- **Web agent creation UX** — `GenerateAndSave()` blocks the HTTP request while claude runs (no streaming/async progress)

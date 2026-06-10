@@ -1,29 +1,36 @@
 {{template "head" .}}
 
-<div class="min-h-screen flex items-center justify-center bg-base-200">
-  <div class="card w-full max-w-md shadow-2xl bg-base-100">
-    <div class="card-body">
-      <div class="text-center mb-6">
-        <h1 class="text-3xl font-bold">⚡ Simple Agents</h1>
-        <p class="text-base-content/60 mt-1">Sign in to your account</p>
-      </div>
-
-      {{template "alert" .}}
-
-      <form method="POST" action="/login" class="space-y-4">
-        <div class="form-control">
-          <label class="label"><span class="label-text">Username</span></label>
-          <input type="text" name="username" placeholder="your-username"
-            class="input input-bordered w-full" required autofocus autocomplete="username">
-        </div>
-        <div class="form-control">
-          <label class="label"><span class="label-text">Password</span></label>
-          <input type="password" name="password" placeholder="••••••••"
-            class="input input-bordered w-full" required autocomplete="current-password">
-        </div>
-        <button type="submit" class="btn btn-primary w-full">Sign In</button>
-      </form>
+<div class="min-h-screen flex items-center justify-center bg-base-200 p-4">
+  <div class="w-full max-w-sm">
+    <div class="text-center mb-8">
+      <div class="text-5xl mb-3">⚡</div>
+      <h1 class="text-3xl font-bold tracking-tight">Simple Agents</h1>
+      <p class="text-base-content/50 text-sm mt-1">AI agents for your home server</p>
     </div>
+
+    <div class="card bg-base-100 shadow-xl border border-base-300">
+      <div class="card-body gap-4">
+        <h2 class="text-lg font-semibold text-center">Sign in</h2>
+
+        {{template "alert" .}}
+
+        <form method="POST" action="/login" class="space-y-4">
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">Username</span></label>
+            <input type="text" name="username" placeholder="your-username"
+              class="input input-bordered w-full" required autofocus autocomplete="username">
+          </div>
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">Password</span></label>
+            <input type="password" name="password" placeholder="••••••••"
+              class="input input-bordered w-full" required autocomplete="current-password">
+          </div>
+          <button type="submit" class="btn btn-primary w-full">Sign In</button>
+        </form>
+      </div>
+    </div>
+
+    <p class="text-center text-xs text-base-content/30 mt-6">Powered by Claude</p>
   </div>
 </div>
 

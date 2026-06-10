@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/reminder"
 )
 
 // TextHandler is called for non-command messages (one-off chat).
@@ -218,35 +219,53 @@ func (r *Router) handleSecret(ctx context.Context, msg Message, arg string, send
 	return nil
 }
 
-// handleRemind parses: /remind <duration> <message>
-// Duration formats: 30m, 1h, 2h30m, 1d
-// Example: /remind 1h Check the oven
+// handleRemind parses natural language reminders:
+//   /remind in 10 minutes to check the oven
+//   /remind next Tuesday to call doctor
+//   /remind me in 10 minutes to start fire
+//   /remind 30m old format still works
 func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send func(string)) error {
 	arg = strings.TrimSpace(arg)
 	if arg == "" {
-		send("Usage: /remind \\<duration\\> \\<message\\>\nExamples:\n• /remind 30m Check the oven\n• /remind 1h Call doctor\n• /remind 2h30m Meeting prep\n• /remind 1d Pay bills")
+		send("Usage: /remind \\<when\\> to \\<message\\>\nExamples:\n• /remind in 10 minutes to check the oven\n• /remind tomorrow at 3pm to call doctor\n• /remind next Tuesday to pay bills\n• /remind 30m old format still works")
 		return nil
 	}
 
-	parts := strings.SplitN(arg, " ", 2)
-	if len(parts) < 2 {
-		send("Please include a message\\. Example: /remind 30m Check the oven")
-		return nil
+	// Strip optional leading "me "
+	arg = strings.TrimPrefix(arg, "me ")
+	arg = strings.TrimSpace(arg)
+
+	// Split on " to " to separate time expression from message.
+	// Falls back to first-word-is-duration for backward compat.
+	var timeExpr, message string
+	if idx := strings.Index(arg, " to "); idx >= 0 {
+		timeExpr = strings.TrimSpace(arg[:idx])
+		message = strings.TrimSpace(arg[idx+4:])
+	} else {
+		parts := strings.SplitN(arg, " ", 2)
+		if len(parts) < 2 {
+			send("Please include a message\\. Example: /remind in 10 minutes to check the oven")
+			return nil
+		}
+		timeExpr, message = parts[0], strings.TrimSpace(parts[1])
 	}
-	durStr := parts[0]
-	message := strings.TrimSpace(parts[1])
+
 	if message == "" {
-		send("Reminder message cannot be empty\\.")
+		send("Please include a message after 'to'\\. Example: /remind in 10 minutes to check the oven")
 		return nil
 	}
 
-	d, err := parseDuration(durStr)
+	// Try natural language parser first, then legacy duration format.
+	remindAt, err := reminder.ParseNaturalTime(timeExpr, time.Now(), time.UTC)
 	if err != nil {
-		send("Invalid duration `" + escapeMarkdown(durStr) + "`\\. Use formats like: 30m, 1h, 2h30m, 1d")
-		return nil
+		d, err2 := parseDuration(timeExpr)
+		if err2 != nil {
+			send("Couldn't understand that time\\. Try:\n• /remind in 10 minutes to check oven\n• /remind next Tuesday to call doctor\n• /remind 30m old format")
+			return nil
+		}
+		remindAt = time.Now().Add(d)
 	}
 
-	remindAt := time.Now().Add(d)
 	rm := &db.Reminder{
 		ID:       uuid.New().String(),
 		UserID:   msg.UserID,
@@ -420,7 +439,7 @@ func helpText() string {
 /agent cancel — cancel active agent creation
 /run \<name\> — run an agent
 /secret list — list stored secret names
-/remind \<duration\> \<message\> — set a reminder \(e\.g\. /remind 30m Check oven\)
+/remind \<when\> to \<message\> — set a reminder \(e\.g\. /remind in 10 minutes to check oven\)
 /session start \[name\] — start a chat session
 /session list — list active sessions
 /session stop — stop current session

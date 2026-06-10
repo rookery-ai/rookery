@@ -123,7 +123,7 @@ func serveCmd() *cli.Command {
 			reminderSvc := reminder.New(database, gwManager)
 			go reminderSvc.Run(ctx)
 
-			srv, err := web.NewServer(cfg, database, gwManager, runner, designFlow)
+			srv, err := web.NewServer(cfg, database, gwManager, runner, designer, homesDir)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}

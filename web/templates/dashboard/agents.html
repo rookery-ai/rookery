@@ -4,43 +4,51 @@
 <div class="container mx-auto px-4 py-8 max-w-6xl">
   {{template "alert" .}}
 
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold">🤖 My Agents</h1>
-    <a href="/dashboard/agents/new" class="btn btn-primary">+ New Agent</a>
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+    <div>
+      <h1 class="text-2xl font-bold">🤖 My Agents</h1>
+      <p class="text-base-content/50 text-sm mt-0.5">{{if .Agents}}{{len .Agents}} agent{{if gt (len .Agents) 1}}s{{end}} configured{{else}}No agents yet{{end}}</p>
+    </div>
+    <a href="/dashboard/agents/new" class="btn btn-primary gap-1 w-full sm:w-auto">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      New Agent
+    </a>
   </div>
 
   {{if .Agents}}
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
     {{range .Agents}}
-    <div class="card bg-base-100 shadow hover:shadow-md transition-shadow">
-      <div class="card-body">
-        <div class="flex items-start justify-between">
-          <h2 class="card-title text-lg">{{.Name}}</h2>
-          {{if .Active}}<span class="badge badge-success badge-sm">Active</span>
-          {{else}}<span class="badge badge-ghost badge-sm">Inactive</span>{{end}}
+    <div class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all">
+      <div class="card-body p-5">
+        <div class="flex items-start justify-between gap-2">
+          <h2 class="card-title text-base font-semibold leading-tight">{{.Name}}</h2>
+          {{if .Active}}<span class="badge badge-success badge-sm shrink-0">Active</span>
+          {{else}}<span class="badge badge-ghost badge-sm shrink-0">Inactive</span>{{end}}
         </div>
-        <p class="text-base-content/60 text-sm flex-1">
-          {{if .Description}}{{truncate .Description 100}}{{else}}<em>No description</em>{{end}}
+        <p class="text-base-content/50 text-sm flex-1 leading-relaxed">
+          {{if .Description}}{{truncate .Description 110}}{{else}}<em class="text-base-content/30">No description</em>{{end}}
         </p>
-        <p class="text-xs text-base-content/40">Created {{.CreatedAt.Format "Jan 2, 2006"}}</p>
-        <div class="card-actions justify-end mt-2">
-          <form method="POST" action="/dashboard/agents/{{.ID}}/run" class="inline">
-            <button type="submit" class="btn btn-primary btn-xs">▶ Run</button>
+        <p class="text-xs text-base-content/30">Created {{.CreatedAt.Format "Jan 2, 2006"}}</p>
+        <div class="card-actions justify-between items-center mt-1">
+          <a href="/dashboard/agents/{{.ID}}" class="btn btn-ghost btn-sm">Details</a>
+          <form method="POST" action="/dashboard/agents/{{.ID}}/run">
+            <button type="submit" class="btn btn-primary btn-sm gap-1">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              Run
+            </button>
           </form>
-          <a href="/dashboard/agents/{{.ID}}" class="btn btn-ghost btn-xs">Details</a>
         </div>
       </div>
     </div>
     {{end}}
   </div>
   {{else}}
-  <div class="card bg-base-100 shadow">
-    <div class="card-body items-center text-center py-16">
+  <div class="card bg-base-100 shadow-sm border border-base-300">
+    <div class="card-body items-center text-center py-20">
       <div class="text-6xl mb-4">🤖</div>
       <h2 class="text-xl font-bold mb-2">No agents yet</h2>
-      <p class="text-base-content/60 mb-6">
-        Create your first agent by describing what you want it to do.
-        The system will guide you through the setup.
+      <p class="text-base-content/50 text-sm mb-6 max-w-sm">
+        Create your first agent by describing what you want it to do in plain language.
       </p>
       <a href="/dashboard/agents/new" class="btn btn-primary">Create Your First Agent</a>
     </div>

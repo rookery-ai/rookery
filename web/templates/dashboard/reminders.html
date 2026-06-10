@@ -4,52 +4,71 @@
 <div class="container mx-auto px-4 py-8 max-w-3xl">
   {{template "alert" .}}
 
-  <h1 class="text-2xl font-bold mb-6">⏰ Reminders</h1>
+  <div class="mb-8">
+    <h1 class="text-2xl font-bold">⏰ Reminders</h1>
+    <p class="text-base-content/50 text-sm mt-0.5">One-time reminders delivered to your connected chat app.</p>
+  </div>
 
-  <div class="card bg-base-100 shadow mb-6">
-    <div class="card-body">
-      <h2 class="card-title text-lg">Add Reminder</h2>
-      <form method="POST" action="/dashboard/reminders" class="space-y-3">
+  <!-- Add reminder -->
+  <div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
+    <div class="card-body p-5">
+      <h2 class="font-semibold mb-4">Add Reminder</h2>
+      <form method="POST" action="/dashboard/reminders" class="space-y-4">
         <div class="form-control">
-          <label class="label"><span class="label-text">Message</span></label>
+          <label class="label pb-1"><span class="label-text font-medium">Message</span></label>
           <input type="text" name="message" placeholder="What to remind you about..."
             class="input input-bordered w-full" required>
         </div>
         <div class="form-control">
-          <label class="label"><span class="label-text">When</span></label>
-          <input type="datetime-local" name="remind_at" class="input input-bordered w-full" required>
+          <label class="label pb-1">
+            <span class="label-text font-medium">When</span>
+            <span class="label-text-alt text-base-content/40">natural language</span>
+          </label>
+          <input type="text" name="when" class="input input-bordered w-full"
+            placeholder='e.g. "in 10 minutes", "tomorrow at 3pm", "next Tuesday at noon"'
+            required autocomplete="off">
         </div>
-        <button type="submit" class="btn btn-primary">Set Reminder</button>
+        <button type="submit" class="btn btn-primary gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+          Set Reminder
+        </button>
       </form>
     </div>
   </div>
 
-  <div class="card bg-base-100 shadow">
-    <div class="card-body">
-      <h2 class="card-title text-lg">Your Reminders</h2>
+  <!-- Reminder list -->
+  <div class="card bg-base-100 shadow-sm border border-base-300">
+    <div class="card-body p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold">Your Reminders</h2>
+        {{if .Reminders}}<span class="badge badge-ghost badge-sm">{{len .Reminders}}</span>{{end}}
+      </div>
       {{if .Reminders}}
       <ul class="divide-y divide-base-200">
         {{range .Reminders}}
-        <li class="flex items-center justify-between py-3">
+        <li class="flex items-center justify-between py-3 gap-3">
           <div class="flex items-center gap-3">
-            <span>{{if .Sent}}✅{{else}}🔔{{end}}</span>
+            <span class="text-xl shrink-0">{{if .Sent}}✅{{else}}🔔{{end}}</span>
             <div>
-              <p class="font-medium {{if .Sent}}line-through opacity-50{{end}}">{{.Message}}</p>
-              <p class="text-xs text-base-content/50">{{.RemindAt.Format "January 2, 2006 at 15:04"}}</p>
+              <p class="font-medium text-sm {{if .Sent}}line-through opacity-40{{end}}">{{.Message}}</p>
+              <p class="text-xs text-base-content/40">{{.RemindAt.Format "January 2, 2006 at 15:04"}}</p>
             </div>
           </div>
           {{if not .Sent}}
           <form method="POST" action="/dashboard/reminders/{{.ID}}/delete"
             onsubmit="return confirm('Delete this reminder?')">
-            <button type="submit" class="btn btn-ghost btn-xs text-error">Delete</button>
+            <button type="submit" class="btn btn-ghost btn-xs text-error shrink-0">Delete</button>
           </form>
+          {{else}}
+          <span class="badge badge-ghost badge-xs shrink-0">Sent</span>
           {{end}}
         </li>
         {{end}}
       </ul>
       {{else}}
-      <div class="text-center py-8 text-base-content/40">
-        <p>No reminders set.</p>
+      <div class="text-center py-12 text-base-content/30">
+        <div class="text-4xl mb-3">⏰</div>
+        <p class="text-sm">No reminders set.</p>
       </div>
       {{end}}
     </div>

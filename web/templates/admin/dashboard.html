@@ -4,44 +4,88 @@
 <div class="container mx-auto px-4 py-8 max-w-6xl">
   {{template "alert" .}}
 
-  <h1 class="text-2xl font-bold mb-6">⚡ Admin Dashboard</h1>
+  <div class="mb-8">
+    <h1 class="text-2xl font-bold">⚡ Admin Dashboard</h1>
+    <p class="text-base-content/50 text-sm mt-0.5">System overview and recent activity.</p>
+  </div>
 
-  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-    <div class="stat bg-base-100 rounded-box shadow">
-      <div class="stat-title">Total Users</div>
-      <div class="stat-value text-primary">{{.UserCount}}</div>
-      <div class="stat-actions"><a href="/admin/users" class="btn btn-xs btn-ghost">Manage →</a></div>
+  <!-- Stats -->
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+    <div class="stat bg-base-100 rounded-xl shadow-sm border border-base-300 p-4">
+      <div class="stat-figure text-primary">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+      </div>
+      <div class="stat-title text-xs">Users</div>
+      <div class="stat-value text-2xl text-primary">{{.UserCount}}</div>
+      <div class="stat-desc"><a href="/admin/users" class="link link-primary text-xs">Manage →</a></div>
     </div>
-    <div class="stat bg-base-100 rounded-box shadow">
-      <div class="stat-title">Total Agents</div>
-      <div class="stat-value text-secondary">{{.AgentCount}}</div>
+    <div class="stat bg-base-100 rounded-xl shadow-sm border border-base-300 p-4">
+      <div class="stat-figure text-secondary">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"/></svg>
+      </div>
+      <div class="stat-title text-xs">Agents</div>
+      <div class="stat-value text-2xl text-secondary">{{.AgentCount}}</div>
+      <div class="stat-desc text-xs opacity-40">across all users</div>
+    </div>
+    <div class="stat bg-base-100 rounded-xl shadow-sm border border-base-300 p-4">
+      <div class="stat-figure text-accent">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+      </div>
+      <div class="stat-title text-xs">Coders</div>
+      <div class="stat-value text-2xl text-accent">{{.CoderCount}}</div>
+      <div class="stat-desc"><a href="/admin/coders" class="link link-accent text-xs">Manage →</a></div>
+    </div>
+    <div class="stat bg-base-100 rounded-xl shadow-sm border border-base-300 p-4">
+      <div class="stat-figure text-info">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+      </div>
+      <div class="stat-title text-xs">Audit Events</div>
+      <div class="stat-value text-2xl text-info">{{len .AuditLogs}}</div>
+      <div class="stat-desc"><a href="/admin/audit" class="link link-info text-xs">View log →</a></div>
     </div>
   </div>
 
-  <div class="card bg-base-100 shadow">
-    <div class="card-body">
-      <div class="flex items-center justify-between">
-        <h2 class="card-title">Recent Audit Events</h2>
-        <a href="/admin/audit" class="btn btn-ghost btn-xs">View All</a>
+  <!-- Recent audit events -->
+  <div class="card bg-base-100 shadow-sm border border-base-300">
+    <div class="card-body p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold">Recent Audit Events</h2>
+        <a href="/admin/audit" class="btn btn-ghost btn-xs">View All →</a>
       </div>
       {{if .AuditLogs}}
       <div class="overflow-x-auto">
-        <table class="table table-sm">
-          <thead><tr><th>Action</th><th>Target</th><th>Detail</th><th>When</th></tr></thead>
+        <table class="table table-sm table-zebra">
+          <thead>
+            <tr>
+              <th class="text-xs">Action</th>
+              <th class="text-xs">Target</th>
+              <th class="text-xs">Detail</th>
+              <th class="text-xs">When</th>
+            </tr>
+          </thead>
           <tbody>
           {{range .AuditLogs}}
           <tr>
-            <td><span class="badge badge-ghost badge-sm font-mono">{{.Action}}</span></td>
-            <td class="text-xs font-mono text-base-content/60">{{.Target}}</td>
-            <td class="text-xs text-base-content/60 max-w-xs truncate">{{.Detail}}</td>
-            <td class="text-xs text-base-content/50">{{.CreatedAt.Format "Jan 2 15:04"}}</td>
+            <td>
+              {{if eq .Action "login"}}<span class="badge badge-info badge-sm font-mono">{{.Action}}</span>
+              {{else if eq .Action "logout"}}<span class="badge badge-ghost badge-sm font-mono">{{.Action}}</span>
+              {{else if eq .Action "create_user"}}<span class="badge badge-success badge-sm font-mono">{{.Action}}</span>
+              {{else if eq .Action "delete_agent"}}<span class="badge badge-error badge-sm font-mono">{{.Action}}</span>
+              {{else if eq .Action "create_agent"}}<span class="badge badge-success badge-sm font-mono">{{.Action}}</span>
+              {{else}}<span class="badge badge-ghost badge-sm font-mono">{{.Action}}</span>{{end}}
+            </td>
+            <td class="text-xs font-mono text-base-content/50">{{.Target}}</td>
+            <td class="text-xs text-base-content/50 max-w-xs truncate">{{.Detail}}</td>
+            <td class="text-xs text-base-content/40 whitespace-nowrap">{{.CreatedAt.Format "Jan 2 15:04"}}</td>
           </tr>
           {{end}}
           </tbody>
         </table>
       </div>
       {{else}}
-      <p class="text-base-content/40 text-sm">No audit events yet.</p>
+      <div class="text-center py-10 text-base-content/30">
+        <p class="text-sm">No audit events recorded yet.</p>
+      </div>
       {{end}}
     </div>
   </div>

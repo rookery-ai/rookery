@@ -4,33 +4,43 @@
 <div class="container mx-auto px-4 py-8 max-w-3xl">
   {{template "alert" .}}
 
-  <div class="flex items-center justify-between mb-6">
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
     <div>
       <h1 class="text-2xl font-bold">💬 Chat Sessions</h1>
-      <p class="text-base-content/60 text-sm mt-1">Sessions auto-stop after 30 minutes of inactivity</p>
+      <p class="text-base-content/50 text-sm mt-0.5">Sessions keep conversation history with Claude. Regular Telegram messages without a session are one-time calls — Claude answers but no history is saved. Sessions auto-stop after 30 minutes of inactivity.</p>
     </div>
     <form method="POST" action="/dashboard/sessions">
       <input type="hidden" name="name" value="">
-      <button type="submit" class="btn btn-primary btn-sm">+ New Session</button>
+      <button type="submit" class="btn btn-primary btn-sm gap-1 w-full sm:w-auto">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        New Session
+      </button>
     </form>
   </div>
 
   {{if .Sessions}}
   <div class="space-y-3">
     {{range .Sessions}}
-    <div class="card bg-base-100 shadow">
-      <div class="card-body py-4">
-        <div class="flex items-center justify-between">
+    <div class="card bg-base-100 shadow-sm border {{if .Active}}border-success/30{{else}}border-base-300{{end}}">
+      <div class="card-body py-4 px-5">
+        <div class="flex items-center justify-between gap-3">
           <div class="flex items-center gap-3">
-            <span>{{if .Active}}🟢{{else}}⚫{{end}}</span>
+            <div class="{{if .Active}}text-success{{else}}text-base-content/20{{end}}">
+              {{if .Active}}
+              <span class="inline-block w-2.5 h-2.5 rounded-full bg-success animate-pulse"></span>
+              {{else}}
+              <span class="inline-block w-2.5 h-2.5 rounded-full bg-base-300"></span>
+              {{end}}
+            </div>
             <div>
-              <p class="font-semibold">{{if .Name}}{{.Name}}{{else}}Unnamed Session{{end}}</p>
-              <p class="text-xs text-base-content/50">
+              <p class="font-semibold text-sm">{{if .Name}}{{.Name}}{{else}}Unnamed Session{{end}}</p>
+              <p class="text-xs text-base-content/40">
                 {{.Platform}} · Last active {{.LastSeen.Format "Jan 2 at 15:04"}}
+                {{if .Active}}<span class="badge badge-success badge-xs ml-1">active</span>{{end}}
               </p>
             </div>
           </div>
-          <div class="flex gap-2">
+          <div class="flex gap-2 shrink-0">
             {{if .Active}}
             <form method="POST" action="/dashboard/sessions/{{.ID}}/stop">
               <button class="btn btn-warning btn-xs">Stop</button>
@@ -47,11 +57,12 @@
     {{end}}
   </div>
   {{else}}
-  <div class="card bg-base-100 shadow">
-    <div class="card-body items-center text-center py-12">
-      <div class="text-5xl mb-3">💬</div>
-      <h2 class="text-lg font-bold">No sessions yet</h2>
-      <p class="text-base-content/60 text-sm">Start a chat session from your connected bot with <code>/session start</code></p>
+  <div class="card bg-base-100 shadow-sm border border-base-300">
+    <div class="card-body items-center text-center py-16">
+      <div class="text-5xl mb-4">💬</div>
+      <h2 class="text-lg font-bold mb-1">No sessions yet</h2>
+      <p class="text-base-content/50 text-sm mb-4">Start a chat session from your connected bot:</p>
+      <code class="bg-base-200 border border-base-300 rounded-lg px-4 py-2 text-sm font-mono">/session start</code>
     </div>
   </div>
   {{end}}

@@ -2,6 +2,8 @@ package web
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"strings"
@@ -59,9 +61,11 @@ func (s *Server) handleNewAgent(c echo.Context) error {
 
 	agentID := uuid.New().String()
 
-	// Use the design flow to generate real agent code if available.
-	if s.designFlow != nil {
-		if err := s.designFlow.GenerateAndSave(context.Background(), u.ID, agentID, name, description); err != nil {
+	// Use a per-user coder flow to generate real agent code if available.
+	if s.designer != nil {
+		userCoder := s.coderForUser(u.ID)
+		flow := agentdesigner.NewFlow(userCoder, s.designer)
+		if err := flow.GenerateAndSave(context.Background(), u.ID, agentID, name, description); err != nil {
 			p := s.page(c, "Create Agent")
 			p.Error = "Agent generation failed: " + err.Error()
 			return c.Render(http.StatusInternalServerError, "dashboard/agent_new.html", p)
@@ -285,5 +289,49 @@ func (s *Server) handleSaveCode(c echo.Context) error {
 	s.audit.Log(u.ID, "edit_agent_code", "agent:"+id, agent.Name, c.RealIP())
 	p.Success = "Code saved"
 	return s.renderAgentDetail(c, agent, u.ID, p)
+}
+
+// handleGenerateAgentSSE streams agent generation progress via Server-Sent Events.
+// The form on agent_new.html submits here via JS EventSource instead of a blocking POST.
+func (s *Server) handleGenerateAgentSSE(c echo.Context) error {
+	u := c.Get("user").(*db.User)
+	name := strings.TrimSpace(c.QueryParam("name"))
+	description := strings.TrimSpace(c.QueryParam("description"))
+
+	if name == "" || description == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "name and description required"})
+	}
+
+	agentID := uuid.New().String()
+
+	c.Response().Header().Set("Content-Type", "text/event-stream")
+	c.Response().Header().Set("Cache-Control", "no-cache")
+	c.Response().Header().Set("X-Accel-Buffering", "no")
+	c.Response().Header().Set("Connection", "keep-alive")
+	c.Response().WriteHeader(http.StatusOK)
+
+	type sseEvent struct {
+		Type string `json:"type"`
+		Msg  string `json:"msg,omitempty"`
+		URL  string `json:"url,omitempty"`
+	}
+	sendEvent := func(evt sseEvent) {
+		b, _ := json.Marshal(evt)
+		fmt.Fprintf(c.Response(), "data: %s\n\n", b)
+		c.Response().Flush()
+	}
+
+	sendEvent(sseEvent{Type: "status", Msg: "Calling Claude to generate Python code..."})
+
+	flow := agentdesigner.NewFlow(s.coderForUser(u.ID), s.designer)
+	if err := flow.GenerateAndSave(context.Background(), u.ID, agentID, name, description); err != nil {
+		sendEvent(sseEvent{Type: "error", Msg: err.Error()})
+		return nil
+	}
+
+	sendEvent(sseEvent{Type: "status", Msg: "Running security checks and saving..."})
+	s.audit.Log(u.ID, "create_agent", "agent:"+agentID, name, c.RealIP())
+	sendEvent(sseEvent{Type: "done", URL: "/dashboard/agents/" + agentID})
+	return nil
 }
 

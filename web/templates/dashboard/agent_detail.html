@@ -1,77 +1,106 @@
 {{template "head" .}}
 {{template "navbar" .}}
 
-<div class="container mx-auto px-4 py-8 max-w-4xl">
+<div class="container mx-auto px-4 py-8 max-w-5xl">
   {{template "alert" .}}
 
-  <div class="flex items-center gap-4 mb-6">
-    <a href="/dashboard/agents" class="btn btn-ghost btn-sm">← Back</a>
-    <h1 class="text-2xl font-bold">🤖 {{.Agent.Name}}</h1>
-    {{if .Agent.Active}}<span class="badge badge-success">Active</span>
-    {{else}}<span class="badge badge-ghost">Inactive</span>{{end}}
+  <div class="flex items-center gap-3 mb-6">
+    <a href="/dashboard/agents" class="btn btn-ghost btn-sm gap-1">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      Agents
+    </a>
+    <span class="text-base-content/30">/</span>
+    <h1 class="text-xl font-bold">{{.Agent.Name}}</h1>
+    {{if .Agent.Active}}<span class="badge badge-success badge-sm">Active</span>
+    {{else}}<span class="badge badge-ghost badge-sm">Inactive</span>{{end}}
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <!-- Main info -->
-    <div class="lg:col-span-2 space-y-4">
-      <div class="card bg-base-100 shadow">
-        <div class="card-body">
-          <h2 class="card-title text-lg">Description</h2>
-          <p class="text-base-content/70">{{if .Agent.Description}}{{.Agent.Description}}{{else}}<em>No description</em>{{end}}</p>
-          <div class="text-xs text-base-content/40 mt-2">
-            Created: {{.Agent.CreatedAt.Format "January 2, 2006 at 15:04"}}
-          </div>
+    <!-- Main content -->
+    <div class="lg:col-span-2 space-y-5">
+
+      <!-- Description -->
+      <div class="card bg-base-100 shadow-sm border border-base-300">
+        <div class="card-body p-5">
+          <h2 class="font-semibold text-sm text-base-content/50 uppercase tracking-wide mb-1">Description</h2>
+          <p class="text-base-content/80 leading-relaxed">
+            {{if .Agent.Description}}{{.Agent.Description}}{{else}}<em class="text-base-content/30">No description</em>{{end}}
+          </p>
+          <p class="text-xs text-base-content/30 mt-2">Created {{.Agent.CreatedAt.Format "January 2, 2006 at 15:04"}}</p>
         </div>
       </div>
 
       <!-- Agent Code -->
-      <div class="card bg-base-100 shadow">
-        <div class="card-body">
-          <h2 class="card-title text-lg">Agent Code</h2>
+      <div class="card bg-base-100 shadow-sm border border-base-300">
+        <div class="card-body p-5">
+          <h2 class="font-semibold text-sm text-base-content/50 uppercase tracking-wide mb-3">Agent Code</h2>
           {{if .Code}}
           <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/code" class="space-y-3">
-            <textarea name="code" class="textarea textarea-bordered w-full font-mono text-xs h-64 leading-relaxed"
-              spellcheck="false">{{.Code}}</textarea>
+            <textarea name="code"
+              class="textarea textarea-bordered w-full font-mono text-xs leading-relaxed resize-y"
+              style="min-height:300px; tab-size:4;"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off">{{.Code}}</textarea>
             <div class="flex justify-between items-center">
-              <p class="text-xs text-base-content/40">Guardrails run on save. Forbidden: eval, exec, subprocess, socket.</p>
+              <p class="text-xs text-base-content/30">Guardrails run on save. Forbidden: eval, exec, subprocess, socket.</p>
               <button type="submit" class="btn btn-primary btn-sm">Save Code</button>
             </div>
           </form>
           {{else}}
-          <p class="text-sm text-base-content/40">No code generated yet. Use the chat wizard or create the agent from the web form to generate code.</p>
+          <div class="text-center py-8 text-base-content/40">
+            <div class="text-4xl mb-3">📝</div>
+            <p class="text-sm">No code generated yet.</p>
+            <p class="text-xs mt-1">Create the agent via the wizard to generate code.</p>
+          </div>
           {{end}}
         </div>
       </div>
 
       <!-- Run history -->
-      <div class="card bg-base-100 shadow">
-        <div class="card-body">
-          <h2 class="card-title text-lg">Run History</h2>
+      <div class="card bg-base-100 shadow-sm border border-base-300">
+        <div class="card-body p-5">
+          <h2 class="font-semibold text-sm text-base-content/50 uppercase tracking-wide mb-3">Run History</h2>
           {{if .Runs}}
           <div class="overflow-x-auto">
-            <table class="table table-sm">
-              <thead><tr><th>Trigger</th><th>Status</th><th>Output</th><th>When</th></tr></thead>
+            <table class="table table-sm table-zebra">
+              <thead>
+                <tr>
+                  <th class="text-xs">Trigger</th>
+                  <th class="text-xs">Status</th>
+                  <th class="text-xs">Output</th>
+                  <th class="text-xs">When</th>
+                </tr>
+              </thead>
               <tbody>
               {{range .Runs}}
               <tr>
-                <td><span class="badge badge-ghost badge-sm">{{.Trigger}}</span></td>
+                <td><span class="badge badge-ghost badge-xs">{{.Trigger}}</span></td>
                 <td>
                   {{if .ExitCode}}
-                    {{if eq (derefInt .ExitCode) 0}}<span class="badge badge-success badge-sm">OK</span>
-                    {{else}}<span class="badge badge-error badge-sm">Exit {{derefInt .ExitCode}}</span>{{end}}
-                  {{else}}<span class="badge badge-warning badge-sm">Running</span>{{end}}
+                    {{if eq (derefInt .ExitCode) 0}}<span class="badge badge-success badge-xs">OK</span>
+                    {{else}}<span class="badge badge-error badge-xs">Exit {{derefInt .ExitCode}}</span>{{end}}
+                  {{else}}<span class="badge badge-warning badge-xs">Running</span>{{end}}
                 </td>
                 <td class="max-w-xs">
-                  {{if .Stdout}}<span class="text-xs font-mono text-base-content/60">{{truncate .Stdout 60}}</span>{{else}}<span class="text-base-content/30 text-xs">—</span>{{end}}
+                  {{if .Stdout}}
+                  <details class="cursor-pointer">
+                    <summary class="text-xs font-mono text-base-content/50 truncate max-w-[200px]">{{truncate .Stdout 50}}</summary>
+                    <pre class="text-xs font-mono bg-base-200 rounded p-2 mt-1 max-h-32 overflow-auto whitespace-pre-wrap">{{.Stdout}}</pre>
+                  </details>
+                  {{else}}<span class="text-base-content/20 text-xs">—</span>{{end}}
                 </td>
-                <td class="text-xs text-base-content/50">{{.StartedAt.Format "Jan 2 15:04"}}</td>
+                <td class="text-xs text-base-content/40 whitespace-nowrap">{{.StartedAt.Format "Jan 2 15:04"}}</td>
               </tr>
               {{end}}
               </tbody>
             </table>
           </div>
           {{else}}
-          <p class="text-base-content/40 text-sm">No runs yet.</p>
+          <div class="text-center py-8 text-base-content/30">
+            <p class="text-sm">No runs yet — hit "Run Now" to test.</p>
+          </div>
           {{end}}
         </div>
       </div>
@@ -79,12 +108,16 @@
 
     <!-- Actions sidebar -->
     <div class="space-y-4">
-      <div class="card bg-base-100 shadow">
-        <div class="card-body">
-          <h2 class="card-title text-lg">Actions</h2>
+      <!-- Run actions -->
+      <div class="card bg-base-100 shadow-sm border border-base-300">
+        <div class="card-body p-4">
+          <h2 class="font-semibold text-sm mb-3">Actions</h2>
           <div class="space-y-2">
             <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/run">
-              <button type="submit" class="btn btn-primary w-full">▶ Run Now</button>
+              <button type="submit" class="btn btn-primary w-full gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                Run Now
+              </button>
             </form>
             <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/delete"
               onsubmit="return confirm('Delete agent {{.Agent.Name}}? This cannot be undone.')">
@@ -94,44 +127,63 @@
         </div>
       </div>
 
-      <div class="card bg-base-100 shadow">
-        <div class="card-body">
-          <h2 class="card-title text-lg">Schedule</h2>
+      <!-- Schedule -->
+      <div class="card bg-base-100 shadow-sm border border-base-300">
+        <div class="card-body p-4">
+          <h2 class="font-semibold text-sm mb-3">Schedule</h2>
           {{if .Schedule}}
-          <div class="text-sm mb-3">
-            <p class="font-mono bg-base-200 px-2 py-1 rounded">{{.Schedule.CronExpr}}</p>
+          <div class="mb-3">
+            <p class="font-mono text-sm bg-base-200 px-3 py-1.5 rounded border border-base-300">{{.Schedule.CronExpr}}</p>
             {{if .Schedule.NextRunAt}}
-            <p class="text-base-content/60 mt-2 text-xs">Next run: {{.Schedule.NextRunAt.Format "Jan 2 at 15:04"}}</p>
+            <p class="text-xs text-base-content/40 mt-1.5">Next: {{.Schedule.NextRunAt.Format "Jan 2 at 15:04"}}</p>
             {{end}}
           </div>
           <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/schedule/delete"
             onsubmit="return confirm('Remove this schedule?')">
-            <button type="submit" class="btn btn-ghost btn-xs text-error">Remove schedule</button>
+            <button type="submit" class="btn btn-ghost btn-xs text-error mb-3 w-full">Remove schedule</button>
           </form>
           {{else}}
-          <p class="text-sm text-base-content/50 mb-3">No schedule set.</p>
+          <p class="text-xs text-base-content/40 mb-3">No schedule set.</p>
           {{end}}
-          <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/schedule" class="space-y-2 mt-2">
+
+          <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/schedule" class="space-y-2">
             <div class="form-control">
               <input type="text" name="cron_expr" placeholder="0 8 * * *"
                 class="input input-bordered input-sm w-full font-mono"
-                value="{{if .Schedule}}{{.Schedule.CronExpr}}{{end}}">
-              <label class="label"><span class="label-text-alt text-base-content/40">min hour day month weekday</span></label>
+                value="{{if .Schedule}}{{.Schedule.CronExpr}}{{end}}"
+                id="cron-input">
+              <label class="label pt-1">
+                <span class="label-text-alt text-base-content/30">min hour day month weekday</span>
+              </label>
+            </div>
+            <!-- Cron presets -->
+            <div class="flex flex-wrap gap-1 pb-1">
+              <button type="button" onclick="setCron('0 8 * * *')" class="badge badge-ghost badge-sm cursor-pointer hover:badge-primary text-xs">Daily 8am</button>
+              <button type="button" onclick="setCron('0 * * * *')" class="badge badge-ghost badge-sm cursor-pointer hover:badge-primary text-xs">Hourly</button>
+              <button type="button" onclick="setCron('*/30 * * * *')" class="badge badge-ghost badge-sm cursor-pointer hover:badge-primary text-xs">30 min</button>
+              <button type="button" onclick="setCron('0 8 * * 1')" class="badge badge-ghost badge-sm cursor-pointer hover:badge-primary text-xs">Mon 8am</button>
             </div>
             <button type="submit" class="btn btn-primary btn-sm w-full">
-              {{if .Schedule}}Update Schedule{{else}}Set Schedule{{end}}
+              {{if .Schedule}}Update{{else}}Set{{end}} Schedule
             </button>
           </form>
         </div>
       </div>
 
-      <div class="card bg-base-100 shadow">
+      <!-- Meta -->
+      <div class="card bg-base-100 shadow-sm border border-base-300">
         <div class="card-body p-4">
-          <p class="text-xs text-base-content/50 font-mono">ID: {{.Agent.ID}}</p>
+          <p class="text-xs text-base-content/30 font-mono break-all">ID: {{.Agent.ID}}</p>
         </div>
       </div>
     </div>
   </div>
 </div>
+
+<script>
+function setCron(v) {
+  document.getElementById('cron-input').value = v;
+}
+</script>
 
 {{template "foot" .}}

@@ -1,75 +1,73 @@
 {{template "head" .}}
 
 <div class="min-h-screen bg-base-200 py-12 px-4">
-  <div class="max-w-2xl mx-auto">
+  <div class="max-w-xl mx-auto">
     <div class="text-center mb-8">
-      <h1 class="text-3xl font-bold">⚡ Welcome to Simple Agents</h1>
-      <p class="text-base-content/60 mt-2">Let's get your account set up in a few steps</p>
+      <div class="text-4xl mb-3">⚡</div>
+      <h1 class="text-3xl font-bold">Welcome to Simple Agents</h1>
+      <p class="text-base-content/50 mt-1 text-sm">Let's get your account configured</p>
     </div>
 
     <!-- Steps indicator -->
-    <ul class="steps steps-horizontal w-full mb-8">
+    <ul class="steps steps-horizontal w-full mb-8 text-xs">
       <li class="step {{if ge .Step 1}}step-primary{{end}}">Password</li>
       <li class="step {{if ge .Step 2}}step-primary{{end}}">Master Key</li>
       <li class="step {{if ge .Step 3}}step-primary{{end}}">Chat App</li>
       <li class="step {{if ge .Step 4}}step-primary{{end}}">Done</li>
     </ul>
 
-    <div class="card bg-base-100 shadow-xl">
+    <div class="card bg-base-100 shadow-xl border border-base-300">
       <div class="card-body">
         {{template "alert" .}}
 
         {{if eq .Step 1}}
-        <!-- Step 1: Already handled by /change-password, redirect there -->
+        <div class="text-center py-4">
+          <span class="loading loading-spinner loading-md text-primary"></span>
+          <p class="text-sm text-base-content/50 mt-2">Redirecting to password change...</p>
+        </div>
         <script>window.location="/change-password"</script>
 
         {{else if eq .Step 2}}
-        <!-- Step 2: Set master password -->
-        <h2 class="card-title text-xl mb-2">🔐 Set Your Master Password</h2>
-        <p class="text-base-content/60 mb-4">
-          Your master password protects all your secrets. It is <strong>not</strong> your login password.
-          <br>This password is used to encrypt/decrypt your API keys and tokens.
+        <h2 class="card-title text-xl mb-1">🔐 Set Your Master Password</h2>
+        <p class="text-base-content/60 text-sm mb-4">
+          Your master password encrypts all agent secrets (API keys, tokens, passwords).
+          It is <strong>separate</strong> from your login password and <strong>cannot be recovered</strong> if lost.
         </p>
         <form method="POST" action="/setup" class="space-y-4">
           <input type="hidden" name="action" value="master_password">
           <div class="form-control">
-            <label class="label"><span class="label-text">Master Password</span></label>
+            <label class="label pb-1"><span class="label-text font-medium">Master Password</span></label>
             <input type="password" name="master_password" placeholder="Strong password (min 8 chars)"
-              class="input input-bordered w-full" required minlength="8" autocomplete="new-password"
-              id="mp-input">
-            <label class="label">
-              <span class="label-text-alt text-base-content/50">
-                This password cannot be recovered — remember it!
-              </span>
-            </label>
+              class="input input-bordered w-full" required minlength="8" autocomplete="new-password">
           </div>
           <div class="form-control">
-            <label class="label"><span class="label-text">Confirm Master Password</span></label>
+            <label class="label pb-1"><span class="label-text font-medium">Confirm Master Password</span></label>
             <input type="password" name="confirm" placeholder="Repeat master password"
               class="input input-bordered w-full" required autocomplete="new-password">
           </div>
-          <div class="flex gap-2">
-            <button type="submit" class="btn btn-primary flex-1">Set Master Password →</button>
+          <div role="alert" class="alert alert-warning py-2 text-xs">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            <span>Write this password down and store it safely — it cannot be recovered.</span>
           </div>
+          <button type="submit" class="btn btn-primary w-full">Set Master Password →</button>
         </form>
 
         {{else if eq .Step 3}}
-        <!-- Step 3: Connect chat app -->
-        <h2 class="card-title text-xl mb-2">📱 Connect Your Chat App</h2>
-        <p class="text-base-content/60 mb-4">
-          Connect a chat app so you can interact with your agents from Telegram, Discord, or other platforms.
-          You can skip this and set it up later from the dashboard.
+        <h2 class="card-title text-xl mb-1">📱 Connect Your Chat App</h2>
+        <p class="text-base-content/60 text-sm mb-5">
+          Connect a Telegram bot to interact with your agents from chat. You can skip this and set it up later.
         </p>
 
-        <div class="card bg-base-200 mb-4">
+        <div class="card bg-base-200 border border-base-300 mb-4">
           <div class="card-body p-4">
-            <h3 class="font-semibold flex items-center gap-2">
-              <span class="text-blue-400">📨</span> Telegram
+            <h3 class="font-semibold flex items-center gap-2 mb-2">
+              <span class="text-blue-400 text-xl">📨</span> Telegram Bot
             </h3>
-            <p class="text-sm text-base-content/60 mb-3">
-              Create a bot via <a href="https://t.me/BotFather" target="_blank" class="link link-primary">@BotFather</a>
-              and paste the token below.
-            </p>
+            <ol class="list-decimal list-inside text-sm text-base-content/70 space-y-1 mb-3">
+              <li>Open Telegram and message <a href="https://t.me/BotFather" target="_blank" class="link link-primary">@BotFather</a></li>
+              <li>Send <code class="bg-base-300 px-1 rounded">/newbot</code> and follow the prompts</li>
+              <li>Copy the token (e.g. <code class="bg-base-300 px-1 rounded text-xs">123456:AABBCCxxx</code>)</li>
+            </ol>
             <form method="POST" action="/dashboard/connectors" class="flex gap-2">
               <input type="hidden" name="platform" value="telegram">
               <input type="hidden" name="next" value="/setup?step=4">
@@ -82,20 +80,25 @@
 
         <form method="POST" action="/setup">
           <input type="hidden" name="action" value="skip_connector">
-          <button type="submit" class="btn btn-ghost btn-sm w-full">Skip for now →</button>
+          <button type="submit" class="btn btn-ghost btn-sm w-full text-base-content/50">Skip for now — I'll set this up later</button>
         </form>
 
         {{else if eq .Step 4}}
-        <!-- Step 4: Done -->
-        <div class="text-center py-8">
+        <div class="text-center py-4">
           <div class="text-6xl mb-4">🎉</div>
           <h2 class="text-2xl font-bold mb-2">You're all set!</h2>
-          <p class="text-base-content/60 mb-6">
-            Your account is configured. Head to the dashboard to create your first agent.
+          <p class="text-base-content/60 text-sm mb-4">
+            Your account is configured and ready to use.
           </p>
+          {{if .BotUsername}}
+          <div class="bg-primary/10 border border-primary/30 rounded-lg p-4 mb-5 text-sm text-left">
+            <p class="font-semibold text-primary mb-1">✅ Bot connected: {{.BotUsername}}</p>
+            <p class="text-base-content/60">Open Telegram, find <strong>{{.BotUsername}}</strong>, and send <code class="bg-base-300 px-1 rounded">/start</code> to link your account and begin chatting with your agents.</p>
+          </div>
+          {{end}}
           <form method="POST" action="/setup">
             <input type="hidden" name="action" value="finish">
-            <button type="submit" class="btn btn-primary btn-lg">Go to Dashboard →</button>
+            <button type="submit" class="btn btn-primary btn-lg px-10">Go to Dashboard →</button>
           </form>
         </div>
         {{end}}

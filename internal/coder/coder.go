@@ -39,7 +39,7 @@ func New(bin string, timeout time.Duration, homesDir string) *Coder {
 		bin = "claude"
 	}
 	if timeout == 0 {
-		timeout = 2 * time.Minute
+		timeout = 20 * time.Minute
 	}
 	return &Coder{bin: bin, timeout: timeout, homesDir: homesDir}
 }

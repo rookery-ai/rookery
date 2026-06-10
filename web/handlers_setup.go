@@ -11,15 +11,21 @@ import (
 
 type setupData struct {
 	*pageData
-	Step int // 1=password, 2=master_password, 3=connector, 4=done
+	Step        int // 1=password, 2=master_password, 3=connector, 4=done
+	BotUsername string
 }
 
 func (s *Server) showSetup(c echo.Context) error {
 	u := c.Get("user").(*db.User)
 	step := setupStep(u, s.db)
+	var botUsername string
+	if step == 4 {
+		botUsername, _ = s.db.GetSetting(u.ID, "telegram_bot_username")
+	}
 	return c.Render(http.StatusOK, "auth/setup.html", &setupData{
-		pageData: s.page(c, "Setup Your Account"),
-		Step:     step,
+		pageData:    s.page(c, "Setup Your Account"),
+		Step:        step,
+		BotUsername: botUsername,
 	})
 }
 

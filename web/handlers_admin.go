@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/auth"
@@ -24,6 +25,8 @@ type adminUserDetailData struct {
 	Target         *db.User
 	Permissions    []string
 	AllPermissions []permEntry
+	AssignedCoder  *db.Coder
+	AllCoders      []*db.Coder
 }
 
 var allPermissions = []string{"bash", "web-browser", "system-tools", "mcp-servers"}
@@ -32,17 +35,20 @@ type adminDashData struct {
 	*pageData
 	UserCount  int
 	AgentCount int
+	CoderCount int
 	AuditLogs  []*db.AuditLog
 }
 
 func (s *Server) showAdminDashboard(c echo.Context) error {
 	userCount, _ := s.db.CountUsers()
 	agentCount, _ := s.db.CountAgents("")
+	coderCount, _ := s.db.CountCoders()
 	logs, _ := s.db.ListAuditLogs(20)
 	return c.Render(http.StatusOK, "admin/dashboard.html", &adminDashData{
 		pageData:   s.page(c, "Admin Dashboard"),
 		UserCount:  userCount,
 		AgentCount: agentCount,
+		CoderCount: coderCount,
 		AuditLogs:  logs,
 	})
 }
@@ -93,7 +99,12 @@ func (s *Server) showAdminUser(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "user not found")
 	}
 	perms, _ := s.db.ListPermissions(id)
-	return c.Render(http.StatusOK, "admin/user_detail.html", buildUserDetailData(s.page(c, "User: "+target.Username), target, perms))
+	assignedCoder, _ := s.db.GetUserCoder(id)
+	allCoders, _ := s.db.ListCoders()
+	d := buildUserDetailData(s.page(c, "User: "+target.Username), target, perms)
+	d.AssignedCoder = assignedCoder
+	d.AllCoders = allCoders
+	return c.Render(http.StatusOK, "admin/user_detail.html", d)
 }
 
 var validPermissions = []string{"bash", "web-browser", "system-tools", "mcp-servers"}
@@ -164,7 +175,12 @@ func (s *Server) handleAdminResetPassword(c echo.Context) error {
 	p := s.page(c, "User: "+target.Username)
 	p.Success = "Password reset. New temporary password: " + tempPw
 	perms, _ := s.db.ListPermissions(userID)
-	return c.Render(http.StatusOK, "admin/user_detail.html", buildUserDetailData(p, target, perms))
+	assignedCoder, _ := s.db.GetUserCoder(userID)
+	allCoders, _ := s.db.ListCoders()
+	d := buildUserDetailData(p, target, perms)
+	d.AssignedCoder = assignedCoder
+	d.AllCoders = allCoders
+	return c.Render(http.StatusOK, "admin/user_detail.html", d)
 }
 
 const systemUserID = "system"
@@ -243,6 +259,145 @@ func buildUserDetailData(p *pageData, target *db.User, perms []string) *adminUse
 		Permissions:    perms,
 		AllPermissions: entries,
 	}
+}
+
+// ── Coder CRUD ─────────────────────────────────────────────────────────────
+
+type adminCodersData struct {
+	*pageData
+	Coders []*db.Coder
+}
+
+type adminCoderDetailData struct {
+	*pageData
+	Coder *db.Coder
+}
+
+func (s *Server) showAdminCoders(c echo.Context) error {
+	coders, _ := s.db.ListCoders()
+	return c.Render(http.StatusOK, "admin/coders.html", &adminCodersData{
+		pageData: s.page(c, "Coder Profiles"),
+		Coders:   coders,
+	})
+}
+
+func (s *Server) handleAdminCreateCoder(c echo.Context) error {
+	admin := c.Get("user").(*db.User)
+	name := c.FormValue("name")
+	description := c.FormValue("description")
+	claudeBin := c.FormValue("claude_bin")
+	timeoutStr := c.FormValue("timeout_s")
+
+	if name == "" {
+		p := s.page(c, "Coder Profiles")
+		p.Error = "Name is required"
+		coders, _ := s.db.ListCoders()
+		return c.Render(http.StatusBadRequest, "admin/coders.html", &adminCodersData{pageData: p, Coders: coders})
+	}
+	if claudeBin == "" {
+		claudeBin = "claude"
+	}
+	timeoutS := 120
+	if timeoutStr != "" {
+		if v, err := strconv.Atoi(timeoutStr); err == nil && v > 0 {
+			timeoutS = v
+		}
+	}
+
+	coderObj := &db.Coder{
+		ID:          uuid.New().String(),
+		Name:        name,
+		Description: description,
+		ClaudeBin:   claudeBin,
+		TimeoutS:    timeoutS,
+	}
+	if err := s.db.CreateCoder(coderObj); err != nil {
+		p := s.page(c, "Coder Profiles")
+		p.Error = "Failed to create coder: " + err.Error()
+		coders, _ := s.db.ListCoders()
+		return c.Render(http.StatusInternalServerError, "admin/coders.html", &adminCodersData{pageData: p, Coders: coders})
+	}
+
+	s.audit.Log(admin.ID, "create_coder", "coder:"+coderObj.ID, name, c.RealIP())
+	return c.Redirect(http.StatusFound, "/admin/coders/"+coderObj.ID)
+}
+
+func (s *Server) showAdminCoder(c echo.Context) error {
+	id := c.Param("id")
+	coderObj, err := s.db.GetCoder(id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "coder not found")
+	}
+	return c.Render(http.StatusOK, "admin/coder_detail.html", &adminCoderDetailData{
+		pageData: s.page(c, "Edit Coder: "+coderObj.Name),
+		Coder:    coderObj,
+	})
+}
+
+func (s *Server) handleAdminUpdateCoder(c echo.Context) error {
+	admin := c.Get("user").(*db.User)
+	id := c.Param("id")
+	coderObj, err := s.db.GetCoder(id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "coder not found")
+	}
+
+	if name := c.FormValue("name"); name != "" {
+		coderObj.Name = name
+	}
+	coderObj.Description = c.FormValue("description")
+	if bin := c.FormValue("claude_bin"); bin != "" {
+		coderObj.ClaudeBin = bin
+	}
+	if v, err := strconv.Atoi(c.FormValue("timeout_s")); err == nil && v > 0 {
+		coderObj.TimeoutS = v
+	}
+
+	if err := s.db.UpdateCoder(coderObj); err != nil {
+		p := s.page(c, "Edit Coder: "+coderObj.Name)
+		p.Error = "Failed to update: " + err.Error()
+		return c.Render(http.StatusInternalServerError, "admin/coder_detail.html", &adminCoderDetailData{pageData: p, Coder: coderObj})
+	}
+
+	s.audit.Log(admin.ID, "update_coder", "coder:"+id, coderObj.Name, c.RealIP())
+	p := s.page(c, "Edit Coder: "+coderObj.Name)
+	p.Success = "Coder profile updated."
+	return c.Render(http.StatusOK, "admin/coder_detail.html", &adminCoderDetailData{pageData: p, Coder: coderObj})
+}
+
+func (s *Server) handleAdminDeleteCoder(c echo.Context) error {
+	admin := c.Get("user").(*db.User)
+	id := c.Param("id")
+	if err := s.db.DeleteCoder(id); err != nil {
+		return err
+	}
+	s.audit.Log(admin.ID, "delete_coder", "coder:"+id, "", c.RealIP())
+	return c.Redirect(http.StatusFound, "/admin/coders")
+}
+
+// ── Coder assignment ────────────────────────────────────────────────────────
+
+func (s *Server) handleAdminAssignCoder(c echo.Context) error {
+	admin := c.Get("user").(*db.User)
+	userID := c.Param("id")
+	coderID := c.FormValue("coder_id")
+
+	if err := s.db.AssignUserCoder(userID, coderID); err != nil {
+		return err
+	}
+	s.audit.Log(admin.ID, "assign_coder", "user:"+userID, "coder:"+coderID, c.RealIP())
+	return c.Redirect(http.StatusFound, "/admin/users/"+userID)
+}
+
+func (s *Server) handleAdminUnassignCoder(c echo.Context) error {
+	admin := c.Get("user").(*db.User)
+	userID := c.Param("id")
+
+	if err := s.db.UnassignUserCoder(userID); err != nil {
+		return err
+	}
+	s.audit.Log(admin.ID, "unassign_coder", "user:"+userID, "", c.RealIP())
+	return c.Redirect(http.StatusFound, "/admin/users/"+userID)
 }
 
 func (s *Server) showAuditLog(c echo.Context) error {

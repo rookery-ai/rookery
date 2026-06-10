@@ -1,0 +1,82 @@
+{{template "head" .}}
+{{template "admin_navbar" .}}
+
+<div class="container mx-auto px-4 py-8 max-w-4xl">
+  {{template "alert" .}}
+
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold">Coder Profiles</h1>
+      <p class="text-base-content/50 text-sm mt-0.5">Each profile defines a Claude CLI binary and timeout. Assign profiles to users.</p>
+    </div>
+  </div>
+
+  <!-- Create form -->
+  <div class="card bg-base-100 shadow-sm border border-base-300 mb-8">
+    <div class="card-body p-5">
+      <h2 class="font-semibold mb-4">New Coder Profile</h2>
+      <form method="POST" action="/admin/coders" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div class="form-control">
+          <label class="label pb-1"><span class="label-text text-sm">Profile Name</span></label>
+          <input type="text" name="name" class="input input-bordered input-sm" placeholder="e.g. Default, GPT-4o Turbo" required>
+        </div>
+        <div class="form-control">
+          <label class="label pb-1"><span class="label-text text-sm">Claude Binary Path</span></label>
+          <input type="text" name="claude_bin" class="input input-bordered input-sm font-mono" placeholder="claude" value="claude">
+        </div>
+        <div class="form-control">
+          <label class="label pb-1"><span class="label-text text-sm">Timeout (seconds)</span></label>
+          <input type="number" name="timeout_s" class="input input-bordered input-sm" placeholder="1200" value="1200" min="10" max="3600">
+        </div>
+        <div class="form-control">
+          <label class="label pb-1"><span class="label-text text-sm">Description</span></label>
+          <input type="text" name="description" class="input input-bordered input-sm" placeholder="Optional description">
+        </div>
+        <div class="sm:col-span-2">
+          <button type="submit" class="btn btn-primary btn-sm">Create Profile</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Existing coders -->
+  {{if .Coders}}
+  <div class="card bg-base-100 shadow-sm border border-base-300">
+    <div class="card-body p-5">
+      <h2 class="font-semibold mb-4">Existing Profiles</h2>
+      <div class="overflow-x-auto">
+        <table class="table table-sm">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Binary</th>
+              <th>Timeout</th>
+              <th>Description</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+          {{range .Coders}}
+          <tr>
+            <td class="font-semibold">{{.Name}}</td>
+            <td class="font-mono text-xs text-base-content/70">{{.ClaudeBin}}</td>
+            <td class="text-sm">{{.TimeoutS}}s</td>
+            <td class="text-sm text-base-content/60 max-w-xs truncate">{{.Description}}</td>
+            <td><a href="/admin/coders/{{.ID}}" class="btn btn-ghost btn-xs">Edit →</a></td>
+          </tr>
+          {{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  {{else}}
+  <div class="card bg-base-100 shadow-sm border border-base-300">
+    <div class="card-body py-12 text-center">
+      <p class="text-base-content/30 text-sm">No coder profiles yet. Create one above.</p>
+    </div>
+  </div>
+  {{end}}
+</div>
+
+{{template "foot" .}}

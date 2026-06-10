@@ -3,10 +3,12 @@ package web
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/reminder"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
 )
@@ -86,18 +88,18 @@ func (s *Server) showReminders(c echo.Context) error {
 func (s *Server) handleCreateReminder(c echo.Context) error {
 	u := c.Get("user").(*db.User)
 	message := c.FormValue("message")
-	remindAtStr := c.FormValue("remind_at")
+	whenStr := strings.TrimSpace(c.FormValue("when"))
 
 	p := s.page(c, "Reminders")
-	if message == "" || remindAtStr == "" {
+	if message == "" || whenStr == "" {
 		p.Error = "Message and reminder time are required"
 		reminders, _ := s.db.ListReminders(u.ID)
 		return c.Render(http.StatusBadRequest, "dashboard/reminders.html", &remindersPageData{pageData: p, Reminders: reminders})
 	}
 
-	remindAt, err := time.ParseInLocation("2006-01-02T15:04", remindAtStr, time.Local)
+	remindAt, err := reminder.ParseNaturalTime(whenStr, time.Now(), time.Local)
 	if err != nil {
-		p.Error = "Invalid date/time format"
+		p.Error = `Couldn't parse that time. Try: "in 10 minutes", "tomorrow at 3pm", "next Tuesday"`
 		reminders, _ := s.db.ListReminders(u.ID)
 		return c.Render(http.StatusBadRequest, "dashboard/reminders.html", &remindersPageData{pageData: p, Reminders: reminders})
 	}

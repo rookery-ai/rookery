@@ -4,42 +4,68 @@
 <div class="container mx-auto px-4 py-8 max-w-5xl">
   {{template "alert" .}}
 
-  <h1 class="text-2xl font-bold mb-6">📋 Audit Log</h1>
+  <div class="mb-8">
+    <h1 class="text-2xl font-bold">📋 Audit Log</h1>
+    <p class="text-base-content/50 text-sm mt-0.5">All user and system actions.</p>
+  </div>
 
-  <div class="card bg-base-100 shadow">
-    <div class="card-body">
+  <div class="card bg-base-100 shadow-sm border border-base-300">
+    <div class="card-body p-5">
       {{if .Logs}}
+      <div class="flex items-center justify-between mb-4">
+        <span class="badge badge-ghost">{{len .Logs}} events</span>
+        <input type="text" id="audit-search" placeholder="Filter by action or target..."
+          class="input input-bordered input-sm w-60" oninput="filterAudit(this.value)">
+      </div>
       <div class="overflow-x-auto">
-        <table class="table table-sm">
+        <table class="table table-sm table-zebra" id="audit-table">
           <thead>
             <tr>
-              <th>Action</th>
-              <th>Target</th>
-              <th>Detail</th>
-              <th>IP</th>
-              <th>When</th>
+              <th class="text-xs">Action</th>
+              <th class="text-xs">Target</th>
+              <th class="text-xs">Detail</th>
+              <th class="text-xs">IP</th>
+              <th class="text-xs">When</th>
             </tr>
           </thead>
           <tbody>
           {{range .Logs}}
-          <tr class="hover">
-            <td><span class="badge badge-ghost badge-sm font-mono">{{.Action}}</span></td>
-            <td class="text-xs font-mono text-base-content/60">{{.Target}}</td>
-            <td class="text-xs text-base-content/60 max-w-xs truncate">{{.Detail}}</td>
-            <td class="text-xs text-base-content/40">{{.IPAddress}}</td>
-            <td class="text-xs text-base-content/50 whitespace-nowrap">{{.CreatedAt.Format "Jan 2 15:04:05"}}</td>
+          <tr class="hover audit-row" data-action="{{.Action}}" data-target="{{.Target}}">
+            <td>
+              {{if or (eq .Action "login") (eq .Action "logout")}}<span class="badge badge-info badge-sm font-mono">{{.Action}}</span>
+              {{else if or (eq .Action "create_user") (eq .Action "create_agent") (eq .Action "create_secret")}}<span class="badge badge-success badge-sm font-mono">{{.Action}}</span>
+              {{else if or (eq .Action "delete_agent") (eq .Action "delete_secret") (eq .Action "delete_user")}}<span class="badge badge-error badge-sm font-mono">{{.Action}}</span>
+              {{else if or (eq .Action "update_settings") (eq .Action "save_settings")}}<span class="badge badge-warning badge-sm font-mono">{{.Action}}</span>
+              {{else}}<span class="badge badge-ghost badge-sm font-mono">{{.Action}}</span>{{end}}
+            </td>
+            <td class="text-xs font-mono text-base-content/50 max-w-[120px] truncate" title="{{.Target}}">{{.Target}}</td>
+            <td class="text-xs text-base-content/50 max-w-xs truncate" title="{{.Detail}}">{{.Detail}}</td>
+            <td class="text-xs text-base-content/30 font-mono">{{.IPAddress}}</td>
+            <td class="text-xs text-base-content/40 whitespace-nowrap">{{.CreatedAt.Format "Jan 2 15:04:05"}}</td>
           </tr>
           {{end}}
           </tbody>
         </table>
       </div>
       {{else}}
-      <div class="text-center py-12 text-base-content/40">
-        <p>No audit events yet.</p>
+      <div class="text-center py-16 text-base-content/30">
+        <div class="text-5xl mb-3">📋</div>
+        <p class="text-sm">No audit events yet.</p>
       </div>
       {{end}}
     </div>
   </div>
 </div>
+
+<script>
+function filterAudit(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('.audit-row').forEach(function(row) {
+    var action = row.dataset.action.toLowerCase();
+    var target = row.dataset.target.toLowerCase();
+    row.style.display = (action.includes(q) || target.includes(q)) ? '' : 'none';
+  });
+}
+</script>
 
 {{template "foot" .}}

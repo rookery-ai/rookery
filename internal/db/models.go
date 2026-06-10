@@ -11,8 +11,19 @@ type User struct {
 	SecretsSalt             string
 	NeedsSetup              bool
 	MustChangePassword      bool
+	CoderID                 *string // nil = use system default coder
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
+}
+
+type Coder struct {
+	ID          string
+	Name        string
+	Description string
+	ClaudeBin   string
+	TimeoutS    int
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type UserPermission struct {

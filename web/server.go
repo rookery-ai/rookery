@@ -9,12 +9,14 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/gorilla/sessions"
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/audit"
 	"github.com/ilijad1/simple-agents/internal/auth"
+	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/config"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/gateway"
@@ -28,21 +30,22 @@ const sessionName = "sa_session"
 
 // Server is the HTTP server for the Simple Agents web UI.
 type Server struct {
-	echo        *echo.Echo
-	cfg         *config.Config
-	db          *db.DB
-	store       *sessions.CookieStore
-	audit       *audit.Writer
-	systemKey   []byte                      // 32-byte key for encrypting master passwords at rest
-	gateway     *gateway.GatewayManager     // may be nil in tests
-	runner      *agentrunner.Runner          // may be nil in tests
-	memory      *memory.Store               // may be nil in tests
-	designFlow  *agentdesigner.Flow          // may be nil in tests
+	echo      *echo.Echo
+	cfg       *config.Config
+	db        *db.DB
+	store     *sessions.CookieStore
+	audit     *audit.Writer
+	systemKey []byte                  // 32-byte key for encrypting master passwords at rest
+	gateway   *gateway.GatewayManager // may be nil in tests
+	runner    *agentrunner.Runner     // may be nil in tests
+	memory    *memory.Store           // may be nil in tests
+	designer  *agentdesigner.AgentDesigner
+	homesDir  string // per-user claude HOME directories
 }
 
 // NewServer wires up all routes and middleware.
-// gatewayManager, runner, and flow may be nil (e.g. in tests).
-func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, flow *agentdesigner.Flow) (*Server, error) {
+// gatewayManager and runner may be nil (e.g. in tests).
+func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, designer *agentdesigner.AgentDesigner, homesDir string) (*Server, error) {
 	sessionKey := []byte(cfg.Server.SessionKey)
 	if len(sessionKey) == 0 {
 		// Use a fixed dev key if not configured; production MUST set SA_SESSION_KEY.
@@ -66,16 +69,17 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 	memStore := memory.New(memDir)
 
 	s := &Server{
-		echo:       echo.New(),
-		cfg:        cfg,
-		db:         database,
-		store:      store,
-		audit:      audit.New(database),
-		systemKey:  sysKey,
-		gateway:    gatewayManager,
-		runner:     runner,
-		memory:     memStore,
-		designFlow: flow,
+		echo:      echo.New(),
+		cfg:       cfg,
+		db:        database,
+		store:     store,
+		audit:     audit.New(database),
+		systemKey: sysKey,
+		gateway:   gatewayManager,
+		runner:    runner,
+		memory:    memStore,
+		designer:  designer,
+		homesDir:  homesDir,
 	}
 
 	s.echo.HideBanner = true
@@ -212,14 +216,16 @@ func (s *Server) setupRoutes() {
 	authed.GET("/change-password", s.showChangePassword)
 	authed.POST("/change-password", s.handleChangePassword)
 
-	// User dashboard
+	// User dashboard (admins are blocked and redirected to /admin)
 	dash := s.echo.Group("/dashboard")
 	dash.Use(s.requireAuth)
+	dash.Use(s.requireUserOnly)
 	dash.Use(s.requireSetupComplete)
 	dash.GET("", s.showDashboard)
 	dash.GET("/agents", s.showAgents)
 	dash.GET("/agents/new", s.showNewAgent)
 	dash.POST("/agents/new", s.handleNewAgent)
+	dash.GET("/agents/generate", s.handleGenerateAgentSSE)
 	dash.GET("/agents/:id", s.showAgentDetail)
 	dash.POST("/agents/:id/delete", s.handleDeleteAgent)
 	dash.POST("/agents/:id/run", s.handleRunAgent)
@@ -257,6 +263,13 @@ func (s *Server) setupRoutes() {
 	admin.POST("/users/:id/permissions", s.handleAdminGrantPermission)
 	admin.POST("/users/:id/permissions/:perm/revoke", s.handleAdminRevokePermission)
 	admin.POST("/users/:id/reset-password", s.handleAdminResetPassword)
+	admin.POST("/users/:id/coder", s.handleAdminAssignCoder)
+	admin.POST("/users/:id/coder/unassign", s.handleAdminUnassignCoder)
+	admin.GET("/coders", s.showAdminCoders)
+	admin.POST("/coders", s.handleAdminCreateCoder)
+	admin.GET("/coders/:id", s.showAdminCoder)
+	admin.POST("/coders/:id", s.handleAdminUpdateCoder)
+	admin.POST("/coders/:id/delete", s.handleAdminDeleteCoder)
 	admin.GET("/settings", s.showAdminSettings)
 	admin.POST("/settings", s.handleAdminSaveSettings)
 	admin.GET("/audit", s.showAuditLog)
@@ -281,19 +294,14 @@ func (s *Server) currentUser(c echo.Context) (*db.User, bool) {
 }
 
 func (s *Server) setSession(c echo.Context, userID string) error {
-	sess, err := s.store.Get(c.Request(), sessionName)
-	if err != nil {
-		return err
-	}
+	// Ignore decode error: Get always returns a usable session even for stale/invalid cookies.
+	sess, _ := s.store.Get(c.Request(), sessionName)
 	sess.Values["user_id"] = userID
 	return sess.Save(c.Request(), c.Response())
 }
 
 func (s *Server) clearSession(c echo.Context) error {
-	sess, err := s.store.Get(c.Request(), sessionName)
-	if err != nil {
-		return err
-	}
+	sess, _ := s.store.Get(c.Request(), sessionName)
 	sess.Options.MaxAge = -1
 	return sess.Save(c.Request(), c.Response())
 }
@@ -335,14 +343,37 @@ func (s *Server) requireAdmin(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
+func (s *Server) requireUserOnly(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		u := c.Get("user").(*db.User)
+		if u.Role == auth.RoleAdmin {
+			return c.Redirect(http.StatusFound, "/admin")
+		}
+		return next(c)
+	}
+}
+
 // ── Utility ────────────────────────────────────────────────────────────────
 
 func (s *Server) redirectRoot(c echo.Context) error {
-	_, ok := s.currentUser(c)
+	u, ok := s.currentUser(c)
 	if ok {
+		if u.Role == auth.RoleAdmin {
+			return c.Redirect(http.StatusFound, "/admin")
+		}
 		return c.Redirect(http.StatusFound, "/dashboard")
 	}
 	return c.Redirect(http.StatusFound, "/login")
+}
+
+// coderForUser returns a Coder for the given user. If the user has a coder
+// profile assigned, its settings are used; otherwise the system defaults apply.
+func (s *Server) coderForUser(userID string) *coder.Coder {
+	if profile, err := s.db.GetUserCoder(userID); err == nil && profile != nil {
+		timeout := time.Duration(profile.TimeoutS) * time.Second
+		return coder.New(profile.ClaudeBin, timeout, s.homesDir)
+	}
+	return coder.New(s.cfg.Coder.ClaudeBin, s.cfg.Coder.Timeout, s.homesDir)
 }
 
 type pageData struct {

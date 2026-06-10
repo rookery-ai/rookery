@@ -39,21 +39,21 @@ func (d *DB) CreateUser(u *User) error {
 
 func (d *DB) GetUserByID(id string) (*User, error) {
 	row := d.QueryRow(`SELECT id,username,password_hash,role,encrypted_master_password,
-		secrets_salt,needs_setup,must_change_password,created_at,updated_at
+		secrets_salt,needs_setup,must_change_password,created_at,updated_at,coder_id
 		FROM users WHERE id=?`, id)
 	return scanUser(row)
 }
 
 func (d *DB) GetUserByUsername(username string) (*User, error) {
 	row := d.QueryRow(`SELECT id,username,password_hash,role,encrypted_master_password,
-		secrets_salt,needs_setup,must_change_password,created_at,updated_at
+		secrets_salt,needs_setup,must_change_password,created_at,updated_at,coder_id
 		FROM users WHERE username=?`, username)
 	return scanUser(row)
 }
 
 func (d *DB) ListUsers() ([]*User, error) {
 	rows, err := d.Query(`SELECT id,username,password_hash,role,encrypted_master_password,
-		secrets_salt,needs_setup,must_change_password,created_at,updated_at
+		secrets_salt,needs_setup,must_change_password,created_at,updated_at,coder_id
 		FROM users ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -103,7 +103,7 @@ func scanUser(s scanner) (*User, error) {
 	var needsSetup, mustChange int
 	err := s.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role,
 		&u.EncryptedMasterPassword, &u.SecretsSalt,
-		&needsSetup, &mustChange, &createdAt, &updatedAt)
+		&needsSetup, &mustChange, &createdAt, &updatedAt, &u.CoderID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -891,4 +891,90 @@ func (d *DB) GetScheduleForAgent(agentID string) (*AgentSchedule, error) {
 	s.Enabled = enabled == 1
 	s.CreatedAt = scanTime(createdAt)
 	return &s, nil
+}
+
+// ── Coders ─────────────────────────────────────────────────────────────────
+
+func (d *DB) CreateCoder(c *Coder) error {
+	_, err := d.Exec(`INSERT INTO coders(id,name,description,claude_bin,timeout_s,created_at,updated_at)
+		VALUES(?,?,?,?,?,datetime('now'),datetime('now'))`,
+		c.ID, c.Name, c.Description, c.ClaudeBin, c.TimeoutS)
+	return err
+}
+
+func (d *DB) GetCoder(id string) (*Coder, error) {
+	row := d.QueryRow(`SELECT id,name,description,claude_bin,timeout_s,created_at,updated_at
+		FROM coders WHERE id=?`, id)
+	return scanCoder(row)
+}
+
+func (d *DB) ListCoders() ([]*Coder, error) {
+	rows, err := d.Query(`SELECT id,name,description,claude_bin,timeout_s,created_at,updated_at
+		FROM coders ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Coder
+	for rows.Next() {
+		c, err := scanCoder(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) UpdateCoder(c *Coder) error {
+	_, err := d.Exec(`UPDATE coders SET name=?,description=?,claude_bin=?,timeout_s=?,updated_at=datetime('now') WHERE id=?`,
+		c.Name, c.Description, c.ClaudeBin, c.TimeoutS, c.ID)
+	return err
+}
+
+func (d *DB) DeleteCoder(id string) error {
+	_, err := d.Exec(`DELETE FROM coders WHERE id=?`, id)
+	return err
+}
+
+func (d *DB) AssignUserCoder(userID, coderID string) error {
+	_, err := d.Exec(`UPDATE users SET coder_id=?,updated_at=datetime('now') WHERE id=?`, coderID, userID)
+	return err
+}
+
+func (d *DB) UnassignUserCoder(userID string) error {
+	_, err := d.Exec(`UPDATE users SET coder_id=NULL,updated_at=datetime('now') WHERE id=?`, userID)
+	return err
+}
+
+// GetUserCoder returns the Coder assigned to a user, or (nil, nil) if none assigned.
+func (d *DB) GetUserCoder(userID string) (*Coder, error) {
+	row := d.QueryRow(`SELECT c.id,c.name,c.description,c.claude_bin,c.timeout_s,c.created_at,c.updated_at
+		FROM coders c JOIN users u ON u.coder_id=c.id WHERE u.id=?`, userID)
+	c, err := scanCoder(row)
+	if errors.Is(err, ErrNotFound) {
+		return nil, nil
+	}
+	return c, err
+}
+
+func (d *DB) CountCoders() (int, error) {
+	var n int
+	err := d.QueryRow(`SELECT COUNT(*) FROM coders`).Scan(&n)
+	return n, err
+}
+
+func scanCoder(s scanner) (*Coder, error) {
+	var c Coder
+	var createdAt, updatedAt string
+	err := s.Scan(&c.ID, &c.Name, &c.Description, &c.ClaudeBin, &c.TimeoutS, &createdAt, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	c.CreatedAt = scanTime(createdAt)
+	c.UpdatedAt = scanTime(updatedAt)
+	return &c, nil
 }

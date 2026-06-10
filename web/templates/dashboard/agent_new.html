@@ -1,69 +1,178 @@
 {{template "head" .}}
 {{template "navbar" .}}
 
-<div class="container mx-auto px-4 py-8 max-w-3xl">
+<div class="container mx-auto px-4 py-8 max-w-4xl">
   {{template "alert" .}}
 
   <div class="mb-6">
-    <a href="/dashboard/agents" class="btn btn-ghost btn-sm">← Back to Agents</a>
+    <a href="/dashboard/agents" class="btn btn-ghost btn-sm gap-1">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      Back to Agents
+    </a>
   </div>
 
-  <div class="card bg-base-100 shadow-xl">
-    <div class="card-body">
-      <h1 class="card-title text-2xl">🤖 Create a New Agent</h1>
-      <p class="text-base-content/60 mb-4">
-        Describe what you want your agent to do. The interactive wizard will help you
-        configure everything through your connected chat app once created.
-      </p>
-
-      <form method="POST" action="/dashboard/agents/new" class="space-y-6">
-
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text font-semibold">Agent Name</span>
-            <span class="label-text-alt text-base-content/50">Lowercase, no spaces (e.g. price-monitor)</span>
-          </label>
-          <input type="text" name="name" placeholder="my-agent"
-            class="input input-bordered w-full"
-            pattern="[a-z0-9\-]+" title="Lowercase letters, numbers, and hyphens only"
-            required autocomplete="off">
-        </div>
-
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text font-semibold">What should this agent do?</span>
-            <span class="label-text-alt text-base-content/50">Be as descriptive as possible</span>
-          </label>
-          <textarea name="description"
-            class="textarea textarea-bordered w-full h-32"
-            placeholder="Describe your agent in plain language. Example: 'Monitor my GitHub notifications and send me a daily summary of new issues and PRs' or 'Check the weather every morning and send me a forecast'"
-            required></textarea>
-          <label class="label">
-            <span class="label-text-alt text-base-content/40">
-              The agent designer wizard (via chat) will ask you clarifying questions and generate the code.
-            </span>
-          </label>
-        </div>
-
-        <div class="divider">Or start the interactive wizard via chat</div>
-
-        <div class="bg-base-200 rounded-lg p-4">
-          <p class="text-sm font-semibold mb-2">🤖 Start via Telegram/Discord</p>
-          <p class="text-sm text-base-content/60">
-            Send this command to your connected bot for the full interactive experience:
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Form -->
+    <div class="lg:col-span-2">
+      <div class="card bg-base-100 shadow-sm border border-base-300">
+        <div class="card-body">
+          <h1 class="card-title text-xl">🤖 Create a New Agent</h1>
+          <p class="text-base-content/50 text-sm mb-2">
+            Describe what you want your agent to do. Claude will generate the Python code automatically.
           </p>
-          <code class="block bg-base-300 rounded px-3 py-2 mt-2 text-sm font-mono">
-            /agent create my-agent-name
-          </code>
-        </div>
 
-        <div class="card-actions justify-end">
-          <a href="/dashboard/agents" class="btn btn-ghost">Cancel</a>
-          <button type="submit" class="btn btn-primary">Create Agent →</button>
+          <form id="agent-create-form" method="POST" action="/dashboard/agents/new" class="space-y-5 mt-2">
+            <div class="form-control">
+              <label class="label pb-1">
+                <span class="label-text font-semibold">Agent Name</span>
+                <span class="label-text-alt text-base-content/40">lowercase, no spaces</span>
+              </label>
+              <input type="text" name="name" placeholder="e.g. price-monitor, news-digest"
+                class="input input-bordered w-full"
+                pattern="[a-z0-9\-]+" title="Lowercase letters, numbers, and hyphens only"
+                required autocomplete="off">
+            </div>
+
+            <div class="form-control">
+              <label class="label pb-1">
+                <span class="label-text font-semibold">What should this agent do?</span>
+                <span class="label-text-alt text-base-content/40">be descriptive</span>
+              </label>
+              <textarea name="description"
+                class="textarea textarea-bordered w-full h-36 text-sm leading-relaxed"
+                placeholder="Describe your agent clearly. Example: 'Monitor my GitHub notifications and send me a daily summary of new issues and PRs'"
+                required id="desc-field"></textarea>
+              <label class="label pt-1">
+                <span class="label-text-alt text-base-content/30">More detail = better generated code</span>
+              </label>
+            </div>
+
+            <!-- Quick example chips -->
+            <div>
+              <p class="text-xs text-base-content/40 mb-2 font-medium">Example ideas (click to use):</p>
+              <div class="flex flex-wrap gap-2">
+                <button type="button" class="badge badge-outline badge-sm cursor-pointer hover:badge-primary transition-colors"
+                  onclick="document.getElementById('desc-field').value='Monitor Hacker News top stories and send me a daily digest of the top 5 most interesting articles at 8am'">HN Digest</button>
+                <button type="button" class="badge badge-outline badge-sm cursor-pointer hover:badge-primary transition-colors"
+                  onclick="document.getElementById('desc-field').value='Check the weather forecast every morning and send me a brief summary with temperature and conditions'">Weather</button>
+                <button type="button" class="badge badge-outline badge-sm cursor-pointer hover:badge-primary transition-colors"
+                  onclick="document.getElementById('desc-field').value='Monitor a website for changes and notify me when the content changes'">Site Monitor</button>
+                <button type="button" class="badge badge-outline badge-sm cursor-pointer hover:badge-primary transition-colors"
+                  onclick="document.getElementById('desc-field').value='Fetch my GitHub notifications and summarize new issues, pull requests, and mentions'">GitHub</button>
+              </div>
+            </div>
+
+            <div class="card-actions justify-end pt-2">
+              <a href="/dashboard/agents" class="btn btn-ghost btn-sm" id="cancel-btn">Cancel</a>
+              <button type="submit" id="gen-btn" class="btn btn-primary gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                Generate Agent →
+              </button>
+            </div>
+          </form>
+
+          <!-- Progress panel (hidden until generation starts) -->
+          <div id="gen-progress" class="hidden mt-4">
+            <div class="flex items-center gap-3 mb-4">
+              <span class="loading loading-spinner loading-sm text-primary"></span>
+              <span class="font-semibold">Generating your agent...</span>
+            </div>
+            <ul id="gen-log" class="space-y-2 text-sm text-base-content/70 font-mono mb-4 pl-2"></ul>
+            <div id="gen-error" class="hidden alert alert-error text-sm py-2"></div>
+          </div>
         </div>
-      </form>
+      </div>
+    </div>
+
+    <!-- Tips sidebar -->
+    <div class="space-y-4">
+      <div class="card bg-base-200 border border-base-300">
+        <div class="card-body p-4">
+          <h3 class="font-semibold text-sm mb-2">💡 Tips for good agents</h3>
+          <ul class="text-xs text-base-content/60 space-y-2">
+            <li>• Specify <strong>what data</strong> to fetch (URL, API, file)</li>
+            <li>• Describe the <strong>output format</strong> you want</li>
+            <li>• Mention any <strong>filtering criteria</strong></li>
+            <li>• State the <strong>frequency</strong> if time-sensitive</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card bg-base-200 border border-base-300">
+        <div class="card-body p-4">
+          <h3 class="font-semibold text-sm mb-2">🤖 Via Telegram</h3>
+          <p class="text-xs text-base-content/60 mb-2">For the full interactive wizard via chat:</p>
+          <code class="block bg-base-300 rounded px-3 py-2 text-xs font-mono">/agent create my-agent-name</code>
+        </div>
+      </div>
+
+      <div class="card bg-warning/10 border border-warning/30">
+        <div class="card-body p-4">
+          <p class="text-xs text-base-content/60">
+            ⚠️ Agent generation calls Claude and may take 30–60 seconds.
+          </p>
+        </div>
+      </div>
     </div>
   </div>
 </div>
+
+<script>
+document.getElementById('agent-create-form').addEventListener('submit', function(e) {
+  e.preventDefault();
+  var name = this.elements['name'].value.trim();
+  var desc = this.elements['description'].value.trim();
+  if (!name || !desc) return;
+
+  // Hide form, show progress
+  this.classList.add('hidden');
+  document.getElementById('cancel-btn').classList.add('hidden');
+  var progress = document.getElementById('gen-progress');
+  progress.classList.remove('hidden');
+  var log = document.getElementById('gen-log');
+  var errDiv = document.getElementById('gen-error');
+
+  var addLog = function(msg) {
+    var li = document.createElement('li');
+    li.innerHTML = '<span class="text-primary mr-2">›</span>' + msg;
+    log.appendChild(li);
+  };
+
+  var showError = function(msg) {
+    progress.classList.add('hidden');
+    var form = document.getElementById('agent-create-form');
+    form.classList.remove('hidden');
+    document.getElementById('cancel-btn').classList.remove('hidden');
+    errDiv.textContent = msg;
+    errDiv.classList.remove('hidden');
+  };
+
+  var url = '/dashboard/agents/generate?name=' + encodeURIComponent(name) +
+            '&description=' + encodeURIComponent(desc);
+
+  var es = new EventSource(url);
+
+  es.onmessage = function(evt) {
+    try {
+      var d = JSON.parse(evt.data);
+      if (d.type === 'status') {
+        addLog(d.msg);
+      } else if (d.type === 'done') {
+        es.close();
+        addLog('Done! Redirecting...');
+        window.location = d.url;
+      } else if (d.type === 'error') {
+        es.close();
+        showError('Generation failed: ' + d.msg);
+      }
+    } catch(ignored) {}
+  };
+
+  es.onerror = function() {
+    es.close();
+    showError('Connection lost. Please try again.');
+  };
+});
+</script>
 
 {{template "foot" .}}

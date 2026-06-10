@@ -4,53 +4,63 @@
 <div class="container mx-auto px-4 py-8 max-w-4xl">
   {{template "alert" .}}
 
-  <h1 class="text-2xl font-bold mb-6">👥 Manage Users</h1>
+  <h1 class="text-2xl font-bold mb-8">👥 Manage Users</h1>
 
-  <!-- Create user form -->
-  <div class="card bg-base-100 shadow mb-6">
-    <div class="card-body">
-      <h2 class="card-title text-lg">Create New User</h2>
-      <form method="POST" action="/admin/users" class="flex gap-3">
+  <!-- Create user -->
+  <div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
+    <div class="card-body p-5">
+      <h2 class="font-semibold mb-3">Create New User</h2>
+      <form method="POST" action="/admin/users" class="flex flex-col sm:flex-row gap-3">
         <input type="text" name="username" placeholder="username"
-          class="input input-bordered flex-1" required pattern="[a-zA-Z0-9_\-]+"
+          class="input input-bordered flex-1 font-mono"
+          required pattern="[a-zA-Z0-9_\-]+"
           title="Letters, numbers, underscores, hyphens">
-        <button type="submit" class="btn btn-primary">Create User</button>
+        <button type="submit" class="btn btn-primary gap-1 shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          Create User
+        </button>
       </form>
-      <p class="text-xs text-base-content/40 mt-1">
-        A temporary password will be generated and shown once. The user must change it on first login.
+      <p class="text-xs text-base-content/30 mt-2">
+        A temporary password will be shown once. The user must change it on first login.
       </p>
     </div>
   </div>
 
   <!-- User list -->
-  <div class="card bg-base-100 shadow">
-    <div class="card-body">
-      <h2 class="card-title text-lg">All Users</h2>
+  <div class="card bg-base-100 shadow-sm border border-base-300">
+    <div class="card-body p-5">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold">All Users</h2>
+        <div class="flex items-center gap-2">
+          {{if .Users}}<span class="badge badge-ghost badge-sm">{{len .Users}}</span>{{end}}
+          <input type="text" id="user-search" placeholder="Filter..." class="input input-bordered input-xs w-32" oninput="filterUsers(this.value)">
+        </div>
+      </div>
       <div class="overflow-x-auto">
-        <table class="table">
+        <table class="table table-sm" id="users-table">
           <thead>
             <tr>
-              <th>Username</th>
-              <th>Role</th>
-              <th>Status</th>
-              <th>Created</th>
-              <th>Actions</th>
+              <th class="text-xs">Username</th>
+              <th class="text-xs">Role</th>
+              <th class="text-xs">Status</th>
+              <th class="text-xs">Created</th>
+              <th class="text-xs">Actions</th>
             </tr>
           </thead>
           <tbody>
           {{range .Users}}
-          <tr>
-            <td class="font-semibold">{{.Username}}</td>
+          <tr class="hover user-row" data-username="{{.Username}}">
+            <td class="font-semibold text-sm font-mono">{{.Username}}</td>
             <td>
-              {{if eq .Role "admin"}}<span class="badge badge-primary">admin</span>
-              {{else}}<span class="badge badge-ghost">user</span>{{end}}
+              {{if eq .Role "admin"}}<span class="badge badge-primary badge-sm">admin</span>
+              {{else}}<span class="badge badge-ghost badge-sm">user</span>{{end}}
             </td>
             <td>
               {{if .NeedsSetup}}<span class="badge badge-warning badge-sm">Needs Setup</span>
               {{else if .MustChangePassword}}<span class="badge badge-info badge-sm">Change PW</span>
               {{else}}<span class="badge badge-success badge-sm">Active</span>{{end}}
             </td>
-            <td class="text-sm text-base-content/60">{{.CreatedAt.Format "Jan 2, 2006"}}</td>
+            <td class="text-xs text-base-content/40">{{.CreatedAt.Format "Jan 2, 2006"}}</td>
             <td>
               <a href="/admin/users/{{.ID}}" class="btn btn-ghost btn-xs">Manage</a>
             </td>
@@ -62,5 +72,15 @@
     </div>
   </div>
 </div>
+
+<script>
+function filterUsers(q) {
+  q = q.toLowerCase();
+  document.querySelectorAll('.user-row').forEach(function(row) {
+    var username = row.dataset.username.toLowerCase();
+    row.style.display = username.includes(q) ? '' : 'none';
+  });
+}
+</script>
 
 {{template "foot" .}}
