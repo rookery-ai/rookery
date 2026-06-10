@@ -72,6 +72,7 @@
             </p>
             <form method="POST" action="/dashboard/connectors" class="flex gap-2">
               <input type="hidden" name="platform" value="telegram">
+              <input type="hidden" name="next" value="/setup?step=4">
               <input type="text" name="token" placeholder="123456789:AABBCCxxx..."
                 class="input input-bordered input-sm flex-1" autocomplete="off">
               <button type="submit" class="btn btn-primary btn-sm">Connect</button>

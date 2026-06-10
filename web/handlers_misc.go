@@ -190,26 +190,59 @@ func (s *Server) handleUpdateMemory(c echo.Context) error {
 
 // ── Settings ───────────────────────────────────────────────────────────────
 
+type settingsPageData struct {
+	*pageData
+	DisplayName string
+}
+
 func (s *Server) showSettings(c echo.Context) error {
-	return c.Render(http.StatusOK, "dashboard/settings.html", s.page(c, "Settings"))
+	u := c.Get("user").(*db.User)
+	dn, _ := s.db.GetSetting(u.ID, "display_name")
+	if dn == "" {
+		dn = u.Username
+	}
+	return c.Render(http.StatusOK, "dashboard/settings.html", &settingsPageData{
+		pageData:    s.page(c, "Settings"),
+		DisplayName: dn,
+	})
 }
 
 func (s *Server) handleSaveSettings(c echo.Context) error {
+	u := c.Get("user").(*db.User)
+	displayName := c.FormValue("display_name")
 	p := s.page(c, "Settings")
-	p.Success = "Settings saved"
-	return c.Render(http.StatusOK, "dashboard/settings.html", p)
+
+	if displayName != "" {
+		if err := s.db.SetSetting(u.ID, "display_name", displayName); err != nil {
+			p.Error = "Failed to save settings: " + err.Error()
+		} else {
+			s.audit.Log(u.ID, "update_settings", "user:"+u.ID, "display_name", c.RealIP())
+			p.Success = "Settings saved"
+		}
+	} else {
+		p.Success = "Settings saved"
+	}
+
+	return c.Render(http.StatusOK, "dashboard/settings.html", &settingsPageData{
+		pageData:    p,
+		DisplayName: displayName,
+	})
 }
 
 func (s *Server) handleChangeMasterPassword(c echo.Context) error {
 	u := c.Get("user").(*db.User)
-	oldPw := c.FormValue("old_master_password")
-	newPw := c.FormValue("new_master_password")
+	oldPw := c.FormValue("current")
+	newPw := c.FormValue("new_password")
 	confirm := c.FormValue("confirm")
 
 	renderErr := func(msg string) error {
+		dn, _ := s.db.GetSetting(u.ID, "display_name")
+		if dn == "" {
+			dn = u.Username
+		}
 		p := s.page(c, "Settings")
 		p.Error = msg
-		return c.Render(http.StatusBadRequest, "dashboard/settings.html", p)
+		return c.Render(http.StatusBadRequest, "dashboard/settings.html", &settingsPageData{pageData: p, DisplayName: dn})
 	}
 
 	if oldPw == "" || newPw == "" {
@@ -259,7 +292,11 @@ func (s *Server) handleChangeMasterPassword(c echo.Context) error {
 	}
 
 	s.audit.Log(u.ID, "change_master_password", "user:"+u.ID, "", c.RealIP())
+	dn, _ := s.db.GetSetting(u.ID, "display_name")
+	if dn == "" {
+		dn = u.Username
+	}
 	p := s.page(c, "Settings")
 	p.Success = "Master password changed successfully"
-	return c.Render(http.StatusOK, "dashboard/settings.html", p)
+	return c.Render(http.StatusOK, "dashboard/settings.html", &settingsPageData{pageData: p, DisplayName: dn})
 }

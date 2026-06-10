@@ -3,7 +3,9 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
@@ -55,6 +57,8 @@ func (r *Router) Handle(ctx context.Context, msg Message, send func(string)) err
 		return r.handleRemind(ctx, msg, arg, send)
 	case "run":
 		return r.handleRun(ctx, msg, arg, send)
+	case "session":
+		return r.handleSession(ctx, msg, arg, send)
 	case "":
 		// Plain text — one-off chat
 		return r.handleText(ctx, msg, send)
@@ -214,10 +218,97 @@ func (r *Router) handleSecret(ctx context.Context, msg Message, arg string, send
 	return nil
 }
 
+// handleRemind parses: /remind <duration> <message>
+// Duration formats: 30m, 1h, 2h30m, 1d
+// Example: /remind 1h Check the oven
 func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send func(string)) error {
-	// Full implementation in Phase 7 (reminder service with natural language parsing).
-	send("Reminders via chat are coming in a future update\\. Use the web dashboard → Reminders to set them now\\.")
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		send("Usage: /remind \\<duration\\> \\<message\\>\nExamples:\n• /remind 30m Check the oven\n• /remind 1h Call doctor\n• /remind 2h30m Meeting prep\n• /remind 1d Pay bills")
+		return nil
+	}
+
+	parts := strings.SplitN(arg, " ", 2)
+	if len(parts) < 2 {
+		send("Please include a message\\. Example: /remind 30m Check the oven")
+		return nil
+	}
+	durStr := parts[0]
+	message := strings.TrimSpace(parts[1])
+	if message == "" {
+		send("Reminder message cannot be empty\\.")
+		return nil
+	}
+
+	d, err := parseDuration(durStr)
+	if err != nil {
+		send("Invalid duration `" + escapeMarkdown(durStr) + "`\\. Use formats like: 30m, 1h, 2h30m, 1d")
+		return nil
+	}
+
+	remindAt := time.Now().Add(d)
+	rm := &db.Reminder{
+		ID:       uuid.New().String(),
+		UserID:   msg.UserID,
+		Message:  message,
+		RemindAt: remindAt,
+	}
+	if err := r.db.CreateReminder(rm); err != nil {
+		return fmt.Errorf("create reminder: %w", err)
+	}
+
+	when := remindAt.Format("Jan 2 at 15:04")
+	send(fmt.Sprintf("⏰ Reminder set for *%s*: _%s_", escapeMarkdown(when), escapeMarkdown(message)))
 	return nil
+}
+
+// parseDuration parses reminder durations: 30m, 1h, 2h30m, 1d, 2d.
+func parseDuration(s string) (time.Duration, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return 0, fmt.Errorf("empty duration")
+	}
+
+	var total time.Duration
+	remaining := s
+
+	// days
+	if idx := strings.Index(remaining, "d"); idx >= 0 {
+		n, err := strconv.Atoi(remaining[:idx])
+		if err != nil || n <= 0 {
+			return 0, fmt.Errorf("invalid days")
+		}
+		total += time.Duration(n) * 24 * time.Hour
+		remaining = remaining[idx+1:]
+	}
+
+	// hours
+	if idx := strings.Index(remaining, "h"); idx >= 0 {
+		n, err := strconv.Atoi(remaining[:idx])
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("invalid hours")
+		}
+		total += time.Duration(n) * time.Hour
+		remaining = remaining[idx+1:]
+	}
+
+	// minutes
+	if idx := strings.Index(remaining, "m"); idx >= 0 {
+		n, err := strconv.Atoi(remaining[:idx])
+		if err != nil || n < 0 {
+			return 0, fmt.Errorf("invalid minutes")
+		}
+		total += time.Duration(n) * time.Minute
+		remaining = remaining[idx+1:]
+	}
+
+	if remaining != "" && remaining != "s" {
+		return 0, fmt.Errorf("unrecognised duration suffix: %q", remaining)
+	}
+	if total <= 0 {
+		return 0, fmt.Errorf("duration must be positive")
+	}
+	return total, nil
 }
 
 func (r *Router) handleText(ctx context.Context, msg Message, send func(string)) error {
@@ -240,6 +331,85 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string))
 	return r.onText(ctx, msg.UserID, msg.Text, send)
 }
 
+func (r *Router) handleSession(ctx context.Context, msg Message, arg string, send func(string)) error {
+	parts := strings.Fields(arg)
+	sub := ""
+	if len(parts) > 0 {
+		sub = strings.ToLower(parts[0])
+	}
+	name := ""
+	if len(parts) > 1 {
+		name = strings.Join(parts[1:], " ")
+	}
+
+	switch sub {
+	case "start", "":
+		sess := &db.ChatSession{
+			ID:       uuid.New().String(),
+			UserID:   msg.UserID,
+			Name:     name,
+			Platform: string(msg.Platform),
+			Active:   true,
+		}
+		if err := r.db.CreateChatSession(sess); err != nil {
+			return fmt.Errorf("create session: %w", err)
+		}
+		label := name
+		if label == "" {
+			label = sess.ID[:8]
+		}
+		send(fmt.Sprintf("💬 Session *%s* started\\. Send /session stop to end it\\.", escapeMarkdown(label)))
+
+	case "list":
+		sessions, err := r.db.ListChatSessions(msg.UserID)
+		if err != nil {
+			return err
+		}
+		active := sessions[:0]
+		for _, s := range sessions {
+			if s.Active {
+				active = append(active, s)
+			}
+		}
+		if len(active) == 0 {
+			send("No active sessions\\. Use /session start to begin one\\.")
+			return nil
+		}
+		var b strings.Builder
+		b.WriteString("*Active sessions:*\n")
+		for _, s := range active {
+			label := s.Name
+			if label == "" {
+				label = s.ID[:8]
+			}
+			b.WriteString(fmt.Sprintf("• *%s* — %s\n", escapeMarkdown(label), escapeMarkdown(s.LastSeen.Format("Jan 2 15:04"))))
+		}
+		send(b.String())
+
+	case "stop":
+		sessions, err := r.db.ListChatSessions(msg.UserID)
+		if err != nil {
+			return err
+		}
+		stopped := 0
+		for _, s := range sessions {
+			if s.Active && s.Platform == string(msg.Platform) {
+				_ = r.db.StopChatSession(s.ID)
+				stopped++
+			}
+		}
+		if stopped == 0 {
+			send("No active sessions to stop\\.")
+		} else {
+			send(fmt.Sprintf("Session stopped\\. %d session\\(s\\) closed\\.", stopped))
+		}
+
+	default:
+		send("Usage: /session start \\[name\\] · /session list · /session stop")
+	}
+	return nil
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func helpText() string {
@@ -250,7 +420,10 @@ func helpText() string {
 /agent cancel — cancel active agent creation
 /run \<name\> — run an agent
 /secret list — list stored secret names
-/remind — set a reminder \(coming soon\)
+/remind \<duration\> \<message\> — set a reminder \(e\.g\. /remind 30m Check oven\)
+/session start \[name\] — start a chat session
+/session list — list active sessions
+/session stop — stop current session
 /help — this message
 
 _Manage agents, secrets & settings at the web dashboard_`

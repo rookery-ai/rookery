@@ -80,6 +80,11 @@ func (s *Server) handleSaveConnector(c echo.Context) error {
 		}
 	}
 
+	// Allow setup wizard to redirect back to its flow.
+	if next := c.FormValue("next"); next != "" && len(next) > 0 && next[0] == '/' {
+		return c.Redirect(http.StatusFound, next)
+	}
+
 	p := s.page(c, "Chat Connectors")
 	p.Success = "Connected to " + platform + " successfully! Send /start to your bot to link your account."
 	return s.renderConnectors(c, u, p)

@@ -61,7 +61,7 @@ func CreateUser(database *db.DB, username string) (*db.User, string, error) {
 		return nil, "", ErrUserExists
 	}
 
-	tempPw := generateTempPassword()
+	tempPw := GenerateTempPassword()
 	hash, err := bcrypt.GenerateFromPassword([]byte(tempPw), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, "", fmt.Errorf("hash password: %w", err)
@@ -116,8 +116,8 @@ func GenerateSecretsSalt() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// generateTempPassword creates a 16-char random alphanumeric password.
-func generateTempPassword() string {
+// GenerateTempPassword creates a 16-char random alphanumeric password.
+func GenerateTempPassword() string {
 	const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, 16)
 	for i := range b {

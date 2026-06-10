@@ -117,13 +117,13 @@ func serveCmd() *cli.Command {
 			defer gwManager.StopAll()
 
 			// Start scheduler and reminder service.
-			sched := scheduler.New(database, runner)
+			sched := scheduler.New(database, runner, sysKey).WithSender(gwManager)
 			go sched.Run(ctx)
 
 			reminderSvc := reminder.New(database, gwManager)
 			go reminderSvc.Run(ctx)
 
-			srv, err := web.NewServer(cfg, database, gwManager, runner)
+			srv, err := web.NewServer(cfg, database, gwManager, runner, designFlow)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}

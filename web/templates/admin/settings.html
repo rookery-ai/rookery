@@ -16,13 +16,13 @@
             <span class="label-text-alt text-base-content/50">Path to the <code>claude</code> CLI</span>
           </label>
           <input type="text" name="claude_bin" placeholder="/usr/local/bin/claude or claude"
-            class="input input-bordered w-full font-mono" value="claude">
+            class="input input-bordered w-full font-mono" value="{{.ClaudeBin}}">
         </div>
         <div class="form-control">
           <label class="label">
             <span class="label-text">Coder Timeout (seconds)</span>
           </label>
-          <input type="number" name="coder_timeout" class="input input-bordered w-full" value="120" min="30" max="600">
+          <input type="number" name="coder_timeout" class="input input-bordered w-full" value="{{.CoderTimeout}}" min="30" max="600">
         </div>
         <button type="submit" class="btn btn-primary btn-sm">Save Settings</button>
       </form>
@@ -38,19 +38,19 @@
             <span class="label-text">Firejail Binary Path</span>
           </label>
           <input type="text" name="firejail_bin" placeholder="/usr/bin/firejail or firejail"
-            class="input input-bordered w-full font-mono" value="firejail">
+            class="input input-bordered w-full font-mono" value="{{.FirejailBin}}">
         </div>
         <div class="form-control">
           <label class="label">
             <span class="label-text">Default Agent Timeout (seconds)</span>
           </label>
-          <input type="number" name="agent_timeout" class="input input-bordered w-full" value="300" min="30" max="3600">
+          <input type="number" name="agent_timeout" class="input input-bordered w-full" value="{{.AgentTimeout}}" min="30" max="3600">
         </div>
         <div class="form-control">
           <label class="label">
             <span class="label-text">Default Memory Limit (MB)</span>
           </label>
-          <input type="number" name="memory_mb" class="input input-bordered w-full" value="256" min="64" max="2048">
+          <input type="number" name="memory_mb" class="input input-bordered w-full" value="{{.MemoryMB}}" min="64" max="2048">
         </div>
         <button type="submit" class="btn btn-primary btn-sm">Save Settings</button>
       </form>

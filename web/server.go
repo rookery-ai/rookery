@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/gorilla/sessions"
+	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/audit"
 	"github.com/ilijad1/simple-agents/internal/auth"
@@ -27,20 +28,21 @@ const sessionName = "sa_session"
 
 // Server is the HTTP server for the Simple Agents web UI.
 type Server struct {
-	echo      *echo.Echo
-	cfg       *config.Config
-	db        *db.DB
-	store     *sessions.CookieStore
-	audit     *audit.Writer
-	systemKey []byte                   // 32-byte key for encrypting master passwords at rest
-	gateway   *gateway.GatewayManager  // may be nil in tests
-	runner    *agentrunner.Runner       // may be nil in tests
-	memory    *memory.Store             // may be nil in tests
+	echo        *echo.Echo
+	cfg         *config.Config
+	db          *db.DB
+	store       *sessions.CookieStore
+	audit       *audit.Writer
+	systemKey   []byte                      // 32-byte key for encrypting master passwords at rest
+	gateway     *gateway.GatewayManager     // may be nil in tests
+	runner      *agentrunner.Runner          // may be nil in tests
+	memory      *memory.Store               // may be nil in tests
+	designFlow  *agentdesigner.Flow          // may be nil in tests
 }
 
 // NewServer wires up all routes and middleware.
-// gatewayManager and runner may be nil (e.g. in tests).
-func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner) (*Server, error) {
+// gatewayManager, runner, and flow may be nil (e.g. in tests).
+func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, flow *agentdesigner.Flow) (*Server, error) {
 	sessionKey := []byte(cfg.Server.SessionKey)
 	if len(sessionKey) == 0 {
 		// Use a fixed dev key if not configured; production MUST set SA_SESSION_KEY.
@@ -64,15 +66,16 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 	memStore := memory.New(memDir)
 
 	s := &Server{
-		echo:      echo.New(),
-		cfg:       cfg,
-		db:        database,
-		store:     store,
-		audit:     audit.New(database),
-		systemKey: sysKey,
-		gateway:   gatewayManager,
-		runner:    runner,
-		memory:    memStore,
+		echo:       echo.New(),
+		cfg:        cfg,
+		db:         database,
+		store:      store,
+		audit:      audit.New(database),
+		systemKey:  sysKey,
+		gateway:    gatewayManager,
+		runner:     runner,
+		memory:     memStore,
+		designFlow: flow,
 	}
 
 	s.echo.HideBanner = true
@@ -220,6 +223,9 @@ func (s *Server) setupRoutes() {
 	dash.GET("/agents/:id", s.showAgentDetail)
 	dash.POST("/agents/:id/delete", s.handleDeleteAgent)
 	dash.POST("/agents/:id/run", s.handleRunAgent)
+	dash.POST("/agents/:id/schedule", s.handleSaveSchedule)
+	dash.POST("/agents/:id/schedule/delete", s.handleDeleteSchedule)
+	dash.POST("/agents/:id/code", s.handleSaveCode)
 	dash.GET("/secrets", s.showSecrets)
 	dash.POST("/secrets", s.handleCreateSecret)
 	dash.POST("/secrets/:name/delete", s.handleDeleteSecret)

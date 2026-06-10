@@ -223,6 +223,24 @@ func (d *DB) DeletePlatformConnection(userID, platform string) error {
 	return err
 }
 
+func (d *DB) ListUserPlatformConnections(userID string) ([]*PlatformConnection, error) {
+	rows, err := d.Query(`SELECT id,user_id,platform,encrypted_token,active,created_at,updated_at
+		FROM platform_connections WHERE user_id=?`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*PlatformConnection
+	for rows.Next() {
+		c, err := scanPlatformConnection(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 func scanPlatformConnection(s scanner) (*PlatformConnection, error) {
 	var c PlatformConnection
 	var createdAt, updatedAt string
@@ -407,10 +425,15 @@ func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
 // ── Agent schedules ────────────────────────────────────────────────────────
 
 func (d *DB) UpsertAgentSchedule(s *AgentSchedule) error {
-	_, err := d.Exec(`INSERT INTO agent_schedules(id,agent_id,user_id,cron_expr,enabled,created_at)
-		VALUES(?,?,?,?,1,datetime('now'))
-		ON CONFLICT(id) DO UPDATE SET cron_expr=excluded.cron_expr, enabled=excluded.enabled`,
-		s.ID, s.AgentID, s.UserID, s.CronExpr)
+	var nextRun *string
+	if s.NextRunAt != nil {
+		t := s.NextRunAt.UTC().Format("2006-01-02 15:04:05")
+		nextRun = &t
+	}
+	_, err := d.Exec(`INSERT INTO agent_schedules(id,agent_id,user_id,cron_expr,next_run_at,enabled,created_at)
+		VALUES(?,?,?,?,?,1,datetime('now'))
+		ON CONFLICT(id) DO UPDATE SET cron_expr=excluded.cron_expr, next_run_at=excluded.next_run_at, enabled=excluded.enabled`,
+		s.ID, s.AgentID, s.UserID, s.CronExpr, nextRun)
 	return err
 }
 
@@ -747,6 +770,44 @@ func (d *DB) CountAgents(userID string) (int, error) {
 		err = d.QueryRow(`SELECT COUNT(*) FROM agents WHERE user_id=?`, userID).Scan(&count)
 	}
 	return count, err
+}
+
+// AgentRunWithName embeds AgentRun with the agent name for display purposes.
+type AgentRunWithName struct {
+	AgentRun
+	AgentName string
+}
+
+// RecentAgentRunsWithNames returns the N most recent runs with the agent name joined in.
+func (d *DB) RecentAgentRunsWithNames(userID string, limit int) ([]*AgentRunWithName, error) {
+	rows, err := d.Query(`SELECT r.id,r.agent_id,r.user_id,r.trigger,r.exit_code,r.stdout,r.stderr,r.started_at,r.finished_at, COALESCE(a.name,'')
+		FROM agent_runs r LEFT JOIN agents a ON a.id=r.agent_id
+		WHERE r.user_id=? ORDER BY r.started_at DESC LIMIT ?`, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var runs []*AgentRunWithName
+	for rows.Next() {
+		var rn AgentRunWithName
+		var exitCode sql.NullInt64
+		var startedAt string
+		var finishedAt sql.NullString
+		if err := rows.Scan(&rn.ID, &rn.AgentID, &rn.UserID, &rn.Trigger, &exitCode, &rn.Stdout, &rn.Stderr, &startedAt, &finishedAt, &rn.AgentName); err != nil {
+			return nil, err
+		}
+		if exitCode.Valid {
+			v := int(exitCode.Int64)
+			rn.ExitCode = &v
+		}
+		rn.StartedAt = scanTime(startedAt)
+		if finishedAt.Valid {
+			t := scanTime(finishedAt.String)
+			rn.FinishedAt = &t
+		}
+		runs = append(runs, &rn)
+	}
+	return runs, rows.Err()
 }
 
 // RecentAgentRuns returns the N most recent runs across all agents for a user.

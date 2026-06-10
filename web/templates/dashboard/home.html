@@ -8,7 +8,7 @@
   <!-- Welcome + quick actions -->
   <div class="flex items-center justify-between mb-6">
     <div>
-      <h1 class="text-2xl font-bold">Good to see you, {{.User.Username}}!</h1>
+      <h1 class="text-2xl font-bold">Good to see you, {{.DisplayName}}!</h1>
       <p class="text-base-content/60">Here's what's happening with your agents.</p>
     </div>
     <a href="/dashboard/agents/new" class="btn btn-primary">
@@ -73,7 +73,7 @@
             <tbody>
             {{range .RecentRuns}}
             <tr>
-              <td class="font-mono text-xs">{{truncate .AgentID 8}}</td>
+              <td class="font-mono text-xs">{{if .AgentName}}{{.AgentName}}{{else}}{{truncate .AgentID 8}}{{end}}</td>
               <td><span class="badge badge-ghost badge-sm">{{.Trigger}}</span></td>
               <td>
                 {{if .ExitCode}}

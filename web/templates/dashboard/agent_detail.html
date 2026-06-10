@@ -24,6 +24,25 @@
         </div>
       </div>
 
+      <!-- Agent Code -->
+      <div class="card bg-base-100 shadow">
+        <div class="card-body">
+          <h2 class="card-title text-lg">Agent Code</h2>
+          {{if .Code}}
+          <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/code" class="space-y-3">
+            <textarea name="code" class="textarea textarea-bordered w-full font-mono text-xs h-64 leading-relaxed"
+              spellcheck="false">{{.Code}}</textarea>
+            <div class="flex justify-between items-center">
+              <p class="text-xs text-base-content/40">Guardrails run on save. Forbidden: eval, exec, subprocess, socket.</p>
+              <button type="submit" class="btn btn-primary btn-sm">Save Code</button>
+            </div>
+          </form>
+          {{else}}
+          <p class="text-sm text-base-content/40">No code generated yet. Use the chat wizard or create the agent from the web form to generate code.</p>
+          {{end}}
+        </div>
+      </div>
+
       <!-- Run history -->
       <div class="card bg-base-100 shadow">
         <div class="card-body">
@@ -75,27 +94,36 @@
         </div>
       </div>
 
-      {{if .Schedule}}
       <div class="card bg-base-100 shadow">
         <div class="card-body">
           <h2 class="card-title text-lg">Schedule</h2>
-          <div class="text-sm">
+          {{if .Schedule}}
+          <div class="text-sm mb-3">
             <p class="font-mono bg-base-200 px-2 py-1 rounded">{{.Schedule.CronExpr}}</p>
             {{if .Schedule.NextRunAt}}
             <p class="text-base-content/60 mt-2 text-xs">Next run: {{.Schedule.NextRunAt.Format "Jan 2 at 15:04"}}</p>
             {{end}}
           </div>
+          <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/schedule/delete"
+            onsubmit="return confirm('Remove this schedule?')">
+            <button type="submit" class="btn btn-ghost btn-xs text-error">Remove schedule</button>
+          </form>
+          {{else}}
+          <p class="text-sm text-base-content/50 mb-3">No schedule set.</p>
+          {{end}}
+          <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/schedule" class="space-y-2 mt-2">
+            <div class="form-control">
+              <input type="text" name="cron_expr" placeholder="0 8 * * *"
+                class="input input-bordered input-sm w-full font-mono"
+                value="{{if .Schedule}}{{.Schedule.CronExpr}}{{end}}">
+              <label class="label"><span class="label-text-alt text-base-content/40">min hour day month weekday</span></label>
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm w-full">
+              {{if .Schedule}}Update Schedule{{else}}Set Schedule{{end}}
+            </button>
+          </form>
         </div>
       </div>
-      {{else}}
-      <div class="card bg-base-100 shadow">
-        <div class="card-body">
-          <h2 class="card-title text-lg">Schedule</h2>
-          <p class="text-sm text-base-content/50">No schedule set.</p>
-          <p class="text-xs text-base-content/40 mt-1">Use <code>/agent schedule {{.Agent.Name}} "0 8 * * *"</code> in your chat app to schedule this agent.</p>
-        </div>
-      </div>
-      {{end}}
 
       <div class="card bg-base-100 shadow">
         <div class="card-body p-4">

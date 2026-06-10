@@ -132,6 +132,46 @@ func (f *Flow) GetSession(userID string) *DesignSession {
 	return f.sessions[userID]
 }
 
+// GenerateAndSave performs a single-shot code generation from name + description,
+// runs guardrails, and saves the agent. No multi-turn session is created.
+// This is used by the web UI create form where the user provides a full description upfront.
+func (f *Flow) GenerateAndSave(ctx context.Context, userID, agentID, name, description string) error {
+	prompt := fmt.Sprintf(`You are an expert Python developer. Generate a complete, production-ready automated agent script.
+
+Agent name: %s
+Description: %s
+
+The script MUST follow this exact structure:
+1. Module docstring (agent name + description)
+2. Standard imports (os, json, sys, etc.)
+3. The line: # ======= USER LOGIC =======
+4. All custom logic, including a main() function
+5. if __name__ == "__main__": main()
+6. The line: # ======= SYSTEM INJECTED =======
+
+Rules:
+- NEVER use eval(), exec(), compile(), __import__(), os.system(), subprocess, or socket.socket()
+- Access secrets via os.environ.get("SECRET_NAME", "")
+- Send output to Telegram with print("[CHAT] your message")
+- Handle errors gracefully; log failures with print("[ERROR] ...")
+- Code must be self-contained and runnable with: python3 main.py
+
+Return ONLY the Python code. No markdown fences. No explanation.`, name, description)
+
+	result, err := f.coder.Generate(ctx, userID, prompt)
+	if err != nil {
+		return fmt.Errorf("generate code: %w", err)
+	}
+
+	code := cleanCodeFence(result.Text)
+
+	if err := RunFullGuardrails(code, prompt); err != nil {
+		return fmt.Errorf("guardrails: %w", err)
+	}
+
+	return f.designer.SaveAgent(userID, agentID, name, description, code)
+}
+
 // ─── FSM step handlers ────────────────────────────────────────────────────────
 
 func (f *Flow) stepDescribing(ctx context.Context, userID, description string) (string, bool, error) {

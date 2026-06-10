@@ -149,13 +149,7 @@ func (s *Server) handleAdminResetPassword(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "user not found")
 	}
 
-	// Generate a new temp password
-	_, tempPw, err := auth.CreateUser(s.db, "__temp_"+target.Username)
-	if err != nil {
-		// Fall through to direct reset
-		tempPw = "reset-error"
-	}
-
+	tempPw := auth.GenerateTempPassword()
 	if err := auth.ChangePassword(s.db, userID, tempPw); err != nil {
 		return err
 	}
@@ -173,14 +167,65 @@ func (s *Server) handleAdminResetPassword(c echo.Context) error {
 	return c.Render(http.StatusOK, "admin/user_detail.html", buildUserDetailData(p, target, perms))
 }
 
+const systemUserID = "system"
+
+type adminSettingsData struct {
+	*pageData
+	ClaudeBin    string
+	CoderTimeout string
+	FirejailBin  string
+	AgentTimeout string
+	MemoryMB     string
+}
+
+func (s *Server) loadAdminSettings() *adminSettingsData {
+	get := func(key, fallback string) string {
+		if v, err := s.db.GetSetting(systemUserID, key); err == nil && v != "" {
+			return v
+		}
+		return fallback
+	}
+	return &adminSettingsData{
+		ClaudeBin:    get("claude_bin", "claude"),
+		CoderTimeout: get("coder_timeout", "120"),
+		FirejailBin:  get("firejail_bin", "firejail"),
+		AgentTimeout: get("agent_timeout", "300"),
+		MemoryMB:     get("memory_mb", "256"),
+	}
+}
+
 func (s *Server) showAdminSettings(c echo.Context) error {
-	return c.Render(http.StatusOK, "admin/settings.html", s.page(c, "System Settings"))
+	d := s.loadAdminSettings()
+	d.pageData = s.page(c, "System Settings")
+	return c.Render(http.StatusOK, "admin/settings.html", d)
 }
 
 func (s *Server) handleAdminSaveSettings(c echo.Context) error {
-	p := s.page(c, "System Settings")
-	p.Success = "Settings saved"
-	return c.Render(http.StatusOK, "admin/settings.html", p)
+	admin := c.Get("user").(*db.User)
+	fields := map[string]string{
+		"claude_bin":    c.FormValue("claude_bin"),
+		"coder_timeout": c.FormValue("coder_timeout"),
+		"firejail_bin":  c.FormValue("firejail_bin"),
+		"agent_timeout": c.FormValue("agent_timeout"),
+		"memory_mb":     c.FormValue("memory_mb"),
+	}
+
+	for key, val := range fields {
+		if val != "" {
+			if err := s.db.SetSetting(systemUserID, key, val); err != nil {
+				d := s.loadAdminSettings()
+				d.pageData = s.page(c, "System Settings")
+				d.pageData.Error = "Failed to save: " + err.Error()
+				return c.Render(http.StatusInternalServerError, "admin/settings.html", d)
+			}
+		}
+	}
+
+	s.audit.Log(admin.ID, "update_system_settings", "system", "", c.RealIP())
+	d := s.loadAdminSettings()
+	d.pageData = s.page(c, "System Settings")
+	d.pageData.Success = "Settings saved. Restart the server for binary path changes to take effect."
+	return c.Render(http.StatusOK, "admin/settings.html", d)
 }
 
 func buildUserDetailData(p *pageData, target *db.User, perms []string) *adminUserDetailData {

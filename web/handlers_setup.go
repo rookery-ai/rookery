@@ -16,7 +16,7 @@ type setupData struct {
 
 func (s *Server) showSetup(c echo.Context) error {
 	u := c.Get("user").(*db.User)
-	step := setupStep(u)
+	step := setupStep(u, s.db)
 	return c.Render(http.StatusOK, "auth/setup.html", &setupData{
 		pageData: s.page(c, "Setup Your Account"),
 		Step:     step,
@@ -84,12 +84,20 @@ func (s *Server) handleSetupMasterPassword(c echo.Context, u *db.User) error {
 }
 
 // setupStep determines which step of setup to show based on user state.
-func setupStep(u *db.User) int {
+// The db parameter is used to check whether the user has connected a platform yet.
+func setupStep(u *db.User, database *db.DB) int {
 	if u.MustChangePassword {
 		return 1
 	}
 	if u.SecretsSalt == "" {
 		return 2
+	}
+	// Show step 4 (done) if user already has a platform connection.
+	if database != nil {
+		conns, _ := database.ListUserPlatformConnections(u.ID)
+		if len(conns) > 0 {
+			return 4
+		}
 	}
 	return 3
 }

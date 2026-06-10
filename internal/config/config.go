@@ -71,7 +71,7 @@ func Load(path string) (*Config, error) {
 
 func defaults() *Config {
 	home, _ := os.UserHomeDir()
-	dataDir := filepath.Join(home, ".simple-agents")
+	dataDir := filepath.Join(home, ".simple-agents-v2")
 	return &Config{
 		Server: ServerConfig{
 			Host: "0.0.0.0",
