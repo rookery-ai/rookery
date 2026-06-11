@@ -1,10 +1,10 @@
 // Package coder wraps the claude CLI subprocess as the code generation engine.
-// Each user gets an isolated HOME directory so Claude Code's config, caches,
-// and auth are completely separate between users.
+// Each user gets an isolated config directory so their sessions are completely
+// separate from the server operator's settings, CLAUDE.md files, and history.
 //
 // Security: the subprocess runs WITHOUT --sandbox (firejail handles Python execution;
-// the coder only generates code, never runs it). The per-user HOME ensures no
-// user can read another's Claude config or conversation history.
+// the coder only generates code, never runs it). Per-user isolation is enforced by
+// CLAUDE_CONFIG_DIR and --setting-sources "".
 package coder
 
 import (
@@ -17,7 +17,20 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/ilijad1/simple-agents/internal/db"
 )
+
+// knownAuthEnvVars are env var names that carry LLM provider credentials.
+// These are always forwarded to non-claude subprocesses so future tool types
+// (opencode, cursor, etc.) can authenticate without a credentials file.
+var knownAuthEnvVars = []string{
+	"ANTHROPIC_API_KEY",
+	"ANTHROPIC_AUTH_TOKEN",
+	"OPENAI_API_KEY",
+	"OPENAI_BASE_URL",
+	"GOOGLE_API_KEY",
+}
 
 // Result holds the output from a claude invocation.
 type Result struct {
@@ -25,11 +38,12 @@ type Result struct {
 	Duration time.Duration
 }
 
-// Coder generates code or text by invoking the claude CLI.
+// Coder generates code or text by invoking a configured CLI tool.
 type Coder struct {
-	bin       string        // path to claude binary
-	timeout   time.Duration // per-request timeout
-	homesDir  string        // root dir for per-user HOME directories (~/.simple-agents/claude-homes/)
+	bin          string        // path to the coder binary (claude, opencode, …)
+	timeout      time.Duration // per-request timeout
+	homesDir     string        // root dir for per-user isolated HOME directories
+	sysClaudeDir string        // path to the operator's ~/.claude — for credential copying
 }
 
 // New creates a Coder.
@@ -41,11 +55,17 @@ func New(bin string, timeout time.Duration, homesDir string) *Coder {
 	if timeout == 0 {
 		timeout = 20 * time.Minute
 	}
-	return &Coder{bin: bin, timeout: timeout, homesDir: homesDir}
+	sysHome, _ := os.UserHomeDir()
+	return &Coder{
+		bin:          bin,
+		timeout:      timeout,
+		homesDir:     homesDir,
+		sysClaudeDir: filepath.Join(sysHome, ".claude"),
+	}
 }
 
-// Generate sends prompt to claude and returns the text response.
-// userID is used to select the per-user HOME directory.
+// Generate sends prompt to the coder binary and returns the text response.
+// userID is used to select the per-user isolated home directory.
 func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, error) {
 	homeDir, err := c.ensureUserHome(userID)
 	if err != nil {
@@ -57,14 +77,16 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 
 	start := time.Now()
 
-	// --output-format json gives structured output with is_error flag.
-	cmd := exec.CommandContext(ctx, c.bin,
-		"-p", prompt,
-		"--output-format", "json",
-	)
-	// Do not override HOME — the subprocess uses the real ~/.claude for auth.
-	// Per-user HOME dirs are preserved as workdirs for context isolation.
+	args := []string{"-p", prompt, "--output-format", "json"}
+	if c.isClaude() {
+		// Suppress all settings files and CLAUDE.md directory traversal so the
+		// operator's global config does not bleed into user sessions.
+		args = append(args, "--setting-sources", "")
+	}
+
+	cmd := exec.CommandContext(ctx, c.bin, args...)
 	cmd.Dir = homeDir
+	cmd.Env = c.buildEnv(homeDir)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -72,9 +94,9 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("claude timed out after %s", c.timeout)
+			return nil, fmt.Errorf("coder timed out after %s", c.timeout)
 		}
-		return nil, fmt.Errorf("claude exited with error: %w\nstderr: %s", err, stderr.String())
+		return nil, fmt.Errorf("coder exited with error: %w\nstderr: %s", err, stderr.String())
 	}
 
 	text, isError, err := extractText(stdout.Bytes())
@@ -82,23 +104,40 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 		// Fall back to raw stdout if JSON parsing fails.
 		text = strings.TrimSpace(stdout.String())
 	} else if isError {
-		return nil, fmt.Errorf("claude error: %s", text)
+		return nil, fmt.Errorf("coder error: %s", text)
 	}
 
 	return &Result{Text: text, Duration: time.Since(start)}, nil
 }
 
-// Chat sends a conversational message to claude. Unlike Generate, it passes
-// a system prompt and conversation history for context-aware replies.
-func (c *Coder) Chat(ctx context.Context, userID, systemPrompt, userMessage string) (*Result, error) {
-	// Build a single prompt that combines system context with the user message.
-	// For multi-turn chat, session persistence is handled by the caller via
-	// the session package (Phase 7); here we keep each call stateless.
-	combined := userMessage
-	if systemPrompt != "" {
-		combined = "SYSTEM: " + systemPrompt + "\n\nUSER: " + userMessage
+// Chat sends a conversational message to claude with optional history for multi-turn sessions.
+// systemContext is prepended before history (use it for persistent user memory / facts).
+// When history is non-empty, prior turns are formatted into the prompt so the model has context.
+func (c *Coder) Chat(ctx context.Context, userID string, history []db.ChatMessage, systemContext, userMessage string) (*Result, error) {
+	var sb strings.Builder
+	if systemContext != "" {
+		sb.WriteString("[Persistent user context]\n")
+		sb.WriteString(systemContext)
+		sb.WriteByte('\n')
 	}
-	return c.Generate(ctx, userID, combined)
+	if len(history) > 0 {
+		sb.WriteString("[Previous conversation]\n")
+		for _, m := range history {
+			switch m.Role {
+			case "user":
+				sb.WriteString("Human: ")
+			case "assistant":
+				sb.WriteString("Assistant: ")
+			}
+			sb.WriteString(m.Content)
+			sb.WriteByte('\n')
+		}
+		sb.WriteString("\nCurrent message: ")
+		sb.WriteString(userMessage)
+	} else {
+		sb.WriteString(userMessage)
+	}
+	return c.Generate(ctx, userID, sb.String())
 }
 
 // Ping checks that the claude binary is reachable and returns its version string.
@@ -126,7 +165,77 @@ func (c *Coder) ensureUserHome(userID string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
+
+	if c.isClaude() {
+		claudeDir := filepath.Join(dir, ".claude")
+		if err := os.MkdirAll(claudeDir, 0o700); err != nil {
+			return "", err
+		}
+		// Copy credentials on every call so refreshed OAuth tokens are available.
+		// The file is small (< 1 KB) and copying is cheaper than stale auth errors.
+		if c.sysClaudeDir != "" {
+			src := filepath.Join(c.sysClaudeDir, ".credentials.json")
+			if data, err := os.ReadFile(src); err == nil {
+				_ = os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), data, 0o600)
+			}
+		}
+	}
+
 	return dir, nil
+}
+
+// isClaude returns true when the configured binary is the claude CLI.
+// This gates claude-specific isolation flags and credential handling.
+func (c *Coder) isClaude() bool {
+	return strings.Contains(strings.ToLower(filepath.Base(c.bin)), "claude")
+}
+
+// buildEnv constructs the subprocess environment with per-user isolation applied.
+// For claude: redirects CLAUDE_CONFIG_DIR and HOME to the per-user home.
+// For other tools: passes through known auth env vars; HOME is still overridden.
+func (c *Coder) buildEnv(homeDir string) []string {
+	overrides := map[string]string{
+		"HOME": homeDir,
+	}
+	if c.isClaude() {
+		overrides["CLAUDE_CONFIG_DIR"] = filepath.Join(homeDir, ".claude")
+	} else {
+		// For non-claude tools, preserve any API key env vars already set in the
+		// parent process so the tool can authenticate to its LLM provider.
+		for _, key := range knownAuthEnvVars {
+			if val := os.Getenv(key); val != "" {
+				overrides[key] = val
+			}
+		}
+	}
+	return overrideEnv(os.Environ(), overrides)
+}
+
+// overrideEnv returns base with the given key=value pairs replaced or appended.
+// All keys in base that are not in overrides are preserved unchanged.
+func overrideEnv(base []string, overrides map[string]string) []string {
+	result := make([]string, 0, len(base)+len(overrides))
+	seen := make(map[string]bool, len(overrides))
+	for _, kv := range base {
+		idx := strings.IndexByte(kv, '=')
+		if idx < 0 {
+			result = append(result, kv)
+			continue
+		}
+		k := kv[:idx]
+		if v, ok := overrides[k]; ok {
+			result = append(result, k+"="+v)
+			seen[k] = true
+		} else {
+			result = append(result, kv)
+		}
+	}
+	for k, v := range overrides {
+		if !seen[k] {
+			result = append(result, k+"="+v)
+		}
+	}
+	return result
 }
 
 // claudeJSONResponse is the JSON envelope returned by `claude --output-format json`.

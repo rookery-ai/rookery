@@ -563,6 +563,67 @@ func scanChatSession(s scanner) (*ChatSession, error) {
 	return &cs, nil
 }
 
+// ── Chat messages ─────────────────────────────────────────────────────────
+
+func (d *DB) AddChatMessage(sessionID, role, content string) error {
+	_, err := d.Exec(`INSERT INTO chat_messages(session_id,role,content,created_at) VALUES(?,?,?,datetime('now'))`,
+		sessionID, role, content)
+	return err
+}
+
+func (d *DB) ListChatMessages(sessionID string) ([]ChatMessage, error) {
+	rows, err := d.Query(`SELECT id,session_id,role,content,created_at FROM chat_messages WHERE session_id=? ORDER BY id ASC`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ChatMessage
+	for rows.Next() {
+		var m ChatMessage
+		var createdAt string
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &createdAt); err != nil {
+			return nil, err
+		}
+		m.CreatedAt = scanTime(createdAt)
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// GetActiveSessionForPlatform returns the most-recently-touched active session
+// for the given user on the given platform, or nil if none exists.
+func (d *DB) GetActiveSessionForPlatform(userID, platform string) (*ChatSession, error) {
+	row := d.QueryRow(`SELECT id,user_id,agent_id,name,platform,active,created_at,last_seen
+		FROM chat_sessions WHERE user_id=? AND platform=? AND active=1
+		ORDER BY last_seen DESC LIMIT 1`, userID, platform)
+	s, err := scanChatSession(row)
+	if errors.Is(err, ErrNotFound) {
+		return nil, nil
+	}
+	return s, err
+}
+
+// FindSessionByPrefix returns the first session whose ID starts with the given prefix.
+func (d *DB) FindSessionByPrefix(userID, prefix string) (*ChatSession, error) {
+	rows, err := d.Query(`SELECT id,user_id,agent_id,name,platform,active,created_at,last_seen
+		FROM chat_sessions WHERE user_id=? AND id LIKE ? ORDER BY last_seen DESC LIMIT 1`,
+		userID, prefix+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, ErrNotFound
+	}
+	return scanChatSession(rows)
+}
+
+// ResumeSession sets a session active again.
+func (d *DB) ResumeSession(id string) error {
+	_, err := d.Exec(`UPDATE chat_sessions SET active=1, last_seen=datetime('now') WHERE id=?`, id)
+	return err
+}
+
 // ── Reminders ──────────────────────────────────────────────────────────────
 
 func (d *DB) CreateReminder(r *Reminder) error {
@@ -977,4 +1038,28 @@ func scanCoder(s scanner) (*Coder, error) {
 	c.CreatedAt = scanTime(createdAt)
 	c.UpdatedAt = scanTime(updatedAt)
 	return &c, nil
+}
+
+// ── MCP servers ────────────────────────────────────────────────────────────
+
+func (d *DB) ListMCPServers(userID string) ([]*MCPServer, error) {
+	rows, err := d.Query(`SELECT id,user_id,name,url,enabled,created_at,updated_at FROM mcp_servers WHERE user_id=? ORDER BY name`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var servers []*MCPServer
+	for rows.Next() {
+		var s MCPServer
+		var enabled int
+		var createdAt, updatedAt string
+		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.URL, &enabled, &createdAt, &updatedAt); err != nil {
+			return nil, err
+		}
+		s.Enabled = enabled == 1
+		s.CreatedAt = scanTime(createdAt)
+		s.UpdatedAt = scanTime(updatedAt)
+		servers = append(servers, &s)
+	}
+	return servers, rows.Err()
 }

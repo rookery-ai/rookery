@@ -64,7 +64,7 @@ Telegram adapter (per-user bot instance)
 | `internal/rbac` | `CanPerform(db, userID, permission)` — reads `user_permissions` table |
 | `internal/secrets` | AES-256-GCM store; Argon2id key derivation; `Proxy()` resolves `${NAME}` in-memory only |
 | `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router`, `IdentityResolver`, `TelegramGateway` |
-| `internal/coder` | `ClaudeCoder`: runs `claude -p` subprocess with per-user HOME isolation |
+| `internal/coder` | `Coder`: runs coder CLI subprocess with full per-user isolation (config dir, credentials, settings) |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Clarifying→Generating→Reviewing→Saving→Done); `RunFullGuardrails`; `GenerateAndSave` for web UI |
 | `internal/agentrunner` | Load agent → `secrets.Proxy()` → Firejail → capture `[CHAT]` lines → send via GatewayManager |
 | `internal/sandbox` | Firejail wrapper; `NetworkPolicy` enum (None/Restricted/Full) |
@@ -139,6 +139,38 @@ Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`,
 
 Admin creates named **Coder Profiles** (`coders` table) each with a `claude_bin` path and `timeout_s`. Users are assigned a coder via `users.coder_id` FK. `coderForUser(userID)` on the Server builds the right `*coder.Coder` per user, falling back to system defaults when unassigned.
 
+### Per-user coder isolation
+
+Every coder subprocess runs in a fully isolated environment — the operator's global Claude settings, `CLAUDE.md` files, and conversation history never bleed into user sessions.
+
+**How it works (`internal/coder/coder.go`):**
+
+- `CLAUDE_CONFIG_DIR` is set to `<data_dir>/claude-homes/<userID>/.claude/` — each user gets their own config dir, history, sessions, and cache.
+- `HOME` is overridden to `<data_dir>/claude-homes/<userID>/` — prevents directory traversal from reaching the operator's home-level `CLAUDE.md`.
+- `--setting-sources ""` is passed to the claude binary — this is the confirmed mechanism to suppress both `settings.json`/`settings.local.json` and all `CLAUDE.md` traversal. `HOME` override alone is **not** sufficient; this flag is required.
+- `.credentials.json` is copied from the operator's `~/.claude/` into the per-user config dir on every invocation, so OAuth subscription auth always works with fresh tokens.
+
+**Auth type matrix:**
+
+| Auth type | How it flows |
+|---|---|
+| Claude OAuth subscription | `.credentials.json` copied to per-user `CLAUDE_CONFIG_DIR` |
+| `ANTHROPIC_API_KEY` (or any env var) | Passes through untouched via `os.Environ()` base |
+| Future tools (opencode, cursor) | `isClaude()` returns false → `knownAuthEnvVars` are explicitly forwarded from parent env |
+
+**Extending to new tools:** Add a branch in `buildEnv()` keyed on `isClaude()` or a future `toolType` field. Add any new provider key names to the `knownAuthEnvVars` slice at the top of `coder.go`.
+
+**`ANTHROPIC_CONFIG_DIR` does NOT work** — only `CLAUDE_CONFIG_DIR` redirects the config dir. This was verified empirically; don't switch them.
+
+### Chat session system context
+
+The `textHandler` closure in `cmd/simple-agents/main.go` builds a structured system context (`buildUserContext`) before every `coder.Chat()` call. It includes:
+1. User's persistent memory entries (from `internal/memory`)
+2. User's agents (name + description, all)
+3. User's enabled MCP tool names
+
+This context is injected as `[Persistent user context]` in the prompt. It applies only to Telegram chat sessions — web agent generation calls `coder.Generate()` directly with its own explicit prompt.
+
 ### Natural language reminders
 
 `internal/reminder/timeparser.go` — `ParseNaturalTime(text, now, loc)` parses expressions like `"in 10 minutes"`, `"tomorrow at 3pm"`, `"next Tuesday at noon"` using regex only (no external deps). Used by both the web UI (`handlers_misc.go`) and Telegram router (`gateway/router.go`). Telegram `/remind` syntax: `/remind in 10 minutes to check oven` (also `"me "` prefix stripped, old `30m` format still works).
@@ -167,7 +199,8 @@ Build: **PASS**. `go vet`: **PASS**.
 | `b572ff5` | Phase 8 — web UI: full user dashboard (DaisyUI/Tailwind) |
 | `50936af` | Polish — /remind, /session commands; web code editor; real settings persistence; RBAC |
 | `45f8cdc` | Docs — CLAUDE.md architecture, build status, known gaps |
-| (current) | UI overhaul (DaisyUI v4 fix), admin/user separation, coder profiles, SSE agent creation, NL reminders, connector bot instructions |
+| `f89cb2e` | UI overhaul (DaisyUI v4 fix), admin/user separation, coder profiles, SSE agent creation, NL reminders, connector bot instructions |
+| (current) | Per-user coder isolation (CLAUDE_CONFIG_DIR, --setting-sources, credential copy); richer chat system context (agents + MCP tools) |
 
 ### Known gaps (not yet implemented)
 

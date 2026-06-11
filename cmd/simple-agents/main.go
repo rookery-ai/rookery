@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
@@ -14,9 +15,11 @@ import (
 	"github.com/ilijad1/simple-agents/internal/config"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/gateway"
+	"github.com/ilijad1/simple-agents/internal/memory"
 	"github.com/ilijad1/simple-agents/internal/reminder"
 	"github.com/ilijad1/simple-agents/internal/scheduler"
 	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/simple-agents/internal/session"
 	"github.com/ilijad1/simple-agents/web"
 	"github.com/urfave/cli/v3"
 )
@@ -89,8 +92,11 @@ func serveCmd() *cli.Command {
 			designFlow := agentdesigner.NewFlow(coderSvc, designer)
 			runner := agentrunner.New(database, sysKey, agentsDir)
 
-			textHandler := func(ctx context.Context, userID, text string, send func(string)) error {
-				result, err := coderSvc.Chat(ctx, userID, "", text)
+			memStore := memory.New(filepath.Join(cfg.Data.Dir, "memory"))
+
+			textHandler := func(ctx context.Context, userID string, history []db.ChatMessage, text string, send func(string)) error {
+				sysCtx := buildUserContext(database, memStore, userID)
+				result, err := coderSvc.Chat(ctx, userID, history, sysCtx, text)
 				if err != nil {
 					send("Sorry, I ran into an error: " + err.Error())
 					return nil
@@ -106,7 +112,7 @@ func serveCmd() *cli.Command {
 				return runner.RunByName(ctx, userID, agentName, "", send)
 			}
 
-			router := gateway.NewRouter(database, textHandler, agentRunHandler, designFlow)
+			router := gateway.NewRouter(database, textHandler, agentRunHandler, designFlow, memStore)
 			gwManager := gateway.New(database, sysKey, router)
 
 			go func() {
@@ -123,7 +129,10 @@ func serveCmd() *cli.Command {
 			reminderSvc := reminder.New(database, gwManager)
 			go reminderSvc.Run(ctx)
 
-			srv, err := web.NewServer(cfg, database, gwManager, runner, designer, homesDir)
+			sessionSvc := session.New(database)
+			go sessionSvc.Run(ctx)
+
+			srv, err := web.NewServer(cfg, database, gwManager, runner, designer, homesDir, memStore)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
@@ -170,6 +179,44 @@ func adminCmd() *cli.Command {
 			},
 		},
 	}
+}
+
+// buildUserContext assembles a system context string for the coder that includes
+// the user's persistent memory, their agents, and their enabled MCP tools.
+func buildUserContext(database *db.DB, memStore interface{ ContextString(string) (string, error) }, userID string) string {
+	var sb strings.Builder
+
+	if mem, err := memStore.ContextString(userID); err == nil && mem != "" {
+		sb.WriteString("[User memory]\n")
+		sb.WriteString(mem)
+		sb.WriteByte('\n')
+	}
+
+	if agents, err := database.ListAgents(userID); err == nil && len(agents) > 0 {
+		sb.WriteString("[User's agents]\n")
+		for _, a := range agents {
+			sb.WriteString("- ")
+			sb.WriteString(a.Name)
+			if a.Description != "" {
+				sb.WriteString(": ")
+				sb.WriteString(a.Description)
+			}
+			sb.WriteByte('\n')
+		}
+	}
+
+	if mcpServers, err := database.ListMCPServers(userID); err == nil && len(mcpServers) > 0 {
+		sb.WriteString("[User's MCP tools]\n")
+		for _, s := range mcpServers {
+			if s.Enabled {
+				sb.WriteString("- ")
+				sb.WriteString(s.Name)
+				sb.WriteByte('\n')
+			}
+		}
+	}
+
+	return sb.String()
 }
 
 // resolveDir returns the given subdir relative to the binary's location,
