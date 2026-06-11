@@ -45,7 +45,7 @@ type Server struct {
 
 // NewServer wires up all routes and middleware.
 // gatewayManager and runner may be nil (e.g. in tests).
-func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, designer *agentdesigner.AgentDesigner, homesDir string) (*Server, error) {
+func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, designer *agentdesigner.AgentDesigner, homesDir string, memStore *memory.Store) (*Server, error) {
 	sessionKey := []byte(cfg.Server.SessionKey)
 	if len(sessionKey) == 0 {
 		// Use a fixed dev key if not configured; production MUST set SA_SESSION_KEY.
@@ -64,9 +64,6 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 	if err != nil {
 		return nil, fmt.Errorf("system key: %w", err)
 	}
-
-	memDir := filepath.Join(cfg.Data.Dir, "memory")
-	memStore := memory.New(memDir)
 
 	s := &Server{
 		echo:      echo.New(),

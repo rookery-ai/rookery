@@ -48,6 +48,15 @@ type Gateway interface {
 	Send(platformUserID, text string) error
 }
 
+// TypingGateway is an optional interface for gateways that support typing
+// indicators and message editing (e.g. Telegram). GatewayManager checks for
+// this interface at dispatch time to provide the "⏳ Thinking… → edit" UX.
+type TypingGateway interface {
+	SendTyping(platformUserID string) error
+	SendMessageGetID(platformUserID, text string) (int, error)
+	EditMessage(platformUserID string, msgID int, text string) error
+}
+
 // GatewayManager manages one Gateway per active platform_connection.
 // It is safe for concurrent use.
 type GatewayManager struct {
@@ -211,7 +220,37 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 		msg.UserID = identity.UserID
 	}
 
+	// For plain-text messages (not commands), use typing indicator + placeholder
+	// message that gets edited with the final response, if the gateway supports it.
+	var placeholderID int
+	isPlainText := !strings.HasPrefix(msg.Text, "/")
+	if isPlainText {
+		m.mu.RLock()
+		gw, ok := m.gateways[key(msg.Platform, msg.UserID)]
+		m.mu.RUnlock()
+		if ok {
+			if tg, ok := gw.(TypingGateway); ok {
+				_ = tg.SendTyping(msg.PlatformUserID)
+				placeholderID, _ = tg.SendMessageGetID(msg.PlatformUserID, "⏳ _Thinking\\.\\.\\._")
+			}
+		}
+	}
+
 	send := func(text string) {
+		if placeholderID != 0 {
+			m.mu.RLock()
+			gw, ok := m.gateways[key(msg.Platform, msg.UserID)]
+			m.mu.RUnlock()
+			if ok {
+				if tg, ok := gw.(TypingGateway); ok {
+					if err := tg.EditMessage(msg.PlatformUserID, placeholderID, text); err == nil {
+						placeholderID = 0 // mark used so subsequent sends go through normally
+						return
+					}
+				}
+			}
+			placeholderID = 0
+		}
 		if err := m.Send(msg.Platform, msg.UserID, msg.PlatformUserID, text); err != nil {
 			fmt.Printf("gateway: send error: %v\n", err)
 		}

@@ -46,6 +46,8 @@ func (g *TelegramGateway) Start(ctx context.Context) error {
 	g.bot.Handle("/secret", g.handle)
 	g.bot.Handle("/remind", g.handle)
 	g.bot.Handle("/run", g.handle)
+	g.bot.Handle("/session", g.handle)
+	g.bot.Handle("/memory", g.handle)
 
 	// Stop the bot when context is cancelled.
 	go func() {
@@ -73,6 +75,47 @@ func (g *TelegramGateway) Send(platformUserID, text string) error {
 	if err != nil {
 		// Fall back to plain text if MarkdownV2 parsing fails.
 		_, err = g.bot.Send(chat, text)
+	}
+	return err
+}
+
+// SendTyping sends a typing action to the chat.
+func (g *TelegramGateway) SendTyping(platformUserID string) error {
+	chatID, err := strconv.ParseInt(platformUserID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid telegram chat id %q: %w", platformUserID, err)
+	}
+	return g.bot.Notify(&telebot.Chat{ID: chatID}, telebot.Typing)
+}
+
+// SendMessageGetID sends a message and returns its Telegram message ID.
+func (g *TelegramGateway) SendMessageGetID(platformUserID, text string) (int, error) {
+	chatID, err := strconv.ParseInt(platformUserID, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid telegram chat id %q: %w", platformUserID, err)
+	}
+	chat := &telebot.Chat{ID: chatID}
+	sent, err := g.bot.Send(chat, text, telebot.ModeMarkdownV2)
+	if err != nil {
+		sent, err = g.bot.Send(chat, text)
+	}
+	if err != nil {
+		return 0, err
+	}
+	return sent.ID, nil
+}
+
+// EditMessage replaces the text of an existing message.
+func (g *TelegramGateway) EditMessage(platformUserID string, msgID int, text string) error {
+	chatID, err := strconv.ParseInt(platformUserID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid telegram chat id %q: %w", platformUserID, err)
+	}
+	msg := &telebot.Message{ID: msgID, Chat: &telebot.Chat{ID: chatID}}
+	_, err = g.bot.Edit(msg, text, telebot.ModeMarkdownV2)
+	if err != nil {
+		// Fall back to plain text if markdown parsing fails on the response.
+		_, err = g.bot.Edit(msg, text)
 	}
 	return err
 }

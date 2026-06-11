@@ -106,6 +106,14 @@ type ChatSession struct {
 	LastSeen  time.Time
 }
 
+type ChatMessage struct {
+	ID        int64
+	SessionID string
+	Role      string // "user" or "assistant"
+	Content   string
+	CreatedAt time.Time
+}
+
 type Reminder struct {
 	ID         string
 	UserID     string
