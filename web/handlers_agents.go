@@ -1,11 +1,9 @@
 package web
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,10 +22,17 @@ type agentsPageData struct {
 
 type agentDetailData struct {
 	*pageData
-	Agent    *db.Agent
-	Schedule *db.AgentSchedule
-	Runs     []*db.AgentRun
-	Code     string // contents of main.py; empty if not yet generated
+	Agent          *db.Agent
+	Schedule       *db.AgentSchedule
+	Runs           []*db.AgentRun
+	Manifest       *agentdesigner.AgentManifest
+	AgentMD        string   // AGENT.md
+	State          string   // state.json (read-only)
+	Logs           []string // sorted log file names (newest first)
+	LastLog        string   // content of most recent log
+	AgentSkills    []*db.Skill
+	AllSkills      []*db.Skill
+	MissingSecrets []string
 }
 
 func (s *Server) showAgents(c echo.Context) error {
@@ -43,53 +48,77 @@ func (s *Server) showNewAgent(c echo.Context) error {
 	return c.Render(http.StatusOK, "dashboard/agent_new.html", s.page(c, "Create Agent"))
 }
 
-func (s *Server) handleNewAgent(c echo.Context) error {
+// handleDesignChat drives the conversational agent creation via JSON API.
+// POST /dashboard/agents/design
+// Body: {"name": "my-agent", "message": "..."}
+// Response: {"response": "...", "done": false} or {"response": "...", "done": true, "agent_id": "..."}
+func (s *Server) handleDesignChat(c echo.Context) error {
 	u := c.Get("user").(*db.User)
-	name := c.FormValue("name")
-	description := c.FormValue("description")
 
-	if name == "" {
-		p := s.page(c, "Create Agent")
-		p.Error = "Agent name is required"
-		return c.Render(http.StatusBadRequest, "dashboard/agent_new.html", p)
+	var req struct {
+		Name    string `json:"name"`
+		Message string `json:"message"`
 	}
-	if description == "" {
-		p := s.page(c, "Create Agent")
-		p.Error = "Description is required"
-		return c.Render(http.StatusBadRequest, "dashboard/agent_new.html", p)
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	req.Message = strings.TrimSpace(req.Message)
+
+	if req.Message == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "message is required"})
 	}
 
-	agentID := uuid.New().String()
+	if s.designFlow == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent designer not configured"})
+	}
 
-	// Use a per-user coder flow to generate real agent code if available.
-	if s.designer != nil {
-		userCoder := s.coderForUser(u.ID)
-		flow := agentdesigner.NewFlow(userCoder, s.designer)
-		if err := flow.GenerateAndSave(context.Background(), u.ID, agentID, name, description); err != nil {
-			p := s.page(c, "Create Agent")
-			p.Error = "Agent generation failed: " + err.Error()
-			return c.Render(http.StatusInternalServerError, "dashboard/agent_new.html", p)
+	ctx := c.Request().Context()
+
+	// If no active session and a name is provided, start a new design session.
+	if s.designFlow.GetSession(u.ID) == nil {
+		if req.Name == "" {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": "name is required to start a new session"})
 		}
-		s.audit.Log(u.ID, "create_agent", "agent:"+agentID, name, c.RealIP())
-		return c.Redirect(http.StatusFound, "/dashboard/agents/"+agentID)
+		response, err := s.designFlow.StartDesign(ctx, u.ID, req.Name, req.Message)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		}
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"response": response,
+			"done":     false,
+		})
 	}
 
-	// Fallback: create a DB row without code (coder not available).
-	agent := &db.Agent{
-		ID:          agentID,
-		UserID:      u.ID,
-		Name:        name,
-		Description: description,
-		Active:      true,
-	}
-	if err := s.db.CreateAgent(agent); err != nil {
-		p := s.page(c, "Create Agent")
-		p.Error = "Failed to create agent: " + err.Error()
-		return c.Render(http.StatusInternalServerError, "dashboard/agent_new.html", p)
+	// Existing session: step the FSM.
+	response, isDone, agentID, err := s.designFlow.Step(ctx, u.ID, req.Message)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
-	s.audit.Log(u.ID, "create_agent", "agent:"+agentID, name, c.RealIP())
-	return c.Redirect(http.StatusFound, "/dashboard/agents/"+agentID)
+	if isDone {
+		s.audit.Log(u.ID, "create_agent", "agent:"+agentID, req.Name, c.RealIP())
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"response": response,
+			"done":     true,
+			"agent_id": agentID,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"response": response,
+		"done":     false,
+	})
+}
+
+// handleCancelDesign cancels the active design session.
+// POST /dashboard/agents/design/cancel
+func (s *Server) handleCancelDesign(c echo.Context) error {
+	u := c.Get("user").(*db.User)
+	if s.designFlow != nil {
+		s.designFlow.Cancel(u.ID)
+	}
+	return c.JSON(http.StatusOK, map[string]string{"status": "cancelled"})
 }
 
 func (s *Server) showAgentDetail(c echo.Context) error {
@@ -116,19 +145,68 @@ func (s *Server) agentsDir() string {
 func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, userID string, p *pageData) error {
 	schedule, _ := s.db.GetScheduleForAgent(agent.ID)
 	runs, _ := s.db.ListAgentRuns(agent.ID, 10)
-	var code string
-	if dir := s.agentsDir(); dir != "" {
-		if data, err := os.ReadFile(agentdesigner.AgentCodePath(dir, userID, agent.ID)); err == nil {
-			code = string(data)
+	allSkills, _ := s.db.ListSkills(userID)
+	agentSkills, _ := s.db.ListSkillsForAgent(agent.ID)
+
+	data := &agentDetailData{
+		pageData:    p,
+		Agent:       agent,
+		Schedule:    schedule,
+		Runs:        runs,
+		AgentSkills: agentSkills,
+		AllSkills:   allSkills,
+	}
+
+	dir := s.agentsDir()
+	if dir != "" {
+		manifest, _ := agentdesigner.LoadManifest(dir, userID, agent.ID)
+		data.Manifest = manifest
+
+		// Load AGENT.md (fall back to CLAUDE.md for legacy agents).
+		if raw, err := os.ReadFile(agentdesigner.AgentDescPath(dir, userID, agent.ID)); err == nil {
+			data.AgentMD = string(raw)
+		} else if raw, err := os.ReadFile(agentdesigner.AgentMDPath(dir, userID, agent.ID)); err == nil {
+			data.AgentMD = string(raw)
+		}
+
+		// Load state.json.
+		if raw, err := os.ReadFile(agentdesigner.AgentStatePath(dir, userID, agent.ID)); err == nil {
+			data.State = string(raw)
+		}
+
+		// List log files (newest first).
+		logsDir := agentdesigner.AgentLogsDir(dir, userID, agent.ID)
+		if entries, err := os.ReadDir(logsDir); err == nil {
+			for i := len(entries) - 1; i >= 0; i-- {
+				e := entries[i]
+				if !e.IsDir() && strings.HasSuffix(e.Name(), ".txt") {
+					data.Logs = append(data.Logs, e.Name())
+				}
+			}
+			// Load content of the most recent log.
+			if len(data.Logs) > 0 {
+				if raw, err := os.ReadFile(filepath.Join(logsDir, data.Logs[0])); err == nil {
+					data.LastLog = string(raw)
+				}
+			}
+		}
+
+		// Compute missing secrets for manifest-declared requirements.
+		if manifest != nil && len(manifest.RequiredSecrets) > 0 {
+			knownNames, _ := s.db.ListSecretNames(userID)
+			knownSet := make(map[string]bool, len(knownNames))
+			for _, n := range knownNames {
+				knownSet[n] = true
+			}
+			for _, req := range manifest.RequiredSecrets {
+				if !knownSet[req] {
+					data.MissingSecrets = append(data.MissingSecrets, req)
+				}
+			}
 		}
 	}
-	return c.Render(http.StatusOK, "dashboard/agent_detail.html", &agentDetailData{
-		pageData: p,
-		Agent:    agent,
-		Schedule: schedule,
-		Runs:     runs,
-		Code:     code,
-	})
+
+	return c.Render(http.StatusOK, "dashboard/agent_detail.html", data)
 }
 
 func (s *Server) handleDeleteAgent(c echo.Context) error {
@@ -248,90 +326,4 @@ func (s *Server) handleDeleteSchedule(c echo.Context) error {
 	return c.Redirect(http.StatusFound, "/dashboard/agents/"+id)
 }
 
-func (s *Server) handleSaveCode(c echo.Context) error {
-	u := c.Get("user").(*db.User)
-	id := c.Param("id")
-
-	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.UserID != u.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
-	}
-
-	code := c.FormValue("code")
-	p := s.page(c, "Agent: "+agent.Name)
-
-	if code == "" {
-		p.Error = "Code cannot be empty"
-		return s.renderAgentDetail(c, agent, u.ID, p)
-	}
-
-	if err := agentdesigner.RunFullGuardrails(code, ""); err != nil {
-		p.Error = "Code failed safety checks: " + err.Error()
-		return s.renderAgentDetail(c, agent, u.ID, p)
-	}
-
-	dir := s.agentsDir()
-	if dir == "" {
-		p.Error = "Storage not configured"
-		return s.renderAgentDetail(c, agent, u.ID, p)
-	}
-
-	codePath := agentdesigner.AgentCodePath(dir, u.ID, id)
-	if err := os.MkdirAll(dir+"/"+u.ID+"/"+id, 0o750); err != nil {
-		p.Error = "Failed to create agent directory: " + err.Error()
-		return s.renderAgentDetail(c, agent, u.ID, p)
-	}
-	if err := os.WriteFile(codePath, []byte(code), 0o640); err != nil {
-		p.Error = "Failed to save code: " + err.Error()
-		return s.renderAgentDetail(c, agent, u.ID, p)
-	}
-
-	s.audit.Log(u.ID, "edit_agent_code", "agent:"+id, agent.Name, c.RealIP())
-	p.Success = "Code saved"
-	return s.renderAgentDetail(c, agent, u.ID, p)
-}
-
-// handleGenerateAgentSSE streams agent generation progress via Server-Sent Events.
-// The form on agent_new.html submits here via JS EventSource instead of a blocking POST.
-func (s *Server) handleGenerateAgentSSE(c echo.Context) error {
-	u := c.Get("user").(*db.User)
-	name := strings.TrimSpace(c.QueryParam("name"))
-	description := strings.TrimSpace(c.QueryParam("description"))
-
-	if name == "" || description == "" {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "name and description required"})
-	}
-
-	agentID := uuid.New().String()
-
-	c.Response().Header().Set("Content-Type", "text/event-stream")
-	c.Response().Header().Set("Cache-Control", "no-cache")
-	c.Response().Header().Set("X-Accel-Buffering", "no")
-	c.Response().Header().Set("Connection", "keep-alive")
-	c.Response().WriteHeader(http.StatusOK)
-
-	type sseEvent struct {
-		Type string `json:"type"`
-		Msg  string `json:"msg,omitempty"`
-		URL  string `json:"url,omitempty"`
-	}
-	sendEvent := func(evt sseEvent) {
-		b, _ := json.Marshal(evt)
-		fmt.Fprintf(c.Response(), "data: %s\n\n", b)
-		c.Response().Flush()
-	}
-
-	sendEvent(sseEvent{Type: "status", Msg: "Calling Claude to generate Python code..."})
-
-	flow := agentdesigner.NewFlow(s.coderForUser(u.ID), s.designer)
-	if err := flow.GenerateAndSave(context.Background(), u.ID, agentID, name, description); err != nil {
-		sendEvent(sseEvent{Type: "error", Msg: err.Error()})
-		return nil
-	}
-
-	sendEvent(sseEvent{Type: "status", Msg: "Running security checks and saving..."})
-	s.audit.Log(u.ID, "create_agent", "agent:"+agentID, name, c.RealIP())
-	sendEvent(sseEvent{Type: "done", URL: "/dashboard/agents/" + agentID})
-	return nil
-}
 

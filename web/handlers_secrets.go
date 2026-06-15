@@ -29,7 +29,6 @@ func (s *Server) handleCreateSecret(c echo.Context) error {
 	u := c.Get("user").(*db.User)
 	name := c.FormValue("name")
 	value := c.FormValue("value")
-	masterPw := c.FormValue("master_password")
 
 	names, _ := s.db.ListSecretNames(u.ID)
 	renderErr := func(status int, msg string) error {
@@ -47,11 +46,14 @@ func (s *Server) handleCreateSecret(c echo.Context) error {
 	if value == "" {
 		return renderErr(http.StatusBadRequest, "Secret value is required")
 	}
-	if masterPw == "" {
-		return renderErr(http.StatusBadRequest, "Master password is required")
-	}
-	if u.SecretsSalt == "" {
+	if u.SecretsSalt == "" || u.EncryptedMasterPassword == "" {
 		return renderErr(http.StatusBadRequest, "Complete account setup before managing secrets")
+	}
+
+	// Decrypt the stored master password — no need for the user to re-enter it when adding.
+	masterPw, err := secrets.DecryptMasterPassword(u.EncryptedMasterPassword, s.systemKey)
+	if err != nil {
+		return renderErr(http.StatusInternalServerError, "Could not decrypt master password — re-run account setup")
 	}
 
 	svc := secrets.New(s.db, u.ID, masterPw, u.SecretsSalt)
@@ -74,11 +76,48 @@ func (s *Server) handleCreateSecret(c echo.Context) error {
 func (s *Server) handleDeleteSecret(c echo.Context) error {
 	u := c.Get("user").(*db.User)
 	name := c.Param("name")
+	masterPw := c.FormValue("master_password")
+
+	names, _ := s.db.ListSecretNames(u.ID)
+	renderErr := func(status int, msg string) error {
+		p := s.page(c, "Secrets")
+		p.Error = msg
+		return c.Render(status, "dashboard/secrets.html", &secretsPageData{
+			pageData:    p,
+			SecretNames: names,
+		})
+	}
+
+	if masterPw == "" {
+		return renderErr(http.StatusBadRequest, "Master password is required to delete a secret")
+	}
+	if u.SecretsSalt == "" {
+		return renderErr(http.StatusBadRequest, "Account setup incomplete")
+	}
+
+	// Verify the master password by attempting to decrypt the secret.
+	svc := secrets.New(s.db, u.ID, masterPw, u.SecretsSalt)
+	if _, err := svc.Get(context.Background(), name); err != nil {
+		if errors.Is(err, secrets.ErrWrongPassword) {
+			return renderErr(http.StatusUnauthorized, "Wrong master password")
+		}
+		if !errors.Is(err, db.ErrNotFound) {
+			return renderErr(http.StatusInternalServerError, "Verification failed: "+err.Error())
+		}
+		// Secret not found — let the delete proceed (idempotent).
+	}
 
 	if err := s.db.DeleteSecret(u.ID, name); err != nil && !errors.Is(err, db.ErrNotFound) {
 		return err
 	}
 
 	s.audit.Log(u.ID, "delete_secret", "secret:"+name, "", c.RealIP())
-	return c.Redirect(http.StatusFound, "/dashboard/secrets")
+
+	names, _ = s.db.ListSecretNames(u.ID)
+	p := s.page(c, "Secrets")
+	p.Success = "Secret '" + name + "' deleted"
+	return c.Render(http.StatusOK, "dashboard/secrets.html", &secretsPageData{
+		pageData:    p,
+		SecretNames: names,
+	})
 }

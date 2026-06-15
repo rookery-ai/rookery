@@ -16,19 +16,18 @@ var ForbiddenKeywords = []string{
 	"bitcoin wallet", "private key", "steal", "exfil",
 }
 
-const (
-	markerUserLogic    = "# ======= USER LOGIC ======="
-	markerSystemInject = "# ======= SYSTEM INJECTED ======="
-)
 
-// RunFullGuardrails runs all three guardrail checks in order and returns the
-// first failure. The prompt argument is reserved for future ethics context.
+// CheckEthics is the exported ethics-only guardrail used for md/hybrid agents.
+func CheckEthics(code, _ string) error {
+	return checkEthics(code)
+}
+
+// RunFullGuardrails runs ethics + AST checks on free-form Python tool scripts.
+// The template marker check is intentionally omitted — tool scripts in tools/ are
+// plain helpers, not the old main.py template format.
 func RunFullGuardrails(code, _ string) error {
 	if err := checkEthics(code); err != nil {
 		return fmt.Errorf("ethics filter: %w", err)
-	}
-	if err := checkTemplate(code); err != nil {
-		return fmt.Errorf("template validator: %w", err)
 	}
 	if PythonAvailable() {
 		if err := checkAST(code); err != nil {
@@ -56,20 +55,6 @@ func checkEthics(code string) error {
 	return nil
 }
 
-func checkTemplate(code string) error {
-	ul := strings.Index(code, markerUserLogic)
-	si := strings.Index(code, markerSystemInject)
-	if ul < 0 {
-		return fmt.Errorf("missing required marker: %q", markerUserLogic)
-	}
-	if si < 0 {
-		return fmt.Errorf("missing required marker: %q", markerSystemInject)
-	}
-	if ul >= si {
-		return fmt.Errorf("USER LOGIC marker must appear before SYSTEM INJECTED marker")
-	}
-	return nil
-}
 
 // astCheckScript is inlined Python that checks for forbidden AST nodes.
 const astCheckScript = `

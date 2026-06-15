@@ -15,6 +15,13 @@
     {{else}}<span class="badge badge-ghost badge-sm">Inactive</span>{{end}}
   </div>
 
+  {{if .MissingSecrets}}
+  <div class="alert alert-warning mb-4 py-2">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+    <span class="text-sm">Missing secrets required by this agent: <strong>{{range $i, $s := .MissingSecrets}}{{if $i}}, {{end}}{{$s}}{{end}}</strong>. Add them in <a href="/dashboard/secrets" class="link">Secrets</a>.</span>
+  </div>
+  {{end}}
+
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <!-- Main content -->
     <div class="lg:col-span-2 space-y-5">
@@ -30,33 +37,49 @@
         </div>
       </div>
 
-      <!-- Agent Code -->
+      <!-- AGENT.md editor -->
       <div class="card bg-base-100 shadow-sm border border-base-300">
         <div class="card-body p-5">
-          <h2 class="font-semibold text-sm text-base-content/50 uppercase tracking-wide mb-3">Agent Code</h2>
-          {{if .Code}}
-          <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/code" class="space-y-3">
-            <textarea name="code"
+          <h2 class="font-semibold text-sm text-base-content/50 uppercase tracking-wide mb-3">Agent Description (AGENT.md)</h2>
+          <p class="text-xs text-base-content/40 mb-3">The coder reads these instructions on every run. Use <code>[CHAT]</code>, <code>[STATE]</code>/<code>[/STATE]</code>, and <code>[CALL: name]</code> markers for output.</p>
+          <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/agent-md" class="space-y-3">
+            <textarea name="agent_md"
               class="textarea textarea-bordered w-full font-mono text-xs leading-relaxed resize-y"
-              style="min-height:300px; tab-size:4;"
-              spellcheck="false"
-              autocomplete="off"
-              autocorrect="off"
-              autocapitalize="off">{{.Code}}</textarea>
+              style="min-height:300px;"
+              spellcheck="false">{{.AgentMD}}</textarea>
             <div class="flex justify-between items-center">
-              <p class="text-xs text-base-content/30">Guardrails run on save. Forbidden: eval, exec, subprocess, socket.</p>
-              <button type="submit" class="btn btn-primary btn-sm">Save Code</button>
+              <p class="text-xs text-base-content/30">Ethics filter applied on save.</p>
+              <button type="submit" class="btn btn-primary btn-sm">Save AGENT.md</button>
             </div>
           </form>
-          {{else}}
-          <div class="text-center py-8 text-base-content/40">
-            <div class="text-4xl mb-3">📝</div>
-            <p class="text-sm">No code generated yet.</p>
-            <p class="text-xs mt-1">Create the agent via the wizard to generate code.</p>
-          </div>
-          {{end}}
         </div>
       </div>
+
+      <!-- Current state -->
+      {{if .State}}
+      <div class="card bg-base-100 shadow-sm border border-base-300">
+        <div class="card-body p-5">
+          <h2 class="font-semibold text-sm text-base-content/50 uppercase tracking-wide mb-3">Current State</h2>
+          <pre class="text-xs font-mono bg-base-200 rounded p-3 max-h-48 overflow-auto">{{.State}}</pre>
+        </div>
+      </div>
+      {{end}}
+
+      <!-- Last run log -->
+      {{if .LastLog}}
+      <div class="card bg-base-100 shadow-sm border border-base-300">
+        <div class="card-body p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="font-semibold text-sm text-base-content/50 uppercase tracking-wide">Last Run Log</h2>
+            {{if .Logs}}<span class="text-xs text-base-content/30">{{len .Logs}} total run{{if gt (len .Logs) 1}}s{{end}}</span>{{end}}
+          </div>
+          {{if .Logs}}
+          <p class="text-xs font-mono text-base-content/40 mb-2">{{index .Logs 0}}</p>
+          {{end}}
+          <pre class="text-xs font-mono bg-base-200 rounded p-3 max-h-64 overflow-auto whitespace-pre-wrap">{{truncate .LastLog 4000}}</pre>
+        </div>
+      </div>
+      {{end}}
 
       <!-- Run history -->
       <div class="card bg-base-100 shadow-sm border border-base-300">
@@ -127,6 +150,64 @@
         </div>
       </div>
 
+      <!-- Skills -->
+      <div class="card bg-base-100 shadow-sm border border-base-300">
+        <div class="card-body p-4">
+          <h2 class="font-semibold text-sm mb-3">Skills</h2>
+          {{if .AgentSkills}}
+          <div class="flex flex-wrap gap-1 mb-3">
+            {{range .AgentSkills}}
+            <span class="badge badge-outline badge-sm">{{.Name}}</span>
+            {{end}}
+          </div>
+          {{else}}
+          <p class="text-xs text-base-content/40 mb-3">No skills assigned.</p>
+          {{end}}
+          {{if .AllSkills}}
+          <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/skills">
+            <div class="space-y-1 mb-2 max-h-40 overflow-y-auto">
+              {{range .AllSkills}}
+              {{$skillID := .ID}}
+              <label class="flex items-center gap-2 cursor-pointer text-xs">
+                <input type="checkbox" name="skill_ids" value="{{.ID}}" class="checkbox checkbox-xs"
+                  {{range $.AgentSkills}}{{if eq .ID $skillID}}checked{{end}}{{end}}>
+                <span>{{.Name}}</span>
+              </label>
+              {{end}}
+            </div>
+            <button type="submit" class="btn btn-ghost btn-xs w-full">Update Skills</button>
+          </form>
+          {{else}}
+          <a href="/dashboard/skills" class="btn btn-ghost btn-xs w-full">Install Skills</a>
+          {{end}}
+        </div>
+      </div>
+
+      <!-- Required secrets -->
+      {{if .Manifest}}{{if .Manifest.RequiredSecrets}}
+      <div class="card bg-base-100 shadow-sm border border-base-300">
+        <div class="card-body p-4">
+          <h2 class="font-semibold text-sm mb-2">Required Secrets</h2>
+          <div class="space-y-1">
+            {{range .Manifest.RequiredSecrets}}
+            {{$sec := .}}
+            {{$missing := false}}
+            {{range $.MissingSecrets}}{{if eq . $sec}}{{$missing = true}}{{end}}{{end}}
+            <div class="flex items-center gap-2 text-xs">
+              {{if $missing}}
+              <span class="badge badge-error badge-xs">missing</span>
+              {{else}}
+              <span class="badge badge-success badge-xs">ok</span>
+              {{end}}
+              <code class="font-mono">{{$sec}}</code>
+            </div>
+            {{end}}
+          </div>
+          <a href="/dashboard/secrets" class="btn btn-ghost btn-xs w-full mt-2">Manage Secrets</a>
+        </div>
+      </div>
+      {{end}}{{end}}
+
       <!-- Schedule -->
       <div class="card bg-base-100 shadow-sm border border-base-300">
         <div class="card-body p-4">
@@ -156,7 +237,6 @@
                 <span class="label-text-alt text-base-content/30">min hour day month weekday</span>
               </label>
             </div>
-            <!-- Cron presets -->
             <div class="flex flex-wrap gap-1 pb-1">
               <button type="button" onclick="setCron('0 8 * * *')" class="badge badge-ghost badge-sm cursor-pointer hover:badge-primary text-xs">Daily 8am</button>
               <button type="button" onclick="setCron('0 * * * *')" class="badge badge-ghost badge-sm cursor-pointer hover:badge-primary text-xs">Hourly</button>

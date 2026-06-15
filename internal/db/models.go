@@ -62,6 +62,14 @@ type Agent struct {
 	UpdatedAt   time.Time
 }
 
+type Skill struct {
+	ID          string
+	UserID      string
+	Name        string
+	Description string
+	InstalledAt time.Time
+}
+
 type AgentSchedule struct {
 	ID         string
 	AgentID    string

@@ -20,6 +20,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/scheduler"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/ilijad1/simple-agents/internal/session"
+	"github.com/ilijad1/simple-agents/internal/skillstore"
 	"github.com/ilijad1/simple-agents/web"
 	"github.com/urfave/cli/v3"
 )
@@ -85,12 +86,15 @@ func serveCmd() *cli.Command {
 			}
 
 			homesDir := filepath.Join(cfg.Data.Dir, "claude-homes")
-			coderSvc := coder.New(cfg.Coder.ClaudeBin, cfg.Coder.Timeout, homesDir)
+			coderSvc := coder.New(cfg.Coder.ClaudeBin, cfg.Coder.Timeout, homesDir, cfg.Data.Dir)
 
 			agentsDir := filepath.Join(cfg.Data.Dir, "agents")
+			skillsDir := filepath.Join(cfg.Data.Dir, "skills")
 			designer := agentdesigner.NewDesigner(database, agentsDir)
-			designFlow := agentdesigner.NewFlow(coderSvc, designer)
-			runner := agentrunner.New(database, sysKey, agentsDir)
+			// Telegram uses a single system coder; wrap it in a resolver lambda.
+			designFlow := agentdesigner.NewFlow(func(_ string) *coder.Coder { return coderSvc }, designer).WithDB(database)
+			skillStore := skillstore.New(database, skillsDir)
+			runner := agentrunner.New(database, sysKey, agentsDir, homesDir, cfg.Data.Dir, coderSvc, skillsDir)
 
 			memStore := memory.New(filepath.Join(cfg.Data.Dir, "memory"))
 
@@ -132,7 +136,7 @@ func serveCmd() *cli.Command {
 			sessionSvc := session.New(database)
 			go sessionSvc.Run(ctx)
 
-			srv, err := web.NewServer(cfg, database, gwManager, runner, designer, homesDir, memStore)
+			srv, err := web.NewServer(cfg, database, gwManager, runner, designer, homesDir, memStore, skillStore, designFlow)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}

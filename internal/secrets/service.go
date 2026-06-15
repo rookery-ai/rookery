@@ -160,6 +160,43 @@ func (s *Service) Proxy(ctx context.Context, text string) (string, error) {
 	return result, nil
 }
 
+// GetAll decrypts and returns every secret for this user as a name→value map.
+// The returned map MUST NOT be logged, stored, or sent to any LLM. Only pass to subprocess env.
+func (s *Service) GetAll(ctx context.Context) (map[string]string, error) {
+	names, err := s.db.ListSecretNames(s.userID)
+	if err != nil {
+		return nil, err
+	}
+	if len(names) == 0 {
+		return map[string]string{}, nil
+	}
+	key, err := s.deriveKey()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(names))
+	for _, name := range names {
+		row, err := s.db.GetSecret(s.userID, name)
+		if err != nil {
+			continue
+		}
+		ct, err := base64.StdEncoding.DecodeString(row.Ciphertext)
+		if err != nil {
+			continue
+		}
+		n, err := base64.StdEncoding.DecodeString(row.Nonce)
+		if err != nil {
+			continue
+		}
+		pt, err := aesGCMDecrypt(key, ct, n)
+		if err != nil {
+			continue
+		}
+		out[name] = string(pt)
+	}
+	return out, nil
+}
+
 // EncryptMasterPassword encrypts the user's master password using the system key
 // so it can be stored at rest and used for cron-triggered agent runs.
 // Returns a base64-encoded "nonce||ciphertext" string.

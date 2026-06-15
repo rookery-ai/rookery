@@ -105,6 +105,15 @@ func (g *TelegramGateway) SendMessageGetID(platformUserID, text string) (int, er
 	return sent.ID, nil
 }
 
+// DeleteMessage removes a message from the chat (e.g. to redact a typed password).
+func (g *TelegramGateway) DeleteMessage(platformUserID string, msgID int) error {
+	chatID, err := strconv.ParseInt(platformUserID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid telegram chat id %q: %w", platformUserID, err)
+	}
+	return g.bot.Delete(&telebot.Message{ID: msgID, Chat: &telebot.Chat{ID: chatID}})
+}
+
 // EditMessage replaces the text of an existing message.
 func (g *TelegramGateway) EditMessage(platformUserID string, msgID int, text string) error {
 	chatID, err := strconv.ParseInt(platformUserID, 10, 64)
@@ -130,8 +139,9 @@ func (g *TelegramGateway) handle(tc telebot.Context) error {
 	msg := Message{
 		Platform:       "telegram",
 		PlatformUserID: strconv.FormatInt(chat.ID, 10),
-		UserID:         g.ownerUserID, // always route to bot owner
+		UserID:         g.ownerUserID,
 		Text:           tc.Text(),
+		MessageID:      tc.Message().ID,
 	}
 
 	// Commands arrive as "/cmd" from telebot — ensure leading slash is present.

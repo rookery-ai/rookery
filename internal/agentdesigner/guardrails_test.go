@@ -38,40 +38,17 @@ func TestGuardrails_EthicsFilter(t *testing.T) {
 	assert.Contains(t, err.Error(), "ethics filter")
 }
 
-func TestGuardrails_MissingUserLogicMarker(t *testing.T) {
+func TestGuardrails_PlainToolScriptAllowed(t *testing.T) {
+	// Tool scripts in tools/ are plain Python helpers — no markers required.
 	code := `#!/usr/bin/env python3
-def main():
-    pass
-# ======= SYSTEM INJECTED =======
-`
-	err := agentdesigner.RunFullGuardrails(code, "")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "template validator")
-	assert.Contains(t, err.Error(), "USER LOGIC")
-}
+import requests
 
-func TestGuardrails_MissingSystemInjectMarker(t *testing.T) {
-	code := `#!/usr/bin/env python3
-# ======= USER LOGIC =======
-def main():
-    pass
+def fetch_price(symbol):
+    r = requests.get(f"https://api.example.com/price/{symbol}")
+    return r.json()["price"]
 `
 	err := agentdesigner.RunFullGuardrails(code, "")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "template validator")
-	assert.Contains(t, err.Error(), "SYSTEM INJECTED")
-}
-
-func TestGuardrails_WrongMarkerOrder(t *testing.T) {
-	code := `#!/usr/bin/env python3
-# ======= SYSTEM INJECTED =======
-# ======= USER LOGIC =======
-def main():
-    pass
-`
-	err := agentdesigner.RunFullGuardrails(code, "")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "template validator")
+	require.NoError(t, err)
 }
 
 func TestGuardrails_ASTBlocksEval(t *testing.T) {

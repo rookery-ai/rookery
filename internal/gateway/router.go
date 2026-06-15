@@ -2,9 +2,11 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +14,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/memory"
 	"github.com/ilijad1/simple-agents/internal/reminder"
+	"github.com/ilijad1/simple-agents/internal/secrets"
 )
 
 // TextHandler is called for non-command messages (one-off chat or within a session).
@@ -22,13 +25,22 @@ type TextHandler func(ctx context.Context, userID string, history []db.ChatMessa
 // Implemented in Phase 6 (AgentRunner).
 type AgentRunHandler func(ctx context.Context, userID, agentName string, send func(string)) error
 
+// secretChallenge holds a pending master-password request for a secret operation.
+type secretChallenge struct {
+	action string // "show" or "delete"
+	name   string // secret name
+}
+
 // Router dispatches incoming messages to the appropriate handler.
 type Router struct {
-	db             *db.DB
-	onText         TextHandler
-	onAgentRun     AgentRunHandler
-	designFlow     *agentdesigner.Flow // may be nil until Phase 5 is wired
-	memory         *memory.Store
+	db         *db.DB
+	onText     TextHandler
+	onAgentRun AgentRunHandler
+	designFlow *agentdesigner.Flow
+	memory     *memory.Store
+
+	mu         sync.Mutex
+	challenges map[string]*secretChallenge // userID → pending challenge
 }
 
 // NewRouter creates a Router. textHandler, agentRunHandler, and designFlow may be nil
@@ -40,11 +52,14 @@ func NewRouter(database *db.DB, textHandler TextHandler, agentRunHandler AgentRu
 		onAgentRun: agentRunHandler,
 		designFlow: flow,
 		memory:     mem,
+		challenges: make(map[string]*secretChallenge),
 	}
 }
 
 // Handle dispatches msg to the right handler and uses send() for replies.
-func (r *Router) Handle(ctx context.Context, msg Message, send func(string)) error {
+// deleteIncoming removes the user's incoming message (used to redact typed passwords).
+// sendAutoDelete sends a message that is automatically deleted after 30 s (used for secret values).
+func (r *Router) Handle(ctx context.Context, msg Message, send func(string), deleteIncoming func(), sendAutoDelete func(string)) error {
 	cmd, arg := ParseCommand(msg.Text)
 
 	switch cmd {
@@ -66,8 +81,7 @@ func (r *Router) Handle(ctx context.Context, msg Message, send func(string)) err
 	case "memory":
 		return r.handleMemory(ctx, msg, arg, send)
 	case "":
-		// Plain text — one-off chat
-		return r.handleText(ctx, msg, send)
+		return r.handleText(ctx, msg, send, deleteIncoming, sendAutoDelete)
 	default:
 		send(fmt.Sprintf("Unknown command /%s — try /help", cmd))
 		return nil
@@ -200,6 +214,10 @@ func (r *Router) handleSecret(ctx context.Context, msg Message, arg string, send
 	if len(parts) > 0 {
 		sub = strings.ToLower(parts[0])
 	}
+	rest := ""
+	if len(parts) > 1 {
+		rest = strings.Join(parts[1:], " ")
+	}
 
 	switch sub {
 	case "list", "":
@@ -212,14 +230,120 @@ func (r *Router) handleSecret(ctx context.Context, msg Message, arg string, send
 			return nil
 		}
 		var b strings.Builder
-		b.WriteString("*Stored secrets \\(names only\\):*\n")
+		b.WriteString("*Stored secrets:*\n")
 		for _, n := range names {
 			b.WriteString("• `" + escapeMarkdown(n) + "`\n")
 		}
-		b.WriteString("\n_Values are never shown here for security\\. Use the web dashboard to manage secrets\\._")
+		b.WriteString("\n_/secret show \\<name\\> · /secret delete \\<name\\>_")
 		send(b.String())
+
+	case "show", "get":
+		name := strings.TrimSpace(rest)
+		if name == "" {
+			send("Usage: /secret show \\<name\\>")
+			return nil
+		}
+		names, _ := r.db.ListSecretNames(msg.UserID)
+		found := false
+		for _, n := range names {
+			if n == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			send("Secret `" + escapeMarkdown(name) + "` not found\\.")
+			return nil
+		}
+		r.mu.Lock()
+		r.challenges[msg.UserID] = &secretChallenge{action: "show", name: name}
+		r.mu.Unlock()
+		send("🔐 Enter your master password to reveal `" + escapeMarkdown(name) + "`:\n\n_⚠️ The value will appear in this chat\\. Telegram stores chat history\\._")
+
+	case "delete":
+		name := strings.TrimSpace(rest)
+		if name == "" {
+			send("Usage: /secret delete \\<name\\>")
+			return nil
+		}
+		names, _ := r.db.ListSecretNames(msg.UserID)
+		found := false
+		for _, n := range names {
+			if n == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			send("Secret `" + escapeMarkdown(name) + "` not found\\.")
+			return nil
+		}
+		r.mu.Lock()
+		r.challenges[msg.UserID] = &secretChallenge{action: "delete", name: name}
+		r.mu.Unlock()
+		send("🔐 Enter your master password to confirm deletion of `" + escapeMarkdown(name) + "`:")
+
 	default:
-		send("Usage: /secret list\n\n_To add or delete secrets, use the web dashboard → Secrets_")
+		send("Usage: /secret list · /secret show \\<name\\> · /secret delete \\<name\\>\n\n_To add secrets, use the web dashboard → Secrets_")
+	}
+	return nil
+}
+
+// resolveMasterPwChallenge handles the master-password reply for a pending challenge.
+// It deletes the incoming password message from chat and does NOT persist this
+// exchange to session history. The secret value (if shown) is sent via
+// sendAutoDelete so it is automatically removed after 30 seconds.
+func (r *Router) resolveMasterPwChallenge(ctx context.Context, msg Message, ch *secretChallenge, send func(string), deleteIncoming func(), sendAutoDelete func(string)) error {
+	// Delete the typed password from chat immediately, before doing anything else.
+	deleteIncoming()
+
+	masterPw := strings.TrimSpace(msg.Text)
+	if masterPw == "" {
+		send("Master password cannot be empty\\. Challenge cancelled\\.")
+		return nil
+	}
+
+	u, err := r.db.GetUserByID(msg.UserID)
+	if err != nil {
+		send("Error: could not load user\\.")
+		return err
+	}
+	if u.SecretsSalt == "" {
+		send("Account setup incomplete — no master password configured\\.")
+		return nil
+	}
+
+	svc := secrets.New(r.db, msg.UserID, masterPw, u.SecretsSalt)
+
+	switch ch.action {
+	case "show":
+		val, err := svc.Get(ctx, ch.name)
+		if errors.Is(err, secrets.ErrWrongPassword) {
+			send("❌ Wrong master password\\.")
+			return nil
+		}
+		if errors.Is(err, secrets.ErrNotFound) {
+			send("Secret `" + escapeMarkdown(ch.name) + "` not found\\.")
+			return nil
+		}
+		if err != nil {
+			send("Error retrieving secret: " + escapeMarkdown(err.Error()))
+			return nil
+		}
+		sendAutoDelete("🔑 `" + escapeMarkdown(ch.name) + "`:\n`" + escapeMarkdown(val) + "`\n\n_⏱ This message will be deleted in 30 seconds_")
+
+	case "delete":
+		if _, err := svc.Get(ctx, ch.name); err != nil {
+			if errors.Is(err, secrets.ErrWrongPassword) {
+				send("❌ Wrong master password — secret not deleted\\.")
+				return nil
+			}
+		}
+		if err := r.db.DeleteSecret(msg.UserID, ch.name); err != nil {
+			send("Error deleting secret: " + escapeMarkdown(err.Error()))
+			return nil
+		}
+		send("🗑 Secret `" + escapeMarkdown(ch.name) + "` deleted\\.")
 	}
 	return nil
 }
@@ -335,16 +459,27 @@ func parseDuration(s string) (time.Duration, error) {
 	return total, nil
 }
 
-func (r *Router) handleText(ctx context.Context, msg Message, send func(string)) error {
+func (r *Router) handleText(ctx context.Context, msg Message, send func(string), deleteIncoming func(), sendAutoDelete func(string)) error {
+	// Check for a pending master-password challenge. These exchanges are intentionally
+	// NOT persisted to session history to keep sensitive values out of the DB.
+	r.mu.Lock()
+	challenge, hasPending := r.challenges[msg.UserID]
+	if hasPending {
+		delete(r.challenges, msg.UserID)
+	}
+	r.mu.Unlock()
+	if hasPending {
+		return r.resolveMasterPwChallenge(ctx, msg, challenge, send, deleteIncoming, sendAutoDelete)
+	}
+
 	// If the user has an active design session, route all text there.
 	if r.designFlow != nil && r.designFlow.GetSession(msg.UserID) != nil {
-		response, isDone, err := r.designFlow.Step(ctx, msg.UserID, msg.Text)
+		response, _, _, err := r.designFlow.Step(ctx, msg.UserID, msg.Text)
 		if err != nil {
 			send("Design session error: " + escapeMarkdown(err.Error()))
 			return nil
 		}
 		send(response)
-		_ = isDone
 		return nil
 	}
 
@@ -584,6 +719,8 @@ func helpText() string {
 /agent cancel — cancel active agent creation
 /run \<name\> — run an agent
 /secret list — list stored secret names
+/secret show \<name\> — reveal a secret value \(requires master password\)
+/secret delete \<name\> — delete a secret \(requires master password\)
 /remind \<when\> to \<message\> — set a reminder \(e\.g\. /remind in 10 minutes to check oven\)
 /session start \[name\] — start a chat session \(saves history\)
 /session list — list all sessions with IDs
@@ -595,7 +732,7 @@ func helpText() string {
 /memory delete \<n\> — delete entry by number
 /help — this message
 
-_Manage agents, secrets & settings at the web dashboard_`
+_Add secrets at the web dashboard — no master password needed to add_`
 }
 
 // escapeMarkdown escapes special characters for Telegram MarkdownV2.

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ilijad1/simple-agents/internal/db"
 )
@@ -22,6 +23,7 @@ type Message struct {
 	PlatformUserID string // platform-specific user/chat ID
 	UserID         string // resolved internal user ID (empty if not yet linked)
 	Text           string
+	MessageID      int // platform message ID (used to delete incoming messages)
 }
 
 // ParseCommand splits "/cmd arg1 arg2 ..." into (name, remainder).
@@ -55,6 +57,12 @@ type TypingGateway interface {
 	SendTyping(platformUserID string) error
 	SendMessageGetID(platformUserID, text string) (int, error)
 	EditMessage(platformUserID string, msgID int, text string) error
+}
+
+// DeletableGateway is an optional interface for gateways that can delete
+// incoming messages (e.g. to redact a typed master password from chat history).
+type DeletableGateway interface {
+	DeleteMessage(platformUserID string, msgID int) error
 }
 
 // GatewayManager manages one Gateway per active platform_connection.
@@ -255,7 +263,64 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 			fmt.Printf("gateway: send error: %v\n", err)
 		}
 	}
-	if err := m.router.Handle(ctx, msg, send); err != nil {
+	// deleteIncoming silently removes the user's incoming message from chat.
+	// Used to redact typed master passwords from the visible chat history.
+	deleteIncoming := func() {
+		if msg.MessageID == 0 {
+			return
+		}
+		m.mu.RLock()
+		gw, ok := m.gateways[key(msg.Platform, msg.UserID)]
+		m.mu.RUnlock()
+		if ok {
+			if dg, ok := gw.(DeletableGateway); ok {
+				_ = dg.DeleteMessage(msg.PlatformUserID, msg.MessageID)
+			}
+		}
+	}
+
+	// sendAutoDelete sends text, captures the sent message ID, and schedules
+	// deletion after 30 s followed by a notification to the user.
+	// Used for messages containing sensitive values (e.g. revealed secrets).
+	sendAutoDelete := func(text string) {
+		var sentMsgID int
+
+		m.mu.RLock()
+		gw, ok := m.gateways[key(msg.Platform, msg.UserID)]
+		m.mu.RUnlock()
+
+		if ok {
+			if tg, ok2 := gw.(TypingGateway); ok2 {
+				if placeholderID != 0 {
+					if err := tg.EditMessage(msg.PlatformUserID, placeholderID, text); err == nil {
+						sentMsgID = placeholderID
+					}
+					placeholderID = 0
+				} else {
+					sentMsgID, _ = tg.SendMessageGetID(msg.PlatformUserID, text)
+				}
+			}
+		}
+		if sentMsgID == 0 {
+			_ = m.Send(msg.Platform, msg.UserID, msg.PlatformUserID, text)
+			return
+		}
+
+		go func(id int) {
+			time.Sleep(30 * time.Second)
+			m.mu.RLock()
+			gw2, ok2 := m.gateways[key(msg.Platform, msg.UserID)]
+			m.mu.RUnlock()
+			if ok2 {
+				if dg, ok3 := gw2.(DeletableGateway); ok3 {
+					_ = dg.DeleteMessage(msg.PlatformUserID, id)
+				}
+			}
+			_ = m.Send(msg.Platform, msg.UserID, msg.PlatformUserID, "🔐 Secret message was automatically deleted\\.")
+		}(sentMsgID)
+	}
+
+	if err := m.router.Handle(ctx, msg, send, deleteIncoming, sendAutoDelete); err != nil {
 		send("An error occurred: " + err.Error())
 	}
 }

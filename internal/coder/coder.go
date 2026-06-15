@@ -2,9 +2,9 @@
 // Each user gets an isolated config directory so their sessions are completely
 // separate from the server operator's settings, CLAUDE.md files, and history.
 //
-// Security: the subprocess runs WITHOUT --sandbox (firejail handles Python execution;
-// the coder only generates code, never runs it). Per-user isolation is enforced by
-// CLAUDE_CONFIG_DIR and --setting-sources "".
+// When Firejail is available, every invocation runs inside a per-user sandbox:
+// the user's persistent home dir is bind-mounted as the sandbox home, the rest
+// of the data directory is blacklisted, and no other user's files are visible.
 package coder
 
 import (
@@ -22,8 +22,6 @@ import (
 )
 
 // knownAuthEnvVars are env var names that carry LLM provider credentials.
-// These are always forwarded to non-claude subprocesses so future tool types
-// (opencode, cursor, etc.) can authenticate without a credentials file.
 var knownAuthEnvVars = []string{
 	"ANTHROPIC_API_KEY",
 	"ANTHROPIC_AUTH_TOKEN",
@@ -40,15 +38,36 @@ type Result struct {
 
 // Coder generates code or text by invoking a configured CLI tool.
 type Coder struct {
-	bin          string        // path to the coder binary (claude, opencode, …)
-	timeout      time.Duration // per-request timeout
-	homesDir     string        // root dir for per-user isolated HOME directories
-	sysClaudeDir string        // path to the operator's ~/.claude — for credential copying
+	bin          string
+	timeout      time.Duration
+	homesDir     string            // root dir for per-user isolated HOME directories
+	sysClaudeDir string            // operator's ~/.claude — for credential copying
+	extraEnv     map[string]string // additional env vars merged into the subprocess environment
+	noTools      bool              // when true, passes --allowedTools "" to disable all tools
+}
+
+// WithExtraEnv returns a shallow copy of the Coder with additional environment variables
+// injected into every subprocess invocation. Existing system overrides (HOME, CLAUDE_CONFIG_DIR)
+// take precedence over any keys in env.
+func (c *Coder) WithExtraEnv(env map[string]string) *Coder {
+	c2 := *c
+	c2.extraEnv = env
+	return &c2
+}
+
+// WithNoTools returns a shallow copy of the Coder with all tools disabled.
+// Use this for design/generation calls where output must be plain text only.
+func (c *Coder) WithNoTools() *Coder {
+	c2 := *c
+	c2.noTools = true
+	return &c2
 }
 
 // New creates a Coder.
 // homesDir should be cfg.Data.Dir + "/claude-homes".
-func New(bin string, timeout time.Duration, homesDir string) *Coder {
+// dataDir is accepted for API compatibility but is not used by the coder itself
+// (it is used by the agent runner's sandbox).
+func New(bin string, timeout time.Duration, homesDir, dataDir string) *Coder {
 	if bin == "" {
 		bin = "claude"
 	}
@@ -65,9 +84,8 @@ func New(bin string, timeout time.Duration, homesDir string) *Coder {
 }
 
 // Generate sends prompt to the coder binary and returns the text response.
-// userID is used to select the per-user isolated home directory.
 func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, error) {
-	homeDir, err := c.ensureUserHome(userID)
+	userDir, err := c.ensureUserHome(userID)
 	if err != nil {
 		return nil, fmt.Errorf("ensure user home: %w", err)
 	}
@@ -79,14 +97,21 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 
 	args := []string{"-p", prompt, "--output-format", "json"}
 	if c.isClaude() {
-		// Suppress all settings files and CLAUDE.md directory traversal so the
-		// operator's global config does not bleed into user sessions.
 		args = append(args, "--setting-sources", "")
+		if c.noTools {
+			// Disable all tools so the subprocess outputs plain text only.
+			// Used for design conversations and agent generation.
+			args = append(args, "--allowedTools", "")
+		}
 	}
 
+	// The coder binary (claude CLI) is installed in the operator's real home
+	// (e.g. ~/.local/share/claude/). Firejail's --private would replace that
+	// home and break the binary's own installation. Per-user isolation for the
+	// coder is handled via CLAUDE_CONFIG_DIR, HOME override, and --setting-sources "".
 	cmd := exec.CommandContext(ctx, c.bin, args...)
-	cmd.Dir = homeDir
-	cmd.Env = c.buildEnv(homeDir)
+	cmd.Dir = userDir
+	cmd.Env = c.buildEnv(userDir)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -98,11 +123,11 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 		}
 		return nil, fmt.Errorf("coder exited with error: %w\nstderr: %s", err, stderr.String())
 	}
+	stdoutBytes := stdout.Bytes()
 
-	text, isError, err := extractText(stdout.Bytes())
+	text, isError, err := extractText(stdoutBytes)
 	if err != nil {
-		// Fall back to raw stdout if JSON parsing fails.
-		text = strings.TrimSpace(stdout.String())
+		text = strings.TrimSpace(string(stdoutBytes))
 	} else if isError {
 		return nil, fmt.Errorf("coder error: %s", text)
 	}
@@ -110,9 +135,7 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 	return &Result{Text: text, Duration: time.Since(start)}, nil
 }
 
-// Chat sends a conversational message to claude with optional history for multi-turn sessions.
-// systemContext is prepended before history (use it for persistent user memory / facts).
-// When history is non-empty, prior turns are formatted into the prompt so the model has context.
+// Chat sends a conversational message to claude with optional history.
 func (c *Coder) Chat(ctx context.Context, userID string, history []db.ChatMessage, systemContext, userMessage string) (*Result, error) {
 	var sb strings.Builder
 	if systemContext != "" {
@@ -171,8 +194,6 @@ func (c *Coder) ensureUserHome(userID string) (string, error) {
 		if err := os.MkdirAll(claudeDir, 0o700); err != nil {
 			return "", err
 		}
-		// Copy credentials on every call so refreshed OAuth tokens are available.
-		// The file is small (< 1 KB) and copying is cheaper than stale auth errors.
 		if c.sysClaudeDir != "" {
 			src := filepath.Join(c.sysClaudeDir, ".credentials.json")
 			if data, err := os.ReadFile(src); err == nil {
@@ -184,15 +205,11 @@ func (c *Coder) ensureUserHome(userID string) (string, error) {
 	return dir, nil
 }
 
-// isClaude returns true when the configured binary is the claude CLI.
-// This gates claude-specific isolation flags and credential handling.
 func (c *Coder) isClaude() bool {
 	return strings.Contains(strings.ToLower(filepath.Base(c.bin)), "claude")
 }
 
-// buildEnv constructs the subprocess environment with per-user isolation applied.
-// For claude: redirects CLAUDE_CONFIG_DIR and HOME to the per-user home.
-// For other tools: passes through known auth env vars; HOME is still overridden.
+// buildEnv constructs the subprocess environment for non-sandboxed execution.
 func (c *Coder) buildEnv(homeDir string) []string {
 	overrides := map[string]string{
 		"HOME": homeDir,
@@ -200,19 +217,22 @@ func (c *Coder) buildEnv(homeDir string) []string {
 	if c.isClaude() {
 		overrides["CLAUDE_CONFIG_DIR"] = filepath.Join(homeDir, ".claude")
 	} else {
-		// For non-claude tools, preserve any API key env vars already set in the
-		// parent process so the tool can authenticate to its LLM provider.
 		for _, key := range knownAuthEnvVars {
 			if val := os.Getenv(key); val != "" {
 				overrides[key] = val
 			}
 		}
 	}
+	// Merge extra env vars, but never override system keys (HOME, CLAUDE_CONFIG_DIR, etc.).
+	for k, v := range c.extraEnv {
+		if _, exists := overrides[k]; !exists {
+			overrides[k] = v
+		}
+	}
 	return overrideEnv(os.Environ(), overrides)
 }
 
-// overrideEnv returns base with the given key=value pairs replaced or appended.
-// All keys in base that are not in overrides are preserved unchanged.
+
 func overrideEnv(base []string, overrides map[string]string) []string {
 	result := make([]string, 0, len(base)+len(overrides))
 	seen := make(map[string]bool, len(overrides))
@@ -238,12 +258,11 @@ func overrideEnv(base []string, overrides map[string]string) []string {
 	return result
 }
 
-// claudeJSONResponse is the JSON envelope returned by `claude --output-format json`.
 type claudeJSONResponse struct {
-	Type    string `json:"type"`
-	Subtype string `json:"subtype"`
-	IsError bool   `json:"is_error"`
-	Result  string `json:"result"`
+	Type     string `json:"type"`
+	Subtype  string `json:"subtype"`
+	IsError  bool   `json:"is_error"`
+	Result   string `json:"result"`
 	Messages []struct {
 		Role    string `json:"role"`
 		Content []struct {
@@ -253,8 +272,6 @@ type claudeJSONResponse struct {
 	} `json:"messages"`
 }
 
-// extractText parses claude's JSON output and returns (text, isError, err).
-// isError is true when the JSON contains is_error:true (e.g. auth failure).
 func extractText(data []byte) (text string, isError bool, err error) {
 	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
 
@@ -291,7 +308,6 @@ func extractText(data []byte) (text string, isError bool, err error) {
 	return strings.TrimSpace(lastText), lastIsError, nil
 }
 
-// safeID strips characters that are unsafe in directory names.
 func safeID(id string) string {
 	var b strings.Builder
 	for _, r := range id {

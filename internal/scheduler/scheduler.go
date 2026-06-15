@@ -106,6 +106,10 @@ func (s *Scheduler) fire(ctx context.Context, sched *db.AgentSchedule, firedAt t
 			}
 		}
 	}
+	if masterPw == "" {
+		slog.Warn("scheduler: running agent without secrets — system key not configured or user has no master password",
+			"agent_id", sched.AgentID, "user_id", sched.UserID)
+	}
 
 	var sendFn agentrunner.SendFunc
 	if s.sender != nil {

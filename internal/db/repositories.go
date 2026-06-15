@@ -438,8 +438,10 @@ func (d *DB) UpsertAgentSchedule(s *AgentSchedule) error {
 }
 
 func (d *DB) ListDueSchedules(now time.Time) ([]*AgentSchedule, error) {
-	rows, err := d.Query(`SELECT id,agent_id,user_id,cron_expr,next_run_at,last_run_at,enabled,created_at
-		FROM agent_schedules WHERE enabled=1 AND (next_run_at IS NULL OR next_run_at <= ?)`,
+	rows, err := d.Query(`SELECT s.id,s.agent_id,s.user_id,s.cron_expr,s.next_run_at,s.last_run_at,s.enabled,s.created_at
+		FROM agent_schedules s
+		JOIN agents a ON a.id = s.agent_id AND a.active = 1
+		WHERE s.enabled=1 AND (s.next_run_at IS NULL OR s.next_run_at <= ?)`,
 		now.UTC().Format("2006-01-02 15:04:05"))
 	if err != nil {
 		return nil, err
@@ -1038,6 +1040,113 @@ func scanCoder(s scanner) (*Coder, error) {
 	c.CreatedAt = scanTime(createdAt)
 	c.UpdatedAt = scanTime(updatedAt)
 	return &c, nil
+}
+
+// ── MCP servers ────────────────────────────────────────────────────────────
+
+// ── Skills ─────────────────────────────────────────────────────────────────
+
+func (d *DB) CreateSkill(s *Skill) error {
+	_, err := d.Exec(`INSERT INTO skills(id,user_id,name,description,installed_at)
+		VALUES(?,?,?,?,datetime('now'))`,
+		s.ID, s.UserID, s.Name, s.Description)
+	return err
+}
+
+func (d *DB) GetSkillByName(userID, name string) (*Skill, error) {
+	row := d.QueryRow(`SELECT id,user_id,name,description,installed_at FROM skills WHERE user_id=? AND name=?`, userID, name)
+	return scanSkill(row)
+}
+
+func (d *DB) GetSkill(id string) (*Skill, error) {
+	row := d.QueryRow(`SELECT id,user_id,name,description,installed_at FROM skills WHERE id=?`, id)
+	return scanSkill(row)
+}
+
+func (d *DB) ListSkills(userID string) ([]*Skill, error) {
+	rows, err := d.Query(`SELECT id,user_id,name,description,installed_at FROM skills WHERE user_id=? ORDER BY name`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var skills []*Skill
+	for rows.Next() {
+		s, err := scanSkill(rows)
+		if err != nil {
+			return nil, err
+		}
+		skills = append(skills, s)
+	}
+	return skills, rows.Err()
+}
+
+func (d *DB) DeleteSkill(id string) error {
+	res, err := d.Exec(`DELETE FROM skills WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (d *DB) UpdateSkillDescription(id, description string) error {
+	_, err := d.Exec(`UPDATE skills SET description=? WHERE id=?`, description, id)
+	return err
+}
+
+// SetAgentSkills replaces all skill associations for an agent atomically.
+func (d *DB) SetAgentSkills(agentID string, skillIDs []string) error {
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM agent_skills WHERE agent_id=?`, agentID); err != nil {
+		return err
+	}
+	for _, sid := range skillIDs {
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO agent_skills(agent_id,skill_id) VALUES(?,?)`, agentID, sid); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ListSkillsForAgent returns skills declared by an agent.
+func (d *DB) ListSkillsForAgent(agentID string) ([]*Skill, error) {
+	rows, err := d.Query(`SELECT s.id,s.user_id,s.name,s.description,s.installed_at
+		FROM skills s JOIN agent_skills ags ON ags.skill_id=s.id WHERE ags.agent_id=?`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var skills []*Skill
+	for rows.Next() {
+		s, err := scanSkill(rows)
+		if err != nil {
+			return nil, err
+		}
+		skills = append(skills, s)
+	}
+	return skills, rows.Err()
+}
+
+func scanSkill(s scanner) (*Skill, error) {
+	var sk Skill
+	var installedAt string
+	err := s.Scan(&sk.ID, &sk.UserID, &sk.Name, &sk.Description, &installedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	sk.InstalledAt = scanTime(installedAt)
+	return &sk, nil
 }
 
 // ── MCP servers ────────────────────────────────────────────────────────────

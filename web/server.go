@@ -22,6 +22,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/gateway"
 	"github.com/ilijad1/simple-agents/internal/memory"
 	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/simple-agents/internal/skillstore"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
@@ -30,22 +31,24 @@ const sessionName = "sa_session"
 
 // Server is the HTTP server for the Simple Agents web UI.
 type Server struct {
-	echo      *echo.Echo
-	cfg       *config.Config
-	db        *db.DB
-	store     *sessions.CookieStore
-	audit     *audit.Writer
-	systemKey []byte                  // 32-byte key for encrypting master passwords at rest
-	gateway   *gateway.GatewayManager // may be nil in tests
-	runner    *agentrunner.Runner     // may be nil in tests
-	memory    *memory.Store           // may be nil in tests
-	designer  *agentdesigner.AgentDesigner
-	homesDir  string // per-user claude HOME directories
+	echo       *echo.Echo
+	cfg        *config.Config
+	db         *db.DB
+	store      *sessions.CookieStore
+	audit      *audit.Writer
+	systemKey  []byte                  // 32-byte key for encrypting master passwords at rest
+	gateway    *gateway.GatewayManager // may be nil in tests
+	runner     *agentrunner.Runner     // may be nil in tests
+	memory     *memory.Store           // may be nil in tests
+	designer   *agentdesigner.AgentDesigner
+	skills     *skillstore.Store
+	designFlow *agentdesigner.Flow // shared with Telegram gateway
+	homesDir   string              // per-user claude HOME directories
 }
 
 // NewServer wires up all routes and middleware.
 // gatewayManager and runner may be nil (e.g. in tests).
-func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, designer *agentdesigner.AgentDesigner, homesDir string, memStore *memory.Store) (*Server, error) {
+func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, designer *agentdesigner.AgentDesigner, homesDir string, memStore *memory.Store, skillStore *skillstore.Store, designFlow *agentdesigner.Flow) (*Server, error) {
 	sessionKey := []byte(cfg.Server.SessionKey)
 	if len(sessionKey) == 0 {
 		// Use a fixed dev key if not configured; production MUST set SA_SESSION_KEY.
@@ -66,17 +69,19 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 	}
 
 	s := &Server{
-		echo:      echo.New(),
-		cfg:       cfg,
-		db:        database,
-		store:     store,
-		audit:     audit.New(database),
-		systemKey: sysKey,
-		gateway:   gatewayManager,
-		runner:    runner,
-		memory:    memStore,
-		designer:  designer,
-		homesDir:  homesDir,
+		echo:       echo.New(),
+		cfg:        cfg,
+		db:         database,
+		store:      store,
+		audit:      audit.New(database),
+		systemKey:  sysKey,
+		gateway:    gatewayManager,
+		runner:     runner,
+		memory:     memStore,
+		designer:   designer,
+		skills:     skillStore,
+		designFlow: designFlow,
+		homesDir:   homesDir,
 	}
 
 	s.echo.HideBanner = true
@@ -221,14 +226,20 @@ func (s *Server) setupRoutes() {
 	dash.GET("", s.showDashboard)
 	dash.GET("/agents", s.showAgents)
 	dash.GET("/agents/new", s.showNewAgent)
-	dash.POST("/agents/new", s.handleNewAgent)
-	dash.GET("/agents/generate", s.handleGenerateAgentSSE)
+	dash.POST("/agents/design", s.handleDesignChat)
+	dash.POST("/agents/design/cancel", s.handleCancelDesign)
 	dash.GET("/agents/:id", s.showAgentDetail)
 	dash.POST("/agents/:id/delete", s.handleDeleteAgent)
 	dash.POST("/agents/:id/run", s.handleRunAgent)
 	dash.POST("/agents/:id/schedule", s.handleSaveSchedule)
 	dash.POST("/agents/:id/schedule/delete", s.handleDeleteSchedule)
-	dash.POST("/agents/:id/code", s.handleSaveCode)
+	dash.POST("/agents/:id/agent-md", s.handleSaveAgentMD)
+	dash.POST("/agents/:id/skills", s.handleSaveAgentSkills)
+	dash.GET("/skills", s.showSkills)
+	dash.POST("/skills", s.handleCreateSkill)
+	dash.GET("/skills/:id", s.showSkillDetail)
+	dash.POST("/skills/:id", s.handleSaveSkill)
+	dash.POST("/skills/:id/delete", s.handleDeleteSkill)
 	dash.GET("/secrets", s.showSecrets)
 	dash.POST("/secrets", s.handleCreateSecret)
 	dash.POST("/secrets/:name/delete", s.handleDeleteSecret)
@@ -366,11 +377,12 @@ func (s *Server) redirectRoot(c echo.Context) error {
 // coderForUser returns a Coder for the given user. If the user has a coder
 // profile assigned, its settings are used; otherwise the system defaults apply.
 func (s *Server) coderForUser(userID string) *coder.Coder {
+	dataDir := s.cfg.Data.Dir
 	if profile, err := s.db.GetUserCoder(userID); err == nil && profile != nil {
 		timeout := time.Duration(profile.TimeoutS) * time.Second
-		return coder.New(profile.ClaudeBin, timeout, s.homesDir)
+		return coder.New(profile.ClaudeBin, timeout, s.homesDir, dataDir)
 	}
-	return coder.New(s.cfg.Coder.ClaudeBin, s.cfg.Coder.Timeout, s.homesDir)
+	return coder.New(s.cfg.Coder.ClaudeBin, s.cfg.Coder.Timeout, s.homesDir, dataDir)
 }
 
 type pageData struct {

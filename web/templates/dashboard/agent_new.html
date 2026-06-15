@@ -1,116 +1,79 @@
 {{template "head" .}}
 {{template "navbar" .}}
 
-<div class="container mx-auto px-4 py-8 max-w-4xl">
+<div class="container mx-auto px-4 py-8 max-w-3xl">
   {{template "alert" .}}
 
-  <div class="mb-6">
+  <div class="flex items-center gap-2 mb-6">
     <a href="/dashboard/agents" class="btn btn-ghost btn-sm gap-1">
       <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-      Back to Agents
+      Agents
     </a>
+    <span class="text-base-content/30">/</span>
+    <h1 class="text-xl font-bold">Create Agent</h1>
   </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <!-- Form -->
-    <div class="lg:col-span-2">
-      <div class="card bg-base-100 shadow-sm border border-base-300">
-        <div class="card-body">
-          <h1 class="card-title text-xl">🤖 Create a New Agent</h1>
-          <p class="text-base-content/50 text-sm mb-2">
-            Describe what you want your agent to do. Claude will generate the Python code automatically.
-          </p>
-
-          <form id="agent-create-form" method="POST" action="/dashboard/agents/new" class="space-y-5 mt-2">
-            <div class="form-control">
-              <label class="label pb-1">
-                <span class="label-text font-semibold">Agent Name</span>
-                <span class="label-text-alt text-base-content/40">lowercase, no spaces</span>
-              </label>
-              <input type="text" name="name" placeholder="e.g. price-monitor, news-digest"
-                class="input input-bordered w-full"
-                pattern="[a-z0-9\-]+" title="Lowercase letters, numbers, and hyphens only"
-                required autocomplete="off">
-            </div>
-
-            <div class="form-control">
-              <label class="label pb-1">
-                <span class="label-text font-semibold">What should this agent do?</span>
-                <span class="label-text-alt text-base-content/40">be descriptive</span>
-              </label>
-              <textarea name="description"
-                class="textarea textarea-bordered w-full h-36 text-sm leading-relaxed"
-                placeholder="Describe your agent clearly. Example: 'Monitor my GitHub notifications and send me a daily summary of new issues and PRs'"
-                required id="desc-field"></textarea>
-              <label class="label pt-1">
-                <span class="label-text-alt text-base-content/30">More detail = better generated code</span>
-              </label>
-            </div>
-
-            <!-- Quick example chips -->
-            <div>
-              <p class="text-xs text-base-content/40 mb-2 font-medium">Example ideas (click to use):</p>
-              <div class="flex flex-wrap gap-2">
-                <button type="button" class="badge badge-outline badge-sm cursor-pointer hover:badge-primary transition-colors"
-                  onclick="document.getElementById('desc-field').value='Monitor Hacker News top stories and send me a daily digest of the top 5 most interesting articles at 8am'">HN Digest</button>
-                <button type="button" class="badge badge-outline badge-sm cursor-pointer hover:badge-primary transition-colors"
-                  onclick="document.getElementById('desc-field').value='Check the weather forecast every morning and send me a brief summary with temperature and conditions'">Weather</button>
-                <button type="button" class="badge badge-outline badge-sm cursor-pointer hover:badge-primary transition-colors"
-                  onclick="document.getElementById('desc-field').value='Monitor a website for changes and notify me when the content changes'">Site Monitor</button>
-                <button type="button" class="badge badge-outline badge-sm cursor-pointer hover:badge-primary transition-colors"
-                  onclick="document.getElementById('desc-field').value='Fetch my GitHub notifications and summarize new issues, pull requests, and mentions'">GitHub</button>
-              </div>
-            </div>
-
-            <div class="card-actions justify-end pt-2">
-              <a href="/dashboard/agents" class="btn btn-ghost btn-sm" id="cancel-btn">Cancel</a>
-              <button type="submit" id="gen-btn" class="btn btn-primary gap-1">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                Generate Agent →
-              </button>
-            </div>
-          </form>
-
-          <!-- Progress panel (hidden until generation starts) -->
-          <div id="gen-progress" class="hidden mt-4">
-            <div class="flex items-center gap-3 mb-4">
-              <span class="loading loading-spinner loading-sm text-primary"></span>
-              <span class="font-semibold">Generating your agent...</span>
-            </div>
-            <ul id="gen-log" class="space-y-2 text-sm text-base-content/70 font-mono mb-4 pl-2"></ul>
-            <div id="gen-error" class="hidden alert alert-error text-sm py-2"></div>
-          </div>
+  <!-- Phase 1: Name entry -->
+  <div id="phase-start" class="card bg-base-100 shadow-sm border border-base-300">
+    <div class="card-body">
+      <h2 class="card-title text-lg">New Agent</h2>
+      <p class="text-base-content/50 text-sm">Give your agent a name and describe what it should do. The AI designer will ask clarifying questions before building it.</p>
+      <div class="space-y-4 mt-2">
+        <div class="form-control">
+          <label class="label"><span class="label-text font-medium">Agent Name</span></label>
+          <input id="agent-name-input" type="text" placeholder="e.g. bitcoin-price-tracker" class="input input-bordered" autocomplete="off" />
+        </div>
+        <div class="form-control">
+          <label class="label"><span class="label-text font-medium">What should it do?</span></label>
+          <textarea id="agent-desc-input" class="textarea textarea-bordered" rows="3"
+            placeholder="e.g. Check the Bitcoin price every 10 minutes and alert me when it crosses $100k"></textarea>
+        </div>
+        <div id="start-error" class="hidden alert alert-error text-sm py-2"></div>
+        <div class="flex justify-end gap-2">
+          <a href="/dashboard/agents" class="btn btn-ghost btn-sm">Cancel</a>
+          <button id="start-btn" onclick="startDesign()" class="btn btn-primary gap-2">
+            Start designing
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+          </button>
         </div>
       </div>
     </div>
+  </div>
 
-    <!-- Tips sidebar -->
-    <div class="space-y-4">
-      <div class="card bg-base-200 border border-base-300">
-        <div class="card-body p-4">
-          <h3 class="font-semibold text-sm mb-2">💡 Tips for good agents</h3>
-          <ul class="text-xs text-base-content/60 space-y-2">
-            <li>• Specify <strong>what data</strong> to fetch (URL, API, file)</li>
-            <li>• Describe the <strong>output format</strong> you want</li>
-            <li>• Mention any <strong>filtering criteria</strong></li>
-            <li>• State the <strong>frequency</strong> if time-sensitive</li>
-          </ul>
+  <!-- Phase 2: Chat interface -->
+  <div id="phase-chat" class="hidden space-y-4">
+    <div class="card bg-base-100 shadow-sm border border-base-300">
+      <div class="card-body p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-semibold text-sm">Designing: <span id="chat-agent-name" class="text-primary font-mono"></span></h2>
+          <button onclick="cancelDesign()" class="btn btn-ghost btn-xs text-error">Cancel</button>
         </div>
-      </div>
 
-      <div class="card bg-base-200 border border-base-300">
-        <div class="card-body p-4">
-          <h3 class="font-semibold text-sm mb-2">🤖 Via Telegram</h3>
-          <p class="text-xs text-base-content/60 mb-2">For the full interactive wizard via chat:</p>
-          <code class="block bg-base-300 rounded px-3 py-2 text-xs font-mono">/agent create my-agent-name</code>
+        <!-- Message list -->
+        <div id="chat-messages" class="space-y-3 max-h-[500px] overflow-y-auto mb-4 pr-1 scroll-smooth"></div>
+
+        <!-- Spinner -->
+        <div id="chat-spinner" class="hidden flex justify-center py-2">
+          <span class="loading loading-dots loading-md text-primary"></span>
         </div>
-      </div>
 
-      <div class="card bg-warning/10 border border-warning/30">
-        <div class="card-body p-4">
-          <p class="text-xs text-base-content/60">
-            ⚠️ Agent generation calls Claude and may take 30–60 seconds.
-          </p>
+        <!-- Approve quick action -->
+        <div id="approve-bar" class="hidden mb-3">
+          <div class="flex items-center gap-2 p-3 rounded-lg bg-success/10 border border-success/30">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span class="text-sm flex-1">Happy with the proposal? Generate the agent.</span>
+            <button onclick="sendMessage('approve')" class="btn btn-success btn-sm gap-1">
+              Approve &amp; Build
+            </button>
+          </div>
+        </div>
+
+        <!-- Input -->
+        <div class="flex gap-2">
+          <input id="chat-input" type="text" placeholder="Answer questions or type 'approve' to build..."
+            class="input input-bordered flex-1 text-sm"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();sendFromInput()}" />
+          <button onclick="sendFromInput()" class="btn btn-primary btn-sm px-4">Send</button>
         </div>
       </div>
     </div>
@@ -118,60 +81,140 @@
 </div>
 
 <script>
-document.getElementById('agent-create-form').addEventListener('submit', function(e) {
-  e.preventDefault();
-  var name = this.elements['name'].value.trim();
-  var desc = this.elements['description'].value.trim();
-  if (!name || !desc) return;
+var agentName = '';
 
-  // Hide form, show progress
-  this.classList.add('hidden');
-  document.getElementById('cancel-btn').classList.add('hidden');
-  var progress = document.getElementById('gen-progress');
-  progress.classList.remove('hidden');
-  var log = document.getElementById('gen-log');
-  var errDiv = document.getElementById('gen-error');
+function startDesign() {
+  var name = document.getElementById('agent-name-input').value.trim();
+  var desc = document.getElementById('agent-desc-input').value.trim();
 
-  var addLog = function(msg) {
-    var li = document.createElement('li');
-    li.innerHTML = '<span class="text-primary mr-2">›</span>' + msg;
-    log.appendChild(li);
-  };
+  if (!name) { document.getElementById('agent-name-input').focus(); return; }
+  if (!desc) { document.getElementById('agent-desc-input').focus(); return; }
 
-  var showError = function(msg) {
-    progress.classList.add('hidden');
-    var form = document.getElementById('agent-create-form');
-    form.classList.remove('hidden');
-    document.getElementById('cancel-btn').classList.remove('hidden');
-    errDiv.textContent = msg;
-    errDiv.classList.remove('hidden');
-  };
+  document.getElementById('start-btn').disabled = true;
+  document.getElementById('start-error').classList.add('hidden');
 
-  var url = '/dashboard/agents/generate?name=' + encodeURIComponent(name) +
-            '&description=' + encodeURIComponent(desc);
+  agentName = name;
+  document.getElementById('chat-agent-name').textContent = name;
 
-  var es = new EventSource(url);
+  doRequest(name, desc, true);
+}
 
-  es.onmessage = function(evt) {
-    try {
-      var d = JSON.parse(evt.data);
-      if (d.type === 'status') {
-        addLog(d.msg);
-      } else if (d.type === 'done') {
-        es.close();
-        addLog('Done! Redirecting...');
-        window.location = d.url;
-      } else if (d.type === 'error') {
-        es.close();
-        showError('Generation failed: ' + d.msg);
+function sendFromInput() {
+  var input = document.getElementById('chat-input');
+  var msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  sendMessage(msg);
+}
+
+async function sendMessage(msg) {
+  msg = (msg || '').trim();
+  if (!msg) return;
+  appendMessage('user', msg);
+  doRequest(agentName, msg, false);
+}
+
+async function doRequest(name, msg, isFirst) {
+  if (isFirst) {
+    document.getElementById('phase-start').classList.add('hidden');
+    document.getElementById('phase-chat').classList.remove('hidden');
+  }
+  setLoading(true);
+  try {
+    var resp = await fetch('/dashboard/agents/design', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, message: msg})
+    });
+    var data = await resp.json();
+    setLoading(false);
+    if (data.error) {
+      if (isFirst) {
+        document.getElementById('phase-chat').classList.add('hidden');
+        document.getElementById('phase-start').classList.remove('hidden');
+        document.getElementById('start-btn').disabled = false;
+        document.getElementById('start-error').textContent = data.error;
+        document.getElementById('start-error').classList.remove('hidden');
+      } else {
+        appendError(data.error);
       }
-    } catch(ignored) {}
-  };
+      return;
+    }
+    appendMessage('assistant', data.response);
+    if (data.done) {
+      appendSystem('Agent created! Redirecting...');
+      setTimeout(function() { window.location.href = '/dashboard/agents/' + data.agent_id; }, 800);
+      return;
+    }
+    showApproveBar();
+    document.getElementById('chat-input').focus();
+  } catch(e) {
+    setLoading(false);
+    if (isFirst) {
+      document.getElementById('phase-chat').classList.add('hidden');
+      document.getElementById('phase-start').classList.remove('hidden');
+      document.getElementById('start-btn').disabled = false;
+      document.getElementById('start-error').textContent = 'Network error: ' + e.message;
+      document.getElementById('start-error').classList.remove('hidden');
+    } else {
+      appendError('Network error: ' + e.message);
+    }
+  }
+}
 
-  es.onerror = function() {
-    es.close();
-    showError('Connection lost. Please try again.');
-  };
+async function cancelDesign() {
+  await fetch('/dashboard/agents/design/cancel', {method: 'POST'});
+  window.location.href = '/dashboard/agents';
+}
+
+function appendMessage(role, text) {
+  var c = document.getElementById('chat-messages');
+  var d = document.createElement('div');
+  if (role === 'user') {
+    d.className = 'flex justify-end';
+    d.innerHTML = '<div class="max-w-[85%] px-4 py-2 rounded-2xl rounded-tr-sm bg-primary text-primary-content text-sm whitespace-pre-wrap break-words">' + esc(text) + '</div>';
+  } else {
+    d.className = 'flex justify-start';
+    d.innerHTML = '<div class="max-w-[85%] px-4 py-3 rounded-2xl rounded-tl-sm bg-base-200 text-sm whitespace-pre-wrap break-words leading-relaxed">' + esc(text) + '</div>';
+  }
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+}
+
+function appendError(msg) {
+  var c = document.getElementById('chat-messages');
+  var d = document.createElement('div');
+  d.className = 'alert alert-error text-sm py-2';
+  d.textContent = msg;
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+}
+
+function appendSystem(msg) {
+  var c = document.getElementById('chat-messages');
+  var d = document.createElement('div');
+  d.className = 'text-center text-xs text-base-content/40 py-1';
+  d.textContent = msg;
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+}
+
+function setLoading(on) {
+  document.getElementById('chat-spinner').classList.toggle('hidden', !on);
+  var inp = document.getElementById('chat-input');
+  if (inp) inp.disabled = on;
+}
+
+function showApproveBar() {
+  document.getElementById('approve-bar').classList.remove('hidden');
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('agent-name-input').focus();
 });
 </script>
 
