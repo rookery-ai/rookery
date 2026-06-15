@@ -3,6 +3,8 @@ package agentdesigner
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +22,7 @@ const (
 	StateIdle       DesignState = iota
 	StateDescribing             // Telegram: waiting for description after /agent create <name>
 	StateDesigning              // free-form Q&A until user says "approve"
+	StateVerifying              // test run shown; waiting for user to confirm or request changes
 	StateDone
 )
 
@@ -31,6 +34,8 @@ func (s DesignState) String() string {
 		return "describing"
 	case StateDesigning:
 		return "designing"
+	case StateVerifying:
+		return "verifying"
 	case StateDone:
 		return "done"
 	}
@@ -47,6 +52,10 @@ type DesignSession struct {
 	Skills             []string         // installed skill names, loaded once on Start
 	ConnectedPlatforms []string         // e.g. ["telegram"] — loaded from platform_connections
 	CreatedAt          time.Time
+
+	// Set after generation; cleared on finalize or when user requests changes.
+	PendingAgentMD string
+	PendingTools   map[string]string
 }
 
 type dbDesignStore interface {
@@ -155,6 +164,8 @@ func (f *Flow) Step(ctx context.Context, userID, input string) (string, bool, st
 		return f.stepDescribing(ctx, userID, input)
 	case StateDesigning:
 		return f.stepDesigning(ctx, userID, input)
+	case StateVerifying:
+		return f.stepVerifying(ctx, userID, input)
 	default:
 		return "", false, "", fmt.Errorf("unexpected state: %s", state)
 	}
@@ -195,6 +206,27 @@ func (f *Flow) stepDesigning(ctx context.Context, userID, input string) (string,
 	if isApproval(input) {
 		return f.runGeneration(ctx, userID)
 	}
+
+	response, err := f.callCoder(ctx, userID, input)
+	if err != nil {
+		return "", false, "", err
+	}
+	return response, false, "", nil
+}
+
+// stepVerifying: test output was shown; wait for approval or change request.
+func (f *Flow) stepVerifying(ctx context.Context, userID, input string) (string, bool, string, error) {
+	if isApproval(input) {
+		return f.finalizeAgent(ctx, userID)
+	}
+
+	// User wants changes — drop pending content, return to designing.
+	f.mu.Lock()
+	sess := f.sessions[userID]
+	sess.State = StateDesigning
+	sess.PendingAgentMD = ""
+	sess.PendingTools = nil
+	f.mu.Unlock()
 
 	response, err := f.callCoder(ctx, userID, input)
 	if err != nil {
@@ -302,14 +334,15 @@ HARD CONSTRAINTS (never violate):
 
 // ─── Generation (triggered by approval) ──────────────────────────────────────
 
+// runGeneration creates agent files by giving Claude Code full tool access to
+// write files, run them, fix errors, and verify output — all in one pass.
+// Only after the coder confirms things work does the user see the results.
 func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, string, error) {
 	f.mu.Lock()
 	sess := f.sessions[userID]
 	coderSvc := f.coderFor(userID)
-	// Snapshot session fields under the lock so we don't hold it during LLM calls.
 	agentIDSnap := sess.AgentID
 	agentNameSnap := sess.AgentName
-	skillsSnap := sess.Skills
 	historySnap := make([]db.ChatMessage, len(sess.History))
 	copy(historySnap, sess.History)
 	f.mu.Unlock()
@@ -318,84 +351,200 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 		return "", false, "", fmt.Errorf("no coder configured for this user")
 	}
 
-	generationPrompt := `Based on our conversation, implement the agent now.
-
-REQUIRED CONSTRAINTS:
-1. The VERY FIRST line of AGENT.md must be the suggested schedule:
-   # Suggested schedule: */10 * * * *
-   (Replace with the cron expression we discussed. Use "none" if this agent runs on-demand only.)
-2. Do NOT include instructions to acquire Telegram credentials, write files to disk, or set up cron jobs.
-3. Secrets are injected as environment variables at runtime (e.g. os.environ['COINGECKO_API_KEY'] in Python). NEVER hardcode values or include instructions to obtain them at runtime — the user adds them to the Secrets store separately.
-4. [CHAT] is the only way to send messages. No messaging libraries or Telegram API calls.
-5. Tool scripts live in tools/ — reference them as tools/filename.py. Do NOT instruct the agent to create or write files.
-
-Output the following — in this exact order, with no markdown fences:
-
-1. The complete AGENT.md file. This is the instruction file the coder reads on every scheduled run.
-   Line 1: # Suggested schedule: <cron expression or "none">
-   Then: a comment block listing required secrets (omit if none):
-   # Required secrets:
-   # - SECRET_NAME: what this is and where to get it
-
-   AGENT.md must describe:
-   - What the agent does on each run
-   - Output protocol: [CHAT] <text> to send messages, [STATE]...[/STATE] to persist JSON state, [CALL: agent-name] to call another agent
-   - How to use any tool scripts in tools/ (reference as tools/filename.py)
-   - Environment variables it reads (os.environ['NAME'])
-
-2. If Python helper scripts are needed for data fetching or reusable logic, output each as:
-   [TOOL: filename.py]
-   (complete script — no subprocess, no eval, no exec, no socket)
-   [/TOOL]
-   These will be placed in tools/ automatically.
-
-Output raw text only. No markdown code fences. No explanations outside the files above.`
-
-	// Build a single prompt that embeds the full conversation history so claude
-	// sees this as a text-output task, not an interactive conversation where it
-	// might try to write files. WithNoTools() ensures no file tools are available.
-	var genPrompt strings.Builder
-	genPrompt.WriteString("Design conversation for agent \"")
-	genPrompt.WriteString(agentNameSnap)
-	genPrompt.WriteString("\":\n\n")
-	for _, m := range historySnap {
-		if m.Role == "user" {
-			genPrompt.WriteString("User: ")
-		} else {
-			genPrompt.WriteString("Designer: ")
+	// Create the agent directory structure on disk before the coder runs so it
+	// has a clean workspace to write into.
+	agentDir := filepath.Join(f.designer.agentsDir, userID, agentIDSnap)
+	for _, sub := range []string{".", "tools", "logs"} {
+		if err := os.MkdirAll(filepath.Join(agentDir, sub), 0o750); err != nil {
+			return "", false, "", fmt.Errorf("create agent dir: %w", err)
 		}
-		genPrompt.WriteString(m.Content)
-		genPrompt.WriteString("\n\n")
 	}
-	genPrompt.WriteString("---\n\n")
-	genPrompt.WriteString(generationPrompt)
+	if err := os.WriteFile(filepath.Join(agentDir, "state.json"), []byte("{}"), 0o640); err != nil {
+		return "", false, "", fmt.Errorf("write state.json: %w", err)
+	}
 
-	result, err := coderSvc.WithNoTools().Generate(ctx, userID, genPrompt.String())
+	// Run the coder WITH full tools so it can write files, execute them, debug
+	// errors, and confirm the implementation works — all in one session.
+	// WithAllowedTools pre-approves the specific tools needed so the subprocess
+	// never blocks on interactive permission prompts.
+	prompt := buildImplementationPrompt(agentNameSnap, historySnap)
+	result, err := coderSvc.WithDir(agentDir).WithAllowedTools("Bash,Write,Edit,Read").Generate(ctx, userID, prompt)
 	if err != nil {
-		return "", false, "", fmt.Errorf("generate agent: %w", err)
+		_ = os.RemoveAll(agentDir)
+		return "", false, "", fmt.Errorf("coder: %w", err)
 	}
 
-	agentMD, tools := parseGeneratedOutput(result.Text)
-	agentMD = strings.TrimSpace(agentMD)
+	// Ground truth: read what the coder actually wrote to disk.
+	agentMDBytes, err := os.ReadFile(filepath.Join(agentDir, "AGENT.md"))
+	if err != nil {
+		_ = os.RemoveAll(agentDir)
+		return "The coder didn't create AGENT.md. Tell me what to change and I'll try again.", false, "", nil
+	}
+	agentMD := strings.TrimSpace(string(agentMDBytes))
 
-	if agentMD == "" {
-		f.mu.Lock()
-		delete(f.sessions, userID)
-		f.mu.Unlock()
-		return "", false, "", fmt.Errorf("coder returned empty AGENT.md — please try again")
+	tools, err := readToolsFromDisk(agentDir)
+	if err != nil {
+		_ = os.RemoveAll(agentDir)
+		return "", false, "", fmt.Errorf("read tools: %w", err)
 	}
 
-	// Run guardrails.
+	// Guardrails on the actual content the coder wrote.
 	if err := CheckEthics(agentMD, ""); err != nil {
-		return fmt.Sprintf("Generated agent failed safety checks: %s\n\nPlease rephrase your request.", err.Error()),
-			false, "", nil
+		_ = os.RemoveAll(agentDir)
+		return fmt.Sprintf("Agent failed safety checks: %s\n\nPlease rephrase.", err.Error()), false, "", nil
 	}
 	for filename, code := range tools {
 		if err := RunFullGuardrails(code, ""); err != nil {
-			return fmt.Sprintf("Generated tool %s failed safety checks: %s\n\nPlease rephrase.", filename, err.Error()),
-				false, "", nil
+			_ = os.RemoveAll(agentDir)
+			return fmt.Sprintf("Tool %s failed safety checks: %s\n\nPlease rephrase.", filename, err.Error()), false, "", nil
 		}
 	}
+
+	// Store verified content in session and wait for user confirmation.
+	testOut := parseTestOutput(result.Text)
+
+	f.mu.Lock()
+	sess = f.sessions[userID]
+	sess.State = StateVerifying
+	sess.PendingAgentMD = agentMD
+	sess.PendingTools = tools
+	f.mu.Unlock()
+
+	if testOut == "" {
+		return "The agent was built and tested successfully — no output messages were sent, which is expected if the agent only updates its internal state.\n\n" +
+			"Type **approve** to save it, or tell me what to change.", false, "", nil
+	}
+	return fmt.Sprintf(
+		"Here's what a test run produces:\n\n---\n%s\n---\n\nDoes this look right? Type **approve** to save the agent, or tell me what to change.",
+		testOut,
+	), false, "", nil
+}
+
+// buildImplementationPrompt creates the prompt that tells Claude Code to write
+// the agent files, test them, fix errors, and report the verified output.
+func buildImplementationPrompt(agentName string, history []db.ChatMessage) string {
+	var sb strings.Builder
+	sb.WriteString("You are implementing an AI agent called \"")
+	sb.WriteString(agentName)
+	sb.WriteString("\".\n\n")
+	sb.WriteString("DESIGN CONVERSATION:\n")
+	for _, m := range history {
+		if m.Role == "user" {
+			sb.WriteString("User: ")
+		} else {
+			sb.WriteString("Designer: ")
+		}
+		sb.WriteString(m.Content)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString(`
+YOUR TASK — follow these steps in order:
+
+STEP 1 — CREATE THE AGENT FILES in the current directory.
+
+Write AGENT.md:
+- Line 1 MUST be exactly: # Suggested schedule: <5-part cron expression or "none">
+- Optional secrets block (omit if no secrets needed):
+  # Required secrets:
+  # - SECRET_NAME: plain-language description
+- Describe what the agent does each run
+- Output protocol:
+    [CHAT] <text>        — send a message to the user (the ONLY way to send output)
+    [STATE]...[/STATE]   — JSON block merged into state.json
+- Reference Python helpers as: python3 tools/filename.py
+
+Write tools/<name>.py for data fetching / processing (if needed):
+- Allowed: os, json, re, datetime, requests
+- Forbidden: subprocess, eval, exec, socket, open() for writing files
+- Read secrets via: os.environ.get('SECRET_NAME', '')
+
+Do NOT create or modify state.json — it already exists.
+
+STEP 2 — TEST THE IMPLEMENTATION.
+
+Run each Python script using Bash and confirm it produces real, non-empty output.
+If a script errors or returns None/empty, fix it and re-run until it works.
+
+SECRETS: If a required secret is missing from the environment, substitute a
+realistic mock value FOR THIS TEST ONLY (e.g. use a public test endpoint or
+hard-code an example response). Do NOT abort — show the output format.
+
+STEP 3 — REPORT THE VERIFIED RESULT.
+
+Once everything works, end your final response with:
+[TEST_OUTPUT]
+<paste the actual terminal output from your test run>
+[/TEST_OUTPUT]
+
+HARD CONSTRAINTS — never violate:
+- [CHAT] is the ONLY output channel. No Telegram API, no requests to messaging services.
+- Never hardcode real credentials — always os.environ.get('NAME', '').
+- Never create files outside the agent directory.
+- Never set up cron jobs or external schedulers.
+- No non-standard Python libraries (requests is fine; pandas, numpy, etc. are not).
+`)
+	return sb.String()
+}
+
+// parseTestOutput extracts content between [TEST_OUTPUT] and [/TEST_OUTPUT].
+func parseTestOutput(text string) string {
+	start := strings.Index(text, "[TEST_OUTPUT]")
+	if start < 0 {
+		return ""
+	}
+	start += len("[TEST_OUTPUT]")
+	end := strings.Index(text[start:], "[/TEST_OUTPUT]")
+	if end < 0 {
+		return strings.TrimSpace(text[start:])
+	}
+	return strings.TrimSpace(text[start : start+end])
+}
+
+// readToolsFromDisk reads all .py files from agentDir/tools/ and returns them
+// as a filename→content map.
+func readToolsFromDisk(agentDir string) (map[string]string, error) {
+	toolsDir := filepath.Join(agentDir, "tools")
+	entries, err := os.ReadDir(toolsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]string{}, nil
+		}
+		return nil, err
+	}
+	result := make(map[string]string, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".py") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(toolsDir, e.Name()))
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", e.Name(), err)
+		}
+		result[e.Name()] = string(data)
+	}
+	return result, nil
+}
+
+// finalizeAgent saves the pending agent content and cleans up the session.
+// Called from stepVerifying when the user approves the test output.
+func (f *Flow) finalizeAgent(ctx context.Context, userID string) (string, bool, string, error) {
+	f.mu.Lock()
+	sess := f.sessions[userID]
+	agentMD := sess.PendingAgentMD
+	tools := sess.PendingTools
+	f.mu.Unlock()
+
+	return f.saveAndFinish(ctx, userID, agentMD, tools)
+}
+
+// saveAndFinish writes the agent to disk/DB and terminates the session.
+func (f *Flow) saveAndFinish(ctx context.Context, userID, agentMD string, tools map[string]string) (string, bool, string, error) {
+	f.mu.Lock()
+	sess := f.sessions[userID]
+	agentIDSnap := sess.AgentID
+	agentNameSnap := sess.AgentName
+	skillsSnap := sess.Skills
+	f.mu.Unlock()
 
 	requiredSecrets := parseRequiredSecrets(agentMD)
 	description := extractDescription(agentMD, agentNameSnap)
@@ -427,8 +576,8 @@ Output raw text only. No markdown code fences. No explanations outside the files
 	f.mu.Unlock()
 
 	return fmt.Sprintf(
-		"Agent \"%s\" created!%s Use /run %s to test it manually.",
-		agentNameSnap, scheduleMsg, agentNameSnap,
+		"Agent \"%s\" created!%s",
+		agentNameSnap, scheduleMsg,
 	), true, agentIDSnap, nil
 }
 
@@ -449,49 +598,6 @@ func parseSuggestedSchedule(agentMD string) string {
 		return ""
 	}
 	return expr
-}
-
-// ─── Output parsing ───────────────────────────────────────────────────────────
-
-// parseGeneratedOutput splits coder output into AGENT.md content and tool scripts.
-func parseGeneratedOutput(text string) (agentMD string, tools map[string]string) {
-	tools = make(map[string]string)
-
-	firstTool := strings.Index(text, "[TOOL:")
-	if firstTool < 0 {
-		return text, tools
-	}
-
-	agentMD = text[:firstTool]
-
-	rest := text[firstTool:]
-	for {
-		start := strings.Index(rest, "[TOOL:")
-		if start < 0 {
-			break
-		}
-		headerEnd := strings.Index(rest[start:], "]")
-		if headerEnd < 0 {
-			break
-		}
-		header := rest[start : start+headerEnd+1]
-		filename := strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(header, "]"), "[TOOL:"))
-
-		contentStart := start + headerEnd + 1
-		endMarker := strings.Index(rest[contentStart:], "[/TOOL]")
-		if endMarker < 0 {
-			break
-		}
-
-		content := rest[contentStart : contentStart+endMarker]
-		if filename != "" {
-			tools[filename] = strings.TrimSpace(content)
-		}
-
-		rest = rest[contentStart+endMarker+len("[/TOOL]"):]
-	}
-
-	return agentMD, tools
 }
 
 // parseRequiredSecrets extracts SECRET_NAME from "# - SECRET_NAME: description" header lines.

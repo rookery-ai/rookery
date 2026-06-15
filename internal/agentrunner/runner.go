@@ -100,6 +100,52 @@ func (r *Runner) RunByName(ctx context.Context, userID, agentName, masterPw stri
 	})
 }
 
+// TestRunFromContent executes agentMD content once from a temp directory and
+// returns the joined [CHAT] lines. Used by the agent designer to verify an agent
+// works before committing it to disk/DB. Returns ("", nil) if the agent produces
+// no [CHAT] output; returns ("", err) if the coder subprocess fails.
+func (r *Runner) TestRunFromContent(ctx context.Context, userID, agentMD string, tools map[string]string) (string, error) {
+	tmpDir, err := os.MkdirTemp("", "agent-test-*")
+	if err != nil {
+		return "", fmt.Errorf("create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "AGENT.md"), []byte(agentMD), 0o640); err != nil {
+		return "", fmt.Errorf("write AGENT.md: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "state.json"), []byte("{}"), 0o640); err != nil {
+		return "", fmt.Errorf("write state.json: %w", err)
+	}
+	if len(tools) > 0 {
+		if err := os.MkdirAll(filepath.Join(tmpDir, "tools"), 0o750); err != nil {
+			return "", fmt.Errorf("create tools dir: %w", err)
+		}
+		for filename, code := range tools {
+			dest := filepath.Join(tmpDir, "tools", filepath.Base(filename))
+			if err := os.WriteFile(dest, []byte(code), 0o640); err != nil {
+				return "", fmt.Errorf("write tool %s: %w", filename, err)
+			}
+		}
+	}
+
+	prompt := buildCoderPrompt(agentMD, "{}", nil, nil, nil)
+
+	if r.coderSvc == nil {
+		return "", fmt.Errorf("no coder service configured")
+	}
+	result, err := r.coderSvc.WithDir(tmpDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").Generate(ctx, userID, prompt)
+	if err != nil {
+		return "", err
+	}
+
+	parsed := parseCoderOutput(result.Text)
+	if len(parsed.chatLines) == 0 {
+		return "", nil
+	}
+	return strings.Join(parsed.chatLines, "\n"), nil
+}
+
 // ─── Coder agent execution ────────────────────────────────────────────────────
 
 // coderRunContext tracks mutable state across the turns of one top-level run.
@@ -134,9 +180,12 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 
 	prompt := buildCoderPrompt(string(agentMD), string(stateRaw), allSkills, manifest.Skills, declaredContent)
 
+	// Pre-approve the tools agents need so the subprocess never blocks on
+	// interactive permission prompts (--setting-sources "" suppresses all settings).
+	coderSvc := r.coderSvc.WithAllowedTools("Bash,WebFetch,Read,Write,Edit")
+
 	// Inject user secrets as env vars when master password is available.
-	coderSvc := r.coderSvc
-	if input.MasterPw != "" && coderSvc != nil {
+	if input.MasterPw != "" {
 		if user, err := r.db.GetUserByID(input.UserID); err == nil {
 			svc := secrets.New(r.db, input.UserID, input.MasterPw, user.SecretsSalt)
 			if allSecrets, err := svc.GetAll(ctx); err == nil && len(allSecrets) > 0 {
@@ -306,32 +355,64 @@ type parsedOutput struct {
 }
 
 // parseCoderOutput scans the coder's text response for protocol markers.
+//
+// [CHAT] blocks may span multiple lines — continuation lines immediately
+// following the [CHAT] prefix line (no blank line between them) are joined
+// into a single message. A blank line or any protocol marker ends the block.
+//
+// [STATE] may appear as a multi-line block ([STATE]\n{...}\n[/STATE]) or
+// as a single inline line ([STATE]{...}[/STATE]).
 func parseCoderOutput(text string) parsedOutput {
 	var out parsedOutput
 	lines := strings.Split(text, "\n")
 
 	var stateAcc strings.Builder
 	inState := false
+	var chatAcc strings.Builder
+	inChat := false
+
+	flushChat := func() {
+		if inChat && chatAcc.Len() > 0 {
+			out.chatLines = append(out.chatLines, strings.TrimSpace(chatAcc.String()))
+			chatAcc.Reset()
+			inChat = false
+		}
+	}
+
+	parseStateJSON := func(raw string) {
+		var update map[string]interface{}
+		if err := json.Unmarshal([]byte(raw), &update); err != nil {
+			out.warnings = append(out.warnings,
+				fmt.Sprintf("state parse error: %s (json: %.200s)", err, raw))
+		} else {
+			out.stateUpdates = append(out.stateUpdates, update)
+		}
+	}
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
+		// ── [STATE] block opener ──────────────────────────────────────────────
 		if !inState && trimmed == "[STATE]" {
+			flushChat()
 			inState = true
 			stateAcc.Reset()
 			continue
 		}
 
+		// ── inline [STATE]{...}[/STATE] on a single line ─────────────────────
+		if !inState && strings.HasPrefix(trimmed, "[STATE]") && strings.HasSuffix(trimmed, "[/STATE]") {
+			flushChat()
+			jsonPart := strings.TrimSuffix(strings.TrimPrefix(trimmed, "[STATE]"), "[/STATE]")
+			parseStateJSON(jsonPart)
+			continue
+		}
+
+		// ── inside a [STATE] block ────────────────────────────────────────────
 		if inState {
 			if trimmed == "[/STATE]" {
 				inState = false
-				var update map[string]interface{}
-				if err := json.Unmarshal([]byte(stateAcc.String()), &update); err != nil {
-					out.warnings = append(out.warnings,
-						fmt.Sprintf("state parse error: %s (json: %.200s)", err, stateAcc.String()))
-				} else {
-					out.stateUpdates = append(out.stateUpdates, update)
-				}
+				parseStateJSON(stateAcc.String())
 				stateAcc.Reset()
 			} else {
 				stateAcc.WriteString(line)
@@ -340,12 +421,17 @@ func parseCoderOutput(text string) parsedOutput {
 			continue
 		}
 
+		// ── [CHAT] — start a new chat block ──────────────────────────────────
 		if strings.HasPrefix(trimmed, "[CHAT] ") {
-			out.chatLines = append(out.chatLines, strings.TrimPrefix(trimmed, "[CHAT] "))
+			flushChat()
+			inChat = true
+			chatAcc.WriteString(strings.TrimPrefix(trimmed, "[CHAT] "))
 			continue
 		}
 
+		// ── [CALL: <name>] ────────────────────────────────────────────────────
 		if strings.HasPrefix(trimmed, "[CALL: ") && strings.HasSuffix(trimmed, "]") {
+			flushChat()
 			name := strings.TrimSuffix(strings.TrimPrefix(trimmed, "[CALL: "), "]")
 			name = strings.TrimSpace(name)
 			if name != "" {
@@ -353,7 +439,19 @@ func parseCoderOutput(text string) parsedOutput {
 			}
 			continue
 		}
+
+		// ── chat continuation or end ──────────────────────────────────────────
+		if inChat {
+			if trimmed == "" {
+				flushChat()
+			} else {
+				chatAcc.WriteByte('\n')
+				chatAcc.WriteString(trimmed)
+			}
+		}
 	}
+
+	flushChat()
 
 	if inState {
 		out.warnings = append(out.warnings, "unclosed [STATE] block in coder output — discarded")
@@ -429,17 +527,30 @@ func buildCoderPrompt(claudeMD, stateJSON string, allSkills []*db.Skill, declare
 		}
 	}
 
-	sb.WriteString(`Run your scheduled task. Use the following output markers:
-- [CHAT] <text>        — send a message to the user
-- [STATE]...[/STATE]   — JSON block to merge into state.json (null value = delete key)
-- [CALL: <agent-name>] — invoke another agent synchronously
+	sb.WriteString(`Run your scheduled task. Use ONLY these output markers:
+
+[CHAT] First line of the message
+Any continuation lines immediately after (no blank line)
+are joined into the same message sent to the user.
+
+[STATE]
+{
+  "key": "value"
+}
+[/STATE]
+
+  Merges JSON into state.json. Use null to delete a key.
+  Can also be written inline: [STATE]{"key":"value"}[/STATE]
+
+[CALL: agent-name]   — invoke another agent synchronously
 
 CONSTRAINTS — this process runs non-interactively as a subprocess:
-- Use [CHAT] for all user output. Do NOT call Telegram APIs or any messaging service directly.
-- Secrets are injected as environment variables (e.g. os.environ['COINGECKO_API_KEY'] in Python). Do NOT hardcode credential values.
-- Use [STATE]...[/STATE] for persistence. Do NOT write arbitrary files to disk.
+- [CHAT] is the ONLY way to send messages. Do NOT call Telegram APIs or any messaging service directly.
+- Secrets are injected as environment variables (e.g. os.environ['API_KEY']). Do NOT hardcode credential values.
+- Use [STATE] for persistence. Do NOT write arbitrary files to disk.
 - Do NOT set up or modify cron jobs or external schedulers — this subprocess is invoked by the scheduler.
-- There is no interactive user present. Never prompt for input or request permissions.`)
+- There is no interactive user present. Never prompt for input or request permissions.
+- You MUST emit at least one [CHAT] line with the actual result so the user receives a message.`)
 
 	return sb.String()
 }

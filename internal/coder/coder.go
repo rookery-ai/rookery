@@ -44,6 +44,8 @@ type Coder struct {
 	sysClaudeDir string            // operator's ~/.claude — for credential copying
 	extraEnv     map[string]string // additional env vars merged into the subprocess environment
 	noTools      bool              // when true, passes --allowedTools "" to disable all tools
+	workDir      string            // when non-empty, overrides cmd.Dir (default: per-user home)
+	allowedTools string            // when non-empty, passed as --allowedTools <value>
 }
 
 // WithExtraEnv returns a shallow copy of the Coder with additional environment variables
@@ -60,6 +62,25 @@ func (c *Coder) WithExtraEnv(env map[string]string) *Coder {
 func (c *Coder) WithNoTools() *Coder {
 	c2 := *c
 	c2.noTools = true
+	return &c2
+}
+
+// WithDir returns a shallow copy of the Coder that runs the subprocess with dir
+// as the working directory instead of the per-user home. HOME and CLAUDE_CONFIG_DIR
+// still point to the user's isolated home so credentials are accessible.
+func (c *Coder) WithDir(dir string) *Coder {
+	c2 := *c
+	c2.workDir = dir
+	return &c2
+}
+
+// WithAllowedTools returns a shallow copy of the Coder that passes
+// --allowedTools <tools> to the claude CLI. Use this when running with full
+// tools (not WithNoTools) so the subprocess doesn't block on permission prompts.
+// Example: c.WithAllowedTools("Bash,Write,Edit,Read")
+func (c *Coder) WithAllowedTools(tools string) *Coder {
+	c2 := *c
+	c2.allowedTools = tools
 	return &c2
 }
 
@@ -98,10 +119,11 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 	args := []string{"-p", prompt, "--output-format", "json"}
 	if c.isClaude() {
 		args = append(args, "--setting-sources", "")
-		if c.noTools {
-			// Disable all tools so the subprocess outputs plain text only.
-			// Used for design conversations and agent generation.
+		switch {
+		case c.noTools:
 			args = append(args, "--allowedTools", "")
+		case c.allowedTools != "":
+			args = append(args, "--allowedTools", c.allowedTools)
 		}
 	}
 
@@ -111,6 +133,9 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 	// coder is handled via CLAUDE_CONFIG_DIR, HOME override, and --setting-sources "".
 	cmd := exec.CommandContext(ctx, c.bin, args...)
 	cmd.Dir = userDir
+	if c.workDir != "" {
+		cmd.Dir = c.workDir
+	}
 	cmd.Env = c.buildEnv(userDir)
 
 	var stdout, stderr bytes.Buffer

@@ -104,6 +104,7 @@ Agent creation uses a single `agentdesigner.Flow` FSM shared between the Telegra
 **FSM states:**
 - `StateDescribing` — Telegram only: waiting for description after `/agent create <name>`
 - `StateDesigning` — free-form Q&A with the coder until user says "approve"
+- `StateVerifying` — test run shown to user; waiting for confirmation or change requests
 - `StateDone`
 
 **Web path:** `StartDesign(ctx, userID, agentName, firstMessage)` — creates session in `StateDesigning` directly, returns first coder response.
@@ -115,9 +116,11 @@ Agent creation uses a single `agentdesigner.Flow` FSM shared between the Telegra
 **Approval triggers** (exact match only — "yes"/"ok" do NOT trigger):
 `"approve"`, `"go ahead"`, `"build it"`, `"create it"`, `"/approve"`
 
-**On approval:** `runGeneration()` calls `coder.WithNoTools().Generate()` with full conversation history embedded as context. The coder outputs AGENT.md and optional `[TOOL: filename.py]...[/TOOL]` blocks as plain text. The flow parses the output, runs guardrails, saves via `AgentDesigner.SaveAgent()`, and auto-creates the schedule from `# Suggested schedule: <cron>` on the first line of AGENT.md.
+**On approval:** `runGeneration()` creates the agent directory on disk, then calls the coder **with full tools** (`WithDir(agentDir).WithAllowedTools("Bash,Write,Edit,Read")`). Claude Code writes AGENT.md and `tools/*.py` directly to disk, runs the scripts via Bash, fixes any errors, and outputs `[TEST_OUTPUT]...[/TEST_OUTPUT]` with the verified result. The flow reads AGENT.md back from disk, runs guardrails, stores content in `PendingAgentMD`/`PendingTools`, and moves to `StateVerifying` — showing the test output to the user.
 
-**`WithNoTools()`** is used for ALL design and generation calls so the coder outputs plain text and never attempts file writes or permission prompts.
+**`WithNoTools()`** is used for design conversation turns only. Generation uses full tools so Claude Code can actually write and execute the agent before showing results.
+
+**`StateVerifying`:** The user sees real test output and approves or requests changes. On approval → `finalizeAgent()` → `saveAndFinish()` saves `PendingAgentMD`/`PendingTools` via `SaveAgent()`. On change request → back to `StateDesigning`.
 
 **Auto-schedule:** If AGENT.md starts with `# Suggested schedule: */10 * * * *`, `parseSuggestedSchedule()` validates the cron expression and calls `db.UpsertAgentSchedule()` — the schedule is set immediately on agent creation.
 
@@ -139,9 +142,25 @@ type dbDesignStore interface {
 ### Agent output protocol (AGENT.md)
 
 The coder reads AGENT.md and uses these markers in its output:
-- `[CHAT] <text>` — sends a message to the user via the connected platform
-- `[STATE]...[/STATE]` — JSON block merged into `state.json` (null value = delete key)
-- `[CALL: <agent-name>]` — invoke another agent synchronously (max depth 3, cycle detection)
+
+- **`[CHAT]`** — sends a message to the user. Continuation lines immediately after (no blank line between them) are joined into the same message:
+  ```
+  [CHAT] BTC-USDT Price Update
+  Current price: $66,527.99
+  ```
+  A blank line or next protocol marker ends the block.
+
+- **`[STATE]...[/STATE]`** — JSON merged into `state.json` (null value = delete key). Supports both multi-line and inline forms:
+  ```
+  [STATE]
+  {"last_price": 66527.99}
+  [/STATE]
+  ```
+  or inline: `[STATE]{"last_price": 66527.99}[/STATE]`
+
+- **`[CALL: <agent-name>]`** — invoke another agent synchronously (max depth 3, cycle detection)
+
+`parseCoderOutput()` in `runner.go` handles all three forms. Multi-line `[CHAT]` and inline `[STATE]` were added after the original single-line-only implementation proved insufficient.
 
 ### Secret injection
 
@@ -157,12 +176,14 @@ The agent accesses secrets via `os.environ['SECRET_NAME']` in Python. Values are
 
 ### Coder tool isolation
 
-`internal/coder/coder.go` provides two modifiers:
+`internal/coder/coder.go` provides these modifiers (all return a shallow copy — original unchanged):
 
-- **`WithNoTools()`** — adds `--allowedTools ""` to the claude CLI args, disabling all file-write, bash, and edit tools. Used for design conversations and generation so claude outputs pure text without attempting file operations.
-- **`WithExtraEnv(env map[string]string)`** — merges additional env vars (e.g. decrypted secrets) into the subprocess environment. System overrides (`HOME`, `CLAUDE_CONFIG_DIR`) always take precedence.
+- **`WithNoTools()`** — adds `--allowedTools ""`, disabling all tools. Used for design conversation turns so claude outputs plain text.
+- **`WithAllowedTools(tools string)`** — adds `--allowedTools <tools>`, pre-approving specific tools. **Required** whenever `--setting-sources ""` is active (which suppresses all settings including tool allowlists) — without this, the subprocess blocks forever on interactive permission prompts in non-interactive mode. Generation uses `"Bash,Write,Edit,Read"`; agent runs use `"Bash,WebFetch,Read,Write,Edit"`.
+- **`WithDir(dir string)`** — overrides `cmd.Dir` for the subprocess CWD without changing `HOME`/`CLAUDE_CONFIG_DIR`. Used to run generation inside `agentDir` so Write/Edit calls land in the right place.
+- **`WithExtraEnv(env map[string]string)`** — merges additional env vars (e.g. decrypted secrets). System overrides (`HOME`, `CLAUDE_CONFIG_DIR`) always take precedence.
 
-Both return a shallow copy of `*Coder` — the original is unchanged.
+**Critical:** `--setting-sources ""` + no `--allowedTools` = subprocess hangs indefinitely. Always pair them.
 
 ### Guardrails
 
@@ -273,7 +294,8 @@ Build: **PASS**. `go vet`: **PASS**. Tests: **PASS** (`internal/agentdesigner`, 
 | `45f8cdc` | Docs — initial CLAUDE.md |
 | `f89cb2e` | UI overhaul, admin/user separation, coder profiles, SSE agent creation, NL reminders |
 | `b51e929` | Per-user coder isolation (CLAUDE_CONFIG_DIR, --setting-sources, credential copy) |
-| (current) | Unified conversational agent creation; no agent types; AGENT.md+tools/ layout; secret env injection; WithNoTools/WithExtraEnv; auto-schedule from conversation; platform-aware designer; skills UI |
+| `da6eb6a` | Unified conversational agent creation; no agent types; AGENT.md+tools/ layout; secret env injection; WithNoTools/WithExtraEnv; auto-schedule from conversation; platform-aware designer; skills UI |
+| (current) | StateVerifying + full-tools generation (write/run/fix before showing user); WithDir/WithAllowedTools on Coder; runner tool permissions fix; multi-line [CHAT] + inline [STATE] parser |
 
 ### Known gaps
 
