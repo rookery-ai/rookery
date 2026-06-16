@@ -42,7 +42,7 @@ func (s DesignState) String() string {
 	return "unknown"
 }
 
-// DesignSession holds all state for one in-progress agent creation.
+// DesignSession holds all state for one in-progress agent creation or edit.
 type DesignSession struct {
 	UserID             string
 	AgentID            string
@@ -53,6 +53,15 @@ type DesignSession struct {
 	ConnectedPlatforms []string         // e.g. ["telegram"] — loaded from platform_connections
 	CreatedAt          time.Time
 
+	// IsEdit distinguishes an edit-of-existing-agent session from a fresh create.
+	// AgentID is the *existing* agent's ID (not a freshly minted one) when true.
+	IsEdit bool
+
+	// ExistingAgentMD holds the live agent's AGENT.md, reconciled with the real DB
+	// schedule, as of session start. Used to seed the staging workspace during
+	// generation. Empty for create sessions.
+	ExistingAgentMD string
+
 	// Set after generation; cleared on finalize or when user requests changes.
 	PendingAgentMD string
 	PendingTools   map[string]string
@@ -62,6 +71,9 @@ type dbDesignStore interface {
 	ListSkills(userID string) ([]*db.Skill, error)
 	ListUserPlatformConnections(userID string) ([]*db.PlatformConnection, error)
 	UpsertAgentSchedule(s *db.AgentSchedule) error
+	GetAgent(id string) (*db.Agent, error)
+	GetScheduleForAgent(agentID string) (*db.AgentSchedule, error)
+	DeleteAgentSchedule(agentID string) error
 }
 
 // Flow manages per-user design sessions and drives the FSM.
@@ -144,6 +156,118 @@ func (f *Flow) StartDesign(ctx context.Context, userID, agentName, firstMessage 
 	f.mu.Unlock()
 
 	return f.callCoder(ctx, userID, firstMessage)
+}
+
+// StartEdit creates a new Telegram edit session for an existing agentID.
+// Ownership of agentID is assumed pre-checked by the caller (same pattern as the
+// other agent handlers, e.g. the Telegram /agent and web delete/run endpoints).
+// Returns the opening prompt summarizing current behavior and asking what to change.
+func (f *Flow) StartEdit(userID, agentID string) (string, error) {
+	f.mu.Lock()
+	if _, exists := f.sessions[userID]; exists {
+		f.mu.Unlock()
+		return "", fmt.Errorf("you already have an active design session; send /agent cancel to start over")
+	}
+	f.mu.Unlock()
+
+	agentName, reconciledMD, err := f.loadAgentForEdit(userID, agentID)
+	if err != nil {
+		return "", err
+	}
+
+	f.mu.Lock()
+	skills := f.loadSkillNames(userID)
+	platforms := f.loadConnectedPlatforms(userID)
+	f.sessions[userID] = &DesignSession{
+		UserID:             userID,
+		AgentID:            agentID,
+		AgentName:          agentName,
+		State:              StateDescribing,
+		Skills:             skills,
+		ConnectedPlatforms: platforms,
+		CreatedAt:          time.Now(),
+		IsEdit:             true,
+		ExistingAgentMD:    reconciledMD,
+	}
+	f.mu.Unlock()
+
+	return fmt.Sprintf(
+		"Editing agent \"%s\". Here's what it currently does:\n\n---\n%s\n---\n\nWhat would you like to change?",
+		agentName, codePreview(reconciledMD, 30),
+	), nil
+}
+
+// StartEditDesign is the web path for editing: creates a session already in
+// StateDesigning with the user's first change request and returns the coder's
+// first response. Mirrors StartDesign.
+func (f *Flow) StartEditDesign(ctx context.Context, userID, agentID, firstMessage string) (string, error) {
+	f.mu.Lock()
+	if _, exists := f.sessions[userID]; exists {
+		f.mu.Unlock()
+		return "", fmt.Errorf("design session already active; cancel it first")
+	}
+	f.mu.Unlock()
+
+	agentName, reconciledMD, err := f.loadAgentForEdit(userID, agentID)
+	if err != nil {
+		return "", err
+	}
+
+	f.mu.Lock()
+	skills := f.loadSkillNames(userID)
+	platforms := f.loadConnectedPlatforms(userID)
+	sess := &DesignSession{
+		UserID:             userID,
+		AgentID:            agentID,
+		AgentName:          agentName,
+		State:              StateDesigning,
+		Skills:             skills,
+		ConnectedPlatforms: platforms,
+		CreatedAt:          time.Now(),
+		IsEdit:             true,
+		ExistingAgentMD:    reconciledMD,
+	}
+	f.sessions[userID] = sess
+	f.mu.Unlock()
+
+	return f.callCoder(ctx, userID, firstMessage)
+}
+
+// loadAgentForEdit loads an existing agent's name and AGENT.md, reconciling the
+// AGENT.md's "# Suggested schedule:" first line with the real agent_schedules row
+// before returning it. The schedule UI writes the DB directly and never touches
+// AGENT.md, so the on-disk line can be stale; reconciling here makes AGENT.md the
+// single source of truth for the rest of the edit (both what the coder sees and what
+// finalize compares against).
+func (f *Flow) loadAgentForEdit(userID, agentID string) (agentName, reconciledMD string, err error) {
+	if f.db == nil {
+		return "", "", fmt.Errorf("no database configured")
+	}
+
+	agent, err := f.db.GetAgent(agentID)
+	if err != nil {
+		return "", "", fmt.Errorf("agent not found: %w", err)
+	}
+
+	raw, err := os.ReadFile(AgentDescPath(f.designer.agentsDir, userID, agentID))
+	if err != nil {
+		return "", "", fmt.Errorf("read AGENT.md: %w", err)
+	}
+	agentMD := strings.TrimSpace(string(raw))
+
+	scheduleLine := "# Suggested schedule: none"
+	if sched, schedErr := f.db.GetScheduleForAgent(agentID); schedErr == nil && sched != nil && sched.Enabled {
+		scheduleLine = "# Suggested schedule: " + sched.CronExpr
+	}
+
+	lines := strings.SplitN(agentMD, "\n", 2)
+	if len(lines) == 2 && strings.HasPrefix(strings.TrimSpace(lines[0]), "# Suggested schedule:") {
+		agentMD = scheduleLine + "\n" + lines[1]
+	} else {
+		agentMD = scheduleLine + "\n" + agentMD
+	}
+
+	return agent.Name, agentMD, nil
 }
 
 // Step processes one message and advances the FSM.
@@ -269,9 +393,17 @@ func (f *Flow) callCoder(ctx context.Context, userID, userMessage string) (strin
 
 func (f *Flow) buildSystemPrompt(sess *DesignSession) string {
 	var sb strings.Builder
-	sb.WriteString("You are a friendly agent design assistant helping build an autonomous AI agent called \"")
-	sb.WriteString(sess.AgentName)
-	sb.WriteString("\".\n\n")
+	if sess.IsEdit {
+		sb.WriteString("You are a friendly agent design assistant helping the user EDIT an existing autonomous AI agent called \"")
+		sb.WriteString(sess.AgentName)
+		sb.WriteString("\".\n\nHere is its current AGENT.md:\n```\n")
+		sb.WriteString(sess.ExistingAgentMD)
+		sb.WriteString("\n```\n\nFind out exactly what the user wants to change, then propose an updated plan (same format as a new build: behavior, secrets, schedule). Only ask about parts that are actually changing — don't re-litigate things the user didn't mention.\n\n")
+	} else {
+		sb.WriteString("You are a friendly agent design assistant helping build an autonomous AI agent called \"")
+		sb.WriteString(sess.AgentName)
+		sb.WriteString("\".\n\n")
+	}
 
 	// Connected platform context.
 	if len(sess.ConnectedPlatforms) > 0 {
@@ -343,6 +475,8 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 	coderSvc := f.coderFor(userID)
 	agentIDSnap := sess.AgentID
 	agentNameSnap := sess.AgentName
+	isEdit := sess.IsEdit
+	existingAgentMD := sess.ExistingAgentMD
 	historySnap := make([]db.ChatMessage, len(sess.History))
 	copy(historySnap, sess.History)
 	f.mu.Unlock()
@@ -351,54 +485,79 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 		return "", false, "", fmt.Errorf("no coder configured for this user")
 	}
 
-	// Create the agent directory structure on disk before the coder runs so it
-	// has a clean workspace to write into.
-	agentDir := filepath.Join(f.designer.agentsDir, userID, agentIDSnap)
-	for _, sub := range []string{".", "tools", "logs"} {
-		if err := os.MkdirAll(filepath.Join(agentDir, sub), 0o750); err != nil {
-			return "", false, "", fmt.Errorf("create agent dir: %w", err)
+	var workDir, prompt string
+	var cleanupOnFail, cleanupOnSuccess func()
+
+	if isEdit {
+		// Edit mode: never let the coder touch the live agent dir before approval —
+		// it may be scheduled and running unattended. Generate against a sibling
+		// staging copy instead; the live dir is only overwritten in finalizeAgent.
+		liveDir := filepath.Join(f.designer.agentsDir, userID, agentIDSnap)
+		stagingDir := liveDir + "-edit-staging"
+		if err := copyAgentWorkspace(liveDir, stagingDir, existingAgentMD); err != nil {
+			return "", false, "", fmt.Errorf("prepare staging workspace: %w", err)
 		}
-	}
-	if err := os.WriteFile(filepath.Join(agentDir, "state.json"), []byte("{}"), 0o640); err != nil {
-		return "", false, "", fmt.Errorf("write state.json: %w", err)
+		workDir = stagingDir
+		prompt = buildEditImplementationPrompt(agentNameSnap, historySnap)
+		remove := func() { _ = os.RemoveAll(stagingDir) }
+		cleanupOnFail, cleanupOnSuccess = remove, remove
+	} else {
+		// Create the agent directory structure on disk before the coder runs so it
+		// has a clean workspace to write into.
+		agentDir := filepath.Join(f.designer.agentsDir, userID, agentIDSnap)
+		for _, sub := range []string{".", "tools", "logs"} {
+			if err := os.MkdirAll(filepath.Join(agentDir, sub), 0o750); err != nil {
+				return "", false, "", fmt.Errorf("create agent dir: %w", err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(agentDir, "state.json"), []byte("{}"), 0o640); err != nil {
+			return "", false, "", fmt.Errorf("write state.json: %w", err)
+		}
+		workDir = agentDir
+		prompt = buildImplementationPrompt(agentNameSnap, historySnap)
+		cleanupOnFail = func() { _ = os.RemoveAll(agentDir) }
+		cleanupOnSuccess = func() {} // the dir IS the pending agent; keep it until finalize/iterate
 	}
 
 	// Run the coder WITH full tools so it can write files, execute them, debug
 	// errors, and confirm the implementation works — all in one session.
 	// WithAllowedTools pre-approves the specific tools needed so the subprocess
 	// never blocks on interactive permission prompts.
-	prompt := buildImplementationPrompt(agentNameSnap, historySnap)
-	result, err := coderSvc.WithDir(agentDir).WithAllowedTools("Bash,Write,Edit,Read").Generate(ctx, userID, prompt)
+	result, err := coderSvc.WithDir(workDir).WithAllowedTools("Bash,Write,Edit,Read").Generate(ctx, userID, prompt)
 	if err != nil {
-		_ = os.RemoveAll(agentDir)
+		cleanupOnFail()
 		return "", false, "", fmt.Errorf("coder: %w", err)
 	}
 
 	// Ground truth: read what the coder actually wrote to disk.
-	agentMDBytes, err := os.ReadFile(filepath.Join(agentDir, "AGENT.md"))
+	agentMDBytes, err := os.ReadFile(filepath.Join(workDir, "AGENT.md"))
 	if err != nil {
-		_ = os.RemoveAll(agentDir)
+		cleanupOnFail()
 		return "The coder didn't create AGENT.md. Tell me what to change and I'll try again.", false, "", nil
 	}
 	agentMD := strings.TrimSpace(string(agentMDBytes))
 
-	tools, err := readToolsFromDisk(agentDir)
+	tools, err := readToolsFromDisk(workDir)
 	if err != nil {
-		_ = os.RemoveAll(agentDir)
+		cleanupOnFail()
 		return "", false, "", fmt.Errorf("read tools: %w", err)
 	}
 
 	// Guardrails on the actual content the coder wrote.
 	if err := CheckEthics(agentMD, ""); err != nil {
-		_ = os.RemoveAll(agentDir)
+		cleanupOnFail()
 		return fmt.Sprintf("Agent failed safety checks: %s\n\nPlease rephrase.", err.Error()), false, "", nil
 	}
 	for filename, code := range tools {
 		if err := RunFullGuardrails(code, ""); err != nil {
-			_ = os.RemoveAll(agentDir)
+			cleanupOnFail()
 			return fmt.Sprintf("Tool %s failed safety checks: %s\n\nPlease rephrase.", filename, err.Error()), false, "", nil
 		}
 	}
+
+	// Content is captured in memory now — discard the workspace (staging dir for
+	// edits; create mode keeps its pending dir on disk until finalize/iterate).
+	cleanupOnSuccess()
 
 	// Store verified content in session and wait for user confirmation.
 	testOut := parseTestOutput(result.Text)
@@ -418,6 +577,53 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 		"Here's what a test run produces:\n\n---\n%s\n---\n\nDoes this look right? Type **approve** to save the agent, or tell me what to change.",
 		testOut,
 	), false, "", nil
+}
+
+// copyAgentWorkspace creates a fresh staging directory containing the editable
+// surface of a live agent: AGENT.md (the reconciled version, not the raw on-disk
+// one), state.json, and tools/*.py. Used so an edit's test generation never touches
+// the live agent. liveDir's logs/ and agent.json are intentionally not copied —
+// the coder doesn't need them to make or test changes.
+func copyAgentWorkspace(liveDir, stagingDir, reconciledAgentMD string) error {
+	if err := os.RemoveAll(stagingDir); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(stagingDir, "tools"), 0o750); err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(filepath.Join(stagingDir, "AGENT.md"), []byte(reconciledAgentMD), 0o640); err != nil {
+		return err
+	}
+
+	state, err := os.ReadFile(filepath.Join(liveDir, "state.json"))
+	if err != nil {
+		state = []byte("{}")
+	}
+	if err := os.WriteFile(filepath.Join(stagingDir, "state.json"), state, 0o640); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(filepath.Join(liveDir, "tools"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".py") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(liveDir, "tools", e.Name()))
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(stagingDir, "tools", e.Name()), data, 0o640); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // buildImplementationPrompt creates the prompt that tells Claude Code to write
@@ -486,6 +692,80 @@ HARD CONSTRAINTS — never violate:
 	return sb.String()
 }
 
+// buildEditImplementationPrompt creates the prompt that tells Claude Code to read
+// the existing agent files in the current directory (a staging copy), apply the
+// requested changes, test them, fix errors, and report the verified output.
+func buildEditImplementationPrompt(agentName string, history []db.ChatMessage) string {
+	var sb strings.Builder
+	sb.WriteString("You are EDITING an existing AI agent called \"")
+	sb.WriteString(agentName)
+	sb.WriteString("\". The current directory contains its existing AGENT.md and tools/*.py — this is a safe working copy, not the live agent.\n\n")
+	sb.WriteString("EDIT CONVERSATION (what the user wants changed):\n")
+	for _, m := range history {
+		if m.Role == "user" {
+			sb.WriteString("User: ")
+		} else {
+			sb.WriteString("Designer: ")
+		}
+		sb.WriteString(m.Content)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString(`
+YOUR TASK — follow these steps in order:
+
+STEP 0 — READ THE EXISTING FILES.
+
+Read AGENT.md and every file in tools/ in the current directory to understand what
+the agent currently does before changing anything.
+
+STEP 1 — APPLY THE REQUESTED CHANGES.
+
+Edit AGENT.md and tools/*.py to implement what the user asked for in the conversation
+above. Keep everything that wasn't asked to change. Delete any tool script that's no
+longer needed as a result of the change.
+
+- Line 1 of AGENT.md MUST remain exactly: # Suggested schedule: <5-part cron expression or "none">
+  (update it only if the user asked to change how often the agent runs)
+- Optional secrets block (omit if no secrets needed):
+  # Required secrets:
+  # - SECRET_NAME: plain-language description
+- Output protocol unchanged:
+    [CHAT] <text>        — send a message to the user (the ONLY way to send output)
+    [STATE]...[/STATE]   — JSON block merged into state.json
+- Reference Python helpers as: python3 tools/filename.py
+- Allowed in tools/*.py: os, json, re, datetime, requests
+- Forbidden: subprocess, eval, exec, socket, open() for writing files
+- Read secrets via: os.environ.get('SECRET_NAME', '')
+
+Do NOT create or modify state.json directly — it already exists and reflects the
+agent's real persisted state; let the output protocol's [STATE] block manage it.
+
+STEP 2 — TEST THE IMPLEMENTATION.
+
+Run each Python script using Bash and confirm it produces real, non-empty output.
+If a script errors or returns None/empty, fix it and re-run until it works.
+
+SECRETS: If a required secret is missing from the environment, substitute a
+realistic mock value FOR THIS TEST ONLY (e.g. use a public test endpoint or
+hard-code an example response). Do NOT abort — show the output format.
+
+STEP 3 — REPORT THE VERIFIED RESULT.
+
+Once everything works, end your final response with:
+[TEST_OUTPUT]
+<paste the actual terminal output from your test run>
+[/TEST_OUTPUT]
+
+HARD CONSTRAINTS — never violate:
+- [CHAT] is the ONLY output channel. No Telegram API, no requests to messaging services.
+- Never hardcode real credentials — always os.environ.get('NAME', '').
+- Never create files outside the current directory.
+- Never set up cron jobs or external schedulers.
+- No non-standard Python libraries (requests is fine; pandas, numpy, etc. are not).
+`)
+	return sb.String()
+}
+
 // parseTestOutput extracts content between [TEST_OUTPUT] and [/TEST_OUTPUT].
 func parseTestOutput(text string) string {
 	start := strings.Index(text, "[TEST_OUTPUT]")
@@ -532,12 +812,16 @@ func (f *Flow) finalizeAgent(ctx context.Context, userID string) (string, bool, 
 	sess := f.sessions[userID]
 	agentMD := sess.PendingAgentMD
 	tools := sess.PendingTools
+	isEdit := sess.IsEdit
 	f.mu.Unlock()
 
+	if isEdit {
+		return f.updateAndFinish(ctx, userID, agentMD, tools)
+	}
 	return f.saveAndFinish(ctx, userID, agentMD, tools)
 }
 
-// saveAndFinish writes the agent to disk/DB and terminates the session.
+// saveAndFinish writes a brand-new agent to disk/DB and terminates the session.
 func (f *Flow) saveAndFinish(ctx context.Context, userID, agentMD string, tools map[string]string) (string, bool, string, error) {
 	f.mu.Lock()
 	sess := f.sessions[userID]
@@ -579,6 +863,81 @@ func (f *Flow) saveAndFinish(ctx context.Context, userID, agentMD string, tools 
 		"Agent \"%s\" created!%s",
 		agentNameSnap, scheduleMsg,
 	), true, agentIDSnap, nil
+}
+
+// updateAndFinish overwrites an existing agent's files/DB row with the edited
+// content and terminates the session. The schedule line in agentMD was reconciled
+// with the real DB schedule at edit-session start (loadAgentForEdit), so it is now
+// the authoritative source of truth: a valid cron upserts (reusing the existing
+// schedule row's ID — never minting a new one, since agent_id has no unique
+// constraint and a fresh ID would create a duplicate, double-firing schedule), and
+// "none"/invalid where a schedule previously existed removes it.
+func (f *Flow) updateAndFinish(ctx context.Context, userID, agentMD string, tools map[string]string) (string, bool, string, error) {
+	f.mu.Lock()
+	sess := f.sessions[userID]
+	agentIDSnap := sess.AgentID
+	agentNameSnap := sess.AgentName
+	skillsSnap := sess.Skills
+	f.mu.Unlock()
+
+	requiredSecrets := parseRequiredSecrets(agentMD)
+	description := extractDescription(agentMD, agentNameSnap)
+
+	if err := f.designer.UpdateAgent(userID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap, requiredSecrets); err != nil {
+		return "", false, "", fmt.Errorf("update agent: %w", err)
+	}
+
+	scheduleMsg := reconcileScheduleOnSave(f.db, userID, agentIDSnap, agentMD)
+
+	f.mu.Lock()
+	delete(f.sessions, userID)
+	f.mu.Unlock()
+
+	return fmt.Sprintf(
+		"Agent \"%s\" updated!%s",
+		agentNameSnap, scheduleMsg,
+	), true, agentIDSnap, nil
+}
+
+// reconcileScheduleOnSave applies agentMD's "# Suggested schedule:" line to the
+// agent_schedules table on an edit save, returning a short human-readable suffix
+// describing what happened (or "" if nothing changed). It always reuses an existing
+// schedule row's ID on upsert — agent_id has no unique constraint, so minting a new
+// ID here would insert a duplicate row and fire the agent twice per tick — and
+// deletes the row outright when the (now-reconciled) line says "none"/invalid and a
+// schedule previously existed.
+func reconcileScheduleOnSave(database dbDesignStore, userID, agentID, agentMD string) string {
+	if database == nil {
+		return ""
+	}
+	existing, _ := database.GetScheduleForAgent(agentID)
+	cronExpr := parseSuggestedSchedule(agentMD)
+	if cronExpr != "" {
+		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+		sched, err := parser.Parse(cronExpr)
+		if err != nil {
+			return ""
+		}
+		nextRun := sched.Next(time.Now())
+		schedID := uuid.New().String()
+		if existing != nil {
+			schedID = existing.ID
+		}
+		_ = database.UpsertAgentSchedule(&db.AgentSchedule{
+			ID:        schedID,
+			AgentID:   agentID,
+			UserID:    userID,
+			CronExpr:  cronExpr,
+			NextRunAt: &nextRun,
+			Enabled:   true,
+		})
+		return fmt.Sprintf(" Schedule set: %s.", cronExpr)
+	}
+	if existing != nil {
+		_ = database.DeleteAgentSchedule(agentID)
+		return " Schedule removed."
+	}
+	return ""
 }
 
 // parseSuggestedSchedule reads the first line of AGENT.md for "# Suggested schedule: <cron>".

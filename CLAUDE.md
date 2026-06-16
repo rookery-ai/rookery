@@ -130,6 +130,9 @@ type dbDesignStore interface {
     ListSkills(userID string) ([]*db.Skill, error)
     ListUserPlatformConnections(userID string) ([]*db.PlatformConnection, error)
     UpsertAgentSchedule(s *db.AgentSchedule) error
+    GetAgent(id string) (*db.Agent, error)
+    GetScheduleForAgent(agentID string) (*db.AgentSchedule, error)
+    DeleteAgentSchedule(agentID string) error
 }
 ```
 
@@ -138,6 +141,25 @@ type dbDesignStore interface {
 - Secrets guidance — tell user to add to Secrets store; never paste in chat; reference as `os.environ['NAME']`
 - Scheduling guidance — detect frequency from conversation; propose cron; auto-set on creation
 - Non-technical user style — explain API keys and cron in plain language; one/two questions per turn
+
+### Conversational agent editing
+
+Editing reuses the same `Flow` FSM as creation via `DesignSession.IsEdit` — no parallel "EditFlow". Entry points mirror the create path:
+
+- **Telegram:** `/agent edit <name>` → `Flow.StartEdit(userID, agentID)` → `StateDescribing`.
+- **Web:** `GET /dashboard/agents/:id/edit` (chat UI) → `POST /dashboard/agents/:id/edit/start` → `Flow.StartEditDesign(ctx, userID, agentID, firstMessage)` → `StateDesigning` directly. Continuation reuses the existing generic `POST /dashboard/agents/design` stepper unchanged (it only checks `req.Name` when no session exists yet) and the existing `POST /dashboard/agents/design/cancel`.
+
+Both loaders go through `loadAgentForEdit(userID, agentID)`, which reads the live `AGENT.md` and then **reconciles its `# Suggested schedule:` first line against the real `agent_schedules` row** before the coder ever sees it. This matters because the web schedule-editor form (`handleSaveSchedule`) writes the DB directly and never touches `AGENT.md` — the two can drift. After reconciliation, `AGENT.md` is the single source of truth for the rest of the edit conversation and for finalize.
+
+**Generation never touches the live agent dir before approval** (it may be scheduled and running unattended). `runGeneration` branches on `IsEdit`:
+- Create (unchanged): writes directly into the not-yet-saved `agentDir`.
+- Edit: `copyAgentWorkspace()` copies `AGENT.md` (the reconciled version), `state.json`, and `tools/*.py` into a sibling staging dir (`<agentID>-edit-staging`); the coder runs there with `buildEditImplementationPrompt()` (tells it to `Read` the existing files first, then edit). Content is read back from staging into `PendingAgentMD`/`PendingTools`, and the staging dir is `RemoveAll`'d — on both success and failure — before the response ever reaches the user.
+
+**On approval**, `finalizeAgent` branches: create calls `saveAndFinish()` (`AgentDesigner.SaveAgent` → `db.CreateAgent`, INSERT); edit calls `updateAndFinish()` (`AgentDesigner.UpdateAgent` → `db.UpdateAgentDescription`, UPDATE — calling `CreateAgent` again would violate the PK/`UNIQUE(user_id,name)` constraint). Schedule changes on edit go through `reconcileScheduleOnSave()`, which **always reuses the existing schedule row's ID** on upsert (there's no unique constraint on `agent_id`, so a fresh `uuid.New()` would insert a duplicate row and fire the agent twice per tick) and deletes the row outright if the line resolves to "none"/invalid where one existed.
+
+`AgentDesigner.SaveAgent` and `UpdateAgent` both delegate to a shared `writeAgentContent()`: it wipes and fully rewrites `tools/` from the incoming map (so an edit that removes a script actually deletes the file, not just stops referencing it), writes `state.json` only if missing (never clobbers a live agent's persisted state), and preserves the manifest's original `CreatedAt` across edits by loading the existing `agent.json` first.
+
+Unit-tested in `internal/agentdesigner/edit_test.go` against a real migrated SQLite DB: schedule-drift reconciliation, the duplicate-schedule-row/double-fire guard, schedule deletion on "none", `state.json`/`CreatedAt` preservation, stale-tool wipe, and — the core safety property — `copyAgentWorkspace` proven to leave the live agent dir byte-for-byte untouched. The coder subprocess round-trip itself (real edit → `[TEST_OUTPUT]` → approve/reject) is exercised manually, not by an automated test.
 
 ### Agent output protocol (AGENT.md)
 
@@ -244,6 +266,8 @@ Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`,
 /dashboard/agents/design            # POST JSON API: drives design FSM turn-by-turn
 /dashboard/agents/design/cancel     # POST: cancel active design session
 /dashboard/agents/:id               # detail: AGENT.md editor, state, logs, schedule, skills
+/dashboard/agents/:id/edit          # conversational agent editing (chat UI)
+/dashboard/agents/:id/edit/start    # POST JSON API: starts an edit design session
 /dashboard/agents/:id/delete
 /dashboard/agents/:id/run
 /dashboard/agents/:id/schedule
@@ -289,6 +313,8 @@ The `designFlow` is constructed with a resolver `func(userID string) *coder.Code
 
 Build: **PASS**. `go vet`: **PASS**. Tests: **PASS** (`internal/agentdesigner`, `internal/secrets`).
 
+Manual web round-trip and `/agent edit` on Telegram for the edit flow below have not been exercised end-to-end with a real coder subprocess in this environment — the schedule/state/staging-isolation logic around it is unit-tested, the coder interaction itself is not.
+
 ### Commit history
 
 | Commit | Phase |
@@ -307,11 +333,12 @@ Build: **PASS**. `go vet`: **PASS**. Tests: **PASS** (`internal/agentdesigner`, 
 | `b51e929` | Per-user coder isolation (CLAUDE_CONFIG_DIR, --setting-sources, credential copy) |
 | `da6eb6a` | Unified conversational agent creation; no agent types; AGENT.md+tools/ layout; secret env injection; WithNoTools/WithExtraEnv; auto-schedule from conversation; platform-aware designer; skills UI |
 | `12f0461` | StateVerifying + full-tools generation (write/run/fix before showing user); WithDir/WithAllowedTools on Coder; runner tool permissions fix; multi-line [CHAT] + inline [STATE] parser |
-| (current) | runCoderAgent runs inside agentDir (was the shared per-user home — caused cross-agent file contamination); manual "Run Now" decrypts stored master password instead of a non-existent form field; coder.ErrUsageLimit detection + coder-agnostic friendly error messages sent to the user on every run failure |
+| `92d37be` | runCoderAgent runs inside agentDir (was the shared per-user home — caused cross-agent file contamination); manual "Run Now" decrypts stored master password instead of a non-existent form field; coder.ErrUsageLimit detection + coder-agnostic friendly error messages sent to the user on every run failure |
+| (current) | Conversational agent editing (Telegram `/agent edit` + web Edit button), reusing the create FSM via `DesignSession.IsEdit`; schedule-line reconciliation against the real `agent_schedules` row; edit generation runs in a staging dir copy so the live agent is never touched before approval; `AgentDesigner.UpdateAgent`/`db.UpdateAgentDescription` for the UPDATE-not-INSERT save path; `reconcileScheduleOnSave` reuses the existing schedule row's ID to avoid duplicate/double-firing schedules |
 
 ### Known gaps
 
-- **Tests** — only `internal/agentdesigner` and `internal/secrets` have test files; no integration or e2e coverage
+- **Tests** — only `internal/agentdesigner` and `internal/secrets` have test files; no integration or e2e coverage. The agent-editing logic is unit-tested around the coder boundary (schedule reconciliation, staging-dir isolation, file invariants) but the coder subprocess round-trip itself (real edit → test → approve/reject) has no automated test
 - **Discord adapter** — in the original plan; not implemented
 - **`/remind` list/delete via Telegram** — only create is wired; no list or cancel command
 - **`/memory` Telegram command** — memory store exists but no `/memory` chat command in Router

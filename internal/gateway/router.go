@@ -180,14 +180,36 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 		}
 		send(response)
 
+	case "edit":
+		if r.designFlow == nil {
+			send("Agent editing is not yet available\\.")
+			return nil
+		}
+		name := strings.TrimSpace(rest)
+		if name == "" {
+			send("Usage: /agent edit \\<name\\>")
+			return nil
+		}
+		agent, err := r.db.GetAgentByName(msg.UserID, name)
+		if err != nil {
+			send("Agent `" + escapeMarkdown(name) + "` not found\\.")
+			return nil
+		}
+		response, err := r.designFlow.StartEdit(msg.UserID, agent.ID)
+		if err != nil {
+			send(escapeMarkdown(err.Error()))
+			return nil
+		}
+		send(response)
+
 	case "cancel":
 		if r.designFlow != nil {
 			r.designFlow.Cancel(msg.UserID)
 		}
-		send("Agent creation cancelled\\.")
+		send("Agent design session cancelled\\.")
 
 	default:
-		send("Usage: /agent list · /agent create \\<name\\> · /agent cancel")
+		send("Usage: /agent list · /agent create \\<name\\> · /agent edit \\<name\\> · /agent cancel")
 	}
 	return nil
 }
@@ -716,7 +738,8 @@ func helpText() string {
 
 /agent list — list your agents
 /agent create \<name\> — build a new agent with AI wizard
-/agent cancel — cancel active agent creation
+/agent edit \<name\> — change an existing agent with AI wizard
+/agent cancel — cancel active agent creation or edit
 /run \<name\> — run an agent
 /secret list — list stored secret names
 /secret show \<name\> — reveal a secret value \(requires master password\)

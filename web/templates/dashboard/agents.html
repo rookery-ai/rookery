@@ -30,7 +30,10 @@
         </p>
         <p class="text-xs text-base-content/30">Created {{.CreatedAt.Format "Jan 2, 2006"}}</p>
         <div class="card-actions justify-between items-center mt-1">
-          <a href="/dashboard/agents/{{.ID}}" class="btn btn-ghost btn-sm">Details</a>
+          <div class="flex gap-1">
+            <a href="/dashboard/agents/{{.ID}}" class="btn btn-ghost btn-sm">Details</a>
+            <a href="/dashboard/agents/{{.ID}}/edit" class="btn btn-ghost btn-sm">Edit</a>
+          </div>
           <form method="POST" action="/dashboard/agents/{{.ID}}/run">
             <button type="submit" class="btn btn-primary btn-sm gap-1">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>

@@ -91,14 +91,27 @@ func (s *Server) handleDesignChat(c echo.Context) error {
 		})
 	}
 
-	// Existing session: step the FSM.
+	// Existing session: step the FSM. Capture whether this is an edit session (and
+	// its name, for the audit log) *before* stepping — Step deletes the session
+	// from memory once isDone, so sess fields would no longer be readable afterwards.
+	sess := s.designFlow.GetSession(u.ID)
+	wasEdit := sess != nil && sess.IsEdit
+	auditName := req.Name
+	if sess != nil && sess.AgentName != "" {
+		auditName = sess.AgentName
+	}
+
 	response, isDone, agentID, err := s.designFlow.Step(ctx, u.ID, req.Message)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
 	if isDone {
-		s.audit.Log(u.ID, "create_agent", "agent:"+agentID, req.Name, c.RealIP())
+		action := "create_agent"
+		if wasEdit {
+			action = "edit_agent"
+		}
+		s.audit.Log(u.ID, action, "agent:"+agentID, auditName, c.RealIP())
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"response": response,
 			"done":     true,
@@ -120,6 +133,72 @@ func (s *Server) handleCancelDesign(c echo.Context) error {
 		s.designFlow.Cancel(u.ID)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "cancelled"})
+}
+
+// showEditAgent renders the conversational edit UI for an existing agent.
+// GET /dashboard/agents/:id/edit
+func (s *Server) showEditAgent(c echo.Context) error {
+	u := c.Get("user").(*db.User)
+	id := c.Param("id")
+
+	agent, err := s.db.GetAgent(id)
+	if err != nil || agent.UserID != u.ID {
+		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
+	}
+
+	var agentMD string
+	if dir := s.agentsDir(); dir != "" {
+		if raw, err := os.ReadFile(agentdesigner.AgentDescPath(dir, u.ID, id)); err == nil {
+			agentMD = string(raw)
+		}
+	}
+
+	return c.Render(http.StatusOK, "dashboard/agent_edit.html", &agentDetailData{
+		pageData: s.page(c, "Edit Agent: "+agent.Name),
+		Agent:    agent,
+		AgentMD:  agentMD,
+	})
+}
+
+// handleStartEditDesign starts a new edit session for an existing agent and
+// returns the coder's first response. Continuation reuses handleDesignChat /
+// handleCancelDesign — the session, once created, is keyed by userID like any
+// other design session.
+// POST /dashboard/agents/:id/edit/start
+// Body: {"message": "..."}
+func (s *Server) handleStartEditDesign(c echo.Context) error {
+	u := c.Get("user").(*db.User)
+	id := c.Param("id")
+
+	agent, err := s.db.GetAgent(id)
+	if err != nil || agent.UserID != u.ID {
+		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
+	}
+
+	var req struct {
+		Message string `json:"message"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request"})
+	}
+	req.Message = strings.TrimSpace(req.Message)
+	if req.Message == "" {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "message is required"})
+	}
+
+	if s.designFlow == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent designer not configured"})
+	}
+
+	response, err := s.designFlow.StartEditDesign(c.Request().Context(), u.ID, id, req.Message)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"response": response,
+		"done":     false,
+	})
 }
 
 func (s *Server) showAgentDetail(c echo.Context) error {

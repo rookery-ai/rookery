@@ -229,6 +229,8 @@ func (s *Server) setupRoutes() {
 	dash.POST("/agents/design", s.handleDesignChat)
 	dash.POST("/agents/design/cancel", s.handleCancelDesign)
 	dash.GET("/agents/:id", s.showAgentDetail)
+	dash.GET("/agents/:id/edit", s.showEditAgent)
+	dash.POST("/agents/:id/edit/start", s.handleStartEditDesign)
 	dash.POST("/agents/:id/delete", s.handleDeleteAgent)
 	dash.POST("/agents/:id/run", s.handleRunAgent)
 	dash.POST("/agents/:id/schedule", s.handleSaveSchedule)

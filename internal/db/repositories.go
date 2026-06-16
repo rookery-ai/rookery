@@ -350,6 +350,13 @@ func (d *DB) ListAgents(userID string) ([]*Agent, error) {
 	return agents, rows.Err()
 }
 
+// UpdateAgentDescription updates an agent's description (used when an edit session
+// regenerates AGENT.md). Name/ID are immutable in the edit flow.
+func (d *DB) UpdateAgentDescription(id, description string) error {
+	_, err := d.Exec(`UPDATE agents SET description=?, updated_at=datetime('now') WHERE id=?`, description, id)
+	return err
+}
+
 func (d *DB) SetAgentActive(id string, active bool) error {
 	_, err := d.Exec(`UPDATE agents SET active=?, updated_at=datetime('now') WHERE id=?`, boolToInt(active), id)
 	return err

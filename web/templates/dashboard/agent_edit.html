@@ -1,0 +1,230 @@
+{{template "head" .}}
+{{template "navbar" .}}
+
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+  {{template "alert" .}}
+
+  <div class="flex items-center gap-2 mb-6">
+    <a href="/dashboard/agents/{{.Agent.ID}}" class="btn btn-ghost btn-sm gap-1">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      {{.Agent.Name}}
+    </a>
+    <span class="text-base-content/30">/</span>
+    <h1 class="text-xl font-bold">Edit Agent</h1>
+  </div>
+
+  <!-- Phase 1: describe the change -->
+  <div id="phase-start" class="card bg-base-100 shadow-sm border border-base-300">
+    <div class="card-body">
+      <h2 class="card-title text-lg">What would you like to change?</h2>
+      <p class="text-base-content/50 text-sm">Describe the change in plain language. The AI designer will ask clarifying questions, then show you a test run before anything is saved — the live agent isn't touched until you approve.</p>
+      <div class="space-y-4 mt-2">
+        <div class="form-control">
+          <textarea id="agent-change-input" class="textarea textarea-bordered" rows="3"
+            placeholder="e.g. Also alert me when the price drops below $90k, and check every 5 minutes instead of 10"></textarea>
+        </div>
+        {{if .AgentMD}}
+        <details class="text-xs">
+          <summary class="cursor-pointer text-base-content/40 hover:text-base-content/70">Current AGENT.md</summary>
+          <pre class="mt-2 p-3 rounded-lg bg-base-200 text-xs whitespace-pre-wrap overflow-x-auto">{{.AgentMD}}</pre>
+        </details>
+        {{end}}
+        <div id="start-error" class="hidden alert alert-error text-sm py-2"></div>
+        <div class="flex justify-end gap-2">
+          <a href="/dashboard/agents/{{.Agent.ID}}" class="btn btn-ghost btn-sm">Cancel</a>
+          <button id="start-btn" onclick="startEdit()" class="btn btn-primary gap-2">
+            Start editing
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 2: Chat interface -->
+  <div id="phase-chat" class="hidden space-y-4">
+    <div class="card bg-base-100 shadow-sm border border-base-300">
+      <div class="card-body p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-semibold text-sm">Editing: <span class="text-primary font-mono">{{.Agent.Name}}</span></h2>
+          <button onclick="cancelEdit()" class="btn btn-ghost btn-xs text-error">Cancel</button>
+        </div>
+
+        <!-- Message list -->
+        <div id="chat-messages" class="space-y-3 max-h-[500px] overflow-y-auto mb-4 pr-1 scroll-smooth"></div>
+
+        <!-- Spinner -->
+        <div id="chat-spinner" class="hidden flex justify-center py-2">
+          <span class="loading loading-dots loading-md text-primary"></span>
+        </div>
+
+        <!-- Approve quick action -->
+        <div id="approve-bar" class="hidden mb-3">
+          <div class="flex items-center gap-2 p-3 rounded-lg bg-success/10 border border-success/30">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span class="text-sm flex-1">Happy with the proposal? Apply the change.</span>
+            <button onclick="sendMessage('approve')" class="btn btn-success btn-sm gap-1">
+              Approve &amp; Apply
+            </button>
+          </div>
+        </div>
+
+        <!-- Input -->
+        <div class="flex gap-2">
+          <input id="chat-input" type="text" placeholder="Answer questions or type 'approve' to apply..."
+            class="input input-bordered flex-1 text-sm"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();sendFromInput()}" />
+          <button onclick="sendFromInput()" class="btn btn-primary btn-sm px-4">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var agentID = "{{.Agent.ID}}";
+
+function startEdit() {
+  var msg = document.getElementById('agent-change-input').value.trim();
+  if (!msg) { document.getElementById('agent-change-input').focus(); return; }
+
+  document.getElementById('start-btn').disabled = true;
+  document.getElementById('start-error').classList.add('hidden');
+
+  doStartRequest(msg);
+}
+
+function sendFromInput() {
+  var input = document.getElementById('chat-input');
+  var msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  sendMessage(msg);
+}
+
+async function sendMessage(msg) {
+  msg = (msg || '').trim();
+  if (!msg) return;
+  appendMessage('user', msg);
+  doStepRequest(msg);
+}
+
+async function doStartRequest(msg) {
+  document.getElementById('phase-start').classList.add('hidden');
+  document.getElementById('phase-chat').classList.remove('hidden');
+  appendMessage('user', msg);
+  setLoading(true);
+  try {
+    var resp = await fetch('/dashboard/agents/' + agentID + '/edit/start', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: msg})
+    });
+    var data = await resp.json();
+    setLoading(false);
+    if (data.error) {
+      document.getElementById('phase-chat').classList.add('hidden');
+      document.getElementById('phase-start').classList.remove('hidden');
+      document.getElementById('start-btn').disabled = false;
+      document.getElementById('start-error').textContent = data.error;
+      document.getElementById('start-error').classList.remove('hidden');
+      return;
+    }
+    appendMessage('assistant', data.response);
+    showApproveBar();
+    document.getElementById('chat-input').focus();
+  } catch(e) {
+    setLoading(false);
+    document.getElementById('phase-chat').classList.add('hidden');
+    document.getElementById('phase-start').classList.remove('hidden');
+    document.getElementById('start-btn').disabled = false;
+    document.getElementById('start-error').textContent = 'Network error: ' + e.message;
+    document.getElementById('start-error').classList.remove('hidden');
+  }
+}
+
+async function doStepRequest(msg) {
+  setLoading(true);
+  try {
+    var resp = await fetch('/dashboard/agents/design', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: msg})
+    });
+    var data = await resp.json();
+    setLoading(false);
+    if (data.error) {
+      appendError(data.error);
+      return;
+    }
+    appendMessage('assistant', data.response);
+    if (data.done) {
+      appendSystem('Agent updated! Redirecting...');
+      setTimeout(function() { window.location.href = '/dashboard/agents/' + agentID; }, 800);
+      return;
+    }
+    showApproveBar();
+    document.getElementById('chat-input').focus();
+  } catch(e) {
+    setLoading(false);
+    appendError('Network error: ' + e.message);
+  }
+}
+
+async function cancelEdit() {
+  await fetch('/dashboard/agents/design/cancel', {method: 'POST'});
+  window.location.href = '/dashboard/agents/' + agentID;
+}
+
+function appendMessage(role, text) {
+  var c = document.getElementById('chat-messages');
+  var d = document.createElement('div');
+  if (role === 'user') {
+    d.className = 'flex justify-end';
+    d.innerHTML = '<div class="max-w-[85%] px-4 py-2 rounded-2xl rounded-tr-sm bg-primary text-primary-content text-sm whitespace-pre-wrap break-words">' + esc(text) + '</div>';
+  } else {
+    d.className = 'flex justify-start';
+    d.innerHTML = '<div class="max-w-[85%] px-4 py-3 rounded-2xl rounded-tl-sm bg-base-200 text-sm whitespace-pre-wrap break-words leading-relaxed">' + esc(text) + '</div>';
+  }
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+}
+
+function appendError(msg) {
+  var c = document.getElementById('chat-messages');
+  var d = document.createElement('div');
+  d.className = 'alert alert-error text-sm py-2';
+  d.textContent = msg;
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+}
+
+function appendSystem(msg) {
+  var c = document.getElementById('chat-messages');
+  var d = document.createElement('div');
+  d.className = 'text-center text-xs text-base-content/40 py-1';
+  d.textContent = msg;
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+}
+
+function setLoading(on) {
+  document.getElementById('chat-spinner').classList.toggle('hidden', !on);
+  var inp = document.getElementById('chat-input');
+  if (inp) inp.disabled = on;
+}
+
+function showApproveBar() {
+  document.getElementById('approve-bar').classList.remove('hidden');
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('agent-change-input').focus();
+});
+</script>
+
+{{template "foot" .}}
