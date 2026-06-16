@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -84,6 +85,13 @@ func (c *Coder) WithAllowedTools(tools string) *Coder {
 	return &c2
 }
 
+// Name returns a short identifier for the underlying CLI binary (e.g. "claude"),
+// suitable for user-facing messages. The system supports multiple coder profiles
+// with different binaries, so callers should never hardcode a specific name.
+func (c *Coder) Name() string {
+	return filepath.Base(c.bin)
+}
+
 // New creates a Coder.
 // homesDir should be cfg.Data.Dir + "/claude-homes".
 // dataDir is accepted for API compatibility but is not used by the coder itself
@@ -146,7 +154,10 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("coder timed out after %s", c.timeout)
 		}
-		return nil, fmt.Errorf("coder exited with error: %w\nstderr: %s", err, stderr.String())
+		if looksLikeUsageLimit(stdout.String(), stderr.String()) {
+			return nil, ErrUsageLimit
+		}
+		return nil, fmt.Errorf("coder exited with error: %w\nstdout: %.500s\nstderr: %.500s", err, stdout.String(), stderr.String())
 	}
 	stdoutBytes := stdout.Bytes()
 
@@ -154,10 +165,38 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 	if err != nil {
 		text = strings.TrimSpace(string(stdoutBytes))
 	} else if isError {
+		if looksLikeUsageLimit(text, "") {
+			return nil, ErrUsageLimit
+		}
 		return nil, fmt.Errorf("coder error: %s", text)
 	}
 
 	return &Result{Text: text, Duration: time.Since(start)}, nil
+}
+
+// ErrUsageLimit indicates the coder subprocess failed because the underlying
+// Claude account/session hit its usage limit, not because of an agent bug.
+// Callers should surface this distinctly (e.g. "retrying next scheduled run")
+// rather than treating it as a generic execution failure.
+var ErrUsageLimit = errors.New("coder usage limit reached")
+
+// looksLikeUsageLimit detects the claude CLI's failure signature for hitting
+// the account/session usage limit: a non-zero exit with completely empty
+// stdout and stderr (verified empirically), or explicit limit-related text
+// in whatever output was produced.
+func looksLikeUsageLimit(stdout, stderr string) bool {
+	stdout = strings.TrimSpace(stdout)
+	stderr = strings.TrimSpace(stderr)
+	if stdout == "" && stderr == "" {
+		return true
+	}
+	combined := strings.ToLower(stdout + " " + stderr)
+	for _, kw := range []string{"usage limit", "rate limit", "rate_limit", "quota exceeded", "limit reached"} {
+		if strings.Contains(combined, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // Chat sends a conversational message to claude with optional history.

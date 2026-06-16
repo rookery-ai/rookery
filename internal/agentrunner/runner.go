@@ -5,6 +5,7 @@ package agentrunner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -180,9 +181,12 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 
 	prompt := buildCoderPrompt(string(agentMD), string(stateRaw), allSkills, manifest.Skills, declaredContent)
 
-	// Pre-approve the tools agents need so the subprocess never blocks on
-	// interactive permission prompts (--setting-sources "" suppresses all settings).
-	coderSvc := r.coderSvc.WithAllowedTools("Bash,WebFetch,Read,Write,Edit")
+	// Run inside the agent's own directory (not the shared per-user home) so
+	// tools/*.py and state.json resolve correctly and runs never see other
+	// agents' files. Pre-approve the tools agents need so the subprocess never
+	// blocks on interactive permission prompts (--setting-sources "" suppresses
+	// all settings).
+	coderSvc := r.coderSvc.WithDir(agentDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit")
 
 	// Inject user secrets as env vars when master password is available.
 	if input.MasterPw != "" {
@@ -206,7 +210,13 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 
 	if err := r.runCoderTurns(ctx, agent, manifest, input, agentDir, stateRaw, prompt, coderSvc, rctx); err != nil {
 		_ = r.db.FinishAgentRun(runID, -1, strings.Join(rctx.chatLines, "\n"), strings.Join(rctx.warnings, "\n")+"\n"+err.Error())
-		return err
+		friendly := friendlyRunError(err, coderSvc.Name())
+		// Notify the user directly — for cron-triggered runs this is the ONLY
+		// way they'd ever find out (the scheduler otherwise just logs to slog).
+		if input.SendOutput != nil {
+			input.SendOutput(friendly)
+		}
+		return errors.New(friendly)
 	}
 
 	_ = r.db.FinishAgentRun(runID, 0,
@@ -343,6 +353,24 @@ func (r *Runner) runCoderTurns(
 	}
 
 	return nil
+}
+
+// friendlyRunError converts a low-level run failure into a message safe to
+// show the user directly (web UI error banner, or sent as a chat message for
+// cron-triggered runs). Usage-limit hits are an expected, recurring condition
+// — not an agent bug — so they get a distinct, reassuring message instead of
+// a raw exit code. coderName identifies the underlying CLI binary (e.g.
+// "claude") so the message stays accurate across different coder profiles;
+// pass "" to fall back to a generic phrase.
+func friendlyRunError(err error, coderName string) string {
+	if errors.Is(err, coder.ErrUsageLimit) {
+		who := "The coder"
+		if coderName != "" {
+			who = coderName
+		}
+		return fmt.Sprintf("⚠️ This agent run was skipped — %s hit its usage limit. It will retry automatically on the next scheduled run.", who)
+	}
+	return "⚠️ This agent run failed: " + err.Error()
 }
 
 // ─── Output parsing ───────────────────────────────────────────────────────────

@@ -164,7 +164,7 @@ The coder reads AGENT.md and uses these markers in its output:
 
 ### Secret injection
 
-Secrets are stored encrypted in the `secrets` table. At runtime the scheduler decrypts them using the user's master password and passes `MasterPw` in `RunInput`. `runCoderAgent()` then:
+Secrets are stored encrypted in the `secrets` table. At runtime `runCoderAgent()` needs `RunInput.MasterPw` to decrypt them:
 1. Gets the user's `SecretsSalt` from DB
 2. Creates a `secrets.Service` with the master password
 3. Calls `svc.GetAll(ctx)` to decrypt all secrets → `map[string]string`
@@ -174,16 +174,27 @@ The agent accesses secrets via `os.environ['SECRET_NAME']` in Python. Values are
 
 `secrets.GetAll()` is the only bulk-decrypt method. `secrets.Proxy()` is still used for `${NAME}` placeholder substitution in legacy contexts.
 
+**Two sources of `MasterPw`, both required for secret injection to actually happen:**
+- **Scheduled (cron) runs** — `scheduler.go` decrypts the user's stored `EncryptedMasterPassword` (encrypted at rest with the server's `systemKey`) and passes it through. Always available once the user has completed `/setup`.
+- **Manual runs ("Run Now" in the web UI)** — `handleRunAgent()` decrypts the same stored `EncryptedMasterPassword` the same way. There is **no password-entry field on the run form** — agent execution doesn't require live re-entry the way viewing a secret's plaintext value does. (This was previously broken: the handler read a non-existent `master_password` form value, so manual runs always got `MasterPw=""` and silently skipped secret injection. Fixed by mirroring the scheduler's decrypt-from-stored-password approach.)
+
 ### Coder tool isolation
 
 `internal/coder/coder.go` provides these modifiers (all return a shallow copy — original unchanged):
 
 - **`WithNoTools()`** — adds `--allowedTools ""`, disabling all tools. Used for design conversation turns so claude outputs plain text.
 - **`WithAllowedTools(tools string)`** — adds `--allowedTools <tools>`, pre-approving specific tools. **Required** whenever `--setting-sources ""` is active (which suppresses all settings including tool allowlists) — without this, the subprocess blocks forever on interactive permission prompts in non-interactive mode. Generation uses `"Bash,Write,Edit,Read"`; agent runs use `"Bash,WebFetch,Read,Write,Edit"`.
-- **`WithDir(dir string)`** — overrides `cmd.Dir` for the subprocess CWD without changing `HOME`/`CLAUDE_CONFIG_DIR`. Used to run generation inside `agentDir` so Write/Edit calls land in the right place.
+- **`WithDir(dir string)`** — overrides `cmd.Dir` for the subprocess CWD without changing `HOME`/`CLAUDE_CONFIG_DIR`. Used both by generation (`agentDir` during creation) **and by `runCoderAgent()` on every run** — without it, `cmd.Dir` defaults to the *shared* per-user home (`claude-homes/<userID>/`), so the agent sees and can write to other agents' files instead of its own `tools/`/`state.json`. (This was missing from the run path until it caused exactly that cross-contamination — one agent's self-corrected script got written into the shared home instead of back into its own directory, and a different agent then read the wrong `tools/*.py`.)
 - **`WithExtraEnv(env map[string]string)`** — merges additional env vars (e.g. decrypted secrets). System overrides (`HOME`, `CLAUDE_CONFIG_DIR`) always take precedence.
+- **`Name() string`** — returns `filepath.Base(bin)` (e.g. `"claude"`). Used for user-facing messages so they never hardcode a specific coder's name (the system supports multiple coder profiles with different binaries).
 
 **Critical:** `--setting-sources ""` + no `--allowedTools` = subprocess hangs indefinitely. Always pair them.
+
+### Usage-limit detection
+
+`coder.ErrUsageLimit` is a sentinel returned by `Generate()` when the underlying CLI account/session hits its usage limit. Detected via `looksLikeUsageLimit()`: empirically, the claude CLI's signature for this is a **non-zero exit with completely empty stdout and stderr** (no error text at all) — that combination is treated as a limit hit. Explicit text matches (`"usage limit"`, `"rate limit"`, `"quota exceeded"`, `"limit reached"`) are also checked as a fallback in case the CLI does emit a message.
+
+`agentrunner.friendlyRunError(err, coderName)` converts this into a user-facing message — `"⚠️ This agent run was skipped — <coderName> hit its usage limit. It will retry automatically on the next scheduled run."` — instead of a raw `exit status 1`. `runCoderAgent()` sends this via `input.SendOutput` on **every** run failure (not just limit hits), which fixed a real gap: cron-triggered failures previously only went to `slog` — the user had no way to find out an agent failed at all unless they checked server logs.
 
 ### Guardrails
 
@@ -295,7 +306,8 @@ Build: **PASS**. `go vet`: **PASS**. Tests: **PASS** (`internal/agentdesigner`, 
 | `f89cb2e` | UI overhaul, admin/user separation, coder profiles, SSE agent creation, NL reminders |
 | `b51e929` | Per-user coder isolation (CLAUDE_CONFIG_DIR, --setting-sources, credential copy) |
 | `da6eb6a` | Unified conversational agent creation; no agent types; AGENT.md+tools/ layout; secret env injection; WithNoTools/WithExtraEnv; auto-schedule from conversation; platform-aware designer; skills UI |
-| (current) | StateVerifying + full-tools generation (write/run/fix before showing user); WithDir/WithAllowedTools on Coder; runner tool permissions fix; multi-line [CHAT] + inline [STATE] parser |
+| `12f0461` | StateVerifying + full-tools generation (write/run/fix before showing user); WithDir/WithAllowedTools on Coder; runner tool permissions fix; multi-line [CHAT] + inline [STATE] parser |
+| (current) | runCoderAgent runs inside agentDir (was the shared per-user home — caused cross-agent file contamination); manual "Run Now" decrypts stored master password instead of a non-existent form field; coder.ErrUsageLimit detection + coder-agnostic friendly error messages sent to the user on every run failure |
 
 ### Known gaps
 

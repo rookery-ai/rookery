@@ -11,6 +11,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
 	"github.com/robfig/cron/v3"
 )
@@ -242,7 +243,16 @@ func (s *Server) handleRunAgent(c echo.Context) error {
 	if s.runner == nil {
 		p.Error = "Agent runner is not configured"
 	} else {
-		masterPw := c.FormValue("master_password")
+		// Decrypt the user's stored master password the same way the scheduler
+		// does for cron runs, so manual "Run Now" gets secret injection too.
+		// There is no password-entry field on this form — agent execution
+		// (unlike viewing secret values) doesn't require live re-entry.
+		var masterPw string
+		if u.EncryptedMasterPassword != "" {
+			if pw, err := secrets.DecryptMasterPassword(u.EncryptedMasterPassword, s.systemKey); err == nil {
+				masterPw = pw
+			}
+		}
 		var outputLines []string
 		send := func(msg string) { outputLines = append(outputLines, msg) }
 
