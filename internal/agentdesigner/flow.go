@@ -13,6 +13,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/profile"
+	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/robfig/cron/v3"
 )
 
@@ -404,7 +405,15 @@ func (f *Flow) callCoder(ctx context.Context, userID, userMessage string) (strin
 		return "", fmt.Errorf("no coder configured for this user")
 	}
 
-	systemPrompt := f.buildSystemPrompt(sess)
+	systemPrompt := prompts.BuildDesignSystemPrompt(prompts.DesignSystemParams{
+		AgentName:          sess.AgentName,
+		IsEdit:             sess.IsEdit,
+		ExistingAgentMD:    sess.ExistingAgentMD,
+		ConnectedPlatforms: sess.ConnectedPlatforms,
+		Skills:             sess.Skills,
+		UserProfile:        sess.UserProfile,
+		UserMemory:         sess.UserMemory,
+	})
 
 	// Use WithNoTools so the design conversation outputs plain text and never
 	// attempts to write files or request permissions.
@@ -423,88 +432,13 @@ func (f *Flow) callCoder(ctx context.Context, userID, userMessage string) (strin
 	return result.Text, nil
 }
 
-func (f *Flow) buildSystemPrompt(sess *DesignSession) string {
-	var sb strings.Builder
-	if sess.IsEdit {
-		sb.WriteString("You are a friendly agent design assistant helping the user EDIT an existing autonomous AI agent called \"")
-		sb.WriteString(sess.AgentName)
-		sb.WriteString("\".\n\nHere is its current AGENT.md:\n```\n")
-		sb.WriteString(sess.ExistingAgentMD)
-		sb.WriteString("\n```\n\nFind out exactly what the user wants to change, then propose an updated plan (same format as a new build: behavior, secrets, schedule). Only ask about parts that are actually changing — don't re-litigate things the user didn't mention.\n\n")
-	} else {
-		sb.WriteString("You are a friendly agent design assistant helping build an autonomous AI agent called \"")
-		sb.WriteString(sess.AgentName)
-		sb.WriteString("\".\n\n")
+// dbMessagesToPrompt converts db.ChatMessage slice to prompts.ChatMessage slice.
+func dbMessagesToPrompt(msgs []db.ChatMessage) []prompts.ChatMessage {
+	out := make([]prompts.ChatMessage, len(msgs))
+	for i, m := range msgs {
+		out[i] = prompts.ChatMessage{Role: m.Role, Content: m.Content}
 	}
-
-	// Connected platform context.
-	if len(sess.ConnectedPlatforms) > 0 {
-		sb.WriteString("CONNECTED PLATFORMS:\n")
-		sb.WriteString("The user has connected: ")
-		sb.WriteString(strings.Join(sess.ConnectedPlatforms, ", "))
-		sb.WriteString(`
-When the user says "send to Telegram", "notify me", "post a message", or similar, they mean: emit [CHAT] text in your output — the system automatically routes it to their connected platform. No bot token, chat ID, or messaging credentials of any kind are needed or should be requested.
-
-`)
-	} else {
-		sb.WriteString(`CONNECTED PLATFORMS:
-No chat platform is currently connected. If the agent needs to send notifications, mention that the user can connect Telegram from Settings → Connectors in the web dashboard. Agents still use [CHAT] output for this — no credentials needed from the user.
-
-`)
-	}
-
-	if len(sess.Skills) > 0 {
-		sb.WriteString("INSTALLED SKILLS (can be used by this agent): ")
-		sb.WriteString(strings.Join(sess.Skills, ", "))
-		sb.WriteString("\n\n")
-	}
-
-	if sess.UserProfile != "" {
-		sb.WriteString(sess.UserProfile)
-		sb.WriteString("\n")
-	}
-
-	if sess.UserMemory != "" {
-		sb.WriteString("[User memory]\n")
-		sb.WriteString(sess.UserMemory)
-		sb.WriteString("\n")
-	}
-
-	sb.WriteString(`SECRETS (API keys and credentials):
-When the agent needs an API key or credential:
-- Tell the user to add it to the Secrets store in the web dashboard (Settings → Secrets) using a clear name like COINGECKO_API_KEY.
-- Do NOT ask the user to paste secret values in this chat — that would expose them.
-- Explain in plain language what the credential is and where to get it (e.g. "You'll need a free CoinGecko API key — sign up at coingecko.com/en/api and generate one under Developer Dashboard").
-- Secrets are injected automatically as environment variables when the agent runs. Reference them by name only (e.g. $COINGECKO_API_KEY). Never display values.
-
-SCHEDULING:
-- If the user mentions a frequency ("every 10 minutes", "daily at 8am", "once a week"), note it and include the schedule in your proposal: "This agent will run every 10 minutes (cron: */10 * * * *)."
-- If no frequency is mentioned and the agent seems like it should recur (e.g. a price monitor), ask the user how often it should run before proposing.
-- Do NOT suggest cron jobs, systemd timers, or any external scheduling — the system has a built-in scheduler.
-
-YOUR JOB:
-Have a focused conversation to fully understand what the agent should do. Then propose what you will build.
-1. Ask focused questions: data sources, any APIs needed, what to do with the data, frequency.
-2. When you have a clear picture, propose your implementation plan and explicitly list:
-   - What the agent will do each run
-   - Any required secrets (name + plain-language explanation + where to get it)
-   - The run schedule (frequency and cron expression)
-3. Tell the user to type "approve" when they're happy with the proposal.
-
-STYLE:
-- Assume the user may not be technical. Explain API keys, environment variables, and cron expressions in plain language when they come up. Do not use jargon without explanation.
-- Ask one or two focused questions per turn — not a list of ten.
-- Guide the user through setup steps where needed (e.g. "go to coingecko.com/en/api, click 'Get Free API Key'...").
-- Do not write code or generate files yet — that happens after approval.
-
-HARD CONSTRAINTS (never violate):
-- Never ask for Telegram bot token, chat ID, or any messaging credentials.
-- Never suggest writing files to the home directory or any disk path.
-- Never suggest cron job setup or any external scheduling tool.
-- Always use [CHAT] as the only way to send messages to the user.
-`)
-
-	return sb.String()
+	return out
 }
 
 // ─── Generation (triggered by approval) ──────────────────────────────────────
@@ -541,7 +475,7 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 			return "", false, "", fmt.Errorf("prepare staging workspace: %w", err)
 		}
 		workDir = stagingDir
-		prompt = buildEditImplementationPrompt(agentNameSnap, historySnap)
+		prompt = prompts.BuildEditImplementationPrompt(agentNameSnap, dbMessagesToPrompt(historySnap))
 		remove := func() { _ = os.RemoveAll(stagingDir) }
 		cleanupOnFail, cleanupOnSuccess = remove, remove
 	} else {
@@ -557,7 +491,7 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 			return "", false, "", fmt.Errorf("write state.json: %w", err)
 		}
 		workDir = agentDir
-		prompt = buildImplementationPrompt(agentNameSnap, historySnap)
+		prompt = prompts.BuildImplementationPrompt(agentNameSnap, dbMessagesToPrompt(historySnap))
 		cleanupOnFail = func() { _ = os.RemoveAll(agentDir) }
 		cleanupOnSuccess = func() {} // the dir IS the pending agent; keep it until finalize/iterate
 	}
@@ -669,145 +603,6 @@ func copyAgentWorkspace(liveDir, stagingDir, reconciledAgentMD string) error {
 	return nil
 }
 
-// buildImplementationPrompt creates the prompt that tells Claude Code to write
-// the agent files, test them, fix errors, and report the verified output.
-func buildImplementationPrompt(agentName string, history []db.ChatMessage) string {
-	var sb strings.Builder
-	sb.WriteString("You are implementing an AI agent called \"")
-	sb.WriteString(agentName)
-	sb.WriteString("\".\n\n")
-	sb.WriteString("DESIGN CONVERSATION:\n")
-	for _, m := range history {
-		if m.Role == "user" {
-			sb.WriteString("User: ")
-		} else {
-			sb.WriteString("Designer: ")
-		}
-		sb.WriteString(m.Content)
-		sb.WriteString("\n\n")
-	}
-	sb.WriteString(`
-YOUR TASK — follow these steps in order:
-
-STEP 1 — CREATE THE AGENT FILES in the current directory.
-
-Write AGENT.md:
-- Line 1 MUST be exactly: # Suggested schedule: <5-part cron expression or "none">
-- Optional secrets block (omit if no secrets needed):
-  # Required secrets:
-  # - SECRET_NAME: plain-language description
-- Describe what the agent does each run
-- Output protocol:
-    [CHAT] <text>        — send a message to the user (the ONLY way to send output)
-    [STATE]...[/STATE]   — JSON block merged into state.json
-- Reference Python helpers as: python3 tools/filename.py
-
-Write tools/<name>.py for data fetching / processing (if needed):
-- Allowed: os, json, re, datetime, requests
-- Forbidden: subprocess, eval, exec, socket, open() for writing files
-- Read secrets via: os.environ.get('SECRET_NAME', '')
-
-Do NOT create or modify state.json — it already exists.
-
-STEP 2 — TEST THE IMPLEMENTATION.
-
-Run each Python script using Bash and confirm it produces real, non-empty output.
-If a script errors or returns None/empty, fix it and re-run until it works.
-
-SECRETS: If a required secret is missing from the environment, substitute a
-realistic mock value FOR THIS TEST ONLY (e.g. use a public test endpoint or
-hard-code an example response). Do NOT abort — show the output format.
-
-STEP 3 — REPORT THE VERIFIED RESULT.
-
-Once everything works, end your final response with:
-[TEST_OUTPUT]
-<paste the actual terminal output from your test run>
-[/TEST_OUTPUT]
-
-HARD CONSTRAINTS — never violate:
-- [CHAT] is the ONLY output channel. No Telegram API, no requests to messaging services.
-- Never hardcode real credentials — always os.environ.get('NAME', '').
-- Never create files outside the agent directory.
-- Never set up cron jobs or external schedulers.
-- No non-standard Python libraries (requests is fine; pandas, numpy, etc. are not).
-`)
-	return sb.String()
-}
-
-// buildEditImplementationPrompt creates the prompt that tells Claude Code to read
-// the existing agent files in the current directory (a staging copy), apply the
-// requested changes, test them, fix errors, and report the verified output.
-func buildEditImplementationPrompt(agentName string, history []db.ChatMessage) string {
-	var sb strings.Builder
-	sb.WriteString("You are EDITING an existing AI agent called \"")
-	sb.WriteString(agentName)
-	sb.WriteString("\". The current directory contains its existing AGENT.md and tools/*.py — this is a safe working copy, not the live agent.\n\n")
-	sb.WriteString("EDIT CONVERSATION (what the user wants changed):\n")
-	for _, m := range history {
-		if m.Role == "user" {
-			sb.WriteString("User: ")
-		} else {
-			sb.WriteString("Designer: ")
-		}
-		sb.WriteString(m.Content)
-		sb.WriteString("\n\n")
-	}
-	sb.WriteString(`
-YOUR TASK — follow these steps in order:
-
-STEP 0 — READ THE EXISTING FILES.
-
-Read AGENT.md and every file in tools/ in the current directory to understand what
-the agent currently does before changing anything.
-
-STEP 1 — APPLY THE REQUESTED CHANGES.
-
-Edit AGENT.md and tools/*.py to implement what the user asked for in the conversation
-above. Keep everything that wasn't asked to change. Delete any tool script that's no
-longer needed as a result of the change.
-
-- Line 1 of AGENT.md MUST remain exactly: # Suggested schedule: <5-part cron expression or "none">
-  (update it only if the user asked to change how often the agent runs)
-- Optional secrets block (omit if no secrets needed):
-  # Required secrets:
-  # - SECRET_NAME: plain-language description
-- Output protocol unchanged:
-    [CHAT] <text>        — send a message to the user (the ONLY way to send output)
-    [STATE]...[/STATE]   — JSON block merged into state.json
-- Reference Python helpers as: python3 tools/filename.py
-- Allowed in tools/*.py: os, json, re, datetime, requests
-- Forbidden: subprocess, eval, exec, socket, open() for writing files
-- Read secrets via: os.environ.get('SECRET_NAME', '')
-
-Do NOT create or modify state.json directly — it already exists and reflects the
-agent's real persisted state; let the output protocol's [STATE] block manage it.
-
-STEP 2 — TEST THE IMPLEMENTATION.
-
-Run each Python script using Bash and confirm it produces real, non-empty output.
-If a script errors or returns None/empty, fix it and re-run until it works.
-
-SECRETS: If a required secret is missing from the environment, substitute a
-realistic mock value FOR THIS TEST ONLY (e.g. use a public test endpoint or
-hard-code an example response). Do NOT abort — show the output format.
-
-STEP 3 — REPORT THE VERIFIED RESULT.
-
-Once everything works, end your final response with:
-[TEST_OUTPUT]
-<paste the actual terminal output from your test run>
-[/TEST_OUTPUT]
-
-HARD CONSTRAINTS — never violate:
-- [CHAT] is the ONLY output channel. No Telegram API, no requests to messaging services.
-- Never hardcode real credentials — always os.environ.get('NAME', '').
-- Never create files outside the current directory.
-- Never set up cron jobs or external schedulers.
-- No non-standard Python libraries (requests is fine; pandas, numpy, etc. are not).
-`)
-	return sb.String()
-}
 
 // parseTestOutput extracts content between [TEST_OUTPUT] and [/TEST_OUTPUT].
 func parseTestOutput(text string) string {

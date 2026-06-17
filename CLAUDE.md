@@ -71,7 +71,8 @@ Telegram adapter (per-user bot instance)
 | `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users |
 | `internal/reminder` | Creates/lists/fires reminders; background polling goroutine |
 | `internal/session` | `ChatSession` create/list/stop; 30-min idle auto-stop |
-| `internal/memory` | Per-user append-only JSONL store; `ContextString()` formats entries as a bullet list for LLM injection; injected into agent design sessions (`buildSystemPrompt`) and agent run prompts (`buildCoderPrompt`) via `WithMemory()` on both `Flow` and `Runner` |
+| `internal/prompts` | Central home for all LLM prompt construction: `BuildDesignSystemPrompt`, `BuildImplementationPrompt`, `BuildEditImplementationPrompt`, `BuildCoderPrompt`, `BuildChildAgentFollowUpPrompt`, `BuildSkillMetaPrompt`. No inline prompt text exists outside this package. |
+| `internal/memory` | Per-user append-only JSONL store; `ContextString()` formats entries as a bullet list for LLM injection; injected into agent design sessions and agent run prompts via `WithMemory()` on both `Flow` and `Runner` |
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
 | `internal/profile` | Per-user personalization (name, email, location, timezone, tone, language, notes); stored in the generic `settings` table; `Load()`/`Save()`/`ContextString()` for LLM injection; `LoadLocation()` for timezone-aware reminder parsing; `IsComplete()`/`MarkComplete()` sentinel for setup wizard |
 | `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per user |
@@ -138,7 +139,7 @@ type dbDesignStore interface {
 }
 ```
 
-**System prompt context injected into every design turn:**
+**System prompt context injected into every design turn** (assembled by `prompts.BuildDesignSystemPrompt`):
 - Connected platforms (e.g. Telegram) — coder knows to use `[CHAT]` not raw Telegram API
 - User profile (`[User profile]` block) — name, location, timezone, tone, language, notes from `internal/profile`; loaded once on session start via `loadUserProfile()`; empty if no fields saved
 - Secrets guidance — tell user to add to Secrets store; never paste in chat; reference as `os.environ['NAME']`
@@ -156,7 +157,7 @@ Both loaders go through `loadAgentForEdit(userID, agentID)`, which reads the liv
 
 **Generation never touches the live agent dir before approval** (it may be scheduled and running unattended). `runGeneration` branches on `IsEdit`:
 - Create (unchanged): writes directly into the not-yet-saved `agentDir`.
-- Edit: `copyAgentWorkspace()` copies `AGENT.md` (the reconciled version), `state.json`, and `tools/*.py` into a sibling staging dir (`<agentID>-edit-staging`); the coder runs there with `buildEditImplementationPrompt()` (tells it to `Read` the existing files first, then edit). Content is read back from staging into `PendingAgentMD`/`PendingTools`, and the staging dir is `RemoveAll`'d — on both success and failure — before the response ever reaches the user.
+- Edit: `copyAgentWorkspace()` copies `AGENT.md` (the reconciled version), `state.json`, and `tools/*.py` into a sibling staging dir (`<agentID>-edit-staging`); the coder runs there with `prompts.BuildEditImplementationPrompt()` (tells it to `Read` the existing files first, then edit). Content is read back from staging into `PendingAgentMD`/`PendingTools`, and the staging dir is `RemoveAll`'d — on both success and failure — before the response ever reaches the user.
 
 **On approval**, `finalizeAgent` branches: create calls `saveAndFinish()` (`AgentDesigner.SaveAgent` → `db.CreateAgent`, INSERT); edit calls `updateAndFinish()` (`AgentDesigner.UpdateAgent` → `db.UpdateAgentDescription`, UPDATE — calling `CreateAgent` again would violate the PK/`UNIQUE(user_id,name)` constraint). Schedule changes on edit go through `reconcileScheduleOnSave()`, which **always reuses the existing schedule row's ID** on upsert (there's no unique constraint on `agent_id`, so a fresh `uuid.New()` would insert a duplicate row and fire the agent twice per tick) and deletes the row outright if the line resolves to "none"/invalid where one existed.
 
@@ -341,7 +342,8 @@ Manual web round-trip and `/agent edit` on Telegram for the edit flow have not b
 | `92d37be` | runCoderAgent runs inside agentDir (was the shared per-user home — caused cross-agent file contamination); manual "Run Now" decrypts stored master password instead of a non-existent form field; coder.ErrUsageLimit detection + coder-agnostic friendly error messages sent to the user on every run failure |
 | `81c6baf` | Conversational agent editing (Telegram `/agent edit` + web Edit button), reusing the create FSM via `DesignSession.IsEdit`; schedule-line reconciliation against the real `agent_schedules` row; edit generation runs in a staging dir copy so the live agent is never touched before approval; `AgentDesigner.UpdateAgent`/`db.UpdateAgentDescription` for the UPDATE-not-INSERT save path; `reconcileScheduleOnSave` reuses the existing schedule row's ID to avoid duplicate/double-firing schedules |
 | `aa269a7` | User profile system (`internal/profile`): name, email, location, timezone, tone, language, notes stored in `settings` table; injected as `[User profile]` block into agent designer system prompt; setup wizard gains profile step (step 3 of 5); Settings page expanded to full profile editor; reminder timezone now uses per-user saved timezone via `profile.LoadLocation()` (both web + Telegram) |
-| (current) | User memory injection: `memory.ContextString()` now injected as `[User memory]` block into agent design sessions (`buildSystemPrompt`) and agent run prompts (`buildCoderPrompt`); `Flow.WithMemory()` and `Runner.WithMemory()` wire the store via a local `memoryStore` interface in each package |
+| `d29c5bd` | User memory injection: `memory.ContextString()` now injected as `[User memory]` block into agent design sessions and agent run prompts; `Flow.WithMemory()` and `Runner.WithMemory()` wire the store via a local `memoryStore` interface in each package |
+| (current) | Prompt centralization: all LLM prompt builders moved to `internal/prompts`; no inline prompt text remains in `agentdesigner`, `agentrunner`, or `web` packages |
 
 ### Known gaps
 

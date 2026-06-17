@@ -3,7 +3,6 @@ package web
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/skillstore"
 	"github.com/labstack/echo/v4"
 )
@@ -138,14 +138,7 @@ func (s *Server) inferSkillMeta(ctx context.Context, userID, content string) (na
 		return
 	}
 
-	prompt := fmt.Sprintf(`Read this SKILL.md and output ONLY a JSON object with two fields: "name" and "description".
-- "name" must be a lowercase kebab-case identifier (letters, digits, hyphens only; 3-64 chars)
-- "description" must be a single concise sentence (under 120 chars)
-
-Output ONLY the JSON object, nothing else.
-
-SKILL.md:
-%s`, content)
+	prompt := prompts.BuildSkillMetaPrompt(content)
 
 	result, err := coder.Generate(ctx, userID, prompt)
 	if err != nil {

@@ -17,6 +17,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 )
 
@@ -142,7 +143,7 @@ func (r *Runner) TestRunFromContent(ctx context.Context, userID, agentMD string,
 		}
 	}
 
-	prompt := buildCoderPrompt(agentMD, "{}", "", nil, nil, nil)
+	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{AgentMD: agentMD, StateJSON: "{}"})
 
 	if r.coderSvc == nil {
 		return "", fmt.Errorf("no coder service configured")
@@ -196,7 +197,18 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		userMemory, _ = r.memStore.ContextString(input.UserID)
 	}
 
-	prompt := buildCoderPrompt(string(agentMD), string(stateRaw), userMemory, allSkills, manifest.Skills, declaredContent)
+	skillRefs := make([]prompts.SkillRef, len(allSkills))
+	for i, sk := range allSkills {
+		skillRefs[i] = prompts.SkillRef{Name: sk.Name, Description: sk.Description}
+	}
+	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
+		AgentMD:         string(agentMD),
+		StateJSON:       string(stateRaw),
+		UserMemory:      userMemory,
+		AllSkills:       skillRefs,
+		DeclaredSkills:  manifest.Skills,
+		DeclaredContent: declaredContent,
+	})
 
 	// Run inside the agent's own directory (not the shared per-user home) so
 	// tools/*.py and state.json resolve correctly and runs never see other
@@ -365,8 +377,7 @@ func (r *Runner) runCoderTurns(
 		}
 
 		// Build follow-up prompt injecting child results.
-		prompt = fmt.Sprintf("The agents you called have returned their results:\n\n%s\n\nContinue your task, using the above results as context.",
-			strings.Join(childOutputs, "\n\n"))
+		prompt = prompts.BuildChildAgentFollowUpPrompt(childOutputs)
 	}
 
 	return nil
@@ -540,70 +551,6 @@ func writeRunLog(agentDir, content string, t time.Time) {
 	_ = os.MkdirAll(logsDir, 0o750)
 	name := "run_log_" + t.UTC().Format("20060102_150405") + ".txt"
 	_ = os.WriteFile(filepath.Join(logsDir, name), []byte(content), 0o640)
-}
-
-// ─── Prompt building ──────────────────────────────────────────────────────────
-
-func buildCoderPrompt(claudeMD, stateJSON, userMemory string, allSkills []*db.Skill, declaredSkills []string, declaredContent map[string]string) string {
-	var sb strings.Builder
-
-	sb.WriteString("[Agent Instructions]\n")
-	sb.WriteString(claudeMD)
-	sb.WriteString("\n\n")
-
-	sb.WriteString("[Current State]\n")
-	sb.WriteString(stateJSON)
-	sb.WriteString("\n\n")
-
-	if userMemory != "" {
-		sb.WriteString("[User memory]\n")
-		sb.WriteString(userMemory)
-		sb.WriteString("\n\n")
-	}
-
-	if len(allSkills) > 0 {
-		sb.WriteString("[Available Skills]\n")
-		for _, sk := range allSkills {
-			sb.WriteString(fmt.Sprintf("- %s: %s\n", sk.Name, sk.Description))
-		}
-		sb.WriteString("\n")
-	}
-
-	if len(declaredContent) > 0 {
-		sb.WriteString("[Full Skill Instructions]\n")
-		for _, name := range declaredSkills {
-			if content, ok := declaredContent[name]; ok {
-				sb.WriteString(fmt.Sprintf("=== %s ===\n%s\n\n", name, content))
-			}
-		}
-	}
-
-	sb.WriteString(`Run your scheduled task. Use ONLY these output markers:
-
-[CHAT] First line of the message
-Any continuation lines immediately after (no blank line)
-are joined into the same message sent to the user.
-
-[STATE]
-{
-  "key": "value"
-}
-[/STATE]
-
-  Merges JSON into state.json. Use null to delete a key.
-  Can also be written inline: [STATE]{"key":"value"}[/STATE]
-
-[CALL: agent-name]   — invoke another agent synchronously
-
-CONSTRAINTS — this process runs non-interactively as a subprocess:
-- [CHAT] is the ONLY way to send messages. Do NOT call Telegram APIs or any messaging service directly.
-- Secrets are injected as environment variables (e.g. os.environ['API_KEY']). Do NOT hardcode credential values.
-- Use [STATE] for persistence. Do NOT write arbitrary files to disk.
-- Do NOT set up or modify cron jobs or external schedulers — this subprocess is invoked by the scheduler.
-- There is no interactive user present. Never prompt for input or request permissions.
-- You MUST emit at least one [CHAT] line with the actual result so the user receives a message.`)
-
-	return sb.String()
 }
 
 // ─── Skills loading ───────────────────────────────────────────────────────────
