@@ -53,6 +53,7 @@ type DesignSession struct {
 	Skills             []string         // installed skill names, loaded once on Start
 	ConnectedPlatforms []string         // e.g. ["telegram"] — loaded from platform_connections
 	UserProfile        string           // rendered "[User profile]" block, loaded once on session start
+	UserMemory         string           // bullet list of saved memory entries, loaded once on session start
 	CreatedAt          time.Time
 
 	// IsEdit distinguishes an edit-of-existing-agent session from a fresh create.
@@ -79,6 +80,11 @@ type dbDesignStore interface {
 	GetSetting(userID, key string) (string, error)
 }
 
+// memoryStore is satisfied by *memory.Store — kept local to avoid the import.
+type memoryStore interface {
+	ContextString(userID string) (string, error)
+}
+
 // Flow manages per-user design sessions and drives the FSM.
 // It is safe for concurrent use.
 type Flow struct {
@@ -88,6 +94,7 @@ type Flow struct {
 	coderFor func(userID string) *coder.Coder
 	designer *AgentDesigner
 	db       dbDesignStore
+	memStore memoryStore // optional; nil = no memory injected
 }
 
 // NewFlow creates a Flow. coderResolver maps a userID to the right coder.
@@ -106,6 +113,12 @@ func (f *Flow) WithDB(database dbDesignStore) *Flow {
 	return f
 }
 
+// WithMemory attaches a memory store so saved user facts are injected into design sessions.
+func (f *Flow) WithMemory(m memoryStore) *Flow {
+	f.memStore = m
+	return f
+}
+
 // Start creates a new Telegram design session for userID.
 // Returns the opening prompt asking for a description.
 func (f *Flow) Start(userID, agentName string) (string, error) {
@@ -119,6 +132,7 @@ func (f *Flow) Start(userID, agentName string) (string, error) {
 	skills := f.loadSkillNames(userID)
 	platforms := f.loadConnectedPlatforms(userID)
 	userProfile := f.loadUserProfile(userID)
+	userMemory := f.loadUserMemory(userID)
 	f.sessions[userID] = &DesignSession{
 		UserID:             userID,
 		AgentID:            uuid.New().String(),
@@ -127,6 +141,7 @@ func (f *Flow) Start(userID, agentName string) (string, error) {
 		Skills:             skills,
 		ConnectedPlatforms: platforms,
 		UserProfile:        userProfile,
+		UserMemory:         userMemory,
 		CreatedAt:          time.Now(),
 	}
 
@@ -149,6 +164,7 @@ func (f *Flow) StartDesign(ctx context.Context, userID, agentName, firstMessage 
 	skills := f.loadSkillNames(userID)
 	platforms := f.loadConnectedPlatforms(userID)
 	userProfile := f.loadUserProfile(userID)
+	userMemory := f.loadUserMemory(userID)
 	sess := &DesignSession{
 		UserID:             userID,
 		AgentID:            uuid.New().String(),
@@ -157,6 +173,7 @@ func (f *Flow) StartDesign(ctx context.Context, userID, agentName, firstMessage 
 		Skills:             skills,
 		ConnectedPlatforms: platforms,
 		UserProfile:        userProfile,
+		UserMemory:         userMemory,
 		CreatedAt:          time.Now(),
 	}
 	f.sessions[userID] = sess
@@ -186,6 +203,7 @@ func (f *Flow) StartEdit(userID, agentID string) (string, error) {
 	skills := f.loadSkillNames(userID)
 	platforms := f.loadConnectedPlatforms(userID)
 	userProfile := f.loadUserProfile(userID)
+	userMemory := f.loadUserMemory(userID)
 	f.sessions[userID] = &DesignSession{
 		UserID:             userID,
 		AgentID:            agentID,
@@ -194,6 +212,7 @@ func (f *Flow) StartEdit(userID, agentID string) (string, error) {
 		Skills:             skills,
 		ConnectedPlatforms: platforms,
 		UserProfile:        userProfile,
+		UserMemory:         userMemory,
 		CreatedAt:          time.Now(),
 		IsEdit:             true,
 		ExistingAgentMD:    reconciledMD,
@@ -226,6 +245,7 @@ func (f *Flow) StartEditDesign(ctx context.Context, userID, agentID, firstMessag
 	skills := f.loadSkillNames(userID)
 	platforms := f.loadConnectedPlatforms(userID)
 	userProfile := f.loadUserProfile(userID)
+	userMemory := f.loadUserMemory(userID)
 	sess := &DesignSession{
 		UserID:             userID,
 		AgentID:            agentID,
@@ -234,6 +254,7 @@ func (f *Flow) StartEditDesign(ctx context.Context, userID, agentID, firstMessag
 		Skills:             skills,
 		ConnectedPlatforms: platforms,
 		UserProfile:        userProfile,
+		UserMemory:         userMemory,
 		CreatedAt:          time.Now(),
 		IsEdit:             true,
 		ExistingAgentMD:    reconciledMD,
@@ -440,6 +461,12 @@ No chat platform is currently connected. If the agent needs to send notification
 
 	if sess.UserProfile != "" {
 		sb.WriteString(sess.UserProfile)
+		sb.WriteString("\n")
+	}
+
+	if sess.UserMemory != "" {
+		sb.WriteString("[User memory]\n")
+		sb.WriteString(sess.UserMemory)
 		sb.WriteString("\n")
 	}
 
@@ -1064,6 +1091,15 @@ func (f *Flow) loadUserProfile(userID string) string {
 		return ""
 	}
 	return profile.Load(f.db, userID).ContextString()
+}
+
+// loadUserMemory returns saved memory entries as a bullet list, or "" if none.
+func (f *Flow) loadUserMemory(userID string) string {
+	if f.memStore == nil {
+		return ""
+	}
+	mem, _ := f.memStore.ContextString(userID)
+	return mem
 }
 
 // ─── Text helpers ─────────────────────────────────────────────────────────────

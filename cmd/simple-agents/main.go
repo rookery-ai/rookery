@@ -93,11 +93,11 @@ func serveCmd() *cli.Command {
 			skillsDir := filepath.Join(cfg.Data.Dir, "skills")
 			designer := agentdesigner.NewDesigner(database, agentsDir)
 			// Telegram uses a single system coder; wrap it in a resolver lambda.
-			designFlow := agentdesigner.NewFlow(func(_ string) *coder.Coder { return coderSvc }, designer).WithDB(database)
-			skillStore := skillstore.New(database, skillsDir)
-			runner := agentrunner.New(database, sysKey, agentsDir, homesDir, cfg.Data.Dir, coderSvc, skillsDir)
-
 			memStore := memory.New(filepath.Join(cfg.Data.Dir, "memory"))
+
+			designFlow := agentdesigner.NewFlow(func(_ string) *coder.Coder { return coderSvc }, designer).WithDB(database).WithMemory(memStore)
+			skillStore := skillstore.New(database, skillsDir)
+			runner := agentrunner.New(database, sysKey, agentsDir, homesDir, cfg.Data.Dir, coderSvc, skillsDir).WithMemory(memStore)
 
 			textHandler := func(ctx context.Context, userID string, history []db.ChatMessage, text string, send func(string)) error {
 				sysCtx := buildUserContext(database, memStore, userID)

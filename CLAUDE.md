@@ -71,7 +71,7 @@ Telegram adapter (per-user bot instance)
 | `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users |
 | `internal/reminder` | Creates/lists/fires reminders; background polling goroutine |
 | `internal/session` | `ChatSession` create/list/stop; 30-min idle auto-stop |
-| `internal/memory` | Per-user append-only JSONL store |
+| `internal/memory` | Per-user append-only JSONL store; `ContextString()` formats entries as a bullet list for LLM injection; injected into agent design sessions (`buildSystemPrompt`) and agent run prompts (`buildCoderPrompt`) via `WithMemory()` on both `Flow` and `Runner` |
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
 | `internal/profile` | Per-user personalization (name, email, location, timezone, tone, language, notes); stored in the generic `settings` table; `Load()`/`Save()`/`ContextString()` for LLM injection; `LoadLocation()` for timezone-aware reminder parsing; `IsComplete()`/`MarkComplete()` sentinel for setup wizard |
 | `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per user |
@@ -340,7 +340,8 @@ Manual web round-trip and `/agent edit` on Telegram for the edit flow have not b
 | `12f0461` | StateVerifying + full-tools generation (write/run/fix before showing user); WithDir/WithAllowedTools on Coder; runner tool permissions fix; multi-line [CHAT] + inline [STATE] parser |
 | `92d37be` | runCoderAgent runs inside agentDir (was the shared per-user home — caused cross-agent file contamination); manual "Run Now" decrypts stored master password instead of a non-existent form field; coder.ErrUsageLimit detection + coder-agnostic friendly error messages sent to the user on every run failure |
 | `81c6baf` | Conversational agent editing (Telegram `/agent edit` + web Edit button), reusing the create FSM via `DesignSession.IsEdit`; schedule-line reconciliation against the real `agent_schedules` row; edit generation runs in a staging dir copy so the live agent is never touched before approval; `AgentDesigner.UpdateAgent`/`db.UpdateAgentDescription` for the UPDATE-not-INSERT save path; `reconcileScheduleOnSave` reuses the existing schedule row's ID to avoid duplicate/double-firing schedules |
-| (current) | User profile system (`internal/profile`): name, email, location, timezone, tone, language, notes stored in `settings` table; injected as `[User profile]` block into agent designer system prompt; setup wizard gains profile step (step 3 of 5); Settings page expanded to full profile editor; reminder timezone now uses per-user saved timezone via `profile.LoadLocation()` (both web + Telegram) |
+| `aa269a7` | User profile system (`internal/profile`): name, email, location, timezone, tone, language, notes stored in `settings` table; injected as `[User profile]` block into agent designer system prompt; setup wizard gains profile step (step 3 of 5); Settings page expanded to full profile editor; reminder timezone now uses per-user saved timezone via `profile.LoadLocation()` (both web + Telegram) |
+| (current) | User memory injection: `memory.ContextString()` now injected as `[User memory]` block into agent design sessions (`buildSystemPrompt`) and agent run prompts (`buildCoderPrompt`); `Flow.WithMemory()` and `Runner.WithMemory()` wire the store via a local `memoryStore` interface in each package |
 
 ### Known gaps
 

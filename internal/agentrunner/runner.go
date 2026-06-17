@@ -40,6 +40,11 @@ type RunInput struct {
 	visited    map[string]bool // internal: cycle detection for agent-to-agent calls
 }
 
+// memoryStore is satisfied by *memory.Store — kept local to avoid the import.
+type memoryStore interface {
+	ContextString(userID string) (string, error)
+}
+
 // Runner executes agents.
 type Runner struct {
 	db        *db.DB
@@ -49,6 +54,7 @@ type Runner struct {
 	dataDir   string // root data dir (blacklisted inside sandbox)
 	coderSvc  *coder.Coder
 	skillsDir string // root dir for per-user skills: <dataDir>/skills
+	memStore  memoryStore // optional; nil = no memory injected
 }
 
 // New creates a Runner.
@@ -62,6 +68,12 @@ func New(database *db.DB, systemKey []byte, agentsDir, homesDir, dataDir string,
 		coderSvc:  coderSvc,
 		skillsDir: skillsDir,
 	}
+}
+
+// WithMemory attaches a memory store so saved user facts are injected into agent run prompts.
+func (r *Runner) WithMemory(m memoryStore) *Runner {
+	r.memStore = m
+	return r
 }
 
 // Run executes the agent identified by input.AgentID.
@@ -130,7 +142,7 @@ func (r *Runner) TestRunFromContent(ctx context.Context, userID, agentMD string,
 		}
 	}
 
-	prompt := buildCoderPrompt(agentMD, "{}", nil, nil, nil)
+	prompt := buildCoderPrompt(agentMD, "{}", "", nil, nil, nil)
 
 	if r.coderSvc == nil {
 		return "", fmt.Errorf("no coder service configured")
@@ -179,7 +191,12 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	allSkills, _ := r.db.ListSkills(input.UserID)
 	declaredContent, _ := r.loadDeclaredSkillContent(input.UserID, manifest.Skills)
 
-	prompt := buildCoderPrompt(string(agentMD), string(stateRaw), allSkills, manifest.Skills, declaredContent)
+	var userMemory string
+	if r.memStore != nil {
+		userMemory, _ = r.memStore.ContextString(input.UserID)
+	}
+
+	prompt := buildCoderPrompt(string(agentMD), string(stateRaw), userMemory, allSkills, manifest.Skills, declaredContent)
 
 	// Run inside the agent's own directory (not the shared per-user home) so
 	// tools/*.py and state.json resolve correctly and runs never see other
@@ -527,7 +544,7 @@ func writeRunLog(agentDir, content string, t time.Time) {
 
 // ─── Prompt building ──────────────────────────────────────────────────────────
 
-func buildCoderPrompt(claudeMD, stateJSON string, allSkills []*db.Skill, declaredSkills []string, declaredContent map[string]string) string {
+func buildCoderPrompt(claudeMD, stateJSON, userMemory string, allSkills []*db.Skill, declaredSkills []string, declaredContent map[string]string) string {
 	var sb strings.Builder
 
 	sb.WriteString("[Agent Instructions]\n")
@@ -537,6 +554,12 @@ func buildCoderPrompt(claudeMD, stateJSON string, allSkills []*db.Skill, declare
 	sb.WriteString("[Current State]\n")
 	sb.WriteString(stateJSON)
 	sb.WriteString("\n\n")
+
+	if userMemory != "" {
+		sb.WriteString("[User memory]\n")
+		sb.WriteString(userMemory)
+		sb.WriteString("\n\n")
+	}
 
 	if len(allSkills) > 0 {
 		sb.WriteString("[Available Skills]\n")
