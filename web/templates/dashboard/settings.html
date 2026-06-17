@@ -19,6 +19,105 @@
             <span class="label-text-alt text-base-content/30">Shown in the dashboard greeting</span>
           </label>
         </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">Email</span></label>
+            <input type="email" name="email" placeholder="you@example.com"
+              class="input input-bordered w-full" value="{{.Email}}">
+          </div>
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">Location</span></label>
+            <div class="sd-container relative" data-placeholder="City or Country">
+              <input type="hidden" name="location" value="{{.Location}}">
+              <button type="button" class="sd-trigger input input-bordered w-full text-left flex items-center justify-between">
+                <span class="sd-display"></span>
+                <svg class="w-4 h-4 opacity-40 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+              </button>
+              <div class="sd-panel absolute z-[100] w-full bg-base-100 border border-base-300 rounded-box shadow-xl hidden">
+                <div class="p-2 sticky top-0 bg-base-100 border-b border-base-300">
+                  <input type="text" class="sd-search input input-bordered input-sm w-full" placeholder="Search...">
+                </div>
+                <ul class="sd-list max-h-52 overflow-y-auto py-1 text-sm">
+                  {{template "location-li-options" .}}
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-control">
+          <label class="label pb-1"><span class="label-text font-medium">Timezone</span></label>
+          <div class="sd-container relative" data-placeholder="e.g. Europe/Skopje">
+            <input type="hidden" name="timezone" value="{{.Timezone}}">
+            <button type="button" class="sd-trigger input input-bordered w-full text-left flex items-center justify-between">
+              <span class="sd-display"></span>
+              <svg class="w-4 h-4 opacity-40 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div class="sd-panel absolute z-[100] w-full bg-base-100 border border-base-300 rounded-box shadow-xl hidden">
+              <div class="p-2 sticky top-0 bg-base-100 border-b border-base-300">
+                <input type="text" class="sd-search input input-bordered input-sm w-full" placeholder="Search...">
+              </div>
+              <ul class="sd-list max-h-52 overflow-y-auto py-1 text-sm">
+                {{template "timezone-li-options" .}}
+              </ul>
+            </div>
+          </div>
+          <label class="label pt-1">
+            <span class="label-text-alt text-base-content/30">IANA name — used for reminders and agent context</span>
+          </label>
+        </div>
+
+        <div class="form-control">
+          <label class="label pb-1"><span class="label-text font-medium">Preferred communication tone</span></label>
+          <div class="flex gap-4 text-sm mb-2">
+            <label class="flex items-center gap-2">
+              <input type="radio" name="tone" value="Short & concise" class="radio radio-sm" {{if eq .Tone "Short & concise"}}checked{{end}}>
+              Short &amp; concise
+            </label>
+            <label class="flex items-center gap-2">
+              <input type="radio" name="tone" value="Balanced" class="radio radio-sm" {{if eq .Tone "Balanced"}}checked{{end}}>
+              Balanced
+            </label>
+            <label class="flex items-center gap-2">
+              <input type="radio" name="tone" value="Detailed & thorough" class="radio radio-sm" {{if eq .Tone "Detailed & thorough"}}checked{{end}}>
+              Detailed &amp; thorough
+            </label>
+          </div>
+          {{if not (or (eq .Tone "Short & concise") (eq .Tone "Balanced") (eq .Tone "Detailed & thorough") (eq .Tone ""))}}
+          <input type="text" name="tone_custom" value="{{.Tone}}" placeholder="Or describe your own tone — overrides the choice above"
+            class="input input-bordered input-sm w-full">
+          {{else}}
+          <input type="text" name="tone_custom" placeholder="Or describe your own tone — overrides the choice above"
+            class="input input-bordered input-sm w-full">
+          {{end}}
+        </div>
+
+        <div class="form-control">
+          <label class="label pb-1"><span class="label-text font-medium">Preferred language</span></label>
+          <div class="sd-container relative" data-placeholder="Select language">
+            <input type="hidden" name="language" value="{{.Language}}">
+            <button type="button" class="sd-trigger input input-bordered w-full text-left flex items-center justify-between">
+              <span class="sd-display"></span>
+              <svg class="w-4 h-4 opacity-40 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </button>
+            <div class="sd-panel absolute z-[100] w-full bg-base-100 border border-base-300 rounded-box shadow-xl hidden">
+              <div class="p-2 sticky top-0 bg-base-100 border-b border-base-300">
+                <input type="text" class="sd-search input input-bordered input-sm w-full" placeholder="Search...">
+              </div>
+              <ul class="sd-list max-h-52 overflow-y-auto py-1 text-sm">
+                {{template "language-li-options" .}}
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-control">
+          <label class="label pb-1"><span class="label-text font-medium">Anything else we should know?</span></label>
+          <textarea name="notes" maxlength="300" rows="3"
+            class="textarea textarea-bordered w-full">{{.Notes}}</textarea>
+        </div>
+
         <button type="submit" class="btn btn-primary btn-sm">Save Profile</button>
       </form>
     </div>
@@ -64,4 +163,5 @@
 
 </div>
 
+{{template "searchable-dropdown-script" .}}
 {{template "foot" .}}

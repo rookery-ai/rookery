@@ -13,6 +13,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/memory"
+	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/reminder"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 )
@@ -407,7 +408,7 @@ func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send
 	}
 
 	// Try natural language parser first, then legacy duration format.
-	remindAt, err := reminder.ParseNaturalTime(timeExpr, time.Now(), time.UTC)
+	remindAt, err := reminder.ParseNaturalTime(timeExpr, time.Now(), profile.LoadLocation(r.db, msg.UserID))
 	if err != nil {
 		d, err2 := parseDuration(timeExpr)
 		if err2 != nil {

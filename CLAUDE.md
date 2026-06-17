@@ -73,6 +73,7 @@ Telegram adapter (per-user bot instance)
 | `internal/session` | `ChatSession` create/list/stop; 30-min idle auto-stop |
 | `internal/memory` | Per-user append-only JSONL store |
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
+| `internal/profile` | Per-user personalization (name, email, location, timezone, tone, language, notes); stored in the generic `settings` table; `Load()`/`Save()`/`ContextString()` for LLM injection; `LoadLocation()` for timezone-aware reminder parsing; `IsComplete()`/`MarkComplete()` sentinel for setup wizard |
 | `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per user |
 | `web/` | Echo v4 web server; full user dashboard + admin UI |
 
@@ -133,11 +134,13 @@ type dbDesignStore interface {
     GetAgent(id string) (*db.Agent, error)
     GetScheduleForAgent(agentID string) (*db.AgentSchedule, error)
     DeleteAgentSchedule(agentID string) error
+    GetSetting(userID, key string) (string, error)
 }
 ```
 
 **System prompt context injected into every design turn:**
 - Connected platforms (e.g. Telegram) — coder knows to use `[CHAT]` not raw Telegram API
+- User profile (`[User profile]` block) — name, location, timezone, tone, language, notes from `internal/profile`; loaded once on session start via `loadUserProfile()`; empty if no fields saved
 - Secrets guidance — tell user to add to Secrets store; never paste in chat; reference as `os.environ['NAME']`
 - Scheduling guidance — detect frequency from conversation; propose cron; auto-set on creation
 - Non-technical user style — explain API keys and cron in plain language; one/two questions per turn
@@ -258,7 +261,7 @@ Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`,
 
 ```
 /login, /logout
-/setup                              # forced first-login wizard
+/setup                              # forced first-login wizard (5 steps: password → master_password → profile → connector → done)
 /change-password                    # forced if must_change_password=1
 /dashboard                          # user home
 /dashboard/agents                   # list agents
@@ -281,7 +284,7 @@ Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`,
 /dashboard/sessions                 # chat sessions
 /dashboard/reminders                # natural language reminder creation
 /dashboard/memory                   # view/add entries
-/dashboard/settings                 # display name, change master password
+/dashboard/settings                 # full user profile (name, email, location, timezone, tone, language, notes) + change master password
 /admin                              # admin dashboard
 /admin/users, /admin/users/:id      # create user, grant permissions, reset password
 /admin/users/:id/coder[/unassign]   # assign coder profile to user
@@ -307,13 +310,15 @@ The `designFlow` is constructed with a resolver `func(userID string) *coder.Code
 
 `internal/reminder/timeparser.go` — `ParseNaturalTime(text, now, loc)` parses expressions like `"in 10 minutes"`, `"tomorrow at 3pm"`, `"next Tuesday at noon"` using regex only. Used by both the web UI and Telegram router. Telegram syntax: `/remind in 10 minutes to check oven`.
 
+Both callers pass `profile.LoadLocation(db, userID)` as `loc` so reminders fire relative to the user's saved timezone, not UTC. Falls back to `time.UTC` when no timezone is set.
+
 ---
 
 ## Build Status
 
-Build: **PASS**. `go vet`: **PASS**. Tests: **PASS** (`internal/agentdesigner`, `internal/secrets`).
+Build: **PASS**. `go vet`: **PASS**. Tests: **PASS** (`internal/agentdesigner`, `internal/secrets`, `internal/profile`, `web/`).
 
-Manual web round-trip and `/agent edit` on Telegram for the edit flow below have not been exercised end-to-end with a real coder subprocess in this environment — the schedule/state/staging-isolation logic around it is unit-tested, the coder interaction itself is not.
+Manual web round-trip and `/agent edit` on Telegram for the edit flow have not been exercised end-to-end with a real coder subprocess — the schedule/state/staging-isolation logic is unit-tested, the coder interaction itself is not.
 
 ### Commit history
 
@@ -334,11 +339,12 @@ Manual web round-trip and `/agent edit` on Telegram for the edit flow below have
 | `da6eb6a` | Unified conversational agent creation; no agent types; AGENT.md+tools/ layout; secret env injection; WithNoTools/WithExtraEnv; auto-schedule from conversation; platform-aware designer; skills UI |
 | `12f0461` | StateVerifying + full-tools generation (write/run/fix before showing user); WithDir/WithAllowedTools on Coder; runner tool permissions fix; multi-line [CHAT] + inline [STATE] parser |
 | `92d37be` | runCoderAgent runs inside agentDir (was the shared per-user home — caused cross-agent file contamination); manual "Run Now" decrypts stored master password instead of a non-existent form field; coder.ErrUsageLimit detection + coder-agnostic friendly error messages sent to the user on every run failure |
-| (current) | Conversational agent editing (Telegram `/agent edit` + web Edit button), reusing the create FSM via `DesignSession.IsEdit`; schedule-line reconciliation against the real `agent_schedules` row; edit generation runs in a staging dir copy so the live agent is never touched before approval; `AgentDesigner.UpdateAgent`/`db.UpdateAgentDescription` for the UPDATE-not-INSERT save path; `reconcileScheduleOnSave` reuses the existing schedule row's ID to avoid duplicate/double-firing schedules |
+| `81c6baf` | Conversational agent editing (Telegram `/agent edit` + web Edit button), reusing the create FSM via `DesignSession.IsEdit`; schedule-line reconciliation against the real `agent_schedules` row; edit generation runs in a staging dir copy so the live agent is never touched before approval; `AgentDesigner.UpdateAgent`/`db.UpdateAgentDescription` for the UPDATE-not-INSERT save path; `reconcileScheduleOnSave` reuses the existing schedule row's ID to avoid duplicate/double-firing schedules |
+| (current) | User profile system (`internal/profile`): name, email, location, timezone, tone, language, notes stored in `settings` table; injected as `[User profile]` block into agent designer system prompt; setup wizard gains profile step (step 3 of 5); Settings page expanded to full profile editor; reminder timezone now uses per-user saved timezone via `profile.LoadLocation()` (both web + Telegram) |
 
 ### Known gaps
 
-- **Tests** — only `internal/agentdesigner` and `internal/secrets` have test files; no integration or e2e coverage. The agent-editing logic is unit-tested around the coder boundary (schedule reconciliation, staging-dir isolation, file invariants) but the coder subprocess round-trip itself (real edit → test → approve/reject) has no automated test
+- **Tests** — `internal/agentdesigner`, `internal/secrets`, `internal/profile`, and `web/` (template smoke tests) have test files; no integration or e2e coverage. The agent-editing logic is unit-tested around the coder boundary (schedule reconciliation, staging-dir isolation, file invariants) but the coder subprocess round-trip itself (real edit → test → approve/reject) has no automated test
 - **Discord adapter** — in the original plan; not implemented
 - **`/remind` list/delete via Telegram** — only create is wired; no list or cancel command
 - **`/memory` Telegram command** — memory store exists but no `/memory` chat command in Router

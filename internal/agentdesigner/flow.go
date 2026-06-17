@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/robfig/cron/v3"
 )
 
@@ -51,6 +52,7 @@ type DesignSession struct {
 	History            []db.ChatMessage // full conversation fed to coder on every turn
 	Skills             []string         // installed skill names, loaded once on Start
 	ConnectedPlatforms []string         // e.g. ["telegram"] — loaded from platform_connections
+	UserProfile        string           // rendered "[User profile]" block, loaded once on session start
 	CreatedAt          time.Time
 
 	// IsEdit distinguishes an edit-of-existing-agent session from a fresh create.
@@ -74,6 +76,7 @@ type dbDesignStore interface {
 	GetAgent(id string) (*db.Agent, error)
 	GetScheduleForAgent(agentID string) (*db.AgentSchedule, error)
 	DeleteAgentSchedule(agentID string) error
+	GetSetting(userID, key string) (string, error)
 }
 
 // Flow manages per-user design sessions and drives the FSM.
@@ -115,6 +118,7 @@ func (f *Flow) Start(userID, agentName string) (string, error) {
 
 	skills := f.loadSkillNames(userID)
 	platforms := f.loadConnectedPlatforms(userID)
+	userProfile := f.loadUserProfile(userID)
 	f.sessions[userID] = &DesignSession{
 		UserID:             userID,
 		AgentID:            uuid.New().String(),
@@ -122,6 +126,7 @@ func (f *Flow) Start(userID, agentName string) (string, error) {
 		State:              StateDescribing,
 		Skills:             skills,
 		ConnectedPlatforms: platforms,
+		UserProfile:        userProfile,
 		CreatedAt:          time.Now(),
 	}
 
@@ -143,6 +148,7 @@ func (f *Flow) StartDesign(ctx context.Context, userID, agentName, firstMessage 
 
 	skills := f.loadSkillNames(userID)
 	platforms := f.loadConnectedPlatforms(userID)
+	userProfile := f.loadUserProfile(userID)
 	sess := &DesignSession{
 		UserID:             userID,
 		AgentID:            uuid.New().String(),
@@ -150,6 +156,7 @@ func (f *Flow) StartDesign(ctx context.Context, userID, agentName, firstMessage 
 		State:              StateDesigning,
 		Skills:             skills,
 		ConnectedPlatforms: platforms,
+		UserProfile:        userProfile,
 		CreatedAt:          time.Now(),
 	}
 	f.sessions[userID] = sess
@@ -178,6 +185,7 @@ func (f *Flow) StartEdit(userID, agentID string) (string, error) {
 	f.mu.Lock()
 	skills := f.loadSkillNames(userID)
 	platforms := f.loadConnectedPlatforms(userID)
+	userProfile := f.loadUserProfile(userID)
 	f.sessions[userID] = &DesignSession{
 		UserID:             userID,
 		AgentID:            agentID,
@@ -185,6 +193,7 @@ func (f *Flow) StartEdit(userID, agentID string) (string, error) {
 		State:              StateDescribing,
 		Skills:             skills,
 		ConnectedPlatforms: platforms,
+		UserProfile:        userProfile,
 		CreatedAt:          time.Now(),
 		IsEdit:             true,
 		ExistingAgentMD:    reconciledMD,
@@ -216,6 +225,7 @@ func (f *Flow) StartEditDesign(ctx context.Context, userID, agentID, firstMessag
 	f.mu.Lock()
 	skills := f.loadSkillNames(userID)
 	platforms := f.loadConnectedPlatforms(userID)
+	userProfile := f.loadUserProfile(userID)
 	sess := &DesignSession{
 		UserID:             userID,
 		AgentID:            agentID,
@@ -223,6 +233,7 @@ func (f *Flow) StartEditDesign(ctx context.Context, userID, agentID, firstMessag
 		State:              StateDesigning,
 		Skills:             skills,
 		ConnectedPlatforms: platforms,
+		UserProfile:        userProfile,
 		CreatedAt:          time.Now(),
 		IsEdit:             true,
 		ExistingAgentMD:    reconciledMD,
@@ -425,6 +436,11 @@ No chat platform is currently connected. If the agent needs to send notification
 		sb.WriteString("INSTALLED SKILLS (can be used by this agent): ")
 		sb.WriteString(strings.Join(sess.Skills, ", "))
 		sb.WriteString("\n\n")
+	}
+
+	if sess.UserProfile != "" {
+		sb.WriteString(sess.UserProfile)
+		sb.WriteString("\n")
 	}
 
 	sb.WriteString(`SECRETS (API keys and credentials):
@@ -1039,6 +1055,15 @@ func (f *Flow) loadConnectedPlatforms(userID string) []string {
 		out = append(out, c.Platform)
 	}
 	return out
+}
+
+// loadUserProfile returns the rendered "[User profile]" context block for
+// userID, or "" if no db is attached or no profile fields are set.
+func (f *Flow) loadUserProfile(userID string) string {
+	if f.db == nil {
+		return ""
+	}
+	return profile.Load(f.db, userID).ContextString()
 }
 
 // ─── Text helpers ─────────────────────────────────────────────────────────────

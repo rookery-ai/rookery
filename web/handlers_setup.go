@@ -5,13 +5,14 @@ import (
 
 	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
 )
 
 type setupData struct {
 	*pageData
-	Step        int // 1=password, 2=master_password, 3=connector, 4=done
+	Step        int // 1=password, 2=master_password, 3=profile, 4=connector, 5=done
 	BotUsername string
 }
 
@@ -19,7 +20,7 @@ func (s *Server) showSetup(c echo.Context) error {
 	u := c.Get("user").(*db.User)
 	step := setupStep(u, s.db)
 	var botUsername string
-	if step == 4 {
+	if step == 5 {
 		botUsername, _ = s.db.GetSetting(u.ID, "telegram_bot_username")
 	}
 	return c.Render(http.StatusOK, "auth/setup.html", &setupData{
@@ -36,9 +37,16 @@ func (s *Server) handleSetup(c echo.Context) error {
 	switch action {
 	case "master_password":
 		return s.handleSetupMasterPassword(c, u)
+	case "profile":
+		return s.handleSetupProfile(c, u)
+	case "skip_profile":
+		if err := profile.MarkComplete(s.db, u.ID); err != nil {
+			return err
+		}
+		return c.Redirect(http.StatusFound, "/setup")
 	case "connector":
 		// Connector setup is handled by /dashboard/connectors — just advance
-		return c.Redirect(http.StatusFound, "/setup?step=4")
+		return c.Redirect(http.StatusFound, "/setup")
 	case "skip_connector":
 		if err := s.db.UpdateUserSetup(u.ID, u.EncryptedMasterPassword, u.SecretsSalt); err != nil {
 			return err
@@ -85,12 +93,40 @@ func (s *Server) handleSetupMasterPassword(c echo.Context, u *db.User) error {
 
 	s.audit.Log(u.ID, "set_master_password", "user:"+u.ID, "", c.RealIP())
 
-	// Don't mark needs_setup=0 yet; let user proceed to connector step
-	return c.Redirect(http.StatusFound, "/setup?step=3")
+	// Don't mark needs_setup=0 yet; let user proceed to the profile step
+	return c.Redirect(http.StatusFound, "/setup")
+}
+
+// handleSetupProfile saves the profile fields submitted from the setup wizard
+// and marks the profile step complete, then advances to the connector step.
+// All fields are optional — this never validates required-ness.
+func (s *Server) handleSetupProfile(c echo.Context, u *db.User) error {
+	tone := c.FormValue("tone_custom")
+	if tone == "" {
+		tone = c.FormValue("tone")
+	}
+	p := profile.Profile{
+		DisplayName: c.FormValue("display_name"),
+		Email:       c.FormValue("email"),
+		Location:    c.FormValue("location"),
+		Timezone:    c.FormValue("timezone"),
+		Tone:        tone,
+		Language:    c.FormValue("language"),
+		Notes:       c.FormValue("notes"),
+	}
+	if err := profile.Save(s.db, u.ID, p); err != nil {
+		return err
+	}
+	if err := profile.MarkComplete(s.db, u.ID); err != nil {
+		return err
+	}
+	s.audit.Log(u.ID, "update_profile", "user:"+u.ID, "", c.RealIP())
+	return c.Redirect(http.StatusFound, "/setup")
 }
 
 // setupStep determines which step of setup to show based on user state.
-// The db parameter is used to check whether the user has connected a platform yet.
+// The db parameter is used to check the profile-completed sentinel and
+// whether the user has connected a platform yet.
 func setupStep(u *db.User, database *db.DB) int {
 	if u.MustChangePassword {
 		return 1
@@ -98,13 +134,16 @@ func setupStep(u *db.User, database *db.DB) int {
 	if u.SecretsSalt == "" {
 		return 2
 	}
-	// Show step 4 (done) if user already has a platform connection.
+	if database != nil && !profile.IsComplete(database, u.ID) {
+		return 3
+	}
+	// Show step 5 (done) if user already has a platform connection.
 	if database != nil {
 		conns, _ := database.ListUserPlatformConnections(u.ID)
 		if len(conns) > 0 {
-			return 4
+			return 5
 		}
 	}
-	return 3
+	return 4
 }
 

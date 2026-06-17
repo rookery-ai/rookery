@@ -16,6 +16,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/gateway"
 	"github.com/ilijad1/simple-agents/internal/memory"
+	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/reminder"
 	"github.com/ilijad1/simple-agents/internal/scheduler"
 	"github.com/ilijad1/simple-agents/internal/secrets"
@@ -189,6 +190,10 @@ func adminCmd() *cli.Command {
 // the user's persistent memory, their agents, and their enabled MCP tools.
 func buildUserContext(database *db.DB, memStore interface{ ContextString(string) (string, error) }, userID string) string {
 	var sb strings.Builder
+
+	if p := profile.Load(database, userID).ContextString(); p != "" {
+		sb.WriteString(p)
+	}
 
 	if mem, err := memStore.ContextString(userID); err == nil && mem != "" {
 		sb.WriteString("[User memory]\n")

@@ -12,8 +12,9 @@
     <ul class="steps steps-horizontal w-full mb-8 text-xs">
       <li class="step {{if ge .Step 1}}step-primary{{end}}">Password</li>
       <li class="step {{if ge .Step 2}}step-primary{{end}}">Master Key</li>
-      <li class="step {{if ge .Step 3}}step-primary{{end}}">Chat App</li>
-      <li class="step {{if ge .Step 4}}step-primary{{end}}">Done</li>
+      <li class="step {{if ge .Step 3}}step-primary{{end}}">Profile</li>
+      <li class="step {{if ge .Step 4}}step-primary{{end}}">Chat App</li>
+      <li class="step {{if ge .Step 5}}step-primary{{end}}">Done</li>
     </ul>
 
     <div class="card bg-base-100 shadow-xl border border-base-300">
@@ -53,6 +54,121 @@
         </form>
 
         {{else if eq .Step 3}}
+        <h2 class="card-title text-xl mb-1">👤 Customize Your Profile</h2>
+        <p class="text-base-content/60 text-sm mb-5">
+          Tell your agents a bit about you so their replies feel personal. Everything here is optional and editable later from Settings.
+        </p>
+        <form method="POST" action="/setup" class="space-y-4">
+          <input type="hidden" name="action" value="profile">
+
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">What should we call you?</span></label>
+            <input type="text" name="display_name" placeholder="Your name"
+              class="input input-bordered w-full">
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="form-control">
+              <label class="label pb-1"><span class="label-text font-medium">Email</span></label>
+              <input type="email" name="email" placeholder="you@example.com"
+                class="input input-bordered w-full">
+            </div>
+            <div class="form-control">
+              <label class="label pb-1"><span class="label-text font-medium">Location</span></label>
+              <div class="sd-container relative" data-placeholder="City or Country">
+                <input type="hidden" name="location" value="">
+                <button type="button" class="sd-trigger input input-bordered w-full text-left flex items-center justify-between">
+                  <span class="sd-display"></span>
+                  <svg class="w-4 h-4 opacity-40 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                </button>
+                <div class="sd-panel absolute z-[100] w-full bg-base-100 border border-base-300 rounded-box shadow-xl hidden">
+                  <div class="p-2 sticky top-0 bg-base-100 border-b border-base-300">
+                    <input type="text" class="sd-search input input-bordered input-sm w-full" placeholder="Search...">
+                  </div>
+                  <ul class="sd-list max-h-52 overflow-y-auto py-1 text-sm">
+                    {{template "location-li-options" .}}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">Timezone</span></label>
+            <div class="sd-container relative" data-placeholder="e.g. Europe/Skopje" data-autodetect="timezone">
+              <input type="hidden" name="timezone" value="">
+              <button type="button" class="sd-trigger input input-bordered w-full text-left flex items-center justify-between">
+                <span class="sd-display"></span>
+                <svg class="w-4 h-4 opacity-40 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+              </button>
+              <div class="sd-panel absolute z-[100] w-full bg-base-100 border border-base-300 rounded-box shadow-xl hidden">
+                <div class="p-2 sticky top-0 bg-base-100 border-b border-base-300">
+                  <input type="text" class="sd-search input input-bordered input-sm w-full" placeholder="Search...">
+                </div>
+                <ul class="sd-list max-h-52 overflow-y-auto py-1 text-sm">
+                  {{template "timezone-li-options" .}}
+                </ul>
+              </div>
+            </div>
+            <label class="label pt-1">
+              <span class="label-text-alt text-base-content/30">Auto-detected — feel free to correct it</span>
+            </label>
+          </div>
+
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">Preferred communication tone</span></label>
+            <div class="flex gap-4 text-sm mb-2">
+              <label class="flex items-center gap-2">
+                <input type="radio" name="tone" value="Short & concise" class="radio radio-sm" checked>
+                Short &amp; concise
+              </label>
+              <label class="flex items-center gap-2">
+                <input type="radio" name="tone" value="Balanced" class="radio radio-sm">
+                Balanced
+              </label>
+              <label class="flex items-center gap-2">
+                <input type="radio" name="tone" value="Detailed & thorough" class="radio radio-sm">
+                Detailed &amp; thorough
+              </label>
+            </div>
+            <input type="text" name="tone_custom" placeholder="Or describe your own tone — overrides the choice above"
+              class="input input-bordered input-sm w-full">
+          </div>
+
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">Preferred language</span></label>
+            <div class="sd-container relative" data-placeholder="Select language">
+              <input type="hidden" name="language" value="English">
+              <button type="button" class="sd-trigger input input-bordered w-full text-left flex items-center justify-between">
+                <span class="sd-display"></span>
+                <svg class="w-4 h-4 opacity-40 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+              </button>
+              <div class="sd-panel absolute z-[100] w-full bg-base-100 border border-base-300 rounded-box shadow-xl hidden">
+                <div class="p-2 sticky top-0 bg-base-100 border-b border-base-300">
+                  <input type="text" class="sd-search input input-bordered input-sm w-full" placeholder="Search...">
+                </div>
+                <ul class="sd-list max-h-52 overflow-y-auto py-1 text-sm">
+                  {{template "language-li-options" .}}
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">Anything else we should know?</span></label>
+            <textarea name="notes" maxlength="300" rows="3" placeholder="Optional notes for your agents (max 300 characters)"
+              class="textarea textarea-bordered w-full"></textarea>
+          </div>
+
+          <button type="submit" class="btn btn-primary w-full">Save and Continue →</button>
+        </form>
+        <form method="POST" action="/setup" class="mt-2">
+          <input type="hidden" name="action" value="skip_profile">
+          <button type="submit" class="btn btn-ghost btn-sm w-full text-base-content/50">Skip for now — I'll fill this in later</button>
+        </form>
+        {{template "searchable-dropdown-script" .}}
+
+        {{else if eq .Step 4}}
         <h2 class="card-title text-xl mb-1">📱 Connect Your Chat App</h2>
         <p class="text-base-content/60 text-sm mb-5">
           Connect a Telegram bot to interact with your agents from chat. You can skip this and set it up later.
@@ -83,7 +199,7 @@
           <button type="submit" class="btn btn-ghost btn-sm w-full text-base-content/50">Skip for now — I'll set this up later</button>
         </form>
 
-        {{else if eq .Step 4}}
+        {{else if eq .Step 5}}
         <div class="text-center py-4">
           <div class="text-6xl mb-4">🎉</div>
           <h2 class="text-2xl font-bold mb-2">You're all set!</h2>

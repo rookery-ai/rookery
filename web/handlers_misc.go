@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/reminder"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
@@ -97,7 +98,7 @@ func (s *Server) handleCreateReminder(c echo.Context) error {
 		return c.Render(http.StatusBadRequest, "dashboard/reminders.html", &remindersPageData{pageData: p, Reminders: reminders})
 	}
 
-	remindAt, err := reminder.ParseNaturalTime(whenStr, time.Now(), time.Local)
+	remindAt, err := reminder.ParseNaturalTime(whenStr, time.Now(), profile.LoadLocation(s.db, u.ID))
 	if err != nil {
 		p.Error = `Couldn't parse that time. Try: "in 10 minutes", "tomorrow at 3pm", "next Tuesday"`
 		reminders, _ := s.db.ListReminders(u.ID)
@@ -195,39 +196,70 @@ func (s *Server) handleUpdateMemory(c echo.Context) error {
 type settingsPageData struct {
 	*pageData
 	DisplayName string
+	Email       string
+	Location    string
+	Timezone    string
+	Tone        string
+	Language    string
+	Notes       string
 }
 
 func (s *Server) showSettings(c echo.Context) error {
 	u := c.Get("user").(*db.User)
-	dn, _ := s.db.GetSetting(u.ID, "display_name")
+	prof := profile.Load(s.db, u.ID)
+	dn := prof.DisplayName
 	if dn == "" {
 		dn = u.Username
 	}
 	return c.Render(http.StatusOK, "dashboard/settings.html", &settingsPageData{
 		pageData:    s.page(c, "Settings"),
 		DisplayName: dn,
+		Email:       prof.Email,
+		Location:    prof.Location,
+		Timezone:    prof.Timezone,
+		Tone:        prof.Tone,
+		Language:    prof.Language,
+		Notes:       prof.Notes,
 	})
 }
 
 func (s *Server) handleSaveSettings(c echo.Context) error {
 	u := c.Get("user").(*db.User)
-	displayName := c.FormValue("display_name")
+	tone := c.FormValue("tone_custom")
+	if tone == "" {
+		tone = c.FormValue("tone")
+	}
+	prof := profile.Profile{
+		DisplayName: c.FormValue("display_name"),
+		Email:       c.FormValue("email"),
+		Location:    c.FormValue("location"),
+		Timezone:    c.FormValue("timezone"),
+		Tone:        tone,
+		Language:    c.FormValue("language"),
+		Notes:       c.FormValue("notes"),
+	}
 	p := s.page(c, "Settings")
 
-	if displayName != "" {
-		if err := s.db.SetSetting(u.ID, "display_name", displayName); err != nil {
-			p.Error = "Failed to save settings: " + err.Error()
-		} else {
-			s.audit.Log(u.ID, "update_settings", "user:"+u.ID, "display_name", c.RealIP())
-			p.Success = "Settings saved"
-		}
+	if err := profile.Save(s.db, u.ID, prof); err != nil {
+		p.Error = "Failed to save settings: " + err.Error()
 	} else {
+		s.audit.Log(u.ID, "update_settings", "user:"+u.ID, "profile", c.RealIP())
 		p.Success = "Settings saved"
 	}
 
+	dn := prof.DisplayName
+	if dn == "" {
+		dn = u.Username
+	}
 	return c.Render(http.StatusOK, "dashboard/settings.html", &settingsPageData{
 		pageData:    p,
-		DisplayName: displayName,
+		DisplayName: dn,
+		Email:       prof.Email,
+		Location:    prof.Location,
+		Timezone:    prof.Timezone,
+		Tone:        prof.Tone,
+		Language:    prof.Language,
+		Notes:       prof.Notes,
 	})
 }
 
@@ -238,13 +270,17 @@ func (s *Server) handleChangeMasterPassword(c echo.Context) error {
 	confirm := c.FormValue("confirm")
 
 	renderErr := func(msg string) error {
-		dn, _ := s.db.GetSetting(u.ID, "display_name")
+		prof := profile.Load(s.db, u.ID)
+		dn := prof.DisplayName
 		if dn == "" {
 			dn = u.Username
 		}
 		p := s.page(c, "Settings")
 		p.Error = msg
-		return c.Render(http.StatusBadRequest, "dashboard/settings.html", &settingsPageData{pageData: p, DisplayName: dn})
+		return c.Render(http.StatusBadRequest, "dashboard/settings.html", &settingsPageData{
+			pageData: p, DisplayName: dn, Email: prof.Email, Location: prof.Location,
+			Timezone: prof.Timezone, Tone: prof.Tone, Language: prof.Language, Notes: prof.Notes,
+		})
 	}
 
 	if oldPw == "" || newPw == "" {
@@ -294,11 +330,15 @@ func (s *Server) handleChangeMasterPassword(c echo.Context) error {
 	}
 
 	s.audit.Log(u.ID, "change_master_password", "user:"+u.ID, "", c.RealIP())
-	dn, _ := s.db.GetSetting(u.ID, "display_name")
+	prof := profile.Load(s.db, u.ID)
+	dn := prof.DisplayName
 	if dn == "" {
 		dn = u.Username
 	}
 	p := s.page(c, "Settings")
 	p.Success = "Master password changed successfully"
-	return c.Render(http.StatusOK, "dashboard/settings.html", &settingsPageData{pageData: p, DisplayName: dn})
+	return c.Render(http.StatusOK, "dashboard/settings.html", &settingsPageData{
+		pageData: p, DisplayName: dn, Email: prof.Email, Location: prof.Location,
+		Timezone: prof.Timezone, Tone: prof.Tone, Language: prof.Language, Notes: prof.Notes,
+	})
 }
