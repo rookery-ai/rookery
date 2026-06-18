@@ -244,6 +244,23 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 		}
 	}
 
+	// updatePlaceholder edits the placeholder message WITHOUT consuming it, so the
+	// final send() call can still do the definitive edit. Used by the router to
+	// push mid-generation progress updates (milestones) to the Telegram chat.
+	updatePlaceholder := func(text string) {
+		if placeholderID == 0 {
+			return
+		}
+		m.mu.RLock()
+		gw, ok := m.gateways[key(msg.Platform, msg.UserID)]
+		m.mu.RUnlock()
+		if ok {
+			if tg, ok := gw.(TypingGateway); ok {
+				_ = tg.EditMessage(msg.PlatformUserID, placeholderID, text)
+			}
+		}
+	}
+
 	send := func(text string) {
 		if placeholderID != 0 {
 			m.mu.RLock()
@@ -320,7 +337,7 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 		}(sentMsgID)
 	}
 
-	if err := m.router.Handle(ctx, msg, send, deleteIncoming, sendAutoDelete); err != nil {
+	if err := m.router.Handle(ctx, msg, send, deleteIncoming, sendAutoDelete, updatePlaceholder); err != nil {
 		send("An error occurred: " + err.Error())
 	}
 }

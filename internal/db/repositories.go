@@ -314,6 +314,15 @@ func (d *DB) ListPlatformIdentities(userID, platform string) ([]*PlatformIdentit
 	return out, rows.Err()
 }
 
+// HasPlatformIdentity returns true when the user has at least one linked
+// platform (Telegram, etc.). Used to skip reminders and agent runs for
+// users who have no way to receive output, preventing wasted API usage.
+func (d *DB) HasPlatformIdentity(userID string) bool {
+	var count int
+	_ = d.QueryRow(`SELECT COUNT(*) FROM platform_identities WHERE user_id=?`, userID).Scan(&count)
+	return count > 0
+}
+
 // ── Agents ─────────────────────────────────────────────────────────────────
 
 func (d *DB) CreateAgent(a *Agent) error {
@@ -966,20 +975,20 @@ func (d *DB) GetScheduleForAgent(agentID string) (*AgentSchedule, error) {
 // ── Coders ─────────────────────────────────────────────────────────────────
 
 func (d *DB) CreateCoder(c *Coder) error {
-	_, err := d.Exec(`INSERT INTO coders(id,name,description,claude_bin,timeout_s,created_at,updated_at)
-		VALUES(?,?,?,?,?,datetime('now'),datetime('now'))`,
-		c.ID, c.Name, c.Description, c.ClaudeBin, c.TimeoutS)
+	_, err := d.Exec(`INSERT INTO coders(id,name,description,claude_bin,timeout_s,backend_type,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,datetime('now'),datetime('now'))`,
+		c.ID, c.Name, c.Description, c.ClaudeBin, c.TimeoutS, c.BackendType)
 	return err
 }
 
 func (d *DB) GetCoder(id string) (*Coder, error) {
-	row := d.QueryRow(`SELECT id,name,description,claude_bin,timeout_s,created_at,updated_at
+	row := d.QueryRow(`SELECT id,name,description,claude_bin,timeout_s,backend_type,created_at,updated_at
 		FROM coders WHERE id=?`, id)
 	return scanCoder(row)
 }
 
 func (d *DB) ListCoders() ([]*Coder, error) {
-	rows, err := d.Query(`SELECT id,name,description,claude_bin,timeout_s,created_at,updated_at
+	rows, err := d.Query(`SELECT id,name,description,claude_bin,timeout_s,backend_type,created_at,updated_at
 		FROM coders ORDER BY name`)
 	if err != nil {
 		return nil, err
@@ -997,8 +1006,8 @@ func (d *DB) ListCoders() ([]*Coder, error) {
 }
 
 func (d *DB) UpdateCoder(c *Coder) error {
-	_, err := d.Exec(`UPDATE coders SET name=?,description=?,claude_bin=?,timeout_s=?,updated_at=datetime('now') WHERE id=?`,
-		c.Name, c.Description, c.ClaudeBin, c.TimeoutS, c.ID)
+	_, err := d.Exec(`UPDATE coders SET name=?,description=?,claude_bin=?,timeout_s=?,backend_type=?,updated_at=datetime('now') WHERE id=?`,
+		c.Name, c.Description, c.ClaudeBin, c.TimeoutS, c.BackendType, c.ID)
 	return err
 }
 
@@ -1019,7 +1028,7 @@ func (d *DB) UnassignUserCoder(userID string) error {
 
 // GetUserCoder returns the Coder assigned to a user, or (nil, nil) if none assigned.
 func (d *DB) GetUserCoder(userID string) (*Coder, error) {
-	row := d.QueryRow(`SELECT c.id,c.name,c.description,c.claude_bin,c.timeout_s,c.created_at,c.updated_at
+	row := d.QueryRow(`SELECT c.id,c.name,c.description,c.claude_bin,c.timeout_s,c.backend_type,c.created_at,c.updated_at
 		FROM coders c JOIN users u ON u.coder_id=c.id WHERE u.id=?`, userID)
 	c, err := scanCoder(row)
 	if errors.Is(err, ErrNotFound) {
@@ -1037,7 +1046,7 @@ func (d *DB) CountCoders() (int, error) {
 func scanCoder(s scanner) (*Coder, error) {
 	var c Coder
 	var createdAt, updatedAt string
-	err := s.Scan(&c.ID, &c.Name, &c.Description, &c.ClaudeBin, &c.TimeoutS, &createdAt, &updatedAt)
+	err := s.Scan(&c.ID, &c.Name, &c.Description, &c.ClaudeBin, &c.TimeoutS, &c.BackendType, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

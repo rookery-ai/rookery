@@ -58,6 +58,13 @@ func (s *Service) tick() {
 	}
 
 	for _, r := range reminders {
+		// Skip users with no platform connected — they have no way to receive
+		// the reminder. Keep it pending so it fires once they link a platform.
+		if !s.db.HasPlatformIdentity(r.UserID) {
+			slog.Warn("reminder: skipping — user has no platform connected",
+				"reminder_id", r.ID, "user_id", r.UserID)
+			continue
+		}
 		if err := s.sender.SendToUser(r.UserID, fmt.Sprintf("Reminder: %s", r.Message)); err != nil {
 			slog.Error("reminder: send failed", "reminder_id", r.ID, "user_id", r.UserID, "err", err)
 			continue

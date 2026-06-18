@@ -22,6 +22,7 @@ type Coder struct {
 	Description string
 	ClaudeBin   string
 	TimeoutS    int
+	BackendType string // '' = auto-detect, 'claude', or 'generic'
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 }

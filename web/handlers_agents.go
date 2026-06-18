@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -34,6 +35,12 @@ type agentDetailData struct {
 	AgentSkills    []*db.Skill
 	AllSkills      []*db.Skill
 	MissingSecrets []string
+	HasPlatform    bool // user has at least one linked chat platform
+}
+
+type newAgentPageData struct {
+	*pageData
+	HasPlatform bool
 }
 
 func (s *Server) showAgents(c echo.Context) error {
@@ -46,7 +53,11 @@ func (s *Server) showAgents(c echo.Context) error {
 }
 
 func (s *Server) showNewAgent(c echo.Context) error {
-	return c.Render(http.StatusOK, "dashboard/agent_new.html", s.page(c, "Create Agent"))
+	u := c.Get("user").(*db.User)
+	return c.Render(http.StatusOK, "dashboard/agent_new.html", &newAgentPageData{
+		pageData:    s.page(c, "Create Agent"),
+		HasPlatform: s.db.HasPlatformIdentity(u.ID),
+	})
 }
 
 // handleDesignChat drives the conversational agent creation via JSON API.
@@ -125,7 +136,8 @@ func (s *Server) handleDesignChat(c echo.Context) error {
 	})
 }
 
-// handleCancelDesign cancels the active design session.
+// handleCancelDesign cancels the active design session, killing any in-flight
+// coder subprocess and closing the SSE progress channel.
 // POST /dashboard/agents/design/cancel
 func (s *Server) handleCancelDesign(c echo.Context) error {
 	u := c.Get("user").(*db.User)
@@ -133,6 +145,61 @@ func (s *Server) handleCancelDesign(c echo.Context) error {
 		s.designFlow.Cancel(u.ID)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"status": "cancelled"})
+}
+
+// handleDesignProgress streams generation milestone events via Server-Sent Events.
+// The browser opens this endpoint when the user sends an approval message. The
+// handler polls for progressCh for up to 30 s (the POST and runGeneration start
+// concurrently, so the channel may not exist yet). Once found it streams until
+// the channel closes or the client disconnects.
+// GET /dashboard/agents/design/progress
+func (s *Server) handleDesignProgress(c echo.Context) error {
+	u := c.Get("user").(*db.User)
+	reqCtx := c.Request().Context()
+
+	if s.designFlow == nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "no design flow"})
+	}
+
+	// Poll up to 30 s for progressCh to appear. The browser opens this endpoint
+	// before (or concurrently with) the approval POST, so the channel may not
+	// exist yet. Stop early if the client disconnects.
+	var ch <-chan string
+	for i := 0; i < 150; i++ {
+		select {
+		case <-reqCtx.Done():
+			return nil
+		default:
+		}
+		if c2, ok := s.designFlow.GetProgressChan(u.ID); ok {
+			ch = c2
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if ch == nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "no active generation"})
+	}
+
+	w := c.Response()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // disable nginx/caddy buffering
+	w.WriteHeader(http.StatusOK)
+
+	for {
+		select {
+		case <-reqCtx.Done():
+			return nil
+		case msg, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			fmt.Fprintf(w, "data: %s\n\n", msg)
+			w.Flush()
+		}
+	}
 }
 
 // showEditAgent renders the conversational edit UI for an existing agent.
@@ -154,9 +221,10 @@ func (s *Server) showEditAgent(c echo.Context) error {
 	}
 
 	return c.Render(http.StatusOK, "dashboard/agent_edit.html", &agentDetailData{
-		pageData: s.page(c, "Edit Agent: "+agent.Name),
-		Agent:    agent,
-		AgentMD:  agentMD,
+		pageData:    s.page(c, "Edit Agent: "+agent.Name),
+		Agent:       agent,
+		AgentMD:     agentMD,
+		HasPlatform: s.db.HasPlatformIdentity(u.ID),
 	})
 }
 

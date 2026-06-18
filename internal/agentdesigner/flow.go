@@ -2,6 +2,7 @@ package agentdesigner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -69,6 +70,12 @@ type DesignSession struct {
 	// Set after generation; cleared on finalize or when user requests changes.
 	PendingAgentMD string
 	PendingTools   map[string]string
+
+	// Generation cancellation and progress. All fields are set in runGeneration
+	// and cleared / closed in Cancel.
+	cancelGenerate context.CancelFunc // cancels the in-flight coder.Generate() call
+	progressFunc   func(string)       // Telegram: edits the placeholder message mid-run
+	progressCh     chan string         // Web SSE: buffered milestone channel
 }
 
 type dbDesignStore interface {
@@ -328,11 +335,49 @@ func (f *Flow) Step(ctx context.Context, userID, input string) (string, bool, st
 	}
 }
 
-// Cancel removes the user's active session without saving.
+// Cancel removes the user's active session without saving. If a coder subprocess
+// is currently running, its context is cancelled (killing the process).
+// The progress channel is NOT closed here — runGeneration detects the
+// context.Canceled error and calls closeProgress itself, making it the sole
+// closer of the channel. Closing here in addition would race with notify()
+// sends and panic even inside a select (select only guards against a full
+// channel, not a closed one).
 func (f *Flow) Cancel(userID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	sess, ok := f.sessions[userID]
+	if !ok {
+		return
+	}
+	if sess.cancelGenerate != nil {
+		sess.cancelGenerate()
+	}
 	delete(f.sessions, userID)
+}
+
+// SetProgressHandler stores a function that will be called with milestone
+// messages during the next generation phase for this user's session. The
+// router calls this before Step() when it detects an approval message so that
+// Telegram can update its placeholder message with live progress.
+func (f *Flow) SetProgressHandler(userID string, fn func(string)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if sess, ok := f.sessions[userID]; ok {
+		sess.progressFunc = fn
+	}
+}
+
+// GetProgressChan returns the buffered progress channel for the user's active
+// session. The Web SSE handler reads from this channel to stream milestone
+// events to the browser. Returns (nil, false) if no session exists.
+func (f *Flow) GetProgressChan(userID string) (<-chan string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sess, ok := f.sessions[userID]
+	if !ok || sess.progressCh == nil {
+		return nil, false
+	}
+	return sess.progressCh, true
 }
 
 // GetSession returns the user's active session, or nil.
@@ -419,6 +464,9 @@ func (f *Flow) callCoder(ctx context.Context, userID, userMessage string) (strin
 	// attempts to write files or request permissions.
 	result, err := coderSvc.WithNoTools().Chat(ctx, userID, sess.History, systemPrompt, userMessage)
 	if err != nil {
+		if errors.Is(err, coder.ErrUsageLimit) {
+			return fmt.Sprintf("⚠️ %s hit its usage limit. The design session is still active — try again in a while.", coderSvc.Name()), nil
+		}
 		return "", fmt.Errorf("coder: %w", err)
 	}
 
@@ -456,11 +504,58 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 	existingAgentMD := sess.ExistingAgentMD
 	historySnap := make([]db.ChatMessage, len(sess.History))
 	copy(historySnap, sess.History)
+
+	// Set up a buffered progress channel for SSE and snapshot the Telegram progress func.
+	if sess.progressCh == nil {
+		sess.progressCh = make(chan string, 8)
+	}
+	progressCh := sess.progressCh
+	progressFunc := sess.progressFunc
+
+	// Create a child context so Cancel() can kill the subprocess without
+	// cancelling the outer request context (which would close the SSE stream).
+	genCtx, cancelGenerate := context.WithCancel(ctx)
+	sess.cancelGenerate = cancelGenerate
 	f.mu.Unlock()
 
+	// notify sends a milestone string to both the SSE channel (non-blocking)
+	// and the Telegram progress callback.
+	notify := func(msg string) {
+		select {
+		case progressCh <- msg:
+		default:
+		}
+		if progressFunc != nil {
+			progressFunc(msg)
+		}
+	}
+
+	// closeProgress closes the local progressCh ref so SSE handlers unblock.
+	// It uses a Once so it is safe to call on every return path without risk of
+	// double-close. It closes the *local* ref (not via a session lookup) because
+	// Cancel() may have already deleted the session from f.sessions by the time
+	// Generate() returns — a session lookup would then silently no-op and the SSE
+	// goroutine would block forever.
+	var progressOnce sync.Once
+	closeProgress := func() {
+		progressOnce.Do(func() {
+			// Nil out the session's field under lock so GetProgressChan can't hand
+			// out the closed channel to a new caller.
+			f.mu.Lock()
+			if s, ok := f.sessions[userID]; ok {
+				s.progressCh = nil
+			}
+			f.mu.Unlock()
+			close(progressCh)
+		})
+	}
+
 	if coderSvc == nil {
+		closeProgress()
 		return "", false, "", fmt.Errorf("no coder configured for this user")
 	}
+
+	notify("⚙️ Preparing workspace…")
 
 	var workDir, prompt string
 	var cleanupOnFail, cleanupOnSuccess func()
@@ -472,6 +567,7 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 		liveDir := filepath.Join(f.designer.agentsDir, userID, agentIDSnap)
 		stagingDir := liveDir + "-edit-staging"
 		if err := copyAgentWorkspace(liveDir, stagingDir, existingAgentMD); err != nil {
+			closeProgress()
 			return "", false, "", fmt.Errorf("prepare staging workspace: %w", err)
 		}
 		workDir = stagingDir
@@ -484,10 +580,12 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 		agentDir := filepath.Join(f.designer.agentsDir, userID, agentIDSnap)
 		for _, sub := range []string{".", "tools", "logs"} {
 			if err := os.MkdirAll(filepath.Join(agentDir, sub), 0o750); err != nil {
+				closeProgress()
 				return "", false, "", fmt.Errorf("create agent dir: %w", err)
 			}
 		}
 		if err := os.WriteFile(filepath.Join(agentDir, "state.json"), []byte("{}"), 0o640); err != nil {
+			closeProgress()
 			return "", false, "", fmt.Errorf("write state.json: %w", err)
 		}
 		workDir = agentDir
@@ -496,20 +594,42 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 		cleanupOnSuccess = func() {} // the dir IS the pending agent; keep it until finalize/iterate
 	}
 
+	notify("🤖 Coder is building your agent — this can take a few minutes…")
+
 	// Run the coder WITH full tools so it can write files, execute them, debug
 	// errors, and confirm the implementation works — all in one session.
-	// WithAllowedTools pre-approves the specific tools needed so the subprocess
-	// never blocks on interactive permission prompts.
-	result, err := coderSvc.WithDir(workDir).WithAllowedTools("Bash,Write,Edit,Read").Generate(ctx, userID, prompt)
+	// genCtx (not ctx) is used so Cancel() can kill the subprocess without
+	// also cancelling the outer HTTP/SSE context.
+	result, err := coderSvc.WithDir(workDir).WithAllowedTools("Bash,Write,Edit,Read").Generate(genCtx, userID, prompt)
 	if err != nil {
 		cleanupOnFail()
+		closeProgress()
+		if errors.Is(err, context.Canceled) {
+			return "Agent creation was cancelled.", false, "", nil
+		}
+		if errors.Is(err, coder.ErrUsageLimit) {
+			return fmt.Sprintf("⚠️ %s hit its usage limit during generation. Your design session is still active — try again in a while, or simplify what you asked for.", coderSvc.Name()), false, "", nil
+		}
+		if strings.Contains(err.Error(), "timed out") {
+			return "⚠️ The coder timed out — the task may be too complex to build in one go. Try breaking it into simpler steps, then type approve.", false, "", nil
+		}
 		return "", false, "", fmt.Errorf("coder: %w", err)
 	}
+
+	// Coder determined the task is impossible — return soft message so user stays in designing.
+	if blocked := parseBlockedOutput(result.Text); blocked != "" {
+		cleanupOnFail()
+		closeProgress()
+		return "The coder ran into a blocker:\n\n" + blocked + "\n\nTell me how you'd like to proceed, or describe a different approach.", false, "", nil
+	}
+
+	notify("🔍 Validating agent safety checks…")
 
 	// Ground truth: read what the coder actually wrote to disk.
 	agentMDBytes, err := os.ReadFile(filepath.Join(workDir, "AGENT.md"))
 	if err != nil {
 		cleanupOnFail()
+		closeProgress()
 		return "The coder didn't create AGENT.md. Tell me what to change and I'll try again.", false, "", nil
 	}
 	agentMD := strings.TrimSpace(string(agentMDBytes))
@@ -517,17 +637,20 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 	tools, err := readToolsFromDisk(workDir)
 	if err != nil {
 		cleanupOnFail()
+		closeProgress()
 		return "", false, "", fmt.Errorf("read tools: %w", err)
 	}
 
 	// Guardrails on the actual content the coder wrote.
 	if err := CheckEthics(agentMD, ""); err != nil {
 		cleanupOnFail()
+		closeProgress()
 		return fmt.Sprintf("Agent failed safety checks: %s\n\nPlease rephrase.", err.Error()), false, "", nil
 	}
 	for filename, code := range tools {
 		if err := RunFullGuardrails(code, ""); err != nil {
 			cleanupOnFail()
+			closeProgress()
 			return fmt.Sprintf("Tool %s failed safety checks: %s\n\nPlease rephrase.", filename, err.Error()), false, "", nil
 		}
 	}
@@ -535,10 +658,19 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 	// Content is captured in memory now — discard the workspace (staging dir for
 	// edits; create mode keeps its pending dir on disk until finalize/iterate).
 	cleanupOnSuccess()
+	closeProgress()
 
-	// Store verified content in session and wait for user confirmation.
 	testOut := parseTestOutput(result.Text)
 
+	// No [TEST_OUTPUT] means the coder didn't complete the test step (silent agents
+	// should still emit [TEST_OUTPUT]No chat output — agent only updates state.[/TEST_OUTPUT]).
+	// Keep the user in StateDesigning: "approve" here retries generation rather than saving.
+	if testOut == "" {
+		return "The agent was built but the coder didn't produce verifiable test output. " +
+			"Tell me what to adjust, or type **approve** to attempt a rebuild.", false, "", nil
+	}
+
+	// Test verified — move to StateVerifying so the user can approve or request changes.
 	f.mu.Lock()
 	sess = f.sessions[userID]
 	sess.State = StateVerifying
@@ -546,10 +678,6 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 	sess.PendingTools = tools
 	f.mu.Unlock()
 
-	if testOut == "" {
-		return "The agent was built and tested successfully — no output messages were sent, which is expected if the agent only updates its internal state.\n\n" +
-			"Type **approve** to save it, or tell me what to change.", false, "", nil
-	}
 	return fmt.Sprintf(
 		"Here's what a test run produces:\n\n---\n%s\n---\n\nDoes this look right? Type **approve** to save the agent, or tell me what to change.",
 		testOut,
@@ -612,6 +740,21 @@ func parseTestOutput(text string) string {
 	}
 	start += len("[TEST_OUTPUT]")
 	end := strings.Index(text[start:], "[/TEST_OUTPUT]")
+	if end < 0 {
+		return strings.TrimSpace(text[start:])
+	}
+	return strings.TrimSpace(text[start : start+end])
+}
+
+// parseBlockedOutput extracts the coder's explanation from a [BLOCKED]...[/BLOCKED] block.
+// Returns "" if no blocked marker is present.
+func parseBlockedOutput(text string) string {
+	start := strings.Index(text, "[BLOCKED]")
+	if start < 0 {
+		return ""
+	}
+	start += len("[BLOCKED]")
+	end := strings.Index(text[start:], "[/BLOCKED]")
 	if end < 0 {
 		return strings.TrimSpace(text[start:])
 	}

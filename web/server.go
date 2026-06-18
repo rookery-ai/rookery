@@ -228,6 +228,7 @@ func (s *Server) setupRoutes() {
 	dash.GET("/agents/new", s.showNewAgent)
 	dash.POST("/agents/design", s.handleDesignChat)
 	dash.POST("/agents/design/cancel", s.handleCancelDesign)
+	dash.GET("/agents/design/progress", s.handleDesignProgress)
 	dash.GET("/agents/:id", s.showAgentDetail)
 	dash.GET("/agents/:id/edit", s.showEditAgent)
 	dash.POST("/agents/:id/edit/start", s.handleStartEditDesign)
@@ -382,7 +383,7 @@ func (s *Server) coderForUser(userID string) *coder.Coder {
 	dataDir := s.cfg.Data.Dir
 	if profile, err := s.db.GetUserCoder(userID); err == nil && profile != nil {
 		timeout := time.Duration(profile.TimeoutS) * time.Second
-		return coder.New(profile.ClaudeBin, timeout, s.homesDir, dataDir)
+		return coder.New(profile.ClaudeBin, timeout, s.homesDir, dataDir).WithBackendType(profile.BackendType)
 	}
 	return coder.New(s.cfg.Coder.ClaudeBin, s.cfg.Coder.Timeout, s.homesDir, dataDir)
 }

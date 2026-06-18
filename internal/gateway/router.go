@@ -60,7 +60,8 @@ func NewRouter(database *db.DB, textHandler TextHandler, agentRunHandler AgentRu
 // Handle dispatches msg to the right handler and uses send() for replies.
 // deleteIncoming removes the user's incoming message (used to redact typed passwords).
 // sendAutoDelete sends a message that is automatically deleted after 30 s (used for secret values).
-func (r *Router) Handle(ctx context.Context, msg Message, send func(string), deleteIncoming func(), sendAutoDelete func(string)) error {
+// sendProgress edits the current Telegram placeholder WITHOUT consuming it, used for mid-generation milestones.
+func (r *Router) Handle(ctx context.Context, msg Message, send func(string), deleteIncoming func(), sendAutoDelete func(string), sendProgress func(string)) error {
 	cmd, arg := ParseCommand(msg.Text)
 
 	switch cmd {
@@ -82,7 +83,7 @@ func (r *Router) Handle(ctx context.Context, msg Message, send func(string), del
 	case "memory":
 		return r.handleMemory(ctx, msg, arg, send)
 	case "":
-		return r.handleText(ctx, msg, send, deleteIncoming, sendAutoDelete)
+		return r.handleText(ctx, msg, send, deleteIncoming, sendAutoDelete, sendProgress)
 	default:
 		send(fmt.Sprintf("Unknown command /%s — try /help", cmd))
 		return nil
@@ -482,7 +483,7 @@ func parseDuration(s string) (time.Duration, error) {
 	return total, nil
 }
 
-func (r *Router) handleText(ctx context.Context, msg Message, send func(string), deleteIncoming func(), sendAutoDelete func(string)) error {
+func (r *Router) handleText(ctx context.Context, msg Message, send func(string), deleteIncoming func(), sendAutoDelete func(string), sendProgress func(string)) error {
 	// Check for a pending master-password challenge. These exchanges are intentionally
 	// NOT persisted to session history to keep sensitive values out of the DB.
 	r.mu.Lock()
@@ -497,6 +498,12 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 
 	// If the user has an active design session, route all text there.
 	if r.designFlow != nil && r.designFlow.GetSession(msg.UserID) != nil {
+		sess := r.designFlow.GetSession(msg.UserID)
+		// When the user approves generation, register the progress callback so the
+		// Telegram placeholder gets edited with milestone messages during the run.
+		if sess != nil && sess.State == agentdesigner.StateDesigning && isApprovalText(msg.Text) && sendProgress != nil {
+			r.designFlow.SetProgressHandler(msg.UserID, sendProgress)
+		}
 		response, _, _, err := r.designFlow.Step(ctx, msg.UserID, msg.Text)
 		if err != nil {
 			send("Design session error: " + escapeMarkdown(err.Error()))
@@ -757,6 +764,18 @@ func helpText() string {
 /help — this message
 
 _Add secrets at the web dashboard — no master password needed to add_`
+}
+
+// isApprovalText returns true when the user message is one of the exact approval
+// triggers recognised by agentdesigner.Flow. Mirrors the list in flow.go so the
+// router can register a progress callback before Step() blocks on generation.
+func isApprovalText(text string) bool {
+	t := strings.ToLower(strings.TrimSpace(text))
+	switch t {
+	case "approve", "go ahead", "build it", "create it", "/approve":
+		return true
+	}
+	return false
 }
 
 // escapeMarkdown escapes special characters for Telegram MarkdownV2.

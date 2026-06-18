@@ -64,7 +64,7 @@ Telegram adapter (per-user bot instance)
 | `internal/rbac` | `CanPerform(db, userID, permission)` — reads `user_permissions` table |
 | `internal/secrets` | AES-256-GCM store; Argon2id key derivation; `GetAll()` decrypts all for env injection; `Proxy()` resolves `${NAME}` in-memory only |
 | `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router`, `IdentityResolver`, `TelegramGateway` |
-| `internal/coder` | `Coder`: runs coder CLI subprocess with full per-user isolation; `WithNoTools()` for text-only calls; `WithExtraEnv()` for secret injection |
+| `internal/coder` | `Coder`: runs coder CLI subprocess with full per-user isolation; `CoderBackend` interface abstracts Claude vs. generic CLIs; `WithNoTools()` for text-only calls; `WithExtraEnv()` for secret injection |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails` (ethics + AST only) |
 | `internal/agentrunner` | Load agent → decrypt secrets into env via `WithExtraEnv` → coder subprocess → capture `[CHAT]` lines → send via GatewayManager; timestamped run logs |
 | `internal/sandbox` | Firejail wrapper (available for future use; not used by coder agents) |
@@ -118,7 +118,15 @@ Agent creation uses a single `agentdesigner.Flow` FSM shared between the Telegra
 **Approval triggers** (exact match only — "yes"/"ok" do NOT trigger):
 `"approve"`, `"go ahead"`, `"build it"`, `"create it"`, `"/approve"`
 
-**On approval:** `runGeneration()` creates the agent directory on disk, then calls the coder **with full tools** (`WithDir(agentDir).WithAllowedTools("Bash,Write,Edit,Read")`). Claude Code writes AGENT.md and `tools/*.py` directly to disk, runs the scripts via Bash, fixes any errors, and outputs `[TEST_OUTPUT]...[/TEST_OUTPUT]` with the verified result. The flow reads AGENT.md back from disk, runs guardrails, stores content in `PendingAgentMD`/`PendingTools`, and moves to `StateVerifying` — showing the test output to the user.
+**On approval:** `runGeneration()` creates the agent directory on disk, then calls the coder **with full tools** (`WithDir(agentDir).WithAllowedTools("Bash,Write,Edit,Read")`). Claude Code writes AGENT.md and `tools/*.py` directly to disk, runs the scripts via Bash, fixes any errors, and outputs `[TEST_OUTPUT]...[/TEST_OUTPUT]` with the verified result. The flow reads AGENT.md back from disk, runs guardrails, stores content in `PendingAgentMD`/`PendingTools`, and moves to `StateVerifying` — showing the test output to the user. **`StateVerifying` is only entered when `[TEST_OUTPUT]` is present**; if the coder omits it, the user stays in `StateDesigning` and "approve" retries generation rather than saving unverified content.
+
+**Generation failure handling:** `runGeneration` converts failure conditions into soft responses (not Go errors) so the user stays in `StateDesigning`:
+- `[BLOCKED]...[/BLOCKED]` marker: coder signals an impossible task; `parseBlockedOutput()` extracts the explanation + alternatives and returns them to the user.
+- `ErrUsageLimit`: friendly "hit its usage limit — try again in a while" message.
+- Timeout (`"timed out"` in error text): friendly "too complex — try simpler steps" message.
+- `callCoder()` (design Q&A turns) also handles `ErrUsageLimit` softly — no HTTP 500 for a usage limit hit during a plain conversation turn.
+
+**SSE progress during generation:** `DesignSession` carries a buffered `progressCh chan string` and `cancelGenerate context.CancelFunc`. `SetProgressHandler(userID, fn)` lets the Telegram router register a callback before `Step()` blocks on generation. `GetProgressChan(userID)` lets the web SSE handler stream milestone events to the browser. `Cancel()` kills the in-flight subprocess via `cancelGenerate()`.
 
 **`WithNoTools()`** is used for design conversation turns only. Generation uses full tools so Claude Code can actually write and execute the agent before showing results.
 
@@ -212,7 +220,14 @@ The agent accesses secrets via `os.environ['SECRET_NAME']` in Python. Values are
 - **`WithAllowedTools(tools string)`** — adds `--allowedTools <tools>`, pre-approving specific tools. **Required** whenever `--setting-sources ""` is active (which suppresses all settings including tool allowlists) — without this, the subprocess blocks forever on interactive permission prompts in non-interactive mode. Generation uses `"Bash,Write,Edit,Read"`; agent runs use `"Bash,WebFetch,Read,Write,Edit"`.
 - **`WithDir(dir string)`** — overrides `cmd.Dir` for the subprocess CWD without changing `HOME`/`CLAUDE_CONFIG_DIR`. Used both by generation (`agentDir` during creation) **and by `runCoderAgent()` on every run** — without it, `cmd.Dir` defaults to the *shared* per-user home (`claude-homes/<userID>/`), so the agent sees and can write to other agents' files instead of its own `tools/`/`state.json`. (This was missing from the run path until it caused exactly that cross-contamination — one agent's self-corrected script got written into the shared home instead of back into its own directory, and a different agent then read the wrong `tools/*.py`.)
 - **`WithExtraEnv(env map[string]string)`** — merges additional env vars (e.g. decrypted secrets). System overrides (`HOME`, `CLAUDE_CONFIG_DIR`) always take precedence.
+- **`WithBackendType(t string)`** — forces a specific backend (`"claude"`, `"generic"`, or `""` for auto-detect by binary name). Used by `coderForUser()` to honour the admin-configured `BackendType` per coder profile.
 - **`Name() string`** — returns `filepath.Base(bin)` (e.g. `"claude"`). Used for user-facing messages so they never hardcode a specific coder's name (the system supports multiple coder profiles with different binaries).
+
+**`CoderBackend` interface** (`internal/coder/backend.go`): abstracts CLI-specific behaviour. Two implementations:
+- `claudeBackend` — Claude CLI: `--output-format json`, `--setting-sources ""`, `--allowedTools`, copies `.credentials.json`, sets `CLAUDE_CONFIG_DIR`.
+- `genericCLIBackend` — any other CLI: passes prompt as last argument, reads plain-text stdout, injects known auth env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.).
+
+Auto-detection: binary name containing `"claude"` → `claudeBackend`; otherwise → `genericCLIBackend`. Explicit `WithBackendType` overrides detection.
 
 **Critical:** `--setting-sources ""` + no `--allowedTools` = subprocess hangs indefinitely. Always pair them.
 
@@ -221,6 +236,8 @@ The agent accesses secrets via `os.environ['SECRET_NAME']` in Python. Values are
 `coder.ErrUsageLimit` is a sentinel returned by `Generate()` when the underlying CLI account/session hits its usage limit. Detected via `looksLikeUsageLimit()`: empirically, the claude CLI's signature for this is a **non-zero exit with completely empty stdout and stderr** (no error text at all) — that combination is treated as a limit hit. Explicit text matches (`"usage limit"`, `"rate limit"`, `"quota exceeded"`, `"limit reached"`) are also checked as a fallback in case the CLI does emit a message.
 
 `agentrunner.friendlyRunError(err, coderName)` converts this into a user-facing message — `"⚠️ This agent run was skipped — <coderName> hit its usage limit. It will retry automatically on the next scheduled run."` — instead of a raw `exit status 1`. `runCoderAgent()` sends this via `input.SendOutput` on **every** run failure (not just limit hits), which fixed a real gap: cron-triggered failures previously only went to `slog` — the user had no way to find out an agent failed at all unless they checked server logs.
+
+`ErrUsageLimit` is also handled during **agent generation** in `runGeneration` and during **design conversation turns** in `callCoder` — both return soft user-facing strings (not Go errors) so the web UI and Telegram router show a helpful message rather than HTTP 500 or a raw error prefix.
 
 ### Guardrails
 
@@ -253,6 +270,9 @@ SQLite via `modernc.org/sqlite` (CGo-free, bundles SQLite 3.49). WAL mode and fo
 | `002_coders.up.sql` | `coders` table, `users.coder_id` FK |
 | `003_agent_type_skills.up.sql` | `skills`, `agent_skills` tables; added `agents.type` column |
 | `004_drop_agent_type.up.sql` | Drops `agents.type` (no agent types in the unified model) |
+| `005_coder_backend_type.up.sql` | Adds `backend_type TEXT NOT NULL DEFAULT ''` to `coders` |
+
+`db.HasPlatformIdentity(userID)` was added to the repositories layer — returns true when a user has at least one linked platform. Used by the scheduler and reminder service to skip runs/reminders for users with no way to receive output, preventing wasted API quota.
 
 Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`, `agent_schedules`,
 `agent_runs`, `secrets`, `chat_sessions`, `reminders`, `user_permissions`, `mcp_servers`,
@@ -269,6 +289,7 @@ Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`,
 /dashboard/agents/new               # conversational agent creation (chat UI)
 /dashboard/agents/design            # POST JSON API: drives design FSM turn-by-turn
 /dashboard/agents/design/cancel     # POST: cancel active design session
+/dashboard/agents/design/progress   # GET SSE: streams generation milestone events to the browser
 /dashboard/agents/:id               # detail: AGENT.md editor, state, logs, schedule, skills
 /dashboard/agents/:id/edit          # conversational agent editing (chat UI)
 /dashboard/agents/:id/edit/start    # POST JSON API: starts an edit design session
@@ -303,7 +324,7 @@ Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`,
 
 ### Multi-coder system
 
-Admin creates named **Coder Profiles** (`coders` table) each with a `claude_bin` path and `timeout_s`. Users are assigned a coder via `users.coder_id` FK. `coderForUser(userID)` on the Server builds the right `*coder.Coder` per user, falling back to system defaults when unassigned.
+Admin creates named **Coder Profiles** (`coders` table) each with a `claude_bin` path, `timeout_s`, and `backend_type` (`""` = auto-detect, `"claude"`, or `"generic"`). Users are assigned a coder via `users.coder_id` FK. `coderForUser(userID)` on the Server builds the right `*coder.Coder` per user (via `.WithBackendType(profile.BackendType)`), falling back to system defaults when unassigned.
 
 The `designFlow` is constructed with a resolver `func(userID string) *coder.Coder` so it picks up per-user profiles during agent design.
 
@@ -343,7 +364,8 @@ Manual web round-trip and `/agent edit` on Telegram for the edit flow have not b
 | `81c6baf` | Conversational agent editing (Telegram `/agent edit` + web Edit button), reusing the create FSM via `DesignSession.IsEdit`; schedule-line reconciliation against the real `agent_schedules` row; edit generation runs in a staging dir copy so the live agent is never touched before approval; `AgentDesigner.UpdateAgent`/`db.UpdateAgentDescription` for the UPDATE-not-INSERT save path; `reconcileScheduleOnSave` reuses the existing schedule row's ID to avoid duplicate/double-firing schedules |
 | `aa269a7` | User profile system (`internal/profile`): name, email, location, timezone, tone, language, notes stored in `settings` table; injected as `[User profile]` block into agent designer system prompt; setup wizard gains profile step (step 3 of 5); Settings page expanded to full profile editor; reminder timezone now uses per-user saved timezone via `profile.LoadLocation()` (both web + Telegram) |
 | `d29c5bd` | User memory injection: `memory.ContextString()` now injected as `[User memory]` block into agent design sessions and agent run prompts; `Flow.WithMemory()` and `Runner.WithMemory()` wire the store via a local `memoryStore` interface in each package |
-| (current) | Prompt centralization: all LLM prompt builders moved to `internal/prompts`; no inline prompt text remains in `agentdesigner`, `agentrunner`, or `web` packages |
+| `cb0273d` | Prompt centralization: all LLM prompt builders moved to `internal/prompts`; no inline prompt text remains in `agentdesigner`, `agentrunner`, or `web` packages |
+| (current) | Multi-backend coder: `CoderBackend` interface + `claudeBackend`/`genericCLIBackend` in `backend.go`; `WithBackendType()` on Coder; `backend_type` field on coder profiles (migration 005); designer flow failure handling: `[BLOCKED]` protocol for impossible tasks (3-attempt limit, `parseBlockedOutput`), `ErrUsageLimit`/timeout soft responses in `runGeneration` and `callCoder`, FSM state ordering fix (StateVerifying only entered when `[TEST_OUTPUT]` is present); SSE progress channel + `cancelGenerate` in DesignSession; `sendProgress` callback threaded through GatewayManager → Router → handleText; scheduler/reminder skip runs for users with no platform connected (`HasPlatformIdentity`) |
 
 ### Known gaps
 

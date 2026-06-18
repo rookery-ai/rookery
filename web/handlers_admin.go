@@ -287,6 +287,7 @@ func (s *Server) handleAdminCreateCoder(c echo.Context) error {
 	description := c.FormValue("description")
 	claudeBin := c.FormValue("claude_bin")
 	timeoutStr := c.FormValue("timeout_s")
+	backendType := c.FormValue("backend_type")
 
 	if name == "" {
 		p := s.page(c, "Coder Profiles")
@@ -310,6 +311,7 @@ func (s *Server) handleAdminCreateCoder(c echo.Context) error {
 		Description: description,
 		ClaudeBin:   claudeBin,
 		TimeoutS:    timeoutS,
+		BackendType: backendType,
 	}
 	if err := s.db.CreateCoder(coderObj); err != nil {
 		p := s.page(c, "Coder Profiles")
@@ -352,6 +354,7 @@ func (s *Server) handleAdminUpdateCoder(c echo.Context) error {
 	if v, err := strconv.Atoi(c.FormValue("timeout_s")); err == nil && v > 0 {
 		coderObj.TimeoutS = v
 	}
+	coderObj.BackendType = c.FormValue("backend_type")
 
 	if err := s.db.UpdateCoder(coderObj); err != nil {
 		p := s.page(c, "Edit Coder: "+coderObj.Name)

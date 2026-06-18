@@ -94,6 +94,15 @@ func (s *Scheduler) fire(ctx context.Context, sched *db.AgentSchedule, firedAt t
 		slog.Error("scheduler: update schedule times", "schedule_id", sched.ID, "err", err)
 	}
 
+	// Skip the coder run entirely if the user has no platform connected.
+	// The agent cannot deliver output and running it wastes API quota.
+	// next_run_at is already advanced above, so the schedule stays live.
+	if !s.db.HasPlatformIdentity(sched.UserID) {
+		slog.Warn("scheduler: skipping agent run — user has no platform connected",
+			"agent_id", sched.AgentID, "user_id", sched.UserID, "next_run", next)
+		return
+	}
+
 	slog.Info("scheduler: firing agent", "agent_id", sched.AgentID, "user_id", sched.UserID, "next_run", next)
 
 	// Decrypt the user's stored master password so secrets are injected at run time.

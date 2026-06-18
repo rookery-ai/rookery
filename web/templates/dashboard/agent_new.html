@@ -13,6 +13,17 @@
     <h1 class="text-xl font-bold">Create Agent</h1>
   </div>
 
+  {{if not .HasPlatform}}
+  <div class="alert alert-warning mb-4">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+    <div>
+      <p class="font-semibold">No chat app connected</p>
+      <p class="text-sm">You won't receive scheduled agent output or notifications until you connect a chat app. Agents can still be run manually from the web UI.</p>
+    </div>
+    <a href="/dashboard/connectors" class="btn btn-sm btn-warning">Connect</a>
+  </div>
+  {{end}}
+
   <!-- Phase 1: Name entry -->
   <div id="phase-start" class="card bg-base-100 shadow-sm border border-base-300">
     <div class="card-body">
@@ -46,15 +57,25 @@
       <div class="card-body p-4">
         <div class="flex items-center justify-between mb-3">
           <h2 class="font-semibold text-sm">Designing: <span id="chat-agent-name" class="text-primary font-mono"></span></h2>
-          <button onclick="cancelDesign()" class="btn btn-ghost btn-xs text-error">Cancel</button>
+          <button id="cancel-btn" onclick="cancelDesign()" class="btn btn-outline btn-error btn-xs">Cancel</button>
         </div>
 
         <!-- Message list -->
         <div id="chat-messages" class="space-y-3 max-h-[500px] overflow-y-auto mb-4 pr-1 scroll-smooth"></div>
 
-        <!-- Spinner -->
+        <!-- Spinner (regular request turns) -->
         <div id="chat-spinner" class="hidden flex justify-center py-2">
           <span class="loading loading-dots loading-md text-primary"></span>
+        </div>
+
+        <!-- Generation progress panel (shown while coder subprocess runs) -->
+        <div id="generation-progress" class="hidden flex items-start gap-3 p-3 rounded-lg bg-base-200 border border-base-300 mb-2">
+          <span class="loading loading-spinner loading-sm text-primary mt-0.5 shrink-0"></span>
+          <div class="flex-1 min-w-0">
+            <p id="generation-status" class="text-sm font-medium">Building your agent…</p>
+            <p class="text-xs text-base-content/50 mt-0.5">This can take a few minutes.</p>
+          </div>
+          <button onclick="cancelDesign()" class="btn btn-ghost btn-xs text-error shrink-0">Cancel</button>
         </div>
 
         <!-- Approve quick action -->
@@ -82,6 +103,8 @@
 
 <script>
 var agentName = '';
+var isGenerating = false;
+var progressSource = null;
 
 function startDesign() {
   var name = document.getElementById('agent-name-input').value.trim();
@@ -114,12 +137,66 @@ async function sendMessage(msg) {
   doRequest(agentName, msg, false);
 }
 
+function isApproval(msg) {
+  var t = msg.trim().toLowerCase();
+  return t === 'approve' || t === 'go ahead' || t === 'build it' || t === 'create it' || t === '/approve';
+}
+
+function startProgressStream() {
+  if (progressSource) return;
+  progressSource = new EventSource('/dashboard/agents/design/progress');
+  progressSource.onmessage = function(e) {
+    document.getElementById('generation-status').textContent = e.data;
+  };
+  progressSource.onerror = function() {
+    stopProgressStream();
+  };
+}
+
+function stopProgressStream() {
+  if (progressSource) {
+    progressSource.close();
+    progressSource = null;
+  }
+}
+
+function showProgress() {
+  document.getElementById('chat-spinner').classList.add('hidden');
+  document.getElementById('generation-progress').classList.remove('hidden');
+  document.getElementById('approve-bar').classList.add('hidden');
+  setInputDisabled(true);
+}
+
+function hideProgress() {
+  document.getElementById('generation-progress').classList.add('hidden');
+  setInputDisabled(false);
+}
+
+function setInputDisabled(on) {
+  var inp = document.getElementById('chat-input');
+  var btn = document.querySelector('button[onclick="sendFromInput()"]');
+  if (inp) inp.disabled = on;
+  if (btn) btn.disabled = on;
+}
+
 async function doRequest(name, msg, isFirst) {
   if (isFirst) {
     document.getElementById('phase-start').classList.add('hidden');
     document.getElementById('phase-chat').classList.remove('hidden');
   }
-  setLoading(true);
+
+  // If this is an approval message, switch to generation mode with progress streaming.
+  // Open EventSource BEFORE the POST so the SSE handler has time to start polling
+  // for the progress channel, which runGeneration() creates when the POST arrives.
+  var generating = !isFirst && isApproval(msg);
+  if (generating) {
+    isGenerating = true;
+    showProgress();
+    startProgressStream();
+  } else {
+    setLoading(true);
+  }
+
   try {
     var resp = await fetch('/dashboard/agents/design', {
       method: 'POST',
@@ -127,7 +204,15 @@ async function doRequest(name, msg, isFirst) {
       body: JSON.stringify({name: name, message: msg})
     });
     var data = await resp.json();
-    setLoading(false);
+
+    if (generating) {
+      stopProgressStream();
+      hideProgress();
+      isGenerating = false;
+    } else {
+      setLoading(false);
+    }
+
     if (data.error) {
       if (isFirst) {
         document.getElementById('phase-chat').classList.add('hidden');
@@ -149,7 +234,13 @@ async function doRequest(name, msg, isFirst) {
     showApproveBar();
     document.getElementById('chat-input').focus();
   } catch(e) {
-    setLoading(false);
+    if (generating) {
+      stopProgressStream();
+      hideProgress();
+      isGenerating = false;
+    } else {
+      setLoading(false);
+    }
     if (isFirst) {
       document.getElementById('phase-chat').classList.add('hidden');
       document.getElementById('phase-start').classList.remove('hidden');
@@ -164,7 +255,14 @@ async function doRequest(name, msg, isFirst) {
 
 async function cancelDesign() {
   await fetch('/dashboard/agents/design/cancel', {method: 'POST'});
-  window.location.href = '/dashboard/agents';
+  if (isGenerating) {
+    stopProgressStream();
+    hideProgress();
+    isGenerating = false;
+    appendMessage('assistant', 'Agent creation was cancelled.');
+  } else {
+    window.location.href = '/dashboard/agents';
+  }
 }
 
 function appendMessage(role, text) {

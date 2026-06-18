@@ -1,16 +1,15 @@
-// Package coder wraps the claude CLI subprocess as the code generation engine.
-// Each user gets an isolated config directory so their sessions are completely
-// separate from the server operator's settings, CLAUDE.md files, and history.
+// Package coder wraps any compatible coder CLI as the code generation engine.
+// Each user gets an isolated home directory so their sessions are completely
+// separate from the server operator's settings and history.
 //
-// When Firejail is available, every invocation runs inside a per-user sandbox:
-// the user's persistent home dir is bind-mounted as the sandbox home, the rest
-// of the data directory is blacklisted, and no other user's files are visible.
+// The concrete CLI behaviour (flags, output parsing, credential setup) is
+// abstracted behind the CoderBackend interface in backend.go. Two implementations
+// are provided: claudeBackend (Claude CLI) and genericCLIBackend (everything else).
 package coder
 
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -47,6 +46,7 @@ type Coder struct {
 	noTools      bool              // when true, passes --allowedTools "" to disable all tools
 	workDir      string            // when non-empty, overrides cmd.Dir (default: per-user home)
 	allowedTools string            // when non-empty, passed as --allowedTools <value>
+	backendType  string            // '' = auto-detect by binary name, 'claude', or 'generic'
 }
 
 // WithExtraEnv returns a shallow copy of the Coder with additional environment variables
@@ -67,21 +67,29 @@ func (c *Coder) WithNoTools() *Coder {
 }
 
 // WithDir returns a shallow copy of the Coder that runs the subprocess with dir
-// as the working directory instead of the per-user home. HOME and CLAUDE_CONFIG_DIR
-// still point to the user's isolated home so credentials are accessible.
+// as the working directory instead of the per-user home. HOME and any backend
+// config-dir overrides still point to the user's isolated home.
 func (c *Coder) WithDir(dir string) *Coder {
 	c2 := *c
 	c2.workDir = dir
 	return &c2
 }
 
-// WithAllowedTools returns a shallow copy of the Coder that passes
-// --allowedTools <tools> to the claude CLI. Use this when running with full
-// tools (not WithNoTools) so the subprocess doesn't block on permission prompts.
+// WithAllowedTools returns a shallow copy of the Coder that pre-approves specific
+// tools so the subprocess doesn't block on permission prompts. The format is
+// backend-specific; for the Claude backend use comma-separated tool names.
 // Example: c.WithAllowedTools("Bash,Write,Edit,Read")
 func (c *Coder) WithAllowedTools(tools string) *Coder {
 	c2 := *c
 	c2.allowedTools = tools
+	return &c2
+}
+
+// WithBackendType returns a shallow copy of the Coder with the backend explicitly
+// set, overriding name-based auto-detection. Valid values: "claude", "generic", "".
+func (c *Coder) WithBackendType(t string) *Coder {
+	c2 := *c
+	c2.backendType = t
 	return &c2
 }
 
@@ -93,7 +101,8 @@ func (c *Coder) Name() string {
 }
 
 // New creates a Coder.
-// homesDir should be cfg.Data.Dir + "/claude-homes".
+// homesDir is the root directory for per-user isolated HOME directories
+// (typically cfg.Data.Dir + "/claude-homes" for historical reasons).
 // dataDir is accepted for API compatibility but is not used by the coder itself
 // (it is used by the agent runner's sandbox).
 func New(bin string, timeout time.Duration, homesDir, dataDir string) *Coder {
@@ -114,7 +123,9 @@ func New(bin string, timeout time.Duration, homesDir, dataDir string) *Coder {
 
 // Generate sends prompt to the coder binary and returns the text response.
 func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, error) {
-	userDir, err := c.ensureUserHome(userID)
+	backend := c.selectBackend()
+
+	userDir, err := c.ensureUserHome(userID, backend)
 	if err != nil {
 		return nil, fmt.Errorf("ensure user home: %w", err)
 	}
@@ -124,27 +135,16 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 
 	start := time.Now()
 
-	args := []string{"-p", prompt, "--output-format", "json"}
-	if c.isClaude() {
-		args = append(args, "--setting-sources", "")
-		switch {
-		case c.noTools:
-			args = append(args, "--allowedTools", "")
-		case c.allowedTools != "":
-			args = append(args, "--allowedTools", c.allowedTools)
-		}
-	}
+	args := backend.buildArgs(prompt, c.noTools, c.allowedTools)
 
-	// The coder binary (claude CLI) is installed in the operator's real home
-	// (e.g. ~/.local/share/claude/). Firejail's --private would replace that
-	// home and break the binary's own installation. Per-user isolation for the
-	// coder is handled via CLAUDE_CONFIG_DIR, HOME override, and --setting-sources "".
+	// The coder binary is installed in the operator's real home directory.
+	// Per-user isolation is handled by the backend via HOME + config-dir overrides.
 	cmd := exec.CommandContext(ctx, c.bin, args...)
 	cmd.Dir = userDir
 	if c.workDir != "" {
 		cmd.Dir = c.workDir
 	}
-	cmd.Env = c.buildEnv(userDir)
+	cmd.Env = c.buildEnv(userDir, backend)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -154,18 +154,18 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 		if ctx.Err() == context.DeadlineExceeded {
 			return nil, fmt.Errorf("coder timed out after %s", c.timeout)
 		}
-		if looksLikeUsageLimit(stdout.String(), stderr.String()) {
+		if backend.looksLikeLimit(stdout.String(), stderr.String()) {
 			return nil, ErrUsageLimit
 		}
 		return nil, fmt.Errorf("coder exited with error: %w\nstdout: %.500s\nstderr: %.500s", err, stdout.String(), stderr.String())
 	}
 	stdoutBytes := stdout.Bytes()
 
-	text, isError, err := extractText(stdoutBytes)
+	text, isError, err := backend.parseOutput(stdoutBytes)
 	if err != nil {
 		text = strings.TrimSpace(string(stdoutBytes))
 	} else if isError {
-		if looksLikeUsageLimit(text, "") {
+		if backend.looksLikeLimit(text, "") {
 			return nil, ErrUsageLimit
 		}
 		return nil, fmt.Errorf("coder error: %s", text)
@@ -175,29 +175,10 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 }
 
 // ErrUsageLimit indicates the coder subprocess failed because the underlying
-// Claude account/session hit its usage limit, not because of an agent bug.
-// Callers should surface this distinctly (e.g. "retrying next scheduled run")
-// rather than treating it as a generic execution failure.
+// account/session hit its usage limit, not because of an agent bug. Callers
+// should surface this distinctly (e.g. "retrying next scheduled run") rather
+// than treating it as a generic execution failure.
 var ErrUsageLimit = errors.New("coder usage limit reached")
-
-// looksLikeUsageLimit detects the claude CLI's failure signature for hitting
-// the account/session usage limit: a non-zero exit with completely empty
-// stdout and stderr (verified empirically), or explicit limit-related text
-// in whatever output was produced.
-func looksLikeUsageLimit(stdout, stderr string) bool {
-	stdout = strings.TrimSpace(stdout)
-	stderr = strings.TrimSpace(stderr)
-	if stdout == "" && stderr == "" {
-		return true
-	}
-	combined := strings.ToLower(stdout + " " + stderr)
-	for _, kw := range []string{"usage limit", "rate limit", "rate_limit", "quota exceeded", "limit reached"} {
-		if strings.Contains(combined, kw) {
-			return true
-		}
-	}
-	return false
-}
 
 // Chat sends a conversational message to claude with optional history.
 func (c *Coder) Chat(ctx context.Context, userID string, history []db.ChatMessage, systemContext, userMessage string) (*Result, error) {
@@ -247,47 +228,42 @@ func (c *Coder) UserHomeDir(userID string) string {
 
 // ─── Internal ─────────────────────────────────────────────────────────────────
 
-func (c *Coder) ensureUserHome(userID string) (string, error) {
+// selectBackend returns the CoderBackend for this invocation. An explicit
+// backendType field takes precedence; otherwise detection falls back to the
+// binary name (any name containing "claude" → claudeBackend).
+func (c *Coder) selectBackend() CoderBackend {
+	switch c.backendType {
+	case "claude":
+		return &claudeBackend{sysClaudeDir: c.sysClaudeDir}
+	case "generic":
+		return &genericCLIBackend{}
+	}
+	// Auto-detect by binary name.
+	if strings.Contains(strings.ToLower(filepath.Base(c.bin)), "claude") {
+		return &claudeBackend{sysClaudeDir: c.sysClaudeDir}
+	}
+	return &genericCLIBackend{}
+}
+
+func (c *Coder) ensureUserHome(userID string, backend CoderBackend) (string, error) {
 	dir := c.UserHomeDir(userID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-
-	if c.isClaude() {
-		claudeDir := filepath.Join(dir, ".claude")
-		if err := os.MkdirAll(claudeDir, 0o700); err != nil {
-			return "", err
-		}
-		if c.sysClaudeDir != "" {
-			src := filepath.Join(c.sysClaudeDir, ".credentials.json")
-			if data, err := os.ReadFile(src); err == nil {
-				_ = os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), data, 0o600)
-			}
-		}
+	if err := backend.setupHome(dir, c.sysClaudeDir); err != nil {
+		return "", err
 	}
-
 	return dir, nil
 }
 
-func (c *Coder) isClaude() bool {
-	return strings.Contains(strings.ToLower(filepath.Base(c.bin)), "claude")
-}
-
-// buildEnv constructs the subprocess environment for non-sandboxed execution.
-func (c *Coder) buildEnv(homeDir string) []string {
-	overrides := map[string]string{
-		"HOME": homeDir,
+// buildEnv constructs the subprocess environment. System overrides (HOME plus
+// any backend-specific vars) always take precedence over c.extraEnv.
+func (c *Coder) buildEnv(homeDir string, backend CoderBackend) []string {
+	overrides := map[string]string{"HOME": homeDir}
+	for k, v := range backend.extraEnvForUser(homeDir) {
+		overrides[k] = v
 	}
-	if c.isClaude() {
-		overrides["CLAUDE_CONFIG_DIR"] = filepath.Join(homeDir, ".claude")
-	} else {
-		for _, key := range knownAuthEnvVars {
-			if val := os.Getenv(key); val != "" {
-				overrides[key] = val
-			}
-		}
-	}
-	// Merge extra env vars, but never override system keys (HOME, CLAUDE_CONFIG_DIR, etc.).
+	// Extra env (e.g. decrypted secrets) may not override system keys.
 	for k, v := range c.extraEnv {
 		if _, exists := overrides[k]; !exists {
 			overrides[k] = v
@@ -295,7 +271,6 @@ func (c *Coder) buildEnv(homeDir string) []string {
 	}
 	return overrideEnv(os.Environ(), overrides)
 }
-
 
 func overrideEnv(base []string, overrides map[string]string) []string {
 	result := make([]string, 0, len(base)+len(overrides))
@@ -320,56 +295,6 @@ func overrideEnv(base []string, overrides map[string]string) []string {
 		}
 	}
 	return result
-}
-
-type claudeJSONResponse struct {
-	Type     string `json:"type"`
-	Subtype  string `json:"subtype"`
-	IsError  bool   `json:"is_error"`
-	Result   string `json:"result"`
-	Messages []struct {
-		Role    string `json:"role"`
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	} `json:"messages"`
-}
-
-func extractText(data []byte) (text string, isError bool, err error) {
-	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
-
-	var lastText string
-	var lastIsError bool
-	for _, line := range lines {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-		var resp claudeJSONResponse
-		if json.Unmarshal(line, &resp) != nil {
-			continue
-		}
-		if resp.Result != "" {
-			lastText = resp.Result
-			lastIsError = resp.IsError
-		}
-		for _, msg := range resp.Messages {
-			if msg.Role == "assistant" {
-				for _, part := range msg.Content {
-					if part.Type == "text" && part.Text != "" {
-						lastText = part.Text
-						lastIsError = false
-					}
-				}
-			}
-		}
-	}
-
-	if lastText == "" {
-		return "", false, fmt.Errorf("no assistant text found in response")
-	}
-	return strings.TrimSpace(lastText), lastIsError, nil
 }
 
 func safeID(id string) string {
