@@ -24,6 +24,16 @@
     </div>
   </div>
 
+  <div role="alert" class="alert alert-info mb-4 shadow-sm">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    <div class="text-sm">
+      <p class="font-medium">API key permissions matter</p>
+      <p class="opacity-80">If agents get "permission denied" errors, your key may be read-only. Create a new key with <strong>Tool execution</strong> and <strong>Write All</strong> permissions, then update your secret.</p>
+    </div>
+  </div>
+
   <div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
     <div class="card-body p-5">
       <h2 class="font-semibold text-lg mb-1">Manage your connected services</h2>
@@ -141,10 +151,22 @@ result = composio_execute(
         <li class="flex gap-4">
           <div class="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-content flex items-center justify-center font-bold text-sm">2</div>
           <div>
-            <p class="font-medium">Copy your API key</p>
+            <p class="font-medium">Create an API key with full permissions</p>
             <p class="text-sm text-base-content/60 mt-0.5">
-              After signing in, go to <strong>Settings → API Keys</strong> and create a new key.
-              Copy the value — it starts with <code class="bg-base-300 px-1 rounded text-xs">ak_</code> or <code class="bg-base-300 px-1 rounded text-xs">c_live_</code>.
+              Go to <strong>Settings → API Keys</strong> and create a new key.
+              <span class="text-error font-medium">Important:</span> Select <strong>all permissions</strong> when creating the key:
+            </p>
+            <ul class="text-sm text-base-content/60 mt-1 ml-4 list-disc list-inside space-y-0.5">
+              <li><strong>Tool execution</strong> — required for agents to call Composio tools</li>
+              <li><strong>Connected accounts</strong> — to discover your connected services</li>
+              <li><strong>Write All</strong> — for agents that create or modify data</li>
+            </ul>
+            <p class="text-xs text-base-content/50 mt-1">
+              Read-only keys won't work — agents need to execute tools and manage connected accounts.
+              Permissions can't be changed after creation.
+            </p>
+            <p class="text-sm text-base-content/60 mt-1">
+              Copy the key value — it starts with <code class="bg-base-300 px-1 rounded text-xs">ak_</code>.
             </p>
           </div>
         </li>
