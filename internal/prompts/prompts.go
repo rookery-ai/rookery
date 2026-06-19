@@ -33,6 +33,7 @@ type DesignSystemParams struct {
 	Skills             []string
 	UserProfile        string
 	UserMemory         string
+	ComposioEnabled    bool // true when user has COMPOSIO_API_KEY in their secrets
 }
 
 // BuildDesignSystemPrompt returns the system prompt for the conversational agent
@@ -146,6 +147,146 @@ Have a focused conversation to fully understand what the agent should do. Then p
 `)
 	}
 
+	// ── Composio (external services) ─────────────────────────────────────────
+	if p.ComposioEnabled {
+		sb.WriteString(`<connected_services>
+This user has configured Composio (composio.dev) and connected external services to their
+personal Composio account. Their COMPOSIO_API_KEY is available as an environment variable.
+
+━━━ DO NOT USE THE COMPOSIO-CORE SDK ━━━
+The composio-core Python package (ComposioToolSet, Action enum) uses deprecated v1/v2
+endpoints that return HTTP 410. FORBIDDEN:
+  ❌ from composio import ComposioToolSet, Action
+  ❌ from composio import Composio; composio.create(...)
+  ❌ toolset.execute_action(...)
+  ❌ requests.post(".../api/v1/..." or ".../api/v2/...")
+
+━━━ USE THE v3 REST API DIRECTLY ━━━
+
+## Step 1 — Always generate tools/composio_helper.py
+
+` + "```python" + `
+import os, json, requests
+
+COMPOSIO_BASE = "https://backend.composio.dev/api/v3"
+
+def _headers(api_key):
+    return {"x-api-key": api_key, "Content-Type": "application/json"}
+
+def composio_get(path, api_key=None):
+    api_key = api_key or os.environ["COMPOSIO_API_KEY"]
+    r = requests.get(f"{COMPOSIO_BASE}{path}", headers=_headers(api_key), timeout=20)
+    r.raise_for_status()
+    return r.json()
+
+def composio_execute(tool_slug, conn_id, user_id, arguments, api_key=None):
+    api_key = api_key or os.environ["COMPOSIO_API_KEY"]
+    r = requests.post(
+        f"{COMPOSIO_BASE}/tools/execute/{tool_slug}",
+        headers=_headers(api_key),
+        json={"connected_account_id": conn_id, "user_id": user_id, "arguments": arguments},
+        timeout=30,
+    )
+    r.raise_for_status()
+    return r.json()
+
+def get_connection(toolkit_slug, api_key=None):
+    """Returns (conn_id, user_id) for the first ACTIVE connection. Raises ConnectionError if none."""
+    api_key = api_key or os.environ["COMPOSIO_API_KEY"]
+    data = composio_get("/connected_accounts?limit=100", api_key)
+    for acc in data.get("items", []):
+        if acc.get("toolkit", {}).get("slug") == toolkit_slug and acc.get("status") == "ACTIVE":
+            return acc["id"], acc["user_id"]
+    raise ConnectionError(
+        f"No active {toolkit_slug} connection found. "
+        f"Go to app.composio.dev/connections → add {toolkit_slug} → run this agent again."
+    )
+` + "```" + `
+
+## Step 2 — Discover tool slugs before writing any code
+
+Before hardcoding a tool slug, discover the available slugs for the target service:
+  GET /api/v3/tools?toolkit_slug=APPNAME&limit=50   → items[].slug, items[].name
+
+Common toolkit slugs: notion, slack, google-drive, gmail, google-calendar, github, linear, jira
+
+## Step 3 — Execute pattern (use in every tool script)
+
+` + "```python" + `
+from composio_helper import get_connection, composio_execute
+import json, sys
+
+try:
+    conn_id, user_id = get_connection("notion")   # ← replace with target toolkit_slug
+except ConnectionError as e:
+    print(json.dumps({"error": str(e)}))
+    sys.exit(1)
+
+result = composio_execute("NOTION_SEARCH_NOTION_PAGE", conn_id, user_id,
+                          {"query": "My Database"})
+
+if not result.get("successful", True) or result.get("error"):
+    raise RuntimeError(result.get("error") or "unknown error")
+
+# Extract response — two patterns (try both):
+resp = result.get("data", {}).get("response_data") or result.get("data", {})
+` + "```" + `
+
+## Step 4 — Connection error output (copy this pattern verbatim in AGENT.md)
+
+When a ConnectionError is caught, the agent must output:
+  [CHAT] ❌ Could not access [ServiceName]: {error_message}
+
+The error_message from get_connection() already contains the actionable fix
+("Go to app.composio.dev/connections → add {service} → run this agent again.")
+
+## Verified tool slugs
+
+Notion:       NOTION_SEARCH_NOTION_PAGE, NOTION_FETCH_BLOCK_CONTENTS,
+              NOTION_QUERY_DATABASE, NOTION_CREATE_NOTION_PAGE, NOTION_UPDATE_BLOCK,
+              NOTION_APPEND_BLOCK_CHILDREN, NOTION_DELETE_BLOCK, NOTION_ADD_PAGE_CONTENT,
+              NOTION_CREATE_DATABASE, NOTION_DUPLICATE_PAGE, NOTION_FETCH_BLOCK_METADATA
+Slack:        SLACK_SENDS_A_MESSAGE, SLACK_LIST_CHANNELS, SLACK_FETCH_MESSAGE
+Google Drive: GOOGLEDRIVE_FIND_FOLDER, GOOGLEDRIVE_LIST_FILES_IN_FOLDER, GOOGLEDRIVE_UPLOAD
+Gmail:        GMAIL_FETCH_EMAILS, GMAIL_SEND_EMAIL, GMAIL_LIST_THREADS
+Google Cal:   GOOGLECALENDAR_LIST_EVENTS, GOOGLECALENDAR_CREATE_EVENT
+GitHub:       GITHUB_LIST_ISSUES, GITHUB_CREATE_AN_ISSUE, GITHUB_LIST_PULL_REQUESTS
+Linear:       LINEAR_GET_ISSUES, LINEAR_CREATE_ISSUE, LINEAR_UPDATE_ISSUE
+Jira:         JIRACLOUD_GET_ISSUES, JIRACLOUD_CREATE_ISSUE
+
+IMPORTANT: Slugs may change. Always verify via GET /api/v3/tools?toolkit_slug=APPNAME&limit=50
+before coding. If a slug returns 404, fetch the list and find the closest match by name.
+
+## Connection status values
+
+Only proceed when status == "ACTIVE":
+INITIALIZING, INITIATED — auth in progress; FAILED, EXPIRED, REVOKED — re-auth needed;
+INACTIVE — disabled. All of these → direct user to app.composio.dev/connections.
+
+## Response data notes
+
+- Always check ` + "`result.get(\"successful\", True)`" + ` — tools return HTTP 200 even on failure
+- Check ` + "`result.get(\"error\")`" + ` first
+- Most tools: ` + "`result[\"data\"][\"response_data\"]`" + ` contains the payload
+- Some tools: ` + "`result[\"data\"]`" + ` directly contains ` + "`http_error`" + `, ` + "`message`" + `, ` + "`status_code`" + `
+
+## Natural language argument inference (optional)
+
+If you're unsure what arguments a tool needs:
+  POST /api/v3/tools/execute/{tool_slug}/input
+  Body: {"connected_account_id":"ca_xxx","user_id":"...","text":"describe what you want"}
+This converts plain text to the correct arguments object.
+
+## Testing
+
+COMPOSIO_API_KEY IS in your environment. Make REAL API calls — do NOT mock.
+If a connection is not active, output the guidance in [TEST_OUTPUT].
+A failed-but-guiding output is better than fake mock success.
+</connected_services>
+
+`)
+	}
+
 	// ── Style ─────────────────────────────────────────────────────────────────
 	sb.WriteString(`<style>
 - Assume the user may not be technical. Avoid jargon — if you must use a term like "API key" or "cron", explain it immediately in one plain sentence.
@@ -218,9 +359,12 @@ If a script errors or returns None/empty, fix it and re-run. After 3 failed atte
 stop and emit [BLOCKED] (see below) explaining why it cannot work and what could be
 done instead.
 
-SECRETS: If a required secret is missing from the environment, substitute a
-realistic mock value FOR THIS TEST ONLY (e.g. use a public test endpoint or
-hard-code a representative example response). Do NOT abort — demonstrate the output format.
+SECRETS: Read all secrets via os.environ.get('SECRET_NAME', '').
+If COMPOSIO_API_KEY is present in the environment, make REAL API calls — produce REAL
+output, not mock data. If a Composio connection fails, output the real error in
+[TEST_OUTPUT] and guide the user what to fix (e.g. "go to app.composio.dev/connections").
+For other missing secrets (non-Composio), substitute a realistic mock value for the test
+only. Do NOT abort.
 </step>
 
 <step name="report">
@@ -326,8 +470,12 @@ If a script errors or returns None/empty, fix it and re-run. After 3 failed atte
 stop and emit [BLOCKED] (see below) explaining why it cannot work and what could be
 done instead.
 
-SECRETS: If a required secret is missing from the environment, substitute a
-realistic mock value FOR THIS TEST ONLY. Do NOT abort — demonstrate the output format.
+SECRETS: Read all secrets via os.environ.get('SECRET_NAME', '').
+If COMPOSIO_API_KEY is present in the environment, make REAL API calls — produce REAL
+output, not mock data. If a Composio connection fails, output the real error in
+[TEST_OUTPUT] and guide the user what to fix.
+For other missing secrets (non-Composio), substitute a realistic mock value for the test
+only. Do NOT abort.
 </step>
 
 <step name="report">

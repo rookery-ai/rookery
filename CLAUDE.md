@@ -153,6 +153,31 @@ type dbDesignStore interface {
 - Secrets guidance — tell user to add to Secrets store; never paste in chat; reference as `os.environ['NAME']`
 - Scheduling guidance — detect frequency from conversation; propose cron; auto-set on creation
 - Non-technical user style — explain API keys and cron in plain language; one/two questions per turn
+- **Composio guidance** (when `COMPOSIO_API_KEY` secret exists) — v3 REST API pattern, tool slug discovery, connection error handling, forbidden SDK patterns
+
+### Composio integration
+
+Composio connects user agents to 250+ external services (Notion, Slack, Google Drive, etc.). The integration uses the **v3 REST API directly** (not the SDK, which uses deprecated v1/v2 endpoints).
+
+**Key files:**
+- `internal/prompts/prompts.go` — `<connected_services>` block with `composio_helper.py` template
+- `internal/agentdesigner/flow.go` — `WithSecretsLoader()` injects secrets during generation
+- `internal/agentdesigner/guardrails.go` — blocks SDK imports (`from composio import`) and literal API keys
+- `web/templates/dashboard/composio.html` — setup guide and code example
+
+**Flow:**
+1. User adds `COMPOSIO_API_KEY` in Secrets page → `db.SecretExists()` returns true → `ComposioEnabled` in design system prompt
+2. Coder receives the `<connected_services>` block with v3 REST patterns
+3. During generation, `runGeneration()` calls `secretsLoader()` → decrypts stored master password → `secrets.GetAll()` → `WithExtraEnv(secrets)`
+4. Agent subprocess sees `os.environ['COMPOSIO_API_KEY']` → makes real API calls during validation
+5. If connection fails, agent outputs `[CHAT] ❌ Could not access...` with actionable guidance
+
+**v3 API pattern (injected into system prompt):**
+- Base: `https://backend.composio.dev/api/v3`
+- Auth: `x-api-key` header
+- Connected accounts: `GET /connected_accounts?limit=100` → filter by `toolkit.slug` + `status=ACTIVE`
+- Execute: `POST /tools/execute/{TOOL_SLUG}` with body `{connected_account_id, user_id, arguments}`
+- Tool discovery: `GET /tools?toolkit_slug=APPNAME&limit=50`
 
 ### Conversational agent editing
 
@@ -208,9 +233,11 @@ The agent accesses secrets via `os.environ['SECRET_NAME']` in Python. Values are
 
 `secrets.GetAll()` is the only bulk-decrypt method. `secrets.Proxy()` is still used for `${NAME}` placeholder substitution in legacy contexts.
 
-**Two sources of `MasterPw`, both required for secret injection to actually happen:**
+**Three sources of `MasterPw` for secret injection:**
+
 - **Scheduled (cron) runs** — `scheduler.go` decrypts the user's stored `EncryptedMasterPassword` (encrypted at rest with the server's `systemKey`) and passes it through. Always available once the user has completed `/setup`.
-- **Manual runs ("Run Now" in the web UI)** — `handleRunAgent()` decrypts the same stored `EncryptedMasterPassword` the same way. There is **no password-entry field on the run form** — agent execution doesn't require live re-entry the way viewing a secret's plaintext value does. (This was previously broken: the handler read a non-existent `master_password` form value, so manual runs always got `MasterPw=""` and silently skipped secret injection. Fixed by mirroring the scheduler's decrypt-from-stored-password approach.)
+- **Manual runs ("Run Now" in the web UI)** — `handleRunAgent()` decrypts the same stored `EncryptedMasterPassword` the same way. There is **no password-entry field on the run form** — agent execution doesn't require live re-entry the way viewing a secret's plaintext value does.
+- **Agent generation (design flow)** — `Flow.WithSecretsLoader()` in `main.go` wires a loader that decrypts the master password and calls `secrets.GetAll()`. `runGeneration()` calls `.WithExtraEnv(secrets)` before `.Generate()` so the coder can make real API calls during validation. This enables agents using Composio to produce real test output instead of mock data.
 
 ### Coder tool isolation
 
@@ -245,6 +272,8 @@ Auto-detection: binary name containing `"claude"` → `claudeBackend`; otherwise
 - `CheckEthics(code, "")` — blocklist check (rm -rf, drop table, bitcoin wallet, etc.). Used on AGENT.md.
 - `RunFullGuardrails(code, "")` — ethics + AST check. Used on `tools/*.py` scripts. **Does NOT check template markers** (the old `# ======= USER LOGIC =======` format is gone).
 - AST check blocks: `eval`, `exec`, `compile`, `__import__`, `os.system`, `subprocess.*`, `socket.socket`.
+- **Composio SDK import blocking** — `composioSDKImport` regex blocks `from composio import` and `import composio` patterns; returns error directing coder to use v3 REST API directly.
+- **Composio API key literal blocking** — `composioKeyLiteral` regex blocks hardcoded keys (`ak_...`, `c_live_...`, `c_test_...`); requires reading from `os.environ['COMPOSIO_API_KEY']`.
 
 ### Per-user coder isolation
 
@@ -365,7 +394,7 @@ Manual web round-trip and `/agent edit` on Telegram for the edit flow have not b
 | `aa269a7` | User profile system (`internal/profile`): name, email, location, timezone, tone, language, notes stored in `settings` table; injected as `[User profile]` block into agent designer system prompt; setup wizard gains profile step (step 3 of 5); Settings page expanded to full profile editor; reminder timezone now uses per-user saved timezone via `profile.LoadLocation()` (both web + Telegram) |
 | `d29c5bd` | User memory injection: `memory.ContextString()` now injected as `[User memory]` block into agent design sessions and agent run prompts; `Flow.WithMemory()` and `Runner.WithMemory()` wire the store via a local `memoryStore` interface in each package |
 | `cb0273d` | Prompt centralization: all LLM prompt builders moved to `internal/prompts`; no inline prompt text remains in `agentdesigner`, `agentrunner`, or `web` packages |
-| (current) | Multi-backend coder: `CoderBackend` interface + `claudeBackend`/`genericCLIBackend` in `backend.go`; `WithBackendType()` on Coder; `backend_type` field on coder profiles (migration 005); designer flow failure handling: `[BLOCKED]` protocol for impossible tasks (3-attempt limit, `parseBlockedOutput`), `ErrUsageLimit`/timeout soft responses in `runGeneration` and `callCoder`, FSM state ordering fix (StateVerifying only entered when `[TEST_OUTPUT]` is present); SSE progress channel + `cancelGenerate` in DesignSession; `sendProgress` callback threaded through GatewayManager → Router → handleText; scheduler/reminder skip runs for users with no platform connected (`HasPlatformIdentity`) |
+| (current) | Composio v3 REST API integration: replaced broken SDK guidance with direct v3 API pattern (`composio_helper.py` template, `get_connection()`, `composio_execute()`); secrets injection during generation (`Flow.WithSecretsLoader()` + decrypt-from-stored-master-password in `main.go`); SDK import blocking in guardrails (`composioSDKImport` regex, `ak_` key prefix); implementation prompt now requires real API calls when secrets present; UI code example updated to REST pattern; real validation during agent creation (no mock data when `COMPOSIO_API_KEY` available); connection error guidance in agent output (`[CHAT] ❌ Could not access...`) |
 
 ### Known gaps
 

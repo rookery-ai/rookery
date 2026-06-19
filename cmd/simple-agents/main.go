@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
@@ -95,7 +96,21 @@ func serveCmd() *cli.Command {
 			// Telegram uses a single system coder; wrap it in a resolver lambda.
 			memStore := memory.New(filepath.Join(cfg.Data.Dir, "memory"))
 
-			designFlow := agentdesigner.NewFlow(func(_ string) *coder.Coder { return coderSvc }, designer).WithDB(database).WithMemory(memStore)
+			designFlow := agentdesigner.NewFlow(func(_ string) *coder.Coder { return coderSvc }, designer).
+				WithDB(database).
+				WithMemory(memStore).
+				WithSecretsLoader(func(ctx context.Context, userID string) (map[string]string, error) {
+					user, err := database.GetUserByID(userID)
+					if err != nil || user.EncryptedMasterPassword == "" {
+						return nil, err
+					}
+					masterPw, err := secrets.DecryptMasterPassword(user.EncryptedMasterPassword, sysKey)
+					if err != nil {
+						return nil, err
+					}
+					svc := secrets.New(database, userID, masterPw, user.SecretsSalt)
+					return svc.GetAll(ctx)
+				})
 			skillStore := skillstore.New(database, skillsDir)
 			runner := agentrunner.New(database, sysKey, agentsDir, homesDir, cfg.Data.Dir, coderSvc, skillsDir).WithMemory(memStore)
 
@@ -136,6 +151,32 @@ func serveCmd() *cli.Command {
 
 			sessionSvc := session.New(database)
 			go sessionSvc.Run(ctx)
+
+			// Nightly GC for expired agent design drafts: drops the draft row and,
+			// for create-mode drafts that reached StateVerifying, removes the
+			// orphaned pre-approved agent directory left on disk by runGeneration.
+			go func() {
+				ticker := time.NewTicker(24 * time.Hour)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						expired, err := database.ListExpiredAgentDrafts()
+						if err != nil {
+							slog.Warn("draft gc: list expired", "err", err)
+							continue
+						}
+						for _, d := range expired {
+							if !d.IsEdit && d.State == "verifying" && d.AgentID != "" {
+								_ = os.RemoveAll(filepath.Join(cfg.Data.Dir, "agents", d.UserID, d.AgentID))
+							}
+							_ = database.DeleteAgentDraft(d.UserID)
+						}
+					}
+				}
+			}()
 
 			srv, err := web.NewServer(cfg, database, gwManager, runner, designer, homesDir, memStore, skillStore, designFlow)
 			if err != nil {

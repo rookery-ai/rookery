@@ -2,6 +2,7 @@ package agentdesigner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -22,10 +23,11 @@ import (
 type DesignState int
 
 const (
-	StateIdle       DesignState = iota
-	StateDescribing             // Telegram: waiting for description after /agent create <name>
-	StateDesigning              // free-form Q&A until user says "approve"
-	StateVerifying              // test run shown; waiting for user to confirm or request changes
+	StateIdle           DesignState = iota
+	StateAwaitingResume             // a draft exists; waiting for user to pick "resume" or "new"
+	StateDescribing                 // Telegram: waiting for description after /agent create <name>
+	StateDesigning                  // free-form Q&A until user says "approve"
+	StateVerifying                  // test run shown; waiting for user to confirm or request changes
 	StateDone
 )
 
@@ -33,6 +35,8 @@ func (s DesignState) String() string {
 	switch s {
 	case StateIdle:
 		return "idle"
+	case StateAwaitingResume:
+		return "awaiting_resume"
 	case StateDescribing:
 		return "describing"
 	case StateDesigning:
@@ -58,6 +62,10 @@ type DesignSession struct {
 	UserMemory         string           // bullet list of saved memory entries, loaded once on session start
 	CreatedAt          time.Time
 
+	// ComposioEnabled is true when the user has stored a COMPOSIO_API_KEY secret,
+	// indicating their agents can use Composio to access external services.
+	ComposioEnabled bool
+
 	// IsEdit distinguishes an edit-of-existing-agent session from a fresh create.
 	// AgentID is the *existing* agent's ID (not a freshly minted one) when true.
 	IsEdit bool
@@ -71,11 +79,16 @@ type DesignSession struct {
 	PendingAgentMD string
 	PendingTools   map[string]string
 
+	// pendingName holds the agent name the user originally typed in the
+	// StateAwaitingResume flow, so the "new" branch can start a fresh create
+	// session with that name once the draft is dismissed.
+	pendingName string
+
 	// Generation cancellation and progress. All fields are set in runGeneration
 	// and cleared / closed in Cancel.
 	cancelGenerate context.CancelFunc // cancels the in-flight coder.Generate() call
 	progressFunc   func(string)       // Telegram: edits the placeholder message mid-run
-	progressCh     chan string         // Web SSE: buffered milestone channel
+	progressCh     chan string        // Web SSE: buffered milestone channel
 }
 
 type dbDesignStore interface {
@@ -86,6 +99,11 @@ type dbDesignStore interface {
 	GetScheduleForAgent(agentID string) (*db.AgentSchedule, error)
 	DeleteAgentSchedule(agentID string) error
 	GetSetting(userID, key string) (string, error)
+	SecretExists(userID, name string) (bool, error)
+
+	UpsertAgentDraft(d *db.AgentDraft) error
+	GetAgentDraft(userID string) (*db.AgentDraft, error)
+	DeleteAgentDraft(userID string) error
 }
 
 // memoryStore is satisfied by *memory.Store — kept local to avoid the import.
@@ -99,10 +117,11 @@ type Flow struct {
 	mu       sync.Mutex
 	sessions map[string]*DesignSession // keyed by userID
 
-	coderFor func(userID string) *coder.Coder
-	designer *AgentDesigner
-	db       dbDesignStore
-	memStore memoryStore // optional; nil = no memory injected
+	coderFor      func(userID string) *coder.Coder
+	designer      *AgentDesigner
+	db            dbDesignStore
+	memStore      memoryStore // optional; nil = no memory injected
+	secretsLoader func(ctx context.Context, userID string) (map[string]string, error)
 }
 
 // NewFlow creates a Flow. coderResolver maps a userID to the right coder.
@@ -127,6 +146,14 @@ func (f *Flow) WithMemory(m memoryStore) *Flow {
 	return f
 }
 
+// WithSecretsLoader attaches a loader that decrypts all secrets for a user.
+// The loader is called during agent generation to inject secrets like COMPOSIO_API_KEY
+// into the coder subprocess so real API calls can be made during validation.
+func (f *Flow) WithSecretsLoader(fn func(ctx context.Context, userID string) (map[string]string, error)) *Flow {
+	f.secretsLoader = fn
+	return f
+}
+
 // Start creates a new Telegram design session for userID.
 // Returns the opening prompt asking for a description.
 func (f *Flow) Start(userID, agentName string) (string, error) {
@@ -141,6 +168,7 @@ func (f *Flow) Start(userID, agentName string) (string, error) {
 	platforms := f.loadConnectedPlatforms(userID)
 	userProfile := f.loadUserProfile(userID)
 	userMemory := f.loadUserMemory(userID)
+	composioEnabled := f.loadComposioEnabled(userID)
 	f.sessions[userID] = &DesignSession{
 		UserID:             userID,
 		AgentID:            uuid.New().String(),
@@ -150,6 +178,7 @@ func (f *Flow) Start(userID, agentName string) (string, error) {
 		ConnectedPlatforms: platforms,
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
+		ComposioEnabled:    composioEnabled,
 		CreatedAt:          time.Now(),
 	}
 
@@ -173,6 +202,7 @@ func (f *Flow) StartDesign(ctx context.Context, userID, agentName, firstMessage 
 	platforms := f.loadConnectedPlatforms(userID)
 	userProfile := f.loadUserProfile(userID)
 	userMemory := f.loadUserMemory(userID)
+	composioEnabled := f.loadComposioEnabled(userID)
 	sess := &DesignSession{
 		UserID:             userID,
 		AgentID:            uuid.New().String(),
@@ -182,6 +212,7 @@ func (f *Flow) StartDesign(ctx context.Context, userID, agentName, firstMessage 
 		ConnectedPlatforms: platforms,
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
+		ComposioEnabled:    composioEnabled,
 		CreatedAt:          time.Now(),
 	}
 	f.sessions[userID] = sess
@@ -212,6 +243,7 @@ func (f *Flow) StartEdit(userID, agentID string) (string, error) {
 	platforms := f.loadConnectedPlatforms(userID)
 	userProfile := f.loadUserProfile(userID)
 	userMemory := f.loadUserMemory(userID)
+	composioEnabled := f.loadComposioEnabled(userID)
 	f.sessions[userID] = &DesignSession{
 		UserID:             userID,
 		AgentID:            agentID,
@@ -221,6 +253,7 @@ func (f *Flow) StartEdit(userID, agentID string) (string, error) {
 		ConnectedPlatforms: platforms,
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
+		ComposioEnabled:    composioEnabled,
 		CreatedAt:          time.Now(),
 		IsEdit:             true,
 		ExistingAgentMD:    reconciledMD,
@@ -254,6 +287,7 @@ func (f *Flow) StartEditDesign(ctx context.Context, userID, agentID, firstMessag
 	platforms := f.loadConnectedPlatforms(userID)
 	userProfile := f.loadUserProfile(userID)
 	userMemory := f.loadUserMemory(userID)
+	composioEnabled := f.loadComposioEnabled(userID)
 	sess := &DesignSession{
 		UserID:             userID,
 		AgentID:            agentID,
@@ -263,6 +297,7 @@ func (f *Flow) StartEditDesign(ctx context.Context, userID, agentID, firstMessag
 		ConnectedPlatforms: platforms,
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
+		ComposioEnabled:    composioEnabled,
 		CreatedAt:          time.Now(),
 		IsEdit:             true,
 		ExistingAgentMD:    reconciledMD,
@@ -324,6 +359,8 @@ func (f *Flow) Step(ctx context.Context, userID, input string) (string, bool, st
 	f.mu.Unlock()
 
 	switch state {
+	case StateAwaitingResume:
+		return f.stepAwaitingResume(ctx, userID, input)
 	case StateDescribing:
 		return f.stepDescribing(ctx, userID, input)
 	case StateDesigning:
@@ -387,7 +424,218 @@ func (f *Flow) GetSession(userID string) *DesignSession {
 	return f.sessions[userID]
 }
 
+// ─── Draft save / resume ──────────────────────────────────────────────────────
+
+// draftTTL is how long a saved design draft remains resumable.
+const draftTTL = 7 * 24 * time.Hour
+
+// saveDraft serializes the current session and upserts it as the user's draft.
+// Called while the Flow mutex is held; a single SQLite upsert is fast enough that
+// holding the lock is acceptable (consistent with other db calls in runGeneration).
+// Only "designing" and "verifying" states are persisted — StateAwaitingResume is
+// a transient prompt and never saved.
+func (f *Flow) saveDraft(sess *DesignSession) {
+	if f.db == nil {
+		return
+	}
+	histJSON, _ := json.Marshal(sess.History)
+	toolsJSON, _ := json.Marshal(sess.PendingTools)
+	state := "designing"
+	if sess.State == StateVerifying {
+		state = "verifying"
+	}
+	_ = f.db.UpsertAgentDraft(&db.AgentDraft{
+		UserID:           sess.UserID,
+		AgentID:          sess.AgentID,
+		AgentName:        sess.AgentName,
+		IsEdit:           sess.IsEdit,
+		State:            state,
+		HistoryJSON:      string(histJSON),
+		PendingAgentMD:   sess.PendingAgentMD,
+		PendingToolsJSON: string(toolsJSON),
+		ExpiresAt:        time.Now().Add(draftTTL),
+	})
+}
+
+// deleteDraft removes the user's draft. Called after a successful finalize so the
+// draft prompt never reappears for an agent that was already saved.
+func (f *Flow) deleteDraft(userID string) {
+	if f.db == nil {
+		return
+	}
+	_ = f.db.DeleteAgentDraft(userID)
+}
+
+// HasDraft returns the user's draft if one exists and is not expired; nil otherwise.
+func (f *Flow) HasDraft(userID string) *db.AgentDraft {
+	if f.db == nil {
+		return nil
+	}
+	draft, err := f.db.GetAgentDraft(userID)
+	if err != nil {
+		return nil
+	}
+	return draft
+}
+
+// DismissDraft deletes the user's draft. For create-mode drafts in "verifying"
+// state it also removes the agent's pre-approved directory so orphaned files don't
+// accumulate on disk — that dir was created by runGeneration but never finalized.
+func (f *Flow) DismissDraft(userID string) error {
+	if f.db == nil {
+		return nil
+	}
+	draft := f.HasDraft(userID)
+	if draft == nil {
+		return nil
+	}
+	_ = f.db.DeleteAgentDraft(userID)
+	if !draft.IsEdit && draft.State == "verifying" && draft.AgentID != "" {
+		_ = os.RemoveAll(filepath.Join(f.designer.agentsDir, userID, draft.AgentID))
+	}
+	return nil
+}
+
+// ResumeDraft reconstructs a DesignSession from the saved draft and returns the
+// message to show the user to continue the conversation. Derived context (Skills,
+// ConnectedPlatforms, UserProfile, UserMemory) is reloaded the same way Start()/
+// StartDesign() do — it is cheap to reload and may have changed since the draft
+// was saved, so it is never stored in the draft itself.
+//
+// For edit drafts it re-runs loadAgentForEdit(userID, agentID); if the agent no
+// longer exists the draft is dismissed and an error is returned so callers can
+// tell the user.
+//
+// The coder is never re-run on resume — generation only happens when the user
+// next says "approve".
+func (f *Flow) ResumeDraft(ctx context.Context, userID string) (string, error) {
+	if f.db == nil {
+		return "", fmt.Errorf("no database configured")
+	}
+	draft, err := f.db.GetAgentDraft(userID)
+	if err != nil {
+		return "", fmt.Errorf("no draft to resume")
+	}
+
+	sess := &DesignSession{
+		UserID:             userID,
+		AgentID:            draft.AgentID,
+		AgentName:          draft.AgentName,
+		IsEdit:             draft.IsEdit,
+		PendingAgentMD:     draft.PendingAgentMD,
+		Skills:             f.loadSkillNames(userID),
+		ConnectedPlatforms: f.loadConnectedPlatforms(userID),
+		UserProfile:        f.loadUserProfile(userID),
+		UserMemory:         f.loadUserMemory(userID),
+		ComposioEnabled:    f.loadComposioEnabled(userID),
+		CreatedAt:          time.Now(),
+	}
+	_ = json.Unmarshal([]byte(draft.HistoryJSON), &sess.History)
+	if draft.PendingToolsJSON != "" {
+		_ = json.Unmarshal([]byte(draft.PendingToolsJSON), &sess.PendingTools)
+	}
+
+	if draft.IsEdit {
+		agentName, reconciledMD, err := f.loadAgentForEdit(userID, draft.AgentID)
+		if err != nil {
+			// The agent being edited is gone — drop the draft and any shell session.
+			_ = f.DismissDraft(userID)
+			f.mu.Lock()
+			delete(f.sessions, userID)
+			f.mu.Unlock()
+			return "", fmt.Errorf("the agent being edited no longer exists; draft dismissed")
+		}
+		sess.AgentName = agentName
+		sess.ExistingAgentMD = reconciledMD
+	}
+
+	if draft.State == "verifying" {
+		sess.State = StateVerifying
+	} else {
+		sess.State = StateDesigning
+	}
+
+	f.mu.Lock()
+	f.sessions[userID] = sess
+	f.mu.Unlock()
+
+	if sess.State == StateVerifying {
+		preview := sess.PendingAgentMD
+		if len(preview) > 600 {
+			preview = preview[:600] + "…"
+		}
+		return fmt.Sprintf(
+			"Resuming your draft for **%s**. The coder has already built this version:\n\n```\n%s\n```\n\nType `approve` to save it, or describe any changes you'd like.",
+			sess.AgentName, preview,
+		), nil
+	}
+	return fmt.Sprintf(
+		"Resuming your draft for **%s**. Here's the conversation so far — continue, or type 'approve' when ready to generate.",
+		sess.AgentName,
+	), nil
+}
+
+// OfferDraftResume creates a minimal session in StateAwaitingResume and returns the
+// prompt to send the user. pendingAgentName is stored so the "new" branch of
+// stepAwaitingResume can start a fresh create session with the name the user
+// originally typed.
+func (f *Flow) OfferDraftResume(userID, pendingAgentName string, draft *db.AgentDraft) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sessions[userID] = &DesignSession{
+		UserID:      userID,
+		AgentID:     draft.AgentID,
+		AgentName:   draft.AgentName,
+		State:       StateAwaitingResume,
+		IsEdit:      draft.IsEdit,
+		pendingName: pendingAgentName,
+		CreatedAt:   time.Now(),
+	}
+	return fmt.Sprintf(
+		"Found an unfinished draft for \"%s\". Reply 'resume' to continue it, or 'new' to start fresh.",
+		draft.AgentName,
+	), nil
+}
+
 // ─── FSM step handlers ────────────────────────────────────────────────────────
+
+// stepAwaitingResume handles the draft-resume offer. "resume" reconstructs the
+// session from the saved draft; "new" (or anything else) dismisses the draft and
+// starts a fresh create session with the name the user originally typed.
+// Runs without the Flow mutex held (Step releases it before dispatching), so it
+// can call ResumeDraft / Start directly.
+func (f *Flow) stepAwaitingResume(ctx context.Context, userID, msg string) (string, bool, string, error) {
+	f.mu.Lock()
+	sess := f.sessions[userID]
+	pendingName := ""
+	if sess != nil {
+		pendingName = sess.pendingName
+	}
+	f.mu.Unlock()
+
+	lower := strings.TrimSpace(strings.ToLower(msg))
+	if lower == "resume" {
+		resp, err := f.ResumeDraft(ctx, userID)
+		if err != nil {
+			return "", false, "", err
+		}
+		return resp, false, "", nil
+	}
+
+	// "new" or anything else → dismiss the draft and start a fresh create session.
+	_ = f.DismissDraft(userID)
+	f.mu.Lock()
+	delete(f.sessions, userID) // drop the awaiting-resume shell so Start() doesn't refuse
+	f.mu.Unlock()
+	if pendingName == "" {
+		pendingName = "agent"
+	}
+	resp, err := f.Start(userID, pendingName)
+	if err != nil {
+		return "", false, "", err
+	}
+	return resp, false, "", nil
+}
 
 // stepDescribing (Telegram only): user sends their first description.
 func (f *Flow) stepDescribing(ctx context.Context, userID, description string) (string, bool, string, error) {
@@ -458,6 +706,7 @@ func (f *Flow) callCoder(ctx context.Context, userID, userMessage string) (strin
 		Skills:             sess.Skills,
 		UserProfile:        sess.UserProfile,
 		UserMemory:         sess.UserMemory,
+		ComposioEnabled:    sess.ComposioEnabled,
 	})
 
 	// Use WithNoTools so the design conversation outputs plain text and never
@@ -475,6 +724,9 @@ func (f *Flow) callCoder(ctx context.Context, userID, userMessage string) (strin
 		db.ChatMessage{Role: "user", Content: userMessage},
 		db.ChatMessage{Role: "assistant", Content: result.Text},
 	)
+	// Persist the draft so a reload/restart can resume from this turn. Covers
+	// every conversation turn including StartDesign's first message.
+	f.saveDraft(sess)
 	f.mu.Unlock()
 
 	return result.Text, nil
@@ -600,7 +852,15 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 	// errors, and confirm the implementation works — all in one session.
 	// genCtx (not ctx) is used so Cancel() can kill the subprocess without
 	// also cancelling the outer HTTP/SSE context.
-	result, err := coderSvc.WithDir(workDir).WithAllowedTools("Bash,Write,Edit,Read").Generate(genCtx, userID, prompt)
+	// Inject secrets (e.g., COMPOSIO_API_KEY) so the coder can make real API calls
+	// during validation instead of using mock data.
+	generationCoder := coderSvc.WithDir(workDir).WithAllowedTools("Bash,Write,Edit,Read")
+	if f.secretsLoader != nil {
+		if env, err := f.secretsLoader(genCtx, userID); err == nil && len(env) > 0 {
+			generationCoder = generationCoder.WithExtraEnv(env)
+		}
+	}
+	result, err := generationCoder.Generate(genCtx, userID, prompt)
 	if err != nil {
 		cleanupOnFail()
 		closeProgress()
@@ -676,6 +936,9 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 	sess.State = StateVerifying
 	sess.PendingAgentMD = agentMD
 	sess.PendingTools = tools
+	// Persist the generated content so a reload before final approval can resume
+	// without re-running the (quota-consuming) coder generation.
+	f.saveDraft(sess)
 	f.mu.Unlock()
 
 	return fmt.Sprintf(
@@ -730,7 +993,6 @@ func copyAgentWorkspace(liveDir, stagingDir, reconciledAgentMD string) error {
 	}
 	return nil
 }
-
 
 // parseTestOutput extracts content between [TEST_OUTPUT] and [/TEST_OUTPUT].
 func parseTestOutput(text string) string {
@@ -796,10 +1058,21 @@ func (f *Flow) finalizeAgent(ctx context.Context, userID string) (string, bool, 
 	isEdit := sess.IsEdit
 	f.mu.Unlock()
 
+	var resp string
+	var done bool
+	var agentID string
+	var err error
 	if isEdit {
-		return f.updateAndFinish(ctx, userID, agentMD, tools)
+		resp, done, agentID, err = f.updateAndFinish(ctx, userID, agentMD, tools)
+	} else {
+		resp, done, agentID, err = f.saveAndFinish(ctx, userID, agentMD, tools)
 	}
-	return f.saveAndFinish(ctx, userID, agentMD, tools)
+	// On a successful save the agent is persisted — drop the draft so the resume
+	// prompt never reappears for an already-created/updated agent.
+	if err == nil {
+		f.deleteDraft(userID)
+	}
+	return resp, done, agentID, err
 }
 
 // saveAndFinish writes a brand-new agent to disk/DB and terminates the session.
@@ -1029,6 +1302,16 @@ func (f *Flow) loadUserProfile(userID string) string {
 		return ""
 	}
 	return profile.Load(f.db, userID).ContextString()
+}
+
+// loadComposioEnabled returns true if the user has stored a COMPOSIO_API_KEY secret.
+// Uses a presence-only check so no master password is required.
+func (f *Flow) loadComposioEnabled(userID string) bool {
+	if f.db == nil {
+		return false
+	}
+	ok, _ := f.db.SecretExists(userID, "COMPOSIO_API_KEY")
+	return ok
 }
 
 // loadUserMemory returns saved memory entries as a bullet list, or "" if none.

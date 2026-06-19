@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 )
 
@@ -16,6 +17,12 @@ var ForbiddenKeywords = []string{
 	"bitcoin wallet", "private key", "steal", "exfil",
 }
 
+// composioKeyLiteral matches a Composio API key (c_live_…, c_test_…, or ak_…) appearing
+// as a string literal instead of being read from os.environ.
+var composioKeyLiteral = regexp.MustCompile(`(?i)(["'])(c_live_|c_test_|ak_)[A-Za-z0-9]{8,}["']`)
+
+// composioSDKImport matches imports of the deprecated composio-core SDK.
+var composioSDKImport = regexp.MustCompile(`(?m)^\s*(from\s+composio\s+import|import\s+composio)`)
 
 // CheckEthics is the exported ethics-only guardrail used for md/hybrid agents.
 func CheckEthics(code, _ string) error {
@@ -51,6 +58,12 @@ func checkEthics(code string) error {
 		if strings.Contains(lower, strings.ToLower(kw)) {
 			return fmt.Errorf("code contains forbidden pattern: %q", kw)
 		}
+	}
+	if composioKeyLiteral.MatchString(code) {
+		return fmt.Errorf("Composio API key must be read from os.environ['COMPOSIO_API_KEY'], not hardcoded as a string literal")
+	}
+	if composioSDKImport.MatchString(code) {
+		return fmt.Errorf("use the Composio v3 REST API directly (requests library) — the composio-core SDK uses deprecated endpoints. See the agent design guide.")
 	}
 	return nil
 }
