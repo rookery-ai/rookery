@@ -24,6 +24,18 @@ var composioKeyLiteral = regexp.MustCompile(`(?i)(["'])(c_live_|c_test_|ak_)[A-Z
 // composioSDKImport matches imports of the deprecated composio-core SDK.
 var composioSDKImport = regexp.MustCompile(`(?m)^\s*(from\s+composio\s+import|import\s+composio)`)
 
+// composioRef is a cheap gate so the version/host checks below only fire on code
+// that is actually talking to Composio (avoids flagging some other API's /v1/).
+var composioRef = regexp.MustCompile(`(?i)composio`)
+
+// composioWrongHost matches the removed Composio API host. The only correct host
+// is backend.composio.dev (api.composio.dev returns 410/connection failures).
+var composioWrongHost = regexp.MustCompile(`(?i)\bapi\.composio\.dev`)
+
+// composioOldVersion matches Composio's removed v1/v2 REST endpoints. v3 is the
+// only supported version. Matches /v1/, /v2/, /api/v1/, /api/v2/ but never /v3/.
+var composioOldVersion = regexp.MustCompile(`(?i)/(api/)?v[12]/`)
+
 // CheckEthics is the exported ethics-only guardrail used for md/hybrid agents.
 func CheckEthics(code, _ string) error {
 	return checkEthics(code)
@@ -65,9 +77,16 @@ func checkEthics(code string) error {
 	if composioSDKImport.MatchString(code) {
 		return fmt.Errorf("use the Composio v3 REST API directly (requests library) — the composio-core SDK uses deprecated endpoints. See the agent design guide.")
 	}
+	if composioRef.MatchString(code) {
+		if composioWrongHost.MatchString(code) {
+			return fmt.Errorf("Composio API host must be backend.composio.dev/api/v3 — api.composio.dev is removed and returns HTTP 410. Use https://backend.composio.dev/api/v3")
+		}
+		if composioOldVersion.MatchString(code) {
+			return fmt.Errorf("Composio v1/v2 endpoints are removed (HTTP 410). Use the v3 REST API: GET /api/v3/connected_accounts and POST /api/v3/tools/execute/{TOOL_SLUG}")
+		}
+	}
 	return nil
 }
-
 
 // astCheckScript is inlined Python that checks for forbidden AST nodes.
 const astCheckScript = `

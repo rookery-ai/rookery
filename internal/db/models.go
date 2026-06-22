@@ -72,14 +72,14 @@ type Skill struct {
 }
 
 type AgentSchedule struct {
-	ID         string
-	AgentID    string
-	UserID     string
-	CronExpr   string
-	NextRunAt  *time.Time
-	LastRunAt  *time.Time
-	Enabled    bool
-	CreatedAt  time.Time
+	ID        string
+	AgentID   string
+	UserID    string
+	CronExpr  string
+	NextRunAt *time.Time
+	LastRunAt *time.Time
+	Enabled   bool
+	CreatedAt time.Time
 }
 
 type AgentRun struct {
@@ -159,4 +159,19 @@ type AuditLog struct {
 	Detail    string
 	IPAddress string
 	CreatedAt time.Time
+}
+
+// AgentDraft is a persisted in-progress agent creation/edit session, used to
+// resume after a page reload, browser close, or server restart. One per user.
+type AgentDraft struct {
+	UserID           string
+	AgentID          string // freshly-minted for create; existing agent's ID for edit
+	AgentName        string
+	IsEdit           bool
+	State            string // "designing" or "verifying"
+	HistoryJSON      string
+	PendingAgentMD   string
+	PendingToolsJSON string
+	UpdatedAt        time.Time
+	ExpiresAt        time.Time
 }

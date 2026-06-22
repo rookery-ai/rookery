@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/secrets"
@@ -27,8 +28,8 @@ func (s *Server) showSecrets(c echo.Context) error {
 
 func (s *Server) handleCreateSecret(c echo.Context) error {
 	u := c.Get("user").(*db.User)
-	name := c.FormValue("name")
-	value := c.FormValue("value")
+	name := strings.TrimSpace(c.FormValue("name"))
+	value := strings.TrimSpace(c.FormValue("value"))
 
 	names, _ := s.db.ListSecretNames(u.ID)
 	renderErr := func(status int, msg string) error {

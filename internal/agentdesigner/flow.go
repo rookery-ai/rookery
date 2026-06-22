@@ -491,7 +491,7 @@ func (f *Flow) DismissDraft(userID string) error {
 	}
 	_ = f.db.DeleteAgentDraft(userID)
 	if !draft.IsEdit && draft.State == "verifying" && draft.AgentID != "" {
-		_ = os.RemoveAll(filepath.Join(f.designer.agentsDir, userID, draft.AgentID))
+		_ = os.RemoveAll(AgentDir(f.designer.agentsDir, userID, draft.AgentID))
 	}
 	return nil
 }
@@ -756,6 +756,12 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 	existingAgentMD := sess.ExistingAgentMD
 	historySnap := make([]db.ChatMessage, len(sess.History))
 	copy(historySnap, sess.History)
+	// The capability spec (e.g. Composio v3) must travel into the generation prompt
+	// because Generate() carries no system prompt the way the design Chat() does.
+	implParams := prompts.ImplementationParams{
+		ComposioEnabled:    sess.ComposioEnabled,
+		ConnectedPlatforms: sess.ConnectedPlatforms,
+	}
 
 	// Set up a buffered progress channel for SSE and snapshot the Telegram progress func.
 	if sess.progressCh == nil {
@@ -816,21 +822,21 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 		// Edit mode: never let the coder touch the live agent dir before approval —
 		// it may be scheduled and running unattended. Generate against a sibling
 		// staging copy instead; the live dir is only overwritten in finalizeAgent.
-		liveDir := filepath.Join(f.designer.agentsDir, userID, agentIDSnap)
+		liveDir := AgentDir(f.designer.agentsDir, userID, agentIDSnap)
 		stagingDir := liveDir + "-edit-staging"
 		if err := copyAgentWorkspace(liveDir, stagingDir, existingAgentMD); err != nil {
 			closeProgress()
 			return "", false, "", fmt.Errorf("prepare staging workspace: %w", err)
 		}
 		workDir = stagingDir
-		prompt = prompts.BuildEditImplementationPrompt(agentNameSnap, dbMessagesToPrompt(historySnap))
+		prompt = prompts.BuildEditImplementationPrompt(agentNameSnap, dbMessagesToPrompt(historySnap), implParams)
 		remove := func() { _ = os.RemoveAll(stagingDir) }
 		cleanupOnFail, cleanupOnSuccess = remove, remove
 	} else {
 		// Create the agent directory structure on disk before the coder runs so it
 		// has a clean workspace to write into.
-		agentDir := filepath.Join(f.designer.agentsDir, userID, agentIDSnap)
-		for _, sub := range []string{".", "tools", "logs"} {
+		agentDir := AgentDir(f.designer.agentsDir, userID, agentIDSnap)
+		for _, sub := range []string{".", "tools", "logs", "notes"} {
 			if err := os.MkdirAll(filepath.Join(agentDir, sub), 0o750); err != nil {
 				closeProgress()
 				return "", false, "", fmt.Errorf("create agent dir: %w", err)
@@ -841,7 +847,7 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 			return "", false, "", fmt.Errorf("write state.json: %w", err)
 		}
 		workDir = agentDir
-		prompt = prompts.BuildImplementationPrompt(agentNameSnap, dbMessagesToPrompt(historySnap))
+		prompt = prompts.BuildImplementationPrompt(agentNameSnap, dbMessagesToPrompt(historySnap), implParams)
 		cleanupOnFail = func() { _ = os.RemoveAll(agentDir) }
 		cleanupOnSuccess = func() {} // the dir IS the pending agent; keep it until finalize/iterate
 	}
@@ -911,7 +917,10 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 		if err := RunFullGuardrails(code, ""); err != nil {
 			cleanupOnFail()
 			closeProgress()
-			return fmt.Sprintf("Tool %s failed safety checks: %s\n\nPlease rephrase.", filename, err.Error()), false, "", nil
+			// The generated code didn't meet the contract (e.g. wrong Composio API
+			// version). Keep the user in StateDesigning so "approve" rebuilds — the
+			// generation prompt now restates the correct spec, so a retry should fix it.
+			return fmt.Sprintf("The generated tool %s didn't pass validation: %s\n\nType **approve** to rebuild, or tell me what to change.", filename, err.Error()), false, "", nil
 		}
 	}
 

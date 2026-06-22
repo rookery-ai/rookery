@@ -12,10 +12,10 @@ import (
 // AgentDesigner handles file I/O and DB writes for completed agents.
 type AgentDesigner struct {
 	db        *db.DB
-	agentsDir string // root dir: <data>/agents/
+	agentsDir string // vaults base: <data>/vaults/ (agent dirs at <base>/<userID>/agents/<agentID>)
 }
 
-// NewDesigner creates an AgentDesigner.
+// NewDesigner creates an AgentDesigner. agentsDir is the vaults base directory.
 func NewDesigner(database *db.DB, agentsDir string) *AgentDesigner {
 	return &AgentDesigner{db: database, agentsDir: agentsDir}
 }
@@ -71,7 +71,7 @@ func (d *AgentDesigner) writeAgentContent(userID, agentID, name string, agentMD 
 		}
 	}
 
-	dir := filepath.Join(d.agentsDir, userID, agentID)
+	dir := AgentDir(d.agentsDir, userID, agentID)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create agent dir: %w", err)
 	}

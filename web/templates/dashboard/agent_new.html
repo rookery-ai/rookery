@@ -24,6 +24,20 @@
   </div>
   {{end}}
 
+  {{if .Draft}}
+  <div id="draft-banner" class="alert alert-info shadow-sm mb-4">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    <div class="flex-1">
+      <p class="font-semibold">You have an unfinished draft: {{.Draft.AgentName}}</p>
+      <p class="text-sm">Resume to continue where you left off, or start fresh.</p>
+    </div>
+    <div class="flex gap-2">
+      <button id="btn-resume-draft" class="btn btn-sm btn-primary">Resume</button>
+      <button id="btn-dismiss-draft" class="btn btn-sm btn-ghost">Start fresh</button>
+    </div>
+  </div>
+  {{end}}
+
   <!-- Phase 1: Name entry -->
   <div id="phase-start" class="card bg-base-100 shadow-sm border border-base-300">
     <div class="card-body">
@@ -100,6 +114,20 @@
     </div>
   </div>
 </div>
+
+<!-- Cancel confirmation: save the draft to resume later, or discard it. -->
+<dialog id="cancel-modal" class="modal">
+  <div class="modal-box w-full max-w-md">
+    <h3 class="font-bold text-lg mb-1">Cancel agent design?</h3>
+    <p class="text-base-content/60 text-sm mb-4">Your progress so far can be saved as a draft so you can continue later, or discarded entirely.</p>
+    <div class="modal-action flex-col gap-2">
+      <button class="btn btn-primary w-full" onclick="saveDraftAndExit()">Save as draft</button>
+      <button class="btn btn-ghost text-error w-full" onclick="discardDraft()">Discard</button>
+      <button class="btn btn-ghost w-full" onclick="document.getElementById('cancel-modal').close()">Keep editing</button>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>close</button></form>
+</dialog>
 
 <script>
 var agentName = '';
@@ -254,15 +282,40 @@ async function doRequest(name, msg, isFirst) {
 }
 
 async function cancelDesign() {
-  await fetch('/dashboard/agents/design/cancel', {method: 'POST'});
+  // Mid-generation abort: just stop the build, no draft prompt (the draft from
+  // the last design turn is already saved).
   if (isGenerating) {
+    await fetch('/dashboard/agents/design/cancel', {method: 'POST'});
     stopProgressStream();
     hideProgress();
     isGenerating = false;
     appendMessage('assistant', 'Agent creation was cancelled.');
-  } else {
-    window.location.href = '/dashboard/agents';
+    return;
   }
+  // Otherwise ask: save the draft to resume later, or discard it?
+  document.getElementById('cancel-modal').showModal();
+}
+
+// Save as draft: the draft is already auto-saved on every turn, so we just end
+// the active session (cancel) and leave. The draft stays resumable from the
+// agents page and the "New Agent" banner.
+async function saveDraftAndExit() {
+  document.getElementById('cancel-modal').close();
+  try {
+    await fetch('/dashboard/agents/design/cancel', {method: 'POST'});
+  } catch(e) { /* proceed to leave regardless */ }
+  window.location.href = '/dashboard/agents';
+}
+
+// Discard: end the session AND delete the draft (and the orphaned pre-approved
+// agent directory if generation had reached verifying).
+async function discardDraft() {
+  document.getElementById('cancel-modal').close();
+  try {
+    await fetch('/dashboard/agents/design/cancel', {method: 'POST'});
+    await fetch('/dashboard/agents/design/dismiss', {method: 'POST'});
+  } catch(e) { /* proceed to leave regardless */ }
+  window.location.href = '/dashboard/agents';
 }
 
 function appendMessage(role, text) {
@@ -313,6 +366,67 @@ function esc(s) {
 
 document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('agent-name-input').focus();
+
+  // Resume an unfinished design draft: fetch the saved conversation, replay it
+  // into the chat, then enter phase-chat ready to continue.
+  var btnResume = document.getElementById('btn-resume-draft');
+  if (btnResume) {
+    btnResume.addEventListener('click', async function() {
+      btnResume.disabled = true;
+      try {
+        var res = await fetch('/dashboard/agents/design/resume', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'}
+        });
+        var data = await res.json();
+        if (data.error) {
+          btnResume.disabled = false;
+          var banner = document.getElementById('draft-banner');
+          if (banner) {
+            var err = document.createElement('p');
+            err.className = 'text-sm text-error';
+            err.textContent = data.error;
+            banner.appendChild(err);
+          }
+          return;
+        }
+        agentName = data.agent_name || '';
+        var nameEl = document.getElementById('chat-agent-name');
+        if (nameEl) { nameEl.textContent = agentName; }
+        document.getElementById('phase-start').classList.add('hidden');
+        document.getElementById('draft-banner').classList.add('hidden');
+        document.getElementById('phase-chat').classList.remove('hidden');
+        (data.history || []).forEach(function(m) {
+          appendMessage(m.role === 'assistant' ? 'ai' : 'user', m.content);
+        });
+        appendMessage('ai', data.response);
+        if (data.state === 'verifying') { showApproveBar(); }
+        document.getElementById('chat-input').focus();
+      } catch(e) {
+        btnResume.disabled = false;
+        appendError('Network error: ' + e.message);
+      }
+    });
+  }
+
+  // Arrived via the "Continue" link on the agents page (?resume=1) — auto-resume
+  // so one click on the agents page drops straight into the chat.
+  if (btnResume && new URLSearchParams(window.location.search).get('resume') === '1') {
+    btnResume.click();
+  }
+
+  // Dismiss the draft and start fresh with the normal name/description form.
+  var btnDismiss = document.getElementById('btn-dismiss-draft');
+  if (btnDismiss) {
+    btnDismiss.addEventListener('click', async function() {
+      await fetch('/dashboard/agents/design/dismiss', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+      });
+      var banner = document.getElementById('draft-banner');
+      if (banner) { banner.remove(); }
+    });
+  }
 });
 </script>
 

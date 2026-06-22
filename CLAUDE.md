@@ -72,32 +72,68 @@ Telegram adapter (per-user bot instance)
 | `internal/reminder` | Creates/lists/fires reminders; background polling goroutine |
 | `internal/session` | `ChatSession` create/list/stop; 30-min idle auto-stop |
 | `internal/prompts` | Central home for all LLM prompt construction: `BuildDesignSystemPrompt`, `BuildImplementationPrompt`, `BuildEditImplementationPrompt`, `BuildCoderPrompt`, `BuildChildAgentFollowUpPrompt`, `BuildSkillMetaPrompt`. No inline prompt text exists outside this package. |
-| `internal/memory` | Per-user append-only JSONL store; `ContextString()` formats entries as a bullet list for LLM injection; injected into agent design sessions and agent run prompts via `WithMemory()` on both `Flow` and `Runner` |
+| `internal/memory` | Per-user memory store; now writes one markdown note per entry under the vault (`memory/<id>.md`), with `ImportJSONL` migrating the legacy `memory.jsonl`. `ContextString()` formats entries for LLM injection; injected via `WithMemory()` on both `Flow` and `Runner` |
+| `internal/vault` | Per-user Obsidian-style knowledge base: `Vault` (paths + `Resolve` safety + file IO), `Reflector` (DB→markdown+sidecar), `LinkIndex` ([[wikilinks]]), `Searcher` (ripgrep), `Guard` (post-run write-scope enforcement), `MigrateLegacyLayout`. See "Per-user knowledge base (vault)" |
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
 | `internal/profile` | Per-user personalization (name, email, location, timezone, tone, language, notes); stored in the generic `settings` table; `Load()`/`Save()`/`ContextString()` for LLM injection; `LoadLocation()` for timezone-aware reminder parsing; `IsComplete()`/`MarkComplete()` sentinel for setup wizard |
 | `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per user |
 | `web/` | Echo v4 web server; full user dashboard + admin UI |
 
-### Agent file layout on disk
+### Per-user knowledge base (vault)
+
+Every user has one Obsidian-style vault — a single directory of interlinked
+markdown notes that is the knowledge + backup layer for everything they own.
+`internal/vault` owns all vault path/IO/safety logic. The SQLite DB remains the
+system-of-record; structured rows are *reflected* into the vault as markdown +
+JSON sidecars.
 
 ```
-<data_dir>/agents/<userID>/<agentID>/
-├── agent.json          # manifest: id, name, required_secrets, skills, created_at (no type field)
-├── AGENT.md            # agent instructions (read by coder on every run)
-├── state.json          # persistent key-value state, starts as {}
-├── tools/              # optional Python helper scripts (placed here by system)
-│   └── fetch_price.py
-└── logs/
-    └── run_log_20060102_150405.txt  # one timestamped file per run, all kept
+<data_dir>/vaults/<userID>/
+├── README.md                       # vault home note (scaffolded)
+├── notes/                          # user-authored notes/journals/plans/todos (user RW, agents RO)
+├── memory/<id>.md                  # memory entries (markdown, one per note; was memory.jsonl)
+├── skills/<name>/SKILL.md          # per-user skills
+├── agents/<agentID>/               # an agent's OWN writable area
+│   ├── agent.json AGENT.md state.json
+│   ├── tools/*.py  notes/*.md
+│   └── logs/run_<ts>.md            # markdown run notes (reflected)
+├── sessions/<id>.md                # reflected chat transcripts
+├── reminders/<id>.md               # reflected reminders
+└── .kb/                            # internal: db-export/ JSON sidecars, links.json (hidden everywhere)
 ```
 
-Path helpers in `internal/agentdesigner/manifest.go`:
-- `AgentDescPath(dir, userID, agentID)` → `AGENT.md`
-- `AgentStatePath(dir, userID, agentID)` → `state.json`
-- `AgentLogsDir(dir, userID, agentID)` → `logs/`
-- `AgentLogPath(dir, userID, agentID, t)` → timestamped log file
+`claude-homes/<userID>/` stays OUTSIDE the vault (holds `.claude` credentials — must
+never be backed up). `internal/coder.safeID` keying is unchanged; vault/agent/
+memory/skill paths all key by raw `userID` (UUIDs), and these dirs nest under the
+vault root consistently.
+
+Key types in `internal/vault`:
+- **`Vault`** — `Root/AgentsDir/AgentDir/MemoryDir/SkillsDir`; **`Resolve(userID, rel)`** is the security primitive every read/write path uses (rejects `..`/absolute escapes); `WriteNote` (atomic), `Read/Delete/Rename/List/EnsureScaffold`. `List` hides dotfiles.
+- **`Reflector`** — `ReflectReminder/ReflectSession/ReflectAgentRun`: markdown note + `.kb/db-export/<table>/<id>.json` sidecar. Wired at the service layer (`internal/reminder` on fire, `internal/session` on idle-stop, `internal/agentrunner` per run). vault→{memory} only; no db dependency (methods take vault-local structs).
+- **`LinkIndex`** — `[[wikilink]]` parsing/resolution + `RenderHTMLLinks`; `Backlinks`.
+- **`Searcher`** — `ripgrepSearcher` (rg `--json`, pure-Go fallback); interface kept for future semantic search.
+- **`Guard`** — post-run write-scope enforcement (see below).
+- **`MigrateLegacyLayout()`** — idempotent startup migration of pre-vault `agents/`, `memory/` (jsonl→md), `skills/` into vaults; runs in `cmd/simple-agents/main.go`.
+
+**Agent access model + guard.** An agent's run CWD is its own vault dir; the coder
+prompt (`prompts.BuildCoderPrompt`, `<knowledge_base>` block) tells it to READ
+anywhere under the vault root but WRITE only inside its own dir. Enforcement is
+detective: `runCoderAgent` calls `guard.Snapshot(userID)` before the run and
+`guard.Restore` after, reverting any create/modify/delete to the user's authored
+content and logging violations. The protected region is everything EXCEPT
+`systemOwnedDirs` = {`.kb`, `agents`, `sessions`, `reminders`} — those are excluded
+so concurrent agent runs and the background reflection goroutines (reminder/session
+pollers firing mid-run) are never mistaken for agent writes. Excluded dirs are all
+re-derivable from the DB.
+
+Path helpers in `internal/agentdesigner/manifest.go` now take the **vaults base**
+(`<data>/vaults`) and insert the per-user `agents` segment via `AgentDir(vaultsBase,
+userID, agentID)`:
+- `AgentDescPath` → `AGENT.md`, `AgentStatePath` → `state.json`, `AgentLogsDir` → `logs/`, `AgentLogPath` → timestamped `.md`
 
 Runner falls back to `CLAUDE.md` if `AGENT.md` is missing (legacy agent support).
+Backup/sync to GitHub/Drive/S3 is designed-for but not implemented: the vault is a
+self-contained unit and `config.BackupConfig` is the (inert) hook point.
 
 ### Unified conversational agent creation
 
@@ -178,6 +214,22 @@ Composio connects user agents to 250+ external services (Notion, Slack, Google D
 - Connected accounts: `GET /connected_accounts?limit=100` → filter by `toolkit.slug` + `status=ACTIVE`
 - Execute: `POST /tools/execute/{TOOL_SLUG}` with body `{connected_account_id, user_id, arguments}`
 - Tool discovery: `GET /tools?toolkit_slug=APPNAME&limit=50`
+
+### Capability context must reach every phase (single source of truth)
+
+The design **conversation** runs via `coder.Chat()` and gets the rich
+`BuildDesignSystemPrompt` as a real system prompt. But **generation/edit** run via
+`coder.Generate()`, which carries **no system prompt** — so any binding contract
+(e.g. the Composio v3 spec) that lived only in the design system prompt was absent
+exactly when the coder wrote the code. A weaker/non-Claude backend then fell back to
+its training data and emitted deprecated Composio **v1** calls (`api.composio.dev/api/v1`,
+HTTP 410) → "Gmail not connected" even though it was.
+
+Fix (the v3 spec is now one shared block, present at every phase):
+- `composioServicesBlock()` in `internal/prompts/prompts.go` is the **single source** of the v3 spec; `BuildDesignSystemPrompt` calls it instead of holding an inline copy.
+- `prompts.ImplementationParams{ComposioEnabled, ConnectedPlatforms}` + `capabilitySpec()` inject that same block (and a `connectedPlatformsBlock()`) into `BuildImplementationPrompt` **and** `BuildEditImplementationPrompt`. `runGeneration` passes the params it already computes (`sess.ComposioEnabled`, `sess.ConnectedPlatforms`).
+- Enforcement backstop in guardrails (above) rejects v1/wrong-host code, so a model that still drifts can't ship — the user re-runs and the now-complete generation prompt self-corrects.
+- Regression guard: `internal/prompts/prompts_test.go` asserts the v3 markers appear in design/create/edit prompts when Composio is enabled (and not when disabled). Adding any future capability instruction = edit **one** block; it then appears across create/edit/write/validate/test.
 
 ### Conversational agent editing
 
@@ -274,6 +326,7 @@ Auto-detection: binary name containing `"claude"` → `claudeBackend`; otherwise
 - AST check blocks: `eval`, `exec`, `compile`, `__import__`, `os.system`, `subprocess.*`, `socket.socket`.
 - **Composio SDK import blocking** — `composioSDKImport` regex blocks `from composio import` and `import composio` patterns; returns error directing coder to use v3 REST API directly.
 - **Composio API key literal blocking** — `composioKeyLiteral` regex blocks hardcoded keys (`ak_...`, `c_live_...`, `c_test_...`); requires reading from `os.environ['COMPOSIO_API_KEY']`.
+- **Composio v1/v2 + wrong-host blocking** — gated by `composioRef` (code mentions "composio"), `composioWrongHost` rejects `api.composio.dev` (must be `backend.composio.dev`) and `composioOldVersion` rejects `/v1/`/`/v2/` endpoints (HTTP 410). This is the enforcement backstop: even if a weaker coder ignores the prompt and writes v1 code, generation rejects it and the user re-runs (now with the v3 spec in the generation prompt — see below). The non-Composio `/api/v1/` of an unrelated service is not flagged.
 
 ### Per-user coder isolation
 
@@ -335,6 +388,10 @@ Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`,
 /dashboard/sessions                 # chat sessions
 /dashboard/reminders                # natural language reminder creation
 /dashboard/memory                   # view/add entries
+/dashboard/kb                       # knowledge-base file browser (?path=)
+/dashboard/kb/view|edit|raw         # GET: render note / edit form / raw bytes (?path=)
+/dashboard/kb/save|new|delete|rename# POST: mutate notes/folders (all via vault.Resolve)
+/dashboard/kb/search                # GET: ripgrep keyword search (?q=)
 /dashboard/settings                 # full user profile (name, email, location, timezone, tone, language, notes) + change master password
 /admin                              # admin dashboard
 /admin/users, /admin/users/:id      # create user, grant permissions, reset password

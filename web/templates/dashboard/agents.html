@@ -15,8 +15,32 @@
     </a>
   </div>
 
-  {{if .Agents}}
+  {{if or .Agents .Draft}}
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    {{if .Draft}}
+    <div class="card bg-base-100 shadow-sm border border-info/40 hover:border-info hover:shadow-md transition-all">
+      <div class="card-body p-5">
+        <div class="flex items-start justify-between gap-2">
+          <h2 class="card-title text-base font-semibold leading-tight">{{.Draft.AgentName}}</h2>
+          <span class="badge badge-info badge-sm shrink-0 gap-1">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            Draft
+          </span>
+        </div>
+        <p class="text-base-content/50 text-sm flex-1 leading-relaxed">
+          {{if eq .Draft.State "verifying"}}Ready to approve — generated and tested, awaiting your final OK.{{else}}In progress — describe what to change, or approve to generate.{{end}}{{if .Draft.IsEdit}}<br><span class="text-base-content/40">Editing an existing agent.</span>{{end}}
+        </p>
+        <p class="text-xs text-base-content/30">Last edited {{.Draft.UpdatedAt.Format "Jan 2, 2006"}}</p>
+        <div class="card-actions justify-between items-center mt-1">
+          <button id="btn-discard-draft" class="btn btn-ghost btn-sm text-error">Discard</button>
+          <a href="/dashboard/agents/new?resume=1" class="btn btn-primary btn-sm gap-1">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+            Continue
+          </a>
+        </div>
+      </div>
+    </div>
+    {{end}}
     {{range .Agents}}
     <div class="card bg-base-100 shadow-sm border border-base-300 hover:border-primary/40 hover:shadow-md transition-all">
       <div class="card-body p-5">
@@ -58,5 +82,18 @@
   </div>
   {{end}}
 </div>
+
+<script>
+document.getElementById('btn-discard-draft')?.addEventListener('click', async function() {
+  this.disabled = true;
+  try {
+    await fetch('/dashboard/agents/design/dismiss', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'}
+    });
+  } catch(e) { /* proceed to reload regardless */ }
+  window.location.reload();
+});
+</script>
 
 {{template "foot" .}}

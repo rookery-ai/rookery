@@ -19,6 +19,8 @@ import (
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/simple-agents/internal/skillstore"
+	"github.com/ilijad1/simple-agents/internal/vault"
 )
 
 const (
@@ -50,12 +52,14 @@ type memoryStore interface {
 type Runner struct {
 	db        *db.DB
 	systemKey []byte
-	agentsDir string
+	agentsDir string // vaults base: <data>/vaults/ (agent dirs at <base>/<userID>/agents/<agentID>)
 	homesDir  string // per-user home dirs root (for per-user sandbox binding)
 	dataDir   string // root data dir (blacklisted inside sandbox)
 	coderSvc  *coder.Coder
-	skillsDir string // root dir for per-user skills: <dataDir>/skills
-	memStore  memoryStore // optional; nil = no memory injected
+	skillsDir string // vaults base: <data>/vaults (skills at <base>/<userID>/skills/<name>)
+	memStore  memoryStore      // optional; nil = no memory injected
+	reflector *vault.Reflector // optional; mirrors runs into the user's vault
+	guard     *vault.Guard     // optional; protects user content from agent writes
 }
 
 // New creates a Runner.
@@ -74,6 +78,14 @@ func New(database *db.DB, systemKey []byte, agentsDir, homesDir, dataDir string,
 // WithMemory attaches a memory store so saved user facts are injected into agent run prompts.
 func (r *Runner) WithMemory(m memoryStore) *Runner {
 	r.memStore = m
+	return r
+}
+
+// WithVault wires the knowledge base so runs are mirrored into the user's vault
+// and a post-run guard protects the user's authored content from stray writes.
+func (r *Runner) WithVault(v *vault.Vault) *Runner {
+	r.reflector = v.Reflector()
+	r.guard = v.NewGuard()
 	return r
 }
 
@@ -167,10 +179,11 @@ type coderRunContext struct {
 	turnsUsed int
 	chatLines []string
 	warnings  []string
+	rawChunks []string // raw coder output per turn, joined into the run note
 }
 
 func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *agentdesigner.AgentManifest, input RunInput) error {
-	agentDir := filepath.Join(r.agentsDir, input.UserID, input.AgentID)
+	agentDir := agentdesigner.AgentDir(r.agentsDir, input.UserID, input.AgentID)
 
 	// Read AGENT.md instructions (fall back to CLAUDE.md for legacy agents).
 	agentMD, err := os.ReadFile(agentdesigner.AgentDescPath(r.agentsDir, input.UserID, input.AgentID))
@@ -208,6 +221,8 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		AllSkills:       skillRefs,
 		DeclaredSkills:  manifest.Skills,
 		DeclaredContent: declaredContent,
+		VaultRoot:       filepath.Join(r.agentsDir, input.UserID),
+		AgentDir:        agentDir,
 	})
 
 	// Run inside the agent's own directory (not the shared per-user home) so
@@ -228,6 +243,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	}
 
 	runID := uuid.New().String()
+	startedAt := time.Now().UTC()
 	if err := r.db.CreateAgentRun(&db.AgentRun{
 		ID: runID, AgentID: input.AgentID,
 		UserID: input.UserID, Trigger: input.Trigger,
@@ -235,11 +251,24 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		return fmt.Errorf("create run record: %w", err)
 	}
 
-	rctx := &coderRunContext{}
+	// Snapshot the user's authored content so the post-run guard can revert any
+	// write the agent makes outside its own directory. Best-effort: a snapshot
+	// failure never blocks the run.
+	snap, _ := r.guard.Snapshot(input.UserID)
 
-	if err := r.runCoderTurns(ctx, agent, manifest, input, agentDir, stateRaw, prompt, coderSvc, rctx); err != nil {
-		_ = r.db.FinishAgentRun(runID, -1, strings.Join(rctx.chatLines, "\n"), strings.Join(rctx.warnings, "\n")+"\n"+err.Error())
-		friendly := friendlyRunError(err, coderSvc.Name())
+	rctx := &coderRunContext{}
+	runErr := r.runCoderTurns(ctx, agent, manifest, input, agentDir, stateRaw, prompt, coderSvc, rctx)
+
+	exitCode := 0
+	if runErr != nil {
+		exitCode = -1
+	}
+	r.enforceGuard(input.UserID, snap, runID)
+	r.reflectRun(input, agent, runID, exitCode, startedAt, rctx)
+
+	if runErr != nil {
+		_ = r.db.FinishAgentRun(runID, -1, strings.Join(rctx.chatLines, "\n"), strings.Join(rctx.warnings, "\n")+"\n"+runErr.Error())
+		friendly := friendlyRunError(runErr, coderSvc.Name())
 		// Notify the user directly — for cron-triggered runs this is the ONLY
 		// way they'd ever find out (the scheduler otherwise just logs to slog).
 		if input.SendOutput != nil {
@@ -257,6 +286,37 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	}
 
 	return nil
+}
+
+// enforceGuard reverts any out-of-scope writes the agent made to the user's
+// protected content and records each violation to the audit log and run warnings.
+func (r *Runner) enforceGuard(userID string, snap *vault.Snapshot, runID string) {
+	violations, err := r.guard.Restore(snap)
+	if err != nil {
+		slog.Warn("agentrunner: guard restore", "run_id", runID, "err", err)
+		return
+	}
+	for _, v := range violations {
+		slog.Warn("agentrunner: reverted out-of-scope agent write", "run_id", runID, "path", v)
+	}
+}
+
+// reflectRun mirrors the completed run into the user's vault as a markdown note.
+func (r *Runner) reflectRun(input RunInput, agent *db.Agent, runID string, exitCode int, startedAt time.Time, rctx *coderRunContext) {
+	if err := r.reflector.ReflectAgentRun(input.UserID, vault.RunNote{
+		RunID:      runID,
+		AgentID:    input.AgentID,
+		AgentName:  agent.Name,
+		Trigger:    input.Trigger,
+		ExitCode:   exitCode,
+		StartedAt:  startedAt,
+		FinishedAt: time.Now().UTC(),
+		Output:     strings.Join(rctx.rawChunks, "\n\n———\n\n"),
+		ChatLines:  rctx.chatLines,
+		Warnings:   rctx.warnings,
+	}); err != nil {
+		slog.Warn("agentrunner: reflect run to vault", "run_id", runID, "err", err)
+	}
 }
 
 // runCoderTurns drives the multi-turn coder loop for one agent invocation.
@@ -310,8 +370,9 @@ func (r *Runner) runCoderTurns(
 			}
 		}
 
-		// Write raw output to timestamped log (all runs kept).
-		writeRunLog(agentDir, result.Text, time.Now())
+		// Accumulate raw output; the run note (markdown, in the vault) is written
+		// once the run finishes — see reflectRun in runCoderAgent.
+		rctx.rawChunks = append(rctx.rawChunks, result.Text)
 
 		// Handle agent-to-agent calls.
 		if len(parsed.callAgents) == 0 {
@@ -545,20 +606,12 @@ func saveState(agentDir string, state map[string]interface{}) error {
 	return os.Rename(tmpPath, filepath.Join(agentDir, "state.json"))
 }
 
-// writeRunLog writes raw output to a timestamped log file; all runs are kept.
-func writeRunLog(agentDir, content string, t time.Time) {
-	logsDir := filepath.Join(agentDir, "logs")
-	_ = os.MkdirAll(logsDir, 0o750)
-	name := "run_log_" + t.UTC().Format("20060102_150405") + ".txt"
-	_ = os.WriteFile(filepath.Join(logsDir, name), []byte(content), 0o640)
-}
-
 // ─── Skills loading ───────────────────────────────────────────────────────────
 
 func (r *Runner) loadDeclaredSkillContent(userID string, skillNames []string) (map[string]string, error) {
 	result := make(map[string]string)
 	for _, name := range skillNames {
-		skillMD := filepath.Join(r.skillsDir, userID, name, "SKILL.md")
+		skillMD := filepath.Join(skillstore.SkillDir(r.skillsDir, userID, name), "SKILL.md")
 		data, err := os.ReadFile(skillMD)
 		if err != nil {
 			slog.Warn("agentrunner: skill not found on disk", "user_id", userID, "skill", name)

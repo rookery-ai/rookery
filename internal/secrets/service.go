@@ -192,7 +192,7 @@ func (s *Service) GetAll(ctx context.Context) (map[string]string, error) {
 		if err != nil {
 			continue
 		}
-		out[name] = string(pt)
+		out[name] = strings.TrimSpace(string(pt))
 	}
 	return out, nil
 }

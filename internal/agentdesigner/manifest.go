@@ -18,10 +18,17 @@ type AgentManifest struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
+// AgentDir returns an agent's own directory inside the user's vault:
+// <vaultsBase>/<userID>/agents/<agentID>. All other agent path helpers build on
+// this. The "agents" segment scopes each agent's writable area within the vault.
+func AgentDir(vaultsBase, userID, agentID string) string {
+	return filepath.Join(vaultsBase, userID, "agents", agentID)
+}
+
 // LoadManifest loads an agent's manifest from agent.json.
 // Falls back to a minimal manifest synthesised from config.json for legacy python agents.
-func LoadManifest(agentsDir, userID, agentID string) (*AgentManifest, error) {
-	dir := filepath.Join(agentsDir, userID, agentID)
+func LoadManifest(vaultsBase, userID, agentID string) (*AgentManifest, error) {
+	dir := AgentDir(vaultsBase, userID, agentID)
 
 	data, err := os.ReadFile(filepath.Join(dir, "agent.json"))
 	if err == nil {
@@ -58,8 +65,8 @@ func LoadManifest(agentsDir, userID, agentID string) (*AgentManifest, error) {
 }
 
 // SaveManifest writes agent.json to the agent's directory.
-func SaveManifest(agentsDir, userID, agentID string, m *AgentManifest) error {
-	dir := filepath.Join(agentsDir, userID, agentID)
+func SaveManifest(vaultsBase, userID, agentID string, m *AgentManifest) error {
+	dir := AgentDir(vaultsBase, userID, agentID)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
@@ -71,33 +78,34 @@ func SaveManifest(agentsDir, userID, agentID string, m *AgentManifest) error {
 }
 
 // AgentDescPath returns the path to an agent's AGENT.md description file.
-func AgentDescPath(agentsDir, userID, agentID string) string {
-	return filepath.Join(agentsDir, userID, agentID, "AGENT.md")
+func AgentDescPath(vaultsBase, userID, agentID string) string {
+	return filepath.Join(AgentDir(vaultsBase, userID, agentID), "AGENT.md")
 }
 
 // AgentMDPath is an alias for AgentDescPath kept for callers not yet updated.
 // Deprecated: use AgentDescPath.
-func AgentMDPath(agentsDir, userID, agentID string) string {
-	return AgentDescPath(agentsDir, userID, agentID)
+func AgentMDPath(vaultsBase, userID, agentID string) string {
+	return AgentDescPath(vaultsBase, userID, agentID)
 }
 
 // AgentStatePath returns the path to an agent's state.json file.
-func AgentStatePath(agentsDir, userID, agentID string) string {
-	return filepath.Join(agentsDir, userID, agentID, "state.json")
+func AgentStatePath(vaultsBase, userID, agentID string) string {
+	return filepath.Join(AgentDir(vaultsBase, userID, agentID), "state.json")
 }
 
 // AgentLogsDir returns the path to an agent's logs directory.
-func AgentLogsDir(agentsDir, userID, agentID string) string {
-	return filepath.Join(agentsDir, userID, agentID, "logs")
+func AgentLogsDir(vaultsBase, userID, agentID string) string {
+	return filepath.Join(AgentDir(vaultsBase, userID, agentID), "logs")
 }
 
-// AgentLogPath returns a timestamped log file path for a new run.
-func AgentLogPath(agentsDir, userID, agentID string, t time.Time) string {
-	return filepath.Join(agentsDir, userID, agentID, "logs",
-		"run_log_"+t.UTC().Format("20060102_150405")+".txt")
+// AgentLogPath returns a timestamped log file path for a new run. Run logs are
+// markdown notes so they render in the knowledge-base UI like any other note.
+func AgentLogPath(vaultsBase, userID, agentID string, t time.Time) string {
+	return filepath.Join(AgentDir(vaultsBase, userID, agentID), "logs",
+		"run_log_"+t.UTC().Format("20060102_150405")+".md")
 }
 
 // AgentCodePath returns the absolute path to an agent's main.py (legacy python agents only).
-func AgentCodePath(agentsDir, userID, agentID string) string {
-	return filepath.Join(agentsDir, userID, agentID, "main.py")
+func AgentCodePath(vaultsBase, userID, agentID string) string {
+	return filepath.Join(AgentDir(vaultsBase, userID, agentID), "main.py")
 }

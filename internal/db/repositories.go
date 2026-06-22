@@ -816,6 +816,14 @@ func (d *DB) SetSetting(userID, key, value string) error {
 	return err
 }
 
+// SecretExists reports whether the user has a secret with the given name.
+// It does NOT decrypt the value — safe to call without a master password.
+func (d *DB) SecretExists(userID, name string) (bool, error) {
+	var n int
+	err := d.QueryRow(`SELECT COUNT(*) FROM secrets WHERE user_id=? AND name=?`, userID, name).Scan(&n)
+	return n > 0, err
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 func boolToInt(b bool) int {
@@ -1187,4 +1195,70 @@ func (d *DB) ListMCPServers(userID string) ([]*MCPServer, error) {
 		servers = append(servers, &s)
 	}
 	return servers, rows.Err()
+}
+
+// ── Agent drafts ──────────────────────────────────────────────────────────────
+
+// UpsertAgentDraft saves or overwrites the user's single in-progress design draft.
+func (d *DB) UpsertAgentDraft(dr *AgentDraft) error {
+	_, err := d.Exec(`INSERT OR REPLACE INTO agent_drafts
+		(user_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, updated_at, expires_at)
+		VALUES (?,?,?,?,?,?,?,?,datetime('now'),?)`,
+		dr.UserID, dr.AgentID, dr.AgentName, boolToInt(dr.IsEdit), dr.State,
+		dr.HistoryJSON, dr.PendingAgentMD, dr.PendingToolsJSON,
+		dr.ExpiresAt.UTC().Format("2006-01-02 15:04:05"))
+	return err
+}
+
+// GetAgentDraft returns the user's draft if one exists and has not expired.
+// Returns ErrNotFound when absent or expired.
+func (d *DB) GetAgentDraft(userID string) (*AgentDraft, error) {
+	var dr AgentDraft
+	var isEdit int
+	var updatedAt, expiresAt string
+	err := d.QueryRow(`SELECT user_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, updated_at, expires_at
+		FROM agent_drafts WHERE user_id=? AND expires_at > datetime('now')`, userID).
+		Scan(&dr.UserID, &dr.AgentID, &dr.AgentName, &isEdit, &dr.State, &dr.HistoryJSON,
+			&dr.PendingAgentMD, &dr.PendingToolsJSON, &updatedAt, &expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	dr.IsEdit = isEdit == 1
+	dr.UpdatedAt = scanTime(updatedAt)
+	dr.ExpiresAt = scanTime(expiresAt)
+	return &dr, nil
+}
+
+// DeleteAgentDraft removes the user's draft.
+func (d *DB) DeleteAgentDraft(userID string) error {
+	_, err := d.Exec(`DELETE FROM agent_drafts WHERE user_id=?`, userID)
+	return err
+}
+
+// ListExpiredAgentDrafts returns all drafts past their expiry (for the nightly GC).
+func (d *DB) ListExpiredAgentDrafts() ([]*AgentDraft, error) {
+	rows, err := d.Query(`SELECT user_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, updated_at, expires_at
+		FROM agent_drafts WHERE expires_at <= datetime('now')`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var drafts []*AgentDraft
+	for rows.Next() {
+		var dr AgentDraft
+		var isEdit int
+		var updatedAt, expiresAt string
+		if err := rows.Scan(&dr.UserID, &dr.AgentID, &dr.AgentName, &isEdit, &dr.State, &dr.HistoryJSON,
+			&dr.PendingAgentMD, &dr.PendingToolsJSON, &updatedAt, &expiresAt); err != nil {
+			return nil, err
+		}
+		dr.IsEdit = isEdit == 1
+		dr.UpdatedAt = scanTime(updatedAt)
+		dr.ExpiresAt = scanTime(expiresAt)
+		drafts = append(drafts, &dr)
+	}
+	return drafts, rows.Err()
 }

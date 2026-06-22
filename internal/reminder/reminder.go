@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/vault"
 )
 
 const pollInterval = 60 * time.Second
@@ -21,13 +22,20 @@ type Sender interface {
 
 // Service polls for due reminders and sends them.
 type Service struct {
-	db     *db.DB
-	sender Sender
+	db        *db.DB
+	sender    Sender
+	reflector *vault.Reflector // optional; mirrors reminders into the user's vault
 }
 
 // New creates a Service.
 func New(database *db.DB, sender Sender) *Service {
 	return &Service{db: database, sender: sender}
+}
+
+// WithReflector enables mirroring fired reminders into each user's vault.
+func (s *Service) WithReflector(r *vault.Reflector) *Service {
+	s.reflector = r
+	return s
 }
 
 // Run starts the polling loop and blocks until ctx is cancelled.
@@ -71,6 +79,12 @@ func (s *Service) tick() {
 		}
 		if err := s.db.MarkReminderSent(r.ID); err != nil {
 			slog.Error("reminder: mark sent failed", "reminder_id", r.ID, "err", err)
+		}
+		if err := s.reflector.ReflectReminder(r.UserID, vault.ReminderNote{
+			ID: r.ID, Message: r.Message, RemindAt: r.RemindAt,
+			Recurrence: r.Recurrence, Sent: true, CreatedAt: r.CreatedAt,
+		}); err != nil {
+			slog.Warn("reminder: reflect to vault failed", "reminder_id", r.ID, "err", err)
 		}
 	}
 }

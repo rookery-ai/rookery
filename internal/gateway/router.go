@@ -40,20 +40,22 @@ type Router struct {
 	designFlow *agentdesigner.Flow
 	memory     *memory.Store
 
-	mu         sync.Mutex
-	challenges map[string]*secretChallenge // userID → pending challenge
+	mu            sync.Mutex
+	challenges    map[string]*secretChallenge // userID → pending master-password challenge
+	pendingCancel map[string]bool             // userID → waiting for save/discard reply to /agent cancel
 }
 
 // NewRouter creates a Router. textHandler, agentRunHandler, and designFlow may be nil
 // until the corresponding phases are wired in; the router will reply with stub messages.
 func NewRouter(database *db.DB, textHandler TextHandler, agentRunHandler AgentRunHandler, flow *agentdesigner.Flow, mem *memory.Store) *Router {
 	return &Router{
-		db:         database,
-		onText:     textHandler,
-		onAgentRun: agentRunHandler,
-		designFlow: flow,
-		memory:     mem,
-		challenges: make(map[string]*secretChallenge),
+		db:            database,
+		onText:        textHandler,
+		onAgentRun:    agentRunHandler,
+		designFlow:    flow,
+		memory:        mem,
+		challenges:    make(map[string]*secretChallenge),
+		pendingCancel: make(map[string]bool),
 	}
 }
 
@@ -175,6 +177,17 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 			send("Usage: /agent create \\<name\\>")
 			return nil
 		}
+		// If the user has a resumable draft, offer to continue it instead of
+		// starting fresh. Subsequent text routes through Step → stepAwaitingResume.
+		if draft := r.designFlow.HasDraft(msg.UserID); draft != nil {
+			response, err := r.designFlow.OfferDraftResume(msg.UserID, name, draft)
+			if err != nil {
+				send(escapeMarkdown(err.Error()))
+				return nil
+			}
+			send(response)
+			return nil
+		}
 		response, err := r.designFlow.Start(msg.UserID, name)
 		if err != nil {
 			send(escapeMarkdown(err.Error()))
@@ -205,10 +218,28 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 		send(response)
 
 	case "cancel":
-		if r.designFlow != nil {
-			r.designFlow.Cancel(msg.UserID)
+		if r.designFlow == nil {
+			send("Agent design is not yet available\\.")
+			return nil
 		}
-		send("Agent design session cancelled\\.")
+		// Stop any in-flight generation / drop the active session now. The draft
+		// (auto-saved on every turn) is preserved either way — the question below
+		// is only whether to keep it or throw it away.
+		r.designFlow.Cancel(msg.UserID)
+
+		draft := r.designFlow.HasDraft(msg.UserID)
+		if draft == nil {
+			send("Agent design session cancelled\\. No draft to save\\.")
+			return nil
+		}
+		// Ask the user to choose. The reply is handled in handleText (pendingCancel).
+		r.mu.Lock()
+		r.pendingCancel[msg.UserID] = true
+		r.mu.Unlock()
+		send(fmt.Sprintf(
+			"Agent design cancelled\\. You have an unfinished draft: *%s*\n\nReply `save` to keep it as a draft you can resume later, or `discard` to delete it\\.",
+			escapeMarkdown(draft.AgentName),
+		))
 
 	default:
 		send("Usage: /agent list · /agent create \\<name\\> · /agent edit \\<name\\> · /agent cancel")
@@ -372,11 +403,39 @@ func (r *Router) resolveMasterPwChallenge(ctx context.Context, msg Message, ch *
 	return nil
 }
 
+// resolveCancelChoice handles the user's reply to the /agent cancel save/discard
+// prompt. "discard" deletes the draft (and the orphaned pre-approved agent
+// directory if generation had reached verifying); anything else keeps the draft
+// as resumable. The active session was already cancelled when /agent cancel ran.
+func (r *Router) resolveCancelChoice(msg Message, send func(string)) error {
+	lower := strings.ToLower(strings.TrimSpace(msg.Text))
+
+	if lower == "discard" || lower == "delete" || lower == "drop" {
+		name := ""
+		if d := r.designFlow.HasDraft(msg.UserID); d != nil {
+			name = d.AgentName
+		}
+		_ = r.designFlow.DismissDraft(msg.UserID)
+		if name != "" {
+			send(fmt.Sprintf("🗑 Draft *%s* discarded\\.", escapeMarkdown(name)))
+		} else {
+			send("🗑 Draft discarded\\.")
+		}
+		return nil
+	}
+
+	// "save" (or anything else) → keep the draft. It stays resumable via
+	// /agent create <name> (which will offer to resume) or the web dashboard.
+	send("✅ Draft saved\\. Use `/agent create \\<name\\>` to resume it later\\.")
+	return nil
+}
+
 // handleRemind parses natural language reminders:
-//   /remind in 10 minutes to check the oven
-//   /remind next Tuesday to call doctor
-//   /remind me in 10 minutes to start fire
-//   /remind 30m old format still works
+//
+//	/remind in 10 minutes to check the oven
+//	/remind next Tuesday to call doctor
+//	/remind me in 10 minutes to start fire
+//	/remind 30m old format still works
 func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send func(string)) error {
 	arg = strings.TrimSpace(arg)
 	if arg == "" {
@@ -494,6 +553,18 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 	r.mu.Unlock()
 	if hasPending {
 		return r.resolveMasterPwChallenge(ctx, msg, challenge, send, deleteIncoming, sendAutoDelete)
+	}
+
+	// Check for a pending /agent cancel save/discard choice. This runs before the
+	// design-session routing because Cancel() already dropped any active session.
+	r.mu.Lock()
+	hasCancelChoice := r.pendingCancel[msg.UserID]
+	if hasCancelChoice {
+		delete(r.pendingCancel, msg.UserID)
+	}
+	r.mu.Unlock()
+	if hasCancelChoice {
+		return r.resolveCancelChoice(msg, send)
 	}
 
 	// If the user has an active design session, route all text there.

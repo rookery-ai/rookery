@@ -20,6 +20,7 @@ import (
 type agentsPageData struct {
 	*pageData
 	Agents []*db.Agent
+	Draft  *db.AgentDraft // unfinished design draft, or nil
 }
 
 type agentDetailData struct {
@@ -41,23 +42,83 @@ type agentDetailData struct {
 type newAgentPageData struct {
 	*pageData
 	HasPlatform bool
+	Draft       *db.AgentDraft // unfinished design draft, or nil
 }
 
 func (s *Server) showAgents(c echo.Context) error {
 	u := c.Get("user").(*db.User)
 	agents, _ := s.db.ListAgents(u.ID)
+	var draft *db.AgentDraft
+	if s.designFlow != nil {
+		draft = s.designFlow.HasDraft(u.ID)
+	}
 	return c.Render(http.StatusOK, "dashboard/agents.html", &agentsPageData{
 		pageData: s.page(c, "My Agents"),
 		Agents:   agents,
+		Draft:    draft,
 	})
 }
 
 func (s *Server) showNewAgent(c echo.Context) error {
 	u := c.Get("user").(*db.User)
+	var draft *db.AgentDraft
+	if s.designFlow != nil {
+		draft = s.designFlow.HasDraft(u.ID)
+	}
 	return c.Render(http.StatusOK, "dashboard/agent_new.html", &newAgentPageData{
 		pageData:    s.page(c, "Create Agent"),
 		HasPlatform: s.db.HasPlatformIdentity(u.ID),
+		Draft:       draft,
 	})
+}
+
+// handleResumeDraft reconstructs the user's saved design draft as an active
+// session and returns the conversation history + resumption message so the
+// browser can replay the chat and continue. The coder is never re-run here —
+// generation only happens when the user next says "approve".
+// POST /dashboard/agents/design/resume
+func (s *Server) handleResumeDraft(c echo.Context) error {
+	u := c.Get("user").(*db.User)
+	if s.designFlow == nil {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent designer not configured"})
+	}
+	resp, err := s.designFlow.ResumeDraft(c.Request().Context(), u.ID)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+	}
+	type histEntry struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	sess := s.designFlow.GetSession(u.ID)
+	out := map[string]interface{}{
+		"response": resp,
+		"state":    "",
+		"history":  []histEntry{},
+		"agent_id": "",
+	}
+	if sess != nil {
+		hist := make([]histEntry, 0, len(sess.History))
+		for _, m := range sess.History {
+			hist = append(hist, histEntry{Role: m.Role, Content: m.Content})
+		}
+		out["state"] = sess.State.String()
+		out["history"] = hist
+		out["agent_id"] = sess.AgentID
+		out["agent_name"] = sess.AgentName
+	}
+	return c.JSON(http.StatusOK, out)
+}
+
+// handleDismissDraft clears the user's saved draft (and, for create-mode
+// verifying drafts, removes the orphaned pre-approved agent directory).
+// POST /dashboard/agents/design/dismiss
+func (s *Server) handleDismissDraft(c echo.Context) error {
+	u := c.Get("user").(*db.User)
+	if s.designFlow != nil {
+		_ = s.designFlow.DismissDraft(u.ID)
+	}
+	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // handleDesignChat drives the conversational agent creation via JSON API.
@@ -281,12 +342,13 @@ func (s *Server) showAgentDetail(c echo.Context) error {
 	return s.renderAgentDetail(c, agent, u.ID, s.page(c, "Agent: "+agent.Name))
 }
 
-// agentsDir returns the agents base directory from config (or empty string in tests).
+// agentsDir returns the vaults base directory from config (or empty string in
+// tests). Agent dirs live at <base>/<userID>/agents/<agentID>.
 func (s *Server) agentsDir() string {
 	if s.cfg == nil {
 		return ""
 	}
-	return s.cfg.Data.Dir + "/agents"
+	return filepath.Join(s.cfg.Data.Dir, "vaults")
 }
 
 // renderAgentDetail loads all data needed for the agent detail page and renders it.
@@ -368,6 +430,12 @@ func (s *Server) handleDeleteAgent(c echo.Context) error {
 
 	if err := s.db.DeleteAgent(id); err != nil {
 		return err
+	}
+
+	// Remove the agent's directory from the user's vault so no orphaned files
+	// linger (otherwise the deleted agent keeps showing up in the knowledge base).
+	if dir := s.agentsDir(); dir != "" {
+		_ = os.RemoveAll(agentdesigner.AgentDir(dir, u.ID, id))
 	}
 
 	s.audit.Log(u.ID, "delete_agent", "agent:"+id, agent.Name, c.RealIP())
@@ -482,5 +550,3 @@ func (s *Server) handleDeleteSchedule(c echo.Context) error {
 	s.audit.Log(u.ID, "delete_schedule", "agent:"+id, "", c.RealIP())
 	return c.Redirect(http.StatusFound, "/dashboard/agents/"+id)
 }
-
-

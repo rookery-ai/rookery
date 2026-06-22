@@ -14,7 +14,8 @@
       <li class="step {{if ge .Step 2}}step-primary{{end}}">Master Key</li>
       <li class="step {{if ge .Step 3}}step-primary{{end}}">Profile</li>
       <li class="step {{if ge .Step 4}}step-primary{{end}}">Chat App</li>
-      <li class="step {{if ge .Step 5}}step-primary{{end}}">Done</li>
+      <li class="step {{if ge .Step 5}}step-primary{{end}}">Services</li>
+      <li class="step {{if ge .Step 6}}step-primary{{end}}">Done</li>
     </ul>
 
     <div class="card bg-base-100 shadow-xl border border-base-300">
@@ -200,6 +201,33 @@
         </form>
 
         {{else if eq .Step 5}}
+        <h2 class="card-title text-xl mb-1">🔌 Connect External Services <span class="badge badge-ghost badge-sm ml-1">Optional</span></h2>
+        <p class="text-base-content/60 text-sm mb-5">
+          Connect Google Drive, Notion, Slack, and 250+ other services to your agents using
+          <strong>Composio</strong> — a free tool that handles secure logins for you.
+          You can always set this up later from the <a href="/dashboard/composio" class="link link-primary">External Services</a> page.
+        </p>
+
+        <div class="bg-base-200 border border-base-300 rounded-lg p-4 text-sm mb-5">
+          <p class="font-medium mb-2">Quick setup (5 minutes):</p>
+          <ol class="list-decimal list-inside space-y-1.5 text-base-content/70">
+            <li>Create a free account at <a href="https://app.composio.dev/signup" target="_blank" class="link link-primary font-medium">composio.dev</a></li>
+            <li>Go to <strong>Settings → API Keys</strong>, create a key and copy it</li>
+            <li>Add it to <a href="/dashboard/secrets" class="link link-primary font-medium">your Secrets</a> with the name <code class="bg-base-300 px-1 rounded font-mono">COMPOSIO_API_KEY</code></li>
+            <li>Connect Google Drive, Notion, etc. in your <a href="https://app.composio.dev/connections" target="_blank" class="link link-primary font-medium">Composio dashboard</a></li>
+          </ol>
+        </div>
+
+        <form method="POST" action="/setup" class="mb-2">
+          <input type="hidden" name="action" value="composio_done">
+          <button type="submit" class="btn btn-primary w-full">I've set it up — Continue →</button>
+        </form>
+        <form method="POST" action="/setup">
+          <input type="hidden" name="action" value="skip_composio">
+          <button type="submit" class="btn btn-ghost btn-sm w-full text-base-content/50">Skip for now — I'll set this up later</button>
+        </form>
+
+        {{else if eq .Step 6}}
         <div class="text-center py-4">
           <div class="text-6xl mb-4">🎉</div>
           <h2 class="text-2xl font-bold mb-2">You're all set!</h2>

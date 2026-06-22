@@ -33,9 +33,9 @@ func testDB(t *testing.T) (*db.DB, string) {
 	return database, userID
 }
 
-func seedAgent(t *testing.T, database *db.DB, agentsDir, userID, agentID, agentMD string, tools map[string]string) {
+func seedAgent(t *testing.T, database *db.DB, vaultsBase, userID, agentID, agentMD string, tools map[string]string) {
 	t.Helper()
-	dir := filepath.Join(agentsDir, userID, agentID)
+	dir := AgentDir(vaultsBase, userID, agentID)
 	if err := os.MkdirAll(filepath.Join(dir, "tools"), 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func seedAgent(t *testing.T, database *db.DB, agentsDir, userID, agentID, agentM
 		}
 	}
 	manifest := &AgentManifest{ID: agentID, Name: "test-agent", CreatedAt: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)}
-	if err := SaveManifest(agentsDir, userID, agentID, manifest); err != nil {
+	if err := SaveManifest(vaultsBase, userID, agentID, manifest); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.CreateAgent(&db.Agent{ID: agentID, UserID: userID, Name: "test-agent", Description: "d", Active: true}); err != nil {
@@ -271,7 +271,7 @@ func TestUpdateAgent_PreservesStateAndCreatedAtAndWipesRemovedTools(t *testing.T
 		t.Fatalf("UpdateAgent: %v", err)
 	}
 
-	dir := filepath.Join(agentsDir, userID, agentID)
+	dir := AgentDir(agentsDir, userID, agentID)
 
 	// state.json must be byte-identical to what was there before the edit.
 	state, err := os.ReadFile(filepath.Join(dir, "state.json"))

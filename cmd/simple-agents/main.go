@@ -23,6 +23,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/ilijad1/simple-agents/internal/session"
 	"github.com/ilijad1/simple-agents/internal/skillstore"
+	"github.com/ilijad1/simple-agents/internal/vault"
 	"github.com/ilijad1/simple-agents/web"
 	"github.com/urfave/cli/v3"
 )
@@ -90,11 +91,22 @@ func serveCmd() *cli.Command {
 			homesDir := filepath.Join(cfg.Data.Dir, "claude-homes")
 			coderSvc := coder.New(cfg.Coder.ClaudeBin, cfg.Coder.Timeout, homesDir, cfg.Data.Dir)
 
-			agentsDir := filepath.Join(cfg.Data.Dir, "agents")
-			skillsDir := filepath.Join(cfg.Data.Dir, "skills")
+			// All per-user knowledge now lives under one vault root per user:
+			// <data>/vaults/<userID>/. Agent dirs, skills, and memory are scoped
+			// inside it so each user's vault is a single browsable, backup-able unit.
+			vaultsDir := filepath.Join(cfg.Data.Dir, "vaults")
+			vlt := vault.New(cfg.Data.Dir)
+			agentsDir := vaultsDir
+			skillsDir := vaultsDir
 			designer := agentdesigner.NewDesigner(database, agentsDir)
 			// Telegram uses a single system coder; wrap it in a resolver lambda.
-			memStore := memory.New(filepath.Join(cfg.Data.Dir, "memory"))
+			memStore := memory.New(vaultsDir)
+
+			// One-time, idempotent migration of any pre-vault on-disk data
+			// (<data>/agents, <data>/memory, <data>/skills) into per-user vaults.
+			if err := vlt.MigrateLegacyLayout(); err != nil {
+				slog.Warn("vault migration", "err", err)
+			}
 
 			designFlow := agentdesigner.NewFlow(func(_ string) *coder.Coder { return coderSvc }, designer).
 				WithDB(database).
@@ -112,7 +124,9 @@ func serveCmd() *cli.Command {
 					return svc.GetAll(ctx)
 				})
 			skillStore := skillstore.New(database, skillsDir)
-			runner := agentrunner.New(database, sysKey, agentsDir, homesDir, cfg.Data.Dir, coderSvc, skillsDir).WithMemory(memStore)
+			runner := agentrunner.New(database, sysKey, agentsDir, homesDir, cfg.Data.Dir, coderSvc, skillsDir).
+				WithMemory(memStore).
+				WithVault(vlt)
 
 			textHandler := func(ctx context.Context, userID string, history []db.ChatMessage, text string, send func(string)) error {
 				sysCtx := buildUserContext(database, memStore, userID)
@@ -146,10 +160,10 @@ func serveCmd() *cli.Command {
 			sched := scheduler.New(database, runner, sysKey).WithSender(gwManager)
 			go sched.Run(ctx)
 
-			reminderSvc := reminder.New(database, gwManager)
+			reminderSvc := reminder.New(database, gwManager).WithReflector(vlt.Reflector())
 			go reminderSvc.Run(ctx)
 
-			sessionSvc := session.New(database)
+			sessionSvc := session.New(database).WithReflector(vlt.Reflector())
 			go sessionSvc.Run(ctx)
 
 			// Nightly GC for expired agent design drafts: drops the draft row and,
@@ -170,7 +184,7 @@ func serveCmd() *cli.Command {
 						}
 						for _, d := range expired {
 							if !d.IsEdit && d.State == "verifying" && d.AgentID != "" {
-								_ = os.RemoveAll(filepath.Join(cfg.Data.Dir, "agents", d.UserID, d.AgentID))
+								_ = os.RemoveAll(agentdesigner.AgentDir(vaultsDir, d.UserID, d.AgentID))
 							}
 							_ = database.DeleteAgentDraft(d.UserID)
 						}

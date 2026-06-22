@@ -23,6 +23,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/memory"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/ilijad1/simple-agents/internal/skillstore"
+	"github.com/ilijad1/simple-agents/internal/vault"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
@@ -44,6 +45,7 @@ type Server struct {
 	skills     *skillstore.Store
 	designFlow *agentdesigner.Flow // shared with Telegram gateway
 	homesDir   string              // per-user claude HOME directories
+	vault      *vault.Vault        // per-user knowledge base
 }
 
 // NewServer wires up all routes and middleware.
@@ -82,6 +84,7 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 		skills:     skillStore,
 		designFlow: designFlow,
 		homesDir:   homesDir,
+		vault:      vault.New(cfg.Data.Dir),
 	}
 
 	s.echo.HideBanner = true
@@ -228,6 +231,8 @@ func (s *Server) setupRoutes() {
 	dash.GET("/agents/new", s.showNewAgent)
 	dash.POST("/agents/design", s.handleDesignChat)
 	dash.POST("/agents/design/cancel", s.handleCancelDesign)
+	dash.POST("/agents/design/resume", s.handleResumeDraft)
+	dash.POST("/agents/design/dismiss", s.handleDismissDraft)
 	dash.GET("/agents/design/progress", s.handleDesignProgress)
 	dash.GET("/agents/:id", s.showAgentDetail)
 	dash.GET("/agents/:id/edit", s.showEditAgent)
@@ -250,6 +255,7 @@ func (s *Server) setupRoutes() {
 	dash.POST("/connectors", s.handleSaveConnector)
 	dash.POST("/connectors/:platform/delete", s.handleDeleteConnector)
 	dash.POST("/connectors/:platform/test", s.handleTestConnector)
+	dash.GET("/composio", s.showComposio)
 	dash.GET("/sessions", s.showSessions)
 	dash.POST("/sessions", s.handleCreateSession)
 	dash.POST("/sessions/:id/stop", s.handleStopSession)
@@ -259,6 +265,15 @@ func (s *Server) setupRoutes() {
 	dash.POST("/reminders/:id/delete", s.handleDeleteReminder)
 	dash.GET("/memory", s.showMemory)
 	dash.POST("/memory", s.handleUpdateMemory)
+	dash.GET("/kb", s.showKB)
+	dash.GET("/kb/view", s.viewKBNote)
+	dash.GET("/kb/edit", s.editKBNote)
+	dash.POST("/kb/save", s.handleSaveKBNote)
+	dash.POST("/kb/new", s.handleNewKBNote)
+	dash.POST("/kb/delete", s.handleDeleteKBNote)
+	dash.POST("/kb/rename", s.handleRenameKBNote)
+	dash.GET("/kb/search", s.searchKB)
+	dash.GET("/kb/raw", s.rawKBNote)
 	dash.GET("/settings", s.showSettings)
 	dash.POST("/settings", s.handleSaveSettings)
 	dash.POST("/settings/master-password", s.handleChangeMasterPassword)
