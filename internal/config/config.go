@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -49,11 +50,15 @@ type CoderConfig struct {
 	Timeout   time.Duration `yaml:"timeout"`
 }
 
+// SandboxConfig controls the Landlock filesystem confinement applied to every
+// coder subprocess. When Enabled and the kernel supports Landlock, an agent can
+// only read/write its own user's files; otherwise it falls back to the detective
+// vault guard. Set via SA_SANDBOX (0/false/off disables).
 type SandboxConfig struct {
-	FirejailBin   string        `yaml:"firejail_bin"`
-	PythonBin     string        `yaml:"python_bin"`
-	DefaultTimeout time.Duration `yaml:"default_timeout"`
-	DefaultMemoryMB int          `yaml:"default_memory_mb"`
+	Enabled         bool          `yaml:"enabled"`
+	PythonBin       string        `yaml:"python_bin"`
+	DefaultTimeout  time.Duration `yaml:"default_timeout"`
+	DefaultMemoryMB int           `yaml:"default_memory_mb"`
 }
 
 type SessionConfig struct {
@@ -98,7 +103,7 @@ func defaults() *Config {
 			Timeout:   20 * time.Minute,
 		},
 		Sandbox: SandboxConfig{
-			FirejailBin:     "firejail",
+			Enabled:         true,
 			PythonBin:       "python3",
 			DefaultTimeout:  5 * time.Minute,
 			DefaultMemoryMB: 256,
@@ -128,5 +133,8 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("SA_STATIC_DIR"); v != "" {
 		cfg.Server.StaticDir = v
+	}
+	if v := os.Getenv("SA_SANDBOX"); v != "" {
+		cfg.Sandbox.Enabled = !(v == "0" || strings.EqualFold(v, "false") || strings.EqualFold(v, "off"))
 	}
 }

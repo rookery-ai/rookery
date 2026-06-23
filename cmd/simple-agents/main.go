@@ -19,6 +19,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/memory"
 	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/reminder"
+	"github.com/ilijad1/simple-agents/internal/sandbox"
 	"github.com/ilijad1/simple-agents/internal/scheduler"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/ilijad1/simple-agents/internal/session"
@@ -43,6 +44,7 @@ func main() {
 		Commands: []*cli.Command{
 			serveCmd(),
 			adminCmd(),
+			sandboxExecCmd(),
 		},
 	}
 
@@ -89,7 +91,11 @@ func serveCmd() *cli.Command {
 			}
 
 			homesDir := filepath.Join(cfg.Data.Dir, "claude-homes")
-			coderSvc := coder.New(cfg.Coder.ClaudeBin, cfg.Coder.Timeout, homesDir, cfg.Data.Dir)
+			coderSvc := coder.New(cfg.Coder.ClaudeBin, cfg.Coder.Timeout, homesDir, cfg.Data.Dir).
+				WithSandbox(cfg.Sandbox.Enabled)
+			if cfg.Sandbox.Enabled && !sandbox.Supported() {
+				slog.Warn("sandbox enabled but kernel has no Landlock support; falling back to detective vault guard")
+			}
 
 			// All per-user knowledge now lives under one vault root per user:
 			// <data>/vaults/<userID>/. Agent dirs, skills, and memory are scoped
@@ -200,6 +206,28 @@ func serveCmd() *cli.Command {
 			addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 			slog.Info("listening", "addr", addr)
 			return srv.Start(addr)
+		},
+	}
+}
+
+// sandboxExecCmd is the hidden helper invoked by the coder via re-exec. It
+// applies Landlock confinement + resource limits to itself and then exec()s the
+// real command encoded in its single argument. It must do no other startup work.
+func sandboxExecCmd() *cli.Command {
+	return &cli.Command{
+		Name:   sandbox.HelperCommand,
+		Hidden: true,
+		Action: func(_ context.Context, cmd *cli.Command) error {
+			args := cmd.Args().Slice()
+			if len(args) != 1 {
+				return fmt.Errorf("%s expects exactly one encoded spec argument", sandbox.HelperCommand)
+			}
+			spec, err := sandbox.DecodeSpec(args[0])
+			if err != nil {
+				return fmt.Errorf("decode sandbox spec: %w", err)
+			}
+			// On success this never returns (the process image is replaced).
+			return sandbox.Exec(spec)
 		},
 	}
 }

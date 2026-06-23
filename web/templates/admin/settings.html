@@ -37,16 +37,23 @@
   <div class="card bg-base-100 shadow-sm border border-base-300">
     <div class="card-body p-5">
       <h2 class="font-semibold mb-1">Sandbox Configuration</h2>
-      <p class="text-base-content/50 text-sm mb-4">Firejail sandbox settings for agent execution.</p>
+      <p class="text-base-content/50 text-sm mb-4">Filesystem confinement for agent execution.</p>
+      <div class="mb-4">
+        {{if and .SandboxOn .LandlockReady}}
+          <div class="alert alert-success py-2 text-sm">
+            <span><strong>Landlock active.</strong> Each agent is confined to its own user's files — no setup required.</span>
+          </div>
+        {{else if .SandboxOn}}
+          <div class="alert alert-warning py-2 text-sm">
+            <span><strong>Sandbox enabled, but this kernel has no Landlock support.</strong> Falling back to the detective vault guard (writes are reverted after the run; reads are not blocked). Kernel 5.13+ required.</span>
+          </div>
+        {{else}}
+          <div class="alert py-2 text-sm">
+            <span><strong>Sandbox disabled</strong> (<code>SA_SANDBOX=0</code>). Using the detective vault guard. Unset to enable Landlock confinement.</span>
+          </div>
+        {{end}}
+      </div>
       <form method="POST" action="/admin/settings" class="space-y-4">
-        <div class="form-control">
-          <label class="label pb-1">
-            <span class="label-text font-medium">Firejail Binary Path</span>
-            <span class="label-text-alt text-base-content/30">path to <code>firejail</code></span>
-          </label>
-          <input type="text" name="firejail_bin" placeholder="/usr/bin/firejail"
-            class="input input-bordered w-full font-mono text-sm" value="{{.FirejailBin}}">
-        </div>
         <div class="form-control">
           <label class="label pb-1">
             <span class="label-text font-medium">Default Agent Timeout (seconds)</span>

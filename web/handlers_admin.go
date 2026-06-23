@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/sandbox"
 	"github.com/labstack/echo/v4"
 )
 
@@ -187,11 +188,12 @@ const systemUserID = "system"
 
 type adminSettingsData struct {
 	*pageData
-	ClaudeBin    string
-	CoderTimeout string
-	FirejailBin  string
-	AgentTimeout string
-	MemoryMB     string
+	ClaudeBin     string
+	CoderTimeout  string
+	AgentTimeout  string
+	MemoryMB      string
+	SandboxOn     bool // sandbox enabled in config
+	LandlockReady bool // kernel actually supports Landlock
 }
 
 func (s *Server) loadAdminSettings() *adminSettingsData {
@@ -202,11 +204,12 @@ func (s *Server) loadAdminSettings() *adminSettingsData {
 		return fallback
 	}
 	return &adminSettingsData{
-		ClaudeBin:    get("claude_bin", "claude"),
-		CoderTimeout: get("coder_timeout", "120"),
-		FirejailBin:  get("firejail_bin", "firejail"),
-		AgentTimeout: get("agent_timeout", "300"),
-		MemoryMB:     get("memory_mb", "256"),
+		ClaudeBin:     get("claude_bin", "claude"),
+		CoderTimeout:  get("coder_timeout", "120"),
+		AgentTimeout:  get("agent_timeout", "300"),
+		MemoryMB:      get("memory_mb", "256"),
+		SandboxOn:     s.cfg.Sandbox.Enabled,
+		LandlockReady: sandbox.Supported(),
 	}
 }
 
@@ -221,7 +224,6 @@ func (s *Server) handleAdminSaveSettings(c echo.Context) error {
 	fields := map[string]string{
 		"claude_bin":    c.FormValue("claude_bin"),
 		"coder_timeout": c.FormValue("coder_timeout"),
-		"firejail_bin":  c.FormValue("firejail_bin"),
 		"agent_timeout": c.FormValue("agent_timeout"),
 		"memory_mb":     c.FormValue("memory_mb"),
 	}

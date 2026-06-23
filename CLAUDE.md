@@ -67,7 +67,7 @@ Telegram adapter (per-user bot instance)
 | `internal/coder` | `Coder`: runs coder CLI subprocess with full per-user isolation; `CoderBackend` interface abstracts Claude vs. generic CLIs; `WithNoTools()` for text-only calls; `WithExtraEnv()` for secret injection |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails` (ethics + AST only) |
 | `internal/agentrunner` | Load agent → decrypt secrets into env via `WithExtraEnv` → coder subprocess → capture `[CHAT]` lines → send via GatewayManager; timestamped run logs |
-| `internal/sandbox` | Firejail wrapper (available for future use; not used by coder agents) |
+| `internal/sandbox` | Self-contained Landlock filesystem confinement for coder subprocesses (Linux). `Spec`, `Supported()`, `Wrap()` (re-exec via the hidden `__sandbox-exec` helper), `Exec()` (applies Landlock + rlimits, then `execve`). No external dependency (no firejail/setuid/namespaces). See "Coder filesystem confinement (Landlock)" |
 | `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users |
 | `internal/reminder` | Creates/lists/fires reminders; background polling goroutine |
 | `internal/session` | `ChatSession` create/list/stop; 30-min idle auto-stop |
@@ -340,6 +340,59 @@ Every coder subprocess runs in a fully isolated environment.
 
 **`ANTHROPIC_CONFIG_DIR` does NOT work** — only `CLAUDE_CONFIG_DIR` redirects config. Verified empirically.
 
+### Coder filesystem confinement (Landlock)
+
+The env overrides above isolate *config*, but on their own they don't stop a
+subprocess from reading elsewhere on disk. `internal/sandbox` adds a *preventive*
+filesystem boundary using the Linux **Landlock LSM** — no external dependency, no
+setuid, no namespaces, no sysctl toggle (chosen over user namespaces precisely
+because those are gated behind distro switches that would break "just run the
+binary"). Linux only; Windows/macOS confinement is a future phase.
+
+**Mechanism — re-exec helper.** Landlock must be applied to the process that will
+run the command (Go's M:N threading makes restricting the parent unsafe), so the
+coder doesn't restrict itself. Instead `coder.buildCommand()` wraps the real
+command as `simple-agents __sandbox-exec <base64-spec>` (a hidden subcommand
+registered in `cmd/simple-agents/main.go`). The helper (`sandbox.Exec`) applies
+resource limits + `landlock.V5.BestEffort().RestrictPaths(...)` to **itself**, then
+`syscall.Exec`s the real command. Landlock is inherited across exec and by all
+children → the whole `claude`→`bash`→`python` tree is confined in one shot.
+
+**What each run can touch** (`coder.buildCommand` builds the `sandbox.Spec`):
+- **RW**: the per-user HOME (`claude-homes/<userID>`, includes `.claude`) and the
+  agent workdir (`WithDir`). A path under the workdir gets RW even though it's
+  inside the vault, because Landlock applies the most-specific matching rule.
+- **RO**: broad system paths (`/usr`,`/bin`,`/lib*`,`/etc`,`/proc`,`/sys`,… each
+  `IgnoreIfMissing` for distro portability), the resolved coder-binary install dir
+  (often under the operator's HOME, e.g. `~/.local/share/claude/...` — granted
+  explicitly so the agent can exec it), and the user's **own** vault root (read the
+  whole KB, write only the agent dir).
+- **Denied by default**: everything else — the SQLite DB, `config.yaml`, **other
+  users'** vaults and `claude-homes`, and the operator's real `~/.claude`
+  credentials. (The credential copy that seeds each per-user `.claude` happens in
+  the parent before exec, so the operator's real `~/.claude` is never in the
+  allow-list.)
+
+**Relationship to the Guard.** Where Landlock is active it supersedes
+`vault.Guard` for *writes* (preventive vs. revert-after); the Guard still runs and
+simply finds nothing to revert. On a kernel without Landlock (`sandbox.Supported()`
+false) or with `SA_SANDBOX=0`, the run falls back to direct exec and the Guard is
+the boundary. `config.SandboxConfig.Enabled` (default true; `SA_SANDBOX=0/false/off`
+disables) gates it; `coder.WithSandbox()` carries the flag; the admin Settings page
+shows live status (Landlock active / unavailable→Guard fallback / disabled).
+
+**Bonus fixes folded in.** `buildCommand` puts the child in its own process group
+(`Setpgid`) and kills the **group** on ctx cancel/timeout (`cmd.Cancel` +
+`WaitDelay`), fixing a latent orphan-leak where `CommandContext` killed only the
+direct child and left `node`/`python` descendants running. `RLIMIT_NOFILE` is set;
+`RLIMIT_AS`/`RLIMIT_CPU` plumbing exists but is left off by default (node/V8 dislike
+`RLIMIT_AS`).
+
+**Boundary test:** `internal/sandbox/landlock_linux_test.go` re-execs the test
+binary as the helper and asserts the core property — RW dir writable, RO dir
+readable-not-writable, a path outside all grants unreadable. Self-skips when
+`sandbox.Supported()` is false (matches the python3-absent skip pattern).
+
 ### Database
 
 SQLite via `modernc.org/sqlite` (CGo-free, bundles SQLite 3.49). WAL mode and foreign keys set on open in `db.Open()`. Migrations applied in alphabetical order from `migrations/`.
@@ -397,7 +450,7 @@ Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`,
 /admin/users, /admin/users/:id      # create user, grant permissions, reset password
 /admin/users/:id/coder[/unassign]   # assign coder profile to user
 /admin/coders, /admin/coders/:id    # list + create/edit/delete coder profiles
-/admin/settings                     # system settings (claude_bin, firejail_bin, timeouts)
+/admin/settings                     # system settings (claude_bin, timeouts, sandbox status)
 /admin/audit                        # audit log viewer
 ```
 
@@ -424,7 +477,7 @@ Both callers pass `profile.LoadLocation(db, userID)` as `loc` so reminders fire 
 
 ## Build Status
 
-Build: **PASS**. `go vet`: **PASS**. Tests: **PASS** (`internal/agentdesigner`, `internal/secrets`, `internal/profile`, `web/`).
+Build: **PASS**. `go vet`: **PASS**. Tests: **PASS** (`internal/agentdesigner`, `internal/secrets`, `internal/profile`, `internal/sandbox`, `web/`).
 
 Manual web round-trip and `/agent edit` on Telegram for the edit flow have not been exercised end-to-end with a real coder subprocess — the schedule/state/staging-isolation logic is unit-tested, the coder interaction itself is not.
 
@@ -451,7 +504,8 @@ Manual web round-trip and `/agent edit` on Telegram for the edit flow have not b
 | `aa269a7` | User profile system (`internal/profile`): name, email, location, timezone, tone, language, notes stored in `settings` table; injected as `[User profile]` block into agent designer system prompt; setup wizard gains profile step (step 3 of 5); Settings page expanded to full profile editor; reminder timezone now uses per-user saved timezone via `profile.LoadLocation()` (both web + Telegram) |
 | `d29c5bd` | User memory injection: `memory.ContextString()` now injected as `[User memory]` block into agent design sessions and agent run prompts; `Flow.WithMemory()` and `Runner.WithMemory()` wire the store via a local `memoryStore` interface in each package |
 | `cb0273d` | Prompt centralization: all LLM prompt builders moved to `internal/prompts`; no inline prompt text remains in `agentdesigner`, `agentrunner`, or `web` packages |
-| (current) | Composio v3 REST API integration: replaced broken SDK guidance with direct v3 API pattern (`composio_helper.py` template, `get_connection()`, `composio_execute()`); secrets injection during generation (`Flow.WithSecretsLoader()` + decrypt-from-stored-master-password in `main.go`); SDK import blocking in guardrails (`composioSDKImport` regex, `ak_` key prefix); implementation prompt now requires real API calls when secrets present; UI code example updated to REST pattern; real validation during agent creation (no mock data when `COMPOSIO_API_KEY` available); connection error guidance in agent output (`[CHAT] ❌ Could not access...`) |
+| `7edf5ee` | Composio v3 REST API integration: replaced broken SDK guidance with direct v3 API pattern (`composio_helper.py` template, `get_connection()`, `composio_execute()`); secrets injection during generation (`Flow.WithSecretsLoader()` + decrypt-from-stored-master-password in `main.go`); SDK import blocking in guardrails (`composioSDKImport` regex, `ak_` key prefix); implementation prompt now requires real API calls when secrets present; UI code example updated to REST pattern; real validation during agent creation (no mock data when `COMPOSIO_API_KEY` available); connection error guidance in agent output (`[CHAT] ❌ Could not access...`) |
+| (current) | Landlock filesystem confinement replaces the unused Firejail wrapper: rewrote `internal/sandbox` around Landlock + a hidden `__sandbox-exec` re-exec helper (zero external deps); `coder.buildCommand()`/`WithSandbox()` confine every coder subprocess to the user's own files via `sandbox.Spec` (RW: per-user HOME + agent workdir; RO: system paths + resolved coder-binary dir + the user's own vault root; everything else default-denied); `config.SandboxConfig.Enabled` + `SA_SANDBOX` env toggle; admin Settings shows live Landlock status; vault `Guard` reframed as the fallback when Landlock is unavailable; folded-in fixes: process-group kill on timeout (orphan-leak) + `RLIMIT_NOFILE`; boundary unit test in `internal/sandbox/landlock_linux_test.go` |
 
 ### Known gaps
 

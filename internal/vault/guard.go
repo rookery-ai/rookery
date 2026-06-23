@@ -9,11 +9,15 @@ import (
 )
 
 // Guard enforces the rule "an agent may read the whole vault but write only to
-// its own directory" using a detective post-run check. Because every subprocess
-// runs as the same OS user (env-based isolation, no firejail), nothing physically
-// prevents an agent from writing elsewhere; the Guard instead snapshots the user's
+// its own directory" using a detective post-run check. It snapshots the user's
 // authored content before a run and reverts any out-of-scope create/modify/delete
 // afterward, reporting what it had to undo.
+//
+// Where Landlock confinement is active (see internal/sandbox), it *preventively*
+// blocks out-of-scope writes before they happen, superseding the Guard for writes
+// — the Guard then simply finds nothing to revert. The Guard remains the boundary
+// on kernels without Landlock (or when SA_SANDBOX=0), where every subprocess runs
+// as the same OS user and nothing physically prevents writing elsewhere.
 //
 // The protected region is the user's *authored* knowledge — notes, journals,
 // plans, memory, skills, README — i.e. everything EXCEPT directories that are

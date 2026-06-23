@@ -398,9 +398,12 @@ func (s *Server) coderForUser(userID string) *coder.Coder {
 	dataDir := s.cfg.Data.Dir
 	if profile, err := s.db.GetUserCoder(userID); err == nil && profile != nil {
 		timeout := time.Duration(profile.TimeoutS) * time.Second
-		return coder.New(profile.ClaudeBin, timeout, s.homesDir, dataDir).WithBackendType(profile.BackendType)
+		return coder.New(profile.ClaudeBin, timeout, s.homesDir, dataDir).
+			WithBackendType(profile.BackendType).
+			WithSandbox(s.cfg.Sandbox.Enabled)
 	}
-	return coder.New(s.cfg.Coder.ClaudeBin, s.cfg.Coder.Timeout, s.homesDir, dataDir)
+	return coder.New(s.cfg.Coder.ClaudeBin, s.cfg.Coder.Timeout, s.homesDir, dataDir).
+		WithSandbox(s.cfg.Sandbox.Enabled)
 }
 
 type pageData struct {

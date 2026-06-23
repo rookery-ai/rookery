@@ -16,9 +16,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/sandbox"
 )
 
 // knownAuthEnvVars are env var names that carry LLM provider credentials.
@@ -41,7 +43,10 @@ type Coder struct {
 	bin          string
 	timeout      time.Duration
 	homesDir     string            // root dir for per-user isolated HOME directories
+	dataDir      string            // root data dir; used to derive the per-user vault root for sandbox RO access
 	sysClaudeDir string            // operator's ~/.claude — for credential copying
+	selfExe      string            // path to this binary, for re-exec into the sandbox helper
+	sandbox      bool              // when true, confine subprocesses via Landlock (Linux only)
 	extraEnv     map[string]string // additional env vars merged into the subprocess environment
 	noTools      bool              // when true, passes --allowedTools "" to disable all tools
 	workDir      string            // when non-empty, overrides cmd.Dir (default: per-user home)
@@ -93,6 +98,17 @@ func (c *Coder) WithBackendType(t string) *Coder {
 	return &c2
 }
 
+// WithSandbox returns a shallow copy of the Coder with Landlock confinement
+// toggled. When enabled (and supported by the kernel), every subprocess is
+// re-executed through the sandbox helper so it can only read/write the calling
+// user's own files. When disabled or unsupported, the subprocess runs directly
+// and the detective vault.Guard remains the boundary.
+func (c *Coder) WithSandbox(enabled bool) *Coder {
+	c2 := *c
+	c2.sandbox = enabled
+	return &c2
+}
+
 // Name returns a short identifier for the underlying CLI binary (e.g. "claude"),
 // suitable for user-facing messages. The system supports multiple coder profiles
 // with different binaries, so callers should never hardcode a specific name.
@@ -103,8 +119,8 @@ func (c *Coder) Name() string {
 // New creates a Coder.
 // homesDir is the root directory for per-user isolated HOME directories
 // (typically cfg.Data.Dir + "/claude-homes" for historical reasons).
-// dataDir is accepted for API compatibility but is not used by the coder itself
-// (it is used by the agent runner's sandbox).
+// dataDir is the root data directory; it is used to derive the per-user vault
+// root that the sandbox grants read-only when confinement is enabled.
 func New(bin string, timeout time.Duration, homesDir, dataDir string) *Coder {
 	if bin == "" {
 		bin = "claude"
@@ -113,11 +129,14 @@ func New(bin string, timeout time.Duration, homesDir, dataDir string) *Coder {
 		timeout = 20 * time.Minute
 	}
 	sysHome, _ := os.UserHomeDir()
+	selfExe, _ := os.Executable()
 	return &Coder{
 		bin:          bin,
 		timeout:      timeout,
 		homesDir:     homesDir,
+		dataDir:      dataDir,
 		sysClaudeDir: filepath.Join(sysHome, ".claude"),
+		selfExe:      selfExe,
 	}
 }
 
@@ -136,15 +155,16 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 	start := time.Now()
 
 	args := backend.buildArgs(prompt, c.noTools, c.allowedTools)
+	env := c.buildEnv(userDir, backend)
+	runDir := userDir
+	if c.workDir != "" {
+		runDir = c.workDir
+	}
 
 	// The coder binary is installed in the operator's real home directory.
-	// Per-user isolation is handled by the backend via HOME + config-dir overrides.
-	cmd := exec.CommandContext(ctx, c.bin, args...)
-	cmd.Dir = userDir
-	if c.workDir != "" {
-		cmd.Dir = c.workDir
-	}
-	cmd.Env = c.buildEnv(userDir, backend)
+	// Per-user isolation is handled by the backend via HOME + config-dir overrides,
+	// and (when enabled) hardened by Landlock filesystem confinement.
+	cmd := c.buildCommand(ctx, userID, args, env, runDir)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -228,6 +248,97 @@ func (c *Coder) UserHomeDir(userID string) string {
 
 // ─── Internal ─────────────────────────────────────────────────────────────────
 
+// buildCommand constructs the subprocess to run. When sandboxing is enabled and
+// the kernel supports Landlock, the real command is wrapped in the in-binary
+// sandbox helper so it (and its children) can only touch the calling user's own
+// files. Otherwise it runs directly and the detective vault.Guard is the boundary.
+//
+// In both cases the child is placed in its own process group and killed
+// group-wide on ctx cancel/timeout, so the agent's descendants (bash, python, …)
+// are not orphaned when a run is aborted.
+func (c *Coder) buildCommand(ctx context.Context, userID string, args, env []string, runDir string) *exec.Cmd {
+	var cmd *exec.Cmd
+
+	if c.sandbox && c.selfExe != "" && sandbox.Supported() {
+		spec := sandbox.Spec{
+			Command:        append([]string{c.bin}, args...),
+			Dir:            runDir,
+			Env:            env,
+			ReadWritePaths: dedupePaths(c.UserHomeDir(userID), runDir),
+			ReadOnlyPaths:  c.sandboxReadOnlyPaths(userID),
+			ReadWriteFiles: sandbox.SystemReadWriteFiles(),
+			NoFile:         8192,
+		}
+		if wargv, err := sandbox.Wrap(c.selfExe, spec); err == nil {
+			cmd = exec.CommandContext(ctx, wargv[0], wargv[1:]...)
+		}
+	}
+	if cmd == nil {
+		cmd = exec.CommandContext(ctx, c.bin, args...)
+	}
+	cmd.Dir = runDir
+	cmd.Env = env
+
+	// Own process group + group-wide SIGKILL on cancel so child processes are
+	// never orphaned (CommandContext otherwise signals only the direct child).
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 5 * time.Second
+	return cmd
+}
+
+// sandboxReadOnlyPaths returns the read-only roots a confined coder subprocess
+// needs: the system locations the CLI runtime requires, the resolved coder
+// binary's own install directory (often under the operator's HOME, e.g.
+// ~/.local/share/claude/...), and the user's own vault root (so an agent can
+// READ its whole knowledge base while only its own agent dir is writable).
+func (c *Coder) sandboxReadOnlyPaths(userID string) []string {
+	ro := sandbox.SystemReadOnlyPaths()
+	ro = append(ro, c.sandboxBinaryDirs()...)
+	if c.dataDir != "" {
+		ro = append(ro, filepath.Join(c.dataDir, "vaults", userID))
+	}
+	return ro
+}
+
+// sandboxBinaryDirs resolves the coder binary (following symlinks) and returns
+// the directories that must be readable+executable for it to run. The launcher
+// is frequently a symlink into a versioned install dir; both are granted.
+func (c *Coder) sandboxBinaryDirs() []string {
+	resolved, err := exec.LookPath(c.bin)
+	if err != nil {
+		return nil
+	}
+	out := []string{filepath.Dir(resolved)}
+	if real, err := filepath.EvalSymlinks(resolved); err == nil && real != resolved {
+		if fi, statErr := os.Stat(real); statErr == nil && fi.IsDir() {
+			out = append(out, real)
+		} else {
+			out = append(out, filepath.Dir(real))
+		}
+	}
+	return out
+}
+
+// dedupePaths returns the non-empty inputs with duplicates removed, preserving order.
+func dedupePaths(paths ...string) []string {
+	seen := make(map[string]bool, len(paths))
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	return out
+}
+
 // selectBackend returns the CoderBackend for this invocation. An explicit
 // backendType field takes precedence; otherwise detection falls back to the
 // binary name (any name containing "claude" → claudeBackend).
@@ -250,6 +361,12 @@ func (c *Coder) ensureUserHome(userID string, backend CoderBackend) (string, err
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
+	// Per-user private temp dir (under the RW-granted HOME) so tmp files don't
+	// need — and don't leak through — the shared, world-writable /tmp, which the
+	// sandbox deliberately does not grant. TMPDIR below points subprocesses here.
+	if err := os.MkdirAll(filepath.Join(dir, "tmp"), 0o700); err != nil {
+		return "", err
+	}
 	if err := backend.setupHome(dir, c.sysClaudeDir); err != nil {
 		return "", err
 	}
@@ -259,7 +376,13 @@ func (c *Coder) ensureUserHome(userID string, backend CoderBackend) (string, err
 // buildEnv constructs the subprocess environment. System overrides (HOME plus
 // any backend-specific vars) always take precedence over c.extraEnv.
 func (c *Coder) buildEnv(homeDir string, backend CoderBackend) []string {
-	overrides := map[string]string{"HOME": homeDir}
+	tmpDir := filepath.Join(homeDir, "tmp")
+	overrides := map[string]string{
+		"HOME":   homeDir,
+		"TMPDIR": tmpDir,
+		"TMP":    tmpDir,
+		"TEMP":   tmpDir,
+	}
 	for k, v := range backend.extraEnvForUser(homeDir) {
 		overrides[k] = v
 	}
