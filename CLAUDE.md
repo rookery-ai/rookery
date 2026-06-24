@@ -65,13 +65,13 @@ Telegram adapter (per-user bot instance)
 | `internal/secrets` | AES-256-GCM store; Argon2id key derivation; `GetAll()` decrypts all for env injection; `Proxy()` resolves `${NAME}` in-memory only |
 | `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router`, `IdentityResolver`, `TelegramGateway` |
 | `internal/coder` | `Coder`: runs coder CLI subprocess with full per-user isolation; `CoderBackend` interface abstracts Claude vs. generic CLIs; `WithNoTools()` for text-only calls; `WithExtraEnv()` for secret injection |
-| `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails` (ethics + AST only) |
-| `internal/agentrunner` | Load agent → decrypt secrets into env via `WithExtraEnv` → coder subprocess → capture `[CHAT]` lines → send via GatewayManager; timestamped run logs |
+| `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects |
+| `internal/agentrunner` | Load agent → decrypt secrets into env via `WithExtraEnv` → coder subprocess → capture `[CHAT]` lines → send via GatewayManager; timestamped run logs; `RunInput.OnProgress` per-turn hook for live SSE streaming |
 | `internal/sandbox` | Self-contained Landlock filesystem confinement for coder subprocesses (Linux). `Spec`, `Supported()`, `Wrap()` (re-exec via the hidden `__sandbox-exec` helper), `Exec()` (applies Landlock + rlimits, then `execve`). No external dependency (no firejail/setuid/namespaces). See "Coder filesystem confinement (Landlock)" |
 | `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users |
 | `internal/reminder` | Creates/lists/fires reminders; background polling goroutine |
 | `internal/session` | `ChatSession` create/list/stop; 30-min idle auto-stop |
-| `internal/prompts` | Central home for all LLM prompt construction: `BuildDesignSystemPrompt`, `BuildImplementationPrompt`, `BuildEditImplementationPrompt`, `BuildCoderPrompt`, `BuildChildAgentFollowUpPrompt`, `BuildSkillMetaPrompt`. No inline prompt text exists outside this package. |
+| `internal/prompts` | Central home for all LLM prompt construction: `BuildDesignSystemPrompt`, `BuildImplementationPrompt`, `BuildEditImplementationPrompt`, `BuildCoderPrompt`, `BuildChildAgentFollowUpPrompt`, `BuildSkillMetaPrompt`. No inline prompt text exists outside this package. Shared single-source blocks injected into every phase: `agentPhilosophyBlock` (brain vs scripts), `testingRulesBlock`, `shellSafetyBlock`, `scriptRobustnessBlock`, `composioServicesBlock`. |
 | `internal/memory` | Per-user memory store; now writes one markdown note per entry under the vault (`memory/<id>.md`), with `ImportJSONL` migrating the legacy `memory.jsonl`. `ContextString()` formats entries for LLM injection; injected via `WithMemory()` on both `Flow` and `Runner` |
 | `internal/vault` | Per-user Obsidian-style knowledge base: `Vault` (paths + `Resolve` safety + file IO), `Reflector` (DB→markdown+sidecar), `LinkIndex` ([[wikilinks]]), `Searcher` (ripgrep), `Guard` (post-run write-scope enforcement), `MigrateLegacyLayout`. See "Per-user knowledge base (vault)" |
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
@@ -249,6 +249,82 @@ Both loaders go through `loadAgentForEdit(userID, agentID)`, which reads the liv
 `AgentDesigner.SaveAgent` and `UpdateAgent` both delegate to a shared `writeAgentContent()`: it wipes and fully rewrites `tools/` from the incoming map (so an edit that removes a script actually deletes the file, not just stops referencing it), writes `state.json` only if missing (never clobbers a live agent's persisted state), and preserves the manifest's original `CreatedAt` across edits by loading the existing `agent.json` first.
 
 Unit-tested in `internal/agentdesigner/edit_test.go` against a real migrated SQLite DB: schedule-drift reconciliation, the duplicate-schedule-row/double-fire guard, schedule deletion on "none", `state.json`/`CreatedAt` preservation, stale-tool wipe, and — the core safety property — `copyAgentWorkspace` proven to leave the live agent dir byte-for-byte untouched. The coder subprocess round-trip itself (real edit → `[TEST_OUTPUT]` → approve/reject) is exercised manually, not by an automated test.
+
+### Smarter agents, multi-file projects, background runs
+
+**Brain vs scripts (single source of truth).** `prompts.agentPhilosophyBlock()` is
+injected into design, create, edit, AND runtime prompts. The contract: the coder is
+an LLM with judgment — for anything ambiguous/fuzzy (which attachments are
+"payroll", which emails matter, classifying, summarizing) it REASONS at runtime and
+does NOT hardcode brittle rules; Python scripts are only for repetitive, deterministic,
+high-volume work (fetching, parsing known formats, math) to save tokens. The design
+prompt adds `<design_for_flexibility>`: if the user is unsure of exact criteria
+(filenames, patterns, thresholds), do NOT force them to specify — design the agent
+to figure it out at runtime.
+
+**Multi-file agent projects.** Agents may write a nested project under `tools/`
+(helper modules, `tests/`, `requirements.txt`) — not just single flat scripts. Four
+sites used to flatten paths via `filepath.Base()` and drop subdirs/non-`.py` files;
+all I/O is now recursive and path-safe via `internal/agentdesigner/toolstree.go`:
+- `WriteToolsTree(toolsDir, map)` — recursive write, map keys are rel paths under
+  `tools/`; `safeToolPath` rejects `..`/absolute escapes (mirrors `vault.Resolve`).
+- `ReadToolsTree(toolsDir)` — recursive read; includes non-`.py`; excludes
+  `__pycache__`/dotted dirs/`*.pyc`; caps `maxToolFileBytes=1MiB`,
+  `maxToolsTotalBytes=5MiB`, `maxToolFiles=200`.
+- `writeAgentContent` (designer), `readToolsFromDisk`/`copyAgentWorkspace` (flow),
+  `TestRunFromContent` (runner) all use the tree helpers. Edit-staging still mirrors
+  the live layout byte-for-byte.
+- Guardrails: `RunToolGuardrails(filename, code)` runs ethics on all files, AST only
+  on `*.py` (so `requirements.txt` passes). The AST blocklist (subprocess/eval/exec/
+  socket) is intentionally unchanged — tests run via the Bash tool at runtime, not via
+  subprocess inside tool scripts.
+
+**Generation/test prompt rules.** `testingRulesBlock()` steers the coder to write
+import-based unit tests (`python3 -m unittest`/`pytest` via Bash) and NOT shell out
+via subprocess from a test (the AST guardrail rejects that in every `.py`). This
+fixed the edit-flow case where the coder wrote a `subprocess.run`-based test that
+guardrails correctly blocked.
+
+**Shell + script robustness (single source).** `shellSafetyBlock()` + `scriptRobustnessBlock()`
+are injected into create/edit (judgment-level rules restated in the runtime prompt).
+Covers the shell `$`-expansion hazard (a `"$62,752.44"` shell arg arrives as
+`2,752.44` — `$6` eaten), full metachar hazard list, safe patterns (pass raw data,
+format `$` inside Python), stdout-JSON/stderr-logs contract, `set -euo pipefail`,
+the paths rule (don't `cd` mid-run), network timeouts/retry, sanity-check fetched
+values (HTTP 200 can still return wrong/empty data), never print secrets, UTF-8
+encoding, idempotency/verify side-effects. Runtime `BuildCoderPrompt` adds: use
+values EXACTLY as scripts return them (never retype/round numbers by hand),
+sanity-check before acting, check state + verify side-effects.
+
+**Edit flow sees its own scripts.** `loadAgentForEdit` now returns the live tool
+source via `ReadToolsTree`; the design system prompt renders a `<current_tools>`
+block (only on edit) so the coder can diagnose code bugs without file access and
+never asks the user "where are the scripts". Create sessions never carry it.
+
+**Background manual runs + live SSE.** `handleRunAgent` (`web/handlers_agents.go`)
+fires the run on a **detached `context.Background()`** in a goroutine (was
+synchronous on the request context → navigating away SIGKILLed it → "exit -1").
+`web/run_tracker.go` holds `Server.runs map[string]*agentRunState` (keyed by agentID).
+`RunInput.OnProgress` is called per turn in `runCoderTurns` with that turn's fresh
+`[CHAT]` lines → buffered `progressCh` → `GET /dashboard/agents/:id/run/progress`
+SSE streams them to the browser. Final output is also pushed to the user's chat via
+`gateway.SendToUser` (same path cron uses). `startManualRun` refuses if a run is
+already in flight (in-memory + DB `GetUnfinishedAgentRun`).
+
+**Durable "Running" badge + boot reconciliation.** `Running` (badge, DB-or-memory)
+is split from `LiveRun` (gates SSE, in-memory only) so a scheduled run shows the
+badge without opening an SSE that would 404. `db.ReconcileStaleRuns()` runs on
+`serve` startup: closes any `agent_runs` left `finished_at IS NULL` (crash/shutdown
+mid-run) with exit -1 so the badge never sticks. `ListAgentRuns`/`RecentAgentRuns`
+scan stdout/stderr as `sql.NullString` (in-progress runs have them NULL).
+
+**Run-loop fix (Post/Redirect/Get).** `handleRunAgent` returns a **303 See Other**
+redirect to the detail page, NOT an inline render. Rendering left the browser on a
+POST-loaded page; the detail-page JS reloads when the SSE run completes, and on a
+POST-loaded page `reload()` replays the POST — firing "Run Now" again in an infinite
+loop (one run per ~15-30s, burning tokens). PRG lands the browser on a GET-loaded
+page so reload is a safe GET. The running badge + live-progress panel convey
+started/already-running visually, so no flash message is lost.
 
 ### Agent output protocol (AGENT.md)
 
@@ -429,7 +505,8 @@ Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`,
 /dashboard/agents/:id/edit          # conversational agent editing (chat UI)
 /dashboard/agents/:id/edit/start    # POST JSON API: starts an edit design session
 /dashboard/agents/:id/delete
-/dashboard/agents/:id/run
+/dashboard/agents/:id/run                  # POST: starts a background run, 303-redirects to detail (PRG — see "Background manual runs")
+/dashboard/agents/:id/run/progress         # GET SSE: streams a manual run's [CHAT] output live to the browser
 /dashboard/agents/:id/schedule
 /dashboard/agents/:id/schedule/delete
 /dashboard/agents/:id/agent-md      # POST: save AGENT.md (ethics check applied)
@@ -477,9 +554,9 @@ Both callers pass `profile.LoadLocation(db, userID)` as `loc` so reminders fire 
 
 ## Build Status
 
-Build: **PASS**. `go vet`: **PASS**. Tests: **PASS** (`internal/agentdesigner`, `internal/secrets`, `internal/profile`, `internal/sandbox`, `web/`).
+Build: **PASS**. `go vet`: **PASS**. Tests: **PASS** (`internal/agentdesigner`, `internal/agentdesigner/toolstree_test.go`, `internal/secrets`, `internal/profile`, `internal/sandbox`, `internal/prompts`, `internal/db/runs_test.go`, `web/`).
 
-Manual web round-trip and `/agent edit` on Telegram for the edit flow have not been exercised end-to-end with a real coder subprocess — the schedule/state/staging-isolation logic is unit-tested, the coder interaction itself is not.
+Manual web round-trip and `/agent edit` on Telegram for the edit flow have not been exercised end-to-end with a real coder subprocess — the schedule/state/staging-isolation logic is unit-tested, the coder interaction itself is not. The background-run + SSE + PRG path is unit-tested at the template level (`TestAgentTemplatesRenderWithRunning` across Running/LiveRun states) and exercised live; the run-loop fix is verified by the server log no longer showing the POST→reload→POST cycle.
 
 ### Commit history
 
@@ -505,11 +582,12 @@ Manual web round-trip and `/agent edit` on Telegram for the edit flow have not b
 | `d29c5bd` | User memory injection: `memory.ContextString()` now injected as `[User memory]` block into agent design sessions and agent run prompts; `Flow.WithMemory()` and `Runner.WithMemory()` wire the store via a local `memoryStore` interface in each package |
 | `cb0273d` | Prompt centralization: all LLM prompt builders moved to `internal/prompts`; no inline prompt text remains in `agentdesigner`, `agentrunner`, or `web` packages |
 | `7edf5ee` | Composio v3 REST API integration: replaced broken SDK guidance with direct v3 API pattern (`composio_helper.py` template, `get_connection()`, `composio_execute()`); secrets injection during generation (`Flow.WithSecretsLoader()` + decrypt-from-stored-master-password in `main.go`); SDK import blocking in guardrails (`composioSDKImport` regex, `ak_` key prefix); implementation prompt now requires real API calls when secrets present; UI code example updated to REST pattern; real validation during agent creation (no mock data when `COMPOSIO_API_KEY` available); connection error guidance in agent output (`[CHAT] ❌ Could not access...`) |
-| (current) | Landlock filesystem confinement replaces the unused Firejail wrapper: rewrote `internal/sandbox` around Landlock + a hidden `__sandbox-exec` re-exec helper (zero external deps); `coder.buildCommand()`/`WithSandbox()` confine every coder subprocess to the user's own files via `sandbox.Spec` (RW: per-user HOME + agent workdir; RO: system paths + resolved coder-binary dir + the user's own vault root; everything else default-denied); `config.SandboxConfig.Enabled` + `SA_SANDBOX` env toggle; admin Settings shows live Landlock status; vault `Guard` reframed as the fallback when Landlock is unavailable; folded-in fixes: process-group kill on timeout (orphan-leak) + `RLIMIT_NOFILE`; boundary unit test in `internal/sandbox/landlock_linux_test.go` |
+| `66e2a11` | Landlock filesystem confinement replaces the unused Firejail wrapper: rewrote `internal/sandbox` around Landlock + a hidden `__sandbox-exec` re-exec helper (zero external deps); `coder.buildCommand()`/`WithSandbox()` confine every coder subprocess to the user's own files via `sandbox.Spec` (RW: per-user HOME + agent workdir; RO: system paths + resolved coder-binary dir + the user's own vault root; everything else default-denied); `config.SandboxConfig.Enabled` + `SA_SANDBOX` env toggle; admin Settings shows live Landlock status; vault `Guard` reframed as the fallback when Landlock is unavailable; folded-in fixes: process-group kill on timeout (orphan-leak) + `RLIMIT_NOFILE`; boundary unit test in `internal/sandbox/landlock_linux_test.go` |
+| (current) | Smarter + more flexible agents, multi-file projects, background runs, clickable names, run-loop fix. `prompts.agentPhilosophyBlock` (brain vs scripts) + `<design_for_flexibility>` injected into every phase so agents reason about ambiguity at runtime instead of hardcoding brittle rules; `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` + `RunToolGuardrails` (ethics all files, AST only `*.py`) so agents ship nested multi-file projects with tests under `tools/`; `testingRulesBlock` steers import-based tests (no subprocess in tests); `shellSafetyBlock` + `scriptRobustnessBlock` (shell `$`-expansion hazard, `set -euo pipefail`, paths rule, network timeouts/retry, sanity-check fetched values, never print secrets, idempotency); edit flow now passes live tool source via `<current_tools>` so the coder never asks where scripts are; `handleRunAgent` runs on a detached `context.Background()` + `RunInput.OnProgress` per-turn hook + `GET /:id/run/progress` SSE (`web/run_tracker.go`) so navigating away no longer kills the run ("exit -1" fixed); `Running`/`LiveRun` split + `db.ReconcileStaleRuns()` on boot + `GetUnfinishedAgentRun` for a durable badge; `ListAgentRuns`/`RecentAgentRuns` use `sql.NullString`; **run-loop fix**: `handleRunAgent` returns 303 redirect (PRG) instead of rendering inline — inline render left a POST-loaded page whose `reload()` replayed the POST and fired "Run Now" in an infinite loop burning tokens; agent name on the list page made clickable. Tests: `prompts_test.go` (philosophy/testing/shell/robustness/edit-tools markers), `toolstree_test.go`, `db/runs_test.go`, `web/template_smoke_test.go` Running/LiveRun states |
 
 ### Known gaps
 
-- **Tests** — `internal/agentdesigner`, `internal/secrets`, `internal/profile`, and `web/` (template smoke tests) have test files; no integration or e2e coverage. The agent-editing logic is unit-tested around the coder boundary (schedule reconciliation, staging-dir isolation, file invariants) but the coder subprocess round-trip itself (real edit → test → approve/reject) has no automated test
+- **Tests** — `internal/agentdesigner`, `internal/secrets`, `internal/profile`, `internal/prompts`, `internal/db`, and `web/` (template smoke tests) have test files; no integration or e2e coverage. The agent-editing logic is unit-tested around the coder boundary (schedule reconciliation, staging-dir isolation, file invariants) but the coder subprocess round-trip itself (real edit → test → approve/reject) has no automated test. The background-run + SSE + PRG path is template-tested and verified live, not by an automated e2e test.
 - **Discord adapter** — in the original plan; not implemented
 - **`/remind` list/delete via Telegram** — only create is wired; no list or cancel command
 - **`/memory` Telegram command** — memory store exists but no `/memory` chat command in Router

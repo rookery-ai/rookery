@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/gorilla/sessions"
@@ -46,6 +47,12 @@ type Server struct {
 	designFlow *agentdesigner.Flow // shared with Telegram gateway
 	homesDir   string              // per-user claude HOME directories
 	vault      *vault.Vault        // per-user knowledge base
+
+	// runs tracks in-flight manual ("Run Now") agent runs so progress can be
+	// streamed to the browser over SSE while the run executes on a detached
+	// context that outlives the originating HTTP request. Keyed by agentID.
+	runs   map[string]*agentRunState
+	runsMu sync.Mutex
 }
 
 // NewServer wires up all routes and middleware.
@@ -85,6 +92,7 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 		designFlow: designFlow,
 		homesDir:   homesDir,
 		vault:      vault.New(cfg.Data.Dir),
+		runs:       make(map[string]*agentRunState),
 	}
 
 	s.echo.HideBanner = true
@@ -239,6 +247,7 @@ func (s *Server) setupRoutes() {
 	dash.POST("/agents/:id/edit/start", s.handleStartEditDesign)
 	dash.POST("/agents/:id/delete", s.handleDeleteAgent)
 	dash.POST("/agents/:id/run", s.handleRunAgent)
+	dash.GET("/agents/:id/run/progress", s.handleRunProgress)
 	dash.POST("/agents/:id/schedule", s.handleSaveSchedule)
 	dash.POST("/agents/:id/schedule/delete", s.handleDeleteSchedule)
 	dash.POST("/agents/:id/agent-md", s.handleSaveAgentMD)

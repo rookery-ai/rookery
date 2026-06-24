@@ -56,6 +56,23 @@ func RunFullGuardrails(code, _ string) error {
 	return nil
 }
 
+// RunToolGuardrails runs guardrails on a single agent project file. The ethics and
+// Composio checks apply to EVERY file (including non-Python files like
+// requirements.txt), but the Python AST check only runs on .py files — parsing a
+// non-Python file as Python would spuriously fail. This is the guardrail used for
+// multi-file agent projects.
+func RunToolGuardrails(filename, code string) error {
+	if err := checkEthics(code); err != nil {
+		return fmt.Errorf("ethics filter: %w", err)
+	}
+	if strings.HasSuffix(filename, ".py") && PythonAvailable() {
+		if err := checkAST(code); err != nil {
+			return fmt.Errorf("ast check: %w", err)
+		}
+	}
+	return nil
+}
+
 // PythonAvailable returns true if python3 is in PATH.
 func PythonAvailable() bool {
 	_, err := exec.LookPath("python3")

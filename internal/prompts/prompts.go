@@ -5,8 +5,20 @@ package prompts
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
+
+// sortedKeys returns a map's keys in deterministic order so generated prompts are
+// stable run-to-run (important for prompt caching and reproducible behavior).
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
 
 // ChatMessage is a minimal conversation turn. It mirrors db.ChatMessage so this
 // package stays free of the db import.
@@ -29,6 +41,7 @@ type DesignSystemParams struct {
 	AgentName          string
 	IsEdit             bool
 	ExistingAgentMD    string
+	ExistingTools      map[string]string // relpath→content of the agent's tool scripts (edit only)
 	ConnectedPlatforms []string
 	Skills             []string
 	UserProfile        string
@@ -178,6 +191,47 @@ A failed-but-guiding output is better than fake mock success.
 `
 }
 
+// agentPhilosophyBlock returns the brain-vs-scripts philosophy shared by the
+// design conversation, the generation/edit prompts, and the runtime prompt. It is
+// the single source of truth (mirrors composioServicesBlock) so the same contract
+// is present at every phase: an agent is an LLM with judgment that scripts only the
+// repetitive, deterministic work and reasons about everything ambiguous at runtime.
+func agentPhilosophyBlock() string {
+	return `<agent_philosophy>
+An agent is NOT just a Python script — it is YOU, an LLM with judgment, invoked on a
+schedule. Split every agent into two layers and lean on the right one:
+
+1. THE BRAIN (you, at runtime): anything that needs understanding, judgment, or
+   handling of fuzzy/ambiguous input. Examples: deciding which emails or attachments
+   are "payroll" / "an invoice" / "important", classifying or summarizing content,
+   interpreting messy real-world data, choosing what matters. Do NOT hardcode brittle
+   rules (exact filenames, rigid regexes, fixed thresholds) for these — read the data
+   and REASON about it each run. If you don't have a deterministic rule that is
+   genuinely reliable, that is a signal to use your judgment, not to invent a fragile
+   pattern.
+
+2. THE HANDS (Python scripts in tools/): repetitive, deterministic, high-volume work
+   where running the LLM would waste tokens — fetching from an API, paging through
+   results, parsing a known/stable format, arithmetic, formatting. Scripts gather and
+   pre-process; you decide. A script should hand raw/structured data UP to you for the
+   judgment call, not try to make the judgment itself with hardcoded heuristics.
+
+Concrete example — "email me payroll attachments":
+  ✗ WRONG: a script that filters attachments by a hardcoded filename pattern the user
+    had to specify up front (fails the moment a file is named differently).
+  ✓ RIGHT: a script lists recent messages + attachment names/metadata (the repetitive
+    fetch); YOU read that list and reason about which ones are actually payroll, then a
+    script downloads exactly those (the repetitive download). Ambiguity → brain;
+    bulk I/O → hands.
+
+You may build a real multi-file project under tools/ — helper modules (tools/lib/...),
+a tests/ folder (tools/tests/test_*.py), shared utilities — not just one flat script.
+Prefer this when the logic is non-trivial: it is more reliable than one giant script.
+</agent_philosophy>
+
+`
+}
+
 // BuildDesignSystemPrompt returns the system prompt for the conversational agent
 // design/edit wizard. It guides the coder to act as a design assistant that asks
 // focused questions and proposes an implementation plan before any code is written.
@@ -190,7 +244,22 @@ func BuildDesignSystemPrompt(p DesignSystemParams) string {
 		sb.WriteString(p.AgentName)
 		sb.WriteString("\".\n\nHere is its current AGENT.md so you understand what it already does:\n<current_agent_md>\n")
 		sb.WriteString(p.ExistingAgentMD)
-		sb.WriteString("\n</current_agent_md>\n</role>\n\n")
+		sb.WriteString("\n</current_agent_md>\n")
+		// Include the actual tool scripts so the conversation can diagnose code-level
+		// bugs (e.g. wrong price field, broken number formatting) WITHOUT file access.
+		// These are the live files; do not ask the user where they are or to paste them.
+		if len(p.ExistingTools) > 0 {
+			sb.WriteString("\nHere are its current tool scripts (the live files — you can already see them, so NEVER ask the user where the scripts are or to paste them). When the user reports a bug, read these and pinpoint the cause:\n<current_tools>\n")
+			for _, name := range sortedKeys(p.ExistingTools) {
+				sb.WriteString("--- tools/")
+				sb.WriteString(name)
+				sb.WriteString(" ---\n")
+				sb.WriteString(p.ExistingTools[name])
+				sb.WriteString("\n")
+			}
+			sb.WriteString("</current_tools>\n")
+		}
+		sb.WriteString("</role>\n\n")
 	} else {
 		sb.WriteString("<role>\nYou are a friendly agent design assistant helping build a new autonomous AI agent called \"")
 		sb.WriteString(p.AgentName)
@@ -207,6 +276,23 @@ NEVER do any of the following — no exceptions:
 - Describe implementation details unless the user specifically asks.
 - Ask more than two questions in a single reply.
 </constraints>
+
+`)
+
+	// ── Agent philosophy (brain vs. scripts) ─────────────────────────────────
+	sb.WriteString(agentPhilosophyBlock())
+
+	// ── Designing for flexibility ─────────────────────────────────────────────
+	sb.WriteString(`<design_for_flexibility>
+Because the agent reasons at runtime, you do NOT need the user to nail down every
+detail. If the user is unsure of exact criteria — filenames, patterns, keywords,
+thresholds, which items "count" — do NOT push them to specify a rigid rule. Reassure
+them: "No problem — the agent will look at each one and figure out which are <X>." Then
+design the agent to make that judgment at runtime. Only ask for specifics the user
+actually knows and that are genuinely fixed (e.g. which account, how often, where to
+send results). Forcing a brittle pattern the user had to guess at is the main thing
+that makes these agents fail.
+</design_for_flexibility>
 
 `)
 
@@ -323,6 +409,10 @@ type ImplementationParams struct {
 // design conversation, so create/edit/write/validate/test all see identical rules.
 func (p ImplementationParams) capabilitySpec() string {
 	var sb strings.Builder
+	sb.WriteString(agentPhilosophyBlock())
+	sb.WriteString(testingRulesBlock())
+	sb.WriteString(shellSafetyBlock())
+	sb.WriteString(scriptRobustnessBlock())
 	if len(p.ConnectedPlatforms) > 0 {
 		sb.WriteString(connectedPlatformsBlock(p.ConnectedPlatforms))
 	}
@@ -330,6 +420,104 @@ func (p ImplementationParams) capabilitySpec() string {
 		sb.WriteString(composioServicesBlock())
 	}
 	return sb.String()
+}
+
+// testingRulesBlock is the single source of truth for HOW agent code is tested. The
+// guardrail bans subprocess/eval/exec/os.system/socket in EVERY .py file under tools/
+// (tests included), so tests must import and call functions directly rather than shell
+// out to run a script. Shared by the create and edit generation prompts.
+func testingRulesBlock() string {
+	return "<testing_rules>\n" +
+		"How to test agent code. An automated guardrail rejects subprocess, eval, exec,\n" +
+		"os.system, and socket in EVERY .py file under tools/ — INCLUDING test files. So:\n\n" +
+		"- Put logic in importable functions; keep side effects (network calls, prints,\n" +
+		"  draft creation) under `if __name__ == \"__main__\":`.\n" +
+		"    # tools/lib/pricing.py\n" +
+		"    def format_price(p): return f\"${p:,.2f}\"\n" +
+		"    def is_above(p, threshold): return p > threshold\n" +
+		"- Tests IMPORT and call those functions directly — never shell out:\n" +
+		"    # tools/tests/test_pricing.py\n" +
+		"    import sys, os, unittest\n" +
+		"    sys.path.insert(0, os.path.join(os.path.dirname(__file__), \"..\"))\n" +
+		"    from lib.pricing import format_price, is_above\n" +
+		"    class T(unittest.TestCase):\n" +
+		"        def test_format(self): self.assertEqual(format_price(107000), \"$107,000.00\")\n" +
+		"        def test_above(self):  self.assertTrue(is_above(107000, 60000))\n" +
+		"- Run them: python3 -m unittest discover -s tools/tests\n" +
+		"- DO NOT write a test that runs the whole script via subprocess.run([...]) — it\n" +
+		"  WILL be rejected on save. Verify the end-to-end workflow by RUNNING THE SCRIPT\n" +
+		"  YOURSELF in the shell during the test step; that is always allowed.\n" +
+		"</testing_rules>\n\n"
+}
+
+// shellSafetyBlock warns against the single most common runtime corruption: passing
+// dynamic data (especially text containing `$`) as a shell argument, where the shell
+// expands `$6`/`$VAR` and silently eats characters — e.g. "$62,752.44" becomes
+// "2,752.44". Shared by the generation prompts and the runtime prompt.
+func shellSafetyBlock() string {
+	return "<shell_safety>\n" +
+		"When you run helper scripts via the shell, the shell REWRITES your command line\n" +
+		"before Python sees it. This silently corrupts data and can execute injected text.\n\n" +
+		"#1 RULE — DON'T PASS DATA THROUGH THE SHELL AT ALL.\n" +
+		"If one step's result feeds another, write a SINGLE Python entrypoint that imports\n" +
+		"the helper functions and passes values as Python objects (a float stays a float).\n" +
+		"No shell interpolation = none of the bugs below. Chaining scripts by pasting one's\n" +
+		"output into another's command line is the thing to avoid.\n\n" +
+		"If you DO put data on the command line, pass ONLY plain numbers or simple\n" +
+		"identifiers — never text containing any of:  $  \"  '  `  *  ?  [  ]  (  )  spaces\n" +
+		"newlines. Format currency ($), thousands separators, and prose INSIDE Python.\n" +
+		"What the shell does to such data:\n" +
+		"  - $name / $1 EXPANDS: python3 tools/draft.py \"Price: $62,752.44\" arrives as\n" +
+		"    \"Price: 2,752.44\" ($6 is an empty variable, so the '$6' is deleted).\n" +
+		"  - $(...) and `...` RUN as commands (corruption + injection).\n" +
+		"  - * ? [ ] EXPAND to matching filenames (globbing).\n" +
+		"  - unquoted spaces/quotes/newlines SPLIT one argument into several or break it.\n\n" +
+		"Safe ways to pass non-trivial data:\n" +
+		"  - Plain number as an arg, format in Python:  python3 tools/draft.py 62752.44\n" +
+		"  - JSON file written with the Write tool (NOT the shell), pass the path:\n" +
+		"      python3 tools/draft.py payload.json     (script does json.load)\n" +
+		"  - SINGLE-quoted heredoc (prevents expansion):\n" +
+		"      python3 tools/draft.py <<'JSON'\n" +
+		"      {\"body\": \"Price: $62,752.44\"}\n" +
+		"      JSON\n\n" +
+		"Script I/O contract (so output is reliable):\n" +
+		"  - A script prints ONLY a single machine-readable JSON object on STDOUT.\n" +
+		"  - Logs, progress, and debug text go to STDERR: print(msg, file=sys.stderr).\n" +
+		"  - After running a script, CHECK its result (the JSON \"error\"/\"success\" field or a\n" +
+		"    non-zero exit) before treating the step as done — don't assume it worked.\n\n" +
+		"Multi-command shell & paths:\n" +
+		"  - If you run several commands in ONE shell invocation, start it with\n" +
+		"    `set -euo pipefail` so a failed step aborts instead of silently continuing.\n" +
+		"  - Your working directory IS the agent dir. Use paths relative to it\n" +
+		"    (tools/foo.py) and do NOT `cd` elsewhere mid-run — that breaks relative paths\n" +
+		"    and the file boundary the agent is confined to.\n" +
+		"</shell_safety>\n\n"
+}
+
+// scriptRobustnessBlock encodes the "wrong-but-plausible output" defenses — the
+// failure mode where a script runs without error yet produces a corrupted/garbage
+// value. Injected into the generation prompts (create + edit) so the written scripts
+// carry these defenses; the runtime prompt restates the judgment-level rules.
+func scriptRobustnessBlock() string {
+	return "<script_robustness>\n" +
+		"Write scripts that fail loudly and never act on garbage:\n\n" +
+		"- NETWORK: every HTTP call sets a timeout (e.g. requests.get(..., timeout=15)).\n" +
+		"  Retry transient failures (timeouts, 429, 5xx) 2-3 times with a short backoff;\n" +
+		"  give up with a clear JSON error rather than hanging the whole run.\n" +
+		"- SANITY-CHECK fetched values before acting on them. A request can succeed (HTTP\n" +
+		"  200) yet return a wrong/empty/placeholder value. Validate type and plausibility\n" +
+		"  (e.g. a BTC price is a positive number in a sane range, a list is non-empty) and\n" +
+		"  return an error instead of passing garbage downstream. If a value looks off, say\n" +
+		"  so in [CHAT] rather than silently using it.\n" +
+		"- SECRETS: read from os.environ; NEVER print a secret's value to stdout/stderr or\n" +
+		"  include it in output, errors, or [CHAT]. Mask if you must reference one.\n" +
+		"- ENCODING: text may contain non-ASCII (₿, €, emoji, accents). Keep everything\n" +
+		"  str/UTF-8; don't .encode('ascii') or assume ASCII. JSON with ensure_ascii=False\n" +
+		"  is fine.\n" +
+		"- IDEMPOTENCY & VERIFY: before a side-effect (create draft, send, post), check\n" +
+		"  state so you don't duplicate it on the next run; AFTER it, confirm the result\n" +
+		"  (e.g. a returned draft_id / success=true) before reporting success.\n" +
+		"</script_robustness>\n\n"
 }
 
 // connectedPlatformsBlock tells the coder which platforms deliver output and that
@@ -377,15 +565,36 @@ Write AGENT.md:
 - Optional secrets block immediately after (omit entirely if no secrets needed):
   # Required secrets:
   # - SECRET_NAME: plain-language description of what this is
-- Then describe what the agent does each run in plain prose.
+- Then describe, in plain prose, what the agent does each run — and explicitly which
+  decisions YOU (the LLM) make at runtime vs. which steps the helper scripts perform.
+  See <agent_philosophy>: script the repetitive/deterministic work; reason about
+  anything fuzzy or judgment-based yourself each run. Do NOT bake brittle rules
+  (exact filenames, rigid keyword lists, fixed thresholds) into a script when the
+  honest answer is "it depends — look and decide".
 - Output protocol (the ONLY way to produce output):
     [CHAT] <text>        — sends a message to the user
     [STATE]...[/STATE]   — JSON block merged into state.json for persistence
-- If the agent uses helper scripts, reference them as: python3 tools/filename.py
+- Reference helper scripts as: python3 tools/filename.py (or python3 tools/sub/dir/x.py)
 
-Write tools/<name>.py for any data fetching or processing logic (if needed):
-- Allowed standard libraries: os, json, re, datetime, requests
-- Forbidden: subprocess, eval, exec, socket, open() for writing files
+Write helper scripts under tools/ for the deterministic "hands" work (if needed):
+- You may build a REAL multi-file project, not just one flat file:
+    tools/fetch.py, tools/lib/parser.py, tools/tests/test_parser.py, etc.
+  Use this when the logic is non-trivial — small focused modules + tests are more
+  reliable than one giant script.
+- Write unit tests under tools/tests/ (test_*.py, stdlib unittest) for non-trivial
+  PURE logic (parsing, formatting, threshold/decision helpers). Structure scripts so
+  that logic lives in importable functions, with side effects (network calls, prints,
+  draft creation) under ` + "`if __name__ == \"__main__\":`" + `. Tests MUST import the
+  module and call those functions directly — see the <testing_rules> section above.
+- ALL project files must live under tools/ (including any tools/requirements.txt).
+- Allowed standard libraries: os, json, re, datetime, requests (plus stdlib unittest
+  for tests). Scripts may import your own modules under tools/.
+- Forbidden inside EVERY .py file (scripts AND tests): subprocess, eval, exec, socket,
+  open() for writing files. These are rejected by an automated check on save — a test
+  that does subprocess.run(['python3', ...]) WILL be blocked. To verify the whole
+  workflow end-to-end, run the script yourself in the shell (the test step) instead.
+  (Running scripts/tests via the shell is YOUR job and is always allowed; the ban is
+  only on these calls appearing inside the .py files.)
 - Read secrets via: os.environ.get('SECRET_NAME', '')
 - Do NOT read or write state.json directly — use [STATE] blocks in AGENT.md output
 
@@ -396,9 +605,11 @@ Do NOT create or modify state.json — it already exists and is managed by the s
 TEST THE IMPLEMENTATION.
 
 Execute each Python script in a shell and confirm it produces real, non-empty output.
-If a script errors or returns None/empty, fix it and re-run. After 3 failed attempts,
-stop and emit [BLOCKED] (see below) explaining why it cannot work and what could be
-done instead.
+If you wrote unit tests under tools/tests/, run them too
+(e.g. python3 -m unittest discover -s tools/tests) and make them pass.
+If a script or test errors or returns None/empty, fix it and re-run. After 3 failed
+attempts, stop and emit [BLOCKED] (see below) explaining why it cannot work and what
+could be done instead.
 
 SECRETS: Read all secrets via os.environ.get('SECRET_NAME', '').
 If COMPOSIO_API_KEY is present in the environment, make REAL API calls — produce REAL
@@ -485,9 +696,9 @@ everything the user did not ask to change.
 <step name="edit">
 APPLY ONLY THE REQUESTED CHANGES.
 
-Edit AGENT.md and tools/*.py to implement what the user asked for in the conversation
-above. Preserve everything that was not mentioned. Delete any tool script that is no
-longer needed as a result of the change.
+Edit the files under tools/ and AGENT.md to implement what the user asked for in the
+conversation above. Preserve everything that was not mentioned. Delete any tool script
+(or test) that is no longer needed as a result of the change.
 
 - Line 1 of AGENT.md MUST remain exactly: # Suggested schedule: <5-part cron expression or "none">
   Update it only if the user asked to change the run frequency.
@@ -497,9 +708,17 @@ longer needed as a result of the change.
 - Output protocol unchanged:
     [CHAT] <text>        — sends a message to the user
     [STATE]...[/STATE]   — JSON block merged into state.json
-- Reference Python helpers as: python3 tools/filename.py
-- Allowed in tools/*.py: os, json, re, datetime, requests
-- Forbidden: subprocess, eval, exec, socket, open() for writing files
+- Keep AGENT.md honest about which decisions YOU make at runtime vs. what the scripts
+  do (see <agent_philosophy>). Prefer reasoning over brittle hardcoded rules.
+- You may keep or grow a multi-file project under tools/ (tools/lib/..., tools/tests/...).
+  Reference helpers as: python3 tools/filename.py. Update tests under tools/tests/ to
+  match your changes and keep them passing — tests must IMPORT functions and call them
+  directly (see <testing_rules>), never invoke a script via subprocess.
+- All project files must stay under tools/ (including tools/requirements.txt).
+- Allowed in tools/ code: os, json, re, datetime, requests (plus stdlib unittest for tests).
+- Forbidden inside EVERY .py file (scripts AND tests): subprocess, eval, exec, socket,
+  open() for writing files. A test using subprocess.run([...]) WILL be rejected on save;
+  verify end-to-end by running the script yourself in the shell instead.
 - Read secrets via: os.environ.get('SECRET_NAME', '')
 
 Do NOT create or modify state.json — it reflects the agent's live persisted state
@@ -510,9 +729,11 @@ and is managed by the system. Use [STATE] blocks in AGENT.md output to update it
 TEST THE IMPLEMENTATION.
 
 Execute each Python script in a shell and confirm it produces real, non-empty output.
-If a script errors or returns None/empty, fix it and re-run. After 3 failed attempts,
-stop and emit [BLOCKED] (see below) explaining why it cannot work and what could be
-done instead.
+If you wrote unit tests under tools/tests/, run them too
+(e.g. python3 -m unittest discover -s tools/tests) and make them pass.
+If a script or test errors or returns None/empty, fix it and re-run. After 3 failed
+attempts, stop and emit [BLOCKED] (see below) explaining why it cannot work and what
+could be done instead.
 
 SECRETS: Read all secrets via os.environ.get('SECRET_NAME', '').
 If COMPOSIO_API_KEY is present in the environment, make REAL API calls — produce REAL
@@ -578,6 +799,9 @@ type CoderPromptParams struct {
 // available skills, and the output protocol specification.
 func BuildCoderPrompt(p CoderPromptParams) string {
 	var sb strings.Builder
+
+	sb.WriteString(agentPhilosophyBlock())
+	sb.WriteString(shellSafetyBlock())
 
 	sb.WriteString("<agent_instructions>\n")
 	sb.WriteString(p.AgentMD)
@@ -659,6 +883,11 @@ Invokes another agent synchronously and waits for its result before continuing.
 - Secrets are injected as environment variables. Access them via your language's env API (e.g. os.environ.get('KEY') in Python, process.env.KEY in Node). Never hardcode credential values.
 - Use [STATE] blocks for your structured state (state.json is machine-merged — do not hand-edit it). You MAY additionally write durable markdown notes inside your own directory (see <knowledge_base>), but never outside it.
 - Do not set up or modify cron jobs or external schedulers — this subprocess is invoked by the built-in scheduler.
+- Run your helper scripts under tools/ via the shell to do the repetitive fetching/processing, then YOU make the judgment calls on the results (see <agent_philosophy>) — do not reimplement deterministic logic inline, and do not blindly trust a hardcoded rule where reasoning is needed.
+- Use values EXACTLY as your scripts return them: parse their JSON stdout and copy the value through. Never retype, round, or reformat a number by hand into a message, draft, or [STATE] — the number the user sees MUST be the number your script produced. When a value flows into another script, follow <shell_safety> (pass plain numbers / a JSON file, never a "$"-string on the command line).
+- Sanity-check before acting: a script can succeed yet return a wrong/empty/placeholder value. If a value is implausible (e.g. a price far outside any sane range, an empty list where you expected data), do NOT act on it — report the anomaly in [CHAT] instead.
+- Side-effects (create draft, send, post): check your state first so you don't duplicate one you already did, and confirm the result (e.g. a returned id / success) before reporting it as done.
+- Never print or echo a secret's value (in [CHAT], state, or logs).
 - You MUST emit at least one [CHAT] line with the actual result so the user receives output.
 </constraints>
 `)

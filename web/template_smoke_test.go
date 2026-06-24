@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"testing"
+	"time"
 
 	"github.com/ilijad1/simple-agents/internal/db"
 )
@@ -59,6 +60,48 @@ func TestSettingsTemplateRenders(t *testing.T) {
 		}
 		if buf.Len() == 0 {
 			t.Fatalf("tone=%q: rendered empty output", tone)
+		}
+	}
+}
+
+// TestAgentTemplatesRenderWithRunning exercises the agents list and detail templates
+// in both the idle and "running" states, so an execute-time reference to the new
+// .Running field / index $.Running .ID can't silently break.
+func TestAgentTemplatesRenderWithRunning(t *testing.T) {
+	tmpl, err := parseTemplates("templates")
+	if err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+	user := &db.User{Username: "ilija", Role: "user"}
+	agent := &db.Agent{ID: "a1", Name: "Payroll Finder", Description: "finds payroll emails", Active: true, CreatedAt: time.Now()}
+
+	// (Running, LiveRun): idle, scheduled-only (badge but no SSE), live manual run.
+	cases := []struct{ running, live bool }{{false, false}, {true, false}, {true, true}}
+	for _, tc := range cases {
+		// List page.
+		listData := &agentsPageData{
+			pageData: &pageData{Title: "My Agents", User: user},
+			Agents:   []*db.Agent{agent},
+			Running:  map[string]bool{"a1": tc.running},
+		}
+		var buf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&buf, "dashboard/agents.html", listData); err != nil {
+			t.Fatalf("running=%v: agents.html execute: %v", tc.running, err)
+		}
+
+		// Detail page.
+		detailData := &agentDetailData{
+			pageData: &pageData{Title: "Agent", User: user},
+			Agent:    agent,
+			Running:  tc.running,
+			LiveRun:  tc.live,
+		}
+		buf.Reset()
+		if err := tmpl.ExecuteTemplate(&buf, "dashboard/agent_detail.html", detailData); err != nil {
+			t.Fatalf("running=%v live=%v: agent_detail.html execute: %v", tc.running, tc.live, err)
+		}
+		if buf.Len() == 0 {
+			t.Fatalf("running=%v live=%v: agent_detail.html rendered empty", tc.running, tc.live)
 		}
 	}
 }

@@ -419,15 +419,20 @@ func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
 	for rows.Next() {
 		var r AgentRun
 		var exitCode sql.NullInt64
+		var stdout, stderr sql.NullString
 		var startedAt string
 		var finishedAt sql.NullString
-		if err := rows.Scan(&r.ID, &r.AgentID, &r.UserID, &r.Trigger, &exitCode, &r.Stdout, &r.Stderr, &startedAt, &finishedAt); err != nil {
+		// stdout/stderr are NULL until FinishAgentRun runs; an in-progress (async)
+		// run row is listed on the detail page, so scan through NullString.
+		if err := rows.Scan(&r.ID, &r.AgentID, &r.UserID, &r.Trigger, &exitCode, &stdout, &stderr, &startedAt, &finishedAt); err != nil {
 			return nil, err
 		}
 		if exitCode.Valid {
 			v := int(exitCode.Int64)
 			r.ExitCode = &v
 		}
+		r.Stdout = stdout.String
+		r.Stderr = stderr.String
 		r.StartedAt = scanTime(startedAt)
 		if finishedAt.Valid {
 			t := scanTime(finishedAt.String)
@@ -436,6 +441,41 @@ func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
 		runs = append(runs, &r)
 	}
 	return runs, rows.Err()
+}
+
+// GetUnfinishedAgentRun returns the most recent run for an agent that has not yet
+// finished (finished_at IS NULL), or (nil, nil) if there is none. Used to show a
+// durable "Running…" badge that survives a page reload (the in-memory run tracker
+// drives the live SSE stream; this DB row drives the badge).
+func (d *DB) GetUnfinishedAgentRun(agentID string) (*AgentRun, error) {
+	row := d.QueryRow(`SELECT id,agent_id,user_id,trigger,started_at
+		FROM agent_runs WHERE agent_id=? AND finished_at IS NULL
+		ORDER BY started_at DESC LIMIT 1`, agentID)
+	var r AgentRun
+	var startedAt string
+	if err := row.Scan(&r.ID, &r.AgentID, &r.UserID, &r.Trigger, &startedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	r.StartedAt = scanTime(startedAt)
+	return &r, nil
+}
+
+// ReconcileStaleRuns marks every run still flagged in-progress (finished_at IS NULL)
+// as finished with exit code -1. Called once on server startup: a crash or shutdown
+// mid-run otherwise leaves the row open forever, showing a permanently stuck
+// "Running…" badge. Returns the number of rows reconciled.
+func (d *DB) ReconcileStaleRuns() (int64, error) {
+	res, err := d.Exec(`UPDATE agent_runs
+		SET finished_at=datetime('now'), exit_code=-1,
+		    stderr=CASE WHEN stderr IS NULL OR stderr='' THEN 'run interrupted by server restart' ELSE stderr END
+		WHERE finished_at IS NULL`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // ── Agent schedules ────────────────────────────────────────────────────────
@@ -909,15 +949,20 @@ func (d *DB) RecentAgentRuns(userID string, limit int) ([]*AgentRun, error) {
 	for rows.Next() {
 		var r AgentRun
 		var exitCode sql.NullInt64
+		var stdout, stderr sql.NullString
 		var startedAt string
 		var finishedAt sql.NullString
-		if err := rows.Scan(&r.ID, &r.AgentID, &r.UserID, &r.Trigger, &exitCode, &r.Stdout, &r.Stderr, &startedAt, &finishedAt); err != nil {
+		// stdout/stderr are NULL until FinishAgentRun runs; an in-progress (async)
+		// run row is listed on the detail page, so scan through NullString.
+		if err := rows.Scan(&r.ID, &r.AgentID, &r.UserID, &r.Trigger, &exitCode, &stdout, &stderr, &startedAt, &finishedAt); err != nil {
 			return nil, err
 		}
 		if exitCode.Valid {
 			v := int(exitCode.Int64)
 			r.ExitCode = &v
 		}
+		r.Stdout = stdout.String
+		r.Stderr = stderr.String
 		r.StartedAt = scanTime(startedAt)
 		if finishedAt.Valid {
 			t := scanTime(finishedAt.String)

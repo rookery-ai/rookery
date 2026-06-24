@@ -80,7 +80,7 @@ func TestLoadAgentForEdit_ReconcilesScheduleFromDB(t *testing.T) {
 	}
 
 	flow := &Flow{designer: NewDesigner(database, agentsDir), db: database}
-	_, reconciled, err := flow.loadAgentForEdit(userID, agentID)
+	_, reconciled, _, err := flow.loadAgentForEdit(userID, agentID)
 	if err != nil {
 		t.Fatalf("loadAgentForEdit: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestLoadAgentForEdit_NoScheduleReconcilesToNone(t *testing.T) {
 	// No schedule row created — agent is on-demand only.
 
 	flow := &Flow{designer: NewDesigner(database, agentsDir), db: database}
-	_, reconciled, err := flow.loadAgentForEdit(userID, agentID)
+	_, reconciled, _, err := flow.loadAgentForEdit(userID, agentID)
 	if err != nil {
 		t.Fatalf("loadAgentForEdit: %v", err)
 	}

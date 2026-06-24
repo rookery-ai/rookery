@@ -13,6 +13,9 @@
     <h1 class="text-xl font-bold">{{.Agent.Name}}</h1>
     {{if .Agent.Active}}<span class="badge badge-success badge-sm">Active</span>
     {{else}}<span class="badge badge-ghost badge-sm">Inactive</span>{{end}}
+    <span id="running-badge" class="badge badge-info badge-sm gap-1 {{if not .Running}}hidden{{end}}">
+      <span class="loading loading-spinner loading-xs"></span> Running
+    </span>
   </div>
 
   {{if .MissingSecrets}}
@@ -25,6 +28,18 @@
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <!-- Main content -->
     <div class="lg:col-span-2 space-y-5">
+
+      <!-- Live run progress (shown while a manual run is in flight) -->
+      <div id="run-progress-card" class="card bg-base-100 shadow-sm border border-info/40 {{if not .Running}}hidden{{end}}">
+        <div class="card-body p-5">
+          <h2 class="font-semibold text-sm text-info uppercase tracking-wide mb-3 flex items-center gap-2">
+            <span id="run-progress-spinner" class="loading loading-spinner loading-xs"></span>
+            <span id="run-progress-title">Run in progress…</span>
+          </h2>
+          <pre id="run-progress-output" class="text-xs font-mono bg-base-200 rounded p-3 max-h-64 overflow-auto whitespace-pre-wrap text-base-content/80">Waiting for output…</pre>
+          <p class="text-xs text-base-content/40 mt-2">This run keeps going even if you leave the page. The result is also sent to your chat.</p>
+        </div>
+      </div>
 
       <!-- Description -->
       <div class="card bg-base-100 shadow-sm border border-base-300">
@@ -137,9 +152,13 @@
           <h2 class="font-semibold text-sm mb-3">Actions</h2>
           <div class="space-y-2">
             <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/run">
-              <button type="submit" class="btn btn-primary w-full gap-2">
+              <button type="submit" id="run-now-btn" class="btn btn-primary w-full gap-2" {{if .Running}}disabled{{end}}>
+                {{if .Running}}
+                <span class="loading loading-spinner loading-xs"></span> Running…
+                {{else}}
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                 Run Now
+                {{end}}
               </button>
             </form>
             <a href="/dashboard/agents/{{.Agent.ID}}/edit" class="btn btn-outline w-full btn-sm gap-2">
@@ -268,6 +287,57 @@
 function setCron(v) {
   document.getElementById('cron-input').value = v;
 }
+
+// Run progress UI. Two cases:
+//   LiveRun — a manual run is in flight ON THIS SERVER, so /run/progress has a
+//             producer: stream its [CHAT] output over SSE. The run executes on a
+//             detached server context, so closing this page does NOT stop it.
+//   Running (only) — a run is in flight per the DB but not streamable here (e.g. a
+//             scheduled run): show the badge/panel and slow-poll by reloading until
+//             it finishes. Never open the SSE (it would 404 → reload loop).
+(function () {
+  var liveRun = {{if .LiveRun}}true{{else}}false{{end}};
+  var running = {{if .Running}}true{{else}}false{{end}};
+
+  var card = document.getElementById('run-progress-card');
+  var out = document.getElementById('run-progress-output');
+  var title = document.getElementById('run-progress-title');
+  var spinner = document.getElementById('run-progress-spinner');
+
+  if (liveRun) {
+    if (card) card.classList.remove('hidden');
+    var lines = [];
+    var src = new EventSource('/dashboard/agents/{{.Agent.ID}}/run/progress');
+    var finished = false;
+
+    src.onmessage = function (e) {
+      if (e.data === '') return;
+      lines.push(e.data);
+      if (out) out.textContent = lines.join('\n');
+    };
+
+    function finish(label) {
+      if (finished) return;
+      finished = true;
+      if (title) title.textContent = label;
+      if (spinner) spinner.classList.add('hidden');
+      try { src.close(); } catch (_) {}
+      // Reload so the completed run shows in Run History and Run Now re-enables.
+      setTimeout(function () { window.location.reload(); }, 1500);
+    }
+
+    src.addEventListener('done', function () { finish('Run complete'); });
+    src.onerror = function () { finish('Run finished'); }; // stream ended / dropped
+    return;
+  }
+
+  if (running) {
+    // A scheduled (or other-server) run is in flight; we can't stream it here.
+    if (card) card.classList.remove('hidden');
+    if (out) out.textContent = 'A run is in progress (e.g. on schedule). This page will refresh when it finishes; the result is also sent to your chat.';
+    setTimeout(function () { window.location.reload(); }, 8000);
+  }
+})();
 </script>
 
 {{template "foot" .}}

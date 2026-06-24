@@ -66,7 +66,7 @@ func (d *AgentDesigner) writeAgentContent(userID, agentID, name string, agentMD 
 		return fmt.Errorf("guardrails: %w", err)
 	}
 	for filename, code := range tools {
-		if err := RunFullGuardrails(code, ""); err != nil {
+		if err := RunToolGuardrails(filename, code); err != nil {
 			return fmt.Errorf("guardrails (%s): %w", filename, err)
 		}
 	}
@@ -94,11 +94,10 @@ func (d *AgentDesigner) writeAgentContent(userID, agentID, name string, agentMD 
 		return fmt.Errorf("write AGENT.md: %w", err)
 	}
 
-	for filename, code := range tools {
-		dest := filepath.Join(toolsDir, filepath.Base(filename))
-		if err := os.WriteFile(dest, []byte(code), 0o640); err != nil {
-			return fmt.Errorf("write tool %s: %w", filename, err)
-		}
+	// Write the full project tree (nested dirs, tests, requirements.txt, …). The
+	// map keys are paths relative to tools/; safety is enforced in WriteToolsTree.
+	if err := WriteToolsTree(toolsDir, tools); err != nil {
+		return err
 	}
 
 	// Write state.json only if it doesn't exist yet — never clobber a running agent's

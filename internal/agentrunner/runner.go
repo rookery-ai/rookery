@@ -39,7 +39,12 @@ type RunInput struct {
 	Trigger    string // "chat", "cron", "manual"
 	MasterPw   string // user's master password for secret decryption
 	SendOutput SendFunc
-	depth      int            // internal: recursion depth (0 = top-level)
+	// OnProgress, if set, is called once per coder turn with that turn's freshly
+	// parsed [CHAT] lines as they arrive — enabling live streaming (e.g. SSE) while
+	// the run is still in flight. SendOutput is still called once at the end with the
+	// full joined output for durable delivery (Telegram, run history). Optional.
+	OnProgress SendFunc
+	depth      int             // internal: recursion depth (0 = top-level)
 	visited    map[string]bool // internal: cycle detection for agent-to-agent calls
 }
 
@@ -56,7 +61,7 @@ type Runner struct {
 	homesDir  string // per-user home dirs root (for per-user sandbox binding)
 	dataDir   string // root data dir (blacklisted inside sandbox)
 	coderSvc  *coder.Coder
-	skillsDir string // vaults base: <data>/vaults (skills at <base>/<userID>/skills/<name>)
+	skillsDir string           // vaults base: <data>/vaults (skills at <base>/<userID>/skills/<name>)
 	memStore  memoryStore      // optional; nil = no memory injected
 	reflector *vault.Reflector // optional; mirrors runs into the user's vault
 	guard     *vault.Guard     // optional; protects user content from agent writes
@@ -144,14 +149,9 @@ func (r *Runner) TestRunFromContent(ctx context.Context, userID, agentMD string,
 		return "", fmt.Errorf("write state.json: %w", err)
 	}
 	if len(tools) > 0 {
-		if err := os.MkdirAll(filepath.Join(tmpDir, "tools"), 0o750); err != nil {
-			return "", fmt.Errorf("create tools dir: %w", err)
-		}
-		for filename, code := range tools {
-			dest := filepath.Join(tmpDir, "tools", filepath.Base(filename))
-			if err := os.WriteFile(dest, []byte(code), 0o640); err != nil {
-				return "", fmt.Errorf("write tool %s: %w", filename, err)
-			}
+		// Reproduce the full nested project tree (helper modules, tests, …).
+		if err := agentdesigner.WriteToolsTree(filepath.Join(tmpDir, "tools"), tools); err != nil {
+			return "", err
 		}
 	}
 
@@ -359,6 +359,12 @@ func (r *Runner) runCoderTurns(
 		parsed := parseCoderOutput(result.Text)
 		rctx.chatLines = append(rctx.chatLines, parsed.chatLines...)
 		rctx.warnings = append(rctx.warnings, parsed.warnings...)
+
+		// Stream this turn's chat lines live (SSE) while the run is still going.
+		// Final durable delivery (Telegram/history) still happens once at the end.
+		if input.OnProgress != nil && len(parsed.chatLines) > 0 {
+			input.OnProgress(strings.Join(parsed.chatLines, "\n"))
+		}
 
 		// Merge state updates.
 		if len(parsed.stateUpdates) > 0 {
@@ -621,4 +627,3 @@ func (r *Runner) loadDeclaredSkillContent(userID string, skillNames []string) (m
 	}
 	return result, nil
 }
-

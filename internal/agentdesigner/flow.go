@@ -75,6 +75,11 @@ type DesignSession struct {
 	// generation. Empty for create sessions.
 	ExistingAgentMD string
 
+	// ExistingTools holds the live agent's tool scripts (relpath→content) as of
+	// session start, so the edit conversation can reason about the actual code.
+	// Empty for create sessions.
+	ExistingTools map[string]string
+
 	// Set after generation; cleared on finalize or when user requests changes.
 	PendingAgentMD string
 	PendingTools   map[string]string
@@ -233,7 +238,7 @@ func (f *Flow) StartEdit(userID, agentID string) (string, error) {
 	}
 	f.mu.Unlock()
 
-	agentName, reconciledMD, err := f.loadAgentForEdit(userID, agentID)
+	agentName, reconciledMD, tools, err := f.loadAgentForEdit(userID, agentID)
 	if err != nil {
 		return "", err
 	}
@@ -257,6 +262,7 @@ func (f *Flow) StartEdit(userID, agentID string) (string, error) {
 		CreatedAt:          time.Now(),
 		IsEdit:             true,
 		ExistingAgentMD:    reconciledMD,
+		ExistingTools:      tools,
 	}
 	f.mu.Unlock()
 
@@ -277,7 +283,7 @@ func (f *Flow) StartEditDesign(ctx context.Context, userID, agentID, firstMessag
 	}
 	f.mu.Unlock()
 
-	agentName, reconciledMD, err := f.loadAgentForEdit(userID, agentID)
+	agentName, reconciledMD, tools, err := f.loadAgentForEdit(userID, agentID)
 	if err != nil {
 		return "", err
 	}
@@ -301,6 +307,7 @@ func (f *Flow) StartEditDesign(ctx context.Context, userID, agentID, firstMessag
 		CreatedAt:          time.Now(),
 		IsEdit:             true,
 		ExistingAgentMD:    reconciledMD,
+		ExistingTools:      tools,
 	}
 	f.sessions[userID] = sess
 	f.mu.Unlock()
@@ -314,19 +321,19 @@ func (f *Flow) StartEditDesign(ctx context.Context, userID, agentID, firstMessag
 // AGENT.md, so the on-disk line can be stale; reconciling here makes AGENT.md the
 // single source of truth for the rest of the edit (both what the coder sees and what
 // finalize compares against).
-func (f *Flow) loadAgentForEdit(userID, agentID string) (agentName, reconciledMD string, err error) {
+func (f *Flow) loadAgentForEdit(userID, agentID string) (agentName, reconciledMD string, tools map[string]string, err error) {
 	if f.db == nil {
-		return "", "", fmt.Errorf("no database configured")
+		return "", "", nil, fmt.Errorf("no database configured")
 	}
 
 	agent, err := f.db.GetAgent(agentID)
 	if err != nil {
-		return "", "", fmt.Errorf("agent not found: %w", err)
+		return "", "", nil, fmt.Errorf("agent not found: %w", err)
 	}
 
 	raw, err := os.ReadFile(AgentDescPath(f.designer.agentsDir, userID, agentID))
 	if err != nil {
-		return "", "", fmt.Errorf("read AGENT.md: %w", err)
+		return "", "", nil, fmt.Errorf("read AGENT.md: %w", err)
 	}
 	agentMD := strings.TrimSpace(string(raw))
 
@@ -342,7 +349,12 @@ func (f *Flow) loadAgentForEdit(userID, agentID string) (agentName, reconciledMD
 		agentMD = scheduleLine + "\n" + agentMD
 	}
 
-	return agent.Name, agentMD, nil
+	// Load the existing tool scripts so the edit *conversation* can see the actual
+	// code (not just AGENT.md). Without this the coder has no file access during Q&A
+	// and asks the user where the scripts are. Best-effort: missing tools/ is fine.
+	tools, _ = readToolsFromDisk(AgentDir(f.designer.agentsDir, userID, agentID))
+
+	return agent.Name, agentMD, tools, nil
 }
 
 // Step processes one message and advances the FSM.
@@ -536,7 +548,7 @@ func (f *Flow) ResumeDraft(ctx context.Context, userID string) (string, error) {
 	}
 
 	if draft.IsEdit {
-		agentName, reconciledMD, err := f.loadAgentForEdit(userID, draft.AgentID)
+		agentName, reconciledMD, tools, err := f.loadAgentForEdit(userID, draft.AgentID)
 		if err != nil {
 			// The agent being edited is gone — drop the draft and any shell session.
 			_ = f.DismissDraft(userID)
@@ -547,6 +559,7 @@ func (f *Flow) ResumeDraft(ctx context.Context, userID string) (string, error) {
 		}
 		sess.AgentName = agentName
 		sess.ExistingAgentMD = reconciledMD
+		sess.ExistingTools = tools
 	}
 
 	if draft.State == "verifying" {
@@ -702,6 +715,7 @@ func (f *Flow) callCoder(ctx context.Context, userID, userMessage string) (strin
 		AgentName:          sess.AgentName,
 		IsEdit:             sess.IsEdit,
 		ExistingAgentMD:    sess.ExistingAgentMD,
+		ExistingTools:      sess.ExistingTools,
 		ConnectedPlatforms: sess.ConnectedPlatforms,
 		Skills:             sess.Skills,
 		UserProfile:        sess.UserProfile,
@@ -914,7 +928,7 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 		return fmt.Sprintf("Agent failed safety checks: %s\n\nPlease rephrase.", err.Error()), false, "", nil
 	}
 	for filename, code := range tools {
-		if err := RunFullGuardrails(code, ""); err != nil {
+		if err := RunToolGuardrails(filename, code); err != nil {
 			cleanupOnFail()
 			closeProgress()
 			// The generated code didn't meet the contract (e.g. wrong Composio API
@@ -958,9 +972,10 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 
 // copyAgentWorkspace creates a fresh staging directory containing the editable
 // surface of a live agent: AGENT.md (the reconciled version, not the raw on-disk
-// one), state.json, and tools/*.py. Used so an edit's test generation never touches
-// the live agent. liveDir's logs/ and agent.json are intentionally not copied —
-// the coder doesn't need them to make or test changes.
+// one), state.json, and the full tools/ project tree (nested modules, tests,
+// requirements.txt, …). Used so an edit's test generation never touches the live
+// agent. liveDir's logs/ and agent.json are intentionally not copied — the coder
+// doesn't need them to make or test changes.
 func copyAgentWorkspace(liveDir, stagingDir, reconciledAgentMD string) error {
 	if err := os.RemoveAll(stagingDir); err != nil {
 		return err
@@ -981,26 +996,13 @@ func copyAgentWorkspace(liveDir, stagingDir, reconciledAgentMD string) error {
 		return err
 	}
 
-	entries, err := os.ReadDir(filepath.Join(liveDir, "tools"))
+	// Copy the full project tree (nested dirs, tests, requirements.txt, …) so the
+	// staging copy mirrors the live agent's layout exactly.
+	tools, err := ReadToolsTree(filepath.Join(liveDir, "tools"))
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
 		return err
 	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".py") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(liveDir, "tools", e.Name()))
-		if err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join(stagingDir, "tools", e.Name()), data, 0o640); err != nil {
-			return err
-		}
-	}
-	return nil
+	return WriteToolsTree(filepath.Join(stagingDir, "tools"), tools)
 }
 
 // parseTestOutput extracts content between [TEST_OUTPUT] and [/TEST_OUTPUT].
@@ -1032,29 +1034,11 @@ func parseBlockedOutput(text string) string {
 	return strings.TrimSpace(text[start : start+end])
 }
 
-// readToolsFromDisk reads all .py files from agentDir/tools/ and returns them
-// as a filename→content map.
+// readToolsFromDisk reads the full project tree under agentDir/tools/ (nested
+// dirs, tests, requirements.txt and other non-.py files) and returns it as a
+// relpath→content map. See ReadToolsTree for the include/exclude and size rules.
 func readToolsFromDisk(agentDir string) (map[string]string, error) {
-	toolsDir := filepath.Join(agentDir, "tools")
-	entries, err := os.ReadDir(toolsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]string{}, nil
-		}
-		return nil, err
-	}
-	result := make(map[string]string, len(entries))
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".py") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(toolsDir, e.Name()))
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", e.Name(), err)
-		}
-		result[e.Name()] = string(data)
-	}
-	return result, nil
+	return ReadToolsTree(filepath.Join(agentDir, "tools"))
 }
 
 // finalizeAgent saves the pending agent content and cleans up the session.

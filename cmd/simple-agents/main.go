@@ -114,6 +114,15 @@ func serveCmd() *cli.Command {
 				slog.Warn("vault migration", "err", err)
 			}
 
+			// Any run still flagged in-progress is a leftover from a crash/shutdown
+			// mid-run — close it out so it can't show a permanently stuck "Running…"
+			// badge (runs now execute on a detached context that outlives the request).
+			if n, err := database.ReconcileStaleRuns(); err != nil {
+				slog.Warn("reconcile stale runs", "err", err)
+			} else if n > 0 {
+				slog.Info("reconciled stale agent runs", "count", n)
+			}
+
 			designFlow := agentdesigner.NewFlow(func(_ string) *coder.Coder { return coderSvc }, designer).
 				WithDB(database).
 				WithMemory(memStore).

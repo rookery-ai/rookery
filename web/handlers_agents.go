@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
-	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
@@ -19,8 +18,9 @@ import (
 
 type agentsPageData struct {
 	*pageData
-	Agents []*db.Agent
-	Draft  *db.AgentDraft // unfinished design draft, or nil
+	Agents  []*db.Agent
+	Running map[string]bool // agentID → true if a run is currently in flight
+	Draft   *db.AgentDraft  // unfinished design draft, or nil
 }
 
 type agentDetailData struct {
@@ -37,6 +37,8 @@ type agentDetailData struct {
 	AllSkills      []*db.Skill
 	MissingSecrets []string
 	HasPlatform    bool // user has at least one linked chat platform
+	Running        bool // a run is in flight (manual or scheduled) — drives the badge
+	LiveRun        bool // a manual run is in flight on THIS server — gates the SSE stream
 }
 
 type newAgentPageData struct {
@@ -48,6 +50,12 @@ type newAgentPageData struct {
 func (s *Server) showAgents(c echo.Context) error {
 	u := c.Get("user").(*db.User)
 	agents, _ := s.db.ListAgents(u.ID)
+	running := make(map[string]bool, len(agents))
+	for _, a := range agents {
+		if s.isAgentRunning(a.ID) {
+			running[a.ID] = true
+		}
+	}
 	var draft *db.AgentDraft
 	if s.designFlow != nil {
 		draft = s.designFlow.HasDraft(u.ID)
@@ -55,6 +63,7 @@ func (s *Server) showAgents(c echo.Context) error {
 	return c.Render(http.StatusOK, "dashboard/agents.html", &agentsPageData{
 		pageData: s.page(c, "My Agents"),
 		Agents:   agents,
+		Running:  running,
 		Draft:    draft,
 	})
 }
@@ -365,6 +374,8 @@ func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, userID strin
 		Runs:        runs,
 		AgentSkills: agentSkills,
 		AllSkills:   allSkills,
+		Running:     s.isAgentRunning(agent.ID),
+		LiveRun:     s.isLiveRun(agent.ID),
 	}
 
 	dir := s.agentsDir()
@@ -457,37 +468,34 @@ func (s *Server) handleRunAgent(c echo.Context) error {
 
 	if s.runner == nil {
 		p.Error = "Agent runner is not configured"
-	} else {
-		// Decrypt the user's stored master password the same way the scheduler
-		// does for cron runs, so manual "Run Now" gets secret injection too.
-		// There is no password-entry field on this form — agent execution
-		// (unlike viewing secret values) doesn't require live re-entry.
-		var masterPw string
-		if u.EncryptedMasterPassword != "" {
-			if pw, err := secrets.DecryptMasterPassword(u.EncryptedMasterPassword, s.systemKey); err == nil {
-				masterPw = pw
-			}
-		}
-		var outputLines []string
-		send := func(msg string) { outputLines = append(outputLines, msg) }
+		return s.renderAgentDetail(c, agent, u.ID, p)
+	}
 
-		runErr := s.runner.Run(c.Request().Context(), agentrunner.RunInput{
-			AgentID:    agent.ID,
-			UserID:     u.ID,
-			Trigger:    "manual",
-			MasterPw:   masterPw,
-			SendOutput: send,
-		})
-		if runErr != nil {
-			p.Error = "Run failed: " + runErr.Error()
-		} else if len(outputLines) > 0 {
-			p.Success = strings.Join(outputLines, "\n")
-		} else {
-			p.Success = "Agent completed with no output."
+	// Decrypt the user's stored master password the same way the scheduler does for
+	// cron runs, so manual "Run Now" gets secret injection too. There is no
+	// password-entry field on this form — agent execution (unlike viewing secret
+	// values) doesn't require live re-entry.
+	var masterPw string
+	if u.EncryptedMasterPassword != "" {
+		if pw, err := secrets.DecryptMasterPassword(u.EncryptedMasterPassword, s.systemKey); err == nil {
+			masterPw = pw
 		}
 	}
 
-	return s.renderAgentDetail(c, agent, u.ID, p)
+	// Fire the run in the background on a detached context so it survives the user
+	// navigating away (the old synchronous path was tied to the request context and
+	// got SIGKILLed on navigation, surfacing as "exit -1"). Progress streams to the
+	// detail page over SSE; the final result is also delivered to the user's chat.
+	//
+	// MUST redirect (303 See Other) rather than render the page in response to the
+	// POST. Rendering left the browser on a POST-loaded page; the detail-page JS
+	// reloads when the SSE run completes, and on a POST-loaded page `reload()` replays
+	// the POST — firing "Run Now" again in an infinite loop, one run per ~15-30s,
+	// burning tokens. Post/Redirect/Get breaks the loop: the browser lands on a
+	// GET-loaded page so reload is a safe GET. The running badge + live-progress
+	// panel convey "started"/"already running" visually, so no flash message is lost.
+	s.startManualRun(u.ID, agent, masterPw)
+	return c.Redirect(http.StatusSeeOther, "/dashboard/agents/"+id)
 }
 
 func (s *Server) handleSaveSchedule(c echo.Context) error {
