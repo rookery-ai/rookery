@@ -74,12 +74,12 @@
           {{if .IsDir}}
           <a href="/dashboard/kb?path={{.Path}}" class="flex items-center gap-3 flex-1 min-w-0">
             <span class="text-base-content/50">📁</span>
-            <span class="text-sm font-medium truncate">{{.Name}}</span>
+            <span class="text-sm font-medium truncate">{{if .DisplayName}}{{.DisplayName}}{{else}}{{.Name}}{{end}}</span>
           </a>
           {{else}}
           <a href="/dashboard/kb/view?path={{.Path}}" class="flex items-center gap-3 flex-1 min-w-0">
             <span class="text-base-content/40">📄</span>
-            <span class="text-sm truncate">{{.Name}}</span>
+            <span class="text-sm truncate">{{if .DisplayName}}{{.DisplayName}}{{else}}{{.Name}}{{end}}</span>
           </a>
           {{end}}
           <form method="POST" action="/dashboard/kb/delete" class="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">

@@ -25,6 +25,7 @@ type Service struct {
 	db        *db.DB
 	sender    Sender
 	reflector *vault.Reflector // optional; mirrors reminders into the user's vault
+	searcher  vault.Searcher   // optional; enriches fired reminders with related KB notes
 }
 
 // New creates a Service.
@@ -35,6 +36,12 @@ func New(database *db.DB, sender Sender) *Service {
 // WithReflector enables mirroring fired reminders into each user's vault.
 func (s *Service) WithReflector(r *vault.Reflector) *Service {
 	s.reflector = r
+	return s
+}
+
+// WithSearcher enables enriching fired reminder messages with related vault notes.
+func (s *Service) WithSearcher(sr vault.Searcher) *Service {
+	s.searcher = sr
 	return s
 }
 
@@ -59,7 +66,9 @@ func (s *Service) Run(ctx context.Context) {
 }
 
 func (s *Service) tick() {
-	reminders, err := s.db.ListDueReminders(time.Now())
+	ctx := context.Background()
+	now := time.Now()
+	reminders, err := s.db.ListDueReminders(now)
 	if err != nil {
 		slog.Error("reminder: list due", "err", err)
 		return
@@ -73,18 +82,43 @@ func (s *Service) tick() {
 				"reminder_id", r.ID, "user_id", r.UserID)
 			continue
 		}
-		if err := s.sender.SendToUser(r.UserID, fmt.Sprintf("Reminder: %s", r.Message)); err != nil {
+
+		msg := s.buildReminderMessage(ctx, r, now)
+		if err := s.sender.SendToUser(r.UserID, msg); err != nil {
 			slog.Error("reminder: send failed", "reminder_id", r.ID, "user_id", r.UserID, "err", err)
 			continue
 		}
 		if err := s.db.MarkReminderSent(r.ID); err != nil {
 			slog.Error("reminder: mark sent failed", "reminder_id", r.ID, "err", err)
 		}
-		if err := s.reflector.ReflectReminder(r.UserID, vault.ReminderNote{
-			ID: r.ID, Message: r.Message, RemindAt: r.RemindAt,
-			Recurrence: r.Recurrence, Sent: true, CreatedAt: r.CreatedAt,
-		}); err != nil {
-			slog.Warn("reminder: reflect to vault failed", "reminder_id", r.ID, "err", err)
-		}
 	}
+}
+
+// buildReminderMessage builds the outgoing reminder text, optionally enriching it
+// with related knowledge-base notes when a Searcher is configured.
+func (s *Service) buildReminderMessage(ctx context.Context, r *db.Reminder, now time.Time) string {
+	prefix := "⏰ Reminder"
+	if time.Since(r.RemindAt) > 2*time.Hour {
+		prefix = "⏰ Delayed reminder"
+	}
+	msg := fmt.Sprintf("%s: %s", prefix, r.Message)
+
+	if s.searcher == nil {
+		return msg
+	}
+
+	// Search the vault with the reminder text to surface related notes.
+	hits, err := s.searcher.Search(ctx, r.UserID, r.Message)
+	if err != nil || len(hits) == 0 {
+		return msg
+	}
+
+	msg += "\n\n📎 Related notes:"
+	for i, h := range hits {
+		if i >= 3 {
+			break
+		}
+		msg += fmt.Sprintf("\n• %s: %s", h.Path, h.Snippet)
+	}
+	return msg
 }

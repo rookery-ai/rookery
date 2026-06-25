@@ -50,7 +50,7 @@ Telegram adapter (per-user bot instance)
       → /secret → SecretStore
       → /remind → reminder.Service
       → /session → db.ChatSession (start/list/stop)
-      → /memory → memory.Store
+      → /memory → memory.Store (add/list/delete bullets in GENERAL.md)
       → plain text → one-off chat (coder.Coder)
 ```
 
@@ -67,528 +67,212 @@ Telegram adapter (per-user bot instance)
 | `internal/coder` | `Coder`: runs coder CLI subprocess with full per-user isolation; `CoderBackend` interface abstracts Claude vs. generic CLIs; `WithNoTools()` for text-only calls; `WithExtraEnv()` for secret injection |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects |
 | `internal/agentrunner` | Load agent → decrypt secrets into env via `WithExtraEnv` → coder subprocess → capture `[CHAT]` lines → send via GatewayManager; timestamped run logs; `RunInput.OnProgress` per-turn hook for live SSE streaming |
-| `internal/sandbox` | Self-contained Landlock filesystem confinement for coder subprocesses (Linux). `Spec`, `Supported()`, `Wrap()` (re-exec via the hidden `__sandbox-exec` helper), `Exec()` (applies Landlock + rlimits, then `execve`). No external dependency (no firejail/setuid/namespaces). See "Coder filesystem confinement (Landlock)" |
+| `internal/sandbox` | Self-contained Landlock filesystem confinement for coder subprocesses (Linux). `Spec`, `Supported()`, `Wrap()` (re-exec via the hidden `__sandbox-exec` helper), `Exec()` (applies Landlock + rlimits, then `execve`). No external dependency. |
 | `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users |
-| `internal/reminder` | Creates/lists/fires reminders; background polling goroutine |
+| `internal/reminder` | Creates/lists/fires reminders; background polling goroutine. Reminders live only in the DB and the reminders UI tab — they are NOT reflected to the vault. |
 | `internal/session` | `ChatSession` create/list/stop; 30-min idle auto-stop |
-| `internal/prompts` | Central home for all LLM prompt construction: `BuildDesignSystemPrompt`, `BuildImplementationPrompt`, `BuildEditImplementationPrompt`, `BuildCoderPrompt`, `BuildChildAgentFollowUpPrompt`, `BuildSkillMetaPrompt`. No inline prompt text exists outside this package. Shared single-source blocks injected into every phase: `agentPhilosophyBlock` (brain vs scripts), `testingRulesBlock`, `shellSafetyBlock`, `scriptRobustnessBlock`, `composioServicesBlock`. |
-| `internal/memory` | Per-user memory store; now writes one markdown note per entry under the vault (`memory/<id>.md`), with `ImportJSONL` migrating the legacy `memory.jsonl`. `ContextString()` formats entries for LLM injection; injected via `WithMemory()` on both `Flow` and `Runner` |
-| `internal/vault` | Per-user Obsidian-style knowledge base: `Vault` (paths + `Resolve` safety + file IO), `Reflector` (DB→markdown+sidecar), `LinkIndex` ([[wikilinks]]), `Searcher` (ripgrep), `Guard` (post-run write-scope enforcement), `MigrateLegacyLayout`. See "Per-user knowledge base (vault)" |
+| `internal/prompts` | Central home for all LLM prompt construction: `BuildDesignSystemPrompt`, `BuildImplementationPrompt`, `BuildEditImplementationPrompt`, `BuildCoderPrompt`, `BuildChildAgentFollowUpPrompt`, `BuildSkillMetaPrompt`. No inline prompt text exists outside this package. Shared single-source blocks: `agentPhilosophyBlock`, `testingRulesBlock`, `shellSafetyBlock`, `scriptRobustnessBlock`, `composioServicesBlock`. |
+| `internal/memory` | Per-user structured context store. Memory lives as named `.md` files in `memory/` (`USER.md`, `SOUL.md`, `GENERAL.md`, etc.) — editable via the KB browser. `ContextString()` reads all files, skips placeholder-only ones, and returns sectioned markdown for LLM injection. `Append/List/Delete` target GENERAL.md bullet lines (used by Telegram `/memory` command). `MigrateToStructuredFiles()` consolidates legacy UUID-keyed entries at startup. |
+| `internal/vault` | Per-user Obsidian-style knowledge base: `Vault` (paths + `Resolve` safety + file IO), `Reflector` (sessions→markdown+sidecar), `LinkIndex` ([[wikilinks]]), `Searcher` (ripgrep), `Guard` (post-run write-scope enforcement), `MigrateLegacyLayout`. |
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
-| `internal/profile` | Per-user personalization (name, email, location, timezone, tone, language, notes); stored in the generic `settings` table; `Load()`/`Save()`/`ContextString()` for LLM injection; `LoadLocation()` for timezone-aware reminder parsing; `IsComplete()`/`MarkComplete()` sentinel for setup wizard |
+| `internal/profile` | Per-user personalization (name, email, location, timezone, tone, language, notes); stored in the generic `settings` table; `Load()`/`Save()`/`ContextString()` for LLM injection; `LoadLocation()` for timezone-aware reminder parsing |
 | `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per user |
 | `web/` | Echo v4 web server; full user dashboard + admin UI |
 
 ### Per-user knowledge base (vault)
 
-Every user has one Obsidian-style vault — a single directory of interlinked
-markdown notes that is the knowledge + backup layer for everything they own.
-`internal/vault` owns all vault path/IO/safety logic. The SQLite DB remains the
-system-of-record; structured rows are *reflected* into the vault as markdown +
-JSON sidecars.
+Every user has one Obsidian-style vault — a single directory of interlinked markdown notes.
+`internal/vault` owns all vault path/IO/safety logic. The SQLite DB remains the system-of-record;
+chat sessions are *reflected* into the vault as markdown + JSON sidecars.
 
 ```
 <data_dir>/vaults/<userID>/
 ├── README.md                       # vault home note (scaffolded)
-├── notes/                          # user-authored notes/journals/plans/todos (user RW, agents RO)
-├── memory/<id>.md                  # memory entries (markdown, one per note; was memory.jsonl)
+├── notes/                          # user-authored notes/journals/plans/todos
+├── memory/
+│   ├── USER.md                     # user profile — name, location, role, background
+│   ├── SOUL.md                     # communication style and preferences
+│   ├── GENERAL.md                  # quick notes added via /memory Telegram command
+│   └── <any>.md                    # additional context files the user creates
 ├── skills/<name>/SKILL.md          # per-user skills
 ├── agents/<agentID>/               # an agent's OWN writable area
-│   ├── agent.json AGENT.md state.json
+│   ├── AGENT.md  agent.json  state.json
 │   ├── tools/*.py  notes/*.md
-│   └── logs/run_<ts>.md            # markdown run notes (reflected)
+│   └── logs/run_<ts>.md
 ├── sessions/<id>.md                # reflected chat transcripts
-├── reminders/<id>.md               # reflected reminders
-└── .kb/                            # internal: db-export/ JSON sidecars, links.json (hidden everywhere)
+└── .kb/                            # internal: db-export/ JSON sidecars, links.json (hidden)
 ```
 
-`claude-homes/<userID>/` stays OUTSIDE the vault (holds `.claude` credentials — must
-never be backed up). `internal/coder.safeID` keying is unchanged; vault/agent/
-memory/skill paths all key by raw `userID` (UUIDs), and these dirs nest under the
-vault root consistently.
+`claude-homes/<userID>/` stays OUTSIDE the vault (holds `.claude` credentials — never backed up).
+
+**Memory injection.** All `.md` files in `memory/` are automatically injected into every LLM
+context (design sessions, agent runs, one-off chat) via `memory.ContextString()`. Files whose
+body is only headings and HTML placeholder comments are silently skipped until the user fills
+them in. `EnsureScaffold` creates `USER.md` and `SOUL.md` with placeholder content on first visit.
 
 Key types in `internal/vault`:
 - **`Vault`** — `Root/AgentsDir/AgentDir/MemoryDir/SkillsDir`; **`Resolve(userID, rel)`** is the security primitive every read/write path uses (rejects `..`/absolute escapes); `WriteNote` (atomic), `Read/Delete/Rename/List/EnsureScaffold`. `List` hides dotfiles.
-- **`Reflector`** — `ReflectReminder/ReflectSession/ReflectAgentRun`: markdown note + `.kb/db-export/<table>/<id>.json` sidecar. Wired at the service layer (`internal/reminder` on fire, `internal/session` on idle-stop, `internal/agentrunner` per run). vault→{memory} only; no db dependency (methods take vault-local structs).
+- **`Reflector`** — `ReflectSession/ReflectAgentRun`: markdown note + `.kb/db-export/<table>/<id>.json` sidecar. Reminders are NOT reflected.
 - **`LinkIndex`** — `[[wikilink]]` parsing/resolution + `RenderHTMLLinks`; `Backlinks`.
-- **`Searcher`** — `ripgrepSearcher` (rg `--json`, pure-Go fallback); interface kept for future semantic search.
-- **`Guard`** — post-run write-scope enforcement (see below).
-- **`MigrateLegacyLayout()`** — idempotent startup migration of pre-vault `agents/`, `memory/` (jsonl→md), `skills/` into vaults; runs in `cmd/simple-agents/main.go`.
+- **`Searcher`** — `ripgrepSearcher` (rg `--json`, pure-Go fallback).
+- **`Guard`** — post-run write-scope enforcement. Protected region is everything EXCEPT `systemOwnedDirs` = {`.kb`, `agents`, `sessions`} — those are excluded so concurrent agent runs and background reflection goroutines are never mistaken for out-of-scope agent writes.
+- **`MigrateLegacyLayout()`** — idempotent startup migration of pre-vault `agents/`, `memory/` (jsonl→md), `skills/` into vaults.
 
-**Agent access model + guard.** An agent's run CWD is its own vault dir; the coder
-prompt (`prompts.BuildCoderPrompt`, `<knowledge_base>` block) tells it to READ
-anywhere under the vault root but WRITE only inside its own dir. Enforcement is
-detective: `runCoderAgent` calls `guard.Snapshot(userID)` before the run and
-`guard.Restore` after, reverting any create/modify/delete to the user's authored
-content and logging violations. The protected region is everything EXCEPT
-`systemOwnedDirs` = {`.kb`, `agents`, `sessions`, `reminders`} — those are excluded
-so concurrent agent runs and the background reflection goroutines (reminder/session
-pollers firing mid-run) are never mistaken for agent writes. Excluded dirs are all
-re-derivable from the DB.
-
-Path helpers in `internal/agentdesigner/manifest.go` now take the **vaults base**
-(`<data>/vaults`) and insert the per-user `agents` segment via `AgentDir(vaultsBase,
-userID, agentID)`:
-- `AgentDescPath` → `AGENT.md`, `AgentStatePath` → `state.json`, `AgentLogsDir` → `logs/`, `AgentLogPath` → timestamped `.md`
-
-Runner falls back to `CLAUDE.md` if `AGENT.md` is missing (legacy agent support).
-Backup/sync to GitHub/Drive/S3 is designed-for but not implemented: the vault is a
-self-contained unit and `config.BackupConfig` is the (inert) hook point.
+**Agent access model.** An agent's run CWD is its own vault dir; the coder prompt (`BuildCoderPrompt`, `<knowledge_base>` block) tells it to READ anywhere under the vault root but WRITE only inside its own dir. Guard enforces this detective-style (snapshot before, restore after, log violations).
 
 ### Unified conversational agent creation
 
-Agent creation uses a single `agentdesigner.Flow` FSM shared between the Telegram bot and the web UI. There is **no agent type** — every agent is the same structure.
+Agent creation uses a single `agentdesigner.Flow` FSM shared between Telegram and web. No agent types — every agent is the same structure.
 
-**FSM states:**
-- `StateDescribing` — Telegram only: waiting for description after `/agent create <name>`
-- `StateDesigning` — free-form Q&A with the coder until user says "approve"
-- `StateVerifying` — test run shown to user; waiting for confirmation or change requests
-- `StateDone`
+**FSM states:** `StateDescribing` (Telegram only) → `StateDesigning` → `StateVerifying` → `StateDone`
 
-**Web path:** `StartDesign(ctx, userID, agentName, firstMessage)` — creates session in `StateDesigning` directly, returns first coder response.
+**Approval triggers** (exact match): `"approve"`, `"go ahead"`, `"build it"`, `"create it"`, `"/approve"`
 
-**Telegram path:** `Start(userID, agentName)` → `StateDescribing` → `Step()` transitions to `StateDesigning`.
+**On approval:** `runGeneration()` calls the coder with full tools (`WithDir(agentDir).WithAllowedTools("Bash,Write,Edit,Read")`). Coder writes `AGENT.md` + `tools/*.py` to disk, runs scripts via Bash, fixes errors, outputs `[TEST_OUTPUT]...[/TEST_OUTPUT]`. Flow reads AGENT.md, runs guardrails, stores in `PendingAgentMD`/`PendingTools`, moves to `StateVerifying`. If `[TEST_OUTPUT]` is absent, user stays in `StateDesigning`.
 
-**Step returns:** `(response string, isDone bool, agentID string, err error)`
+**Generation failure handling:** `[BLOCKED]` marker, `ErrUsageLimit`, and timeout all return soft user-facing strings (not Go errors) — user stays in `StateDesigning`.
 
-**Approval triggers** (exact match only — "yes"/"ok" do NOT trigger):
-`"approve"`, `"go ahead"`, `"build it"`, `"create it"`, `"/approve"`
+**SSE progress:** `DesignSession` carries `progressCh chan string` + `cancelGenerate`. `GetProgressChan(userID)` lets the web SSE handler stream milestone events to the browser.
 
-**On approval:** `runGeneration()` creates the agent directory on disk, then calls the coder **with full tools** (`WithDir(agentDir).WithAllowedTools("Bash,Write,Edit,Read")`). Claude Code writes AGENT.md and `tools/*.py` directly to disk, runs the scripts via Bash, fixes any errors, and outputs `[TEST_OUTPUT]...[/TEST_OUTPUT]` with the verified result. The flow reads AGENT.md back from disk, runs guardrails, stores content in `PendingAgentMD`/`PendingTools`, and moves to `StateVerifying` — showing the test output to the user. **`StateVerifying` is only entered when `[TEST_OUTPUT]` is present**; if the coder omits it, the user stays in `StateDesigning` and "approve" retries generation rather than saving unverified content.
-
-**Generation failure handling:** `runGeneration` converts failure conditions into soft responses (not Go errors) so the user stays in `StateDesigning`:
-- `[BLOCKED]...[/BLOCKED]` marker: coder signals an impossible task; `parseBlockedOutput()` extracts the explanation + alternatives and returns them to the user.
-- `ErrUsageLimit`: friendly "hit its usage limit — try again in a while" message.
-- Timeout (`"timed out"` in error text): friendly "too complex — try simpler steps" message.
-- `callCoder()` (design Q&A turns) also handles `ErrUsageLimit` softly — no HTTP 500 for a usage limit hit during a plain conversation turn.
-
-**SSE progress during generation:** `DesignSession` carries a buffered `progressCh chan string` and `cancelGenerate context.CancelFunc`. `SetProgressHandler(userID, fn)` lets the Telegram router register a callback before `Step()` blocks on generation. `GetProgressChan(userID)` lets the web SSE handler stream milestone events to the browser. `Cancel()` kills the in-flight subprocess via `cancelGenerate()`.
-
-**`WithNoTools()`** is used for design conversation turns only. Generation uses full tools so Claude Code can actually write and execute the agent before showing results.
-
-**`StateVerifying`:** The user sees real test output and approves or requests changes. On approval → `finalizeAgent()` → `saveAndFinish()` saves `PendingAgentMD`/`PendingTools` via `SaveAgent()`. On change request → back to `StateDesigning`.
-
-**Auto-schedule:** If AGENT.md starts with `# Suggested schedule: */10 * * * *`, `parseSuggestedSchedule()` validates the cron expression and calls `db.UpsertAgentSchedule()` — the schedule is set immediately on agent creation.
-
-**`dbDesignStore` interface** (implemented by `*db.DB`):
-```go
-type dbDesignStore interface {
-    ListSkills(userID string) ([]*db.Skill, error)
-    ListUserPlatformConnections(userID string) ([]*db.PlatformConnection, error)
-    UpsertAgentSchedule(s *db.AgentSchedule) error
-    GetAgent(id string) (*db.Agent, error)
-    GetScheduleForAgent(agentID string) (*db.AgentSchedule, error)
-    DeleteAgentSchedule(agentID string) error
-    GetSetting(userID, key string) (string, error)
-}
-```
-
-**System prompt context injected into every design turn** (assembled by `prompts.BuildDesignSystemPrompt`):
-- Connected platforms (e.g. Telegram) — coder knows to use `[CHAT]` not raw Telegram API
-- User profile (`[User profile]` block) — name, location, timezone, tone, language, notes from `internal/profile`; loaded once on session start via `loadUserProfile()`; empty if no fields saved
-- Secrets guidance — tell user to add to Secrets store; never paste in chat; reference as `os.environ['NAME']`
-- Scheduling guidance — detect frequency from conversation; propose cron; auto-set on creation
-- Non-technical user style — explain API keys and cron in plain language; one/two questions per turn
-- **Composio guidance** (when `COMPOSIO_API_KEY` secret exists) — v3 REST API pattern, tool slug discovery, connection error handling, forbidden SDK patterns
+**Auto-schedule:** If AGENT.md starts with `# Suggested schedule: */10 * * * *`, `parseSuggestedSchedule()` calls `db.UpsertAgentSchedule()` immediately.
 
 ### Composio integration
 
-Composio connects user agents to 250+ external services (Notion, Slack, Google Drive, etc.). The integration uses the **v3 REST API directly** (not the SDK, which uses deprecated v1/v2 endpoints).
+Composio connects agents to 250+ external services via the **v3 REST API** (not the deprecated SDK).
 
-**Key files:**
-- `internal/prompts/prompts.go` — `<connected_services>` block with `composio_helper.py` template
-- `internal/agentdesigner/flow.go` — `WithSecretsLoader()` injects secrets during generation
-- `internal/agentdesigner/guardrails.go` — blocks SDK imports (`from composio import`) and literal API keys
-- `web/templates/dashboard/composio.html` — setup guide and code example
-
-**Flow:**
-1. User adds `COMPOSIO_API_KEY` in Secrets page → `db.SecretExists()` returns true → `ComposioEnabled` in design system prompt
-2. Coder receives the `<connected_services>` block with v3 REST patterns
-3. During generation, `runGeneration()` calls `secretsLoader()` → decrypts stored master password → `secrets.GetAll()` → `WithExtraEnv(secrets)`
-4. Agent subprocess sees `os.environ['COMPOSIO_API_KEY']` → makes real API calls during validation
-5. If connection fails, agent outputs `[CHAT] ❌ Could not access...` with actionable guidance
-
-**v3 API pattern (injected into system prompt):**
-- Base: `https://backend.composio.dev/api/v3`
-- Auth: `x-api-key` header
-- Connected accounts: `GET /connected_accounts?limit=100` → filter by `toolkit.slug` + `status=ACTIVE`
-- Execute: `POST /tools/execute/{TOOL_SLUG}` with body `{connected_account_id, user_id, arguments}`
-- Tool discovery: `GET /tools?toolkit_slug=APPNAME&limit=50`
-
-### Capability context must reach every phase (single source of truth)
-
-The design **conversation** runs via `coder.Chat()` and gets the rich
-`BuildDesignSystemPrompt` as a real system prompt. But **generation/edit** run via
-`coder.Generate()`, which carries **no system prompt** — so any binding contract
-(e.g. the Composio v3 spec) that lived only in the design system prompt was absent
-exactly when the coder wrote the code. A weaker/non-Claude backend then fell back to
-its training data and emitted deprecated Composio **v1** calls (`api.composio.dev/api/v1`,
-HTTP 410) → "Gmail not connected" even though it was.
-
-Fix (the v3 spec is now one shared block, present at every phase):
-- `composioServicesBlock()` in `internal/prompts/prompts.go` is the **single source** of the v3 spec; `BuildDesignSystemPrompt` calls it instead of holding an inline copy.
-- `prompts.ImplementationParams{ComposioEnabled, ConnectedPlatforms}` + `capabilitySpec()` inject that same block (and a `connectedPlatformsBlock()`) into `BuildImplementationPrompt` **and** `BuildEditImplementationPrompt`. `runGeneration` passes the params it already computes (`sess.ComposioEnabled`, `sess.ConnectedPlatforms`).
-- Enforcement backstop in guardrails (above) rejects v1/wrong-host code, so a model that still drifts can't ship — the user re-runs and the now-complete generation prompt self-corrects.
-- Regression guard: `internal/prompts/prompts_test.go` asserts the v3 markers appear in design/create/edit prompts when Composio is enabled (and not when disabled). Adding any future capability instruction = edit **one** block; it then appears across create/edit/write/validate/test.
+- `composioServicesBlock()` in `internal/prompts/prompts.go` is the **single source** of the v3 spec — injected into design, create, and edit prompts.
+- Base: `https://backend.composio.dev/api/v3` · Auth: `x-api-key` header
+- Connected accounts: `GET /connected_accounts?limit=100` · Execute: `POST /tools/execute/{TOOL_SLUG}`
+- Guardrails block: SDK imports (`from composio import`), hardcoded keys (`ak_...`), wrong host (`api.composio.dev`), old versions (`/v1/`, `/v2/`).
 
 ### Conversational agent editing
 
-Editing reuses the same `Flow` FSM as creation via `DesignSession.IsEdit` — no parallel "EditFlow". Entry points mirror the create path:
+Editing reuses the same `Flow` FSM via `DesignSession.IsEdit`. `loadAgentForEdit` reads live `AGENT.md` and reconciles its `# Suggested schedule:` line against the real `agent_schedules` row before the coder sees it.
 
-- **Telegram:** `/agent edit <name>` → `Flow.StartEdit(userID, agentID)` → `StateDescribing`.
-- **Web:** `GET /dashboard/agents/:id/edit` (chat UI) → `POST /dashboard/agents/:id/edit/start` → `Flow.StartEditDesign(ctx, userID, agentID, firstMessage)` → `StateDesigning` directly. Continuation reuses the existing generic `POST /dashboard/agents/design` stepper unchanged (it only checks `req.Name` when no session exists yet) and the existing `POST /dashboard/agents/design/cancel`.
-
-Both loaders go through `loadAgentForEdit(userID, agentID)`, which reads the live `AGENT.md` and then **reconciles its `# Suggested schedule:` first line against the real `agent_schedules` row** before the coder ever sees it. This matters because the web schedule-editor form (`handleSaveSchedule`) writes the DB directly and never touches `AGENT.md` — the two can drift. After reconciliation, `AGENT.md` is the single source of truth for the rest of the edit conversation and for finalize.
-
-**Generation never touches the live agent dir before approval** (it may be scheduled and running unattended). `runGeneration` branches on `IsEdit`:
-- Create (unchanged): writes directly into the not-yet-saved `agentDir`.
-- Edit: `copyAgentWorkspace()` copies `AGENT.md` (the reconciled version), `state.json`, and `tools/*.py` into a sibling staging dir (`<agentID>-edit-staging`); the coder runs there with `prompts.BuildEditImplementationPrompt()` (tells it to `Read` the existing files first, then edit). Content is read back from staging into `PendingAgentMD`/`PendingTools`, and the staging dir is `RemoveAll`'d — on both success and failure — before the response ever reaches the user.
-
-**On approval**, `finalizeAgent` branches: create calls `saveAndFinish()` (`AgentDesigner.SaveAgent` → `db.CreateAgent`, INSERT); edit calls `updateAndFinish()` (`AgentDesigner.UpdateAgent` → `db.UpdateAgentDescription`, UPDATE — calling `CreateAgent` again would violate the PK/`UNIQUE(user_id,name)` constraint). Schedule changes on edit go through `reconcileScheduleOnSave()`, which **always reuses the existing schedule row's ID** on upsert (there's no unique constraint on `agent_id`, so a fresh `uuid.New()` would insert a duplicate row and fire the agent twice per tick) and deletes the row outright if the line resolves to "none"/invalid where one existed.
-
-`AgentDesigner.SaveAgent` and `UpdateAgent` both delegate to a shared `writeAgentContent()`: it wipes and fully rewrites `tools/` from the incoming map (so an edit that removes a script actually deletes the file, not just stops referencing it), writes `state.json` only if missing (never clobbers a live agent's persisted state), and preserves the manifest's original `CreatedAt` across edits by loading the existing `agent.json` first.
-
-Unit-tested in `internal/agentdesigner/edit_test.go` against a real migrated SQLite DB: schedule-drift reconciliation, the duplicate-schedule-row/double-fire guard, schedule deletion on "none", `state.json`/`CreatedAt` preservation, stale-tool wipe, and — the core safety property — `copyAgentWorkspace` proven to leave the live agent dir byte-for-byte untouched. The coder subprocess round-trip itself (real edit → `[TEST_OUTPUT]` → approve/reject) is exercised manually, not by an automated test.
-
-### Smarter agents, multi-file projects, background runs
-
-**Brain vs scripts (single source of truth).** `prompts.agentPhilosophyBlock()` is
-injected into design, create, edit, AND runtime prompts. The contract: the coder is
-an LLM with judgment — for anything ambiguous/fuzzy (which attachments are
-"payroll", which emails matter, classifying, summarizing) it REASONS at runtime and
-does NOT hardcode brittle rules; Python scripts are only for repetitive, deterministic,
-high-volume work (fetching, parsing known formats, math) to save tokens. The design
-prompt adds `<design_for_flexibility>`: if the user is unsure of exact criteria
-(filenames, patterns, thresholds), do NOT force them to specify — design the agent
-to figure it out at runtime.
-
-**Multi-file agent projects.** Agents may write a nested project under `tools/`
-(helper modules, `tests/`, `requirements.txt`) — not just single flat scripts. Four
-sites used to flatten paths via `filepath.Base()` and drop subdirs/non-`.py` files;
-all I/O is now recursive and path-safe via `internal/agentdesigner/toolstree.go`:
-- `WriteToolsTree(toolsDir, map)` — recursive write, map keys are rel paths under
-  `tools/`; `safeToolPath` rejects `..`/absolute escapes (mirrors `vault.Resolve`).
-- `ReadToolsTree(toolsDir)` — recursive read; includes non-`.py`; excludes
-  `__pycache__`/dotted dirs/`*.pyc`; caps `maxToolFileBytes=1MiB`,
-  `maxToolsTotalBytes=5MiB`, `maxToolFiles=200`.
-- `writeAgentContent` (designer), `readToolsFromDisk`/`copyAgentWorkspace` (flow),
-  `TestRunFromContent` (runner) all use the tree helpers. Edit-staging still mirrors
-  the live layout byte-for-byte.
-- Guardrails: `RunToolGuardrails(filename, code)` runs ethics on all files, AST only
-  on `*.py` (so `requirements.txt` passes). The AST blocklist (subprocess/eval/exec/
-  socket) is intentionally unchanged — tests run via the Bash tool at runtime, not via
-  subprocess inside tool scripts.
-
-**Generation/test prompt rules.** `testingRulesBlock()` steers the coder to write
-import-based unit tests (`python3 -m unittest`/`pytest` via Bash) and NOT shell out
-via subprocess from a test (the AST guardrail rejects that in every `.py`). This
-fixed the edit-flow case where the coder wrote a `subprocess.run`-based test that
-guardrails correctly blocked.
-
-**Shell + script robustness (single source).** `shellSafetyBlock()` + `scriptRobustnessBlock()`
-are injected into create/edit (judgment-level rules restated in the runtime prompt).
-Covers the shell `$`-expansion hazard (a `"$62,752.44"` shell arg arrives as
-`2,752.44` — `$6` eaten), full metachar hazard list, safe patterns (pass raw data,
-format `$` inside Python), stdout-JSON/stderr-logs contract, `set -euo pipefail`,
-the paths rule (don't `cd` mid-run), network timeouts/retry, sanity-check fetched
-values (HTTP 200 can still return wrong/empty data), never print secrets, UTF-8
-encoding, idempotency/verify side-effects. Runtime `BuildCoderPrompt` adds: use
-values EXACTLY as scripts return them (never retype/round numbers by hand),
-sanity-check before acting, check state + verify side-effects.
-
-**Edit flow sees its own scripts.** `loadAgentForEdit` now returns the live tool
-source via `ReadToolsTree`; the design system prompt renders a `<current_tools>`
-block (only on edit) so the coder can diagnose code bugs without file access and
-never asks the user "where are the scripts". Create sessions never carry it.
-
-**Background manual runs + live SSE.** `handleRunAgent` (`web/handlers_agents.go`)
-fires the run on a **detached `context.Background()`** in a goroutine (was
-synchronous on the request context → navigating away SIGKILLed it → "exit -1").
-`web/run_tracker.go` holds `Server.runs map[string]*agentRunState` (keyed by agentID).
-`RunInput.OnProgress` is called per turn in `runCoderTurns` with that turn's fresh
-`[CHAT]` lines → buffered `progressCh` → `GET /dashboard/agents/:id/run/progress`
-SSE streams them to the browser. Final output is also pushed to the user's chat via
-`gateway.SendToUser` (same path cron uses). `startManualRun` refuses if a run is
-already in flight (in-memory + DB `GetUnfinishedAgentRun`).
-
-**Durable "Running" badge + boot reconciliation.** `Running` (badge, DB-or-memory)
-is split from `LiveRun` (gates SSE, in-memory only) so a scheduled run shows the
-badge without opening an SSE that would 404. `db.ReconcileStaleRuns()` runs on
-`serve` startup: closes any `agent_runs` left `finished_at IS NULL` (crash/shutdown
-mid-run) with exit -1 so the badge never sticks. `ListAgentRuns`/`RecentAgentRuns`
-scan stdout/stderr as `sql.NullString` (in-progress runs have them NULL).
-
-**Run-loop fix (Post/Redirect/Get).** `handleRunAgent` returns a **303 See Other**
-redirect to the detail page, NOT an inline render. Rendering left the browser on a
-POST-loaded page; the detail-page JS reloads when the SSE run completes, and on a
-POST-loaded page `reload()` replays the POST — firing "Run Now" again in an infinite
-loop (one run per ~15-30s, burning tokens). PRG lands the browser on a GET-loaded
-page so reload is a safe GET. The running badge + live-progress panel convey
-started/already-running visually, so no flash message is lost.
+**Edit generation** runs in a sibling staging dir (`<agentID>-edit-staging`) — the live agent dir is never touched before approval. On approval, `updateAndFinish()` calls `AgentDesigner.UpdateAgent` → `db.UpdateAgentDescription` (UPDATE, not INSERT). `reconcileScheduleOnSave()` reuses the existing schedule row's ID to avoid duplicate rows and double-firing.
 
 ### Agent output protocol (AGENT.md)
 
-The coder reads AGENT.md and uses these markers in its output:
-
-- **`[CHAT]`** — sends a message to the user. Continuation lines immediately after (no blank line between them) are joined into the same message:
-  ```
-  [CHAT] BTC-USDT Price Update
-  Current price: $66,527.99
-  ```
-  A blank line or next protocol marker ends the block.
-
-- **`[STATE]...[/STATE]`** — JSON merged into `state.json` (null value = delete key). Supports both multi-line and inline forms:
-  ```
-  [STATE]
-  {"last_price": 66527.99}
-  [/STATE]
-  ```
-  or inline: `[STATE]{"last_price": 66527.99}[/STATE]`
-
-- **`[CALL: <agent-name>]`** — invoke another agent synchronously (max depth 3, cycle detection)
-
-`parseCoderOutput()` in `runner.go` handles all three forms. Multi-line `[CHAT]` and inline `[STATE]` were added after the original single-line-only implementation proved insufficient.
+- **`[CHAT]`** — sends a message to the user. Continuation lines (no blank line) are joined.
+- **`[STATE]...[/STATE]`** — JSON merged into `state.json` (null = delete key). Inline and multi-line forms accepted.
+- **`[CALL: <agent-name>]`** — invoke another agent synchronously (max depth 3, cycle detection).
 
 ### Secret injection
 
-Secrets are stored encrypted in the `secrets` table. At runtime `runCoderAgent()` needs `RunInput.MasterPw` to decrypt them:
-1. Gets the user's `SecretsSalt` from DB
-2. Creates a `secrets.Service` with the master password
-3. Calls `svc.GetAll(ctx)` to decrypt all secrets → `map[string]string`
-4. Uses `r.coderSvc.WithExtraEnv(allSecrets)` to inject them as environment variables
-
-The agent accesses secrets via `os.environ['SECRET_NAME']` in Python. Values are **never** written to disk, logs, or LLM prompts.
-
-`secrets.GetAll()` is the only bulk-decrypt method. `secrets.Proxy()` is still used for `${NAME}` placeholder substitution in legacy contexts.
-
-**Three sources of `MasterPw` for secret injection:**
-
-- **Scheduled (cron) runs** — `scheduler.go` decrypts the user's stored `EncryptedMasterPassword` (encrypted at rest with the server's `systemKey`) and passes it through. Always available once the user has completed `/setup`.
-- **Manual runs ("Run Now" in the web UI)** — `handleRunAgent()` decrypts the same stored `EncryptedMasterPassword` the same way. There is **no password-entry field on the run form** — agent execution doesn't require live re-entry the way viewing a secret's plaintext value does.
-- **Agent generation (design flow)** — `Flow.WithSecretsLoader()` in `main.go` wires a loader that decrypts the master password and calls `secrets.GetAll()`. `runGeneration()` calls `.WithExtraEnv(secrets)` before `.Generate()` so the coder can make real API calls during validation. This enables agents using Composio to produce real test output instead of mock data.
+Secrets stored encrypted in `secrets` table. Three sources of `MasterPw` at runtime:
+- **Scheduled runs** — `scheduler.go` decrypts stored `EncryptedMasterPassword` (encrypted with `systemKey`).
+- **Manual runs** — `handleRunAgent()` does the same. No password field on the run form.
+- **Agent generation** — `Flow.WithSecretsLoader()` decrypts and injects via `WithExtraEnv(secrets)` so agents can make real API calls during validation.
 
 ### Coder tool isolation
 
-`internal/coder/coder.go` provides these modifiers (all return a shallow copy — original unchanged):
+`internal/coder/coder.go` modifiers (all return a shallow copy):
 
-- **`WithNoTools()`** — adds `--allowedTools ""`, disabling all tools. Used for design conversation turns so claude outputs plain text.
-- **`WithAllowedTools(tools string)`** — adds `--allowedTools <tools>`, pre-approving specific tools. **Required** whenever `--setting-sources ""` is active (which suppresses all settings including tool allowlists) — without this, the subprocess blocks forever on interactive permission prompts in non-interactive mode. Generation uses `"Bash,Write,Edit,Read"`; agent runs use `"Bash,WebFetch,Read,Write,Edit"`.
-- **`WithDir(dir string)`** — overrides `cmd.Dir` for the subprocess CWD without changing `HOME`/`CLAUDE_CONFIG_DIR`. Used both by generation (`agentDir` during creation) **and by `runCoderAgent()` on every run** — without it, `cmd.Dir` defaults to the *shared* per-user home (`claude-homes/<userID>/`), so the agent sees and can write to other agents' files instead of its own `tools/`/`state.json`. (This was missing from the run path until it caused exactly that cross-contamination — one agent's self-corrected script got written into the shared home instead of back into its own directory, and a different agent then read the wrong `tools/*.py`.)
-- **`WithExtraEnv(env map[string]string)`** — merges additional env vars (e.g. decrypted secrets). System overrides (`HOME`, `CLAUDE_CONFIG_DIR`) always take precedence.
-- **`WithBackendType(t string)`** — forces a specific backend (`"claude"`, `"generic"`, or `""` for auto-detect by binary name). Used by `coderForUser()` to honour the admin-configured `BackendType` per coder profile.
-- **`Name() string`** — returns `filepath.Base(bin)` (e.g. `"claude"`). Used for user-facing messages so they never hardcode a specific coder's name (the system supports multiple coder profiles with different binaries).
+- **`WithNoTools()`** — `--allowedTools ""`. Used for design conversation turns.
+- **`WithAllowedTools(tools)`** — Required whenever `--setting-sources ""` is active or subprocess blocks on permission prompts. Generation: `"Bash,Write,Edit,Read"`; runs: `"Bash,WebFetch,Read,Write,Edit"`.
+- **`WithDir(dir)`** — overrides subprocess CWD. Used by generation AND every agent run — without it the agent writes to the shared per-user home and contaminates other agents.
+- **`WithExtraEnv(env)`** — merges additional env vars. System overrides always take precedence.
+- **`WithBackendType(t)`** — forces `"claude"`, `"generic"`, or `""` (auto-detect by binary name).
 
-**`CoderBackend` interface** (`internal/coder/backend.go`): abstracts CLI-specific behaviour. Two implementations:
-- `claudeBackend` — Claude CLI: `--output-format json`, `--setting-sources ""`, `--allowedTools`, copies `.credentials.json`, sets `CLAUDE_CONFIG_DIR`.
-- `genericCLIBackend` — any other CLI: passes prompt as last argument, reads plain-text stdout, injects known auth env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.).
+**`CoderBackend`** (`internal/coder/backend.go`): `claudeBackend` (Claude CLI: `--output-format json`, `--setting-sources ""`) and `genericCLIBackend` (any other CLI, plain-text stdout).
 
-Auto-detection: binary name containing `"claude"` → `claudeBackend`; otherwise → `genericCLIBackend`. Explicit `WithBackendType` overrides detection.
-
-**Critical:** `--setting-sources ""` + no `--allowedTools` = subprocess hangs indefinitely. Always pair them.
+**Critical:** `--setting-sources ""` + no `--allowedTools` = subprocess hangs indefinitely.
 
 ### Usage-limit detection
 
-`coder.ErrUsageLimit` is a sentinel returned by `Generate()` when the underlying CLI account/session hits its usage limit. Detected via `looksLikeUsageLimit()`: empirically, the claude CLI's signature for this is a **non-zero exit with completely empty stdout and stderr** (no error text at all) — that combination is treated as a limit hit. Explicit text matches (`"usage limit"`, `"rate limit"`, `"quota exceeded"`, `"limit reached"`) are also checked as a fallback in case the CLI does emit a message.
-
-`agentrunner.friendlyRunError(err, coderName)` converts this into a user-facing message — `"⚠️ This agent run was skipped — <coderName> hit its usage limit. It will retry automatically on the next scheduled run."` — instead of a raw `exit status 1`. `runCoderAgent()` sends this via `input.SendOutput` on **every** run failure (not just limit hits), which fixed a real gap: cron-triggered failures previously only went to `slog` — the user had no way to find out an agent failed at all unless they checked server logs.
-
-`ErrUsageLimit` is also handled during **agent generation** in `runGeneration` and during **design conversation turns** in `callCoder` — both return soft user-facing strings (not Go errors) so the web UI and Telegram router show a helpful message rather than HTTP 500 or a raw error prefix.
+`coder.ErrUsageLimit` — non-zero exit with empty stdout+stderr. `agentrunner.friendlyRunError` converts to a user-facing message sent via `input.SendOutput` on every run failure. Also handled softly during generation and design conversation turns.
 
 ### Guardrails
 
 `internal/agentdesigner/guardrails.go`:
-- `CheckEthics(code, "")` — blocklist check (rm -rf, drop table, bitcoin wallet, etc.). Used on AGENT.md.
-- `RunFullGuardrails(code, "")` — ethics + AST check. Used on `tools/*.py` scripts. **Does NOT check template markers** (the old `# ======= USER LOGIC =======` format is gone).
-- AST check blocks: `eval`, `exec`, `compile`, `__import__`, `os.system`, `subprocess.*`, `socket.socket`.
-- **Composio SDK import blocking** — `composioSDKImport` regex blocks `from composio import` and `import composio` patterns; returns error directing coder to use v3 REST API directly.
-- **Composio API key literal blocking** — `composioKeyLiteral` regex blocks hardcoded keys (`ak_...`, `c_live_...`, `c_test_...`); requires reading from `os.environ['COMPOSIO_API_KEY']`.
-- **Composio v1/v2 + wrong-host blocking** — gated by `composioRef` (code mentions "composio"), `composioWrongHost` rejects `api.composio.dev` (must be `backend.composio.dev`) and `composioOldVersion` rejects `/v1/`/`/v2/` endpoints (HTTP 410). This is the enforcement backstop: even if a weaker coder ignores the prompt and writes v1 code, generation rejects it and the user re-runs (now with the v3 spec in the generation prompt — see below). The non-Composio `/api/v1/` of an unrelated service is not flagged.
+- `CheckEthics(code, "")` — blocklist (rm -rf, drop table, bitcoin wallet, etc.). Used on AGENT.md.
+- `RunFullGuardrails(code, "")` — ethics + AST. Used on `tools/*.py`. AST blocks: `eval`, `exec`, `compile`, `__import__`, `os.system`, `subprocess.*`, `socket.socket`.
+- Composio: blocks SDK imports, hardcoded keys, wrong host, v1/v2 endpoints.
 
 ### Per-user coder isolation
 
-Every coder subprocess runs in a fully isolated environment.
-
-**How it works (`internal/coder/coder.go`):**
 - `CLAUDE_CONFIG_DIR` → `<data_dir>/claude-homes/<userID>/.claude/`
 - `HOME` → `<data_dir>/claude-homes/<userID>/`
-- `--setting-sources ""` — suppresses `settings.json` and all `CLAUDE.md` traversal. `HOME` override alone is **not** sufficient.
-- `.credentials.json` copied from operator's `~/.claude/` on every invocation (fresh OAuth tokens).
+- `--setting-sources ""` — suppresses `settings.json` and all `CLAUDE.md` traversal.
+- `.credentials.json` copied from operator's `~/.claude/` on every invocation.
 
-**`ANTHROPIC_CONFIG_DIR` does NOT work** — only `CLAUDE_CONFIG_DIR` redirects config. Verified empirically.
+**`ANTHROPIC_CONFIG_DIR` does NOT work** — only `CLAUDE_CONFIG_DIR` redirects config.
 
 ### Coder filesystem confinement (Landlock)
 
-The env overrides above isolate *config*, but on their own they don't stop a
-subprocess from reading elsewhere on disk. `internal/sandbox` adds a *preventive*
-filesystem boundary using the Linux **Landlock LSM** — no external dependency, no
-setuid, no namespaces, no sysctl toggle (chosen over user namespaces precisely
-because those are gated behind distro switches that would break "just run the
-binary"). Linux only; Windows/macOS confinement is a future phase.
+`internal/sandbox` adds preventive filesystem confinement via Linux Landlock LSM. No external deps, no setuid, no namespaces.
 
-**Mechanism — re-exec helper.** Landlock must be applied to the process that will
-run the command (Go's M:N threading makes restricting the parent unsafe), so the
-coder doesn't restrict itself. Instead `coder.buildCommand()` wraps the real
-command as `simple-agents __sandbox-exec <base64-spec>` (a hidden subcommand
-registered in `cmd/simple-agents/main.go`). The helper (`sandbox.Exec`) applies
-resource limits + `landlock.V5.BestEffort().RestrictPaths(...)` to **itself**, then
-`syscall.Exec`s the real command. Landlock is inherited across exec and by all
-children → the whole `claude`→`bash`→`python` tree is confined in one shot.
+**Mechanism:** `coder.buildCommand()` wraps the real command as `simple-agents __sandbox-exec <base64-spec>`. The helper applies `landlock.V5.BestEffort().RestrictPaths(...)` then `syscall.Exec`s the real command. Inherited by all children (`claude`→`bash`→`python`).
 
-**What each run can touch** (`coder.buildCommand` builds the `sandbox.Spec`):
-- **RW**: the per-user HOME (`claude-homes/<userID>`, includes `.claude`) and the
-  agent workdir (`WithDir`). A path under the workdir gets RW even though it's
-  inside the vault, because Landlock applies the most-specific matching rule.
-- **RO**: broad system paths (`/usr`,`/bin`,`/lib*`,`/etc`,`/proc`,`/sys`,… each
-  `IgnoreIfMissing` for distro portability), the resolved coder-binary install dir
-  (often under the operator's HOME, e.g. `~/.local/share/claude/...` — granted
-  explicitly so the agent can exec it), and the user's **own** vault root (read the
-  whole KB, write only the agent dir).
-- **Denied by default**: everything else — the SQLite DB, `config.yaml`, **other
-  users'** vaults and `claude-homes`, and the operator's real `~/.claude`
-  credentials. (The credential copy that seeds each per-user `.claude` happens in
-  the parent before exec, so the operator's real `~/.claude` is never in the
-  allow-list.)
+**Allowed:** RW: per-user HOME + agent workdir. RO: system paths, coder binary dir, user's vault root. Denied: SQLite DB, config.yaml, other users' vaults.
 
-**Relationship to the Guard.** Where Landlock is active it supersedes
-`vault.Guard` for *writes* (preventive vs. revert-after); the Guard still runs and
-simply finds nothing to revert. On a kernel without Landlock (`sandbox.Supported()`
-false) or with `SA_SANDBOX=0`, the run falls back to direct exec and the Guard is
-the boundary. `config.SandboxConfig.Enabled` (default true; `SA_SANDBOX=0/false/off`
-disables) gates it; `coder.WithSandbox()` carries the flag; the admin Settings page
-shows live status (Landlock active / unavailable→Guard fallback / disabled).
-
-**Bonus fixes folded in.** `buildCommand` puts the child in its own process group
-(`Setpgid`) and kills the **group** on ctx cancel/timeout (`cmd.Cancel` +
-`WaitDelay`), fixing a latent orphan-leak where `CommandContext` killed only the
-direct child and left `node`/`python` descendants running. `RLIMIT_NOFILE` is set;
-`RLIMIT_AS`/`RLIMIT_CPU` plumbing exists but is left off by default (node/V8 dislike
-`RLIMIT_AS`).
-
-**Boundary test:** `internal/sandbox/landlock_linux_test.go` re-execs the test
-binary as the helper and asserts the core property — RW dir writable, RO dir
-readable-not-writable, a path outside all grants unreadable. Self-skips when
-`sandbox.Supported()` is false (matches the python3-absent skip pattern).
+`config.SandboxConfig.Enabled` (default true; `SA_SANDBOX=0` disables). Guard is the fallback when Landlock is unavailable.
 
 ### Database
 
-SQLite via `modernc.org/sqlite` (CGo-free, bundles SQLite 3.49). WAL mode and foreign keys set on open in `db.Open()`. Migrations applied in alphabetical order from `migrations/`.
+SQLite via `modernc.org/sqlite` (CGo-free). WAL mode + foreign keys set on open. Migrations in alphabetical order from `migrations/`.
 
-**Migrations:**
-| File | Change |
-|------|--------|
-| `001_initial_schema.up.sql` | All core tables (13 total) |
-| `002_chat_messages.up.sql` | `chat_messages` table |
-| `002_coders.up.sql` | `coders` table, `users.coder_id` FK |
-| `003_agent_type_skills.up.sql` | `skills`, `agent_skills` tables; added `agents.type` column |
-| `004_drop_agent_type.up.sql` | Drops `agents.type` (no agent types in the unified model) |
-| `005_coder_backend_type.up.sql` | Adds `backend_type TEXT NOT NULL DEFAULT ''` to `coders` |
-
-`db.HasPlatformIdentity(userID)` was added to the repositories layer — returns true when a user has at least one linked platform. Used by the scheduler and reminder service to skip runs/reminders for users with no way to receive output, preventing wasted API quota.
-
-Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`, `agent_schedules`,
-`agent_runs`, `secrets`, `chat_sessions`, `reminders`, `user_permissions`, `mcp_servers`,
-`settings`, `audit_logs`, `schema_migrations`, `chat_messages`, `coders`, `skills`, `agent_skills`.
+Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`, `agent_schedules`, `agent_runs`, `secrets`, `chat_sessions`, `reminders`, `user_permissions`, `mcp_servers`, `settings`, `audit_logs`, `schema_migrations`, `chat_messages`, `coders`, `skills`, `agent_skills`.
 
 ### Web UI routes
 
 ```
 /login, /logout
-/setup                              # forced first-login wizard (5 steps: password → master_password → profile → connector → done)
-/change-password                    # forced if must_change_password=1
+/setup                              # first-login wizard (password → master_password → profile → connector → done)
+/change-password
 /dashboard                          # user home
 /dashboard/agents                   # list agents
-/dashboard/agents/new               # conversational agent creation (chat UI)
-/dashboard/agents/design            # POST JSON API: drives design FSM turn-by-turn
+/dashboard/agents/new               # conversational agent creation
+/dashboard/agents/design            # POST: drives design FSM turn-by-turn
 /dashboard/agents/design/cancel     # POST: cancel active design session
-/dashboard/agents/design/progress   # GET SSE: streams generation milestone events to the browser
+/dashboard/agents/design/progress   # GET SSE: generation milestone events
 /dashboard/agents/:id               # detail: AGENT.md editor, state, logs, schedule, skills
-/dashboard/agents/:id/edit          # conversational agent editing (chat UI)
-/dashboard/agents/:id/edit/start    # POST JSON API: starts an edit design session
+/dashboard/agents/:id/edit          # conversational agent editing
+/dashboard/agents/:id/edit/start    # POST: starts an edit design session
 /dashboard/agents/:id/delete
-/dashboard/agents/:id/run                  # POST: starts a background run, 303-redirects to detail (PRG — see "Background manual runs")
-/dashboard/agents/:id/run/progress         # GET SSE: streams a manual run's [CHAT] output live to the browser
-/dashboard/agents/:id/schedule
-/dashboard/agents/:id/schedule/delete
-/dashboard/agents/:id/agent-md      # POST: save AGENT.md (ethics check applied)
+/dashboard/agents/:id/run           # POST: starts background run, 303-redirects (PRG)
+/dashboard/agents/:id/run/progress  # GET SSE: live [CHAT] output
+/dashboard/agents/:id/schedule[/delete]
+/dashboard/agents/:id/agent-md      # POST: save AGENT.md (ethics check)
 /dashboard/agents/:id/skills        # POST: update agent skill assignments
-/dashboard/skills                   # list skills
-/dashboard/skills/:id               # view/edit SKILL.md
-/dashboard/secrets                  # list, create, delete (master-password gated)
-/dashboard/connectors               # connect/disconnect Telegram bot token
-/dashboard/sessions                 # chat sessions
-/dashboard/reminders                # natural language reminder creation
-/dashboard/memory                   # view/add entries
-/dashboard/kb                       # knowledge-base file browser (?path=)
-/dashboard/kb/view|edit|raw         # GET: render note / edit form / raw bytes (?path=)
-/dashboard/kb/save|new|delete|rename# POST: mutate notes/folders (all via vault.Resolve)
-/dashboard/kb/search                # GET: ripgrep keyword search (?q=)
-/dashboard/settings                 # full user profile (name, email, location, timezone, tone, language, notes) + change master password
-/admin                              # admin dashboard
-/admin/users, /admin/users/:id      # create user, grant permissions, reset password
-/admin/users/:id/coder[/unassign]   # assign coder profile to user
-/admin/coders, /admin/coders/:id    # list + create/edit/delete coder profiles
-/admin/settings                     # system settings (claude_bin, timeouts, sandbox status)
-/admin/audit                        # audit log viewer
+/dashboard/skills, /dashboard/skills/:id
+/dashboard/secrets
+/dashboard/connectors
+/dashboard/sessions
+/dashboard/reminders
+/dashboard/memory                   # redirects to /dashboard/kb?path=memory
+/dashboard/kb                       # knowledge-base file browser
+/dashboard/kb/view|edit|raw         # GET: render / edit / download note
+/dashboard/kb/save|new|delete|rename# POST: mutate notes/folders
+/dashboard/kb/search                # GET: ripgrep full-text search
+/dashboard/settings                 # user profile + change master password
+/admin, /admin/users, /admin/users/:id
+/admin/users/:id/coder[/unassign]
+/admin/coders, /admin/coders/:id
+/admin/settings
+/admin/audit
 ```
 
 ### Admin vs. user separation
 
-- **Admin** (`role="admin"`): only `/admin/*` — manages users, coder profiles, settings, audit. No agents, secrets, reminders, or memory.
-- **Regular users**: only `/dashboard/*` — agents, secrets, connectors, sessions, reminders, memory.
-- `requireUserOnly` middleware on `/dashboard/*` redirects admins to `/admin`.
-- `requireAdmin` middleware on `/admin/*` rejects non-admins with 403.
+- **Admin** (`role="admin"`): only `/admin/*` — manages users, coder profiles, settings, audit.
+- **Regular users**: only `/dashboard/*` — agents, secrets, connectors, sessions, reminders, KB.
+- `requireUserOnly` on `/dashboard/*` redirects admins to `/admin`.
+- `requireAdmin` on `/admin/*` rejects non-admins with 403.
 
 ### Multi-coder system
 
-Admin creates named **Coder Profiles** (`coders` table) each with a `claude_bin` path, `timeout_s`, and `backend_type` (`""` = auto-detect, `"claude"`, or `"generic"`). Users are assigned a coder via `users.coder_id` FK. `coderForUser(userID)` on the Server builds the right `*coder.Coder` per user (via `.WithBackendType(profile.BackendType)`), falling back to system defaults when unassigned.
-
-The `designFlow` is constructed with a resolver `func(userID string) *coder.Coder` so it picks up per-user profiles during agent design.
+Admin creates **Coder Profiles** (`coders` table) with `claude_bin`, `timeout_s`, `backend_type`. Users assigned via `users.coder_id` FK. `coderForUser(userID)` builds the right `*coder.Coder`, falling back to system defaults when unassigned.
 
 ### Natural language reminders
 
-`internal/reminder/timeparser.go` — `ParseNaturalTime(text, now, loc)` parses expressions like `"in 10 minutes"`, `"tomorrow at 3pm"`, `"next Tuesday at noon"` using regex only. Used by both the web UI and Telegram router. Telegram syntax: `/remind in 10 minutes to check oven`.
-
-Both callers pass `profile.LoadLocation(db, userID)` as `loc` so reminders fire relative to the user's saved timezone, not UTC. Falls back to `time.UTC` when no timezone is set.
+`internal/reminder/timeparser.go` — `ParseNaturalTime(text, now, loc)` parses expressions like `"in 10 minutes"`, `"tomorrow at 3pm"`, `"next Tuesday at noon"`. Both web UI and Telegram use `profile.LoadLocation(db, userID)` so reminders fire in the user's timezone.
 
 ---
 
-## Build Status
+## Known gaps
 
-Build: **PASS**. `go vet`: **PASS**. Tests: **PASS** (`internal/agentdesigner`, `internal/agentdesigner/toolstree_test.go`, `internal/secrets`, `internal/profile`, `internal/sandbox`, `internal/prompts`, `internal/db/runs_test.go`, `web/`).
-
-Manual web round-trip and `/agent edit` on Telegram for the edit flow have not been exercised end-to-end with a real coder subprocess — the schedule/state/staging-isolation logic is unit-tested, the coder interaction itself is not. The background-run + SSE + PRG path is unit-tested at the template level (`TestAgentTemplatesRenderWithRunning` across Running/LiveRun states) and exercised live; the run-loop fix is verified by the server log no longer showing the POST→reload→POST cycle.
-
-### Commit history
-
-| Commit | Phase |
-|--------|-------|
-| `46946e4` | Phase 1 — scaffold, DB, auth, web login/setup |
-| `ead1ea5` | Phase 2 — secrets: AES-256-GCM, Argon2id, master password, Proxy() |
-| `d03e24a` | Phase 3 — gateway: Telegram adapter, GatewayManager, Router, identity resolver |
-| `9a49076` | Phase 4 — coder: claude CLI subprocess, per-user HOME isolation |
-| `bac6a94` | Phase 5 — agentdesigner: FSM wizard + guardrails |
-| `504ad44` | Phase 6 — agentrunner + Firejail sandbox + secrets proxy injection |
-| `0894420` | Phase 7 — scheduler (cron), reminders, sessions, memory |
-| `b572ff5` | Phase 8 — web UI: full user dashboard (DaisyUI/Tailwind) |
-| `50936af` | Polish — /remind, /session commands; web code editor; settings persistence; RBAC |
-| `45f8cdc` | Docs — initial CLAUDE.md |
-| `f89cb2e` | UI overhaul, admin/user separation, coder profiles, SSE agent creation, NL reminders |
-| `b51e929` | Per-user coder isolation (CLAUDE_CONFIG_DIR, --setting-sources, credential copy) |
-| `da6eb6a` | Unified conversational agent creation; no agent types; AGENT.md+tools/ layout; secret env injection; WithNoTools/WithExtraEnv; auto-schedule from conversation; platform-aware designer; skills UI |
-| `12f0461` | StateVerifying + full-tools generation (write/run/fix before showing user); WithDir/WithAllowedTools on Coder; runner tool permissions fix; multi-line [CHAT] + inline [STATE] parser |
-| `92d37be` | runCoderAgent runs inside agentDir (was the shared per-user home — caused cross-agent file contamination); manual "Run Now" decrypts stored master password instead of a non-existent form field; coder.ErrUsageLimit detection + coder-agnostic friendly error messages sent to the user on every run failure |
-| `81c6baf` | Conversational agent editing (Telegram `/agent edit` + web Edit button), reusing the create FSM via `DesignSession.IsEdit`; schedule-line reconciliation against the real `agent_schedules` row; edit generation runs in a staging dir copy so the live agent is never touched before approval; `AgentDesigner.UpdateAgent`/`db.UpdateAgentDescription` for the UPDATE-not-INSERT save path; `reconcileScheduleOnSave` reuses the existing schedule row's ID to avoid duplicate/double-firing schedules |
-| `aa269a7` | User profile system (`internal/profile`): name, email, location, timezone, tone, language, notes stored in `settings` table; injected as `[User profile]` block into agent designer system prompt; setup wizard gains profile step (step 3 of 5); Settings page expanded to full profile editor; reminder timezone now uses per-user saved timezone via `profile.LoadLocation()` (both web + Telegram) |
-| `d29c5bd` | User memory injection: `memory.ContextString()` now injected as `[User memory]` block into agent design sessions and agent run prompts; `Flow.WithMemory()` and `Runner.WithMemory()` wire the store via a local `memoryStore` interface in each package |
-| `cb0273d` | Prompt centralization: all LLM prompt builders moved to `internal/prompts`; no inline prompt text remains in `agentdesigner`, `agentrunner`, or `web` packages |
-| `7edf5ee` | Composio v3 REST API integration: replaced broken SDK guidance with direct v3 API pattern (`composio_helper.py` template, `get_connection()`, `composio_execute()`); secrets injection during generation (`Flow.WithSecretsLoader()` + decrypt-from-stored-master-password in `main.go`); SDK import blocking in guardrails (`composioSDKImport` regex, `ak_` key prefix); implementation prompt now requires real API calls when secrets present; UI code example updated to REST pattern; real validation during agent creation (no mock data when `COMPOSIO_API_KEY` available); connection error guidance in agent output (`[CHAT] ❌ Could not access...`) |
-| `66e2a11` | Landlock filesystem confinement replaces the unused Firejail wrapper: rewrote `internal/sandbox` around Landlock + a hidden `__sandbox-exec` re-exec helper (zero external deps); `coder.buildCommand()`/`WithSandbox()` confine every coder subprocess to the user's own files via `sandbox.Spec` (RW: per-user HOME + agent workdir; RO: system paths + resolved coder-binary dir + the user's own vault root; everything else default-denied); `config.SandboxConfig.Enabled` + `SA_SANDBOX` env toggle; admin Settings shows live Landlock status; vault `Guard` reframed as the fallback when Landlock is unavailable; folded-in fixes: process-group kill on timeout (orphan-leak) + `RLIMIT_NOFILE`; boundary unit test in `internal/sandbox/landlock_linux_test.go` |
-| (current) | Smarter + more flexible agents, multi-file projects, background runs, clickable names, run-loop fix. `prompts.agentPhilosophyBlock` (brain vs scripts) + `<design_for_flexibility>` injected into every phase so agents reason about ambiguity at runtime instead of hardcoding brittle rules; `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` + `RunToolGuardrails` (ethics all files, AST only `*.py`) so agents ship nested multi-file projects with tests under `tools/`; `testingRulesBlock` steers import-based tests (no subprocess in tests); `shellSafetyBlock` + `scriptRobustnessBlock` (shell `$`-expansion hazard, `set -euo pipefail`, paths rule, network timeouts/retry, sanity-check fetched values, never print secrets, idempotency); edit flow now passes live tool source via `<current_tools>` so the coder never asks where scripts are; `handleRunAgent` runs on a detached `context.Background()` + `RunInput.OnProgress` per-turn hook + `GET /:id/run/progress` SSE (`web/run_tracker.go`) so navigating away no longer kills the run ("exit -1" fixed); `Running`/`LiveRun` split + `db.ReconcileStaleRuns()` on boot + `GetUnfinishedAgentRun` for a durable badge; `ListAgentRuns`/`RecentAgentRuns` use `sql.NullString`; **run-loop fix**: `handleRunAgent` returns 303 redirect (PRG) instead of rendering inline — inline render left a POST-loaded page whose `reload()` replayed the POST and fired "Run Now" in an infinite loop burning tokens; agent name on the list page made clickable. Tests: `prompts_test.go` (philosophy/testing/shell/robustness/edit-tools markers), `toolstree_test.go`, `db/runs_test.go`, `web/template_smoke_test.go` Running/LiveRun states |
-
-### Known gaps
-
-- **Tests** — `internal/agentdesigner`, `internal/secrets`, `internal/profile`, `internal/prompts`, `internal/db`, and `web/` (template smoke tests) have test files; no integration or e2e coverage. The agent-editing logic is unit-tested around the coder boundary (schedule reconciliation, staging-dir isolation, file invariants) but the coder subprocess round-trip itself (real edit → test → approve/reject) has no automated test. The background-run + SSE + PRG path is template-tested and verified live, not by an automated e2e test.
-- **Discord adapter** — in the original plan; not implemented
-- **`/remind` list/delete via Telegram** — only create is wired; no list or cancel command
-- **`/memory` Telegram command** — memory store exists but no `/memory` chat command in Router
-- **MCP servers** — `mcp_servers` table exists but MCP tool execution is not implemented
+- No integration or e2e test coverage — unit tests cover logic boundaries; coder subprocess round-trips (real edit → test → approve) are exercised manually.
+- **Discord adapter** — not implemented.
+- **`/remind` list/delete via Telegram** — only create is wired.
+- **MCP servers** — `mcp_servers` table exists; MCP tool execution not implemented.

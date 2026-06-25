@@ -12,11 +12,12 @@
 //
 //	README.md                      vault home/index note
 //	notes/                         user-authored notes, journals, plans, todos
-//	memory/<id>.md                 one note per memory entry
+//	memory/USER.md                 user profile (name, location, background)
+//	memory/SOUL.md                 communication style and preferences
+//	memory/<name>.md               any additional context files the user creates
 //	skills/<name>/SKILL.md         migrated skills
 //	agents/<agentID>/              an agent's own writable area
 //	sessions/<id>.md               reflected chat transcripts
-//	reminders/<id>.md              reflected reminders
 //	.kb/                           internal index/sidecar data (hidden from "knowledge")
 //
 // Secret VALUES never enter the vault — they stay encrypted in the database and
@@ -135,7 +136,7 @@ func (v *Vault) Rel(userID, abs string) (string, error) {
 // a README home note if the vault does not yet exist. Idempotent.
 func (v *Vault) EnsureScaffold(userID string) error {
 	root := v.Root(userID)
-	for _, sub := range []string{"notes", "memory", "skills", "agents", "sessions", "reminders", InternalDir} {
+	for _, sub := range []string{"notes", "memory", "skills", "agents", "sessions", InternalDir} {
 		if err := os.MkdirAll(filepath.Join(root, sub), 0o750); err != nil {
 			return fmt.Errorf("scaffold %s: %w", sub, err)
 		}
@@ -146,11 +147,28 @@ func (v *Vault) EnsureScaffold(userID string) error {
 			"This is your personal knowledge base. Everything you and your agents " +
 			"create lives here as interlinked markdown notes.\n\n" +
 			"- [[notes]] — your notes, journals, plans and todos\n" +
-			"- [[memory]] — facts your agents remember\n" +
+			"- [[memory]] — your profile and context (USER.md, SOUL.md, and more)\n" +
 			"- [[agents]] — your agents and their run logs\n" +
-			"- [[sessions]] — chat transcripts\n" +
-			"- [[reminders]] — reminders\n"
+			"- [[sessions]] — chat transcripts\n"
 		if err := writeFileAtomic(readme, []byte(content), 0o640); err != nil {
+			return err
+		}
+	}
+
+	// Scaffold structured memory files if they don't exist yet.
+	// These are the suggested starting points; users may create additional
+	// .md files in memory/ and they will all be auto-injected into LLM context.
+	userMD := filepath.Join(root, "memory", "USER.md")
+	if _, err := os.Stat(userMD); errors.Is(err, os.ErrNotExist) {
+		content := "# About Me\n\n<!-- Add your name, location, role, and background here -->\n"
+		if err := writeFileAtomic(userMD, []byte(content), 0o640); err != nil {
+			return err
+		}
+	}
+	soulMD := filepath.Join(root, "memory", "SOUL.md")
+	if _, err := os.Stat(soulMD); errors.Is(err, os.ErrNotExist) {
+		content := "# Communication Style\n\n<!-- Add your preferred tone, language, and response style here -->\n"
+		if err := writeFileAtomic(soulMD, []byte(content), 0o640); err != nil {
 			return err
 		}
 	}
@@ -211,10 +229,11 @@ func (v *Vault) Rename(userID, fromRel, toRel string) error {
 
 // Node is one entry in the vault file tree.
 type Node struct {
-	Name  string // base name
-	Path  string // vault-relative slash path
-	IsDir bool
-	Size  int64
+	Name        string // base name (raw filename / UUID)
+	Path        string // vault-relative slash path
+	IsDir       bool
+	Size        int64
+	DisplayName string // human-readable label; empty means use Name
 }
 
 // List returns the immediate children of a vault-relative directory, directories

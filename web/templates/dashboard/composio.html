@@ -7,8 +7,7 @@
   <div class="mb-8">
     <h1 class="text-2xl font-bold">🔌 External Services</h1>
     <p class="text-base-content/50 text-sm mt-1">
-      Connect Google Drive, Notion, Slack, Jira, GitHub and more — your agents can use them automatically.
-      Powered by <a href="https://composio.dev" target="_blank" class="link link-primary">Composio</a>.
+      Connect your agents to external apps and APIs.
     </p>
   </div>
 
@@ -19,242 +18,163 @@
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
     </svg>
     <div>
-      <p class="font-semibold">Composio is configured ✓</p>
-      <p class="text-sm opacity-80">Your <code>COMPOSIO_API_KEY</code> secret is stored. Agents can now access your connected services.</p>
-    </div>
-  </div>
-
-  <div role="alert" class="alert alert-info mb-4 shadow-sm">
-    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-    </svg>
-    <div class="text-sm">
-      <p class="font-medium">API key permissions matter</p>
-      <p class="opacity-80">If agents get "permission denied" errors, your key may be read-only. Create a new key with <strong>Tool execution</strong> and <strong>Write All</strong> permissions, then update your secret.</p>
+      <p class="font-semibold">Composio is connected ✓</p>
+      <p class="text-sm opacity-80">Your agents can now access any service you've connected in Composio.</p>
     </div>
   </div>
 
   <div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
-    <div class="card-body p-5">
-      <h2 class="font-semibold text-lg mb-1">Manage your connected services</h2>
-      <p class="text-sm text-base-content/60 mb-4">
-        Connect Google Drive, Notion, Slack, Jira, GitHub, Linear, Gmail, Calendar and 250+ other services
-        directly in your Composio dashboard. Once connected, any agent you create can use them.
-      </p>
-      <a href="https://app.composio.dev/connections" target="_blank" class="btn btn-primary btn-sm w-fit">
-        Open Composio Dashboard →
+    <div class="card-body p-5 flex flex-row items-center gap-4">
+      <div class="text-3xl">⚙️</div>
+      <div class="flex-1">
+        <p class="font-semibold">Manage connected services</p>
+        <p class="text-sm text-base-content/60">Add or remove Google Drive, Notion, Slack, GitHub, Gmail and 250+ more.</p>
+      </div>
+      <a href="https://app.composio.dev/connections" target="_blank" class="btn btn-primary btn-sm shrink-0">
+        Open Composio →
       </a>
     </div>
   </div>
 
-  <!-- Services overview grid -->
-  <h2 class="text-lg font-semibold mb-3">What your agents can access</h2>
-  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-    <div class="card bg-base-100 border border-base-300 p-3 text-center text-sm">
-      <div class="text-2xl mb-1">📁</div>
-      <div class="font-medium">Google Drive</div>
-      <div class="text-xs text-base-content/50">Read &amp; write files</div>
-    </div>
-    <div class="card bg-base-100 border border-base-300 p-3 text-center text-sm">
-      <div class="text-2xl mb-1">📝</div>
-      <div class="font-medium">Notion</div>
-      <div class="text-xs text-base-content/50">Pages &amp; databases</div>
-    </div>
-    <div class="card bg-base-100 border border-base-300 p-3 text-center text-sm">
-      <div class="text-2xl mb-1">💬</div>
-      <div class="font-medium">Slack</div>
-      <div class="text-xs text-base-content/50">Send messages</div>
-    </div>
-    <div class="card bg-base-100 border border-base-300 p-3 text-center text-sm">
-      <div class="text-2xl mb-1">📋</div>
-      <div class="font-medium">Jira</div>
-      <div class="text-xs text-base-content/50">Issues &amp; projects</div>
-    </div>
-    <div class="card bg-base-100 border border-base-300 p-3 text-center text-sm">
-      <div class="text-2xl mb-1">🐙</div>
-      <div class="font-medium">GitHub</div>
-      <div class="text-xs text-base-content/50">Issues &amp; PRs</div>
-    </div>
-    <div class="card bg-base-100 border border-base-300 p-3 text-center text-sm">
-      <div class="text-2xl mb-1">📧</div>
-      <div class="font-medium">Gmail</div>
-      <div class="text-xs text-base-content/50">Read &amp; send email</div>
-    </div>
-    <div class="card bg-base-100 border border-base-300 p-3 text-center text-sm">
-      <div class="text-2xl mb-1">📅</div>
-      <div class="font-medium">Google Calendar</div>
-      <div class="text-xs text-base-content/50">Events &amp; scheduling</div>
-    </div>
-    <div class="card bg-base-100 border border-base-300 p-3 text-center text-sm">
-      <div class="text-2xl mb-1">⚡</div>
-      <div class="font-medium">Linear</div>
-      <div class="text-xs text-base-content/50">Issues &amp; cycles</div>
-    </div>
-  </div>
-
-  <!-- Code example -->
-  <div class="card bg-base-100 border border-base-300">
-    <div class="card-body p-5">
-      <h2 class="font-semibold mb-2">How agents use your services</h2>
-      <p class="text-sm text-base-content/60 mb-3">
-        When you create an agent that needs Google Drive, Notion, or any other connected service,
-        the designer will automatically suggest using Composio. The generated code uses the v3 REST API:
-      </p>
-      <pre class="bg-base-200 rounded-lg p-4 text-xs overflow-x-auto"><code>from composio_helper import get_connection, composio_execute
-import os
-
-# Get the connected account
-conn_id, user_id = get_connection("notion")
-
-# Search Notion pages
-result = composio_execute(
-    "NOTION_SEARCH_NOTION_PAGE",
-    conn_id, user_id,
-    {"query": "My Database"}
-)
-
-# List Google Drive files
-conn_id, user_id = get_connection("google-drive")
-result = composio_execute(
-    "GOOGLEDRIVE_LIST_FILES_IN_FOLDER",
-    conn_id, user_id,
-    {"folder_id": "root"}
-)</code></pre>
-      <p class="text-xs text-base-content/40 mt-2">
-        The API key is injected automatically — agents never see it in plain text and it's never stored in AGENT.md.
-      </p>
+  <!-- Other integrations -->
+  <h2 class="text-base font-semibold mb-3 text-base-content/60 uppercase tracking-wide text-xs">Other Integrations</h2>
+  <div class="card bg-base-100 border border-base-300 opacity-60">
+    <div class="card-body p-4 flex flex-row items-center gap-4">
+      <div class="text-2xl">🔗</div>
+      <div class="flex-1">
+        <p class="font-semibold flex items-center gap-2">
+          Nango
+          <span class="badge badge-ghost badge-sm">Coming Soon</span>
+        </p>
+        <p class="text-sm text-base-content/60">OAuth integrations for 250+ APIs with built-in token management.</p>
+      </div>
     </div>
   </div>
 
   {{else}}
-  <!-- ── Not configured state ─────────────────────────────────────────── -->
-  <div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
-    <div class="card-body p-6">
-      <h2 class="card-title text-xl mb-1">Get started with Composio</h2>
-      <p class="text-base-content/60 text-sm mb-6">
-        Composio is a free service that connects your AI agents to 250+ external apps.
-        Follow these steps to set it up — it takes about 5 minutes.
-      </p>
+  <!-- ── Not configured state — service selector ──────────────────────── -->
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+    <!-- Composio card -->
+    <button id="btn-composio" onclick="selectService('composio')"
+      class="card bg-base-100 shadow-sm border-2 border-primary text-left cursor-pointer hover:shadow-md transition-shadow p-5">
+      <div class="flex items-center gap-3 mb-2">
+        <div class="text-2xl">⚙️</div>
+        <div>
+          <p class="font-semibold">Composio</p>
+          <p class="text-xs text-base-content/50">250+ app integrations</p>
+        </div>
+      </div>
+      <p class="text-sm text-base-content/60">Connect Google Drive, Notion, Slack, GitHub, Gmail, Jira and more.</p>
+    </button>
 
-      <ol class="space-y-5">
-        <li class="flex gap-4">
-          <div class="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-content flex items-center justify-center font-bold text-sm">1</div>
-          <div>
-            <p class="font-medium">Create a free Composio account</p>
-            <p class="text-sm text-base-content/60 mt-0.5">Sign up at composio.dev — no credit card required.</p>
-            <a href="https://app.composio.dev/signup" target="_blank" class="btn btn-outline btn-xs mt-2">
-              Sign up at composio.dev →
-            </a>
-          </div>
-        </li>
-
-        <li class="flex gap-4">
-          <div class="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-content flex items-center justify-center font-bold text-sm">2</div>
-          <div>
-            <p class="font-medium">Create an API key with full permissions</p>
-            <p class="text-sm text-base-content/60 mt-0.5">
-              Go to <strong>Settings → API Keys</strong> and create a new key.
-              <span class="text-error font-medium">Important:</span> Select <strong>all permissions</strong> when creating the key:
-            </p>
-            <ul class="text-sm text-base-content/60 mt-1 ml-4 list-disc list-inside space-y-0.5">
-              <li><strong>Tool execution</strong> — required for agents to call Composio tools</li>
-              <li><strong>Connected accounts</strong> — to discover your connected services</li>
-              <li><strong>Write All</strong> — for agents that create or modify data</li>
-            </ul>
-            <p class="text-xs text-base-content/50 mt-1">
-              Read-only keys won't work — agents need to execute tools and manage connected accounts.
-              Permissions can't be changed after creation.
-            </p>
-            <p class="text-sm text-base-content/60 mt-1">
-              Copy the key value — it starts with <code class="bg-base-300 px-1 rounded text-xs">ak_</code>.
-            </p>
-          </div>
-        </li>
-
-        <li class="flex gap-4">
-          <div class="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-content flex items-center justify-center font-bold text-sm">3</div>
-          <div>
-            <p class="font-medium">Add the key to your Secrets</p>
-            <p class="text-sm text-base-content/60 mt-0.5">
-              Go to the Secrets page and add a new secret with the name
-              <code class="bg-base-300 px-1 rounded text-xs font-mono">COMPOSIO_API_KEY</code>
-              and paste your key as the value. It will be encrypted with your master password.
-            </p>
-            <a href="/dashboard/secrets" class="btn btn-primary btn-xs mt-2">Go to Secrets →</a>
-          </div>
-        </li>
-
-        <li class="flex gap-4">
-          <div class="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-content flex items-center justify-center font-bold text-sm">4</div>
-          <div>
-            <p class="font-medium">Connect your services in Composio</p>
-            <p class="text-sm text-base-content/60 mt-0.5">
-              In your Composio dashboard, go to <strong>Connections</strong> and connect Google Drive,
-              Notion, Slack, or any other service you want your agents to use. Composio handles the
-              login securely — you never share passwords with Simple Agents.
-            </p>
-            <a href="https://app.composio.dev/connections" target="_blank" class="btn btn-outline btn-xs mt-2">
-              Open Composio Connections →
-            </a>
-          </div>
-        </li>
-
-        <li class="flex gap-4">
-          <div class="flex-shrink-0 w-8 h-8 rounded-full bg-success text-success-content flex items-center justify-center font-bold text-sm">✓</div>
-          <div>
-            <p class="font-medium">Done — your agents are ready</p>
-            <p class="text-sm text-base-content/60 mt-0.5">
-              Come back here and you'll see "Composio configured ✓".
-              When you create agents, the designer will automatically know you have Composio
-              and can suggest workflows using your connected services.
-            </p>
-          </div>
-        </li>
-      </ol>
+    <!-- Nango card (coming soon) -->
+    <div class="card bg-base-100 shadow-sm border border-base-300 opacity-50 p-5 cursor-not-allowed">
+      <div class="flex items-center gap-3 mb-2">
+        <div class="text-2xl">🔗</div>
+        <div>
+          <p class="font-semibold flex items-center gap-2">
+            Nango
+            <span class="badge badge-ghost badge-sm">Coming Soon</span>
+          </p>
+          <p class="text-xs text-base-content/50">Managed OAuth flows</p>
+        </div>
+      </div>
+      <p class="text-sm text-base-content/60">OAuth integrations for 250+ APIs with built-in token management.</p>
     </div>
   </div>
 
-  <!-- What you'll be able to do -->
-  <div class="card bg-base-100 border border-base-300">
-    <div class="card-body p-5">
-      <h2 class="font-semibold mb-3">What you'll unlock</h2>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-        <div class="flex items-start gap-2">
-          <span class="text-success mt-0.5">✓</span>
-          <span>Agents that read &amp; write Google Drive files</span>
-        </div>
-        <div class="flex items-start gap-2">
-          <span class="text-success mt-0.5">✓</span>
-          <span>Automatic Notion page creation</span>
-        </div>
-        <div class="flex items-start gap-2">
-          <span class="text-success mt-0.5">✓</span>
-          <span>Slack message sending &amp; reading</span>
-        </div>
-        <div class="flex items-start gap-2">
-          <span class="text-success mt-0.5">✓</span>
-          <span>Jira / GitHub issue management</span>
-        </div>
-        <div class="flex items-start gap-2">
-          <span class="text-success mt-0.5">✓</span>
-          <span>Gmail inbox monitoring &amp; replies</span>
-        </div>
-        <div class="flex items-start gap-2">
-          <span class="text-success mt-0.5">✓</span>
-          <span>Google Calendar event creation</span>
-        </div>
-        <div class="flex items-start gap-2">
-          <span class="text-success mt-0.5">✓</span>
-          <span>Linear sprint &amp; issue tracking</span>
-        </div>
-        <div class="flex items-start gap-2">
-          <span class="text-success mt-0.5">✓</span>
-          <span>250+ more services via Composio</span>
-        </div>
+  <!-- Composio setup steps (hidden until card clicked) -->
+  <div id="composio-setup" class="hidden">
+    <div class="card bg-base-100 shadow-sm border border-base-300">
+      <div class="card-body p-6">
+        <h2 class="card-title text-xl mb-1">Set up Composio</h2>
+        <p class="text-base-content/60 text-sm mb-6">
+          Composio is a free service. Follow these steps — it takes about 5 minutes.
+        </p>
+
+        <ol class="space-y-5">
+          <li class="flex gap-4">
+            <div class="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-content flex items-center justify-center font-bold text-sm">1</div>
+            <div>
+              <p class="font-medium">Create a free Composio account</p>
+              <p class="text-sm text-base-content/60 mt-0.5">Sign up at composio.dev — no credit card required.</p>
+              <a href="https://app.composio.dev/signup" target="_blank" class="btn btn-outline btn-xs mt-2">
+                Sign up at composio.dev →
+              </a>
+            </div>
+          </li>
+
+          <li class="flex gap-4">
+            <div class="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-content flex items-center justify-center font-bold text-sm">2</div>
+            <div>
+              <p class="font-medium">Create an API key</p>
+              <p class="text-sm text-base-content/60 mt-0.5">
+                Go to <strong>Settings → API Keys</strong> and create a new key.
+                Select <strong>Read All</strong> and <strong>Write All</strong> permissions, then copy the key.
+              </p>
+            </div>
+          </li>
+
+          <li class="flex gap-4">
+            <div class="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-content flex items-center justify-center font-bold text-sm">3</div>
+            <div>
+              <p class="font-medium">Add the key to your Secrets</p>
+              <p class="text-sm text-base-content/60 mt-0.5">
+                Go to the Secrets page and add a new secret named
+                <code class="bg-base-300 px-1 rounded text-xs font-mono">COMPOSIO_API_KEY</code>
+                with your key as the value. It will be encrypted with your master password.
+              </p>
+              <a href="/dashboard/secrets" class="btn btn-primary btn-xs mt-2">Go to Secrets →</a>
+            </div>
+          </li>
+
+          <li class="flex gap-4">
+            <div class="flex-shrink-0 w-8 h-8 rounded-full bg-primary text-primary-content flex items-center justify-center font-bold text-sm">4</div>
+            <div>
+              <p class="font-medium">Connect your services</p>
+              <p class="text-sm text-base-content/60 mt-0.5">
+                In your Composio dashboard, go to <strong>Connections</strong> and connect Google Drive,
+                Notion, Slack, or any other service. Composio handles login securely — you never share
+                passwords with Simple Agents.
+              </p>
+              <a href="https://app.composio.dev/connections" target="_blank" class="btn btn-outline btn-xs mt-2">
+                Open Composio Connections →
+              </a>
+            </div>
+          </li>
+
+          <li class="flex gap-4">
+            <div class="flex-shrink-0 w-8 h-8 rounded-full bg-success text-success-content flex items-center justify-center font-bold text-sm">✓</div>
+            <div>
+              <p class="font-medium">Done — your agents are ready</p>
+              <p class="text-sm text-base-content/60 mt-0.5">
+                Come back here and you'll see "Composio is connected ✓".
+                When you create agents, the designer will automatically know about your connected services.
+              </p>
+            </div>
+          </li>
+        </ol>
       </div>
     </div>
   </div>
   {{end}}
 </div>
+
+<script>
+function selectService(name) {
+  if (name === 'composio') {
+    var el = document.getElementById('composio-setup');
+    if (el) {
+      el.classList.remove('hidden');
+      el.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
+  }
+}
+// Auto-expand if only one service is available
+document.addEventListener('DOMContentLoaded', function() {
+  var btn = document.getElementById('btn-composio');
+  if (btn) btn.focus();
+});
+</script>
 
 {{template "foot" .}}

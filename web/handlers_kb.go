@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"html/template"
@@ -67,6 +68,7 @@ func (s *Server) showKB(c echo.Context) error {
 	if err != nil {
 		return s.renderKBError(c, "Could not open folder: "+err.Error())
 	}
+	s.enrichKBDisplayNames(u.ID, rel, nodes)
 	p := s.page(c, "Knowledge Base")
 	return c.Render(http.StatusOK, "dashboard/kb_browse.html", &kbBrowseData{
 		pageData: p,
@@ -74,6 +76,50 @@ func (s *Server) showKB(c echo.Context) error {
 		Crumbs:   kbBreadcrumbs(rel),
 		Nodes:    nodes,
 	})
+}
+
+// enrichKBDisplayNames resolves human-readable names for system-managed vault dirs.
+// It mutates nodes in place; failures are silently ignored (raw name is left as-is).
+func (s *Server) enrichKBDisplayNames(userID, parentPath string, nodes []vault.Node) {
+	top := strings.Trim(parentPath, "/")
+	for i := range nodes {
+		n := &nodes[i]
+		switch top {
+		case "agents":
+			if n.IsDir {
+				if agent, err := s.db.GetAgent(n.Name); err == nil {
+					n.DisplayName = agent.Name
+				}
+			}
+		case "memory", "sessions", "reminders":
+			if !n.IsDir {
+				if title := kbReadFirstHeading(s.vault, userID, n.Path); title != "" {
+					n.DisplayName = title
+				}
+			}
+		}
+	}
+}
+
+// kbReadFirstHeading reads the first markdown heading line from a vault note
+// and returns its text (stripped of leading "# "), capped at 80 chars.
+func kbReadFirstHeading(v *vault.Vault, userID, relPath string) string {
+	data, err := v.ReadNote(userID, relPath)
+	if err != nil {
+		return ""
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "# ") {
+			title := strings.TrimPrefix(line, "# ")
+			if len(title) > 80 {
+				title = title[:80] + "…"
+			}
+			return title
+		}
+	}
+	return ""
 }
 
 // viewKBNote renders a single note: markdown is converted to HTML with working

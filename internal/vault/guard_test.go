@@ -97,9 +97,6 @@ func TestGuardIgnoresConcurrentReflections(t *testing.T) {
 	snap, _ := g.Snapshot(user)
 
 	// Simulate background pollers firing mid-run.
-	if err := r.ReflectReminder(user, ReminderNote{ID: "rem-1", Message: "buy milk"}); err != nil {
-		t.Fatal(err)
-	}
 	if err := r.ReflectSession(user, SessionNote{ID: "sess-1", Name: "chat"}); err != nil {
 		t.Fatal(err)
 	}
@@ -113,10 +110,7 @@ func TestGuardIgnoresConcurrentReflections(t *testing.T) {
 	if len(violations) != 0 {
 		t.Errorf("violations = %v, want none (system reflections must be ignored)", violations)
 	}
-	// The reflected notes must still exist.
-	if _, err := v.ReadNote(user, "reminders/rem-1.md"); err != nil {
-		t.Errorf("reminder reflection was wrongly deleted: %v", err)
-	}
+	// The reflected session note must still exist.
 	if _, err := v.ReadNote(user, "sessions/sess-1.md"); err != nil {
 		t.Errorf("session reflection was wrongly deleted: %v", err)
 	}

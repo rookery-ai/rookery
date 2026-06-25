@@ -21,7 +21,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/config"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/gateway"
-	"github.com/ilijad1/simple-agents/internal/memory"
+	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/ilijad1/simple-agents/internal/skillstore"
 	"github.com/ilijad1/simple-agents/internal/vault"
@@ -41,7 +41,6 @@ type Server struct {
 	systemKey  []byte                  // 32-byte key for encrypting master passwords at rest
 	gateway    *gateway.GatewayManager // may be nil in tests
 	runner     *agentrunner.Runner     // may be nil in tests
-	memory     *memory.Store           // may be nil in tests
 	designer   *agentdesigner.AgentDesigner
 	skills     *skillstore.Store
 	designFlow *agentdesigner.Flow // shared with Telegram gateway
@@ -57,7 +56,7 @@ type Server struct {
 
 // NewServer wires up all routes and middleware.
 // gatewayManager and runner may be nil (e.g. in tests).
-func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, designer *agentdesigner.AgentDesigner, homesDir string, memStore *memory.Store, skillStore *skillstore.Store, designFlow *agentdesigner.Flow) (*Server, error) {
+func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, designer *agentdesigner.AgentDesigner, homesDir string, skillStore *skillstore.Store, designFlow *agentdesigner.Flow) (*Server, error) {
 	sessionKey := []byte(cfg.Server.SessionKey)
 	if len(sessionKey) == 0 {
 		// Use a fixed dev key if not configured; production MUST set SA_SESSION_KEY.
@@ -86,7 +85,6 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 		systemKey:  sysKey,
 		gateway:    gatewayManager,
 		runner:     runner,
-		memory:     memStore,
 		designer:   designer,
 		skills:     skillStore,
 		designFlow: designFlow,
@@ -169,6 +167,12 @@ func parseTemplates(dir string) (*template.Template, error) {
 				return "?"
 			}
 			return string([]rune(s)[:1])
+		},
+		"fmtTZ": func(loc *time.Location, t time.Time, layout string) string {
+			if loc == nil {
+				loc = time.UTC
+			}
+			return t.In(loc).Format(layout)
 		},
 	}
 
@@ -272,8 +276,10 @@ func (s *Server) setupRoutes() {
 	dash.GET("/reminders", s.showReminders)
 	dash.POST("/reminders", s.handleCreateReminder)
 	dash.POST("/reminders/:id/delete", s.handleDeleteReminder)
-	dash.GET("/memory", s.showMemory)
-	dash.POST("/memory", s.handleUpdateMemory)
+	dash.GET("/reminders/poll", s.handlePollReminders)
+	dash.GET("/memory", func(c echo.Context) error {
+		return c.Redirect(http.StatusFound, "/dashboard/kb?path=memory")
+	})
 	dash.GET("/kb", s.showKB)
 	dash.GET("/kb/view", s.viewKBNote)
 	dash.GET("/kb/edit", s.editKBNote)
@@ -421,9 +427,14 @@ type pageData struct {
 	Error   string
 	Success string
 	Data    any
+	UserLoc *time.Location
 }
 
 func (s *Server) page(c echo.Context, title string) *pageData {
 	u, _ := s.currentUser(c)
-	return &pageData{User: u, Title: title}
+	p := &pageData{User: u, Title: title, UserLoc: time.UTC}
+	if u != nil {
+		p.UserLoc = profile.LoadLocation(s.db, u.ID)
+	}
+	return p
 }

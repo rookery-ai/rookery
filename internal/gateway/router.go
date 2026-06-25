@@ -40,23 +40,37 @@ type Router struct {
 	designFlow *agentdesigner.Flow
 	memory     *memory.Store
 
-	mu            sync.Mutex
-	challenges    map[string]*secretChallenge // userID → pending master-password challenge
-	pendingCancel map[string]bool             // userID → waiting for save/discard reply to /agent cancel
+	// timeParserFallback is an optional LLM-backed time parser used when the
+	// regex parser in reminder.ParseNaturalTime fails to understand the input.
+	timeParserFallback reminder.TimeParserFunc
+
+	mu                sync.Mutex
+	challenges        map[string]*secretChallenge // userID → pending master-password challenge
+	pendingCancel     map[string]bool             // userID → waiting for save/discard reply to /agent cancel
+	pendingReminderMsg map[string]string           // userID → reminder message waiting for a "when" reply
 }
 
 // NewRouter creates a Router. textHandler, agentRunHandler, and designFlow may be nil
 // until the corresponding phases are wired in; the router will reply with stub messages.
 func NewRouter(database *db.DB, textHandler TextHandler, agentRunHandler AgentRunHandler, flow *agentdesigner.Flow, mem *memory.Store) *Router {
 	return &Router{
-		db:            database,
-		onText:        textHandler,
-		onAgentRun:    agentRunHandler,
-		designFlow:    flow,
-		memory:        mem,
-		challenges:    make(map[string]*secretChallenge),
-		pendingCancel: make(map[string]bool),
+		db:                 database,
+		onText:             textHandler,
+		onAgentRun:         agentRunHandler,
+		designFlow:         flow,
+		memory:             mem,
+		challenges:         make(map[string]*secretChallenge),
+		pendingCancel:      make(map[string]bool),
+		pendingReminderMsg: make(map[string]string),
 	}
+}
+
+// WithTimeParserFallback sets an LLM-backed time parser to use when the built-in
+// regex parser fails. The fallback is also used when a reminder message is provided
+// without an explicit time expression.
+func (r *Router) WithTimeParserFallback(fn reminder.TimeParserFunc) *Router {
+	r.timeParserFallback = fn
+	return r
 }
 
 // Handle dispatches msg to the right handler and uses send() for replies.
@@ -430,16 +444,17 @@ func (r *Router) resolveCancelChoice(msg Message, send func(string)) error {
 	return nil
 }
 
-// handleRemind parses natural language reminders:
+// handleRemind parses natural language reminders. Accepts flexible input:
 //
 //	/remind in 10 minutes to check the oven
 //	/remind next Tuesday to call doctor
-//	/remind me in 10 minutes to start fire
+//	/remind next Friday evening write a note about my bitcoin price
+//	/remind to write a note about my bitcoin price      (asks for time)
 //	/remind 30m old format still works
 func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send func(string)) error {
 	arg = strings.TrimSpace(arg)
 	if arg == "" {
-		send("Usage: /remind \\<when\\> to \\<message\\>\nExamples:\n• /remind in 10 minutes to check the oven\n• /remind tomorrow at 3pm to call doctor\n• /remind next Tuesday to pay bills\n• /remind 30m old format still works")
+		send("Usage: /remind \\<when\\> to \\<message\\>\nExamples:\n• /remind in 10 minutes to check the oven\n• /remind tomorrow at 3pm to call doctor\n• /remind next Tuesday to pay bills\n• /remind next Friday evening write note about bitcoin price\n• /remind 30m old format still works")
 		return nil
 	}
 
@@ -447,49 +462,115 @@ func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send
 	arg = strings.TrimPrefix(arg, "me ")
 	arg = strings.TrimSpace(arg)
 
-	// Split on " to " to separate time expression from message.
-	// Falls back to first-word-is-duration for backward compat.
+	now := time.Now()
+	loc := profile.LoadLocation(r.db, msg.UserID)
+
+	// Strategy: try to extract a time from the full arg using LLM (smartest path),
+	// falling back to the " to " split + regex approach for speed when possible.
 	var timeExpr, message string
+	var remindAt time.Time
+
+	// 1. Try " to " split → parse time expression with regex first.
 	if idx := strings.Index(arg, " to "); idx >= 0 {
 		timeExpr = strings.TrimSpace(arg[:idx])
 		message = strings.TrimSpace(arg[idx+4:])
-	} else {
-		parts := strings.SplitN(arg, " ", 2)
-		if len(parts) < 2 {
-			send("Please include a message\\. Example: /remind in 10 minutes to check the oven")
-			return nil
+		if t, err := reminder.ParseNaturalTime(timeExpr, now, loc); err == nil {
+			remindAt = t
+		} else if d, err2 := parseDuration(timeExpr); err2 == nil {
+			remindAt = now.Add(d)
 		}
-		timeExpr, message = parts[0], strings.TrimSpace(parts[1])
 	}
 
-	if message == "" {
-		send("Please include a message after 'to'\\. Example: /remind in 10 minutes to check the oven")
+	// 2. If the above didn't resolve, send the whole arg to the LLM.
+	if remindAt.IsZero() {
+		if r.timeParserFallback != nil {
+			when, extractedMsg, err := r.timeParserFallback(ctx, msg.UserID, arg, now, loc)
+			if err == nil && !when.IsZero() {
+				remindAt = when
+				if extractedMsg != "" && extractedMsg != arg {
+					message = extractedMsg
+				}
+			} else if err == nil && when.IsZero() {
+				// LLM says no time in the input — ask the user.
+				if extractedMsg != "" {
+					message = extractedMsg
+				} else {
+					message = arg
+				}
+				r.mu.Lock()
+				r.pendingReminderMsg[msg.UserID] = message
+				r.mu.Unlock()
+				send(fmt.Sprintf("⏰ When should I remind you about *%s*?\nReply with a time, e.g\\. 'in 10 minutes', 'tomorrow at 9am', 'next Friday evening'", escapeMarkdown(message)))
+				return nil
+			}
+		}
+	}
+
+	// 3. Legacy fallback: first word as duration (backward compat).
+	if remindAt.IsZero() {
+		parts := strings.SplitN(arg, " ", 2)
+		if len(parts) == 2 {
+			if d, err := parseDuration(parts[0]); err == nil {
+				remindAt = now.Add(d)
+				if message == "" {
+					message = strings.TrimSpace(parts[1])
+				}
+			}
+		}
+	}
+
+	if remindAt.IsZero() {
+		send("Couldn't understand that time\\. Try:\n• /remind in 10 minutes to check oven\n• /remind next Tuesday to call doctor\n• /remind next Friday evening write note about bitcoin\n• /remind 30m old format\n• /remind to write a note _(I'll ask when)_")
 		return nil
 	}
 
-	// Try natural language parser first, then legacy duration format.
-	remindAt, err := reminder.ParseNaturalTime(timeExpr, time.Now(), profile.LoadLocation(r.db, msg.UserID))
-	if err != nil {
-		d, err2 := parseDuration(timeExpr)
-		if err2 != nil {
-			send("Couldn't understand that time\\. Try:\n• /remind in 10 minutes to check oven\n• /remind next Tuesday to call doctor\n• /remind 30m old format")
-			return nil
-		}
-		remindAt = time.Now().Add(d)
+	if message == "" {
+		send("Please include a reminder message\\. Example: /remind in 10 minutes to check the oven")
+		return nil
 	}
 
+	return r.createReminder(ctx, msg.UserID, message, remindAt, send)
+}
+
+func (r *Router) createReminder(ctx context.Context, userID, message string, remindAt time.Time, send func(string)) error {
 	rm := &db.Reminder{
 		ID:       uuid.New().String(),
-		UserID:   msg.UserID,
+		UserID:   userID,
 		Message:  message,
 		RemindAt: remindAt,
 	}
 	if err := r.db.CreateReminder(rm); err != nil {
 		return fmt.Errorf("create reminder: %w", err)
 	}
-
 	when := remindAt.Format("Jan 2 at 15:04")
 	send(fmt.Sprintf("⏰ Reminder set for *%s*: _%s_", escapeMarkdown(when), escapeMarkdown(message)))
+	return nil
+}
+
+// resolvePendingReminder handles the user's reply to a "when?" prompt for a reminder
+// that had no time expression. The message is already known; this call parses the time.
+func (r *Router) resolvePendingReminder(ctx context.Context, msg Message, reminderMsg string, send func(string)) error {
+	now := time.Now()
+	loc := profile.LoadLocation(r.db, msg.UserID)
+
+	// Try standard regex first.
+	if t, err := reminder.ParseNaturalTime(msg.Text, now, loc); err == nil {
+		return r.createReminder(ctx, msg.UserID, reminderMsg, t, send)
+	}
+
+	// Try LLM fallback.
+	if r.timeParserFallback != nil {
+		when, _, err := r.timeParserFallback(ctx, msg.UserID, msg.Text, now, loc)
+		if err == nil && !when.IsZero() {
+			return r.createReminder(ctx, msg.UserID, reminderMsg, when, send)
+		}
+	}
+
+	// Re-queue the pending message and ask again.
+	r.mu.Lock()
+	r.pendingReminderMsg[msg.UserID] = reminderMsg
+	r.mu.Unlock()
+	send("Couldn't understand that time\\. Please try again, e\\.g\\. 'tomorrow at 9am' or 'next Friday'")
 	return nil
 }
 
@@ -565,6 +646,18 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 	r.mu.Unlock()
 	if hasCancelChoice {
 		return r.resolveCancelChoice(msg, send)
+	}
+
+	// Check for a pending reminder "when?" prompt — the user is supplying a time
+	// for a reminder message that had no time expression.
+	r.mu.Lock()
+	pendingMsg, hasPendingReminder := r.pendingReminderMsg[msg.UserID]
+	if hasPendingReminder {
+		delete(r.pendingReminderMsg, msg.UserID)
+	}
+	r.mu.Unlock()
+	if hasPendingReminder {
+		return r.resolvePendingReminder(ctx, msg, pendingMsg, send)
 	}
 
 	// If the user has an active design session, route all text there.

@@ -17,8 +17,15 @@ import (
 //	N minutes/hours/days/weeks [from now]
 //	tomorrow [at TIME]
 //	today at TIME
-//	next <weekday> [at TIME]
+//	[next|this] <weekday> [at TIME]
 //	at TIME                          (today, or tomorrow if time has already passed)
+//	morning / afternoon / evening / night / tonight  (time-of-day shortcuts)
+//	[this] morning / afternoon / evening / tonight
+//	next week                        (Monday 9am of next week)
+//	end of the/this week             (Friday 5pm)
+//	end of the/this month            (last day of month at 9am)
+//	<Month> <day> [at TIME]          (e.g. "July 15", "July 15 at 3pm")
+//	<day>th [of <Month>] [at TIME]   (e.g. "the 15th", "15th of July")
 //
 // TIME formats: 3pm, 3:30pm, 15:30, noon, midnight
 func ParseNaturalTime(text string, now time.Time, loc *time.Location) (time.Time, error) {
@@ -47,7 +54,7 @@ func ParseNaturalTime(text string, now time.Time, loc *time.Location) (time.Time
 		return t, nil
 	}
 
-	// "next <weekday> [at TIME]"
+	// "[next|this] <weekday> [at TIME]" and "next week"
 	if t, ok := tryNextWeekday(s, now, loc); ok {
 		return t, nil
 	}
@@ -57,7 +64,27 @@ func ParseNaturalTime(text string, now time.Time, loc *time.Location) (time.Time
 		return t, nil
 	}
 
-	return time.Time{}, fmt.Errorf(`unrecognized time expression %q; try: "in 10 minutes", "tomorrow at 3pm", "next Tuesday"`, text)
+	// "[this] morning / afternoon / evening / night / tonight"
+	if t, ok := tryTimeOfDayShortcut(s, now, loc); ok {
+		return t, nil
+	}
+
+	// "end of the/this week" or "end of the/this month"
+	if t, ok := tryEndOf(s, now, loc); ok {
+		return t, nil
+	}
+
+	// "<Month> <day> [at TIME]" — e.g. "July 15", "December 31 at midnight"
+	if t, ok := trySpecificDate(s, now, loc); ok {
+		return t, nil
+	}
+
+	// "the 15th", "15th", "15th of July" [at TIME]
+	if t, ok := tryOrdinalDay(s, now, loc); ok {
+		return t, nil
+	}
+
+	return time.Time{}, fmt.Errorf(`unrecognized time expression %q; try: "in 10 minutes", "tomorrow at 3pm", "next Tuesday", "July 15 at 2pm"`, text)
 }
 
 // ── pattern matchers ───────────────────────────────────────────────────────
@@ -153,13 +180,33 @@ var weekdays = map[string]time.Weekday{
 	"sat":       time.Saturday,
 }
 
-var reNextWeekday = regexp.MustCompile(`^(?:next\s+)?([a-z]+)(\s+at\s+(.+))?$`)
+// months maps English month names (full and abbreviated) to time.Month values.
+var months = map[string]time.Month{
+	"january": time.January, "february": time.February, "march": time.March,
+	"april": time.April, "may": time.May, "june": time.June,
+	"july": time.July, "august": time.August, "september": time.September,
+	"october": time.October, "november": time.November, "december": time.December,
+	"jan": time.January, "feb": time.February, "mar": time.March,
+	"apr": time.April, "jun": time.June, "jul": time.July,
+	"aug": time.August, "sep": time.September, "oct": time.October,
+	"nov": time.November, "dec": time.December,
+}
+
+// "[next|this] <weekday> [at TIME]" — also handles "next week"
+var reNextWeekday = regexp.MustCompile(`^(?:(?:next|this)\s+)?([a-z]+)(\s+at\s+(.+))?$`)
 
 func tryNextWeekday(s string, now time.Time, loc *time.Location) (time.Time, bool) {
 	m := reNextWeekday.FindStringSubmatch(s)
 	if m == nil {
 		return time.Time{}, false
 	}
+
+	// "next week" → next Monday at 9am
+	if m[1] == "week" {
+		base := nextWeekday(now.In(loc), time.Monday)
+		return base.Add(9 * time.Hour), true
+	}
+
 	wd, ok := weekdays[m[1]]
 	if !ok {
 		return time.Time{}, false
@@ -189,6 +236,156 @@ func tryAtTime(s string, now time.Time, loc *time.Location) (time.Time, bool) {
 	t := midnight(now.In(loc)).Add(time.Duration(h)*time.Hour + time.Duration(min)*time.Minute)
 	if !t.After(now) {
 		t = t.Add(24 * time.Hour)
+	}
+	return t, true
+}
+
+// "[this] morning/afternoon/evening/night/tonight" — maps to default hours.
+var reTimeOfDayShortcut = regexp.MustCompile(`^(?:this\s+)?(morning|afternoon|evening|night|tonight)$`)
+
+var timeOfDayHours = map[string]int{
+	"morning":   9,
+	"afternoon": 14,
+	"evening":   18,
+	"night":     21,
+	"tonight":   21,
+}
+
+func tryTimeOfDayShortcut(s string, now time.Time, loc *time.Location) (time.Time, bool) {
+	m := reTimeOfDayShortcut.FindStringSubmatch(s)
+	if m == nil {
+		return time.Time{}, false
+	}
+	h := timeOfDayHours[m[1]]
+	t := midnight(now.In(loc)).Add(time.Duration(h) * time.Hour)
+	if !t.After(now) {
+		t = t.Add(24 * time.Hour)
+	}
+	return t, true
+}
+
+// "end of the/this week" → Friday 5pm; "end of the/this month" → last day at 9am.
+var reEndOf = regexp.MustCompile(`^end\s+of\s+(?:the\s+|this\s+)?(week|month)$`)
+
+func tryEndOf(s string, now time.Time, loc *time.Location) (time.Time, bool) {
+	m := reEndOf.FindStringSubmatch(s)
+	if m == nil {
+		return time.Time{}, false
+	}
+	local := now.In(loc)
+	switch m[1] {
+	case "week":
+		// Next Friday 5pm (or this Friday if it's in the future).
+		base := nextWeekday(local, time.Friday)
+		return midnight(base).Add(17 * time.Hour), true
+	case "month":
+		// Last day of the current month at 9am.
+		y, mo, _ := local.Date()
+		lastDay := time.Date(y, mo+1, 0, 9, 0, 0, 0, loc)
+		if lastDay.Before(now) {
+			// Already past end of month — use next month.
+			lastDay = time.Date(y, mo+2, 0, 9, 0, 0, 0, loc)
+		}
+		return lastDay, true
+	}
+	return time.Time{}, false
+}
+
+// "<Month> <day> [, year] [at TIME]" — e.g. "July 15", "July 15 at 3pm", "Dec 31, 2027".
+var reMonthDay = regexp.MustCompile(
+	`^([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?(?:\s+at\s+(.+))?$`)
+
+func trySpecificDate(s string, now time.Time, loc *time.Location) (time.Time, bool) {
+	m := reMonthDay.FindStringSubmatch(s)
+	if m == nil {
+		return time.Time{}, false
+	}
+	mo, ok := months[m[1]]
+	if !ok {
+		return time.Time{}, false
+	}
+	day, err := strconv.Atoi(m[2])
+	if err != nil || day < 1 || day > 31 {
+		return time.Time{}, false
+	}
+
+	local := now.In(loc)
+	year := local.Year()
+	if m[3] != "" {
+		if y, err := strconv.Atoi(m[3]); err == nil {
+			year = y
+		}
+	}
+
+	h, min := 9, 0 // default 9am
+	if m[4] != "" {
+		hh, mm, ok := parseTimeOfDay(strings.TrimSpace(m[4]))
+		if !ok {
+			return time.Time{}, false
+		}
+		h, min = hh, mm
+	}
+
+	t := time.Date(year, mo, day, h, min, 0, 0, loc)
+	// If the date is in the past and no year was specified, advance to next year.
+	if t.Before(now) && m[3] == "" {
+		t = time.Date(year+1, mo, day, h, min, 0, 0, loc)
+	}
+	if t.Before(now) {
+		return time.Time{}, false // year was explicit but still past
+	}
+	return t, true
+}
+
+// "[the] <ordinal> [of <month>] [at TIME]" — e.g. "the 15th", "15th of July at 3pm".
+var reOrdinalDay = regexp.MustCompile(
+	`^(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)(?:\s+(?:of\s+)?([a-z]+))?(?:\s+at\s+(.+))?$`)
+
+func tryOrdinalDay(s string, now time.Time, loc *time.Location) (time.Time, bool) {
+	m := reOrdinalDay.FindStringSubmatch(s)
+	if m == nil {
+		return time.Time{}, false
+	}
+	day, err := strconv.Atoi(m[1])
+	if err != nil || day < 1 || day > 31 {
+		return time.Time{}, false
+	}
+
+	local := now.In(loc)
+	year, curMonth, _ := local.Date()
+
+	var mo time.Month
+	if m[2] != "" {
+		var ok bool
+		mo, ok = months[m[2]]
+		if !ok {
+			return time.Time{}, false
+		}
+	} else {
+		mo = curMonth
+	}
+
+	h, min := 9, 0
+	if m[3] != "" {
+		hh, mm, ok := parseTimeOfDay(strings.TrimSpace(m[3]))
+		if !ok {
+			return time.Time{}, false
+		}
+		h, min = hh, mm
+	}
+
+	t := time.Date(year, mo, day, h, min, 0, 0, loc)
+	if t.Before(now) {
+		// If no month specified: try next month.
+		if m[2] == "" {
+			t = time.Date(year, mo+1, day, h, min, 0, 0, loc)
+		} else {
+			// Month was specified but date is past → advance to next year.
+			t = time.Date(year+1, mo, day, h, min, 0, 0, loc)
+		}
+	}
+	if t.Before(now) {
+		return time.Time{}, false
 	}
 	return t, true
 }

@@ -13,8 +13,12 @@
 {{end}}
 
 {{define "foot"}}
+<!-- Toast container for reminder notifications -->
+<div id="reminder-toasts" class="toast toast-top toast-center z-50 pointer-events-none" style="display:none"></div>
+
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+  // Active nav link
   var p = location.pathname;
   document.querySelectorAll('.navbar .menu a[href]').forEach(function(a) {
     var h = a.getAttribute('href');
@@ -23,6 +27,47 @@ document.addEventListener('DOMContentLoaded', function() {
       a.classList.add('active');
     }
   });
+
+  // ── Reminder poller ────────────────────────────────────────────────────────
+  // Checks for due reminders every 30s and delivers them via browser notification
+  // or an in-page toast — so web-only users get notified without needing Telegram.
+  var toastContainer = document.getElementById('reminder-toasts');
+
+  function showToast(message) {
+    toastContainer.style.display = '';
+    var alert = document.createElement('div');
+    alert.className = 'alert alert-info shadow-lg pointer-events-auto max-w-sm';
+    alert.innerHTML = '<span class="text-lg shrink-0">⏰</span>'
+      + '<div class="min-w-0"><p class="font-semibold text-sm">Reminder</p>'
+      + '<p class="text-xs opacity-80 break-words">' + message.replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</p></div>'
+      + '<button class="btn btn-ghost btn-xs shrink-0" onclick="this.closest(\'.alert\').remove()">✕</button>';
+    toastContainer.appendChild(alert);
+    setTimeout(function() { if (alert.parentNode) alert.remove(); }, 12000);
+  }
+
+  function fireReminder(message) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('⏰ Reminder', { body: message, icon: '/favicon.ico' });
+    }
+    // Always show in-page toast too (browser notifications may be blocked)
+    showToast(message);
+  }
+
+  function pollReminders() {
+    fetch('/dashboard/reminders/poll', { credentials: 'same-origin' })
+      .then(function(r) { return r.ok ? r.json() : []; })
+      .then(function(items) {
+        (items || []).forEach(function(r) { fireReminder(r.message); });
+      })
+      .catch(function() {});
+  }
+
+  // Request permission and start polling immediately + every 30s
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+  pollReminders();
+  setInterval(pollReminders, 30000);
 });
 </script>
 </body>
@@ -62,7 +107,6 @@ document.addEventListener('DOMContentLoaded', function() {
         <li><a href="/dashboard/composio">🔌 External Services</a></li>
         <li><a href="/dashboard/sessions">💬 Sessions</a></li>
         <li><a href="/dashboard/reminders">⏰ Reminders</a></li>
-        <li><a href="/dashboard/memory">🧠 Memory</a></li>
         <li><a href="/dashboard/kb">📚 Knowledge Base</a></li>
       </ul>
     </div>
@@ -77,7 +121,6 @@ document.addEventListener('DOMContentLoaded', function() {
       <li><a href="/dashboard/composio">Services</a></li>
       <li><a href="/dashboard/sessions">Sessions</a></li>
       <li><a href="/dashboard/reminders">Reminders</a></li>
-      <li><a href="/dashboard/memory">Memory</a></li>
       <li><a href="/dashboard/kb">Knowledge</a></li>
     </ul>
   </div>

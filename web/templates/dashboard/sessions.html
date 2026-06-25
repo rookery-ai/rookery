@@ -35,7 +35,7 @@
             <div>
               <p class="font-semibold text-sm">{{if .Name}}{{.Name}}{{else}}Unnamed Session{{end}}</p>
               <p class="text-xs text-base-content/40">
-                {{.Platform}} · Last active {{.LastSeen.Format "Jan 2 at 15:04"}}
+                {{.Platform}} · Last active {{fmtTZ $.UserLoc .LastSeen "Jan 2 at 15:04"}}
                 {{if .Active}}<span class="badge badge-success badge-xs ml-1">active</span>{{end}}
               </p>
             </div>

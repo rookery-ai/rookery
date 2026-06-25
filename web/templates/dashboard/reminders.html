@@ -6,28 +6,54 @@
 
   <div class="mb-8">
     <h1 class="text-2xl font-bold">⏰ Reminders</h1>
-    <p class="text-base-content/50 text-sm mt-0.5">One-time reminders delivered to your connected chat app.</p>
+    <p class="text-base-content/50 text-sm mt-0.5">Delivered to your connected chat app. Reference your notes, agents, or any topic from your knowledge base.</p>
   </div>
 
   <!-- Add reminder -->
   <div class="card bg-base-100 shadow-sm border border-base-300 mb-6">
     <div class="card-body p-5">
-      <h2 class="font-semibold mb-4">Add Reminder</h2>
+      <h2 class="font-semibold mb-1">Add Reminder</h2>
+      <p class="text-xs text-base-content/40 mb-4">Understands flexible natural language — no need for exact formats.</p>
       <form method="POST" action="/dashboard/reminders" class="space-y-4">
+
         <div class="form-control">
-          <label class="label pb-1"><span class="label-text font-medium">Message</span></label>
-          <input type="text" name="message" placeholder="What to remind you about..."
-            class="input input-bordered w-full" required>
+          <label class="label pb-1">
+            <span class="label-text font-medium">Message</span>
+            <span class="label-text-alt text-base-content/40">what to remind you about</span>
+          </label>
+          <input type="text" name="message" id="reminder-message"
+            placeholder="e.g. call the doctor, review Q2 report, follow up on the project proposal..."
+            class="input input-bordered w-full" required autocomplete="off">
+          <label class="label pt-1">
+            <span class="label-text-alt text-base-content/35">💡 Can reference topics, notes, or agents from your knowledge base</span>
+          </label>
         </div>
+
         <div class="form-control">
           <label class="label pb-1">
             <span class="label-text font-medium">When</span>
-            <span class="label-text-alt text-base-content/40">natural language</span>
+            <span class="label-text-alt text-base-content/40">natural language — powered by AI if needed</span>
           </label>
-          <input type="text" name="when" class="input input-bordered w-full"
-            placeholder='e.g. "in 10 minutes", "tomorrow at 3pm", "next Tuesday at noon"'
-            required autocomplete="off">
+          <input type="text" name="when" id="reminder-when" class="input input-bordered w-full"
+            placeholder='e.g. "tomorrow morning", "next Friday at 2pm", "July 15", "in 3 hours", "this evening"'
+            autocomplete="off">
+          <!-- Quick-pick chips -->
+          <div class="flex flex-wrap gap-1.5 mt-2">
+            <button type="button" class="time-chip badge badge-ghost badge-sm cursor-pointer hover:badge-primary transition-colors" data-val="in 30 minutes">in 30 min</button>
+            <button type="button" class="time-chip badge badge-ghost badge-sm cursor-pointer hover:badge-primary transition-colors" data-val="in 1 hour">in 1 hour</button>
+            <button type="button" class="time-chip badge badge-ghost badge-sm cursor-pointer hover:badge-primary transition-colors" data-val="this evening">this evening</button>
+            <button type="button" class="time-chip badge badge-ghost badge-sm cursor-pointer hover:badge-primary transition-colors" data-val="tomorrow morning">tomorrow morning</button>
+            <button type="button" class="time-chip badge badge-ghost badge-sm cursor-pointer hover:badge-primary transition-colors" data-val="tomorrow at 9am">tomorrow 9am</button>
+            <button type="button" class="time-chip badge badge-ghost badge-sm cursor-pointer hover:badge-primary transition-colors" data-val="next Monday at 9am">next Monday</button>
+            <button type="button" class="time-chip badge badge-ghost badge-sm cursor-pointer hover:badge-primary transition-colors" data-val="next Friday morning">next Friday</button>
+            <button type="button" class="time-chip badge badge-ghost badge-sm cursor-pointer hover:badge-primary transition-colors" data-val="end of the week">end of week</button>
+            <button type="button" class="time-chip badge badge-ghost badge-sm cursor-pointer hover:badge-primary transition-colors" data-val="end of the month">end of month</button>
+          </div>
+          <label class="label pt-1">
+            <span class="label-text-alt text-base-content/35">Accepts dates like "July 15", days like "next Tuesday", times like "at 3pm", and more</span>
+          </label>
         </div>
+
         <button type="submit" class="btn btn-primary gap-2">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
           Set Reminder
@@ -51,7 +77,7 @@
             <span class="text-xl shrink-0">{{if .Sent}}✅{{else}}🔔{{end}}</span>
             <div>
               <p class="font-medium text-sm {{if .Sent}}line-through opacity-40{{end}}">{{.Message}}</p>
-              <p class="text-xs text-base-content/40">{{.RemindAt.Format "January 2, 2006 at 15:04"}}</p>
+              <p class="text-xs text-base-content/40">{{fmtTZ $.UserLoc .RemindAt "Monday, January 2, 2006 at 15:04"}}</p>
             </div>
           </div>
           {{if not .Sent}}
@@ -69,10 +95,24 @@
       <div class="text-center py-12 text-base-content/30">
         <div class="text-4xl mb-3">⏰</div>
         <p class="text-sm">No reminders set.</p>
+        <p class="text-xs mt-1 opacity-60">Set your first reminder above — mention your notes or agents to get related context when it fires.</p>
       </div>
       {{end}}
     </div>
   </div>
 </div>
+
+<script>
+document.querySelectorAll('.time-chip').forEach(function(chip) {
+  chip.addEventListener('click', function() {
+    var whenInput = document.getElementById('reminder-when');
+    whenInput.value = this.dataset.val;
+    whenInput.focus();
+    // Visual feedback
+    document.querySelectorAll('.time-chip').forEach(function(c) { c.classList.remove('badge-primary'); });
+    this.classList.add('badge-primary');
+  });
+});
+</script>
 
 {{template "foot" .}}

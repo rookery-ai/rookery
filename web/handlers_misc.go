@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/profile"
+	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/reminder"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
@@ -34,7 +36,8 @@ func (s *Server) handleCreateSession(c echo.Context) error {
 	u := c.Get("user").(*db.User)
 	name := c.FormValue("name")
 	if name == "" {
-		name = "Session " + time.Now().Format("2006-01-02 15:04")
+		loc := profile.LoadLocation(s.db, u.ID)
+		name = "Session " + time.Now().In(loc).Format("2006-01-02 15:04")
 	}
 	sess := &db.ChatSession{
 		ID:       uuid.New().String(),
@@ -92,17 +95,29 @@ func (s *Server) handleCreateReminder(c echo.Context) error {
 	whenStr := strings.TrimSpace(c.FormValue("when"))
 
 	p := s.page(c, "Reminders")
-	if message == "" || whenStr == "" {
-		p.Error = "Message and reminder time are required"
-		reminders, _ := s.db.ListReminders(u.ID)
-		return c.Render(http.StatusBadRequest, "dashboard/reminders.html", &remindersPageData{pageData: p, Reminders: reminders})
+	renderErr := func(msg string) error {
+		p.Error = msg
+		rs, _ := s.db.ListReminders(u.ID)
+		return c.Render(http.StatusBadRequest, "dashboard/reminders.html", &remindersPageData{pageData: p, Reminders: rs})
 	}
 
-	remindAt, err := reminder.ParseNaturalTime(whenStr, time.Now(), profile.LoadLocation(s.db, u.ID))
+	if message == "" {
+		return renderErr("Reminder message is required")
+	}
+	if whenStr == "" {
+		return renderErr(`When would you like to be reminded? Try: "in 10 minutes", "tomorrow at 3pm", "next Friday morning"`)
+	}
+
+	now := time.Now()
+	loc := profile.LoadLocation(s.db, u.ID)
+	llmFn := buildLLMTimeParser(s.coderForUser(u.ID))
+
+	remindAt, _, err := reminder.ParseNaturalTimeFull(c.Request().Context(), whenStr, now, loc, llmFn, u.ID)
 	if err != nil {
-		p.Error = `Couldn't parse that time. Try: "in 10 minutes", "tomorrow at 3pm", "next Tuesday"`
-		reminders, _ := s.db.ListReminders(u.ID)
-		return c.Render(http.StatusBadRequest, "dashboard/reminders.html", &remindersPageData{pageData: p, Reminders: reminders})
+		return renderErr(`Couldn't understand that time. Try: "in 10 minutes", "tomorrow at 3pm", "next Tuesday", "July 15 at 2pm"`)
+	}
+	if remindAt.IsZero() {
+		return renderErr(`No time found in "` + whenStr + `". Try: "in 10 minutes", "tomorrow at 3pm", "next Friday"`)
 	}
 
 	r := &db.Reminder{
@@ -116,6 +131,61 @@ func (s *Server) handleCreateReminder(c echo.Context) error {
 	return c.Redirect(http.StatusFound, "/dashboard/reminders")
 }
 
+// buildLLMTimeParser returns a reminder.TimeParserFunc backed by the given coder.
+// It calls BuildReminderParsePrompt and parses the JSON response via ParseLLMReminderJSON.
+func buildLLMTimeParser(coderSvc *coder.Coder) reminder.TimeParserFunc {
+	if coderSvc == nil {
+		return nil
+	}
+	return func(ctx context.Context, userID, input string, now time.Time, loc *time.Location) (time.Time, string, error) {
+		tz := "UTC"
+		if loc != nil {
+			tz = loc.String()
+		}
+		nowStr := now.In(loc).Format("2006-01-02 15:04 MST")
+		prompt := prompts.BuildReminderParsePrompt(input, nowStr, tz)
+		result, err := coderSvc.WithNoTools().Generate(ctx, userID, prompt)
+		if err != nil {
+			return time.Time{}, input, err
+		}
+		when, msg, err := reminder.ParseLLMReminderJSON(result.Text, now)
+		return when, msg, err
+	}
+}
+
+// handlePollReminders returns due unsent reminders for the current user.
+// For web-only users (no platform connected) it also marks them sent — this IS the delivery.
+// For users with Telegram connected, it returns them for info display but does NOT mark sent
+// so the server-side tick() can still deliver via Telegram.
+func (s *Server) handlePollReminders(c echo.Context) error {
+	u := c.Get("user").(*db.User)
+	due, err := s.db.ListDueReminders(time.Now())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	hasPlatform := s.db.HasPlatformIdentity(u.ID)
+	type item struct {
+		ID      string `json:"id"`
+		Message string `json:"message"`
+	}
+	var result []item
+	for _, r := range due {
+		if r.UserID != u.ID {
+			continue
+		}
+		result = append(result, item{ID: r.ID, Message: r.Message})
+		// Only mark sent here for web-only users. Platform users get marked sent
+		// by the server-side reminder tick() after Telegram delivery.
+		if !hasPlatform {
+			_ = s.db.MarkReminderSent(r.ID)
+		}
+	}
+	if result == nil {
+		result = []item{}
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
 func (s *Server) handleDeleteReminder(c echo.Context) error {
 	u := c.Get("user").(*db.User)
 	id := c.Param("id")
@@ -125,70 +195,6 @@ func (s *Server) handleDeleteReminder(c echo.Context) error {
 	}
 	_ = s.db.DeleteReminder(id)
 	return c.Redirect(http.StatusFound, "/dashboard/reminders")
-}
-
-// ── Memory ─────────────────────────────────────────────────────────────────
-
-type memoryPageData struct {
-	*pageData
-	Entries []memoryEntry
-}
-
-type memoryEntry struct {
-	ID      string
-	Content string
-	Date    string
-}
-
-func (s *Server) showMemory(c echo.Context) error {
-	u := c.Get("user").(*db.User)
-	p := s.page(c, "Memory")
-	if s.memory == nil {
-		return c.Render(http.StatusOK, "dashboard/memory.html", &memoryPageData{pageData: p})
-	}
-	entries, _ := s.memory.List(u.ID)
-	var rows []memoryEntry
-	for _, e := range entries {
-		rows = append(rows, memoryEntry{
-			ID:      e.ID,
-			Content: e.Content,
-			Date:    e.CreatedAt.Format("Jan 2, 2006"),
-		})
-	}
-	return c.Render(http.StatusOK, "dashboard/memory.html", &memoryPageData{pageData: p, Entries: rows})
-}
-
-func (s *Server) handleUpdateMemory(c echo.Context) error {
-	u := c.Get("user").(*db.User)
-	content := c.FormValue("content")
-	action := c.FormValue("action")
-	entryID := c.FormValue("entry_id")
-
-	p := s.page(c, "Memory")
-
-	if action == "delete" && entryID != "" {
-		if s.memory != nil {
-			_ = s.memory.Delete(u.ID, entryID)
-		}
-		return c.Redirect(http.StatusFound, "/dashboard/memory")
-	}
-
-	if content == "" {
-		p.Error = "Memory content cannot be empty"
-	} else if s.memory != nil {
-		if _, err := s.memory.Append(u.ID, content); err != nil {
-			p.Error = "Failed to save: " + err.Error()
-		} else {
-			p.Success = "Memory saved"
-		}
-	}
-
-	entries, _ := s.memory.List(u.ID)
-	var rows []memoryEntry
-	for _, e := range entries {
-		rows = append(rows, memoryEntry{ID: e.ID, Content: e.Content, Date: e.CreatedAt.Format("Jan 2, 2006")})
-	}
-	return c.Render(http.StatusOK, "dashboard/memory.html", &memoryPageData{pageData: p, Entries: rows})
 }
 
 // ── Settings ───────────────────────────────────────────────────────────────

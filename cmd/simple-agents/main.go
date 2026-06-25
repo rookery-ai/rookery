@@ -18,6 +18,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/gateway"
 	"github.com/ilijad1/simple-agents/internal/memory"
 	"github.com/ilijad1/simple-agents/internal/profile"
+	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/reminder"
 	"github.com/ilijad1/simple-agents/internal/sandbox"
 	"github.com/ilijad1/simple-agents/internal/scheduler"
@@ -114,6 +115,20 @@ func serveCmd() *cli.Command {
 				slog.Warn("vault migration", "err", err)
 			}
 
+			// Consolidate any legacy UUID-keyed memory notes into GENERAL.md.
+			// Must run after MigrateLegacyLayout (which may have just created UUID files
+			// from legacy memory.jsonl via ImportJSONL).
+			if userDirs, err := os.ReadDir(vaultsDir); err == nil {
+				for _, d := range userDirs {
+					if !d.IsDir() {
+						continue
+					}
+					if err := memStore.MigrateToStructuredFiles(d.Name()); err != nil {
+						slog.Warn("memory: migrate to structured files", "user", d.Name(), "err", err)
+					}
+				}
+			}
+
 			// Any run still flagged in-progress is a leftover from a crash/shutdown
 			// mid-run — close it out so it can't show a permanently stuck "Running…"
 			// badge (runs now execute on a detached context that outlives the request).
@@ -143,8 +158,10 @@ func serveCmd() *cli.Command {
 				WithMemory(memStore).
 				WithVault(vlt)
 
+			vaultSearcher := vlt.NewSearcher()
+
 			textHandler := func(ctx context.Context, userID string, history []db.ChatMessage, text string, send func(string)) error {
-				sysCtx := buildUserContext(database, memStore, userID)
+				sysCtx := buildUserContext(database, memStore, userID, text, vaultSearcher)
 				result, err := coderSvc.Chat(ctx, userID, history, sysCtx, text)
 				if err != nil {
 					send("Sorry, I ran into an error: " + err.Error())
@@ -161,7 +178,8 @@ func serveCmd() *cli.Command {
 				return runner.RunByName(ctx, userID, agentName, "", send)
 			}
 
-			router := gateway.NewRouter(database, textHandler, agentRunHandler, designFlow, memStore)
+			router := gateway.NewRouter(database, textHandler, agentRunHandler, designFlow, memStore).
+				WithTimeParserFallback(buildLLMTimeParserFn(coderSvc))
 			gwManager := gateway.New(database, sysKey, router)
 
 			go func() {
@@ -175,7 +193,7 @@ func serveCmd() *cli.Command {
 			sched := scheduler.New(database, runner, sysKey).WithSender(gwManager)
 			go sched.Run(ctx)
 
-			reminderSvc := reminder.New(database, gwManager).WithReflector(vlt.Reflector())
+			reminderSvc := reminder.New(database, gwManager).WithReflector(vlt.Reflector()).WithSearcher(vaultSearcher)
 			go reminderSvc.Run(ctx)
 
 			sessionSvc := session.New(database).WithReflector(vlt.Reflector())
@@ -207,7 +225,7 @@ func serveCmd() *cli.Command {
 				}
 			}()
 
-			srv, err := web.NewServer(cfg, database, gwManager, runner, designer, homesDir, memStore, skillStore, designFlow)
+			srv, err := web.NewServer(cfg, database, gwManager, runner, designer, homesDir, skillStore, designFlow)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
@@ -279,8 +297,10 @@ func adminCmd() *cli.Command {
 }
 
 // buildUserContext assembles a system context string for the coder that includes
-// the user's persistent memory, their agents, and their enabled MCP tools.
-func buildUserContext(database *db.DB, memStore interface{ ContextString(string) (string, error) }, userID string) string {
+// the user's profile, memory, agents, MCP tools, and optionally relevant vault notes.
+// query is the user's current message — used to search the vault for related context.
+// searcher may be nil; if nil, vault injection is skipped.
+func buildUserContext(database *db.DB, memStore interface{ ContextString(string) (string, error) }, userID, query string, searcher vault.Searcher) string {
 	var sb strings.Builder
 
 	if p := profile.Load(database, userID).ContextString(); p != "" {
@@ -317,7 +337,42 @@ func buildUserContext(database *db.DB, memStore interface{ ContextString(string)
 		}
 	}
 
+	// Inject relevant vault notes matching the user's current message.
+	if searcher != nil && strings.TrimSpace(query) != "" {
+		if hits, err := searcher.Search(context.Background(), userID, query); err == nil && len(hits) > 0 {
+			sb.WriteString("[Related knowledge base]\n")
+			for i, h := range hits {
+				if i >= 5 {
+					break
+				}
+				sb.WriteString(fmt.Sprintf("- %s: %s\n", h.Path, h.Snippet))
+			}
+		}
+	}
+
 	return sb.String()
+}
+
+// buildLLMTimeParserFn returns a reminder.TimeParserFunc backed by coderSvc.
+// It uses BuildReminderParsePrompt and parses the JSON via ParseLLMReminderJSON.
+func buildLLMTimeParserFn(coderSvc *coder.Coder) reminder.TimeParserFunc {
+	if coderSvc == nil {
+		return nil
+	}
+	return func(ctx context.Context, userID, input string, now time.Time, loc *time.Location) (time.Time, string, error) {
+		tz := "UTC"
+		if loc != nil {
+			tz = loc.String()
+		}
+		nowStr := now.In(loc).Format("2006-01-02 15:04 MST")
+		prompt := prompts.BuildReminderParsePrompt(input, nowStr, tz)
+		result, err := coderSvc.WithNoTools().Generate(ctx, userID, prompt)
+		if err != nil {
+			return time.Time{}, input, err
+		}
+		when, msg, err := reminder.ParseLLMReminderJSON(result.Text, now)
+		return when, msg, err
+	}
 }
 
 // resolveDir returns the given subdir relative to the binary's location,

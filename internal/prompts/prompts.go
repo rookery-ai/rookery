@@ -842,9 +842,18 @@ markdown notes) at:
   %s
 
 You may READ anything under that path for context — the user's notes, journals,
-plans, todos, past memories, other agents' run logs, and reflected reminders and
-chat transcripts. Use Read/Grep/Bash to find relevant prior knowledge before
-acting; the knowledge you and the user accumulate here should inform this run.
+plans, todos, other agents' run logs, and chat transcripts. Use Read/Grep/Bash
+to find relevant prior knowledge before acting; the knowledge you and the user
+accumulate here should inform this run.
+
+The user's personal context is in the memory/ directory — every .md file there
+is automatically pre-injected into your context above as <user_memory>. Typical
+files to consult:
+  memory/USER.md    — user profile: name, role, location, background
+  memory/SOUL.md    — communication style and preferences
+  memory/GENERAL.md — quick notes added via /memory commands
+  memory/<any>.md   — any additional files the user has created
+Always check these before acting on assumptions about the user.
 
 You may WRITE only inside your OWN directory, which is your current working
 directory:
@@ -916,4 +925,41 @@ Output ONLY the JSON object, nothing else.
 
 SKILL.md:
 %s`, content)
+}
+
+// ─── Reminder time parser prompt ──────────────────────────────────────────────
+
+// BuildReminderParsePrompt builds a one-shot prompt for extracting a time expression
+// and cleaned message from a user's free-form reminder input. The model should return
+// a single JSON object — no prose, no markdown fences.
+//
+// nowStr should be formatted as "2006-01-02 15:04 MST" (the user's local time).
+// The caller passes the response text to reminder.ParseLLMReminderJSON.
+func BuildReminderParsePrompt(input, nowStr, timezone string) string {
+	return fmt.Sprintf(`You are a reminder time parser. Extract the WHEN and the MESSAGE from the user's reminder input.
+
+Current date and time: %s
+User's timezone: %s
+
+Rules:
+1. Identify the time expression (when the reminder should fire).
+2. Remove ONLY the time expression from the text; keep the actual reminder content as-is.
+3. Convert the time to an ISO 8601 UTC timestamp: "2026-07-15T14:00:00Z"
+4. If no time is mentioned at all, set "when" to null.
+5. When in doubt about AM/PM, prefer daytime hours (9am–6pm).
+6. "morning" = 09:00, "afternoon" = 14:00, "evening" = 18:00, "night/tonight" = 21:00.
+7. For a day-only expression with no time ("next Friday"), default to 09:00 local time.
+
+Return ONLY a JSON object — no prose, no code fences, nothing else:
+{"when": "2026-07-15T09:00:00Z", "message": "the reminder text"}
+
+Examples:
+- "in 10 minutes to check the oven"        → {"when": "(now+10m in UTC)", "message": "check the oven"}
+- "next Friday evening to review reports"  → {"when": "(next Fri 18:00 local→UTC)", "message": "review reports"}
+- "tomorrow morning buy groceries"         → {"when": "(tomorrow 09:00 local→UTC)", "message": "buy groceries"}
+- "July 15 at 2pm to submit invoice"       → {"when": "...-07-15T14:00:00Z adjusted", "message": "submit invoice"}
+- "write a note about my bitcoin price"    → {"when": null, "message": "write a note about my bitcoin price"}
+- "this Thursday at 3pm call the doctor"   → {"when": "(this Thursday 15:00 local→UTC)", "message": "call the doctor"}
+
+User input: %s`, nowStr, timezone, input)
 }

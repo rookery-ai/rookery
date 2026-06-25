@@ -116,7 +116,7 @@
                   {{else}}<span class="badge badge-error badge-xs">Failed</span>{{end}}
                 {{else}}<span class="badge badge-warning badge-xs">Running</span>{{end}}
               </td>
-              <td class="text-xs text-base-content/50">{{.StartedAt.Format "Jan 2 15:04"}}</td>
+              <td class="text-xs text-base-content/50">{{fmtTZ $.UserLoc .StartedAt "Jan 2 15:04"}}</td>
             </tr>
             {{end}}
             </tbody>
@@ -146,7 +146,7 @@
             <span class="text-base mt-0.5">🔔</span>
             <div class="flex-1 min-w-0">
               <p class="text-sm font-medium truncate">{{.Message}}</p>
-              <p class="text-xs text-base-content/40 mt-0.5">{{.RemindAt.Format "Jan 2, 2006 at 15:04"}}</p>
+              <p class="text-xs text-base-content/40 mt-0.5">{{fmtTZ $.UserLoc .RemindAt "Jan 2, 2006 at 15:04"}}</p>
             </div>
           </li>
           {{end}}

@@ -48,7 +48,7 @@
           <p class="text-base-content/80 leading-relaxed">
             {{if .Agent.Description}}{{.Agent.Description}}{{else}}<em class="text-base-content/30">No description</em>{{end}}
           </p>
-          <p class="text-xs text-base-content/30 mt-2">Created {{.Agent.CreatedAt.Format "January 2, 2006 at 15:04"}}</p>
+          <p class="text-xs text-base-content/30 mt-2">Created {{fmtTZ $.UserLoc .Agent.CreatedAt "January 2, 2006 at 15:04"}}</p>
         </div>
       </div>
 
@@ -129,7 +129,7 @@
                   </details>
                   {{else}}<span class="text-base-content/20 text-xs">—</span>{{end}}
                 </td>
-                <td class="text-xs text-base-content/40 whitespace-nowrap">{{.StartedAt.Format "Jan 2 15:04"}}</td>
+                <td class="text-xs text-base-content/40 whitespace-nowrap">{{fmtTZ $.UserLoc .StartedAt "Jan 2 15:04"}}</td>
               </tr>
               {{end}}
               </tbody>
@@ -239,7 +239,7 @@
           <div class="mb-3">
             <p class="font-mono text-sm bg-base-200 px-3 py-1.5 rounded border border-base-300">{{.Schedule.CronExpr}}</p>
             {{if .Schedule.NextRunAt}}
-            <p class="text-xs text-base-content/40 mt-1.5">Next: {{.Schedule.NextRunAt.Format "Jan 2 at 15:04"}}</p>
+            <p class="text-xs text-base-content/40 mt-1.5">Next: {{fmtTZ $.UserLoc .Schedule.NextRunAt "Jan 2 at 15:04"}}</p>
             {{end}}
           </div>
           <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/schedule/delete"
