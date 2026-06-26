@@ -152,7 +152,12 @@ func (r *Runner) TestRunFromContent(ctx context.Context, userID, agentMD string,
 		}
 	}
 
-	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{AgentMD: agentMD, StateJSON: "{}"})
+	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
+		AgentMD:     agentMD,
+		StateJSON:   "{}",
+		ChatApps:    r.loadChatApps(userID),
+		BackendType: r.backendType(),
+	})
 
 	if r.coderSvc == nil {
 		return "", fmt.Errorf("no coder service configured")
@@ -173,10 +178,12 @@ func (r *Runner) TestRunFromContent(ctx context.Context, userID, agentMD string,
 
 // coderRunContext tracks mutable state across the turns of one top-level run.
 type coderRunContext struct {
-	turnsUsed int
-	chatLines []string
-	warnings  []string
-	rawChunks []string // raw coder output per turn, joined into the run note
+	turnsUsed       int
+	chatLines       []string
+	warnings        []string
+	rawChunks       []string // raw coder output per turn, joined into the run note
+	lastRaw         string   // raw text of the most recent turn (fallback prose source)
+	silentSignaled  bool     // any turn emitted [SILENT] — run is intentionally quiet
 }
 
 func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *agentdesigner.AgentManifest, input RunInput) error {
@@ -220,6 +227,8 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		DeclaredContent: declaredContent,
 		VaultRoot:       filepath.Join(r.agentsDir, input.UserID),
 		AgentDir:        agentDir,
+		ChatApps:        r.loadChatApps(input.UserID),
+		BackendType:     r.backendType(),
 	})
 
 	// Run inside the agent's own directory (not the shared per-user home) so
@@ -268,12 +277,41 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		return errors.New(friendly)
 	}
 
-	_ = r.db.FinishAgentRun(runID, 0,
-		strings.Join(rctx.chatLines, "\n"),
-		strings.Join(rctx.warnings, "\n"))
+	// ── Reliable delivery ────────────────────────────────────────────────────
+	// Delivery does not depend solely on the coder emitting [CHAT]. If it forgot
+	// the marker (the most common model mistake) and didn't signal [SILENT], fall
+	// back to its prose output so the user still receives the message. A run that
+	// produces nothing deliverable and isn't intentionally silent is surfaced as a
+	// visible warning instead of a silent success.
+	finalOutput := strings.Join(rctx.chatLines, "\n")
+	streamedLive := finalOutput != "" // per-turn OnProgress already streamed [CHAT]
 
-	if input.SendOutput != nil && len(rctx.chatLines) > 0 {
-		input.SendOutput(strings.Join(rctx.chatLines, "\n"))
+	if finalOutput == "" && !rctx.silentSignaled {
+		if prose := extractProseMessage(rctx.lastRaw); prose != "" {
+			rctx.warnings = append(rctx.warnings, "no [CHAT] marker emitted; delivered prose as fallback")
+			finalOutput = prose
+		}
+	}
+
+	_ = r.db.FinishAgentRun(runID, 0, finalOutput, strings.Join(rctx.warnings, "\n"))
+
+	switch {
+	case finalOutput != "":
+		if input.SendOutput != nil {
+			input.SendOutput(finalOutput)
+		}
+		if !streamedLive && input.OnProgress != nil {
+			// Fallback prose wasn't streamed per-turn; show it on the live view too.
+			input.OnProgress(finalOutput)
+		}
+	case !rctx.silentSignaled:
+		warn := fmt.Sprintf("⚠️ %s ran but produced no notification — see the run log.", agent.Name)
+		if input.SendOutput != nil {
+			input.SendOutput(warn)
+		}
+		if input.OnProgress != nil {
+			input.OnProgress(warn)
+		}
 	}
 
 	return nil
@@ -337,6 +375,10 @@ func (r *Runner) runCoderTurns(
 		parsed := parseCoderOutput(result.Text)
 		rctx.chatLines = append(rctx.chatLines, parsed.chatLines...)
 		rctx.warnings = append(rctx.warnings, parsed.warnings...)
+		if parsed.silent {
+			rctx.silentSignaled = true
+		}
+		rctx.lastRaw = result.Text
 
 		// Stream this turn's chat lines live (SSE) while the run is still going.
 		// Final durable delivery (Telegram/history) still happens once at the end.
@@ -453,13 +495,23 @@ type parsedOutput struct {
 	stateUpdates []map[string]interface{}
 	callAgents   []string
 	warnings     []string
+	// silent is true if the coder emitted a [SILENT] marker, signalling that
+	// this run intentionally produces no user-facing message (note-only /
+	// state-only agents). It suppresses the prose-delivery fallback in the
+	// runner so silent agents are not noisified by stray prose.
+	silent bool
 }
 
 // parseCoderOutput scans the coder's text response for protocol markers.
 //
-// [CHAT] blocks may span multiple lines — continuation lines immediately
-// following the [CHAT] prefix line (no blank line between them) are joined
-// into a single message. A blank line or any protocol marker ends the block.
+// [CHAT] blocks run until the next protocol marker ([STATE], [CALL], [SILENT],
+// a new [CHAT]) or the end of output. All lines in between — including blank
+// lines — are part of the message; leading/trailing blank lines are trimmed on
+// flush. Blank lines do NOT end the block (they used to, which silently dropped
+// real content when the runtime emitted a header, a blank line, then content).
+// Empty/whitespace-only [CHAT] blocks are dropped (never deliver a blank msg).
+//
+// [SILENT] (alone on a line) marks the run as intentionally silent.
 //
 // [STATE] may appear as a multi-line block ([STATE]\n{...}\n[/STATE]) or
 // as a single inline line ([STATE]{...}[/STATE]).
@@ -474,7 +526,9 @@ func parseCoderOutput(text string) parsedOutput {
 
 	flushChat := func() {
 		if inChat && chatAcc.Len() > 0 {
-			out.chatLines = append(out.chatLines, strings.TrimSpace(chatAcc.String()))
+			if msg := strings.TrimSpace(chatAcc.String()); msg != "" {
+				out.chatLines = append(out.chatLines, msg)
+			}
 			chatAcc.Reset()
 			inChat = false
 		}
@@ -541,14 +595,25 @@ func parseCoderOutput(text string) parsedOutput {
 			continue
 		}
 
-		// ── chat continuation or end ──────────────────────────────────────────
+		// ── [SILENT] — run intentionally produces no user-facing message ────────
+		// Ends any open [CHAT] block and marks the run silent so the runner does
+		// not fall back to prose delivery.
+		if trimmed == "[SILENT]" {
+			flushChat()
+			out.silent = true
+			continue
+		}
+
+		// ── chat continuation ─────────────────────────────────────────────────
+		// A [CHAT] block runs until the next protocol marker ([STATE], [CALL],
+		// a new [CHAT]) or end of output. Blank lines are part of the message,
+		// NOT a terminator. The previous rule (blank line ends the block) silently
+		// dropped real content when the runtime emitted "header\n\ncontent" — a
+		// common pattern when an AGENT.md example shows a blank line. Leading and
+		// trailing blank lines are stripped on flush via TrimSpace.
 		if inChat {
-			if trimmed == "" {
-				flushChat()
-			} else {
-				chatAcc.WriteByte('\n')
-				chatAcc.WriteString(trimmed)
-			}
+			chatAcc.WriteByte('\n')
+			chatAcc.WriteString(trimmed)
 		}
 	}
 
@@ -559,6 +624,75 @@ func parseCoderOutput(text string) parsedOutput {
 	}
 
 	return out
+}
+
+// extractProseMessage strips protocol markers from the coder's raw text and
+// returns the remaining prose. It is the reliable-delivery fallback for when the
+// coder produced a user-facing message but forgot the [CHAT] marker: its prose
+// output is delivered instead of being silently lost.
+//
+// Strips: [STATE] blocks (multi-line and inline), [CALL: …] lines, [SILENT],
+// standalone [CHAT]/[/CHAT] marker lines, and [BLOCKED]…[/BLOCKED] blocks. The
+// remaining lines are joined, edge-trimmed, and have runs of 3+ blank lines
+// collapsed. Returns "" when nothing usable remains (only markers/whitespace).
+func extractProseMessage(text string) string {
+	lines := strings.Split(text, "\n")
+	var kept []string
+	inState := false
+	inBlocked := false
+	for _, line := range lines {
+		t := strings.TrimSpace(line)
+
+		// [BLOCKED]…[/BLOCKED] block (design-time marker; harmless if present).
+		if inBlocked {
+			if t == "[/BLOCKED]" {
+				inBlocked = false
+			}
+			continue
+		}
+		if t == "[BLOCKED]" {
+			inBlocked = true
+			continue
+		}
+
+		// [STATE] block.
+		if !inState && t == "[STATE]" {
+			inState = true
+			continue
+		}
+		if inState {
+			if t == "[/STATE]" {
+				inState = false
+			}
+			continue
+		}
+		// Inline [STATE]{…}[/STATE].
+		if strings.HasPrefix(t, "[STATE]") && strings.HasSuffix(t, "[/STATE]") {
+			continue
+		}
+
+		// [CALL: …].
+		if strings.HasPrefix(t, "[CALL: ") && strings.HasSuffix(t, "]") {
+			continue
+		}
+		// Explicit silence / standalone chat markers (no content to keep).
+		if t == "[SILENT]" || t == "[CHAT]" || t == "[/CHAT]" {
+			continue
+		}
+		// A malformed [CHAT] line (e.g. "[CHAT]" with content after on the same
+		// line but no space) — keep the content, drop the marker.
+		if strings.HasPrefix(t, "[CHAT]") {
+			kept = append(kept, strings.TrimSpace(strings.TrimPrefix(t, "[CHAT]")))
+			continue
+		}
+
+		kept = append(kept, line)
+	}
+	cleaned := strings.TrimSpace(strings.Join(kept, "\n"))
+	for strings.Contains(cleaned, "\n\n\n") {
+		cleaned = strings.ReplaceAll(cleaned, "\n\n\n", "\n\n")
+	}
+	return cleaned
 }
 
 // ─── State management ─────────────────────────────────────────────────────────
@@ -604,4 +738,31 @@ func (r *Runner) loadDeclaredSkillContent(userID string, skillNames []string) (m
 		result[name] = string(data)
 	}
 	return result, nil
+}
+
+// loadChatApps returns the chat apps connected by this user as prompts.ChatAppInfo
+// (name + commands), so the runtime coder prompt knows where [CHAT] output lands and
+// what the user can type. Returns nil if the DB is unavailable or none are connected.
+func (r *Runner) loadChatApps(userID string) []prompts.ChatAppInfo {
+	if r.db == nil {
+		return nil
+	}
+	conns, err := r.db.ListUserPlatformConnections(userID)
+	if err != nil {
+		return nil
+	}
+	platforms := make([]string, 0, len(conns))
+	for _, c := range conns {
+		platforms = append(platforms, c.Platform)
+	}
+	return prompts.ChatAppsForPlatforms(platforms)
+}
+
+// backendType returns the prompts-level backend capability for this runner's coder, so
+// the runtime prompt can describe how the coder acts on files (full coder vs basic model).
+func (r *Runner) backendType() string {
+	if r.coderSvc == nil {
+		return prompts.BackendFullCoder
+	}
+	return prompts.MapCoderBackend(r.coderSvc.BackendType())
 }

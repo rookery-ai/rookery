@@ -755,6 +755,7 @@ func (f *Flow) callCoder(ctx context.Context, userID, userMessage string) (strin
 		ExistingAgentMD:    sess.ExistingAgentMD,
 		ExistingTools:      sess.ExistingTools,
 		ConnectedPlatforms: sess.ConnectedPlatforms,
+		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
 		Skills:             sess.Skills,
 		UserProfile:        sess.UserProfile,
 		UserMemory:         sess.UserMemory,
@@ -811,9 +812,15 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 	copy(historySnap, sess.History)
 	// The capability spec (e.g. Composio v3) must travel into the generation prompt
 	// because Generate() carries no system prompt the way the design Chat() does.
+	var backendType string
+	if coderSvc != nil {
+		backendType = prompts.MapCoderBackend(coderSvc.BackendType())
+	}
 	implParams := prompts.ImplementationParams{
 		ComposioEnabled:    sess.ComposioEnabled,
 		ConnectedPlatforms: sess.ConnectedPlatforms,
+		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
+		BackendType:        backendType,
 	}
 
 	// Set up a buffered progress channel for SSE and snapshot the Telegram progress func.

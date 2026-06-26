@@ -33,6 +33,40 @@ type SkillRef struct {
 	Description string
 }
 
+// ChatAppInfo describes a connected chat platform and the commands available in it.
+// Injected into design/implementation/runtime prompts so the coder knows what the user
+// can type and where [CHAT] output lands — without referencing a specific platform API.
+type ChatAppInfo struct {
+	Name     string   // e.g. "Telegram"
+	Commands  []string // e.g. "/agent create <name>", "/run <name>", "/chat", "/memory <text>"
+}
+
+// BackendType constants identify what kind of coder executes a prompt. The prompts are
+// coder-agnostic: AGENT.md describes WHAT to do, and coderCapabilitiesBlock() tells the
+// runtime coder HOW it can act on files based on its backend type.
+const (
+	// BackendFullCoder is a CLI coder with direct tool access (Claude Code, OpenCode,
+	// Codex, Cursor, Gemini CLI). It reads/writes files and runs shells directly.
+	BackendFullCoder = "full-coder"
+	// BackendBasicModel is a plain model invocation with no tool calls (e.g. a direct
+	// OpenRouter GLM call). It interacts with the platform via output markers the
+	// host system interprets.
+	BackendBasicModel = "basic-model"
+)
+
+// MapCoderBackend translates a coder.Coder backend type ("claude", "generic", "") into
+// the prompts-level backend capability used by coderCapabilitiesBlock. Today every wired
+// coder is a full CLI coder; "basic"/"model"/"basic-model" map to the basic-model path for
+// the future direct-model coders. Unknown values default to full-coder.
+func MapCoderBackend(coderBackend string) string {
+	switch strings.ToLower(strings.TrimSpace(coderBackend)) {
+	case "basic", "model", "basic-model", "openrouter", "api":
+		return BackendBasicModel
+	default:
+		return BackendFullCoder
+	}
+}
+
 // ─── Design system prompt ─────────────────────────────────────────────────────
 
 // DesignSystemParams is the dynamic context injected into the design conversation
@@ -43,6 +77,7 @@ type DesignSystemParams struct {
 	ExistingAgentMD    string
 	ExistingTools      map[string]string // relpath→content of the agent's tool scripts (edit only)
 	ConnectedPlatforms []string
+	ChatApps           []ChatAppInfo // connected chat platforms + their commands (drives platform context)
 	Skills             []string
 	UserProfile        string
 	UserMemory         string
@@ -197,38 +232,332 @@ A failed-but-guiding output is better than fake mock success.
 // the single source of truth (mirrors composioServicesBlock) so the same contract
 // is present at every phase: an agent is an LLM with judgment that scripts only the
 // repetitive, deterministic work and reasons about everything ambiguous at runtime.
+//
+// It encodes a three-tier architecture decision (reasoning-only / +script / multi-file)
+// plus a mandatory complexity check, so the coder does NOT reach for a Python script
+// for tasks that are pure reasoning (generating text, writing a single note) — the
+// single most common designer failure mode.
 func agentPhilosophyBlock() string {
 	return `<agent_philosophy>
-An agent is NOT just a Python script — it is YOU, an LLM with judgment, invoked on a
-schedule. Split every agent into two layers and lean on the right one:
 
-1. THE BRAIN (you, at runtime): anything that needs understanding, judgment, or
-   handling of fuzzy/ambiguous input. Examples: deciding which emails or attachments
-   are "payroll" / "an invoice" / "important", classifying or summarizing content,
-   interpreting messy real-world data, choosing what matters. Do NOT hardcode brittle
-   rules (exact filenames, rigid regexes, fixed thresholds) for these — read the data
-   and REASON about it each run. If you don't have a deterministic rule that is
-   genuinely reliable, that is a signal to use your judgment, not to invent a fragile
-   pattern.
+## What an agent is
 
-2. THE HANDS (Python scripts in tools/): repetitive, deterministic, high-volume work
-   where running the LLM would waste tokens — fetching from an API, paging through
-   results, parsing a known/stable format, arithmetic, formatting. Scripts gather and
-   pre-process; you decide. A script should hand raw/structured data UP to you for the
-   judgment call, not try to make the judgment itself with hardcoded heuristics.
+An agent is YOU — an AI — invoked on a schedule or manually. You have no persistent memory
+except what you read from the knowledge base or state.json each run. Your job each run:
+read context, think, decide, act, output results.
 
-Concrete example — "email me payroll attachments":
-  ✗ WRONG: a script that filters attachments by a hardcoded filename pattern the user
-    had to specify up front (fails the moment a file is named differently).
-  ✓ RIGHT: a script lists recent messages + attachment names/metadata (the repetitive
-    fetch); YOU read that list and reason about which ones are actually payroll, then a
-    script downloads exactly those (the repetitive download). Ambiguity → brain;
-    bulk I/O → hands.
+You are NOT a Python script. You are the reasoning layer. Helper scripts and tools are
+your hands for mechanical bulk work. Your brain handles everything requiring understanding.
 
-You may build a real multi-file project under tools/ — helper modules (tools/lib/...),
-a tests/ folder (tools/tests/test_*.py), shared utilities — not just one flat script.
-Prefer this when the logic is non-trivial: it is more reliable than one giant script.
+## Three-tier architecture — always choose the SIMPLEST tier that fully solves the task
+
+──────────────────────────────────────────────────────────────────────────────
+TIER 1  REASONING ONLY          No code files. AGENT.md instructions only.
+──────────────────────────────────────────────────────────────────────────────
+Use for: generating text (quotes, summaries, stories, advice), writing/reading a single
+note, making judgments or classifications over small data, composing messages, simple
+calculations, choosing between a small list of options.
+
+  ✓ The agent reads context, thinks, writes a note, sends a message. That is the whole
+    agent — no tools/ directory, no scripts.
+  ✗ DO NOT write a helper script to generate text — YOU generate it directly each run.
+  ✗ DO NOT write a helper script to write or read a single file.
+  ✗ DO NOT write a helper script to make one simple HTTP request that returns small data.
+  ✗ DO NOT write a helper script to pick from a small list or make a simple decision.
+  These are reasoning tasks. An LLM does them directly from instructions — no code needed.
+
+──────────────────────────────────────────────────────────────────────────────
+TIER 2  REASONING + LIGHT TOOLING    One focused helper script.
+──────────────────────────────────────────────────────────────────────────────
+Use for: fetching paginated results (many pages / many items), parsing large or complex
+structured data (big XML, CSV with many columns), arithmetic across many data points,
+multi-step API interactions.
+
+  ✓ A script fetches and pre-processes → YOU read the output and decide what matters →
+    YOU report it. The script gathers; you judge.
+  ✗ The script must NOT make the judgment call with hardcoded rules — it returns data;
+    you reason about it. Ambiguity → brain; bulk I/O → hands.
+  ✗ Justify why TIER 1 is insufficient. "I need to call an API" is NOT a justification —
+    a single API call that returns a short payload is TIER 1.
+
+──────────────────────────────────────────────────────────────────────────────
+TIER 3  REASONING + MULTI-FILE PROJECT    Multiple modules + unit tests.
+──────────────────────────────────────────────────────────────────────────────
+Use for: genuinely complex mechanical logic that benefits from modular code and unit
+tests (parsing + transformation + validation with reusable helpers). Only justified when
+the tooling layer itself is complex enough to need testing.
+
+## Mandatory decision before writing anything
+
+  Q1: Can the agent's task be fully described as "think about X, then write/say Y"?
+      If YES → TIER 1. Stop here. Create ZERO code files.
+  Q2: Must the agent process more than ~10 items in bulk, paginate an API, or parse
+      large structured data? If NO → still TIER 1 (or at most a tiny TIER 2 fetch).
+  Q3: Is the mechanical logic complex enough to warrant reusable modules and unit tests?
+      If YES → TIER 3. Otherwise TIER 2.
+
+If choosing TIER 2 or 3: write one sentence explaining exactly why TIER 1 is insufficient.
+  Example: "TIER 2: the Gmail fetch requires pagination — could be 50+ emails per run."
+  NOT: "TIER 2: I need to call an API." — one short API call is TIER 1.
+
 </agent_philosophy>
+
+`
+}
+
+// chatAppCommands returns the commands a user can type in a given connected chat
+// platform. Only Telegram is wired today; unknown platforms get a generic note. This
+// keeps the prompts coder-agnostic and accurate about what the user can actually type.
+func chatAppCommands(platform string) []string {
+	switch strings.ToLower(platform) {
+	case "telegram":
+		return []string{
+			"/agent create <name> — start designing a new agent",
+			"/agent list — list your agents",
+			"/run <name> — run a named agent now",
+			"/chat — start or resume a conversation",
+			"/memory <text> — save a quick note to memory/GENERAL.md",
+			"/secret <name> <value> — save a secret (encrypted)",
+			"/remind <time> <text> — create a reminder",
+		}
+	default:
+		return []string{"(command list unavailable for this platform)"}
+	}
+}
+
+// ChatAppsForPlatforms maps a list of connected platform names (e.g. ["telegram"]) to
+// ChatAppInfo structs with their commands. Callers (flow.go, runner.go) already load
+// connected platforms from the DB; this centralizes the platform→commands mapping so the
+// design, implementation, and runtime prompts all describe the same chat-app reality.
+func ChatAppsForPlatforms(platforms []string) []ChatAppInfo {
+	if len(platforms) == 0 {
+		return nil
+	}
+	out := make([]ChatAppInfo, 0, len(platforms))
+	for _, p := range platforms {
+		out = append(out, ChatAppInfo{Name: p, Commands: chatAppCommands(p)})
+	}
+	return out
+}
+
+// platformContextBlock returns the platform primer injected into the design, generation,
+// and runtime prompts. It teaches the coder the Simple Agents concepts and terminology —
+// the flexible ever-growing knowledge base, secrets store, chats, reminders, the
+// connected chat apps and their commands, the output protocol, and the schedule line —
+// so the coder never has to guess how the platform works.
+//
+// vaultRoot is "" in the design phase (no concrete vault yet); when non-empty (runtime),
+// the knowledge-base paths are concrete.
+func platformContextBlock(chatApps []ChatAppInfo, vaultRoot string) string {
+	var sb strings.Builder
+	sb.WriteString("<platform_context>\n")
+	sb.WriteString("You are an AI agent running inside Simple Agents — a personal AI platform. Here is\n")
+	sb.WriteString("everything you need to know about the platform and how it works.\n\n")
+
+	// ── Knowledge base ───────────────────────────────────────────────────────
+	sb.WriteString("## Knowledge base — the user's personal knowledge graph\n")
+	sb.WriteString("Every user has a personal vault — an Obsidian-style, ever-growing knowledge base that\n")
+	sb.WriteString("the user owns and organizes themselves (like Obsidian or Notion, but local and\n")
+	sb.WriteString("markdown-based). ")
+	if vaultRoot != "" {
+		sb.WriteString("The vault root is:\n  ")
+		sb.WriteString(vaultRoot)
+		sb.WriteString("\n")
+	} else {
+		sb.WriteString("At runtime you are told the vault root path.\n")
+	}
+	sb.WriteString("\n")
+	sb.WriteString("Think of it as ONE living notebook that holds everything the user knows, wants to\n")
+	sb.WriteString("remember, is working on, or has agents produce. It is NOT a fixed set of system\n")
+	sb.WriteString("folders — it grows with the user and the user is free to reorganize it however\n")
+	sb.WriteString("they like over time.\n\n")
+
+	sb.WriteString("### Default starting layout (the user can change this)\n")
+	sb.WriteString("  notes/               — the user's free-form knowledge: notes, journals, plans,\n")
+	sb.WriteString("                         todos, research, project docs, anything they or agents write.\n")
+	sb.WriteString("                         The user creates subfolders and files here freely; this area\n")
+	sb.WriteString("                         is THEIRS to organize.\n")
+	sb.WriteString("  memory/              — context files automatically injected into every AI session:\n")
+	sb.WriteString("    USER.md            — name, role, location, background\n")
+	sb.WriteString("    SOUL.md            — communication style and tone preferences\n")
+	sb.WriteString("    GENERAL.md         — quick notes appended via the /memory command\n")
+	sb.WriteString("    <other>.md         — any additional context files the user creates\n")
+	sb.WriteString("  agents/<id>/         — each agent's own workspace (AGENT.md, tools/, state.json,\n")
+	sb.WriteString("                         logs/). Per-agent, not shared notes; each agent stays in its\n")
+	sb.WriteString("                         own dir.\n")
+	sb.WriteString("  chats/               — conversation transcripts reflected from the database (read-\n")
+	sb.WriteString("                         only for agents — the system writes these; agents read for\n")
+	sb.WriteString("                         context).\n")
+	sb.WriteString("  skills/              — user-installed skill files.\n\n")
+
+	sb.WriteString("### What the user can reorganize vs. what is fixed\n")
+	sb.WriteString("  USER-REORGANIZABLE: notes/ and its subfolders, memory/*.md contents, and the names\n")
+	sb.WriteString("    and structure of any file the user created. The user can move, rename,\n")
+	sb.WriteString("    restructure, merge, and split these however they want. Agents must RESPECT the\n")
+	sb.WriteString("    user's current layout — always READ / discover the actual structure rather than\n")
+	sb.WriteString("    assuming the default paths still exist. A note the user expects may have been\n")
+	sb.WriteString("    moved or renamed since the last run.\n")
+	sb.WriteString("  SYSTEM-WRITTEN (fixed destinations — agents must NOT relocate these):\n")
+	sb.WriteString("    chats/<id>.md        — only the system writes chat transcripts here. Always here.\n")
+	sb.WriteString("    memory/GENERAL.md     — the /memory command always appends a bullet here. Always\n")
+	sb.WriteString("                           this file.\n")
+	sb.WriteString("    memory/USER.md / SOUL.md — the user's core profile/context; update in place,\n")
+	sb.WriteString("                           do not move.\n")
+	sb.WriteString("    agents/<id>/         — an agent's own workspace; each agent stays in its own dir.\n")
+	sb.WriteString("  When an agent writes a NEW note for the user: default to notes/ unless AGENT.md or\n")
+	sb.WriteString("  the user specified a path. Never write into chats/, .kb/, or another agent's\n")
+	sb.WriteString("  agents/<id>/ dir.\n\n")
+
+	sb.WriteString("### Working with the knowledge base\n")
+	sb.WriteString("  The KB is meant to ACCUMULATE knowledge across runs — agents should read existing\n")
+	sb.WriteString("  notes before acting (build on what's there; don't duplicate or contradict it) and\n")
+	sb.WriteString("  write durable knowledge back so future runs and the user can use it. Link related\n")
+	sb.WriteString("  notes with [[wikilinks]] so the knowledge base becomes an interconnected graph over\n")
+	sb.WriteString("  time. When you write a note: READ the target first so you append/merge rather than\n")
+	sb.WriteString("  blindly overwrite the user's existing content.\n\n")
+
+	// ── Secrets store ─────────────────────────────────────────────────────────
+	sb.WriteString("## Secrets store\n")
+	sb.WriteString("API keys and credentials are stored encrypted in the Secrets store. The user manages\n")
+	sb.WriteString("them through the web dashboard (Settings → Secrets). At runtime, all secrets are\n")
+	sb.WriteString("automatically injected as environment variables. Read them with: os.environ.get('NAME').\n")
+	sb.WriteString("NEVER hardcode a secret value, NEVER print it in output or [CHAT].\n\n")
+
+	// ── Chats ─────────────────────────────────────────────────────────────────
+	sb.WriteString("## Chats\n")
+	sb.WriteString("Conversation sessions in the web dashboard or connected chat apps. Chat transcripts\n")
+	sb.WriteString("are saved by the system as notes in chats/ (a FIXED location — agents read for\n")
+	sb.WriteString("context, never write there). Each new chat session creates a new chats/<id>.md entry\n")
+	sb.WriteString("automatically.\n\n")
+
+	// ── Reminders ─────────────────────────────────────────────────────────────
+	sb.WriteString("## Reminders\n")
+	sb.WriteString("One-time or recurring scheduled notifications. Created by the user through the web\n")
+	sb.WriteString("dashboard or by typing /remind in a connected chat app.\n\n")
+
+	// ── Connected chat apps and commands ─────────────────────────────────────
+	sb.WriteString("## Connected chat apps and commands\n")
+	if len(chatApps) == 0 {
+		sb.WriteString("No chat apps are currently connected. Agent output goes to the web dashboard only.\n")
+	} else {
+		sb.WriteString("The user has connected these chat apps. [CHAT] output is routed to them automatically\n")
+		sb.WriteString("— never call a platform messaging API directly, always use [CHAT].\n")
+		for _, app := range chatApps {
+			sb.WriteString(fmt.Sprintf("\n%s — commands the user can type:\n", app.Name))
+			for _, cmd := range app.Commands {
+				sb.WriteString("  ")
+				sb.WriteString(cmd)
+				sb.WriteString("\n")
+			}
+		}
+	}
+	sb.WriteString("\n")
+
+	// ── Output protocol ───────────────────────────────────────────────────────
+	sb.WriteString("## Output protocol (how agents communicate)\n")
+	sb.WriteString("Agents produce output ONLY via these markers — never by calling external APIs:\n\n")
+	sb.WriteString("  [CHAT] Message to send to the user.\n")
+	sb.WriteString("  Lines after [CHAT] (including blank lines) are all part of the message, until the\n")
+	sb.WriteString("  next marker ([STATE], [CALL], a new [CHAT]) or end of output. To keep the message\n")
+	sb.WriteString("  clean, put it all on one line or on contiguous lines with NO blank line inside — a\n")
+	sb.WriteString("  blank line in the middle leaves a gap in what the user sees.\n\n")
+	sb.WriteString("  [STATE]{\"key\": \"value\"}[/STATE]\n")
+	sb.WriteString("  Merges the JSON object into state.json. Set a key to null to delete it.\n\n")
+	sb.WriteString("  [CALL: agent-name]\n")
+	sb.WriteString("  Invokes another agent synchronously and waits for its result.\n\n")
+	sb.WriteString("  [SILENT]\n")
+	sb.WriteString("  Emit this ALONE as the last line when this run should NOT notify the user (a\n")
+	sb.WriteString("  note-only / state-only agent). It tells the system the silence is intentional;\n")
+	sb.WriteString("  without it, any prose you emit may be delivered to the user as the message.\n\n")
+	sb.WriteString("No [CHAT] output = silent run. This is VALID and CORRECT for agents that only update\n")
+	sb.WriteString("notes or state without notifying the user. For such agents, end the run with [SILENT]\n")
+	sb.WriteString("so the system knows not to deliver stray prose. Do NOT force a [CHAT] if AGENT.md\n")
+	sb.WriteString("says the agent should be silent.\n\n")
+
+	// ── Schedule ──────────────────────────────────────────────────────────────
+	sb.WriteString("## Agent schedule\n")
+	sb.WriteString("Agents run on a cron schedule set in AGENT.md line 1.\n")
+	sb.WriteString("  # Suggested schedule: 0 9 * * *    — daily at 9am\n")
+	sb.WriteString("  # Suggested schedule: none          — no automatic schedule; run manually\n")
+	sb.WriteString("\"none\" is a valid and common choice for agents the user triggers manually.\n")
+	sb.WriteString("</platform_context>\n\n")
+
+	return sb.String()
+}
+
+// coderCapabilitiesBlock tells the coder HOW it can act on files and the platform, based on
+// its backend type. AGENT.md stays coder-agnostic (it says WHAT to do); this block bridges
+// to the actual mechanism. full-coder: direct tool access. basic-model: output markers the
+// host system interprets (for plain model invocations with no tool calls, e.g. OpenRouter).
+func coderCapabilitiesBlock(backendType string) string {
+	if backendType == BackendBasicModel {
+		return `<coder_capabilities>
+You are running as a basic model — you produce text output only and have no tool calls.
+To interact with the filesystem and platform, use these OUTPUT MARKERS which the host
+system interprets and executes for you:
+
+Read a file (the system injects its contents as context on your next turn):
+  [READ_FILE path/relative/to/vault]
+
+Write a file (the system writes it to the knowledge base):
+  [WRITE_FILE notes/filename.md]
+  <full file contents here>
+  [/WRITE_FILE]
+
+Execute a helper script under tools/ (the system runs it and injects stdout):
+  [RUN_SCRIPT tools/script.py]
+
+All paths are relative to the vault root. You cannot run arbitrary shell commands —
+express every filesystem action through these markers.
+</coder_capabilities>
+
+`
+	}
+	// BackendFullCoder or "" (default: a CLI coder with direct tool access).
+	return `<coder_capabilities>
+You are running as a full coder with direct tool access:
+- File operations: read, write, and edit files directly in the vault and your agent dir.
+- Shell: run commands and execute helper scripts under tools/. Do not pip-install anything.
+- Web fetch: retrieve URLs directly when the task needs live web data.
+Use these capabilities to execute the AGENT.md instructions directly on files and the
+shell — do not route routine file writes through output markers.
+</coder_capabilities>
+
+`
+}
+
+// agentArchitectureGateBlock is the mandatory reasoning step injected at the top of the
+// implementation task, before any file is created. It forces the coder to classify each
+// task, decide the tier, and decide notification + schedule — so it never jumps to
+// writing a script for pure-reasoning work, and so silent / no-schedule agents are explicit.
+func agentArchitectureGateBlock() string {
+	return `<architecture_gate>
+MANDATORY — complete this analysis in your response BEFORE creating any file.
+
+TASK ANALYSIS:
+List each distinct thing this agent does on a run. Classify each one:
+  [REASON] — you think, generate, judge, classify, or decide something
+  [SINGLE] — one file read/write, or one short API call returning small data
+  [BULK]   — paginate many results, parse large structured data, multi-step I/O
+
+TIER DECISION:
+  All [REASON] and [SINGLE] → TIER 1. State: "No helper code needed — reasoning only."
+  Any [BULK] → TIER 2 or 3. State exactly which [BULK] task requires code and why TIER 1
+  is insufficient for it.
+
+NOTIFICATION DECISION:
+  Does this agent send notifications to the user?
+  YES → AGENT.md must have explicit [CHAT] instructions with real content.
+  NO  → AGENT.md must say "This agent does not notify the user — it only updates notes or
+        state." Do NOT add a [CHAT] line just to have output.
+
+SCHEDULE DECISION:
+  Does this agent run automatically on a schedule?
+  YES → First line of AGENT.md: # Suggested schedule: <5-part cron expression>
+  NO  → First line of AGENT.md: # Suggested schedule: none
+
+Write your analysis (3-5 sentences) before proceeding to file creation.
+</architecture_gate>
 
 `
 }
@@ -276,6 +605,11 @@ NEVER do any of the following — no exceptions:
 - Write code or generate files during the design conversation.
 - Describe implementation details unless the user specifically asks.
 - Ask more than two questions in a single reply.
+- Use technical jargon with the user. FORBIDDEN terms to use unexplained: AGENT.md,
+  Python, script, vault, cron, JSON, shell, subprocess, Bash, webhook, endpoint, API key
+  (unless you immediately explain it in one plain sentence). Translate everything:
+  "run schedule" not "cron"; "your notes" not "vault"; "the assistant will remember this"
+  not "write to state.json".
 </constraints>
 
 `)
@@ -298,18 +632,17 @@ that makes these agents fail.
 `)
 
 	// ── Platform context ──────────────────────────────────────────────────────
-	sb.WriteString("<platform_context>\n")
+	// Uses the shared platform primer so the designer and the implementation/runtime
+	// coder all see the same description of the platform (KB, secrets, chats, reminders,
+	// connected chat apps + commands, output protocol, schedule).
+	sb.WriteString(platformContextBlock(p.ChatApps, ""))
 	if len(p.ConnectedPlatforms) > 0 {
-		sb.WriteString("The user has connected: ")
-		sb.WriteString(strings.Join(p.ConnectedPlatforms, ", "))
-		sb.WriteString(`
-When the user says "send to Telegram", "notify me", "post a message", or similar — they mean: the system will route the agent's output to their connected platform automatically. No bot token, chat ID, or messaging setup is needed or should be mentioned.
-`)
+		sb.WriteString(fmt.Sprintf("<connected_platforms_summary>\nThe user has connected: %s.\n"+
+			"When the user says \"send to Telegram\", \"notify me\", \"post a message\", or similar — they mean: the system will route the agent's output to their connected platform automatically. No bot token, chat ID, or messaging setup is needed or should be mentioned.\n"+
+			"</connected_platforms_summary>\n\n", strings.Join(p.ConnectedPlatforms, ", ")))
 	} else {
-		sb.WriteString(`No chat platform is currently connected. If the agent needs to send notifications, mention that the user can connect Telegram from Settings → Connectors in the web dashboard. No credentials are needed — the platform handles routing automatically.
-`)
+		sb.WriteString("<connected_platforms_summary>\nNo chat platform is currently connected. If the agent needs to send notifications, mention that the user can connect Telegram from Settings → Connectors in the web dashboard. No credentials are needed — the platform handles routing automatically.\n</connected_platforms_summary>\n\n")
 	}
-	sb.WriteString("</platform_context>\n\n")
 
 	// ── Skills ────────────────────────────────────────────────────────────────
 	if len(p.Skills) > 0 {
@@ -352,25 +685,77 @@ When the agent needs an API key or credential:
 	// ── Your job ──────────────────────────────────────────────────────────────
 	if p.IsEdit {
 		sb.WriteString(`<your_job>
-The user wants to change something about this agent. Your job:
-1. Ask focused questions to understand exactly what they want to change. Do not revisit or reconfirm things they did not mention — only ask about what they want different.
-2. Once you understand the change, propose an updated plan that states:
-   - What will be different after the edit
-   - Any new secrets required (name + plain-language description + where to get it)
-   - Whether the schedule changes (and to what)
-3. Tell the user to type "approve" when they're happy with the proposal.
+The user wants to change or fix something about this assistant. Follow this order:
+
+STEP 1 — DIAGNOSE (before asking questions or proposing anything).
+If the user reports a bug or wrong behavior, read the current agent instructions and tool
+scripts shown in your role. Identify the EXACT cause: which file, which logic, what it does
+wrong vs. what it should do. State this in PLAIN ENGLISH to the user ("I found the issue:
+..."). Do not use code, file names, or jargon the user won't understand. If you cannot
+identify a specific cause from the code, say so and ask the user to describe what happened
+in detail.
+
+STEP 2 — CONFIRM THE FIX.
+Describe what you will change in plain English — no code, no file names, no jargon. Example:
+"I'll change the assistant so it writes the quote itself instead of running a script, and
+the notification will now always include the quote." Ask: "Does that sound right? Type
+approve to proceed."
+
+STEP 3 — AWAIT APPROVAL.
+Tell the user to type "approve" when they are happy with the proposed fix. Do not revisit or
+reconfirm things they did not mention.
+
+RULES:
+- Never describe the fix using technical terms (script, AGENT.md, Python, vault).
+- Show the diagnosis in plain English first — users deserve to understand what went wrong.
+- Be surgical: change only what caused the problem. Never propose to "rewrite the agent".
+- Ask at most one or two targeted questions if the diagnosis is unclear.
+
+After the user approves, append this block (for the code generator only — NOT shown to the
+user):
+[TECHNICAL SPEC]
+Change: <one sentence describing what changes technically>
+Root cause: <what was actually wrong, if a bug>
+Tier change: same | 1→2 | 2→1 | etc.
+[/TECHNICAL SPEC]
 </your_job>
 
 `)
 	} else {
 		sb.WriteString(`<your_job>
-Have a focused conversation to fully understand what the agent should do. Then propose what you will build.
-1. Ask focused questions about: what data the agent watches or fetches, any APIs or services needed, what it should do with the data, and how often it should run.
-2. When you have a clear picture, propose your implementation plan — state explicitly:
-   - What the agent will do each run (in plain English)
-   - Any required secrets (name + plain-language description + where to get it)
-   - The run schedule (frequency in plain English and the cron expression)
-3. Tell the user to type "approve" when they're happy with the proposal.
+Have a focused conversation to understand what the user wants their assistant to do. Ask
+simple, friendly questions — one or two at a time. Your goal is to understand:
+1. What the assistant watches, reads, or monitors
+2. What it should do with that information
+3. Whether it should notify the user — if the user has NOT mentioned notifications, ASK:
+   "Should I send you a message each time this runs, or should it just update your notes
+   silently?" (Silent agents are valid — do not assume notifications are wanted.)
+4. How often it should run — if the user has NOT mentioned a schedule, ASK: "Should this
+   run automatically (like every morning), or would you prefer to trigger it yourself when
+   you need it?" ("only when I ask" / manual is a valid answer.)
+5. Where results should go (a message? your notes? both?) and any accounts or services
+   needed (and what credentials those require, explained step by step).
+
+When you have a complete picture, propose your plan in ONLY plain English (no technical
+terms) — bullet points, not paragraphs:
+- What the assistant will do each run (one sentence per action)
+- How often it runs ("every morning at 9am" / "only when you ask")
+- Whether it will notify you (yes — and what the message looks like — or no, silent)
+- Where results are saved ("your notes under Daily Quotes")
+- Any accounts/services needed and exactly how to set them up, step by step
+
+Then tell the user to type "approve" when they are happy with the proposal.
+
+After the user approves, append this block (for the code generator only — NOT shown to the
+user):
+[TECHNICAL SPEC]
+Tier: 1 / 2 / 3 — reason if 2 or 3
+Schedule: <5-part cron expression> | none
+Notifies user: yes ([CHAT] contains: <description>) | no (silent)
+Knowledge base writes: notes/<filename.md> | none
+Secrets: none | NAME: plain description
+External services: none | <service name and what for>
+[/TECHNICAL SPEC]
 </your_job>
 
 `)
@@ -378,27 +763,33 @@ Have a focused conversation to fully understand what the agent should do. Then p
 
 	// ── Built-in knowledge base (must come BEFORE Composio so it's preferred) ─
 	sb.WriteString(`<knowledge_base>
-This app has a BUILT-IN personal knowledge base: an Obsidian-style vault of
-interlinked markdown notes that belongs to the user. Every agent you build here
-(and the chat) can READ and WRITE it — create, read, and edit notes, journals,
-plans, and memory files — and that knowledge persists across runs. The vault
-holds notes/, memory/, and any folders/files the user has created.
+The built-in knowledge base is the user's OWN personal knowledge graph — an
+Obsidian-style, ever-growing vault of interlinked markdown notes that belongs to
+the user. They organize it however they like (folders, files, [[wikilinks]]) and
+can reorganize it over time; the default starting layout is notes/ (their free-form
+notes), memory/ (context injected into every AI session: USER.md, SOUL.md,
+GENERAL.md), chats/ (saved conversations), and per-agent workspaces. Chat
+transcripts and /memory bullets always land in their fixed spots; the rest the
+user shapes themselves. Every agent you build here (and the chat) can READ and
+WRITE it, and that knowledge persists across runs.
 
-So when the user wants anything to do with "my notes", "my knowledge base",
-"save / update / change / add a note", "keep a journal", or "remember this" —
-design the agent to use the BUILT-IN knowledge base. Do NOT suggest Notion,
-Google Docs, Obsidian, or any other external note app for storing the user's own
-knowledge. Reach for Composio / external services ONLY when the data genuinely
-lives in a specific external app the user names (e.g. they explicitly say "read
-my Notion" or "post to Slack"). For the user's own notes and knowledge, the
-built-in vault is always the answer.
+So when the user says "save it to my notes", "keep a journal", "remember this",
+"add to my knowledge base", or anything about THEIR OWN knowledge — design the
+agent to use the BUILT-IN knowledge base. Do NOT suggest Notion, Google Docs,
+Obsidian, or any other external note app for storing the user's own knowledge.
+Reach for Composio / external services ONLY when the data genuinely lives in a
+specific external app the user names (e.g. they explicitly say "read my Notion"
+or "post to Slack"). For the user's own notes and knowledge, the built-in vault is
+always the answer. When describing where results go to the USER, say "your notes"
+— do not dump file paths or the word "vault" on them.
 `)
 	if p.KBManifest != "" {
 		sb.WriteString(fmt.Sprintf(`The user's knowledge base currently contains these notes:
 <kb_notes>
 %s</kb_notes>
 The agent can read and edit any of these at runtime; reference them by path when
-relevant. This list may be incomplete if notes were just added.
+relevant. The user may have reorganized since this list was made, so have the agent
+discover the actual layout at runtime rather than assuming these exact paths.
 `, p.KBManifest))
 	} else {
 		sb.WriteString(`The user's knowledge base is currently empty — an agent can create notes
@@ -435,6 +826,8 @@ there as it runs.
 type ImplementationParams struct {
 	ComposioEnabled    bool
 	ConnectedPlatforms []string
+	ChatApps           []ChatAppInfo // connected chat platforms + commands (platform context)
+	BackendType        string       // BackendFullCoder | BackendBasicModel | "" (capabilities block)
 }
 
 // capabilitySpec renders the authoritative capability blocks shared with the
@@ -442,6 +835,8 @@ type ImplementationParams struct {
 func (p ImplementationParams) capabilitySpec() string {
 	var sb strings.Builder
 	sb.WriteString(agentPhilosophyBlock())
+	sb.WriteString(platformContextBlock(p.ChatApps, ""))
+	sb.WriteString(coderCapabilitiesBlock(p.BackendType))
 	sb.WriteString(testingRulesBlock())
 	sb.WriteString(shellSafetyBlock())
 	sb.WriteString(scriptRobustnessBlock())
@@ -586,62 +981,135 @@ func BuildImplementationPrompt(agentName string, history []ChatMessage, p Implem
 	}
 	sb.WriteString("</design_conversation>\n\n")
 
+	// Mandatory reasoning gate — the coder must decide the tier, notification, and
+	// schedule BEFORE creating any file, so it never writes a script for pure-reasoning
+	// work and never emits a blank [CHAT] or an unintended schedule.
+	sb.WriteString(agentArchitectureGateBlock())
+
 	sb.WriteString(`<task>
-Follow these steps in order:
+Follow these steps in EXACT order. Do not skip or combine steps.
+
+<step name="analyze">
+ANALYZE FIRST — WRITE NOTHING YET.
+
+Complete the <architecture_gate> analysis above:
+(a) List every task this agent performs each run and label each [REASON], [SINGLE], or [BULK].
+(b) State your tier decision (TIER 1 / 2 / 3) and why.
+(c) State what files, if any, you will create.
+
+Do not proceed to "create" until this analysis is written in your response.
+</step>
 
 <step name="create">
 CREATE THE AGENT FILES in the current directory.
 
-Write AGENT.md:
-- Line 1 MUST be exactly: # Suggested schedule: <5-part cron expression or "none">
-- Optional secrets block immediately after (omit entirely if no secrets needed):
-  # Required secrets:
-  # - SECRET_NAME: plain-language description of what this is
-- Then describe, in plain prose, what the agent does each run — and explicitly which
-  decisions YOU (the LLM) make at runtime vs. which steps the helper scripts perform.
-  See <agent_philosophy>: script the repetitive/deterministic work; reason about
-  anything fuzzy or judgment-based yourself each run. Do NOT bake brittle rules
-  (exact filenames, rigid keyword lists, fixed thresholds) into a script when the
-  honest answer is "it depends — look and decide".
-- Output protocol (the ONLY way to produce output):
-    [CHAT] <text>        — sends a message to the user
-    [STATE]...[/STATE]   — JSON block merged into state.json for persistence
-- Reference helper scripts as: python3 tools/filename.py (or python3 tools/sub/dir/x.py)
+══════════ AGENT.MD — ALWAYS REQUIRED ════════
 
-Write helper scripts under tools/ for the deterministic "hands" work (if needed):
+Line 1 MUST be exactly: # Suggested schedule: <5-part cron expression or "none">
+  Use "none" when the user wants to trigger the agent manually (no automatic schedule).
+
+Optional secrets block immediately after (omit entirely if no secrets needed):
+  # Required secrets:
+  # - SECRET_NAME: plain-language description of what this is and where to get it
+
+Then write clear step-by-step instructions for what the agent does each run. AGENT.md is
+read at runtime by an AI (which may be a different model/backend than you) — write it as
+instructions you would give to an intelligent colleague briefed on the platform, NOT as
+code comments.
+
+AGENT.MD WRITING RULES — read carefully:
+  ✓ Describe operations in plain English. Say WHAT to do, not which tool to use:
+    "Generate a 2-sentence motivational quote about resilience."
+    "Read the user's profile from memory/USER.md in the vault."
+    "Append today's entry to notes/daily-log.md in the vault (create it if absent)."
+  ✓ Reference the knowledge base with relative paths under the vault root. The user's KB
+    is THEIRS and grows/reorganizes over time, so:
+    - For FIXED system locations, use the literal path: "Read memory/USER.md",
+      "Append a bullet to memory/GENERAL.md", "Read past chats in chats/ for context".
+    - For the user's free-form notes/, PREFER instructing the runtime agent to DISCOVER the
+      actual layout rather than hardcoding a path that may not exist:
+        "Look in notes/ for an existing quotes note (the user may have renamed/reorganized
+         it). If one exists, append to it; if not, create notes/quotes.md."
+      Only hardcode a notes/ path when the user explicitly named the file in the conversation.
+  ✓ When writing a note: tell the agent to READ it first and merge/append, not blindly
+    overwrite — the KB accumulates knowledge across runs and the user's content must be kept.
+  ✓ State explicitly which decisions YOU (the runtime LLM) make vs. which steps helper
+    scripts perform. See <agent_philosophy>: script the repetitive/deterministic [BULK] work;
+    reason about anything fuzzy or judgment-based yourself each run. Do NOT bake brittle
+    rules (exact filenames, rigid keyword lists, fixed thresholds) into a script when the
+    honest answer is "it depends — look and decide".
+  ✓ Output protocol (the ONLY way to produce output) — make it explicit in AGENT.md:
+      [CHAT] <text>        — sends a message to the user (include the actual content inline)
+      [STATE]...[/STATE]   — JSON block merged into state.json for persistence
+    If the agent notifies the user: [CHAT] MUST contain the real content, not a label with a
+    blank. WRONG: "[CHAT] Today's quote:". RIGHT: "[CHAT] 💭 <the full generated quote>".
+    NEVER split a [CHAT] message with a blank line — the header and the content must be on
+    one line or on contiguous lines with NO blank line between them. A blank line inside the
+    block leaves a gap in the delivered message. WRONG (header + blank line + content):
+      [CHAT] 📝 Added to your notes:
+      <blank line>
+      **Hemoglobin A1C** (Medical lab test) <description>
+    RIGHT:
+      [CHAT] 📝 Added to your notes: **Hemoglobin A1C** (Medical lab test) — <full description>
+    If the agent does NOT notify the user: state "This agent does not notify the user — it
+    only updates notes or state." and instruct the runtime to end each run with [SILENT] (alone,
+    last line). OMIT [CHAT] entirely. [SILENT] tells the system the silence is intentional so
+    stray prose is NOT delivered to the user. Silent runs are valid.
+  ✓ Reference helper scripts (TIER 2/3 only) as: python3 tools/filename.py
+  ✗ DO NOT reference runtime-specific tool names (Write, Read, Bash, WebFetch) — these vary
+    by the runtime backend. Say WHAT to do, not which tool to use.
+  ✗ DO NOT leave placeholder text like "{the quote}" — tell the agent to include it in full.
+  ✗ DO NOT instruct the agent to write into chats/, .kb/, or another agent's directory.
+
+══════════ HELPER SCRIPTS (TIER 2/3 ONLY) ════════
+
+Only create files under tools/ if your architecture-gate analysis required [BULK] tasks.
+If TIER 1: create NO files under tools/. AGENT.md is the entire agent. Move to the test step.
+
+If creating scripts:
 - You may build a REAL multi-file project, not just one flat file:
     tools/fetch.py, tools/lib/parser.py, tools/tests/test_parser.py, etc.
-  Use this when the logic is non-trivial — small focused modules + tests are more
-  reliable than one giant script.
-- Write unit tests under tools/tests/ (test_*.py, stdlib unittest) for non-trivial
-  PURE logic (parsing, formatting, threshold/decision helpers). Structure scripts so
-  that logic lives in importable functions, with side effects (network calls, prints,
-  draft creation) under ` + "`if __name__ == \"__main__\":`" + `. Tests MUST import the
-  module and call those functions directly — see the <testing_rules> section above.
+  Use this when the logic is non-trivial — small focused modules + tests are more reliable
+  than one giant script.
+- Write unit tests under tools/tests/ (test_*.py, stdlib unittest) for non-trivial PURE logic
+  (parsing, formatting, threshold/decision helpers). Structure scripts so logic lives in
+  importable functions, with side effects (network calls, prints, draft creation) under
+` + "`if __name__ == \"__main__\":`" + `. Tests MUST import the module and call those functions
+  directly — see the <testing_rules> section above.
 - ALL project files must live under tools/ (including any tools/requirements.txt).
-- Allowed standard libraries: os, json, re, datetime, requests (plus stdlib unittest
-  for tests). Scripts may import your own modules under tools/.
+- Allowed standard libraries: os, json, re, datetime, requests (plus stdlib unittest for
+  tests). Scripts may import your own modules under tools/.
 - Forbidden inside EVERY .py file (scripts AND tests): subprocess, eval, exec, socket,
-  open() for writing files. These are rejected by an automated check on save — a test
-  that does subprocess.run(['python3', ...]) WILL be blocked. To verify the whole
-  workflow end-to-end, run the script yourself in the shell (the test step) instead.
-  (Running scripts/tests via the shell is YOUR job and is always allowed; the ban is
-  only on these calls appearing inside the .py files.)
-- Read secrets via: os.environ.get('SECRET_NAME', '')
-- Do NOT read or write state.json directly — use [STATE] blocks in AGENT.md output
+  open() for writing files. These are rejected by an automated check on save — a test that
+  does subprocess.run(['python3', ...]) WILL be blocked. To verify the whole workflow
+  end-to-end, run the script yourself in the shell (the test step) instead.
+- Read secrets via: os.environ.get('SECRET_NAME', '').
+- Do NOT read or write state.json directly — use [STATE] blocks in AGENT.md output.
 
 Do NOT create or modify state.json — it already exists and is managed by the system.
 </step>
 
 <step name="test">
-TEST THE IMPLEMENTATION.
+TEST THE IMPLEMENTATION COMPLETELY.
 
-Execute each Python script in a shell and confirm it produces real, non-empty output.
-If you wrote unit tests under tools/tests/, run them too
-(e.g. python3 -m unittest discover -s tools/tests) and make them pass.
-If a script or test errors or returns None/empty, fix it and re-run. After 3 failed
-attempts, stop and emit [BLOCKED] (see below) explaining why it cannot work and what
-could be done instead.
+TIER 1 (no code files) — execute a complete dry run NOW:
+  (a) Follow each AGENT.md step in sequence as if you were the runtime AI.
+  (b) Actually generate the content (quote, summary, etc.) — do NOT leave a placeholder.
+  (c) If a note write is instructed: write it, then read it back to confirm it is there.
+  (d) Compose the exact [CHAT] text (or confirm the agent is intentionally silent).
+  FAIL conditions — fix before [TEST_OUTPUT]:
+  ✗ [CHAT] contains a label with nothing after it (e.g. "[CHAT] Quote:")
+  ✗ A note write was not confirmed readable
+  ✗ Agent is supposed to notify but has no [CHAT]
+  ✗ Agent is supposed to be silent but accidentally emits a [CHAT]
+
+TIER 2/3 (has code files) — run scripts, then do the TIER 1 dry run:
+  (a) Execute each Python script in a shell and confirm it produces real, non-empty output.
+  (b) Run unit tests if present (e.g. python3 -m unittest discover -s tools/tests) and make
+      them pass.
+  (c) If a script or test errors or returns None/empty: fix it and re-run. After 3 failed
+      attempts on one script, stop and emit [BLOCKED] (see below).
+  (d) After scripts pass: complete the TIER 1 dry run steps above to verify end-to-end.
 
 SECRETS: Read all secrets via os.environ.get('SECRET_NAME', '').
 If COMPOSIO_API_KEY is present in the environment, make REAL API calls — produce REAL
@@ -652,21 +1120,28 @@ only. Do NOT abort.
 </step>
 
 <step name="report">
-REPORT THE VERIFIED RESULT.
+VERIFY AND REPORT.
 
-Once everything works, end your final response with:
+Before writing [TEST_OUTPUT], confirm this checklist:
+  □ If the agent notifies: [CHAT] contains REAL content, not a blank label.
+  □ If the agent is silent: no [CHAT] is emitted (and that is intentional per AGENT.md).
+  □ Any note writes are confirmed readable.
+  □ No secret values appear in [CHAT], [TEST_OUTPUT], or any output.
+  □ Script outputs (if any) are non-empty and plausible.
+
+Then end your final response with:
 [TEST_OUTPUT]
-<paste the actual terminal output from your test run>
+<actual dry-run result — the exact [CHAT] text, file contents written, and any script output>
 [/TEST_OUTPUT]
 
-If the agent produces no [CHAT] output (it only updates state), still write:
-[TEST_OUTPUT]No chat output — agent only updates state.[/TEST_OUTPUT]
+If the agent is intentionally silent (state/notes only, no [CHAT] by design):
+[TEST_OUTPUT]Silent agent — updates state/notes only. No notification sent.[/TEST_OUTPUT]
 </step>
 
 <step name="blocked">
-IF THE TASK IS FUNDAMENTALLY IMPOSSIBLE — for example: the website blocks all
-automated access, the required API does not exist, or a dependency is missing
-and cannot be installed — stop immediately and emit:
+IF THE TASK IS FUNDAMENTALLY IMPOSSIBLE — for example: the website blocks all automated
+access, the required API does not exist, or a dependency is missing and cannot be
+installed — stop immediately and emit:
 
 [BLOCKED]
 What failed: <one sentence explaining the technical blocker>
@@ -678,7 +1153,8 @@ Do NOT loop endlessly. Do NOT attempt workarounds beyond 3 tries. Emit [BLOCKED]
 </task>
 
 <constraints>
-- [CHAT] is the ONLY output channel. Do not call Telegram APIs, webhooks, or any messaging service directly.
+- [CHAT] is the ONLY notification channel. Do not call Telegram APIs, webhooks, or any messaging service directly.
+- AGENT.md instructions must not reference runtime-specific tool names. Write what to do, not which tool to use.
 - Never hardcode real credentials — always use os.environ.get('NAME', '').
 - Never create files outside the current agent directory.
 - Never set up cron jobs or external schedulers — the system handles scheduling.
@@ -715,57 +1191,92 @@ func BuildEditImplementationPrompt(agentName string, history []ChatMessage, p Im
 	sb.WriteString("</edit_conversation>\n\n")
 
 	sb.WriteString(`<task>
-Follow these steps in order:
+Follow these steps in EXACT order. Do not skip the test because "it's just a small edit".
 
 <step name="read">
-READ THE EXISTING FILES FIRST.
+READ ALL EXISTING FILES FIRST.
 
-Open and read AGENT.md and every file in tools/ in the current directory before
-making any changes. Understand what the agent currently does so you can preserve
-everything the user did not ask to change.
+Open and read AGENT.md and every file under tools/ in the current directory before doing
+anything else. Understand what the agent currently does and what the conversation says to
+change, so you can preserve everything the user did not ask to change.
+</step>
+
+<step name="diagnose">
+DIAGNOSE — STATE WHAT IS WRONG BEFORE CHANGING ANYTHING.
+
+If the conversation describes a bug or failure:
+  (a) Identify the exact root cause: which file, which logic, what it does wrong vs. what
+      it should do.
+  (b) State it clearly, e.g. "Root cause: tools/fetch.py returns an empty list because it
+      reads the wrong JSON key ('items' vs 'results'). This causes AGENT.md step 2 to send
+      an empty [CHAT] message."
+  (c) State exactly what you will change: "Fix: change tools/fetch.py to read 'results'.
+      No other files change."
+
+If the conversation describes a feature change (no bug):
+  State: "No bug to diagnose. Applying the requested change: <what changes>."
+
+DO NOT proceed to edit without completing this step. The diagnosis goes in your response.
 </step>
 
 <step name="edit">
-APPLY ONLY THE REQUESTED CHANGES.
+APPLY ONLY THE TARGETED FIX.
 
-Edit the files under tools/ and AGENT.md to implement what the user asked for in the
-conversation above. Preserve everything that was not mentioned. Delete any tool script
-(or test) that is no longer needed as a result of the change.
+Change exactly what the diagnosis identified — and nothing else. Do NOT refactor, rename,
+or touch unrelated code. Preserve everything the user did not ask to change. Delete a tool
+script (or test) only if it is no longer needed as a result of this specific change.
 
-- Line 1 of AGENT.md MUST remain exactly: # Suggested schedule: <5-part cron expression or "none">
+Apply the same AGENT.md writing rules as the create prompt:
+  ✓ Plain English instructions; no runtime-specific tool names (say WHAT to do, not which tool).
+  ✓ Explicit [CHAT] content, OR (if silent) an explicit "this agent does not notify" line PLUS
+    an instruction for the runtime to end each run with [SILENT] (last line, alone).
+  ✓ Vault-relative paths for notes (notes/<filename.md>, memory/...); prefer instructing the
+    runtime agent to discover the actual notes/ layout rather than hardcoding a path.
+  ✓ Read a note before overwriting it; merge/append to preserve accumulated content.
+  ✗ Do NOT introduce a new script when the fix can be done in AGENT.md instructions alone.
+
+- Line 1 of AGENT.md MUST remain exactly: # Suggested schedule: <5-part cron or "none">.
   Update it only if the user asked to change the run frequency.
-- Optional secrets block (keep existing entries; add new ones if needed; remove if no longer needed):
+- Optional secrets block (keep existing entries; add new ones if needed; remove if no
+  longer needed):
   # Required secrets:
   # - SECRET_NAME: plain-language description
-- Output protocol unchanged:
-    [CHAT] <text>        — sends a message to the user
-    [STATE]...[/STATE]   — JSON block merged into state.json
-- Keep AGENT.md honest about which decisions YOU make at runtime vs. what the scripts
-  do (see <agent_philosophy>). Prefer reasoning over brittle hardcoded rules.
+- Output protocol unchanged: [CHAT] <text> and [STATE]...[/STATE].
+- Keep AGENT.md honest about which decisions YOU make at runtime vs. what the scripts do
+  (see <agent_philosophy>). Prefer reasoning over brittle hardcoded rules.
 - You may keep or grow a multi-file project under tools/ (tools/lib/..., tools/tests/...).
-  Reference helpers as: python3 tools/filename.py. Update tests under tools/tests/ to
-  match your changes and keep them passing — tests must IMPORT functions and call them
-  directly (see <testing_rules>), never invoke a script via subprocess.
+  Reference helpers as: python3 tools/filename.py. Update tests under tools/tests/ to match
+  your changes and keep them passing — tests must IMPORT functions and call them directly
+  (see <testing_rules>), never invoke a script via subprocess.
 - All project files must stay under tools/ (including tools/requirements.txt).
 - Allowed in tools/ code: os, json, re, datetime, requests (plus stdlib unittest for tests).
 - Forbidden inside EVERY .py file (scripts AND tests): subprocess, eval, exec, socket,
   open() for writing files. A test using subprocess.run([...]) WILL be rejected on save;
   verify end-to-end by running the script yourself in the shell instead.
-- Read secrets via: os.environ.get('SECRET_NAME', '')
+- Read secrets via: os.environ.get('SECRET_NAME', '').
 
-Do NOT create or modify state.json — it reflects the agent's live persisted state
-and is managed by the system. Use [STATE] blocks in AGENT.md output to update it.
+Do NOT create or modify state.json — it reflects the agent's live persisted state and is
+managed by the system. Use [STATE] blocks in AGENT.md output to update it.
 </step>
 
 <step name="test">
-TEST THE IMPLEMENTATION.
+FULL TEST — same rigor as a new agent. Do not skip it.
 
-Execute each Python script in a shell and confirm it produces real, non-empty output.
-If you wrote unit tests under tools/tests/, run them too
-(e.g. python3 -m unittest discover -s tools/tests) and make them pass.
-If a script or test errors or returns None/empty, fix it and re-run. After 3 failed
-attempts, stop and emit [BLOCKED] (see below) explaining why it cannot work and what
-could be done instead.
+TIER 1 (no scripts): execute a complete dry run of the UPDATED AGENT.md:
+  (a) Follow each step as if you are the runtime AI.
+  (b) Generate the actual output content — no placeholders.
+  (c) Confirm note writes by reading them back.
+  (d) Confirm [CHAT] contains real content (or confirm the agent is silent by design).
+  FAIL conditions: empty [CHAT] label, unconfirmed writes, wrong content, accidental [CHAT]
+  on a silent agent.
+
+TIER 2/3 (has scripts): run each script and show real output. Empty output = failure, fix
+  it. Run unit tests (python3 -m unittest discover -s tools/tests) if present and make them
+  pass. After 3 failed fix attempts on one script: emit [BLOCKED] and stop. Then complete the
+  TIER 1 dry run above to verify the full end-to-end flow.
+
+The test MUST prove the original bug no longer occurs. State this explicitly, e.g.
+"Verified: the script now returns 3 results instead of empty; [CHAT] contains real data."
 
 SECRETS: Read all secrets via os.environ.get('SECRET_NAME', '').
 If COMPOSIO_API_KEY is present in the environment, make REAL API calls — produce REAL
@@ -776,24 +1287,32 @@ only. Do NOT abort.
 </step>
 
 <step name="report">
-REPORT THE VERIFIED RESULT.
+VERIFY AND REPORT.
 
-Once everything works, end your final response with:
+Before writing [TEST_OUTPUT], confirm:
+  □ The original bug is fixed (state this explicitly).
+  □ If the agent notifies: [CHAT] contains REAL content, not a blank label.
+  □ If the agent is silent: no [CHAT] is emitted (intentional per AGENT.md).
+  □ Any note writes are confirmed readable.
+  □ No secret values appear in any output.
+  □ Script outputs (if any) are non-empty and plausible.
+
+Then end your response with:
 [TEST_OUTPUT]
-<paste the actual terminal output from your test run>
+<proof the bug is fixed — the exact [CHAT] text, file contents written, and any script output>
 [/TEST_OUTPUT]
 
-If the agent produces no [CHAT] output (it only updates state), still write:
-[TEST_OUTPUT]No chat output — agent only updates state.[/TEST_OUTPUT]
+If the agent is intentionally silent (state/notes only, no [CHAT] by design):
+[TEST_OUTPUT]Silent agent — updates state/notes only. No notification sent.[/TEST_OUTPUT]
 </step>
 
 <step name="blocked">
-IF THE TASK IS FUNDAMENTALLY IMPOSSIBLE — for example: the website blocks all
-automated access, the required API does not exist, or a dependency is missing
-and cannot be installed — stop immediately and emit:
+IF THE BUG CANNOT BE FIXED after 3 attempts, or the task is fundamentally impossible,
+stop immediately and emit:
 
 [BLOCKED]
-What failed: <one sentence explaining the technical blocker>
+Root cause: <what exactly is wrong>
+Why it cannot be fixed: <one sentence>
 What you can do instead: <one or two concrete alternatives>
 [/BLOCKED]
 
@@ -802,7 +1321,8 @@ Do NOT loop endlessly. Do NOT attempt workarounds beyond 3 tries. Emit [BLOCKED]
 </task>
 
 <constraints>
-- [CHAT] is the ONLY output channel. Do not call Telegram APIs, webhooks, or any messaging service directly.
+- [CHAT] is the ONLY notification channel. Do not call Telegram APIs, webhooks, or any messaging service directly.
+- AGENT.md instructions must not reference runtime-specific tool names. Write what to do, not which tool to use.
 - Never hardcode real credentials — always use os.environ.get('NAME', '').
 - Never create files outside the current directory.
 - Never set up cron jobs or external schedulers.
@@ -824,6 +1344,8 @@ type CoderPromptParams struct {
 	DeclaredContent map[string]string
 	VaultRoot       string // absolute path to the user's knowledge base (read+write to the agent)
 	AgentDir        string // absolute path to this agent's own directory (the agent's writable area / CWD)
+	ChatApps        []ChatAppInfo // connected chat platforms + commands (platform context)
+	BackendType     string        // BackendFullCoder | BackendBasicModel | "" (capabilities block)
 }
 
 // BuildCoderPrompt returns the prompt sent to the coder when executing a saved
@@ -834,6 +1356,11 @@ func BuildCoderPrompt(p CoderPromptParams) string {
 
 	sb.WriteString(agentPhilosophyBlock())
 	sb.WriteString(shellSafetyBlock())
+	// Platform primer (with the concrete vault root at runtime) + how this coder can
+	// act on files (backend-aware). Keeps the prompt coder-agnostic — AGENT.md says
+	// WHAT to do; <coder_capabilities> says HOW.
+	sb.WriteString(platformContextBlock(p.ChatApps, p.VaultRoot))
+	sb.WriteString(coderCapabilitiesBlock(p.BackendType))
 
 	sb.WriteString("<agent_instructions>\n")
 	sb.WriteString(p.AgentMD)
@@ -868,48 +1395,34 @@ func BuildCoderPrompt(p CoderPromptParams) string {
 	}
 
 	if p.VaultRoot != "" {
-		sb.WriteString(fmt.Sprintf(`<knowledge_base>
-The user has a personal knowledge base (an Obsidian-style vault of interlinked
-markdown notes) at:
+		sb.WriteString(fmt.Sprintf(`<agent_workspace>
+Your current working directory is your OWN agent directory, where you keep your own
+files (AGENT.md, tools/, state.json, logs/):
   %s
+You may write here. Do NOT write under .kb/ (internal indexes/sidecars), chats/
+(transcripts reflected from the database), or another agent's directory under agents/ —
+those are system-managed or belong to other agents.
 
-You may READ anything under that path for context — the user's notes, journals,
-plans, todos, other agents' run logs, and chat transcripts. Use Read/Grep/Bash
-to find relevant prior knowledge before acting; the knowledge you and the user
-accumulate here should inform this run.
-
-You may also WRITE to the user's knowledge base — create and edit notes, journals,
-plans, and memory files there to record knowledge the user wants kept. Link
-related notes with [[wikilinks]]. This is how durable knowledge persists between
-runs, so prefer writing to the KB over keeping things only in your own directory
-when the knowledge is meant for the user.
-
-The user's personal context is in the memory/ directory — every .md file there
-is automatically pre-injected into your context above as <user_memory>. Typical
-files to consult (and that you may update when the user asks):
-  memory/USER.md    — user profile: name, role, location, background
-  memory/SOUL.md    — communication style and preferences
-  memory/GENERAL.md — quick notes added via /memory commands
-  memory/<any>.md   — any additional files the user has created
-Always check these before acting on assumptions about the user.
-
-Your current working directory is your OWN agent directory, where you keep your
-own files (AGENT.md, tools/, state.json, logs/):
+The user's knowledge base root is:
   %s
-You may write here too. Do NOT write under .kb/ (internal indexes/sidecars),
-chats/ (transcripts reflected from the database), or another agent's directory
-under agents/ — those are system-managed or belong to other agents.
-</knowledge_base>
+Read it for context (notes/, memory/, chats/, other agents' logs) before acting, and write
+durable knowledge back to notes/ or memory/ so it persists across runs. The user's personal
+context is in memory/ (USER.md, SOUL.md, GENERAL.md — also injected above as <user_memory>);
+check it before acting on assumptions about the user. Use your available file capabilities
+(see <coder_capabilities>) — do not name a specific tool that may not exist on this backend.
+</agent_workspace>
 
-`, p.VaultRoot, p.AgentDir))
+`, p.AgentDir, p.VaultRoot))
 	}
 
 	sb.WriteString(`<output_protocol>
 Run your scheduled task now. Use ONLY the markers below to produce output.
 
 [CHAT] First line of the message
-Any continuation lines immediately after (no blank line between them)
-are joined into a single message sent to the user.
+Lines after [CHAT] (including blank lines) are ALL part of the message, until the
+next marker ([STATE], [CALL], a new [CHAT]) or end of output. To avoid a gap in what
+the user sees, put the full message on one line or on contiguous lines with NO blank
+line inside the block.
 
 [STATE]
 {
@@ -921,20 +1434,25 @@ Inline form also accepted: [STATE]{"key":"value"}[/STATE]
 
 [CALL: agent-name]
 Invokes another agent synchronously and waits for its result before continuing.
+
+[SILENT]
+Emit this ALONE as the last line when this run should NOT notify the user (the agent
+only updates notes/state). It tells the system the silence is intentional; without it,
+any other prose you leave behind may be delivered to the user as the message.
 </output_protocol>
 
 <constraints>
 - You are running as a non-interactive subprocess — there is no user present to answer questions or approve actions.
-- [CHAT] is the ONLY way to send output to the user. Do not call Telegram APIs, webhooks, or any messaging service directly.
-- Secrets are injected as environment variables. Access them via your language's env API (e.g. os.environ.get('KEY') in Python, process.env.KEY in Node). Never hardcode credential values.
-- Use [STATE] blocks for your structured state (state.json is machine-merged — do not hand-edit it). You MAY write durable markdown notes inside your own directory AND in the user's knowledge base (see <knowledge_base>); do not write under .kb/, chats/, or another agent's directory.
+- [CHAT] is the ONLY notification channel. Emit it when AGENT.md instructs you to notify the user. If AGENT.md says the agent is silent (notes-only, state-only): do NOT emit [CHAT] — emit [SILENT] as your last line instead. Silent runs are valid and correct. Do not call Telegram APIs, webhooks, or any messaging service directly.
+- When you do emit [CHAT]: it MUST contain the actual content — never an empty label (e.g. "[CHAT] Quote:" with nothing after it sends a blank notification). If content generation fails, emit [CHAT] explaining what went wrong, not a blank message. Note: if you write a user-facing message as plain prose WITHOUT the [CHAT] marker, the system will deliver that prose as the message anyway (fallback) — but always prefer the explicit [CHAT] marker so formatting is clean.
+- Secrets are injected as environment variables. Access them via your language's env API (e.g. os.environ.get('KEY') in Python, process.env.KEY in Node). Never hardcode credential values. Never print or echo a secret's value (in [CHAT], state, or logs).
+- Use [STATE] blocks for your structured state (state.json is machine-merged — do not hand-edit it). You MAY write durable markdown notes inside your own directory AND in the user's knowledge base; do not write under .kb/, chats/, or another agent's directory.
+- When writing a note or file: use your available file capability (see <coder_capabilities>) directly — do NOT invoke a helper script just to write a file. Read the target note first so you merge/append rather than blindly overwriting the user's existing content.
 - Do not set up or modify cron jobs or external schedulers — this subprocess is invoked by the built-in scheduler.
 - Run your helper scripts under tools/ via the shell to do the repetitive fetching/processing, then YOU make the judgment calls on the results (see <agent_philosophy>) — do not reimplement deterministic logic inline, and do not blindly trust a hardcoded rule where reasoning is needed.
 - Use values EXACTLY as your scripts return them: parse their JSON stdout and copy the value through. Never retype, round, or reformat a number by hand into a message, draft, or [STATE] — the number the user sees MUST be the number your script produced. When a value flows into another script, follow <shell_safety> (pass plain numbers / a JSON file, never a "$"-string on the command line).
 - Sanity-check before acting: a script can succeed yet return a wrong/empty/placeholder value. If a value is implausible (e.g. a price far outside any sane range, an empty list where you expected data), do NOT act on it — report the anomaly in [CHAT] instead.
 - Side-effects (create draft, send, post): check your state first so you don't duplicate one you already did, and confirm the result (e.g. a returned id / success) before reporting it as done.
-- Never print or echo a secret's value (in [CHAT], state, or logs).
-- You MUST emit at least one [CHAT] line with the actual result so the user receives output.
 </constraints>
 `)
 

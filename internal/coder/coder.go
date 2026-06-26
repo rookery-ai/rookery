@@ -98,6 +98,13 @@ func (c *Coder) WithBackendType(t string) *Coder {
 	return &c2
 }
 
+// BackendType returns the configured backend type ("claude", "generic", or "" for
+// auto-detect). Callers map this to a prompts-level backend capability so the agent
+// prompts can describe how the coder can act on files (full coder vs basic model).
+func (c *Coder) BackendType() string {
+	return c.backendType
+}
+
 // WithSandbox returns a shallow copy of the Coder with Landlock confinement
 // toggled. When enabled (and supported by the kernel), every subprocess is
 // re-executed through the sandbox helper so it can only read/write the calling
