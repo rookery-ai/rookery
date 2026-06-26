@@ -49,9 +49,9 @@ Telegram adapter (per-user bot instance)
       → /run    → agentrunner.Runner
       → /secret → SecretStore
       → /remind → reminder.Service
-      → /session → db.ChatSession (start/list/stop)
+      → /chat → db.Chat (start/list/stop/resume/delete)
       → /memory → memory.Store (add/list/delete bullets in GENERAL.md)
-      → plain text → one-off chat (coder.Coder)
+      → plain text → one-off chat (coder.Coder with read+write KB tools; see "Chat knowledge-base access")
 ```
 
 ### Key packages
@@ -70,10 +70,10 @@ Telegram adapter (per-user bot instance)
 | `internal/sandbox` | Self-contained Landlock filesystem confinement for coder subprocesses (Linux). `Spec`, `Supported()`, `Wrap()` (re-exec via the hidden `__sandbox-exec` helper), `Exec()` (applies Landlock + rlimits, then `execve`). No external dependency. |
 | `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users |
 | `internal/reminder` | Creates/lists/fires reminders; background polling goroutine. Reminders live only in the DB and the reminders UI tab — they are NOT reflected to the vault. |
-| `internal/session` | `ChatSession` create/list/stop; 30-min idle auto-stop |
-| `internal/prompts` | Central home for all LLM prompt construction: `BuildDesignSystemPrompt`, `BuildImplementationPrompt`, `BuildEditImplementationPrompt`, `BuildCoderPrompt`, `BuildChildAgentFollowUpPrompt`, `BuildSkillMetaPrompt`. No inline prompt text exists outside this package. Shared single-source blocks: `agentPhilosophyBlock`, `testingRulesBlock`, `shellSafetyBlock`, `scriptRobustnessBlock`, `composioServicesBlock`. |
+| `internal/chat` | `Chat` create/list/stop/resume/delete; 30-min idle auto-stop; `BuildUserContext` (shared **identity-only** context builder for one-off chat — profile/memory/agents/MCP; the broader KB is retrieved on demand via tools, not injected here) |
+| `internal/prompts` | Central home for all LLM prompt construction: `BuildDesignSystemPrompt` (+ `<knowledge_base>` block + `KBManifest`), `BuildImplementationPrompt`, `BuildEditImplementationPrompt`, `BuildCoderPrompt`, `BuildChatSystemPrompt` (chat read+write KB instruction), `BuildChildAgentFollowUpPrompt`, `BuildSkillMetaPrompt`, `BuildReminderParsePrompt`. No inline prompt text exists outside this package. Shared single-source blocks: `agentPhilosophyBlock`, `testingRulesBlock`, `shellSafetyBlock`, `scriptRobustnessBlock`, `composioServicesBlock`. |
 | `internal/memory` | Per-user structured context store. Memory lives as named `.md` files in `memory/` (`USER.md`, `SOUL.md`, `GENERAL.md`, etc.) — editable via the KB browser. `ContextString()` reads all files, skips placeholder-only ones, and returns sectioned markdown for LLM injection. `Append/List/Delete` target GENERAL.md bullet lines (used by Telegram `/memory` command). `MigrateToStructuredFiles()` consolidates legacy UUID-keyed entries at startup. |
-| `internal/vault` | Per-user Obsidian-style knowledge base: `Vault` (paths + `Resolve` safety + file IO), `Reflector` (sessions→markdown+sidecar), `LinkIndex` ([[wikilinks]]), `Searcher` (ripgrep), `Guard` (post-run write-scope enforcement), `MigrateLegacyLayout`. |
+| `internal/vault` | Per-user Obsidian-style knowledge base: `Vault` (paths + `Resolve` safety + file IO), `Reflector` (chats→markdown+sidecar), `LinkIndex` ([[wikilinks]]), `Searcher` (ripgrep), `Guard` (post-run write-scope enforcement), `MigrateLegacyLayout`, `MigrateSessionsToChats`. |
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
 | `internal/profile` | Per-user personalization (name, email, location, timezone, tone, language, notes); stored in the generic `settings` table; `Load()`/`Save()`/`ContextString()` for LLM injection; `LoadLocation()` for timezone-aware reminder parsing |
 | `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per user |
@@ -83,7 +83,7 @@ Telegram adapter (per-user bot instance)
 
 Every user has one Obsidian-style vault — a single directory of interlinked markdown notes.
 `internal/vault` owns all vault path/IO/safety logic. The SQLite DB remains the system-of-record;
-chat sessions are *reflected* into the vault as markdown + JSON sidecars.
+chats are *reflected* into the vault as markdown + JSON sidecars.
 
 ```
 <data_dir>/vaults/<userID>/
@@ -99,7 +99,7 @@ chat sessions are *reflected* into the vault as markdown + JSON sidecars.
 │   ├── AGENT.md  agent.json  state.json
 │   ├── tools/*.py  notes/*.md
 │   └── logs/run_<ts>.md
-├── sessions/<id>.md                # reflected chat transcripts
+├── chats/<id>.md                   # reflected chat transcripts
 └── .kb/                            # internal: db-export/ JSON sidecars, links.json (hidden)
 ```
 
@@ -112,13 +112,17 @@ them in. `EnsureScaffold` creates `USER.md` and `SOUL.md` with placeholder conte
 
 Key types in `internal/vault`:
 - **`Vault`** — `Root/AgentsDir/AgentDir/MemoryDir/SkillsDir`; **`Resolve(userID, rel)`** is the security primitive every read/write path uses (rejects `..`/absolute escapes); `WriteNote` (atomic), `Read/Delete/Rename/List/EnsureScaffold`. `List` hides dotfiles.
-- **`Reflector`** — `ReflectSession/ReflectAgentRun`: markdown note + `.kb/db-export/<table>/<id>.json` sidecar. Reminders are NOT reflected.
+- **`Reflector`** — `ReflectChat/ReflectAgentRun`: markdown note + `.kb/db-export/<table>/<id>.json` sidecar. Reminders are NOT reflected.
 - **`LinkIndex`** — `[[wikilink]]` parsing/resolution + `RenderHTMLLinks`; `Backlinks`.
 - **`Searcher`** — `ripgrepSearcher` (rg `--json`, pure-Go fallback).
-- **`Guard`** — post-run write-scope enforcement. Protected region is everything EXCEPT `systemOwnedDirs` = {`.kb`, `agents`, `sessions`} — those are excluded so concurrent agent runs and background reflection goroutines are never mistaken for out-of-scope agent writes.
+- **`Guard`** — detective post-run write-scope enforcement (snapshot/revert). No longer wired into agent runs (the policy changed to let agents edit the KB directly — see "Agent access model"); the type + tests remain as a reusable utility.
 - **`MigrateLegacyLayout()`** — idempotent startup migration of pre-vault `agents/`, `memory/` (jsonl→md), `skills/` into vaults.
 
-**Agent access model.** An agent's run CWD is its own vault dir; the coder prompt (`BuildCoderPrompt`, `<knowledge_base>` block) tells it to READ anywhere under the vault root but WRITE only inside its own dir. Guard enforces this detective-style (snapshot before, restore after, log violations).
+**Agent access model.** An agent's run CWD is its own vault dir; the coder prompt (`BuildCoderPrompt`, `<knowledge_base>` block) tells it to READ the whole vault and WRITE to both its own dir and the user's knowledge base (notes, memory, user files) — durable knowledge is persisted into the KB across runs. The Landlock sandbox grants RW over the whole vault root (confined to that user's vault + HOME; the DB, config, and other users' vaults stay out of reach). System-managed dirs (`.kb/`, `chats/`, other agents' `agents/<id>/`) are off-limits by prompt, not hard-enforced. The chat uses the same model (see `prompts.BuildChatSystemPrompt`).
+
+**Chat knowledge-base access (on-demand retrieval + editing).** The one-off chat coder runs with `WithDir(vaultRoot).WithAllowedTools("Read,Write,Edit,Glob,Grep")` and a system instruction (`prompts.BuildChatSystemPrompt`) naming the vault root. The LLM retrieves and edits the user's notes **on demand** — only on turns that touch the KB — instead of having the vault injected every prompt. `chat.BuildUserContext` now returns identity-only context (profile/memory/agents/MCP); the old always-on `[Related knowledge base]` keyword-snippet block was removed. The tool set is file-only (no `Bash`/`WebFetch`): the chat can create/edit/read notes but cannot delete, rename, or run shell commands. The same applies to agents (RW over the vault via the sandbox). The detective `Guard` is no longer wired into agent runs — it would revert the KB edits that are now intentional — so agent/chat KB edits persist.
+
+**Agent designer KB awareness.** The designer is text-only (`WithNoTools`) but its system prompt (`BuildDesignSystemPrompt`, `<knowledge_base>` block) now knows the app has a built-in vault that agents read/write, and is told to prefer it over Notion/external note apps for the user's own knowledge. Each design turn injects a fresh manifest of the user's existing note paths via `Flow.WithKBLister` → `vault.NotePaths(userID)` → `DesignSystemParams.KBManifest`, so the designer can reference the user's actual notes.
 
 ### Unified conversational agent creation
 
@@ -206,13 +210,13 @@ Secrets stored encrypted in `secrets` table. Three sources of `MasterPw` at runt
 
 **Allowed:** RW: per-user HOME + agent workdir. RO: system paths, coder binary dir, user's vault root. Denied: SQLite DB, config.yaml, other users' vaults.
 
-`config.SandboxConfig.Enabled` (default true; `SA_SANDBOX=0` disables). Guard is the fallback when Landlock is unavailable.
+`config.SandboxConfig.Enabled` (default true; `SA_SANDBOX=0` disables). With Landlock unavailable, the sandbox is not applied and nothing physically prevents writes outside the vault — agents/chat run trusted within the user's own vault.
 
 ### Database
 
 SQLite via `modernc.org/sqlite` (CGo-free). WAL mode + foreign keys set on open. Migrations in alphabetical order from `migrations/`.
 
-Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`, `agent_schedules`, `agent_runs`, `secrets`, `chat_sessions`, `reminders`, `user_permissions`, `mcp_servers`, `settings`, `audit_logs`, `schema_migrations`, `chat_messages`, `coders`, `skills`, `agent_skills`.
+Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`, `agent_schedules`, `agent_runs`, `secrets`, `chats`, `reminders`, `user_permissions`, `mcp_servers`, `settings`, `audit_logs`, `schema_migrations`, `chat_messages` (FK `chat_id`→`chats`), `coders`, `skills`, `agent_skills`.
 
 ### Web UI routes
 
@@ -238,7 +242,10 @@ Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`,
 /dashboard/skills, /dashboard/skills/:id
 /dashboard/secrets
 /dashboard/connectors
-/dashboard/sessions
+/dashboard/chats                     # list chats; per-chat detail has composer (send msg), resume/stop/delete
+/dashboard/chats/:id                # chat detail: history + message composer
+/dashboard/chats/:id/messages        # POST: send one message (AJAX JSON {message} → {response}|{error}; coder one-off-chat path with KB tools, persists turn)
+/dashboard/chats/:id/resume          # POST: resume a stopped chat
 /dashboard/reminders
 /dashboard/memory                   # redirects to /dashboard/kb?path=memory
 /dashboard/kb                       # knowledge-base file browser
@@ -256,7 +263,7 @@ Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`,
 ### Admin vs. user separation
 
 - **Admin** (`role="admin"`): only `/admin/*` — manages users, coder profiles, settings, audit.
-- **Regular users**: only `/dashboard/*` — agents, secrets, connectors, sessions, reminders, KB.
+- **Regular users**: only `/dashboard/*` — agents, secrets, connectors, chats, reminders, KB.
 - `requireUserOnly` on `/dashboard/*` redirects admins to `/admin`.
 - `requireAdmin` on `/admin/*` rejects non-admins with 403.
 

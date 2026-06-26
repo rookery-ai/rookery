@@ -57,33 +57,33 @@ func (r *Reflector) ReflectReminder(userID string, n ReminderNote) error {
 	return r.write(userID, filepath.Join("reminders", safeName(n.ID)+".md"), fm+body, "reminders", n.ID, n)
 }
 
-// SessionNote is the reflected view of a chat session and its messages.
-type SessionNote struct {
+// ChatNote is the reflected view of a chat and its messages.
+type ChatNote struct {
 	ID        string
 	Name      string
 	Platform  string
 	CreatedAt time.Time
-	Messages  []SessionMessage
+	Messages  []ChatTurn
 }
 
-// SessionMessage is one line of a reflected transcript.
-type SessionMessage struct {
+// ChatTurn is one line of a reflected transcript.
+type ChatTurn struct {
 	Role      string
 	Content   string
 	CreatedAt time.Time
 }
 
-// ReflectSession writes sessions/<id>.md (a full transcript) plus its sidecar.
-func (r *Reflector) ReflectSession(userID string, n SessionNote) error {
+// ReflectChat writes chats/<id>.md (a full transcript) plus its sidecar.
+func (r *Reflector) ReflectChat(userID string, n ChatNote) error {
 	if r == nil {
 		return nil
 	}
 	title := n.Name
 	if title == "" {
-		title = "Chat session"
+		title = "Chat"
 	}
 	fm := frontmatter(map[string]string{
-		"type":       "session",
+		"type":       "chat",
 		"id":         n.ID,
 		"platform":   n.Platform,
 		"created_at": ts(n.CreatedAt),
@@ -94,7 +94,7 @@ func (r *Reflector) ReflectSession(userID string, n SessionNote) error {
 	for _, m := range n.Messages {
 		b.WriteString(fmt.Sprintf("**%s** · %s\n\n%s\n\n", capitalize(m.Role), ts(m.CreatedAt), strings.TrimSpace(m.Content)))
 	}
-	return r.write(userID, filepath.Join("sessions", safeName(n.ID)+".md"), b.String(), "sessions", n.ID, n)
+	return r.write(userID, filepath.Join("chats", safeName(n.ID)+".md"), b.String(), "chats", n.ID, n)
 }
 
 // RunNote is the reflected view of an agent run.

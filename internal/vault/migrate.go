@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/ilijad1/simple-agents/internal/memory"
 )
@@ -110,4 +111,78 @@ func anyExists(paths ...string) bool {
 		}
 	}
 	return false
+}
+
+// MigrateSessionsToChats renames the legacy per-user vault `sessions/` directory
+// to `chats/` and rewrites the home-note `[[sessions]]` wikilink to `[[chats]]`.
+// Idempotent and safe on every startup: it only acts when a `sessions/` dir (or
+// the old wikilink) still exists. Reflected notes are re-derived from the DB on
+// the next chat auto-stop, so their `type: session` frontmatter is not rewritten
+// here — new reflections write `type: chat`.
+func (v *Vault) MigrateSessionsToChats() error {
+	users, err := os.ReadDir(v.VaultsDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	migrated := 0
+	for _, u := range users {
+		if !u.IsDir() {
+			continue
+		}
+		userID := u.Name()
+		root := v.Root(userID)
+
+		// Rename sessions/ → chats/ if chats/ does not already exist.
+		src := filepath.Join(root, "sessions")
+		dst := filepath.Join(root, "chats")
+		if _, err := os.Stat(src); err == nil {
+			if _, err := os.Stat(dst); err != nil {
+				if err := os.Rename(src, dst); err != nil {
+					slog.Warn("vault: migrate sessions→chats", "user", userID, "err", err)
+				} else {
+					migrated++
+				}
+			} else {
+				// Both exist: drain sessions/ into chats/ one file at a time.
+				_ = drainInto(src, dst)
+			}
+		}
+
+		// Rewrite the home-note wikilink [[sessions]] → [[chats]].
+		readme := filepath.Join(root, "README.md")
+		if b, err := os.ReadFile(readme); err == nil {
+			if updated := strings.ReplaceAll(string(b), "[[sessions]]", "[[chats]]"); updated != string(b) {
+				_ = os.WriteFile(readme, []byte(updated), 0o640)
+			}
+		}
+	}
+	if migrated > 0 {
+		slog.Info("vault: renamed sessions/ to chats/", "count", migrated)
+	}
+	return nil
+}
+
+// drainInto moves every file from srcDir into dstDir (best-effort), leaving
+// srcDir empty so a later os.Remove can reclaim it. Used only when both the
+// legacy sessions/ and the new chats/ already coexist.
+func drainInto(srcDir, dstDir string) error {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		src := filepath.Join(srcDir, e.Name())
+		dst := filepath.Join(dstDir, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			continue // never clobber
+		}
+		if err := os.Rename(src, dst); err != nil {
+			slog.Warn("vault: drain sessions→chats", "src", src, "dst", dst, "err", err)
+		}
+	}
+	_ = os.Remove(srcDir) // if now empty
+	return nil
 }

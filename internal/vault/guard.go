@@ -23,7 +23,7 @@ import (
 // plans, memory, skills, README — i.e. everything EXCEPT directories that are
 // system-owned and continuously rewritten by other parts of the app:
 //   - agents/   : each agent's own workspace (concurrent agent runs write here)
-//   - sessions/ : chat transcripts reflected by the session poller mid-run
+//   - chats/    : chat transcripts reflected by the chat poller mid-run
 //   - .kb/      : internal indexes and JSON sidecars
 //
 // Those are excluded so the background reflection goroutines (which can fire for
@@ -49,7 +49,7 @@ type fileState struct {
 
 // systemOwnedDirs are the top-level vault directories excluded from the guard
 // because the app itself (agents, reflection goroutines) writes them.
-var systemOwnedDirs = []string{InternalDir, "agents", "sessions"}
+var systemOwnedDirs = []string{InternalDir, "agents", "chats"}
 
 // isProtected reports whether a vault-relative path is in the guarded region —
 // the user's authored content. System-owned, DB-derivable directories are excluded

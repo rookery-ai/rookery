@@ -91,7 +91,7 @@ func (s *Server) enrichKBDisplayNames(userID, parentPath string, nodes []vault.N
 					n.DisplayName = agent.Name
 				}
 			}
-		case "memory", "sessions", "reminders":
+		case "memory", "chats", "reminders":
 			if !n.IsDir {
 				if title := kbReadFirstHeading(s.vault, userID, n.Path); title != "" {
 					n.DisplayName = title

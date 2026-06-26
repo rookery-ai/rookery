@@ -64,7 +64,6 @@ type Runner struct {
 	skillsDir string           // vaults base: <data>/vaults (skills at <base>/<userID>/skills/<name>)
 	memStore  memoryStore      // optional; nil = no memory injected
 	reflector *vault.Reflector // optional; mirrors runs into the user's vault
-	guard     *vault.Guard     // optional; protects user content from agent writes
 }
 
 // New creates a Runner.
@@ -86,11 +85,9 @@ func (r *Runner) WithMemory(m memoryStore) *Runner {
 	return r
 }
 
-// WithVault wires the knowledge base so runs are mirrored into the user's vault
-// and a post-run guard protects the user's authored content from stray writes.
+// WithVault wires the knowledge base so runs are mirrored into the user's vault.
 func (r *Runner) WithVault(v *vault.Vault) *Runner {
 	r.reflector = v.Reflector()
-	r.guard = v.NewGuard()
 	return r
 }
 
@@ -251,11 +248,6 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		return fmt.Errorf("create run record: %w", err)
 	}
 
-	// Snapshot the user's authored content so the post-run guard can revert any
-	// write the agent makes outside its own directory. Best-effort: a snapshot
-	// failure never blocks the run.
-	snap, _ := r.guard.Snapshot(input.UserID)
-
 	rctx := &coderRunContext{}
 	runErr := r.runCoderTurns(ctx, agent, manifest, input, agentDir, stateRaw, prompt, coderSvc, rctx)
 
@@ -263,7 +255,6 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	if runErr != nil {
 		exitCode = -1
 	}
-	r.enforceGuard(input.UserID, snap, runID)
 	r.reflectRun(input, agent, runID, exitCode, startedAt, rctx)
 
 	if runErr != nil {
@@ -286,19 +277,6 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	}
 
 	return nil
-}
-
-// enforceGuard reverts any out-of-scope writes the agent made to the user's
-// protected content and records each violation to the audit log and run warnings.
-func (r *Runner) enforceGuard(userID string, snap *vault.Snapshot, runID string) {
-	violations, err := r.guard.Restore(snap)
-	if err != nil {
-		slog.Warn("agentrunner: guard restore", "run_id", runID, "err", err)
-		return
-	}
-	for _, v := range violations {
-		slog.Warn("agentrunner: reverted out-of-scope agent write", "run_id", runID, "path", v)
-	}
 }
 
 // reflectRun mirrors the completed run into the user's vault as a markdown note.

@@ -6,24 +6,22 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/auth"
+	"github.com/ilijad1/simple-agents/internal/chat"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/config"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/gateway"
 	"github.com/ilijad1/simple-agents/internal/memory"
-	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/reminder"
 	"github.com/ilijad1/simple-agents/internal/sandbox"
 	"github.com/ilijad1/simple-agents/internal/scheduler"
 	"github.com/ilijad1/simple-agents/internal/secrets"
-	"github.com/ilijad1/simple-agents/internal/session"
 	"github.com/ilijad1/simple-agents/internal/skillstore"
 	"github.com/ilijad1/simple-agents/internal/vault"
 	"github.com/ilijad1/simple-agents/web"
@@ -114,6 +112,9 @@ func serveCmd() *cli.Command {
 			if err := vlt.MigrateLegacyLayout(); err != nil {
 				slog.Warn("vault migration", "err", err)
 			}
+			if err := vlt.MigrateSessionsToChats(); err != nil {
+				slog.Warn("vault sessions→chats migration", "err", err)
+			}
 
 			// Consolidate any legacy UUID-keyed memory notes into GENERAL.md.
 			// Must run after MigrateLegacyLayout (which may have just created UUID files
@@ -152,7 +153,8 @@ func serveCmd() *cli.Command {
 					}
 					svc := secrets.New(database, userID, masterPw, user.SecretsSalt)
 					return svc.GetAll(ctx)
-				})
+				}).
+				WithKBLister(vlt)
 			skillStore := skillstore.New(database, skillsDir)
 			runner := agentrunner.New(database, sysKey, agentsDir, homesDir, cfg.Data.Dir, coderSvc, skillsDir).
 				WithMemory(memStore).
@@ -161,8 +163,9 @@ func serveCmd() *cli.Command {
 			vaultSearcher := vlt.NewSearcher()
 
 			textHandler := func(ctx context.Context, userID string, history []db.ChatMessage, text string, send func(string)) error {
-				sysCtx := buildUserContext(database, memStore, userID, text, vaultSearcher)
-				result, err := coderSvc.Chat(ctx, userID, history, sysCtx, text)
+				root := vlt.Root(userID)
+				sysCtx := prompts.BuildChatSystemPrompt(root) + chat.BuildUserContext(database, memStore, userID)
+				result, err := coderSvc.WithDir(root).WithAllowedTools("Read,Write,Edit,Glob,Grep").Chat(ctx, userID, history, sysCtx, text)
 				if err != nil {
 					send("Sorry, I ran into an error: " + err.Error())
 					return nil
@@ -196,7 +199,7 @@ func serveCmd() *cli.Command {
 			reminderSvc := reminder.New(database, gwManager).WithReflector(vlt.Reflector()).WithSearcher(vaultSearcher)
 			go reminderSvc.Run(ctx)
 
-			sessionSvc := session.New(database).WithReflector(vlt.Reflector())
+			sessionSvc := chat.New(database).WithReflector(vlt.Reflector())
 			go sessionSvc.Run(ctx)
 
 			// Nightly GC for expired agent design drafts: drops the draft row and,
@@ -225,7 +228,7 @@ func serveCmd() *cli.Command {
 				}
 			}()
 
-			srv, err := web.NewServer(cfg, database, gwManager, runner, designer, homesDir, skillStore, designFlow)
+			srv, err := web.NewServer(cfg, database, gwManager, runner, designer, homesDir, skillStore, designFlow, memStore)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
@@ -294,63 +297,6 @@ func adminCmd() *cli.Command {
 			},
 		},
 	}
-}
-
-// buildUserContext assembles a system context string for the coder that includes
-// the user's profile, memory, agents, MCP tools, and optionally relevant vault notes.
-// query is the user's current message — used to search the vault for related context.
-// searcher may be nil; if nil, vault injection is skipped.
-func buildUserContext(database *db.DB, memStore interface{ ContextString(string) (string, error) }, userID, query string, searcher vault.Searcher) string {
-	var sb strings.Builder
-
-	if p := profile.Load(database, userID).ContextString(); p != "" {
-		sb.WriteString(p)
-	}
-
-	if mem, err := memStore.ContextString(userID); err == nil && mem != "" {
-		sb.WriteString("[User memory]\n")
-		sb.WriteString(mem)
-		sb.WriteByte('\n')
-	}
-
-	if agents, err := database.ListAgents(userID); err == nil && len(agents) > 0 {
-		sb.WriteString("[User's agents]\n")
-		for _, a := range agents {
-			sb.WriteString("- ")
-			sb.WriteString(a.Name)
-			if a.Description != "" {
-				sb.WriteString(": ")
-				sb.WriteString(a.Description)
-			}
-			sb.WriteByte('\n')
-		}
-	}
-
-	if mcpServers, err := database.ListMCPServers(userID); err == nil && len(mcpServers) > 0 {
-		sb.WriteString("[User's MCP tools]\n")
-		for _, s := range mcpServers {
-			if s.Enabled {
-				sb.WriteString("- ")
-				sb.WriteString(s.Name)
-				sb.WriteByte('\n')
-			}
-		}
-	}
-
-	// Inject relevant vault notes matching the user's current message.
-	if searcher != nil && strings.TrimSpace(query) != "" {
-		if hits, err := searcher.Search(context.Background(), userID, query); err == nil && len(hits) > 0 {
-			sb.WriteString("[Related knowledge base]\n")
-			for i, h := range hits {
-				if i >= 5 {
-					break
-				}
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", h.Path, h.Snippet))
-			}
-		}
-	}
-
-	return sb.String()
 }
 
 // buildLLMTimeParserFn returns a reminder.TimeParserFunc backed by coderSvc.

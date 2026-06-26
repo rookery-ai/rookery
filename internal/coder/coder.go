@@ -260,11 +260,21 @@ func (c *Coder) buildCommand(ctx context.Context, userID string, args, env []str
 	var cmd *exec.Cmd
 
 	if c.sandbox && c.selfExe != "" && sandbox.Supported() {
+		rw := []string{c.UserHomeDir(userID), runDir}
+		// The user's whole vault is read+write for agent runs and chat: agents
+		// record/persist knowledge into the KB (notes, memory, user files), and
+		// the chat edits notes on demand. Landlock is additive, so a path present
+		// in both ReadWritePaths and ReadOnlyPaths (see sandboxReadOnlyPaths) is
+		// net read+write. Still confined to this user's vault + HOME — the DB,
+		// config, and other users' vaults stay out of reach.
+		if c.dataDir != "" {
+			rw = append(rw, filepath.Join(c.dataDir, "vaults", userID))
+		}
 		spec := sandbox.Spec{
 			Command:        append([]string{c.bin}, args...),
 			Dir:            runDir,
 			Env:            env,
-			ReadWritePaths: dedupePaths(c.UserHomeDir(userID), runDir),
+			ReadWritePaths: dedupePaths(rw...),
 			ReadOnlyPaths:  c.sandboxReadOnlyPaths(userID),
 			ReadWriteFiles: sandbox.SystemReadWriteFiles(),
 			NoFile:         8192,

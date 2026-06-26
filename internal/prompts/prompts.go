@@ -47,6 +47,7 @@ type DesignSystemParams struct {
 	UserProfile        string
 	UserMemory         string
 	ComposioEnabled    bool // true when user has COMPOSIO_API_KEY in their secrets
+	KBManifest         string // rendered bullet list of the user's existing note paths; "" if empty/unknown
 }
 
 // composioServicesBlock returns the authoritative Composio v3 REST API spec.
@@ -374,6 +375,37 @@ Have a focused conversation to fully understand what the agent should do. Then p
 
 `)
 	}
+
+	// ── Built-in knowledge base (must come BEFORE Composio so it's preferred) ─
+	sb.WriteString(`<knowledge_base>
+This app has a BUILT-IN personal knowledge base: an Obsidian-style vault of
+interlinked markdown notes that belongs to the user. Every agent you build here
+(and the chat) can READ and WRITE it — create, read, and edit notes, journals,
+plans, and memory files — and that knowledge persists across runs. The vault
+holds notes/, memory/, and any folders/files the user has created.
+
+So when the user wants anything to do with "my notes", "my knowledge base",
+"save / update / change / add a note", "keep a journal", or "remember this" —
+design the agent to use the BUILT-IN knowledge base. Do NOT suggest Notion,
+Google Docs, Obsidian, or any other external note app for storing the user's own
+knowledge. Reach for Composio / external services ONLY when the data genuinely
+lives in a specific external app the user names (e.g. they explicitly say "read
+my Notion" or "post to Slack"). For the user's own notes and knowledge, the
+built-in vault is always the answer.
+`)
+	if p.KBManifest != "" {
+		sb.WriteString(fmt.Sprintf(`The user's knowledge base currently contains these notes:
+<kb_notes>
+%s</kb_notes>
+The agent can read and edit any of these at runtime; reference them by path when
+relevant. This list may be incomplete if notes were just added.
+`, p.KBManifest))
+	} else {
+		sb.WriteString(`The user's knowledge base is currently empty — an agent can create notes
+there as it runs.
+`)
+	}
+	sb.WriteString("</knowledge_base>\n\n")
 
 	// ── Composio (external services) ─────────────────────────────────────────
 	if p.ComposioEnabled {
@@ -790,7 +822,7 @@ type CoderPromptParams struct {
 	AllSkills       []SkillRef
 	DeclaredSkills  []string
 	DeclaredContent map[string]string
-	VaultRoot       string // absolute path to the user's knowledge base (read-only to the agent)
+	VaultRoot       string // absolute path to the user's knowledge base (read+write to the agent)
 	AgentDir        string // absolute path to this agent's own directory (the agent's writable area / CWD)
 }
 
@@ -846,22 +878,27 @@ plans, todos, other agents' run logs, and chat transcripts. Use Read/Grep/Bash
 to find relevant prior knowledge before acting; the knowledge you and the user
 accumulate here should inform this run.
 
+You may also WRITE to the user's knowledge base — create and edit notes, journals,
+plans, and memory files there to record knowledge the user wants kept. Link
+related notes with [[wikilinks]]. This is how durable knowledge persists between
+runs, so prefer writing to the KB over keeping things only in your own directory
+when the knowledge is meant for the user.
+
 The user's personal context is in the memory/ directory — every .md file there
 is automatically pre-injected into your context above as <user_memory>. Typical
-files to consult:
+files to consult (and that you may update when the user asks):
   memory/USER.md    — user profile: name, role, location, background
   memory/SOUL.md    — communication style and preferences
   memory/GENERAL.md — quick notes added via /memory commands
   memory/<any>.md   — any additional files the user has created
 Always check these before acting on assumptions about the user.
 
-You may WRITE only inside your OWN directory, which is your current working
-directory:
+Your current working directory is your OWN agent directory, where you keep your
+own files (AGENT.md, tools/, state.json, logs/):
   %s
-Record durable knowledge as markdown notes under a notes/ subfolder there, and
-link related notes with [[wikilinks]]. Anything you write outside your own
-directory is automatically reverted after the run, so never edit the user's notes
-or another agent's files directly.
+You may write here too. Do NOT write under .kb/ (internal indexes/sidecars),
+chats/ (transcripts reflected from the database), or another agent's directory
+under agents/ — those are system-managed or belong to other agents.
 </knowledge_base>
 
 `, p.VaultRoot, p.AgentDir))
@@ -890,7 +927,7 @@ Invokes another agent synchronously and waits for its result before continuing.
 - You are running as a non-interactive subprocess — there is no user present to answer questions or approve actions.
 - [CHAT] is the ONLY way to send output to the user. Do not call Telegram APIs, webhooks, or any messaging service directly.
 - Secrets are injected as environment variables. Access them via your language's env API (e.g. os.environ.get('KEY') in Python, process.env.KEY in Node). Never hardcode credential values.
-- Use [STATE] blocks for your structured state (state.json is machine-merged — do not hand-edit it). You MAY additionally write durable markdown notes inside your own directory (see <knowledge_base>), but never outside it.
+- Use [STATE] blocks for your structured state (state.json is machine-merged — do not hand-edit it). You MAY write durable markdown notes inside your own directory AND in the user's knowledge base (see <knowledge_base>); do not write under .kb/, chats/, or another agent's directory.
 - Do not set up or modify cron jobs or external schedulers — this subprocess is invoked by the built-in scheduler.
 - Run your helper scripts under tools/ via the shell to do the repetitive fetching/processing, then YOU make the judgment calls on the results (see <agent_philosophy>) — do not reimplement deterministic logic inline, and do not blindly trust a hardcoded rule where reasoning is needed.
 - Use values EXACTLY as your scripts return them: parse their JSON stdout and copy the value through. Never retype, round, or reformat a number by hand into a message, draft, or [STATE] — the number the user sees MUST be the number your script produced. When a value flows into another script, follow <shell_safety> (pass plain numbers / a JSON file, never a "$"-string on the command line).
@@ -962,4 +999,54 @@ Examples:
 - "this Thursday at 3pm call the doctor"   → {"when": "(this Thursday 15:00 local→UTC)", "message": "call the doctor"}
 
 User input: %s`, nowStr, timezone, input)
+}
+
+// BuildChatSystemPrompt returns the system instruction prepended to every one-off chat
+// turn (web composer + Telegram plain-text). It tells the model it has read+write file
+// tools scoped to the user's knowledge-base vault root, and that it should retrieve and
+// edit notes ON DEMAND — only on turns that touch the knowledge base — rather than having
+// the whole vault injected every prompt. vaultRoot is the absolute per-user vault path.
+//
+// The tool set is intentionally file-only (Read/Write/Edit/Glob/Grep): the chat can read,
+// create, and edit notes, but cannot delete, rename, or run shell commands.
+func BuildChatSystemPrompt(vaultRoot string) string {
+	return fmt.Sprintf(`You are a helpful assistant chatting with the user. Your working directory
+is the user's personal knowledge base, an Obsidian-style vault of markdown notes rooted at:
+
+  %s
+
+The vault contains folders like notes/, memory/, chats/, agents/, reminders/, and any
+folders/files the user has created themselves. You have these file tools available:
+Read, Glob, Grep, Write, Edit.
+
+Retrieving knowledge — ON DEMAND:
+- Only use the file tools when the user's message is about their notes or knowledge base.
+  For a normal conversational reply, do not touch the vault at all.
+- To answer "what notes do I have" or "what's in my knowledge base", use Glob over the
+  user-content directories (e.g. "%[1]s/notes/**/*.md", "%[1]s/memory/**/*.md", plus any
+  user-created folders) to list note paths, then Read a few titles/headers to summarize.
+  Do not dump the whole vault into your reply — report the relevant note names and a
+  one-line description each.
+- To answer a specific question about their notes, use Grep to find matching notes and
+  Read the relevant ones, then answer citing the note path(s).
+
+Editing knowledge — ON DEMAND:
+- When the user asks to add or change a note, use Write (to create a new note; it creates
+  parent folders as needed) or Edit (to modify an existing note in place).
+- Preserve existing content — edit surgically, don't overwrite a whole note unless the
+  user asks for that. After editing, briefly state what you changed and the note path.
+- This built-in knowledge base IS the user's note store. When the user wants to "save a
+  note", "keep a journal", "remember this", or "change my note", use the vault — do not
+  suggest Notion, Google Docs, or other external note apps.
+
+Boundaries:
+- Do NOT write under .kb/, agents/, or chats/ — those are system-managed. You may still
+  Read them if relevant. Keep your edits to the user's own notes and knowledge files.
+- You cannot delete, rename, or move files, and you cannot run shell commands. If the user
+  asks for that, explain the limit and offer what you can do instead (e.g. edit content).
+- Never claim you cannot access the knowledge base if you have not tried the tools. Try
+  Glob/Grep/Read first, then answer.
+
+Respond naturally in the user's language. The user does not see your tool calls — they see
+only your final reply, so make sure your reply actually answers the question.`, vaultRoot)
 }

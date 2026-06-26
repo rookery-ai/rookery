@@ -534,78 +534,78 @@ func (d *DB) DeleteAgentSchedule(agentID string) error {
 	return err
 }
 
-// ── Chat sessions ──────────────────────────────────────────────────────────
+// ── Chats ──────────────────────────────────────────────────────────────────
 
-func (d *DB) CreateChatSession(s *ChatSession) error {
-	_, err := d.Exec(`INSERT INTO chat_sessions(id,user_id,agent_id,name,platform,active,created_at,last_seen)
+func (d *DB) CreateChat(c *Chat) error {
+	_, err := d.Exec(`INSERT INTO chats(id,user_id,agent_id,name,platform,active,created_at,last_seen)
 		VALUES(?,?,?,?,?,1,datetime('now'),datetime('now'))`,
-		s.ID, s.UserID, s.AgentID, s.Name, s.Platform)
+		c.ID, c.UserID, c.AgentID, c.Name, c.Platform)
 	return err
 }
 
-func (d *DB) GetChatSession(id string) (*ChatSession, error) {
-	row := d.QueryRow(`SELECT id,user_id,agent_id,name,platform,active,created_at,last_seen FROM chat_sessions WHERE id=?`, id)
-	return scanChatSession(row)
+func (d *DB) GetChat(id string) (*Chat, error) {
+	row := d.QueryRow(`SELECT id,user_id,agent_id,name,platform,active,created_at,last_seen FROM chats WHERE id=?`, id)
+	return scanChat(row)
 }
 
-func (d *DB) ListChatSessions(userID string) ([]*ChatSession, error) {
+func (d *DB) ListChats(userID string) ([]*Chat, error) {
 	rows, err := d.Query(`SELECT id,user_id,agent_id,name,platform,active,created_at,last_seen
-		FROM chat_sessions WHERE user_id=? ORDER BY last_seen DESC`, userID)
+		FROM chats WHERE user_id=? ORDER BY last_seen DESC`, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var sessions []*ChatSession
+	var chats []*Chat
 	for rows.Next() {
-		s, err := scanChatSession(rows)
+		c, err := scanChat(rows)
 		if err != nil {
 			return nil, err
 		}
-		sessions = append(sessions, s)
+		chats = append(chats, c)
 	}
-	return sessions, rows.Err()
+	return chats, rows.Err()
 }
 
-func (d *DB) TouchChatSession(id string) error {
-	_, err := d.Exec(`UPDATE chat_sessions SET last_seen=datetime('now') WHERE id=?`, id)
+func (d *DB) TouchChat(id string) error {
+	_, err := d.Exec(`UPDATE chats SET last_seen=datetime('now') WHERE id=?`, id)
 	return err
 }
 
-func (d *DB) StopChatSession(id string) error {
-	_, err := d.Exec(`UPDATE chat_sessions SET active=0 WHERE id=?`, id)
+func (d *DB) StopChat(id string) error {
+	_, err := d.Exec(`UPDATE chats SET active=0 WHERE id=?`, id)
 	return err
 }
 
-func (d *DB) DeleteChatSession(id string) error {
-	_, err := d.Exec(`DELETE FROM chat_sessions WHERE id=?`, id)
+func (d *DB) DeleteChat(id string) error {
+	_, err := d.Exec(`DELETE FROM chats WHERE id=?`, id)
 	return err
 }
 
-func (d *DB) ListStaleSessions(before time.Time) ([]*ChatSession, error) {
+func (d *DB) ListStaleChats(before time.Time) ([]*Chat, error) {
 	rows, err := d.Query(`SELECT id,user_id,agent_id,name,platform,active,created_at,last_seen
-		FROM chat_sessions WHERE active=1 AND last_seen < ?`,
+		FROM chats WHERE active=1 AND last_seen < ?`,
 		before.UTC().Format("2006-01-02 15:04:05"))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var sessions []*ChatSession
+	var chats []*Chat
 	for rows.Next() {
-		s, err := scanChatSession(rows)
+		c, err := scanChat(rows)
 		if err != nil {
 			return nil, err
 		}
-		sessions = append(sessions, s)
+		chats = append(chats, c)
 	}
-	return sessions, rows.Err()
+	return chats, rows.Err()
 }
 
-func scanChatSession(s scanner) (*ChatSession, error) {
-	var cs ChatSession
+func scanChat(s scanner) (*Chat, error) {
+	var c Chat
 	var agentID sql.NullString
 	var active int
 	var createdAt, lastSeen string
-	err := s.Scan(&cs.ID, &cs.UserID, &agentID, &cs.Name, &cs.Platform, &active, &createdAt, &lastSeen)
+	err := s.Scan(&c.ID, &c.UserID, &agentID, &c.Name, &c.Platform, &active, &createdAt, &lastSeen)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -613,24 +613,24 @@ func scanChatSession(s scanner) (*ChatSession, error) {
 		return nil, err
 	}
 	if agentID.Valid {
-		cs.AgentID = &agentID.String
+		c.AgentID = &agentID.String
 	}
-	cs.Active = active == 1
-	cs.CreatedAt = scanTime(createdAt)
-	cs.LastSeen = scanTime(lastSeen)
-	return &cs, nil
+	c.Active = active == 1
+	c.CreatedAt = scanTime(createdAt)
+	c.LastSeen = scanTime(lastSeen)
+	return &c, nil
 }
 
 // ── Chat messages ─────────────────────────────────────────────────────────
 
-func (d *DB) AddChatMessage(sessionID, role, content string) error {
-	_, err := d.Exec(`INSERT INTO chat_messages(session_id,role,content,created_at) VALUES(?,?,?,datetime('now'))`,
-		sessionID, role, content)
+func (d *DB) AddChatMessage(chatID, role, content string) error {
+	_, err := d.Exec(`INSERT INTO chat_messages(chat_id,role,content,created_at) VALUES(?,?,?,datetime('now'))`,
+		chatID, role, content)
 	return err
 }
 
-func (d *DB) ListChatMessages(sessionID string) ([]ChatMessage, error) {
-	rows, err := d.Query(`SELECT id,session_id,role,content,created_at FROM chat_messages WHERE session_id=? ORDER BY id ASC`, sessionID)
+func (d *DB) ListChatMessages(chatID string) ([]ChatMessage, error) {
+	rows, err := d.Query(`SELECT id,chat_id,role,content,created_at FROM chat_messages WHERE chat_id=? ORDER BY id ASC`, chatID)
 	if err != nil {
 		return nil, err
 	}
@@ -639,7 +639,7 @@ func (d *DB) ListChatMessages(sessionID string) ([]ChatMessage, error) {
 	for rows.Next() {
 		var m ChatMessage
 		var createdAt string
-		if err := rows.Scan(&m.ID, &m.SessionID, &m.Role, &m.Content, &createdAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.ChatID, &m.Role, &m.Content, &createdAt); err != nil {
 			return nil, err
 		}
 		m.CreatedAt = scanTime(createdAt)
@@ -648,23 +648,23 @@ func (d *DB) ListChatMessages(sessionID string) ([]ChatMessage, error) {
 	return out, rows.Err()
 }
 
-// GetActiveSessionForPlatform returns the most-recently-touched active session
+// GetActiveChatForPlatform returns the most-recently-touched active chat
 // for the given user on the given platform, or nil if none exists.
-func (d *DB) GetActiveSessionForPlatform(userID, platform string) (*ChatSession, error) {
+func (d *DB) GetActiveChatForPlatform(userID, platform string) (*Chat, error) {
 	row := d.QueryRow(`SELECT id,user_id,agent_id,name,platform,active,created_at,last_seen
-		FROM chat_sessions WHERE user_id=? AND platform=? AND active=1
+		FROM chats WHERE user_id=? AND platform=? AND active=1
 		ORDER BY last_seen DESC LIMIT 1`, userID, platform)
-	s, err := scanChatSession(row)
+	c, err := scanChat(row)
 	if errors.Is(err, ErrNotFound) {
 		return nil, nil
 	}
-	return s, err
+	return c, err
 }
 
-// FindSessionByPrefix returns the first session whose ID starts with the given prefix.
-func (d *DB) FindSessionByPrefix(userID, prefix string) (*ChatSession, error) {
+// FindChatByPrefix returns the first chat whose ID starts with the given prefix.
+func (d *DB) FindChatByPrefix(userID, prefix string) (*Chat, error) {
 	rows, err := d.Query(`SELECT id,user_id,agent_id,name,platform,active,created_at,last_seen
-		FROM chat_sessions WHERE user_id=? AND id LIKE ? ORDER BY last_seen DESC LIMIT 1`,
+		FROM chats WHERE user_id=? AND id LIKE ? ORDER BY last_seen DESC LIMIT 1`,
 		userID, prefix+"%")
 	if err != nil {
 		return nil, err
@@ -673,12 +673,12 @@ func (d *DB) FindSessionByPrefix(userID, prefix string) (*ChatSession, error) {
 	if !rows.Next() {
 		return nil, ErrNotFound
 	}
-	return scanChatSession(rows)
+	return scanChat(rows)
 }
 
-// ResumeSession sets a session active again.
-func (d *DB) ResumeSession(id string) error {
-	_, err := d.Exec(`UPDATE chat_sessions SET active=1, last_seen=datetime('now') WHERE id=?`, id)
+// ResumeChat sets a chat active again.
+func (d *DB) ResumeChat(id string) error {
+	_, err := d.Exec(`UPDATE chats SET active=1, last_seen=datetime('now') WHERE id=?`, id)
 	return err
 }
 

@@ -58,23 +58,23 @@ func TestReflectAgentRunLandsInAgentDir(t *testing.T) {
 	}
 }
 
-func TestReflectSessionTranscript(t *testing.T) {
+func TestReflectChatTranscript(t *testing.T) {
 	v := New(t.TempDir())
 	const user = "u1"
 	r := v.Reflector()
 
 	when := time.Date(2026, 6, 22, 8, 0, 0, 0, time.UTC)
-	err := r.ReflectSession(user, SessionNote{
+	err := r.ReflectChat(user, ChatNote{
 		ID: "sess-1", Name: "Planning chat", Platform: "telegram", CreatedAt: when,
-		Messages: []SessionMessage{
+		Messages: []ChatTurn{
 			{Role: "user", Content: "hi", CreatedAt: when},
 			{Role: "assistant", Content: "hello", CreatedAt: when},
 		},
 	})
 	if err != nil {
-		t.Fatalf("ReflectSession: %v", err)
+		t.Fatalf("ReflectChat: %v", err)
 	}
-	note, _ := v.ReadNote(user, "sessions/sess-1.md")
+	note, _ := v.ReadNote(user, "chats/sess-1.md")
 	s := string(note)
 	if !strings.Contains(s, "# Planning chat") || !strings.Contains(s, "**User**") || !strings.Contains(s, "hello") {
 		t.Errorf("transcript missing parts: %q", s)

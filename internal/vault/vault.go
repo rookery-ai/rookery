@@ -17,7 +17,7 @@
 //	memory/<name>.md               any additional context files the user creates
 //	skills/<name>/SKILL.md         migrated skills
 //	agents/<agentID>/              an agent's own writable area
-//	sessions/<id>.md               reflected chat transcripts
+//	chats/<id>.md                  reflected chat transcripts
 //	.kb/                           internal index/sidecar data (hidden from "knowledge")
 //
 // Secret VALUES never enter the vault — they stay encrypted in the database and
@@ -30,6 +30,7 @@ package vault
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -136,7 +137,7 @@ func (v *Vault) Rel(userID, abs string) (string, error) {
 // a README home note if the vault does not yet exist. Idempotent.
 func (v *Vault) EnsureScaffold(userID string) error {
 	root := v.Root(userID)
-	for _, sub := range []string{"notes", "memory", "skills", "agents", "sessions", InternalDir} {
+	for _, sub := range []string{"notes", "memory", "skills", "agents", "chats", InternalDir} {
 		if err := os.MkdirAll(filepath.Join(root, sub), 0o750); err != nil {
 			return fmt.Errorf("scaffold %s: %w", sub, err)
 		}
@@ -149,7 +150,7 @@ func (v *Vault) EnsureScaffold(userID string) error {
 			"- [[notes]] — your notes, journals, plans and todos\n" +
 			"- [[memory]] — your profile and context (USER.md, SOUL.md, and more)\n" +
 			"- [[agents]] — your agents and their run logs\n" +
-			"- [[sessions]] — chat transcripts\n"
+			"- [[chats]] — chat transcripts\n"
 		if err := writeFileAtomic(readme, []byte(content), 0o640); err != nil {
 			return err
 		}
@@ -225,6 +226,61 @@ func (v *Vault) Rename(userID, fromRel, toRel string) error {
 		return err
 	}
 	return os.Rename(from, to)
+}
+
+// kbManifestExcluded are top-level vault dirs omitted from the note manifest
+// shown to the agent designer: they are system-managed or already represented
+// elsewhere in the design context (memory contents are injected separately,
+// skills are listed as Skills, the rest is reflected from the database).
+var kbManifestExcluded = map[string]bool{
+	InternalDir: true, "agents": true, "chats": true,
+	"memory": true, "skills": true, "reminders": true,
+}
+
+// topSegment returns the first slash-separated segment of a vault-relative path.
+func topSegment(rel string) string {
+	rel = filepath.ToSlash(rel)
+	if i := strings.IndexByte(rel, '/'); i >= 0 {
+		return rel[:i]
+	}
+	return rel
+}
+
+// NotePaths returns the vault-relative paths of the user's markdown notes —
+// everything under notes/ plus any folders/files the user created — so callers
+// (e.g. the agent designer) can show what knowledge already exists.
+// System-managed and already-injected dirs (.kb, agents, chats, memory, skills,
+// reminders) are skipped. The result is capped and sorted.
+func (v *Vault) NotePaths(userID string) []string {
+	root := v.Root(userID)
+	if root == "" {
+		return nil
+	}
+	var paths []string
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, err := v.Rel(userID, path)
+		if err != nil || rel == "." {
+			return nil
+		}
+		if d.IsDir() {
+			if kbManifestExcluded[topSegment(rel)] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(rel, ".md") {
+			return nil
+		}
+		if len(paths) < 60 {
+			paths = append(paths, rel)
+		}
+		return nil
+	})
+	sort.Strings(paths)
+	return paths
 }
 
 // Node is one entry in the vault file tree.

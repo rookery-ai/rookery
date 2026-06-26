@@ -46,7 +46,7 @@ func (g *TelegramGateway) Start(ctx context.Context) error {
 	g.bot.Handle("/secret", g.handle)
 	g.bot.Handle("/remind", g.handle)
 	g.bot.Handle("/run", g.handle)
-	g.bot.Handle("/session", g.handle)
+	g.bot.Handle("/chat", g.handle)
 	g.bot.Handle("/memory", g.handle)
 
 	// Stop the bot when context is cancelled.

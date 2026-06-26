@@ -83,7 +83,7 @@ func TestGuardNoViolationsWhenWellBehaved(t *testing.T) {
 }
 
 // TestGuardIgnoresConcurrentReflections is the regression test for the real-world
-// race: while an agent runs for minutes, the reminder/session pollers reflect new
+// race: while an agent runs for minutes, the reminder/chat pollers reflect new
 // rows into the vault. Those system writes must NOT be seen as out-of-scope agent
 // writes and reverted.
 func TestGuardIgnoresConcurrentReflections(t *testing.T) {
@@ -97,7 +97,7 @@ func TestGuardIgnoresConcurrentReflections(t *testing.T) {
 	snap, _ := g.Snapshot(user)
 
 	// Simulate background pollers firing mid-run.
-	if err := r.ReflectSession(user, SessionNote{ID: "sess-1", Name: "chat"}); err != nil {
+	if err := r.ReflectChat(user, ChatNote{ID: "sess-1", Name: "chat"}); err != nil {
 		t.Fatal(err)
 	}
 	// And the agent legitimately writes its own dir.
@@ -110,9 +110,9 @@ func TestGuardIgnoresConcurrentReflections(t *testing.T) {
 	if len(violations) != 0 {
 		t.Errorf("violations = %v, want none (system reflections must be ignored)", violations)
 	}
-	// The reflected session note must still exist.
-	if _, err := v.ReadNote(user, "sessions/sess-1.md"); err != nil {
-		t.Errorf("session reflection was wrongly deleted: %v", err)
+	// The reflected chat note must still exist.
+	if _, err := v.ReadNote(user, "chats/sess-1.md"); err != nil {
+		t.Errorf("chat reflection was wrongly deleted: %v", err)
 	}
 }
 

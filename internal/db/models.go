@@ -104,7 +104,7 @@ type Secret struct {
 	UpdatedAt  time.Time
 }
 
-type ChatSession struct {
+type Chat struct {
 	ID        string
 	UserID    string
 	AgentID   *string
@@ -117,7 +117,7 @@ type ChatSession struct {
 
 type ChatMessage struct {
 	ID        int64
-	SessionID string
+	ChatID    string
 	Role      string // "user" or "assistant"
 	Content   string
 	CreatedAt time.Time

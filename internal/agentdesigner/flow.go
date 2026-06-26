@@ -116,6 +116,35 @@ type memoryStore interface {
 	ContextString(userID string) (string, error)
 }
 
+// kbLister enumerates the user's knowledge-base note paths (vault-relative) so
+// the designer can be shown what notes already exist. Satisfied by *vault.Vault.
+type kbLister interface {
+	NotePaths(userID string) []string
+}
+
+// loadKBManifest returns a rendered bullet list of the user's existing note paths
+// (capped), or "" if no lister is attached or the knowledge base is empty.
+func (f *Flow) loadKBManifest(userID string) string {
+	if f.kb == nil {
+		return ""
+	}
+	paths := f.kb.NotePaths(userID)
+	if len(paths) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for i, p := range paths {
+		if i >= 30 {
+			fmt.Fprintf(&sb, "- …and %d more\n", len(paths)-30)
+			break
+		}
+		sb.WriteString("- ")
+		sb.WriteString(p)
+		sb.WriteByte('\n')
+	}
+	return sb.String()
+}
+
 // Flow manages per-user design sessions and drives the FSM.
 // It is safe for concurrent use.
 type Flow struct {
@@ -126,6 +155,7 @@ type Flow struct {
 	designer      *AgentDesigner
 	db            dbDesignStore
 	memStore      memoryStore // optional; nil = no memory injected
+	kb            kbLister     // optional; nil = no KB manifest injected
 	secretsLoader func(ctx context.Context, userID string) (map[string]string, error)
 }
 
@@ -148,6 +178,14 @@ func (f *Flow) WithDB(database dbDesignStore) *Flow {
 // WithMemory attaches a memory store so saved user facts are injected into design sessions.
 func (f *Flow) WithMemory(m memoryStore) *Flow {
 	f.memStore = m
+	return f
+}
+
+// WithKBLister attaches a knowledge-base enumerator so the designer is told what
+// notes the user already has (a manifest of note paths is injected into each
+// design turn). nil = no manifest.
+func (f *Flow) WithKBLister(k kbLister) *Flow {
+	f.kb = k
 	return f
 }
 
@@ -721,6 +759,7 @@ func (f *Flow) callCoder(ctx context.Context, userID, userMessage string) (strin
 		UserProfile:        sess.UserProfile,
 		UserMemory:         sess.UserMemory,
 		ComposioEnabled:    sess.ComposioEnabled,
+		KBManifest:         f.loadKBManifest(userID),
 	})
 
 	// Use WithNoTools so the design conversation outputs plain text and never

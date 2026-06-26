@@ -21,6 +21,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/config"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/gateway"
+	"github.com/ilijad1/simple-agents/internal/memory"
 	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/ilijad1/simple-agents/internal/skillstore"
@@ -46,6 +47,7 @@ type Server struct {
 	designFlow *agentdesigner.Flow // shared with Telegram gateway
 	homesDir   string              // per-user claude HOME directories
 	vault      *vault.Vault        // per-user knowledge base
+	memory     *memory.Store       // per-user structured context (injected into one-off chat)
 
 	// runs tracks in-flight manual ("Run Now") agent runs so progress can be
 	// streamed to the browser over SSE while the run executes on a detached
@@ -55,8 +57,8 @@ type Server struct {
 }
 
 // NewServer wires up all routes and middleware.
-// gatewayManager and runner may be nil (e.g. in tests).
-func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, designer *agentdesigner.AgentDesigner, homesDir string, skillStore *skillstore.Store, designFlow *agentdesigner.Flow) (*Server, error) {
+// gatewayManager, runner and memStore may be nil (e.g. in tests).
+func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, designer *agentdesigner.AgentDesigner, homesDir string, skillStore *skillstore.Store, designFlow *agentdesigner.Flow, memStore *memory.Store) (*Server, error) {
 	sessionKey := []byte(cfg.Server.SessionKey)
 	if len(sessionKey) == 0 {
 		// Use a fixed dev key if not configured; production MUST set SA_SESSION_KEY.
@@ -90,6 +92,7 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 		designFlow: designFlow,
 		homesDir:   homesDir,
 		vault:      vault.New(cfg.Data.Dir),
+		memory:     memStore,
 		runs:       make(map[string]*agentRunState),
 	}
 
@@ -269,10 +272,13 @@ func (s *Server) setupRoutes() {
 	dash.POST("/connectors/:platform/delete", s.handleDeleteConnector)
 	dash.POST("/connectors/:platform/test", s.handleTestConnector)
 	dash.GET("/composio", s.showComposio)
-	dash.GET("/sessions", s.showSessions)
-	dash.POST("/sessions", s.handleCreateSession)
-	dash.POST("/sessions/:id/stop", s.handleStopSession)
-	dash.POST("/sessions/:id/delete", s.handleDeleteSession)
+	dash.GET("/chats", s.showChats)
+	dash.POST("/chats", s.handleCreateChat)
+	dash.GET("/chats/:id", s.showChatDetail)
+	dash.POST("/chats/:id/messages", s.handleChatMessage)
+	dash.POST("/chats/:id/resume", s.handleResumeChat)
+	dash.POST("/chats/:id/stop", s.handleStopChat)
+	dash.POST("/chats/:id/delete", s.handleDeleteChat)
 	dash.GET("/reminders", s.showReminders)
 	dash.POST("/reminders", s.handleCreateReminder)
 	dash.POST("/reminders/:id/delete", s.handleDeleteReminder)

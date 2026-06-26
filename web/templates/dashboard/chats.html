@@ -1,0 +1,83 @@
+{{template "head" .}}
+{{template "navbar" .}}
+
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+  {{template "alert" .}}
+
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+    <div>
+      <h1 class="text-2xl font-bold">💬 Chats</h1>
+      <p class="text-base-content/50 text-sm mt-0.5">Chats keep conversation history with Claude and pull in context from your knowledge base. Regular Telegram messages without a chat are one-time calls — Claude answers but no history is saved. Chats auto-stop after 30 minutes of inactivity.</p>
+    </div>
+    <form method="POST" action="/dashboard/chats">
+      <input type="hidden" name="name" value="">
+      <button type="submit" class="btn btn-primary btn-sm gap-1 w-full sm:w-auto">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        New Chat
+      </button>
+    </form>
+  </div>
+
+  {{if .Chats}}
+  <div class="space-y-3">
+    {{range .Chats}}
+    <a href="/dashboard/chats/{{.ID}}" class="block">
+      <div class="card bg-base-100 shadow-sm border {{if .Active}}border-success/30 hover:border-primary/40{{else}}border-base-300 hover:border-base-content/20{{end}} transition-all">
+        <div class="card-body py-4 px-5">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <div class="{{if .Active}}text-success{{else}}text-base-content/20{{end}}">
+                {{if .Active}}
+                <span class="inline-block w-2.5 h-2.5 rounded-full bg-success animate-pulse"></span>
+                {{else}}
+                <span class="inline-block w-2.5 h-2.5 rounded-full bg-base-300"></span>
+                {{end}}
+              </div>
+              <div>
+                <p class="font-semibold text-sm">{{if .Name}}{{.Name}}{{else}}Unnamed Chat{{end}}</p>
+                <p class="text-xs text-base-content/40">
+                  {{.Platform}} · Last active {{fmtTZ $.UserLoc .LastSeen "Jan 2 at 15:04"}}
+                  {{if .Active}}<span class="badge badge-success badge-xs ml-1">active</span>{{end}}
+                </p>
+              </div>
+            </div>
+            <div class="flex gap-2 shrink-0" onclick="event.preventDefault(); event.stopPropagation()">
+              {{if .Active}}
+              <form method="POST" action="/dashboard/chats/{{.ID}}/stop">
+                <button class="btn btn-warning btn-xs">Stop</button>
+              </form>
+              {{else}}
+              <form method="POST" action="/dashboard/chats/{{.ID}}/resume">
+                <button class="btn btn-outline btn-xs">Resume</button>
+              </form>
+              {{end}}
+              <form method="POST" action="/dashboard/chats/{{.ID}}/delete"
+                onsubmit="return confirm('Delete this chat and its history?')">
+                <button class="btn btn-ghost btn-xs text-error">Delete</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </a>
+    {{end}}
+  </div>
+  {{else}}
+  <div class="card bg-base-100 shadow-sm border border-base-300">
+    <div class="card-body items-center text-center py-16">
+      <div class="text-5xl mb-4">💬</div>
+      <h2 class="text-lg font-bold mb-1">No chats yet</h2>
+      <p class="text-base-content/50 text-sm mb-4">Start one to keep conversation history:</p>
+      <form method="POST" action="/dashboard/chats">
+        <input type="hidden" name="name" value="">
+        <button type="submit" class="btn btn-primary btn-sm gap-1">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          New Chat
+        </button>
+      </form>
+    </div>
+  </div>
+  {{end}}
+</div>
+
+{{template "foot" .}}

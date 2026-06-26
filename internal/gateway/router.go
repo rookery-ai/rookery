@@ -18,8 +18,8 @@ import (
 	"github.com/ilijad1/simple-agents/internal/secrets"
 )
 
-// TextHandler is called for non-command messages (one-off chat or within a session).
-// history contains prior turns when an active session is present; empty for stateless chat.
+// TextHandler is called for non-command messages (one-off chat or within a chat).
+// history contains prior turns when an active chat is present; empty for stateless chat.
 type TextHandler func(ctx context.Context, userID string, history []db.ChatMessage, text string, send func(string)) error
 
 // AgentRunHandler is called when /run <name> is issued.
@@ -94,8 +94,8 @@ func (r *Router) Handle(ctx context.Context, msg Message, send func(string), del
 		return r.handleRemind(ctx, msg, arg, send)
 	case "run":
 		return r.handleRun(ctx, msg, arg, send)
-	case "session":
-		return r.handleSession(ctx, msg, arg, send)
+	case "chat":
+		return r.handleChat(ctx, msg, arg, send)
 	case "memory":
 		return r.handleMemory(ctx, msg, arg, send)
 	case "":
@@ -682,15 +682,15 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 		return nil
 	}
 
-	// Look up an active chat session for this user+platform and load its history.
+	// Look up an active chat for this user+platform and load its history.
 	var history []db.ChatMessage
-	var activeSession *db.ChatSession
-	if sess, err := r.db.GetActiveSessionForPlatform(msg.UserID, msg.Platform); err == nil && sess != nil {
-		activeSession = sess
-		history, _ = r.db.ListChatMessages(sess.ID)
+	var activeChat *db.Chat
+	if c, err := r.db.GetActiveChatForPlatform(msg.UserID, msg.Platform); err == nil && c != nil {
+		activeChat = c
+		history, _ = r.db.ListChatMessages(c.ID)
 	}
 
-	// Intercept send so we can capture the assistant reply for session storage.
+	// Intercept send so we can capture the assistant reply for chat storage.
 	var assistantReply string
 	wrappedSend := func(text string) {
 		assistantReply = text
@@ -701,16 +701,16 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 		return err
 	}
 
-	// Persist messages and touch the session.
-	if activeSession != nil && assistantReply != "" {
-		_ = r.db.AddChatMessage(activeSession.ID, "user", msg.Text)
-		_ = r.db.AddChatMessage(activeSession.ID, "assistant", assistantReply)
-		_ = r.db.TouchChatSession(activeSession.ID)
+	// Persist messages and touch the chat.
+	if activeChat != nil && assistantReply != "" {
+		_ = r.db.AddChatMessage(activeChat.ID, "user", msg.Text)
+		_ = r.db.AddChatMessage(activeChat.ID, "assistant", assistantReply)
+		_ = r.db.TouchChat(activeChat.ID)
 	}
 	return nil
 }
 
-func (r *Router) handleSession(ctx context.Context, msg Message, arg string, send func(string)) error {
+func (r *Router) handleChat(ctx context.Context, msg Message, arg string, send func(string)) error {
 	parts := strings.Fields(arg)
 	sub := ""
 	if len(parts) > 0 {
@@ -723,112 +723,112 @@ func (r *Router) handleSession(ctx context.Context, msg Message, arg string, sen
 
 	switch sub {
 	case "start", "":
-		// Stop any currently active session on this platform first.
-		if cur, err := r.db.GetActiveSessionForPlatform(msg.UserID, msg.Platform); err == nil && cur != nil {
-			_ = r.db.StopChatSession(cur.ID)
+		// Stop any currently active chat on this platform first.
+		if cur, err := r.db.GetActiveChatForPlatform(msg.UserID, msg.Platform); err == nil && cur != nil {
+			_ = r.db.StopChat(cur.ID)
 		}
-		sess := &db.ChatSession{
+		c := &db.Chat{
 			ID:       uuid.New().String(),
 			UserID:   msg.UserID,
 			Name:     rest,
 			Platform: msg.Platform,
 			Active:   true,
 		}
-		if err := r.db.CreateChatSession(sess); err != nil {
-			return fmt.Errorf("create session: %w", err)
+		if err := r.db.CreateChat(c); err != nil {
+			return fmt.Errorf("create chat: %w", err)
 		}
 		label := rest
 		if label == "" {
-			label = sess.ID[:8]
+			label = c.ID[:8]
 		}
-		send(fmt.Sprintf("💬 Session *%s* started \\(`%s`\\)\\. Send /session stop to end it\\.", escapeMarkdown(label), escapeMarkdown(sess.ID[:8])))
+		send(fmt.Sprintf("💬 Chat *%s* started \\(`%s`\\)\\. Send /chat stop to end it\\.", escapeMarkdown(label), escapeMarkdown(c.ID[:8])))
 
 	case "list":
-		sessions, err := r.db.ListChatSessions(msg.UserID)
+		chats, err := r.db.ListChats(msg.UserID)
 		if err != nil {
 			return err
 		}
-		if len(sessions) == 0 {
-			send("No sessions yet\\. Use /session start to begin one\\.")
+		if len(chats) == 0 {
+			send("No chats yet\\. Use /chat start to begin one\\.")
 			return nil
 		}
 		var b strings.Builder
-		b.WriteString("*Sessions:*\n")
-		for _, s := range sessions {
-			label := s.Name
+		b.WriteString("*Chats:*\n")
+		for _, c := range chats {
+			label := c.Name
 			if label == "" {
-				label = s.ID[:8]
+				label = c.ID[:8]
 			}
 			status := "🟢"
-			if !s.Active {
+			if !c.Active {
 				status = "⚫"
 			}
 			b.WriteString(fmt.Sprintf("%s *%s* `%s` — %s\n",
 				status,
 				escapeMarkdown(label),
-				escapeMarkdown(s.ID[:8]),
-				escapeMarkdown(s.LastSeen.Format("Jan 2 15:04"))))
+				escapeMarkdown(c.ID[:8]),
+				escapeMarkdown(c.LastSeen.Format("Jan 2 15:04"))))
 		}
-		b.WriteString("\n_/session resume \\<id\\> · /session delete \\<id\\> · /session stop_")
+		b.WriteString("\n_/chat resume \\<id\\> · /chat delete \\<id\\> · /chat stop_")
 		send(b.String())
 
 	case "stop":
-		if cur, err := r.db.GetActiveSessionForPlatform(msg.UserID, msg.Platform); err == nil && cur != nil {
-			_ = r.db.StopChatSession(cur.ID)
+		if cur, err := r.db.GetActiveChatForPlatform(msg.UserID, msg.Platform); err == nil && cur != nil {
+			_ = r.db.StopChat(cur.ID)
 			label := cur.Name
 			if label == "" {
 				label = cur.ID[:8]
 			}
-			send(fmt.Sprintf("Session *%s* stopped\\.", escapeMarkdown(label)))
+			send(fmt.Sprintf("Chat *%s* stopped\\.", escapeMarkdown(label)))
 		} else {
-			send("No active session to stop\\.")
+			send("No active chat to stop\\.")
 		}
 
 	case "resume":
 		if rest == "" {
-			send("Usage: /session resume \\<id\\>")
+			send("Usage: /chat resume \\<id\\>")
 			return nil
 		}
-		sess, err := r.db.FindSessionByPrefix(msg.UserID, rest)
+		c, err := r.db.FindChatByPrefix(msg.UserID, rest)
 		if err != nil {
-			send("Session not found\\. Use /session list to see your sessions\\.")
+			send("Chat not found\\. Use /chat list to see your chats\\.")
 			return nil
 		}
-		// Stop any currently active session first.
-		if cur, err := r.db.GetActiveSessionForPlatform(msg.UserID, msg.Platform); err == nil && cur != nil && cur.ID != sess.ID {
-			_ = r.db.StopChatSession(cur.ID)
+		// Stop any currently active chat first.
+		if cur, err := r.db.GetActiveChatForPlatform(msg.UserID, msg.Platform); err == nil && cur != nil && cur.ID != c.ID {
+			_ = r.db.StopChat(cur.ID)
 		}
-		if err := r.db.ResumeSession(sess.ID); err != nil {
-			return fmt.Errorf("resume session: %w", err)
+		if err := r.db.ResumeChat(c.ID); err != nil {
+			return fmt.Errorf("resume chat: %w", err)
 		}
-		label := sess.Name
+		label := c.Name
 		if label == "" {
-			label = sess.ID[:8]
+			label = c.ID[:8]
 		}
-		history, _ := r.db.ListChatMessages(sess.ID)
-		send(fmt.Sprintf("💬 Session *%s* resumed \\(%d messages\\)\\. Continue chatting\\.", escapeMarkdown(label), len(history)))
+		history, _ := r.db.ListChatMessages(c.ID)
+		send(fmt.Sprintf("💬 Chat *%s* resumed \\(%d messages\\)\\. Continue chatting\\.", escapeMarkdown(label), len(history)))
 
 	case "delete":
 		if rest == "" {
-			send("Usage: /session delete \\<id\\>")
+			send("Usage: /chat delete \\<id\\>")
 			return nil
 		}
-		sess, err := r.db.FindSessionByPrefix(msg.UserID, rest)
+		c, err := r.db.FindChatByPrefix(msg.UserID, rest)
 		if err != nil {
-			send("Session not found\\. Use /session list to see your sessions\\.")
+			send("Chat not found\\. Use /chat list to see your chats\\.")
 			return nil
 		}
-		label := sess.Name
+		label := c.Name
 		if label == "" {
-			label = sess.ID[:8]
+			label = c.ID[:8]
 		}
-		if err := r.db.DeleteChatSession(sess.ID); err != nil {
-			return fmt.Errorf("delete session: %w", err)
+		if err := r.db.DeleteChat(c.ID); err != nil {
+			return fmt.Errorf("delete chat: %w", err)
 		}
-		send(fmt.Sprintf("🗑 Session *%s* deleted\\.", escapeMarkdown(label)))
+		send(fmt.Sprintf("🗑 Chat *%s* deleted\\.", escapeMarkdown(label)))
 
 	default:
-		send("Usage: /session start \\[name\\] · /session list · /session stop · /session resume \\<id\\> · /session delete \\<id\\>")
+		send("Usage: /chat start \\[name\\] · /chat list · /chat stop · /chat resume \\<id\\> · /chat delete \\<id\\>")
 	}
 	return nil
 }
@@ -917,11 +917,11 @@ func helpText() string {
 /secret show \<name\> — reveal a secret value \(requires master password\)
 /secret delete \<name\> — delete a secret \(requires master password\)
 /remind \<when\> to \<message\> — set a reminder \(e\.g\. /remind in 10 minutes to check oven\)
-/session start \[name\] — start a chat session \(saves history\)
-/session list — list all sessions with IDs
-/session stop — stop current session
-/session resume \<id\> — resume a previous session
-/session delete \<id\> — delete a session and its history
+/chat start \[name\] — start a chat \(saves history\)
+/chat list — list all chats with IDs
+/chat stop — stop current chat
+/chat resume \<id\> — resume a previous chat
+/chat delete \<id\> — delete a chat and its history
 /memory list — list saved memory entries
 /memory add \<text\> — save a new memory entry
 /memory delete \<n\> — delete entry by number

@@ -16,7 +16,7 @@ type Config struct {
 	Data     DataConfig     `yaml:"data"`
 	Coder    CoderConfig    `yaml:"coder"`
 	Sandbox  SandboxConfig  `yaml:"sandbox"`
-	Session  SessionConfig  `yaml:"session"`
+	Chat     ChatConfig    `yaml:"chat"`
 	Backup   BackupConfig   `yaml:"backup"`
 }
 
@@ -61,7 +61,7 @@ type SandboxConfig struct {
 	DefaultMemoryMB int           `yaml:"default_memory_mb"`
 }
 
-type SessionConfig struct {
+type ChatConfig struct {
 	InactivityTimeout time.Duration `yaml:"inactivity_timeout"`
 }
 
@@ -108,7 +108,7 @@ func defaults() *Config {
 			DefaultTimeout:  5 * time.Minute,
 			DefaultMemoryMB: 256,
 		},
-		Session: SessionConfig{
+		Chat: ChatConfig{
 			InactivityTimeout: 30 * time.Minute,
 		},
 	}
