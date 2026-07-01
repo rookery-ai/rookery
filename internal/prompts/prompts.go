@@ -78,7 +78,7 @@ type DesignSystemParams struct {
 	ExistingTools      map[string]string // relpath→content of the agent's tool scripts (edit only)
 	ConnectedPlatforms []string
 	ChatApps           []ChatAppInfo // connected chat platforms + their commands (drives platform context)
-	Skills             []string
+	Skills             []SkillRef
 	UserProfile        string
 	UserMemory         string
 	ComposioEnabled    bool // true when user has COMPOSIO_API_KEY in their secrets
@@ -647,9 +647,13 @@ that makes these agents fail.
 	// ── Skills ────────────────────────────────────────────────────────────────
 	if len(p.Skills) > 0 {
 		sb.WriteString("<available_skills>\n")
-		sb.WriteString("This agent can use these pre-built skills: ")
-		sb.WriteString(strings.Join(p.Skills, ", "))
-		sb.WriteString("\n</available_skills>\n\n")
+		sb.WriteString("The user has these pre-built skills installed. When the task clearly benefits from one, use it:\n")
+		sb.WriteString("- Mention it naturally in the conversation (e.g. \"I'll use the pdf-reader skill to extract the text\").\n")
+		sb.WriteString("- Include a `# Skills: skill-name, other-skill` header line in the generated AGENT.md (like the schedule line).\n\n")
+		for _, sk := range p.Skills {
+			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", sk.Name, sk.Description))
+		}
+		sb.WriteString("</available_skills>\n\n")
 	}
 
 	// ── User context ──────────────────────────────────────────────────────────
@@ -874,6 +878,25 @@ func testingRulesBlock() string {
 		"- DO NOT write a test that runs the whole script via subprocess.run([...]) — it\n" +
 		"  WILL be rejected on save. Verify the end-to-end workflow by RUNNING THE SCRIPT\n" +
 		"  YOURSELF in the shell during the test step; that is always allowed.\n" +
+		"- CODE FIRST, ONE BOUNDED SMOKE TEST. Write ALL of AGENT.md and tools/*.py BEFORE\n" +
+		"  making any live API call. Only after the code is complete, run ONE end-to-end pass\n" +
+		"  against the real service — fetch at most a handful of items, process at most ONE\n" +
+		"  attachment/document. Then stop. Do not probe further, re-explore, or download more.\n" +
+		"  You have the user's real secrets injected (same env the agent gets at run time) and\n" +
+		"  real network access. Use them for this one smoke test — real output proves the\n" +
+		"  pipeline works. A build that only tested in mock is a build that ships broken.\n" +
+		"  * The ONE hard exception: never send real OUTBOUND messages on the user's behalf\n" +
+		"    at build time — no sending/POSTing emails, DMs, Slack messages, social posts,\n" +
+		"    ticket comments, or any other write to an external service — unless the user\n" +
+		"    explicitly asked you to. For anything that sends, test it in DRY-RUN / draft mode\n" +
+		"    instead (print the message you would send, or write it to a local file) and prove\n" +
+		"    the draft/formatting is correct. The user's real outbox is not your test fixture.\n" +
+		"- The system cleans up test artifacts after the user approves, so you do not need to\n" +
+		"  manually delete downloaded files or run outputs. However, scratch probe scripts\n" +
+		"  (_probe.py, _disc.py, _show.py, etc.) should NOT be left in the work dir because a\n" +
+		"  probe that defines a local helper named exec/eval/compile will TRIP THE GUARDRAIL\n" +
+		"  and fail the whole build. Name your real helpers something other than those keywords,\n" +
+		"  and avoid leaving scratch probes in tools/ when you are done with them.\n" +
 		"</testing_rules>\n\n"
 }
 
@@ -997,6 +1020,12 @@ Complete the <architecture_gate> analysis above:
 (b) State your tier decision (TIER 1 / 2 / 3) and why.
 (c) State what files, if any, you will create.
 
+DISCOVERY (if needed): If you need Composio tool slugs or API field names that are not in
+the design conversation, make ONE bounded lookup NOW — e.g. one GET /connected_accounts or
+one tool-list call — record the result in your analysis, then stop. That is your only pre-code
+API call. Do not iterate or explore further; write all code in the "create" step without
+touching the live service again until the "test" step.
+
 Do not proceed to "create" until this analysis is written in your response.
 </step>
 
@@ -1090,7 +1119,11 @@ Do NOT create or modify state.json — it already exists and is managed by the s
 </step>
 
 <step name="test">
-TEST THE IMPLEMENTATION COMPLETELY.
+TEST THE IMPLEMENTATION — ONE BOUNDED SMOKE TEST, THEN A DRY RUN.
+
+IMPORTANT: Code must be fully written before this step. Do NOT make any additional API
+discovery calls here — you already have the slugs/args from the analyze step. This step
+is for proving the code works, not for further exploration.
 
 TIER 1 (no code files) — execute a complete dry run NOW:
   (a) Follow each AGENT.md step in sequence as if you were the runtime AI.
@@ -1103,10 +1136,12 @@ TIER 1 (no code files) — execute a complete dry run NOW:
   ✗ Agent is supposed to notify but has no [CHAT]
   ✗ Agent is supposed to be silent but accidentally emits a [CHAT]
 
-TIER 2/3 (has code files) — run scripts, then do the TIER 1 dry run:
-  (a) Execute each Python script in a shell and confirm it produces real, non-empty output.
-  (b) Run unit tests if present (e.g. python3 -m unittest discover -s tools/tests) and make
-      them pass.
+TIER 2/3 (has code files) — ONE smoke test, then the TIER 1 dry run:
+  (a) Run each Python script ONCE in the shell to confirm it produces real, non-empty output.
+      Fetch at most a handful of items; process at most ONE attachment/document. Stop after
+      this one pass — do not re-run, re-probe, or download more items.
+  (b) Run unit tests if present (python3 -m unittest discover -s tools/tests) and make them
+      pass.
   (c) If a script or test errors or returns None/empty: fix it and re-run. After 3 failed
       attempts on one script, stop and emit [BLOCKED] (see below).
   (d) After scripts pass: complete the TIER 1 dry run steps above to verify end-to-end.
@@ -1270,10 +1305,12 @@ TIER 1 (no scripts): execute a complete dry run of the UPDATED AGENT.md:
   FAIL conditions: empty [CHAT] label, unconfirmed writes, wrong content, accidental [CHAT]
   on a silent agent.
 
-TIER 2/3 (has scripts): run each script and show real output. Empty output = failure, fix
-  it. Run unit tests (python3 -m unittest discover -s tools/tests) if present and make them
-  pass. After 3 failed fix attempts on one script: emit [BLOCKED] and stop. Then complete the
-  TIER 1 dry run above to verify the full end-to-end flow.
+TIER 2/3 (has scripts): ONE bounded smoke test, then the TIER 1 dry run:
+  Run each script ONCE and confirm real, non-empty output. Fetch at most a handful of items;
+  process at most ONE attachment/document. Do not re-probe or download more. Empty output =
+  failure, fix it. Run unit tests (python3 -m unittest discover -s tools/tests) if present
+  and make them pass. After 3 failed fix attempts on one script: emit [BLOCKED] and stop.
+  Then complete the TIER 1 dry run above to verify the full end-to-end flow.
 
 The test MUST prove the original bug no longer occurs. State this explicitly, e.g.
 "Verified: the script now returns 3 results instead of empty; [CHAT] contains real data."
@@ -1342,6 +1379,7 @@ type CoderPromptParams struct {
 	AllSkills       []SkillRef
 	DeclaredSkills  []string
 	DeclaredContent map[string]string
+	SkillEnv        string // pre-built <skill_environment> block (resolved tool paths); "" if none
 	VaultRoot       string // absolute path to the user's knowledge base (read+write to the agent)
 	AgentDir        string // absolute path to this agent's own directory (the agent's writable area / CWD)
 	ChatApps        []ChatAppInfo // connected chat platforms + commands (platform context)
@@ -1392,6 +1430,11 @@ func BuildCoderPrompt(p CoderPromptParams) string {
 			}
 		}
 		sb.WriteString("</skill_instructions>\n\n")
+	}
+
+	if p.SkillEnv != "" {
+		sb.WriteString(p.SkillEnv)
+		sb.WriteString("\n")
 	}
 
 	if p.VaultRoot != "" {
@@ -1567,4 +1610,287 @@ Boundaries:
 
 Respond naturally in the user's language. The user does not see your tool calls — they see
 only your final reply, so make sure your reply actually answers the question.`, vaultRoot)
+}
+
+// ─── Skill creator prompts ──────────────────────────────────────────────────
+
+// SkillDesignParams is the dynamic context injected into the skill-creator
+// design conversation system prompt.
+type SkillDesignParams struct {
+	SkillName          string
+	AvailableSkills    []SkillRef // core + user skills, for the designer's awareness
+	UserProfile        string
+	UserMemory         string
+	ComposioEnabled    bool
+	KBManifest         string
+	ConnectedPlatforms []string
+	ChatApps           []ChatAppInfo
+}
+
+// BuildSkillDesignSystemPrompt returns the system prompt for the conversational
+// skill-creator wizard. It guides the coder to act as a design assistant that
+// asks focused questions about what capability the new skill should provide,
+// then proposes a SKILL.md plan before any file is written.
+func BuildSkillDesignSystemPrompt(p SkillDesignParams) string {
+	var sb strings.Builder
+
+	sb.WriteString("<role>\nYou are a friendly skill design assistant helping the user build a new skill")
+	if p.SkillName != "" {
+		sb.WriteString(" called \"")
+		sb.WriteString(p.SkillName)
+		sb.WriteString("\"")
+	}
+	sb.WriteString(".\n\nA skill is a reusable capability: a folder with a SKILL.md (and optional scripts/) that teaches an agent how to do a recurring task. Skills are loaded into an agent's context on demand — only the name + description are always present, the SKILL.md body is injected when the agent decides the skill is relevant.\n</role>\n\n")
+
+	sb.WriteString(`<constraints>
+NEVER do any of the following — no exceptions:
+- Ask the user to paste API keys, passwords, or secret values in this chat. Secrets are
+  stored separately and injected as environment variables.
+- Write code or generate the SKILL.md / scripts during the design conversation.
+- Ask more than two questions in a single reply.
+- Use heavy jargon the user won't understand. Translate: "the skill will convert
+  documents" not "invoke pandoc via subprocess"; "your notes" not "the vault".
+</constraints>
+
+`)
+	sb.WriteString(platformContextBlock(p.ChatApps, ""))
+
+	sb.WriteString(`<skill_format>
+A skill folder looks like:
+  <name>/SKILL.md        (required: YAML frontmatter + markdown instructions)
+  <name>/scripts/        (optional: deterministic/repetitive code)
+  <name>/references/     (optional: docs loaded on demand)
+
+The SKILL.md frontmatter (only name + description are strictly required):
+  ---
+  name: my-skill          # lowercase, hyphens, 3-64 chars
+  description: ...        # what it does + when to use it (the trigger!)
+  version: 1.0.0
+  license: MIT-0
+  category: File Processing
+  metadata:
+    openclaw:
+      requires:
+        bins: [pandoc]            # tools that MUST be present (or anyBins: at-least-one)
+        env: [COMPOSIO_API_KEY]   # required env vars
+      install:
+        - kind: binary            # static binary download
+          bin: pandoc
+          url: https://...
+          strip: 1
+        - kind: pip              # python package
+          package: pdfplumber
+  ---
+
+The ` + "`description`" + ` is the most important field: it must say what the skill does AND the
+specific triggers/contexts that activate it. Without a good description, the agent never
+picks the skill. Write tool names BARE in the body (pandoc ...) — the runtime env block
+supplies the real absolute path.
+</skill_format>
+
+`)
+	if p.ComposioEnabled {
+		sb.WriteString(composioServicesBlock())
+	}
+
+	if len(p.AvailableSkills) > 0 {
+		sb.WriteString("<existing_skills>\nThe user already has these skills (core + their own). The new skill should complement, not duplicate, them:\n")
+		for _, sk := range p.AvailableSkills {
+			sb.WriteString(fmt.Sprintf("- %s: %s\n", sk.Name, sk.Description))
+		}
+		sb.WriteString("</existing_skills>\n\n")
+	}
+
+	if p.UserProfile != "" {
+		sb.WriteString(p.UserProfile)
+		sb.WriteString("\n")
+	}
+	if p.UserMemory != "" {
+		sb.WriteString("[User memory]\n")
+		sb.WriteString(p.UserMemory)
+		sb.WriteString("\n\n")
+	}
+	if p.KBManifest != "" {
+		sb.WriteString("<knowledge_base_manifest>\nThe user's existing notes (the skill may reference these at runtime):\n")
+		sb.WriteString(p.KBManifest)
+		sb.WriteString("</knowledge_base_manifest>\n\n")
+	}
+
+	sb.WriteString(`<your_job>
+Have a focused conversation to understand what capability the user wants the skill to
+provide. Ask simple, friendly questions — one or two at a time. Your goal is to understand:
+1. What the skill should DO (read X, create Y, convert A→B, call service Z).
+2. What inputs/outputs are involved (file types, formats, destinations).
+3. What tools or services it needs (CLI tools, Python packages, Composio, secrets).
+4. Whether it needs scripts/ or is reasoning-only with inline snippets.
+
+Prefer the simplest design that solves the task: a reasoning-only SKILL.md with a few
+inline copy-pasteable snippets is ideal; add scripts/ only when the operation is
+fragile/repetitive and benefits from exact code.
+
+When you understand enough, propose a concise plan: the skill name, a one-line purpose,
+the tools/packages it will need, and whether it will have scripts. Then ask the user to
+type "approve" to generate it. Do not write the SKILL.md itself in this conversation.
+</your_job>
+`)
+	return sb.String()
+}
+
+// BuildSkillImplementationPrompt returns the prompt that instructs the coder to
+// write a new skill's SKILL.md (+ optional scripts/), test it, fix errors, and
+// report the verified output inside [TEST_OUTPUT] markers. skillCreatorBody is
+// the body of the skill-creator core skill (the authoring instruction set).
+func BuildSkillImplementationPrompt(skillName string, history []ChatMessage, skillCreatorBody string, p SkillDesignParams) string {
+	var sb strings.Builder
+	sb.WriteString("You are creating a skill called \"")
+	sb.WriteString(skillName)
+	sb.WriteString("\" for the simple-agents platform.\n\n")
+
+	sb.WriteString("<capabilities>\nYou have file read/write tools and a shell. Use them to create the skill folder, write SKILL.md (+ optional scripts/), execute the scripts to test them, and fix any errors before reporting results.\n</capabilities>\n\n")
+
+	if skillCreatorBody != "" {
+		sb.WriteString("<skill_creator_guide>\n")
+		sb.WriteString(skillCreatorBody)
+		sb.WriteString("\n</skill_creator_guide>\n\n")
+	}
+
+	if p.ComposioEnabled {
+		sb.WriteString(composioServicesBlock())
+	}
+
+	sb.WriteString("<design_conversation>\n")
+	for _, m := range history {
+		if m.Role == "user" {
+			sb.WriteString("User: ")
+		} else {
+			sb.WriteString("Designer: ")
+		}
+		sb.WriteString(m.Content)
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString("</design_conversation>\n\n")
+
+	sb.WriteString(fmt.Sprintf(`<task>
+Follow these steps in EXACT order.
+
+1. ANALYZE — Decide the simplest design that fulfills the agreed plan: is this
+   reasoning-only (just SKILL.md with inline snippets) or does it need scripts/?
+   Which tools/packages does it require (declare them in metadata.openclaw.requires
+   and .install)? Which env vars / secrets?
+
+2. CREATE — Write SKILL.md with valid YAML frontmatter. The ` + "`description`" + ` field is
+   the trigger: say what the skill does AND the specific phrases/contexts that
+   activate it. Write the body in imperative voice with copy-pasteable examples.
+   If scripts/ are needed, write them under scripts/ (minimal, robust).
+
+3. TEST — Run every script to confirm it does not crash:
+   ` + "`python3 scripts/<file>.py --help`" + ` or an import/smoke check against a sample.
+   For prompt-only skills, validate the frontmatter parses and the description
+   reads as a clear trigger. Report results inside:
+
+   [TEST_OUTPUT]
+   <what you tested, what passed, any errors you fixed>
+   [/TEST_OUTPUT]
+
+RULES:
+- Write tool names BARE in the body (pandoc ...). The runtime env block supplies the
+  real absolute path — never hardcode /usr/bin/... or $HOME paths in the SKILL.md body.
+- Secrets are env vars (os.environ); never hardcode keys.
+- Composio uses backend.composio.dev/api/v3 only (REST, never the SDK).
+- Keep SKILL.md under ~500 lines; move deep reference into references/.
+- Output to the vault / $TMPDIR, never /tmp.
+- Folder name: %s (lowercase, hyphens, 3-64 chars). Write it to the staging directory
+  you were given.
+</task>
+`, skillName))
+	return sb.String()
+}
+
+// BuildSkillVettingPrompt returns the prompt for the security audit of a freshly
+// generated skill. vetterBody is the body of the skill-vetter core skill (the
+// vetting protocol). It instructs the coder to audit the SKILL.md + scripts and
+// emit a structured vetting report with a verdict.
+func BuildSkillVettingPrompt(skillName, skillMD string, scripts map[string]string, vetterBody string) string {
+	var sb strings.Builder
+	sb.WriteString("You are auditing a newly generated skill for safety before it is saved.\n\n")
+	if vetterBody != "" {
+		sb.WriteString("<skill_vetter_protocol>\n")
+		sb.WriteString(vetterBody)
+		sb.WriteString("\n</skill_vetter_protocol>\n\n")
+	}
+	sb.WriteString("<skill_under_review>\n")
+	sb.WriteString("Skill name: ")
+	sb.WriteString(skillName)
+	sb.WriteString("\n\n--- SKILL.md ---\n")
+	sb.WriteString(skillMD)
+	sb.WriteString("\n")
+	if len(scripts) > 0 {
+		for _, name := range sortedKeys(scripts) {
+			sb.WriteString("\n--- scripts/")
+			sb.WriteString(name)
+			sb.WriteString(" ---\n")
+			sb.WriteString(scripts[name])
+			sb.WriteString("\n")
+		}
+	} else {
+		sb.WriteString("\n(no scripts)\n")
+	}
+	sb.WriteString("</skill_under_review>\n\n")
+	sb.WriteString(`<task>
+Review the skill above following the vetting protocol. Read EVERY file. Check for the
+red flags (exfiltration of vault notes/USER.md/SOUL.md/secrets, raw-IP network calls,
+obfuscated/encoded payloads, sudo, unlisted package installs, credential harvesting,
+destructive ops, deceptive instructions, reads/writes outside the vault). Classify the
+risk and produce the verdict. Emit ONLY the vetting report in the exact format specified
+by the protocol (the "SKILL VETTING REPORT" block). Do not emit anything else.
+</task>
+`)
+	return sb.String()
+}
+
+// SkillBin is one declared tool binary and its resolved path (or empty if missing).
+type SkillBin struct {
+	Skill string // owning skill name
+	Bin   string // bare tool name
+	Path  string // resolved absolute path, "" if not installed
+}
+
+// SkillEnvBlock builds the <skill_environment> block injected into an agent run
+// alongside <skill_instructions>. For each declared tool it states the resolved
+// absolute path (or "missing — install via the cli-tool-installer skill") plus
+// the sandbox conventions: invoke tools by absolute path, use $TMPDIR not /tmp,
+// tools live at $HOME/.local/bin, secrets are env vars, vault root.
+func SkillEnvBlock(bins []SkillBin, homeDir, vaultRoot string) string {
+	if len(bins) == 0 && vaultRoot == "" {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("<skill_environment>\n")
+	if len(bins) > 0 {
+		sb.WriteString("Declared skill tools and their resolved paths:\n")
+		seen := map[string]bool{}
+		for _, b := range bins {
+			key := b.Bin
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			if b.Path != "" {
+				sb.WriteString(fmt.Sprintf("- %s → %s\n", b.Bin, b.Path))
+			} else {
+				sb.WriteString(fmt.Sprintf("- %s → NOT installed. Install it via the cli-tool-installer skill (download the static binary to %s/.local/bin/%s), then invoke it by that absolute path.\n", b.Bin, homeDir, b.Bin))
+			}
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString(fmt.Sprintf(`Conventions:
+- Installed CLI tools live at %s/.local/bin/ — ALWAYS invoke them by absolute path
+  (e.g. %s/.local/bin/pandoc), never the bare name: the inherited PATH points elsewhere.
+- Use $TMPDIR (=%s/tmp) for scratch, NEVER /tmp.
+- Secrets are environment variables — read from os.environ, never hardcode.
+- The user's knowledge base root is: %s — read it for context and write durable
+  knowledge back into notes/ or memory/.
+</skill_environment>
+`, homeDir, homeDir, homeDir, vaultRoot))
+	return sb.String()
 }

@@ -12,13 +12,18 @@ import (
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/prompts"
+	"github.com/ilijad1/simple-agents/internal/skilllibrary"
 	"github.com/ilijad1/simple-agents/internal/skillstore"
 	"github.com/labstack/echo/v4"
 )
 
+// ── Skills (user list + CRUD + import) ──────────────────────────────────────
+
 type skillsPageData struct {
 	*pageData
-	Skills []*db.Skill
+	Skills     []*db.Skill
+	CoreSkills []skilllibrary.SkillMeta
+	Draft      *db.SkillDraft
 }
 
 type skillDetailData struct {
@@ -27,14 +32,44 @@ type skillDetailData struct {
 	Content string
 }
 
+// coreSkillData renders a read-only view of an embedded core skill's SKILL.md.
+type coreSkillData struct {
+	*pageData
+	Meta    skilllibrary.SkillMeta
+	Content string
+}
+
 // ── Skills list ───────────────────────────────────────────────────────────────
 
 func (s *Server) showSkills(c echo.Context) error {
 	u := c.Get("user").(*db.User)
 	skills, _ := s.db.ListSkills(u.ID)
+	var draft *db.SkillDraft
+	if s.skillFlow != nil {
+		draft = s.skillFlow.HasDraft(u.ID)
+	}
 	return c.Render(http.StatusOK, "dashboard/skills.html", &skillsPageData{
-		pageData: s.page(c, "Skills"),
-		Skills:   skills,
+		pageData:   s.page(c, "Skills"),
+		Skills:     skills,
+		CoreSkills: skilllibrary.LoadBundled(),
+		Draft:      draft,
+	})
+}
+
+// showCoreSkill renders a core (embedded, always-on) skill read-only — no edit,
+// no delete. Core skills have no DB row, so they live under a dedicated route
+// keyed by slug rather than /skills/:id.
+func (s *Server) showCoreSkill(c echo.Context) error {
+	slug := c.Param("slug")
+	content, ok := skilllibrary.CoreSkillContent(slug)
+	if !ok {
+		return echo.NewHTTPError(http.StatusNotFound, "core skill not found")
+	}
+	meta, _ := skilllibrary.ParseMeta(content)
+	return c.Render(http.StatusOK, "dashboard/skill_core.html", &coreSkillData{
+		pageData: s.page(c, "Core Skill: "+meta.Name),
+		Meta:    meta,
+		Content: content,
 	})
 }
 

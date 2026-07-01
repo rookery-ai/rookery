@@ -22,6 +22,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/sandbox"
 	"github.com/ilijad1/simple-agents/internal/scheduler"
 	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/simple-agents/internal/skilldesigner"
 	"github.com/ilijad1/simple-agents/internal/skillstore"
 	"github.com/ilijad1/simple-agents/internal/vault"
 	"github.com/ilijad1/simple-agents/web"
@@ -160,6 +161,27 @@ func serveCmd() *cli.Command {
 				WithMemory(memStore).
 				WithVault(vlt)
 
+			// Conversational skill-creator: same shape as the agent designer.
+			// Core skills are embedded (always-on) and need no seeding; the saver
+			// writes user-created skills into the user's vault.
+			skillSaver := skilldesigner.NewSaver(database, skillsDir)
+			skillFlow := skilldesigner.NewSkillFlow(func(_ string) *coder.Coder { return coderSvc }, skillSaver).
+				WithDB(database).
+				WithMemory(memStore).
+				WithSecretsLoader(func(ctx context.Context, userID string) (map[string]string, error) {
+					user, err := database.GetUserByID(userID)
+					if err != nil || user.EncryptedMasterPassword == "" {
+						return nil, err
+					}
+					masterPw, err := secrets.DecryptMasterPassword(user.EncryptedMasterPassword, sysKey)
+					if err != nil {
+						return nil, err
+					}
+					svc := secrets.New(database, userID, masterPw, user.SecretsSalt)
+					return svc.GetAll(ctx)
+				}).
+				WithKBLister(vlt)
+
 			vaultSearcher := vlt.NewSearcher()
 
 			textHandler := func(ctx context.Context, userID string, history []db.ChatMessage, text string, send func(string)) error {
@@ -224,11 +246,23 @@ func serveCmd() *cli.Command {
 							}
 							_ = database.DeleteAgentDraft(d.UserID)
 						}
+						// Expired skill-creator drafts: drop the row and any orphaned
+						// staging directory left by runGeneration.
+						expiredSkillDrafts, err := database.ListExpiredSkillDrafts()
+						if err != nil {
+							slog.Warn("skill draft gc: list expired", "err", err)
+						}
+						for _, d := range expiredSkillDrafts {
+							if d.SkillName != "" {
+								_ = os.RemoveAll(filepath.Join(vaultsDir, d.UserID, "skills", ".staging-"+d.SkillName))
+							}
+							_ = database.DeleteSkillDraft(d.UserID)
+						}
 					}
 				}
 			}()
 
-			srv, err := web.NewServer(cfg, database, gwManager, runner, designer, homesDir, skillStore, designFlow, memStore)
+			srv, err := web.NewServer(cfg, database, gwManager, runner, designer, homesDir, skillStore, designFlow, skillFlow, memStore)
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}

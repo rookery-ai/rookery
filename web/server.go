@@ -24,6 +24,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/memory"
 	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/simple-agents/internal/skilldesigner"
 	"github.com/ilijad1/simple-agents/internal/skillstore"
 	"github.com/ilijad1/simple-agents/internal/vault"
 	"github.com/labstack/echo/v4"
@@ -44,7 +45,8 @@ type Server struct {
 	runner     *agentrunner.Runner     // may be nil in tests
 	designer   *agentdesigner.AgentDesigner
 	skills     *skillstore.Store
-	designFlow *agentdesigner.Flow // shared with Telegram gateway
+	designFlow *agentdesigner.Flow   // shared with Telegram gateway
+	skillFlow  *skilldesigner.Flow  // conversational skill-creator (web + Telegram)
 	homesDir   string              // per-user claude HOME directories
 	vault      *vault.Vault        // per-user knowledge base
 	memory     *memory.Store       // per-user structured context (injected into one-off chat)
@@ -58,7 +60,7 @@ type Server struct {
 
 // NewServer wires up all routes and middleware.
 // gatewayManager, runner and memStore may be nil (e.g. in tests).
-func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, designer *agentdesigner.AgentDesigner, homesDir string, skillStore *skillstore.Store, designFlow *agentdesigner.Flow, memStore *memory.Store) (*Server, error) {
+func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, designer *agentdesigner.AgentDesigner, homesDir string, skillStore *skillstore.Store, designFlow *agentdesigner.Flow, skillFlow *skilldesigner.Flow, memStore *memory.Store) (*Server, error) {
 	sessionKey := []byte(cfg.Server.SessionKey)
 	if len(sessionKey) == 0 {
 		// Use a fixed dev key if not configured; production MUST set SA_SESSION_KEY.
@@ -90,6 +92,7 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 		designer:   designer,
 		skills:     skillStore,
 		designFlow: designFlow,
+		skillFlow:  skillFlow,
 		homesDir:   homesDir,
 		vault:      vault.New(cfg.Data.Dir),
 		memory:     memStore,
@@ -260,7 +263,14 @@ func (s *Server) setupRoutes() {
 	dash.POST("/agents/:id/agent-md", s.handleSaveAgentMD)
 	dash.POST("/agents/:id/skills", s.handleSaveAgentSkills)
 	dash.GET("/skills", s.showSkills)
+	dash.GET("/skills/new", s.showNewSkill)
+	dash.POST("/skills/design", s.handleSkillDesignChat)
+	dash.POST("/skills/design/cancel", s.handleCancelSkillDesign)
+	dash.POST("/skills/design/resume", s.handleResumeSkillDraft)
+	dash.POST("/skills/design/dismiss", s.handleDismissSkillDraft)
+	dash.GET("/skills/design/progress", s.handleSkillDesignProgress)
 	dash.POST("/skills", s.handleCreateSkill)
+	dash.GET("/skills/core/:slug", s.showCoreSkill)
 	dash.GET("/skills/:id", s.showSkillDetail)
 	dash.POST("/skills/:id", s.handleSaveSkill)
 	dash.POST("/skills/:id/delete", s.handleDeleteSkill)

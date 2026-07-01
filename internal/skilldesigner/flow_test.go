@@ -1,0 +1,94 @@
+package skilldesigner
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/ilijad1/simple-agents/internal/skilllibrary"
+)
+
+func writeTestFile(dir, name, content string) error {
+	return os.WriteFile(filepath.Join(dir, name), []byte(content), 0o640)
+}
+
+// skillFrontmatterName mirrors the finalize step's name extraction (frontmatter
+// name, if present).
+func skillFrontmatterName(skillMD string) string {
+	meta, _ := skilllibrary.ParseMeta(skillMD)
+	return meta.Name
+}
+
+func TestVettingBlocksSave(t *testing.T) {
+	cases := []struct {
+		name   string
+		report string
+		want   bool
+	}{
+		{"empty", "", false},
+		{"safe", "SKILL VETTING REPORT\nRisk level: 🟢 LOW\nVerdict: ✅ safe to save", false},
+		{"caution", "Risk level: 🟡 MEDIUM\nVerdict: ⚠️ save with caution", false},
+		{"high", "Risk level: 🔴 HIGH\nVerdict: ❌ do not save", true},
+		{"extreme", "Risk level: ⛔ EXTREME\nVerdict: ❌ do not save", true},
+		{"blockOnlyVerdict", "Verdict: ❌ do not save — exfiltrates USER.md", true},
+		{"highNoVerdict", "Risk level: 🔴 HIGH", false}, // malformed: no verdict → fail open (report still shown)
+		{"echoedAlternation", "Risk level: 🟢 LOW\nVerdict: ✅ safe to save | ⚠️ save with caution | ❌ do not save", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := vettingBlocksSave(c.report); got != c.want {
+				t.Errorf("vettingBlocksSave(%q) = %v, want %v", c.report, got, c.want)
+			}
+		})
+	}
+}
+
+func TestParseTestOutput(t *testing.T) {
+	if got := parseTestOutput("before\n[TEST_OUTPUT]ok output[/TEST_OUTPUT]\nafter"); got != "ok output" {
+		t.Errorf("got %q", got)
+	}
+	if got := parseTestOutput("no markers here"); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+	if got := parseTestOutput("[TEST_OUTPUT]unclosed"); got != "unclosed" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestReadScriptsFromDisk(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeTestFile(dir, "a.py", "print('hi')"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeTestFile(dir, "b.txt", "ignored"); err != nil {
+		t.Fatal(err)
+	}
+	scripts, err := readScriptsFromDisk(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scripts) != 1 {
+		t.Fatalf("expected 1 script, got %d", len(scripts))
+	}
+	if scripts["a.py"] != "print('hi')" {
+		t.Errorf("unexpected content: %q", scripts["a.py"])
+	}
+
+	// Missing scripts dir → empty map, no error.
+	scripts, err = readScriptsFromDisk(dir + "/does-not-exist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scripts) != 0 {
+		t.Errorf("expected empty map, got %d", len(scripts))
+	}
+}
+
+func TestFrontmatterNameExtraction(t *testing.T) {
+	skillMD := "---\nname: csv-summary\ndescription: Extract tables from CSV.\n---\n# CSV Summary\nbody"
+	// Reuse the skilllibrary parser the flow relies on at finalize time.
+	got := skillFrontmatterName(skillMD)
+	if got != "csv-summary" {
+		t.Errorf("got %q, want csv-summary", got)
+	}
+}

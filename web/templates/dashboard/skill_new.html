@@ -1,0 +1,401 @@
+{{template "head" .}}
+{{template "navbar" .}}
+
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+  {{template "alert" .}}
+
+  <div class="flex items-center gap-2 mb-6">
+    <a href="/dashboard/skills" class="btn btn-ghost btn-sm gap-1">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      Skills
+    </a>
+    <span class="text-base-content/30">/</span>
+    <h1 class="text-xl font-bold">Create Skill</h1>
+  </div>
+
+  {{if .Draft}}
+  <div id="draft-banner" class="alert alert-info shadow-sm mb-4">
+    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    <div class="flex-1">
+      <p class="font-semibold">You have an unfinished draft: {{.Draft.SkillName}}</p>
+      <p class="text-sm">Resume to continue where you left off, or start fresh.</p>
+    </div>
+    <div class="flex gap-2">
+      <button id="btn-resume-draft" class="btn btn-sm btn-primary">Resume</button>
+      <button id="btn-dismiss-draft" class="btn btn-sm btn-ghost">Start fresh</button>
+    </div>
+  </div>
+  {{end}}
+
+  <!-- Phase 1: Name entry -->
+  <div id="phase-start" class="card bg-base-100 shadow-sm border border-base-300">
+    <div class="card-body">
+      <h2 class="card-title text-lg">New Skill</h2>
+      <p class="text-base-content/50 text-sm">A skill is a reusable capability an agent can call on (e.g. "read this PDF", "send an email via Gmail"). Describe what you need and the assistant will ask a few questions, then build, test, and security-vet it before saving.</p>
+      <div class="space-y-4 mt-2">
+        <div class="form-control">
+          <label class="label"><span class="label-text font-medium">Skill Name</span></label>
+          <input id="skill-name-input" type="text" placeholder="e.g. csv-to-email-summary" class="input input-bordered" autocomplete="off" />
+        </div>
+        <div class="form-control">
+          <label class="label"><span class="label-text font-medium">What should it do?</span></label>
+          <textarea id="skill-desc-input" class="textarea textarea-bordered" rows="3"
+            placeholder="e.g. Extract tables from a CSV and email a summary digest via Gmail"></textarea>
+        </div>
+        <div id="start-error" class="hidden alert alert-error text-sm py-2"></div>
+        <div class="flex justify-end gap-2">
+          <a href="/dashboard/skills" class="btn btn-ghost btn-sm">Cancel</a>
+          <button id="start-btn" onclick="startDesign()" class="btn btn-primary gap-2">
+            Start designing
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 2: Chat interface -->
+  <div id="phase-chat" class="hidden space-y-4">
+    <div class="card bg-base-100 shadow-sm border border-base-300">
+      <div class="card-body p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-semibold text-sm">Designing: <span id="chat-skill-name" class="text-primary font-mono"></span></h2>
+          <button id="cancel-btn" onclick="cancelDesign()" class="btn btn-outline btn-error btn-xs">Cancel</button>
+        </div>
+
+        <div id="chat-messages" class="space-y-3 max-h-[500px] overflow-y-auto mb-4 pr-1 scroll-smooth"></div>
+
+        <div id="chat-spinner" class="hidden flex justify-center py-2">
+          <span class="loading loading-dots loading-md text-primary"></span>
+        </div>
+
+        <div id="generation-progress" class="hidden flex items-start gap-3 p-3 rounded-lg bg-base-200 border border-base-300 mb-2">
+          <span class="loading loading-spinner loading-sm text-primary mt-0.5 shrink-0"></span>
+          <div class="flex-1 min-w-0">
+            <p id="generation-status" class="text-sm font-medium">Building your skill…</p>
+            <p class="text-xs text-base-content/50 mt-0.5">This can take a few minutes.</p>
+          </div>
+          <button onclick="cancelDesign()" class="btn btn-ghost btn-xs text-error shrink-0">Cancel</button>
+        </div>
+
+        <div id="approve-bar" class="hidden mb-3">
+          <div class="flex items-center gap-2 p-3 rounded-lg bg-success/10 border border-success/30">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span class="text-sm flex-1">Happy with the tested, vetted skill? Save it.</span>
+            <button onclick="sendMessage('approve')" class="btn btn-success btn-sm gap-1">
+              Approve &amp; Save
+            </button>
+          </div>
+        </div>
+
+        <div class="flex gap-2">
+          <input id="chat-input" type="text" placeholder="Answer questions or type 'approve' to build..."
+            class="input input-bordered flex-1 text-sm"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();sendFromInput()}" />
+          <button onclick="sendFromInput()" class="btn btn-primary btn-sm px-4">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Cancel confirmation: save the draft to resume later, or discard it. -->
+<dialog id="cancel-modal" class="modal">
+  <div class="modal-box w-full max-w-md">
+    <h3 class="font-bold text-lg mb-1">Cancel skill design?</h3>
+    <p class="text-base-content/60 text-sm mb-4">Your progress so far can be saved as a draft so you can continue later, or discarded entirely.</p>
+    <div class="modal-action flex-col gap-2">
+      <button class="btn btn-primary w-full" onclick="saveDraftAndExit()">Save as draft</button>
+      <button class="btn btn-ghost text-error w-full" onclick="discardDraft()">Discard</button>
+      <button class="btn btn-ghost w-full" onclick="document.getElementById('cancel-modal').close()">Keep editing</button>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop"><button>close</button></form>
+</dialog>
+
+<script>
+var skillName = '';
+var isGenerating = false;
+var progressSource = null;
+
+function startDesign() {
+  var name = document.getElementById('skill-name-input').value.trim();
+  var desc = document.getElementById('skill-desc-input').value.trim();
+
+  if (!name) { document.getElementById('skill-name-input').focus(); return; }
+  if (!desc) { document.getElementById('skill-desc-input').focus(); return; }
+
+  document.getElementById('start-btn').disabled = true;
+  document.getElementById('start-error').classList.add('hidden');
+
+  skillName = name;
+  document.getElementById('chat-skill-name').textContent = name;
+
+  doRequest(name, desc, true);
+}
+
+function sendFromInput() {
+  var input = document.getElementById('chat-input');
+  var msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  sendMessage(msg);
+}
+
+async function sendMessage(msg) {
+  msg = (msg || '').trim();
+  if (!msg) return;
+  appendMessage('user', msg);
+  doRequest(skillName, msg, false);
+}
+
+function isApproval(msg) {
+  var t = msg.trim().toLowerCase();
+  return t === 'approve' || t === 'go ahead' || t === 'build it' || t === 'create it' || t === '/approve';
+}
+
+function startProgressStream() {
+  if (progressSource) return;
+  progressSource = new EventSource('/dashboard/skills/design/progress');
+  progressSource.onmessage = function(e) {
+    document.getElementById('generation-status').textContent = e.data;
+  };
+  progressSource.onerror = function() {
+    stopProgressStream();
+  };
+}
+
+function stopProgressStream() {
+  if (progressSource) {
+    progressSource.close();
+    progressSource = null;
+  }
+}
+
+function showProgress() {
+  document.getElementById('chat-spinner').classList.add('hidden');
+  document.getElementById('generation-progress').classList.remove('hidden');
+  document.getElementById('approve-bar').classList.add('hidden');
+  setInputDisabled(true);
+}
+
+function hideProgress() {
+  document.getElementById('generation-progress').classList.add('hidden');
+  setInputDisabled(false);
+}
+
+function setInputDisabled(on) {
+  var inp = document.getElementById('chat-input');
+  var btn = document.querySelector('button[onclick="sendFromInput()"]');
+  if (inp) inp.disabled = on;
+  if (btn) btn.disabled = on;
+}
+
+async function doRequest(name, msg, isFirst) {
+  if (isFirst) {
+    document.getElementById('phase-start').classList.add('hidden');
+    document.getElementById('phase-chat').classList.remove('hidden');
+  }
+
+  var generating = !isFirst && isApproval(msg);
+  if (generating) {
+    isGenerating = true;
+    showProgress();
+    startProgressStream();
+  } else {
+    setLoading(true);
+  }
+
+  try {
+    var resp = await fetch('/dashboard/skills/design', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name, message: msg})
+    });
+    var data = await resp.json();
+
+    if (generating) {
+      stopProgressStream();
+      hideProgress();
+      isGenerating = false;
+    } else {
+      setLoading(false);
+    }
+
+    if (data.error) {
+      if (isFirst) {
+        document.getElementById('phase-chat').classList.add('hidden');
+        document.getElementById('phase-start').classList.remove('hidden');
+        document.getElementById('start-btn').disabled = false;
+        document.getElementById('start-error').textContent = data.error;
+        document.getElementById('start-error').classList.remove('hidden');
+      } else {
+        appendError(data.error);
+      }
+      return;
+    }
+    appendMessage('assistant', data.response);
+    if (data.done) {
+      appendSystem('Skill saved! Redirecting...');
+      setTimeout(function() { window.location.href = '/dashboard/skills/' + data.skill_id; }, 800);
+      return;
+    }
+    showApproveBar();
+    document.getElementById('chat-input').focus();
+  } catch(e) {
+    if (generating) {
+      stopProgressStream();
+      hideProgress();
+      isGenerating = false;
+    } else {
+      setLoading(false);
+    }
+    if (isFirst) {
+      document.getElementById('phase-chat').classList.add('hidden');
+      document.getElementById('phase-start').classList.remove('hidden');
+      document.getElementById('start-btn').disabled = false;
+      document.getElementById('start-error').textContent = 'Network error: ' + e.message;
+      document.getElementById('start-error').classList.remove('hidden');
+    } else {
+      appendError('Network error: ' + e.message);
+    }
+  }
+}
+
+async function cancelDesign() {
+  if (isGenerating) {
+    await fetch('/dashboard/skills/design/cancel', {method: 'POST'});
+    stopProgressStream();
+    hideProgress();
+    isGenerating = false;
+    appendMessage('assistant', 'Skill creation was cancelled.');
+    return;
+  }
+  document.getElementById('cancel-modal').showModal();
+}
+
+async function saveDraftAndExit() {
+  document.getElementById('cancel-modal').close();
+  try {
+    await fetch('/dashboard/skills/design/cancel', {method: 'POST'});
+  } catch(e) { /* proceed to leave regardless */ }
+  window.location.href = '/dashboard/skills';
+}
+
+async function discardDraft() {
+  document.getElementById('cancel-modal').close();
+  try {
+    await fetch('/dashboard/skills/design/cancel', {method: 'POST'});
+    await fetch('/dashboard/skills/design/dismiss', {method: 'POST'});
+  } catch(e) { /* proceed to leave regardless */ }
+  window.location.href = '/dashboard/skills';
+}
+
+function appendMessage(role, text) {
+  var c = document.getElementById('chat-messages');
+  var d = document.createElement('div');
+  if (role === 'user') {
+    d.className = 'flex justify-end';
+    d.innerHTML = '<div class="max-w-[85%] px-4 py-2 rounded-2xl rounded-tr-sm bg-primary text-primary-content text-sm whitespace-pre-wrap break-words">' + esc(text) + '</div>';
+  } else {
+    d.className = 'flex justify-start';
+    d.innerHTML = '<div class="max-w-[85%] px-4 py-3 rounded-2xl rounded-tl-sm bg-base-200 text-sm whitespace-pre-wrap break-words leading-relaxed">' + esc(text) + '</div>';
+  }
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+}
+
+function appendError(msg) {
+  var c = document.getElementById('chat-messages');
+  var d = document.createElement('div');
+  d.className = 'alert alert-error text-sm py-2';
+  d.textContent = msg;
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+}
+
+function appendSystem(msg) {
+  var c = document.getElementById('chat-messages');
+  var d = document.createElement('div');
+  d.className = 'text-center text-xs text-base-content/40 py-1';
+  d.textContent = msg;
+  c.appendChild(d);
+  c.scrollTop = c.scrollHeight;
+}
+
+function setLoading(on) {
+  document.getElementById('chat-spinner').classList.toggle('hidden', !on);
+  var inp = document.getElementById('chat-input');
+  if (inp) inp.disabled = on;
+}
+
+function showApproveBar() {
+  document.getElementById('approve-bar').classList.remove('hidden');
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  document.getElementById('skill-name-input').focus();
+
+  var btnResume = document.getElementById('btn-resume-draft');
+  if (btnResume) {
+    btnResume.addEventListener('click', async function() {
+      btnResume.disabled = true;
+      try {
+        var res = await fetch('/dashboard/skills/design/resume', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'}
+        });
+        var data = await res.json();
+        if (data.error) {
+          btnResume.disabled = false;
+          var banner = document.getElementById('draft-banner');
+          if (banner) {
+            var err = document.createElement('p');
+            err.className = 'text-sm text-error';
+            err.textContent = data.error;
+            banner.appendChild(err);
+          }
+          return;
+        }
+        skillName = data.skill_name || '';
+        var nameEl = document.getElementById('chat-skill-name');
+        if (nameEl) { nameEl.textContent = skillName; }
+        document.getElementById('phase-start').classList.add('hidden');
+        document.getElementById('draft-banner').classList.add('hidden');
+        document.getElementById('phase-chat').classList.remove('hidden');
+        (data.history || []).forEach(function(m) {
+          appendMessage(m.role === 'assistant' ? 'ai' : 'user', m.content);
+        });
+        appendMessage('ai', data.response);
+        if (data.state === 'verifying') { showApproveBar(); }
+        document.getElementById('chat-input').focus();
+      } catch(e) {
+        btnResume.disabled = false;
+        appendError('Network error: ' + e.message);
+      }
+    });
+  }
+
+  if (btnResume && new URLSearchParams(window.location.search).get('resume') === '1') {
+    btnResume.click();
+  }
+
+  var btnDismiss = document.getElementById('btn-dismiss-draft');
+  if (btnDismiss) {
+    btnDismiss.addEventListener('click', async function() {
+      await fetch('/dashboard/skills/design/dismiss', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+      });
+      var banner = document.getElementById('draft-banner');
+      if (banner) { banner.remove(); }
+    });
+  }
+});
+</script>
+
+{{template "foot" .}}

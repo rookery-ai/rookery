@@ -1115,6 +1115,8 @@ func scanCoder(s scanner) (*Coder, error) {
 
 // ── Skills ─────────────────────────────────────────────────────────────────
 
+const skillCols = `id,user_id,name,description,installed_at`
+
 func (d *DB) CreateSkill(s *Skill) error {
 	_, err := d.Exec(`INSERT INTO skills(id,user_id,name,description,installed_at)
 		VALUES(?,?,?,?,datetime('now'))`,
@@ -1123,17 +1125,17 @@ func (d *DB) CreateSkill(s *Skill) error {
 }
 
 func (d *DB) GetSkillByName(userID, name string) (*Skill, error) {
-	row := d.QueryRow(`SELECT id,user_id,name,description,installed_at FROM skills WHERE user_id=? AND name=?`, userID, name)
+	row := d.QueryRow(`SELECT `+skillCols+` FROM skills WHERE user_id=? AND name=?`, userID, name)
 	return scanSkill(row)
 }
 
 func (d *DB) GetSkill(id string) (*Skill, error) {
-	row := d.QueryRow(`SELECT id,user_id,name,description,installed_at FROM skills WHERE id=?`, id)
+	row := d.QueryRow(`SELECT `+skillCols+` FROM skills WHERE id=?`, id)
 	return scanSkill(row)
 }
 
 func (d *DB) ListSkills(userID string) ([]*Skill, error) {
-	rows, err := d.Query(`SELECT id,user_id,name,description,installed_at FROM skills WHERE user_id=? ORDER BY name`, userID)
+	rows, err := d.Query(`SELECT `+skillCols+` FROM skills WHERE user_id=? ORDER BY name`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -1216,6 +1218,68 @@ func scanSkill(s scanner) (*Skill, error) {
 	}
 	sk.InstalledAt = scanTime(installedAt)
 	return &sk, nil
+}
+
+// ── Skill drafts ─────────────────────────────────────────────────────────────
+
+// UpsertSkillDraft saves or overwrites the user's single in-progress skill-creator draft.
+func (d *DB) UpsertSkillDraft(dr *SkillDraft) error {
+	_, err := d.Exec(`INSERT OR REPLACE INTO skill_drafts
+		(user_id, skill_name, state, history_json, pending_skill_md, pending_scripts_json, vetting_report, updated_at, expires_at)
+		VALUES (?,?,?,?,?,?,?,datetime('now'),?)`,
+		dr.UserID, dr.SkillName, dr.State, dr.HistoryJSON,
+		dr.PendingSkillMD, dr.PendingScriptsJSON, dr.VettingReport,
+		dr.ExpiresAt.UTC().Format("2006-01-02 15:04:05"))
+	return err
+}
+
+// GetSkillDraft returns the user's draft if one exists and has not expired.
+// Returns ErrNotFound when absent or expired.
+func (d *DB) GetSkillDraft(userID string) (*SkillDraft, error) {
+	var dr SkillDraft
+	var updatedAt, expiresAt string
+	err := d.QueryRow(`SELECT user_id, skill_name, state, history_json, pending_skill_md, pending_scripts_json, vetting_report, updated_at, expires_at
+		FROM skill_drafts WHERE user_id=? AND expires_at > datetime('now')`, userID).
+		Scan(&dr.UserID, &dr.SkillName, &dr.State, &dr.HistoryJSON,
+			&dr.PendingSkillMD, &dr.PendingScriptsJSON, &dr.VettingReport, &updatedAt, &expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	dr.UpdatedAt = scanTime(updatedAt)
+	dr.ExpiresAt = scanTime(expiresAt)
+	return &dr, nil
+}
+
+// DeleteSkillDraft removes the user's draft.
+func (d *DB) DeleteSkillDraft(userID string) error {
+	_, err := d.Exec(`DELETE FROM skill_drafts WHERE user_id=?`, userID)
+	return err
+}
+
+// ListExpiredSkillDrafts returns all skill drafts past their expiry (for the nightly GC).
+func (d *DB) ListExpiredSkillDrafts() ([]*SkillDraft, error) {
+	rows, err := d.Query(`SELECT user_id, skill_name, state, history_json, pending_skill_md, pending_scripts_json, vetting_report, updated_at, expires_at
+		FROM skill_drafts WHERE expires_at <= datetime('now')`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var drafts []*SkillDraft
+	for rows.Next() {
+		var dr SkillDraft
+		var updatedAt, expiresAt string
+		if err := rows.Scan(&dr.UserID, &dr.SkillName, &dr.State, &dr.HistoryJSON,
+			&dr.PendingSkillMD, &dr.PendingScriptsJSON, &dr.VettingReport, &updatedAt, &expiresAt); err != nil {
+			return nil, err
+		}
+		dr.UpdatedAt = scanTime(updatedAt)
+		dr.ExpiresAt = scanTime(expiresAt)
+		drafts = append(drafts, &dr)
+	}
+	return drafts, rows.Err()
 }
 
 // ── MCP servers ────────────────────────────────────────────────────────────

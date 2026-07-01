@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/simple-agents/internal/skilllibrary"
 	"github.com/ilijad1/simple-agents/internal/skillstore"
 	"github.com/ilijad1/simple-agents/internal/vault"
 )
@@ -205,7 +207,8 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		stateRaw = []byte("{}")
 	}
 
-	// Load skills context.
+	// Load skills context. The available pool is core skills (always-on, embedded)
+	// plus the user's own installed/created skills.
 	allSkills, _ := r.db.ListSkills(input.UserID)
 	declaredContent, _ := r.loadDeclaredSkillContent(input.UserID, manifest.Skills)
 
@@ -214,10 +217,18 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		userMemory, _ = r.memStore.ContextString(input.UserID)
 	}
 
-	skillRefs := make([]prompts.SkillRef, len(allSkills))
-	for i, sk := range allSkills {
-		skillRefs[i] = prompts.SkillRef{Name: sk.Name, Description: sk.Description}
+	skillRefs := make([]prompts.SkillRef, 0, len(allSkills)+8)
+	for _, s := range skilllibrary.LoadBundled() {
+		skillRefs = append(skillRefs, prompts.SkillRef{Name: s.Name, Description: s.Description})
 	}
+	for _, sk := range allSkills {
+		skillRefs = append(skillRefs, prompts.SkillRef{Name: sk.Name, Description: sk.Description})
+	}
+
+	homeDir := filepath.Join(r.homesDir, input.UserID)
+	vaultRoot := filepath.Join(r.agentsDir, input.UserID)
+	skillEnv := prompts.SkillEnvBlock(r.resolveSkillBins(input.UserID, homeDir, manifest.Skills, declaredContent), homeDir, vaultRoot)
+
 	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
 		AgentMD:         string(agentMD),
 		StateJSON:       string(stateRaw),
@@ -225,7 +236,8 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		AllSkills:       skillRefs,
 		DeclaredSkills:  manifest.Skills,
 		DeclaredContent: declaredContent,
-		VaultRoot:       filepath.Join(r.agentsDir, input.UserID),
+		SkillEnv:        skillEnv,
+		VaultRoot:       vaultRoot,
 		AgentDir:        agentDir,
 		ChatApps:        r.loadChatApps(input.UserID),
 		BackendType:     r.backendType(),
@@ -729,6 +741,11 @@ func saveState(agentDir string, state map[string]interface{}) error {
 func (r *Runner) loadDeclaredSkillContent(userID string, skillNames []string) (map[string]string, error) {
 	result := make(map[string]string)
 	for _, name := range skillNames {
+		// Core skills are always-on and embedded — read from the binary, not disk.
+		if content, ok := skilllibrary.CoreSkillContent(name); ok {
+			result[name] = content
+			continue
+		}
 		skillMD := filepath.Join(skillstore.SkillDir(r.skillsDir, userID, name), "SKILL.md")
 		data, err := os.ReadFile(skillMD)
 		if err != nil {
@@ -738,6 +755,47 @@ func (r *Runner) loadDeclaredSkillContent(userID string, skillNames []string) (m
 		result[name] = string(data)
 	}
 	return result, nil
+}
+
+// resolveSkillBins resolves the absolute path of every CLI tool a declared skill
+// requires (metadata.openclaw.requires.bins / anyBins), so the runtime env block
+// can tell the agent where to invoke each tool. A tool is "resolved" if it exists
+// at $HOME/.local/bin/<bin> or on PATH; otherwise Path is empty (the env block
+// instructs the agent to install it via the cli-tool-installer skill).
+func (r *Runner) resolveSkillBins(userID, homeDir string, declaredSkills []string, declaredContent map[string]string) []prompts.SkillBin {
+	localBin := filepath.Join(homeDir, ".local", "bin")
+	var out []prompts.SkillBin
+	seen := map[string]bool{}
+	add := func(skill, bin string) {
+		if bin == "" || seen[bin] {
+			return
+		}
+		seen[bin] = true
+		cand := filepath.Join(localBin, bin)
+		if info, err := os.Stat(cand); err == nil && !info.IsDir() {
+			out = append(out, prompts.SkillBin{Skill: skill, Bin: bin, Path: cand})
+			return
+		}
+		if p, err := exec.LookPath(bin); err == nil {
+			out = append(out, prompts.SkillBin{Skill: skill, Bin: bin, Path: p})
+			return
+		}
+		out = append(out, prompts.SkillBin{Skill: skill, Bin: bin, Path: ""})
+	}
+	for _, name := range declaredSkills {
+		content, ok := declaredContent[name]
+		if !ok {
+			continue
+		}
+		meta, _ := skilllibrary.ParseMeta(content)
+		for _, b := range meta.RequiresBins {
+			add(name, b)
+		}
+		for _, b := range meta.AnyBins {
+			add(name, b)
+		}
+	}
+	return out
 }
 
 // loadChatApps returns the chat apps connected by this user as prompts.ChatAppInfo

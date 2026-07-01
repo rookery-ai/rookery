@@ -33,9 +33,9 @@ AST guardrail tests shell out to `python3`. If Python is not available, those te
 `cmd/simple-agents/main.go` loads `config.yaml` via `internal/config`, wires all services, and
 delegates subcommands via `github.com/urfave/cli/v3`. The `serve` subcommand:
 1. Opens/migrates SQLite DB
-2. Creates secrets service, coder, agent designer, agent runner
+2. Creates secrets service, coder, agent designer, agent runner, skill designer (`skilldesigner.Flow`)
 3. Starts `GatewayManager` (loads all `platform_connections` from DB, starts per-user adapters)
-4. Starts scheduler and reminder background goroutines
+4. Starts scheduler and reminder background goroutines (nightly GC also sweeps expired `skill_drafts` + orphaned staging dirs)
 5. Starts Echo web server
 
 ### Inbound message pipeline
@@ -65,18 +65,20 @@ Telegram adapter (per-user bot instance)
 | `internal/secrets` | AES-256-GCM store; Argon2id key derivation; `GetAll()` decrypts all for env injection; `Proxy()` resolves `${NAME}` in-memory only |
 | `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router`, `IdentityResolver`, `TelegramGateway` |
 | `internal/coder` | `Coder`: runs coder CLI subprocess with full per-user isolation; `CoderBackend` interface abstracts Claude vs. generic CLIs; `WithNoTools()` for text-only calls; `WithExtraEnv()` for secret injection |
-| `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects |
-| `internal/agentrunner` | Load agent → decrypt secrets into env via `WithExtraEnv` → coder subprocess → capture `[CHAT]` lines → send via GatewayManager; timestamped run logs; `RunInput.OnProgress` per-turn hook for live SSE streaming. **Reliable delivery**: `parseCoderOutput` (blank lines don't end `[CHAT]`; empty `[CHAT]` dropped; `[SILENT]` detected) + `extractProseMessage` fallback when no `[CHAT]` emitted and not silent → visible warning when nothing deliverable. Covered by `runner_test.go`. |
+| `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal) |
+| `internal/skilldesigner` | Conversational skill-creator wizard mirroring `agentdesigner.Flow` (FSM Idle→AwaitingResume→Describing→Designing→Verifying→Done, SSE progress, 7-day drafts, approval triggers); `SkillSaver` writes SKILL.md+scripts/ to vault + DB upsert; generation runs with the `skill-creator` core skill, vetting runs the `skill-vetter` core skill as a text-only audit; `vettingBlocksSave()` parses the verdict line. Web-wired only (Telegram route not yet added). |
+| `internal/skilllibrary` | Embedded core skill catalog (`go:embed skills/*/SKILL.md`) — always-on for every user, no DB rows, no admin gate. `LoadBundled()`, `CoreSkillContent(slug)`, `IsCoreSkill()`, `ParseMeta()` (Anthropic+openclaw YAML frontmatter: requires.bins/anyBins/env, install specs). Supersedes the admin-catalog approach dropped in migration 009. |
+| `internal/agentrunner` | Load agent → decrypt secrets into env via `WithExtraEnv` → coder subprocess → capture `[CHAT]` lines → send via GatewayManager; timestamped run logs; `RunInput.OnProgress` per-turn hook for live SSE streaming. Skills pool = core skills (embedded) + user skills; `resolveSkillBins` resolves declared tools' paths for the runtime `<skill_environment>` block; `loadDeclaredSkillContent` reads core skills from the embed. **Reliable delivery**: `parseCoderOutput` (blank lines don't end `[CHAT]`; empty `[CHAT]` dropped; `[SILENT]` detected) + `extractProseMessage` fallback when no `[CHAT]` emitted and not silent → visible warning when nothing deliverable. Covered by `runner_test.go`. |
 | `internal/sandbox` | Self-contained Landlock filesystem confinement for coder subprocesses (Linux). `Spec`, `Supported()`, `Wrap()` (re-exec via the hidden `__sandbox-exec` helper), `Exec()` (applies Landlock + rlimits, then `execve`). No external dependency. |
 | `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users |
 | `internal/reminder` | Creates/lists/fires reminders; background polling goroutine. Reminders live only in the DB and the reminders UI tab — they are NOT reflected to the vault. |
 | `internal/chat` | `Chat` create/list/stop/resume/delete; 30-min idle auto-stop; `BuildUserContext` (shared **identity-only** context builder for one-off chat — profile/memory/agents/MCP; the broader KB is retrieved on demand via tools, not injected here) |
-| `internal/prompts` | Central home for all LLM prompt construction: `BuildDesignSystemPrompt` (+ `<knowledge_base>` block + `KBManifest`), `BuildImplementationPrompt`, `BuildEditImplementationPrompt` (diagnose-before-fix), `BuildCoderPrompt`, `BuildChatSystemPrompt` (chat read+write KB instruction), `BuildChildAgentFollowUpPrompt`, `BuildSkillMetaPrompt`, `BuildReminderParsePrompt`. No inline prompt text exists outside this package. Shared single-source blocks: `agentPhilosophyBlock` (three-tier), `platformContextBlock`, `coderCapabilitiesBlock` (backend-aware), `agentArchitectureGateBlock`, `testingRulesBlock`, `shellSafetyBlock`, `scriptRobustnessBlock`, `composioServicesBlock`. `ChatAppsForPlatforms` + `MapCoderBackend` bridge callers to prompt params. |
+| `internal/prompts` | Central home for all LLM prompt construction: `BuildDesignSystemPrompt` (+ `<knowledge_base>` block + `KBManifest`), `BuildImplementationPrompt`, `BuildEditImplementationPrompt` (diagnose-before-fix), `BuildCoderPrompt` (+ `<skill_instructions>` + `<skill_environment>` blocks), `BuildChatSystemPrompt` (chat read+write KB instruction), `BuildChildAgentFollowUpPrompt`, `BuildSkillMetaPrompt`, `BuildReminderParsePrompt`, skill-creator prompts (`BuildSkillDesignSystemPrompt`, `BuildSkillImplementationPrompt`, `BuildSkillVettingPrompt`, `SkillEnvBlock`). `SkillRef`/`SkillBin` types. No inline prompt text exists outside this package. Shared single-source blocks: `agentPhilosophyBlock` (three-tier), `platformContextBlock`, `coderCapabilitiesBlock` (backend-aware), `agentArchitectureGateBlock`, `testingRulesBlock` (one bounded smoke test + dry run; real secrets at build time, no outbound sends), `shellSafetyBlock`, `scriptRobustnessBlock`, `composioServicesBlock`. `ChatAppsForPlatforms` + `MapCoderBackend` bridge callers to prompt params. |
 | `internal/memory` | Per-user structured context store. Memory lives as named `.md` files in `memory/` (`USER.md`, `SOUL.md`, `GENERAL.md`, etc.) — editable via the KB browser. `ContextString()` reads all files, skips placeholder-only ones, and returns sectioned markdown for LLM injection. `Append/List/Delete` target GENERAL.md bullet lines (used by Telegram `/memory` command). `MigrateToStructuredFiles()` consolidates legacy UUID-keyed entries at startup. |
 | `internal/vault` | Per-user Obsidian-style knowledge base: `Vault` (paths + `Resolve` safety + file IO), `Reflector` (chats→markdown+sidecar), `LinkIndex` ([[wikilinks]]), `Searcher` (ripgrep), `Guard` (post-run write-scope enforcement), `MigrateLegacyLayout`, `MigrateSessionsToChats`. |
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
 | `internal/profile` | Per-user personalization (name, email, location, timezone, tone, language, notes); stored in the generic `settings` table; `Load()`/`Save()`/`ContextString()` for LLM injection; `LoadLocation()` for timezone-aware reminder parsing |
-| `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per user |
+| `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per user. `SkillDir(base, userID, name)` is the path helper shared with the skill designer (staging dirs use the `.staging-<name>` convention). |
 | `web/` | Echo v4 web server; full user dashboard + admin UI |
 
 ### Per-user knowledge base (vault)
@@ -130,15 +132,23 @@ Agent creation uses a single `agentdesigner.Flow` FSM shared between Telegram an
 
 **FSM states:** `StateDescribing` (Telegram only) → `StateDesigning` → `StateVerifying` → `StateDone`
 
-**Approval triggers** (exact match): `"approve"`, `"go ahead"`, `"build it"`, `"create it"`, `"/approve"`
+**Approval triggers** — two tests, deliberately different:
+- **`isApproval`** (used in `StateDesigning`, strict) — exact match on `"approve"`, `"go ahead"`, `"build it"`, `"create it"`, `"/approve"` (trailing punctuation trimmed). Casual `"ok"`/`"yes"` while answering design questions does NOT launch a full generation run.
+- **`isVerifyApproval`** (used in `StateVerifying`, forgiving) — also accepts `"yes"`, `"save"`, `"ok"`, `"looks good"`, `"confirm"`, `"go"`, `"do it"`, `"ship it"`, `"lgtm"`, `"perfect"`, `"great"`, …, and excludes negative cues (`"don't"`, `"not yet"`, `"change"`, `"wait"`, `"instead"`). A natural confirmation saves the build instead of being read as a change request.
 
-**On approval:** `runGeneration()` calls the coder with full tools (`WithDir(agentDir).WithAllowedTools("Bash,Write,Edit,Read")`). Coder writes `AGENT.md` + `tools/*.py` to disk, runs scripts via Bash, fixes errors, outputs `[TEST_OUTPUT]...[/TEST_OUTPUT]`. Flow reads AGENT.md, runs guardrails, stores in `PendingAgentMD`/`PendingTools`, moves to `StateVerifying`. If `[TEST_OUTPUT]` is absent, user stays in `StateDesigning`.
+**Change requests no longer discard the build.** When the user replies in `StateVerifying` with something that isn't approval, the session returns to `StateDesigning` but **keeps** `PendingAgentMD`/`PendingTools` in memory — a misfire (e.g. `"yes"`, `"save"`, `"ok"`) no longer silently drops the generated agent. The next approve re-generates with the change context and overwrites.
+
+**On approval:** `runGeneration()` calls the coder with the same tool set as an agent run (`WithDir(agentDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit")`) — so the coder runs REAL end-to-end tests against live services during the build, not mock-only. Secrets are injected via `WithSecretsLoader`/`WithExtraEnv` so the real API calls the agent will make at run time are actually exercised here. The one hard exception: never send real OUTBOUND messages on the user's behalf at build time (enforced by the testing-rules prompt, not by withholding credentials). Coder writes `AGENT.md` + `tools/*.py` to disk, runs scripts via Bash, fixes errors, outputs `[TEST_OUTPUT]...[/TEST_OUTPUT]`. Flow reads AGENT.md, runs guardrails, stores in `PendingAgentMD`/`PendingTools`, moves to `StateVerifying`. If `[TEST_OUTPUT]` is absent, user stays in `StateDesigning`.
+
+**Test-artifact cleanup.** A real end-to-end test leaves junk in the agent dir (downloaded files, run outputs, scratch probes like `_probe.py`). `cleanupTestArtifacts(agentDir)` (post-approval, in `saveAndFinish`/`updateAndFinish`) removes that junk so only shipping source remains; artifacts persist through `StateVerifying` so the user can see real test output as proof. `isTestArtifact(path, name, toolsDir)` in `toolstree.go` is the shared classifier (binary-download extensions, run-output file names/suffixes, `_`-prefixed scratch probes at the `tools/` top level, root-level scratch `.json`). `ReadToolsTree` also skips test artifacts so they never corrupt the pending-tools map or trip guardrails.
 
 **Generation failure handling:** `[BLOCKED]` marker, `ErrUsageLimit`, and timeout all return soft user-facing strings (not Go errors) — user stays in `StateDesigning`.
 
 **SSE progress:** `DesignSession` carries `progressCh chan string` + `cancelGenerate`. `GetProgressChan(userID)` lets the web SSE handler stream milestone events to the browser.
 
 **Auto-schedule:** If AGENT.md starts with `# Suggested schedule: */10 * * * *`, `parseSuggestedSchedule()` calls `db.UpsertAgentSchedule()` immediately.
+
+**Skills selection via `# Skills:` header.** `DesignSession.Skills` is now `[]prompts.SkillRef` (name+description), loaded once on start as **core skills (embedded) + the user's own skills**. The designer's `<available_skills>` block lists each skill with its description and instructs the coder to emit a `# Skills: skill-one, skill-two` header line in AGENT.md (alongside the schedule line). `parseSkillsLine(agentMD, installed)` reads that header, validates names against the installed set, and returns only known names; if the line is absent, `saveAndFinish`/`updateAndFinish` fall back to all installed skills. This is how an agent declares which skills it actually uses at run time.
 
 ### Prompt architecture (coder-agnostic, three-tier)
 
@@ -159,6 +169,25 @@ Composio connects agents to 250+ external services via the **v3 REST API** (not 
 - Base: `https://backend.composio.dev/api/v3` · Auth: `x-api-key` header
 - Connected accounts: `GET /connected_accounts?limit=100` · Execute: `POST /tools/execute/{TOOL_SLUG}`
 - Guardrails block: SDK imports (`from composio import`), hardcoded keys (`ak_...`), wrong host (`api.composio.dev`), old versions (`/v1/`, `/v2/`).
+
+### Skill system (core + user skills)
+
+Two pools of skills, both surfaced to the agent designer and the runner as `[]prompts.SkillRef`:
+
+- **Core skills** — embedded in the binary (`internal/skilllibrary/skills/*/SKILL.md`, `go:embed`). Always-on for every user: no DB rows, no disk seeding, no admin gate. `LoadBundled()` enumerates metadata; `CoreSkillContent(slug)` returns the full SKILL.md (frontmatter+body) for agent-context injection when an agent declares the skill; `IsCoreSkill(slug)` is the reserved-name guard. `ParseMeta()` reads Anthropic+openclaw YAML frontmatter (name, description, version, license, category, `metadata.openclaw.requires.{bins,anyBins,env}`, `metadata.openclaw.install[]`). 12 bundled skills: csv, pdf, docx, pptx, xlsx, markdown, web-search, web-scraper, playwright-browser, google-workspace, github-integration, composio-toolkit, cli-tool-installer, skill-creator, skill-vetter.
+- **User skills** — created via the skill creator (below) or imported (ZIP/pasted SKILL.md), per-user, written to `<vault>/skills/<name>/SKILL.md` (+ `scripts/`), tracked in the `skills` table. Loaded from disk by `skillstore`.
+
+At run time (`agentrunner.runCoderAgent`), the agent's declared skills' content is injected into the coder prompt's `<skill_instructions>` block. Core skill content comes from the embed (`skilllibrary.CoreSkillContent`); user skill content is read from disk. `resolveSkillBins` resolves the absolute path of every CLI tool a declared skill requires (`requires.bins` / `anyBins`: `$HOME/.local/bin/<bin>` then `PATH`) and `prompts.SkillEnvBlock` builds a `<skill_environment>` block telling the agent where each tool lives (or to install it via the cli-tool-installer skill) plus sandbox conventions (invoke by absolute path, use `$TMPDIR` not `/tmp`, secrets are env vars, vault root).
+
+**Skill format.** `skills/<name>/SKILL.md` (required: YAML frontmatter + markdown body) + optional `scripts/` (deterministic code) + `references/` (on-demand docs). Only `name`+`description` are strictly required; `description` is the trigger — it must say what the skill does AND the contexts that activate it. Tool names are written BARE in the body (the runtime env block supplies the real path).
+
+**Conversational skill creator** (`internal/skilldesigner`, web `/dashboard/skills/new`): mirrors `agentdesigner.Flow`'s shape — FSM (`StateIdle → StateAwaitingResume → StateDescribing → StateDesigning → StateVerifying → StateDone`), SSE progress, 7-day drafts (`skill_drafts` table, one per user), strict/forgiving approval triggers (same split as the agent designer). Flow:
+1. Design conversation (text-only coder, `BuildSkillDesignSystemPrompt`) — focused Q&A, proposes a plan, asks for `approve`. Drafts are persisted on every turn so the conversation survives reloads/restarts (even on usage-limit).
+2. Generation (`runGeneration`, `BuildSkillImplementationPrompt` with the `skill-creator` core skill body) — coder writes SKILL.md (+ `scripts/`) into a staging dir (`<vault>/skills/.staging-<name>/`, live folder touched only on approval), tests scripts, emits `[TEST_OUTPUT]`. Guardrails (`CheckEthics` + `RunToolGuardrails`) run on the actual generated content.
+3. Vetting (`vetSkill`, `BuildSkillVettingPrompt` with the `skill-vetter` core skill body as the system prompt) — a second text-only coder call audits the skill for malicious behaviour (exfil of vault notes/USER.md/SOUL.md/secrets, raw-IP network calls, obfuscated payloads, sudo, destructive ops, …) and emits a structured report. `vettingBlocksSave()` parses the authoritative `Verdict:` line (a pure `❌ do not save` blocks save; an echoed `✅ safe to save | ⚠️ … | ❌ do not save` alternation does NOT — guards against a literal model echoing the option list). A blocking verdict keeps the user in `StateDesigning` and the skill is NOT saved. Covered by `flow_test.go`.
+4. Approval → `SkillSaver.SaveSkill` writes SKILL.md+scripts/ to the vault, upserts the `skills` row (in-place overwrite if a skill of the same name exists; core-skill names are reserved and rejected), drops the draft + session, cleans up staging.
+
+Nightly GC (in `serve`) sweeps expired skill drafts and their orphaned `.staging-<name>/` dirs alongside agent drafts.
 
 ### Conversational agent editing
 
@@ -191,14 +220,14 @@ Delivery reaches both paths: `SendOutput` (durable — web → `gateway.SendToUs
 Secrets stored encrypted in `secrets` table. Three sources of `MasterPw` at runtime:
 - **Scheduled runs** — `scheduler.go` decrypts stored `EncryptedMasterPassword` (encrypted with `systemKey`).
 - **Manual runs** — `handleRunAgent()` does the same. No password field on the run form.
-- **Agent generation** — `Flow.WithSecretsLoader()` decrypts and injects via `WithExtraEnv(secrets)` so agents can make real API calls during validation.
+- **Agent generation** — `Flow.WithSecretsLoader()` decrypts and injects via `WithExtraEnv(secrets)` so agents can make real API calls during validation. Same loader is wired on the skill creator (`skilldesigner.Flow.WithSecretsLoader`).
 
 ### Coder tool isolation
 
 `internal/coder/coder.go` modifiers (all return a shallow copy):
 
 - **`WithNoTools()`** — `--allowedTools ""`. Used for design conversation turns.
-- **`WithAllowedTools(tools)`** — Required whenever `--setting-sources ""` is active or subprocess blocks on permission prompts. Generation: `"Bash,Write,Edit,Read"`; runs: `"Bash,WebFetch,Read,Write,Edit"`.
+- **`WithAllowedTools(tools)`** — Required whenever `--setting-sources ""` is active or subprocess blocks on permission prompts. Agent generation: `"Bash,WebFetch,Read,Write,Edit"` (matches the run set, so builds do real end-to-end tests against live services); skill generation: `"Bash,Write,Edit,Read"`; runs: `"Bash,WebFetch,Read,Write,Edit"`.
 - **`WithDir(dir)`** — overrides subprocess CWD. Used by generation AND every agent run — without it the agent writes to the shared per-user home and contaminates other agents.
 - **`WithExtraEnv(env)`** — merges additional env vars. System overrides always take precedence.
 - **`WithBackendType(t)`** — forces `"claude"`, `"generic"`, or `""` (auto-detect by binary name).
@@ -241,7 +270,7 @@ Secrets stored encrypted in `secrets` table. Three sources of `MasterPw` at runt
 
 SQLite via `modernc.org/sqlite` (CGo-free). WAL mode + foreign keys set on open. Migrations in alphabetical order from `migrations/`.
 
-Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`, `agent_schedules`, `agent_runs`, `secrets`, `chats`, `reminders`, `user_permissions`, `mcp_servers`, `settings`, `audit_logs`, `schema_migrations`, `chat_messages` (FK `chat_id`→`chats`), `coders`, `skills`, `agent_skills`.
+Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`, `agent_schedules`, `agent_runs`, `secrets`, `chats`, `reminders`, `user_permissions`, `mcp_servers`, `settings`, `audit_logs`, `schema_migrations`, `chat_messages` (FK `chat_id`→`chats`), `coders`, `skills`, `agent_skills`, `skill_drafts` (one row per user; 7-day TTL; FK `user_id`→`users`). Note: migration 008 created an admin `skill_library` catalog table; migration 009 dropped it (and `skills.library_slug`/`library_version`) when core skills pivoted to embedded-only.
 
 ### Web UI routes
 
@@ -264,7 +293,15 @@ Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`,
 /dashboard/agents/:id/schedule[/delete]
 /dashboard/agents/:id/agent-md      # POST: save AGENT.md (ethics check)
 /dashboard/agents/:id/skills        # POST: update agent skill assignments
-/dashboard/skills, /dashboard/skills/:id
+/dashboard/skills                     # list: your skills + core skills (always-on) + draft-resume card
+/dashboard/skills/new                 # conversational skill creator (chat UI)
+/dashboard/skills/design              # POST: drive skill-creator FSM turn-by-turn (JSON {name,message})
+/dashboard/skills/design/cancel       # POST: cancel active skill-design session
+/dashboard/skills/design/resume       # POST: resume a saved skill draft
+/dashboard/skills/design/dismiss      # POST: discard a saved skill draft
+/dashboard/skills/design/progress     # GET SSE: skill-generation milestone events
+/dashboard/skills/core/:slug         # GET: read-only view of an embedded core skill
+/dashboard/skills/:id                 # user skill detail (edit/delete)
 /dashboard/secrets
 /dashboard/connectors
 /dashboard/chats                     # list chats; per-chat detail has composer (send msg), resume/stop/delete
@@ -307,4 +344,5 @@ Admin creates **Coder Profiles** (`coders` table) with `claude_bin`, `timeout_s`
 - No integration or e2e test coverage — unit tests cover logic boundaries; coder subprocess round-trips (real edit → test → approve) are exercised manually.
 - **Discord adapter** — not implemented.
 - **`/remind` list/delete via Telegram** — only create is wired.
+- **Skill creator via Telegram** — `internal/skilldesigner.Flow` supports the Telegram states (`StateDescribing`, `StateAwaitingResume`) but the gateway router has no `/skill` command route; the skill creator is web-only for now (platform-parity gap).
 - **MCP servers** — `mcp_servers` table exists; MCP tool execution not implemented.

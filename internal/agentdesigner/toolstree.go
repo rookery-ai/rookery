@@ -55,10 +55,56 @@ func WriteToolsTree(toolsDir string, tools map[string]string) error {
 	return nil
 }
 
+// isTestArtifact reports whether a file under the agent work dir is a build-time test
+// artifact (binary download, run output, scratch probe) rather than shipping agent source.
+// toolsDir is the absolute path to the agent's tools/ directory; it is used to detect
+// _-prefixed scratch probes that sit at the tools/ top level (real modules are plain-named
+// there; dunders like __init__.py and __main__.py are kept).
+func isTestArtifact(absPath, name, toolsDir string) bool {
+	// Binary downloads / saved emails — never shipping source.
+	artifactExts := map[string]bool{
+		".pdf": true, ".eml": true, ".msg": true,
+		".doc": true, ".docx": true, ".xls": true, ".xlsx": true, ".ppt": true, ".pptx": true,
+		".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true,
+		".zip": true, ".tar": true, ".gz": true, ".bz2": true, ".7z": true,
+		".mp3": true, ".mp4": true, ".mov": true, ".avi": true,
+		".htm": true, ".html": true, ".pyc": true,
+	}
+	// Well-known run-output file names (matched with or without a leading _).
+	artifactNames := map[string]bool{
+		"run.json": true, "run.err": true, "run.out": true,
+		"output.json": true, "results.json": true, "results.txt": true,
+		"captured.json": true, "captured.txt": true, "testcfg.json": true,
+	}
+
+	lower := strings.ToLower(name)
+	if artifactExts[strings.ToLower(filepath.Ext(name))] {
+		return true
+	}
+	if artifactNames[lower] || artifactNames[strings.TrimPrefix(lower, "_")] {
+		return true
+	}
+	// *.out / *.err / *.log run-output suffixes.
+	if strings.HasSuffix(lower, ".out") || strings.HasSuffix(lower, ".err") || strings.HasSuffix(lower, ".log") {
+		return true
+	}
+	// _-prefixed scratch probes at tools/ top level. Real agent modules are plain-named;
+	// dunders (__init__.py, __main__.py) are legitimate.
+	if strings.HasPrefix(name, "_") && !strings.HasPrefix(name, "__") {
+		td, err1 := filepath.Abs(toolsDir)
+		parent, err2 := filepath.Abs(filepath.Dir(absPath))
+		if err1 == nil && err2 == nil && parent == td {
+			return true
+		}
+	}
+	return false
+}
+
 // ReadToolsTree walks toolsDir recursively and returns a relpath→content map of
 // the agent's project files. Subdirectories and non-.py files are included so an
 // agent can ship helper modules, tests, and a requirements.txt. __pycache__/ and
-// other dotted/cache directories and *.pyc files are skipped; per-file and total
+// other dotted/cache directories, *.pyc files, and build-time test artifacts
+// (binary downloads, run outputs, scratch probes) are skipped; per-file and total
 // size caps prevent reading back junk or binaries. Returns an empty map if
 // toolsDir does not exist.
 func ReadToolsTree(toolsDir string) (map[string]string, error) {
@@ -81,6 +127,10 @@ func ReadToolsTree(toolsDir string) (map[string]string, error) {
 			return nil
 		}
 		if strings.HasSuffix(d.Name(), ".pyc") {
+			return nil
+		}
+		// Skip test artifacts so they never corrupt the pending-tools map or trip guardrails.
+		if isTestArtifact(path, d.Name(), toolsDir) {
 			return nil
 		}
 		info, err := d.Info()

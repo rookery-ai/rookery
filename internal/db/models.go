@@ -71,6 +71,20 @@ type Skill struct {
 	InstalledAt time.Time
 }
 
+// SkillDraft is a persisted in-progress skill-creator session, used to resume
+// after a page reload, browser close, or server restart. One per user.
+type SkillDraft struct {
+	UserID             string
+	SkillName          string
+	State              string // "designing" or "verifying"
+	HistoryJSON        string
+	PendingSkillMD     string
+	PendingScriptsJSON string
+	VettingReport      string
+	UpdatedAt          time.Time
+	ExpiresAt          time.Time
+}
+
 type AgentSchedule struct {
 	ID        string
 	AgentID   string

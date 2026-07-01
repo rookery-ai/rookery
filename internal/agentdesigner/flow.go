@@ -16,6 +16,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/prompts"
+	"github.com/ilijad1/simple-agents/internal/skilllibrary"
 	"github.com/robfig/cron/v3"
 )
 
@@ -56,7 +57,7 @@ type DesignSession struct {
 	AgentName          string
 	State              DesignState
 	History            []db.ChatMessage // full conversation fed to coder on every turn
-	Skills             []string         // installed skill names, loaded once on Start
+	Skills             []prompts.SkillRef // installed skills (name+description), loaded once on Start
 	ConnectedPlatforms []string         // e.g. ["telegram"] — loaded from platform_connections
 	UserProfile        string           // rendered "[User profile]" block, loaded once on session start
 	UserMemory         string           // bullet list of saved memory entries, loaded once on session start
@@ -717,16 +718,19 @@ func (f *Flow) stepDesigning(ctx context.Context, userID, input string) (string,
 
 // stepVerifying: test output was shown; wait for approval or change request.
 func (f *Flow) stepVerifying(ctx context.Context, userID, input string) (string, bool, string, error) {
-	if isApproval(input) {
+	if isVerifyApproval(input) {
 		return f.finalizeAgent(ctx, userID)
 	}
 
-	// User wants changes — drop pending content, return to designing.
+	// User wants changes — return to designing to revise. KEEP the generated
+	// agent in memory (PendingAgentMD/Tools): the next approve re-generates with
+	// the change context and overwrites it, but a misfire no longer silently
+	// discards the whole build. Previously this cleared the pending content,
+	// which lost the generated agent if the user's reply wasn't an exact
+	// "approve" (e.g. "yes", "save", "ok", "approve!").
 	f.mu.Lock()
 	sess := f.sessions[userID]
 	sess.State = StateDesigning
-	sess.PendingAgentMD = ""
-	sess.PendingTools = nil
 	f.mu.Unlock()
 
 	response, err := f.callCoder(ctx, userID, input)
@@ -920,7 +924,12 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 	// also cancelling the outer HTTP/SSE context.
 	// Inject secrets (e.g., COMPOSIO_API_KEY) so the coder can make real API calls
 	// during validation instead of using mock data.
-	generationCoder := coderSvc.WithDir(workDir).WithAllowedTools("Bash,Write,Edit,Read")
+	// Same tool set as an agent run (Bash,WebFetch,Read,Write,Edit) so the coder can do
+	// REAL end-to-end tests against the live services during the build — not mock-only.
+	// Secrets are injected below so the real API calls the agent will make at run time are
+	// actually exercised here (the only exception is sending real outbound messages,
+	// enforced by the testing-rules prompt, not by withholding credentials).
+	generationCoder := coderSvc.WithDir(workDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit")
 	if f.secretsLoader != nil {
 		if env, err := f.secretsLoader(genCtx, userID); err == nil && len(env) > 0 {
 			generationCoder = generationCoder.WithExtraEnv(env)
@@ -1014,6 +1023,47 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 		"Here's what a test run produces:\n\n---\n%s\n---\n\nDoes this look right? Type **approve** to save the agent, or tell me what to change.",
 		testOut,
 	), false, "", nil
+}
+
+// cleanupTestArtifacts removes downloaded files, run outputs, scratch probes, and caches
+// left in agentDir by the coder's real end-to-end test step, so only the agent's own
+// source remains on disk after the build. Called post-save (after user approves) so
+// artifacts persist through StateVerifying as proof for the user, then are cleaned up once
+// the agent is persisted. Uses isTestArtifact (toolstree.go) as the shared classifier.
+// Also removes root-level scratch .json files (e.g. acc.json, probe.json) that are direct
+// children of agentDir but are not state.json or agent.json.
+func cleanupTestArtifacts(agentDir string) {
+	toolsDir := filepath.Join(agentDir, "tools")
+	absAgentDir, _ := filepath.Abs(agentDir)
+	_ = filepath.Walk(agentDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			if path != agentDir {
+				name := info.Name()
+				if name == "__pycache__" || name == ".pytest_cache" || strings.HasPrefix(name, ".") {
+					_ = os.RemoveAll(path)
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		name := info.Name()
+		if isTestArtifact(path, name, toolsDir) {
+			_ = os.Remove(path)
+			return nil
+		}
+		// Root-level scratch .json (e.g. acc.json, probe.json) — direct children of the
+		// agent dir only; files in subdirs (tools/, notes/, logs/) are unaffected.
+		if filepath.Ext(name) == ".json" && name != "state.json" && name != "agent.json" {
+			parent, err2 := filepath.Abs(filepath.Dir(path))
+			if err2 == nil && parent == absAgentDir {
+				_ = os.Remove(path)
+			}
+		}
+		return nil
+	})
 }
 
 // copyAgentWorkspace creates a fresh staging directory containing the editable
@@ -1120,15 +1170,28 @@ func (f *Flow) saveAndFinish(ctx context.Context, userID, agentMD string, tools 
 	sess := f.sessions[userID]
 	agentIDSnap := sess.AgentID
 	agentNameSnap := sess.AgentName
-	skillsSnap := sess.Skills
+	skillRefs := sess.Skills
 	f.mu.Unlock()
 
 	requiredSecrets := parseRequiredSecrets(agentMD)
 	description := extractDescription(agentMD, agentNameSnap)
 
+	skillsSnap := parseSkillsLine(agentMD, skillRefs)
+	if skillsSnap == nil {
+		skillsSnap = make([]string, 0, len(skillRefs))
+		for _, sr := range skillRefs {
+			skillsSnap = append(skillsSnap, sr.Name)
+		}
+	}
+
 	if err := f.designer.SaveAgent(userID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap, requiredSecrets); err != nil {
 		return "", false, "", fmt.Errorf("save agent: %w", err)
 	}
+
+	// Remove test artifacts (downloaded files, scratch probes, run outputs) from the live
+	// agent dir now that the agent is saved. Artifacts persist through StateVerifying so
+	// the user can see real test output as proof; this is the post-approval cleanup.
+	cleanupTestArtifacts(AgentDir(f.designer.agentsDir, userID, agentIDSnap))
 
 	// Auto-create schedule if coder embedded a suggested cron expression.
 	scheduleMsg := ""
@@ -1170,15 +1233,27 @@ func (f *Flow) updateAndFinish(ctx context.Context, userID, agentMD string, tool
 	sess := f.sessions[userID]
 	agentIDSnap := sess.AgentID
 	agentNameSnap := sess.AgentName
-	skillsSnap := sess.Skills
+	skillRefs := sess.Skills
 	f.mu.Unlock()
 
 	requiredSecrets := parseRequiredSecrets(agentMD)
 	description := extractDescription(agentMD, agentNameSnap)
 
+	skillsSnap := parseSkillsLine(agentMD, skillRefs)
+	if skillsSnap == nil {
+		skillsSnap = make([]string, 0, len(skillRefs))
+		for _, sr := range skillRefs {
+			skillsSnap = append(skillsSnap, sr.Name)
+		}
+	}
+
 	if err := f.designer.UpdateAgent(userID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap, requiredSecrets); err != nil {
 		return "", false, "", fmt.Errorf("update agent: %w", err)
 	}
+
+	// Remove any test artifacts left in the live agent dir post-save. For edits the
+	// staging dir is already gone; this cleans root-level scratch from the live dir.
+	cleanupTestArtifacts(AgentDir(f.designer.agentsDir, userID, agentIDSnap))
 
 	scheduleMsg := reconcileScheduleOnSave(f.db, userID, agentIDSnap, agentMD)
 
@@ -1299,9 +1374,38 @@ func extractDescription(agentMD, fallback string) string {
 // isApproval matches only explicit approval phrases that cannot arise naturally
 // in Q&A answers. "yes", "ok", "sure" are deliberately excluded.
 func isApproval(input string) bool {
-	lower := strings.ToLower(strings.TrimSpace(input))
+	s := strings.ToLower(strings.TrimSpace(input))
+	s = strings.TrimRight(s, ".!?,;:)")
 	for _, trigger := range []string{"approve", "go ahead", "build it", "create it", "/approve"} {
-		if lower == trigger {
+		if s == trigger {
+			return true
+		}
+	}
+	return false
+}
+
+// isVerifyApproval is the forgiving approval test used in StateVerifying, where
+// the agent is already built and the user is only confirming whether to save it.
+// Common confirmations ("yes", "save", "ok", "looks good") count so a natural
+// reply saves the build instead of being treated as a change request that
+// discards it. A negative cue ("don't", "not yet", "change", "wait", "instead")
+// means the user wants changes, not approval. isApproval (used in StateDesigning)
+// stays strict by design so a casual "ok"/"yes" while answering design questions
+// doesn't launch a full generation run.
+func isVerifyApproval(input string) bool {
+	s := strings.ToLower(strings.TrimSpace(input))
+	s = strings.TrimRight(s, ".!?,;:)")
+	if strings.Contains(s, "don't") || strings.Contains(s, "do not") ||
+		strings.Contains(s, "not yet") || strings.Contains(s, "change") ||
+		strings.Contains(s, "wait") || strings.Contains(s, "instead") {
+		return false
+	}
+	for _, trigger := range []string{
+		"approve", "go ahead", "build it", "create it", "/approve",
+		"yes", "save", "save it", "ok", "okay", "looks good", "looks good to me",
+		"confirm", "confirmed", "go", "do it", "ship it", "lgtm", "perfect", "great",
+	} {
+		if s == trigger {
 			return true
 		}
 	}
@@ -1310,16 +1414,49 @@ func isApproval(input string) bool {
 
 // ─── Skills helpers ───────────────────────────────────────────────────────────
 
-func (f *Flow) loadSkillNames(userID string) []string {
+func (f *Flow) loadSkillNames(userID string) []prompts.SkillRef {
+	// Core skills are always-on for every user — always available to the designer.
+	refs := make([]prompts.SkillRef, 0, 16)
+	for _, s := range skilllibrary.LoadBundled() {
+		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description})
+	}
 	if f.db == nil {
-		return nil
+		return refs
 	}
 	skills, _ := f.db.ListSkills(userID)
-	names := make([]string, 0, len(skills))
 	for _, s := range skills {
-		names = append(names, s.Name)
+		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description})
 	}
-	return names
+	return refs
+}
+
+// parseSkillsLine reads a "# Skills: skill1, skill2" header comment from AGENT.md.
+// It validates names against the installed set and returns only known names.
+// Returns nil if the line is absent (caller falls back to all installed skills).
+func parseSkillsLine(agentMD string, installed []prompts.SkillRef) []string {
+	installedSet := make(map[string]bool, len(installed))
+	for _, s := range installed {
+		installedSet[s.Name] = true
+	}
+
+	for _, line := range strings.Split(agentMD, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "#") {
+			break
+		}
+		after, ok := strings.CutPrefix(trimmed, "# Skills:")
+		if !ok {
+			continue
+		}
+		var valid []string
+		for _, part := range strings.Split(after, ",") {
+			if name := strings.TrimSpace(part); name != "" && name != "none" && installedSet[name] {
+				valid = append(valid, name)
+			}
+		}
+		return valid
+	}
+	return nil
 }
 
 func (f *Flow) loadConnectedPlatforms(userID string) []string {
