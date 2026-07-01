@@ -208,9 +208,11 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	}
 
 	// Load skills context. The available pool is core skills (always-on, embedded)
-	// plus the user's own installed/created skills.
+	// plus the user's own installed/created skills. The agent's DECLARED skills come
+	// from the agent_skills DB table (the source of truth), not from AGENT.md.
 	allSkills, _ := r.db.ListSkills(input.UserID)
-	declaredContent, _ := r.loadDeclaredSkillContent(input.UserID, manifest.Skills)
+	declaredSkills, _ := r.db.ListAgentSkillNames(agent.ID)
+	declaredContent, _ := r.loadDeclaredSkillContent(input.UserID, declaredSkills)
 
 	var userMemory string
 	if r.memStore != nil {
@@ -227,14 +229,14 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 
 	homeDir := filepath.Join(r.homesDir, input.UserID)
 	vaultRoot := filepath.Join(r.agentsDir, input.UserID)
-	skillEnv := prompts.SkillEnvBlock(r.resolveSkillBins(input.UserID, homeDir, manifest.Skills, declaredContent), homeDir, vaultRoot)
+	skillEnv := prompts.SkillEnvBlock(r.resolveSkillBins(input.UserID, homeDir, declaredSkills, declaredContent), homeDir, vaultRoot)
 
 	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
 		AgentMD:         string(agentMD),
 		StateJSON:       string(stateRaw),
 		UserMemory:      userMemory,
 		AllSkills:       skillRefs,
-		DeclaredSkills:  manifest.Skills,
+		DeclaredSkills:  declaredSkills,
 		DeclaredContent: declaredContent,
 		SkillEnv:        skillEnv,
 		VaultRoot:       vaultRoot,

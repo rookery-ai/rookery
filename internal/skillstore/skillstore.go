@@ -278,6 +278,8 @@ func (s *Store) Delete(userID, skillID, skillName string) error {
 	if err := s.db.DeleteSkill(skillID); err != nil {
 		return err
 	}
+	// Drop any agent attachments referencing this skill by name so they don't dangle.
+	_ = s.db.DeleteAgentSkillsByName(userID, skillName)
 	_ = os.RemoveAll(s.skillDir(userID, skillName))
 	return nil
 }

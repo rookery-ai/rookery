@@ -109,3 +109,95 @@ func AgentLogPath(vaultsBase, userID, agentID string, t time.Time) string {
 func AgentCodePath(vaultsBase, userID, agentID string) string {
 	return filepath.Join(AgentDir(vaultsBase, userID, agentID), "main.py")
 }
+
+// ReconcileSkillAttachmentsToDB is a one-time cutover: it makes the agent_skills
+// DB table the single source of truth for an agent's skills and empties the
+// legacy manifest.Skills field (AGENT.md is for the LLM, not the skill record).
+//
+// Per agent, only when the DB has no skill rows for that agent yet (so it never
+// overwrites skills the designer/manual-handler already wrote to the DB):
+//
+//   - If manifest.Skills is a curated list (a real subset), copy it into the DB.
+//   - If manifest.Skills carries the legacy "fallback to all installed skills"
+//     signature (it contains every core skill name — produced by the old
+//     designer behaviour when AGENT.md declared no "# Skills:" line), the agent
+//     declared no skills, so the DB is left empty.
+//
+// Then manifest.Skills is cleared on disk. Idempotent: once manifest.Skills is
+// empty, subsequent runs do nothing (the DB already holds the result).
+func ReconcileSkillAttachmentsToDB(database skillDB, vaultsBase string, coreSkillNames []string) (int, error) {
+	coreSet := make(map[string]bool, len(coreSkillNames))
+	for _, n := range coreSkillNames {
+		coreSet[n] = true
+	}
+
+	userDirs, err := os.ReadDir(vaultsBase)
+	if err != nil {
+		return 0, err
+	}
+
+	reconciled := 0
+	for _, ud := range userDirs {
+		if !ud.IsDir() {
+			continue
+		}
+		entries, err := os.ReadDir(filepath.Join(vaultsBase, ud.Name(), "agents"))
+		if err != nil {
+			continue // no agents dir for this user
+		}
+		for _, ed := range entries {
+			if !ed.IsDir() {
+				continue
+			}
+			agentID := ed.Name()
+
+			m, _ := LoadManifest(vaultsBase, ud.Name(), agentID)
+			if m == nil || len(m.Skills) == 0 {
+				continue // nothing to migrate
+			}
+
+			// Only seed the DB when it has no rows for this agent — never overwrite
+			// attachments the designer or manual handler already persisted.
+			existing, _ := database.ListAgentSkillNames(agentID)
+			if len(existing) == 0 {
+				if !manifestIsFallbackBloat(m.Skills, coreSet) {
+					_ = database.SetAgentSkills(agentID, m.Skills)
+					reconciled++
+				}
+			}
+
+			// Clear the legacy field so the DB is the only source going forward.
+			m.Skills = nil
+			_ = SaveManifest(vaultsBase, ud.Name(), agentID, m)
+		}
+	}
+	return reconciled, nil
+}
+
+// manifestIsFallbackBloat reports whether a skill list carries the legacy
+// "fallback to all installed skills" signature: it contains every core skill
+// name. A curated subset never matches.
+func manifestIsFallbackBloat(skills []string, coreSet map[string]bool) bool {
+	if len(coreSet) == 0 {
+		return false
+	}
+	present := make(map[string]bool, len(skills))
+	for _, s := range skills {
+		present[s] = true
+	}
+	for name := range coreSet {
+		if !present[name] {
+			return false
+		}
+	}
+	return true
+}
+
+// skillDB is the DB surface ReconcileSkillAttachmentsToDB needs — a tiny slice
+// of *db.DB so the agentdesigner package doesn't import internal/db (which would
+// be a cycle: db → agentdesigner? it doesn't, but keeping it loose avoids any
+// future import churn).
+type skillDB interface {
+	ListAgentSkillNames(agentID string) ([]string, error)
+	SetAgentSkills(agentID string, skillNames []string) error
+}

@@ -40,6 +40,13 @@ func (d *AgentDesigner) SaveAgent(userID, agentID, name, description string, age
 		return fmt.Errorf("db insert: %w", err)
 	}
 
+	// Persist the coder's declared skills to the DB (the source of truth for an
+	// agent's skills). Must run after CreateAgent so the agents row exists for the
+	// agent_skills FK.
+	if err := d.db.SetAgentSkills(agentID, skills); err != nil {
+		return fmt.Errorf("set agent skills: %w", err)
+	}
+
 	return nil
 }
 
@@ -53,6 +60,11 @@ func (d *AgentDesigner) UpdateAgent(userID, agentID, name, description string, a
 
 	if err := d.db.UpdateAgentDescription(agentID, description); err != nil {
 		return fmt.Errorf("db update: %w", err)
+	}
+
+	// Reconcile the agent's skill attachments in the DB (source of truth).
+	if err := d.db.SetAgentSkills(agentID, skills); err != nil {
+		return fmt.Errorf("set agent skills: %w", err)
 	}
 
 	return nil
@@ -119,7 +131,7 @@ func (d *AgentDesigner) writeAgentContent(userID, agentID, name string, agentMD 
 		ID:              agentID,
 		Name:            name,
 		RequiredSecrets: requiredSecrets,
-		Skills:          skills,
+		Skills:          nil, // skills live in the agent_skills DB table (source of truth); AGENT.md is for the LLM.
 		CreatedAt:       createdAt,
 	}
 	if err := SaveManifest(d.agentsDir, userID, agentID, manifest); err != nil {

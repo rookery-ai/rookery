@@ -315,22 +315,39 @@ func (s *Server) handleSaveAgentSkills(c echo.Context) error {
 	}
 
 	_ = c.Request().ParseForm()
-	skillIDs := c.Request().Form["skill_ids"]
-	if err := s.db.SetAgentSkills(agent.ID, skillIDs); err != nil {
-		return s.renderAgentDetailWithError(c, agent, u.ID, "Failed to save skills: "+err.Error())
+	submitted := c.Request().Form["skill_names"]
+
+	// Allowed universe = core skill names ∪ the user's own skill names. Core
+	// skills have no DB row, so the form carries names (not IDs); only names can
+	// represent core skills. Drop anything not in the universe (defensive).
+	coreNames := make(map[string]bool)
+	for _, cs := range skilllibrary.LoadBundled() {
+		coreNames[cs.Name] = true
+	}
+	userSkills, _ := s.db.ListSkills(u.ID)
+	userByName := make(map[string]*db.Skill, len(userSkills))
+	for _, sk := range userSkills {
+		userByName[sk.Name] = sk
 	}
 
-	// Update manifest skills list.
-	dir := s.agentsDir()
-	if manifest, err := agentdesigner.LoadManifest(dir, u.ID, agent.ID); err == nil {
-		var names []string
-		for _, sid := range skillIDs {
-			if sk, err := s.db.GetSkill(sid); err == nil {
-				names = append(names, sk.Name)
-			}
+	var valid []string
+	seen := make(map[string]bool)
+	for _, name := range submitted {
+		if name == "" || seen[name] {
+			continue
 		}
-		manifest.Skills = names
-		_ = agentdesigner.SaveManifest(dir, u.ID, agent.ID, manifest)
+		if !coreNames[name] && userByName[name] == nil {
+			continue // unknown skill — ignore
+		}
+		seen[name] = true
+		valid = append(valid, name)
+	}
+
+	// The agent_skills DB table is the single source of truth for an agent's
+	// skills (core + user, by name). AGENT.md is only the LLM's instructions, so
+	// we never touch it here.
+	if err := s.db.SetAgentSkills(agent.ID, valid); err != nil {
+		return s.renderAgentDetailWithError(c, agent, u.ID, "Failed to save skills: "+err.Error())
 	}
 
 	p := s.page(c, "Agent: "+agent.Name)

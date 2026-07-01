@@ -23,6 +23,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/scheduler"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/ilijad1/simple-agents/internal/skilldesigner"
+	"github.com/ilijad1/simple-agents/internal/skilllibrary"
 	"github.com/ilijad1/simple-agents/internal/skillstore"
 	"github.com/ilijad1/simple-agents/internal/vault"
 	"github.com/ilijad1/simple-agents/web"
@@ -129,6 +130,22 @@ func serveCmd() *cli.Command {
 						slog.Warn("memory: migrate to structured files", "user", d.Name(), "err", err)
 					}
 				}
+			}
+
+			// One-time cutover: make the agent_skills DB table the single source of
+			// truth for an agent's skills. Pre-refactor agents had their declared
+			// skills in manifest.Skills (agent.json) only; the designer never wrote the
+			// DB table. Seed the DB from each manifest (skipping the legacy "all skills"
+			// fallback bloat), then clear manifest.Skills. AGENT.md is for the LLM; the
+			// DB is the skill record. Idempotent — a no-op once manifest.Skills is empty.
+			coreSkillNames := make([]string, 0)
+			for _, s := range skilllibrary.LoadBundled() {
+				coreSkillNames = append(coreSkillNames, s.Name)
+			}
+			if n, err := agentdesigner.ReconcileSkillAttachmentsToDB(database, vaultsDir, coreSkillNames); err != nil {
+				slog.Warn("reconcile skill attachments to db", "err", err)
+			} else if n > 0 {
+				slog.Info("reconciled skill attachments to db", "count", n)
 			}
 
 			// Any run still flagged in-progress is a leftover from a crash/shutdown

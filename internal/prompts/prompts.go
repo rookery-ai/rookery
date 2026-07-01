@@ -649,7 +649,9 @@ that makes these agents fail.
 		sb.WriteString("<available_skills>\n")
 		sb.WriteString("The user has these pre-built skills installed. When the task clearly benefits from one, use it:\n")
 		sb.WriteString("- Mention it naturally in the conversation (e.g. \"I'll use the pdf-reader skill to extract the text\").\n")
-		sb.WriteString("- Include a `# Skills: skill-name, other-skill` header line in the generated AGENT.md (like the schedule line).\n\n")
+		sb.WriteString("- You MUST include a `# Skills: skill-one, skill-two` header line in the generated AGENT.md (alongside the schedule line) declaring EXACTLY the skills this agent needs.\n")
+		sb.WriteString("- List ONLY the specific skills the agent actually uses at runtime — never list all available skills, and never omit the line. If the agent genuinely needs none, write `# Skills: none`.\n")
+		sb.WriteString("- The names must match the skill names below exactly; they are how the agent's skills are recorded.\n\n")
 		for _, sk := range p.Skills {
 			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", sk.Name, sk.Description))
 		}

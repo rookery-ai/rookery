@@ -1168,8 +1168,12 @@ func (d *DB) UpdateSkillDescription(id, description string) error {
 	return err
 }
 
-// SetAgentSkills replaces all skill associations for an agent atomically.
-func (d *DB) SetAgentSkills(agentID string, skillIDs []string) error {
+// SetAgentSkills replaces all skill attachments for an agent atomically.
+// skillNames are skill NAMES (not IDs) — core (embedded) skills are attached by
+// name since they have no skills-table row. The DB is the single source of truth
+// for an agent's skills; AGENT.md's "# Skills:" line is only the coder's
+// declaration channel, parsed once at generation time.
+func (d *DB) SetAgentSkills(agentID string, skillNames []string) error {
 	tx, err := d.Begin()
 	if err != nil {
 		return err
@@ -1179,31 +1183,45 @@ func (d *DB) SetAgentSkills(agentID string, skillIDs []string) error {
 	if _, err := tx.Exec(`DELETE FROM agent_skills WHERE agent_id=?`, agentID); err != nil {
 		return err
 	}
-	for _, sid := range skillIDs {
-		if _, err := tx.Exec(`INSERT OR IGNORE INTO agent_skills(agent_id,skill_id) VALUES(?,?)`, agentID, sid); err != nil {
+	for _, name := range skillNames {
+		if name == "" {
+			continue
+		}
+		if _, err := tx.Exec(`INSERT OR IGNORE INTO agent_skills(agent_id,skill_name) VALUES(?,?)`, agentID, name); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-// ListSkillsForAgent returns skills declared by an agent.
-func (d *DB) ListSkillsForAgent(agentID string) ([]*Skill, error) {
-	rows, err := d.Query(`SELECT s.id,s.user_id,s.name,s.description,s.installed_at
-		FROM skills s JOIN agent_skills ags ON ags.skill_id=s.id WHERE ags.agent_id=?`, agentID)
+// ListAgentSkillNames returns the skill names attached to an agent (core + user),
+// in insertion order. This is the authoritative skill list for the runner and the
+// agent page.
+func (d *DB) ListAgentSkillNames(agentID string) ([]string, error) {
+	rows, err := d.Query(`SELECT skill_name FROM agent_skills WHERE agent_id=?`, agentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var skills []*Skill
+
+	var names []string
 	for rows.Next() {
-		s, err := scanSkill(rows)
-		if err != nil {
+		var n string
+		if err := rows.Scan(&n); err != nil {
 			return nil, err
 		}
-		skills = append(skills, s)
+		names = append(names, n)
 	}
-	return skills, rows.Err()
+	return names, rows.Err()
+}
+
+// DeleteAgentSkillsByName removes agent_skills rows matching a skill name for
+// every agent owned by userID — used when a user skill is deleted so attachments
+// don't dangle. Core skills can't be deleted by the user.
+func (d *DB) DeleteAgentSkillsByName(userID, skillName string) error {
+	_, err := d.Exec(`DELETE FROM agent_skills WHERE skill_name=? AND agent_id IN
+		(SELECT id FROM agents WHERE user_id=?)`, skillName, userID)
+	return err
 }
 
 func scanSkill(s scanner) (*Skill, error) {

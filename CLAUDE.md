@@ -22,9 +22,24 @@ go test -v ./internal/agentdesigner/... -run TestFlow
 
 # Database migration
 ./bin/simple-agents db migrate
+
+# Deploy / restart the server (build + run in background, logs to logs/server.log)
+make deploy    # stop existing server, rebuild, start in background
+make restart   # stop + start (no rebuild)
+make stop      # stop the running server
+make logs      # tail -f logs/server.log
+make status    # show running server process
+make test      # run the unit tests
 ```
 
 AST guardrail tests shell out to `python3`. If Python is not available, those tests self-skip.
+
+> **Deploy workflow:** When the user says "restart the server", "rebuild", or
+> "deploy", run `make deploy` — it stops the running server, rebuilds, and
+> starts it in the background with logs captured to `logs/server.log`. The
+> server listens on `0.0.0.0:8080` by default (override with `SA_PORT=…`).
+> Verify with `make status` / `make logs`; smoke-test with
+> `curl -sS http://127.0.0.1:8080/login`.
 
 ## Architecture
 
@@ -68,7 +83,7 @@ Telegram adapter (per-user bot instance)
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal) |
 | `internal/skilldesigner` | Conversational skill-creator wizard mirroring `agentdesigner.Flow` (FSM Idle→AwaitingResume→Describing→Designing→Verifying→Done, SSE progress, 7-day drafts, approval triggers); `SkillSaver` writes SKILL.md+scripts/ to vault + DB upsert; generation runs with the `skill-creator` core skill, vetting runs the `skill-vetter` core skill as a text-only audit; `vettingBlocksSave()` parses the verdict line. Web-wired only (Telegram route not yet added). |
 | `internal/skilllibrary` | Embedded core skill catalog (`go:embed skills/*/SKILL.md`) — always-on for every user, no DB rows, no admin gate. `LoadBundled()`, `CoreSkillContent(slug)`, `IsCoreSkill()`, `ParseMeta()` (Anthropic+openclaw YAML frontmatter: requires.bins/anyBins/env, install specs). Supersedes the admin-catalog approach dropped in migration 009. |
-| `internal/agentrunner` | Load agent → decrypt secrets into env via `WithExtraEnv` → coder subprocess → capture `[CHAT]` lines → send via GatewayManager; timestamped run logs; `RunInput.OnProgress` per-turn hook for live SSE streaming. Skills pool = core skills (embedded) + user skills; `resolveSkillBins` resolves declared tools' paths for the runtime `<skill_environment>` block; `loadDeclaredSkillContent` reads core skills from the embed. **Reliable delivery**: `parseCoderOutput` (blank lines don't end `[CHAT]`; empty `[CHAT]` dropped; `[SILENT]` detected) + `extractProseMessage` fallback when no `[CHAT]` emitted and not silent → visible warning when nothing deliverable. Covered by `runner_test.go`. |
+| `internal/agentrunner` | Load agent → decrypt secrets into env via `WithExtraEnv` → coder subprocess → capture `[CHAT]` lines → send via GatewayManager; timestamped run logs; `RunInput.OnProgress` per-turn hook for live SSE streaming. Skills pool = core skills (embedded) + user skills; the agent's DECLARED skills come from the `agent_skills` DB table (`db.ListAgentSkillNames`, the source of truth) not the manifest; `resolveSkillBins` resolves declared tools' paths for the runtime `<skill_environment>` block; `loadDeclaredSkillContent` reads core skills from the embed. **Reliable delivery**: `parseCoderOutput` (blank lines don't end `[CHAT]`; empty `[CHAT]` dropped; `[SILENT]` detected) + `extractProseMessage` fallback when no `[CHAT]` emitted and not silent → visible warning when nothing deliverable. Covered by `runner_test.go`. |
 | `internal/sandbox` | Self-contained Landlock filesystem confinement for coder subprocesses (Linux). `Spec`, `Supported()`, `Wrap()` (re-exec via the hidden `__sandbox-exec` helper), `Exec()` (applies Landlock + rlimits, then `execve`). No external dependency. |
 | `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users |
 | `internal/reminder` | Creates/lists/fires reminders; background polling goroutine. Reminders live only in the DB and the reminders UI tab — they are NOT reflected to the vault. |
@@ -148,7 +163,9 @@ Agent creation uses a single `agentdesigner.Flow` FSM shared between Telegram an
 
 **Auto-schedule:** If AGENT.md starts with `# Suggested schedule: */10 * * * *`, `parseSuggestedSchedule()` calls `db.UpsertAgentSchedule()` immediately.
 
-**Skills selection via `# Skills:` header.** `DesignSession.Skills` is now `[]prompts.SkillRef` (name+description), loaded once on start as **core skills (embedded) + the user's own skills**. The designer's `<available_skills>` block lists each skill with its description and instructs the coder to emit a `# Skills: skill-one, skill-two` header line in AGENT.md (alongside the schedule line). `parseSkillsLine(agentMD, installed)` reads that header, validates names against the installed set, and returns only known names; if the line is absent, `saveAndFinish`/`updateAndFinish` fall back to all installed skills. This is how an agent declares which skills it actually uses at run time.
+**Skills selection via `# Skills:` header.** `DesignSession.Skills` is `[]prompts.SkillRef` (name+description), loaded once on start as **core skills (embedded) + the user's own skills**. The designer's `<available_skills>` block lists each skill with its description and **requires** the coder to emit a `# Skills: skill-one, skill-two` header line in AGENT.md (alongside the schedule line) declaring EXACTLY the skills this agent needs — never all of them, and never omitting the line (`# Skills: none` if it needs none). `parseSkillsLine(agentMD, installed)` reads that header and is deliberately tolerant of LLM formatting drift: case-insensitive heading matching (any `#` level, optional `required/needed/uses` qualifier, `:`/`-`/`=` separator), splits on `,`/`;`/`|`/`+`/`&`/`/`/` and `/` or `/newline, strips backticks/quotes/trailing prose (`pdf (for …)` → `pdf`), and also reads a bullet/numbered list when the heading has no inline names. Names are matched case-insensitively against the installed pool (so multi-word names like "Google Workspace" survive — bare spaces are NOT separators); unknown names are dropped with a warning rather than failing. Contract: returns `nil` ONLY when no skills header is found at all (caller treats as "declared none"); a present-but-empty/`none` header returns a non-nil empty slice. On approval `saveAndFinish`/`updateAndFinish` persist the declared names to the `agent_skills` DB table (the source of truth — see "Skill attachments source of truth" below); if no header is found, **no skills are attached** (the old "fall back to all installed skills" behaviour was removed because it polluted the agent page with every skill). Covered by `parse_skills_test.go` + `skills_db_test.go`.
+
+**Skill attachments source of truth (DB, not AGENT.md).** The `agent_skills` DB table — keyed by **skill name**, not `skill_id` — is the single source of truth for an agent's skills (core + user, by name). Core (embedded) skills have no `skills`-table row, so they could never be represented by the old `skill_id` FK; migration 010 rebuilt `agent_skills(agent_id, skill_name)` and backfilled existing user-skill rows by resolving `skill_id → name`. The designer (`SaveAgent`/`UpdateAgent`) writes the parsed `# Skills:` names here; `manifest.Skills` (`agent.json`) is now left empty — AGENT.md/`agent.json` are for the LLM only, the DB is the skill record. The runner (`runCoderAgent`) and the agent page (`renderAgentDetail`) read declared skills from `db.ListAgentSkillNames(agentID)`, never from the manifest. The web Skills card renders core + user skill checkboxes by name (`AttachedSet`/`AttachedSkills` + `CoreSkills`/`AllSkills`); `handleSaveAgentSkills` accepts `skill_names` (not IDs), validates against core ∪ user names, and writes the DB only. Deleting a user skill calls `db.DeleteAgentSkillsByName` to drop dangling attachments. **One-time cutover:** `agentdesigner.ReconcileSkillAttachmentsToDB` (run at `serve` startup, idempotent) seeds the DB from each legacy `manifest.Skills` — but only when the DB has no rows for that agent yet, and skipping the legacy "all core skills" fallback-bloat signature — then clears `manifest.Skills` on disk.
 
 ### Prompt architecture (coder-agnostic, three-tier)
 
@@ -270,7 +287,7 @@ Secrets stored encrypted in `secrets` table. Three sources of `MasterPw` at runt
 
 SQLite via `modernc.org/sqlite` (CGo-free). WAL mode + foreign keys set on open. Migrations in alphabetical order from `migrations/`.
 
-Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`, `agent_schedules`, `agent_runs`, `secrets`, `chats`, `reminders`, `user_permissions`, `mcp_servers`, `settings`, `audit_logs`, `schema_migrations`, `chat_messages` (FK `chat_id`→`chats`), `coders`, `skills`, `agent_skills`, `skill_drafts` (one row per user; 7-day TTL; FK `user_id`→`users`). Note: migration 008 created an admin `skill_library` catalog table; migration 009 dropped it (and `skills.library_slug`/`library_version`) when core skills pivoted to embedded-only.
+Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`, `agent_schedules`, `agent_runs`, `secrets`, `chats`, `reminders`, `user_permissions`, `mcp_servers`, `settings`, `audit_logs`, `schema_migrations`, `chat_messages` (FK `chat_id`→`chats`), `coders`, `skills`, `agent_skills` (keyed by `(agent_id, skill_name)` — core + user skills by name; migration 010 rebuilt it from the old `skill_id` FK and backfilled existing rows), `skill_drafts` (one row per user; 7-day TTL; FK `user_id`→`users`). Note: migration 008 created an admin `skill_library` catalog table; migration 009 dropped it (and `skills.library_slug`/`library_version`) when core skills pivoted to embedded-only.
 
 ### Web UI routes
 

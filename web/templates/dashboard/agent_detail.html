@@ -177,25 +177,39 @@
       <div class="card bg-base-100 shadow-sm border border-base-300">
         <div class="card-body p-4">
           <h2 class="font-semibold text-sm mb-3">Skills</h2>
-          {{if .AgentSkills}}
+          {{$attached := .AttachedSet}}
+          {{if .AttachedSkills}}
           <div class="flex flex-wrap gap-1 mb-3">
-            {{range .AgentSkills}}
-            <span class="badge badge-outline badge-sm">{{.Name}}</span>
+            {{range .AttachedSkills}}
+            <span class="badge badge-outline badge-sm">{{.}}</span>
             {{end}}
           </div>
           {{else}}
           <p class="text-xs text-base-content/40 mb-3">No skills assigned.</p>
           {{end}}
-          {{if .AllSkills}}
+          {{if or .CoreSkills .AllSkills}}
           <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/skills">
-            <div class="space-y-1 mb-2 max-h-40 overflow-y-auto">
+            <input type="text" placeholder="Search skills…" oninput="filterSkills(this.value)"
+              class="input input-bordered input-xs w-full mb-2">
+            <div class="space-y-1 mb-2 max-h-56 overflow-y-auto">
+              {{range .CoreSkills}}
+              <div class="skill-row" data-name="{{.Name}}">
+                <label class="flex items-center gap-2 cursor-pointer text-xs">
+                  <input type="checkbox" name="skill_names" value="{{.Name}}" class="checkbox checkbox-xs"
+                    {{if index $attached .Name}}checked{{end}}>
+                  <span>{{.Name}}</span>
+                  <span class="badge badge-ghost badge-xs">core</span>
+                </label>
+              </div>
+              {{end}}
               {{range .AllSkills}}
-              {{$skillID := .ID}}
-              <label class="flex items-center gap-2 cursor-pointer text-xs">
-                <input type="checkbox" name="skill_ids" value="{{.ID}}" class="checkbox checkbox-xs"
-                  {{range $.AgentSkills}}{{if eq .ID $skillID}}checked{{end}}{{end}}>
-                <span>{{.Name}}</span>
-              </label>
+              <div class="skill-row" data-name="{{.Name}}">
+                <label class="flex items-center gap-2 cursor-pointer text-xs">
+                  <input type="checkbox" name="skill_names" value="{{.Name}}" class="checkbox checkbox-xs"
+                    {{if index $attached .Name}}checked{{end}}>
+                  <span>{{.Name}}</span>
+                </label>
+              </div>
               {{end}}
             </div>
             <button type="submit" class="btn btn-ghost btn-xs w-full">Update Skills</button>
@@ -338,6 +352,17 @@ function setCron(v) {
     setTimeout(function () { window.location.reload(); }, 8000);
   }
 })();
+</script>
+
+<script>
+// Filter the skills checkbox list by name as the user types.
+function filterSkills(q) {
+  q = (q || '').toLowerCase();
+  document.querySelectorAll('.skill-row').forEach(function (row) {
+    var name = (row.dataset.name || row.textContent || '').toLowerCase();
+    row.style.display = name.indexOf(q) !== -1 ? '' : 'none';
+  });
+}
 </script>
 
 {{template "foot" .}}

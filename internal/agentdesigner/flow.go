@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -1178,10 +1180,11 @@ func (f *Flow) saveAndFinish(ctx context.Context, userID, agentMD string, tools 
 
 	skillsSnap := parseSkillsLine(agentMD, skillRefs)
 	if skillsSnap == nil {
-		skillsSnap = make([]string, 0, len(skillRefs))
-		for _, sr := range skillRefs {
-			skillsSnap = append(skillsSnap, sr.Name)
-		}
+		// No "# Skills:" line in AGENT.md → the agent declared no skills. Leave
+		// the manifest empty (the user can assign skills on the agent page).
+		// Previously this fell back to ALL installed skills, which polluted the
+		// manifest and made the agent page show every skill as assigned.
+		skillsSnap = []string{}
 	}
 
 	if err := f.designer.SaveAgent(userID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap, requiredSecrets); err != nil {
@@ -1241,10 +1244,8 @@ func (f *Flow) updateAndFinish(ctx context.Context, userID, agentMD string, tool
 
 	skillsSnap := parseSkillsLine(agentMD, skillRefs)
 	if skillsSnap == nil {
-		skillsSnap = make([]string, 0, len(skillRefs))
-		for _, sr := range skillRefs {
-			skillsSnap = append(skillsSnap, sr.Name)
-		}
+		// No "# Skills:" line in AGENT.md → the agent declared no skills.
+		skillsSnap = []string{}
 	}
 
 	if err := f.designer.UpdateAgent(userID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap, requiredSecrets); err != nil {
@@ -1433,30 +1434,140 @@ func (f *Flow) loadSkillNames(userID string) []prompts.SkillRef {
 // parseSkillsLine reads a "# Skills: skill1, skill2" header comment from AGENT.md.
 // It validates names against the installed set and returns only known names.
 // Returns nil if the line is absent (caller falls back to all installed skills).
+// parseSkillsLine extracts the skills the coder declared for an agent from its
+// AGENT.md. It is deliberately tolerant of LLM formatting drift: the coder is
+// asked to emit a `# Skills: a, b` header, but models often vary the spelling,
+// the heading level, the delimiter, the casing, or wrap names in backticks/quotes
+// — and sometimes put the line after a blank line or render it as a bullet list.
+//
+// It returns the validated canonical skill names (matched case-insensitively
+// against the installed pool). It returns nil ONLY when no skills header is found
+// at all (caller treats nil as "declared none"). When a header is found, it
+// returns a non-nil slice (empty if the header said "none" or no names matched).
+//
+// Unknown names are dropped (with a warning log) rather than failing — a
+// hallucinated or misspelled skill name attaches nothing instead of poisoning
+// the agent.
 func parseSkillsLine(agentMD string, installed []prompts.SkillRef) []string {
-	installedSet := make(map[string]bool, len(installed))
+	byLower := make(map[string]string, len(installed))
 	for _, s := range installed {
-		installedSet[s.Name] = true
+		byLower[strings.ToLower(s.Name)] = s.Name
+	}
+	if len(byLower) == 0 {
+		return nil
 	}
 
-	for _, line := range strings.Split(agentMD, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "#") {
-			break
-		}
-		after, ok := strings.CutPrefix(trimmed, "# Skills:")
-		if !ok {
-			continue
-		}
-		var valid []string
-		for _, part := range strings.Split(after, ",") {
-			if name := strings.TrimSpace(part); name != "" && name != "none" && installedSet[name] {
-				valid = append(valid, name)
+	lines := strings.Split(agentMD, "\n")
+	for i, line := range lines {
+		if rest, ok := skillsHeaderInline(line); ok {
+			names := matchSkillNames(splitSkillCandidates(rest), byLower)
+			if len(names) > 0 {
+				return names
 			}
+			// Header present but no inline names (e.g. "# Skills:") — gather the
+			// bullet/numbered list that usually follows it.
+			return matchSkillNames(bulletCandidates(lines[i+1:]), byLower)
 		}
-		return valid
+		if skillsListHeading(line) {
+			return matchSkillNames(bulletCandidates(lines[i+1:]), byLower)
+		}
 	}
 	return nil
+}
+
+// skillsHeaderInline matches a line that declares skills inline, e.g.
+// "# Skills: csv, pdf", "## skills - csv and pdf", "Required skills: csv",
+// "Skill: csv". It returns the text after the separator and true, or "", false.
+// Scanning is case-insensitive and tolerates 0-6 heading hashes, an optional
+// qualifier (required/needed/uses/used), and a ':', '-', or '=' separator.
+var skillsInlineRe = regexp.MustCompile(`(?i)^\s*#{0,6}\s*(?:required\s+|needed\s+|uses?\s+)?skills?\b\s*[:\-=]\s*(.*)$`)
+
+func skillsHeaderInline(line string) (string, bool) {
+	m := skillsInlineRe.FindStringSubmatch(line)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// skillsListHeading matches a bare heading that introduces a bullet list of
+// skills, e.g. "## Skills" with no separator.
+var skillsListHeadingRe = regexp.MustCompile(`(?i)^\s*#{0,6}\s*(?:required\s+|needed\s+|uses?\s+)?skills?\s*$`)
+
+func skillsListHeading(line string) bool {
+	return skillsListHeadingRe.MatchString(line)
+}
+
+// bulletCandidates collects the text of bullet/numbered list items from the lines
+// immediately following a skills heading, stopping at the first non-list line.
+var bulletItemRe = regexp.MustCompile(`^\s*(?:[-*+]|\d+\.)\s+(.*)$`)
+
+func bulletCandidates(lines []string) []string {
+	var out []string
+	for _, line := range lines {
+		m := bulletItemRe.FindStringSubmatch(line)
+		if m == nil {
+			break // blank line or prose ends the list
+		}
+		out = append(out, m[1])
+	}
+	return out
+}
+
+// splitSkillCandidates splits the inline skill list on the delimiters the LLM
+// tends to use: comma, semicolon, pipe, newline, " and ", " or ", "&", "+", "/".
+// Bare spaces are NOT separators — skill names can contain spaces
+// (e.g. "Google Workspace") — so "csv pdf" with no comma is left as one
+// (non-matching) token rather than mis-splitting a multi-word name.
+var skillSepRe = regexp.MustCompile(`(?i)\s*,\s*|\s*;\s*|\s*\|\s*|\s*\+\s*|\s*&\s*|\s*/\s*|\s+and\s+|\s+or\s+|\n`)
+
+func splitSkillCandidates(rest string) []string {
+	return skillSepRe.Split(rest, -1)
+}
+
+// matchSkillNames normalises each candidate (strips markdown emphasis/quotes,
+// truncates trailing prose like "(for …)" or "— used for …"), lowercases it, and
+// returns the canonical installed names that match. Unknown names are dropped
+// with a warning. Always returns a non-nil slice (empty if nothing matched).
+func matchSkillNames(candidates []string, byLower map[string]string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, c := range candidates {
+		c = cutSkillProse(c)
+		c = strings.Trim(c, " \t`'\"*._-")
+		c = strings.TrimSpace(c)
+		if c == "" {
+			continue
+		}
+		low := strings.ToLower(c)
+		if low == "none" || low == "n/a" || low == "na" {
+			continue
+		}
+		canon, ok := byLower[low]
+		if !ok {
+			slog.Warn("agentdesigner: skill name in # Skills line did not match any installed skill", "name", c)
+			continue
+		}
+		if !seen[canon] {
+			seen[canon] = true
+			out = append(out, canon)
+		}
+	}
+	return out
+}
+
+// cutSkillProse truncates a skill candidate at the first trailing prose marker
+// so "pdf (for extracting text)" → "pdf" and "csv — used for parsing" → "csv".
+func cutSkillProse(s string) string {
+	for _, ch := range "([←—–" {
+		if idx := strings.IndexRune(s, ch); idx >= 0 {
+			s = s[:idx]
+		}
+	}
+	if idx := strings.Index(s, " //"); idx >= 0 {
+		s = s[:idx]
+	}
+	return s
 }
 
 func (f *Flow) loadConnectedPlatforms(userID string) []string {

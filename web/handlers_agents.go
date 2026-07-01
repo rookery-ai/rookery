@@ -12,6 +12,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/simple-agents/internal/skilllibrary"
 	"github.com/labstack/echo/v4"
 	"github.com/robfig/cron/v3"
 )
@@ -33,8 +34,10 @@ type agentDetailData struct {
 	State          string   // state.json (read-only)
 	Logs           []string // sorted log file names (newest first)
 	LastLog        string   // content of most recent log
-	AgentSkills    []*db.Skill
-	AllSkills      []*db.Skill
+	AttachedSet    map[string]bool       // agent_skills names (core+user) → true; drives checkbox "checked"
+	AttachedSkills []string              // agent_skills names in DB order; renders the attached-skill badges
+	CoreSkills     []skilllibrary.SkillMeta // core (embedded) checkbox pool, always-on
+	AllSkills      []*db.Skill           // user-installed checkbox pool
 	MissingSecrets []string
 	HasPlatform    bool // user has at least one linked chat platform
 	Running        bool // a run is in flight (manual or scheduled) — drives the badge
@@ -365,14 +368,27 @@ func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, userID strin
 	schedule, _ := s.db.GetScheduleForAgent(agent.ID)
 	runs, _ := s.db.ListAgentRuns(agent.ID, 10)
 	allSkills, _ := s.db.ListSkills(userID)
-	agentSkills, _ := s.db.ListSkillsForAgent(agent.ID)
+
+	// AttachedSet is the source of truth for the Skills card: the agent's skill
+	// attachments from the agent_skills DB table (names, core+user). AGENT.md is
+	// only the LLM's instructions — skills are never derived from it.
+	attached := make(map[string]bool)
+	var attachedSkills []string
+	if names, err := s.db.ListAgentSkillNames(agent.ID); err == nil {
+		attachedSkills = names
+		for _, name := range names {
+			attached[name] = true
+		}
+	}
 
 	data := &agentDetailData{
 		pageData:    p,
 		Agent:       agent,
 		Schedule:    schedule,
 		Runs:        runs,
-		AgentSkills: agentSkills,
+		AttachedSet: attached,
+		AttachedSkills: attachedSkills,
+		CoreSkills:  skilllibrary.LoadBundled(),
 		AllSkills:   allSkills,
 		Running:     s.isAgentRunning(agent.ID),
 		LiveRun:     s.isLiveRun(agent.ID),
