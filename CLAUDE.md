@@ -2,6 +2,19 @@
 
 This file provides guidance to Claude Code when working with code in this repository.
 
+## Tenancy model: single-owner, multi-workspace
+
+The platform has **one owner** (the installer; a single row in the `owner` table) who logs in and
+manages **workspaces**. A **workspace** is a fully isolated tenant — its own vault, claude-home,
+secrets, agents, connector, and inlined coder config — and replaces the old per-user account.
+Workspaces have no login of their own: the owner **enters** a workspace by typing that workspace's
+**master password** (re-entered on every switch). The web session is two-level: `owner_id`
+(logged in) + `active_workspace_id` (entered). All tenant-scoped tables key off `workspace_id`.
+Bootstrap the owner with `simple-agents owner bootstrap -u <name> -p <pw>`.
+
+Terminology map (fully renamed throughout): user → **workspace**, admin → **owner**,
+`user_id` → `workspace_id`, `db.User` → `db.Workspace` (+ new `db.Owner`).
+
 ## Commands
 
 ```bash
@@ -17,8 +30,8 @@ go test -v ./internal/agentdesigner/... -run TestFlow
 # Run the server (after build)
 ./bin/simple-agents serve
 
-# Bootstrap admin user (first run only)
-./bin/simple-agents admin bootstrap
+# Bootstrap the owner account (first run only)
+./bin/simple-agents owner bootstrap -u <username> -p <password>
 
 # Database migration
 ./bin/simple-agents db migrate
@@ -49,16 +62,16 @@ AST guardrail tests shell out to `python3`. If Python is not available, those te
 delegates subcommands via `github.com/urfave/cli/v3`. The `serve` subcommand:
 1. Opens/migrates SQLite DB
 2. Creates secrets service, coder, agent designer, agent runner, skill designer (`skilldesigner.Flow`)
-3. Starts `GatewayManager` (loads all `platform_connections` from DB, starts per-user adapters)
+3. Starts `GatewayManager` (loads all `platform_connections` from DB, starts per-workspace adapters)
 4. Starts scheduler and reminder background goroutines (nightly GC also sweeps expired `skill_drafts` + orphaned staging dirs)
 5. Starts Echo web server
 
 ### Inbound message pipeline
 
 ```
-Telegram adapter (per-user bot instance)
+Telegram adapter (per-workspace bot instance)
   → GatewayManager.route()
-    → IdentityResolver  (platform_user_id → internal user_id via platform_identities table)
+    → IdentityResolver  (platform_user_id → internal workspace_id via platform_identities table)
     → Router.Handle()
       → /agent  → agentdesigner.Flow (conversational FSM)
       → /run    → agentrunner.Runner
@@ -75,11 +88,11 @@ Telegram adapter (per-user bot instance)
 |---|---|
 | `internal/config` | YAML config + env overrides |
 | `internal/db` | SQLite via `modernc.org/sqlite`; `DB`, models, per-table query helpers |
-| `internal/auth` | CreateUser, Authenticate, ChangePassword, GenerateTempPassword, bcrypt |
-| `internal/rbac` | `CanPerform(db, userID, permission)` — reads `user_permissions` table |
+| `internal/auth` | `BootstrapOwner`, `Authenticate` (owner login), `ChangePassword` (owner), `CreateWorkspace(name, about)`, `GenerateSecretsSalt`, bcrypt |
+| `internal/rbac` | `CanPerform(db, workspaceID, permission)` — reads `workspace_permissions` table |
 | `internal/secrets` | AES-256-GCM store; Argon2id key derivation; `GetAll()` decrypts all for env injection; `Proxy()` resolves `${NAME}` in-memory only |
 | `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router`, `IdentityResolver`, `TelegramGateway` |
-| `internal/coder` | `Coder`: runs coder CLI subprocess with full per-user isolation; `CoderBackend` interface abstracts Claude vs. generic CLIs; `WithNoTools()` for text-only calls; `WithExtraEnv()` for secret injection |
+| `internal/coder` | `Coder`: runs coder CLI subprocess with full per-workspace isolation; `CoderBackend` interface abstracts Claude vs. generic CLIs; `WithNoTools()` for text-only calls; `WithExtraEnv()` for secret injection; `ForWorkspace(w, …)` builds a coder from the workspace's inlined config |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal) |
 | `internal/skilldesigner` | Conversational skill-creator wizard mirroring `agentdesigner.Flow` (FSM Idle→AwaitingResume→Describing→Designing→Verifying→Done, SSE progress, 7-day drafts, approval triggers); `SkillSaver` writes SKILL.md+scripts/ to vault + DB upsert; generation runs with the `skill-creator` core skill, vetting runs the `skill-vetter` core skill as a text-only audit; `vettingBlocksSave()` parses the verdict line. Web-wired only (Telegram route not yet added). |
 | `internal/skilllibrary` | Embedded core skill catalog (`go:embed skills/*/SKILL.md`) — always-on for every user, no DB rows, no admin gate. `LoadBundled()`, `CoreSkillContent(slug)`, `IsCoreSkill()`, `ParseMeta()` (Anthropic+openclaw YAML frontmatter: requires.bins/anyBins/env, install specs). Supersedes the admin-catalog approach dropped in migration 009. |
@@ -93,7 +106,7 @@ Telegram adapter (per-user bot instance)
 | `internal/vault` | Per-user Obsidian-style knowledge base: `Vault` (paths + `Resolve` safety + file IO), `Reflector` (chats→markdown+sidecar), `LinkIndex` ([[wikilinks]]), `Searcher` (ripgrep), `Guard` (post-run write-scope enforcement), `MigrateLegacyLayout`, `MigrateSessionsToChats`. |
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
 | `internal/profile` | Per-user personalization (name, email, location, timezone, tone, language, notes); stored in the generic `settings` table; `Load()`/`Save()`/`ContextString()` for LLM injection; `LoadLocation()` for timezone-aware reminder parsing |
-| `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per user. `SkillDir(base, userID, name)` is the path helper shared with the skill designer (staging dirs use the `.staging-<name>` convention). |
+| `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per workspace. `SkillDir(base, workspaceID, name)` is the path helper shared with the skill designer (staging dirs use the `.staging-<name>` convention). |
 | `web/` | Echo v4 web server; full user dashboard + admin UI |
 
 ### Per-user knowledge base (vault)
@@ -103,15 +116,15 @@ Every user has one Obsidian-style vault — a single directory of interlinked ma
 chats are *reflected* into the vault as markdown + JSON sidecars.
 
 ```
-<data_dir>/vaults/<userID>/
+<data_dir>/vaults/<workspaceID>/
 ├── README.md                       # vault home note (scaffolded)
 ├── notes/                          # user-authored notes/journals/plans/todos
 ├── memory/
-│   ├── USER.md                     # user profile — name, location, role, background
+│   ├── USER.md                     # workspace profile — name, location, role, background
 │   ├── SOUL.md                     # communication style and preferences
 │   ├── GENERAL.md                  # quick notes added via /memory Telegram command
 │   └── <any>.md                    # additional context files the user creates
-├── skills/<name>/SKILL.md          # per-user skills
+├── skills/<name>/SKILL.md          # per-workspace skills
 ├── agents/<agentID>/               # an agent's OWN writable area
 │   ├── AGENT.md  agent.json  state.json
 │   ├── tools/*.py  notes/*.md
@@ -120,7 +133,7 @@ chats are *reflected* into the vault as markdown + JSON sidecars.
 └── .kb/                            # internal: db-export/ JSON sidecars, links.json (hidden)
 ```
 
-`claude-homes/<userID>/` stays OUTSIDE the vault (holds `.claude` credentials — never backed up).
+`claude-homes/<workspaceID>/` stays OUTSIDE the vault (holds `.claude` credentials — never backed up).
 
 **Memory injection.** All `.md` files in `memory/` are automatically injected into every LLM
 context (design sessions, agent runs, one-off chat) via `memory.ContextString()`. Files whose
@@ -128,7 +141,7 @@ body is only headings and HTML placeholder comments are silently skipped until t
 them in. `EnsureScaffold` creates `USER.md` and `SOUL.md` with placeholder content on first visit.
 
 Key types in `internal/vault`:
-- **`Vault`** — `Root/AgentsDir/AgentDir/MemoryDir/SkillsDir`; **`Resolve(userID, rel)`** is the security primitive every read/write path uses (rejects `..`/absolute escapes); `WriteNote` (atomic), `Read/Delete/Rename/List/EnsureScaffold`. `List` hides dotfiles.
+- **`Vault`** — `Root/AgentsDir/AgentDir/MemoryDir/SkillsDir`; **`Resolve(workspaceID, rel)`** is the security primitive every read/write path uses (rejects `..`/absolute escapes); `WriteNote` (atomic), `Read/Delete/Rename/List/EnsureScaffold`. `List` hides dotfiles.
 - **`Reflector`** — `ReflectChat/ReflectAgentRun`: markdown note + `.kb/db-export/<table>/<id>.json` sidecar. Reminders are NOT reflected.
 - **`LinkIndex`** — `[[wikilink]]` parsing/resolution + `RenderHTMLLinks`; `Backlinks`.
 - **`Searcher`** — `ripgrepSearcher` (rg `--json`, pure-Go fallback).
@@ -139,7 +152,7 @@ Key types in `internal/vault`:
 
 **Chat knowledge-base access (on-demand retrieval + editing).** The one-off chat coder runs with `WithDir(vaultRoot).WithAllowedTools("Read,Write,Edit,Glob,Grep")` and a system instruction (`prompts.BuildChatSystemPrompt`) naming the vault root. The LLM retrieves and edits the user's notes **on demand** — only on turns that touch the KB — instead of having the vault injected every prompt. `chat.BuildUserContext` now returns identity-only context (profile/memory/agents/MCP); the old always-on `[Related knowledge base]` keyword-snippet block was removed. The tool set is file-only (no `Bash`/`WebFetch`): the chat can create/edit/read notes but cannot delete, rename, or run shell commands. The same applies to agents (RW over the vault via the sandbox). The detective `Guard` is no longer wired into agent runs — it would revert the KB edits that are now intentional — so agent/chat KB edits persist.
 
-**Agent designer KB awareness.** The designer is text-only (`WithNoTools`) but its system prompt (`BuildDesignSystemPrompt`, `<knowledge_base>` block) now knows the app has a built-in vault that agents read/write, and is told to prefer it over Notion/external note apps for the user's own knowledge. Each design turn injects a fresh manifest of the user's existing note paths via `Flow.WithKBLister` → `vault.NotePaths(userID)` → `DesignSystemParams.KBManifest`, so the designer can reference the user's actual notes.
+**Agent designer KB awareness.** The designer is text-only (`WithNoTools`) but its system prompt (`BuildDesignSystemPrompt`, `<knowledge_base>` block) now knows the app has a built-in vault that agents read/write, and is told to prefer it over Notion/external note apps for the user's own knowledge. Each design turn injects a fresh manifest of the user's existing note paths via `Flow.WithKBLister` → `vault.NotePaths(workspaceID)` → `DesignSystemParams.KBManifest`, so the designer can reference the user's actual notes.
 
 ### Unified conversational agent creation
 
@@ -159,7 +172,7 @@ Agent creation uses a single `agentdesigner.Flow` FSM shared between Telegram an
 
 **Generation failure handling:** `[BLOCKED]` marker, `ErrUsageLimit`, and timeout all return soft user-facing strings (not Go errors) — user stays in `StateDesigning`.
 
-**SSE progress:** `DesignSession` carries `progressCh chan string` + `cancelGenerate`. `GetProgressChan(userID)` lets the web SSE handler stream milestone events to the browser.
+**SSE progress:** `DesignSession` carries `progressCh chan string` + `cancelGenerate`. `GetProgressChan(workspaceID)` lets the web SSE handler stream milestone events to the browser.
 
 **Auto-schedule:** If AGENT.md starts with `# Suggested schedule: */10 * * * *`, `parseSuggestedSchedule()` calls `db.UpsertAgentSchedule()` immediately.
 
@@ -192,7 +205,7 @@ Composio connects agents to 250+ external services via the **v3 REST API** (not 
 Two pools of skills, both surfaced to the agent designer and the runner as `[]prompts.SkillRef`:
 
 - **Core skills** — embedded in the binary (`internal/skilllibrary/skills/*/SKILL.md`, `go:embed`). Always-on for every user: no DB rows, no disk seeding, no admin gate. `LoadBundled()` enumerates metadata; `CoreSkillContent(slug)` returns the full SKILL.md (frontmatter+body) for agent-context injection when an agent declares the skill; `IsCoreSkill(slug)` is the reserved-name guard. `ParseMeta()` reads Anthropic+openclaw YAML frontmatter (name, description, version, license, category, `metadata.openclaw.requires.{bins,anyBins,env}`, `metadata.openclaw.install[]`). 12 bundled skills: csv, pdf, docx, pptx, xlsx, markdown, web-search, web-scraper, playwright-browser, google-workspace, github-integration, composio-toolkit, cli-tool-installer, skill-creator, skill-vetter.
-- **User skills** — created via the skill creator (below) or imported (ZIP/pasted SKILL.md), per-user, written to `<vault>/skills/<name>/SKILL.md` (+ `scripts/`), tracked in the `skills` table. Loaded from disk by `skillstore`.
+- **User skills** — created via the skill creator (below) or imported (ZIP/pasted SKILL.md), per-workspace, written to `<vault>/skills/<name>/SKILL.md` (+ `scripts/`), tracked in the `skills` table. Loaded from disk by `skillstore`.
 
 At run time (`agentrunner.runCoderAgent`), the agent's declared skills' content is injected into the coder prompt's `<skill_instructions>` block. Core skill content comes from the embed (`skilllibrary.CoreSkillContent`); user skill content is read from disk. `resolveSkillBins` resolves the absolute path of every CLI tool a declared skill requires (`requires.bins` / `anyBins`: `$HOME/.local/bin/<bin>` then `PATH`) and `prompts.SkillEnvBlock` builds a `<skill_environment>` block telling the agent where each tool lives (or to install it via the cli-tool-installer skill) plus sandbox conventions (invoke by absolute path, use `$TMPDIR` not `/tmp`, secrets are env vars, vault root).
 
@@ -245,7 +258,7 @@ Secrets stored encrypted in `secrets` table. Three sources of `MasterPw` at runt
 
 - **`WithNoTools()`** — `--allowedTools ""`. Used for design conversation turns.
 - **`WithAllowedTools(tools)`** — Required whenever `--setting-sources ""` is active or subprocess blocks on permission prompts. Agent generation: `"Bash,WebFetch,Read,Write,Edit"` (matches the run set, so builds do real end-to-end tests against live services); skill generation: `"Bash,Write,Edit,Read"`; runs: `"Bash,WebFetch,Read,Write,Edit"`.
-- **`WithDir(dir)`** — overrides subprocess CWD. Used by generation AND every agent run — without it the agent writes to the shared per-user home and contaminates other agents.
+- **`WithDir(dir)`** — overrides subprocess CWD. Used by generation AND every agent run — without it the agent writes to the shared per-workspace home and contaminates other agents.
 - **`WithExtraEnv(env)`** — merges additional env vars. System overrides always take precedence.
 - **`WithBackendType(t)`** — forces `"claude"`, `"generic"`, or `""` (auto-detect by binary name).
 
@@ -264,10 +277,10 @@ Secrets stored encrypted in `secrets` table. Three sources of `MasterPw` at runt
 - `RunFullGuardrails(code, "")` — ethics + AST. Used on `tools/*.py`. AST blocks: `eval`, `exec`, `compile`, `__import__`, `os.system`, `subprocess.*`, `socket.socket`.
 - Composio: blocks SDK imports, hardcoded keys, wrong host, v1/v2 endpoints.
 
-### Per-user coder isolation
+### Per-workspace coder isolation
 
-- `CLAUDE_CONFIG_DIR` → `<data_dir>/claude-homes/<userID>/.claude/`
-- `HOME` → `<data_dir>/claude-homes/<userID>/`
+- `CLAUDE_CONFIG_DIR` → `<data_dir>/claude-homes/<workspaceID>/.claude/`
+- `HOME` → `<data_dir>/claude-homes/<workspaceID>/`
 - `--setting-sources ""` — suppresses `settings.json` and all `CLAUDE.md` traversal.
 - `.credentials.json` copied from operator's `~/.claude/` on every invocation.
 
@@ -279,7 +292,7 @@ Secrets stored encrypted in `secrets` table. Three sources of `MasterPw` at runt
 
 **Mechanism:** `coder.buildCommand()` wraps the real command as `simple-agents __sandbox-exec <base64-spec>`. The helper applies `landlock.V5.BestEffort().RestrictPaths(...)` then `syscall.Exec`s the real command. Inherited by all children (`claude`→`bash`→`python`).
 
-**Allowed:** RW: per-user HOME + agent workdir. RO: system paths, coder binary dir, user's vault root. Denied: SQLite DB, config.yaml, other users' vaults.
+**Allowed:** RW: per-workspace HOME + agent workdir. RO: system paths, coder binary dir, the workspace's vault root. Denied: SQLite DB, config.yaml, other workspaces' vaults.
 
 `config.SandboxConfig.Enabled` (default true; `SA_SANDBOX=0` disables). With Landlock unavailable, the sandbox is not applied and nothing physically prevents writes outside the vault — agents/chat run trusted within the user's own vault.
 
@@ -287,15 +300,27 @@ Secrets stored encrypted in `secrets` table. Three sources of `MasterPw` at runt
 
 SQLite via `modernc.org/sqlite` (CGo-free). WAL mode + foreign keys set on open. Migrations in alphabetical order from `migrations/`.
 
-Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`, `agent_schedules`, `agent_runs`, `secrets`, `chats`, `reminders`, `user_permissions`, `mcp_servers`, `settings`, `audit_logs`, `schema_migrations`, `chat_messages` (FK `chat_id`→`chats`), `coders`, `skills`, `agent_skills` (keyed by `(agent_id, skill_name)` — core + user skills by name; migration 010 rebuilt it from the old `skill_id` FK and backfilled existing rows), `skill_drafts` (one row per user; 7-day TTL; FK `user_id`→`users`). Note: migration 008 created an admin `skill_library` catalog table; migration 009 dropped it (and `skills.library_slug`/`library_version`) when core skills pivoted to embedded-only.
+The schema is a single consolidated `migrations/001_initial_schema.up.sql` (the old incremental
+migrations were collapsed during the workspace refactor; data was wiped and re-created fresh).
+Tables: `owner` (single row), `workspaces` (replaces `users`; carries `about` + inlined coder
+config: `coder_kind`/`coder_bin`/`coder_timeout_s`/`coder_backend_type` + reserved
+`coder_provider`/`coder_model`/`coder_api_key_secret`), `platform_connections`,
+`platform_identities`, `agents`, `agent_schedules`, `agent_runs`, `secrets`, `chats`, `reminders`,
+`workspace_permissions` (was `user_permissions`), `mcp_servers`, `workspace_settings` (was
+`user_settings`), `system_settings` (owner/system-level, not tenant-scoped, no FK),
+`audit_logs` (records active `workspace_id`; owner is the implicit actor), `schema_migrations`,
+`chat_messages` (FK `chat_id`→`chats`), `skills`, `agent_skills` (keyed by `(agent_id, skill_name)`),
+`agent_drafts`/`skill_drafts` (one row per workspace; 7-day TTL). Every tenant table keys off
+`workspace_id`. There is **no** `coders` table — coder config is inlined on `workspaces`.
 
 ### Web UI routes
 
 ```
-/login, /logout
-/setup                              # first-login wizard (password → master_password → profile → connector → done)
-/change-password
-/dashboard                          # user home
+/login, /logout                     # owner login/logout
+/change-password                    # owner password (requireOwner)
+/dashboard/setup                    # per-workspace onboarding wizard (basics → master_password → coder → profile → connector → composio → done)
+/workspace/leave                    # POST: leave the active workspace (owner stays logged in)
+/dashboard                          # active-workspace home
 /dashboard/agents                   # list agents
 /dashboard/agents/new               # conversational agent creation
 /dashboard/agents/design            # POST: drives design FSM turn-by-turn
@@ -332,27 +357,41 @@ Schema tables: `users`, `platform_connections`, `platform_identities`, `agents`,
 /dashboard/kb/save|new|delete|rename# POST: mutate notes/folders
 /dashboard/kb/search                # GET: ripgrep full-text search
 /dashboard/settings                 # user profile + change master password
-/admin, /admin/users, /admin/users/:id
-/admin/users/:id/coder[/unassign]
-/admin/coders, /admin/coders/:id
-/admin/settings
+/dashboard/settings                 # workspace profile + name/about + coder config + change master password
+/dashboard/settings/workspace       # POST: save workspace name + about
+/dashboard/settings/coder           # POST: save workspace coder config
+/dashboard/settings/master-password # POST: change workspace master password (re-encrypts secrets)
+/admin                              # owner dashboard: workspace cards + stats + recent audit
+/admin/workspaces, /admin/workspaces/:id
+/admin/workspaces/:id/enter         # POST: master-password gate → set active workspace
+/admin/workspaces/:id/delete
+/admin/workspaces/:id/permissions[/:perm/revoke]
+/admin/settings                    # system settings
 /admin/audit
 ```
 
-### Admin vs. user separation
+### Owner vs. workspace separation
 
-- **Admin** (`role="admin"`): only `/admin/*` — manages users, coder profiles, settings, audit.
-- **Regular users**: only `/dashboard/*` — agents, secrets, connectors, chats, reminders, KB.
-- `requireUserOnly` on `/dashboard/*` redirects admins to `/admin`.
-- `requireAdmin` on `/admin/*` rejects non-admins with 403.
+- **Owner**: only `/admin/*` (guarded by `requireOwner`) — manages workspaces, system settings, audit.
+- **Active workspace**: `/dashboard/*` (guarded by `requireOwner` + `requireActiveWorkspace`) — agents, secrets, connectors, chats, reminders, KB, scoped to the entered workspace.
+- Middleware (`web/server.go`): `requireOwner` (session `owner_id` → `c.Set("owner")`), `requireActiveWorkspace` (session `active_workspace_id` → `c.Set("workspace")`; redirects to `/admin` if none), `requireSetupComplete` (redirects to `/dashboard/setup` while `needs_setup`). Handlers read `c.Get("workspace").(*db.Workspace)`.
+- Entering/switching: `handleEnterWorkspace` decrypts the workspace's `encrypted_master_password` with the system key and compares to the typed one (an access gate — the stored form must remain so the scheduler can decrypt for headless cron runs). Re-prompts on every switch; `handleLeaveWorkspace` clears the active workspace.
 
-### Multi-coder system
+### Per-workspace coder
 
-Admin creates **Coder Profiles** (`coders` table) with `claude_bin`, `timeout_s`, `backend_type`. Users assigned via `users.coder_id` FK. `coderForUser(userID)` builds the right `*coder.Coder`, falling back to system defaults when unassigned.
+Each workspace inlines its own coder config on the `workspaces` row (`coder_kind` `local`/`api`,
+`coder_bin`, `coder_timeout_s`, `coder_backend_type`). `coder.ForWorkspace(w, …)` builds a
+`*coder.Coder` from it, falling back to the system defaults when unset; `coder.DetectInstalled()`
+probes PATH + `~/.local/bin` for supported binaries (claude/claude-code, opencode, codex, cursor)
+to populate the picker. The web `coderForWorkspace(id)` and the runner's injected coder factory
+(`Runner.WithCoderFactory`, wired in `main.go`) both use `ForWorkspace`, so scheduled + manual
+agent runs now honor the workspace's coder (previously the runner ignored the assignment). The
+`api` kind (direct provider API using a secret-store key) is reserved for future work — it falls
+back to the default binary today.
 
 ### Natural language reminders
 
-`internal/reminder/timeparser.go` — `ParseNaturalTime(text, now, loc)` parses expressions like `"in 10 minutes"`, `"tomorrow at 3pm"`, `"next Tuesday at noon"`. Both web UI and Telegram use `profile.LoadLocation(db, userID)` so reminders fire in the user's timezone.
+`internal/reminder/timeparser.go` — `ParseNaturalTime(text, now, loc)` parses expressions like `"in 10 minutes"`, `"tomorrow at 3pm"`, `"next Tuesday at noon"`. Both web UI and Telegram use `profile.LoadLocation(db, workspaceID)` so reminders fire in the workspace's timezone.
 
 ---
 
