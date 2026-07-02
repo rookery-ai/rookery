@@ -6,6 +6,59 @@
 
   <h1 class="text-2xl font-bold mb-8">⚙️ Settings</h1>
 
+  <!-- Workspace -->
+  <div class="card bg-base-100 shadow-sm border border-base-300 mb-4">
+    <div class="card-body p-5">
+      <h2 class="font-semibold mb-4">Workspace</h2>
+      <form method="POST" action="/dashboard/settings/workspace" class="space-y-4">
+        <div class="form-control">
+          <label class="label pb-1"><span class="label-text font-medium">Name</span></label>
+          <input type="text" name="name" class="input input-bordered w-full"
+            value="{{if .Workspace}}{{.Workspace.Name}}{{end}}" required>
+        </div>
+        <div class="form-control">
+          <label class="label pb-1"><span class="label-text font-medium">About</span></label>
+          <textarea name="about" rows="3" placeholder="What is this workspace about?"
+            class="textarea textarea-bordered w-full">{{if .Workspace}}{{.Workspace.About}}{{end}}</textarea>
+          <label class="label pt-1"><span class="label-text-alt text-base-content/30">Shared with this workspace's agents as context</span></label>
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Save Workspace</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Coder -->
+  <div class="card bg-base-100 shadow-sm border border-base-300 mb-4">
+    <div class="card-body p-5">
+      <h2 class="font-semibold mb-1">Coder</h2>
+      <p class="text-sm text-base-content/50 mb-4">The coder CLI this workspace's agents run on.</p>
+      <form method="POST" action="/dashboard/settings/coder" class="space-y-4">
+        <div class="form-control">
+          <label class="label pb-1"><span class="label-text font-medium">Coder binary</span></label>
+          {{if .DetectedCoders}}
+          <select name="coder_bin" class="select select-bordered w-full">
+            <option value="" {{if eq .Workspace.CoderBin ""}}selected{{end}}>System default</option>
+            {{$cur := ""}}{{if .Workspace}}{{$cur = .Workspace.CoderBin}}{{end}}
+            {{range .DetectedCoders}}
+            <option value="{{.Bin}}" {{if eq .Bin $cur}}selected{{end}}>{{.Name}} — {{.Bin}}</option>
+            {{end}}
+          </select>
+          {{else}}
+          <input type="text" name="coder_bin" class="input input-bordered w-full"
+            value="{{if .Workspace}}{{.Workspace.CoderBin}}{{end}}" placeholder="claude (leave blank for default)">
+          {{end}}
+        </div>
+        <div class="form-control">
+          <label class="label pb-1"><span class="label-text font-medium">Timeout (seconds)</span></label>
+          <input type="number" name="coder_timeout_s" min="0" class="input input-bordered w-full"
+            value="{{if and .Workspace (gt .Workspace.CoderTimeoutS 0)}}{{.Workspace.CoderTimeoutS}}{{end}}"
+            placeholder="Leave blank for default">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">Save Coder</button>
+      </form>
+    </div>
+  </div>
+
   <!-- Profile -->
   <div class="card bg-base-100 shadow-sm border border-base-300 mb-4">
     <div class="card-body p-5">

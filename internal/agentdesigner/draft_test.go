@@ -15,24 +15,24 @@ import (
 // newDraftFlow builds a Flow wired to a fresh migrated DB + temp agents dir.
 func newDraftFlow(t *testing.T) (*Flow, *db.DB, string, string) {
 	t.Helper()
-	database, userID := testDB(t)
+	database, workspaceID := testDB(t)
 	agentsDir := t.TempDir()
 	flow := &Flow{
 		sessions: make(map[string]*DesignSession),
 		designer: NewDesigner(database, agentsDir),
 		db:       database,
 	}
-	return flow, database, userID, agentsDir
+	return flow, database, workspaceID, agentsDir
 }
 
 // TestDraftSaveAndResume_Designing verifies a saved designing-state draft restores
 // the conversation history and reloads derived context on resume — without any
 // coder subprocess involved.
 func TestDraftSaveAndResume_Designing(t *testing.T) {
-	flow, database, userID, _ := newDraftFlow(t)
+	flow, database, workspaceID, _ := newDraftFlow(t)
 
 	sess := &DesignSession{
-		UserID:    userID,
+		WorkspaceID:    workspaceID,
 		AgentID:   uuid.New().String(),
 		AgentName: "price-tracker",
 		State:     StateDesigning,
@@ -45,12 +45,12 @@ func TestDraftSaveAndResume_Designing(t *testing.T) {
 	}
 	flow.saveDraft(sess)
 
-	if d := flow.HasDraft(userID); d == nil || d.AgentName != "price-tracker" || d.State != "designing" {
+	if d := flow.HasDraft(workspaceID); d == nil || d.AgentName != "price-tracker" || d.State != "designing" {
 		t.Fatalf("HasDraft = %+v, want a designing draft for price-tracker", d)
 	}
 
 	// Simulate session loss: no in-memory session exists.
-	resp, err := flow.ResumeDraft(context.Background(), userID)
+	resp, err := flow.ResumeDraft(context.Background(), workspaceID)
 	if err != nil {
 		t.Fatalf("ResumeDraft: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestDraftSaveAndResume_Designing(t *testing.T) {
 		t.Errorf("resume message = %q, want it to mention the agent name", resp)
 	}
 
-	got := flow.GetSession(userID)
+	got := flow.GetSession(workspaceID)
 	if got == nil {
 		t.Fatal("no session reconstructed after resume")
 	}
@@ -77,11 +77,11 @@ func TestDraftSaveAndResume_Designing(t *testing.T) {
 // TestDraftSaveAndResume_Verifying verifies a saved verifying-state draft restores
 // the generated AGENT.md content and surfaces it in the resume message.
 func TestDraftSaveAndResume_Verifying(t *testing.T) {
-	flow, _, userID, _ := newDraftFlow(t)
+	flow, _, workspaceID, _ := newDraftFlow(t)
 
 	pendingMD := "# Suggested schedule: */10 * * * *\nFetches BTC price and alerts."
 	sess := &DesignSession{
-		UserID:         userID,
+		WorkspaceID:         workspaceID,
 		AgentID:        uuid.New().String(),
 		AgentName:      "price-tracker",
 		State:          StateVerifying,
@@ -90,7 +90,7 @@ func TestDraftSaveAndResume_Verifying(t *testing.T) {
 	}
 	flow.saveDraft(sess)
 
-	resp, err := flow.ResumeDraft(context.Background(), userID)
+	resp, err := flow.ResumeDraft(context.Background(), workspaceID)
 	if err != nil {
 		t.Fatalf("ResumeDraft: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestDraftSaveAndResume_Verifying(t *testing.T) {
 		t.Errorf("verifying resume message = %q, want an approve prompt", resp)
 	}
 
-	got := flow.GetSession(userID)
+	got := flow.GetSession(workspaceID)
 	if got == nil || got.State != StateVerifying {
 		t.Fatalf("state after resume = %+v, want verifying", got)
 	}
@@ -114,24 +114,24 @@ func TestDraftSaveAndResume_Verifying(t *testing.T) {
 // (no coder — pending content is pre-set) and asserts the agent is persisted and
 // the draft row is deleted so the resume prompt never reappears.
 func TestDraftDismissedOnFinalize(t *testing.T) {
-	flow, database, userID, _ := newDraftFlow(t)
+	flow, database, workspaceID, _ := newDraftFlow(t)
 
 	agentID := uuid.New().String()
 	sess := &DesignSession{
-		UserID:         userID,
+		WorkspaceID:         workspaceID,
 		AgentID:        agentID,
 		AgentName:      "price-tracker",
 		State:          StateVerifying,
 		PendingAgentMD: "# Suggested schedule: none\nFetches BTC price and alerts.",
 	}
-	flow.sessions[userID] = sess
+	flow.sessions[workspaceID] = sess
 	flow.saveDraft(sess)
 
-	if flow.HasDraft(userID) == nil {
+	if flow.HasDraft(workspaceID) == nil {
 		t.Fatal("draft should exist before finalize")
 	}
 
-	resp, done, gotID, err := flow.Step(context.Background(), userID, "approve")
+	resp, done, gotID, err := flow.Step(context.Background(), workspaceID, "approve")
 	if err != nil {
 		t.Fatalf("Step approve: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestDraftDismissedOnFinalize(t *testing.T) {
 		t.Fatalf("Step = (%q, %v, %q, %v), want done with agentID %q", resp, done, gotID, err, agentID)
 	}
 
-	if flow.HasDraft(userID) != nil {
+	if flow.HasDraft(workspaceID) != nil {
 		t.Error("draft should be deleted after a successful finalize")
 	}
 	if a, err := database.GetAgent(agentID); err != nil || a == nil {
@@ -150,10 +150,10 @@ func TestDraftDismissedOnFinalize(t *testing.T) {
 // TestDraftCleanupOrphanDir verifies DismissDraft removes the pre-approved agent
 // directory left by runGeneration for a create-mode verifying draft.
 func TestDraftCleanupOrphanDir(t *testing.T) {
-	flow, _, userID, agentsDir := newDraftFlow(t)
+	flow, _, workspaceID, agentsDir := newDraftFlow(t)
 
 	agentID := uuid.New().String()
-	agentDir := AgentDir(agentsDir, userID, agentID)
+	agentDir := AgentDir(agentsDir, workspaceID, agentID)
 	if err := os.MkdirAll(filepath.Join(agentDir, "tools"), 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestDraftCleanupOrphanDir(t *testing.T) {
 	}
 
 	sess := &DesignSession{
-		UserID:         userID,
+		WorkspaceID:         workspaceID,
 		AgentID:        agentID,
 		AgentName:      "price-tracker",
 		State:          StateVerifying,
@@ -170,13 +170,13 @@ func TestDraftCleanupOrphanDir(t *testing.T) {
 	}
 	flow.saveDraft(sess)
 
-	if err := flow.DismissDraft(userID); err != nil {
+	if err := flow.DismissDraft(workspaceID); err != nil {
 		t.Fatalf("DismissDraft: %v", err)
 	}
 	if _, err := os.Stat(agentDir); !os.IsNotExist(err) {
 		t.Errorf("orphan agent dir should be removed; stat err = %v", err)
 	}
-	if flow.HasDraft(userID) != nil {
+	if flow.HasDraft(workspaceID) != nil {
 		t.Error("draft should be deleted by DismissDraft")
 	}
 }
@@ -185,25 +185,25 @@ func TestDraftCleanupOrphanDir(t *testing.T) {
 // (not yet generated) create draft does NOT touch any directory — there is none
 // to clean, and DismissDraft must never RemoveAll a path that wasn't created.
 func TestDraftDismiss_CreateDesigningKeepsDir(t *testing.T) {
-	flow, _, userID, agentsDir := newDraftFlow(t)
+	flow, _, workspaceID, agentsDir := newDraftFlow(t)
 
 	agentID := uuid.New().String()
 	// A real sibling agent dir exists (e.g. a finalized agent); DismissDraft must
 	// not touch it because this draft is in "designing" state (no generation ran).
-	siblingDir := AgentDir(agentsDir, userID, agentID)
+	siblingDir := AgentDir(agentsDir, workspaceID, agentID)
 	if err := os.MkdirAll(siblingDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 
 	sess := &DesignSession{
-		UserID:    userID,
+		WorkspaceID:    workspaceID,
 		AgentID:   agentID,
 		AgentName: "price-tracker",
 		State:     StateDesigning,
 	}
 	flow.saveDraft(sess)
 
-	if err := flow.DismissDraft(userID); err != nil {
+	if err := flow.DismissDraft(workspaceID); err != nil {
 		t.Fatalf("DismissDraft: %v", err)
 	}
 	if _, err := os.Stat(siblingDir); err != nil {
@@ -214,13 +214,13 @@ func TestDraftDismiss_CreateDesigningKeepsDir(t *testing.T) {
 // TestEditDraftResume_AgentDeleted verifies that resuming an edit draft whose
 // agent has since been deleted dismisses the draft and returns an error.
 func TestEditDraftResume_AgentDeleted(t *testing.T) {
-	flow, database, userID, agentsDir := newDraftFlow(t)
+	flow, database, workspaceID, agentsDir := newDraftFlow(t)
 
 	agentID := uuid.New().String()
-	seedAgent(t, database, agentsDir, userID, agentID, "# Suggested schedule: none\nDoes a thing.", nil)
+	seedAgent(t, database, agentsDir, workspaceID, agentID, "# Suggested schedule: none\nDoes a thing.", nil)
 
 	sess := &DesignSession{
-		UserID:          userID,
+		WorkspaceID:          workspaceID,
 		AgentID:         agentID,
 		AgentName:       "test-agent",
 		State:           StateDesigning,
@@ -233,22 +233,22 @@ func TestEditDraftResume_AgentDeleted(t *testing.T) {
 	if err := database.DeleteAgent(agentID); err != nil {
 		t.Fatal(err)
 	}
-	_ = os.RemoveAll(filepath.Join(agentsDir, userID, agentID))
+	_ = os.RemoveAll(filepath.Join(agentsDir, workspaceID, agentID))
 
-	if _, err := flow.ResumeDraft(context.Background(), userID); err == nil {
+	if _, err := flow.ResumeDraft(context.Background(), workspaceID); err == nil {
 		t.Fatal("ResumeDraft should error when the edited agent no longer exists")
 	}
-	if flow.HasDraft(userID) != nil {
+	if flow.HasDraft(workspaceID) != nil {
 		t.Error("draft should be dismissed after a failed edit resume")
 	}
 }
 
 // TestDraftExpiry verifies an expired draft is treated as absent by GetAgentDraft.
 func TestDraftExpiry(t *testing.T) {
-	_, database, userID, _ := newDraftFlow(t)
+	_, database, workspaceID, _ := newDraftFlow(t)
 
 	if err := database.UpsertAgentDraft(&db.AgentDraft{
-		UserID:    userID,
+		WorkspaceID:    workspaceID,
 		AgentName: "stale",
 		State:     "designing",
 		ExpiresAt: time.Now().Add(-24 * time.Hour), // already expired
@@ -256,7 +256,7 @@ func TestDraftExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := database.GetAgentDraft(userID); err != db.ErrNotFound {
+	if _, err := database.GetAgentDraft(workspaceID); err != db.ErrNotFound {
 		t.Errorf("GetAgentDraft err = %v, want ErrNotFound for expired draft", err)
 	}
 }
@@ -264,11 +264,11 @@ func TestDraftExpiry(t *testing.T) {
 // TestAwaitingResume_NewBranch verifies the "new" path dismisses the draft and
 // starts a fresh create session (reusing Start's context loading).
 func TestAwaitingResume_NewBranch(t *testing.T) {
-	flow, _, userID, _ := newDraftFlow(t)
+	flow, _, workspaceID, _ := newDraftFlow(t)
 
 	agentID := uuid.New().String()
-	flow.sessions[userID] = &DesignSession{
-		UserID:      userID,
+	flow.sessions[workspaceID] = &DesignSession{
+		WorkspaceID:      workspaceID,
 		AgentID:     agentID,
 		AgentName:   "old-draft-name",
 		State:       StateAwaitingResume,
@@ -276,23 +276,23 @@ func TestAwaitingResume_NewBranch(t *testing.T) {
 	}
 	// Seed a draft so DismissDraft has something to clear.
 	flow.saveDraft(&DesignSession{
-		UserID: userID, AgentID: agentID, AgentName: "old-draft-name", State: StateDesigning,
+		WorkspaceID: workspaceID, AgentID: agentID, AgentName: "old-draft-name", State: StateDesigning,
 	})
-	if flow.HasDraft(userID) == nil {
+	if flow.HasDraft(workspaceID) == nil {
 		t.Fatal("draft should exist before 'new'")
 	}
 
-	resp, _, _, err := flow.Step(context.Background(), userID, "new")
+	resp, _, _, err := flow.Step(context.Background(), workspaceID, "new")
 	if err != nil {
 		t.Fatalf("Step new: %v", err)
 	}
 	if !strings.Contains(resp, "fresh-name") {
 		t.Errorf("new-branch response = %q, want it to mention the pending name", resp)
 	}
-	if flow.HasDraft(userID) != nil {
+	if flow.HasDraft(workspaceID) != nil {
 		t.Error("draft should be dismissed on the 'new' branch")
 	}
-	sess := flow.GetSession(userID)
+	sess := flow.GetSession(workspaceID)
 	if sess == nil || sess.State != StateDescribing || sess.AgentName != "fresh-name" {
 		t.Errorf("session after 'new' = %+v, want fresh StateDescribing session named fresh-name", sess)
 	}

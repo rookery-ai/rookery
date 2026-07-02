@@ -21,7 +21,7 @@ import (
 type Message struct {
 	Platform       string // "telegram"
 	PlatformUserID string // platform-specific user/chat ID
-	UserID         string // resolved internal user ID (empty if not yet linked)
+	WorkspaceID         string // resolved internal user ID (empty if not yet linked)
 	Text           string
 	MessageID      int // platform message ID (used to delete incoming messages)
 }
@@ -73,7 +73,7 @@ type GatewayManager struct {
 	router    *Router
 
 	mu       sync.RWMutex
-	gateways map[string]Gateway        // key: "platform:userID"
+	gateways map[string]Gateway        // key: "platform:workspaceID"
 	cancels  map[string]context.CancelFunc
 }
 
@@ -97,7 +97,7 @@ func (m *GatewayManager) StartAll(ctx context.Context) error {
 	for _, conn := range connections {
 		if err := m.start(ctx, conn); err != nil {
 			// Log but don't abort — other users' bots should still start.
-			fmt.Printf("gateway: failed to start %s for user %s: %v\n", conn.Platform, conn.UserID, err)
+			fmt.Printf("gateway: failed to start %s for user %s: %v\n", conn.Platform, conn.WorkspaceID, err)
 		}
 	}
 	return nil
@@ -119,11 +119,11 @@ func (m *GatewayManager) StopAll() {
 
 // Reload starts or stops the gateway for a specific user+platform.
 // Call this after a user adds or removes a connector via the web UI.
-func (m *GatewayManager) Reload(ctx context.Context, userID, platform string) error {
+func (m *GatewayManager) Reload(ctx context.Context, workspaceID, platform string) error {
 	// Stop existing if running.
-	m.stop(userID, platform)
+	m.stop(workspaceID, platform)
 
-	conn, err := m.db.GetPlatformConnection(userID, platform)
+	conn, err := m.db.GetPlatformConnection(workspaceID, platform)
 	if err != nil {
 		return nil // connection was deleted — nothing to start
 	}
@@ -134,12 +134,12 @@ func (m *GatewayManager) Reload(ctx context.Context, userID, platform string) er
 }
 
 // Send delivers a message to a platform user on behalf of a user's bot.
-func (m *GatewayManager) Send(platform, userID, platformUserID, text string) error {
+func (m *GatewayManager) Send(platform, workspaceID, platformUserID, text string) error {
 	m.mu.RLock()
-	gw, ok := m.gateways[key(platform, userID)]
+	gw, ok := m.gateways[key(platform, workspaceID)]
 	m.mu.RUnlock()
 	if !ok {
-		return fmt.Errorf("no active %s gateway for user %s", platform, userID)
+		return fmt.Errorf("no active %s gateway for user %s", platform, workspaceID)
 	}
 	return gw.Send(platformUserID, text)
 }
@@ -147,18 +147,18 @@ func (m *GatewayManager) Send(platform, userID, platformUserID, text string) err
 // SendToUser looks up the user's linked platform identity and sends a message.
 // It tries all known platforms in order; the first successful send wins.
 // Satisfies the reminder.Sender interface.
-func (m *GatewayManager) SendToUser(userID, text string) error {
+func (m *GatewayManager) SendToUser(workspaceID, text string) error {
 	// Find all platform identities for this user.
-	identities, err := m.db.ListPlatformIdentities(userID, "")
+	identities, err := m.db.ListPlatformIdentities(workspaceID, "")
 	if err != nil || len(identities) == 0 {
-		return fmt.Errorf("no platform identity for user %s", userID)
+		return fmt.Errorf("no platform identity for user %s", workspaceID)
 	}
 	for _, identity := range identities {
-		if err := m.Send(identity.Platform, userID, identity.PlatformUserID, text); err == nil {
+		if err := m.Send(identity.Platform, workspaceID, identity.PlatformUserID, text); err == nil {
 			return nil
 		}
 	}
-	return fmt.Errorf("failed to deliver message to user %s on any platform", userID)
+	return fmt.Errorf("failed to deliver message to user %s on any platform", workspaceID)
 }
 
 // ─── Internal ─────────────────────────────────────────────────────────────────
@@ -172,7 +172,7 @@ func (m *GatewayManager) start(ctx context.Context, conn *db.PlatformConnection)
 	var gw Gateway
 	switch conn.Platform {
 	case "telegram":
-		gw, err = NewTelegram(token, conn.UserID, m)
+		gw, err = NewTelegram(token, conn.WorkspaceID, m)
 		if err != nil {
 			return fmt.Errorf("new telegram: %w", err)
 		}
@@ -183,23 +183,23 @@ func (m *GatewayManager) start(ctx context.Context, conn *db.PlatformConnection)
 	gwCtx, cancel := context.WithCancel(ctx)
 
 	m.mu.Lock()
-	k := key(conn.Platform, conn.UserID)
+	k := key(conn.Platform, conn.WorkspaceID)
 	m.gateways[k] = gw
 	m.cancels[k] = cancel
 	m.mu.Unlock()
 
 	go func() {
 		if err := gw.Start(gwCtx); err != nil && gwCtx.Err() == nil {
-			fmt.Printf("gateway: %s for user %s stopped with error: %v\n", conn.Platform, conn.UserID, err)
+			fmt.Printf("gateway: %s for user %s stopped with error: %v\n", conn.Platform, conn.WorkspaceID, err)
 		}
 	}()
 	return nil
 }
 
-func (m *GatewayManager) stop(userID, platform string) {
+func (m *GatewayManager) stop(workspaceID, platform string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	k := key(platform, userID)
+	k := key(platform, workspaceID)
 	if cancel, ok := m.cancels[k]; ok {
 		cancel()
 		delete(m.cancels, k)
@@ -219,13 +219,13 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 		// Sender is not linked. Only /start is permitted.
 		cmd, _ := ParseCommand(msg.Text)
 		if cmd != "start" {
-			_ = m.Send(msg.Platform, msg.UserID, msg.PlatformUserID,
+			_ = m.Send(msg.Platform, msg.WorkspaceID, msg.PlatformUserID,
 				"This is a private bot. Send /start to link your account.")
 			return
 		}
-		// For /start, keep msg.UserID = ownerUserID so the router can create the identity.
+		// For /start, keep msg.WorkspaceID = ownerWorkspaceID so the router can create the identity.
 	} else {
-		msg.UserID = identity.UserID
+		msg.WorkspaceID = identity.WorkspaceID
 	}
 
 	// For plain-text messages (not commands), use typing indicator + placeholder
@@ -234,7 +234,7 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 	isPlainText := !strings.HasPrefix(msg.Text, "/")
 	if isPlainText {
 		m.mu.RLock()
-		gw, ok := m.gateways[key(msg.Platform, msg.UserID)]
+		gw, ok := m.gateways[key(msg.Platform, msg.WorkspaceID)]
 		m.mu.RUnlock()
 		if ok {
 			if tg, ok := gw.(TypingGateway); ok {
@@ -252,7 +252,7 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 			return
 		}
 		m.mu.RLock()
-		gw, ok := m.gateways[key(msg.Platform, msg.UserID)]
+		gw, ok := m.gateways[key(msg.Platform, msg.WorkspaceID)]
 		m.mu.RUnlock()
 		if ok {
 			if tg, ok := gw.(TypingGateway); ok {
@@ -264,7 +264,7 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 	send := func(text string) {
 		if placeholderID != 0 {
 			m.mu.RLock()
-			gw, ok := m.gateways[key(msg.Platform, msg.UserID)]
+			gw, ok := m.gateways[key(msg.Platform, msg.WorkspaceID)]
 			m.mu.RUnlock()
 			if ok {
 				if tg, ok := gw.(TypingGateway); ok {
@@ -276,7 +276,7 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 			}
 			placeholderID = 0
 		}
-		if err := m.Send(msg.Platform, msg.UserID, msg.PlatformUserID, text); err != nil {
+		if err := m.Send(msg.Platform, msg.WorkspaceID, msg.PlatformUserID, text); err != nil {
 			fmt.Printf("gateway: send error: %v\n", err)
 		}
 	}
@@ -287,7 +287,7 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 			return
 		}
 		m.mu.RLock()
-		gw, ok := m.gateways[key(msg.Platform, msg.UserID)]
+		gw, ok := m.gateways[key(msg.Platform, msg.WorkspaceID)]
 		m.mu.RUnlock()
 		if ok {
 			if dg, ok := gw.(DeletableGateway); ok {
@@ -303,7 +303,7 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 		var sentMsgID int
 
 		m.mu.RLock()
-		gw, ok := m.gateways[key(msg.Platform, msg.UserID)]
+		gw, ok := m.gateways[key(msg.Platform, msg.WorkspaceID)]
 		m.mu.RUnlock()
 
 		if ok {
@@ -319,21 +319,21 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 			}
 		}
 		if sentMsgID == 0 {
-			_ = m.Send(msg.Platform, msg.UserID, msg.PlatformUserID, text)
+			_ = m.Send(msg.Platform, msg.WorkspaceID, msg.PlatformUserID, text)
 			return
 		}
 
 		go func(id int) {
 			time.Sleep(30 * time.Second)
 			m.mu.RLock()
-			gw2, ok2 := m.gateways[key(msg.Platform, msg.UserID)]
+			gw2, ok2 := m.gateways[key(msg.Platform, msg.WorkspaceID)]
 			m.mu.RUnlock()
 			if ok2 {
 				if dg, ok3 := gw2.(DeletableGateway); ok3 {
 					_ = dg.DeleteMessage(msg.PlatformUserID, id)
 				}
 			}
-			_ = m.Send(msg.Platform, msg.UserID, msg.PlatformUserID, "🔐 Secret message was automatically deleted\\.")
+			_ = m.Send(msg.Platform, msg.WorkspaceID, msg.PlatformUserID, "🔐 Secret message was automatically deleted\\.")
 		}(sentMsgID)
 	}
 
@@ -342,8 +342,8 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 	}
 }
 
-func key(platform, userID string) string {
-	return platform + ":" + userID
+func key(platform, workspaceID string) string {
+	return platform + ":" + workspaceID
 }
 
 // ─── Token encryption (system key AES-256-GCM) ────────────────────────────────

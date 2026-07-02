@@ -18,7 +18,7 @@ type secretsPageData struct {
 }
 
 func (s *Server) showSecrets(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	names, _ := s.db.ListSecretNames(u.ID)
 	return c.Render(http.StatusOK, "dashboard/secrets.html", &secretsPageData{
 		pageData:    s.page(c, "Secrets"),
@@ -27,7 +27,7 @@ func (s *Server) showSecrets(c echo.Context) error {
 }
 
 func (s *Server) handleCreateSecret(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	name := strings.TrimSpace(c.FormValue("name"))
 	value := strings.TrimSpace(c.FormValue("value"))
 
@@ -75,7 +75,7 @@ func (s *Server) handleCreateSecret(c echo.Context) error {
 }
 
 func (s *Server) handleDeleteSecret(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	name := c.Param("name")
 	masterPw := c.FormValue("master_password")
 

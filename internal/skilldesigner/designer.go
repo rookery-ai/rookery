@@ -19,7 +19,7 @@ import (
 // agentdesigner.AgentDesigner but for skill folders: <vault>/skills/<name>/.
 type SkillSaver struct {
 	db        *db.DB
-	skillsDir string // vaults base: <data>/vaults/ (skills at <base>/<userID>/skills/<name>)
+	skillsDir string // vaults base: <data>/vaults/ (skills at <base>/<workspaceID>/skills/<name>)
 }
 
 // NewSaver creates a SkillSaver. skillsDir is the vaults base directory.
@@ -35,7 +35,7 @@ func (s *SkillSaver) SkillsDir() string { return s.skillsDir }
 // user, its files are overwritten in place and the description is updated; the
 // row ID is preserved. The skill name must not collide with a core skill — the
 // caller (the creator flow) enforces that before reaching here.
-func (s *SkillSaver) SaveSkill(userID, name, description, skillMD string, scripts map[string]string) (*db.Skill, error) {
+func (s *SkillSaver) SaveSkill(workspaceID, name, description, skillMD string, scripts map[string]string) (*db.Skill, error) {
 	if skilllibrary.IsCoreSkill(name) {
 		return nil, fmt.Errorf("the name %q is reserved by a core skill; choose a different name", name)
 	}
@@ -48,7 +48,7 @@ func (s *SkillSaver) SaveSkill(userID, name, description, skillMD string, script
 		}
 	}
 
-	skillDir := skillstore.SkillDir(s.skillsDir, userID, name)
+	skillDir := skillstore.SkillDir(s.skillsDir, workspaceID, name)
 	if err := os.MkdirAll(skillDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create skill dir: %w", err)
 	}
@@ -90,7 +90,7 @@ func (s *SkillSaver) SaveSkill(userID, name, description, skillMD string, script
 	}
 
 	// Upsert the DB row: update description if the skill already exists, else insert.
-	if existing, err := s.db.GetSkillByName(userID, name); err == nil && existing != nil {
+	if existing, err := s.db.GetSkillByName(workspaceID, name); err == nil && existing != nil {
 		if err := s.db.UpdateSkillDescription(existing.ID, description); err != nil {
 			return nil, fmt.Errorf("db update skill: %w", err)
 		}
@@ -100,7 +100,7 @@ func (s *SkillSaver) SaveSkill(userID, name, description, skillMD string, script
 
 	skill := &db.Skill{
 		ID:          uuid.New().String(),
-		UserID:      userID,
+		WorkspaceID:      workspaceID,
 		Name:        name,
 		Description: description,
 		InstalledAt: time.Now().UTC(),

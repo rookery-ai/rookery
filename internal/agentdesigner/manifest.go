@@ -19,16 +19,16 @@ type AgentManifest struct {
 }
 
 // AgentDir returns an agent's own directory inside the user's vault:
-// <vaultsBase>/<userID>/agents/<agentID>. All other agent path helpers build on
+// <vaultsBase>/<workspaceID>/agents/<agentID>. All other agent path helpers build on
 // this. The "agents" segment scopes each agent's writable area within the vault.
-func AgentDir(vaultsBase, userID, agentID string) string {
-	return filepath.Join(vaultsBase, userID, "agents", agentID)
+func AgentDir(vaultsBase, workspaceID, agentID string) string {
+	return filepath.Join(vaultsBase, workspaceID, "agents", agentID)
 }
 
 // LoadManifest loads an agent's manifest from agent.json.
 // Falls back to a minimal manifest synthesised from config.json for legacy python agents.
-func LoadManifest(vaultsBase, userID, agentID string) (*AgentManifest, error) {
-	dir := AgentDir(vaultsBase, userID, agentID)
+func LoadManifest(vaultsBase, workspaceID, agentID string) (*AgentManifest, error) {
+	dir := AgentDir(vaultsBase, workspaceID, agentID)
 
 	data, err := os.ReadFile(filepath.Join(dir, "agent.json"))
 	if err == nil {
@@ -65,8 +65,8 @@ func LoadManifest(vaultsBase, userID, agentID string) (*AgentManifest, error) {
 }
 
 // SaveManifest writes agent.json to the agent's directory.
-func SaveManifest(vaultsBase, userID, agentID string, m *AgentManifest) error {
-	dir := AgentDir(vaultsBase, userID, agentID)
+func SaveManifest(vaultsBase, workspaceID, agentID string, m *AgentManifest) error {
+	dir := AgentDir(vaultsBase, workspaceID, agentID)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
@@ -78,36 +78,36 @@ func SaveManifest(vaultsBase, userID, agentID string, m *AgentManifest) error {
 }
 
 // AgentDescPath returns the path to an agent's AGENT.md description file.
-func AgentDescPath(vaultsBase, userID, agentID string) string {
-	return filepath.Join(AgentDir(vaultsBase, userID, agentID), "AGENT.md")
+func AgentDescPath(vaultsBase, workspaceID, agentID string) string {
+	return filepath.Join(AgentDir(vaultsBase, workspaceID, agentID), "AGENT.md")
 }
 
 // AgentMDPath is an alias for AgentDescPath kept for callers not yet updated.
 // Deprecated: use AgentDescPath.
-func AgentMDPath(vaultsBase, userID, agentID string) string {
-	return AgentDescPath(vaultsBase, userID, agentID)
+func AgentMDPath(vaultsBase, workspaceID, agentID string) string {
+	return AgentDescPath(vaultsBase, workspaceID, agentID)
 }
 
 // AgentStatePath returns the path to an agent's state.json file.
-func AgentStatePath(vaultsBase, userID, agentID string) string {
-	return filepath.Join(AgentDir(vaultsBase, userID, agentID), "state.json")
+func AgentStatePath(vaultsBase, workspaceID, agentID string) string {
+	return filepath.Join(AgentDir(vaultsBase, workspaceID, agentID), "state.json")
 }
 
 // AgentLogsDir returns the path to an agent's logs directory.
-func AgentLogsDir(vaultsBase, userID, agentID string) string {
-	return filepath.Join(AgentDir(vaultsBase, userID, agentID), "logs")
+func AgentLogsDir(vaultsBase, workspaceID, agentID string) string {
+	return filepath.Join(AgentDir(vaultsBase, workspaceID, agentID), "logs")
 }
 
 // AgentLogPath returns a timestamped log file path for a new run. Run logs are
 // markdown notes so they render in the knowledge-base UI like any other note.
-func AgentLogPath(vaultsBase, userID, agentID string, t time.Time) string {
-	return filepath.Join(AgentDir(vaultsBase, userID, agentID), "logs",
+func AgentLogPath(vaultsBase, workspaceID, agentID string, t time.Time) string {
+	return filepath.Join(AgentDir(vaultsBase, workspaceID, agentID), "logs",
 		"run_log_"+t.UTC().Format("20060102_150405")+".md")
 }
 
 // AgentCodePath returns the absolute path to an agent's main.py (legacy python agents only).
-func AgentCodePath(vaultsBase, userID, agentID string) string {
-	return filepath.Join(AgentDir(vaultsBase, userID, agentID), "main.py")
+func AgentCodePath(vaultsBase, workspaceID, agentID string) string {
+	return filepath.Join(AgentDir(vaultsBase, workspaceID, agentID), "main.py")
 }
 
 // ReconcileSkillAttachmentsToDB is a one-time cutover: it makes the agent_skills

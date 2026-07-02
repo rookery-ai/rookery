@@ -1,5 +1,5 @@
 // Package memory provides a per-user store for structured context files.
-// Context lives at <vaultsBase>/<userID>/memory/ as named markdown files
+// Context lives at <vaultsBase>/<workspaceID>/memory/ as named markdown files
 // (USER.md, SOUL.md, GENERAL.md, etc.). Every .md file is browsable and
 // editable via the Knowledge Base. ContextString assembles them all into a
 // single block for LLM injection. Quick entries added via the Telegram
@@ -28,7 +28,7 @@ type Entry struct {
 
 // Store manages per-user memory files.
 type Store struct {
-	baseDir string // vaults base; files live at baseDir/<userID>/memory/
+	baseDir string // vaults base; files live at baseDir/<workspaceID>/memory/
 }
 
 // New creates a Store rooted at the vaults base directory.
@@ -38,11 +38,11 @@ func New(baseDir string) *Store {
 
 // Append adds a bullet entry to memory/GENERAL.md.
 // Used by the Telegram /memory add command.
-func (s *Store) Append(userID, content string) (*Entry, error) {
+func (s *Store) Append(workspaceID, content string) (*Entry, error) {
 	if content == "" {
 		return nil, fmt.Errorf("content cannot be empty")
 	}
-	dir := s.memDir(userID)
+	dir := s.memDir(workspaceID)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
 	}
@@ -76,8 +76,8 @@ func (s *Store) Append(userID, content string) (*Entry, error) {
 
 // List returns bullet entries from memory/GENERAL.md.
 // Used by the Telegram /memory list and /memory delete commands.
-func (s *Store) List(userID string) ([]*Entry, error) {
-	data, err := os.ReadFile(filepath.Join(s.memDir(userID), "GENERAL.md"))
+func (s *Store) List(workspaceID string) ([]*Entry, error) {
+	data, err := os.ReadFile(filepath.Join(s.memDir(workspaceID), "GENERAL.md"))
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -112,11 +112,11 @@ func (s *Store) List(userID string) ([]*Entry, error) {
 }
 
 // Delete removes a bullet entry from GENERAL.md by its "general:<n>" ID.
-func (s *Store) Delete(userID, entryID string) error {
+func (s *Store) Delete(workspaceID, entryID string) error {
 	_, numStr, found := strings.Cut(entryID, ":")
 	if !found {
 		// Legacy UUID path: try removing the old-format file (used during migration window).
-		err := os.Remove(s.notePath(userID, entryID))
+		err := os.Remove(s.notePath(workspaceID, entryID))
 		if os.IsNotExist(err) {
 			return nil
 		}
@@ -126,7 +126,7 @@ func (s *Store) Delete(userID, entryID string) error {
 	if err != nil || n < 1 {
 		return fmt.Errorf("invalid entry ID: %s", entryID)
 	}
-	generalPath := filepath.Join(s.memDir(userID), "GENERAL.md")
+	generalPath := filepath.Join(s.memDir(workspaceID), "GENERAL.md")
 	data, err := os.ReadFile(generalPath)
 	if os.IsNotExist(err) {
 		return nil
@@ -153,7 +153,7 @@ func (s *Store) Delete(userID, entryID string) error {
 // Existing notes are never overwritten. Returns the number of entries imported.
 // These UUID-named notes are then consolidated by MigrateToStructuredFiles on the
 // next startup.
-func (s *Store) ImportJSONL(userID, jsonlPath string) (int, error) {
+func (s *Store) ImportJSONL(workspaceID, jsonlPath string) (int, error) {
 	data, err := os.ReadFile(jsonlPath)
 	if os.IsNotExist(err) {
 		return 0, nil
@@ -161,7 +161,7 @@ func (s *Store) ImportJSONL(userID, jsonlPath string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	dir := s.memDir(userID)
+	dir := s.memDir(workspaceID)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return 0, err
 	}
@@ -181,7 +181,7 @@ func (s *Store) ImportJSONL(userID, jsonlPath string) (int, error) {
 		if e.CreatedAt.IsZero() {
 			e.CreatedAt = time.Now().UTC()
 		}
-		path := s.notePath(userID, e.ID)
+		path := s.notePath(workspaceID, e.ID)
 		if _, err := os.Stat(path); err == nil {
 			continue // do not clobber an already-migrated note
 		}
@@ -197,8 +197,8 @@ func (s *Store) ImportJSONL(userID, jsonlPath string) (int, error) {
 // written by pre-v2 Append or ImportJSONL) into bullet lines in GENERAL.md, then
 // deletes the UUID files. Idempotent: a second run finds no legacy files and returns
 // immediately.
-func (s *Store) MigrateToStructuredFiles(userID string) error {
-	dir := s.memDir(userID)
+func (s *Store) MigrateToStructuredFiles(workspaceID string) error {
+	dir := s.memDir(workspaceID)
 	files, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return nil
@@ -259,8 +259,8 @@ func (s *Store) MigrateToStructuredFiles(userID string) error {
 // injection. Every .md file under memory/ contributes a section keyed by filename.
 // Files whose effective body is blank (only headings and/or HTML comment placeholders)
 // are skipped so scaffold templates don't pollute prompts before the user fills them.
-func (s *Store) ContextString(userID string) (string, error) {
-	dir := s.memDir(userID)
+func (s *Store) ContextString(workspaceID string) (string, error) {
+	dir := s.memDir(workspaceID)
 	files, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
 		return "", nil
@@ -291,12 +291,12 @@ func (s *Store) ContextString(userID string) (string, error) {
 	return strings.Join(sections, "\n\n"), nil
 }
 
-func (s *Store) memDir(userID string) string {
-	return filepath.Join(s.baseDir, userID, "memory")
+func (s *Store) memDir(workspaceID string) string {
+	return filepath.Join(s.baseDir, workspaceID, "memory")
 }
 
-func (s *Store) notePath(userID, id string) string {
-	return filepath.Join(s.memDir(userID), id+".md")
+func (s *Store) notePath(workspaceID, id string) string {
+	return filepath.Join(s.memDir(workspaceID), id+".md")
 }
 
 // stripFrontmatter removes YAML frontmatter (---...---) from the top of a note body.

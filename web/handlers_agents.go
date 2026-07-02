@@ -51,7 +51,7 @@ type newAgentPageData struct {
 }
 
 func (s *Server) showAgents(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	agents, _ := s.db.ListAgents(u.ID)
 	running := make(map[string]bool, len(agents))
 	for _, a := range agents {
@@ -72,7 +72,7 @@ func (s *Server) showAgents(c echo.Context) error {
 }
 
 func (s *Server) showNewAgent(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	var draft *db.AgentDraft
 	if s.designFlow != nil {
 		draft = s.designFlow.HasDraft(u.ID)
@@ -90,7 +90,7 @@ func (s *Server) showNewAgent(c echo.Context) error {
 // generation only happens when the user next says "approve".
 // POST /dashboard/agents/design/resume
 func (s *Server) handleResumeDraft(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	if s.designFlow == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent designer not configured"})
 	}
@@ -126,7 +126,7 @@ func (s *Server) handleResumeDraft(c echo.Context) error {
 // verifying drafts, removes the orphaned pre-approved agent directory).
 // POST /dashboard/agents/design/dismiss
 func (s *Server) handleDismissDraft(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	if s.designFlow != nil {
 		_ = s.designFlow.DismissDraft(u.ID)
 	}
@@ -138,7 +138,7 @@ func (s *Server) handleDismissDraft(c echo.Context) error {
 // Body: {"name": "my-agent", "message": "..."}
 // Response: {"response": "...", "done": false} or {"response": "...", "done": true, "agent_id": "..."}
 func (s *Server) handleDesignChat(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 
 	var req struct {
 		Name    string `json:"name"`
@@ -213,7 +213,7 @@ func (s *Server) handleDesignChat(c echo.Context) error {
 // coder subprocess and closing the SSE progress channel.
 // POST /dashboard/agents/design/cancel
 func (s *Server) handleCancelDesign(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	if s.designFlow != nil {
 		s.designFlow.Cancel(u.ID)
 	}
@@ -227,7 +227,7 @@ func (s *Server) handleCancelDesign(c echo.Context) error {
 // the channel closes or the client disconnects.
 // GET /dashboard/agents/design/progress
 func (s *Server) handleDesignProgress(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	reqCtx := c.Request().Context()
 
 	if s.designFlow == nil {
@@ -278,11 +278,11 @@ func (s *Server) handleDesignProgress(c echo.Context) error {
 // showEditAgent renders the conversational edit UI for an existing agent.
 // GET /dashboard/agents/:id/edit
 func (s *Server) showEditAgent(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 
 	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.UserID != u.ID {
+	if err != nil || agent.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
 
@@ -303,16 +303,16 @@ func (s *Server) showEditAgent(c echo.Context) error {
 
 // handleStartEditDesign starts a new edit session for an existing agent and
 // returns the coder's first response. Continuation reuses handleDesignChat /
-// handleCancelDesign — the session, once created, is keyed by userID like any
+// handleCancelDesign — the session, once created, is keyed by workspaceID like any
 // other design session.
 // POST /dashboard/agents/:id/edit/start
 // Body: {"message": "..."}
 func (s *Server) handleStartEditDesign(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 
 	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.UserID != u.ID {
+	if err != nil || agent.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
 
@@ -343,11 +343,11 @@ func (s *Server) handleStartEditDesign(c echo.Context) error {
 }
 
 func (s *Server) showAgentDetail(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 
 	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.UserID != u.ID {
+	if err != nil || agent.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
 
@@ -355,7 +355,7 @@ func (s *Server) showAgentDetail(c echo.Context) error {
 }
 
 // agentsDir returns the vaults base directory from config (or empty string in
-// tests). Agent dirs live at <base>/<userID>/agents/<agentID>.
+// tests). Agent dirs live at <base>/<workspaceID>/agents/<agentID>.
 func (s *Server) agentsDir() string {
 	if s.cfg == nil {
 		return ""
@@ -364,10 +364,10 @@ func (s *Server) agentsDir() string {
 }
 
 // renderAgentDetail loads all data needed for the agent detail page and renders it.
-func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, userID string, p *pageData) error {
+func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, workspaceID string, p *pageData) error {
 	schedule, _ := s.db.GetScheduleForAgent(agent.ID)
 	runs, _ := s.db.ListAgentRuns(agent.ID, 10)
-	allSkills, _ := s.db.ListSkills(userID)
+	allSkills, _ := s.db.ListSkills(workspaceID)
 
 	// AttachedSet is the source of truth for the Skills card: the agent's skill
 	// attachments from the agent_skills DB table (names, core+user). AGENT.md is
@@ -396,23 +396,23 @@ func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, userID strin
 
 	dir := s.agentsDir()
 	if dir != "" {
-		manifest, _ := agentdesigner.LoadManifest(dir, userID, agent.ID)
+		manifest, _ := agentdesigner.LoadManifest(dir, workspaceID, agent.ID)
 		data.Manifest = manifest
 
 		// Load AGENT.md (fall back to CLAUDE.md for legacy agents).
-		if raw, err := os.ReadFile(agentdesigner.AgentDescPath(dir, userID, agent.ID)); err == nil {
+		if raw, err := os.ReadFile(agentdesigner.AgentDescPath(dir, workspaceID, agent.ID)); err == nil {
 			data.AgentMD = string(raw)
-		} else if raw, err := os.ReadFile(agentdesigner.AgentMDPath(dir, userID, agent.ID)); err == nil {
+		} else if raw, err := os.ReadFile(agentdesigner.AgentMDPath(dir, workspaceID, agent.ID)); err == nil {
 			data.AgentMD = string(raw)
 		}
 
 		// Load state.json.
-		if raw, err := os.ReadFile(agentdesigner.AgentStatePath(dir, userID, agent.ID)); err == nil {
+		if raw, err := os.ReadFile(agentdesigner.AgentStatePath(dir, workspaceID, agent.ID)); err == nil {
 			data.State = string(raw)
 		}
 
 		// List log files (newest first).
-		logsDir := agentdesigner.AgentLogsDir(dir, userID, agent.ID)
+		logsDir := agentdesigner.AgentLogsDir(dir, workspaceID, agent.ID)
 		if entries, err := os.ReadDir(logsDir); err == nil {
 			for i := len(entries) - 1; i >= 0; i-- {
 				e := entries[i]
@@ -430,7 +430,7 @@ func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, userID strin
 
 		// Compute missing secrets for manifest-declared requirements.
 		if manifest != nil && len(manifest.RequiredSecrets) > 0 {
-			knownNames, _ := s.db.ListSecretNames(userID)
+			knownNames, _ := s.db.ListSecretNames(workspaceID)
 			knownSet := make(map[string]bool, len(knownNames))
 			for _, n := range knownNames {
 				knownSet[n] = true
@@ -447,11 +447,11 @@ func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, userID strin
 }
 
 func (s *Server) handleDeleteAgent(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 
 	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.UserID != u.ID {
+	if err != nil || agent.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
 
@@ -470,11 +470,11 @@ func (s *Server) handleDeleteAgent(c echo.Context) error {
 }
 
 func (s *Server) handleRunAgent(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 
 	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.UserID != u.ID {
+	if err != nil || agent.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
 
@@ -515,11 +515,11 @@ func (s *Server) handleRunAgent(c echo.Context) error {
 }
 
 func (s *Server) handleSaveSchedule(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 
 	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.UserID != u.ID {
+	if err != nil || agent.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
 
@@ -544,7 +544,7 @@ func (s *Server) handleSaveSchedule(c echo.Context) error {
 			row := &db.AgentSchedule{
 				ID:        schedID,
 				AgentID:   agent.ID,
-				UserID:    u.ID,
+				WorkspaceID:    u.ID,
 				CronExpr:  cronExpr,
 				NextRunAt: &nextRun,
 				Enabled:   true,
@@ -562,11 +562,11 @@ func (s *Server) handleSaveSchedule(c echo.Context) error {
 }
 
 func (s *Server) handleDeleteSchedule(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 
 	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.UserID != u.ID {
+	if err != nil || agent.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
 

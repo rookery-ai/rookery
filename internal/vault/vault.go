@@ -8,7 +8,7 @@
 // the live system-of-record; structured rows are *reflected* into the vault (see
 // reflect.go). Secrets never enter the vault — only their names.
 //
-// Layout (per user, under <dataDir>/vaults/<safeID(userID)>):
+// Layout (per user, under <dataDir>/vaults/<safeID(workspaceID)>):
 //
 //	README.md                      vault home/index note
 //	notes/                         user-authored notes, journals, plans, todos
@@ -23,7 +23,7 @@
 // Secret VALUES never enter the vault — they stay encrypted in the database and
 // are injected into agents as environment variables at run time.
 //
-// claude-homes/<userID>/ deliberately stays OUTSIDE the vault — it holds .claude
+// claude-homes/<workspaceID>/ deliberately stays OUTSIDE the vault — it holds .claude
 // credentials that must never be backed up.
 package vault
 
@@ -64,43 +64,43 @@ func (v *Vault) VaultsDir() string {
 // server-generated UUIDs and are used as the directory segment directly, matching
 // how internal/agentdesigner, internal/memory and internal/skillstore key their
 // per-user paths (whose dirs live inside this root).
-func (v *Vault) Root(userID string) string {
-	return filepath.Join(v.VaultsDir(), userID)
+func (v *Vault) Root(workspaceID string) string {
+	return filepath.Join(v.VaultsDir(), workspaceID)
 }
 
 // AgentsDir returns the directory holding a user's agent workspaces. This is the
 // base the agentdesigner manifest path helpers join against, replacing the old
 // flat <dataDir>/agents.
-func (v *Vault) AgentsDir(userID string) string {
-	return filepath.Join(v.Root(userID), "agents")
+func (v *Vault) AgentsDir(workspaceID string) string {
+	return filepath.Join(v.Root(workspaceID), "agents")
 }
 
 // AgentDir returns a single agent's own writable directory.
-func (v *Vault) AgentDir(userID, agentID string) string {
-	return filepath.Join(v.AgentsDir(userID), agentID)
+func (v *Vault) AgentDir(workspaceID, agentID string) string {
+	return filepath.Join(v.AgentsDir(workspaceID), agentID)
 }
 
 // MemoryDir returns the directory holding a user's memory notes.
-func (v *Vault) MemoryDir(userID string) string {
-	return filepath.Join(v.Root(userID), "memory")
+func (v *Vault) MemoryDir(workspaceID string) string {
+	return filepath.Join(v.Root(workspaceID), "memory")
 }
 
 // SkillsDir returns the directory holding a user's skills.
-func (v *Vault) SkillsDir(userID string) string {
-	return filepath.Join(v.Root(userID), "skills")
+func (v *Vault) SkillsDir(workspaceID string) string {
+	return filepath.Join(v.Root(workspaceID), "skills")
 }
 
 // internalSub returns an absolute path inside the user's hidden .kb directory.
-func (v *Vault) internalSub(userID string, parts ...string) string {
-	return filepath.Join(append([]string{v.Root(userID), InternalDir}, parts...)...)
+func (v *Vault) internalSub(workspaceID string, parts ...string) string {
+	return filepath.Join(append([]string{v.Root(workspaceID), InternalDir}, parts...)...)
 }
 
 // Resolve is the security primitive every read/write/delete path must use. It
 // cleans relPath, rejects absolute paths and any traversal that would escape the
 // user's vault, and returns the absolute on-disk path. relPath is always
 // interpreted relative to the vault root, never the process CWD.
-func (v *Vault) Resolve(userID, relPath string) (string, error) {
-	root := v.Root(userID)
+func (v *Vault) Resolve(workspaceID, relPath string) (string, error) {
+	root := v.Root(workspaceID)
 	// Treat the input as vault-relative. Strip a leading slash so callers can pass
 	// "/notes/x.md" or "notes/x.md" interchangeably, then clean as a relative path.
 	clean := filepath.Clean(strings.TrimPrefix(filepath.ToSlash(relPath), "/"))
@@ -121,8 +121,8 @@ func (v *Vault) Resolve(userID, relPath string) (string, error) {
 // Rel converts an absolute path inside the user's vault back to a vault-relative
 // slash path (the form used in URLs and the file tree). It errors if abs is not
 // within the vault.
-func (v *Vault) Rel(userID, abs string) (string, error) {
-	root := v.Root(userID)
+func (v *Vault) Rel(workspaceID, abs string) (string, error) {
+	root := v.Root(workspaceID)
 	rel, err := filepath.Rel(root, abs)
 	if err != nil {
 		return "", err
@@ -135,8 +135,8 @@ func (v *Vault) Rel(userID, abs string) (string, error) {
 
 // EnsureScaffold creates a user's vault with its standard top-level structure and
 // a README home note if the vault does not yet exist. Idempotent.
-func (v *Vault) EnsureScaffold(userID string) error {
-	root := v.Root(userID)
+func (v *Vault) EnsureScaffold(workspaceID string) error {
+	root := v.Root(workspaceID)
 	for _, sub := range []string{"notes", "memory", "skills", "agents", "chats", InternalDir} {
 		if err := os.MkdirAll(filepath.Join(root, sub), 0o750); err != nil {
 			return fmt.Errorf("scaffold %s: %w", sub, err)
@@ -177,8 +177,8 @@ func (v *Vault) EnsureScaffold(userID string) error {
 }
 
 // ReadNote returns the raw bytes of a vault-relative file.
-func (v *Vault) ReadNote(userID, relPath string) ([]byte, error) {
-	abs, err := v.Resolve(userID, relPath)
+func (v *Vault) ReadNote(workspaceID, relPath string) ([]byte, error) {
+	abs, err := v.Resolve(workspaceID, relPath)
 	if err != nil {
 		return nil, err
 	}
@@ -188,8 +188,8 @@ func (v *Vault) ReadNote(userID, relPath string) ([]byte, error) {
 // WriteNote writes data to a vault-relative file, creating parent directories as
 // needed. The write is atomic (temp file + rename), matching the discipline used
 // for agent state.json elsewhere in the codebase.
-func (v *Vault) WriteNote(userID, relPath string, data []byte) error {
-	abs, err := v.Resolve(userID, relPath)
+func (v *Vault) WriteNote(workspaceID, relPath string, data []byte) error {
+	abs, err := v.Resolve(workspaceID, relPath)
 	if err != nil {
 		return err
 	}
@@ -201,24 +201,24 @@ func (v *Vault) WriteNote(userID, relPath string, data []byte) error {
 
 // Delete removes a vault-relative file or empty directory. It refuses to delete
 // the vault root or the internal .kb directory.
-func (v *Vault) Delete(userID, relPath string) error {
-	abs, err := v.Resolve(userID, relPath)
+func (v *Vault) Delete(workspaceID, relPath string) error {
+	abs, err := v.Resolve(workspaceID, relPath)
 	if err != nil {
 		return err
 	}
-	if abs == v.Root(userID) || abs == v.internalSub(userID) {
+	if abs == v.Root(workspaceID) || abs == v.internalSub(workspaceID) {
 		return errors.New("refusing to delete protected path")
 	}
 	return os.RemoveAll(abs)
 }
 
 // Rename moves a vault-relative file or directory to a new vault-relative path.
-func (v *Vault) Rename(userID, fromRel, toRel string) error {
-	from, err := v.Resolve(userID, fromRel)
+func (v *Vault) Rename(workspaceID, fromRel, toRel string) error {
+	from, err := v.Resolve(workspaceID, fromRel)
 	if err != nil {
 		return err
 	}
-	to, err := v.Resolve(userID, toRel)
+	to, err := v.Resolve(workspaceID, toRel)
 	if err != nil {
 		return err
 	}
@@ -251,8 +251,8 @@ func topSegment(rel string) string {
 // (e.g. the agent designer) can show what knowledge already exists.
 // System-managed and already-injected dirs (.kb, agents, chats, memory, skills,
 // reminders) are skipped. The result is capped and sorted.
-func (v *Vault) NotePaths(userID string) []string {
-	root := v.Root(userID)
+func (v *Vault) NotePaths(workspaceID string) []string {
+	root := v.Root(workspaceID)
 	if root == "" {
 		return nil
 	}
@@ -261,7 +261,7 @@ func (v *Vault) NotePaths(userID string) []string {
 		if err != nil {
 			return nil
 		}
-		rel, err := v.Rel(userID, path)
+		rel, err := v.Rel(workspaceID, path)
 		if err != nil || rel == "." {
 			return nil
 		}
@@ -295,8 +295,8 @@ type Node struct {
 // List returns the immediate children of a vault-relative directory, directories
 // first then files, both alphabetical. The hidden .kb directory is omitted at the
 // top level. Passing "" or "." lists the vault root.
-func (v *Vault) List(userID, relDir string) ([]Node, error) {
-	abs, err := v.Resolve(userID, relDir)
+func (v *Vault) List(workspaceID, relDir string) ([]Node, error) {
+	abs, err := v.Resolve(workspaceID, relDir)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +310,7 @@ func (v *Vault) List(userID, relDir string) ([]Node, error) {
 		if strings.HasPrefix(name, ".") {
 			continue // hide internal data (.kb) and folder-keep files (.keep)
 		}
-		rel, err := v.Rel(userID, filepath.Join(abs, name))
+		rel, err := v.Rel(workspaceID, filepath.Join(abs, name))
 		if err != nil {
 			continue
 		}

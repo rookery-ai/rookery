@@ -21,21 +21,19 @@ func testDB(t *testing.T) (*db.DB, string) {
 	}
 	t.Cleanup(func() { database.Close() })
 
-	userID := uuid.New().String()
-	if err := database.CreateUser(&db.User{
-		ID:           userID,
-		Username:     "tester",
-		PasswordHash: "x",
-		Role:         "user",
+	workspaceID := uuid.New().String()
+	if err := database.CreateWorkspace(&db.Workspace{
+		ID:   workspaceID,
+		Name: "tester",
 	}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	return database, userID
+	return database, workspaceID
 }
 
-func seedAgent(t *testing.T, database *db.DB, vaultsBase, userID, agentID, agentMD string, tools map[string]string) {
+func seedAgent(t *testing.T, database *db.DB, vaultsBase, workspaceID, agentID, agentMD string, tools map[string]string) {
 	t.Helper()
-	dir := AgentDir(vaultsBase, userID, agentID)
+	dir := AgentDir(vaultsBase, workspaceID, agentID)
 	if err := os.MkdirAll(filepath.Join(dir, "tools"), 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -51,10 +49,10 @@ func seedAgent(t *testing.T, database *db.DB, vaultsBase, userID, agentID, agent
 		}
 	}
 	manifest := &AgentManifest{ID: agentID, Name: "test-agent", CreatedAt: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)}
-	if err := SaveManifest(vaultsBase, userID, agentID, manifest); err != nil {
+	if err := SaveManifest(vaultsBase, workspaceID, agentID, manifest); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.CreateAgent(&db.Agent{ID: agentID, UserID: userID, Name: "test-agent", Description: "d", Active: true}); err != nil {
+	if err := database.CreateAgent(&db.Agent{ID: agentID, WorkspaceID: workspaceID, Name: "test-agent", Description: "d", Active: true}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -62,25 +60,25 @@ func seedAgent(t *testing.T, database *db.DB, vaultsBase, userID, agentID, agent
 // ─── loadAgentForEdit: schedule reconciliation ────────────────────────────────
 
 func TestLoadAgentForEdit_ReconcilesScheduleFromDB(t *testing.T) {
-	database, userID := testDB(t)
+	database, workspaceID := testDB(t)
 	agentsDir := t.TempDir()
 	agentID := uuid.New().String()
 
 	// AGENT.md on disk says */10 (stale — simulates drift from the schedule UI,
 	// which writes the DB directly and never touches AGENT.md).
-	seedAgent(t, database, agentsDir, userID, agentID,
+	seedAgent(t, database, agentsDir, workspaceID, agentID,
 		"# Suggested schedule: */10 * * * *\nDoes a thing.", nil)
 
 	// The real schedule (set via the web schedule-editor form) is */5.
 	if err := database.UpsertAgentSchedule(&db.AgentSchedule{
-		ID: uuid.New().String(), AgentID: agentID, UserID: userID,
+		ID: uuid.New().String(), AgentID: agentID, WorkspaceID: workspaceID,
 		CronExpr: "*/5 * * * *", Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	flow := &Flow{designer: NewDesigner(database, agentsDir), db: database}
-	_, reconciled, _, err := flow.loadAgentForEdit(userID, agentID)
+	_, reconciled, _, err := flow.loadAgentForEdit(workspaceID, agentID)
 	if err != nil {
 		t.Fatalf("loadAgentForEdit: %v", err)
 	}
@@ -92,16 +90,16 @@ func TestLoadAgentForEdit_ReconcilesScheduleFromDB(t *testing.T) {
 }
 
 func TestLoadAgentForEdit_NoScheduleReconcilesToNone(t *testing.T) {
-	database, userID := testDB(t)
+	database, workspaceID := testDB(t)
 	agentsDir := t.TempDir()
 	agentID := uuid.New().String()
 
-	seedAgent(t, database, agentsDir, userID, agentID,
+	seedAgent(t, database, agentsDir, workspaceID, agentID,
 		"# Suggested schedule: */10 * * * *\nDoes a thing.", nil)
 	// No schedule row created — agent is on-demand only.
 
 	flow := &Flow{designer: NewDesigner(database, agentsDir), db: database}
-	_, reconciled, _, err := flow.loadAgentForEdit(userID, agentID)
+	_, reconciled, _, err := flow.loadAgentForEdit(workspaceID, agentID)
 	if err != nil {
 		t.Fatalf("loadAgentForEdit: %v", err)
 	}
@@ -114,19 +112,19 @@ func TestLoadAgentForEdit_NoScheduleReconcilesToNone(t *testing.T) {
 // ─── reconcileScheduleOnSave: the duplicate-row / double-fire guard ──────────
 
 func TestReconcileScheduleOnSave_UpsertReusesExistingID(t *testing.T) {
-	database, userID := testDB(t)
+	database, workspaceID := testDB(t)
 	agentID := uuid.New().String()
-	if err := database.CreateAgent(&db.Agent{ID: agentID, UserID: userID, Name: "a"}); err != nil {
+	if err := database.CreateAgent(&db.Agent{ID: agentID, WorkspaceID: workspaceID, Name: "a"}); err != nil {
 		t.Fatal(err)
 	}
 	existingID := uuid.New().String()
 	if err := database.UpsertAgentSchedule(&db.AgentSchedule{
-		ID: existingID, AgentID: agentID, UserID: userID, CronExpr: "*/10 * * * *", Enabled: true,
+		ID: existingID, AgentID: agentID, WorkspaceID: workspaceID, CronExpr: "*/10 * * * *", Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	reconcileScheduleOnSave(database, userID, agentID, "# Suggested schedule: */5 * * * *\nbody")
+	reconcileScheduleOnSave(database, workspaceID, agentID, "# Suggested schedule: */5 * * * *\nbody")
 
 	sched, err := database.GetScheduleForAgent(agentID)
 	if err != nil || sched == nil {
@@ -149,18 +147,18 @@ func TestReconcileScheduleOnSave_UpsertReusesExistingID(t *testing.T) {
 }
 
 func TestReconcileScheduleOnSave_DeletesOnNone(t *testing.T) {
-	database, userID := testDB(t)
+	database, workspaceID := testDB(t)
 	agentID := uuid.New().String()
-	if err := database.CreateAgent(&db.Agent{ID: agentID, UserID: userID, Name: "a"}); err != nil {
+	if err := database.CreateAgent(&db.Agent{ID: agentID, WorkspaceID: workspaceID, Name: "a"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.UpsertAgentSchedule(&db.AgentSchedule{
-		ID: uuid.New().String(), AgentID: agentID, UserID: userID, CronExpr: "*/10 * * * *", Enabled: true,
+		ID: uuid.New().String(), AgentID: agentID, WorkspaceID: workspaceID, CronExpr: "*/10 * * * *", Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	reconcileScheduleOnSave(database, userID, agentID, "# Suggested schedule: none\nbody")
+	reconcileScheduleOnSave(database, workspaceID, agentID, "# Suggested schedule: none\nbody")
 
 	sched, err := database.GetScheduleForAgent(agentID)
 	if err != nil {
@@ -172,13 +170,13 @@ func TestReconcileScheduleOnSave_DeletesOnNone(t *testing.T) {
 }
 
 func TestReconcileScheduleOnSave_CreatesWhenNoneExisted(t *testing.T) {
-	database, userID := testDB(t)
+	database, workspaceID := testDB(t)
 	agentID := uuid.New().String()
-	if err := database.CreateAgent(&db.Agent{ID: agentID, UserID: userID, Name: "a"}); err != nil {
+	if err := database.CreateAgent(&db.Agent{ID: agentID, WorkspaceID: workspaceID, Name: "a"}); err != nil {
 		t.Fatal(err)
 	}
 
-	reconcileScheduleOnSave(database, userID, agentID, "# Suggested schedule: */15 * * * *\nbody")
+	reconcileScheduleOnSave(database, workspaceID, agentID, "# Suggested schedule: */15 * * * *\nbody")
 
 	sched, err := database.GetScheduleForAgent(agentID)
 	if err != nil || sched == nil {
@@ -256,22 +254,22 @@ func TestCopyAgentWorkspace_NeverTouchesLive(t *testing.T) {
 // ─── UpdateAgent: state preservation, CreatedAt preservation, tool wipe ──────
 
 func TestUpdateAgent_PreservesStateAndCreatedAtAndWipesRemovedTools(t *testing.T) {
-	database, userID := testDB(t)
+	database, workspaceID := testDB(t)
 	agentsDir := t.TempDir()
 	agentID := uuid.New().String()
 
-	seedAgent(t, database, agentsDir, userID, agentID,
+	seedAgent(t, database, agentsDir, workspaceID, agentID,
 		"# Suggested schedule: none\nOld body.",
 		map[string]string{"keep.py": "print('keep')", "remove.py": "print('remove')"})
 
 	designer := NewDesigner(database, agentsDir)
 	newTools := map[string]string{"keep.py": "print('keep updated')"}
-	if err := designer.UpdateAgent(userID, agentID, "test-agent", "new description",
+	if err := designer.UpdateAgent(workspaceID, agentID, "test-agent", "new description",
 		"# Suggested schedule: none\nNew body.", newTools, nil, nil); err != nil {
 		t.Fatalf("UpdateAgent: %v", err)
 	}
 
-	dir := AgentDir(agentsDir, userID, agentID)
+	dir := AgentDir(agentsDir, workspaceID, agentID)
 
 	// state.json must be byte-identical to what was there before the edit.
 	state, err := os.ReadFile(filepath.Join(dir, "state.json"))
@@ -292,7 +290,7 @@ func TestUpdateAgent_PreservesStateAndCreatedAtAndWipesRemovedTools(t *testing.T
 	}
 
 	// Manifest CreatedAt must survive the edit.
-	manifest, err := LoadManifest(agentsDir, userID, agentID)
+	manifest, err := LoadManifest(agentsDir, workspaceID, agentID)
 	if err != nil {
 		t.Fatal(err)
 	}

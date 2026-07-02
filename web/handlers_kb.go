@@ -57,7 +57,7 @@ type kbEditData struct {
 
 // showKB renders the file-tree browser for a directory in the user's vault.
 func (s *Server) showKB(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	if s.vault == nil {
 		return echo.NewHTTPError(http.StatusNotImplemented, "knowledge base not available")
 	}
@@ -80,7 +80,7 @@ func (s *Server) showKB(c echo.Context) error {
 
 // enrichKBDisplayNames resolves human-readable names for system-managed vault dirs.
 // It mutates nodes in place; failures are silently ignored (raw name is left as-is).
-func (s *Server) enrichKBDisplayNames(userID, parentPath string, nodes []vault.Node) {
+func (s *Server) enrichKBDisplayNames(workspaceID, parentPath string, nodes []vault.Node) {
 	top := strings.Trim(parentPath, "/")
 	for i := range nodes {
 		n := &nodes[i]
@@ -93,7 +93,7 @@ func (s *Server) enrichKBDisplayNames(userID, parentPath string, nodes []vault.N
 			}
 		case "memory", "chats", "reminders":
 			if !n.IsDir {
-				if title := kbReadFirstHeading(s.vault, userID, n.Path); title != "" {
+				if title := kbReadFirstHeading(s.vault, workspaceID, n.Path); title != "" {
 					n.DisplayName = title
 				}
 			}
@@ -103,8 +103,8 @@ func (s *Server) enrichKBDisplayNames(userID, parentPath string, nodes []vault.N
 
 // kbReadFirstHeading reads the first markdown heading line from a vault note
 // and returns its text (stripped of leading "# "), capped at 80 chars.
-func kbReadFirstHeading(v *vault.Vault, userID, relPath string) string {
-	data, err := v.ReadNote(userID, relPath)
+func kbReadFirstHeading(v *vault.Vault, workspaceID, relPath string) string {
+	data, err := v.ReadNote(workspaceID, relPath)
 	if err != nil {
 		return ""
 	}
@@ -125,7 +125,7 @@ func kbReadFirstHeading(v *vault.Vault, userID, relPath string) string {
 // viewKBNote renders a single note: markdown is converted to HTML with working
 // [[wikilinks]]; other files are shown as raw text.
 func (s *Server) viewKBNote(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	if s.vault == nil {
 		return echo.NewHTTPError(http.StatusNotImplemented, "knowledge base not available")
 	}
@@ -159,7 +159,7 @@ func (s *Server) viewKBNote(c echo.Context) error {
 
 // editKBNote shows a raw-text editor for a note (or a blank one for a new note).
 func (s *Server) editKBNote(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	rel := cleanKBParam(c.QueryParam("path"))
 	var content string
 	if rel != "" {
@@ -182,7 +182,7 @@ func (s *Server) editKBNote(c echo.Context) error {
 // handleSaveKBNote writes a note's content. All path handling goes through the
 // vault's Resolve, so traversal outside the user's vault is impossible.
 func (s *Server) handleSaveKBNote(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	rel := cleanKBParam(c.FormValue("path"))
 	if rel == "" {
 		return s.renderKBError(c, "A note path is required.")
@@ -199,7 +199,7 @@ func (s *Server) handleSaveKBNote(c echo.Context) error {
 
 // handleNewKBNote creates a new note or folder under a directory.
 func (s *Server) handleNewKBNote(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	dir := cleanKBParam(c.FormValue("dir"))
 	name := strings.TrimSpace(c.FormValue("name"))
 	kind := c.FormValue("kind")
@@ -228,7 +228,7 @@ func (s *Server) handleNewKBNote(c echo.Context) error {
 
 // handleDeleteKBNote removes a note or folder and returns to its parent.
 func (s *Server) handleDeleteKBNote(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	rel := cleanKBParam(c.FormValue("path"))
 	if err := s.vault.Delete(u.ID, rel); err != nil {
 		return s.renderKBError(c, "Delete failed: "+err.Error())
@@ -242,7 +242,7 @@ func (s *Server) handleDeleteKBNote(c echo.Context) error {
 
 // handleRenameKBNote moves a note/folder to a new path.
 func (s *Server) handleRenameKBNote(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	from := cleanKBParam(c.FormValue("from"))
 	to := cleanKBParam(c.FormValue("to"))
 	if from == "" || to == "" {
@@ -256,7 +256,7 @@ func (s *Server) handleRenameKBNote(c echo.Context) error {
 
 // searchKB runs a keyword search over the user's vault.
 func (s *Server) searchKB(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	q := strings.TrimSpace(c.QueryParam("q"))
 	p := s.page(c, "Search knowledge base")
 	bd := &kbBrowseData{pageData: p, Query: q, Crumbs: kbBreadcrumbs("")}
@@ -274,7 +274,7 @@ func (s *Server) searchKB(c echo.Context) error {
 
 // rawKBNote serves a note's bytes as plain text (for download / external tools).
 func (s *Server) rawKBNote(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	rel := cleanKBParam(c.QueryParam("path"))
 	data, err := s.vault.ReadNote(u.ID, rel)
 	if err != nil {
@@ -285,8 +285,8 @@ func (s *Server) rawKBNote(c echo.Context) error {
 
 // renderMarkdown rewrites [[wikilinks]] to KB viewer links, then converts the
 // markdown to sanitised HTML.
-func (s *Server) renderMarkdown(userID, content string) template.HTML {
-	if idx, err := s.vault.BuildLinkIndex(userID); err == nil {
+func (s *Server) renderMarkdown(workspaceID, content string) template.HTML {
+	if idx, err := s.vault.BuildLinkIndex(workspaceID); err == nil {
 		content = idx.RenderHTMLLinks(content, func(rel string) string {
 			return "/dashboard/kb/view?path=" + url.QueryEscape(rel)
 		})
@@ -308,7 +308,7 @@ func (s *Server) redirectKB(c echo.Context, dir string) error {
 }
 
 func (s *Server) renderKBError(c echo.Context, msg string) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	_ = s.vault.EnsureScaffold(u.ID)
 	nodes, _ := s.vault.List(u.ID, "")
 	p := s.page(c, "Knowledge Base")

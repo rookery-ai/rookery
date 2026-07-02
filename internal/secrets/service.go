@@ -41,7 +41,7 @@ var placeholderRe = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
 // Service manages per-user encrypted secrets.
 type Service struct {
 	db          *db.DB
-	userID      string
+	workspaceID      string
 	masterPw    string // plaintext master password (held in-memory only during operation)
 	salt        string // hex-encoded per-user Argon2id salt from users table
 	systemKey   []byte // 32-byte system key for encrypting master password at rest
@@ -49,10 +49,10 @@ type Service struct {
 
 // New creates a Service for a user with their plaintext master password.
 // The master password is used to derive the AES key for secret encryption.
-func New(database *db.DB, userID, masterPw, salt string) *Service {
+func New(database *db.DB, workspaceID, masterPw, salt string) *Service {
 	return &Service{
 		db:       database,
-		userID:   userID,
+		workspaceID:   workspaceID,
 		masterPw: masterPw,
 		salt:     salt,
 	}
@@ -79,7 +79,7 @@ func (s *Service) Set(ctx context.Context, name, value string) error {
 
 	return s.db.UpsertSecret(&db.Secret{
 		ID:         uuid.New().String(),
-		UserID:     s.userID,
+		WorkspaceID:     s.workspaceID,
 		Name:       name,
 		Ciphertext: base64.StdEncoding.EncodeToString(ciphertext),
 		Nonce:      base64.StdEncoding.EncodeToString(nonce),
@@ -89,7 +89,7 @@ func (s *Service) Set(ctx context.Context, name, value string) error {
 // Get decrypts and returns a named secret. Returns ErrNotFound if absent,
 // ErrWrongPassword if the master password is incorrect.
 func (s *Service) Get(ctx context.Context, name string) (string, error) {
-	row, err := s.db.GetSecret(s.userID, name)
+	row, err := s.db.GetSecret(s.workspaceID, name)
 	if err != nil {
 		return "", err
 	}
@@ -117,12 +117,12 @@ func (s *Service) Get(ctx context.Context, name string) (string, error) {
 
 // List returns all secret names for the user. Values are never returned.
 func (s *Service) List(ctx context.Context) ([]string, error) {
-	return s.db.ListSecretNames(s.userID)
+	return s.db.ListSecretNames(s.workspaceID)
 }
 
 // Delete removes a named secret. Returns ErrNotFound if absent.
 func (s *Service) Delete(ctx context.Context, name string) error {
-	return s.db.DeleteSecret(s.userID, name)
+	return s.db.DeleteSecret(s.workspaceID, name)
 }
 
 // Proxy resolves ${NAME} placeholders in text using in-memory decrypted secret values.
@@ -163,7 +163,7 @@ func (s *Service) Proxy(ctx context.Context, text string) (string, error) {
 // GetAll decrypts and returns every secret for this user as a name→value map.
 // The returned map MUST NOT be logged, stored, or sent to any LLM. Only pass to subprocess env.
 func (s *Service) GetAll(ctx context.Context) (map[string]string, error) {
-	names, err := s.db.ListSecretNames(s.userID)
+	names, err := s.db.ListSecretNames(s.workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func (s *Service) GetAll(ctx context.Context) (map[string]string, error) {
 	}
 	out := make(map[string]string, len(names))
 	for _, name := range names {
-		row, err := s.db.GetSecret(s.userID, name)
+		row, err := s.db.GetSecret(s.workspaceID, name)
 		if err != nil {
 			continue
 		}

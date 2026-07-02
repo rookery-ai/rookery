@@ -22,7 +22,7 @@ type SearchHit struct {
 // kept deliberately small so a future embedding-based (semantic) implementation
 // can be dropped in without touching callers.
 type Searcher interface {
-	Search(ctx context.Context, userID, query string) ([]SearchHit, error)
+	Search(ctx context.Context, workspaceID, query string) ([]SearchHit, error)
 }
 
 // ripgrepSearcher shells out to ripgrep (rg) for fast full-text search, falling
@@ -34,22 +34,22 @@ type ripgrepSearcher struct {
 // NewSearcher returns the default keyword searcher for a vault.
 func (v *Vault) NewSearcher() Searcher { return &ripgrepSearcher{v: v} }
 
-func (s *ripgrepSearcher) Search(ctx context.Context, userID, query string) ([]SearchHit, error) {
+func (s *ripgrepSearcher) Search(ctx context.Context, workspaceID, query string) ([]SearchHit, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, nil
 	}
-	root := s.v.Root(userID)
+	root := s.v.Root(workspaceID)
 	if _, err := exec.LookPath("rg"); err == nil {
-		if hits, err := s.searchRipgrep(ctx, root, userID, query); err == nil {
+		if hits, err := s.searchRipgrep(ctx, root, workspaceID, query); err == nil {
 			return hits, nil
 		}
 		// fall through to the Go fallback on rg failure
 	}
-	return s.searchGo(userID, query)
+	return s.searchGo(workspaceID, query)
 }
 
-func (s *ripgrepSearcher) searchRipgrep(ctx context.Context, root, userID, query string) ([]SearchHit, error) {
+func (s *ripgrepSearcher) searchRipgrep(ctx context.Context, root, workspaceID, query string) ([]SearchHit, error) {
 	// --json gives structured matches; -i case-insensitive; -F fixed strings so a
 	// user's query is never interpreted as a regex; glob excludes the internal dir.
 	cmd := exec.CommandContext(ctx, "rg", "--json", "-i", "-F",
@@ -81,7 +81,7 @@ func (s *ripgrepSearcher) searchRipgrep(ctx context.Context, root, userID, query
 		if err := json.Unmarshal(sc.Bytes(), &ev); err != nil || ev.Type != "match" {
 			continue
 		}
-		rel, err := s.v.Rel(userID, ev.Data.Path.Text)
+		rel, err := s.v.Rel(workspaceID, ev.Data.Path.Text)
 		if err != nil {
 			continue
 		}
@@ -95,15 +95,15 @@ func (s *ripgrepSearcher) searchRipgrep(ctx context.Context, root, userID, query
 }
 
 // searchGo is the dependency-free fallback used when ripgrep is unavailable.
-func (s *ripgrepSearcher) searchGo(userID, query string) ([]SearchHit, error) {
+func (s *ripgrepSearcher) searchGo(workspaceID, query string) ([]SearchHit, error) {
 	q := strings.ToLower(query)
 	var hits []SearchHit
-	nodes, err := s.v.walkNotes(userID)
+	nodes, err := s.v.walkNotes(workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	for _, rel := range nodes {
-		data, err := s.v.ReadNote(userID, rel)
+		data, err := s.v.ReadNote(workspaceID, rel)
 		if err != nil {
 			continue
 		}
@@ -127,9 +127,9 @@ func (s *ripgrepSearcher) searchGo(userID, query string) ([]SearchHit, error) {
 }
 
 // walkNotes returns every markdown note's vault-relative path, skipping .kb.
-func (v *Vault) walkNotes(userID string) ([]string, error) {
+func (v *Vault) walkNotes(workspaceID string) ([]string, error) {
 	var out []string
-	root := v.Root(userID)
+	root := v.Root(workspaceID)
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -143,7 +143,7 @@ func (v *Vault) walkNotes(userID string) ([]string, error) {
 		if !strings.EqualFold(filepath.Ext(d.Name()), ".md") {
 			return nil
 		}
-		if rel, err := v.Rel(userID, path); err == nil {
+		if rel, err := v.Rel(workspaceID, path); err == nil {
 			out = append(out, rel)
 		}
 		return nil

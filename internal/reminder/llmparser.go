@@ -14,14 +14,14 @@ import (
 //   - when: the parsed absolute time (zero value if no time was found in the input)
 //   - message: the reminder text with the time expression stripped (same as input if no time found)
 //   - err: non-nil only when the LLM call itself failed; zero time with nil err means "no time in input"
-type TimeParserFunc func(ctx context.Context, userID, input string, now time.Time, loc *time.Location) (when time.Time, message string, err error)
+type TimeParserFunc func(ctx context.Context, workspaceID, input string, now time.Time, loc *time.Location) (when time.Time, message string, err error)
 
 // ParseNaturalTimeFull tries the fast regex parser first, then falls back to llm.
 // It returns (parsedTime, cleanedMessage, error) where:
 //   - parsedTime is zero when no time was found (llm returned null "when")
 //   - cleanedMessage is the input unchanged when regex succeeds, or the LLM-extracted message
 //   - error is non-nil only on a hard failure (LLM call error or both parsers failed with no llm)
-func ParseNaturalTimeFull(ctx context.Context, text string, now time.Time, loc *time.Location, llm TimeParserFunc, userID string) (time.Time, string, error) {
+func ParseNaturalTimeFull(ctx context.Context, text string, now time.Time, loc *time.Location, llm TimeParserFunc, workspaceID string) (time.Time, string, error) {
 	// Fast path: pure regex — zero cost, no network call.
 	if t, err := ParseNaturalTime(text, now, loc); err == nil {
 		return t, text, nil
@@ -32,7 +32,7 @@ func ParseNaturalTimeFull(ctx context.Context, text string, now time.Time, loc *
 		return time.Time{}, text, fmt.Errorf("could not parse time expression %q", text)
 	}
 
-	when, msg, err := llm(ctx, userID, text, now, loc)
+	when, msg, err := llm(ctx, workspaceID, text, now, loc)
 	if err != nil {
 		return time.Time{}, text, err
 	}

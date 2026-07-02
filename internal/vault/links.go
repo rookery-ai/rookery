@@ -49,8 +49,8 @@ type LinkIndex struct {
 
 // BuildLinkIndex walks a user's vault and indexes every markdown note. The hidden
 // .kb directory is skipped.
-func (v *Vault) BuildLinkIndex(userID string) (*LinkIndex, error) {
-	root := v.Root(userID)
+func (v *Vault) BuildLinkIndex(workspaceID string) (*LinkIndex, error) {
+	root := v.Root(workspaceID)
 	idx := &LinkIndex{byName: map[string]string{}, byPath: map[string]string{}}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -65,7 +65,7 @@ func (v *Vault) BuildLinkIndex(userID string) (*LinkIndex, error) {
 		if !strings.EqualFold(filepath.Ext(d.Name()), ".md") {
 			return nil
 		}
-		rel, err := v.Rel(userID, path)
+		rel, err := v.Rel(workspaceID, path)
 		if err != nil {
 			return nil
 		}
@@ -124,9 +124,9 @@ func (idx *LinkIndex) RenderHTMLLinks(content string, linkURL func(relPath strin
 }
 
 // Backlinks returns the vault-relative paths of every note that links to target.
-func (v *Vault) Backlinks(userID, targetRel string) ([]string, error) {
-	root := v.Root(userID)
-	idx, err := v.BuildLinkIndex(userID)
+func (v *Vault) Backlinks(workspaceID, targetRel string) ([]string, error) {
+	root := v.Root(workspaceID)
+	idx, err := v.BuildLinkIndex(workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func (v *Vault) Backlinks(userID, targetRel string) ([]string, error) {
 		}
 		for _, l := range ParseWikilinks(string(data)) {
 			if idx.Resolve(l.Target) == targetRel {
-				if rel, err := v.Rel(userID, path); err == nil {
+				if rel, err := v.Rel(workspaceID, path); err == nil {
 					out = append(out, rel)
 				}
 				break

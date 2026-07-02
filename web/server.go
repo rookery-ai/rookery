@@ -16,7 +16,6 @@ import (
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/audit"
-	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/config"
 	"github.com/ilijad1/simple-agents/internal/db"
@@ -231,18 +230,20 @@ func (s *Server) setupRoutes() {
 	s.echo.POST("/login", s.handleLogin)
 	s.echo.GET("/logout", s.handleLogout)
 
-	// Authenticated routes (any role)
+	// Owner-authenticated routes (no active workspace required)
 	authed := s.echo.Group("")
-	authed.Use(s.requireAuth)
-	authed.GET("/setup", s.showSetup)
-	authed.POST("/setup", s.handleSetup)
+	authed.Use(s.requireOwner)
 	authed.GET("/change-password", s.showChangePassword)
 	authed.POST("/change-password", s.handleChangePassword)
 
-	// User dashboard (admins are blocked and redirected to /admin)
+	// Workspace context (owner logged in AND a workspace entered).
+	// The create/onboarding wizard runs here so a not-yet-set-up workspace can
+	// still be configured, but every other dashboard route requires setup complete.
 	dash := s.echo.Group("/dashboard")
-	dash.Use(s.requireAuth)
-	dash.Use(s.requireUserOnly)
+	dash.Use(s.requireOwner)
+	dash.Use(s.requireActiveWorkspace)
+	dash.GET("/setup", s.showSetup)
+	dash.POST("/setup", s.handleSetup)
 	dash.Use(s.requireSetupComplete)
 	dash.GET("", s.showDashboard)
 	dash.GET("/agents", s.showAgents)
@@ -307,53 +308,86 @@ func (s *Server) setupRoutes() {
 	dash.GET("/kb/raw", s.rawKBNote)
 	dash.GET("/settings", s.showSettings)
 	dash.POST("/settings", s.handleSaveSettings)
+	dash.POST("/settings/workspace", s.handleSaveWorkspaceMeta)
+	dash.POST("/settings/coder", s.handleSaveWorkspaceCoder)
 	dash.POST("/settings/master-password", s.handleChangeMasterPassword)
 
-	// Admin routes
+	// Owner management area (relabeled "Workspaces" in the UI). Owner logged in;
+	// no active workspace required.
 	admin := s.echo.Group("/admin")
-	admin.Use(s.requireAuth)
-	admin.Use(s.requireAdmin)
+	admin.Use(s.requireOwner)
 	admin.GET("", s.showAdminDashboard)
-	admin.GET("/users", s.showAdminUsers)
-	admin.POST("/users", s.handleAdminCreateUser)
-	admin.GET("/users/:id", s.showAdminUser)
-	admin.POST("/users/:id/permissions", s.handleAdminGrantPermission)
-	admin.POST("/users/:id/permissions/:perm/revoke", s.handleAdminRevokePermission)
-	admin.POST("/users/:id/reset-password", s.handleAdminResetPassword)
-	admin.POST("/users/:id/coder", s.handleAdminAssignCoder)
-	admin.POST("/users/:id/coder/unassign", s.handleAdminUnassignCoder)
-	admin.GET("/coders", s.showAdminCoders)
-	admin.POST("/coders", s.handleAdminCreateCoder)
-	admin.GET("/coders/:id", s.showAdminCoder)
-	admin.POST("/coders/:id", s.handleAdminUpdateCoder)
-	admin.POST("/coders/:id/delete", s.handleAdminDeleteCoder)
+	admin.GET("/workspaces", s.showAdminWorkspaces)
+	admin.POST("/workspaces", s.handleAdminCreateWorkspace)
+	admin.GET("/workspaces/:id", s.showAdminWorkspace)
+	admin.POST("/workspaces/:id/enter", s.handleEnterWorkspace)
+	admin.POST("/workspaces/:id/delete", s.handleAdminDeleteWorkspace)
+	admin.POST("/workspaces/:id/permissions", s.handleAdminGrantPermission)
+	admin.POST("/workspaces/:id/permissions/:perm/revoke", s.handleAdminRevokePermission)
 	admin.GET("/settings", s.showAdminSettings)
 	admin.POST("/settings", s.handleAdminSaveSettings)
 	admin.GET("/audit", s.showAuditLog)
+
+	// Leaving the active workspace (back to the owner's workspace list).
+	s.echo.POST("/workspace/leave", s.handleLeaveWorkspace, s.requireOwner)
 }
 
 // ── Auth helpers ───────────────────────────────────────────────────────────
 
-func (s *Server) currentUser(c echo.Context) (*db.User, bool) {
+// currentOwner returns the logged-in owner from the session, if any.
+func (s *Server) currentOwner(c echo.Context) (*db.Owner, bool) {
 	sess, err := s.store.Get(c.Request(), sessionName)
 	if err != nil {
 		return nil, false
 	}
-	userID, ok := sess.Values["user_id"].(string)
-	if !ok || userID == "" {
+	ownerID, ok := sess.Values["owner_id"].(string)
+	if !ok || ownerID == "" {
 		return nil, false
 	}
-	u, err := s.db.GetUserByID(userID)
+	o, err := s.db.GetOwner()
+	if err != nil || o == nil || o.ID != ownerID {
+		return nil, false
+	}
+	return o, true
+}
+
+// activeWorkspace returns the workspace the owner has currently entered, if any.
+func (s *Server) activeWorkspace(c echo.Context) (*db.Workspace, bool) {
+	sess, err := s.store.Get(c.Request(), sessionName)
 	if err != nil {
 		return nil, false
 	}
-	return u, true
+	wsID, ok := sess.Values["active_workspace_id"].(string)
+	if !ok || wsID == "" {
+		return nil, false
+	}
+	w, err := s.db.GetWorkspaceByID(wsID)
+	if err != nil {
+		return nil, false
+	}
+	return w, true
 }
 
-func (s *Server) setSession(c echo.Context, userID string) error {
-	// Ignore decode error: Get always returns a usable session even for stale/invalid cookies.
+// setOwnerSession marks the owner as logged in.
+func (s *Server) setOwnerSession(c echo.Context, ownerID string) error {
 	sess, _ := s.store.Get(c.Request(), sessionName)
-	sess.Values["user_id"] = userID
+	sess.Values["owner_id"] = ownerID
+	return sess.Save(c.Request(), c.Response())
+}
+
+// setActiveWorkspace records the entered workspace. Switching requires re-entering
+// the target workspace's master password (see handleEnterWorkspace), so this simply
+// replaces the single active workspace id.
+func (s *Server) setActiveWorkspace(c echo.Context, wsID string) error {
+	sess, _ := s.store.Get(c.Request(), sessionName)
+	sess.Values["active_workspace_id"] = wsID
+	return sess.Save(c.Request(), c.Response())
+}
+
+// clearActiveWorkspace leaves the current workspace without logging the owner out.
+func (s *Server) clearActiveWorkspace(c echo.Context) error {
+	sess, _ := s.store.Get(c.Request(), sessionName)
+	delete(sess.Values, "active_workspace_id")
 	return sess.Save(c.Request(), c.Response())
 }
 
@@ -365,46 +399,38 @@ func (s *Server) clearSession(c echo.Context) error {
 
 // ── Middleware handlers ────────────────────────────────────────────────────
 
-func (s *Server) requireAuth(next echo.HandlerFunc) echo.HandlerFunc {
+// requireOwner ensures the owner is logged in and injects "owner" into context.
+func (s *Server) requireOwner(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		u, ok := s.currentUser(c)
+		o, ok := s.currentOwner(c)
 		if !ok {
 			return c.Redirect(http.StatusFound, "/login")
 		}
-		// Force password change before anything else
-		if u.MustChangePassword && c.Path() != "/change-password" {
+		if o.MustChangePassword && c.Path() != "/change-password" {
 			return c.Redirect(http.StatusFound, "/change-password")
 		}
-		c.Set("user", u)
+		c.Set("owner", o)
+		return next(c)
+	}
+}
+
+// requireActiveWorkspace ensures a workspace is entered and injects "workspace".
+func (s *Server) requireActiveWorkspace(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		w, ok := s.activeWorkspace(c)
+		if !ok {
+			return c.Redirect(http.StatusFound, "/admin")
+		}
+		c.Set("workspace", w)
 		return next(c)
 	}
 }
 
 func (s *Server) requireSetupComplete(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		u := c.Get("user").(*db.User)
-		if u.NeedsSetup && c.Path() != "/setup" {
-			return c.Redirect(http.StatusFound, "/setup")
-		}
-		return next(c)
-	}
-}
-
-func (s *Server) requireAdmin(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
-		u := c.Get("user").(*db.User)
-		if u.Role != auth.RoleAdmin {
-			return echo.NewHTTPError(http.StatusForbidden, "admin access required")
-		}
-		return next(c)
-	}
-}
-
-func (s *Server) requireUserOnly(next echo.HandlerFunc) echo.HandlerFunc {
-	return func(c echo.Context) error {
-		u := c.Get("user").(*db.User)
-		if u.Role == auth.RoleAdmin {
-			return c.Redirect(http.StatusFound, "/admin")
+		w := c.Get("workspace").(*db.Workspace)
+		if w.NeedsSetup && c.Path() != "/dashboard/setup" {
+			return c.Redirect(http.StatusFound, "/dashboard/setup")
 		}
 		return next(c)
 	}
@@ -413,44 +439,40 @@ func (s *Server) requireUserOnly(next echo.HandlerFunc) echo.HandlerFunc {
 // ── Utility ────────────────────────────────────────────────────────────────
 
 func (s *Server) redirectRoot(c echo.Context) error {
-	u, ok := s.currentUser(c)
-	if ok {
-		if u.Role == auth.RoleAdmin {
-			return c.Redirect(http.StatusFound, "/admin")
-		}
-		return c.Redirect(http.StatusFound, "/dashboard")
+	if _, ok := s.currentOwner(c); ok {
+		return c.Redirect(http.StatusFound, "/admin")
 	}
 	return c.Redirect(http.StatusFound, "/login")
 }
 
-// coderForUser returns a Coder for the given user. If the user has a coder
-// profile assigned, its settings are used; otherwise the system defaults apply.
-func (s *Server) coderForUser(userID string) *coder.Coder {
-	dataDir := s.cfg.Data.Dir
-	if profile, err := s.db.GetUserCoder(userID); err == nil && profile != nil {
-		timeout := time.Duration(profile.TimeoutS) * time.Second
-		return coder.New(profile.ClaudeBin, timeout, s.homesDir, dataDir).
-			WithBackendType(profile.BackendType).
-			WithSandbox(s.cfg.Sandbox.Enabled)
-	}
-	return coder.New(s.cfg.Coder.ClaudeBin, s.cfg.Coder.Timeout, s.homesDir, dataDir).
-		WithSandbox(s.cfg.Sandbox.Enabled)
+// coderForWorkspace returns a Coder configured from the workspace's inlined coder
+// settings, falling back to the system defaults when unset.
+func (s *Server) coderForWorkspace(workspaceID string) *coder.Coder {
+	w, _ := s.db.GetWorkspaceByID(workspaceID)
+	return coder.ForWorkspace(w, s.homesDir, s.cfg.Data.Dir,
+		s.cfg.Coder.ClaudeBin, s.cfg.Coder.Timeout, s.cfg.Sandbox.Enabled)
 }
 
 type pageData struct {
-	User    *db.User
-	Title   string
-	Error   string
-	Success string
-	Data    any
-	UserLoc *time.Location
+	Owner      *db.Owner
+	Workspace  *db.Workspace   // active workspace (nil on owner-only pages)
+	Workspaces []*db.Workspace // all workspaces, for the switcher dropdown
+	Title      string
+	Error      string
+	Success    string
+	Data       any
+	UserLoc    *time.Location
 }
 
 func (s *Server) page(c echo.Context, title string) *pageData {
-	u, _ := s.currentUser(c)
-	p := &pageData{User: u, Title: title, UserLoc: time.UTC}
-	if u != nil {
-		p.UserLoc = profile.LoadLocation(s.db, u.ID)
+	o, _ := s.currentOwner(c)
+	p := &pageData{Owner: o, Title: title, UserLoc: time.UTC}
+	if o != nil {
+		p.Workspaces, _ = s.db.ListWorkspaces()
+	}
+	if w, ok := s.activeWorkspace(c); ok {
+		p.Workspace = w
+		p.UserLoc = profile.LoadLocation(s.db, w.ID)
 	}
 	return p
 }

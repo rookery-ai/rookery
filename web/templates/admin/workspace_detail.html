@@ -1,0 +1,96 @@
+{{template "head" .}}
+{{template "admin_navbar" .}}
+
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+  {{template "alert" .}}
+
+  <div class="flex items-center gap-3 mb-6">
+    <a href="/admin/workspaces" class="btn btn-ghost btn-sm gap-1">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      Workspaces
+    </a>
+    <span class="text-base-content/30">/</span>
+    <h1 class="text-xl font-bold">{{.Target.Name}}</h1>
+    {{if .Target.NeedsSetup}}<span class="badge badge-warning">needs setup</span>{{end}}
+  </div>
+
+  <!-- Enter / switch -->
+  <div class="card bg-base-100 shadow-sm border border-base-300 mb-4">
+    <div class="card-body p-5">
+      <h2 class="font-semibold mb-3">Enter Workspace</h2>
+      {{if .Target.NeedsSetup}}
+      <form method="POST" action="/admin/workspaces/{{.Target.ID}}/enter">
+        <button type="submit" class="btn btn-warning btn-sm">Continue setup →</button>
+      </form>
+      {{else}}
+      <form method="POST" action="/admin/workspaces/{{.Target.ID}}/enter" class="flex gap-2 max-w-sm">
+        <input type="password" name="master_password" placeholder="Master password"
+          class="input input-bordered input-sm flex-1" required autocomplete="off">
+        <button type="submit" class="btn btn-primary btn-sm">Enter</button>
+      </form>
+      <p class="text-xs text-base-content/40 mt-2">The master password is required on every switch.</p>
+      {{end}}
+    </div>
+  </div>
+
+  <!-- Info -->
+  <div class="card bg-base-100 shadow-sm border border-base-300 mb-4">
+    <div class="card-body p-5">
+      <h2 class="font-semibold mb-4">Workspace Info</h2>
+      <div class="grid grid-cols-2 gap-x-8 gap-y-3 text-sm">
+        <div>
+          <p class="text-xs text-base-content/40 font-medium uppercase tracking-wide">Workspace ID</p>
+          <code class="text-xs font-mono text-base-content/60 break-all">{{.Target.ID}}</code>
+        </div>
+        <div>
+          <p class="text-xs text-base-content/40 font-medium uppercase tracking-wide">Coder</p>
+          <p class="font-mono text-xs">{{if .Target.CoderBin}}{{.Target.CoderBin}}{{else}}system default{{end}}</p>
+        </div>
+        <div class="col-span-2">
+          <p class="text-xs text-base-content/40 font-medium uppercase tracking-wide">About</p>
+          <p class="text-base-content/70">{{if .Target.About}}{{.Target.About}}{{else}}—{{end}}</p>
+        </div>
+        <div>
+          <p class="text-xs text-base-content/40 font-medium uppercase tracking-wide">Created</p>
+          <p class="text-base-content/70">{{.Target.CreatedAt.Format "January 2, 2006"}}</p>
+        </div>
+      </div>
+      <div class="divider my-3"></div>
+      <form method="POST" action="/admin/workspaces/{{.Target.ID}}/delete"
+        onsubmit="return confirm('Delete workspace {{.Target.Name}}? This permanently removes its agents, secrets, and data.')">
+        <button type="submit" class="btn btn-error btn-sm btn-outline">Delete workspace</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Permissions -->
+  <div class="card bg-base-100 shadow-sm border border-base-300">
+    <div class="card-body p-5">
+      <h2 class="font-semibold mb-1">Capabilities</h2>
+      <p class="text-sm text-base-content/50 mb-5">Extra capabilities this workspace's agents may use.</p>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {{range .AllPermissions}}
+        <div class="flex items-center justify-between bg-base-200 rounded-lg px-3 py-2.5 border border-base-300">
+          <div class="flex items-center gap-2">
+            <code class="text-sm">{{.Name}}</code>
+            {{if .Granted}}<span class="badge badge-success badge-xs">granted</span>{{end}}
+          </div>
+          {{if .Granted}}
+          <form method="POST" action="/admin/workspaces/{{$.Target.ID}}/permissions/{{.Name}}/revoke">
+            <button type="submit" class="btn btn-error btn-xs">Revoke</button>
+          </form>
+          {{else}}
+          <form method="POST" action="/admin/workspaces/{{$.Target.ID}}/permissions">
+            <input type="hidden" name="permission" value="{{.Name}}">
+            <button type="submit" class="btn btn-success btn-xs">Grant</button>
+          </form>
+          {{end}}
+        </div>
+        {{end}}
+      </div>
+    </div>
+  </div>
+</div>
+
+{{template "foot" .}}

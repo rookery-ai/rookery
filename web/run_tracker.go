@@ -26,7 +26,7 @@ type agentRunState struct {
 // startManualRun launches an agent run in the background on a detached context and
 // registers an agentRunState for SSE streaming. Returns false if a run for this
 // agent is already in flight (so a double-click can't fire it twice).
-func (s *Server) startManualRun(userID string, agent *db.Agent, masterPw string) bool {
+func (s *Server) startManualRun(workspaceID string, agent *db.Agent, masterPw string) bool {
 	s.runsMu.Lock()
 	if existing, ok := s.runs[agent.ID]; ok {
 		existing.mu.Lock()
@@ -67,13 +67,13 @@ func (s *Server) startManualRun(userID string, agent *db.Agent, masterPw string)
 			// Durable delivery to the user's chat platform (same path cron runs use),
 			// so the result arrives even after the user has left the page.
 			if s.gateway != nil {
-				_ = s.gateway.SendToUser(userID, msg)
+				_ = s.gateway.SendToUser(workspaceID, msg)
 			}
 		}
 
 		runErr := s.runner.Run(ctx, agentrunner.RunInput{
 			AgentID:    agent.ID,
-			UserID:     userID,
+			WorkspaceID:     workspaceID,
 			Trigger:    "manual",
 			MasterPw:   masterPw,
 			OnProgress: onProgress,
@@ -147,11 +147,11 @@ func (s *Server) isLiveRun(agentID string) bool {
 // on a detached context and this handler only observes it.
 // GET /dashboard/agents/:id/run/progress
 func (s *Server) handleRunProgress(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 
 	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.UserID != u.ID {
+	if err != nil || agent.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
 

@@ -9,7 +9,7 @@ import (
 )
 
 // runsTestDB opens a fresh migrated DB with one user + one agent (FK targets) and
-// returns the agentID and its userID.
+// returns the agentID and its workspaceID.
 func runsTestDB(t *testing.T) (*db.DB, string, string) {
 	t.Helper()
 	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../../migrations")
@@ -18,28 +18,28 @@ func runsTestDB(t *testing.T) (*db.DB, string, string) {
 	}
 	t.Cleanup(func() { database.Close() })
 
-	userID := uuid.New().String()
-	if err := database.CreateUser(&db.User{ID: userID, Username: "tester", PasswordHash: "x", Role: "user"}); err != nil {
+	workspaceID := uuid.New().String()
+	if err := database.CreateWorkspace(&db.Workspace{ID: workspaceID, Name: "tester"}); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	agentID := "agent-1"
-	if err := database.CreateAgent(&db.Agent{ID: agentID, UserID: userID, Name: "A", Active: true}); err != nil {
+	if err := database.CreateAgent(&db.Agent{ID: agentID, WorkspaceID: workspaceID, Name: "A", Active: true}); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	return database, agentID, userID
+	return database, agentID, workspaceID
 }
 
 // TestGetUnfinishedAgentRun drives the durable "Running…" badge: an open run (no
 // finished_at) is reported; once finished it no longer is.
 func TestGetUnfinishedAgentRun(t *testing.T) {
-	database, agentID, userID := runsTestDB(t)
+	database, agentID, workspaceID := runsTestDB(t)
 
 	if run, err := database.GetUnfinishedAgentRun(agentID); err != nil || run != nil {
 		t.Fatalf("expected no unfinished run, got run=%v err=%v", run, err)
 	}
 
 	runID := uuid.New().String()
-	if err := database.CreateAgentRun(&db.AgentRun{ID: runID, AgentID: agentID, UserID: userID, Trigger: "manual"}); err != nil {
+	if err := database.CreateAgentRun(&db.AgentRun{ID: runID, AgentID: agentID, WorkspaceID: workspaceID, Trigger: "manual"}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
 	run, err := database.GetUnfinishedAgentRun(agentID)
@@ -58,12 +58,12 @@ func TestGetUnfinishedAgentRun(t *testing.T) {
 // TestReconcileStaleRuns proves a crash-leftover open run is closed out (exit -1) on
 // boot so the badge can't stick on forever, while a finished run is left untouched.
 func TestReconcileStaleRuns(t *testing.T) {
-	database, agentID, userID := runsTestDB(t)
+	database, agentID, workspaceID := runsTestDB(t)
 
 	openID := uuid.New().String()
 	doneID := uuid.New().String()
 	for _, id := range []string{openID, doneID} {
-		if err := database.CreateAgentRun(&db.AgentRun{ID: id, AgentID: agentID, UserID: userID, Trigger: "manual"}); err != nil {
+		if err := database.CreateAgentRun(&db.AgentRun{ID: id, AgentID: agentID, WorkspaceID: workspaceID, Trigger: "manual"}); err != nil {
 			t.Fatalf("create run: %v", err)
 		}
 	}

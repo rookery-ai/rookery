@@ -38,7 +38,7 @@ func (v *Vault) NewGuard() *Guard { return &Guard{v: v} }
 
 // Snapshot captures the protected region's files and contents prior to a run.
 type Snapshot struct {
-	userID string
+	workspaceID string
 	files  map[string]fileState // vault-relative path → state
 }
 
@@ -68,17 +68,17 @@ func isProtected(rel string) bool {
 // changes can be reverted after the run. A nil Guard yields a nil snapshot, and
 // all Guard operations tolerate a nil receiver/snapshot so callers need no guards
 // of their own.
-func (g *Guard) Snapshot(userID string) (*Snapshot, error) {
+func (g *Guard) Snapshot(workspaceID string) (*Snapshot, error) {
 	if g == nil {
 		return nil, nil
 	}
-	root := g.v.Root(userID)
-	snap := &Snapshot{userID: userID, files: map[string]fileState{}}
+	root := g.v.Root(workspaceID)
+	snap := &Snapshot{workspaceID: workspaceID, files: map[string]fileState{}}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		rel, err := g.v.Rel(userID, path)
+		rel, err := g.v.Rel(workspaceID, path)
 		if err != nil {
 			return nil
 		}
@@ -119,12 +119,12 @@ func (g *Guard) Restore(snap *Snapshot) ([]string, error) {
 	var violations []string
 
 	// Detect new files that appeared in the protected region and delete them.
-	root := g.v.Root(snap.userID)
+	root := g.v.Root(snap.workspaceID)
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		rel, err := g.v.Rel(snap.userID, path)
+		rel, err := g.v.Rel(snap.workspaceID, path)
 		if err != nil || rel == "." {
 			return nil
 		}
@@ -147,20 +147,20 @@ func (g *Guard) Restore(snap *Snapshot) ([]string, error) {
 
 	// Revert modifications and recreate deletions.
 	for rel, st := range snap.files {
-		abs, err := g.v.Resolve(snap.userID, rel)
+		abs, err := g.v.Resolve(snap.workspaceID, rel)
 		if err != nil {
 			continue
 		}
 		cur, err := os.ReadFile(abs)
 		if err != nil {
 			// File was deleted by the agent — recreate it.
-			if err := g.v.WriteNote(snap.userID, rel, st.content); err == nil {
+			if err := g.v.WriteNote(snap.workspaceID, rel, st.content); err == nil {
 				violations = append(violations, rel+" (deleted)")
 			}
 			continue
 		}
 		if sha256.Sum256(cur) != st.hash {
-			if err := g.v.WriteNote(snap.userID, rel, st.content); err == nil {
+			if err := g.v.WriteNote(snap.workspaceID, rel, st.content); err == nil {
 				violations = append(violations, rel+" (modified)")
 			}
 		}

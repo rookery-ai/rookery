@@ -10,15 +10,15 @@ import (
 )
 
 // Getter is the minimal read capability profile needs. *db.DB satisfies this
-// already via GetSetting(userID, key string) (string, error).
+// already via GetSetting(workspaceID, key string) (string, error).
 type Getter interface {
-	GetSetting(userID, key string) (string, error)
+	GetSetting(workspaceID, key string) (string, error)
 }
 
 // Setter is the minimal write capability profile needs. *db.DB satisfies this
-// already via SetSetting(userID, key, value string) error.
+// already via SetSetting(workspaceID, key, value string) error.
 type Setter interface {
-	SetSetting(userID, key, value string) error
+	SetSetting(workspaceID, key, value string) error
 }
 
 // Profile holds the structured personalization fields. All fields are
@@ -46,11 +46,11 @@ const (
 	notesMaxRunes = 300
 )
 
-// Load reads all profile fields for userID. Per-key lookup errors (including
+// Load reads all profile fields for workspaceID. Per-key lookup errors (including
 // db.ErrNotFound) are treated as "" — Load never fails.
-func Load(g Getter, userID string) Profile {
+func Load(g Getter, workspaceID string) Profile {
 	get := func(key string) string {
-		v, err := g.GetSetting(userID, key)
+		v, err := g.GetSetting(workspaceID, key)
 		if err != nil {
 			return ""
 		}
@@ -70,7 +70,7 @@ func Load(g Getter, userID string) Profile {
 // Save writes all profile fields (data only, not the completed sentinel).
 // Every field is written even if empty, so callers can clear a previously-set
 // field. Notes is clamped to notesMaxRunes before writing.
-func Save(s Setter, userID string, p Profile) error {
+func Save(s Setter, workspaceID string, p Profile) error {
 	if n := []rune(p.Notes); len(n) > notesMaxRunes {
 		p.Notes = string(n[:notesMaxRunes])
 	}
@@ -84,7 +84,7 @@ func Save(s Setter, userID string, p Profile) error {
 		{keyNotes, p.Notes},
 	}
 	for _, f := range fields {
-		if err := s.SetSetting(userID, f.key, f.val); err != nil {
+		if err := s.SetSetting(workspaceID, f.key, f.val); err != nil {
 			return err
 		}
 	}
@@ -93,15 +93,15 @@ func Save(s Setter, userID string, p Profile) error {
 
 // IsComplete reports whether the user has passed (or skipped) the profile
 // setup step. Sentinel-only — does not look at any data field.
-func IsComplete(g Getter, userID string) bool {
-	v, err := g.GetSetting(userID, keyCompleted)
+func IsComplete(g Getter, workspaceID string) bool {
+	v, err := g.GetSetting(workspaceID, keyCompleted)
 	return err == nil && v == "1"
 }
 
 // MarkComplete sets the profile_completed sentinel. Called on both "save and
 // continue" and "skip" in the setup wizard.
-func MarkComplete(s Setter, userID string) error {
-	return s.SetSetting(userID, keyCompleted, "1")
+func MarkComplete(s Setter, workspaceID string) error {
+	return s.SetSetting(workspaceID, keyCompleted, "1")
 }
 
 // ContextString renders the full "[User profile]" block for LLM system-prompt
@@ -129,8 +129,8 @@ func (p Profile) ContextString() string {
 
 // LoadLocation resolves the user's saved timezone to a *time.Location,
 // falling back to time.UTC if unset or invalid.
-func LoadLocation(g Getter, userID string) *time.Location {
-	tz := Load(g, userID).Timezone
+func LoadLocation(g Getter, workspaceID string) *time.Location {
+	tz := Load(g, workspaceID).Timezone
 	if tz == "" {
 		return time.UTC
 	}

@@ -2,18 +2,87 @@ package web
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/auth"
+	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/sandbox"
+	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
 )
 
-type adminUsersData struct {
+// ── Owner dashboard ──────────────────────────────────────────────────────────
+
+type adminDashData struct {
 	*pageData
-	Users []*db.User
+	WorkspaceCount int
+	AgentCount     int
+	Workspaces     []*db.Workspace
+	AuditLogs      []*db.AuditLog
+}
+
+func (s *Server) showAdminDashboard(c echo.Context) error {
+	workspaces, _ := s.db.ListWorkspaces()
+	agentCount, _ := s.db.CountAgents("")
+	logs, _ := s.db.ListAuditLogs(20)
+	return c.Render(http.StatusOK, "admin/dashboard.html", &adminDashData{
+		pageData:       s.page(c, "Workspaces"),
+		WorkspaceCount: len(workspaces),
+		AgentCount:     agentCount,
+		Workspaces:     workspaces,
+		AuditLogs:      logs,
+	})
+}
+
+// ── Workspace management ─────────────────────────────────────────────────────
+
+type adminWorkspacesData struct {
+	*pageData
+	Workspaces []*db.Workspace
+}
+
+func (s *Server) showAdminWorkspaces(c echo.Context) error {
+	workspaces, _ := s.db.ListWorkspaces()
+	return c.Render(http.StatusOK, "admin/workspaces.html", &adminWorkspacesData{
+		pageData:   s.page(c, "Workspaces"),
+		Workspaces: workspaces,
+	})
+}
+
+func (s *Server) handleAdminCreateWorkspace(c echo.Context) error {
+	name := c.FormValue("name")
+	about := c.FormValue("about")
+
+	if name == "" {
+		workspaces, _ := s.db.ListWorkspaces()
+		p := s.page(c, "Workspaces")
+		p.Error = "Workspace name is required"
+		return c.Render(http.StatusBadRequest, "admin/workspaces.html", &adminWorkspacesData{pageData: p, Workspaces: workspaces})
+	}
+
+	w, err := auth.CreateWorkspace(s.db, name, about)
+	if err != nil {
+		workspaces, _ := s.db.ListWorkspaces()
+		p := s.page(c, "Workspaces")
+		if err == auth.ErrWorkspaceExists {
+			p.Error = "A workspace with that name already exists"
+		} else {
+			p.Error = "Failed to create workspace: " + err.Error()
+		}
+		return c.Render(http.StatusBadRequest, "admin/workspaces.html", &adminWorkspacesData{pageData: p, Workspaces: workspaces})
+	}
+
+	if o, ok := s.currentOwner(c); ok {
+		s.audit.Log(w.ID, "create_workspace", "workspace:"+w.ID, "owner:"+o.ID, c.RealIP())
+	}
+
+	// A newly created workspace has no master password yet, so it can't go through
+	// the enter gate — take the owner straight into the onboarding wizard.
+	if err := s.setActiveWorkspace(c, w.ID); err != nil {
+		return err
+	}
+	return c.Redirect(http.StatusFound, "/dashboard/setup")
 }
 
 type permEntry struct {
@@ -21,98 +90,117 @@ type permEntry struct {
 	Granted bool
 }
 
-type adminUserDetailData struct {
+type adminWorkspaceDetailData struct {
 	*pageData
-	Target         *db.User
+	Target         *db.Workspace
 	Permissions    []string
 	AllPermissions []permEntry
-	AssignedCoder  *db.Coder
-	AllCoders      []*db.Coder
+	DetectedCoders []coder.Installed
 }
 
 var allPermissions = []string{"bash", "web-browser", "system-tools", "mcp-servers"}
+var validPermissions = allPermissions
 
-type adminDashData struct {
-	*pageData
-	UserCount  int
-	AgentCount int
-	CoderCount int
-	AuditLogs  []*db.AuditLog
-}
-
-func (s *Server) showAdminDashboard(c echo.Context) error {
-	userCount, _ := s.db.CountUsers()
-	agentCount, _ := s.db.CountAgents("")
-	coderCount, _ := s.db.CountCoders()
-	logs, _ := s.db.ListAuditLogs(20)
-	return c.Render(http.StatusOK, "admin/dashboard.html", &adminDashData{
-		pageData:   s.page(c, "Admin Dashboard"),
-		UserCount:  userCount,
-		AgentCount: agentCount,
-		CoderCount: coderCount,
-		AuditLogs:  logs,
-	})
-}
-
-func (s *Server) showAdminUsers(c echo.Context) error {
-	users, _ := s.db.ListUsers()
-	return c.Render(http.StatusOK, "admin/users.html", &adminUsersData{
-		pageData: s.page(c, "Manage Users"),
-		Users:    users,
-	})
-}
-
-func (s *Server) handleAdminCreateUser(c echo.Context) error {
-	admin := c.Get("user").(*db.User)
-	username := c.FormValue("username")
-
-	if username == "" {
-		p := s.page(c, "Manage Users")
-		p.Error = "Username is required"
-		users, _ := s.db.ListUsers()
-		return c.Render(http.StatusBadRequest, "admin/users.html", &adminUsersData{pageData: p, Users: users})
-	}
-
-	_, tempPw, err := auth.CreateUser(s.db, username)
-	if err != nil {
-		p := s.page(c, "Manage Users")
-		if err == auth.ErrUserExists {
-			p.Error = "Username already taken"
-		} else {
-			p.Error = "Failed to create user: " + err.Error()
-		}
-		users, _ := s.db.ListUsers()
-		return c.Render(http.StatusBadRequest, "admin/users.html", &adminUsersData{pageData: p, Users: users})
-	}
-
-	s.audit.Log(admin.ID, "create_user", "user:"+username, "", c.RealIP())
-
-	p := s.page(c, "Manage Users")
-	p.Success = "User '" + username + "' created. Temporary password: " + tempPw
-	users, _ := s.db.ListUsers()
-	return c.Render(http.StatusOK, "admin/users.html", &adminUsersData{pageData: p, Users: users})
-}
-
-func (s *Server) showAdminUser(c echo.Context) error {
+func (s *Server) showAdminWorkspace(c echo.Context) error {
 	id := c.Param("id")
-	target, err := s.db.GetUserByID(id)
+	target, err := s.db.GetWorkspaceByID(id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "user not found")
+		return echo.NewHTTPError(http.StatusNotFound, "workspace not found")
 	}
 	perms, _ := s.db.ListPermissions(id)
-	assignedCoder, _ := s.db.GetUserCoder(id)
-	allCoders, _ := s.db.ListCoders()
-	d := buildUserDetailData(s.page(c, "User: "+target.Username), target, perms)
-	d.AssignedCoder = assignedCoder
-	d.AllCoders = allCoders
-	return c.Render(http.StatusOK, "admin/user_detail.html", d)
+	return c.Render(http.StatusOK, "admin/workspace_detail.html",
+		s.buildWorkspaceDetailData(s.page(c, "Workspace: "+target.Name), target, perms))
 }
 
-var validPermissions = []string{"bash", "web-browser", "system-tools", "mcp-servers"}
+func (s *Server) buildWorkspaceDetailData(p *pageData, target *db.Workspace, perms []string) *adminWorkspaceDetailData {
+	granted := make(map[string]bool, len(perms))
+	for _, perm := range perms {
+		granted[perm] = true
+	}
+	entries := make([]permEntry, len(allPermissions))
+	for i, name := range allPermissions {
+		entries[i] = permEntry{Name: name, Granted: granted[name]}
+	}
+	return &adminWorkspaceDetailData{
+		pageData:       p,
+		Target:         target,
+		Permissions:    perms,
+		AllPermissions: entries,
+		DetectedCoders: coder.DetectInstalled(),
+	}
+}
+
+// handleEnterWorkspace verifies the workspace master password and enters it. A
+// not-yet-set-up workspace has no master password, so it goes straight to the
+// onboarding wizard. Re-entering (switching) always re-prompts for the password.
+func (s *Server) handleEnterWorkspace(c echo.Context) error {
+	id := c.Param("id")
+	w, err := s.db.GetWorkspaceByID(id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "workspace not found")
+	}
+
+	if w.NeedsSetup {
+		if err := s.setActiveWorkspace(c, w.ID); err != nil {
+			return err
+		}
+		return c.Redirect(http.StatusFound, "/dashboard/setup")
+	}
+
+	password := c.FormValue("master_password")
+	if !s.verifyWorkspaceMasterPassword(w, password) {
+		workspaces, _ := s.db.ListWorkspaces()
+		p := s.page(c, "Workspaces")
+		p.Error = "Incorrect master password for workspace '" + w.Name + "'"
+		return c.Render(http.StatusUnauthorized, "admin/workspaces.html", &adminWorkspacesData{pageData: p, Workspaces: workspaces})
+	}
+
+	if err := s.setActiveWorkspace(c, w.ID); err != nil {
+		return err
+	}
+	s.audit.Log(w.ID, "enter_workspace", "workspace:"+w.ID, "", c.RealIP())
+	return c.Redirect(http.StatusFound, "/dashboard")
+}
+
+// handleLeaveWorkspace leaves the active workspace (owner stays logged in).
+func (s *Server) handleLeaveWorkspace(c echo.Context) error {
+	_ = s.clearActiveWorkspace(c)
+	return c.Redirect(http.StatusFound, "/admin")
+}
+
+func (s *Server) handleAdminDeleteWorkspace(c echo.Context) error {
+	id := c.Param("id")
+	if err := s.db.DeleteWorkspace(id); err != nil {
+		return err
+	}
+	// If the deleted workspace was active, leave it.
+	if w, ok := s.activeWorkspace(c); ok && w.ID == id {
+		_ = s.clearActiveWorkspace(c)
+	}
+	s.audit.Log("", "delete_workspace", "workspace:"+id, "", c.RealIP())
+	return c.Redirect(http.StatusFound, "/admin/workspaces")
+}
+
+// verifyWorkspaceMasterPassword decrypts the stored (system-key encrypted) master
+// password and compares it to the supplied one. The stored form must remain (the
+// scheduler decrypts it for headless cron runs), so this is an access gate, not the
+// encryption key itself.
+func (s *Server) verifyWorkspaceMasterPassword(w *db.Workspace, password string) bool {
+	if password == "" || w.EncryptedMasterPassword == "" {
+		return false
+	}
+	stored, err := secrets.DecryptMasterPassword(w.EncryptedMasterPassword, s.systemKey)
+	if err != nil {
+		return false
+	}
+	return stored == password
+}
+
+// ── Workspace permissions ────────────────────────────────────────────────────
 
 func (s *Server) handleAdminGrantPermission(c echo.Context) error {
-	admin := c.Get("user").(*db.User)
-	userID := c.Param("id")
+	o := c.Get("owner").(*db.Owner)
+	workspaceID := c.Param("id")
 	perm := c.FormValue("permission")
 
 	valid := false
@@ -126,65 +214,32 @@ func (s *Server) handleAdminGrantPermission(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid permission")
 	}
 
-	if err := s.db.GrantPermission(&db.UserPermission{
-		ID:        uuid.New().String(),
-		UserID:    userID,
-		Permission: perm,
-		GrantedBy: admin.ID,
+	if err := s.db.GrantPermission(&db.WorkspacePermission{
+		ID:          uuid.New().String(),
+		WorkspaceID: workspaceID,
+		Permission:  perm,
+		GrantedBy:   o.ID,
 	}); err != nil {
 		return err
 	}
 
-	s.audit.Log(admin.ID, "grant_permission", "user:"+userID, perm, c.RealIP())
-	return c.Redirect(http.StatusFound, "/admin/users/"+userID)
+	s.audit.Log(workspaceID, "grant_permission", "workspace:"+workspaceID, perm, c.RealIP())
+	return c.Redirect(http.StatusFound, "/admin/workspaces/"+workspaceID)
 }
 
 func (s *Server) handleAdminRevokePermission(c echo.Context) error {
-	admin := c.Get("user").(*db.User)
-	userID := c.Param("id")
+	workspaceID := c.Param("id")
 	perm := c.Param("perm")
 
-	if err := s.db.RevokePermission(userID, perm); err != nil {
+	if err := s.db.RevokePermission(workspaceID, perm); err != nil {
 		return err
 	}
 
-	s.audit.Log(admin.ID, "revoke_permission", "user:"+userID, perm, c.RealIP())
-	return c.Redirect(http.StatusFound, "/admin/users/"+userID)
+	s.audit.Log(workspaceID, "revoke_permission", "workspace:"+workspaceID, perm, c.RealIP())
+	return c.Redirect(http.StatusFound, "/admin/workspaces/"+workspaceID)
 }
 
-func (s *Server) handleAdminResetPassword(c echo.Context) error {
-	admin := c.Get("user").(*db.User)
-	userID := c.Param("id")
-
-	target, err := s.db.GetUserByID(userID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "user not found")
-	}
-
-	tempPw := auth.GenerateTempPassword()
-	if err := auth.ChangePassword(s.db, userID, tempPw); err != nil {
-		return err
-	}
-
-	// Force user to change password on next login
-	if _, err := s.db.Exec(`UPDATE users SET must_change_password=1 WHERE id=?`, userID); err != nil {
-		return err
-	}
-
-	s.audit.Log(admin.ID, "reset_password", "user:"+userID, "", c.RealIP())
-
-	p := s.page(c, "User: "+target.Username)
-	p.Success = "Password reset. New temporary password: " + tempPw
-	perms, _ := s.db.ListPermissions(userID)
-	assignedCoder, _ := s.db.GetUserCoder(userID)
-	allCoders, _ := s.db.ListCoders()
-	d := buildUserDetailData(p, target, perms)
-	d.AssignedCoder = assignedCoder
-	d.AllCoders = allCoders
-	return c.Render(http.StatusOK, "admin/user_detail.html", d)
-}
-
-const systemUserID = "system"
+// ── System settings ──────────────────────────────────────────────────────────
 
 type adminSettingsData struct {
 	*pageData
@@ -198,7 +253,7 @@ type adminSettingsData struct {
 
 func (s *Server) loadAdminSettings() *adminSettingsData {
 	get := func(key, fallback string) string {
-		if v, err := s.db.GetSetting(systemUserID, key); err == nil && v != "" {
+		if v, err := s.db.GetSystemSetting(key); err == nil && v != "" {
 			return v
 		}
 		return fallback
@@ -220,7 +275,6 @@ func (s *Server) showAdminSettings(c echo.Context) error {
 }
 
 func (s *Server) handleAdminSaveSettings(c echo.Context) error {
-	admin := c.Get("user").(*db.User)
 	fields := map[string]string{
 		"claude_bin":    c.FormValue("claude_bin"),
 		"coder_timeout": c.FormValue("coder_timeout"),
@@ -230,7 +284,7 @@ func (s *Server) handleAdminSaveSettings(c echo.Context) error {
 
 	for key, val := range fields {
 		if val != "" {
-			if err := s.db.SetSetting(systemUserID, key, val); err != nil {
+			if err := s.db.SetSystemSetting(key, val); err != nil {
 				d := s.loadAdminSettings()
 				d.pageData = s.page(c, "System Settings")
 				d.pageData.Error = "Failed to save: " + err.Error()
@@ -239,170 +293,11 @@ func (s *Server) handleAdminSaveSettings(c echo.Context) error {
 		}
 	}
 
-	s.audit.Log(admin.ID, "update_system_settings", "system", "", c.RealIP())
+	s.audit.Log("", "update_system_settings", "system", "", c.RealIP())
 	d := s.loadAdminSettings()
 	d.pageData = s.page(c, "System Settings")
 	d.pageData.Success = "Settings saved. Restart the server for binary path changes to take effect."
 	return c.Render(http.StatusOK, "admin/settings.html", d)
-}
-
-func buildUserDetailData(p *pageData, target *db.User, perms []string) *adminUserDetailData {
-	granted := make(map[string]bool, len(perms))
-	for _, perm := range perms {
-		granted[perm] = true
-	}
-	entries := make([]permEntry, len(allPermissions))
-	for i, name := range allPermissions {
-		entries[i] = permEntry{Name: name, Granted: granted[name]}
-	}
-	return &adminUserDetailData{
-		pageData:       p,
-		Target:         target,
-		Permissions:    perms,
-		AllPermissions: entries,
-	}
-}
-
-// ── Coder CRUD ─────────────────────────────────────────────────────────────
-
-type adminCodersData struct {
-	*pageData
-	Coders []*db.Coder
-}
-
-type adminCoderDetailData struct {
-	*pageData
-	Coder *db.Coder
-}
-
-func (s *Server) showAdminCoders(c echo.Context) error {
-	coders, _ := s.db.ListCoders()
-	return c.Render(http.StatusOK, "admin/coders.html", &adminCodersData{
-		pageData: s.page(c, "Coder Profiles"),
-		Coders:   coders,
-	})
-}
-
-func (s *Server) handleAdminCreateCoder(c echo.Context) error {
-	admin := c.Get("user").(*db.User)
-	name := c.FormValue("name")
-	description := c.FormValue("description")
-	claudeBin := c.FormValue("claude_bin")
-	timeoutStr := c.FormValue("timeout_s")
-	backendType := c.FormValue("backend_type")
-
-	if name == "" {
-		p := s.page(c, "Coder Profiles")
-		p.Error = "Name is required"
-		coders, _ := s.db.ListCoders()
-		return c.Render(http.StatusBadRequest, "admin/coders.html", &adminCodersData{pageData: p, Coders: coders})
-	}
-	if claudeBin == "" {
-		claudeBin = "claude"
-	}
-	timeoutS := 120
-	if timeoutStr != "" {
-		if v, err := strconv.Atoi(timeoutStr); err == nil && v > 0 {
-			timeoutS = v
-		}
-	}
-
-	coderObj := &db.Coder{
-		ID:          uuid.New().String(),
-		Name:        name,
-		Description: description,
-		ClaudeBin:   claudeBin,
-		TimeoutS:    timeoutS,
-		BackendType: backendType,
-	}
-	if err := s.db.CreateCoder(coderObj); err != nil {
-		p := s.page(c, "Coder Profiles")
-		p.Error = "Failed to create coder: " + err.Error()
-		coders, _ := s.db.ListCoders()
-		return c.Render(http.StatusInternalServerError, "admin/coders.html", &adminCodersData{pageData: p, Coders: coders})
-	}
-
-	s.audit.Log(admin.ID, "create_coder", "coder:"+coderObj.ID, name, c.RealIP())
-	return c.Redirect(http.StatusFound, "/admin/coders/"+coderObj.ID)
-}
-
-func (s *Server) showAdminCoder(c echo.Context) error {
-	id := c.Param("id")
-	coderObj, err := s.db.GetCoder(id)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "coder not found")
-	}
-	return c.Render(http.StatusOK, "admin/coder_detail.html", &adminCoderDetailData{
-		pageData: s.page(c, "Edit Coder: "+coderObj.Name),
-		Coder:    coderObj,
-	})
-}
-
-func (s *Server) handleAdminUpdateCoder(c echo.Context) error {
-	admin := c.Get("user").(*db.User)
-	id := c.Param("id")
-	coderObj, err := s.db.GetCoder(id)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "coder not found")
-	}
-
-	if name := c.FormValue("name"); name != "" {
-		coderObj.Name = name
-	}
-	coderObj.Description = c.FormValue("description")
-	if bin := c.FormValue("claude_bin"); bin != "" {
-		coderObj.ClaudeBin = bin
-	}
-	if v, err := strconv.Atoi(c.FormValue("timeout_s")); err == nil && v > 0 {
-		coderObj.TimeoutS = v
-	}
-	coderObj.BackendType = c.FormValue("backend_type")
-
-	if err := s.db.UpdateCoder(coderObj); err != nil {
-		p := s.page(c, "Edit Coder: "+coderObj.Name)
-		p.Error = "Failed to update: " + err.Error()
-		return c.Render(http.StatusInternalServerError, "admin/coder_detail.html", &adminCoderDetailData{pageData: p, Coder: coderObj})
-	}
-
-	s.audit.Log(admin.ID, "update_coder", "coder:"+id, coderObj.Name, c.RealIP())
-	p := s.page(c, "Edit Coder: "+coderObj.Name)
-	p.Success = "Coder profile updated."
-	return c.Render(http.StatusOK, "admin/coder_detail.html", &adminCoderDetailData{pageData: p, Coder: coderObj})
-}
-
-func (s *Server) handleAdminDeleteCoder(c echo.Context) error {
-	admin := c.Get("user").(*db.User)
-	id := c.Param("id")
-	if err := s.db.DeleteCoder(id); err != nil {
-		return err
-	}
-	s.audit.Log(admin.ID, "delete_coder", "coder:"+id, "", c.RealIP())
-	return c.Redirect(http.StatusFound, "/admin/coders")
-}
-
-// ── Coder assignment ────────────────────────────────────────────────────────
-
-func (s *Server) handleAdminAssignCoder(c echo.Context) error {
-	admin := c.Get("user").(*db.User)
-	userID := c.Param("id")
-	coderID := c.FormValue("coder_id")
-
-	if err := s.db.AssignUserCoder(userID, coderID); err != nil {
-		return err
-	}
-	s.audit.Log(admin.ID, "assign_coder", "user:"+userID, "coder:"+coderID, c.RealIP())
-	return c.Redirect(http.StatusFound, "/admin/users/"+userID)
-}
-
-func (s *Server) handleAdminUnassignCoder(c echo.Context) error {
-	admin := c.Get("user").(*db.User)
-	userID := c.Param("id")
-
-	if err := s.db.UnassignUserCoder(userID); err != nil {
-		return err
-	}
-	s.audit.Log(admin.ID, "unassign_coder", "user:"+userID, "", c.RealIP())
-	return c.Redirect(http.StatusFound, "/admin/users/"+userID)
 }
 
 func (s *Server) showAuditLog(c echo.Context) error {

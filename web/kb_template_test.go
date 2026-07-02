@@ -17,14 +17,14 @@ func TestKBTemplatesRender(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseTemplates: %v", err)
 	}
-	user := &db.User{Username: "ilija", Role: "user"}
+	user := &db.Workspace{Name: "ilija"}
 
 	cases := []struct {
 		name string
 		data any
 	}{
 		{"dashboard/kb_browse.html", &kbBrowseData{
-			pageData: &pageData{Title: "Knowledge Base", User: user},
+			pageData: &pageData{Title: "Knowledge Base", Workspace: user},
 			Path:     "notes",
 			Crumbs:   kbBreadcrumbs("notes"),
 			Nodes: []vault.Node{
@@ -33,13 +33,13 @@ func TestKBTemplatesRender(t *testing.T) {
 			},
 		}},
 		{"dashboard/kb_browse.html", &kbBrowseData{
-			pageData: &pageData{Title: "Search", User: user},
+			pageData: &pageData{Title: "Search", Workspace: user},
 			Query:    "needle",
 			Crumbs:   kbBreadcrumbs(""),
 			Results:  []vault.SearchHit{{Path: "notes/x.md", Line: 3, Snippet: "the needle"}},
 		}},
 		{"dashboard/kb_view.html", &kbViewData{
-			pageData:   &pageData{Title: "Knowledge Base", User: user},
+			pageData:   &pageData{Title: "Knowledge Base", Workspace: user},
 			Path:       "notes/x.md",
 			NoteTitle:  "x.md",
 			HTML:       template.HTML("<h1>Hi</h1>"),
@@ -48,7 +48,7 @@ func TestKBTemplatesRender(t *testing.T) {
 			Backlinks:  []kbCrumb{{Name: "notes/a.md", Path: "notes/a.md"}},
 		}},
 		{"dashboard/kb_edit.html", &kbEditData{
-			pageData:   &pageData{Title: "Edit", User: user},
+			pageData:   &pageData{Title: "Edit", Workspace: user},
 			Path:       "notes/x.md",
 			Content:    "# hi",
 			ParentPath: "notes",

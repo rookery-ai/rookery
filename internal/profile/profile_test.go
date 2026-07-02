@@ -15,22 +15,22 @@ type fakeStore struct{ m map[string]string }
 
 func newFakeStore() *fakeStore { return &fakeStore{m: map[string]string{}} }
 
-func (f *fakeStore) GetSetting(userID, key string) (string, error) {
-	v, ok := f.m[userID+"|"+key]
+func (f *fakeStore) GetSetting(workspaceID, key string) (string, error) {
+	v, ok := f.m[workspaceID+"|"+key]
 	if !ok {
 		return "", errNotFound
 	}
 	return v, nil
 }
 
-func (f *fakeStore) SetSetting(userID, key, value string) error {
-	f.m[userID+"|"+key] = value
+func (f *fakeStore) SetSetting(workspaceID, key, value string) error {
+	f.m[workspaceID+"|"+key] = value
 	return nil
 }
 
 func TestSaveLoadRoundTrip(t *testing.T) {
 	store := newFakeStore()
-	const userID = "u1"
+	const workspaceID = "u1"
 
 	p := Profile{
 		DisplayName: "Ilija",
@@ -41,11 +41,11 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		Language:    "English",
 		Notes:       "Prefers technical detail",
 	}
-	if err := Save(store, userID, p); err != nil {
+	if err := Save(store, workspaceID, p); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	got := Load(store, userID)
+	got := Load(store, workspaceID)
 	if got != p {
 		t.Fatalf("Load mismatch: got %+v, want %+v", got, p)
 	}
@@ -53,10 +53,10 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	// Clearing a field: Save again with Email blank must actually clear it,
 	// not leave the old value in place.
 	p.Email = ""
-	if err := Save(store, userID, p); err != nil {
+	if err := Save(store, workspaceID, p); err != nil {
 		t.Fatalf("Save (clear): %v", err)
 	}
-	got = Load(store, userID)
+	got = Load(store, workspaceID)
 	if got.Email != "" {
 		t.Fatalf("Email not cleared, got %q", got.Email)
 	}

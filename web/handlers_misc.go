@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,7 +27,7 @@ type chatsPageData struct {
 }
 
 func (s *Server) showChats(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	chats, _ := s.db.ListChats(u.ID)
 	return c.Render(http.StatusOK, "dashboard/chats.html", &chatsPageData{
 		pageData: s.page(c, "Chats"),
@@ -35,7 +36,7 @@ func (s *Server) showChats(c echo.Context) error {
 }
 
 func (s *Server) handleCreateChat(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	name := c.FormValue("name")
 	if name == "" {
 		loc := profile.LoadLocation(s.db, u.ID)
@@ -43,7 +44,7 @@ func (s *Server) handleCreateChat(c echo.Context) error {
 	}
 	ch := &db.Chat{
 		ID:       uuid.New().String(),
-		UserID:   u.ID,
+		WorkspaceID:   u.ID,
 		Name:     name,
 		Platform: "web",
 		Active:   true,
@@ -63,10 +64,10 @@ type chatDetailPageData struct {
 
 // showChatDetail renders a chat's full message history plus a composer.
 func (s *Server) showChatDetail(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 	ch, err := s.db.GetChat(id)
-	if err != nil || ch.UserID != u.ID {
+	if err != nil || ch.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "chat not found")
 	}
 	msgs, _ := s.db.ListChatMessages(id)
@@ -81,10 +82,10 @@ func (s *Server) showChatDetail(c echo.Context) error {
 // persists both turns, and returns the assistant reply as JSON. Used by the
 // chat detail page's AJAX composer (mirrors the agent-designer chat flow).
 func (s *Server) handleChatMessage(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 	ch, err := s.db.GetChat(id)
-	if err != nil || ch.UserID != u.ID {
+	if err != nil || ch.WorkspaceID != u.ID {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": "chat not found"})
 	}
 
@@ -117,7 +118,7 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 		_ = s.db.ResumeChat(id)
 	}
 
-	coder := s.coderForUser(u.ID).WithDir(root).WithAllowedTools("Read,Write,Edit,Glob,Grep")
+	coder := s.coderForWorkspace(u.ID).WithDir(root).WithAllowedTools("Read,Write,Edit,Glob,Grep")
 	result, err := coder.Chat(c.Request().Context(), u.ID, history, sysCtx, text)
 	if err != nil {
 		// Don't persist on failure — the client already shows the user bubble,
@@ -133,10 +134,10 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 
 // handleResumeChat re-activates a previously stopped chat.
 func (s *Server) handleResumeChat(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 	ch, err := s.db.GetChat(id)
-	if err != nil || ch.UserID != u.ID {
+	if err != nil || ch.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "chat not found")
 	}
 	_ = s.db.ResumeChat(id)
@@ -145,10 +146,10 @@ func (s *Server) handleResumeChat(c echo.Context) error {
 }
 
 func (s *Server) handleStopChat(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 	ch, err := s.db.GetChat(id)
-	if err != nil || ch.UserID != u.ID {
+	if err != nil || ch.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "chat not found")
 	}
 	_ = s.db.StopChat(id)
@@ -157,10 +158,10 @@ func (s *Server) handleStopChat(c echo.Context) error {
 }
 
 func (s *Server) handleDeleteChat(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 	ch, err := s.db.GetChat(id)
-	if err != nil || ch.UserID != u.ID {
+	if err != nil || ch.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "chat not found")
 	}
 	_ = s.db.DeleteChat(id)
@@ -176,7 +177,7 @@ type remindersPageData struct {
 }
 
 func (s *Server) showReminders(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	reminders, _ := s.db.ListReminders(u.ID)
 	return c.Render(http.StatusOK, "dashboard/reminders.html", &remindersPageData{
 		pageData:  s.page(c, "Reminders"),
@@ -185,7 +186,7 @@ func (s *Server) showReminders(c echo.Context) error {
 }
 
 func (s *Server) handleCreateReminder(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	message := c.FormValue("message")
 	whenStr := strings.TrimSpace(c.FormValue("when"))
 
@@ -205,7 +206,7 @@ func (s *Server) handleCreateReminder(c echo.Context) error {
 
 	now := time.Now()
 	loc := profile.LoadLocation(s.db, u.ID)
-	llmFn := buildLLMTimeParser(s.coderForUser(u.ID))
+	llmFn := buildLLMTimeParser(s.coderForWorkspace(u.ID))
 
 	remindAt, _, err := reminder.ParseNaturalTimeFull(c.Request().Context(), whenStr, now, loc, llmFn, u.ID)
 	if err != nil {
@@ -217,7 +218,7 @@ func (s *Server) handleCreateReminder(c echo.Context) error {
 
 	r := &db.Reminder{
 		ID:       uuid.New().String(),
-		UserID:   u.ID,
+		WorkspaceID:   u.ID,
 		Message:  message,
 		RemindAt: remindAt,
 	}
@@ -232,14 +233,14 @@ func buildLLMTimeParser(coderSvc *coder.Coder) reminder.TimeParserFunc {
 	if coderSvc == nil {
 		return nil
 	}
-	return func(ctx context.Context, userID, input string, now time.Time, loc *time.Location) (time.Time, string, error) {
+	return func(ctx context.Context, workspaceID, input string, now time.Time, loc *time.Location) (time.Time, string, error) {
 		tz := "UTC"
 		if loc != nil {
 			tz = loc.String()
 		}
 		nowStr := now.In(loc).Format("2006-01-02 15:04 MST")
 		prompt := prompts.BuildReminderParsePrompt(input, nowStr, tz)
-		result, err := coderSvc.WithNoTools().Generate(ctx, userID, prompt)
+		result, err := coderSvc.WithNoTools().Generate(ctx, workspaceID, prompt)
 		if err != nil {
 			return time.Time{}, input, err
 		}
@@ -253,7 +254,7 @@ func buildLLMTimeParser(coderSvc *coder.Coder) reminder.TimeParserFunc {
 // For users with Telegram connected, it returns them for info display but does NOT mark sent
 // so the server-side tick() can still deliver via Telegram.
 func (s *Server) handlePollReminders(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	due, err := s.db.ListDueReminders(time.Now())
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -265,7 +266,7 @@ func (s *Server) handlePollReminders(c echo.Context) error {
 	}
 	var result []item
 	for _, r := range due {
-		if r.UserID != u.ID {
+		if r.WorkspaceID != u.ID {
 			continue
 		}
 		result = append(result, item{ID: r.ID, Message: r.Message})
@@ -282,10 +283,10 @@ func (s *Server) handlePollReminders(c echo.Context) error {
 }
 
 func (s *Server) handleDeleteReminder(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 	r, err := s.db.GetReminder(id)
-	if err != nil || r.UserID != u.ID {
+	if err != nil || r.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "reminder not found")
 	}
 	_ = s.db.DeleteReminder(id)
@@ -296,36 +297,44 @@ func (s *Server) handleDeleteReminder(c echo.Context) error {
 
 type settingsPageData struct {
 	*pageData
-	DisplayName string
-	Email       string
-	Location    string
-	Timezone    string
-	Tone        string
-	Language    string
-	Notes       string
+	DisplayName    string
+	Email          string
+	Location       string
+	Timezone       string
+	Tone           string
+	Language       string
+	Notes          string
+	DetectedCoders []coder.Installed
+}
+
+// buildSettingsData assembles the settings page view model (profile + detected
+// coders). The active workspace comes through pageData.Workspace.
+func (s *Server) buildSettingsData(p *pageData, w *db.Workspace) *settingsPageData {
+	prof := profile.Load(s.db, w.ID)
+	dn := prof.DisplayName
+	if dn == "" {
+		dn = w.Name
+	}
+	return &settingsPageData{
+		pageData:       p,
+		DisplayName:    dn,
+		Email:          prof.Email,
+		Location:       prof.Location,
+		Timezone:       prof.Timezone,
+		Tone:           prof.Tone,
+		Language:       prof.Language,
+		Notes:          prof.Notes,
+		DetectedCoders: coder.DetectInstalled(),
+	}
 }
 
 func (s *Server) showSettings(c echo.Context) error {
-	u := c.Get("user").(*db.User)
-	prof := profile.Load(s.db, u.ID)
-	dn := prof.DisplayName
-	if dn == "" {
-		dn = u.Username
-	}
-	return c.Render(http.StatusOK, "dashboard/settings.html", &settingsPageData{
-		pageData:    s.page(c, "Settings"),
-		DisplayName: dn,
-		Email:       prof.Email,
-		Location:    prof.Location,
-		Timezone:    prof.Timezone,
-		Tone:        prof.Tone,
-		Language:    prof.Language,
-		Notes:       prof.Notes,
-	})
+	w := c.Get("workspace").(*db.Workspace)
+	return c.Render(http.StatusOK, "dashboard/settings.html", s.buildSettingsData(s.page(c, "Settings"), w))
 }
 
 func (s *Server) handleSaveSettings(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	w := c.Get("workspace").(*db.Workspace)
 	tone := c.FormValue("tone_custom")
 	if tone == "" {
 		tone = c.FormValue("tone")
@@ -341,47 +350,64 @@ func (s *Server) handleSaveSettings(c echo.Context) error {
 	}
 	p := s.page(c, "Settings")
 
-	if err := profile.Save(s.db, u.ID, prof); err != nil {
+	if err := profile.Save(s.db, w.ID, prof); err != nil {
 		p.Error = "Failed to save settings: " + err.Error()
 	} else {
-		s.audit.Log(u.ID, "update_settings", "user:"+u.ID, "profile", c.RealIP())
+		s.audit.Log(w.ID, "update_settings", "workspace:"+w.ID, "profile", c.RealIP())
 		p.Success = "Settings saved"
 	}
+	return c.Render(http.StatusOK, "dashboard/settings.html", s.buildSettingsData(p, w))
+}
 
-	dn := prof.DisplayName
-	if dn == "" {
-		dn = u.Username
+// handleSaveWorkspaceMeta updates the workspace name + about from the settings page.
+func (s *Server) handleSaveWorkspaceMeta(c echo.Context) error {
+	w := c.Get("workspace").(*db.Workspace)
+	name := c.FormValue("name")
+	about := c.FormValue("about")
+	p := s.page(c, "Settings")
+	if name == "" {
+		p.Error = "Workspace name is required"
+	} else if err := s.db.UpdateWorkspaceMeta(w.ID, name, about); err != nil {
+		p.Error = "Failed to save: " + err.Error()
+	} else {
+		s.audit.Log(w.ID, "update_workspace_meta", "workspace:"+w.ID, "", c.RealIP())
+		p.Success = "Workspace details saved"
+		w, _ = s.db.GetWorkspaceByID(w.ID) // reflect new values in the view
+		p.Workspace = w
 	}
-	return c.Render(http.StatusOK, "dashboard/settings.html", &settingsPageData{
-		pageData:    p,
-		DisplayName: dn,
-		Email:       prof.Email,
-		Location:    prof.Location,
-		Timezone:    prof.Timezone,
-		Tone:        prof.Tone,
-		Language:    prof.Language,
-		Notes:       prof.Notes,
-	})
+	return c.Render(http.StatusOK, "dashboard/settings.html", s.buildSettingsData(p, w))
+}
+
+// handleSaveWorkspaceCoder updates the workspace's coder config from settings.
+func (s *Server) handleSaveWorkspaceCoder(c echo.Context) error {
+	w := c.Get("workspace").(*db.Workspace)
+	bin := c.FormValue("coder_bin")
+	timeoutS := 0
+	if v, err := strconv.Atoi(c.FormValue("coder_timeout_s")); err == nil && v > 0 {
+		timeoutS = v
+	}
+	p := s.page(c, "Settings")
+	if err := s.db.UpdateWorkspaceCoder(w.ID, "local", bin, timeoutS, c.FormValue("coder_backend_type"), "", "", ""); err != nil {
+		p.Error = "Failed to save coder: " + err.Error()
+	} else {
+		s.audit.Log(w.ID, "configure_coder", "workspace:"+w.ID, bin, c.RealIP())
+		p.Success = "Coder settings saved"
+		w, _ = s.db.GetWorkspaceByID(w.ID)
+		p.Workspace = w
+	}
+	return c.Render(http.StatusOK, "dashboard/settings.html", s.buildSettingsData(p, w))
 }
 
 func (s *Server) handleChangeMasterPassword(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	oldPw := c.FormValue("current")
 	newPw := c.FormValue("new_password")
 	confirm := c.FormValue("confirm")
 
 	renderErr := func(msg string) error {
-		prof := profile.Load(s.db, u.ID)
-		dn := prof.DisplayName
-		if dn == "" {
-			dn = u.Username
-		}
 		p := s.page(c, "Settings")
 		p.Error = msg
-		return c.Render(http.StatusBadRequest, "dashboard/settings.html", &settingsPageData{
-			pageData: p, DisplayName: dn, Email: prof.Email, Location: prof.Location,
-			Timezone: prof.Timezone, Tone: prof.Tone, Language: prof.Language, Notes: prof.Notes,
-		})
+		return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, u))
 	}
 
 	if oldPw == "" || newPw == "" {
@@ -426,20 +452,12 @@ func (s *Server) handleChangeMasterPassword(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := s.db.UpdateUserSetup(u.ID, encMasterPw, u.SecretsSalt); err != nil {
+	if err := s.db.UpdateWorkspaceSetup(u.ID, encMasterPw, u.SecretsSalt); err != nil {
 		return err
 	}
 
-	s.audit.Log(u.ID, "change_master_password", "user:"+u.ID, "", c.RealIP())
-	prof := profile.Load(s.db, u.ID)
-	dn := prof.DisplayName
-	if dn == "" {
-		dn = u.Username
-	}
+	s.audit.Log(u.ID, "change_master_password", "workspace:"+u.ID, "", c.RealIP())
 	p := s.page(c, "Settings")
 	p.Success = "Master password changed successfully"
-	return c.Render(http.StatusOK, "dashboard/settings.html", &settingsPageData{
-		pageData: p, DisplayName: dn, Email: prof.Email, Location: prof.Location,
-		Timezone: prof.Timezone, Tone: prof.Tone, Language: prof.Language, Notes: prof.Notes,
-	})
+	return c.Render(http.StatusOK, "dashboard/settings.html", s.buildSettingsData(p, u))
 }

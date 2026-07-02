@@ -99,7 +99,7 @@ func serveCmd() *cli.Command {
 			}
 
 			// All per-user knowledge now lives under one vault root per user:
-			// <data>/vaults/<userID>/. Agent dirs, skills, and memory are scoped
+			// <data>/vaults/<workspaceID>/. Agent dirs, skills, and memory are scoped
 			// inside it so each user's vault is a single browsable, backup-able unit.
 			vaultsDir := filepath.Join(cfg.Data.Dir, "vaults")
 			vlt := vault.New(cfg.Data.Dir)
@@ -160,8 +160,8 @@ func serveCmd() *cli.Command {
 			designFlow := agentdesigner.NewFlow(func(_ string) *coder.Coder { return coderSvc }, designer).
 				WithDB(database).
 				WithMemory(memStore).
-				WithSecretsLoader(func(ctx context.Context, userID string) (map[string]string, error) {
-					user, err := database.GetUserByID(userID)
+				WithSecretsLoader(func(ctx context.Context, workspaceID string) (map[string]string, error) {
+					user, err := database.GetWorkspaceByID(workspaceID)
 					if err != nil || user.EncryptedMasterPassword == "" {
 						return nil, err
 					}
@@ -169,14 +169,22 @@ func serveCmd() *cli.Command {
 					if err != nil {
 						return nil, err
 					}
-					svc := secrets.New(database, userID, masterPw, user.SecretsSalt)
+					svc := secrets.New(database, workspaceID, masterPw, user.SecretsSalt)
 					return svc.GetAll(ctx)
 				}).
 				WithKBLister(vlt)
 			skillStore := skillstore.New(database, skillsDir)
 			runner := agentrunner.New(database, sysKey, agentsDir, homesDir, cfg.Data.Dir, coderSvc, skillsDir).
 				WithMemory(memStore).
-				WithVault(vlt)
+				WithVault(vlt).
+				WithCoderFactory(func(workspaceID string) *coder.Coder {
+					w, err := database.GetWorkspaceByID(workspaceID)
+					if err != nil || w == nil {
+						return nil
+					}
+					return coder.ForWorkspace(w, homesDir, cfg.Data.Dir,
+						cfg.Coder.ClaudeBin, cfg.Coder.Timeout, cfg.Sandbox.Enabled)
+				})
 
 			// Conversational skill-creator: same shape as the agent designer.
 			// Core skills are embedded (always-on) and need no seeding; the saver
@@ -185,8 +193,8 @@ func serveCmd() *cli.Command {
 			skillFlow := skilldesigner.NewSkillFlow(func(_ string) *coder.Coder { return coderSvc }, skillSaver).
 				WithDB(database).
 				WithMemory(memStore).
-				WithSecretsLoader(func(ctx context.Context, userID string) (map[string]string, error) {
-					user, err := database.GetUserByID(userID)
+				WithSecretsLoader(func(ctx context.Context, workspaceID string) (map[string]string, error) {
+					user, err := database.GetWorkspaceByID(workspaceID)
 					if err != nil || user.EncryptedMasterPassword == "" {
 						return nil, err
 					}
@@ -194,17 +202,17 @@ func serveCmd() *cli.Command {
 					if err != nil {
 						return nil, err
 					}
-					svc := secrets.New(database, userID, masterPw, user.SecretsSalt)
+					svc := secrets.New(database, workspaceID, masterPw, user.SecretsSalt)
 					return svc.GetAll(ctx)
 				}).
 				WithKBLister(vlt)
 
 			vaultSearcher := vlt.NewSearcher()
 
-			textHandler := func(ctx context.Context, userID string, history []db.ChatMessage, text string, send func(string)) error {
-				root := vlt.Root(userID)
-				sysCtx := prompts.BuildChatSystemPrompt(root) + chat.BuildUserContext(database, memStore, userID)
-				result, err := coderSvc.WithDir(root).WithAllowedTools("Read,Write,Edit,Glob,Grep").Chat(ctx, userID, history, sysCtx, text)
+			textHandler := func(ctx context.Context, workspaceID string, history []db.ChatMessage, text string, send func(string)) error {
+				root := vlt.Root(workspaceID)
+				sysCtx := prompts.BuildChatSystemPrompt(root) + chat.BuildUserContext(database, memStore, workspaceID)
+				result, err := coderSvc.WithDir(root).WithAllowedTools("Read,Write,Edit,Glob,Grep").Chat(ctx, workspaceID, history, sysCtx, text)
 				if err != nil {
 					send("Sorry, I ran into an error: " + err.Error())
 					return nil
@@ -216,8 +224,8 @@ func serveCmd() *cli.Command {
 			// AgentRunHandler: /run <name> from Telegram.
 			// MasterPw is empty here — agents without secret injection still run.
 			// Phase 7 adds a session-stored master password.
-			agentRunHandler := func(ctx context.Context, userID, agentName string, send func(string)) error {
-				return runner.RunByName(ctx, userID, agentName, "", send)
+			agentRunHandler := func(ctx context.Context, workspaceID, agentName string, send func(string)) error {
+				return runner.RunByName(ctx, workspaceID, agentName, "", send)
 			}
 
 			router := gateway.NewRouter(database, textHandler, agentRunHandler, designFlow, memStore).
@@ -259,9 +267,9 @@ func serveCmd() *cli.Command {
 						}
 						for _, d := range expired {
 							if !d.IsEdit && d.State == "verifying" && d.AgentID != "" {
-								_ = os.RemoveAll(agentdesigner.AgentDir(vaultsDir, d.UserID, d.AgentID))
+								_ = os.RemoveAll(agentdesigner.AgentDir(vaultsDir, d.WorkspaceID, d.AgentID))
 							}
-							_ = database.DeleteAgentDraft(d.UserID)
+							_ = database.DeleteAgentDraft(d.WorkspaceID)
 						}
 						// Expired skill-creator drafts: drop the row and any orphaned
 						// staging directory left by runGeneration.
@@ -271,9 +279,9 @@ func serveCmd() *cli.Command {
 						}
 						for _, d := range expiredSkillDrafts {
 							if d.SkillName != "" {
-								_ = os.RemoveAll(filepath.Join(vaultsDir, d.UserID, "skills", ".staging-"+d.SkillName))
+								_ = os.RemoveAll(filepath.Join(vaultsDir, d.WorkspaceID, "skills", ".staging-"+d.SkillName))
 							}
-							_ = database.DeleteSkillDraft(d.UserID)
+							_ = database.DeleteSkillDraft(d.WorkspaceID)
 						}
 					}
 				}
@@ -315,12 +323,12 @@ func sandboxExecCmd() *cli.Command {
 
 func adminCmd() *cli.Command {
 	return &cli.Command{
-		Name:  "admin",
-		Usage: "Admin management commands",
+		Name:  "owner",
+		Usage: "Owner account management",
 		Commands: []*cli.Command{
 			{
 				Name:  "bootstrap",
-				Usage: "Create the initial admin account",
+				Usage: "Create the initial owner account",
 				Flags: []cli.Flag{
 					&cli.StringFlag{Name: "username", Aliases: []string{"u"}, Required: true},
 					&cli.StringFlag{Name: "password", Aliases: []string{"p"}, Required: true},
@@ -338,11 +346,11 @@ func adminCmd() *cli.Command {
 					}
 					defer database.Close()
 
-					u, err := auth.BootstrapAdmin(database, cmd.String("username"), cmd.String("password"))
+					o, err := auth.BootstrapOwner(database, cmd.String("username"), cmd.String("password"))
 					if err != nil {
 						return err
 					}
-					fmt.Printf("Admin account created: %s (id: %s)\n", u.Username, u.ID)
+					fmt.Printf("Owner account created: %s (id: %s)\n", o.Username, o.ID)
 					return nil
 				},
 			},
@@ -356,14 +364,14 @@ func buildLLMTimeParserFn(coderSvc *coder.Coder) reminder.TimeParserFunc {
 	if coderSvc == nil {
 		return nil
 	}
-	return func(ctx context.Context, userID, input string, now time.Time, loc *time.Location) (time.Time, string, error) {
+	return func(ctx context.Context, workspaceID, input string, now time.Time, loc *time.Location) (time.Time, string, error) {
 		tz := "UTC"
 		if loc != nil {
 			tz = loc.String()
 		}
 		nowStr := now.In(loc).Format("2006-01-02 15:04 MST")
 		prompt := prompts.BuildReminderParsePrompt(input, nowStr, tz)
-		result, err := coderSvc.WithNoTools().Generate(ctx, userID, prompt)
+		result, err := coderSvc.WithNoTools().Generate(ctx, workspaceID, prompt)
 		if err != nil {
 			return time.Time{}, input, err
 		}

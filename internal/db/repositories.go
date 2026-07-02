@@ -23,118 +23,191 @@ func scanTimePtr(s *string) *time.Time {
 	return &t
 }
 
-// ── Users ──────────────────────────────────────────────────────────────────
-
-func (d *DB) CreateUser(u *User) error {
-	_, err := d.Exec(`INSERT INTO users
-		(id, username, password_hash, role, encrypted_master_password, secrets_salt,
-		 needs_setup, must_change_password, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))`,
-		u.ID, u.Username, u.PasswordHash, u.Role,
-		u.EncryptedMasterPassword, u.SecretsSalt,
-		boolToInt(u.NeedsSetup), boolToInt(u.MustChangePassword),
-	)
-	return err
-}
-
-func (d *DB) GetUserByID(id string) (*User, error) {
-	row := d.QueryRow(`SELECT id,username,password_hash,role,encrypted_master_password,
-		secrets_salt,needs_setup,must_change_password,created_at,updated_at,coder_id
-		FROM users WHERE id=?`, id)
-	return scanUser(row)
-}
-
-func (d *DB) GetUserByUsername(username string) (*User, error) {
-	row := d.QueryRow(`SELECT id,username,password_hash,role,encrypted_master_password,
-		secrets_salt,needs_setup,must_change_password,created_at,updated_at,coder_id
-		FROM users WHERE username=?`, username)
-	return scanUser(row)
-}
-
-func (d *DB) ListUsers() ([]*User, error) {
-	rows, err := d.Query(`SELECT id,username,password_hash,role,encrypted_master_password,
-		secrets_salt,needs_setup,must_change_password,created_at,updated_at,coder_id
-		FROM users ORDER BY created_at`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var users []*User
-	for rows.Next() {
-		u, err := scanUser(rows)
-		if err != nil {
-			return nil, err
-		}
-		users = append(users, u)
-	}
-	return users, rows.Err()
-}
-
-func (d *DB) UpdateUserPassword(id, hash string) error {
-	_, err := d.Exec(`UPDATE users SET password_hash=?, must_change_password=0, updated_at=datetime('now') WHERE id=?`, hash, id)
-	return err
-}
-
-func (d *DB) UpdateUserSetup(id, encMasterPw, salt string) error {
-	_, err := d.Exec(`UPDATE users SET encrypted_master_password=?, secrets_salt=?, needs_setup=0, updated_at=datetime('now') WHERE id=?`,
-		encMasterPw, salt, id)
-	return err
-}
-
-func (d *DB) UpdateUserMasterPassword(id, encMasterPw, salt string) error {
-	_, err := d.Exec(`UPDATE users SET encrypted_master_password=?, secrets_salt=?, updated_at=datetime('now') WHERE id=?`,
-		encMasterPw, salt, id)
-	return err
-}
-
-func (d *DB) AdminExists() (bool, error) {
-	var count int
-	err := d.QueryRow(`SELECT COUNT(*) FROM users WHERE role='admin'`).Scan(&count)
-	return count > 0, err
-}
-
 type scanner interface {
 	Scan(dest ...any) error
 }
 
-func scanUser(s scanner) (*User, error) {
-	var u User
+// ── Owner ──────────────────────────────────────────────────────────────────
+
+func (d *DB) CreateOwner(o *Owner) error {
+	_, err := d.Exec(`INSERT INTO owner
+		(id, username, password_hash, must_change_password, created_at, updated_at)
+		VALUES (?,?,?,?,datetime('now'),datetime('now'))`,
+		o.ID, o.Username, o.PasswordHash, boolToInt(o.MustChangePassword))
+	return err
+}
+
+func (d *DB) GetOwner() (*Owner, error) {
+	row := d.QueryRow(`SELECT id,username,password_hash,must_change_password,created_at,updated_at
+		FROM owner LIMIT 1`)
+	return scanOwner(row)
+}
+
+func (d *DB) GetOwnerByUsername(username string) (*Owner, error) {
+	row := d.QueryRow(`SELECT id,username,password_hash,must_change_password,created_at,updated_at
+		FROM owner WHERE username=?`, username)
+	return scanOwner(row)
+}
+
+func (d *DB) UpdateOwnerPassword(id, hash string) error {
+	_, err := d.Exec(`UPDATE owner SET password_hash=?, must_change_password=0, updated_at=datetime('now') WHERE id=?`, hash, id)
+	return err
+}
+
+func (d *DB) OwnerExists() (bool, error) {
+	var count int
+	err := d.QueryRow(`SELECT COUNT(*) FROM owner`).Scan(&count)
+	return count > 0, err
+}
+
+func scanOwner(s scanner) (*Owner, error) {
+	var o Owner
 	var createdAt, updatedAt string
-	var needsSetup, mustChange int
-	err := s.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role,
-		&u.EncryptedMasterPassword, &u.SecretsSalt,
-		&needsSetup, &mustChange, &createdAt, &updatedAt, &u.CoderID)
+	var mustChange int
+	err := s.Scan(&o.ID, &o.Username, &o.PasswordHash, &mustChange, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	u.NeedsSetup = needsSetup == 1
-	u.MustChangePassword = mustChange == 1
-	u.CreatedAt = scanTime(createdAt)
-	u.UpdatedAt = scanTime(updatedAt)
-	return &u, nil
+	o.MustChangePassword = mustChange == 1
+	o.CreatedAt = scanTime(createdAt)
+	o.UpdatedAt = scanTime(updatedAt)
+	return &o, nil
+}
+
+// ── Workspaces ───────────────────────────────────────────────────────────────
+
+const workspaceCols = `id,name,about,encrypted_master_password,secrets_salt,
+	coder_kind,coder_bin,coder_timeout_s,coder_backend_type,
+	coder_provider,coder_model,coder_api_key_secret,
+	needs_setup,created_at,updated_at`
+
+func (d *DB) CreateWorkspace(w *Workspace) error {
+	_, err := d.Exec(`INSERT INTO workspaces
+		(id, name, about, encrypted_master_password, secrets_salt,
+		 coder_kind, coder_bin, coder_timeout_s, coder_backend_type,
+		 coder_provider, coder_model, coder_api_key_secret,
+		 needs_setup, created_at, updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))`,
+		w.ID, w.Name, w.About, w.EncryptedMasterPassword, w.SecretsSalt,
+		coderKindOrDefault(w.CoderKind), w.CoderBin, w.CoderTimeoutS, w.CoderBackendType,
+		w.CoderProvider, w.CoderModel, w.CoderAPIKeySecret,
+		boolToInt(w.NeedsSetup))
+	return err
+}
+
+func (d *DB) GetWorkspaceByID(id string) (*Workspace, error) {
+	row := d.QueryRow(`SELECT `+workspaceCols+` FROM workspaces WHERE id=?`, id)
+	return scanWorkspace(row)
+}
+
+func (d *DB) GetWorkspaceByName(name string) (*Workspace, error) {
+	row := d.QueryRow(`SELECT `+workspaceCols+` FROM workspaces WHERE name=?`, name)
+	return scanWorkspace(row)
+}
+
+func (d *DB) ListWorkspaces() ([]*Workspace, error) {
+	rows, err := d.Query(`SELECT ` + workspaceCols + ` FROM workspaces ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var workspaces []*Workspace
+	for rows.Next() {
+		w, err := scanWorkspace(rows)
+		if err != nil {
+			return nil, err
+		}
+		workspaces = append(workspaces, w)
+	}
+	return workspaces, rows.Err()
+}
+
+func (d *DB) UpdateWorkspaceSetup(id, encMasterPw, salt string) error {
+	_, err := d.Exec(`UPDATE workspaces SET encrypted_master_password=?, secrets_salt=?, needs_setup=0, updated_at=datetime('now') WHERE id=?`,
+		encMasterPw, salt, id)
+	return err
+}
+
+func (d *DB) UpdateWorkspaceMasterPassword(id, encMasterPw, salt string) error {
+	_, err := d.Exec(`UPDATE workspaces SET encrypted_master_password=?, secrets_salt=?, updated_at=datetime('now') WHERE id=?`,
+		encMasterPw, salt, id)
+	return err
+}
+
+// UpdateWorkspaceMeta updates the workspace name and about fields.
+func (d *DB) UpdateWorkspaceMeta(id, name, about string) error {
+	_, err := d.Exec(`UPDATE workspaces SET name=?, about=?, updated_at=datetime('now') WHERE id=?`, name, about, id)
+	return err
+}
+
+// UpdateWorkspaceCoder updates the inlined coder config for a workspace.
+func (d *DB) UpdateWorkspaceCoder(id, kind, bin string, timeoutS int, backendType, provider, model, apiKeySecret string) error {
+	_, err := d.Exec(`UPDATE workspaces SET
+		coder_kind=?, coder_bin=?, coder_timeout_s=?, coder_backend_type=?,
+		coder_provider=?, coder_model=?, coder_api_key_secret=?, updated_at=datetime('now')
+		WHERE id=?`,
+		coderKindOrDefault(kind), bin, timeoutS, backendType, provider, model, apiKeySecret, id)
+	return err
+}
+
+func (d *DB) MarkWorkspaceSetupComplete(id string) error {
+	_, err := d.Exec(`UPDATE workspaces SET needs_setup=0, updated_at=datetime('now') WHERE id=?`, id)
+	return err
+}
+
+func (d *DB) DeleteWorkspace(id string) error {
+	_, err := d.Exec(`DELETE FROM workspaces WHERE id=?`, id)
+	return err
+}
+
+func coderKindOrDefault(k string) string {
+	if k == "" {
+		return "local"
+	}
+	return k
+}
+
+func scanWorkspace(s scanner) (*Workspace, error) {
+	var w Workspace
+	var createdAt, updatedAt string
+	var needsSetup int
+	err := s.Scan(&w.ID, &w.Name, &w.About, &w.EncryptedMasterPassword, &w.SecretsSalt,
+		&w.CoderKind, &w.CoderBin, &w.CoderTimeoutS, &w.CoderBackendType,
+		&w.CoderProvider, &w.CoderModel, &w.CoderAPIKeySecret,
+		&needsSetup, &createdAt, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	w.NeedsSetup = needsSetup == 1
+	w.CreatedAt = scanTime(createdAt)
+	w.UpdatedAt = scanTime(updatedAt)
+	return &w, nil
 }
 
 // ── Secrets ────────────────────────────────────────────────────────────────
 
 func (d *DB) UpsertSecret(s *Secret) error {
-	_, err := d.Exec(`INSERT INTO secrets(id, user_id, name, ciphertext, nonce, created_at, updated_at)
+	_, err := d.Exec(`INSERT INTO secrets(id, workspace_id, name, ciphertext, nonce, created_at, updated_at)
 		VALUES(?,?,?,?,?,datetime('now'),datetime('now'))
-		ON CONFLICT(user_id, name) DO UPDATE SET
+		ON CONFLICT(workspace_id, name) DO UPDATE SET
 		  ciphertext=excluded.ciphertext,
 		  nonce=excluded.nonce,
 		  updated_at=datetime('now')`,
-		s.ID, s.UserID, s.Name, s.Ciphertext, s.Nonce)
+		s.ID, s.WorkspaceID, s.Name, s.Ciphertext, s.Nonce)
 	return err
 }
 
-func (d *DB) GetSecret(userID, name string) (*Secret, error) {
-	row := d.QueryRow(`SELECT id,user_id,name,ciphertext,nonce,created_at,updated_at FROM secrets WHERE user_id=? AND name=?`, userID, name)
+func (d *DB) GetSecret(workspaceID, name string) (*Secret, error) {
+	row := d.QueryRow(`SELECT id,workspace_id,name,ciphertext,nonce,created_at,updated_at FROM secrets WHERE workspace_id=? AND name=?`, workspaceID, name)
 	var s Secret
 	var createdAt, updatedAt string
-	err := row.Scan(&s.ID, &s.UserID, &s.Name, &s.Ciphertext, &s.Nonce, &createdAt, &updatedAt)
+	err := row.Scan(&s.ID, &s.WorkspaceID, &s.Name, &s.Ciphertext, &s.Nonce, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -146,8 +219,8 @@ func (d *DB) GetSecret(userID, name string) (*Secret, error) {
 	return &s, nil
 }
 
-func (d *DB) ListSecretNames(userID string) ([]string, error) {
-	rows, err := d.Query(`SELECT name FROM secrets WHERE user_id=? ORDER BY name`, userID)
+func (d *DB) ListSecretNames(workspaceID string) ([]string, error) {
+	rows, err := d.Query(`SELECT name FROM secrets WHERE workspace_id=? ORDER BY name`, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -163,8 +236,8 @@ func (d *DB) ListSecretNames(userID string) ([]string, error) {
 	return names, rows.Err()
 }
 
-func (d *DB) DeleteSecret(userID, name string) error {
-	res, err := d.Exec(`DELETE FROM secrets WHERE user_id=? AND name=?`, userID, name)
+func (d *DB) DeleteSecret(workspaceID, name string) error {
+	res, err := d.Exec(`DELETE FROM secrets WHERE workspace_id=? AND name=?`, workspaceID, name)
 	if err != nil {
 		return err
 	}
@@ -178,24 +251,24 @@ func (d *DB) DeleteSecret(userID, name string) error {
 // ── Platform connections ───────────────────────────────────────────────────
 
 func (d *DB) UpsertPlatformConnection(c *PlatformConnection) error {
-	_, err := d.Exec(`INSERT INTO platform_connections(id, user_id, platform, encrypted_token, active, created_at, updated_at)
+	_, err := d.Exec(`INSERT INTO platform_connections(id, workspace_id, platform, encrypted_token, active, created_at, updated_at)
 		VALUES(?,?,?,?,?,datetime('now'),datetime('now'))
-		ON CONFLICT(user_id, platform) DO UPDATE SET
+		ON CONFLICT(workspace_id, platform) DO UPDATE SET
 		  encrypted_token=excluded.encrypted_token,
 		  active=excluded.active,
 		  updated_at=datetime('now')`,
-		c.ID, c.UserID, c.Platform, c.EncryptedToken, boolToInt(c.Active))
+		c.ID, c.WorkspaceID, c.Platform, c.EncryptedToken, boolToInt(c.Active))
 	return err
 }
 
-func (d *DB) GetPlatformConnection(userID, platform string) (*PlatformConnection, error) {
-	row := d.QueryRow(`SELECT id,user_id,platform,encrypted_token,active,created_at,updated_at
-		FROM platform_connections WHERE user_id=? AND platform=?`, userID, platform)
+func (d *DB) GetPlatformConnection(workspaceID, platform string) (*PlatformConnection, error) {
+	row := d.QueryRow(`SELECT id,workspace_id,platform,encrypted_token,active,created_at,updated_at
+		FROM platform_connections WHERE workspace_id=? AND platform=?`, workspaceID, platform)
 	return scanPlatformConnection(row)
 }
 
 func (d *DB) ListActivePlatformConnections() ([]*PlatformConnection, error) {
-	rows, err := d.Query(`SELECT id,user_id,platform,encrypted_token,active,created_at,updated_at
+	rows, err := d.Query(`SELECT id,workspace_id,platform,encrypted_token,active,created_at,updated_at
 		FROM platform_connections WHERE active=1`)
 	if err != nil {
 		return nil, err
@@ -212,20 +285,20 @@ func (d *DB) ListActivePlatformConnections() ([]*PlatformConnection, error) {
 	return out, rows.Err()
 }
 
-func (d *DB) SetPlatformConnectionActive(userID, platform string, active bool) error {
-	_, err := d.Exec(`UPDATE platform_connections SET active=?, updated_at=datetime('now') WHERE user_id=? AND platform=?`,
-		boolToInt(active), userID, platform)
+func (d *DB) SetPlatformConnectionActive(workspaceID, platform string, active bool) error {
+	_, err := d.Exec(`UPDATE platform_connections SET active=?, updated_at=datetime('now') WHERE workspace_id=? AND platform=?`,
+		boolToInt(active), workspaceID, platform)
 	return err
 }
 
-func (d *DB) DeletePlatformConnection(userID, platform string) error {
-	_, err := d.Exec(`DELETE FROM platform_connections WHERE user_id=? AND platform=?`, userID, platform)
+func (d *DB) DeletePlatformConnection(workspaceID, platform string) error {
+	_, err := d.Exec(`DELETE FROM platform_connections WHERE workspace_id=? AND platform=?`, workspaceID, platform)
 	return err
 }
 
-func (d *DB) ListUserPlatformConnections(userID string) ([]*PlatformConnection, error) {
-	rows, err := d.Query(`SELECT id,user_id,platform,encrypted_token,active,created_at,updated_at
-		FROM platform_connections WHERE user_id=?`, userID)
+func (d *DB) ListWorkspacePlatformConnections(workspaceID string) ([]*PlatformConnection, error) {
+	rows, err := d.Query(`SELECT id,workspace_id,platform,encrypted_token,active,created_at,updated_at
+		FROM platform_connections WHERE workspace_id=?`, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +318,7 @@ func scanPlatformConnection(s scanner) (*PlatformConnection, error) {
 	var c PlatformConnection
 	var createdAt, updatedAt string
 	var active int
-	err := s.Scan(&c.ID, &c.UserID, &c.Platform, &c.EncryptedToken, &active, &createdAt, &updatedAt)
+	err := s.Scan(&c.ID, &c.WorkspaceID, &c.Platform, &c.EncryptedToken, &active, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -261,20 +334,20 @@ func scanPlatformConnection(s scanner) (*PlatformConnection, error) {
 // ── Platform identities ────────────────────────────────────────────────────
 
 func (d *DB) UpsertPlatformIdentity(i *PlatformIdentity) error {
-	_, err := d.Exec(`INSERT INTO platform_identities(id, user_id, platform, platform_user_id, linked_at)
+	_, err := d.Exec(`INSERT INTO platform_identities(id, workspace_id, platform, platform_user_id, linked_at)
 		VALUES(?,?,?,?,datetime('now'))
 		ON CONFLICT(platform, platform_user_id) DO UPDATE SET
-		  user_id=excluded.user_id`,
-		i.ID, i.UserID, i.Platform, i.PlatformUserID)
+		  workspace_id=excluded.workspace_id`,
+		i.ID, i.WorkspaceID, i.Platform, i.PlatformUserID)
 	return err
 }
 
 func (d *DB) GetPlatformIdentity(platform, platformUserID string) (*PlatformIdentity, error) {
-	row := d.QueryRow(`SELECT id,user_id,platform,platform_user_id,linked_at
+	row := d.QueryRow(`SELECT id,workspace_id,platform,platform_user_id,linked_at
 		FROM platform_identities WHERE platform=? AND platform_user_id=?`, platform, platformUserID)
 	var i PlatformIdentity
 	var linkedAt string
-	err := row.Scan(&i.ID, &i.UserID, &i.Platform, &i.PlatformUserID, &linkedAt)
+	err := row.Scan(&i.ID, &i.WorkspaceID, &i.Platform, &i.PlatformUserID, &linkedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -285,17 +358,17 @@ func (d *DB) GetPlatformIdentity(platform, platformUserID string) (*PlatformIden
 	return &i, nil
 }
 
-func (d *DB) ListPlatformIdentities(userID, platform string) ([]*PlatformIdentity, error) {
+func (d *DB) ListPlatformIdentities(workspaceID, platform string) ([]*PlatformIdentity, error) {
 	var (
 		rows *sql.Rows
 		err  error
 	)
 	if platform == "" {
-		rows, err = d.Query(`SELECT id,user_id,platform,platform_user_id,linked_at
-			FROM platform_identities WHERE user_id=?`, userID)
+		rows, err = d.Query(`SELECT id,workspace_id,platform,platform_user_id,linked_at
+			FROM platform_identities WHERE workspace_id=?`, workspaceID)
 	} else {
-		rows, err = d.Query(`SELECT id,user_id,platform,platform_user_id,linked_at
-			FROM platform_identities WHERE user_id=? AND platform=?`, userID, platform)
+		rows, err = d.Query(`SELECT id,workspace_id,platform,platform_user_id,linked_at
+			FROM platform_identities WHERE workspace_id=? AND platform=?`, workspaceID, platform)
 	}
 	if err != nil {
 		return nil, err
@@ -305,7 +378,7 @@ func (d *DB) ListPlatformIdentities(userID, platform string) ([]*PlatformIdentit
 	for rows.Next() {
 		var i PlatformIdentity
 		var linkedAt string
-		if err := rows.Scan(&i.ID, &i.UserID, &i.Platform, &i.PlatformUserID, &linkedAt); err != nil {
+		if err := rows.Scan(&i.ID, &i.WorkspaceID, &i.Platform, &i.PlatformUserID, &linkedAt); err != nil {
 			return nil, err
 		}
 		i.LinkedAt = scanTime(linkedAt)
@@ -316,34 +389,34 @@ func (d *DB) ListPlatformIdentities(userID, platform string) ([]*PlatformIdentit
 
 // HasPlatformIdentity returns true when the user has at least one linked
 // platform (Telegram, etc.). Used to skip reminders and agent runs for
-// users who have no way to receive output, preventing wasted API usage.
-func (d *DB) HasPlatformIdentity(userID string) bool {
+// workspaces who have no way to receive output, preventing wasted API usage.
+func (d *DB) HasPlatformIdentity(workspaceID string) bool {
 	var count int
-	_ = d.QueryRow(`SELECT COUNT(*) FROM platform_identities WHERE user_id=?`, userID).Scan(&count)
+	_ = d.QueryRow(`SELECT COUNT(*) FROM platform_identities WHERE workspace_id=?`, workspaceID).Scan(&count)
 	return count > 0
 }
 
 // ── Agents ─────────────────────────────────────────────────────────────────
 
 func (d *DB) CreateAgent(a *Agent) error {
-	_, err := d.Exec(`INSERT INTO agents(id,user_id,name,description,active,created_at,updated_at)
+	_, err := d.Exec(`INSERT INTO agents(id,workspace_id,name,description,active,created_at,updated_at)
 		VALUES(?,?,?,?,1,datetime('now'),datetime('now'))`,
-		a.ID, a.UserID, a.Name, a.Description)
+		a.ID, a.WorkspaceID, a.Name, a.Description)
 	return err
 }
 
 func (d *DB) GetAgent(id string) (*Agent, error) {
-	row := d.QueryRow(`SELECT id,user_id,name,description,active,created_at,updated_at FROM agents WHERE id=?`, id)
+	row := d.QueryRow(`SELECT id,workspace_id,name,description,active,created_at,updated_at FROM agents WHERE id=?`, id)
 	return scanAgent(row)
 }
 
-func (d *DB) GetAgentByName(userID, name string) (*Agent, error) {
-	row := d.QueryRow(`SELECT id,user_id,name,description,active,created_at,updated_at FROM agents WHERE user_id=? AND name=?`, userID, name)
+func (d *DB) GetAgentByName(workspaceID, name string) (*Agent, error) {
+	row := d.QueryRow(`SELECT id,workspace_id,name,description,active,created_at,updated_at FROM agents WHERE workspace_id=? AND name=?`, workspaceID, name)
 	return scanAgent(row)
 }
 
-func (d *DB) ListAgents(userID string) ([]*Agent, error) {
-	rows, err := d.Query(`SELECT id,user_id,name,description,active,created_at,updated_at FROM agents WHERE user_id=? ORDER BY name`, userID)
+func (d *DB) ListAgents(workspaceID string) ([]*Agent, error) {
+	rows, err := d.Query(`SELECT id,workspace_id,name,description,active,created_at,updated_at FROM agents WHERE workspace_id=? ORDER BY name`, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -380,7 +453,7 @@ func scanAgent(s scanner) (*Agent, error) {
 	var a Agent
 	var createdAt, updatedAt string
 	var active int
-	err := s.Scan(&a.ID, &a.UserID, &a.Name, &a.Description, &active, &createdAt, &updatedAt)
+	err := s.Scan(&a.ID, &a.WorkspaceID, &a.Name, &a.Description, &active, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -396,9 +469,9 @@ func scanAgent(s scanner) (*Agent, error) {
 // ── Agent runs ─────────────────────────────────────────────────────────────
 
 func (d *DB) CreateAgentRun(r *AgentRun) error {
-	_, err := d.Exec(`INSERT INTO agent_runs(id,agent_id,user_id,trigger,started_at)
+	_, err := d.Exec(`INSERT INTO agent_runs(id,agent_id,workspace_id,trigger,started_at)
 		VALUES(?,?,?,?,datetime('now'))`,
-		r.ID, r.AgentID, r.UserID, r.Trigger)
+		r.ID, r.AgentID, r.WorkspaceID, r.Trigger)
 	return err
 }
 
@@ -409,7 +482,7 @@ func (d *DB) FinishAgentRun(id string, exitCode int, stdout, stderr string) erro
 }
 
 func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
-	rows, err := d.Query(`SELECT id,agent_id,user_id,trigger,exit_code,stdout,stderr,started_at,finished_at
+	rows, err := d.Query(`SELECT id,agent_id,workspace_id,trigger,exit_code,stdout,stderr,started_at,finished_at
 		FROM agent_runs WHERE agent_id=? ORDER BY started_at DESC LIMIT ?`, agentID, limit)
 	if err != nil {
 		return nil, err
@@ -424,7 +497,7 @@ func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
 		var finishedAt sql.NullString
 		// stdout/stderr are NULL until FinishAgentRun runs; an in-progress (async)
 		// run row is listed on the detail page, so scan through NullString.
-		if err := rows.Scan(&r.ID, &r.AgentID, &r.UserID, &r.Trigger, &exitCode, &stdout, &stderr, &startedAt, &finishedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &exitCode, &stdout, &stderr, &startedAt, &finishedAt); err != nil {
 			return nil, err
 		}
 		if exitCode.Valid {
@@ -448,12 +521,12 @@ func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
 // durable "Running…" badge that survives a page reload (the in-memory run tracker
 // drives the live SSE stream; this DB row drives the badge).
 func (d *DB) GetUnfinishedAgentRun(agentID string) (*AgentRun, error) {
-	row := d.QueryRow(`SELECT id,agent_id,user_id,trigger,started_at
+	row := d.QueryRow(`SELECT id,agent_id,workspace_id,trigger,started_at
 		FROM agent_runs WHERE agent_id=? AND finished_at IS NULL
 		ORDER BY started_at DESC LIMIT 1`, agentID)
 	var r AgentRun
 	var startedAt string
-	if err := row.Scan(&r.ID, &r.AgentID, &r.UserID, &r.Trigger, &startedAt); err != nil {
+	if err := row.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &startedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -486,15 +559,15 @@ func (d *DB) UpsertAgentSchedule(s *AgentSchedule) error {
 		t := s.NextRunAt.UTC().Format("2006-01-02 15:04:05")
 		nextRun = &t
 	}
-	_, err := d.Exec(`INSERT INTO agent_schedules(id,agent_id,user_id,cron_expr,next_run_at,enabled,created_at)
+	_, err := d.Exec(`INSERT INTO agent_schedules(id,agent_id,workspace_id,cron_expr,next_run_at,enabled,created_at)
 		VALUES(?,?,?,?,?,1,datetime('now'))
 		ON CONFLICT(id) DO UPDATE SET cron_expr=excluded.cron_expr, next_run_at=excluded.next_run_at, enabled=excluded.enabled`,
-		s.ID, s.AgentID, s.UserID, s.CronExpr, nextRun)
+		s.ID, s.AgentID, s.WorkspaceID, s.CronExpr, nextRun)
 	return err
 }
 
 func (d *DB) ListDueSchedules(now time.Time) ([]*AgentSchedule, error) {
-	rows, err := d.Query(`SELECT s.id,s.agent_id,s.user_id,s.cron_expr,s.next_run_at,s.last_run_at,s.enabled,s.created_at
+	rows, err := d.Query(`SELECT s.id,s.agent_id,s.workspace_id,s.cron_expr,s.next_run_at,s.last_run_at,s.enabled,s.created_at
 		FROM agent_schedules s
 		JOIN agents a ON a.id = s.agent_id AND a.active = 1
 		WHERE s.enabled=1 AND (s.next_run_at IS NULL OR s.next_run_at <= ?)`,
@@ -509,7 +582,7 @@ func (d *DB) ListDueSchedules(now time.Time) ([]*AgentSchedule, error) {
 		var nextRunAt, lastRunAt sql.NullString
 		var createdAt string
 		var enabled int
-		if err := rows.Scan(&s.ID, &s.AgentID, &s.UserID, &s.CronExpr, &nextRunAt, &lastRunAt, &enabled, &createdAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.AgentID, &s.WorkspaceID, &s.CronExpr, &nextRunAt, &lastRunAt, &enabled, &createdAt); err != nil {
 			return nil, err
 		}
 		s.NextRunAt = scanTimePtr(nullToPtr(nextRunAt))
@@ -537,20 +610,20 @@ func (d *DB) DeleteAgentSchedule(agentID string) error {
 // ── Chats ──────────────────────────────────────────────────────────────────
 
 func (d *DB) CreateChat(c *Chat) error {
-	_, err := d.Exec(`INSERT INTO chats(id,user_id,agent_id,name,platform,active,created_at,last_seen)
+	_, err := d.Exec(`INSERT INTO chats(id,workspace_id,agent_id,name,platform,active,created_at,last_seen)
 		VALUES(?,?,?,?,?,1,datetime('now'),datetime('now'))`,
-		c.ID, c.UserID, c.AgentID, c.Name, c.Platform)
+		c.ID, c.WorkspaceID, c.AgentID, c.Name, c.Platform)
 	return err
 }
 
 func (d *DB) GetChat(id string) (*Chat, error) {
-	row := d.QueryRow(`SELECT id,user_id,agent_id,name,platform,active,created_at,last_seen FROM chats WHERE id=?`, id)
+	row := d.QueryRow(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen FROM chats WHERE id=?`, id)
 	return scanChat(row)
 }
 
-func (d *DB) ListChats(userID string) ([]*Chat, error) {
-	rows, err := d.Query(`SELECT id,user_id,agent_id,name,platform,active,created_at,last_seen
-		FROM chats WHERE user_id=? ORDER BY last_seen DESC`, userID)
+func (d *DB) ListChats(workspaceID string) ([]*Chat, error) {
+	rows, err := d.Query(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen
+		FROM chats WHERE workspace_id=? ORDER BY last_seen DESC`, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -582,7 +655,7 @@ func (d *DB) DeleteChat(id string) error {
 }
 
 func (d *DB) ListStaleChats(before time.Time) ([]*Chat, error) {
-	rows, err := d.Query(`SELECT id,user_id,agent_id,name,platform,active,created_at,last_seen
+	rows, err := d.Query(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen
 		FROM chats WHERE active=1 AND last_seen < ?`,
 		before.UTC().Format("2006-01-02 15:04:05"))
 	if err != nil {
@@ -605,7 +678,7 @@ func scanChat(s scanner) (*Chat, error) {
 	var agentID sql.NullString
 	var active int
 	var createdAt, lastSeen string
-	err := s.Scan(&c.ID, &c.UserID, &agentID, &c.Name, &c.Platform, &active, &createdAt, &lastSeen)
+	err := s.Scan(&c.ID, &c.WorkspaceID, &agentID, &c.Name, &c.Platform, &active, &createdAt, &lastSeen)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -650,10 +723,10 @@ func (d *DB) ListChatMessages(chatID string) ([]ChatMessage, error) {
 
 // GetActiveChatForPlatform returns the most-recently-touched active chat
 // for the given user on the given platform, or nil if none exists.
-func (d *DB) GetActiveChatForPlatform(userID, platform string) (*Chat, error) {
-	row := d.QueryRow(`SELECT id,user_id,agent_id,name,platform,active,created_at,last_seen
-		FROM chats WHERE user_id=? AND platform=? AND active=1
-		ORDER BY last_seen DESC LIMIT 1`, userID, platform)
+func (d *DB) GetActiveChatForPlatform(workspaceID, platform string) (*Chat, error) {
+	row := d.QueryRow(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen
+		FROM chats WHERE workspace_id=? AND platform=? AND active=1
+		ORDER BY last_seen DESC LIMIT 1`, workspaceID, platform)
 	c, err := scanChat(row)
 	if errors.Is(err, ErrNotFound) {
 		return nil, nil
@@ -662,10 +735,10 @@ func (d *DB) GetActiveChatForPlatform(userID, platform string) (*Chat, error) {
 }
 
 // FindChatByPrefix returns the first chat whose ID starts with the given prefix.
-func (d *DB) FindChatByPrefix(userID, prefix string) (*Chat, error) {
-	rows, err := d.Query(`SELECT id,user_id,agent_id,name,platform,active,created_at,last_seen
-		FROM chats WHERE user_id=? AND id LIKE ? ORDER BY last_seen DESC LIMIT 1`,
-		userID, prefix+"%")
+func (d *DB) FindChatByPrefix(workspaceID, prefix string) (*Chat, error) {
+	rows, err := d.Query(`SELECT id,workspace_id,agent_id,name,platform,active,created_at,last_seen
+		FROM chats WHERE workspace_id=? AND id LIKE ? ORDER BY last_seen DESC LIMIT 1`,
+		workspaceID, prefix+"%")
 	if err != nil {
 		return nil, err
 	}
@@ -685,20 +758,20 @@ func (d *DB) ResumeChat(id string) error {
 // ── Reminders ──────────────────────────────────────────────────────────────
 
 func (d *DB) CreateReminder(r *Reminder) error {
-	_, err := d.Exec(`INSERT INTO reminders(id,user_id,message,remind_at,recurrence,sent,created_at)
+	_, err := d.Exec(`INSERT INTO reminders(id,workspace_id,message,remind_at,recurrence,sent,created_at)
 		VALUES(?,?,?,?,?,0,datetime('now'))`,
-		r.ID, r.UserID, r.Message, r.RemindAt.UTC().Format("2006-01-02 15:04:05"), r.Recurrence)
+		r.ID, r.WorkspaceID, r.Message, r.RemindAt.UTC().Format("2006-01-02 15:04:05"), r.Recurrence)
 	return err
 }
 
 func (d *DB) GetReminder(id string) (*Reminder, error) {
-	row := d.QueryRow(`SELECT id,user_id,message,remind_at,recurrence,sent,created_at FROM reminders WHERE id=?`, id)
+	row := d.QueryRow(`SELECT id,workspace_id,message,remind_at,recurrence,sent,created_at FROM reminders WHERE id=?`, id)
 	return scanReminder(row)
 }
 
-func (d *DB) ListReminders(userID string) ([]*Reminder, error) {
-	rows, err := d.Query(`SELECT id,user_id,message,remind_at,recurrence,sent,created_at
-		FROM reminders WHERE user_id=? ORDER BY remind_at`, userID)
+func (d *DB) ListReminders(workspaceID string) ([]*Reminder, error) {
+	rows, err := d.Query(`SELECT id,workspace_id,message,remind_at,recurrence,sent,created_at
+		FROM reminders WHERE workspace_id=? ORDER BY remind_at`, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -715,7 +788,7 @@ func (d *DB) ListReminders(userID string) ([]*Reminder, error) {
 }
 
 func (d *DB) ListDueReminders(now time.Time) ([]*Reminder, error) {
-	rows, err := d.Query(`SELECT id,user_id,message,remind_at,recurrence,sent,created_at
+	rows, err := d.Query(`SELECT id,workspace_id,message,remind_at,recurrence,sent,created_at
 		FROM reminders WHERE sent=0 AND remind_at <= ?`,
 		now.UTC().Format("2006-01-02 15:04:05"))
 	if err != nil {
@@ -754,7 +827,7 @@ func scanReminder(s scanner) (*Reminder, error) {
 	var r Reminder
 	var remindAt, createdAt string
 	var sent int
-	err := s.Scan(&r.ID, &r.UserID, &r.Message, &remindAt, &r.Recurrence, &sent, &createdAt)
+	err := s.Scan(&r.ID, &r.WorkspaceID, &r.Message, &remindAt, &r.Recurrence, &sent, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -769,26 +842,26 @@ func scanReminder(s scanner) (*Reminder, error) {
 
 // ── User permissions ───────────────────────────────────────────────────────
 
-func (d *DB) GrantPermission(p *UserPermission) error {
-	_, err := d.Exec(`INSERT OR IGNORE INTO user_permissions(id,user_id,permission,granted_by,granted_at)
+func (d *DB) GrantPermission(p *WorkspacePermission) error {
+	_, err := d.Exec(`INSERT OR IGNORE INTO workspace_permissions(id,workspace_id,permission,granted_by,granted_at)
 		VALUES(?,?,?,?,datetime('now'))`,
-		p.ID, p.UserID, p.Permission, p.GrantedBy)
+		p.ID, p.WorkspaceID, p.Permission, p.GrantedBy)
 	return err
 }
 
-func (d *DB) RevokePermission(userID, permission string) error {
-	_, err := d.Exec(`DELETE FROM user_permissions WHERE user_id=? AND permission=?`, userID, permission)
+func (d *DB) RevokePermission(workspaceID, permission string) error {
+	_, err := d.Exec(`DELETE FROM workspace_permissions WHERE workspace_id=? AND permission=?`, workspaceID, permission)
 	return err
 }
 
-func (d *DB) HasPermission(userID, permission string) (bool, error) {
+func (d *DB) HasPermission(workspaceID, permission string) (bool, error) {
 	var count int
-	err := d.QueryRow(`SELECT COUNT(*) FROM user_permissions WHERE user_id=? AND permission=?`, userID, permission).Scan(&count)
+	err := d.QueryRow(`SELECT COUNT(*) FROM workspace_permissions WHERE workspace_id=? AND permission=?`, workspaceID, permission).Scan(&count)
 	return count > 0, err
 }
 
-func (d *DB) ListPermissions(userID string) ([]string, error) {
-	rows, err := d.Query(`SELECT permission FROM user_permissions WHERE user_id=?`, userID)
+func (d *DB) ListPermissions(workspaceID string) ([]string, error) {
+	rows, err := d.Query(`SELECT permission FROM workspace_permissions WHERE workspace_id=?`, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -807,14 +880,14 @@ func (d *DB) ListPermissions(userID string) ([]string, error) {
 // ── Audit log ──────────────────────────────────────────────────────────────
 
 func (d *DB) WriteAuditLog(a *AuditLog) error {
-	_, err := d.Exec(`INSERT INTO audit_logs(id,user_id,action,target,detail,ip_address,created_at)
+	_, err := d.Exec(`INSERT INTO audit_logs(id,workspace_id,action,target,detail,ip_address,created_at)
 		VALUES(?,?,?,?,?,?,datetime('now'))`,
-		a.ID, a.UserID, a.Action, a.Target, a.Detail, a.IPAddress)
+		a.ID, a.WorkspaceID, a.Action, a.Target, a.Detail, a.IPAddress)
 	return err
 }
 
 func (d *DB) ListAuditLogs(limit int) ([]*AuditLog, error) {
-	rows, err := d.Query(`SELECT id,user_id,action,target,detail,ip_address,created_at
+	rows, err := d.Query(`SELECT id,workspace_id,action,target,detail,ip_address,created_at
 		FROM audit_logs ORDER BY created_at DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -823,13 +896,13 @@ func (d *DB) ListAuditLogs(limit int) ([]*AuditLog, error) {
 	var logs []*AuditLog
 	for rows.Next() {
 		var a AuditLog
-		var userID sql.NullString
+		var workspaceID sql.NullString
 		var createdAt string
-		if err := rows.Scan(&a.ID, &userID, &a.Action, &a.Target, &a.Detail, &a.IPAddress, &createdAt); err != nil {
+		if err := rows.Scan(&a.ID, &workspaceID, &a.Action, &a.Target, &a.Detail, &a.IPAddress, &createdAt); err != nil {
 			return nil, err
 		}
-		if userID.Valid {
-			a.UserID = &userID.String
+		if workspaceID.Valid {
+			a.WorkspaceID = &workspaceID.String
 		}
 		a.CreatedAt = scanTime(createdAt)
 		logs = append(logs, &a)
@@ -837,30 +910,49 @@ func (d *DB) ListAuditLogs(limit int) ([]*AuditLog, error) {
 	return logs, rows.Err()
 }
 
-// ── User settings ──────────────────────────────────────────────────────────
+// ── System settings (owner/system-level, not tenant-scoped) ─────────────────
 
-func (d *DB) GetSetting(userID, key string) (string, error) {
+func (d *DB) GetSystemSetting(key string) (string, error) {
 	var value string
-	err := d.QueryRow(`SELECT value FROM user_settings WHERE user_id=? AND key=?`, userID, key).Scan(&value)
+	err := d.QueryRow(`SELECT value FROM system_settings WHERE key=?`, key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrNotFound
 	}
 	return value, err
 }
 
-func (d *DB) SetSetting(userID, key, value string) error {
-	_, err := d.Exec(`INSERT INTO user_settings(id,user_id,key,value,updated_at)
+func (d *DB) SetSystemSetting(key, value string) error {
+	_, err := d.Exec(`INSERT INTO system_settings(key,value,updated_at)
+		VALUES(?,?,datetime('now'))
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')`,
+		key, value)
+	return err
+}
+
+// ── Workspace settings ───────────────────────────────────────────────────────
+
+func (d *DB) GetSetting(workspaceID, key string) (string, error) {
+	var value string
+	err := d.QueryRow(`SELECT value FROM workspace_settings WHERE workspace_id=? AND key=?`, workspaceID, key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return value, err
+}
+
+func (d *DB) SetSetting(workspaceID, key, value string) error {
+	_, err := d.Exec(`INSERT INTO workspace_settings(id,workspace_id,key,value,updated_at)
 		VALUES(lower(hex(randomblob(16))),?,?,?,datetime('now'))
-		ON CONFLICT(user_id,key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')`,
-		userID, key, value)
+		ON CONFLICT(workspace_id,key) DO UPDATE SET value=excluded.value, updated_at=datetime('now')`,
+		workspaceID, key, value)
 	return err
 }
 
 // SecretExists reports whether the user has a secret with the given name.
 // It does NOT decrypt the value — safe to call without a master password.
-func (d *DB) SecretExists(userID, name string) (bool, error) {
+func (d *DB) SecretExists(workspaceID, name string) (bool, error) {
 	var n int
-	err := d.QueryRow(`SELECT COUNT(*) FROM secrets WHERE user_id=? AND name=?`, userID, name).Scan(&n)
+	err := d.QueryRow(`SELECT COUNT(*) FROM secrets WHERE workspace_id=? AND name=?`, workspaceID, name).Scan(&n)
 	return n > 0, err
 }
 
@@ -880,21 +972,21 @@ func nullToPtr(n sql.NullString) *string {
 	return &n.String
 }
 
-// CountUsers returns total user count (used by admin dashboard).
-func (d *DB) CountUsers() (int, error) {
+// CountWorkspaces returns total user count (used by admin dashboard).
+func (d *DB) CountWorkspaces() (int, error) {
 	var count int
-	err := d.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count)
+	err := d.QueryRow(`SELECT COUNT(*) FROM workspaces`).Scan(&count)
 	return count, err
 }
 
 // CountAgents returns total agent count optionally scoped to a user.
-func (d *DB) CountAgents(userID string) (int, error) {
+func (d *DB) CountAgents(workspaceID string) (int, error) {
 	var count int
 	var err error
-	if userID == "" {
+	if workspaceID == "" {
 		err = d.QueryRow(`SELECT COUNT(*) FROM agents`).Scan(&count)
 	} else {
-		err = d.QueryRow(`SELECT COUNT(*) FROM agents WHERE user_id=?`, userID).Scan(&count)
+		err = d.QueryRow(`SELECT COUNT(*) FROM agents WHERE workspace_id=?`, workspaceID).Scan(&count)
 	}
 	return count, err
 }
@@ -906,10 +998,10 @@ type AgentRunWithName struct {
 }
 
 // RecentAgentRunsWithNames returns the N most recent runs with the agent name joined in.
-func (d *DB) RecentAgentRunsWithNames(userID string, limit int) ([]*AgentRunWithName, error) {
-	rows, err := d.Query(`SELECT r.id,r.agent_id,r.user_id,r.trigger,r.exit_code,r.stdout,r.stderr,r.started_at,r.finished_at, COALESCE(a.name,'')
+func (d *DB) RecentAgentRunsWithNames(workspaceID string, limit int) ([]*AgentRunWithName, error) {
+	rows, err := d.Query(`SELECT r.id,r.agent_id,r.workspace_id,r.trigger,r.exit_code,r.stdout,r.stderr,r.started_at,r.finished_at, COALESCE(a.name,'')
 		FROM agent_runs r LEFT JOIN agents a ON a.id=r.agent_id
-		WHERE r.user_id=? ORDER BY r.started_at DESC LIMIT ?`, userID, limit)
+		WHERE r.workspace_id=? ORDER BY r.started_at DESC LIMIT ?`, workspaceID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -920,7 +1012,7 @@ func (d *DB) RecentAgentRunsWithNames(userID string, limit int) ([]*AgentRunWith
 		var exitCode sql.NullInt64
 		var startedAt string
 		var finishedAt sql.NullString
-		if err := rows.Scan(&rn.ID, &rn.AgentID, &rn.UserID, &rn.Trigger, &exitCode, &rn.Stdout, &rn.Stderr, &startedAt, &finishedAt, &rn.AgentName); err != nil {
+		if err := rows.Scan(&rn.ID, &rn.AgentID, &rn.WorkspaceID, &rn.Trigger, &exitCode, &rn.Stdout, &rn.Stderr, &startedAt, &finishedAt, &rn.AgentName); err != nil {
 			return nil, err
 		}
 		if exitCode.Valid {
@@ -938,9 +1030,9 @@ func (d *DB) RecentAgentRunsWithNames(userID string, limit int) ([]*AgentRunWith
 }
 
 // RecentAgentRuns returns the N most recent runs across all agents for a user.
-func (d *DB) RecentAgentRuns(userID string, limit int) ([]*AgentRun, error) {
-	rows, err := d.Query(`SELECT r.id,r.agent_id,r.user_id,r.trigger,r.exit_code,r.stdout,r.stderr,r.started_at,r.finished_at
-		FROM agent_runs r WHERE r.user_id=? ORDER BY r.started_at DESC LIMIT ?`, userID, limit)
+func (d *DB) RecentAgentRuns(workspaceID string, limit int) ([]*AgentRun, error) {
+	rows, err := d.Query(`SELECT r.id,r.agent_id,r.workspace_id,r.trigger,r.exit_code,r.stdout,r.stderr,r.started_at,r.finished_at
+		FROM agent_runs r WHERE r.workspace_id=? ORDER BY r.started_at DESC LIMIT ?`, workspaceID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -954,7 +1046,7 @@ func (d *DB) RecentAgentRuns(userID string, limit int) ([]*AgentRun, error) {
 		var finishedAt sql.NullString
 		// stdout/stderr are NULL until FinishAgentRun runs; an in-progress (async)
 		// run row is listed on the detail page, so scan through NullString.
-		if err := rows.Scan(&r.ID, &r.AgentID, &r.UserID, &r.Trigger, &exitCode, &stdout, &stderr, &startedAt, &finishedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &exitCode, &stdout, &stderr, &startedAt, &finishedAt); err != nil {
 			return nil, err
 		}
 		if exitCode.Valid {
@@ -986,13 +1078,13 @@ func (d *DB) GetAgentWithSchedule(agentID string) (*AgentWithSchedule, error) {
 	}
 	result := &AgentWithSchedule{Agent: a}
 
-	row := d.QueryRow(`SELECT id,agent_id,user_id,cron_expr,next_run_at,last_run_at,enabled,created_at
+	row := d.QueryRow(`SELECT id,agent_id,workspace_id,cron_expr,next_run_at,last_run_at,enabled,created_at
 		FROM agent_schedules WHERE agent_id=?`, agentID)
 	var s AgentSchedule
 	var nextRunAt, lastRunAt sql.NullString
 	var createdAt string
 	var enabled int
-	err = row.Scan(&s.ID, &s.AgentID, &s.UserID, &s.CronExpr, &nextRunAt, &lastRunAt, &enabled, &createdAt)
+	err = row.Scan(&s.ID, &s.AgentID, &s.WorkspaceID, &s.CronExpr, &nextRunAt, &lastRunAt, &enabled, &createdAt)
 	if err == nil {
 		s.NextRunAt = scanTimePtr(nullToPtr(nextRunAt))
 		s.LastRunAt = scanTimePtr(nullToPtr(lastRunAt))
@@ -1005,13 +1097,13 @@ func (d *DB) GetAgentWithSchedule(agentID string) (*AgentWithSchedule, error) {
 
 // GetScheduleForAgent returns the schedule for an agent, or nil if none.
 func (d *DB) GetScheduleForAgent(agentID string) (*AgentSchedule, error) {
-	row := d.QueryRow(`SELECT id,agent_id,user_id,cron_expr,next_run_at,last_run_at,enabled,created_at
+	row := d.QueryRow(`SELECT id,agent_id,workspace_id,cron_expr,next_run_at,last_run_at,enabled,created_at
 		FROM agent_schedules WHERE agent_id=?`, agentID)
 	var s AgentSchedule
 	var nextRunAt, lastRunAt sql.NullString
 	var createdAt string
 	var enabled int
-	err := row.Scan(&s.ID, &s.AgentID, &s.UserID, &s.CronExpr, &nextRunAt, &lastRunAt, &enabled, &createdAt)
+	err := row.Scan(&s.ID, &s.AgentID, &s.WorkspaceID, &s.CronExpr, &nextRunAt, &lastRunAt, &enabled, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -1025,107 +1117,19 @@ func (d *DB) GetScheduleForAgent(agentID string) (*AgentSchedule, error) {
 	return &s, nil
 }
 
-// ── Coders ─────────────────────────────────────────────────────────────────
-
-func (d *DB) CreateCoder(c *Coder) error {
-	_, err := d.Exec(`INSERT INTO coders(id,name,description,claude_bin,timeout_s,backend_type,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,datetime('now'),datetime('now'))`,
-		c.ID, c.Name, c.Description, c.ClaudeBin, c.TimeoutS, c.BackendType)
-	return err
-}
-
-func (d *DB) GetCoder(id string) (*Coder, error) {
-	row := d.QueryRow(`SELECT id,name,description,claude_bin,timeout_s,backend_type,created_at,updated_at
-		FROM coders WHERE id=?`, id)
-	return scanCoder(row)
-}
-
-func (d *DB) ListCoders() ([]*Coder, error) {
-	rows, err := d.Query(`SELECT id,name,description,claude_bin,timeout_s,backend_type,created_at,updated_at
-		FROM coders ORDER BY name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []*Coder
-	for rows.Next() {
-		c, err := scanCoder(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
-}
-
-func (d *DB) UpdateCoder(c *Coder) error {
-	_, err := d.Exec(`UPDATE coders SET name=?,description=?,claude_bin=?,timeout_s=?,backend_type=?,updated_at=datetime('now') WHERE id=?`,
-		c.Name, c.Description, c.ClaudeBin, c.TimeoutS, c.BackendType, c.ID)
-	return err
-}
-
-func (d *DB) DeleteCoder(id string) error {
-	_, err := d.Exec(`DELETE FROM coders WHERE id=?`, id)
-	return err
-}
-
-func (d *DB) AssignUserCoder(userID, coderID string) error {
-	_, err := d.Exec(`UPDATE users SET coder_id=?,updated_at=datetime('now') WHERE id=?`, coderID, userID)
-	return err
-}
-
-func (d *DB) UnassignUserCoder(userID string) error {
-	_, err := d.Exec(`UPDATE users SET coder_id=NULL,updated_at=datetime('now') WHERE id=?`, userID)
-	return err
-}
-
-// GetUserCoder returns the Coder assigned to a user, or (nil, nil) if none assigned.
-func (d *DB) GetUserCoder(userID string) (*Coder, error) {
-	row := d.QueryRow(`SELECT c.id,c.name,c.description,c.claude_bin,c.timeout_s,c.backend_type,c.created_at,c.updated_at
-		FROM coders c JOIN users u ON u.coder_id=c.id WHERE u.id=?`, userID)
-	c, err := scanCoder(row)
-	if errors.Is(err, ErrNotFound) {
-		return nil, nil
-	}
-	return c, err
-}
-
-func (d *DB) CountCoders() (int, error) {
-	var n int
-	err := d.QueryRow(`SELECT COUNT(*) FROM coders`).Scan(&n)
-	return n, err
-}
-
-func scanCoder(s scanner) (*Coder, error) {
-	var c Coder
-	var createdAt, updatedAt string
-	err := s.Scan(&c.ID, &c.Name, &c.Description, &c.ClaudeBin, &c.TimeoutS, &c.BackendType, &createdAt, &updatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	c.CreatedAt = scanTime(createdAt)
-	c.UpdatedAt = scanTime(updatedAt)
-	return &c, nil
-}
-
-// ── MCP servers ────────────────────────────────────────────────────────────
-
 // ── Skills ─────────────────────────────────────────────────────────────────
 
-const skillCols = `id,user_id,name,description,installed_at`
+const skillCols = `id,workspace_id,name,description,installed_at`
 
 func (d *DB) CreateSkill(s *Skill) error {
-	_, err := d.Exec(`INSERT INTO skills(id,user_id,name,description,installed_at)
+	_, err := d.Exec(`INSERT INTO skills(id,workspace_id,name,description,installed_at)
 		VALUES(?,?,?,?,datetime('now'))`,
-		s.ID, s.UserID, s.Name, s.Description)
+		s.ID, s.WorkspaceID, s.Name, s.Description)
 	return err
 }
 
-func (d *DB) GetSkillByName(userID, name string) (*Skill, error) {
-	row := d.QueryRow(`SELECT `+skillCols+` FROM skills WHERE user_id=? AND name=?`, userID, name)
+func (d *DB) GetSkillByName(workspaceID, name string) (*Skill, error) {
+	row := d.QueryRow(`SELECT `+skillCols+` FROM skills WHERE workspace_id=? AND name=?`, workspaceID, name)
 	return scanSkill(row)
 }
 
@@ -1134,8 +1138,8 @@ func (d *DB) GetSkill(id string) (*Skill, error) {
 	return scanSkill(row)
 }
 
-func (d *DB) ListSkills(userID string) ([]*Skill, error) {
-	rows, err := d.Query(`SELECT `+skillCols+` FROM skills WHERE user_id=? ORDER BY name`, userID)
+func (d *DB) ListSkills(workspaceID string) ([]*Skill, error) {
+	rows, err := d.Query(`SELECT `+skillCols+` FROM skills WHERE workspace_id=? ORDER BY name`, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -1216,18 +1220,18 @@ func (d *DB) ListAgentSkillNames(agentID string) ([]string, error) {
 }
 
 // DeleteAgentSkillsByName removes agent_skills rows matching a skill name for
-// every agent owned by userID — used when a user skill is deleted so attachments
+// every agent owned by workspaceID — used when a user skill is deleted so attachments
 // don't dangle. Core skills can't be deleted by the user.
-func (d *DB) DeleteAgentSkillsByName(userID, skillName string) error {
+func (d *DB) DeleteAgentSkillsByName(workspaceID, skillName string) error {
 	_, err := d.Exec(`DELETE FROM agent_skills WHERE skill_name=? AND agent_id IN
-		(SELECT id FROM agents WHERE user_id=?)`, skillName, userID)
+		(SELECT id FROM agents WHERE workspace_id=?)`, skillName, workspaceID)
 	return err
 }
 
 func scanSkill(s scanner) (*Skill, error) {
 	var sk Skill
 	var installedAt string
-	err := s.Scan(&sk.ID, &sk.UserID, &sk.Name, &sk.Description, &installedAt)
+	err := s.Scan(&sk.ID, &sk.WorkspaceID, &sk.Name, &sk.Description, &installedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -1243,9 +1247,9 @@ func scanSkill(s scanner) (*Skill, error) {
 // UpsertSkillDraft saves or overwrites the user's single in-progress skill-creator draft.
 func (d *DB) UpsertSkillDraft(dr *SkillDraft) error {
 	_, err := d.Exec(`INSERT OR REPLACE INTO skill_drafts
-		(user_id, skill_name, state, history_json, pending_skill_md, pending_scripts_json, vetting_report, updated_at, expires_at)
+		(workspace_id, skill_name, state, history_json, pending_skill_md, pending_scripts_json, vetting_report, updated_at, expires_at)
 		VALUES (?,?,?,?,?,?,?,datetime('now'),?)`,
-		dr.UserID, dr.SkillName, dr.State, dr.HistoryJSON,
+		dr.WorkspaceID, dr.SkillName, dr.State, dr.HistoryJSON,
 		dr.PendingSkillMD, dr.PendingScriptsJSON, dr.VettingReport,
 		dr.ExpiresAt.UTC().Format("2006-01-02 15:04:05"))
 	return err
@@ -1253,12 +1257,12 @@ func (d *DB) UpsertSkillDraft(dr *SkillDraft) error {
 
 // GetSkillDraft returns the user's draft if one exists and has not expired.
 // Returns ErrNotFound when absent or expired.
-func (d *DB) GetSkillDraft(userID string) (*SkillDraft, error) {
+func (d *DB) GetSkillDraft(workspaceID string) (*SkillDraft, error) {
 	var dr SkillDraft
 	var updatedAt, expiresAt string
-	err := d.QueryRow(`SELECT user_id, skill_name, state, history_json, pending_skill_md, pending_scripts_json, vetting_report, updated_at, expires_at
-		FROM skill_drafts WHERE user_id=? AND expires_at > datetime('now')`, userID).
-		Scan(&dr.UserID, &dr.SkillName, &dr.State, &dr.HistoryJSON,
+	err := d.QueryRow(`SELECT workspace_id, skill_name, state, history_json, pending_skill_md, pending_scripts_json, vetting_report, updated_at, expires_at
+		FROM skill_drafts WHERE workspace_id=? AND expires_at > datetime('now')`, workspaceID).
+		Scan(&dr.WorkspaceID, &dr.SkillName, &dr.State, &dr.HistoryJSON,
 			&dr.PendingSkillMD, &dr.PendingScriptsJSON, &dr.VettingReport, &updatedAt, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -1272,14 +1276,14 @@ func (d *DB) GetSkillDraft(userID string) (*SkillDraft, error) {
 }
 
 // DeleteSkillDraft removes the user's draft.
-func (d *DB) DeleteSkillDraft(userID string) error {
-	_, err := d.Exec(`DELETE FROM skill_drafts WHERE user_id=?`, userID)
+func (d *DB) DeleteSkillDraft(workspaceID string) error {
+	_, err := d.Exec(`DELETE FROM skill_drafts WHERE workspace_id=?`, workspaceID)
 	return err
 }
 
 // ListExpiredSkillDrafts returns all skill drafts past their expiry (for the nightly GC).
 func (d *DB) ListExpiredSkillDrafts() ([]*SkillDraft, error) {
-	rows, err := d.Query(`SELECT user_id, skill_name, state, history_json, pending_skill_md, pending_scripts_json, vetting_report, updated_at, expires_at
+	rows, err := d.Query(`SELECT workspace_id, skill_name, state, history_json, pending_skill_md, pending_scripts_json, vetting_report, updated_at, expires_at
 		FROM skill_drafts WHERE expires_at <= datetime('now')`)
 	if err != nil {
 		return nil, err
@@ -1289,7 +1293,7 @@ func (d *DB) ListExpiredSkillDrafts() ([]*SkillDraft, error) {
 	for rows.Next() {
 		var dr SkillDraft
 		var updatedAt, expiresAt string
-		if err := rows.Scan(&dr.UserID, &dr.SkillName, &dr.State, &dr.HistoryJSON,
+		if err := rows.Scan(&dr.WorkspaceID, &dr.SkillName, &dr.State, &dr.HistoryJSON,
 			&dr.PendingSkillMD, &dr.PendingScriptsJSON, &dr.VettingReport, &updatedAt, &expiresAt); err != nil {
 			return nil, err
 		}
@@ -1302,8 +1306,8 @@ func (d *DB) ListExpiredSkillDrafts() ([]*SkillDraft, error) {
 
 // ── MCP servers ────────────────────────────────────────────────────────────
 
-func (d *DB) ListMCPServers(userID string) ([]*MCPServer, error) {
-	rows, err := d.Query(`SELECT id,user_id,name,url,enabled,created_at,updated_at FROM mcp_servers WHERE user_id=? ORDER BY name`, userID)
+func (d *DB) ListMCPServers(workspaceID string) ([]*MCPServer, error) {
+	rows, err := d.Query(`SELECT id,workspace_id,name,url,enabled,created_at,updated_at FROM mcp_servers WHERE workspace_id=? ORDER BY name`, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -1313,7 +1317,7 @@ func (d *DB) ListMCPServers(userID string) ([]*MCPServer, error) {
 		var s MCPServer
 		var enabled int
 		var createdAt, updatedAt string
-		if err := rows.Scan(&s.ID, &s.UserID, &s.Name, &s.URL, &enabled, &createdAt, &updatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.WorkspaceID, &s.Name, &s.URL, &enabled, &createdAt, &updatedAt); err != nil {
 			return nil, err
 		}
 		s.Enabled = enabled == 1
@@ -1329,9 +1333,9 @@ func (d *DB) ListMCPServers(userID string) ([]*MCPServer, error) {
 // UpsertAgentDraft saves or overwrites the user's single in-progress design draft.
 func (d *DB) UpsertAgentDraft(dr *AgentDraft) error {
 	_, err := d.Exec(`INSERT OR REPLACE INTO agent_drafts
-		(user_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, updated_at, expires_at)
+		(workspace_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, updated_at, expires_at)
 		VALUES (?,?,?,?,?,?,?,?,datetime('now'),?)`,
-		dr.UserID, dr.AgentID, dr.AgentName, boolToInt(dr.IsEdit), dr.State,
+		dr.WorkspaceID, dr.AgentID, dr.AgentName, boolToInt(dr.IsEdit), dr.State,
 		dr.HistoryJSON, dr.PendingAgentMD, dr.PendingToolsJSON,
 		dr.ExpiresAt.UTC().Format("2006-01-02 15:04:05"))
 	return err
@@ -1339,13 +1343,13 @@ func (d *DB) UpsertAgentDraft(dr *AgentDraft) error {
 
 // GetAgentDraft returns the user's draft if one exists and has not expired.
 // Returns ErrNotFound when absent or expired.
-func (d *DB) GetAgentDraft(userID string) (*AgentDraft, error) {
+func (d *DB) GetAgentDraft(workspaceID string) (*AgentDraft, error) {
 	var dr AgentDraft
 	var isEdit int
 	var updatedAt, expiresAt string
-	err := d.QueryRow(`SELECT user_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, updated_at, expires_at
-		FROM agent_drafts WHERE user_id=? AND expires_at > datetime('now')`, userID).
-		Scan(&dr.UserID, &dr.AgentID, &dr.AgentName, &isEdit, &dr.State, &dr.HistoryJSON,
+	err := d.QueryRow(`SELECT workspace_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, updated_at, expires_at
+		FROM agent_drafts WHERE workspace_id=? AND expires_at > datetime('now')`, workspaceID).
+		Scan(&dr.WorkspaceID, &dr.AgentID, &dr.AgentName, &isEdit, &dr.State, &dr.HistoryJSON,
 			&dr.PendingAgentMD, &dr.PendingToolsJSON, &updatedAt, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -1360,14 +1364,14 @@ func (d *DB) GetAgentDraft(userID string) (*AgentDraft, error) {
 }
 
 // DeleteAgentDraft removes the user's draft.
-func (d *DB) DeleteAgentDraft(userID string) error {
-	_, err := d.Exec(`DELETE FROM agent_drafts WHERE user_id=?`, userID)
+func (d *DB) DeleteAgentDraft(workspaceID string) error {
+	_, err := d.Exec(`DELETE FROM agent_drafts WHERE workspace_id=?`, workspaceID)
 	return err
 }
 
 // ListExpiredAgentDrafts returns all drafts past their expiry (for the nightly GC).
 func (d *DB) ListExpiredAgentDrafts() ([]*AgentDraft, error) {
-	rows, err := d.Query(`SELECT user_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, updated_at, expires_at
+	rows, err := d.Query(`SELECT workspace_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, updated_at, expires_at
 		FROM agent_drafts WHERE expires_at <= datetime('now')`)
 	if err != nil {
 		return nil, err
@@ -1378,7 +1382,7 @@ func (d *DB) ListExpiredAgentDrafts() ([]*AgentDraft, error) {
 		var dr AgentDraft
 		var isEdit int
 		var updatedAt, expiresAt string
-		if err := rows.Scan(&dr.UserID, &dr.AgentID, &dr.AgentName, &isEdit, &dr.State, &dr.HistoryJSON,
+		if err := rows.Scan(&dr.WorkspaceID, &dr.AgentID, &dr.AgentName, &isEdit, &dr.State, &dr.HistoryJSON,
 			&dr.PendingAgentMD, &dr.PendingToolsJSON, &updatedAt, &expiresAt); err != nil {
 			return nil, err
 		}

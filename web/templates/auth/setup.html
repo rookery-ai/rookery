@@ -4,18 +4,19 @@
   <div class="max-w-xl mx-auto">
     <div class="text-center mb-8">
       <div class="text-4xl mb-3">⚡</div>
-      <h1 class="text-3xl font-bold">Welcome to Simple Agents</h1>
-      <p class="text-base-content/50 mt-1 text-sm">Let's get your account configured</p>
+      <h1 class="text-3xl font-bold">Set Up Workspace</h1>
+      <p class="text-base-content/50 mt-1 text-sm">Configure this workspace step by step</p>
     </div>
 
     <!-- Steps indicator -->
     <ul class="steps steps-horizontal w-full mb-8 text-xs">
-      <li class="step {{if ge .Step 1}}step-primary{{end}}">Password</li>
+      <li class="step {{if ge .Step 1}}step-primary{{end}}">Basics</li>
       <li class="step {{if ge .Step 2}}step-primary{{end}}">Master Key</li>
-      <li class="step {{if ge .Step 3}}step-primary{{end}}">Profile</li>
-      <li class="step {{if ge .Step 4}}step-primary{{end}}">Chat App</li>
-      <li class="step {{if ge .Step 5}}step-primary{{end}}">Services</li>
-      <li class="step {{if ge .Step 6}}step-primary{{end}}">Done</li>
+      <li class="step {{if ge .Step 3}}step-primary{{end}}">Coder</li>
+      <li class="step {{if ge .Step 4}}step-primary{{end}}">Profile</li>
+      <li class="step {{if ge .Step 5}}step-primary{{end}}">Chat App</li>
+      <li class="step {{if ge .Step 6}}step-primary{{end}}">Services</li>
+      <li class="step {{if ge .Step 7}}step-primary{{end}}">Done</li>
     </ul>
 
     <div class="card bg-base-100 shadow-xl border border-base-300">
@@ -23,19 +24,33 @@
         {{template "alert" .}}
 
         {{if eq .Step 1}}
-        <div class="text-center py-4">
-          <span class="loading loading-spinner loading-md text-primary"></span>
-          <p class="text-sm text-base-content/50 mt-2">Redirecting to password change...</p>
-        </div>
-        <script>window.location="/change-password"</script>
+        <h2 class="card-title text-xl mb-1">🗂 Workspace Basics</h2>
+        <p class="text-base-content/60 text-sm mb-4">
+          Give this workspace a name and describe what it's about. The description is shared with
+          your agents so they understand the workspace's purpose.
+        </p>
+        <form method="POST" action="/dashboard/setup" class="space-y-4">
+          <input type="hidden" name="action" value="basics">
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">Workspace Name</span></label>
+            <input type="text" name="name" value="{{if .Workspace}}{{.Workspace.Name}}{{end}}"
+              placeholder="e.g. Personal, Work" class="input input-bordered w-full" required>
+          </div>
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">What is this workspace about?</span></label>
+            <textarea name="about" rows="3" placeholder="Its purpose, domain, goals…"
+              class="textarea textarea-bordered w-full">{{if .Workspace}}{{.Workspace.About}}{{end}}</textarea>
+          </div>
+          <button type="submit" class="btn btn-primary w-full">Continue →</button>
+        </form>
 
         {{else if eq .Step 2}}
-        <h2 class="card-title text-xl mb-1">🔐 Set Your Master Password</h2>
+        <h2 class="card-title text-xl mb-1">🔐 Set the Master Password</h2>
         <p class="text-base-content/60 text-sm mb-4">
-          Your master password encrypts all agent secrets (API keys, tokens, passwords).
-          It is <strong>separate</strong> from your login password and <strong>cannot be recovered</strong> if lost.
+          The master password encrypts this workspace's secrets and is required to enter the
+          workspace. It <strong>cannot be recovered</strong> if lost.
         </p>
-        <form method="POST" action="/setup" class="space-y-4">
+        <form method="POST" action="/dashboard/setup" class="space-y-4">
           <input type="hidden" name="action" value="master_password">
           <div class="form-control">
             <label class="label pb-1"><span class="label-text font-medium">Master Password</span></label>
@@ -48,31 +63,62 @@
               class="input input-bordered w-full" required autocomplete="new-password">
           </div>
           <div role="alert" class="alert alert-warning py-2 text-xs">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
             <span>Write this password down and store it safely — it cannot be recovered.</span>
           </div>
           <button type="submit" class="btn btn-primary w-full">Set Master Password →</button>
         </form>
 
         {{else if eq .Step 3}}
-        <h2 class="card-title text-xl mb-1">👤 Customize Your Profile</h2>
-        <p class="text-base-content/60 text-sm mb-5">
-          Tell your agents a bit about you so their replies feel personal. Everything here is optional and editable later from Settings.
+        <h2 class="card-title text-xl mb-1">🤖 Choose a Coder</h2>
+        <p class="text-base-content/60 text-sm mb-4">
+          Pick the coder CLI this workspace's agents will run on. Detected on this host:
         </p>
-        <form method="POST" action="/setup" class="space-y-4">
+        <form method="POST" action="/dashboard/setup" class="space-y-4">
+          <input type="hidden" name="action" value="coder">
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">Coder</span></label>
+            {{if .DetectedCoders}}
+            <select name="coder_bin" class="select select-bordered w-full">
+              <option value="">System default</option>
+              {{range .DetectedCoders}}
+              <option value="{{.Bin}}">{{.Name}} — {{.Bin}}</option>
+              {{end}}
+            </select>
+            {{else}}
+            <input type="text" name="coder_bin" placeholder="claude (path to a coder binary; leave blank for default)"
+              class="input input-bordered w-full">
+            <label class="label pt-1"><span class="label-text-alt text-warning">No coders auto-detected — enter a path or leave blank to use the system default.</span></label>
+            {{end}}
+          </div>
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">Timeout (seconds, optional)</span></label>
+            <input type="number" name="coder_timeout_s" min="0" placeholder="Leave blank for default"
+              class="input input-bordered w-full">
+          </div>
+          <button type="submit" class="btn btn-primary w-full">Save Coder →</button>
+        </form>
+        <form method="POST" action="/dashboard/setup" class="mt-2">
+          <input type="hidden" name="action" value="skip_coder">
+          <button type="submit" class="btn btn-ghost btn-sm w-full text-base-content/50">Use system default</button>
+        </form>
+
+        {{else if eq .Step 4}}
+        <h2 class="card-title text-xl mb-1">👤 Workspace Profile</h2>
+        <p class="text-base-content/60 text-sm mb-5">
+          Tell this workspace's agents who they act for so replies feel personal. All optional and editable later.
+        </p>
+        <form method="POST" action="/dashboard/setup" class="space-y-4">
           <input type="hidden" name="action" value="profile">
 
           <div class="form-control">
             <label class="label pb-1"><span class="label-text font-medium">What should we call you?</span></label>
-            <input type="text" name="display_name" placeholder="Your name"
-              class="input input-bordered w-full">
+            <input type="text" name="display_name" placeholder="Your name" class="input input-bordered w-full">
           </div>
 
           <div class="grid grid-cols-2 gap-4">
             <div class="form-control">
               <label class="label pb-1"><span class="label-text font-medium">Email</span></label>
-              <input type="email" name="email" placeholder="you@example.com"
-                class="input input-bordered w-full">
+              <input type="email" name="email" placeholder="you@example.com" class="input input-bordered w-full">
             </div>
             <div class="form-control">
               <label class="label pb-1"><span class="label-text font-medium">Location</span></label>
@@ -111,29 +157,16 @@
                 </ul>
               </div>
             </div>
-            <label class="label pt-1">
-              <span class="label-text-alt text-base-content/30">Auto-detected — feel free to correct it</span>
-            </label>
           </div>
 
           <div class="form-control">
             <label class="label pb-1"><span class="label-text font-medium">Preferred communication tone</span></label>
             <div class="flex gap-4 text-sm mb-2">
-              <label class="flex items-center gap-2">
-                <input type="radio" name="tone" value="Short & concise" class="radio radio-sm" checked>
-                Short &amp; concise
-              </label>
-              <label class="flex items-center gap-2">
-                <input type="radio" name="tone" value="Balanced" class="radio radio-sm">
-                Balanced
-              </label>
-              <label class="flex items-center gap-2">
-                <input type="radio" name="tone" value="Detailed & thorough" class="radio radio-sm">
-                Detailed &amp; thorough
-              </label>
+              <label class="flex items-center gap-2"><input type="radio" name="tone" value="Short & concise" class="radio radio-sm" checked> Short &amp; concise</label>
+              <label class="flex items-center gap-2"><input type="radio" name="tone" value="Balanced" class="radio radio-sm"> Balanced</label>
+              <label class="flex items-center gap-2"><input type="radio" name="tone" value="Detailed & thorough" class="radio radio-sm"> Detailed &amp; thorough</label>
             </div>
-            <input type="text" name="tone_custom" placeholder="Or describe your own tone — overrides the choice above"
-              class="input input-bordered input-sm w-full">
+            <input type="text" name="tone_custom" placeholder="Or describe your own tone — overrides the choice above" class="input input-bordered input-sm w-full">
           </div>
 
           <div class="form-control">
@@ -157,55 +190,50 @@
 
           <div class="form-control">
             <label class="label pb-1"><span class="label-text font-medium">Anything else we should know?</span></label>
-            <textarea name="notes" maxlength="300" rows="3" placeholder="Optional notes for your agents (max 300 characters)"
-              class="textarea textarea-bordered w-full"></textarea>
+            <textarea name="notes" maxlength="300" rows="3" placeholder="Optional notes for your agents (max 300 characters)" class="textarea textarea-bordered w-full"></textarea>
           </div>
 
           <button type="submit" class="btn btn-primary w-full">Save and Continue →</button>
         </form>
-        <form method="POST" action="/setup" class="mt-2">
+        <form method="POST" action="/dashboard/setup" class="mt-2">
           <input type="hidden" name="action" value="skip_profile">
           <button type="submit" class="btn btn-ghost btn-sm w-full text-base-content/50">Skip for now — I'll fill this in later</button>
         </form>
         {{template "searchable-dropdown-script" .}}
 
-        {{else if eq .Step 4}}
+        {{else if eq .Step 5}}
         <h2 class="card-title text-xl mb-1">📱 Connect Your Chat App</h2>
         <p class="text-base-content/60 text-sm mb-5">
-          Connect a Telegram bot to interact with your agents from chat. You can skip this and set it up later.
+          Connect a Telegram bot to interact with this workspace from chat. You can skip and set it up later.
         </p>
 
         <div class="card bg-base-200 border border-base-300 mb-4">
           <div class="card-body p-4">
-            <h3 class="font-semibold flex items-center gap-2 mb-2">
-              <span class="text-blue-400 text-xl">📨</span> Telegram Bot
-            </h3>
+            <h3 class="font-semibold flex items-center gap-2 mb-2"><span class="text-blue-400 text-xl">📨</span> Telegram Bot</h3>
             <ol class="list-decimal list-inside text-sm text-base-content/70 space-y-1 mb-3">
               <li>Open Telegram and message <a href="https://t.me/BotFather" target="_blank" class="link link-primary">@BotFather</a></li>
               <li>Send <code class="bg-base-300 px-1 rounded">/newbot</code> and follow the prompts</li>
               <li>Copy the token (e.g. <code class="bg-base-300 px-1 rounded text-xs">123456:AABBCCxxx</code>)</li>
             </ol>
-            <form method="POST" action="/dashboard/connectors" class="flex gap-2">
+            <form method="POST" action="/dashboard/setup" class="flex gap-2">
+              <input type="hidden" name="action" value="connector">
               <input type="hidden" name="platform" value="telegram">
-              <input type="hidden" name="next" value="/setup?step=4">
-              <input type="text" name="token" placeholder="123456789:AABBCCxxx..."
-                class="input input-bordered input-sm flex-1" autocomplete="off">
+              <input type="text" name="token" placeholder="123456789:AABBCCxxx..." class="input input-bordered input-sm flex-1" autocomplete="off">
               <button type="submit" class="btn btn-primary btn-sm">Connect</button>
             </form>
           </div>
         </div>
 
-        <form method="POST" action="/setup">
+        <form method="POST" action="/dashboard/setup">
           <input type="hidden" name="action" value="skip_connector">
           <button type="submit" class="btn btn-ghost btn-sm w-full text-base-content/50">Skip for now — I'll set this up later</button>
         </form>
 
-        {{else if eq .Step 5}}
+        {{else if eq .Step 6}}
         <h2 class="card-title text-xl mb-1">🔌 Connect External Services <span class="badge badge-ghost badge-sm ml-1">Optional</span></h2>
         <p class="text-base-content/60 text-sm mb-5">
-          Connect Google Drive, Notion, Slack, and 250+ other services to your agents using
-          <strong>Composio</strong> — a free tool that handles secure logins for you.
-          You can always set this up later from the <a href="/dashboard/composio" class="link link-primary">External Services</a> page.
+          Connect Google Drive, Notion, Slack, and 250+ other services using <strong>Composio</strong>.
+          You can set this up later from the <a href="/dashboard/composio" class="link link-primary">External Services</a> page.
         </p>
 
         <div class="bg-base-200 border border-base-300 rounded-lg p-4 text-sm mb-5">
@@ -214,35 +242,32 @@
             <li>Create a free account at <a href="https://app.composio.dev/signup" target="_blank" class="link link-primary font-medium">composio.dev</a></li>
             <li>Go to <strong>Settings → API Keys</strong>, create a key and copy it</li>
             <li>Add it to <a href="/dashboard/secrets" class="link link-primary font-medium">your Secrets</a> with the name <code class="bg-base-300 px-1 rounded font-mono">COMPOSIO_API_KEY</code></li>
-            <li>Connect Google Drive, Notion, etc. in your <a href="https://app.composio.dev/connections" target="_blank" class="link link-primary font-medium">Composio dashboard</a></li>
           </ol>
         </div>
 
-        <form method="POST" action="/setup" class="mb-2">
+        <form method="POST" action="/dashboard/setup" class="mb-2">
           <input type="hidden" name="action" value="composio_done">
           <button type="submit" class="btn btn-primary w-full">I've set it up — Continue →</button>
         </form>
-        <form method="POST" action="/setup">
+        <form method="POST" action="/dashboard/setup">
           <input type="hidden" name="action" value="skip_composio">
           <button type="submit" class="btn btn-ghost btn-sm w-full text-base-content/50">Skip for now — I'll set this up later</button>
         </form>
 
-        {{else if eq .Step 6}}
+        {{else if eq .Step 7}}
         <div class="text-center py-4">
           <div class="text-6xl mb-4">🎉</div>
-          <h2 class="text-2xl font-bold mb-2">You're all set!</h2>
-          <p class="text-base-content/60 text-sm mb-4">
-            Your account is configured and ready to use.
-          </p>
+          <h2 class="text-2xl font-bold mb-2">Workspace ready!</h2>
+          <p class="text-base-content/60 text-sm mb-4">This workspace is configured and ready to use.</p>
           {{if .BotUsername}}
           <div class="bg-primary/10 border border-primary/30 rounded-lg p-4 mb-5 text-sm text-left">
             <p class="font-semibold text-primary mb-1">✅ Bot connected: {{.BotUsername}}</p>
-            <p class="text-base-content/60">Open Telegram, find <strong>{{.BotUsername}}</strong>, and send <code class="bg-base-300 px-1 rounded">/start</code> to link your account and begin chatting with your agents.</p>
+            <p class="text-base-content/60">Open Telegram, find <strong>{{.BotUsername}}</strong>, and send <code class="bg-base-300 px-1 rounded">/start</code> to link this workspace.</p>
           </div>
           {{end}}
-          <form method="POST" action="/setup">
+          <form method="POST" action="/dashboard/setup">
             <input type="hidden" name="action" value="finish">
-            <button type="submit" class="btn btn-primary btn-lg px-10">Go to Dashboard →</button>
+            <button type="submit" class="btn btn-primary btn-lg px-10">Go to Workspace →</button>
           </form>
         </div>
         {{end}}

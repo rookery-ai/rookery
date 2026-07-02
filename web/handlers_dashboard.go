@@ -17,7 +17,7 @@ type dashboardData struct {
 }
 
 func (s *Server) showDashboard(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 
 	agents, _ := s.db.ListAgents(u.ID)
 	recentRuns, _ := s.db.RecentAgentRunsWithNames(u.ID, 5)
@@ -25,7 +25,7 @@ func (s *Server) showDashboard(c echo.Context) error {
 
 	dn, _ := s.db.GetSetting(u.ID, "display_name")
 	if dn == "" {
-		dn = u.Username
+		dn = u.Name
 	}
 
 	// Check if user has any platform connected

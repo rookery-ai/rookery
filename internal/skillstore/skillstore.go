@@ -25,7 +25,7 @@ const maxZipExtractSize = 10 * 1024 * 1024 // 10 MB total extracted
 // Store manages skills on disk and in the database.
 type Store struct {
 	db        *db.DB
-	skillsDir string // vaults base: <data>/vaults (skills live at <base>/<userID>/skills/<name>)
+	skillsDir string // vaults base: <data>/vaults (skills live at <base>/<workspaceID>/skills/<name>)
 }
 
 // New creates a Store. skillsDir is the vaults base directory.
@@ -34,14 +34,14 @@ func New(database *db.DB, skillsDir string) *Store {
 }
 
 // SkillDir returns a single skill's directory inside the user's vault:
-// <vaultsBase>/<userID>/skills/<name>. Used by both this package and the agent
+// <vaultsBase>/<workspaceID>/skills/<name>. Used by both this package and the agent
 // runner so skill paths are computed in exactly one place.
-func SkillDir(vaultsBase, userID, name string) string {
-	return filepath.Join(vaultsBase, userID, "skills", name)
+func SkillDir(vaultsBase, workspaceID, name string) string {
+	return filepath.Join(vaultsBase, workspaceID, "skills", name)
 }
 
-func (s *Store) skillDir(userID, name string) string {
-	return SkillDir(s.skillsDir, userID, name)
+func (s *Store) skillDir(workspaceID, name string) string {
+	return SkillDir(s.skillsDir, workspaceID, name)
 }
 
 // ParseSkillMeta extracts name and description from SKILL.md frontmatter.
@@ -126,12 +126,12 @@ func PeekZip(data []byte) (skillMD, rootFolder string, err error) {
 }
 
 // Create installs a new skill from a pasted SKILL.md. name and description must already be resolved.
-func (s *Store) Create(userID, name, description, content string) (*db.Skill, error) {
+func (s *Store) Create(workspaceID, name, description, content string) (*db.Skill, error) {
 	if !validSkillName.MatchString(name) {
 		return nil, fmt.Errorf("skill name %q is invalid (must be lowercase alphanumeric + hyphens, 3-64 chars)", name)
 	}
 
-	skillDir := s.skillDir(userID, name)
+	skillDir := s.skillDir(workspaceID, name)
 	if err := os.MkdirAll(skillDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create skill dir: %w", err)
 	}
@@ -145,7 +145,7 @@ func (s *Store) Create(userID, name, description, content string) (*db.Skill, er
 
 	skill := &db.Skill{
 		ID:          uuid.New().String(),
-		UserID:      userID,
+		WorkspaceID:      workspaceID,
 		Name:        name,
 		Description: description,
 		InstalledAt: time.Now().UTC(),
@@ -159,12 +159,12 @@ func (s *Store) Create(userID, name, description, content string) (*db.Skill, er
 
 // InstallFromZip extracts a zip archive and installs it as a skill.
 // name and description must already be resolved by the caller.
-func (s *Store) InstallFromZip(userID, name, description string, data []byte) (*db.Skill, error) {
+func (s *Store) InstallFromZip(workspaceID, name, description string, data []byte) (*db.Skill, error) {
 	if !validSkillName.MatchString(name) {
 		return nil, fmt.Errorf("skill name %q is invalid (must be lowercase alphanumeric + hyphens, 3-64 chars)", name)
 	}
 
-	if existing, err := s.db.GetSkillByName(userID, name); err == nil && existing != nil {
+	if existing, err := s.db.GetSkillByName(workspaceID, name); err == nil && existing != nil {
 		return nil, fmt.Errorf("skill %q already exists", name)
 	}
 
@@ -186,7 +186,7 @@ func (s *Store) InstallFromZip(userID, name, description string, data []byte) (*
 		break
 	}
 
-	skillDir := s.skillDir(userID, name)
+	skillDir := s.skillDir(workspaceID, name)
 	if err := os.MkdirAll(skillDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create skill dir: %w", err)
 	}
@@ -237,7 +237,7 @@ func (s *Store) InstallFromZip(userID, name, description string, data []byte) (*
 
 	skill := &db.Skill{
 		ID:          uuid.New().String(),
-		UserID:      userID,
+		WorkspaceID:      workspaceID,
 		Name:        name,
 		Description: description,
 		InstalledAt: time.Now().UTC(),
@@ -250,8 +250,8 @@ func (s *Store) InstallFromZip(userID, name, description string, data []byte) (*
 }
 
 // LoadContent reads the SKILL.md file for a skill identified by name.
-func (s *Store) LoadContent(userID, skillName string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(s.skillDir(userID, skillName), "SKILL.md"))
+func (s *Store) LoadContent(workspaceID, skillName string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(s.skillDir(workspaceID, skillName), "SKILL.md"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return "", fmt.Errorf("skill %q not found on disk", skillName)
@@ -262,8 +262,8 @@ func (s *Store) LoadContent(userID, skillName string) (string, error) {
 }
 
 // SaveContent overwrites the SKILL.md file for a skill. Also updates description in DB.
-func (s *Store) SaveContent(userID, skillID, skillName, description, content string) error {
-	skillDir := s.skillDir(userID, skillName)
+func (s *Store) SaveContent(workspaceID, skillID, skillName, description, content string) error {
+	skillDir := s.skillDir(workspaceID, skillName)
 	if err := os.MkdirAll(skillDir, 0o750); err != nil {
 		return err
 	}
@@ -274,19 +274,19 @@ func (s *Store) SaveContent(userID, skillID, skillName, description, content str
 }
 
 // Delete removes a skill from DB and disk.
-func (s *Store) Delete(userID, skillID, skillName string) error {
+func (s *Store) Delete(workspaceID, skillID, skillName string) error {
 	if err := s.db.DeleteSkill(skillID); err != nil {
 		return err
 	}
 	// Drop any agent attachments referencing this skill by name so they don't dangle.
-	_ = s.db.DeleteAgentSkillsByName(userID, skillName)
-	_ = os.RemoveAll(s.skillDir(userID, skillName))
+	_ = s.db.DeleteAgentSkillsByName(workspaceID, skillName)
+	_ = os.RemoveAll(s.skillDir(workspaceID, skillName))
 	return nil
 }
 
 // List returns all skills for a user (DB only, fast).
-func (s *Store) List(userID string) ([]*db.Skill, error) {
-	return s.db.ListSkills(userID)
+func (s *Store) List(workspaceID string) ([]*db.Skill, error) {
+	return s.db.ListSkills(workspaceID)
 }
 
 // SanitizeName lowercases and replaces spaces/underscores with hyphens.

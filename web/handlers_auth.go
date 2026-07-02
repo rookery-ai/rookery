@@ -10,11 +10,8 @@ import (
 )
 
 func (s *Server) showLogin(c echo.Context) error {
-	if u, ok := s.currentUser(c); ok {
-		if u.Role == "admin" {
-			return c.Redirect(http.StatusFound, "/admin")
-		}
-		return c.Redirect(http.StatusFound, "/dashboard")
+	if _, ok := s.currentOwner(c); ok {
+		return c.Redirect(http.StatusFound, "/admin")
 	}
 	return c.Render(http.StatusOK, "auth/login.html", s.page(c, "Login"))
 }
@@ -23,7 +20,7 @@ func (s *Server) handleLogin(c echo.Context) error {
 	username := c.FormValue("username")
 	password := c.FormValue("password")
 
-	u, err := auth.Authenticate(s.db, username, password)
+	o, err := auth.Authenticate(s.db, username, password)
 	if err != nil {
 		if errors.Is(err, auth.ErrInvalidCreds) {
 			p := s.page(c, "Login")
@@ -33,27 +30,21 @@ func (s *Server) handleLogin(c echo.Context) error {
 		return err
 	}
 
-	if err := s.setSession(c, u.ID); err != nil {
+	if err := s.setOwnerSession(c, o.ID); err != nil {
 		return err
 	}
 
-	s.audit.Log(u.ID, "login", "user:"+u.ID, "", c.RealIP())
+	s.audit.Log("", "login", "owner:"+o.ID, "", c.RealIP())
 
-	if u.MustChangePassword {
+	if o.MustChangePassword {
 		return c.Redirect(http.StatusFound, "/change-password")
 	}
-	if u.NeedsSetup {
-		return c.Redirect(http.StatusFound, "/setup")
-	}
-	if u.Role == "admin" {
-		return c.Redirect(http.StatusFound, "/admin")
-	}
-	return c.Redirect(http.StatusFound, "/dashboard")
+	return c.Redirect(http.StatusFound, "/admin")
 }
 
 func (s *Server) handleLogout(c echo.Context) error {
-	if u, ok := s.currentUser(c); ok {
-		s.audit.Log(u.ID, "logout", "user:"+u.ID, "", c.RealIP())
+	if o, ok := s.currentOwner(c); ok {
+		s.audit.Log("", "logout", "owner:"+o.ID, "", c.RealIP())
 	}
 	_ = s.clearSession(c)
 	return c.Redirect(http.StatusFound, "/login")
@@ -64,7 +55,7 @@ func (s *Server) showChangePassword(c echo.Context) error {
 }
 
 func (s *Server) handleChangePassword(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	o := c.Get("owner").(*db.Owner)
 	newPw := c.FormValue("password")
 	confirm := c.FormValue("confirm")
 
@@ -78,17 +69,11 @@ func (s *Server) handleChangePassword(c echo.Context) error {
 		return c.Render(http.StatusBadRequest, "auth/change_password.html", p)
 	}
 
-	if err := auth.ChangePassword(s.db, u.ID, newPw); err != nil {
+	if err := auth.ChangePassword(s.db, o.ID, newPw); err != nil {
 		return err
 	}
 
-	s.audit.Log(u.ID, "change_password", "user:"+u.ID, "", c.RealIP())
+	s.audit.Log("", "change_password", "owner:"+o.ID, "", c.RealIP())
 
-	if u.NeedsSetup {
-		return c.Redirect(http.StatusFound, "/setup")
-	}
-	if u.Role == "admin" {
-		return c.Redirect(http.StatusFound, "/admin")
-	}
-	return c.Redirect(http.StatusFound, "/dashboard")
+	return c.Redirect(http.StatusFound, "/admin")
 }

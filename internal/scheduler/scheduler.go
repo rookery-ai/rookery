@@ -18,7 +18,7 @@ const pollInterval = 60 * time.Second
 
 // Sender delivers messages to users (satisfied by gateway.GatewayManager).
 type Sender interface {
-	SendToUser(userID, text string) error
+	SendToUser(workspaceID, text string) error
 }
 
 // Scheduler polls for due agent_schedules and fires them via the runner.
@@ -97,18 +97,18 @@ func (s *Scheduler) fire(ctx context.Context, sched *db.AgentSchedule, firedAt t
 	// Skip the coder run entirely if the user has no platform connected.
 	// The agent cannot deliver output and running it wastes API quota.
 	// next_run_at is already advanced above, so the schedule stays live.
-	if !s.db.HasPlatformIdentity(sched.UserID) {
+	if !s.db.HasPlatformIdentity(sched.WorkspaceID) {
 		slog.Warn("scheduler: skipping agent run — user has no platform connected",
-			"agent_id", sched.AgentID, "user_id", sched.UserID, "next_run", next)
+			"agent_id", sched.AgentID, "user_id", sched.WorkspaceID, "next_run", next)
 		return
 	}
 
-	slog.Info("scheduler: firing agent", "agent_id", sched.AgentID, "user_id", sched.UserID, "next_run", next)
+	slog.Info("scheduler: firing agent", "agent_id", sched.AgentID, "user_id", sched.WorkspaceID, "next_run", next)
 
 	// Decrypt the user's stored master password so secrets are injected at run time.
 	masterPw := ""
 	if len(s.systemKey) > 0 {
-		u, err := s.db.GetUserByID(sched.UserID)
+		u, err := s.db.GetWorkspaceByID(sched.WorkspaceID)
 		if err == nil && u.EncryptedMasterPassword != "" {
 			if pw, err := secrets.DecryptMasterPassword(u.EncryptedMasterPassword, s.systemKey); err == nil {
 				masterPw = pw
@@ -117,21 +117,21 @@ func (s *Scheduler) fire(ctx context.Context, sched *db.AgentSchedule, firedAt t
 	}
 	if masterPw == "" {
 		slog.Warn("scheduler: running agent without secrets — system key not configured or user has no master password",
-			"agent_id", sched.AgentID, "user_id", sched.UserID)
+			"agent_id", sched.AgentID, "user_id", sched.WorkspaceID)
 	}
 
 	var sendFn agentrunner.SendFunc
 	if s.sender != nil {
 		sender := s.sender
-		userID := sched.UserID
+		workspaceID := sched.WorkspaceID
 		sendFn = func(msg string) {
-			_ = sender.SendToUser(userID, msg)
+			_ = sender.SendToUser(workspaceID, msg)
 		}
 	}
 
 	if err := s.runner.Run(ctx, agentrunner.RunInput{
 		AgentID:    sched.AgentID,
-		UserID:     sched.UserID,
+		WorkspaceID:     sched.WorkspaceID,
 		Trigger:    "cron",
 		MasterPw:   masterPw,
 		SendOutput: sendFn,

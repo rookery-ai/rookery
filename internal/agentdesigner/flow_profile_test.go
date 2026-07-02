@@ -18,17 +18,17 @@ func TestLoadUserProfile_NoDB(t *testing.T) {
 // wiring works end-to-end against a real DB, without needing a live coder
 // subprocess.
 func TestLoadUserProfile_RendersSavedFields(t *testing.T) {
-	database, userID := testDB(t)
+	database, workspaceID := testDB(t)
 
-	if err := database.SetSetting(userID, "display_name", "Ilija"); err != nil {
+	if err := database.SetSetting(workspaceID, "display_name", "Ilija"); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.SetSetting(userID, "profile_timezone", "Europe/Skopje"); err != nil {
+	if err := database.SetSetting(workspaceID, "profile_timezone", "Europe/Skopje"); err != nil {
 		t.Fatal(err)
 	}
 
 	f := NewFlow(nil, nil).WithDB(database)
-	got := f.loadUserProfile(userID)
+	got := f.loadUserProfile(workspaceID)
 
 	if !strings.Contains(got, "[User profile]") {
 		t.Fatalf("missing header, got %q", got)
@@ -45,10 +45,10 @@ func TestLoadUserProfile_RendersSavedFields(t *testing.T) {
 // profile fields set yields an empty block (no header-only noise injected
 // into the system prompt).
 func TestLoadUserProfile_EmptyWhenNothingSaved(t *testing.T) {
-	database, userID := testDB(t)
+	database, workspaceID := testDB(t)
 
 	f := NewFlow(nil, nil).WithDB(database)
-	if got := f.loadUserProfile(userID); got != "" {
+	if got := f.loadUserProfile(workspaceID); got != "" {
 		t.Fatalf("expected empty string for unset profile, got %q", got)
 	}
 }

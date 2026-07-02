@@ -12,7 +12,7 @@ import (
 // AgentDesigner handles file I/O and DB writes for completed agents.
 type AgentDesigner struct {
 	db        *db.DB
-	agentsDir string // vaults base: <data>/vaults/ (agent dirs at <base>/<userID>/agents/<agentID>)
+	agentsDir string // vaults base: <data>/vaults/ (agent dirs at <base>/<workspaceID>/agents/<agentID>)
 }
 
 // NewDesigner creates an AgentDesigner. agentsDir is the vaults base directory.
@@ -25,14 +25,14 @@ func NewDesigner(database *db.DB, agentsDir string) *AgentDesigner {
 // tools is a map of filename→content for Python helper scripts (written to tools/).
 // skills is a slice of skill names declared by the agent.
 // requiredSecrets is a slice of secret names required by the agent.
-func (d *AgentDesigner) SaveAgent(userID, agentID, name, description string, agentMD string, tools map[string]string, skills []string, requiredSecrets []string) error {
-	if err := d.writeAgentContent(userID, agentID, name, agentMD, tools, skills, requiredSecrets); err != nil {
+func (d *AgentDesigner) SaveAgent(workspaceID, agentID, name, description string, agentMD string, tools map[string]string, skills []string, requiredSecrets []string) error {
+	if err := d.writeAgentContent(workspaceID, agentID, name, agentMD, tools, skills, requiredSecrets); err != nil {
 		return err
 	}
 
 	if err := d.db.CreateAgent(&db.Agent{
 		ID:          agentID,
-		UserID:      userID,
+		WorkspaceID:      workspaceID,
 		Name:        name,
 		Description: description,
 		Active:      true,
@@ -53,8 +53,8 @@ func (d *AgentDesigner) SaveAgent(userID, agentID, name, description string, age
 // UpdateAgent overwrites an existing agent's files in place and updates its DB row.
 // Identity (ID, name) is immutable here — only content (AGENT.md, tools, manifest
 // metadata, description) changes. Used by the edit flow's finalize step.
-func (d *AgentDesigner) UpdateAgent(userID, agentID, name, description string, agentMD string, tools map[string]string, skills []string, requiredSecrets []string) error {
-	if err := d.writeAgentContent(userID, agentID, name, agentMD, tools, skills, requiredSecrets); err != nil {
+func (d *AgentDesigner) UpdateAgent(workspaceID, agentID, name, description string, agentMD string, tools map[string]string, skills []string, requiredSecrets []string) error {
+	if err := d.writeAgentContent(workspaceID, agentID, name, agentMD, tools, skills, requiredSecrets); err != nil {
 		return err
 	}
 
@@ -73,7 +73,7 @@ func (d *AgentDesigner) UpdateAgent(userID, agentID, name, description string, a
 // writeAgentContent is shared by SaveAgent and UpdateAgent: guardrails, file writes,
 // and manifest. It never touches the agents DB row — callers do that themselves
 // (INSERT vs UPDATE) since that's the only part that differs between create and edit.
-func (d *AgentDesigner) writeAgentContent(userID, agentID, name string, agentMD string, tools map[string]string, skills []string, requiredSecrets []string) error {
+func (d *AgentDesigner) writeAgentContent(workspaceID, agentID, name string, agentMD string, tools map[string]string, skills []string, requiredSecrets []string) error {
 	if err := CheckEthics(agentMD, ""); err != nil {
 		return fmt.Errorf("guardrails: %w", err)
 	}
@@ -83,7 +83,7 @@ func (d *AgentDesigner) writeAgentContent(userID, agentID, name string, agentMD 
 		}
 	}
 
-	dir := AgentDir(d.agentsDir, userID, agentID)
+	dir := AgentDir(d.agentsDir, workspaceID, agentID)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create agent dir: %w", err)
 	}
@@ -123,7 +123,7 @@ func (d *AgentDesigner) writeAgentContent(userID, agentID, name string, agentMD 
 
 	// Preserve the original creation timestamp across edits.
 	createdAt := time.Now().UTC()
-	if existing, err := LoadManifest(d.agentsDir, userID, agentID); err == nil && existing != nil && !existing.CreatedAt.IsZero() {
+	if existing, err := LoadManifest(d.agentsDir, workspaceID, agentID); err == nil && existing != nil && !existing.CreatedAt.IsZero() {
 		createdAt = existing.CreatedAt
 	}
 
@@ -134,7 +134,7 @@ func (d *AgentDesigner) writeAgentContent(userID, agentID, name string, agentMD 
 		Skills:          nil, // skills live in the agent_skills DB table (source of truth); AGENT.md is for the LLM.
 		CreatedAt:       createdAt,
 	}
-	if err := SaveManifest(d.agentsDir, userID, agentID, manifest); err != nil {
+	if err := SaveManifest(d.agentsDir, workspaceID, agentID, manifest); err != nil {
 		return fmt.Errorf("write manifest: %w", err)
 	}
 

@@ -54,7 +54,7 @@ func (s DesignState) String() string {
 
 // DesignSession holds all state for one in-progress agent creation or edit.
 type DesignSession struct {
-	UserID             string
+	WorkspaceID             string
 	AgentID            string
 	AgentName          string
 	State              DesignState
@@ -100,38 +100,38 @@ type DesignSession struct {
 }
 
 type dbDesignStore interface {
-	ListSkills(userID string) ([]*db.Skill, error)
-	ListUserPlatformConnections(userID string) ([]*db.PlatformConnection, error)
+	ListSkills(workspaceID string) ([]*db.Skill, error)
+	ListWorkspacePlatformConnections(workspaceID string) ([]*db.PlatformConnection, error)
 	UpsertAgentSchedule(s *db.AgentSchedule) error
 	GetAgent(id string) (*db.Agent, error)
 	GetScheduleForAgent(agentID string) (*db.AgentSchedule, error)
 	DeleteAgentSchedule(agentID string) error
-	GetSetting(userID, key string) (string, error)
-	SecretExists(userID, name string) (bool, error)
+	GetSetting(workspaceID, key string) (string, error)
+	SecretExists(workspaceID, name string) (bool, error)
 
 	UpsertAgentDraft(d *db.AgentDraft) error
-	GetAgentDraft(userID string) (*db.AgentDraft, error)
-	DeleteAgentDraft(userID string) error
+	GetAgentDraft(workspaceID string) (*db.AgentDraft, error)
+	DeleteAgentDraft(workspaceID string) error
 }
 
 // memoryStore is satisfied by *memory.Store — kept local to avoid the import.
 type memoryStore interface {
-	ContextString(userID string) (string, error)
+	ContextString(workspaceID string) (string, error)
 }
 
 // kbLister enumerates the user's knowledge-base note paths (vault-relative) so
 // the designer can be shown what notes already exist. Satisfied by *vault.Vault.
 type kbLister interface {
-	NotePaths(userID string) []string
+	NotePaths(workspaceID string) []string
 }
 
 // loadKBManifest returns a rendered bullet list of the user's existing note paths
 // (capped), or "" if no lister is attached or the knowledge base is empty.
-func (f *Flow) loadKBManifest(userID string) string {
+func (f *Flow) loadKBManifest(workspaceID string) string {
 	if f.kb == nil {
 		return ""
 	}
-	paths := f.kb.NotePaths(userID)
+	paths := f.kb.NotePaths(workspaceID)
 	if len(paths) == 0 {
 		return ""
 	}
@@ -152,18 +152,18 @@ func (f *Flow) loadKBManifest(userID string) string {
 // It is safe for concurrent use.
 type Flow struct {
 	mu       sync.Mutex
-	sessions map[string]*DesignSession // keyed by userID
+	sessions map[string]*DesignSession // keyed by workspaceID
 
-	coderFor      func(userID string) *coder.Coder
+	coderFor      func(workspaceID string) *coder.Coder
 	designer      *AgentDesigner
 	db            dbDesignStore
 	memStore      memoryStore // optional; nil = no memory injected
 	kb            kbLister     // optional; nil = no KB manifest injected
-	secretsLoader func(ctx context.Context, userID string) (map[string]string, error)
+	secretsLoader func(ctx context.Context, workspaceID string) (map[string]string, error)
 }
 
-// NewFlow creates a Flow. coderResolver maps a userID to the right coder.
-func NewFlow(coderResolver func(userID string) *coder.Coder, designer *AgentDesigner) *Flow {
+// NewFlow creates a Flow. coderResolver maps a workspaceID to the right coder.
+func NewFlow(coderResolver func(workspaceID string) *coder.Coder, designer *AgentDesigner) *Flow {
 	return &Flow{
 		sessions: make(map[string]*DesignSession),
 		coderFor: coderResolver,
@@ -195,28 +195,28 @@ func (f *Flow) WithKBLister(k kbLister) *Flow {
 // WithSecretsLoader attaches a loader that decrypts all secrets for a user.
 // The loader is called during agent generation to inject secrets like COMPOSIO_API_KEY
 // into the coder subprocess so real API calls can be made during validation.
-func (f *Flow) WithSecretsLoader(fn func(ctx context.Context, userID string) (map[string]string, error)) *Flow {
+func (f *Flow) WithSecretsLoader(fn func(ctx context.Context, workspaceID string) (map[string]string, error)) *Flow {
 	f.secretsLoader = fn
 	return f
 }
 
-// Start creates a new Telegram design session for userID.
+// Start creates a new Telegram design session for workspaceID.
 // Returns the opening prompt asking for a description.
-func (f *Flow) Start(userID, agentName string) (string, error) {
+func (f *Flow) Start(workspaceID, agentName string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if _, exists := f.sessions[userID]; exists {
+	if _, exists := f.sessions[workspaceID]; exists {
 		return "", fmt.Errorf("you already have an active design session; send /agent cancel to start over")
 	}
 
-	skills := f.loadSkillNames(userID)
-	platforms := f.loadConnectedPlatforms(userID)
-	userProfile := f.loadUserProfile(userID)
-	userMemory := f.loadUserMemory(userID)
-	composioEnabled := f.loadComposioEnabled(userID)
-	f.sessions[userID] = &DesignSession{
-		UserID:             userID,
+	skills := f.loadSkillNames(workspaceID)
+	platforms := f.loadConnectedPlatforms(workspaceID)
+	userProfile := f.loadUserProfile(workspaceID)
+	userMemory := f.loadUserMemory(workspaceID)
+	composioEnabled := f.loadComposioEnabled(workspaceID)
+	f.sessions[workspaceID] = &DesignSession{
+		WorkspaceID:             workspaceID,
 		AgentID:            uuid.New().String(),
 		AgentName:          agentName,
 		State:              StateDescribing,
@@ -236,21 +236,21 @@ func (f *Flow) Start(userID, agentName string) (string, error) {
 
 // StartDesign is the web path: creates a session already in StateDesigning
 // with the user's first message and returns the coder's first response.
-func (f *Flow) StartDesign(ctx context.Context, userID, agentName, firstMessage string) (string, error) {
+func (f *Flow) StartDesign(ctx context.Context, workspaceID, agentName, firstMessage string) (string, error) {
 	f.mu.Lock()
 
-	if _, exists := f.sessions[userID]; exists {
+	if _, exists := f.sessions[workspaceID]; exists {
 		f.mu.Unlock()
 		return "", fmt.Errorf("design session already active; cancel it first")
 	}
 
-	skills := f.loadSkillNames(userID)
-	platforms := f.loadConnectedPlatforms(userID)
-	userProfile := f.loadUserProfile(userID)
-	userMemory := f.loadUserMemory(userID)
-	composioEnabled := f.loadComposioEnabled(userID)
+	skills := f.loadSkillNames(workspaceID)
+	platforms := f.loadConnectedPlatforms(workspaceID)
+	userProfile := f.loadUserProfile(workspaceID)
+	userMemory := f.loadUserMemory(workspaceID)
+	composioEnabled := f.loadComposioEnabled(workspaceID)
 	sess := &DesignSession{
-		UserID:             userID,
+		WorkspaceID:             workspaceID,
 		AgentID:            uuid.New().String(),
 		AgentName:          agentName,
 		State:              StateDesigning,
@@ -261,37 +261,37 @@ func (f *Flow) StartDesign(ctx context.Context, userID, agentName, firstMessage 
 		ComposioEnabled:    composioEnabled,
 		CreatedAt:          time.Now(),
 	}
-	f.sessions[userID] = sess
+	f.sessions[workspaceID] = sess
 	f.mu.Unlock()
 
-	return f.callCoder(ctx, userID, firstMessage)
+	return f.callCoder(ctx, workspaceID, firstMessage)
 }
 
 // StartEdit creates a new Telegram edit session for an existing agentID.
 // Ownership of agentID is assumed pre-checked by the caller (same pattern as the
 // other agent handlers, e.g. the Telegram /agent and web delete/run endpoints).
 // Returns the opening prompt summarizing current behavior and asking what to change.
-func (f *Flow) StartEdit(userID, agentID string) (string, error) {
+func (f *Flow) StartEdit(workspaceID, agentID string) (string, error) {
 	f.mu.Lock()
-	if _, exists := f.sessions[userID]; exists {
+	if _, exists := f.sessions[workspaceID]; exists {
 		f.mu.Unlock()
 		return "", fmt.Errorf("you already have an active design session; send /agent cancel to start over")
 	}
 	f.mu.Unlock()
 
-	agentName, reconciledMD, tools, err := f.loadAgentForEdit(userID, agentID)
+	agentName, reconciledMD, tools, err := f.loadAgentForEdit(workspaceID, agentID)
 	if err != nil {
 		return "", err
 	}
 
 	f.mu.Lock()
-	skills := f.loadSkillNames(userID)
-	platforms := f.loadConnectedPlatforms(userID)
-	userProfile := f.loadUserProfile(userID)
-	userMemory := f.loadUserMemory(userID)
-	composioEnabled := f.loadComposioEnabled(userID)
-	f.sessions[userID] = &DesignSession{
-		UserID:             userID,
+	skills := f.loadSkillNames(workspaceID)
+	platforms := f.loadConnectedPlatforms(workspaceID)
+	userProfile := f.loadUserProfile(workspaceID)
+	userMemory := f.loadUserMemory(workspaceID)
+	composioEnabled := f.loadComposioEnabled(workspaceID)
+	f.sessions[workspaceID] = &DesignSession{
+		WorkspaceID:             workspaceID,
 		AgentID:            agentID,
 		AgentName:          agentName,
 		State:              StateDescribing,
@@ -316,27 +316,27 @@ func (f *Flow) StartEdit(userID, agentID string) (string, error) {
 // StartEditDesign is the web path for editing: creates a session already in
 // StateDesigning with the user's first change request and returns the coder's
 // first response. Mirrors StartDesign.
-func (f *Flow) StartEditDesign(ctx context.Context, userID, agentID, firstMessage string) (string, error) {
+func (f *Flow) StartEditDesign(ctx context.Context, workspaceID, agentID, firstMessage string) (string, error) {
 	f.mu.Lock()
-	if _, exists := f.sessions[userID]; exists {
+	if _, exists := f.sessions[workspaceID]; exists {
 		f.mu.Unlock()
 		return "", fmt.Errorf("design session already active; cancel it first")
 	}
 	f.mu.Unlock()
 
-	agentName, reconciledMD, tools, err := f.loadAgentForEdit(userID, agentID)
+	agentName, reconciledMD, tools, err := f.loadAgentForEdit(workspaceID, agentID)
 	if err != nil {
 		return "", err
 	}
 
 	f.mu.Lock()
-	skills := f.loadSkillNames(userID)
-	platforms := f.loadConnectedPlatforms(userID)
-	userProfile := f.loadUserProfile(userID)
-	userMemory := f.loadUserMemory(userID)
-	composioEnabled := f.loadComposioEnabled(userID)
+	skills := f.loadSkillNames(workspaceID)
+	platforms := f.loadConnectedPlatforms(workspaceID)
+	userProfile := f.loadUserProfile(workspaceID)
+	userMemory := f.loadUserMemory(workspaceID)
+	composioEnabled := f.loadComposioEnabled(workspaceID)
 	sess := &DesignSession{
-		UserID:             userID,
+		WorkspaceID:             workspaceID,
 		AgentID:            agentID,
 		AgentName:          agentName,
 		State:              StateDesigning,
@@ -350,10 +350,10 @@ func (f *Flow) StartEditDesign(ctx context.Context, userID, agentID, firstMessag
 		ExistingAgentMD:    reconciledMD,
 		ExistingTools:      tools,
 	}
-	f.sessions[userID] = sess
+	f.sessions[workspaceID] = sess
 	f.mu.Unlock()
 
-	return f.callCoder(ctx, userID, firstMessage)
+	return f.callCoder(ctx, workspaceID, firstMessage)
 }
 
 // loadAgentForEdit loads an existing agent's name and AGENT.md, reconciling the
@@ -362,7 +362,7 @@ func (f *Flow) StartEditDesign(ctx context.Context, userID, agentID, firstMessag
 // AGENT.md, so the on-disk line can be stale; reconciling here makes AGENT.md the
 // single source of truth for the rest of the edit (both what the coder sees and what
 // finalize compares against).
-func (f *Flow) loadAgentForEdit(userID, agentID string) (agentName, reconciledMD string, tools map[string]string, err error) {
+func (f *Flow) loadAgentForEdit(workspaceID, agentID string) (agentName, reconciledMD string, tools map[string]string, err error) {
 	if f.db == nil {
 		return "", "", nil, fmt.Errorf("no database configured")
 	}
@@ -372,7 +372,7 @@ func (f *Flow) loadAgentForEdit(userID, agentID string) (agentName, reconciledMD
 		return "", "", nil, fmt.Errorf("agent not found: %w", err)
 	}
 
-	raw, err := os.ReadFile(AgentDescPath(f.designer.agentsDir, userID, agentID))
+	raw, err := os.ReadFile(AgentDescPath(f.designer.agentsDir, workspaceID, agentID))
 	if err != nil {
 		return "", "", nil, fmt.Errorf("read AGENT.md: %w", err)
 	}
@@ -393,7 +393,7 @@ func (f *Flow) loadAgentForEdit(userID, agentID string) (agentName, reconciledMD
 	// Load the existing tool scripts so the edit *conversation* can see the actual
 	// code (not just AGENT.md). Without this the coder has no file access during Q&A
 	// and asks the user where the scripts are. Best-effort: missing tools/ is fine.
-	tools, _ = readToolsFromDisk(AgentDir(f.designer.agentsDir, userID, agentID))
+	tools, _ = readToolsFromDisk(AgentDir(f.designer.agentsDir, workspaceID, agentID))
 
 	return agent.Name, agentMD, tools, nil
 }
@@ -401,9 +401,9 @@ func (f *Flow) loadAgentForEdit(userID, agentID string) (agentName, reconciledMD
 // Step processes one message and advances the FSM.
 // Returns (response, isDone, agentID, err).
 // agentID is non-empty only when isDone=true.
-func (f *Flow) Step(ctx context.Context, userID, input string) (string, bool, string, error) {
+func (f *Flow) Step(ctx context.Context, workspaceID, input string) (string, bool, string, error) {
 	f.mu.Lock()
-	sess, ok := f.sessions[userID]
+	sess, ok := f.sessions[workspaceID]
 	if !ok {
 		f.mu.Unlock()
 		return "", false, "", fmt.Errorf("no active design session; use /agent create <name> to start one")
@@ -413,13 +413,13 @@ func (f *Flow) Step(ctx context.Context, userID, input string) (string, bool, st
 
 	switch state {
 	case StateAwaitingResume:
-		return f.stepAwaitingResume(ctx, userID, input)
+		return f.stepAwaitingResume(ctx, workspaceID, input)
 	case StateDescribing:
-		return f.stepDescribing(ctx, userID, input)
+		return f.stepDescribing(ctx, workspaceID, input)
 	case StateDesigning:
-		return f.stepDesigning(ctx, userID, input)
+		return f.stepDesigning(ctx, workspaceID, input)
 	case StateVerifying:
-		return f.stepVerifying(ctx, userID, input)
+		return f.stepVerifying(ctx, workspaceID, input)
 	default:
 		return "", false, "", fmt.Errorf("unexpected state: %s", state)
 	}
@@ -432,27 +432,27 @@ func (f *Flow) Step(ctx context.Context, userID, input string) (string, bool, st
 // closer of the channel. Closing here in addition would race with notify()
 // sends and panic even inside a select (select only guards against a full
 // channel, not a closed one).
-func (f *Flow) Cancel(userID string) {
+func (f *Flow) Cancel(workspaceID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	sess, ok := f.sessions[userID]
+	sess, ok := f.sessions[workspaceID]
 	if !ok {
 		return
 	}
 	if sess.cancelGenerate != nil {
 		sess.cancelGenerate()
 	}
-	delete(f.sessions, userID)
+	delete(f.sessions, workspaceID)
 }
 
 // SetProgressHandler stores a function that will be called with milestone
 // messages during the next generation phase for this user's session. The
 // router calls this before Step() when it detects an approval message so that
 // Telegram can update its placeholder message with live progress.
-func (f *Flow) SetProgressHandler(userID string, fn func(string)) {
+func (f *Flow) SetProgressHandler(workspaceID string, fn func(string)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if sess, ok := f.sessions[userID]; ok {
+	if sess, ok := f.sessions[workspaceID]; ok {
 		sess.progressFunc = fn
 	}
 }
@@ -460,10 +460,10 @@ func (f *Flow) SetProgressHandler(userID string, fn func(string)) {
 // GetProgressChan returns the buffered progress channel for the user's active
 // session. The Web SSE handler reads from this channel to stream milestone
 // events to the browser. Returns (nil, false) if no session exists.
-func (f *Flow) GetProgressChan(userID string) (<-chan string, bool) {
+func (f *Flow) GetProgressChan(workspaceID string) (<-chan string, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	sess, ok := f.sessions[userID]
+	sess, ok := f.sessions[workspaceID]
 	if !ok || sess.progressCh == nil {
 		return nil, false
 	}
@@ -471,10 +471,10 @@ func (f *Flow) GetProgressChan(userID string) (<-chan string, bool) {
 }
 
 // GetSession returns the user's active session, or nil.
-func (f *Flow) GetSession(userID string) *DesignSession {
+func (f *Flow) GetSession(workspaceID string) *DesignSession {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.sessions[userID]
+	return f.sessions[workspaceID]
 }
 
 // ─── Draft save / resume ──────────────────────────────────────────────────────
@@ -498,7 +498,7 @@ func (f *Flow) saveDraft(sess *DesignSession) {
 		state = "verifying"
 	}
 	_ = f.db.UpsertAgentDraft(&db.AgentDraft{
-		UserID:           sess.UserID,
+		WorkspaceID:           sess.WorkspaceID,
 		AgentID:          sess.AgentID,
 		AgentName:        sess.AgentName,
 		IsEdit:           sess.IsEdit,
@@ -512,19 +512,19 @@ func (f *Flow) saveDraft(sess *DesignSession) {
 
 // deleteDraft removes the user's draft. Called after a successful finalize so the
 // draft prompt never reappears for an agent that was already saved.
-func (f *Flow) deleteDraft(userID string) {
+func (f *Flow) deleteDraft(workspaceID string) {
 	if f.db == nil {
 		return
 	}
-	_ = f.db.DeleteAgentDraft(userID)
+	_ = f.db.DeleteAgentDraft(workspaceID)
 }
 
 // HasDraft returns the user's draft if one exists and is not expired; nil otherwise.
-func (f *Flow) HasDraft(userID string) *db.AgentDraft {
+func (f *Flow) HasDraft(workspaceID string) *db.AgentDraft {
 	if f.db == nil {
 		return nil
 	}
-	draft, err := f.db.GetAgentDraft(userID)
+	draft, err := f.db.GetAgentDraft(workspaceID)
 	if err != nil {
 		return nil
 	}
@@ -534,17 +534,17 @@ func (f *Flow) HasDraft(userID string) *db.AgentDraft {
 // DismissDraft deletes the user's draft. For create-mode drafts in "verifying"
 // state it also removes the agent's pre-approved directory so orphaned files don't
 // accumulate on disk — that dir was created by runGeneration but never finalized.
-func (f *Flow) DismissDraft(userID string) error {
+func (f *Flow) DismissDraft(workspaceID string) error {
 	if f.db == nil {
 		return nil
 	}
-	draft := f.HasDraft(userID)
+	draft := f.HasDraft(workspaceID)
 	if draft == nil {
 		return nil
 	}
-	_ = f.db.DeleteAgentDraft(userID)
+	_ = f.db.DeleteAgentDraft(workspaceID)
 	if !draft.IsEdit && draft.State == "verifying" && draft.AgentID != "" {
-		_ = os.RemoveAll(AgentDir(f.designer.agentsDir, userID, draft.AgentID))
+		_ = os.RemoveAll(AgentDir(f.designer.agentsDir, workspaceID, draft.AgentID))
 	}
 	return nil
 }
@@ -555,32 +555,32 @@ func (f *Flow) DismissDraft(userID string) error {
 // StartDesign() do — it is cheap to reload and may have changed since the draft
 // was saved, so it is never stored in the draft itself.
 //
-// For edit drafts it re-runs loadAgentForEdit(userID, agentID); if the agent no
+// For edit drafts it re-runs loadAgentForEdit(workspaceID, agentID); if the agent no
 // longer exists the draft is dismissed and an error is returned so callers can
 // tell the user.
 //
 // The coder is never re-run on resume — generation only happens when the user
 // next says "approve".
-func (f *Flow) ResumeDraft(ctx context.Context, userID string) (string, error) {
+func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string) (string, error) {
 	if f.db == nil {
 		return "", fmt.Errorf("no database configured")
 	}
-	draft, err := f.db.GetAgentDraft(userID)
+	draft, err := f.db.GetAgentDraft(workspaceID)
 	if err != nil {
 		return "", fmt.Errorf("no draft to resume")
 	}
 
 	sess := &DesignSession{
-		UserID:             userID,
+		WorkspaceID:             workspaceID,
 		AgentID:            draft.AgentID,
 		AgentName:          draft.AgentName,
 		IsEdit:             draft.IsEdit,
 		PendingAgentMD:     draft.PendingAgentMD,
-		Skills:             f.loadSkillNames(userID),
-		ConnectedPlatforms: f.loadConnectedPlatforms(userID),
-		UserProfile:        f.loadUserProfile(userID),
-		UserMemory:         f.loadUserMemory(userID),
-		ComposioEnabled:    f.loadComposioEnabled(userID),
+		Skills:             f.loadSkillNames(workspaceID),
+		ConnectedPlatforms: f.loadConnectedPlatforms(workspaceID),
+		UserProfile:        f.loadUserProfile(workspaceID),
+		UserMemory:         f.loadUserMemory(workspaceID),
+		ComposioEnabled:    f.loadComposioEnabled(workspaceID),
 		CreatedAt:          time.Now(),
 	}
 	_ = json.Unmarshal([]byte(draft.HistoryJSON), &sess.History)
@@ -589,12 +589,12 @@ func (f *Flow) ResumeDraft(ctx context.Context, userID string) (string, error) {
 	}
 
 	if draft.IsEdit {
-		agentName, reconciledMD, tools, err := f.loadAgentForEdit(userID, draft.AgentID)
+		agentName, reconciledMD, tools, err := f.loadAgentForEdit(workspaceID, draft.AgentID)
 		if err != nil {
 			// The agent being edited is gone — drop the draft and any shell session.
-			_ = f.DismissDraft(userID)
+			_ = f.DismissDraft(workspaceID)
 			f.mu.Lock()
-			delete(f.sessions, userID)
+			delete(f.sessions, workspaceID)
 			f.mu.Unlock()
 			return "", fmt.Errorf("the agent being edited no longer exists; draft dismissed")
 		}
@@ -610,7 +610,7 @@ func (f *Flow) ResumeDraft(ctx context.Context, userID string) (string, error) {
 	}
 
 	f.mu.Lock()
-	f.sessions[userID] = sess
+	f.sessions[workspaceID] = sess
 	f.mu.Unlock()
 
 	if sess.State == StateVerifying {
@@ -633,11 +633,11 @@ func (f *Flow) ResumeDraft(ctx context.Context, userID string) (string, error) {
 // prompt to send the user. pendingAgentName is stored so the "new" branch of
 // stepAwaitingResume can start a fresh create session with the name the user
 // originally typed.
-func (f *Flow) OfferDraftResume(userID, pendingAgentName string, draft *db.AgentDraft) (string, error) {
+func (f *Flow) OfferDraftResume(workspaceID, pendingAgentName string, draft *db.AgentDraft) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.sessions[userID] = &DesignSession{
-		UserID:      userID,
+	f.sessions[workspaceID] = &DesignSession{
+		WorkspaceID:      workspaceID,
 		AgentID:     draft.AgentID,
 		AgentName:   draft.AgentName,
 		State:       StateAwaitingResume,
@@ -658,9 +658,9 @@ func (f *Flow) OfferDraftResume(userID, pendingAgentName string, draft *db.Agent
 // starts a fresh create session with the name the user originally typed.
 // Runs without the Flow mutex held (Step releases it before dispatching), so it
 // can call ResumeDraft / Start directly.
-func (f *Flow) stepAwaitingResume(ctx context.Context, userID, msg string) (string, bool, string, error) {
+func (f *Flow) stepAwaitingResume(ctx context.Context, workspaceID, msg string) (string, bool, string, error) {
 	f.mu.Lock()
-	sess := f.sessions[userID]
+	sess := f.sessions[workspaceID]
 	pendingName := ""
 	if sess != nil {
 		pendingName = sess.pendingName
@@ -669,7 +669,7 @@ func (f *Flow) stepAwaitingResume(ctx context.Context, userID, msg string) (stri
 
 	lower := strings.TrimSpace(strings.ToLower(msg))
 	if lower == "resume" {
-		resp, err := f.ResumeDraft(ctx, userID)
+		resp, err := f.ResumeDraft(ctx, workspaceID)
 		if err != nil {
 			return "", false, "", err
 		}
@@ -677,14 +677,14 @@ func (f *Flow) stepAwaitingResume(ctx context.Context, userID, msg string) (stri
 	}
 
 	// "new" or anything else → dismiss the draft and start a fresh create session.
-	_ = f.DismissDraft(userID)
+	_ = f.DismissDraft(workspaceID)
 	f.mu.Lock()
-	delete(f.sessions, userID) // drop the awaiting-resume shell so Start() doesn't refuse
+	delete(f.sessions, workspaceID) // drop the awaiting-resume shell so Start() doesn't refuse
 	f.mu.Unlock()
 	if pendingName == "" {
 		pendingName = "agent"
 	}
-	resp, err := f.Start(userID, pendingName)
+	resp, err := f.Start(workspaceID, pendingName)
 	if err != nil {
 		return "", false, "", err
 	}
@@ -692,13 +692,13 @@ func (f *Flow) stepAwaitingResume(ctx context.Context, userID, msg string) (stri
 }
 
 // stepDescribing (Telegram only): user sends their first description.
-func (f *Flow) stepDescribing(ctx context.Context, userID, description string) (string, bool, string, error) {
+func (f *Flow) stepDescribing(ctx context.Context, workspaceID, description string) (string, bool, string, error) {
 	f.mu.Lock()
-	sess := f.sessions[userID]
+	sess := f.sessions[workspaceID]
 	sess.State = StateDesigning
 	f.mu.Unlock()
 
-	response, err := f.callCoder(ctx, userID, description)
+	response, err := f.callCoder(ctx, workspaceID, description)
 	if err != nil {
 		return "", false, "", err
 	}
@@ -706,12 +706,12 @@ func (f *Flow) stepDescribing(ctx context.Context, userID, description string) (
 }
 
 // stepDesigning: free-form Q&A until "approve".
-func (f *Flow) stepDesigning(ctx context.Context, userID, input string) (string, bool, string, error) {
+func (f *Flow) stepDesigning(ctx context.Context, workspaceID, input string) (string, bool, string, error) {
 	if isApproval(input) {
-		return f.runGeneration(ctx, userID)
+		return f.runGeneration(ctx, workspaceID)
 	}
 
-	response, err := f.callCoder(ctx, userID, input)
+	response, err := f.callCoder(ctx, workspaceID, input)
 	if err != nil {
 		return "", false, "", err
 	}
@@ -719,9 +719,9 @@ func (f *Flow) stepDesigning(ctx context.Context, userID, input string) (string,
 }
 
 // stepVerifying: test output was shown; wait for approval or change request.
-func (f *Flow) stepVerifying(ctx context.Context, userID, input string) (string, bool, string, error) {
+func (f *Flow) stepVerifying(ctx context.Context, workspaceID, input string) (string, bool, string, error) {
 	if isVerifyApproval(input) {
-		return f.finalizeAgent(ctx, userID)
+		return f.finalizeAgent(ctx, workspaceID)
 	}
 
 	// User wants changes — return to designing to revise. KEEP the generated
@@ -731,11 +731,11 @@ func (f *Flow) stepVerifying(ctx context.Context, userID, input string) (string,
 	// which lost the generated agent if the user's reply wasn't an exact
 	// "approve" (e.g. "yes", "save", "ok", "approve!").
 	f.mu.Lock()
-	sess := f.sessions[userID]
+	sess := f.sessions[workspaceID]
 	sess.State = StateDesigning
 	f.mu.Unlock()
 
-	response, err := f.callCoder(ctx, userID, input)
+	response, err := f.callCoder(ctx, workspaceID, input)
 	if err != nil {
 		return "", false, "", err
 	}
@@ -745,10 +745,10 @@ func (f *Flow) stepVerifying(ctx context.Context, userID, input string) (string,
 // ─── Coder conversation ───────────────────────────────────────────────────────
 
 // callCoder sends a conversational turn to the coder and appends to session history.
-func (f *Flow) callCoder(ctx context.Context, userID, userMessage string) (string, error) {
+func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (string, error) {
 	f.mu.Lock()
-	sess := f.sessions[userID]
-	coderSvc := f.coderFor(userID)
+	sess := f.sessions[workspaceID]
+	coderSvc := f.coderFor(workspaceID)
 	f.mu.Unlock()
 
 	if coderSvc == nil {
@@ -766,12 +766,12 @@ func (f *Flow) callCoder(ctx context.Context, userID, userMessage string) (strin
 		UserProfile:        sess.UserProfile,
 		UserMemory:         sess.UserMemory,
 		ComposioEnabled:    sess.ComposioEnabled,
-		KBManifest:         f.loadKBManifest(userID),
+		KBManifest:         f.loadKBManifest(workspaceID),
 	})
 
 	// Use WithNoTools so the design conversation outputs plain text and never
 	// attempts to write files or request permissions.
-	result, err := coderSvc.WithNoTools().Chat(ctx, userID, sess.History, systemPrompt, userMessage)
+	result, err := coderSvc.WithNoTools().Chat(ctx, workspaceID, sess.History, systemPrompt, userMessage)
 	if err != nil {
 		if errors.Is(err, coder.ErrUsageLimit) {
 			return fmt.Sprintf("⚠️ %s hit its usage limit. The design session is still active — try again in a while.", coderSvc.Name()), nil
@@ -806,10 +806,10 @@ func dbMessagesToPrompt(msgs []db.ChatMessage) []prompts.ChatMessage {
 // runGeneration creates agent files by giving Claude Code full tool access to
 // write files, run them, fix errors, and verify output — all in one pass.
 // Only after the coder confirms things work does the user see the results.
-func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, string, error) {
+func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, bool, string, error) {
 	f.mu.Lock()
-	sess := f.sessions[userID]
-	coderSvc := f.coderFor(userID)
+	sess := f.sessions[workspaceID]
+	coderSvc := f.coderFor(workspaceID)
 	agentIDSnap := sess.AgentID
 	agentNameSnap := sess.AgentName
 	isEdit := sess.IsEdit
@@ -866,7 +866,7 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 			// Nil out the session's field under lock so GetProgressChan can't hand
 			// out the closed channel to a new caller.
 			f.mu.Lock()
-			if s, ok := f.sessions[userID]; ok {
+			if s, ok := f.sessions[workspaceID]; ok {
 				s.progressCh = nil
 			}
 			f.mu.Unlock()
@@ -888,7 +888,7 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 		// Edit mode: never let the coder touch the live agent dir before approval —
 		// it may be scheduled and running unattended. Generate against a sibling
 		// staging copy instead; the live dir is only overwritten in finalizeAgent.
-		liveDir := AgentDir(f.designer.agentsDir, userID, agentIDSnap)
+		liveDir := AgentDir(f.designer.agentsDir, workspaceID, agentIDSnap)
 		stagingDir := liveDir + "-edit-staging"
 		if err := copyAgentWorkspace(liveDir, stagingDir, existingAgentMD); err != nil {
 			closeProgress()
@@ -901,7 +901,7 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 	} else {
 		// Create the agent directory structure on disk before the coder runs so it
 		// has a clean workspace to write into.
-		agentDir := AgentDir(f.designer.agentsDir, userID, agentIDSnap)
+		agentDir := AgentDir(f.designer.agentsDir, workspaceID, agentIDSnap)
 		for _, sub := range []string{".", "tools", "logs", "notes"} {
 			if err := os.MkdirAll(filepath.Join(agentDir, sub), 0o750); err != nil {
 				closeProgress()
@@ -933,11 +933,11 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 	// enforced by the testing-rules prompt, not by withholding credentials).
 	generationCoder := coderSvc.WithDir(workDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit")
 	if f.secretsLoader != nil {
-		if env, err := f.secretsLoader(genCtx, userID); err == nil && len(env) > 0 {
+		if env, err := f.secretsLoader(genCtx, workspaceID); err == nil && len(env) > 0 {
 			generationCoder = generationCoder.WithExtraEnv(env)
 		}
 	}
-	result, err := generationCoder.Generate(genCtx, userID, prompt)
+	result, err := generationCoder.Generate(genCtx, workspaceID, prompt)
 	if err != nil {
 		cleanupOnFail()
 		closeProgress()
@@ -1012,7 +1012,7 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 
 	// Test verified — move to StateVerifying so the user can approve or request changes.
 	f.mu.Lock()
-	sess = f.sessions[userID]
+	sess = f.sessions[workspaceID]
 	sess.State = StateVerifying
 	sess.PendingAgentMD = agentMD
 	sess.PendingTools = tools
@@ -1141,9 +1141,9 @@ func readToolsFromDisk(agentDir string) (map[string]string, error) {
 
 // finalizeAgent saves the pending agent content and cleans up the session.
 // Called from stepVerifying when the user approves the test output.
-func (f *Flow) finalizeAgent(ctx context.Context, userID string) (string, bool, string, error) {
+func (f *Flow) finalizeAgent(ctx context.Context, workspaceID string) (string, bool, string, error) {
 	f.mu.Lock()
-	sess := f.sessions[userID]
+	sess := f.sessions[workspaceID]
 	agentMD := sess.PendingAgentMD
 	tools := sess.PendingTools
 	isEdit := sess.IsEdit
@@ -1154,22 +1154,22 @@ func (f *Flow) finalizeAgent(ctx context.Context, userID string) (string, bool, 
 	var agentID string
 	var err error
 	if isEdit {
-		resp, done, agentID, err = f.updateAndFinish(ctx, userID, agentMD, tools)
+		resp, done, agentID, err = f.updateAndFinish(ctx, workspaceID, agentMD, tools)
 	} else {
-		resp, done, agentID, err = f.saveAndFinish(ctx, userID, agentMD, tools)
+		resp, done, agentID, err = f.saveAndFinish(ctx, workspaceID, agentMD, tools)
 	}
 	// On a successful save the agent is persisted — drop the draft so the resume
 	// prompt never reappears for an already-created/updated agent.
 	if err == nil {
-		f.deleteDraft(userID)
+		f.deleteDraft(workspaceID)
 	}
 	return resp, done, agentID, err
 }
 
 // saveAndFinish writes a brand-new agent to disk/DB and terminates the session.
-func (f *Flow) saveAndFinish(ctx context.Context, userID, agentMD string, tools map[string]string) (string, bool, string, error) {
+func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, tools map[string]string) (string, bool, string, error) {
 	f.mu.Lock()
-	sess := f.sessions[userID]
+	sess := f.sessions[workspaceID]
 	agentIDSnap := sess.AgentID
 	agentNameSnap := sess.AgentName
 	skillRefs := sess.Skills
@@ -1187,14 +1187,14 @@ func (f *Flow) saveAndFinish(ctx context.Context, userID, agentMD string, tools 
 		skillsSnap = []string{}
 	}
 
-	if err := f.designer.SaveAgent(userID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap, requiredSecrets); err != nil {
+	if err := f.designer.SaveAgent(workspaceID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap, requiredSecrets); err != nil {
 		return "", false, "", fmt.Errorf("save agent: %w", err)
 	}
 
 	// Remove test artifacts (downloaded files, scratch probes, run outputs) from the live
 	// agent dir now that the agent is saved. Artifacts persist through StateVerifying so
 	// the user can see real test output as proof; this is the post-approval cleanup.
-	cleanupTestArtifacts(AgentDir(f.designer.agentsDir, userID, agentIDSnap))
+	cleanupTestArtifacts(AgentDir(f.designer.agentsDir, workspaceID, agentIDSnap))
 
 	// Auto-create schedule if coder embedded a suggested cron expression.
 	scheduleMsg := ""
@@ -1205,7 +1205,7 @@ func (f *Flow) saveAndFinish(ctx context.Context, userID, agentMD string, tools 
 			_ = f.db.UpsertAgentSchedule(&db.AgentSchedule{
 				ID:        uuid.New().String(),
 				AgentID:   agentIDSnap,
-				UserID:    userID,
+				WorkspaceID:    workspaceID,
 				CronExpr:  cronExpr,
 				NextRunAt: &nextRun,
 				Enabled:   true,
@@ -1215,7 +1215,7 @@ func (f *Flow) saveAndFinish(ctx context.Context, userID, agentMD string, tools 
 	}
 
 	f.mu.Lock()
-	delete(f.sessions, userID)
+	delete(f.sessions, workspaceID)
 	f.mu.Unlock()
 
 	return fmt.Sprintf(
@@ -1231,9 +1231,9 @@ func (f *Flow) saveAndFinish(ctx context.Context, userID, agentMD string, tools 
 // schedule row's ID — never minting a new one, since agent_id has no unique
 // constraint and a fresh ID would create a duplicate, double-firing schedule), and
 // "none"/invalid where a schedule previously existed removes it.
-func (f *Flow) updateAndFinish(ctx context.Context, userID, agentMD string, tools map[string]string) (string, bool, string, error) {
+func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string, tools map[string]string) (string, bool, string, error) {
 	f.mu.Lock()
-	sess := f.sessions[userID]
+	sess := f.sessions[workspaceID]
 	agentIDSnap := sess.AgentID
 	agentNameSnap := sess.AgentName
 	skillRefs := sess.Skills
@@ -1248,18 +1248,18 @@ func (f *Flow) updateAndFinish(ctx context.Context, userID, agentMD string, tool
 		skillsSnap = []string{}
 	}
 
-	if err := f.designer.UpdateAgent(userID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap, requiredSecrets); err != nil {
+	if err := f.designer.UpdateAgent(workspaceID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap, requiredSecrets); err != nil {
 		return "", false, "", fmt.Errorf("update agent: %w", err)
 	}
 
 	// Remove any test artifacts left in the live agent dir post-save. For edits the
 	// staging dir is already gone; this cleans root-level scratch from the live dir.
-	cleanupTestArtifacts(AgentDir(f.designer.agentsDir, userID, agentIDSnap))
+	cleanupTestArtifacts(AgentDir(f.designer.agentsDir, workspaceID, agentIDSnap))
 
-	scheduleMsg := reconcileScheduleOnSave(f.db, userID, agentIDSnap, agentMD)
+	scheduleMsg := reconcileScheduleOnSave(f.db, workspaceID, agentIDSnap, agentMD)
 
 	f.mu.Lock()
-	delete(f.sessions, userID)
+	delete(f.sessions, workspaceID)
 	f.mu.Unlock()
 
 	return fmt.Sprintf(
@@ -1275,7 +1275,7 @@ func (f *Flow) updateAndFinish(ctx context.Context, userID, agentMD string, tool
 // ID here would insert a duplicate row and fire the agent twice per tick — and
 // deletes the row outright when the (now-reconciled) line says "none"/invalid and a
 // schedule previously existed.
-func reconcileScheduleOnSave(database dbDesignStore, userID, agentID, agentMD string) string {
+func reconcileScheduleOnSave(database dbDesignStore, workspaceID, agentID, agentMD string) string {
 	if database == nil {
 		return ""
 	}
@@ -1295,7 +1295,7 @@ func reconcileScheduleOnSave(database dbDesignStore, userID, agentID, agentMD st
 		_ = database.UpsertAgentSchedule(&db.AgentSchedule{
 			ID:        schedID,
 			AgentID:   agentID,
-			UserID:    userID,
+			WorkspaceID:    workspaceID,
 			CronExpr:  cronExpr,
 			NextRunAt: &nextRun,
 			Enabled:   true,
@@ -1415,7 +1415,7 @@ func isVerifyApproval(input string) bool {
 
 // ─── Skills helpers ───────────────────────────────────────────────────────────
 
-func (f *Flow) loadSkillNames(userID string) []prompts.SkillRef {
+func (f *Flow) loadSkillNames(workspaceID string) []prompts.SkillRef {
 	// Core skills are always-on for every user — always available to the designer.
 	refs := make([]prompts.SkillRef, 0, 16)
 	for _, s := range skilllibrary.LoadBundled() {
@@ -1424,7 +1424,7 @@ func (f *Flow) loadSkillNames(userID string) []prompts.SkillRef {
 	if f.db == nil {
 		return refs
 	}
-	skills, _ := f.db.ListSkills(userID)
+	skills, _ := f.db.ListSkills(workspaceID)
 	for _, s := range skills {
 		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description})
 	}
@@ -1570,11 +1570,11 @@ func cutSkillProse(s string) string {
 	return s
 }
 
-func (f *Flow) loadConnectedPlatforms(userID string) []string {
+func (f *Flow) loadConnectedPlatforms(workspaceID string) []string {
 	if f.db == nil {
 		return nil
 	}
-	conns, _ := f.db.ListUserPlatformConnections(userID)
+	conns, _ := f.db.ListWorkspacePlatformConnections(workspaceID)
 	out := make([]string, 0, len(conns))
 	for _, c := range conns {
 		out = append(out, c.Platform)
@@ -1583,30 +1583,30 @@ func (f *Flow) loadConnectedPlatforms(userID string) []string {
 }
 
 // loadUserProfile returns the rendered "[User profile]" context block for
-// userID, or "" if no db is attached or no profile fields are set.
-func (f *Flow) loadUserProfile(userID string) string {
+// workspaceID, or "" if no db is attached or no profile fields are set.
+func (f *Flow) loadUserProfile(workspaceID string) string {
 	if f.db == nil {
 		return ""
 	}
-	return profile.Load(f.db, userID).ContextString()
+	return profile.Load(f.db, workspaceID).ContextString()
 }
 
 // loadComposioEnabled returns true if the user has stored a COMPOSIO_API_KEY secret.
 // Uses a presence-only check so no master password is required.
-func (f *Flow) loadComposioEnabled(userID string) bool {
+func (f *Flow) loadComposioEnabled(workspaceID string) bool {
 	if f.db == nil {
 		return false
 	}
-	ok, _ := f.db.SecretExists(userID, "COMPOSIO_API_KEY")
+	ok, _ := f.db.SecretExists(workspaceID, "COMPOSIO_API_KEY")
 	return ok
 }
 
 // loadUserMemory returns saved memory entries as a bullet list, or "" if none.
-func (f *Flow) loadUserMemory(userID string) string {
+func (f *Flow) loadUserMemory(workspaceID string) string {
 	if f.memStore == nil {
 		return ""
 	}
-	mem, _ := f.memStore.ContextString(userID)
+	mem, _ := f.memStore.ContextString(workspaceID)
 	return mem
 }
 

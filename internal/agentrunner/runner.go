@@ -37,7 +37,7 @@ type SendFunc func(msg string)
 // RunInput describes one agent execution request.
 type RunInput struct {
 	AgentID    string
-	UserID     string
+	WorkspaceID     string
 	Trigger    string // "chat", "cron", "manual"
 	MasterPw   string // user's master password for secret decryption
 	SendOutput SendFunc
@@ -52,20 +52,23 @@ type RunInput struct {
 
 // memoryStore is satisfied by *memory.Store — kept local to avoid the import.
 type memoryStore interface {
-	ContextString(userID string) (string, error)
+	ContextString(workspaceID string) (string, error)
 }
 
 // Runner executes agents.
 type Runner struct {
 	db        *db.DB
 	systemKey []byte
-	agentsDir string // vaults base: <data>/vaults/ (agent dirs at <base>/<userID>/agents/<agentID>)
+	agentsDir string // vaults base: <data>/vaults/ (agent dirs at <base>/<workspaceID>/agents/<agentID>)
 	homesDir  string // per-user home dirs root (for per-user sandbox binding)
 	dataDir   string // root data dir (blacklisted inside sandbox)
 	coderSvc  *coder.Coder
-	skillsDir string           // vaults base: <data>/vaults (skills at <base>/<userID>/skills/<name>)
-	memStore  memoryStore      // optional; nil = no memory injected
-	reflector *vault.Reflector // optional; mirrors runs into the user's vault
+	// coderFactory, when set, builds the coder for a given workspace honoring the
+	// workspace's inlined coder config. When nil (or it returns nil), coderSvc is used.
+	coderFactory func(workspaceID string) *coder.Coder
+	skillsDir    string           // vaults base: <data>/vaults (skills at <base>/<workspaceID>/skills/<name>)
+	memStore     memoryStore      // optional; nil = no memory injected
+	reflector    *vault.Reflector // optional; mirrors runs into the user's vault
 }
 
 // New creates a Runner.
@@ -79,6 +82,26 @@ func New(database *db.DB, systemKey []byte, agentsDir, homesDir, dataDir string,
 		coderSvc:  coderSvc,
 		skillsDir: skillsDir,
 	}
+}
+
+// WithCoderFactory wires a per-workspace coder factory so each workspace's agent
+// runs use that workspace's configured coder (binary + backend + timeout) instead
+// of a single shared default. Without it, runs used the system default coder and
+// ignored the assignment (the pre-refactor gap this fixes).
+func (r *Runner) WithCoderFactory(f func(workspaceID string) *coder.Coder) *Runner {
+	r.coderFactory = f
+	return r
+}
+
+// coderForWorkspace returns the coder to use for a workspace: the factory's result
+// when configured, otherwise the shared default.
+func (r *Runner) coderForWorkspace(workspaceID string) *coder.Coder {
+	if r.coderFactory != nil {
+		if c := r.coderFactory(workspaceID); c != nil {
+			return c
+		}
+	}
+	return r.coderSvc
 }
 
 // WithMemory attaches a memory store so saved user facts are injected into agent run prompts.
@@ -103,11 +126,11 @@ func (r *Runner) Run(ctx context.Context, input RunInput) error {
 	if err != nil {
 		return fmt.Errorf("load agent: %w", err)
 	}
-	if agent.UserID != input.UserID {
+	if agent.WorkspaceID != input.WorkspaceID {
 		return fmt.Errorf("agent not found")
 	}
 
-	manifest, _ := agentdesigner.LoadManifest(r.agentsDir, input.UserID, input.AgentID)
+	manifest, _ := agentdesigner.LoadManifest(r.agentsDir, input.WorkspaceID, input.AgentID)
 	if manifest == nil {
 		manifest = &agentdesigner.AgentManifest{ID: agent.ID, Name: agent.Name}
 	}
@@ -116,14 +139,14 @@ func (r *Runner) Run(ctx context.Context, input RunInput) error {
 }
 
 // RunByName looks up an agent by name and runs it.
-func (r *Runner) RunByName(ctx context.Context, userID, agentName, masterPw string, send SendFunc) error {
-	agent, err := r.db.GetAgentByName(userID, agentName)
+func (r *Runner) RunByName(ctx context.Context, workspaceID, agentName, masterPw string, send SendFunc) error {
+	agent, err := r.db.GetAgentByName(workspaceID, agentName)
 	if err != nil {
 		return fmt.Errorf("agent %q not found", agentName)
 	}
 	return r.Run(ctx, RunInput{
 		AgentID:    agent.ID,
-		UserID:     userID,
+		WorkspaceID:     workspaceID,
 		Trigger:    "chat",
 		MasterPw:   masterPw,
 		SendOutput: send,
@@ -134,7 +157,7 @@ func (r *Runner) RunByName(ctx context.Context, userID, agentName, masterPw stri
 // returns the joined [CHAT] lines. Used by the agent designer to verify an agent
 // works before committing it to disk/DB. Returns ("", nil) if the agent produces
 // no [CHAT] output; returns ("", err) if the coder subprocess fails.
-func (r *Runner) TestRunFromContent(ctx context.Context, userID, agentMD string, tools map[string]string) (string, error) {
+func (r *Runner) TestRunFromContent(ctx context.Context, workspaceID, agentMD string, tools map[string]string) (string, error) {
 	tmpDir, err := os.MkdirTemp("", "agent-test-*")
 	if err != nil {
 		return "", fmt.Errorf("create temp dir: %w", err)
@@ -154,17 +177,18 @@ func (r *Runner) TestRunFromContent(ctx context.Context, userID, agentMD string,
 		}
 	}
 
+	testCoder := r.coderForWorkspace(workspaceID)
 	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
 		AgentMD:     agentMD,
 		StateJSON:   "{}",
-		ChatApps:    r.loadChatApps(userID),
-		BackendType: r.backendType(),
+		ChatApps:    r.loadChatApps(workspaceID),
+		BackendType: backendTypeOf(testCoder),
 	})
 
-	if r.coderSvc == nil {
+	if testCoder == nil {
 		return "", fmt.Errorf("no coder service configured")
 	}
-	result, err := r.coderSvc.WithDir(tmpDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").Generate(ctx, userID, prompt)
+	result, err := testCoder.WithDir(tmpDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").Generate(ctx, workspaceID, prompt)
 	if err != nil {
 		return "", err
 	}
@@ -189,10 +213,10 @@ type coderRunContext struct {
 }
 
 func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *agentdesigner.AgentManifest, input RunInput) error {
-	agentDir := agentdesigner.AgentDir(r.agentsDir, input.UserID, input.AgentID)
+	agentDir := agentdesigner.AgentDir(r.agentsDir, input.WorkspaceID, input.AgentID)
 
 	// Read AGENT.md instructions (fall back to CLAUDE.md for legacy agents).
-	agentMD, err := os.ReadFile(agentdesigner.AgentDescPath(r.agentsDir, input.UserID, input.AgentID))
+	agentMD, err := os.ReadFile(agentdesigner.AgentDescPath(r.agentsDir, input.WorkspaceID, input.AgentID))
 	if err != nil {
 		legacyPath := filepath.Join(agentDir, "CLAUDE.md")
 		agentMD, err = os.ReadFile(legacyPath)
@@ -210,13 +234,13 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	// Load skills context. The available pool is core skills (always-on, embedded)
 	// plus the user's own installed/created skills. The agent's DECLARED skills come
 	// from the agent_skills DB table (the source of truth), not from AGENT.md.
-	allSkills, _ := r.db.ListSkills(input.UserID)
+	allSkills, _ := r.db.ListSkills(input.WorkspaceID)
 	declaredSkills, _ := r.db.ListAgentSkillNames(agent.ID)
-	declaredContent, _ := r.loadDeclaredSkillContent(input.UserID, declaredSkills)
+	declaredContent, _ := r.loadDeclaredSkillContent(input.WorkspaceID, declaredSkills)
 
 	var userMemory string
 	if r.memStore != nil {
-		userMemory, _ = r.memStore.ContextString(input.UserID)
+		userMemory, _ = r.memStore.ContextString(input.WorkspaceID)
 	}
 
 	skillRefs := make([]prompts.SkillRef, 0, len(allSkills)+8)
@@ -227,9 +251,13 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		skillRefs = append(skillRefs, prompts.SkillRef{Name: sk.Name, Description: sk.Description})
 	}
 
-	homeDir := filepath.Join(r.homesDir, input.UserID)
-	vaultRoot := filepath.Join(r.agentsDir, input.UserID)
-	skillEnv := prompts.SkillEnvBlock(r.resolveSkillBins(input.UserID, homeDir, declaredSkills, declaredContent), homeDir, vaultRoot)
+	homeDir := filepath.Join(r.homesDir, input.WorkspaceID)
+	vaultRoot := filepath.Join(r.agentsDir, input.WorkspaceID)
+	skillEnv := prompts.SkillEnvBlock(r.resolveSkillBins(input.WorkspaceID, homeDir, declaredSkills, declaredContent), homeDir, vaultRoot)
+
+	// Resolve the workspace's configured coder up front so both the prompt's backend
+	// description and the actual execution use the same (correct) coder.
+	baseCoder := r.coderForWorkspace(input.WorkspaceID)
 
 	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
 		AgentMD:         string(agentMD),
@@ -241,21 +269,24 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		SkillEnv:        skillEnv,
 		VaultRoot:       vaultRoot,
 		AgentDir:        agentDir,
-		ChatApps:        r.loadChatApps(input.UserID),
-		BackendType:     r.backendType(),
+		ChatApps:        r.loadChatApps(input.WorkspaceID),
+		BackendType:     backendTypeOf(baseCoder),
 	})
 
+	if baseCoder == nil {
+		return fmt.Errorf("no coder service configured")
+	}
 	// Run inside the agent's own directory (not the shared per-user home) so
 	// tools/*.py and state.json resolve correctly and runs never see other
 	// agents' files. Pre-approve the tools agents need so the subprocess never
 	// blocks on interactive permission prompts (--setting-sources "" suppresses
 	// all settings).
-	coderSvc := r.coderSvc.WithDir(agentDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit")
+	coderSvc := baseCoder.WithDir(agentDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit")
 
 	// Inject user secrets as env vars when master password is available.
 	if input.MasterPw != "" {
-		if user, err := r.db.GetUserByID(input.UserID); err == nil {
-			svc := secrets.New(r.db, input.UserID, input.MasterPw, user.SecretsSalt)
+		if user, err := r.db.GetWorkspaceByID(input.WorkspaceID); err == nil {
+			svc := secrets.New(r.db, input.WorkspaceID, input.MasterPw, user.SecretsSalt)
 			if allSecrets, err := svc.GetAll(ctx); err == nil && len(allSecrets) > 0 {
 				coderSvc = coderSvc.WithExtraEnv(allSecrets)
 			}
@@ -266,7 +297,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	startedAt := time.Now().UTC()
 	if err := r.db.CreateAgentRun(&db.AgentRun{
 		ID: runID, AgentID: input.AgentID,
-		UserID: input.UserID, Trigger: input.Trigger,
+		WorkspaceID: input.WorkspaceID, Trigger: input.Trigger,
 	}); err != nil {
 		return fmt.Errorf("create run record: %w", err)
 	}
@@ -333,7 +364,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 
 // reflectRun mirrors the completed run into the user's vault as a markdown note.
 func (r *Runner) reflectRun(input RunInput, agent *db.Agent, runID string, exitCode int, startedAt time.Time, rctx *coderRunContext) {
-	if err := r.reflector.ReflectAgentRun(input.UserID, vault.RunNote{
+	if err := r.reflector.ReflectAgentRun(input.WorkspaceID, vault.RunNote{
 		RunID:      runID,
 		AgentID:    input.AgentID,
 		AgentName:  agent.Name,
@@ -380,7 +411,7 @@ func (r *Runner) runCoderTurns(
 			break
 		}
 
-		result, err := coderSvc.Generate(ctx, input.UserID, prompt)
+		result, err := coderSvc.Generate(ctx, input.WorkspaceID, prompt)
 		rctx.turnsUsed++
 		if err != nil {
 			return fmt.Errorf("coder generate: %w", err)
@@ -434,7 +465,7 @@ func (r *Runner) runCoderTurns(
 				continue
 			}
 
-			child, err := r.db.GetAgentByName(input.UserID, callName)
+			child, err := r.db.GetAgentByName(input.WorkspaceID, callName)
 			if err != nil {
 				warn := fmt.Sprintf("skipping [CALL: %s]: agent not found", callName)
 				rctx.warnings = append(rctx.warnings, warn)
@@ -451,7 +482,7 @@ func (r *Runner) runCoderTurns(
 
 			childInput := RunInput{
 				AgentID:  child.ID,
-				UserID:   input.UserID,
+				WorkspaceID:   input.WorkspaceID,
 				Trigger:  input.Trigger,
 				MasterPw: input.MasterPw,
 				SendOutput: func(msg string) {
@@ -740,7 +771,7 @@ func saveState(agentDir string, state map[string]interface{}) error {
 
 // ─── Skills loading ───────────────────────────────────────────────────────────
 
-func (r *Runner) loadDeclaredSkillContent(userID string, skillNames []string) (map[string]string, error) {
+func (r *Runner) loadDeclaredSkillContent(workspaceID string, skillNames []string) (map[string]string, error) {
 	result := make(map[string]string)
 	for _, name := range skillNames {
 		// Core skills are always-on and embedded — read from the binary, not disk.
@@ -748,10 +779,10 @@ func (r *Runner) loadDeclaredSkillContent(userID string, skillNames []string) (m
 			result[name] = content
 			continue
 		}
-		skillMD := filepath.Join(skillstore.SkillDir(r.skillsDir, userID, name), "SKILL.md")
+		skillMD := filepath.Join(skillstore.SkillDir(r.skillsDir, workspaceID, name), "SKILL.md")
 		data, err := os.ReadFile(skillMD)
 		if err != nil {
-			slog.Warn("agentrunner: skill not found on disk", "user_id", userID, "skill", name)
+			slog.Warn("agentrunner: skill not found on disk", "user_id", workspaceID, "skill", name)
 			continue
 		}
 		result[name] = string(data)
@@ -764,7 +795,7 @@ func (r *Runner) loadDeclaredSkillContent(userID string, skillNames []string) (m
 // can tell the agent where to invoke each tool. A tool is "resolved" if it exists
 // at $HOME/.local/bin/<bin> or on PATH; otherwise Path is empty (the env block
 // instructs the agent to install it via the cli-tool-installer skill).
-func (r *Runner) resolveSkillBins(userID, homeDir string, declaredSkills []string, declaredContent map[string]string) []prompts.SkillBin {
+func (r *Runner) resolveSkillBins(workspaceID, homeDir string, declaredSkills []string, declaredContent map[string]string) []prompts.SkillBin {
 	localBin := filepath.Join(homeDir, ".local", "bin")
 	var out []prompts.SkillBin
 	seen := map[string]bool{}
@@ -803,11 +834,11 @@ func (r *Runner) resolveSkillBins(userID, homeDir string, declaredSkills []strin
 // loadChatApps returns the chat apps connected by this user as prompts.ChatAppInfo
 // (name + commands), so the runtime coder prompt knows where [CHAT] output lands and
 // what the user can type. Returns nil if the DB is unavailable or none are connected.
-func (r *Runner) loadChatApps(userID string) []prompts.ChatAppInfo {
+func (r *Runner) loadChatApps(workspaceID string) []prompts.ChatAppInfo {
 	if r.db == nil {
 		return nil
 	}
-	conns, err := r.db.ListUserPlatformConnections(userID)
+	conns, err := r.db.ListWorkspacePlatformConnections(workspaceID)
 	if err != nil {
 		return nil
 	}
@@ -818,11 +849,11 @@ func (r *Runner) loadChatApps(userID string) []prompts.ChatAppInfo {
 	return prompts.ChatAppsForPlatforms(platforms)
 }
 
-// backendType returns the prompts-level backend capability for this runner's coder, so
-// the runtime prompt can describe how the coder acts on files (full coder vs basic model).
-func (r *Runner) backendType() string {
-	if r.coderSvc == nil {
+// backendTypeOf returns the prompts-level backend capability for a coder, so the
+// runtime prompt can describe how the coder acts on files (full coder vs basic model).
+func backendTypeOf(c *coder.Coder) string {
+	if c == nil {
 		return prompts.BackendFullCoder
 	}
-	return prompts.MapCoderBackend(r.coderSvc.BackendType())
+	return prompts.MapCoderBackend(c.BackendType())
 }

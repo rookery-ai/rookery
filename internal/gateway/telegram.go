@@ -12,12 +12,12 @@ import (
 // TelegramGateway is one user's Telegram bot instance.
 type TelegramGateway struct {
 	bot         *telebot.Bot
-	ownerUserID string
+	ownerWorkspaceID string
 	manager     *GatewayManager
 }
 
 // NewTelegram creates but does not start a Telegram bot adapter.
-func NewTelegram(token, ownerUserID string, manager *GatewayManager) (*TelegramGateway, error) {
+func NewTelegram(token, ownerWorkspaceID string, manager *GatewayManager) (*TelegramGateway, error) {
 	settings := telebot.Settings{
 		Token:  token,
 		Poller: &telebot.LongPoller{Timeout: 10 * time.Second},
@@ -28,13 +28,13 @@ func NewTelegram(token, ownerUserID string, manager *GatewayManager) (*TelegramG
 	}
 	return &TelegramGateway{
 		bot:         bot,
-		ownerUserID: ownerUserID,
+		ownerWorkspaceID: ownerWorkspaceID,
 		manager:     manager,
 	}, nil
 }
 
 func (g *TelegramGateway) Platform() string    { return "telegram" }
-func (g *TelegramGateway) OwnerUserID() string { return g.ownerUserID }
+func (g *TelegramGateway) OwnerUserID() string { return g.ownerWorkspaceID }
 
 // Start registers handlers and runs the bot's long-poll loop.
 // Blocks until ctx is cancelled or the bot stops.
@@ -139,7 +139,7 @@ func (g *TelegramGateway) handle(tc telebot.Context) error {
 	msg := Message{
 		Platform:       "telegram",
 		PlatformUserID: strconv.FormatInt(chat.ID, 10),
-		UserID:         g.ownerUserID,
+		WorkspaceID:         g.ownerWorkspaceID,
 		Text:           tc.Text(),
 		MessageID:      tc.Message().ID,
 	}

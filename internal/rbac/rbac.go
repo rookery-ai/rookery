@@ -11,8 +11,8 @@ const (
 )
 
 // CanPerform returns true if the user has been explicitly granted the given permission.
-func CanPerform(database *db.DB, userID, permission string) bool {
-	perms, err := database.ListPermissions(userID)
+func CanPerform(database *db.DB, workspaceID, permission string) bool {
+	perms, err := database.ListPermissions(workspaceID)
 	if err != nil {
 		return false
 	}

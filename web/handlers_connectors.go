@@ -22,7 +22,7 @@ type connectorsPageData struct {
 var supportedPlatforms = []string{"telegram", "discord"}
 
 func (s *Server) showConnectors(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	var connections []*db.PlatformConnection
 	for _, p := range supportedPlatforms {
 		if conn, err := s.db.GetPlatformConnection(u.ID, p); err == nil {
@@ -36,8 +36,47 @@ func (s *Server) showConnectors(c echo.Context) error {
 	})
 }
 
+// saveConnector validates + encrypts + persists a platform token for a workspace,
+// stores the bot username, and (re)starts the gateway adapter. Shared by the
+// connectors page and the setup wizard's connector step. botStartErr is non-nil
+// only when the token saved but the bot failed to start (non-fatal).
+func (s *Server) saveConnector(workspaceID, platform, token string) (botUsername string, botStartErr error, err error) {
+	if platform == "telegram" {
+		botUsername, err = testTelegramToken(token)
+		if err != nil {
+			return "", nil, fmt.Errorf("invalid bot token: %w", err)
+		}
+	}
+
+	encToken, err := gateway.EncryptToken(token, s.systemKey)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to encrypt token: %w", err)
+	}
+
+	if err := s.db.UpsertPlatformConnection(&db.PlatformConnection{
+		ID:             uuid.New().String(),
+		WorkspaceID:    workspaceID,
+		Platform:       platform,
+		EncryptedToken: encToken,
+		Active:         true,
+	}); err != nil {
+		return "", nil, fmt.Errorf("failed to save connector: %w", err)
+	}
+
+	if botUsername != "" {
+		_ = s.db.SetSetting(workspaceID, "telegram_bot_username", "@"+botUsername)
+	}
+
+	if s.gateway != nil {
+		if e := s.gateway.Reload(context.Background(), workspaceID, platform); e != nil {
+			botStartErr = e // token is valid but bot may be temporarily unreachable
+		}
+	}
+	return botUsername, botStartErr, nil
+}
+
 func (s *Server) handleSaveConnector(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	platform := c.FormValue("platform")
 	token := c.FormValue("token")
 
@@ -47,54 +86,18 @@ func (s *Server) handleSaveConnector(c echo.Context) error {
 		return s.renderConnectors(c, u, p)
 	}
 
-	// Validate token before saving (fail early with a clear error message).
-	var botUsername string
-	if platform == "telegram" {
-		var valErr error
-		botUsername, valErr = testTelegramToken(token)
-		if valErr != nil {
-			p := s.page(c, "Chat Connectors")
-			p.Error = "Invalid bot token: " + valErr.Error()
-			return s.renderConnectors(c, u, p)
-		}
-	}
-
-	encToken, err := gateway.EncryptToken(token, s.systemKey)
+	botUsername, botStartErr, err := s.saveConnector(u.ID, platform, token)
 	if err != nil {
 		p := s.page(c, "Chat Connectors")
-		p.Error = "Failed to encrypt token: " + err.Error()
+		p.Error = err.Error()
 		return s.renderConnectors(c, u, p)
 	}
-
-	conn := &db.PlatformConnection{
-		ID:             uuid.New().String(),
-		UserID:         u.ID,
-		Platform:       platform,
-		EncryptedToken: encToken,
-		Active:         true,
-	}
-
-	if err := s.db.UpsertPlatformConnection(conn); err != nil {
-		p := s.page(c, "Chat Connectors")
-		p.Error = "Failed to save connector: " + err.Error()
-		return s.renderConnectors(c, u, p)
-	}
-
 	s.audit.Log(u.ID, "connect_platform", "platform:"+platform, "", c.RealIP())
 
-	// Store bot username for display in setup wizard step 4.
-	if botUsername != "" {
-		_ = s.db.SetSetting(u.ID, "telegram_bot_username", "@"+botUsername)
-	}
-
-	// Start the gateway adapter for this user (if manager is available).
-	if s.gateway != nil {
-		if err := s.gateway.Reload(context.Background(), u.ID, platform); err != nil {
-			// Non-fatal: token is valid but bot may be temporarily unreachable.
-			p := s.page(c, "Chat Connectors")
-			p.Error = "Connector saved but bot failed to start: " + err.Error()
-			return s.renderConnectors(c, u, p)
-		}
+	if botStartErr != nil {
+		p := s.page(c, "Chat Connectors")
+		p.Error = "Connector saved but bot failed to start: " + botStartErr.Error()
+		return s.renderConnectors(c, u, p)
 	}
 
 	// Allow setup wizard to redirect back to its flow.
@@ -116,7 +119,7 @@ func (s *Server) handleSaveConnector(c echo.Context) error {
 }
 
 func (s *Server) handleDeleteConnector(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	platform := c.Param("platform")
 
 	if s.gateway != nil {
@@ -135,7 +138,7 @@ func (s *Server) handleDeleteConnector(c echo.Context) error {
 }
 
 func (s *Server) handleTestConnector(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	platform := c.Param("platform")
 
 	conn, err := s.db.GetPlatformConnection(u.ID, platform)
@@ -191,7 +194,7 @@ func testTelegramToken(token string) (string, error) {
 	return result.Result.Username, nil
 }
 
-func (s *Server) renderConnectors(c echo.Context, u *db.User, p *pageData) error {
+func (s *Server) renderConnectors(c echo.Context, u *db.Workspace, p *pageData) error {
 	var connections []*db.PlatformConnection
 	for _, pl := range supportedPlatforms {
 		if conn, err := s.db.GetPlatformConnection(u.ID, pl); err == nil {

@@ -62,7 +62,7 @@ func (s DesignState) String() string {
 
 // DesignSession holds all state for one in-progress skill-creation session.
 type DesignSession struct {
-	UserID    string
+	WorkspaceID    string
 	SkillName string
 	State     DesignState
 	History   []db.ChatMessage // full conversation fed to the coder on every turn
@@ -95,40 +95,40 @@ type DesignSession struct {
 
 // dbStore is the subset of *db.DB the flow needs.
 type dbStore interface {
-	ListSkills(userID string) ([]*db.Skill, error)
-	ListUserPlatformConnections(userID string) ([]*db.PlatformConnection, error)
-	GetSetting(userID, key string) (string, error)
-	SecretExists(userID, name string) (bool, error)
+	ListSkills(workspaceID string) ([]*db.Skill, error)
+	ListWorkspacePlatformConnections(workspaceID string) ([]*db.PlatformConnection, error)
+	GetSetting(workspaceID, key string) (string, error)
+	SecretExists(workspaceID, name string) (bool, error)
 
 	UpsertSkillDraft(d *db.SkillDraft) error
-	GetSkillDraft(userID string) (*db.SkillDraft, error)
-	DeleteSkillDraft(userID string) error
+	GetSkillDraft(workspaceID string) (*db.SkillDraft, error)
+	DeleteSkillDraft(workspaceID string) error
 }
 
 type memoryStore interface {
-	ContextString(userID string) (string, error)
+	ContextString(workspaceID string) (string, error)
 }
 
 type kbLister interface {
-	NotePaths(userID string) []string
+	NotePaths(workspaceID string) []string
 }
 
 // Flow manages per-user skill-design sessions and drives the FSM. Safe for
 // concurrent use.
 type Flow struct {
 	mu       sync.Mutex
-	sessions map[string]*DesignSession // keyed by userID
+	sessions map[string]*DesignSession // keyed by workspaceID
 
-	coderFor      func(userID string) *coder.Coder
+	coderFor      func(workspaceID string) *coder.Coder
 	saver         *SkillSaver
 	db            dbStore
 	memStore      memoryStore
 	kb            kbLister
-	secretsLoader func(ctx context.Context, userID string) (map[string]string, error)
+	secretsLoader func(ctx context.Context, workspaceID string) (map[string]string, error)
 }
 
-// NewSkillFlow creates a Flow. coderResolver maps a userID to the right coder.
-func NewSkillFlow(coderResolver func(userID string) *coder.Coder, saver *SkillSaver) *Flow {
+// NewSkillFlow creates a Flow. coderResolver maps a workspaceID to the right coder.
+func NewSkillFlow(coderResolver func(workspaceID string) *coder.Coder, saver *SkillSaver) *Flow {
 	return &Flow{
 		sessions: make(map[string]*DesignSession),
 		coderFor: coderResolver,
@@ -139,36 +139,36 @@ func NewSkillFlow(coderResolver func(userID string) *coder.Coder, saver *SkillSa
 func (f *Flow) WithDB(database dbStore) *Flow        { f.db = database; return f }
 func (f *Flow) WithMemory(m memoryStore) *Flow       { f.memStore = m; return f }
 func (f *Flow) WithKBLister(k kbLister) *Flow        { f.kb = k; return f }
-func (f *Flow) WithSecretsLoader(fn func(ctx context.Context, userID string) (map[string]string, error)) *Flow {
+func (f *Flow) WithSecretsLoader(fn func(ctx context.Context, workspaceID string) (map[string]string, error)) *Flow {
 	f.secretsLoader = fn
 	return f
 }
 
 // StartDesign is the web path: creates a session already in StateDesigning with
 // the user's first message and returns the coder's first response.
-func (f *Flow) StartDesign(ctx context.Context, userID, skillName, firstMessage string) (string, error) {
+func (f *Flow) StartDesign(ctx context.Context, workspaceID, skillName, firstMessage string) (string, error) {
 	f.mu.Lock()
-	if _, exists := f.sessions[userID]; exists {
+	if _, exists := f.sessions[workspaceID]; exists {
 		f.mu.Unlock()
 		return "", fmt.Errorf("a skill design session is already active; cancel it first")
 	}
-	if err := f.validateSkillName(userID, skillName); err != nil {
+	if err := f.validateSkillName(workspaceID, skillName); err != nil {
 		f.mu.Unlock()
 		return "", err
 	}
-	sess := f.newSession(userID, skillName, StateDesigning)
-	f.sessions[userID] = sess
+	sess := f.newSession(workspaceID, skillName, StateDesigning)
+	f.sessions[workspaceID] = sess
 	f.mu.Unlock()
 
-	return f.callCoder(ctx, userID, firstMessage)
+	return f.callCoder(ctx, workspaceID, firstMessage)
 }
 
 // Step advances the session by one user message and returns the assistant reply.
 // The (string, bool, string, error) return mirrors agentdesigner.Flow.Step for a
 // consistent handler shape: reply text, done flag, created-resource-id, error.
-func (f *Flow) Step(ctx context.Context, userID, input string) (string, bool, string, error) {
+func (f *Flow) Step(ctx context.Context, workspaceID, input string) (string, bool, string, error) {
 	f.mu.Lock()
-	sess, ok := f.sessions[userID]
+	sess, ok := f.sessions[workspaceID]
 	if !ok {
 		f.mu.Unlock()
 		return "", false, "", fmt.Errorf("no active skill design session; start one first")
@@ -178,13 +178,13 @@ func (f *Flow) Step(ctx context.Context, userID, input string) (string, bool, st
 
 	switch state {
 	case StateAwaitingResume:
-		return f.stepAwaitingResume(ctx, userID, input)
+		return f.stepAwaitingResume(ctx, workspaceID, input)
 	case StateDescribing:
-		return f.stepDescribing(ctx, userID, input)
+		return f.stepDescribing(ctx, workspaceID, input)
 	case StateDesigning:
-		return f.stepDesigning(ctx, userID, input)
+		return f.stepDesigning(ctx, workspaceID, input)
 	case StateVerifying:
-		return f.stepVerifying(ctx, userID, input)
+		return f.stepVerifying(ctx, workspaceID, input)
 	default:
 		return "", false, "", fmt.Errorf("unexpected state: %s", state)
 	}
@@ -193,35 +193,35 @@ func (f *Flow) Step(ctx context.Context, userID, input string) (string, bool, st
 // Cancel removes the user's active session without saving. If a coder subprocess
 // is running, its context is cancelled. The progress channel is closed by
 // runGeneration when it observes the cancellation (sole closer, like agentdesigner).
-func (f *Flow) Cancel(userID string) {
+func (f *Flow) Cancel(workspaceID string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	sess, ok := f.sessions[userID]
+	sess, ok := f.sessions[workspaceID]
 	if !ok {
 		return
 	}
 	if sess.cancelGenerate != nil {
 		sess.cancelGenerate()
 	}
-	delete(f.sessions, userID)
+	delete(f.sessions, workspaceID)
 }
 
 // SetProgressHandler stores a function called with milestone messages during the
 // next generation (Telegram placeholder updates).
-func (f *Flow) SetProgressHandler(userID string, fn func(string)) {
+func (f *Flow) SetProgressHandler(workspaceID string, fn func(string)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if sess, ok := f.sessions[userID]; ok {
+	if sess, ok := f.sessions[workspaceID]; ok {
 		sess.progressFunc = fn
 	}
 }
 
 // GetProgressChan returns the buffered progress channel for the user's active
 // session (Web SSE). Returns (nil, false) if no session / no channel.
-func (f *Flow) GetProgressChan(userID string) (<-chan string, bool) {
+func (f *Flow) GetProgressChan(workspaceID string) (<-chan string, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	sess, ok := f.sessions[userID]
+	sess, ok := f.sessions[workspaceID]
 	if !ok || sess.progressCh == nil {
 		return nil, false
 	}
@@ -229,17 +229,17 @@ func (f *Flow) GetProgressChan(userID string) (<-chan string, bool) {
 }
 
 // GetSession returns the user's active session, or nil.
-func (f *Flow) GetSession(userID string) *DesignSession {
+func (f *Flow) GetSession(workspaceID string) *DesignSession {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.sessions[userID]
+	return f.sessions[workspaceID]
 }
 
 // ─── FSM step handlers ────────────────────────────────────────────────────────
 
-func (f *Flow) stepAwaitingResume(ctx context.Context, userID, msg string) (string, bool, string, error) {
+func (f *Flow) stepAwaitingResume(ctx context.Context, workspaceID, msg string) (string, bool, string, error) {
 	f.mu.Lock()
-	sess := f.sessions[userID]
+	sess := f.sessions[workspaceID]
 	pendingName := ""
 	if sess != nil {
 		pendingName = sess.pendingName
@@ -247,37 +247,37 @@ func (f *Flow) stepAwaitingResume(ctx context.Context, userID, msg string) (stri
 	f.mu.Unlock()
 
 	if strings.TrimSpace(strings.ToLower(msg)) == "resume" {
-		return ret4(f.ResumeDraft(ctx, userID))
+		return ret4(f.ResumeDraft(ctx, workspaceID))
 	}
 	// "new" or anything else → dismiss the draft and start fresh.
-	_ = f.DismissDraft(userID)
+	_ = f.DismissDraft(workspaceID)
 	f.mu.Lock()
-	delete(f.sessions, userID) // drop the awaiting-resume shell so Start paths don't refuse
+	delete(f.sessions, workspaceID) // drop the awaiting-resume shell so Start paths don't refuse
 	f.mu.Unlock()
 	if pendingName == "" {
 		pendingName = "my-skill"
 	}
-	return ret4(f.StartDesign(ctx, userID, pendingName, "Let's build a skill."))
+	return ret4(f.StartDesign(ctx, workspaceID, pendingName, "Let's build a skill."))
 }
 
-func (f *Flow) stepDescribing(ctx context.Context, userID, description string) (string, bool, string, error) {
+func (f *Flow) stepDescribing(ctx context.Context, workspaceID, description string) (string, bool, string, error) {
 	f.mu.Lock()
-	sess := f.sessions[userID]
+	sess := f.sessions[workspaceID]
 	sess.State = StateDesigning
 	f.mu.Unlock()
-	return ret4(f.callCoder(ctx, userID, description))
+	return ret4(f.callCoder(ctx, workspaceID, description))
 }
 
-func (f *Flow) stepDesigning(ctx context.Context, userID, input string) (string, bool, string, error) {
+func (f *Flow) stepDesigning(ctx context.Context, workspaceID, input string) (string, bool, string, error) {
 	if isApproval(input) {
-		return f.runGeneration(ctx, userID)
+		return f.runGeneration(ctx, workspaceID)
 	}
-	return ret4(f.callCoder(ctx, userID, input))
+	return ret4(f.callCoder(ctx, workspaceID, input))
 }
 
-func (f *Flow) stepVerifying(ctx context.Context, userID, input string) (string, bool, string, error) {
+func (f *Flow) stepVerifying(ctx context.Context, workspaceID, input string) (string, bool, string, error) {
 	if isVerifyApproval(input) {
-		return f.finalizeSkill(ctx, userID)
+		return f.finalizeSkill(ctx, workspaceID)
 	}
 	// User wants changes — return to designing but KEEP the generated skill in
 	// memory (PendingSkillMD/Scripts/VettingReport): the next approve re-generates
@@ -286,10 +286,10 @@ func (f *Flow) stepVerifying(ctx context.Context, userID, input string) (string,
 	// which lost the generated skill if the user's reply wasn't an exact
 	// "approve" (e.g. "yes", "save", "ok", "approve!").
 	f.mu.Lock()
-	sess := f.sessions[userID]
+	sess := f.sessions[workspaceID]
 	sess.State = StateDesigning
 	f.mu.Unlock()
-	return ret4(f.callCoder(ctx, userID, input))
+	return ret4(f.callCoder(ctx, workspaceID, input))
 }
 
 // ret4 adapts a (string, error) into the step-handler 4-tuple (reply, done, id, err).
@@ -297,10 +297,10 @@ func ret4(s string, err error) (string, bool, string, error) { return s, false, 
 
 // ─── Coder conversation ───────────────────────────────────────────────────────
 
-func (f *Flow) callCoder(ctx context.Context, userID, userMessage string) (string, error) {
+func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (string, error) {
 	f.mu.Lock()
-	sess := f.sessions[userID]
-	coderSvc := f.coderFor(userID)
+	sess := f.sessions[workspaceID]
+	coderSvc := f.coderFor(workspaceID)
 	f.mu.Unlock()
 
 	if coderSvc == nil {
@@ -318,7 +318,7 @@ func (f *Flow) callCoder(ctx context.Context, userID, userMessage string) (strin
 		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
 	})
 
-	result, err := coderSvc.WithNoTools().Chat(ctx, userID, sess.History, systemPrompt, userMessage)
+	result, err := coderSvc.WithNoTools().Chat(ctx, workspaceID, sess.History, systemPrompt, userMessage)
 
 	// Persist the draft on every terminal path so the conversation survives a
 	// page navigation or server restart — even when the coder is rate-limited
@@ -351,10 +351,10 @@ func (f *Flow) callCoder(ctx context.Context, userID, userMessage string) (strin
 
 // ─── Generation (triggered by approval) ──────────────────────────────────────
 
-func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, string, error) {
+func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, bool, string, error) {
 	f.mu.Lock()
-	sess := f.sessions[userID]
-	coderSvc := f.coderFor(userID)
+	sess := f.sessions[workspaceID]
+	coderSvc := f.coderFor(workspaceID)
 	skillNameSnap := sess.SkillName
 	historySnap := make([]db.ChatMessage, len(sess.History))
 	copy(historySnap, sess.History)
@@ -389,7 +389,7 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 	closeProgress := func() {
 		progressOnce.Do(func() {
 			f.mu.Lock()
-			if s, ok := f.sessions[userID]; ok {
+			if s, ok := f.sessions[workspaceID]; ok {
 				s.progressCh = nil
 			}
 			f.mu.Unlock()
@@ -404,9 +404,9 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 
 	notify("⚙️ Preparing skill workspace…")
 
-	// Staging dir under the user's vault: <vault>/<userID>/skills/.staging-<name>/.
+	// Staging dir under the user's vault: <vault>/<workspaceID>/skills/.staging-<name>/.
 	// The live skill folder is only written in finalizeSkill after approval.
-	stagingDir := skillstore.SkillDir(f.saver.SkillsDir(), userID, ".staging-"+skillNameSnap)
+	stagingDir := skillstore.SkillDir(f.saver.SkillsDir(), workspaceID, ".staging-"+skillNameSnap)
 	_ = os.RemoveAll(stagingDir)
 	if err := os.MkdirAll(filepath.Join(stagingDir, "scripts"), 0o750); err != nil {
 		closeProgress()
@@ -421,11 +421,11 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 
 	generationCoder := coderSvc.WithDir(stagingDir).WithAllowedTools("Bash,Write,Edit,Read")
 	if f.secretsLoader != nil {
-		if env, err := f.secretsLoader(genCtx, userID); err == nil && len(env) > 0 {
+		if env, err := f.secretsLoader(genCtx, workspaceID); err == nil && len(env) > 0 {
 			generationCoder = generationCoder.WithExtraEnv(env)
 		}
 	}
-	result, err := generationCoder.Generate(genCtx, userID, prompt)
+	result, err := generationCoder.Generate(genCtx, workspaceID, prompt)
 	if err != nil {
 		cleanupStaging()
 		closeProgress()
@@ -483,7 +483,7 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 	testOut := f.runTests(stagingDir, scripts, parseTestOutput(result.Text))
 
 	notify("🔒 Security vetting the skill…")
-	report := f.vetSkill(ctx, userID, coderSvc, skillNameSnap, skillMD, scripts)
+	report := f.vetSkill(ctx, workspaceID, coderSvc, skillNameSnap, skillMD, scripts)
 
 	closeProgress()
 
@@ -491,7 +491,7 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 	// design state to revise — the skill is NOT saved.
 	if vettingBlocksSave(report) {
 		f.mu.Lock()
-		sess = f.sessions[userID]
+		sess = f.sessions[workspaceID]
 		sess.State = StateDesigning
 		sess.PendingSkillMD = skillMD
 		sess.PendingScripts = scripts
@@ -507,7 +507,7 @@ func (f *Flow) runGeneration(ctx context.Context, userID string) (string, bool, 
 
 	// Verified + vetted — move to StateVerifying for the user to approve or revise.
 	f.mu.Lock()
-	sess = f.sessions[userID]
+	sess = f.sessions[workspaceID]
 	sess.State = StateVerifying
 	sess.PendingSkillMD = skillMD
 	sess.PendingScripts = scripts
@@ -555,7 +555,7 @@ func (f *Flow) runTests(stagingDir string, scripts map[string]string, coderTestO
 // vetSkill runs a second, text-only coder call with the skill-vetter core skill
 // as the system prompt over the generated SKILL.md + every script. Returns the
 // vetting report text ("" if the audit itself failed — treated as non-blocking).
-func (f *Flow) vetSkill(ctx context.Context, userID string, coderSvc *coder.Coder, skillName, skillMD string, scripts map[string]string) string {
+func (f *Flow) vetSkill(ctx context.Context, workspaceID string, coderSvc *coder.Coder, skillName, skillMD string, scripts map[string]string) string {
 	if coderSvc == nil {
 		return ""
 	}
@@ -563,9 +563,9 @@ func (f *Flow) vetSkill(ctx context.Context, userID string, coderSvc *coder.Code
 	// The vetter protocol is the system prompt; the skill-under-review + task is
 	// the user message (vetterBody passed empty to avoid double-injecting it).
 	userMsg := prompts.BuildSkillVettingPrompt(skillName, skillMD, scripts, "")
-	result, err := coderSvc.WithNoTools().Chat(ctx, userID, nil, vetterBody, userMsg)
+	result, err := coderSvc.WithNoTools().Chat(ctx, workspaceID, nil, vetterBody, userMsg)
 	if err != nil {
-		slog.Warn("skilldesigner: vetting coder call failed", "user_id", userID, "skill", skillName, "err", err)
+		slog.Warn("skilldesigner: vetting coder call failed", "user_id", workspaceID, "skill", skillName, "err", err)
 		return "⚠️ Security vetting could not run automatically. Review the skill manually before approving."
 	}
 	return strings.TrimSpace(result.Text)
@@ -597,9 +597,9 @@ func vettingBlocksSave(report string) bool {
 }
 
 // finalizeSkill saves the pending skill to the user's vault + DB and cleans up.
-func (f *Flow) finalizeSkill(ctx context.Context, userID string) (string, bool, string, error) {
+func (f *Flow) finalizeSkill(ctx context.Context, workspaceID string) (string, bool, string, error) {
 	f.mu.Lock()
-	sess := f.sessions[userID]
+	sess := f.sessions[workspaceID]
 	skillMD := sess.PendingSkillMD
 	scripts := sess.PendingScripts
 	skillName := sess.SkillName
@@ -619,15 +619,15 @@ func (f *Flow) finalizeSkill(ctx context.Context, userID string) (string, bool, 
 		description = "User-created skill: " + name
 	}
 
-	skill, err := f.saver.SaveSkill(userID, name, description, skillMD, scripts)
+	skill, err := f.saver.SaveSkill(workspaceID, name, description, skillMD, scripts)
 	if err != nil {
 		return "", false, "", fmt.Errorf("save skill: %w", err)
 	}
 
 	// Saved — drop the draft and the session.
-	f.deleteDraft(userID)
+	f.deleteDraft(workspaceID)
 	f.mu.Lock()
-	delete(f.sessions, userID)
+	delete(f.sessions, workspaceID)
 	f.mu.Unlock()
 
 	return fmt.Sprintf("✅ Saved skill **%s**. You can now assign it to agents (it'll appear in their available skills).", name), true, skill.ID, nil
@@ -648,7 +648,7 @@ func (f *Flow) saveDraft(sess *DesignSession) {
 		state = "verifying"
 	}
 	_ = f.db.UpsertSkillDraft(&db.SkillDraft{
-		UserID:             sess.UserID,
+		WorkspaceID:             sess.WorkspaceID,
 		SkillName:          sess.SkillName,
 		State:              state,
 		HistoryJSON:        string(histJSON),
@@ -659,19 +659,19 @@ func (f *Flow) saveDraft(sess *DesignSession) {
 	})
 }
 
-func (f *Flow) deleteDraft(userID string) {
+func (f *Flow) deleteDraft(workspaceID string) {
 	if f.db == nil {
 		return
 	}
-	_ = f.db.DeleteSkillDraft(userID)
+	_ = f.db.DeleteSkillDraft(workspaceID)
 }
 
 // HasDraft returns the user's skill draft if one exists and is not expired.
-func (f *Flow) HasDraft(userID string) *db.SkillDraft {
+func (f *Flow) HasDraft(workspaceID string) *db.SkillDraft {
 	if f.db == nil {
 		return nil
 	}
-	draft, err := f.db.GetSkillDraft(userID)
+	draft, err := f.db.GetSkillDraft(workspaceID)
 	if err != nil {
 		return nil
 	}
@@ -679,28 +679,28 @@ func (f *Flow) HasDraft(userID string) *db.SkillDraft {
 }
 
 // DismissDraft deletes the user's draft and any orphaned staging directory.
-func (f *Flow) DismissDraft(userID string) error {
+func (f *Flow) DismissDraft(workspaceID string) error {
 	if f.db == nil {
 		return nil
 	}
-	draft := f.HasDraft(userID)
+	draft := f.HasDraft(workspaceID)
 	if draft == nil {
 		return nil
 	}
-	_ = f.db.DeleteSkillDraft(userID)
+	_ = f.db.DeleteSkillDraft(workspaceID)
 	if draft.SkillName != "" {
-		_ = os.RemoveAll(skillstore.SkillDir(f.saver.SkillsDir(), userID, ".staging-"+draft.SkillName))
+		_ = os.RemoveAll(skillstore.SkillDir(f.saver.SkillsDir(), workspaceID, ".staging-"+draft.SkillName))
 	}
 	return nil
 }
 
 // OfferDraftResume creates a minimal session in StateAwaitingResume and returns
 // the prompt to send the user.
-func (f *Flow) OfferDraftResume(userID, pendingSkillName string, draft *db.SkillDraft) (string, error) {
+func (f *Flow) OfferDraftResume(workspaceID, pendingSkillName string, draft *db.SkillDraft) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.sessions[userID] = &DesignSession{
-		UserID:      userID,
+	f.sessions[workspaceID] = &DesignSession{
+		WorkspaceID:      workspaceID,
 		SkillName:   draft.SkillName,
 		State:       StateAwaitingResume,
 		pendingName: pendingSkillName,
@@ -715,16 +715,16 @@ func (f *Flow) OfferDraftResume(userID, pendingSkillName string, draft *db.Skill
 // ResumeDraft reconstructs a session from the saved draft and returns the message
 // to show the user. Derived context (Skills, platforms, profile, memory) is
 // reloaded. The coder is never re-run on resume.
-func (f *Flow) ResumeDraft(ctx context.Context, userID string) (string, error) {
+func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string) (string, error) {
 	if f.db == nil {
 		return "", fmt.Errorf("no database configured")
 	}
-	draft, err := f.db.GetSkillDraft(userID)
+	draft, err := f.db.GetSkillDraft(workspaceID)
 	if err != nil {
 		return "", fmt.Errorf("no skill draft to resume")
 	}
 
-	sess := f.newSession(userID, draft.SkillName, StateDesigning)
+	sess := f.newSession(workspaceID, draft.SkillName, StateDesigning)
 	_ = json.Unmarshal([]byte(draft.HistoryJSON), &sess.History)
 	if draft.PendingScriptsJSON != "" {
 		_ = json.Unmarshal([]byte(draft.PendingScriptsJSON), &sess.PendingScripts)
@@ -739,7 +739,7 @@ func (f *Flow) ResumeDraft(ctx context.Context, userID string) (string, error) {
 	}
 
 	f.mu.Lock()
-	f.sessions[userID] = sess
+	f.sessions[workspaceID] = sess
 	f.mu.Unlock()
 
 	if sess.State == StateVerifying {
@@ -760,23 +760,23 @@ func (f *Flow) ResumeDraft(ctx context.Context, userID string) (string, error) {
 
 // ─── session + context loading ────────────────────────────────────────────────
 
-func (f *Flow) newSession(userID, skillName string, state DesignState) *DesignSession {
+func (f *Flow) newSession(workspaceID, skillName string, state DesignState) *DesignSession {
 	return &DesignSession{
-		UserID:             userID,
+		WorkspaceID:             workspaceID,
 		SkillName:          skillName,
 		State:              state,
-		Skills:             f.loadSkillNames(userID),
-		ConnectedPlatforms: f.loadConnectedPlatforms(userID),
-		UserProfile:        f.loadUserProfile(userID),
-		UserMemory:         f.loadUserMemory(userID),
-		ComposioEnabled:    f.loadComposioEnabled(userID),
-		KBManifest:        f.loadKBManifest(userID),
+		Skills:             f.loadSkillNames(workspaceID),
+		ConnectedPlatforms: f.loadConnectedPlatforms(workspaceID),
+		UserProfile:        f.loadUserProfile(workspaceID),
+		UserMemory:         f.loadUserMemory(workspaceID),
+		ComposioEnabled:    f.loadComposioEnabled(workspaceID),
+		KBManifest:        f.loadKBManifest(workspaceID),
 		CreatedAt:          time.Now(),
 	}
 }
 
 // validateSkillName rejects reserved core-skill names and empty/invalid names.
-func (f *Flow) validateSkillName(userID, name string) error {
+func (f *Flow) validateSkillName(workspaceID, name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("give the skill a name first")
@@ -787,7 +787,7 @@ func (f *Flow) validateSkillName(userID, name string) error {
 	return nil
 }
 
-func (f *Flow) loadSkillNames(userID string) []prompts.SkillRef {
+func (f *Flow) loadSkillNames(workspaceID string) []prompts.SkillRef {
 	refs := make([]prompts.SkillRef, 0, 16)
 	for _, s := range skilllibrary.LoadBundled() {
 		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description})
@@ -795,18 +795,18 @@ func (f *Flow) loadSkillNames(userID string) []prompts.SkillRef {
 	if f.db == nil {
 		return refs
 	}
-	skills, _ := f.db.ListSkills(userID)
+	skills, _ := f.db.ListSkills(workspaceID)
 	for _, s := range skills {
 		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description})
 	}
 	return refs
 }
 
-func (f *Flow) loadConnectedPlatforms(userID string) []string {
+func (f *Flow) loadConnectedPlatforms(workspaceID string) []string {
 	if f.db == nil {
 		return nil
 	}
-	conns, err := f.db.ListUserPlatformConnections(userID)
+	conns, err := f.db.ListWorkspacePlatformConnections(workspaceID)
 	if err != nil {
 		return nil
 	}
@@ -817,38 +817,38 @@ func (f *Flow) loadConnectedPlatforms(userID string) []string {
 	return out
 }
 
-func (f *Flow) loadUserProfile(userID string) string {
+func (f *Flow) loadUserProfile(workspaceID string) string {
 	if f.db == nil {
 		return ""
 	}
-	p := profile.Load(f.db, userID)
+	p := profile.Load(f.db, workspaceID)
 	return p.ContextString()
 }
 
-func (f *Flow) loadUserMemory(userID string) string {
+func (f *Flow) loadUserMemory(workspaceID string) string {
 	if f.memStore == nil {
 		return ""
 	}
-	mem, err := f.memStore.ContextString(userID)
+	mem, err := f.memStore.ContextString(workspaceID)
 	if err != nil {
 		return ""
 	}
 	return mem
 }
 
-func (f *Flow) loadComposioEnabled(userID string) bool {
+func (f *Flow) loadComposioEnabled(workspaceID string) bool {
 	if f.db == nil {
 		return false
 	}
-	ok, err := f.db.SecretExists(userID, "COMPOSIO_API_KEY")
+	ok, err := f.db.SecretExists(workspaceID, "COMPOSIO_API_KEY")
 	return err == nil && ok
 }
 
-func (f *Flow) loadKBManifest(userID string) string {
+func (f *Flow) loadKBManifest(workspaceID string) string {
 	if f.kb == nil {
 		return ""
 	}
-	paths := f.kb.NotePaths(userID)
+	paths := f.kb.NotePaths(workspaceID)
 	if len(paths) == 0 {
 		return ""
 	}

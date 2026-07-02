@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/db"
 )
 
@@ -35,7 +36,7 @@ func TestSetupTemplateRenders(t *testing.T) {
 }
 
 // TestSettingsTemplateRenders renders dashboard/settings.html with a fully
-// populated settingsPageData (all profile fields) and a real *db.User so the
+// populated settingsPageData (all profile fields) and a real *db.Workspace so the
 // navbar's {{if .User}} branch is exercised too.
 func TestSettingsTemplateRenders(t *testing.T) {
 	tmpl, err := parseTemplates("templates")
@@ -45,7 +46,7 @@ func TestSettingsTemplateRenders(t *testing.T) {
 	cases := []string{"Balanced", "Sarcastic but helpful", "", "Short & concise"}
 	for _, tone := range cases {
 		data := &settingsPageData{
-			pageData:    &pageData{Title: "Settings", User: &db.User{Username: "ilija", Role: "user"}},
+			pageData:    &pageData{Title: "Settings", Workspace: &db.Workspace{Name: "ilija", CoderBin: "claude"}},
 			DisplayName: "Ilija",
 			Email:       "ilija@example.com",
 			Location:    "Skopje, North Macedonia",
@@ -53,6 +54,9 @@ func TestSettingsTemplateRenders(t *testing.T) {
 			Tone:        tone,
 			Language:    "English",
 			Notes:       "Prefers concise replies",
+			// Non-empty so the coder-picker <select> branch is exercised (guards the
+			// coder_bin selected-option logic from an execute-time type error).
+			DetectedCoders: []coder.Installed{{Name: "Claude Code", Bin: "claude", BackendType: "claude"}},
 		}
 		var buf bytes.Buffer
 		if err := tmpl.ExecuteTemplate(&buf, "dashboard/settings.html", data); err != nil {
@@ -72,7 +76,7 @@ func TestAgentTemplatesRenderWithRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseTemplates: %v", err)
 	}
-	user := &db.User{Username: "ilija", Role: "user"}
+	user := &db.Workspace{Name: "ilija"}
 	agent := &db.Agent{ID: "a1", Name: "Payroll Finder", Description: "finds payroll emails", Active: true, CreatedAt: time.Now()}
 
 	// (Running, LiveRun): idle, scheduled-only (badge but no SSE), live manual run.
@@ -80,7 +84,7 @@ func TestAgentTemplatesRenderWithRunning(t *testing.T) {
 	for _, tc := range cases {
 		// List page.
 		listData := &agentsPageData{
-			pageData: &pageData{Title: "My Agents", User: user},
+			pageData: &pageData{Title: "My Agents", Workspace: user},
 			Agents:   []*db.Agent{agent},
 			Running:  map[string]bool{"a1": tc.running},
 		}
@@ -91,7 +95,7 @@ func TestAgentTemplatesRenderWithRunning(t *testing.T) {
 
 		// Detail page.
 		detailData := &agentDetailData{
-			pageData: &pageData{Title: "Agent", User: user},
+			pageData: &pageData{Title: "Agent", Workspace: user},
 			Agent:    agent,
 			Running:  tc.running,
 			LiveRun:  tc.live,

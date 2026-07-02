@@ -17,7 +17,7 @@ const pollInterval = 60 * time.Second
 type Sender interface {
 	// SendToUser looks up the user's connected platform and sends the message.
 	// It picks the first active platform gateway for the user.
-	SendToUser(userID, text string) error
+	SendToUser(workspaceID, text string) error
 }
 
 // Service polls for due reminders and sends them.
@@ -77,15 +77,15 @@ func (s *Service) tick() {
 	for _, r := range reminders {
 		// Skip users with no platform connected — they have no way to receive
 		// the reminder. Keep it pending so it fires once they link a platform.
-		if !s.db.HasPlatformIdentity(r.UserID) {
+		if !s.db.HasPlatformIdentity(r.WorkspaceID) {
 			slog.Warn("reminder: skipping — user has no platform connected",
-				"reminder_id", r.ID, "user_id", r.UserID)
+				"reminder_id", r.ID, "user_id", r.WorkspaceID)
 			continue
 		}
 
 		msg := s.buildReminderMessage(ctx, r, now)
-		if err := s.sender.SendToUser(r.UserID, msg); err != nil {
-			slog.Error("reminder: send failed", "reminder_id", r.ID, "user_id", r.UserID, "err", err)
+		if err := s.sender.SendToUser(r.WorkspaceID, msg); err != nil {
+			slog.Error("reminder: send failed", "reminder_id", r.ID, "user_id", r.WorkspaceID, "err", err)
 			continue
 		}
 		if err := s.db.MarkReminderSent(r.ID); err != nil {
@@ -108,7 +108,7 @@ func (s *Service) buildReminderMessage(ctx context.Context, r *db.Reminder, now 
 	}
 
 	// Search the vault with the reminder text to surface related notes.
-	hits, err := s.searcher.Search(ctx, r.UserID, r.Message)
+	hits, err := s.searcher.Search(ctx, r.WorkspaceID, r.Message)
 	if err != nil || len(hits) == 0 {
 		return msg
 	}

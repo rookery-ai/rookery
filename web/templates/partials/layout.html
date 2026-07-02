@@ -124,20 +124,35 @@ document.addEventListener('DOMContentLoaded', function() {
       <li><a href="/dashboard/kb">Knowledge</a></li>
     </ul>
   </div>
-  <div class="navbar-end">
-    {{if .User}}
+  <div class="navbar-end gap-2">
+    {{if .Workspace}}
+    <span class="badge badge-primary badge-outline gap-1 hidden sm:inline-flex" title="Active workspace">
+      <span class="opacity-70">workspace:</span> <span class="font-semibold">{{.Workspace.Name}}</span>
+    </span>
     <div class="dropdown dropdown-end">
-      <div tabindex="0" role="button" class="btn btn-ghost btn-circle avatar placeholder" aria-label="User menu">
+      <div tabindex="0" role="button" class="btn btn-ghost btn-circle avatar placeholder" aria-label="Workspace menu">
         <div class="bg-primary text-primary-content rounded-full w-9 ring-2 ring-primary/30">
-          <span class="text-sm font-bold">{{initials .User.Username}}</span>
+          <span class="text-sm font-bold">{{initials .Workspace.Name}}</span>
         </div>
       </div>
-      <ul tabindex="0" class="menu menu-sm dropdown-content mt-3 z-[1] p-2 shadow-xl bg-base-100 rounded-box w-52 border border-base-200">
-        <li class="menu-title"><span>{{.User.Username}}</span></li>
-        {{if eq .User.Role "admin"}}
-        <li><a href="/admin">🛡 Admin Panel</a></li>
+      <ul tabindex="0" class="menu menu-sm dropdown-content mt-3 z-[1] p-2 shadow-xl bg-base-100 rounded-box w-60 border border-base-200">
+        <li class="menu-title"><span>{{.Workspace.Name}}</span></li>
+        <li><a href="/dashboard/settings">⚙️ Workspace Settings</a></li>
+        {{if .Workspaces}}
+        <li class="menu-title mt-1"><span>Switch workspace</span></li>
+        {{range .Workspaces}}
+          {{if ne .ID $.Workspace.ID}}
+          <li><a href="/admin/workspaces/{{.ID}}">🔄 {{.Name}}</a></li>
+          {{end}}
         {{end}}
-        <li><a href="/dashboard/settings">⚙️ Settings</a></li>
+        {{end}}
+        <li class="divider my-0.5"></li>
+        <li>
+          <form method="POST" action="/workspace/leave">
+            <button type="submit" class="w-full text-left">🚪 Leave workspace</button>
+          </form>
+        </li>
+        <li><a href="/admin">🛡 Manage workspaces</a></li>
         <li><a href="/logout" class="text-error">Sign Out</a></li>
       </ul>
     </div>
@@ -157,8 +172,7 @@ document.addEventListener('DOMContentLoaded', function() {
       </div>
       <ul tabindex="0" class="menu menu-sm dropdown-content mt-3 z-[1] p-2 shadow-xl bg-base-100 rounded-box w-56 border border-base-200">
         <li><a href="/admin">⚡ Overview</a></li>
-        <li><a href="/admin/users">👥 Users</a></li>
-        <li><a href="/admin/coders">🤖 Coders</a></li>
+        <li><a href="/admin/workspaces">🗂 Workspaces</a></li>
         <li><a href="/admin/settings">⚙️ System Settings</a></li>
         <li><a href="/admin/audit">📋 Audit Log</a></li>
         <li class="divider my-0.5"></li>
@@ -167,13 +181,12 @@ document.addEventListener('DOMContentLoaded', function() {
     </div>
     <a href="/admin" class="btn btn-ghost text-lg font-bold tracking-tight px-2">
       ⚡ Simple Agents
-      <span class="badge badge-primary badge-sm ml-1">Admin</span>
+      <span class="badge badge-primary badge-sm ml-1">Owner</span>
     </a>
   </div>
   <div class="navbar-center hidden lg:flex">
     <ul class="menu menu-horizontal px-1 gap-0.5 text-sm">
-      <li><a href="/admin/users">Users</a></li>
-      <li><a href="/admin/coders">Coders</a></li>
+      <li><a href="/admin/workspaces">Workspaces</a></li>
       <li><a href="/admin/settings">Settings</a></li>
       <li><a href="/admin/audit">Audit Log</a></li>
     </ul>

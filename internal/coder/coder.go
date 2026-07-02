@@ -148,10 +148,10 @@ func New(bin string, timeout time.Duration, homesDir, dataDir string) *Coder {
 }
 
 // Generate sends prompt to the coder binary and returns the text response.
-func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, error) {
+func (c *Coder) Generate(ctx context.Context, workspaceID, prompt string) (*Result, error) {
 	backend := c.selectBackend()
 
-	userDir, err := c.ensureUserHome(userID, backend)
+	userDir, err := c.ensureUserHome(workspaceID, backend)
 	if err != nil {
 		return nil, fmt.Errorf("ensure user home: %w", err)
 	}
@@ -171,7 +171,7 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 	// The coder binary is installed in the operator's real home directory.
 	// Per-user isolation is handled by the backend via HOME + config-dir overrides,
 	// and (when enabled) hardened by Landlock filesystem confinement.
-	cmd := c.buildCommand(ctx, userID, args, env, runDir)
+	cmd := c.buildCommand(ctx, workspaceID, args, env, runDir)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -208,7 +208,7 @@ func (c *Coder) Generate(ctx context.Context, userID, prompt string) (*Result, e
 var ErrUsageLimit = errors.New("coder usage limit reached")
 
 // Chat sends a conversational message to claude with optional history.
-func (c *Coder) Chat(ctx context.Context, userID string, history []db.ChatMessage, systemContext, userMessage string) (*Result, error) {
+func (c *Coder) Chat(ctx context.Context, workspaceID string, history []db.ChatMessage, systemContext, userMessage string) (*Result, error) {
 	var sb strings.Builder
 	if systemContext != "" {
 		sb.WriteString("[Persistent user context]\n")
@@ -232,7 +232,7 @@ func (c *Coder) Chat(ctx context.Context, userID string, history []db.ChatMessag
 	} else {
 		sb.WriteString(userMessage)
 	}
-	return c.Generate(ctx, userID, sb.String())
+	return c.Generate(ctx, workspaceID, sb.String())
 }
 
 // Ping checks that the claude binary is reachable and returns its version string.
@@ -249,8 +249,8 @@ func (c *Coder) Ping(ctx context.Context) (string, error) {
 }
 
 // UserHomeDir returns the per-user HOME path without creating it.
-func (c *Coder) UserHomeDir(userID string) string {
-	return filepath.Join(c.homesDir, safeID(userID))
+func (c *Coder) UserHomeDir(workspaceID string) string {
+	return filepath.Join(c.homesDir, safeID(workspaceID))
 }
 
 // ─── Internal ─────────────────────────────────────────────────────────────────
@@ -263,11 +263,11 @@ func (c *Coder) UserHomeDir(userID string) string {
 // In both cases the child is placed in its own process group and killed
 // group-wide on ctx cancel/timeout, so the agent's descendants (bash, python, …)
 // are not orphaned when a run is aborted.
-func (c *Coder) buildCommand(ctx context.Context, userID string, args, env []string, runDir string) *exec.Cmd {
+func (c *Coder) buildCommand(ctx context.Context, workspaceID string, args, env []string, runDir string) *exec.Cmd {
 	var cmd *exec.Cmd
 
 	if c.sandbox && c.selfExe != "" && sandbox.Supported() {
-		rw := []string{c.UserHomeDir(userID), runDir}
+		rw := []string{c.UserHomeDir(workspaceID), runDir}
 		// The user's whole vault is read+write for agent runs and chat: agents
 		// record/persist knowledge into the KB (notes, memory, user files), and
 		// the chat edits notes on demand. Landlock is additive, so a path present
@@ -275,14 +275,14 @@ func (c *Coder) buildCommand(ctx context.Context, userID string, args, env []str
 		// net read+write. Still confined to this user's vault + HOME — the DB,
 		// config, and other users' vaults stay out of reach.
 		if c.dataDir != "" {
-			rw = append(rw, filepath.Join(c.dataDir, "vaults", userID))
+			rw = append(rw, filepath.Join(c.dataDir, "vaults", workspaceID))
 		}
 		spec := sandbox.Spec{
 			Command:        append([]string{c.bin}, args...),
 			Dir:            runDir,
 			Env:            env,
 			ReadWritePaths: dedupePaths(rw...),
-			ReadOnlyPaths:  c.sandboxReadOnlyPaths(userID),
+			ReadOnlyPaths:  c.sandboxReadOnlyPaths(workspaceID),
 			ReadWriteFiles: sandbox.SystemReadWriteFiles(),
 			NoFile:         8192,
 		}
@@ -314,11 +314,11 @@ func (c *Coder) buildCommand(ctx context.Context, userID string, args, env []str
 // binary's own install directory (often under the operator's HOME, e.g.
 // ~/.local/share/claude/...), and the user's own vault root (so an agent can
 // READ its whole knowledge base while only its own agent dir is writable).
-func (c *Coder) sandboxReadOnlyPaths(userID string) []string {
+func (c *Coder) sandboxReadOnlyPaths(workspaceID string) []string {
 	ro := sandbox.SystemReadOnlyPaths()
 	ro = append(ro, c.sandboxBinaryDirs()...)
 	if c.dataDir != "" {
-		ro = append(ro, filepath.Join(c.dataDir, "vaults", userID))
+		ro = append(ro, filepath.Join(c.dataDir, "vaults", workspaceID))
 	}
 	return ro
 }
@@ -373,8 +373,8 @@ func (c *Coder) selectBackend() CoderBackend {
 	return &genericCLIBackend{}
 }
 
-func (c *Coder) ensureUserHome(userID string, backend CoderBackend) (string, error) {
-	dir := c.UserHomeDir(userID)
+func (c *Coder) ensureUserHome(workspaceID string, backend CoderBackend) (string, error) {
+	dir := c.UserHomeDir(workspaceID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}

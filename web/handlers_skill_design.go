@@ -18,7 +18,7 @@ type newSkillPageData struct {
 
 // GET /dashboard/skills/new
 func (s *Server) showNewSkill(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	var draft *db.SkillDraft
 	if s.skillFlow != nil {
 		draft = s.skillFlow.HasDraft(u.ID)
@@ -34,7 +34,7 @@ func (s *Server) showNewSkill(c echo.Context) error {
 // Body: {"name": "my-skill", "message": "..."}
 // Response: {"response": "...", "done": false} or {"response": "...", "done": true, "skill_id": "..."}
 func (s *Server) handleSkillDesignChat(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 
 	var req struct {
 		Name    string `json:"name"`
@@ -97,7 +97,7 @@ func (s *Server) handleSkillDesignChat(c echo.Context) error {
 
 // POST /dashboard/skills/design/cancel
 func (s *Server) handleCancelSkillDesign(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	if s.skillFlow != nil {
 		s.skillFlow.Cancel(u.ID)
 	}
@@ -106,7 +106,7 @@ func (s *Server) handleCancelSkillDesign(c echo.Context) error {
 
 // POST /dashboard/skills/design/resume
 func (s *Server) handleResumeSkillDraft(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	if s.skillFlow == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "skill designer not configured"})
 	}
@@ -140,7 +140,7 @@ func (s *Server) handleResumeSkillDraft(c echo.Context) error {
 
 // POST /dashboard/skills/design/dismiss
 func (s *Server) handleDismissSkillDraft(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	if s.skillFlow != nil {
 		_ = s.skillFlow.DismissDraft(u.ID)
 	}
@@ -150,7 +150,7 @@ func (s *Server) handleDismissSkillDraft(c echo.Context) error {
 // handleSkillDesignProgress streams skill-generation milestone events via SSE.
 // GET /dashboard/skills/design/progress
 func (s *Server) handleSkillDesignProgress(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	reqCtx := c.Request().Context()
 
 	if s.skillFlow == nil {

@@ -13,7 +13,7 @@ import (
 // to SaveAgent, and lands in the agent_skills DB table (the source of truth for the
 // agent page and runner). Core skills (no skills-table row) attach by name too.
 func TestSaveAgent_PersistsDeclaredSkillsToDB(t *testing.T) {
-	database, userID := testDB(t)
+	database, workspaceID := testDB(t)
 	agentsDir := t.TempDir()
 	agentID := uuid.New().String()
 
@@ -44,7 +44,7 @@ func TestSaveAgent_PersistsDeclaredSkillsToDB(t *testing.T) {
 	}
 
 	designer := NewDesigner(database, agentsDir)
-	if err := designer.SaveAgent(userID, agentID, "test-agent", "desc",
+	if err := designer.SaveAgent(workspaceID, agentID, "test-agent", "desc",
 		agentMD, nil, declared, nil); err != nil {
 		t.Fatalf("SaveAgent: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestSaveAgent_PersistsDeclaredSkillsToDB(t *testing.T) {
 
 	// The manifest on disk must NOT carry the skills (DB is the source of truth;
 	// AGENT.md is for the LLM).
-	m, err := LoadManifest(agentsDir, userID, agentID)
+	m, err := LoadManifest(agentsDir, workspaceID, agentID)
 	if err != nil {
 		t.Fatalf("LoadManifest: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestSaveAgent_PersistsDeclaredSkillsToDB(t *testing.T) {
 // the "# Skills:" line, no skills are attached (never "all skills"). This is the
 // regression guard for the old fallback-to-all behaviour.
 func TestSaveAgent_NoSkillsLinePersistsNothing(t *testing.T) {
-	database, userID := testDB(t)
+	database, workspaceID := testDB(t)
 	agentsDir := t.TempDir()
 	agentID := uuid.New().String()
 
@@ -106,7 +106,7 @@ func TestSaveAgent_NoSkillsLinePersistsNothing(t *testing.T) {
 	}
 
 	designer := NewDesigner(database, agentsDir)
-	if err := designer.SaveAgent(userID, agentID, "test-agent", "desc",
+	if err := designer.SaveAgent(workspaceID, agentID, "test-agent", "desc",
 		agentMD, nil, declared, nil); err != nil {
 		t.Fatalf("SaveAgent: %v", err)
 	}

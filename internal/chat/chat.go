@@ -67,7 +67,7 @@ func (s *Service) tick() {
 			slog.Error("chat service: stop chat", "id", c.ID, "err", err)
 			continue
 		}
-		slog.Info("chat service: auto-stopped idle chat", "id", c.ID, "user", c.UserID)
+		slog.Info("chat service: auto-stopped idle chat", "id", c.ID, "user", c.WorkspaceID)
 		s.reflectTranscript(c)
 	}
 }
@@ -90,14 +90,14 @@ func (s *Service) reflectTranscript(c *db.Chat) {
 			Role: m.Role, Content: m.Content, CreatedAt: m.CreatedAt,
 		})
 	}
-	if err := s.reflector.ReflectChat(c.UserID, note); err != nil {
+	if err := s.reflector.ReflectChat(c.WorkspaceID, note); err != nil {
 		slog.Warn("chat service: reflect transcript", "id", c.ID, "err", err)
 	}
 }
 
 // ContextStore is the minimal memory-store interface BuildUserContext needs.
 type ContextStore interface {
-	ContextString(userID string) (string, error)
+	ContextString(workspaceID string) (string, error)
 }
 
 // BuildUserContext assembles the always-on system context for the coder: the user's
@@ -110,20 +110,20 @@ type ContextStore interface {
 //
 // Shared by the Telegram textHandler and the web chat composer so both surfaces feed the
 // coder identical context for one-off conversational turns.
-func BuildUserContext(database *db.DB, memStore ContextStore, userID string) string {
+func BuildUserContext(database *db.DB, memStore ContextStore, workspaceID string) string {
 	var sb strings.Builder
 
-	if p := profile.Load(database, userID).ContextString(); p != "" {
+	if p := profile.Load(database, workspaceID).ContextString(); p != "" {
 		sb.WriteString(p)
 	}
 
-	if mem, err := memStore.ContextString(userID); err == nil && mem != "" {
+	if mem, err := memStore.ContextString(workspaceID); err == nil && mem != "" {
 		sb.WriteString("[User memory]\n")
 		sb.WriteString(mem)
 		sb.WriteByte('\n')
 	}
 
-	if agents, err := database.ListAgents(userID); err == nil && len(agents) > 0 {
+	if agents, err := database.ListAgents(workspaceID); err == nil && len(agents) > 0 {
 		sb.WriteString("[User's agents]\n")
 		for _, a := range agents {
 			sb.WriteString("- ")
@@ -136,7 +136,7 @@ func BuildUserContext(database *db.DB, memStore ContextStore, userID string) str
 		}
 	}
 
-	if mcpServers, err := database.ListMCPServers(userID); err == nil && len(mcpServers) > 0 {
+	if mcpServers, err := database.ListMCPServers(workspaceID); err == nil && len(mcpServers) > 0 {
 		sb.WriteString("[User's MCP tools]\n")
 		for _, s := range mcpServers {
 			if s.Enabled {

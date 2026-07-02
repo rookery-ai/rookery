@@ -13,7 +13,7 @@ type composioPageData struct {
 }
 
 func (s *Server) showComposio(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	configured, _ := s.db.SecretExists(u.ID, "COMPOSIO_API_KEY")
 	return c.Render(http.StatusOK, "dashboard/composio.html", &composioPageData{
 		pageData:   s.page(c, "External Services"),

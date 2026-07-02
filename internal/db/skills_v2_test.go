@@ -9,9 +9,9 @@ import (
 	"github.com/ilijad1/simple-agents/internal/db"
 )
 
-// TestSkillLibraryMigrationDropped verifies migration 009: the skill_library
-// table and the skills.library_slug/library_version columns are gone, and the
-// skill_drafts table exists and round-trips.
+// TestSkillLibraryMigrationDropped verifies the schema has no skill_library table
+// and no skills.library_slug/library_version columns, and that the skill_drafts
+// table exists and round-trips (keyed by workspace_id).
 func TestSkillLibraryMigrationDropped(t *testing.T) {
 	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../../migrations")
 	if err != nil {
@@ -46,13 +46,12 @@ func TestSkillLibraryMigrationDropped(t *testing.T) {
 	}
 
 	// skill_drafts must exist and round-trip.
-	userID := uuid.New().String()
-	if _, err := database.Exec("INSERT INTO users(id, username, password_hash, role, created_at) VALUES(?,?,?,'user',datetime('now'))",
-		userID, "skilldraft-tester", "x"); err != nil {
-		t.Fatalf("insert user: %v", err)
+	workspaceID := uuid.New().String()
+	if err := database.CreateWorkspace(&db.Workspace{ID: workspaceID, Name: "skilldraft-tester"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
 	}
 	draft := &db.SkillDraft{
-		UserID:         userID,
+		WorkspaceID:         workspaceID,
 		SkillName:      "my-skill",
 		State:          "designing",
 		HistoryJSON:    "[]",
@@ -63,17 +62,17 @@ func TestSkillLibraryMigrationDropped(t *testing.T) {
 	if err := database.UpsertSkillDraft(draft); err != nil {
 		t.Fatalf("upsert draft: %v", err)
 	}
-	got, err := database.GetSkillDraft(userID)
+	got, err := database.GetSkillDraft(workspaceID)
 	if err != nil {
 		t.Fatalf("get draft: %v", err)
 	}
 	if got.SkillName != "my-skill" {
 		t.Fatalf("skill name = %q", got.SkillName)
 	}
-	if err := database.DeleteSkillDraft(userID); err != nil {
+	if err := database.DeleteSkillDraft(workspaceID); err != nil {
 		t.Fatalf("delete draft: %v", err)
 	}
-	if _, err := database.GetSkillDraft(userID); err == nil {
+	if _, err := database.GetSkillDraft(workspaceID); err == nil {
 		t.Fatal("draft should be gone after delete")
 	}
 }

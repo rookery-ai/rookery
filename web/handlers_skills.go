@@ -42,7 +42,7 @@ type coreSkillData struct {
 // ── Skills list ───────────────────────────────────────────────────────────────
 
 func (s *Server) showSkills(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	skills, _ := s.db.ListSkills(u.ID)
 	var draft *db.SkillDraft
 	if s.skillFlow != nil {
@@ -74,7 +74,7 @@ func (s *Server) showCoreSkill(c echo.Context) error {
 }
 
 func (s *Server) handleCreateSkill(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 
 	renderErr := func(msg string) error {
 		p := s.page(c, "Skills")
@@ -167,15 +167,15 @@ func (s *Server) handleCreateSkill(c echo.Context) error {
 
 // inferSkillMeta calls the coder to extract name and description from SKILL.md content.
 // Returns empty strings on failure (caller should handle gracefully).
-func (s *Server) inferSkillMeta(ctx context.Context, userID, content string) (name, description string) {
-	coder := s.coderForUser(userID)
+func (s *Server) inferSkillMeta(ctx context.Context, workspaceID, content string) (name, description string) {
+	coder := s.coderForWorkspace(workspaceID)
 	if coder == nil {
 		return
 	}
 
 	prompt := prompts.BuildSkillMetaPrompt(content)
 
-	result, err := coder.Generate(ctx, userID, prompt)
+	result, err := coder.Generate(ctx, workspaceID, prompt)
 	if err != nil {
 		slog.Warn("skillstore: coder inference failed", "err", err)
 		return
@@ -204,11 +204,11 @@ func (s *Server) inferSkillMeta(ctx context.Context, userID, content string) (na
 // ── Skill detail ──────────────────────────────────────────────────────────────
 
 func (s *Server) showSkillDetail(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 
 	skill, err := s.db.GetSkill(id)
-	if err != nil || skill.UserID != u.ID {
+	if err != nil || skill.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "skill not found")
 	}
 
@@ -225,11 +225,11 @@ func (s *Server) showSkillDetail(c echo.Context) error {
 }
 
 func (s *Server) handleSaveSkill(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 
 	skill, err := s.db.GetSkill(id)
-	if err != nil || skill.UserID != u.ID {
+	if err != nil || skill.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "skill not found")
 	}
 
@@ -259,11 +259,11 @@ func (s *Server) handleSaveSkill(c echo.Context) error {
 }
 
 func (s *Server) handleDeleteSkill(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 
 	skill, err := s.db.GetSkill(id)
-	if err != nil || skill.UserID != u.ID {
+	if err != nil || skill.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "skill not found")
 	}
 
@@ -282,11 +282,11 @@ func (s *Server) handleDeleteSkill(c echo.Context) error {
 // ── Agent CLAUDE.md and skills ────────────────────────────────────────────────
 
 func (s *Server) handleSaveAgentMD(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 
 	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.UserID != u.ID {
+	if err != nil || agent.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
 
@@ -306,11 +306,11 @@ func (s *Server) handleSaveAgentMD(c echo.Context) error {
 }
 
 func (s *Server) handleSaveAgentSkills(c echo.Context) error {
-	u := c.Get("user").(*db.User)
+	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 
 	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.UserID != u.ID {
+	if err != nil || agent.WorkspaceID != u.ID {
 		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
 	}
 
@@ -355,8 +355,8 @@ func (s *Server) handleSaveAgentSkills(c echo.Context) error {
 	return s.renderAgentDetail(c, agent, u.ID, p)
 }
 
-func (s *Server) renderAgentDetailWithError(c echo.Context, agent *db.Agent, userID, msg string) error {
+func (s *Server) renderAgentDetailWithError(c echo.Context, agent *db.Agent, workspaceID, msg string) error {
 	p := s.page(c, "Agent: "+agent.Name)
 	p.Error = msg
-	return s.renderAgentDetail(c, agent, userID, p)
+	return s.renderAgentDetail(c, agent, workspaceID, p)
 }

@@ -12,9 +12,9 @@ import (
 // MigrateLegacyLayout moves any pre-vault on-disk data into per-user vaults. It
 // handles the three legacy top-level directories:
 //
-//	<data>/agents/<userID>/<agentID>   → <data>/vaults/<userID>/agents/<agentID>
-//	<data>/skills/<userID>/<name>      → <data>/vaults/<userID>/skills/<name>
-//	<data>/memory/<userID>/memory.jsonl→ <data>/vaults/<userID>/memory/<id>.md
+//	<data>/agents/<workspaceID>/<agentID>   → <data>/vaults/<workspaceID>/agents/<agentID>
+//	<data>/skills/<workspaceID>/<name>      → <data>/vaults/<workspaceID>/skills/<name>
+//	<data>/memory/<workspaceID>/memory.jsonl→ <data>/vaults/<workspaceID>/memory/<id>.md
 //
 // It is idempotent and safe to run on every startup: it acts only on legacy
 // directories that still exist, never overwrites an entry already present in the
@@ -45,25 +45,25 @@ func (v *Vault) MigrateLegacyLayout() error {
 			if !u.IsDir() {
 				continue
 			}
-			userID := u.Name()
-			_ = v.EnsureScaffold(userID)
-			jsonl := filepath.Join(legacyMemory, userID, "memory.jsonl")
-			n, err := mem.ImportJSONL(userID, jsonl)
+			workspaceID := u.Name()
+			_ = v.EnsureScaffold(workspaceID)
+			jsonl := filepath.Join(legacyMemory, workspaceID, "memory.jsonl")
+			n, err := mem.ImportJSONL(workspaceID, jsonl)
 			if err != nil {
-				slog.Warn("vault: memory import", "user", userID, "err", err)
+				slog.Warn("vault: memory import", "user", workspaceID, "err", err)
 				continue
 			}
-			slog.Info("vault: migrated memory", "user", userID, "entries", n)
+			slog.Info("vault: migrated memory", "user", workspaceID, "entries", n)
 			_ = os.Remove(jsonl)
-			_ = os.Remove(filepath.Join(legacyMemory, userID)) // removes if now empty
+			_ = os.Remove(filepath.Join(legacyMemory, workspaceID)) // removes if now empty
 		}
 		_ = os.Remove(legacyMemory) // removes if now empty
 	}
 	return nil
 }
 
-// migrateNestedDir moves every <legacyRoot>/<userID>/<leaf> directory to
-// <vault>/<userID>/<subdir>/<leaf>. Existing destinations are left untouched.
+// migrateNestedDir moves every <legacyRoot>/<workspaceID>/<leaf> directory to
+// <vault>/<workspaceID>/<subdir>/<leaf>. Existing destinations are left untouched.
 func (v *Vault) migrateNestedDir(legacyRoot, subdir string) error {
 	users, err := os.ReadDir(legacyRoot)
 	if os.IsNotExist(err) {
@@ -76,20 +76,20 @@ func (v *Vault) migrateNestedDir(legacyRoot, subdir string) error {
 		if !u.IsDir() {
 			continue
 		}
-		userID := u.Name()
-		if err := v.EnsureScaffold(userID); err != nil {
+		workspaceID := u.Name()
+		if err := v.EnsureScaffold(workspaceID); err != nil {
 			return err
 		}
-		destBase := filepath.Join(v.Root(userID), subdir)
+		destBase := filepath.Join(v.Root(workspaceID), subdir)
 		if err := os.MkdirAll(destBase, 0o750); err != nil {
 			return err
 		}
-		leaves, err := os.ReadDir(filepath.Join(legacyRoot, userID))
+		leaves, err := os.ReadDir(filepath.Join(legacyRoot, workspaceID))
 		if err != nil {
 			continue
 		}
 		for _, leaf := range leaves {
-			src := filepath.Join(legacyRoot, userID, leaf.Name())
+			src := filepath.Join(legacyRoot, workspaceID, leaf.Name())
 			dst := filepath.Join(destBase, leaf.Name())
 			if _, err := os.Stat(dst); err == nil {
 				continue // already migrated; never clobber vault data
@@ -98,7 +98,7 @@ func (v *Vault) migrateNestedDir(legacyRoot, subdir string) error {
 				slog.Warn("vault: migrate move", "src", src, "dst", dst, "err", err)
 			}
 		}
-		_ = os.Remove(filepath.Join(legacyRoot, userID)) // if now empty
+		_ = os.Remove(filepath.Join(legacyRoot, workspaceID)) // if now empty
 	}
 	_ = os.Remove(legacyRoot) // if now empty
 	return nil
@@ -132,8 +132,8 @@ func (v *Vault) MigrateSessionsToChats() error {
 		if !u.IsDir() {
 			continue
 		}
-		userID := u.Name()
-		root := v.Root(userID)
+		workspaceID := u.Name()
+		root := v.Root(workspaceID)
 
 		// Rename sessions/ → chats/ if chats/ does not already exist.
 		src := filepath.Join(root, "sessions")
@@ -141,7 +141,7 @@ func (v *Vault) MigrateSessionsToChats() error {
 		if _, err := os.Stat(src); err == nil {
 			if _, err := os.Stat(dst); err != nil {
 				if err := os.Rename(src, dst); err != nil {
-					slog.Warn("vault: migrate sessions→chats", "user", userID, "err", err)
+					slog.Warn("vault: migrate sessions→chats", "user", workspaceID, "err", err)
 				} else {
 					migrated++
 				}

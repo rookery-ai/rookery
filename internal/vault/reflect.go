@@ -33,7 +33,7 @@ type ReminderNote struct {
 }
 
 // ReflectReminder writes reminders/<id>.md plus its sidecar.
-func (r *Reflector) ReflectReminder(userID string, n ReminderNote) error {
+func (r *Reflector) ReflectReminder(workspaceID string, n ReminderNote) error {
 	if r == nil {
 		return nil
 	}
@@ -54,7 +54,7 @@ func (r *Reflector) ReflectReminder(userID string, n ReminderNote) error {
 	if n.Recurrence != "" {
 		body += "- **Repeats:** " + n.Recurrence + "\n"
 	}
-	return r.write(userID, filepath.Join("reminders", safeName(n.ID)+".md"), fm+body, "reminders", n.ID, n)
+	return r.write(workspaceID, filepath.Join("reminders", safeName(n.ID)+".md"), fm+body, "reminders", n.ID, n)
 }
 
 // ChatNote is the reflected view of a chat and its messages.
@@ -74,7 +74,7 @@ type ChatTurn struct {
 }
 
 // ReflectChat writes chats/<id>.md (a full transcript) plus its sidecar.
-func (r *Reflector) ReflectChat(userID string, n ChatNote) error {
+func (r *Reflector) ReflectChat(workspaceID string, n ChatNote) error {
 	if r == nil {
 		return nil
 	}
@@ -94,7 +94,7 @@ func (r *Reflector) ReflectChat(userID string, n ChatNote) error {
 	for _, m := range n.Messages {
 		b.WriteString(fmt.Sprintf("**%s** · %s\n\n%s\n\n", capitalize(m.Role), ts(m.CreatedAt), strings.TrimSpace(m.Content)))
 	}
-	return r.write(userID, filepath.Join("chats", safeName(n.ID)+".md"), b.String(), "chats", n.ID, n)
+	return r.write(workspaceID, filepath.Join("chats", safeName(n.ID)+".md"), b.String(), "chats", n.ID, n)
 }
 
 // RunNote is the reflected view of an agent run.
@@ -114,7 +114,7 @@ type RunNote struct {
 // ReflectAgentRun writes a markdown run log into the agent's own logs directory
 // (agents/<agentID>/logs/run_<ts>.md) plus a sidecar. The note lives inside the
 // agent's writable area, linked back to the agent.
-func (r *Reflector) ReflectAgentRun(userID string, n RunNote) error {
+func (r *Reflector) ReflectAgentRun(workspaceID string, n RunNote) error {
 	if r == nil {
 		return nil
 	}
@@ -153,13 +153,13 @@ func (r *Reflector) ReflectAgentRun(userID string, n RunNote) error {
 	b.WriteString("## Raw output\n\n```\n")
 	b.WriteString(strings.TrimRight(n.Output, "\n"))
 	b.WriteString("\n```\n")
-	return r.write(userID, rel, b.String(), "agent_runs", n.RunID, n)
+	return r.write(workspaceID, rel, b.String(), "agent_runs", n.RunID, n)
 }
 
 // write persists the markdown note and its JSON sidecar. The sidecar holds the
 // full structured value for restore fidelity.
-func (r *Reflector) write(userID, relMarkdown, content, table, id string, sidecar any) error {
-	if err := r.v.WriteNote(userID, relMarkdown, []byte(content)); err != nil {
+func (r *Reflector) write(workspaceID, relMarkdown, content, table, id string, sidecar any) error {
+	if err := r.v.WriteNote(workspaceID, relMarkdown, []byte(content)); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(sidecar, "", "  ")
@@ -167,7 +167,7 @@ func (r *Reflector) write(userID, relMarkdown, content, table, id string, sideca
 		return err
 	}
 	sidecarRel := filepath.Join(InternalDir, "db-export", table, safeName(id)+".json")
-	return r.v.WriteNote(userID, sidecarRel, data)
+	return r.v.WriteNote(workspaceID, sidecarRel, data)
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
