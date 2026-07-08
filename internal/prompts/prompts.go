@@ -230,8 +230,8 @@ failed-but-guiding output is better than fake mock success.
 // plus a mandatory complexity check, so the coder does NOT reach for a Python script
 // for tasks that are pure reasoning (generating text, writing a single note) — the
 // single most common designer failure mode.
-func agentPhilosophyBlock() string {
-	return `<agent_philosophy>
+func agentPhilosophyBlock(backendType string) string {
+	block := `<agent_philosophy>
 
 ## What an agent is
 
@@ -301,6 +301,32 @@ safety margin.
 </agent_philosophy>
 
 `
+	if backendType == BackendToolCalling {
+		// On the tool-calling backend a simple HTTP request is a web_fetch tool call, not a
+		// script — so the CLI-oriented bullet below ("don't script one HTTP request") is
+		// technically right but for the wrong reason, and its "an LLM does this without code"
+		// framing misleads a model whose ONLY way to actually reach the network is a tool.
+		// Rewrite it to point a simple public read at web_fetch, and reserve a script for
+		// calls needing a secret / pagination / heavy processing.
+		block = strings.Replace(block,
+			"  ✗ DO NOT write a helper script to make one simple HTTP request that returns small data.",
+			"  ✓ For a simple read of a PUBLIC url (weather/news/feed), CALL web_fetch directly —\n"+
+				"    no script. To FIND a url you don't have, CALL web_search, then web_fetch to read\n"+
+				"    it. Write a helper script (run_script/bash) only when the call needs a SECRET,\n"+
+				"    must paginate, or needs heavier processing.",
+			1)
+		// Surface the discovery tools in the philosophy block too: finding a note by content
+		// (search_files) or files by name (glob) are direct read-only tool calls, TIER 1 —
+		// not a read_file walk, and not a script.
+		block = strings.Replace(block,
+			"</agent_philosophy>\n",
+			"  ✓ Find a note by its CONTENT → CALL search_files(query) directly — no script, no\n"+
+				"    read_file walk. Find files by NAME/pattern → CALL glob(pattern) directly. Both\n"+
+				"    are read-only lookups (TIER 1).\n"+
+				"</agent_philosophy>\n",
+			1)
+	}
+	return block
 }
 
 // chatAppCommands returns the commands a user can type in a given connected chat
@@ -507,10 +533,38 @@ text. The available tools are:
   vault-root path for the user's notes/memory.
 - edit_file(path, old_string, new_string): replace a unique substring in a file.
 - list_dir(path): list a directory's entries (path defaults to your working directory).
+- search_files(query): search the user's WHOLE knowledge base for literal text
+  (case-insensitive) and get matching lines back as "path:line: snippet" entries. Use it to
+  find a note by its CONTENT instead of read_file-ing your way through folders — e.g. to find
+  "the note where I mentioned the dentist". It searches the whole vault, not just your working
+  directory, and skips the hidden internal sidecars. This is a read-only lookup, no script.
+- glob(pattern): find files in the vault by NAME/pattern (supports *, ?, and **) and get their
+  vault-relative paths back, one per line. Use it to locate files by name instead of listing
+  folders one at a time — e.g. glob with pattern "notes/*-meeting.md". Read-only, no script.
+- web_fetch(url): fetch a PUBLIC URL over HTTP(S) and get its content back as text (HTML is
+  reduced to readable text; JSON/text comes back as-is). Use it for a simple read of a public
+  endpoint — a weather API, an RSS/JSON feed, a web page. It CANNOT send secrets (you don't
+  have the values), so if the request needs an API key, token, or auth header, use run_script
+  or bash instead.
+- web_search(query): search the public web (DuckDuckGo) and get a few results back as
+  numbered title / url / snippet entries. Use it to FIND a URL when you don't have one yet
+  ("top news Macedonia today"), THEN call web_fetch to READ the page you chose. It is
+  query-only and cannot carry secrets — there is nothing to authenticate.
 - run_script(path): run a Python helper script under your working directory's tools/
   folder (e.g. "tools/foo.py") and receive its stdout. Secrets are available to the
-  script as environment variables. Use this for paginated fetches, API calls, and data
-  processing — exactly as a CLI coder would run a tools/ script.
+  script as environment variables. Use this for paginated fetches, calls that need a
+  secret, and heavier data processing — exactly as a CLI coder would run a tools/ script.
+- bash(command): run a shell command with your working directory as CWD, sandboxed, and get
+  its stdout. Secrets are available as environment variables (e.g.
+  curl -H "Authorization: Bearer $TOKEN" ...), so use bash or run_script for any call that
+  needs a secret. Do not install packages.
+
+Choosing between them for FILE DISCOVERY: find a note by its CONTENT → search_files. Find
+files by NAME/pattern → glob. Browse one folder's contents → list_dir. All three are
+read-only, no-script lookups (TIER 1) — don't write a run_script for what they do directly.
+Choosing between them for WEB access: find a URL you don't have → web_search; then read that
+URL → web_fetch (no script). A call that needs a secret, must paginate, or needs heavier
+processing → run_script (or bash).
 
 When you are done, emit your final result as plain text using the AGENT OUTPUT PROTOCOL
 ([CHAT] / [STATE] / [CALL: name] / [SILENT]) — the host reads those markers from your
@@ -563,10 +617,51 @@ shell — do not route routine file writes through output markers.
 func agentArchitectureGateBlock(backendType string) string {
 	weakBias := ""
 	if backendType == BackendToolCalling {
+		// NETWORK SPLIT for the tool-calling backend. It has two network tools: web_fetch (a
+		// single read of a PUBLIC url, no secret) and run_script/bash (when a secret,
+		// pagination, or heavy processing is needed). So a simple public read is a [SINGLE]
+		// action done directly with web_fetch and stays TIER 1 (no file) — matching a CLI
+		// coder — while a secret/paginated/heavy call is genuinely [BULK] → a helper script,
+		// TIER 2. This replaces the earlier "every external call REQUIRES a script" clause
+		// (over-forced scripts once web_fetch existed) and the original "bias hard toward
+		// TIER 1" clause (produced script-less agents that couldn't fetch at all).
 		weakBias = `
-  You are a limited builder. Bias hard toward TIER 1. Treat a task as [BULK] (needing a
-  script) ONLY when it truly cannot be done by reasoning over a small payload. A borderline
-  case resolves to TIER 1 here.`
+  FILE DISCOVERY ON THIS BACKEND — you have three read-only, no-script tools to find and
+  read files in the user's knowledge base:
+    • search_files(query) — find a note by its CONTENT (case-insensitive literal text). This
+      is a [SINGLE] read: for "find the note where I mentioned X", CALL search_files and stay
+      TIER 1 — do NOT write a script or read_file your way through folders.
+    • glob(pattern) — find files by NAME/pattern (supports *, ?, **). [SINGLE] read, TIER 1.
+    • list_dir(path) — browse one folder's entries. [SINGLE] read, TIER 1.
+  NETWORK ACCESS ON THIS BACKEND — you have two tools to reach external services:
+    • web_search(query) — FIND a URL you don't have yet (e.g. "top news Macedonia today"),
+      getting back titles + urls + snippets. This is a [SINGLE] action, TIER 1 — call it
+      directly, then call web_fetch to READ the page you chose. It is query-only, no secret.
+    • web_fetch(url) — a single read of a PUBLIC url (no secret needed). This is a [SINGLE]
+      action: for a simple public fetch, CALL web_fetch directly and stay TIER 1 — do NOT
+      write a script for it.
+    • run_script / bash — use these when the call needs a SECRET (API key/token/auth header),
+      must PAGINATE many pages/items, or needs heavier processing. That is [BULK] → TIER 2,
+      one thin helper script (it fetches and prints raw data; YOU reason over the output).
+  Use only tools/libraries already installed (Python stdlib and requests are available); do
+  NOT pip install or add any new package.
+  During THIS build, actually CALL web_search/web_fetch/bash (or run your script) and confirm
+  it returns the real data you expect BEFORE you finish — a plan you never executed is not a
+  verified agent. Pure reasoning, text, and reading/writing the user's notes need no network →
+  TIER 1.
+
+  WORKED EXAMPLE — "every morning fetch the weather and top news and message me a summary":
+    • fetch today's weather from a public weather API  → [SINGLE] public read → web_fetch, no script
+    • fetch top headlines from a public news/RSS feed  → [SINGLE] public read → web_fetch, no script
+    • write the summary and send it                    → [REASON] → you do it directly in [CHAT]
+    Verdict: TIER 1, ZERO files — just call web_fetch twice and reason over the results.
+    (If a source instead needed an API KEY, that one call would move to a thin run_script/bash
+    step — TIER 2 — because web_fetch cannot carry the secret.)
+  WORKED EXAMPLE — "find my notes about the dentist and remind me what date":
+    • search_files("dentist") to locate the note       → [SINGLE] content read → search_files, no script
+    • read_file the note it found                       → [SINGLE] → read_file
+    • message me the date                                → [REASON] → [CHAT]
+    Verdict: TIER 1, ZERO files — search_files + read_file + reason.`
 	}
 	return `<architecture_gate>
 MANDATORY — complete this analysis in your response BEFORE creating any file.
@@ -687,7 +782,9 @@ context. Follow these rules exactly:
 `)
 
 	// ── Agent philosophy (brain vs. scripts) ─────────────────────────────────
-	sb.WriteString(agentPhilosophyBlock())
+	// Design is backend-agnostic (its proposed tier is only a hint; the implementation
+	// gate does the real, backend-aware enforcement), so pass no backend here.
+	sb.WriteString(agentPhilosophyBlock(""))
 
 	// ── Designing for flexibility ─────────────────────────────────────────────
 	sb.WriteString(`<design_for_flexibility>
@@ -930,7 +1027,7 @@ type ImplementationParams struct {
 // design conversation, so create/edit/write/validate/test all see identical rules.
 func (p ImplementationParams) capabilitySpec() string {
 	var sb strings.Builder
-	sb.WriteString(agentPhilosophyBlock())
+	sb.WriteString(agentPhilosophyBlock(p.BackendType))
 	sb.WriteString(platformContextBlock(p.ChatApps, ""))
 	sb.WriteString(coderCapabilitiesBlock(p.BackendType))
 	sb.WriteString(testingRulesBlock())
@@ -1615,7 +1712,12 @@ func BuildCoderPrompt(p CoderPromptParams) string {
 	var sb strings.Builder
 
 	sb.WriteString(runtimeExecutionBlock())
-	sb.WriteString(agentPhilosophyBlock())
+	// Backend-neutral at RUN time on purpose: the tool-calling philosophy flip ("DO write a
+	// script for an external call") is a BUILD concern — at run time the scripts already
+	// exist and runtimeExecutionBlock forbids creating any, so passing the flipped bullet
+	// here would directly contradict it. coderCapabilitiesBlock already tells the runtime
+	// agent that run_script is its network path.
+	sb.WriteString(agentPhilosophyBlock(""))
 	sb.WriteString(shellSafetyBlock())
 	// Platform primer (with the concrete vault root at runtime) + how this coder can
 	// act on files (backend-aware). Keeps the prompt coder-agnostic — AGENT.md says
@@ -1809,9 +1911,9 @@ User input: %s`, nowStr, timezone, input)
 //
 // backendType selects how the tools are described: a full CLI coder has native Read/Write/
 // Edit/Glob/Grep tools; a tool-calling (API) coder reaches the vault through read_file/
-// write_file/edit_file/list_dir function calls executed by the host. The tool set is
-// intentionally file-only in both cases — the chat can read, create, and edit notes, but
-// cannot delete, rename, or run shell commands.
+// write_file/edit_file/list_dir/search_files/glob function calls executed by the host. The
+// tool set is intentionally file-only in both cases — the chat can read, create, and edit
+// notes, but cannot delete, rename, or run shell commands (no web_search/run_script here).
 func BuildChatSystemPrompt(vaultRoot, backendType string) string {
 	if MapCoderBackend(backendType) == BackendToolCalling {
 		return fmt.Sprintf(`You are a helpful assistant chatting with the user. Your working directory
@@ -1824,16 +1926,22 @@ You act through FUNCTION CALLS (tools) that the host executes and feeds back to 
 - write_file(path, content): create or overwrite a note (creates parent folders).
 - edit_file(path, old_string, new_string): replace a unique substring in a note.
 - list_dir(path): list a directory's entries (defaults to the vault root).
+- search_files(query): search the WHOLE vault for literal text (case-insensitive) and get
+  matches back as "path:line: snippet". Use it to find a note by content instead of reading
+  your way through folders.
+- glob(pattern): find files by name/pattern (supports *, ?, and **) and get their paths.
+  Use it to locate files by name instead of listing folders one at a time.
 You have no shell and cannot run scripts, delete, or rename files.
 
 Retrieving knowledge — ON DEMAND:
 - Only call tools when the user's message is about their notes or knowledge base. For a
   normal conversational reply, do not touch the vault at all.
 - To answer "what notes do I have", call list_dir on "notes", "memory", and any
-  user-created folders, then read_file a few titles/headers to summarize. Do not dump the
-  whole vault into your reply — report the relevant note names and a one-line description.
-- To answer a specific question about their notes, read_file the likely notes and answer
-  citing the note path(s).
+  user-created folders, or glob with a pattern like "notes/**/*.md", then read_file a few
+  titles/headers to summarize. Do not dump the whole vault into your reply — report the
+  relevant note names and a one-line description.
+- To answer a specific question about their notes, search_files for a likely phrase to find
+  the relevant note, then read_file it and answer citing the note path(s).
 
 Editing knowledge — ON DEMAND:
 - When the user asks to add or change a note, use write_file (new note) or edit_file

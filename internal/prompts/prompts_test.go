@@ -180,22 +180,141 @@ func TestArchitectureGateInGenerationPrompts(t *testing.T) {
 // TestGateWeakBackendBias guards the capability-aware clause: only a tool-calling API
 // coder (the weak builder) gets the extra "bias hard toward TIER 1" nudge; the capable
 // CLI path keeps the neutral wording so it isn't burdened with friction.
-func TestGateWeakBackendBias(t *testing.T) {
+// TestGateToolCallingNetworkSplit guards the tier model for the tool-calling (API) backend
+// now that it has web_fetch + bash: a simple PUBLIC read is web_fetch (TIER 1, no script);
+// a call needing a secret / pagination / heavy processing is a helper script (TIER 2). The
+// gate must express this split — not the earlier "every external call REQUIRES a script"
+// clause (which over-forced scripts) and not the original "bias hard toward TIER 1" clause
+// (which produced script-less fetch agents that couldn't fetch).
+//
+// Regression guard on prompt content — it does NOT prove a given model complies; that is
+// verified by re-running the weather/news build on the API backend.
+func TestGateToolCallingNetworkSplit(t *testing.T) {
 	history := []ChatMessage{{Role: "user", Content: "watch prices"}}
-	const biasMarker = "You are a limited builder"
+	const oldHarmfulBias = "Bias hard toward TIER 1"
+	const oldOverForce = "REQUIRES a helper script"
 
 	weakCreate := BuildImplementationPrompt("x", history, ImplementationParams{BackendType: BackendToolCalling})
 	weakEdit := BuildEditImplementationPrompt("x", history, ImplementationParams{BackendType: BackendToolCalling})
 	fullCreate := BuildImplementationPrompt("x", history, ImplementationParams{BackendType: BackendFullCoder})
 
-	if !strings.Contains(weakCreate, biasMarker) {
-		t.Errorf("weak tool-calling create prompt should carry the TIER-1 bias clause")
+	for name, p := range map[string]string{"create": weakCreate, "edit": weakEdit} {
+		if !strings.Contains(p, "web_fetch") {
+			t.Errorf("weak tool-calling %s prompt must tell the model to use web_fetch for a simple public read", name)
+		}
+		if !strings.Contains(p, "secret") {
+			t.Errorf("weak tool-calling %s prompt must say a script is for calls needing a secret/pagination/heavy processing", name)
+		}
+		if strings.Contains(p, oldHarmfulBias) {
+			t.Errorf("weak tool-calling %s prompt must NOT carry the harmful 'bias hard toward TIER 1' clause", name)
+		}
+		if strings.Contains(p, oldOverForce) {
+			t.Errorf("weak tool-calling %s prompt must NOT over-force a script for every external call now that web_fetch exists", name)
+		}
 	}
-	if !strings.Contains(weakEdit, biasMarker) {
-		t.Errorf("weak tool-calling edit prompt should carry the TIER-1 bias clause")
+	if strings.Contains(fullCreate, "web_fetch") {
+		t.Errorf("capable full-coder prompt must NOT carry the tool-calling network split (CLI coders fetch directly — no new friction)")
 	}
-	if strings.Contains(fullCreate, biasMarker) {
-		t.Errorf("capable full-coder prompt must NOT carry the weak-builder bias clause (no new friction)")
+}
+
+// TestGateToolCallingHasWorkedExample guards the few-shot that steers weak-model tier/tool
+// selection: the tool-calling gate must carry a worked TASK ANALYSIS example (a public fetch
+// resolving to web_fetch + TIER 1). The full-coder gate must not carry it (no new friction).
+func TestGateToolCallingHasWorkedExample(t *testing.T) {
+	weak := BuildImplementationPrompt("x", []ChatMessage{{Role: "user", Content: "morning brief"}}, ImplementationParams{BackendType: BackendToolCalling})
+	full := BuildImplementationPrompt("x", nil, ImplementationParams{BackendType: BackendFullCoder})
+	if !strings.Contains(weak, "WORKED EXAMPLE") {
+		t.Errorf("tool-calling gate must carry a worked example to steer weak-model tool/tier selection")
+	}
+	if strings.Contains(full, "WORKED EXAMPLE") {
+		t.Errorf("full-coder gate must not carry the tool-calling worked example")
+	}
+}
+
+// TestPhilosophyToolCallingUsesWebFetch guards that the shared philosophy block, on the
+// tool-calling backend, drops the CLI "don't script one HTTP request" bullet and instead
+// points at web_fetch — so it does not contradict the architecture gate for a weak model
+// reading both in one prompt.
+func TestPhilosophyToolCallingUsesWebFetch(t *testing.T) {
+	const cliBullet = "DO NOT write a helper script to make one simple HTTP request"
+	full := agentPhilosophyBlock(BackendFullCoder)
+	tool := agentPhilosophyBlock(BackendToolCalling)
+	if !strings.Contains(full, cliBullet) {
+		t.Errorf("full-coder philosophy should keep the CLI HTTP bullet")
+	}
+	if strings.Contains(tool, cliBullet) {
+		t.Errorf("tool-calling philosophy must NOT carry the CLI HTTP bullet")
+	}
+	if !strings.Contains(tool, "web_fetch") {
+		t.Errorf("tool-calling philosophy must point a simple public request at web_fetch")
+	}
+}
+
+// TestCapabilitiesToolCallingHasNetworkTools guards that the tool-calling capabilities block
+// advertises web_fetch and bash (so the model knows they exist) and states the secret
+// boundary (web_fetch cannot carry secrets → use a script/bash for authenticated calls).
+func TestCapabilitiesToolCallingHasNetworkTools(t *testing.T) {
+	block := coderCapabilitiesBlock(BackendToolCalling)
+	for _, want := range []string{"web_fetch", "bash", "secret"} {
+		if !strings.Contains(block, want) {
+			t.Errorf("tool-calling capabilities block must mention %q", want)
+		}
+	}
+}
+
+// TestCapabilitiesToolCallingHasDiscoveryTools guards that the tool-calling capabilities
+// block advertises the three discovery tools (search_files, glob, web_search) so a weak
+// model knows they exist — and that the full-coder block does NOT carry them (CLI coders
+// have native Grep/Glob/WebSearch; advertising host tools there adds friction for nothing).
+func TestCapabilitiesToolCallingHasDiscoveryTools(t *testing.T) {
+	tool := coderCapabilitiesBlock(BackendToolCalling)
+	full := coderCapabilitiesBlock(BackendFullCoder)
+	for _, want := range []string{"search_files", "glob", "web_search"} {
+		if !strings.Contains(tool, want) {
+			t.Errorf("tool-calling capabilities block must mention %q", want)
+		}
+		if strings.Contains(full, want) {
+			t.Errorf("full-coder capabilities block must NOT mention host tool %q (CLI has its own)", want)
+		}
+	}
+}
+
+// TestGateToolCallingHasDiscoveryTools guards that the architecture gate, on the
+// tool-calling backend, tells the model search_files/glob/web_search are TIER-1 reads (no
+// script) and to actually call them during a build. The full-coder gate must not.
+func TestGateToolCallingHasDiscoveryTools(t *testing.T) {
+	weakCreate := BuildImplementationPrompt("x", nil, ImplementationParams{BackendType: BackendToolCalling})
+	weakEdit := BuildEditImplementationPrompt("x", nil, ImplementationParams{BackendType: BackendToolCalling})
+	fullCreate := BuildImplementationPrompt("x", nil, ImplementationParams{BackendType: BackendFullCoder})
+	for name, p := range map[string]string{"create": weakCreate, "edit": weakEdit} {
+		for _, want := range []string{"search_files", "glob", "web_search"} {
+			if !strings.Contains(p, want) {
+				t.Errorf("weak tool-calling %s gate must mention %q", name, want)
+			}
+		}
+	}
+	for _, want := range []string{"search_files", "glob(pattern)", "web_search"} {
+		if strings.Contains(fullCreate, want) {
+			t.Errorf("full-coder gate must NOT mention host tool %q", want)
+		}
+	}
+}
+
+// TestChatToolCallingHasSearchAndGlob guards chat parity with the CLI chat path: the
+// tool-calling chat prompt must offer search_files + glob (file-read, safe in chat), but
+// NOT web_search (chat is file-only — web_search/run_script/bash are exec-gated).
+func TestChatToolCallingHasSearchAndGlob(t *testing.T) {
+	p := BuildChatSystemPrompt("/tmp/vault", BackendToolCalling)
+	for _, want := range []string{"search_files", "glob"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("tool-calling chat prompt must offer %q (parity with CLI chat Grep/Glob)", want)
+		}
+	}
+	if strings.Contains(p, "web_search") {
+		t.Errorf("tool-calling chat prompt must NOT offer web_search (chat is file-only)")
+	}
+	if strings.Contains(p, "run_script") {
+		t.Errorf("tool-calling chat prompt must NOT offer run_script (chat is file-only)")
 	}
 }
 

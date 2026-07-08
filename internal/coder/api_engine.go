@@ -367,9 +367,13 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 	if workDir == "" {
 		workDir = vaultRoot
 	}
-	includeRunScript := false
+	// The powerful/execution tools (run_script, bash, web_fetch) are offered only in an
+	// agent execution context (workDir is the agent's own dir, not the vault root). That
+	// excludes one-off chat (workDir == vault root), matching the CLI chat's file-only tool
+	// set (Read,Write,Edit,Glob,Grep — no shell/web-fetch) so the two backends stay at parity.
+	includeExecTools := false
 	if !c.noTools && workDir != "" && vaultRoot != "" {
-		includeRunScript = filepath.Clean(workDir) != filepath.Clean(vaultRoot)
+		includeExecTools = filepath.Clean(workDir) != filepath.Clean(vaultRoot)
 	}
 	return &hostToolSet{
 		workspaceID:      workspaceID,
@@ -380,7 +384,7 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 		selfExe:          c.selfExe,
 		dataDir:          c.dataDir,
 		homesDir:         c.homesDir,
-		includeRunScript: includeRunScript,
+		includeExecTools: includeExecTools,
 		// Enforce script self-verification only during an agent BUILD (the caller sets
 		// SA_BUILD_PHASE=generation). A real run must never block on this — an agent that
 		// legitimately has nothing to report must be free to finish silently.
@@ -433,19 +437,32 @@ func stripKey(env map[string]string, key string) map[string]string {
 
 // toolMilestone renders a short, human-readable line for one tool call, shown on
 // the live progress stream so the user can see the API coder act on files as it
-// works. Shows the path argument when present (the most useful identifier),
-// falling back to a trimmed raw-arg blob.
+// works. Shows the most useful identifier for the call: the path argument for
+// file tools, the query for search_files/web_search, the pattern for glob, or the
+// url for web_fetch — falling back to a trimmed raw-arg blob when none apply.
 func toolMilestone(tc llm.ToolCall) string {
 	var args struct {
-		Path string `json:"path"`
+		Path    string `json:"path"`
+		Query   string `json:"query"`
+		Pattern string `json:"pattern"`
+		URL     string `json:"url"`
 	}
 	_ = json.Unmarshal(tc.Args, &args)
 	detail := args.Path
 	if detail == "" {
+		detail = args.Query
+	}
+	if detail == "" {
+		detail = args.Pattern
+	}
+	if detail == "" {
+		detail = args.URL
+	}
+	if detail == "" {
 		detail = strings.TrimSpace(string(tc.Args))
-		if len(detail) > 60 {
-			detail = detail[:60] + "…"
-		}
+	}
+	if len(detail) > 60 {
+		detail = detail[:60] + "…"
 	}
 	if detail == "" {
 		return "🔧 " + tc.Name

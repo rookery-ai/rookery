@@ -274,6 +274,26 @@ func TestAPIEngine_PerToolCallProgressMilestones(t *testing.T) {
 	}
 }
 
+// TestToolMilestoneShowsQueryPatternURL guards the observability extension: the
+// live progress stream shows the most useful identifier per tool — path for file
+// tools, query for search_files/web_search, pattern for glob, url for web_fetch —
+// instead of a raw JSON arg blob. The detail is capped so a long query/URL can't
+// blow out the milestone line.
+func TestToolMilestoneShowsQueryPatternURL(t *testing.T) {
+	cases := []struct{ name, args, want string }{
+		{"search_files", `{"query":"dentist appointment"}`, "🔧 search_files(dentist appointment)"},
+		{"glob", `{"pattern":"notes/*-meeting.md"}`, "🔧 glob(notes/*-meeting.md)"},
+		{"web_search", `{"query":"weather skopje"}`, "🔧 web_search(weather skopje)"},
+		{"web_fetch", `{"url":"https://example.com/x"}`, "🔧 web_fetch(https://example.com/x)"},
+		{"read_file", `{"path":"notes.md"}`, "🔧 read_file(notes.md)"},
+	}
+	for _, c := range cases {
+		if got := toolMilestone(toolCall(c.name, c.args)); got != c.want {
+			t.Errorf("toolMilestone(%s) = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
 func TestAPIEngine_RunawayLoopHitsErrMaxTurns(t *testing.T) {
 	dir := t.TempDir()
 	ws := "ws4"

@@ -5,9 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -40,7 +46,18 @@ type hostToolSet struct {
 	selfExe          string
 	dataDir          string
 	homesDir         string
-	includeRunScript bool
+	includeExecTools bool // gates the powerful tools (run_script, bash, web_fetch); off for chat
+
+	// web_fetch tuning (both optional; zero values use sane defaults). Injected by tests so
+	// the transient-retry path doesn't sleep for real.
+	httpClient   *http.Client  // nil → a default 30s client
+	webRetryBase time.Duration // 0 → default base backoff for transient (429/5xx/network) retries
+
+	// web_search: the DuckDuckGo HTML endpoint base. Empty → the production endpoint.
+	// Injected by tests (pointed at an httptest server) so the scraper is exercised without
+	// the network; web_search shares httpClient/webRetryBase with web_fetch for the same
+	// transient-retry semantics.
+	ddgBaseURL string
 
 	// Build-time script verification. verifyBuild is set ONLY during agent generation
 	// (SA_BUILD_PHASE=generation) on the API/tool-calling backend — the weaker-model path
@@ -90,16 +107,47 @@ func (h *hostToolSet) tools() []llm.Tool {
 		{Name: "write_file", Description: "Create or overwrite a file in the vault (creates parent folders). Path is relative to the vault root, or absolute within the vault.", Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string","description":"full file contents"}},"required":["path","content"]}`)},
 		{Name: "edit_file", Description: "Replace a unique substring in a vault file. old_string must appear exactly once.", Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"}},"required":["path","old_string","new_string"]}`)},
 		{Name: "list_dir", Description: "List entries in a vault directory. Path is relative to the vault root (default \".\" lists the vault root).", Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string","description":"vault-relative directory; defaults to vault root"}}}`)},
+		{Name: "search_files", Description: "Search the user's whole knowledge base (vault) for literal text and return the matching lines as `path:line: snippet` entries. Case-insensitive. Use this to find a note by its CONTENT instead of read_file-ing your way through folders — " +
+			`e.g. search_files with query "dentist appointment". Returns up to a few dozen matches across all notes/memory/agents files (not the hidden .kb sidecars).`,
+			Parameters: rawSchema(`{"type":"object","properties":{"query":{"type":"string","description":"the literal text to search for across the vault (case-insensitive)"}},"required":["query"]}`)},
+		{Name: "glob", Description: "Find files in the vault by name/pattern and return their vault-relative paths (one per line). Supports * (within one folder), ? (one char), and ** (any depth, crosses folders) — " +
+			`e.g. glob with pattern "notes/*-meeting.md" or "**/*.py". Use this to locate files by NAME instead of listing folders one at a time.`,
+			Parameters: rawSchema(`{"type":"object","properties":{"pattern":{"type":"string","description":"glob pattern matching vault-relative paths (supports *, ?, and **)"}},"required":["pattern"]}`)},
 	}
-	if h.includeRunScript {
-		tools = append(tools, llm.Tool{
-			Name: "run_script",
-			Description: "Run a Python helper script under your working directory's tools/ folder (e.g. \"tools/foo.py\") and return its stdout. " +
-				"Pass command-line arguments via `args` (e.g. [\"tools/payload.json\"] for a script that reads sys.argv[1]) and/or pipe input via `stdin` — " +
-				"this matches how scripts are invoked on a host CLI coder (python3 tools/foo.py tools/payload.json). " +
-				"The script runs with your working directory as CWD, sandboxed; secrets are available as env vars.",
-			Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string","description":"path to the .py file, relative to your working directory"},"args":{"type":"array","items":{"type":"string"},"description":"command-line arguments to pass to the script (e.g. a payload file path the script reads via sys.argv)"},"stdin":{"type":"string","description":"text to feed to the script's stdin"}},"required":["path"]}`),
-		})
+	if h.includeExecTools {
+		tools = append(tools,
+			llm.Tool{
+				Name: "web_fetch",
+				Description: "Fetch a PUBLIC URL over HTTP(S) and return its content as text (HTML is reduced to readable text; JSON/text is returned as-is), " +
+					`e.g. web_fetch with url "https://api.open-meteo.com/v1/forecast?latitude=42.0&longitude=21.4&current=temperature_2m". ` +
+					"Use this for a simple read of a PUBLIC endpoint — a weather API, an RSS/JSON feed, a web page. " +
+					"It CANNOT send secrets: you do not have secret values (they are environment variables), so any call that needs an API key, token, or auth header must use run_script or bash instead, where secrets are available in the environment. " +
+					"Optional: method (GET or POST; default GET).",
+				Parameters: rawSchema(`{"type":"object","properties":{"url":{"type":"string","description":"the public http/https URL to fetch"},"method":{"type":"string","enum":["GET","POST"],"description":"HTTP method (default GET)"}},"required":["url"]}`),
+			},
+			llm.Tool{
+				Name: "web_search",
+				Description: "Search the public web (DuckDuckGo) and return a few results as numbered `title / url / snippet` entries — " +
+					`e.g. web_search with query "weather Skopje today". Use it to FIND a URL when you don't have one yet; then call web_fetch to READ the page you chose. ` +
+					"It is query-only and CANNOT carry secrets — there is nothing to authenticate, so it needs no key/token.",
+				Parameters: rawSchema(`{"type":"object","properties":{"query":{"type":"string","description":"the web search query"}},"required":["query"]}`),
+			},
+			llm.Tool{
+				Name: "run_script",
+				Description: "Run a Python helper script under your working directory's tools/ folder (e.g. \"tools/foo.py\") and return its stdout. " +
+					"Pass command-line arguments via `args` (e.g. [\"tools/payload.json\"] for a script that reads sys.argv[1]) and/or pipe input via `stdin` — " +
+					"this matches how scripts are invoked on a host CLI coder (python3 tools/foo.py tools/payload.json). " +
+					"The script runs with your working directory as CWD, sandboxed; secrets are available as env vars.",
+				Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string","description":"path to the .py file, relative to your working directory"},"args":{"type":"array","items":{"type":"string"},"description":"command-line arguments to pass to the script (e.g. a payload file path the script reads via sys.argv)"},"stdin":{"type":"string","description":"text to feed to the script's stdin"}},"required":["path"]}`),
+			},
+			llm.Tool{
+				Name: "bash",
+				Description: "Run a bash command with your working directory as CWD, sandboxed, and return its stdout. " +
+					"Secrets are available as environment variables (e.g. curl -H \"Authorization: Bearer $MY_TOKEN\" ...), so use this (or run_script) for any call that needs a secret. " +
+					"On failure both stdout and stderr are returned so you can see what went wrong. Do NOT install packages (no internet-backed pip/apt) — use tools that are already present.",
+				Parameters: rawSchema(`{"type":"object","properties":{"command":{"type":"string","description":"the bash command line to run"}},"required":["command"]}`),
+			},
+		)
 	}
 	return tools
 }
@@ -308,12 +356,19 @@ func (h *hostToolSet) verifyFinishNudge() string {
 // the model (or an error, which is also surfaced as the tool result).
 func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 	var args struct {
-		Path      string   `json:"path"`
-		Content   string   `json:"content"`
-		OldString string   `json:"old_string"`
-		NewString string   `json:"new_string"`
-		Args      []string `json:"args"`
-		Stdin     string   `json:"stdin"`
+		Path      string            `json:"path"`
+		Content   string            `json:"content"`
+		OldString string            `json:"old_string"`
+		NewString string            `json:"new_string"`
+		Args      []string          `json:"args"`
+		Stdin     string            `json:"stdin"`
+		URL       string            `json:"url"`
+		Method    string            `json:"method"`
+		Headers   map[string]string `json:"headers"`
+		Body      string            `json:"body"`
+		Command   string            `json:"command"`
+		Query     string            `json:"query"`
+		Pattern   string            `json:"pattern"`
 	}
 	_ = json.Unmarshal(call.Args, &args) // tolerate missing fields
 
@@ -336,11 +391,50 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		return "ok: edited " + args.Path
 	case "list_dir":
 		return h.listDir(args.Path)
+	case "search_files":
+		out, err := h.searchFiles(ctx, args.Query)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return out
+	case "glob":
+		out, err := h.glob(args.Pattern)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return out
 	case "run_script":
-		if !h.includeRunScript {
+		if !h.includeExecTools {
 			return "error: run_script is not available"
 		}
 		out, err := h.runScript(ctx, args.Path, args.Args, args.Stdin)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return truncate(out)
+	case "web_fetch":
+		if !h.includeExecTools {
+			return "error: web_fetch is not available"
+		}
+		out, err := h.webFetch(ctx, args.URL, args.Method, args.Headers, args.Body)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return truncate(out)
+	case "web_search":
+		if !h.includeExecTools {
+			return "error: web_search is not available"
+		}
+		out, err := h.webSearch(ctx, args.Query)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return truncate(out)
+	case "bash":
+		if !h.includeExecTools {
+			return "error: bash is not available"
+		}
+		out, err := h.runBash(ctx, args.Command)
 		if err != nil {
 			return "error: " + err.Error()
 		}
@@ -460,6 +554,148 @@ func (h *hostToolSet) listDir(path string) string {
 		return "(empty)"
 	}
 	return truncate(sb.String())
+}
+
+// ── search_files / glob ───────────────────────────────────────────────────────
+
+// maxSearchHits caps how many search_files matches are returned to the model, so a
+// query that hits dozens of notes doesn't blow the context. The Searcher already
+// caps at 5 matches per file; this bounds the total across all files.
+const maxSearchHits = 50
+
+// maxGlobMatches caps how many file paths glob returns.
+const maxGlobMatches = 200
+
+// searchFiles exposes the existing vault.Searcher (ripgrep + pure-Go fallback,
+// case-insensitive fixed-string, 5 matches/file) to the model as a TIER-1 read —
+// "find the note where I mentioned the dentist" without read_file-ing everything.
+// It searches the WHOLE vault root (not workDir), matching the web KB search and
+// the user's intent. No matches is a valid empty result (NOT an error:) so it never
+// trips the oscillation guard. The Searcher excludes the hidden .kb sidecars.
+func (h *hostToolSet) searchFiles(ctx context.Context, query string) (string, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return "", fmt.Errorf("query is required")
+	}
+	if h.vlt == nil {
+		return "", fmt.Errorf("search_files unavailable: no vault")
+	}
+	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	hits, err := h.vlt.NewSearcher().Search(sctx, h.workspaceID, query)
+	if err != nil {
+		return "", err
+	}
+	if len(hits) == 0 {
+		return fmt.Sprintf("(no matches for %q)", query), nil
+	}
+	if len(hits) > maxSearchHits {
+		hits = hits[:maxSearchHits]
+	}
+	var sb strings.Builder
+	for _, hit := range hits {
+		fmt.Fprintf(&sb, "%s:%d: %s\n", hit.Path, hit.Line, hit.Snippet)
+	}
+	return truncate(sb.String()), nil
+}
+
+// glob finds files by name/pattern across the whole vault and returns their
+// vault-relative paths (one per line), supporting *, ?, and ** (recursive). It
+// skips dotfiles and the internal .kb dir (mirror listDir's dotfile rule + the
+// Searcher's .kb exclusion), so the model never sees or touches internal data.
+// No matches is a valid empty result, not an error.
+func (h *hostToolSet) glob(pattern string) (string, error) {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return "", fmt.Errorf("pattern is required")
+	}
+	if h.vlt == nil {
+		return "", fmt.Errorf("glob unavailable: no vault")
+	}
+	root := h.vlt.Root(h.workspaceID)
+	// A weak model sometimes passes an ABSOLUTE vault path as the pattern
+	// (e.g. "/home/.../vaults/<ws>/notes/*.md") instead of a vault-relative
+	// glob. Relativize it first — mirror read_file/resolveVault — so the call
+	// still matches instead of no-op'ing (an absolute string anchored+quoted by
+	// compileGlob can never match a vault-relative path). An absolute path that
+	// escapes the vault root is rejected.
+	if filepath.IsAbs(pattern) {
+		rel, err := h.vlt.Rel(h.workspaceID, filepath.Clean(pattern))
+		if err != nil {
+			return "", fmt.Errorf("pattern outside vault: %q", pattern)
+		}
+		pattern = rel
+	}
+	matcher, err := compileGlob(pattern)
+	if err != nil {
+		return "", fmt.Errorf("invalid pattern: %w", err)
+	}
+	var matches []string
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if d.IsDir() {
+			// Skip dotfile dirs and the internal .kb dir entirely — their
+			// contents never match, and descending into .kb would leak sidecars.
+			name := d.Name()
+			if name == vault.InternalDir || (strings.HasPrefix(name, ".") && name != "." && name != "..") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		// Skip dotfiles (e.g. .secret.md, .staging scratch).
+		if strings.HasPrefix(d.Name(), ".") {
+			return nil
+		}
+		rel, rerr := h.vlt.Rel(h.workspaceID, path)
+		if rerr != nil {
+			return nil
+		}
+		if matcher.MatchString(rel) {
+			matches = append(matches, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(matches) == 0 {
+		return fmt.Sprintf("(no files matched %q)", pattern), nil
+	}
+	sort.Strings(matches)
+	if len(matches) > maxGlobMatches {
+		matches = matches[:maxGlobMatches]
+	}
+	return truncate(strings.Join(matches, "\n")), nil
+}
+
+// compileGlob converts a glob pattern into an anchored regexp. It supports the
+// three forms a host coder's Glob offers: `*` matches within one folder (no
+// separator), `?` matches one non-separator char, and `**` matches any depth
+// (crosses separators). Everything else is regex-quoted literally. The result
+// is anchored (^...$) so "notes/*.md" doesn't also match "x/notes/a.md".
+func compileGlob(pattern string) (*regexp.Regexp, error) {
+	var sb strings.Builder
+	sb.WriteString("^")
+	for i := 0; i < len(pattern); i++ {
+		c := pattern[i]
+		switch c {
+		case '*':
+			if i+1 < len(pattern) && pattern[i+1] == '*' {
+				sb.WriteString(".*") // ** crosses separators
+				i++
+			} else {
+				sb.WriteString("[^/]*") // * stays within one folder
+			}
+		case '?':
+			sb.WriteString("[^/]")
+		default:
+			sb.WriteString(regexp.QuoteMeta(string(c)))
+		}
+	}
+	sb.WriteString("$")
+	return regexp.Compile(sb.String())
 }
 
 // runScript runs `python3 <workDir>/<path> [args...]` with the agent's secrets
@@ -585,6 +821,365 @@ func buildEnvList(extra map[string]string, homeDir, tmpDir string) []string {
 		}
 	}
 	return overrideEnv(os.Environ(), overrides)
+}
+
+// ── web_fetch ────────────────────────────────────────────────────────────────
+
+// maxWebBody bounds how many bytes web_fetch reads from a response before the result is
+// further truncated to maxToolResult for the model context.
+const maxWebBody = 2 << 20 // 2 MiB
+
+// webFetchMaxAttempts bounds the internal transient-retry loop (429/5xx/network/timeout).
+const webFetchMaxAttempts = 4
+
+// webFetch performs an HTTP(S) request and returns the response body as text (HTML reduced
+// to readable text; JSON/text passed through), prefixed with a short status line. Transient
+// failures (429, 5xx, network, timeout) are retried INTERNALLY with backoff and are NEVER
+// surfaced as an "error:" result — so a blip that clears on its own does not trip the
+// tool-loop's oscillation guard (executeOrNudge treats every "error:" as a repeat-worthy
+// failure). A non-retryable outcome (bad URL, 4xx other than 429) returns an error, which the
+// caller surfaces as "error: ...". It runs in the HOST process (not the sandbox): it is only
+// an HTTP client, and agents already reach the network via run_script/bash, so it adds
+// ergonomics, not capability. It cannot inject secrets (the model has no secret values) — an
+// authenticated call must use run_script/bash where secrets are env vars.
+func (h *hostToolSet) webFetch(ctx context.Context, rawURL, method string, headers map[string]string, body string) (string, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return "", fmt.Errorf("url is required")
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", fmt.Errorf("invalid url %q: must be an http/https URL", rawURL)
+	}
+	if method == "" {
+		method = http.MethodGet
+	}
+	client := h.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	base := h.webRetryBase
+	if base <= 0 {
+		base = 500 * time.Millisecond
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < webFetchMaxAttempts; attempt++ {
+		if attempt > 0 {
+			if !ctxSleep(ctx, base<<(attempt-1)) {
+				return "", ctx.Err()
+			}
+		}
+		text, retryable, err := h.webFetchOnce(ctx, client, method, u.String(), headers, body)
+		if err == nil {
+			return text, nil
+		}
+		lastErr = err
+		if !retryable {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("web_fetch failed after %d attempts: %w", webFetchMaxAttempts, lastErr)
+}
+
+// webFetchOnce performs a single request. retryable is true for transient conditions the
+// caller should retry (429, 5xx, network/timeout); false for definitive outcomes (2xx or a
+// non-retryable 4xx).
+func (h *hostToolSet) webFetchOnce(ctx context.Context, client *http.Client, method, u string, headers map[string]string, body string) (string, bool, error) {
+	var rdr io.Reader
+	if body != "" {
+		rdr = strings.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u, rdr)
+	if err != nil {
+		return "", false, fmt.Errorf("build request: %v", err)
+	}
+	req.Header.Set("User-Agent", "simple-agents/1.0 (+web_fetch)")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", true, fmt.Errorf("request failed: %v", err) // network/timeout → transient
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+		return "", true, fmt.Errorf("HTTP %d from %s", resp.StatusCode, u)
+	}
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxWebBody))
+	if resp.StatusCode >= 400 {
+		return "", false, fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, u, snippetBytes(data))
+	}
+	ct := resp.Header.Get("Content-Type")
+	header := fmt.Sprintf("[web_fetch %d %s %s]\n", resp.StatusCode, contentTypeMain(ct), u)
+	return header + renderWebBody(ct, data), false, nil
+}
+
+var (
+	reScript = regexp.MustCompile(`(?is)<script\b[^>]*>.*?</script>`)
+	reStyle  = regexp.MustCompile(`(?is)<style\b[^>]*>.*?</style>`)
+	reTag    = regexp.MustCompile(`(?s)<[^>]*>`)
+	reWS     = regexp.MustCompile(`\s+`)
+)
+
+// renderWebBody reduces text/html to readable text, passes textual bodies (text/*, JSON,
+// XML, CSV, JS, or an unlabeled body) through as-is, and — for a binary type (image, pdf,
+// octet-stream, …) — returns a short note with the type and size instead of dumping raw
+// bytes into the model context (which would be garbage, and could confuse a weak model).
+func renderWebBody(contentType string, data []byte) string {
+	ct := strings.ToLower(contentType)
+	switch {
+	case strings.Contains(ct, "html"):
+		return stripHTML(string(data))
+	case ct == "" || strings.Contains(ct, "text") || strings.Contains(ct, "json") ||
+		strings.Contains(ct, "xml") || strings.Contains(ct, "csv") || strings.Contains(ct, "javascript"):
+		return string(data)
+	default:
+		return fmt.Sprintf("[web_fetch: %s response, %d bytes — this is not text; if you need to process it, use run_script or bash]",
+			contentTypeMain(contentType), len(data))
+	}
+}
+
+// stripHTML reduces an HTML document to readable text using only the standard library
+// (deliberately dependency-free, matching this codebase): drop <script>/<style> blocks,
+// replace remaining tags with spaces, unescape entities, and collapse whitespace. It is a
+// pragmatic best-effort reduction, not a full HTML parser.
+func stripHTML(s string) string {
+	s = reScript.ReplaceAllString(s, " ")
+	s = reStyle.ReplaceAllString(s, " ")
+	s = reTag.ReplaceAllString(s, " ")
+	s = html.UnescapeString(s)
+	s = reWS.ReplaceAllString(s, " ")
+	return strings.TrimSpace(s)
+}
+
+func contentTypeMain(ct string) string {
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = ct[:i]
+	}
+	if ct = strings.TrimSpace(ct); ct == "" {
+		return "?"
+	}
+	return ct
+}
+
+func snippetBytes(b []byte) string {
+	s := strings.TrimSpace(string(b))
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
+}
+
+// ctxSleep waits d, returning false if the context is cancelled first.
+func ctxSleep(ctx context.Context, d time.Duration) bool {
+	if d <= 0 {
+		return true
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
+}
+
+// ── web_search ───────────────────────────────────────────────────────────────
+
+// ddgHTMLEndpoint is the DuckDuckGo keyless HTML results endpoint. It needs no API
+// key (consistent with web_fetch's key-less design) and returns a parseable HTML
+// page of result blocks. ddgBaseURL, when set on the toolset, overrides it (tests).
+const ddgHTMLEndpoint = "https://html.duckduckgo.com/html/"
+
+// maxWebSearchResults bounds how many results web_search returns to the model.
+const maxWebSearchResults = 6
+
+// webSearch runs a DuckDuckGo HTML query and returns numbered title/url/snippet
+// entries. It is the discovery complement to web_fetch: use it to FIND a URL, then
+// web_fetch to READ it. Query-only — it cannot carry secrets (same boundary as
+// web_fetch). Reliability mirrors webFetch exactly: transient failures (429, 5xx,
+// network, timeout) are retried INTERNALLY with backoff and NEVER surface as an
+// error: result (so a blip that clears doesn't trip the oscillation guard); a
+// non-retryable outcome (bad URL, 4xx other than 429) returns an error. A 200 page
+// with no parseable result blocks is a valid empty result ("(no search results)"),
+// NOT an error — so the model can fall back to web_fetch without tripping the guard.
+func (h *hostToolSet) webSearch(ctx context.Context, query string) (string, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return "", fmt.Errorf("query is required")
+	}
+	target := h.ddgBaseURL
+	if target == "" {
+		target = ddgHTMLEndpoint
+	}
+	full := target + "?q=" + url.QueryEscape(query)
+
+	client := h.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	base := h.webRetryBase
+	if base <= 0 {
+		base = 500 * time.Millisecond
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < webFetchMaxAttempts; attempt++ {
+		if attempt > 0 {
+			if !ctxSleep(ctx, base<<(attempt-1)) {
+				return "", ctx.Err()
+			}
+		}
+		body, retryable, err := h.webSearchOnce(ctx, client, full)
+		if err == nil {
+			return body, nil
+		}
+		lastErr = err
+		if !retryable {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("web_search failed after %d attempts: %w", webFetchMaxAttempts, lastErr)
+}
+
+// webSearchOnce performs a single DDG HTML request. retryable mirrors webFetchOnce
+// (true for 429/5xx/network/timeout; false for 2xx or a definitive 4xx).
+func (h *hostToolSet) webSearchOnce(ctx context.Context, client *http.Client, u string) (string, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", false, fmt.Errorf("build request: %v", err)
+	}
+	// A browser-like User-Agent avoids DDG's JS-challenge interstitial, which
+	// returns a page with no result blocks (we'd report "no search results").
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", true, fmt.Errorf("request failed: %v", err) // network/timeout → transient
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+		return "", true, fmt.Errorf("HTTP %d from %s", resp.StatusCode, u)
+	}
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxWebBody))
+	if resp.StatusCode >= 400 {
+		return "", false, fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, u, snippetBytes(data))
+	}
+	results := parseDDGResults(string(data))
+	if len(results) == 0 {
+		// 200-but-no-results is valid, not a failure — the model can fall back to web_fetch.
+		return "(no search results)", false, nil
+	}
+	if len(results) > maxWebSearchResults {
+		results = results[:maxWebSearchResults]
+	}
+	var sb strings.Builder
+	for i, r := range results {
+		fmt.Fprintf(&sb, "%d. %s\n   %s\n   %s\n", i+1, r.Title, r.URL, r.Snippet)
+	}
+	return strings.TrimSpace(sb.String()), false, nil
+}
+
+// ddgResult is one parsed DuckDuckGo result.
+type ddgResult struct {
+	Title   string
+	URL     string
+	Snippet string
+}
+
+// reDDGBlock matches one DDG result block: an anchor with class "result__a" whose
+// href is the redirect, followed (case-insensitively, dot-all) by an anchor with
+// class "result__snippet" holding the snippet text.
+var reDDGBlock = regexp.MustCompile(`(?is)<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?<a[^>]*class="result__snippet"[^>]*>(.*?)</a>`)
+
+// parseDDGResults extracts result blocks from a DDG HTML page. The result__a href
+// is a //duckduckgo.com/l/?uddg=<encoded real URL> redirect; the real URL is
+// recovered by decoding the uddg query param. Titles and snippets have HTML
+// stripped. Tolerant by design: a malformed block is skipped, not fatal.
+func parseDDGResults(htmlDoc string) []ddgResult {
+	var out []ddgResult
+	for _, m := range reDDGBlock.FindAllStringSubmatch(htmlDoc, maxWebSearchResults*2) {
+		rawHref, titleHTML, snippetHTML := m[1], m[2], m[3]
+		realURL := decodeDDGRedirect(rawHref)
+		if realURL == "" {
+			continue // not a real result link (e.g. a "more results" nav anchor)
+		}
+		out = append(out, ddgResult{
+			Title:   stripHTML(titleHTML),
+			URL:     realURL,
+			Snippet: stripHTML(snippetHTML),
+		})
+		if len(out) >= maxWebSearchResults {
+			break
+		}
+	}
+	return out
+}
+
+// decodeDDGRedirect recovers the real result URL from a DuckDuckGo redirect href of
+// the form "//duckduckgo.com/l/?uddg=<urlencoded>&rut=..." (or an absolute
+// https:// variant). Returns "" if the href isn't a uddg redirect we can decode.
+func decodeDDGRedirect(href string) string {
+	href = strings.TrimSpace(href)
+	if href == "" {
+		return ""
+	}
+	// Resolve protocol-relative "//duckduckgo.com/..." to a parseable absolute URL.
+	if strings.HasPrefix(href, "//") {
+		href = "https:" + href
+	}
+	u, err := url.Parse(href)
+	if err != nil {
+		return ""
+	}
+	uddg := u.Query().Get("uddg")
+	if uddg == "" {
+		return ""
+	}
+	if real, err := url.QueryUnescape(uddg); err == nil {
+		return real
+	}
+	return uddg
+}
+
+// ── bash ─────────────────────────────────────────────────────────────────────
+
+// runBash runs `bash -c <command>` with the agent's secrets in env (provider key stripped),
+// CWD = the agent working directory, sandboxed via Landlock when enabled — the SAME
+// confinement, env, and isolated TMPDIR runScript uses (via buildScriptCommand). `bash -c`
+// (not a login shell) keeps the environment clean and deterministic. On non-zero exit BOTH
+// stdout and stderr are returned so the model can diagnose and self-correct, exactly like
+// runScript. NOTE: unlike an authored tools/*.py (AST-scanned by build guardrails), an
+// arbitrary bash string is not statically vetted — it is sandboxed identically but unvetted.
+func (h *hostToolSet) runBash(ctx context.Context, command string) (string, error) {
+	if strings.TrimSpace(command) == "" {
+		return "", fmt.Errorf("command is required")
+	}
+	homeDir := h.userHomeDir()
+	tmpDir := filepath.Join(homeDir, "tmp")
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
+		return "", fmt.Errorf("prepare tmp dir: %w", err)
+	}
+	env := buildEnvList(h.subprocessEnv, homeDir, tmpDir)
+	cmd := h.buildScriptCommand(ctx, []string{"bash", "-c", command}, env, h.workDir)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("command timed out")
+		}
+		return "", fmt.Errorf("command failed: %w\nstdout: %s\nstderr: %s", err, truncate(stdout.String()), truncate(stderr.String()))
+	}
+	out := stdout.String()
+	if strings.TrimSpace(out) == "" && stderr.Len() > 0 {
+		return noStdoutSentinel + "\n" + truncate(stderr.String()), nil
+	}
+	return out, nil
 }
 
 func truncate(s string) string {
