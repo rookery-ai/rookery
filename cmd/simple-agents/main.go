@@ -103,10 +103,44 @@ func serveCmd() *cli.Command {
 			// inside it so each user's vault is a single browsable, backup-able unit.
 			vaultsDir := filepath.Join(cfg.Data.Dir, "vaults")
 			vlt := vault.New(cfg.Data.Dir)
+
+			// secretsLookup resolves a single named secret for a workspace at run time.
+			// The API coder (workspaces.coder_kind='api') uses it to fetch its provider
+			// API key lazily on every call — the same path the scheduler uses to decrypt
+			// the stored master password. Applied to both the shared default coder and the
+			// per-workspace factory so the Telegram shared-coder path works too.
+			secretsLookup := func(ctx context.Context, workspaceID, name string) (string, error) {
+				w, err := database.GetWorkspaceByID(workspaceID)
+				if err != nil || w == nil || w.EncryptedMasterPassword == "" {
+					return "", err
+				}
+				masterPw, err := secrets.DecryptMasterPassword(w.EncryptedMasterPassword, sysKey)
+				if err != nil {
+					return "", err
+				}
+				svc := secrets.New(database, workspaceID, masterPw, w.SecretsSalt)
+				return svc.Get(ctx, name)
+			}
+			coderSvc = coderSvc.WithVault(vlt).WithSecretsLookup(secretsLookup)
+
+			// coderFor builds a per-workspace coder honoring the workspace's inlined
+			// coder config (local or api), instead of always using the shared CLI
+			// coderSvc. Used by the agent designer, skill creator, and Telegram chat so
+			// a workspace configured with coder_kind=api gets its own engine everywhere
+			// — not just for agent runs and the web chat composer.
+			coderFor := func(workspaceID string) *coder.Coder {
+				w, err := database.GetWorkspaceByID(workspaceID)
+				if err != nil || w == nil {
+					return coderSvc
+				}
+				return coder.ForWorkspace(w, homesDir, cfg.Data.Dir, vlt,
+					cfg.Coder.ClaudeBin, cfg.Coder.Timeout, cfg.Sandbox.Enabled).
+					WithSecretsLookup(secretsLookup)
+			}
+
 			agentsDir := vaultsDir
 			skillsDir := vaultsDir
 			designer := agentdesigner.NewDesigner(database, agentsDir)
-			// Telegram uses a single system coder; wrap it in a resolver lambda.
 			memStore := memory.New(vaultsDir)
 
 			// One-time, idempotent migration of any pre-vault on-disk data
@@ -157,7 +191,7 @@ func serveCmd() *cli.Command {
 				slog.Info("reconciled stale agent runs", "count", n)
 			}
 
-			designFlow := agentdesigner.NewFlow(func(_ string) *coder.Coder { return coderSvc }, designer).
+			designFlow := agentdesigner.NewFlow(coderFor, designer).
 				WithDB(database).
 				WithMemory(memStore).
 				WithSecretsLoader(func(ctx context.Context, workspaceID string) (map[string]string, error) {
@@ -182,15 +216,16 @@ func serveCmd() *cli.Command {
 					if err != nil || w == nil {
 						return nil
 					}
-					return coder.ForWorkspace(w, homesDir, cfg.Data.Dir,
-						cfg.Coder.ClaudeBin, cfg.Coder.Timeout, cfg.Sandbox.Enabled)
+					return coder.ForWorkspace(w, homesDir, cfg.Data.Dir, vlt,
+						cfg.Coder.ClaudeBin, cfg.Coder.Timeout, cfg.Sandbox.Enabled).
+						WithSecretsLookup(secretsLookup)
 				})
 
 			// Conversational skill-creator: same shape as the agent designer.
 			// Core skills are embedded (always-on) and need no seeding; the saver
 			// writes user-created skills into the user's vault.
 			skillSaver := skilldesigner.NewSaver(database, skillsDir)
-			skillFlow := skilldesigner.NewSkillFlow(func(_ string) *coder.Coder { return coderSvc }, skillSaver).
+			skillFlow := skilldesigner.NewSkillFlow(coderFor, skillSaver).
 				WithDB(database).
 				WithMemory(memStore).
 				WithSecretsLoader(func(ctx context.Context, workspaceID string) (map[string]string, error) {
@@ -211,8 +246,12 @@ func serveCmd() *cli.Command {
 
 			textHandler := func(ctx context.Context, workspaceID string, history []db.ChatMessage, text string, send func(string)) error {
 				root := vlt.Root(workspaceID)
-				sysCtx := prompts.BuildChatSystemPrompt(root) + chat.BuildUserContext(database, memStore, workspaceID)
-				result, err := coderSvc.WithDir(root).WithAllowedTools("Read,Write,Edit,Glob,Grep").Chat(ctx, workspaceID, history, sysCtx, text)
+				cd := coderFor(workspaceID).WithDir(root)
+				if !cd.IsAPI() {
+					cd = cd.WithAllowedTools("Read,Write,Edit,Glob,Grep")
+				}
+				sysCtx := prompts.BuildChatSystemPrompt(root, cd.BackendType()) + chat.BuildUserContext(database, memStore, workspaceID)
+				result, err := cd.Chat(ctx, workspaceID, history, sysCtx, text)
 				if err != nil {
 					send("Sorry, I ran into an error: " + err.Error())
 					return nil

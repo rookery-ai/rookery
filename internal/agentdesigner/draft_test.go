@@ -32,10 +32,10 @@ func TestDraftSaveAndResume_Designing(t *testing.T) {
 	flow, database, workspaceID, _ := newDraftFlow(t)
 
 	sess := &DesignSession{
-		WorkspaceID:    workspaceID,
-		AgentID:   uuid.New().String(),
-		AgentName: "price-tracker",
-		State:     StateDesigning,
+		WorkspaceID: workspaceID,
+		AgentID:     uuid.New().String(),
+		AgentName:   "price-tracker",
+		State:       StateDesigning,
 		History: []db.ChatMessage{
 			{Role: "user", Content: "track BTC price"},
 			{Role: "assistant", Content: "Sure — how often?"},
@@ -81,7 +81,7 @@ func TestDraftSaveAndResume_Verifying(t *testing.T) {
 
 	pendingMD := "# Suggested schedule: */10 * * * *\nFetches BTC price and alerts."
 	sess := &DesignSession{
-		WorkspaceID:         workspaceID,
+		WorkspaceID:    workspaceID,
 		AgentID:        uuid.New().String(),
 		AgentName:      "price-tracker",
 		State:          StateVerifying,
@@ -118,7 +118,7 @@ func TestDraftDismissedOnFinalize(t *testing.T) {
 
 	agentID := uuid.New().String()
 	sess := &DesignSession{
-		WorkspaceID:         workspaceID,
+		WorkspaceID:    workspaceID,
 		AgentID:        agentID,
 		AgentName:      "price-tracker",
 		State:          StateVerifying,
@@ -162,7 +162,7 @@ func TestDraftCleanupOrphanDir(t *testing.T) {
 	}
 
 	sess := &DesignSession{
-		WorkspaceID:         workspaceID,
+		WorkspaceID:    workspaceID,
 		AgentID:        agentID,
 		AgentName:      "price-tracker",
 		State:          StateVerifying,
@@ -196,10 +196,10 @@ func TestDraftDismiss_CreateDesigningKeepsDir(t *testing.T) {
 	}
 
 	sess := &DesignSession{
-		WorkspaceID:    workspaceID,
-		AgentID:   agentID,
-		AgentName: "price-tracker",
-		State:     StateDesigning,
+		WorkspaceID: workspaceID,
+		AgentID:     agentID,
+		AgentName:   "price-tracker",
+		State:       StateDesigning,
 	}
 	flow.saveDraft(sess)
 
@@ -220,7 +220,7 @@ func TestEditDraftResume_AgentDeleted(t *testing.T) {
 	seedAgent(t, database, agentsDir, workspaceID, agentID, "# Suggested schedule: none\nDoes a thing.", nil)
 
 	sess := &DesignSession{
-		WorkspaceID:          workspaceID,
+		WorkspaceID:     workspaceID,
 		AgentID:         agentID,
 		AgentName:       "test-agent",
 		State:           StateDesigning,
@@ -248,10 +248,10 @@ func TestDraftExpiry(t *testing.T) {
 	_, database, workspaceID, _ := newDraftFlow(t)
 
 	if err := database.UpsertAgentDraft(&db.AgentDraft{
-		WorkspaceID:    workspaceID,
-		AgentName: "stale",
-		State:     "designing",
-		ExpiresAt: time.Now().Add(-24 * time.Hour), // already expired
+		WorkspaceID: workspaceID,
+		AgentName:   "stale",
+		State:       "designing",
+		ExpiresAt:   time.Now().Add(-24 * time.Hour), // already expired
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -268,7 +268,7 @@ func TestAwaitingResume_NewBranch(t *testing.T) {
 
 	agentID := uuid.New().String()
 	flow.sessions[workspaceID] = &DesignSession{
-		WorkspaceID:      workspaceID,
+		WorkspaceID: workspaceID,
 		AgentID:     agentID,
 		AgentName:   "old-draft-name",
 		State:       StateAwaitingResume,

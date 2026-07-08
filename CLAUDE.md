@@ -92,7 +92,9 @@ Telegram adapter (per-workspace bot instance)
 | `internal/rbac` | `CanPerform(db, workspaceID, permission)` — reads `workspace_permissions` table |
 | `internal/secrets` | AES-256-GCM store; Argon2id key derivation; `GetAll()` decrypts all for env injection; `Proxy()` resolves `${NAME}` in-memory only |
 | `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router`, `IdentityResolver`, `TelegramGateway` |
-| `internal/coder` | `Coder`: runs coder CLI subprocess with full per-workspace isolation; `CoderBackend` interface abstracts Claude vs. generic CLIs; `WithNoTools()` for text-only calls; `WithExtraEnv()` for secret injection; `ForWorkspace(w, …)` builds a coder from the workspace's inlined config |
+| `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface abstracts Claude vs. generic CLIs). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host file tools (`read_file`/`write_file`/`edit_file`/`list_dir`/`run_script`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
+| `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
+| `internal/composioassets` | Single source of truth for the Composio v3 helper scripts (`composio_helper.py`, `composio_discover.py`), `go:embed`ed and **seeded deterministically** into an agent's/skill's working dir by `WriteHelperFiles(dir)` BEFORE the coder runs (build AND real run) — so every generation gets byte-identical, safety-checked code instead of the LLM retyping it. `IsSeededFilename()` skips guardrail vetting on them; `BuildPhaseEnvVar`/`BuildPhaseGeneration` (`SA_BUILD_PHASE=generation`) tells `composio_helper.py` to refuse real outbound/destructive actions at build time. |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal) |
 | `internal/skilldesigner` | Conversational skill-creator wizard mirroring `agentdesigner.Flow` (FSM Idle→AwaitingResume→Describing→Designing→Verifying→Done, SSE progress, 7-day drafts, approval triggers); `SkillSaver` writes SKILL.md+scripts/ to vault + DB upsert; generation runs with the `skill-creator` core skill, vetting runs the `skill-vetter` core skill as a text-only audit; `vettingBlocksSave()` parses the verdict line. Web-wired only (Telegram route not yet added). |
 | `internal/skilllibrary` | Embedded core skill catalog (`go:embed skills/*/SKILL.md`) — always-on for every user, no DB rows, no admin gate. `LoadBundled()`, `CoreSkillContent(slug)`, `IsCoreSkill()`, `ParseMeta()` (Anthropic+openclaw YAML frontmatter: requires.bins/anyBins/env, install specs). Supersedes the admin-catalog approach dropped in migration 009. |
@@ -185,7 +187,7 @@ Agent creation uses a single `agentdesigner.Flow` FSM shared between Telegram an
 All prompts live in `internal/prompts` (single source). The designer produces **coder-agnostic** AGENT.md — it says WHAT to do, never runtime-specific tool names (so it works on a full coder like claude-code/codex OR a basic model call like OpenRouter GLM). HOW the coder acts on files is injected separately based on `BackendType`:
 
 - **`platformContextBlock(chatApps, vaultRoot)`** — full Simple Agents primer (flexible ever-growing KB with USER-REORGANIZABLE vs SYSTEM-WRITTEN fixed locations, secrets store, chats, reminders, connected chat apps + commands, output protocol, schedule). Injected into design, implementation, and runtime prompts.
-- **`coderCapabilitiesBlock(backendType)`** — `BackendFullCoder` → direct tool access; `BackendBasicModel` → `[READ_FILE]`/`[WRITE_FILE]`/`[RUN_SCRIPT]` output markers. `MapCoderBackend()` maps the coder's backend type to these.
+- **`coderCapabilitiesBlock(backendType)`** — three-way: `BackendFullCoder` (CLI) → direct tool access; `BackendToolCalling` (the `api` engine) → native function calls (`read_file`/`write_file`/`edit_file`/`list_dir`/`run_script`) the host executes, final answer as protocol markers; `BackendBasicModel` → `[READ_FILE]`/`[WRITE_FILE]`/`[RUN_SCRIPT]` output markers. `MapCoderBackend()` maps the coder's backend type (`"api"` → tool-calling) to these. `BuildChatSystemPrompt(vaultRoot, backendType)` is likewise backend-aware.
 - **`agentPhilosophyBlock()`** — three-tier taxonomy (TIER 1 reasoning-only / TIER 2 one script / TIER 3 multi-file) with NOT-TO-DO lists; forces the coder to pick the simplest tier that solves the task (prevents writing a script for trivial reasoning work).
 - **`agentArchitectureGateBlock()`** — mandatory TASK ANALYSIS → TIER DECISION → NOTIFICATION DECISION → SCHEDULE DECISION before any file is created. Supports no-notification (`[SILENT]`) and no-schedule (`none`) agents.
 - **`ChatAppsForPlatforms()`** — central platform→`ChatAppInfo` (name + commands) mapping; callers load via `db.ListUserPlatformConnections` (no GatewayManager method needed).
@@ -195,10 +197,11 @@ All prompts live in `internal/prompts` (single source). The designer produces **
 
 Composio connects agents to 250+ external services via the **v3 REST API** (not the deprecated SDK).
 
-- `composioServicesBlock()` in `internal/prompts/prompts.go` is the **single source** of the v3 spec — injected into design, create, and edit prompts.
+- `composioServicesBlock()` in `internal/prompts/prompts.go` is the **single source** of the v3 spec — injected into design, create, and edit prompts. `composioRuntimeNote()` is the leaner RUN-time variant (agents already know their tool slugs; re-injecting the full discovery spec made them re-run discovery).
 - Base: `https://backend.composio.dev/api/v3` · Auth: `x-api-key` header
 - Connected accounts: `GET /connected_accounts?limit=100` · Execute: `POST /tools/execute/{TOOL_SLUG}`
-- Guardrails block: SDK imports (`from composio import`), hardcoded keys (`ak_...`), wrong host (`api.composio.dev`), old versions (`/v1/`, `/v2/`).
+- **Helper scripts are seeded, not retyped.** `internal/composioassets.WriteHelperFiles` writes the verified `composio_helper.py`+`composio_discover.py` into `tools/` (agents) / `scripts/` (skills) before the coder runs, so a weaker model can't garble the safety logic. At build time `SA_BUILD_PHASE=generation` makes the helper refuse real outbound/destructive Composio actions (see `internal/composioassets`).
+- Guardrails block: SDK imports (`from composio import`), hardcoded keys (`ak_...`), wrong host (`api.composio.dev`), old versions (`/v1/`, `/v2/`) — the version/host checks are gated per-line on a `composio` reference so an unrelated API's real `/v2/` endpoint isn't flagged; seeded helper files are skipped (`IsSeededFilename`).
 
 ### Skill system (core + user skills)
 
@@ -260,15 +263,26 @@ Secrets stored encrypted in `secrets` table. Three sources of `MasterPw` at runt
 - **`WithAllowedTools(tools)`** — Required whenever `--setting-sources ""` is active or subprocess blocks on permission prompts. Agent generation: `"Bash,WebFetch,Read,Write,Edit"` (matches the run set, so builds do real end-to-end tests against live services); skill generation: `"Bash,Write,Edit,Read"`; runs: `"Bash,WebFetch,Read,Write,Edit"`.
 - **`WithDir(dir)`** — overrides subprocess CWD. Used by generation AND every agent run — without it the agent writes to the shared per-workspace home and contaminates other agents.
 - **`WithExtraEnv(env)`** — merges additional env vars. System overrides always take precedence.
-- **`WithBackendType(t)`** — forces `"claude"`, `"generic"`, or `""` (auto-detect by binary name).
+- **`WithBackendType(t)`** — forces `"claude"`, `"generic"`, `"api"`, or `""` (auto-detect by binary name).
+- **`WithAPIConfig(provider, model, baseURL, apiKeySecretName)`** — switches the coder to the in-process API engine (`coder_kind=="api"`). Once set, `Generate`/`Chat`/`Ping` dispatch to the tool-calling loop instead of a subprocess. **`WithSecretsLookup(f)`** attaches the lazy provider-key resolver (the API engine fetches its own key by secret name at run time, so every call site authenticates regardless of env injection); **`WithVault(v)`** attaches the vault for the host file tools; **`WithProgress(f)`** streams per-tool-call milestones to the run SSE; **`IsAPI()`** reports the kind. `Ping(ctx, workspaceID)` now takes a workspace id (needed to resolve the API key).
 
-**`CoderBackend`** (`internal/coder/backend.go`): `claudeBackend` (Claude CLI: `--output-format json`, `--setting-sources ""`) and `genericCLIBackend` (any other CLI, plain-text stdout).
+**`CoderBackend`** (`internal/coder/backend.go`): `claudeBackend` (Claude CLI: `--output-format json`, `--setting-sources ""`) and `genericCLIBackend` (any other CLI, plain-text stdout). The API engine is not a `CoderBackend` — it bypasses the subprocess path entirely.
 
-**Critical:** `--setting-sources ""` + no `--allowedTools` = subprocess hangs indefinitely.
+**Critical:** `--setting-sources ""` + no `--allowedTools` = subprocess hangs indefinitely (CLI engine only).
 
-### Usage-limit detection
+### API coder engine (`coder_kind == "api"`)
 
-`coder.ErrUsageLimit` — non-zero exit with empty stdout+stderr. `agentrunner.friendlyRunError` converts to a user-facing message sent via `input.SendOutput` on every run failure. Also handled softly during generation and design conversation turns.
+A workspace can run its coder as a **direct LLM provider API** instead of a host CLI binary. `Coder.runAPI`/`runToolLoop` (`internal/coder/api_engine.go`) drive an in-process loop: `Complete → execute host tools against the vault → feed results back → Complete`, until the model emits a final answer (no tool calls), the turn budget is spent, or the deadline passes. The model's final text carries the same `[CHAT]`/`[STATE]`/`[SILENT]` protocol markers, so the runner's parser is unchanged.
+
+- **Host tools** (`hosttools.go`, `hostToolSet`): `read_file`/`write_file`/`edit_file`/`list_dir` are vault-path-safe (relative to workDir/vault root, escapes rejected); `run_script` (agent runs only — workDir ≠ vault root) runs `python3` sandboxed via Landlock with the agent's secrets in env (provider key stripped). All results are byte-capped and never empty (an empty tool result breaks strict serializers).
+- **Turn budgets**: `maxAPITurns` (25) for runs/chat; `maxBuildAPITurns` (40) + `buildMaxTokens` (8192) for builds. A budget-exhausted loop gets one grace turn to wrap up: `[BLOCKED]` for a build (parsed by the designer), plain language for a run/chat.
+- **Build-time script verification** (weak-model hardening, build only): the engine refuses to "finish" a build while the model authored a helper script that never once returned real output — `verifyFinishNudge` drives it to run/inspect/fix (bounded by `maxVerifyNudges`), or report the failure in plain language. Seeded Composio helpers don't count as verification. Plus a loop-guard (`recentFails` ring + `consecutiveFails`) that short-circuits repeated/oscillating failing calls.
+- **Design conversations vs one-off chat** (`Chat` split by `noTools`): `chatAPI` (text-only single completion, real alternating user/assistant turns so the model doesn't re-ask its opening question) vs `chatToolsAPI` (adds the host file tools, minus `run_script`, for on-demand KB read/write).
+- **Providers** (`internal/llm`): `openai`, `openrouter`, `anthropic`, `generic` (any OpenAI-compatible endpoint; base URL required). Not probed — always available in the settings picker via `coder.APIProviders()`.
+
+### Usage-limit / rate-limit detection
+
+`coder.ErrUsageLimit` — CLI: non-zero exit with empty stdout+stderr; API: provider 402 (credits/quota exhausted, `ErrQuotaExhausted`). `coder.ErrRateLimited` — API transient 429 that didn't clear within the retry budget (distinct so the message says "try again in a moment", not "out of quota"). `coder.ErrAPIAuth` (bad/missing key) and `coder.ErrMaxTurns` (budget exhausted) are config/run errors, not usage limits. `agentrunner.friendlyRunError` converts each to a user-facing message sent via `input.SendOutput` on every run failure. Also handled softly during generation and design conversation turns. API token usage is accumulated across the loop (`coder.Usage`) and persisted per run.
 
 ### Guardrails
 
@@ -300,11 +314,13 @@ Secrets stored encrypted in `secrets` table. Three sources of `MasterPw` at runt
 
 SQLite via `modernc.org/sqlite` (CGo-free). WAL mode + foreign keys set on open. Migrations in alphabetical order from `migrations/`.
 
-The schema is a single consolidated `migrations/001_initial_schema.up.sql` (the old incremental
-migrations were collapsed during the workspace refactor; data was wiped and re-created fresh).
+The base schema was consolidated into `migrations/001_initial_schema.up.sql` during the workspace
+refactor (the old incremental migrations were collapsed; data was wiped and re-created fresh);
+incremental migrations resume from there — `002_coder_api` adds `workspaces.coder_base_url`, and
+`003_agent_runs_usage` adds `agent_runs.{prompt,completion,total}_tokens` for the API coder.
 Tables: `owner` (single row), `workspaces` (replaces `users`; carries `about` + inlined coder
-config: `coder_kind`/`coder_bin`/`coder_timeout_s`/`coder_backend_type` + reserved
-`coder_provider`/`coder_model`/`coder_api_key_secret`), `platform_connections`,
+config: `coder_kind`/`coder_bin`/`coder_timeout_s`/`coder_backend_type` + the now-active API-coder
+fields `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`), `platform_connections`,
 `platform_identities`, `agents`, `agent_schedules`, `agent_runs`, `secrets`, `chats`, `reminders`,
 `workspace_permissions` (was `user_permissions`), `mcp_servers`, `workspace_settings` (was
 `user_settings`), `system_settings` (owner/system-level, not tenant-scoped, no FK),
@@ -380,14 +396,21 @@ config: `coder_kind`/`coder_bin`/`coder_timeout_s`/`coder_backend_type` + reserv
 ### Per-workspace coder
 
 Each workspace inlines its own coder config on the `workspaces` row (`coder_kind` `local`/`api`,
-`coder_bin`, `coder_timeout_s`, `coder_backend_type`). `coder.ForWorkspace(w, …)` builds a
-`*coder.Coder` from it, falling back to the system defaults when unset; `coder.DetectInstalled()`
-probes PATH + `~/.local/bin` for supported binaries (claude/claude-code, opencode, codex, cursor)
-to populate the picker. The web `coderForWorkspace(id)` and the runner's injected coder factory
-(`Runner.WithCoderFactory`, wired in `main.go`) both use `ForWorkspace`, so scheduled + manual
-agent runs now honor the workspace's coder (previously the runner ignored the assignment). The
-`api` kind (direct provider API using a secret-store key) is reserved for future work — it falls
-back to the default binary today.
+`coder_bin`, `coder_timeout_s`, `coder_backend_type`, and for `api`:
+`coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`). `coder.ForWorkspace(w, …)`
+builds a `*coder.Coder` from it — a **local** CLI coder or the **api** engine — falling back to the
+system defaults when unset; `coder.DetectInstalled()` probes PATH + `~/.local/bin` for supported
+binaries (claude/claude-code, opencode, codex, cursor) and `coder.APIProviders()` lists the direct-API
+providers to populate the picker. The web `coderForWorkspace(id)` and the runner's injected coder
+factory (`Runner.WithCoderFactory`, wired in `main.go`) both use `ForWorkspace` — as do the agent
+designer, skill creator, and Telegram chat (via the `coderFor(workspaceID)` factory in `main.go`) —
+so scheduled + manual runs, generation, and chat all honor the workspace's coder.
+
+**Both kinds are fully implemented.** The `api` kind resolves its provider API key lazily via
+`WithSecretsLookup` (a closure in `main.go`/`web.Server.secretsLookup` that decrypts the workspace
+master password and reads the named secret, same path the scheduler uses) — so it authenticates on
+every call site regardless of whether that path injects secrets via env. Settings/setup save
+provider/model/base-url/api-key-secret through `db.UpdateWorkspaceCoder`.
 
 ### Natural language reminders
 

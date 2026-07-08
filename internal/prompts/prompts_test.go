@@ -5,27 +5,30 @@ import (
 	"testing"
 )
 
-// v3 markers that must be present wherever the coder writes Composio code.
+// Markers that must be present wherever the coder is guided to write Composio code.
+// composio_helper is the seeded, Go-authored helper (internal/composioassets) that is
+// now the single source of truth for the actual REST shape (base URL, connected-accounts
+// lookup, execute body) — the prompt intentionally no longer restates that raw spec
+// (see composioServicesBlock's doc comment), so this guard checks that every phase
+// consistently points the coder at the helper + the correct host, not that it repeats
+// endpoint-level detail.
 const (
-	v3Host    = "backend.composio.dev/api/v3"
-	v3Connect = "connected_accounts"
+	v3Host    = "backend.composio.dev"
+	v3Connect = "composio_helper"
 )
 
-// TestComposioSpecPresentInEveryPhase is the regression guard for the bug where
+// TestComposioSpecPresentInCodePhases is the regression guard for the bug where
 // the v3 spec lived only in the design conversation, so generation wrote v1 code.
-// Every phase that produces or guides code must carry the v3 spec when Composio
-// is enabled — and must not leak it when disabled.
-func TestComposioSpecPresentInEveryPhase(t *testing.T) {
+// Every phase that produces or guides CODE (create, edit, runtime) must carry the
+// v3 spec when Composio is enabled — and must not leak it when disabled. The DESIGN
+// conversation is deliberately excluded (see TestDesignPromptNeverLeaksComposioTech).
+func TestComposioSpecPresentInCodePhases(t *testing.T) {
 	history := []ChatMessage{{Role: "user", Content: "fetch my gmail"}}
 
 	phases := map[string]struct {
 		enabled  string
 		disabled string
 	}{
-		"design": {
-			enabled:  BuildDesignSystemPrompt(DesignSystemParams{AgentName: "x", ComposioEnabled: true}),
-			disabled: BuildDesignSystemPrompt(DesignSystemParams{AgentName: "x", ComposioEnabled: false}),
-		},
 		"create": {
 			enabled:  BuildImplementationPrompt("x", history, ImplementationParams{ComposioEnabled: true}),
 			disabled: BuildImplementationPrompt("x", history, ImplementationParams{ComposioEnabled: false}),
@@ -33,6 +36,10 @@ func TestComposioSpecPresentInEveryPhase(t *testing.T) {
 		"edit": {
 			enabled:  BuildEditImplementationPrompt("x", history, ImplementationParams{ComposioEnabled: true}),
 			disabled: BuildEditImplementationPrompt("x", history, ImplementationParams{ComposioEnabled: false}),
+		},
+		"runtime": {
+			enabled:  BuildCoderPrompt(CoderPromptParams{AgentMD: "# Suggested schedule: none\ndo a thing", ComposioEnabled: true}),
+			disabled: BuildCoderPrompt(CoderPromptParams{AgentMD: "# Suggested schedule: none\ndo a thing", ComposioEnabled: false}),
 		},
 	}
 
@@ -47,6 +54,56 @@ func TestComposioSpecPresentInEveryPhase(t *testing.T) {
 		if strings.Contains(p.disabled, v3Host) {
 			t.Errorf("[%s] disabled prompt should not contain the Composio block", name)
 		}
+	}
+}
+
+// TestRuntimePromptExecutesNotRebuilds guards the fix for the runtime re-building itself:
+// a run must EXECUTE the already-built scripts, not re-explore, re-test, re-discover, or
+// write probe scripts. Specifically, the build-time Composio DISCOVERY workflow (run
+// composio_discover.py --toolkit … to find a slug) must NOT be injected at run time — that
+// is what made agents re-run discovery every run.
+func TestRuntimePromptExecutesNotRebuilds(t *testing.T) {
+	p := BuildCoderPrompt(CoderPromptParams{AgentMD: "# Suggested schedule: none\ndo a thing", ComposioEnabled: true})
+
+	// Establishes "already built — just run".
+	if !strings.Contains(p, "ALREADY BUILT") {
+		t.Error("runtime prompt should state the agent is already built and tested")
+	}
+	// Steers away from rebuilding/probing at run time.
+	for _, want := range []string{"do NOT create any new", "Do NOT run composio_discover.py"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("runtime prompt missing runtime guardrail %q", want)
+		}
+	}
+	// The build-time discovery workflow must NOT leak into the run.
+	if strings.Contains(p, "--toolkit") {
+		t.Error("runtime prompt must not inject the build-time composio discovery workflow (--toolkit)")
+	}
+}
+
+// TestDesignPromptNeverLeaksComposioTech guards the fix for the design conversation
+// leaking implementation detail: the (deliberately non-technical) design prompt must
+// NEVER contain the Composio helper/host/tool jargon, even when Composio is enabled —
+// injecting the full spec here contradicted the jargon ban and made the designer leak
+// technical detail and mix phases. When enabled it should carry only a plain-language
+// capability note (<external_services>). When disabled it carries neither.
+func TestDesignPromptNeverLeaksComposioTech(t *testing.T) {
+	enabled := BuildDesignSystemPrompt(DesignSystemParams{AgentName: "x", ComposioEnabled: true})
+	disabled := BuildDesignSystemPrompt(DesignSystemParams{AgentName: "x", ComposioEnabled: false})
+
+	// Technical Composio detail must never reach the design conversation.
+	for _, banned := range []string{v3Host, "composio_helper", "run_script", "composio_execute", "tool_slug", "COMPOSIO_API_KEY"} {
+		if strings.Contains(enabled, banned) {
+			t.Errorf("design prompt leaks technical Composio jargon %q", banned)
+		}
+	}
+	// When enabled, the plain-language capability note is present.
+	if !strings.Contains(enabled, "<external_services>") {
+		t.Errorf("Composio-enabled design prompt missing plain-language external-services note")
+	}
+	// When disabled, neither the note nor the spec appears.
+	if strings.Contains(disabled, "<external_services>") || strings.Contains(disabled, v3Host) {
+		t.Errorf("Composio-disabled design prompt should mention no external-services capability")
 	}
 }
 
@@ -98,6 +155,47 @@ func TestTestingRulesInGenerationPrompts(t *testing.T) {
 		if !strings.Contains(out, "import") {
 			t.Errorf("[%s] prompt should steer toward import-based tests", name)
 		}
+	}
+}
+
+// TestArchitectureGateInGenerationPrompts guards the tier forcing function: the
+// mandatory <architecture_gate> (TASK ANALYSIS → TIER DECISION) must be present in BOTH
+// the create and edit generation prompts — the edit path previously had no gate, letting
+// an edit bolt on a script without justifying a [BULK] task.
+func TestArchitectureGateInGenerationPrompts(t *testing.T) {
+	history := []ChatMessage{{Role: "user", Content: "watch prices"}}
+	for name, out := range map[string]string{
+		"create": BuildImplementationPrompt("x", history, ImplementationParams{}),
+		"edit":   BuildEditImplementationPrompt("x", history, ImplementationParams{}),
+	} {
+		if !strings.Contains(out, "<architecture_gate>") {
+			t.Errorf("[%s] prompt missing <architecture_gate> forcing function", name)
+		}
+		if !strings.Contains(out, "TIER 1 and you create zero code files") {
+			t.Errorf("[%s] prompt missing the hard default-to-TIER-1 rule", name)
+		}
+	}
+}
+
+// TestGateWeakBackendBias guards the capability-aware clause: only a tool-calling API
+// coder (the weak builder) gets the extra "bias hard toward TIER 1" nudge; the capable
+// CLI path keeps the neutral wording so it isn't burdened with friction.
+func TestGateWeakBackendBias(t *testing.T) {
+	history := []ChatMessage{{Role: "user", Content: "watch prices"}}
+	const biasMarker = "You are a limited builder"
+
+	weakCreate := BuildImplementationPrompt("x", history, ImplementationParams{BackendType: BackendToolCalling})
+	weakEdit := BuildEditImplementationPrompt("x", history, ImplementationParams{BackendType: BackendToolCalling})
+	fullCreate := BuildImplementationPrompt("x", history, ImplementationParams{BackendType: BackendFullCoder})
+
+	if !strings.Contains(weakCreate, biasMarker) {
+		t.Errorf("weak tool-calling create prompt should carry the TIER-1 bias clause")
+	}
+	if !strings.Contains(weakEdit, biasMarker) {
+		t.Errorf("weak tool-calling edit prompt should carry the TIER-1 bias clause")
+	}
+	if strings.Contains(fullCreate, biasMarker) {
+		t.Errorf("capable full-coder prompt must NOT carry the weak-builder bias clause (no new friction)")
 	}
 }
 

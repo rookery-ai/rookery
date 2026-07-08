@@ -38,7 +38,7 @@ type SkillRef struct {
 // can type and where [CHAT] output lands — without referencing a specific platform API.
 type ChatAppInfo struct {
 	Name     string   // e.g. "Telegram"
-	Commands  []string // e.g. "/agent create <name>", "/run <name>", "/chat", "/memory <text>"
+	Commands []string // e.g. "/agent create <name>", "/run <name>", "/chat", "/memory <text>"
 }
 
 // BackendType constants identify what kind of coder executes a prompt. The prompts are
@@ -52,15 +52,24 @@ const (
 	// OpenRouter GLM call). It interacts with the platform via output markers the
 	// host system interprets.
 	BackendBasicModel = "basic-model"
+	// BackendToolCalling is a direct LLM-API coder (OpenAI, OpenRouter, Anthropic, any
+	// OpenAI-compatible endpoint) driven by an in-process agentic loop that executes
+	// the model's native function/tool calls against the vault on the host. This is
+	// the same mechanism a CLI coder like claude-code uses internally; the model emits
+	// the standard output-protocol markers ([CHAT]/[STATE]/[SILENT]) in its final text.
+	BackendToolCalling = "tool-calling"
 )
 
-// MapCoderBackend translates a coder.Coder backend type ("claude", "generic", "") into
-// the prompts-level backend capability used by coderCapabilitiesBlock. Today every wired
-// coder is a full CLI coder; "basic"/"model"/"basic-model" map to the basic-model path for
-// the future direct-model coders. Unknown values default to full-coder.
+// MapCoderBackend translates a coder.Coder backend type ("claude", "generic", "api",
+// "openai", "anthropic", …) into the prompts-level backend capability used by
+// coderCapabilitiesBlock. CLI coders (claude/generic/"" ) are full coders; API coders
+// are tool-calling; the legacy "basic"/"model" names map to the un-built marker path.
+// Unknown values default to full-coder.
 func MapCoderBackend(coderBackend string) string {
 	switch strings.ToLower(strings.TrimSpace(coderBackend)) {
-	case "basic", "model", "basic-model", "openrouter", "api":
+	case "openai", "anthropic", "openrouter", "api", "tool-calling", "generic-api":
+		return BackendToolCalling
+	case "basic", "model", "basic-model":
 		return BackendBasicModel
 	default:
 		return BackendFullCoder
@@ -81,147 +90,131 @@ type DesignSystemParams struct {
 	Skills             []SkillRef
 	UserProfile        string
 	UserMemory         string
-	ComposioEnabled    bool // true when user has COMPOSIO_API_KEY in their secrets
+	ComposioEnabled    bool   // true when user has COMPOSIO_API_KEY in their secrets
 	KBManifest         string // rendered bullet list of the user's existing note paths; "" if empty/unknown
 }
 
-// composioServicesBlock returns the authoritative Composio v3 REST API spec.
-// It is the single source of truth shared by the design conversation, the
-// generation/edit prompts, so every phase writes correct v3 code.
+// composioServicesBlock returns the authoritative Composio v3 REST API guidance. It is
+// the single source of truth shared by the design conversation, the generation/edit
+// prompts, and the runtime (per-run) prompt, so every phase gives identical instructions
+// regardless of coder type. It deliberately does NOT restate the composio_helper.py
+// implementation or hardcode any service's tool slugs — see the package doc comment on
+// internal/composioassets for why: that boilerplate is now Go-authored and seeded onto
+// disk before the coder ever runs (verified against the live Composio v3 API, not
+// recalled from training data), and a hardcoded slug list can never cover Composio's
+// 250+ services. This block only teaches the coder how to USE what's already there.
 func composioServicesBlock() string {
 	return `<connected_services>
 This user has configured Composio (composio.dev) and connected external services to their
 personal Composio account. Their COMPOSIO_API_KEY is available as an environment variable.
 
-━━━ DO NOT USE THE COMPOSIO-CORE SDK ━━━
-The composio-core Python package (ComposioToolSet, Action enum) uses deprecated v1/v2
-endpoints that return HTTP 410. FORBIDDEN:
-  ❌ from composio import ComposioToolSet, Action
-  ❌ from composio import Composio; composio.create(...)
-  ❌ toolset.execute_action(...)
+━━━ THE HELPER ALREADY EXISTS — DO NOT WRITE IT ━━━
+tools/composio_helper.py and tools/composio_discover.py already exist in your working
+directory (the platform seeds them, verified against the real Composio v3 API). Do NOT
+recreate, rewrite, or hand-roll requests to backend.composio.dev — import from the
+provided helper instead:
+
+  from composio_helper import get_connection, composio_execute, list_tools, ComposioError
+
+Any edits you make to composio_helper.py are discarded and re-seeded next generation, so
+there is no benefit to changing it — write YOUR OWN scripts that import from it.
+
+FORBIDDEN, always:
+  ❌ from composio import ComposioToolSet, Action   (deprecated composio-core SDK, v1/v2, HTTP 410)
   ❌ requests.post(".../api/v1/..." or ".../api/v2/...")
+  ❌ requests.post(".../tools/execute/...") written directly in your own script instead of
+     calling composio_execute() — that bypasses the build-time safety guard (see below).
 
-━━━ USE THE v3 REST API DIRECTLY ━━━
+━━━ DISCOVER THE ACTION — FOR ANY SERVICE, NEVER GUESS A SLUG ━━━
+Composio has 250+ services and their tool slugs are not fixed or memorable — do not recall
+one from training data, and do not assume a slug exists because it "sounds right". Before
+writing a script that calls a specific action, find out what's actually available:
 
-## Step 1 — Always generate tools/composio_helper.py
+  python3 tools/composio_discover.py --toolkit <toolkit_slug> --query "<plain description>"
 
+or equivalently ` + "`list_tools(toolkit_slug, query=\"...\")`" + ` from your own script — this is ONE
+call either way (it costs exactly one run/tool-call turn). It full-text-searches the
+service's real, currently-valid tools and returns {"slug","name","description"} for each
+match. READ the name and description of every candidate before picking one — this is how
+you tell apart similarly-named actions that do very different things (e.g. a service will
+usually have a "create draft"-shaped action AND a separate "send"-shaped action; picking
+the wrong one because the names look similar is exactly the mistake this discovery step
+prevents). Do this once per toolkit per script — do not re-discover the same toolkit
+repeatedly.
+
+Then execute what you found:
 ` + "```python" + `
-import os, json, requests
-
-COMPOSIO_BASE = "https://backend.composio.dev/api/v3"
-
-def _headers(api_key):
-    return {"x-api-key": api_key, "Content-Type": "application/json"}
-
-def composio_get(path, api_key=None):
-    api_key = api_key or os.environ["COMPOSIO_API_KEY"]
-    r = requests.get(f"{COMPOSIO_BASE}{path}", headers=_headers(api_key), timeout=20)
-    r.raise_for_status()
-    return r.json()
-
-def composio_execute(tool_slug, conn_id, user_id, arguments, api_key=None):
-    api_key = api_key or os.environ["COMPOSIO_API_KEY"]
-    r = requests.post(
-        f"{COMPOSIO_BASE}/tools/execute/{tool_slug}",
-        headers=_headers(api_key),
-        json={"connected_account_id": conn_id, "user_id": user_id, "arguments": arguments},
-        timeout=30,
-    )
-    r.raise_for_status()
-    return r.json()
-
-def get_connection(toolkit_slug, api_key=None):
-    """Returns (conn_id, user_id) for the first ACTIVE connection. Raises ConnectionError if none."""
-    api_key = api_key or os.environ["COMPOSIO_API_KEY"]
-    data = composio_get("/connected_accounts?limit=100", api_key)
-    for acc in data.get("items", []):
-        if acc.get("toolkit", {}).get("slug") == toolkit_slug and acc.get("status") == "ACTIVE":
-            return acc["id"], acc["user_id"]
-    raise ConnectionError(
-        f"No active {toolkit_slug} connection found. "
-        f"Go to app.composio.dev/connections → add {toolkit_slug} → run this agent again."
-    )
-` + "```" + `
-
-## Step 2 — Discover tool slugs before writing any code
-
-Before hardcoding a tool slug, discover the available slugs for the target service:
-  GET /api/v3/tools?toolkit_slug=APPNAME&limit=50   → items[].slug, items[].name
-
-Common toolkit slugs: notion, slack, google-drive, gmail, google-calendar, github, linear, jira
-
-## Step 3 — Execute pattern (use in every tool script)
-
-` + "```python" + `
-from composio_helper import get_connection, composio_execute
+from composio_helper import get_connection, composio_execute, ComposioError
 import json, sys
 
 try:
-    conn_id, user_id = get_connection("notion")   # ← replace with target toolkit_slug
-except ConnectionError as e:
+    conn_id, user_id = get_connection("notion")   # ← the toolkit_slug you discovered against
+    result = composio_execute("NOTION_SEARCH_NOTION_PAGE", conn_id, user_id,
+                              {"query": "My Database"})  # ← the exact slug list_tools returned
+except ComposioError as e:
     print(json.dumps({"error": str(e)}))
     sys.exit(1)
-
-result = composio_execute("NOTION_SEARCH_NOTION_PAGE", conn_id, user_id,
-                          {"query": "My Database"})
-
-if not result.get("successful", True) or result.get("error"):
-    raise RuntimeError(result.get("error") or "unknown error")
 
 # Extract response — two patterns (try both):
 resp = result.get("data", {}).get("response_data") or result.get("data", {})
 ` + "```" + `
 
-## Step 4 — Connection error output (copy this pattern verbatim in AGENT.md)
+━━━ BUILD-TIME SAFETY GUARD — enforced in code, not just this prompt ━━━
+composio_execute() itself refuses to run an action whose slug looks like it delivers or
+removes something for real (contains SEND/PUBLISH/POST/DELIVER/NOTIFY/DELETE/REMOVE/
+COMMENT/REPLY/INVITE) while a build/verification pass is running — it raises
+BuildTimeSendBlocked with an explanation, it does not silently do it and does not silently
+skip it. This is a real backstop, not just advice: even if you pick the wrong action, the
+platform will not let it actually send/publish/delete during a build-time test.
+  - For an action that legitimately does one of those things (the agent's whole job is to
+    send), being stopped by this guard at build time is SUCCESS, not failure — it proves the
+    pipeline reached the send step correctly. Catch BuildTimeSendBlocked (or just don't call
+    the send-shaped action yet), print the exact content/recipients you WOULD send, put that
+    in [TEST_OUTPUT], and FINISH the build normally. This is a PASSING test. Do NOT report it
+    as a Composio error, an authentication problem, or a build failure, and do NOT retry it or
+    loop — the send runs for real the next time the agent executes on schedule.
+  - For a CREATE/DRAFT-shaped action (a Gmail draft, a Notion page, a calendar event, an
+    issue) — those are not blocked; call them for real at build time, they're the proof the
+    pipeline works. Print the returned id/URL as evidence.
+  - A script that only prints a payload and exits 0 without ever calling composio_execute()
+    does NOT perform the action — no draft is created, nothing happens. Always actually call
+    composio_execute(); never substitute a print statement for the real call.
+  - READ THE USER'S REQUEST carefully: "create a draft" / "prepare for review" means a
+    create/draft-shaped action; "send" / "notify" / "email me" means a send-shaped action.
+    Use list_tools()/composio_discover.py to find the slug that actually matches which one
+    they asked for — do not assume, and if genuinely unsure, ask in the design conversation.
 
-When a ConnectionError is caught, the agent must output:
+## Error handling
+
+get_connection()/composio_execute() raise ComposioError (or a subclass:
+ComposioConnectionError for a genuine network failure, ComposioServerError for Composio
+responding with persistent 429/5xx — see the docstring at the top of composio_helper.py)
+with an already-actionable message. Catch it (catching ComposioError catches all of them)
+and surface the message directly — do NOT paraphrase or re-summarize it into a different
+diagnosis (e.g. do not describe a ComposioServerError as "unreachable"; the message already
+says exactly what happened, quote it):
   [CHAT] ❌ Could not access [ServiceName]: {error_message}
-
-The error_message from get_connection() already contains the actionable fix
-("Go to app.composio.dev/connections → add {service} → run this agent again.")
-
-## Verified tool slugs
-
-Notion:       NOTION_SEARCH_NOTION_PAGE, NOTION_FETCH_BLOCK_CONTENTS,
-              NOTION_QUERY_DATABASE, NOTION_CREATE_NOTION_PAGE, NOTION_UPDATE_BLOCK,
-              NOTION_APPEND_BLOCK_CHILDREN, NOTION_DELETE_BLOCK, NOTION_ADD_PAGE_CONTENT,
-              NOTION_CREATE_DATABASE, NOTION_DUPLICATE_PAGE, NOTION_FETCH_BLOCK_METADATA
-Slack:        SLACK_SENDS_A_MESSAGE, SLACK_LIST_CHANNELS, SLACK_FETCH_MESSAGE
-Google Drive: GOOGLEDRIVE_FIND_FOLDER, GOOGLEDRIVE_LIST_FILES_IN_FOLDER, GOOGLEDRIVE_UPLOAD
-Gmail:        GMAIL_FETCH_EMAILS, GMAIL_SEND_EMAIL, GMAIL_LIST_THREADS
-Google Cal:   GOOGLECALENDAR_LIST_EVENTS, GOOGLECALENDAR_CREATE_EVENT
-GitHub:       GITHUB_LIST_ISSUES, GITHUB_CREATE_AN_ISSUE, GITHUB_LIST_PULL_REQUESTS
-Linear:       LINEAR_GET_ISSUES, LINEAR_CREATE_ISSUE, LINEAR_UPDATE_ISSUE
-Jira:         JIRACLOUD_GET_ISSUES, JIRACLOUD_CREATE_ISSUE
-
-IMPORTANT: Slugs may change. Always verify via GET /api/v3/tools?toolkit_slug=APPNAME&limit=50
-before coding. If a slug returns 404, fetch the list and find the closest match by name.
+If a report to the user or a [BLOCKED] block needs to explain a failure, include the actual
+exception text, not your own guess at what it means.
 
 ## Connection status values
 
-Only proceed when status == "ACTIVE":
-INITIALIZING, INITIATED — auth in progress; FAILED, EXPIRED, REVOKED — re-auth needed;
-INACTIVE — disabled. All of these → direct user to app.composio.dev/connections.
+Only proceed when status == "ACTIVE": INITIALIZING, INITIATED — auth in progress; FAILED,
+EXPIRED, REVOKED — re-auth needed; INACTIVE — disabled. All of these → direct the user to
+app.composio.dev/connections (get_connection already does this for you).
 
 ## Response data notes
 
-- Always check ` + "`result.get(\"successful\", True)`" + ` — tools return HTTP 200 even on failure
-- Check ` + "`result.get(\"error\")`" + ` first
-- Most tools: ` + "`result[\"data\"][\"response_data\"]`" + ` contains the payload
-- Some tools: ` + "`result[\"data\"]`" + ` directly contains ` + "`http_error`" + `, ` + "`message`" + `, ` + "`status_code`" + `
-
-## Natural language argument inference (optional)
-
-If you're unsure what arguments a tool needs:
-  POST /api/v3/tools/execute/{tool_slug}/input
-  Body: {"connected_account_id":"ca_xxx","user_id":"...","text":"describe what you want"}
-This converts plain text to the correct arguments object.
+- composio_execute() already raises on ` + "`result.get(\"error\")`" + ` / non-successful results — a
+  returned result is a successful one.
+- Most tools: ` + "`result[\"data\"][\"response_data\"]`" + ` contains the payload.
+- Some tools: ` + "`result[\"data\"]`" + ` directly contains ` + "`http_error`" + `, ` + "`message`" + `, ` + "`status_code`" + `.
 
 ## Testing
 
-COMPOSIO_API_KEY IS in your environment. Make REAL API calls — do NOT mock.
-If a connection is not active, output the guidance in [TEST_OUTPUT].
-A failed-but-guiding output is better than fake mock success.
+COMPOSIO_API_KEY IS in your environment. Make REAL API calls through composio_execute() —
+do NOT mock. If a connection is not active, output the guidance in [TEST_OUTPUT]. A
+failed-but-guiding output is better than fake mock success.
 </connected_services>
 
 `
@@ -299,6 +292,11 @@ the tooling layer itself is complex enough to need testing.
 If choosing TIER 2 or 3: write one sentence explaining exactly why TIER 1 is insufficient.
   Example: "TIER 2: the Gmail fetch requires pagination — could be 50+ emails per run."
   NOT: "TIER 2: I need to call an API." — one short API call is TIER 1.
+
+DEFAULT IS TIER 1. If you cannot name a specific task and classify it [BULK] with a
+concrete reason (which API paginates, how many items, which large structured payload),
+you MUST create ZERO code files. A tools/ directory on a TIER-1 agent is a defect, not a
+safety margin.
 
 </agent_philosophy>
 
@@ -457,10 +455,10 @@ func platformContextBlock(chatApps []ChatAppInfo, vaultRoot string) string {
 	sb.WriteString("## Output protocol (how agents communicate)\n")
 	sb.WriteString("Agents produce output ONLY via these markers — never by calling external APIs:\n\n")
 	sb.WriteString("  [CHAT] Message to send to the user.\n")
-	sb.WriteString("  Lines after [CHAT] (including blank lines) are all part of the message, until the\n")
-	sb.WriteString("  next marker ([STATE], [CALL], a new [CHAT]) or end of output. To keep the message\n")
-	sb.WriteString("  clean, put it all on one line or on contiguous lines with NO blank line inside — a\n")
-	sb.WriteString("  blank line in the middle leaves a gap in what the user sees.\n\n")
+	sb.WriteString("  Every line after [CHAT] — blank lines included — is part of the message, until the\n")
+	sb.WriteString("  next marker ([STATE], [CALL], a new [CHAT]) or the end of output. Blank lines are\n")
+	sb.WriteString("  preserved as paragraph breaks, so use them where you WANT a break and avoid a\n")
+	sb.WriteString("  leading or trailing blank line (which would show as an empty gap).\n\n")
 	sb.WriteString("  [STATE]{\"key\": \"value\"}[/STATE]\n")
 	sb.WriteString("  Merges the JSON object into state.json. Set a key to null to delete it.\n\n")
 	sb.WriteString("  [CALL: agent-name]\n")
@@ -487,9 +485,41 @@ func platformContextBlock(chatApps []ChatAppInfo, vaultRoot string) string {
 
 // coderCapabilitiesBlock tells the coder HOW it can act on files and the platform, based on
 // its backend type. AGENT.md stays coder-agnostic (it says WHAT to do); this block bridges
-// to the actual mechanism. full-coder: direct tool access. basic-model: output markers the
-// host system interprets (for plain model invocations with no tool calls, e.g. OpenRouter).
+// to the actual mechanism. full-coder: direct tool access. tool-calling: native function
+// calls the host executes. basic-model: output markers the host system interprets (legacy,
+// for plain model invocations with no tool calls).
 func coderCapabilitiesBlock(backendType string) string {
+	if backendType == BackendToolCalling {
+		return `<coder_capabilities>
+You are running as a tool-calling LLM. You have no shell and no direct filesystem
+access — instead you act through FUNCTION CALLS (tools) that the host executes for you
+and feeds back as tool results. Call tools to do real work; your final answer is plain
+text. The available tools are:
+
+- read_file(path): read a file. A RELATIVE path is resolved against your current working
+  directory (your own agent directory: AGENT.md, tools/, state.json, logs/ live there).
+  The USER's knowledge base (notes/, memory/, chats/) lives at the vault root — the
+  prompt names that absolute path; use it (an absolute path) when you read or write the
+  user's notes. An absolute path anywhere inside the vault is accepted.
+- write_file(path, content): create or overwrite a file (creates parent folders). Same
+  path rules as read_file: relative → your working directory; absolute → anywhere in the
+  vault. Use relative paths for your own files (AGENT.md, tools/*.py) and the absolute
+  vault-root path for the user's notes/memory.
+- edit_file(path, old_string, new_string): replace a unique substring in a file.
+- list_dir(path): list a directory's entries (path defaults to your working directory).
+- run_script(path): run a Python helper script under your working directory's tools/
+  folder (e.g. "tools/foo.py") and receive its stdout. Secrets are available to the
+  script as environment variables. Use this for paginated fetches, API calls, and data
+  processing — exactly as a CLI coder would run a tools/ script.
+
+When you are done, emit your final result as plain text using the AGENT OUTPUT PROTOCOL
+([CHAT] / [STATE] / [CALL: name] / [SILENT]) — the host reads those markers from your
+final message. Do not use [READ_FILE]/[WRITE_FILE]/[RUN_SCRIPT] text markers; those are
+for a different backend. Use the actual tool calls.
+</coder_capabilities>
+
+`
+	}
 	if backendType == BackendBasicModel {
 		return `<coder_capabilities>
 You are running as a basic model — you produce text output only and have no tool calls.
@@ -530,7 +560,14 @@ shell — do not route routine file writes through output markers.
 // implementation task, before any file is created. It forces the coder to classify each
 // task, decide the tier, and decide notification + schedule — so it never jumps to
 // writing a script for pure-reasoning work, and so silent / no-schedule agents are explicit.
-func agentArchitectureGateBlock() string {
+func agentArchitectureGateBlock(backendType string) string {
+	weakBias := ""
+	if backendType == BackendToolCalling {
+		weakBias = `
+  You are a limited builder. Bias hard toward TIER 1. Treat a task as [BULK] (needing a
+  script) ONLY when it truly cannot be done by reasoning over a small payload. A borderline
+  case resolves to TIER 1 here.`
+	}
 	return `<architecture_gate>
 MANDATORY — complete this analysis in your response BEFORE creating any file.
 
@@ -541,9 +578,13 @@ List each distinct thing this agent does on a run. Classify each one:
   [BULK]   — paginate many results, parse large structured data, multi-step I/O
 
 TIER DECISION:
-  All [REASON] and [SINGLE] → TIER 1. State: "No helper code needed — reasoning only."
+  If NO task is [BULK], the answer is TIER 1 and you create zero code files — mandatory,
+  not a preference. State: "No helper code needed — reasoning only."
   Any [BULK] → TIER 2 or 3. State exactly which [BULK] task requires code and why TIER 1
   is insufficient for it.
+  The design's [TECHNICAL SPEC] proposed a Tier:. Match it, or override toward the LOWER
+  tier. You may NOT silently escalate above the design's tier without naming the exact
+  [BULK] task that forces it.` + weakBias + `
 
 NOTIFICATION DECISION:
   Does this agent send notifications to the user?
@@ -611,6 +652,37 @@ NEVER do any of the following — no exceptions:
   "run schedule" not "cron"; "your notes" not "vault"; "the assistant will remember this"
   not "write to state.json".
 </constraints>
+
+`)
+
+	// ── Conversation discipline (convergence — critical for weaker models) ────
+	// The whole prior conversation is provided to you on every turn. Weaker models
+	// tend to re-ask the opening question or loop; these rules force forward
+	// progress and a single, unambiguous hand-off to "approve". Backend-agnostic:
+	// applies identically whether a full CLI coder or a direct-API model is driving.
+	sb.WriteString(`<conversation_discipline>
+The full conversation so far is given to you every turn as already-established
+context. Follow these rules exactly:
+- NEVER re-ask, re-confirm, or re-summarize anything the user has already told you.
+  Read back over the conversation first; treat every answer already given as settled.
+- Ask about only ONE new thing per reply (two at most). Do not restate the whole plan
+  each turn just to ask one question.
+- Hard cap: ask at most THREE questions total across the entire conversation. Once you
+  have asked three, stop asking — present the plan with any remaining unknowns filled in
+  by reasonable assumptions that you state explicitly ("I'll assume ...") and ask the user
+  to type "approve". Do not keep the conversation going past this to gather more detail.
+- Move forward every turn. Each reply must either ask for the ONE most important thing
+  you still don't know, or — if you now know enough — present the final plan.
+- You know "enough to build" once you have: (a) what the agent does, (b) when it runs
+  (a schedule or "only when I ask"), (c) whether it notifies the user, and (d) which
+  outside accounts or services it needs (if any) and how to get any credential those
+  require. As soon as you have those, STOP asking questions, present the plain-English
+  plan, and tell the user to type "approve". Do not invent further questions to keep the
+  conversation going — but do NOT skip (d) for an agent that clearly touches an external
+  service.
+- Never ask the user to approve more than once in the design conversation. The single
+  "type approve" hand-off comes only after the plan is presented.
+</conversation_discipline>
 
 `)
 
@@ -722,7 +794,7 @@ user):
 [TECHNICAL SPEC]
 Change: <one sentence describing what changes technically>
 Root cause: <what was actually wrong, if a bug>
-Tier change: same | 1→2 | 2→1 | etc.
+Tier change: same | 1→2 | 2→1 | etc. — prefer collapsing toward Tier 1 where the change removes the need for a script.
 [/TECHNICAL SPEC]
 </your_job>
 
@@ -755,7 +827,7 @@ Then tell the user to type "approve" when they are happy with the proposal.
 After the user approves, append this block (for the code generator only — NOT shown to the
 user):
 [TECHNICAL SPEC]
-Tier: 1 / 2 / 3 — reason if 2 or 3
+Tier: 1 / 2 / 3 — for 2 or 3, name the exact [BULK] task (which API paginates / which large data is parsed). Default to 1.
 Schedule: <5-part cron expression> | none
 Notifies user: yes ([CHAT] contains: <description>) | no (silent)
 Knowledge base writes: notes/<filename.md> | none
@@ -805,8 +877,26 @@ there as it runs.
 	sb.WriteString("</knowledge_base>\n\n")
 
 	// ── Composio (external services) ─────────────────────────────────────────
+	// The DESIGN conversation stays strictly non-technical (see <constraints>: no
+	// "script", "Python", "API key", etc.), so it gets only a plain-language note
+	// that external services are reachable — NEVER the composioServicesBlock()
+	// implementation spec (helper scripts, tool slugs, HTTP endpoints). That spec is
+	// injected only into the generation/edit/runtime prompts where code is written.
+	// Injecting it here previously contradicted the jargon ban and made the designer
+	// leak implementation detail and mix the design phases.
 	if p.ComposioEnabled {
-		sb.WriteString(composioServicesBlock())
+		sb.WriteString(`<external_services>
+This user can connect external services (Gmail, Slack, Notion, GitHub, calendars, and
+many others) through Composio. The agent you design CAN read from and act on the
+services the user has actually connected — sending a message, creating a draft, posting
+an update, reading records, and so on. Treat such an action as possible, but if the user
+names a specific service, confirm they've connected it (or tell them they can connect it)
+rather than assuming it's already set up. Talk about all of this only in plain terms
+("the agent will email you a summary", "it can post to your Slack") — do NOT explain or
+mention how it works under the hood (no tool names, scripts, API keys, or endpoints).
+</external_services>
+
+`)
 	}
 
 	// ── Style ─────────────────────────────────────────────────────────────────
@@ -833,7 +923,7 @@ type ImplementationParams struct {
 	ComposioEnabled    bool
 	ConnectedPlatforms []string
 	ChatApps           []ChatAppInfo // connected chat platforms + commands (platform context)
-	BackendType        string       // BackendFullCoder | BackendBasicModel | "" (capabilities block)
+	BackendType        string        // BackendFullCoder | BackendBasicModel | "" (capabilities block)
 }
 
 // capabilitySpec renders the authoritative capability blocks shared with the
@@ -844,6 +934,7 @@ func (p ImplementationParams) capabilitySpec() string {
 	sb.WriteString(platformContextBlock(p.ChatApps, ""))
 	sb.WriteString(coderCapabilitiesBlock(p.BackendType))
 	sb.WriteString(testingRulesBlock())
+	sb.WriteString(selfVerificationBlock())
 	sb.WriteString(shellSafetyBlock())
 	sb.WriteString(scriptRobustnessBlock())
 	if len(p.ConnectedPlatforms) > 0 {
@@ -853,6 +944,41 @@ func (p ImplementationParams) capabilitySpec() string {
 		sb.WriteString(composioServicesBlock())
 	}
 	return sb.String()
+}
+
+// selfVerificationBlock is the single source of the "prove your script works, and keep
+// it thin" contract. A full CLI coder does this instinctively; a weaker tool-calling
+// model does not, so the API build engine ENFORCES it (see hosttools.verifyFinishNudge)
+// and this block states the same rule so every backend follows it. Shared by the create
+// and edit generation prompts.
+func selfVerificationBlock() string {
+	return "<self_verification>\n" +
+		"Never finish a build with a script you have not proven works.\n" +
+		"- After you write a helper script, RUN it and READ its output. An EMPTY result\n" +
+		"  (nothing came back) means it is likely BROKEN — debug it (print the raw API\n" +
+		"  response, check field names, fix the logic) and run it again. Repeat until it\n" +
+		"  returns real data. Do not ship a script that silently returns nothing.\n" +
+		"- BUT: real, non-empty data that merely DIFFERS from what you expected is SUCCESS,\n" +
+		"  not a bug. If the API returned actual records (emails, prices, rows) that don't\n" +
+		"  match a guess you made about their date, count, or field names, adjust YOUR\n" +
+		"  expectation — do not \"fix\" a working script or declare it broken. In particular,\n" +
+		"  never assume today's date or invent a \"current\" timestamp to judge whether data is\n" +
+		"  fresh, and never reject real results because they don't line up with such a guess.\n" +
+		"  Trust the data the service actually returned over any assumption you brought in.\n" +
+		"- Prefer YOUR OWN reasoning over code. Not everything needs a Python script: you can\n" +
+		"  read, decide, judge, summarize, and format directly. Keep any script THIN — have it\n" +
+		"  load its secret from the environment, make the request, and print the raw result,\n" +
+		"  then do the parsing, decisions, and wording yourself from what it printed. A small\n" +
+		"  script you can verify beats a big one you cannot.\n" +
+		"- If, after genuinely trying to fix it, a step still cannot be made to work, do NOT\n" +
+		"  pretend it succeeded. Either accomplish the goal a different way (e.g. without that\n" +
+		"  script), or tell the user in PLAIN language what could not be done (\"I wasn't able\n" +
+		"  to read your emails\") and suggest an alternative — never with code or file names.\n" +
+		"- SECRETS: a script may read a secret from an environment variable and use it, but must\n" +
+		"  NEVER print, log, return, or hardcode the secret value, and never put it on a command\n" +
+		"  line. You (the reasoning model) must never see a secret's value — only the data a\n" +
+		"  script produces with it.\n" +
+		"</self_verification>\n\n"
 }
 
 // testingRulesBlock is the single source of truth for HOW agent code is tested. The
@@ -876,7 +1002,11 @@ func testingRulesBlock() string {
 		"    class T(unittest.TestCase):\n" +
 		"        def test_format(self): self.assertEqual(format_price(107000), \"$107,000.00\")\n" +
 		"        def test_above(self):  self.assertTrue(is_above(107000, 60000))\n" +
-		"- Run them: python3 -m unittest discover -s tools/tests\n" +
+		"    if __name__ == \"__main__\": unittest.main()\n" +
+		"- Run them: run EACH test file directly (e.g. python3 tools/tests/test_pricing.py),\n" +
+		"  and end every test file with `if __name__ == \"__main__\": unittest.main()` so\n" +
+		"  running it actually executes the tests. Run one file at a time — do NOT rely on\n" +
+		"  `python3 -m unittest discover`; some backends can only invoke a single script path.\n" +
 		"- DO NOT write a test that runs the whole script via subprocess.run([...]) — it\n" +
 		"  WILL be rejected on save. Verify the end-to-end workflow by RUNNING THE SCRIPT\n" +
 		"  YOURSELF in the shell during the test step; that is always allowed.\n" +
@@ -889,10 +1019,19 @@ func testingRulesBlock() string {
 		"  pipeline works. A build that only tested in mock is a build that ships broken.\n" +
 		"  * The ONE hard exception: never send real OUTBOUND messages on the user's behalf\n" +
 		"    at build time — no sending/POSTing emails, DMs, Slack messages, social posts,\n" +
-		"    ticket comments, or any other write to an external service — unless the user\n" +
-		"    explicitly asked you to. For anything that sends, test it in DRY-RUN / draft mode\n" +
-		"    instead (print the message you would send, or write it to a local file) and prove\n" +
-		"    the draft/formatting is correct. The user's real outbox is not your test fixture.\n" +
+		"    ticket comments, or any other write that reaches another person — unless the user\n" +
+		"    explicitly asked you to. The user's real outbox is not your test fixture.\n" +
+		"    IMPORTANT: this forbids SENDS, not CREATES. Creating a DRAFT or RECORD via the real\n" +
+		"    API — a Gmail draft, a Notion page, a calendar event, a GitHub/Linear/Jira issue —\n" +
+		"    is NOT an outbound send (no person receives it), so it IS allowed at build time and\n" +
+		"    IS the test: actually call the API (e.g. composio_execute) to create it, then prove\n" +
+		"    it worked by printing the returned id/URL. Do NOT 'print the payload and skip the\n" +
+		"    call' for a draft/record-creating agent — that ships a stub that silently does\n" +
+		"    nothing. 'Draft mode' means create a real draft (not send a real email).\n" +
+		"    For a truly SEND-like action (send email, post DM), test in dry-run: print the\n" +
+		"    exact message you would send, or write it to a local file, and prove the content\n" +
+		"    is correct — but still exercise every NON-send step (compose, format, address\n" +
+		"    resolution) against the real service.\n" +
 		"- The system cleans up test artifacts after the user approves, so you do not need to\n" +
 		"  manually delete downloaded files or run outputs. However, scratch probe scripts\n" +
 		"  (_probe.py, _disc.py, _show.py, etc.) should NOT be left in the work dir because a\n" +
@@ -969,6 +1108,13 @@ func scriptRobustnessBlock() string {
 		"- IDEMPOTENCY & VERIFY: before a side-effect (create draft, send, post), check\n" +
 		"  state so you don't duplicate it on the next run; AFTER it, confirm the result\n" +
 		"  (e.g. a returned draft_id / success=true) before reporting success.\n" +
+		"- MULTI-SCRIPT PIPELINES: if one script's output file feeds the next script (e.g. a\n" +
+		"  fetch step writes data a later step reads), the later script must check the input\n" +
+		"  file exists BEFORE trying to read it, and if missing, say EXACTLY which earlier\n" +
+		"  script produces it (e.g. \"tools/x.json not found — run tools/fetch.py first\") —\n" +
+		"  not a generic path error. When testing a pipeline, run the scripts in dependency\n" +
+		"  order; a \"file not found\" from running step 2 before step 1 is not a path/CWD bug,\n" +
+		"  it means step 1 hasn't run yet.\n" +
 		"</script_robustness>\n\n"
 }
 
@@ -989,9 +1135,11 @@ func BuildImplementationPrompt(agentName string, history []ChatMessage, p Implem
 	sb.WriteString(agentName)
 	sb.WriteString("\".\n\n")
 
-	sb.WriteString("<capabilities>\nYou have access to file read/write tools and a shell. Use them to create files, execute scripts to test them, and fix any errors before reporting results.\n</capabilities>\n\n")
-
-	// Restate the authoritative capability spec at generation time.
+	// The authoritative, backend-aware capability spec (coderCapabilitiesBlock inside
+	// capabilitySpec) is the ONLY capabilities statement — a second hardcoded "you have a
+	// shell" line here used to precede it unconditionally, which directly contradicted the
+	// tool-calling block for an API coder (no shell) in the same prompt. Never restate
+	// capabilities outside capabilitySpec().
 	sb.WriteString(p.capabilitySpec())
 
 	sb.WriteString("<design_conversation>\n")
@@ -1008,8 +1156,9 @@ func BuildImplementationPrompt(agentName string, history []ChatMessage, p Implem
 
 	// Mandatory reasoning gate — the coder must decide the tier, notification, and
 	// schedule BEFORE creating any file, so it never writes a script for pure-reasoning
-	// work and never emits a blank [CHAT] or an unintended schedule.
-	sb.WriteString(agentArchitectureGateBlock())
+	// work and never emits a blank [CHAT] or an unintended schedule. Capability-aware:
+	// a weak (tool-calling API) builder is biased harder toward TIER 1.
+	sb.WriteString(agentArchitectureGateBlock(p.BackendType))
 
 	sb.WriteString(`<task>
 Follow these steps in EXACT order. Do not skip or combine steps.
@@ -1022,11 +1171,12 @@ Complete the <architecture_gate> analysis above:
 (b) State your tier decision (TIER 1 / 2 / 3) and why.
 (c) State what files, if any, you will create.
 
-DISCOVERY (if needed): If you need Composio tool slugs or API field names that are not in
-the design conversation, make ONE bounded lookup NOW — e.g. one GET /connected_accounts or
-one tool-list call — record the result in your analysis, then stop. That is your only pre-code
-API call. Do not iterate or explore further; write all code in the "create" step without
-touching the live service again until the "test" step.
+DISCOVERY (if needed): If you need a Composio tool slug that isn't already established in
+the design conversation, run ` + "`tools/composio_discover.py --toolkit <slug> --query \"...\"`" + `
+NOW — this is already-provided, pre-seeded code, so it costs exactly ONE call regardless of
+coder type. Record the slug(s) it returns in your analysis, then stop. Do not iterate or
+explore further; write all code in the "create" step without touching the live service
+again until the "test" step.
 
 Do not proceed to "create" until this analysis is written in your response.
 </step>
@@ -1087,6 +1237,12 @@ AGENT.MD WRITING RULES — read carefully:
     last line). OMIT [CHAT] entirely. [SILENT] tells the system the silence is intentional so
     stray prose is NOT delivered to the user. Silent runs are valid.
   ✓ Reference helper scripts (TIER 2/3 only) as: python3 tools/filename.py
+  ✓ External-service actions (Composio: Gmail draft, Notion page, calendar event, issue,
+    etc.) MUST be expressed as "run tools/<script>.py to <do the action>" — name the script
+    that makes the real API call. Do NOT write abstract instructions like "use your
+    connected Gmail account to create a draft" with no script: the runtime AI has no
+    native Composio tool and cannot perform the action from text alone. The script does
+    the call; AGENT.md tells the runtime to run it and report the result.
   ✗ DO NOT reference runtime-specific tool names (Write, Read, Bash, WebFetch) — these vary
     by the runtime backend. Say WHAT to do, not which tool to use.
   ✗ DO NOT leave placeholder text like "{the quote}" — tell the agent to include it in full.
@@ -1181,11 +1337,14 @@ access, the required API does not exist, or a dependency is missing and cannot b
 installed — stop immediately and emit:
 
 [BLOCKED]
-What failed: <one sentence explaining the technical blocker>
-What you can do instead: <one or two concrete alternatives>
+What couldn't be done: <one plain-English sentence a non-technical person understands — e.g. "I couldn't read your emails" — NO file names, code, error codes, or jargon>
+What you can do instead: <one or two concrete alternatives, in the same plain language>
 [/BLOCKED]
 
-Do NOT loop endlessly. Do NOT attempt workarounds beyond 3 tries. Emit [BLOCKED] and stop.
+This text is shown DIRECTLY to the user, who is not technical. Do not put file names,
+tracebacks, HTTP status codes, API/field names, or code in it — describe the outcome in
+everyday words. Do NOT loop endlessly. Do NOT attempt workarounds beyond 3 tries. Emit
+[BLOCKED] and stop.
 </step>
 </task>
 
@@ -1210,9 +1369,8 @@ func BuildEditImplementationPrompt(agentName string, history []ChatMessage, p Im
 	sb.WriteString(agentName)
 	sb.WriteString("\". The current directory contains a safe working copy of its files — the live agent is not affected until the user approves your changes.\n\n")
 
-	sb.WriteString("<capabilities>\nYou have access to file read/write tools and a shell. Use them to read existing files, apply changes, execute scripts to test them, and fix any errors before reporting results.\n</capabilities>\n\n")
-
-	// Restate the authoritative capability spec at edit time (same as creation).
+	// Same rationale as BuildImplementationPrompt: capabilitySpec() alone is authoritative
+	// and backend-aware — no separate hardcoded "you have a shell" line above it.
 	sb.WriteString(p.capabilitySpec())
 
 	sb.WriteString("<edit_conversation>\n")
@@ -1226,6 +1384,10 @@ func BuildEditImplementationPrompt(agentName string, history []ChatMessage, p Im
 		sb.WriteString("\n\n")
 	}
 	sb.WriteString("</edit_conversation>\n\n")
+
+	// Same tier forcing function as the create path — an edit that bolts on a helper
+	// script must justify a [BULK] task or stay inline (capability-aware for weak builders).
+	sb.WriteString(agentArchitectureGateBlock(p.BackendType))
 
 	sb.WriteString(`<task>
 Follow these steps in EXACT order. Do not skip the test because "it's just a small edit".
@@ -1310,8 +1472,9 @@ TIER 1 (no scripts): execute a complete dry run of the UPDATED AGENT.md:
 TIER 2/3 (has scripts): ONE bounded smoke test, then the TIER 1 dry run:
   Run each script ONCE and confirm real, non-empty output. Fetch at most a handful of items;
   process at most ONE attachment/document. Do not re-probe or download more. Empty output =
-  failure, fix it. Run unit tests (python3 -m unittest discover -s tools/tests) if present
-  and make them pass. After 3 failed fix attempts on one script: emit [BLOCKED] and stop.
+  failure, fix it. Run unit tests if present by running each test file directly (e.g.
+  python3 tools/tests/test_x.py, with unittest.main() under __main__) and make them pass.
+  After 3 failed fix attempts on one script: emit [BLOCKED] and stop.
   Then complete the TIER 1 dry run above to verify the full end-to-end flow.
 
 The test MUST prove the original bug no longer occurs. State this explicitly, e.g.
@@ -1350,12 +1513,14 @@ IF THE BUG CANNOT BE FIXED after 3 attempts, or the task is fundamentally imposs
 stop immediately and emit:
 
 [BLOCKED]
-Root cause: <what exactly is wrong>
-Why it cannot be fixed: <one sentence>
-What you can do instead: <one or two concrete alternatives>
+What couldn't be done: <one plain-English sentence a non-technical person understands — NO file names, code, error codes, or jargon>
+What you can do instead: <one or two concrete alternatives, in the same plain language>
 [/BLOCKED]
 
-Do NOT loop endlessly. Do NOT attempt workarounds beyond 3 tries. Emit [BLOCKED] and stop.
+This block is shown DIRECTLY to the user, who is not technical — keep your precise
+technical diagnosis for your own reasoning above, but write the [BLOCKED] block itself in
+everyday words (no file names, tracebacks, HTTP codes, or API/field names). Do NOT loop
+endlessly. Do NOT attempt workarounds beyond 3 tries. Emit [BLOCKED] and stop.
 </step>
 </task>
 
@@ -1381,19 +1546,75 @@ type CoderPromptParams struct {
 	AllSkills       []SkillRef
 	DeclaredSkills  []string
 	DeclaredContent map[string]string
-	SkillEnv        string // pre-built <skill_environment> block (resolved tool paths); "" if none
-	VaultRoot       string // absolute path to the user's knowledge base (read+write to the agent)
-	AgentDir        string // absolute path to this agent's own directory (the agent's writable area / CWD)
+	SkillEnv        string        // pre-built <skill_environment> block (resolved tool paths); "" if none
+	VaultRoot       string        // absolute path to the user's knowledge base (read+write to the agent)
+	AgentDir        string        // absolute path to this agent's own directory (the agent's writable area / CWD)
 	ChatApps        []ChatAppInfo // connected chat platforms + commands (platform context)
 	BackendType     string        // BackendFullCoder | BackendBasicModel | "" (capabilities block)
+	// ComposioEnabled is true when the workspace has a COMPOSIO_API_KEY secret. Without
+	// this the runtime prompt never mentioned Composio at all (only generation-time
+	// prompts did) — an agent whose already-written tools/*.py script fails at run time
+	// (e.g. a slug went stale) had no way to know composio_helper.py / discovery exist,
+	// so it couldn't self-correct. Threading it here closes that gap.
+	ComposioEnabled bool
 }
 
 // BuildCoderPrompt returns the prompt sent to the coder when executing a saved
 // agent. It combines the agent's AGENT.md instructions, current state, user memory,
 // available skills, and the output protocol specification.
+// runtimeExecutionBlock is injected FIRST at run time. It draws the hard line the build
+// prompts don't need: a run EXECUTES an already-built, already-tested agent — it must not
+// re-explore, re-test, re-discover, or write/modify code like it's building itself. Without
+// this a weaker model, handed write/run tools, re-read all its own code, re-ran Composio
+// discovery, and wrote a throwaway probe script — burning turns/tokens rebuilding what was
+// already shipped. The scripts exist precisely to keep each run cheap and deterministic.
+func runtimeExecutionBlock() string {
+	return `<runtime_execution>
+You are RUNNING an agent that is ALREADY BUILT AND TESTED. This is a normal run, not a build —
+your job is to DO the task, never to (re)construct or verify the agent itself.
+
+- Follow <agent_instructions> (AGENT.md). Where it names a helper script under tools/, RUN that
+  script to do the repetitive fetching/processing, then reason over its output. The scripts are
+  where the token-heavy, deterministic work lives so each run stays cheap — use them.
+- Do NOT rewrite, "fix", or re-test the existing tools/ scripts, and do NOT create any new
+  script — especially not a probe / diagnostic / connection-test / test_*.py file. All of that
+  was done and verified when the agent was built.
+- Do NOT re-explore your own directory or re-discover external-service actions to "make sure" —
+  the scripts already use the correct, verified calls. Read only what you actually need to act.
+- The ONLY things you write at run time are: state (via [STATE]) and durable notes/memory in the
+  user's knowledge base. Do NOT add or edit anything under tools/.
+- If a script genuinely fails, report the problem plainly in [CHAT] (or emit [SILENT] if the run
+  legitimately has nothing to report). Do NOT try to fix, rebuild, re-verify, or work around it
+  here — a real fix is a separate edit-the-agent action, not something a run should attempt.
+</runtime_execution>
+
+`
+}
+
+// composioRuntimeNote is the RUN-time Composio guidance — deliberately NOT the full
+// composioServicesBlock() (which teaches build-time discovery: "run composio_discover.py to
+// find the slug"). At run time the scripts already embed the correct slugs, so injecting the
+// discovery workflow made agents re-run discovery every run. This tells them to just run the
+// scripts and never rediscover.
+func composioRuntimeNote() string {
+	return `<connected_services>
+This agent uses Composio to reach external services. Its tools/ scripts already call Composio
+with the correct, verified action slugs via the seeded tools/composio_helper.py, and the
+connection was confirmed when the agent was built. At RUN time: simply run those scripts.
+Do NOT run composio_discover.py, do NOT re-verify the connection, and do NOT hand-roll Composio
+requests or rediscover actions — none of that belongs in a run. COMPOSIO_API_KEY is already in
+the environment for the scripts. If a Composio call fails, report it plainly in [CHAT]; do not
+try to rediscover or rebuild. (For reference only, should you ever need to read the helper: it
+targets the Composio v3 REST API at backend.composio.dev — never the removed v1/v2 endpoints.)
+</connected_services>
+
+`
+}
+
 func BuildCoderPrompt(p CoderPromptParams) string {
 	var sb strings.Builder
 
+	sb.WriteString(runtimeExecutionBlock())
 	sb.WriteString(agentPhilosophyBlock())
 	sb.WriteString(shellSafetyBlock())
 	// Platform primer (with the concrete vault root at runtime) + how this coder can
@@ -1460,6 +1681,12 @@ check it before acting on assumptions about the user. Use your available file ca
 `, p.AgentDir, p.VaultRoot))
 	}
 
+	if p.ComposioEnabled {
+		// Runtime note, NOT the full build-time discovery guide — the scripts already know
+		// their slugs; injecting composioServicesBlock() here made agents re-run discovery.
+		sb.WriteString(composioRuntimeNote())
+	}
+
 	sb.WriteString(`<output_protocol>
 Run your scheduled task now. Use ONLY the markers below to produce output.
 
@@ -1510,6 +1737,16 @@ func BuildChildAgentFollowUpPrompt(childOutputs []string) string {
 	return fmt.Sprintf("The agents you called have returned their results:\n\n%s\n\nContinue your task, using the above results as context.",
 		strings.Join(childOutputs, "\n\n"))
 }
+
+// APIEngineKickoffMessage is the user-turn message that starts the API coder's
+// tool-calling loop (internal/coder's runAPI): the system prompt (built via
+// BuildCoderPrompt/BuildChatSystemPrompt) carries the actual instructions, this
+// just tells the model to begin and to use the output protocol.
+const APIEngineKickoffMessage = "Proceed with your task now, following the system instructions above. Emit your final result using the output protocol ([CHAT], [STATE], [SILENT])."
+
+// APIEnginePingMessage is the minimal completion request used to verify an API
+// coder's provider/model/key are reachable (internal/coder's pingAPI).
+const APIEnginePingMessage = "Reply with the single word: ok"
 
 // ─── Skill metadata prompt ────────────────────────────────────────────────────
 
@@ -1570,9 +1807,51 @@ User input: %s`, nowStr, timezone, input)
 // edit notes ON DEMAND — only on turns that touch the knowledge base — rather than having
 // the whole vault injected every prompt. vaultRoot is the absolute per-user vault path.
 //
-// The tool set is intentionally file-only (Read/Write/Edit/Glob/Grep): the chat can read,
-// create, and edit notes, but cannot delete, rename, or run shell commands.
-func BuildChatSystemPrompt(vaultRoot string) string {
+// backendType selects how the tools are described: a full CLI coder has native Read/Write/
+// Edit/Glob/Grep tools; a tool-calling (API) coder reaches the vault through read_file/
+// write_file/edit_file/list_dir function calls executed by the host. The tool set is
+// intentionally file-only in both cases — the chat can read, create, and edit notes, but
+// cannot delete, rename, or run shell commands.
+func BuildChatSystemPrompt(vaultRoot, backendType string) string {
+	if MapCoderBackend(backendType) == BackendToolCalling {
+		return fmt.Sprintf(`You are a helpful assistant chatting with the user. Your working directory
+is the user's personal knowledge base, an Obsidian-style vault of markdown notes rooted at:
+
+  %s
+
+You act through FUNCTION CALLS (tools) that the host executes and feeds back to you:
+- read_file(path): read a vault file (path relative to the vault root, or absolute inside it).
+- write_file(path, content): create or overwrite a note (creates parent folders).
+- edit_file(path, old_string, new_string): replace a unique substring in a note.
+- list_dir(path): list a directory's entries (defaults to the vault root).
+You have no shell and cannot run scripts, delete, or rename files.
+
+Retrieving knowledge — ON DEMAND:
+- Only call tools when the user's message is about their notes or knowledge base. For a
+  normal conversational reply, do not touch the vault at all.
+- To answer "what notes do I have", call list_dir on "notes", "memory", and any
+  user-created folders, then read_file a few titles/headers to summarize. Do not dump the
+  whole vault into your reply — report the relevant note names and a one-line description.
+- To answer a specific question about their notes, read_file the likely notes and answer
+  citing the note path(s).
+
+Editing knowledge — ON DEMAND:
+- When the user asks to add or change a note, use write_file (new note) or edit_file
+  (modify in place). Preserve existing content — edit surgically. After editing, briefly
+  state what you changed and the note path.
+- This built-in knowledge base IS the user's note store. When the user wants to "save a
+  note", "keep a journal", "remember this", or "change my note", use the vault — do not
+  suggest Notion, Google Docs, or other external note apps.
+
+Boundaries:
+- Do NOT write under .kb/, agents/, or chats/ — those are system-managed. You may read
+  them if relevant. Keep your edits to the user's own notes and knowledge files.
+- Never claim you cannot access the knowledge base if you have not tried the tools. Try
+  list_dir/read_file first, then answer.
+
+The user does not see your tool calls — they see only your final reply, so make sure your
+reply actually answers the question. Respond naturally in the user's language.`, vaultRoot)
+	}
 	return fmt.Sprintf(`You are a helpful assistant chatting with the user. Your working directory
 is the user's personal knowledge base, an Obsidian-style vault of markdown notes rooted at:
 
@@ -1627,6 +1906,12 @@ type SkillDesignParams struct {
 	KBManifest         string
 	ConnectedPlatforms []string
 	ChatApps           []ChatAppInfo
+	// BackendType selects the capabilities block in BuildSkillImplementationPrompt
+	// (BackendFullCoder | BackendToolCalling | BackendBasicModel | ""). Unused by
+	// BuildSkillDesignSystemPrompt, whose text-only Q&A turn is identical across
+	// coder types (it runs WithNoTools on every backend, so there is nothing
+	// mechanical to describe).
+	BackendType string
 }
 
 // BuildSkillDesignSystemPrompt returns the system prompt for the conversational
@@ -1748,7 +2033,7 @@ func BuildSkillImplementationPrompt(skillName string, history []ChatMessage, ski
 	sb.WriteString(skillName)
 	sb.WriteString("\" for the simple-agents platform.\n\n")
 
-	sb.WriteString("<capabilities>\nYou have file read/write tools and a shell. Use them to create the skill folder, write SKILL.md (+ optional scripts/), execute the scripts to test them, and fix any errors before reporting results.\n</capabilities>\n\n")
+	sb.WriteString(coderCapabilitiesBlock(p.BackendType))
 
 	if skillCreatorBody != "" {
 		sb.WriteString("<skill_creator_guide>\n")
@@ -1780,13 +2065,13 @@ Follow these steps in EXACT order.
    Which tools/packages does it require (declare them in metadata.openclaw.requires
    and .install)? Which env vars / secrets?
 
-2. CREATE — Write SKILL.md with valid YAML frontmatter. The ` + "`description`" + ` field is
+2. CREATE — Write SKILL.md with valid YAML frontmatter. The `+"`description`"+` field is
    the trigger: say what the skill does AND the specific phrases/contexts that
    activate it. Write the body in imperative voice with copy-pasteable examples.
    If scripts/ are needed, write them under scripts/ (minimal, robust).
 
 3. TEST — Run every script to confirm it does not crash:
-   ` + "`python3 scripts/<file>.py --help`" + ` or an import/smoke check against a sample.
+   `+"`python3 scripts/<file>.py --help`"+` or an import/smoke check against a sample.
    For prompt-only skills, validate the frontmatter parses and the description
    reads as a clear trigger. Report results inside:
 

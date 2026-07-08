@@ -43,11 +43,11 @@ func (s *Server) handleCreateChat(c echo.Context) error {
 		name = "Chat " + time.Now().In(loc).Format("2006-01-02 15:04")
 	}
 	ch := &db.Chat{
-		ID:       uuid.New().String(),
-		WorkspaceID:   u.ID,
-		Name:     name,
-		Platform: "web",
-		Active:   true,
+		ID:          uuid.New().String(),
+		WorkspaceID: u.ID,
+		Name:        name,
+		Platform:    "web",
+		Active:      true,
 	}
 	if err := s.db.CreateChat(ch); err != nil {
 		return err
@@ -73,7 +73,7 @@ func (s *Server) showChatDetail(c echo.Context) error {
 	msgs, _ := s.db.ListChatMessages(id)
 	return c.Render(http.StatusOK, "dashboard/chat_detail.html", &chatDetailPageData{
 		pageData: s.page(c, "Chat"),
-		Chat:    ch,
+		Chat:     ch,
 		Messages: msgs,
 	})
 }
@@ -109,16 +109,24 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 	// System context: a read+write knowledge-base instruction (so the chat can retrieve
 	// and edit notes on demand) + the user's always-on identity context (profile/memory/
 	// agents/MCP). The coder runs with its CWD set to the vault root, which the sandbox
-	// grants read+write access to, and the file toolset Read/Write/Edit/Glob/Grep.
+	// grants read+write access to, and the file toolset Read/Write/Edit/Glob/Grep (for a
+	// CLI coder) or read_file/write_file/edit_file/list_dir tool calls (for an API coder).
 	root := s.vault.Root(u.ID)
-	sysCtx := prompts.BuildChatSystemPrompt(root) + chat.BuildUserContext(s.db, s.memory, u.ID)
+	coder := s.coderForWorkspace(u.ID).WithDir(root)
+	if !coder.IsAPI() {
+		// WithAllowedTools pre-approves the CLI subprocess's tool set so it never
+		// blocks on an interactive permission prompt; it's meaningless for an API
+		// coder (host tools are offered via native function-calling, not gated by
+		// this flag), so skip it there — matches the Telegram chat path.
+		coder = coder.WithAllowedTools("Read,Write,Edit,Glob,Grep")
+	}
+	sysCtx := prompts.BuildChatSystemPrompt(root, coder.BackendType()) + chat.BuildUserContext(s.db, s.memory, u.ID)
 
 	// Re-activate the chat if it had been stopped, so history keeps flowing.
 	if !ch.Active {
 		_ = s.db.ResumeChat(id)
 	}
 
-	coder := s.coderForWorkspace(u.ID).WithDir(root).WithAllowedTools("Read,Write,Edit,Glob,Grep")
 	result, err := coder.Chat(c.Request().Context(), u.ID, history, sysCtx, text)
 	if err != nil {
 		// Don't persist on failure — the client already shows the user bubble,
@@ -217,10 +225,10 @@ func (s *Server) handleCreateReminder(c echo.Context) error {
 	}
 
 	r := &db.Reminder{
-		ID:       uuid.New().String(),
-		WorkspaceID:   u.ID,
-		Message:  message,
-		RemindAt: remindAt,
+		ID:          uuid.New().String(),
+		WorkspaceID: u.ID,
+		Message:     message,
+		RemindAt:    remindAt,
 	}
 	_ = s.db.CreateReminder(r)
 	s.audit.Log(u.ID, "create_reminder", "reminder:"+r.ID, message, c.RealIP())
@@ -305,16 +313,20 @@ type settingsPageData struct {
 	Language       string
 	Notes          string
 	DetectedCoders []coder.Installed
+	APIProviders   []coder.APIProvider
+	SecretNames    []string // workspace's secret names, for the API-key dropdown
 }
 
 // buildSettingsData assembles the settings page view model (profile + detected
-// coders). The active workspace comes through pageData.Workspace.
+// coders + API providers + secret names). The active workspace comes through
+// pageData.Workspace.
 func (s *Server) buildSettingsData(p *pageData, w *db.Workspace) *settingsPageData {
 	prof := profile.Load(s.db, w.ID)
 	dn := prof.DisplayName
 	if dn == "" {
 		dn = w.Name
 	}
+	secretNames, _ := s.db.ListSecretNames(w.ID)
 	return &settingsPageData{
 		pageData:       p,
 		DisplayName:    dn,
@@ -325,6 +337,8 @@ func (s *Server) buildSettingsData(p *pageData, w *db.Workspace) *settingsPageDa
 		Language:       prof.Language,
 		Notes:          prof.Notes,
 		DetectedCoders: coder.DetectInstalled(),
+		APIProviders:   coder.APIProviders(),
+		SecretNames:    secretNames,
 	}
 }
 
@@ -379,18 +393,57 @@ func (s *Server) handleSaveWorkspaceMeta(c echo.Context) error {
 }
 
 // handleSaveWorkspaceCoder updates the workspace's coder config from settings.
+// Two kinds: "local" (a host CLI binary) or "api" (a direct LLM provider API).
 func (s *Server) handleSaveWorkspaceCoder(c echo.Context) error {
 	w := c.Get("workspace").(*db.Workspace)
-	bin := c.FormValue("coder_bin")
+	kind := c.FormValue("coder_kind")
+	if kind == "" {
+		kind = "local"
+	}
 	timeoutS := 0
 	if v, err := strconv.Atoi(c.FormValue("coder_timeout_s")); err == nil && v > 0 {
 		timeoutS = v
 	}
+
 	p := s.page(c, "Settings")
-	if err := s.db.UpdateWorkspaceCoder(w.ID, "local", bin, timeoutS, c.FormValue("coder_backend_type"), "", "", ""); err != nil {
+
+	var (
+		bin, backendType      string
+		provider, model       string
+		apiKeySecret, baseURL string
+	)
+	if kind == "api" {
+		provider = c.FormValue("coder_provider")
+		model = strings.TrimSpace(c.FormValue("coder_model"))
+		apiKeySecret = c.FormValue("coder_api_key_secret")
+		baseURL = strings.TrimSpace(c.FormValue("coder_base_url"))
+		backendType = "api"
+		if provider == "" {
+			p.Error = "Provider is required for an API coder"
+			return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, w))
+		}
+		if model == "" {
+			p.Error = "Model is required for an API coder"
+			return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, w))
+		}
+		if apiKeySecret == "" {
+			p.Error = "Pick (or create) the secret holding the provider API key"
+			return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, w))
+		}
+	} else {
+		kind = "local"
+		bin = c.FormValue("coder_bin")
+		backendType = c.FormValue("coder_backend_type")
+	}
+
+	if err := s.db.UpdateWorkspaceCoder(w.ID, kind, bin, timeoutS, backendType, provider, model, apiKeySecret, baseURL); err != nil {
 		p.Error = "Failed to save coder: " + err.Error()
 	} else {
-		s.audit.Log(w.ID, "configure_coder", "workspace:"+w.ID, bin, c.RealIP())
+		detail := bin
+		if kind == "api" {
+			detail = provider + "/" + model
+		}
+		s.audit.Log(w.ID, "configure_coder", "workspace:"+w.ID, kind+":"+detail, c.RealIP())
 		p.Success = "Coder settings saved"
 		w, _ = s.db.GetWorkspaceByID(w.ID)
 		p.Workspace = w

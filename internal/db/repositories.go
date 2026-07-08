@@ -81,19 +81,19 @@ func scanOwner(s scanner) (*Owner, error) {
 
 const workspaceCols = `id,name,about,encrypted_master_password,secrets_salt,
 	coder_kind,coder_bin,coder_timeout_s,coder_backend_type,
-	coder_provider,coder_model,coder_api_key_secret,
+	coder_provider,coder_model,coder_api_key_secret,coder_base_url,
 	needs_setup,created_at,updated_at`
 
 func (d *DB) CreateWorkspace(w *Workspace) error {
 	_, err := d.Exec(`INSERT INTO workspaces
 		(id, name, about, encrypted_master_password, secrets_salt,
 		 coder_kind, coder_bin, coder_timeout_s, coder_backend_type,
-		 coder_provider, coder_model, coder_api_key_secret,
+		 coder_provider, coder_model, coder_api_key_secret, coder_base_url,
 		 needs_setup, created_at, updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))`,
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))`,
 		w.ID, w.Name, w.About, w.EncryptedMasterPassword, w.SecretsSalt,
 		coderKindOrDefault(w.CoderKind), w.CoderBin, w.CoderTimeoutS, w.CoderBackendType,
-		w.CoderProvider, w.CoderModel, w.CoderAPIKeySecret,
+		w.CoderProvider, w.CoderModel, w.CoderAPIKeySecret, w.CoderBaseURL,
 		boolToInt(w.NeedsSetup))
 	return err
 }
@@ -144,12 +144,12 @@ func (d *DB) UpdateWorkspaceMeta(id, name, about string) error {
 }
 
 // UpdateWorkspaceCoder updates the inlined coder config for a workspace.
-func (d *DB) UpdateWorkspaceCoder(id, kind, bin string, timeoutS int, backendType, provider, model, apiKeySecret string) error {
+func (d *DB) UpdateWorkspaceCoder(id, kind, bin string, timeoutS int, backendType, provider, model, apiKeySecret, baseURL string) error {
 	_, err := d.Exec(`UPDATE workspaces SET
 		coder_kind=?, coder_bin=?, coder_timeout_s=?, coder_backend_type=?,
-		coder_provider=?, coder_model=?, coder_api_key_secret=?, updated_at=datetime('now')
+		coder_provider=?, coder_model=?, coder_api_key_secret=?, coder_base_url=?, updated_at=datetime('now')
 		WHERE id=?`,
-		coderKindOrDefault(kind), bin, timeoutS, backendType, provider, model, apiKeySecret, id)
+		coderKindOrDefault(kind), bin, timeoutS, backendType, provider, model, apiKeySecret, baseURL, id)
 	return err
 }
 
@@ -176,7 +176,7 @@ func scanWorkspace(s scanner) (*Workspace, error) {
 	var needsSetup int
 	err := s.Scan(&w.ID, &w.Name, &w.About, &w.EncryptedMasterPassword, &w.SecretsSalt,
 		&w.CoderKind, &w.CoderBin, &w.CoderTimeoutS, &w.CoderBackendType,
-		&w.CoderProvider, &w.CoderModel, &w.CoderAPIKeySecret,
+		&w.CoderProvider, &w.CoderModel, &w.CoderAPIKeySecret, &w.CoderBaseURL,
 		&needsSetup, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -475,14 +475,14 @@ func (d *DB) CreateAgentRun(r *AgentRun) error {
 	return err
 }
 
-func (d *DB) FinishAgentRun(id string, exitCode int, stdout, stderr string) error {
-	_, err := d.Exec(`UPDATE agent_runs SET exit_code=?, stdout=?, stderr=?, finished_at=datetime('now') WHERE id=?`,
-		exitCode, stdout, stderr, id)
+func (d *DB) FinishAgentRun(id string, exitCode int, stdout, stderr string, prompt, completion, total int) error {
+	_, err := d.Exec(`UPDATE agent_runs SET exit_code=?, stdout=?, stderr=?, prompt_tokens=?, completion_tokens=?, total_tokens=?, finished_at=datetime('now') WHERE id=?`,
+		exitCode, stdout, stderr, prompt, completion, total, id)
 	return err
 }
 
 func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
-	rows, err := d.Query(`SELECT id,agent_id,workspace_id,trigger,exit_code,stdout,stderr,started_at,finished_at
+	rows, err := d.Query(`SELECT id,agent_id,workspace_id,trigger,exit_code,stdout,stderr,prompt_tokens,completion_tokens,total_tokens,started_at,finished_at
 		FROM agent_runs WHERE agent_id=? ORDER BY started_at DESC LIMIT ?`, agentID, limit)
 	if err != nil {
 		return nil, err
@@ -497,7 +497,7 @@ func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
 		var finishedAt sql.NullString
 		// stdout/stderr are NULL until FinishAgentRun runs; an in-progress (async)
 		// run row is listed on the detail page, so scan through NullString.
-		if err := rows.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &exitCode, &stdout, &stderr, &startedAt, &finishedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &exitCode, &stdout, &stderr, &r.PromptTokens, &r.CompletionTokens, &r.TotalTokens, &startedAt, &finishedAt); err != nil {
 			return nil, err
 		}
 		if exitCode.Valid {
@@ -999,7 +999,7 @@ type AgentRunWithName struct {
 
 // RecentAgentRunsWithNames returns the N most recent runs with the agent name joined in.
 func (d *DB) RecentAgentRunsWithNames(workspaceID string, limit int) ([]*AgentRunWithName, error) {
-	rows, err := d.Query(`SELECT r.id,r.agent_id,r.workspace_id,r.trigger,r.exit_code,r.stdout,r.stderr,r.started_at,r.finished_at, COALESCE(a.name,'')
+	rows, err := d.Query(`SELECT r.id,r.agent_id,r.workspace_id,r.trigger,r.exit_code,r.stdout,r.stderr,r.prompt_tokens,r.completion_tokens,r.total_tokens,r.started_at,r.finished_at, COALESCE(a.name,'')
 		FROM agent_runs r LEFT JOIN agents a ON a.id=r.agent_id
 		WHERE r.workspace_id=? ORDER BY r.started_at DESC LIMIT ?`, workspaceID, limit)
 	if err != nil {
@@ -1012,7 +1012,7 @@ func (d *DB) RecentAgentRunsWithNames(workspaceID string, limit int) ([]*AgentRu
 		var exitCode sql.NullInt64
 		var startedAt string
 		var finishedAt sql.NullString
-		if err := rows.Scan(&rn.ID, &rn.AgentID, &rn.WorkspaceID, &rn.Trigger, &exitCode, &rn.Stdout, &rn.Stderr, &startedAt, &finishedAt, &rn.AgentName); err != nil {
+		if err := rows.Scan(&rn.ID, &rn.AgentID, &rn.WorkspaceID, &rn.Trigger, &exitCode, &rn.Stdout, &rn.Stderr, &rn.PromptTokens, &rn.CompletionTokens, &rn.TotalTokens, &startedAt, &finishedAt, &rn.AgentName); err != nil {
 			return nil, err
 		}
 		if exitCode.Valid {
@@ -1031,7 +1031,7 @@ func (d *DB) RecentAgentRunsWithNames(workspaceID string, limit int) ([]*AgentRu
 
 // RecentAgentRuns returns the N most recent runs across all agents for a user.
 func (d *DB) RecentAgentRuns(workspaceID string, limit int) ([]*AgentRun, error) {
-	rows, err := d.Query(`SELECT r.id,r.agent_id,r.workspace_id,r.trigger,r.exit_code,r.stdout,r.stderr,r.started_at,r.finished_at
+	rows, err := d.Query(`SELECT r.id,r.agent_id,r.workspace_id,r.trigger,r.exit_code,r.stdout,r.stderr,r.prompt_tokens,r.completion_tokens,r.total_tokens,r.started_at,r.finished_at
 		FROM agent_runs r WHERE r.workspace_id=? ORDER BY r.started_at DESC LIMIT ?`, workspaceID, limit)
 	if err != nil {
 		return nil, err
@@ -1046,7 +1046,7 @@ func (d *DB) RecentAgentRuns(workspaceID string, limit int) ([]*AgentRun, error)
 		var finishedAt sql.NullString
 		// stdout/stderr are NULL until FinishAgentRun runs; an in-progress (async)
 		// run row is listed on the detail page, so scan through NullString.
-		if err := rows.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &exitCode, &stdout, &stderr, &startedAt, &finishedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &exitCode, &stdout, &stderr, &r.PromptTokens, &r.CompletionTokens, &r.TotalTokens, &startedAt, &finishedAt); err != nil {
 			return nil, err
 		}
 		if exitCode.Valid {

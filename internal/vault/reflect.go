@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -109,6 +110,11 @@ type RunNote struct {
 	Output     string   // raw coder output
 	ChatLines  []string // user-facing [CHAT] lines
 	Warnings   []string
+	// Token usage, reported by the API coder (direct LLM provider). Zero for
+	// CLI coders; omitted from the run log when all zero.
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
 }
 
 // ReflectAgentRun writes a markdown run log into the agent's own logs directory
@@ -124,7 +130,7 @@ func (r *Reflector) ReflectAgentRun(workspaceID string, n RunNote) error {
 	if n.ExitCode != 0 {
 		status = fmt.Sprintf("failed (exit %d)", n.ExitCode)
 	}
-	fm := frontmatter(map[string]string{
+	kv := map[string]string{
 		"type":        "agent-run",
 		"run_id":      n.RunID,
 		"agent_id":    n.AgentID,
@@ -132,10 +138,19 @@ func (r *Reflector) ReflectAgentRun(workspaceID string, n RunNote) error {
 		"status":      status,
 		"started_at":  ts(n.StartedAt),
 		"finished_at": ts(n.FinishedAt),
-	})
+	}
+	if n.TotalTokens > 0 {
+		kv["prompt_tokens"] = strconv.Itoa(n.PromptTokens)
+		kv["completion_tokens"] = strconv.Itoa(n.CompletionTokens)
+		kv["total_tokens"] = strconv.Itoa(n.TotalTokens)
+	}
+	fm := frontmatter(kv)
 	var b strings.Builder
 	b.WriteString(fm)
 	b.WriteString(fmt.Sprintf("# Run of [[%s]] — %s\n\n", agentLinkTarget(n.AgentName, n.AgentID), status))
+	if n.TotalTokens > 0 {
+		b.WriteString(fmt.Sprintf("> **Tokens:** %d prompt / %d completion / %d total\n\n", n.PromptTokens, n.CompletionTokens, n.TotalTokens))
+	}
 	if len(n.ChatLines) > 0 {
 		b.WriteString("## Output sent to user\n\n")
 		for _, l := range n.ChatLines {
@@ -183,7 +198,8 @@ func ts(t time.Time) string {
 // in a stable order.
 func frontmatter(kv map[string]string) string {
 	order := []string{"type", "id", "run_id", "agent_id", "platform", "trigger",
-		"status", "remind_at", "recurrence", "created_at", "started_at", "finished_at"}
+		"status", "remind_at", "recurrence", "created_at", "started_at", "finished_at",
+		"prompt_tokens", "completion_tokens", "total_tokens"}
 	var b strings.Builder
 	b.WriteString("---\n")
 	for _, k := range order {

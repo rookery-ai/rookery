@@ -102,6 +102,7 @@
                 <th class="text-xs font-semibold">Agent</th>
                 <th class="text-xs font-semibold">Trigger</th>
                 <th class="text-xs font-semibold">Status</th>
+                <th class="text-xs font-semibold">Tokens</th>
                 <th class="text-xs font-semibold">Time</th>
               </tr>
             </thead>
@@ -115,6 +116,9 @@
                   {{if eq (derefInt .ExitCode) 0}}<span class="badge badge-success badge-xs">OK</span>
                   {{else}}<span class="badge badge-error badge-xs">Failed</span>{{end}}
                 {{else}}<span class="badge badge-warning badge-xs">Running</span>{{end}}
+              </td>
+              <td class="text-xs text-base-content/50 whitespace-nowrap">
+                {{if gt .TotalTokens 0}}<span title="{{.PromptTokens}} prompt / {{.CompletionTokens}} completion">{{.TotalTokens}} tok</span>{{else}}<span class="text-base-content/20">—</span>{{end}}
               </td>
               <td class="text-xs text-base-content/50">{{fmtTZ $.UserLoc .StartedAt "Jan 2 15:04"}}</td>
             </tr>

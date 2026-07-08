@@ -24,13 +24,14 @@ type Workspace struct {
 	SecretsSalt             string
 
 	// Inlined coder config (moved from the old admin-level coders pool).
-	CoderKind         string // "local" (a host CLI binary) or "api" (future: direct provider API)
+	CoderKind         string // "local" (a host CLI binary) or "api" (direct provider API)
 	CoderBin          string // coder binary name/path when CoderKind == "local"
 	CoderTimeoutS     int    // 0 = use system default
-	CoderBackendType  string // '' = auto-detect, 'claude', or 'generic'
-	CoderProvider     string // reserved for future API coder
-	CoderModel        string // reserved for future API coder
-	CoderAPIKeySecret string // reserved for future API coder (secret name)
+	CoderBackendType  string // '' = auto-detect, 'claude', or 'generic' (local); 'api' (api kind)
+	CoderProvider     string // API coder: llm registry name (openai/openrouter/anthropic/generic)
+	CoderModel        string // API coder: model id, e.g. "gpt-4o", "anthropic/claude-3.5-sonnet"
+	CoderAPIKeySecret string // API coder: name of the secret holding the provider API key
+	CoderBaseURL      string // API coder: optional base URL override (for generic OpenAI-compatible)
 
 	NeedsSetup bool
 	CreatedAt  time.Time
@@ -114,8 +115,13 @@ type AgentRun struct {
 	ExitCode    *int
 	Stdout      string
 	Stderr      string
-	StartedAt   time.Time
-	FinishedAt  *time.Time
+	// Token usage, populated by the API coder (direct LLM provider). Zero for
+	// CLI coders (claude-code/opencode/codex/cursor), which don't report it.
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	StartedAt        time.Time
+	FinishedAt       *time.Time
 }
 
 type Secret struct {

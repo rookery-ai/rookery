@@ -32,7 +32,7 @@ func (d *AgentDesigner) SaveAgent(workspaceID, agentID, name, description string
 
 	if err := d.db.CreateAgent(&db.Agent{
 		ID:          agentID,
-		WorkspaceID:      workspaceID,
+		WorkspaceID: workspaceID,
 		Name:        name,
 		Description: description,
 		Active:      true,

@@ -23,6 +23,7 @@ import (
 
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/coder"
+	"github.com/ilijad1/simple-agents/internal/composioassets"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/prompts"
@@ -62,10 +63,10 @@ func (s DesignState) String() string {
 
 // DesignSession holds all state for one in-progress skill-creation session.
 type DesignSession struct {
-	WorkspaceID    string
-	SkillName string
-	State     DesignState
-	History   []db.ChatMessage // full conversation fed to the coder on every turn
+	WorkspaceID string
+	SkillName   string
+	State       DesignState
+	History     []db.ChatMessage // full conversation fed to the coder on every turn
 
 	// Available skills (core + the user's own) — shown to the designer so a new
 	// skill complements rather than duplicates existing ones. Loaded once on start.
@@ -79,8 +80,8 @@ type DesignSession struct {
 
 	// Set after generation; cleared on finalize or when the user requests changes.
 	PendingSkillMD string
-	PendingScripts  map[string]string
-	VettingReport   string
+	PendingScripts map[string]string
+	VettingReport  string
 
 	// pendingName holds the skill name the user originally typed in the
 	// StateAwaitingResume flow, so the "new" branch can start a fresh session
@@ -136,9 +137,9 @@ func NewSkillFlow(coderResolver func(workspaceID string) *coder.Coder, saver *Sk
 	}
 }
 
-func (f *Flow) WithDB(database dbStore) *Flow        { f.db = database; return f }
-func (f *Flow) WithMemory(m memoryStore) *Flow       { f.memStore = m; return f }
-func (f *Flow) WithKBLister(k kbLister) *Flow        { f.kb = k; return f }
+func (f *Flow) WithDB(database dbStore) *Flow  { f.db = database; return f }
+func (f *Flow) WithMemory(m memoryStore) *Flow { f.memStore = m; return f }
+func (f *Flow) WithKBLister(k kbLister) *Flow  { f.kb = k; return f }
 func (f *Flow) WithSecretsLoader(fn func(ctx context.Context, workspaceID string) (map[string]string, error)) *Flow {
 	f.secretsLoader = fn
 	return f
@@ -328,7 +329,7 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 	switch {
 	case err == nil:
 		reply = result.Text
-	case errors.Is(err, coder.ErrUsageLimit):
+	case errors.Is(err, coder.ErrUsageLimit) || errors.Is(err, coder.ErrRateLimited):
 		reply = fmt.Sprintf("⚠️ %s hit its usage limit. The skill design session is still active — try again in a while.", coderSvc.Name())
 	default:
 		f.mu.Lock()
@@ -358,11 +359,19 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	skillNameSnap := sess.SkillName
 	historySnap := make([]db.ChatMessage, len(sess.History))
 	copy(historySnap, sess.History)
+	// The capability spec must travel into the generation prompt because Generate()
+	// carries no system prompt the way the design Chat() does — mirrors
+	// agentdesigner.Flow.runGeneration's backendType computation.
+	var backendType string
+	if coderSvc != nil {
+		backendType = prompts.MapCoderBackend(coderSvc.BackendType())
+	}
 	paramsSnap := prompts.SkillDesignParams{
 		AvailableSkills:    sess.Skills,
-		ConnectedPlatforms:  sess.ConnectedPlatforms,
-		ChatApps:            prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
+		ConnectedPlatforms: sess.ConnectedPlatforms,
+		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
 		ComposioEnabled:    sess.ComposioEnabled,
+		BackendType:        backendType,
 	}
 
 	if sess.progressCh == nil {
@@ -414,17 +423,32 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	}
 	cleanupStaging := func() { _ = os.RemoveAll(stagingDir) }
 
+	// Seed the Composio helper scripts deterministically — same rationale as
+	// agentdesigner.Flow.runGeneration: never let the coder author this boilerplate
+	// (and its build-time send-guard) from prompt text.
+	if paramsSnap.ComposioEnabled {
+		if err := composioassets.WriteHelperFiles(filepath.Join(stagingDir, "scripts")); err != nil {
+			slog.Warn("skilldesigner: seed composio helper files", "workspace_id", workspaceID, "err", err)
+		}
+	}
+
 	skillCreatorBody, _ := skilllibrary.CoreSkillContent("skill-creator")
 	prompt := prompts.BuildSkillImplementationPrompt(skillNameSnap, dbMessagesToPrompt(historySnap), skillCreatorBody, paramsSnap)
 
 	notify("🤖 Coder is building your skill — this can take a few minutes…")
 
 	generationCoder := coderSvc.WithDir(stagingDir).WithAllowedTools("Bash,Write,Edit,Read")
+	// WithExtraEnv replaces rather than merges, so build the full env map once: secrets
+	// (if any) plus the build-phase marker composio_helper.py's send-guard checks for.
+	extraEnv := map[string]string{composioassets.BuildPhaseEnvVar: composioassets.BuildPhaseGeneration}
 	if f.secretsLoader != nil {
-		if env, err := f.secretsLoader(genCtx, workspaceID); err == nil && len(env) > 0 {
-			generationCoder = generationCoder.WithExtraEnv(env)
+		if env, err := f.secretsLoader(genCtx, workspaceID); err == nil {
+			for k, v := range env {
+				extraEnv[k] = v
+			}
 		}
 	}
+	generationCoder = generationCoder.WithExtraEnv(extraEnv)
 	result, err := generationCoder.Generate(genCtx, workspaceID, prompt)
 	if err != nil {
 		cleanupStaging()
@@ -432,8 +456,11 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		if errors.Is(err, context.Canceled) {
 			return "Skill creation was cancelled.", false, "", nil
 		}
-		if errors.Is(err, coder.ErrUsageLimit) {
+		if errors.Is(err, coder.ErrUsageLimit) || errors.Is(err, coder.ErrRateLimited) {
 			return fmt.Sprintf("⚠️ %s hit its usage limit during generation. Your skill design session is still active — try again later, or simplify what you asked for.", coderSvc.Name()), false, "", nil
+		}
+		if errors.Is(err, coder.ErrMaxTurns) {
+			return "⚠️ The coder ran out of attempts without finishing — the task may need to be broken into simpler steps. Tell me what to adjust, or type **approve** to try again.", false, "", nil
 		}
 		if strings.Contains(err.Error(), "timed out") {
 			return "⚠️ The coder timed out — the task may be too complex to build in one go. Try breaking it into simpler steps, then type approve.", false, "", nil
@@ -465,17 +492,25 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		return "", false, "", fmt.Errorf("read scripts: %w", err)
 	}
 
-	// Guardrails on the actual content the coder wrote.
+	// Guardrails on the actual content the coder wrote. The specific reason (regex/AST
+	// internals, raw endpoint paths, HTTP codes) is an implementation detail — log it
+	// server-side for debugging and show a plain-language message instead.
 	if err := agentdesigner.CheckEthics(skillMD, ""); err != nil {
 		cleanupStaging()
 		closeProgress()
-		return fmt.Sprintf("The skill failed safety checks: %s\n\nPlease rephrase or simplify.", err.Error()), false, "", nil
+		slog.Warn("skilldesigner: skill failed safety checks", "workspace_id", workspaceID, "skill_name", skillNameSnap, "err", err)
+		return "That request tripped a safety check I can't get around. Try describing it differently — for example, avoid destructive or high-risk actions.", false, "", nil
 	}
 	for filename, code := range scripts {
+		if composioassets.IsSeededFilename(filepath.Base(filename)) {
+			// Go-authored, deterministically seeded — nothing to vet.
+			continue
+		}
 		if err := agentdesigner.RunToolGuardrails(filename, code); err != nil {
 			cleanupStaging()
 			closeProgress()
-			return fmt.Sprintf("The generated script %s didn't pass validation: %s\n\nType **approve** to rebuild, or tell me what to change.", filename, err.Error()), false, "", nil
+			slog.Warn("skilldesigner: generated script failed guardrails", "workspace_id", workspaceID, "skill_name", skillNameSnap, "file", filename, "err", err)
+			return "One of the files the build produced didn't pass an internal check, so I held off saving it. Type **approve** to have it rebuilt, or tell me what to change.", false, "", nil
 		}
 	}
 
@@ -648,7 +683,7 @@ func (f *Flow) saveDraft(sess *DesignSession) {
 		state = "verifying"
 	}
 	_ = f.db.UpsertSkillDraft(&db.SkillDraft{
-		WorkspaceID:             sess.WorkspaceID,
+		WorkspaceID:        sess.WorkspaceID,
 		SkillName:          sess.SkillName,
 		State:              state,
 		HistoryJSON:        string(histJSON),
@@ -700,7 +735,7 @@ func (f *Flow) OfferDraftResume(workspaceID, pendingSkillName string, draft *db.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sessions[workspaceID] = &DesignSession{
-		WorkspaceID:      workspaceID,
+		WorkspaceID: workspaceID,
 		SkillName:   draft.SkillName,
 		State:       StateAwaitingResume,
 		pendingName: pendingSkillName,
@@ -762,7 +797,7 @@ func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string) (string, err
 
 func (f *Flow) newSession(workspaceID, skillName string, state DesignState) *DesignSession {
 	return &DesignSession{
-		WorkspaceID:             workspaceID,
+		WorkspaceID:        workspaceID,
 		SkillName:          skillName,
 		State:              state,
 		Skills:             f.loadSkillNames(workspaceID),
@@ -770,7 +805,7 @@ func (f *Flow) newSession(workspaceID, skillName string, state DesignState) *Des
 		UserProfile:        f.loadUserProfile(workspaceID),
 		UserMemory:         f.loadUserMemory(workspaceID),
 		ComposioEnabled:    f.loadComposioEnabled(workspaceID),
-		KBManifest:        f.loadKBManifest(workspaceID),
+		KBManifest:         f.loadKBManifest(workspaceID),
 		CreatedAt:          time.Now(),
 	}
 }

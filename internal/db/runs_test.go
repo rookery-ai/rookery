@@ -47,8 +47,16 @@ func TestGetUnfinishedAgentRun(t *testing.T) {
 		t.Fatalf("expected open run %s, got run=%v err=%v", runID, run, err)
 	}
 
-	if err := database.FinishAgentRun(runID, 0, "ok", ""); err != nil {
+	if err := database.FinishAgentRun(runID, 0, "ok", "", 120, 80, 200); err != nil {
 		t.Fatalf("finish run: %v", err)
+	}
+	// Token usage persisted by the API coder is read back on list/recent queries.
+	runs, err := database.ListAgentRuns(agentID, 10)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("list runs: %v (n=%d)", err, len(runs))
+	}
+	if r := runs[0]; r.PromptTokens != 120 || r.CompletionTokens != 80 || r.TotalTokens != 200 {
+		t.Fatalf("usage = %d/%d/%d, want 120/80/200", r.PromptTokens, r.CompletionTokens, r.TotalTokens)
 	}
 	if run, err := database.GetUnfinishedAgentRun(agentID); err != nil || run != nil {
 		t.Fatalf("expected no unfinished run after finish, got run=%v err=%v", run, err)
@@ -67,7 +75,7 @@ func TestReconcileStaleRuns(t *testing.T) {
 			t.Fatalf("create run: %v", err)
 		}
 	}
-	if err := database.FinishAgentRun(doneID, 0, "ok", ""); err != nil {
+	if err := database.FinishAgentRun(doneID, 0, "ok", "", 0, 0, 0); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 

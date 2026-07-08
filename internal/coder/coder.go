@@ -20,7 +20,9 @@ import (
 	"time"
 
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/llm"
 	"github.com/ilijad1/simple-agents/internal/sandbox"
+	"github.com/ilijad1/simple-agents/internal/vault"
 )
 
 // knownAuthEnvVars are env var names that carry LLM provider credentials.
@@ -32,11 +34,25 @@ var knownAuthEnvVars = []string{
 	"GOOGLE_API_KEY",
 }
 
-// Result holds the output from a claude invocation.
+// Result holds the output from a coder invocation.
 type Result struct {
 	Text     string
 	Duration time.Duration
+	Usage    Usage // populated by the API engine; zero for CLI coders
 }
+
+// Usage is a best-effort token accounting for API coders (zero for CLI coders).
+// Aliased to llm.Usage so the API engine's provider-reported usage needs no
+// conversion shim between the two packages.
+type Usage = llm.Usage
+
+// ErrAPIAuth indicates the API coder could not authenticate (bad/missing API key).
+// This is a configuration error, not a transient failure — distinct from ErrUsageLimit.
+var ErrAPIAuth = errors.New("coder api auth failed")
+
+// ErrMaxTurns indicates the API coder's tool-calling loop exceeded its turn budget
+// without producing a final answer. Surfaced as a normal run error (not ErrUsageLimit).
+var ErrMaxTurns = errors.New("coder exceeded max tool-calling turns")
 
 // Coder generates code or text by invoking a configured CLI tool.
 type Coder struct {
@@ -51,7 +67,16 @@ type Coder struct {
 	noTools      bool              // when true, passes --allowedTools "" to disable all tools
 	workDir      string            // when non-empty, overrides cmd.Dir (default: per-user home)
 	allowedTools string            // when non-empty, passed as --allowedTools <value>
-	backendType  string            // '' = auto-detect by binary name, 'claude', or 'generic'
+	backendType  string            // '' = auto-detect by binary name, 'claude', 'generic', or 'api"
+
+	// ── API coder (coder_kind == "api") ──────────────────────────────────────
+	// When api is non-nil, Generate/Ping dispatch to the in-process tool-calling
+	// engine (api_engine.go) instead of spawning a CLI subprocess. The CLI path
+	// stays byte-identical when api is nil.
+	api           *apiConfig
+	secretsLookup SecretsLookup // resolves the provider API key by secret name at run time
+	vlt           *vault.Vault  // vault for host-tool file operations (read/write/edit/list/run_script)
+	progress      func(string)  // optional live-progress sink (per tool-call milestone) for the API engine
 }
 
 // WithExtraEnv returns a shallow copy of the Coder with additional environment variables
@@ -120,6 +145,13 @@ func (c *Coder) WithSandbox(enabled bool) *Coder {
 // suitable for user-facing messages. The system supports multiple coder profiles
 // with different binaries, so callers should never hardcode a specific name.
 func (c *Coder) Name() string {
+	if c.api != nil {
+		model := c.api.model
+		if model == "" {
+			model = "?"
+		}
+		return c.api.provider + "/" + model
+	}
 	return filepath.Base(c.bin)
 }
 
@@ -149,6 +181,11 @@ func New(bin string, timeout time.Duration, homesDir, dataDir string) *Coder {
 
 // Generate sends prompt to the coder binary and returns the text response.
 func (c *Coder) Generate(ctx context.Context, workspaceID, prompt string) (*Result, error) {
+	// API coder: run the in-process tool-calling loop instead of spawning a CLI.
+	if c.api != nil {
+		return c.runAPI(ctx, workspaceID, prompt)
+	}
+
 	backend := c.selectBackend()
 
 	userDir, err := c.ensureUserHome(workspaceID, backend)
@@ -201,14 +238,40 @@ func (c *Coder) Generate(ctx context.Context, workspaceID, prompt string) (*Resu
 	return &Result{Text: text, Duration: time.Since(start)}, nil
 }
 
-// ErrUsageLimit indicates the coder subprocess failed because the underlying
-// account/session hit its usage limit, not because of an agent bug. Callers
-// should surface this distinctly (e.g. "retrying next scheduled run") rather
-// than treating it as a generic execution failure.
+// ErrUsageLimit indicates the coder failed because the underlying account ran
+// out of credits/quota (e.g. a 402 payment-required), not because of an agent
+// bug. Callers should surface this distinctly (e.g. "retrying next scheduled
+// run") rather than treating it as a generic execution failure.
 var ErrUsageLimit = errors.New("coder usage limit reached")
 
-// Chat sends a conversational message to claude with optional history.
+// ErrRateLimited indicates the API coder was throttled by the provider with a
+// transient 429 (RPM/TPM window) that did not clear within the retry budget. This
+// is NOT quota exhaustion — the run would likely succeed if retried shortly
+// after. Distinct from ErrUsageLimit so the user-facing message can say "try
+// again in a moment" instead of "you're out of quota".
+var ErrRateLimited = errors.New("coder rate-limited by provider")
+
+// Chat sends a conversational message to the coder with optional history. It is
+// used by the text-only design conversations (agent designer, skill designer,
+// skill vetter) — never the agentic tool loop, which uses Generate.
 func (c *Coder) Chat(ctx context.Context, workspaceID string, history []db.ChatMessage, systemContext, userMessage string) (*Result, error) {
+	// API coders need real alternating user/assistant message turns. Flattening
+	// the history into the system prompt (as the CLI path below does) makes the
+	// model treat each turn as a fresh single-turn request and re-ask the
+	// opening question every time — the design-conversation loop.
+	//
+	// Two API-coder chat flavours, split by noTools:
+	//   - WithNoTools (design conversations: agent/skill designer, skill vetter):
+	//     text-only single completion, no tools offered → chatAPI.
+	//   - without WithNoTools (one-off chat): the chat can retrieve and edit the
+	//     user's knowledge base on demand, so it runs the tool-calling loop with
+	//     the host file tools → chatToolsAPI.
+	if c.api != nil {
+		if c.noTools {
+			return c.chatAPI(ctx, workspaceID, history, systemContext, userMessage)
+		}
+		return c.chatToolsAPI(ctx, workspaceID, history, systemContext, userMessage)
+	}
 	var sb strings.Builder
 	if systemContext != "" {
 		sb.WriteString("[Persistent user context]\n")
@@ -235,8 +298,14 @@ func (c *Coder) Chat(ctx context.Context, workspaceID string, history []db.ChatM
 	return c.Generate(ctx, workspaceID, sb.String())
 }
 
-// Ping checks that the claude binary is reachable and returns its version string.
-func (c *Coder) Ping(ctx context.Context) (string, error) {
+// Ping checks that the coder is reachable and returns a short identifying
+// string. For a CLI coder this runs `<bin> --version`; workspaceID is unused.
+// For an API coder, workspaceID is required — it's used to resolve the
+// provider API key via the secrets lookup, exactly as Generate does.
+func (c *Coder) Ping(ctx context.Context, workspaceID string) (string, error) {
+	if c.api != nil {
+		return c.pingAPI(ctx, workspaceID)
+	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 

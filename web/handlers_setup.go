@@ -13,8 +13,9 @@ import (
 )
 
 // Wizard steps (workspace onboarding, owner-driven):
-//   1=basics (name+about) 2=master_password 3=coder 4=profile
-//   5=connector 6=composio(optional) 7=done
+//
+//	1=basics (name+about) 2=master_password 3=coder 4=profile
+//	5=connector 6=composio(optional) 7=done
 type setupData struct {
 	*pageData
 	Step           int
@@ -154,7 +155,7 @@ func (s *Server) handleSetupCoder(c echo.Context, w *db.Workspace) error {
 	if v, err := strconv.Atoi(c.FormValue("coder_timeout_s")); err == nil && v > 0 {
 		timeoutS = v
 	}
-	if err := s.db.UpdateWorkspaceCoder(w.ID, "local", bin, timeoutS, backend, "", "", ""); err != nil {
+	if err := s.db.UpdateWorkspaceCoder(w.ID, "local", bin, timeoutS, backend, "", "", "", ""); err != nil {
 		return err
 	}
 	_ = s.db.SetSetting(w.ID, "wizard_coder_done", "1")

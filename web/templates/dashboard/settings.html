@@ -31,23 +31,75 @@
   <div class="card bg-base-100 shadow-sm border border-base-300 mb-4">
     <div class="card-body p-5">
       <h2 class="font-semibold mb-1">Coder</h2>
-      <p class="text-sm text-base-content/50 mb-4">The coder CLI this workspace's agents run on.</p>
+      <p class="text-sm text-base-content/50 mb-4">The engine this workspace's agents and chat run on — a host CLI (local) or a direct LLM API provider (api).</p>
       <form method="POST" action="/dashboard/settings/coder" class="space-y-4">
+        {{$kind := "local"}}{{if .Workspace}}{{$kind = .Workspace.CoderKind}}{{end}}
         <div class="form-control">
-          <label class="label pb-1"><span class="label-text font-medium">Coder binary</span></label>
-          {{if .DetectedCoders}}
-          <select name="coder_bin" class="select select-bordered w-full">
-            <option value="" {{if eq .Workspace.CoderBin ""}}selected{{end}}>System default</option>
-            {{$cur := ""}}{{if .Workspace}}{{$cur = .Workspace.CoderBin}}{{end}}
-            {{range .DetectedCoders}}
-            <option value="{{.Bin}}" {{if eq .Bin $cur}}selected{{end}}>{{.Name}} — {{.Bin}}</option>
-            {{end}}
+          <label class="label pb-1"><span class="label-text font-medium">Kind</span></label>
+          <select name="coder_kind" id="coder_kind" class="select select-bordered w-full" onchange="saToggleCoderKind()">
+            <option value="local" {{if eq $kind "local"}}selected{{end}}>Local CLI (claude-code, opencode, codex, cursor)</option>
+            <option value="api" {{if eq $kind "api"}}selected{{end}}>Direct LLM API (OpenAI, OpenRouter, Anthropic, OpenAI-compatible)</option>
           </select>
-          {{else}}
-          <input type="text" name="coder_bin" class="input input-bordered w-full"
-            value="{{if .Workspace}}{{.Workspace.CoderBin}}{{end}}" placeholder="claude (leave blank for default)">
-          {{end}}
         </div>
+
+        <div id="coder_local" class="space-y-4">
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">Coder binary</span></label>
+            {{if .DetectedCoders}}
+            <select name="coder_bin" class="select select-bordered w-full">
+              <option value="" {{if eq .Workspace.CoderBin ""}}selected{{end}}>System default</option>
+              {{$cur := ""}}{{if .Workspace}}{{$cur = .Workspace.CoderBin}}{{end}}
+              {{range .DetectedCoders}}
+              <option value="{{.Bin}}" {{if eq .Bin $cur}}selected{{end}}>{{.Name}} — {{.Bin}}</option>
+              {{end}}
+            </select>
+            {{else}}
+            <input type="text" name="coder_bin" class="input input-bordered w-full"
+              value="{{if .Workspace}}{{.Workspace.CoderBin}}{{end}}" placeholder="claude (leave blank for default)">
+            {{end}}
+          </div>
+        </div>
+
+        <div id="coder_api" class="space-y-4">
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">Provider</span></label>
+            <select name="coder_provider" class="select select-bordered w-full">
+              {{$curProv := ""}}{{if .Workspace}}{{$curProv = .Workspace.CoderProvider}}{{end}}
+              {{range .APIProviders}}
+              <option value="{{.Name}}" {{if eq .Name $curProv}}selected{{end}}>{{.Label}}</option>
+              {{end}}
+            </select>
+          </div>
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">Model</span></label>
+            <input type="text" name="coder_model" class="input input-bordered w-full"
+              value="{{if .Workspace}}{{.Workspace.CoderModel}}{{end}}" placeholder="e.g. gpt-4o, anthropic/claude-3.5-sonnet">
+          </div>
+          <div class="form-control" id="coder_baseurl_wrap">
+            <label class="label pb-1"><span class="label-text font-medium">Base URL (optional)</span></label>
+            <input type="text" name="coder_base_url" class="input input-bordered w-full"
+              value="{{if .Workspace}}{{.Workspace.CoderBaseURL}}{{end}}" placeholder="https://your-openai-compatible-host/v1">
+            <label class="label pt-1"><span class="label-text-alt text-base-content/30">Override the provider's default endpoint. Required for "Generic OpenAI-compatible".</span></label>
+          </div>
+          <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">API key secret</span></label>
+            {{if .SecretNames}}
+            <select name="coder_api_key_secret" class="select select-bordered w-full">
+              <option value="" {{if eq .Workspace.CoderAPIKeySecret ""}}selected{{end}}>— pick a secret —</option>
+              {{$curSec := ""}}{{if .Workspace}}{{$curSec = .Workspace.CoderAPIKeySecret}}{{end}}
+              {{range .SecretNames}}
+              <option value="{{.}}" {{if eq . $curSec}}selected{{end}}>{{.}}</option>
+              {{end}}
+            </select>
+            <label class="label pt-1"><span class="label-text-alt text-base-content/30">The secret holding the provider API key. Add it under <a class="link" href="/dashboard/secrets">Secrets</a> first.</span></label>
+            {{else}}
+            <input type="text" name="coder_api_key_secret" class="input input-bordered w-full"
+              value="{{if .Workspace}}{{.Workspace.CoderAPIKeySecret}}{{end}}" placeholder="secret name (add it in Secrets first)">
+            <label class="label pt-1"><span class="label-text-alt text-base-content/30">No secrets yet — add one under <a class="link" href="/dashboard/secrets">Secrets</a>, then return here.</span></label>
+            {{end}}
+          </div>
+        </div>
+
         <div class="form-control">
           <label class="label pb-1"><span class="label-text font-medium">Timeout (seconds)</span></label>
           <input type="number" name="coder_timeout_s" min="0" class="input input-bordered w-full"
@@ -58,6 +110,14 @@
       </form>
     </div>
   </div>
+  <script>
+    function saToggleCoderKind() {
+      const kind = document.getElementById('coder_kind').value;
+      document.getElementById('coder_local').style.display = kind === 'api' ? 'none' : '';
+      document.getElementById('coder_api').style.display = kind === 'api' ? '' : 'none';
+    }
+    saToggleCoderKind();
+  </script>
 
   <!-- Profile -->
   <div class="card bg-base-100 shadow-sm border border-base-300 mb-4">

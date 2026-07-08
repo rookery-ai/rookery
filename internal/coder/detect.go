@@ -14,6 +14,29 @@ type Installed struct {
 	BackendType string // "claude" or "generic" (drives output parsing)
 }
 
+// APIProvider describes a direct LLM API provider usable as a coder (the "api"
+// kind). These are not probed — they're always available (no host binary
+// needed), so DetectInstalled surfaces them for the settings picker.
+type APIProvider struct {
+	Name  string // registry name, e.g. "openai"
+	Label string // human label, e.g. "OpenAI"
+}
+
+// apiProviders is the catalog of direct-LLM-API coder providers (registry
+// names match internal/llm). "generic" is any OpenAI-compatible endpoint; the
+// base URL field is always shown as an optional override for every provider
+// (e.g. Azure OpenAI, a private gateway) and is required only for "generic"
+// (enforced by llm.New at call time, not by the form).
+var apiProviders = []APIProvider{
+	{"openai", "OpenAI"},
+	{"openrouter", "OpenRouter"},
+	{"anthropic", "Anthropic"},
+	{"generic", "Generic OpenAI-compatible"},
+}
+
+// APIProviders returns the available direct-LLM-API coder providers.
+func APIProviders() []APIProvider { return apiProviders }
+
 // knownCoders is the catalog of supported local coder CLIs, probed in order.
 var knownCoders = []struct {
 	Name    string

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"html/template"
 	"io"
@@ -44,8 +45,8 @@ type Server struct {
 	runner     *agentrunner.Runner     // may be nil in tests
 	designer   *agentdesigner.AgentDesigner
 	skills     *skillstore.Store
-	designFlow *agentdesigner.Flow   // shared with Telegram gateway
-	skillFlow  *skilldesigner.Flow  // conversational skill-creator (web + Telegram)
+	designFlow *agentdesigner.Flow // shared with Telegram gateway
+	skillFlow  *skilldesigner.Flow // conversational skill-creator (web + Telegram)
 	homesDir   string              // per-user claude HOME directories
 	vault      *vault.Vault        // per-user knowledge base
 	memory     *memory.Store       // per-user structured context (injected into one-off chat)
@@ -449,8 +450,24 @@ func (s *Server) redirectRoot(c echo.Context) error {
 // settings, falling back to the system defaults when unset.
 func (s *Server) coderForWorkspace(workspaceID string) *coder.Coder {
 	w, _ := s.db.GetWorkspaceByID(workspaceID)
-	return coder.ForWorkspace(w, s.homesDir, s.cfg.Data.Dir,
-		s.cfg.Coder.ClaudeBin, s.cfg.Coder.Timeout, s.cfg.Sandbox.Enabled)
+	return coder.ForWorkspace(w, s.homesDir, s.cfg.Data.Dir, s.vault,
+		s.cfg.Coder.ClaudeBin, s.cfg.Coder.Timeout, s.cfg.Sandbox.Enabled).
+		WithSecretsLookup(s.secretsLookup)
+}
+
+// secretsLookup resolves a single named secret for a workspace at run time. The
+// API coder uses it to fetch its provider API key lazily on every call.
+func (s *Server) secretsLookup(ctx context.Context, workspaceID, name string) (string, error) {
+	w, err := s.db.GetWorkspaceByID(workspaceID)
+	if err != nil || w == nil || w.EncryptedMasterPassword == "" {
+		return "", err
+	}
+	masterPw, err := secrets.DecryptMasterPassword(w.EncryptedMasterPassword, s.systemKey)
+	if err != nil {
+		return "", err
+	}
+	svc := secrets.New(s.db, workspaceID, masterPw, w.SecretsSalt)
+	return svc.Get(ctx, name)
 }
 
 type pageData struct {

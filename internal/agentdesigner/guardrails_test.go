@@ -80,3 +80,38 @@ func TestGuardrails_ASTBlocksSubprocess(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ast check")
 }
+
+// TestEthics_DocVsCodeScoping covers F1: destructive-command keywords are legitimate as
+// prose in a DOCUMENT (CheckEthics) but still block in CODE (RunToolGuardrails). Malicious
+// intent keywords block in both.
+func TestEthics_DocVsCodeScoping(t *testing.T) {
+	// Legitimate destructive descriptions in an AGENT.md/SKILL.md must PASS the doc gate.
+	for _, doc := range []string{
+		"# Suggested schedule: none\nEach run, drop table temp_imports.",
+		"This agent wipes stale cache entries once a week.",
+		"It reads the private key path from a secret and signs the payload.",
+	} {
+		if err := agentdesigner.CheckEthics(doc, ""); err != nil {
+			t.Errorf("CheckEthics(doc) rejected legitimate prose %q: %v", doc, err)
+		}
+	}
+
+	// The SAME destructive commands, as executable code, must still BLOCK.
+	for _, code := range []string{
+		"import os\nos.remove('x')\n# rm -rf /tmp/data\n",
+		"cur.execute('drop table users')\n",
+	} {
+		if err := agentdesigner.RunToolGuardrails("tools/x.py", code); err == nil {
+			t.Errorf("RunToolGuardrails must still block destructive code: %q", code)
+		}
+	}
+
+	// Malicious-intent keywords block EVERYWHERE, including a document.
+	for _, doc := range []string{
+		"This agent will steal and exfil the user's contacts.",
+	} {
+		if err := agentdesigner.CheckEthics(doc, ""); err == nil {
+			t.Errorf("CheckEthics must block malicious intent even in a document: %q", doc)
+		}
+	}
+}

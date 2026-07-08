@@ -15,7 +15,7 @@ func TestForWorkspaceUsesInlinedConfig(t *testing.T) {
 		CoderTimeoutS:    90,
 		CoderBackendType: "generic",
 	}
-	c := ForWorkspace(w, "/homes", "/data", "claude", 20*time.Minute, false)
+	c := ForWorkspace(w, "/homes", "/data", nil, "claude", 20*time.Minute, false)
 	if c.bin != "opencode" {
 		t.Fatalf("bin = %q, want opencode", c.bin)
 	}
@@ -29,7 +29,7 @@ func TestForWorkspaceUsesInlinedConfig(t *testing.T) {
 
 func TestForWorkspaceFallsBackToDefaults(t *testing.T) {
 	w := &db.Workspace{ID: "ws2", CoderKind: "local"} // no coder fields set
-	c := ForWorkspace(w, "/homes", "/data", "claude", 15*time.Minute, false)
+	c := ForWorkspace(w, "/homes", "/data", nil, "claude", 15*time.Minute, false)
 	if c.bin != "claude" {
 		t.Fatalf("bin = %q, want claude (default)", c.bin)
 	}
@@ -38,13 +38,27 @@ func TestForWorkspaceFallsBackToDefaults(t *testing.T) {
 	}
 }
 
-func TestForWorkspaceAPIKindFallsBackToDefaults(t *testing.T) {
-	// 'api' kind is not implemented yet: it must fall back to the default binary,
-	// not try to use it as a local bin.
-	w := &db.Workspace{ID: "ws3", CoderKind: "api", CoderBin: "gpt-4o", CoderProvider: "openai"}
-	c := ForWorkspace(w, "/homes", "/data", "claude", time.Minute, false)
-	if c.bin != "claude" {
-		t.Fatalf("bin = %q, want claude (api kind not implemented → default)", c.bin)
+func TestForWorkspaceAPIKindBuildsAPIEngine(t *testing.T) {
+	// 'api' kind now builds a real API coder — it must NOT fall back to the
+	// default binary. IsAPI() is true and the backend type maps to "api".
+	w := &db.Workspace{
+		ID:                "ws3",
+		CoderKind:         "api",
+		CoderProvider:     "openai",
+		CoderModel:        "gpt-4o",
+		CoderAPIKeySecret: "OPENAI_API_KEY",
+		CoderBaseURL:      "https://api.openai.com/v1",
+		CoderTimeoutS:     120,
+	}
+	c := ForWorkspace(w, "/homes", "/data", nil, "claude", time.Minute, false)
+	if !c.IsAPI() {
+		t.Fatal("IsAPI() = false, want true for api-kind workspace")
+	}
+	if c.BackendType() != "api" {
+		t.Fatalf("backend = %q, want api", c.BackendType())
+	}
+	if c.timeout != 120*time.Second {
+		t.Fatalf("timeout = %v, want 120s", c.timeout)
 	}
 }
 

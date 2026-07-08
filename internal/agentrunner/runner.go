@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/coder"
+	"github.com/ilijad1/simple-agents/internal/composioassets"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/secrets"
@@ -36,11 +37,11 @@ type SendFunc func(msg string)
 
 // RunInput describes one agent execution request.
 type RunInput struct {
-	AgentID    string
-	WorkspaceID     string
-	Trigger    string // "chat", "cron", "manual"
-	MasterPw   string // user's master password for secret decryption
-	SendOutput SendFunc
+	AgentID     string
+	WorkspaceID string
+	Trigger     string // "chat", "cron", "manual"
+	MasterPw    string // user's master password for secret decryption
+	SendOutput  SendFunc
 	// OnProgress, if set, is called once per coder turn with that turn's freshly
 	// parsed [CHAT] lines as they arrive — enabling live streaming (e.g. SSE) while
 	// the run is still in flight. SendOutput is still called once at the end with the
@@ -145,11 +146,11 @@ func (r *Runner) RunByName(ctx context.Context, workspaceID, agentName, masterPw
 		return fmt.Errorf("agent %q not found", agentName)
 	}
 	return r.Run(ctx, RunInput{
-		AgentID:    agent.ID,
-		WorkspaceID:     workspaceID,
-		Trigger:    "chat",
-		MasterPw:   masterPw,
-		SendOutput: send,
+		AgentID:     agent.ID,
+		WorkspaceID: workspaceID,
+		Trigger:     "chat",
+		MasterPw:    masterPw,
+		SendOutput:  send,
 	})
 }
 
@@ -204,12 +205,13 @@ func (r *Runner) TestRunFromContent(ctx context.Context, workspaceID, agentMD st
 
 // coderRunContext tracks mutable state across the turns of one top-level run.
 type coderRunContext struct {
-	turnsUsed       int
-	chatLines       []string
-	warnings        []string
-	rawChunks       []string // raw coder output per turn, joined into the run note
-	lastRaw         string   // raw text of the most recent turn (fallback prose source)
-	silentSignaled  bool     // any turn emitted [SILENT] — run is intentionally quiet
+	turnsUsed      int
+	chatLines      []string
+	warnings       []string
+	rawChunks      []string    // raw coder output per turn, joined into the run note
+	lastRaw        string      // raw text of the most recent turn (fallback prose source)
+	silentSignaled bool        // any turn emitted [SILENT] — run is intentionally quiet
+	usage          coder.Usage // accumulated token usage (API coder); zero for CLI coders
 }
 
 func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *agentdesigner.AgentManifest, input RunInput) error {
@@ -259,6 +261,8 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	// description and the actual execution use the same (correct) coder.
 	baseCoder := r.coderForWorkspace(input.WorkspaceID)
 
+	composioEnabled, _ := r.db.SecretExists(input.WorkspaceID, "COMPOSIO_API_KEY")
+
 	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
 		AgentMD:         string(agentMD),
 		StateJSON:       string(stateRaw),
@@ -271,17 +275,26 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		AgentDir:        agentDir,
 		ChatApps:        r.loadChatApps(input.WorkspaceID),
 		BackendType:     backendTypeOf(baseCoder),
+		ComposioEnabled: composioEnabled,
 	})
 
 	if baseCoder == nil {
 		return fmt.Errorf("no coder service configured")
+	}
+	// Seed the Composio helper scripts deterministically (same verified-correct code as
+	// generation time) — NOT gated by SA_BUILD_PHASE here: this is a real run, and a real
+	// run must be able to actually send/publish/delete when the agent's job is to do so.
+	if composioEnabled {
+		if err := composioassets.WriteHelperFiles(filepath.Join(agentDir, "tools")); err != nil {
+			slog.Warn("agentrunner: seed composio helper files", "workspace_id", input.WorkspaceID, "agent_id", agent.ID, "err", err)
+		}
 	}
 	// Run inside the agent's own directory (not the shared per-user home) so
 	// tools/*.py and state.json resolve correctly and runs never see other
 	// agents' files. Pre-approve the tools agents need so the subprocess never
 	// blocks on interactive permission prompts (--setting-sources "" suppresses
 	// all settings).
-	coderSvc := baseCoder.WithDir(agentDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit")
+	coderSvc := baseCoder.WithDir(agentDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").WithProgress(input.OnProgress)
 
 	// Inject user secrets as env vars when master password is available.
 	if input.MasterPw != "" {
@@ -312,8 +325,15 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	r.reflectRun(input, agent, runID, exitCode, startedAt, rctx)
 
 	if runErr != nil {
-		_ = r.db.FinishAgentRun(runID, -1, strings.Join(rctx.chatLines, "\n"), strings.Join(rctx.warnings, "\n")+"\n"+runErr.Error())
+		_ = r.db.FinishAgentRun(runID, -1, strings.Join(rctx.chatLines, "\n"), strings.Join(rctx.warnings, "\n")+"\n"+runErr.Error(), rctx.usage.PromptTokens, rctx.usage.CompletionTokens, rctx.usage.TotalTokens)
 		friendly := friendlyRunError(runErr, coderSvc.Name())
+		// A multi-turn run (e.g. one that made a [CALL: agent] to a child agent, or
+		// completed some turns before the final one failed) may have already
+		// accumulated real [CHAT] output before the error — don't let a late failure
+		// silently swallow it. Show what was delivered so far, then the error.
+		if partial := strings.Join(rctx.chatLines, "\n"); partial != "" {
+			friendly = partial + "\n\n" + friendly
+		}
 		// Notify the user directly — for cron-triggered runs this is the ONLY
 		// way they'd ever find out (the scheduler otherwise just logs to slog).
 		if input.SendOutput != nil {
@@ -338,7 +358,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		}
 	}
 
-	_ = r.db.FinishAgentRun(runID, 0, finalOutput, strings.Join(rctx.warnings, "\n"))
+	_ = r.db.FinishAgentRun(runID, 0, finalOutput, strings.Join(rctx.warnings, "\n"), rctx.usage.PromptTokens, rctx.usage.CompletionTokens, rctx.usage.TotalTokens)
 
 	switch {
 	case finalOutput != "":
@@ -365,16 +385,19 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 // reflectRun mirrors the completed run into the user's vault as a markdown note.
 func (r *Runner) reflectRun(input RunInput, agent *db.Agent, runID string, exitCode int, startedAt time.Time, rctx *coderRunContext) {
 	if err := r.reflector.ReflectAgentRun(input.WorkspaceID, vault.RunNote{
-		RunID:      runID,
-		AgentID:    input.AgentID,
-		AgentName:  agent.Name,
-		Trigger:    input.Trigger,
-		ExitCode:   exitCode,
-		StartedAt:  startedAt,
-		FinishedAt: time.Now().UTC(),
-		Output:     strings.Join(rctx.rawChunks, "\n\n———\n\n"),
-		ChatLines:  rctx.chatLines,
-		Warnings:   rctx.warnings,
+		RunID:            runID,
+		AgentID:          input.AgentID,
+		AgentName:        agent.Name,
+		Trigger:          input.Trigger,
+		ExitCode:         exitCode,
+		StartedAt:        startedAt,
+		FinishedAt:       time.Now().UTC(),
+		Output:           strings.Join(rctx.rawChunks, "\n\n———\n\n"),
+		ChatLines:        rctx.chatLines,
+		Warnings:         rctx.warnings,
+		PromptTokens:     rctx.usage.PromptTokens,
+		CompletionTokens: rctx.usage.CompletionTokens,
+		TotalTokens:      rctx.usage.TotalTokens,
 	}); err != nil {
 		slog.Warn("agentrunner: reflect run to vault", "run_id", runID, "err", err)
 	}
@@ -416,6 +439,7 @@ func (r *Runner) runCoderTurns(
 		if err != nil {
 			return fmt.Errorf("coder generate: %w", err)
 		}
+		rctx.usage = addUsage(rctx.usage, result.Usage)
 
 		parsed := parseCoderOutput(result.Text)
 		rctx.chatLines = append(rctx.chatLines, parsed.chatLines...)
@@ -481,10 +505,10 @@ func (r *Runner) runCoderTurns(
 			newVisited[agent.Name] = true
 
 			childInput := RunInput{
-				AgentID:  child.ID,
-				WorkspaceID:   input.WorkspaceID,
-				Trigger:  input.Trigger,
-				MasterPw: input.MasterPw,
+				AgentID:     child.ID,
+				WorkspaceID: input.WorkspaceID,
+				Trigger:     input.Trigger,
+				MasterPw:    input.MasterPw,
 				SendOutput: func(msg string) {
 					childChat = append(childChat, msg)
 				},
@@ -523,12 +547,26 @@ func (r *Runner) runCoderTurns(
 // "claude") so the message stays accurate across different coder profiles;
 // pass "" to fall back to a generic phrase.
 func friendlyRunError(err error, coderName string) string {
+	who := "The coder"
+	if coderName != "" {
+		who = coderName
+	}
+	if errors.Is(err, coder.ErrRateLimited) {
+		// Transient provider throttle (429 RPM/TPM window), not quota
+		// exhaustion — chat still works because its requests are smaller. The
+		// run would very likely succeed if retried shortly after.
+		return fmt.Sprintf("⚠️ %s was rate-limited by the provider (too many requests just now). Try running the agent again in a minute — your quota is fine.", who)
+	}
 	if errors.Is(err, coder.ErrUsageLimit) {
-		who := "The coder"
-		if coderName != "" {
-			who = coderName
-		}
-		return fmt.Sprintf("⚠️ This agent run was skipped — %s hit its usage limit. It will retry automatically on the next scheduled run.", who)
+		return fmt.Sprintf("⚠️ This agent run was skipped — %s hit its usage limit (quota/credits exhausted). It will retry automatically on the next scheduled run.", who)
+	}
+	if errors.Is(err, coder.ErrMaxTurns) {
+		// Normally unreachable: the API-coder tool loop (api_engine.go's runToolLoop)
+		// gives the model one final text-only turn to explain itself and stop before
+		// returning this — so a real run only reaches this branch if that grace turn
+		// ALSO failed. Any [CHAT] output from earlier turns in this same run is
+		// prepended by the caller, so this is the fallback for when there's none.
+		return fmt.Sprintf("⚠️ %s ran out of attempts partway through this run and couldn't finish or explain why. It will retry on the next scheduled run — if this keeps happening, the task likely needs to be simplified or split up.", who)
 	}
 	return "⚠️ This agent run failed: " + err.Error()
 }
@@ -856,4 +894,13 @@ func backendTypeOf(c *coder.Coder) string {
 		return prompts.BackendFullCoder
 	}
 	return prompts.MapCoderBackend(c.BackendType())
+}
+
+// addUsage accumulates coder.Usage across turns. CLI coders report zero; the API
+// coder reports provider-reported token counts per turn.
+func addUsage(a, b coder.Usage) coder.Usage {
+	a.PromptTokens += b.PromptTokens
+	a.CompletionTokens += b.CompletionTokens
+	a.TotalTokens += b.TotalTokens
+	return a
 }
