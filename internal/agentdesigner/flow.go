@@ -976,7 +976,16 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// actually exercised here (the only exception is sending real outbound messages,
 	// enforced by the testing-rules prompt AND, for Composio, a code-level guard in the
 	// seeded composio_helper.py keyed off SA_BUILD_PHASE below).
-	generationCoder := coderSvc.WithDir(workDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit")
+	generationCoder := coderSvc.WithDir(workDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").
+		// Stream the API engine's per-tool-call milestones (🔧 web_search(...), 🔧
+		// run_script(...), 🔧 write_file(...)) to the build SSE + Telegram, the same
+		// way agent runs do (agentrunner wires WithProgress(OnProgress)). Without this,
+		// a build only emits the 3 fixed "🤖 Coder is building…" strings and the user
+		// has zero visibility into what the coder is actually doing — which matters most
+		// on a weak model (Mistral) building a complex agent, where you need to see it
+		// converge (or oscillate) tool-call by tool-call. No-op for the CLI engine, which
+		// never calls the progress sink.
+		WithProgress(notify)
 	// WithExtraEnv replaces rather than merges, so build the full env map once: secrets
 	// (if any) plus the build-phase marker that tells composio_execute() this is a
 	// generation/verification pass, not a real run — it must never be set for a real run.

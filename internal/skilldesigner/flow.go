@@ -437,7 +437,12 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 
 	notify("🤖 Coder is building your skill — this can take a few minutes…")
 
-	generationCoder := coderSvc.WithDir(stagingDir).WithAllowedTools("Bash,Write,Edit,Read")
+	generationCoder := coderSvc.WithDir(stagingDir).WithAllowedTools("Bash,Write,Edit,Read").
+		// Stream the API engine's per-tool-call milestones (🔧 run_script(...), 🔧
+		// write_file(...)) to the build SSE, mirroring agentdesigner.runGeneration +
+		// agent runs. Without this a skill build only emits the fixed "🤖 Coder is
+		// building…" strings. No-op for the CLI engine.
+		WithProgress(notify)
 	// WithExtraEnv replaces rather than merges, so build the full env map once: secrets
 	// (if any) plus the build-phase marker composio_helper.py's send-guard checks for.
 	extraEnv := map[string]string{composioassets.BuildPhaseEnvVar: composioassets.BuildPhaseGeneration}
