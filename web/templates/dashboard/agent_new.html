@@ -1,6 +1,27 @@
 {{template "head" .}}
 {{template "navbar" .}}
 
+<style>
+  /* Live stage ribbon — shows where in the build you are */
+  #stage-ribbon { display: flex; align-items: center; gap: 0; margin-bottom: 10px; }
+  #stage-ribbon .stg { display: flex; align-items: center; gap: 7px; flex: 1 1 0; min-width: 0; color: #8b929c; font-size: 12px; }
+  #stage-ribbon .stg .dot { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; flex: none; }
+  #stage-ribbon .stg .lb { white-space: nowrap; }
+  #stage-ribbon .stg .bar { flex: 1; height: 2px; background: currentColor; opacity: .3; margin: 0 8px; border-radius: 2px; min-width: 8px; }
+  #stage-ribbon .stg:last-child .bar { display: none; }
+  #stage-ribbon .stg.done { color: #2f9e6a; }
+  #stage-ribbon .stg.done .dot { background: #2f9e6a; }
+  #stage-ribbon .stg.active { color: #0e9bb8; font-weight: 650; }
+  #stage-ribbon .stg.active .dot { background: #0e9bb8; box-shadow: 0 0 0 3px rgba(14,155,184,.22); }
+  #stage-caption { font-size: 12px; color: #8b929c; margin: 0 0 12px; min-height: 16px; }
+  .act-wrap { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; padding: 12px 14px; border-radius: 12px; }
+  .act-wrap.tone-success { background: rgba(47,158,106,.10); border: 1px solid rgba(47,158,106,.32); }
+  .act-wrap.tone-warning { background: rgba(190,122,21,.10); border: 1px solid rgba(190,122,21,.32); }
+  .act-wrap.tone-primary { background: rgba(14,155,184,.10); border: 1px solid rgba(14,155,184,.32); }
+  .act-note { font-size: 14px; flex: 1 1 auto; min-width: 130px; }
+  .act-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+</style>
+
 <div class="container mx-auto px-4 py-8 max-w-3xl">
   {{template "alert" .}}
 
@@ -70,9 +91,19 @@
     <div class="card bg-base-100 shadow-sm border border-base-300">
       <div class="card-body p-4">
         <div class="flex items-center justify-between mb-3">
-          <h2 class="font-semibold text-sm">Designing: <span id="chat-agent-name" class="text-primary font-mono"></span></h2>
+          <h2 class="font-semibold text-sm">Creating: <span id="chat-agent-name" class="text-primary font-mono"></span></h2>
           <button id="cancel-btn" onclick="cancelDesign()" class="btn btn-outline btn-error btn-xs">Cancel</button>
         </div>
+
+        <!-- Live stage ribbon: where in the build you are -->
+        <div id="stage-ribbon">
+          <div class="stg" data-stage="describe"><span class="dot"></span><span class="lb">Describe</span><span class="bar"></span></div>
+          <div class="stg" data-stage="design"><span class="dot"></span><span class="lb">Design</span><span class="bar"></span></div>
+          <div class="stg" data-stage="build"><span class="dot"></span><span class="lb">Build</span><span class="bar"></span></div>
+          <div class="stg" data-stage="review"><span class="dot"></span><span class="lb">Review</span><span class="bar"></span></div>
+          <div class="stg" data-stage="saved"><span class="dot"></span><span class="lb">Saved</span><span class="bar"></span></div>
+        </div>
+        <div id="stage-caption"></div>
 
         <!-- Message list -->
         <div id="chat-messages" class="space-y-3 max-h-[500px] overflow-y-auto mb-4 pr-1 scroll-smooth"></div>
@@ -82,26 +113,19 @@
           <span class="loading loading-dots loading-md text-primary"></span>
         </div>
 
-        <!-- Generation progress panel (shown while coder subprocess runs) -->
+        <!-- Coder activity panel (shown while the coder builds) -->
         <div id="generation-progress" class="hidden flex items-start gap-3 p-3 rounded-lg bg-base-200 border border-base-300 mb-2">
           <span class="loading loading-spinner loading-sm text-primary mt-0.5 shrink-0"></span>
           <div class="flex-1 min-w-0">
-            <p id="generation-status" class="text-sm font-medium">Building your agent…</p>
-            <p class="text-xs text-base-content/50 mt-0.5">This can take a few minutes.</p>
+            <p class="text-xs uppercase tracking-wide text-base-content/40 mb-0.5">Coder is working</p>
+            <p id="generation-status" class="text-sm font-medium font-mono break-words">Starting the build…</p>
+            <p class="text-xs text-base-content/50 mt-0.5">This can take a few minutes. You can leave this page — the build keeps running.</p>
           </div>
           <button onclick="cancelDesign()" class="btn btn-ghost btn-xs text-error shrink-0">Cancel</button>
         </div>
 
-        <!-- Approve quick action -->
-        <div id="approve-bar" class="hidden mb-3">
-          <div class="flex items-center gap-2 p-3 rounded-lg bg-success/10 border border-success/30">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-success shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            <span class="text-sm flex-1">Happy with the proposal? Generate the agent.</span>
-            <button onclick="sendMessage('approve')" class="btn btn-success btn-sm gap-1">
-              Approve &amp; Build
-            </button>
-          </div>
-        </div>
+        <!-- Context-aware action bar (buttons match the current moment) -->
+        <div id="action-bar" class="hidden mb-3"></div>
 
         <!-- Input -->
         <div class="flex gap-2">
@@ -133,6 +157,12 @@
 var agentName = '';
 var isGenerating = false;
 var progressSource = null;
+// How many History entries the chat already shows. Used only by the restore /
+// reconnect path (a fresh page load) so syncHistory appends just the new entries.
+var renderedHistoryLen = 0;
+// True while watching a build we reconnected to (vs. one started in this tab), so
+// the SSE close handler knows to re-fetch /design/state for the final result.
+var reconnectingBuild = false;
 
 function startDesign() {
   var name = document.getElementById('agent-name-input').value.trim();
@@ -170,14 +200,32 @@ function isApproval(msg) {
   return t === 'approve' || t === 'go ahead' || t === 'build it' || t === 'create it' || t === '/approve';
 }
 
+// triggersBuild reports whether sending this message will launch a coder build, so
+// doRequest can open the progress stream and show the Build stage. Covers the plain
+// approve words plus the post-block retry phrases the "Keep going" button sends.
+// ("keep it as-is" force-SAVES rather than builds, so it is deliberately excluded.)
+function triggersBuild(msg) {
+  var t = msg.trim().toLowerCase();
+  if (isApproval(t)) return true;
+  return t.indexOf('keep going') >= 0 || t.indexOf('keep trying') >= 0 ||
+         t.indexOf('try again') >= 0 || t === 'retry' || t.indexOf('another pass') >= 0;
+}
+
 function startProgressStream() {
   if (progressSource) return;
   progressSource = new EventSource('/dashboard/agents/design/progress');
   progressSource.onmessage = function(e) {
-    document.getElementById('generation-status').textContent = e.data;
+    var el = document.getElementById('generation-status');
+    if (el) el.textContent = e.data;
   };
   progressSource.onerror = function() {
     stopProgressStream();
+    // A build we reconnected to has no POST to deliver its result. When the SSE
+    // ends (server closed the channel after the build committed its state) fetch
+    // /design/state to render the outcome and transition the UI.
+    if (reconnectingBuild) {
+      onGenerationFinished();
+    }
   };
 }
 
@@ -188,10 +236,99 @@ function stopProgressStream() {
   }
 }
 
+// Append only the History entries not yet shown (used by the restore/reconnect
+// path — a fresh page load renders from an empty chat, so renderedHistoryLen
+// starts at 0 and tracks how far we've replayed).
+function syncHistory(history) {
+  history = history || [];
+  for (var i = renderedHistoryLen; i < history.length; i++) {
+    appendMessage(history[i].role === 'user' ? 'user' : 'assistant', history[i].content);
+  }
+  if (history.length > renderedHistoryLen) renderedHistoryLen = history.length;
+}
+
+// On page load, restore an in-flight or just-finished live design session so
+// navigating away and back does not lose the build. Returns true if a live
+// session was restored (in which case the draft-banner/resume flow is skipped).
+async function restoreLiveSession() {
+  var data;
+  try {
+    var res = await fetch('/dashboard/agents/design/state');
+    data = await res.json();
+  } catch(e) {
+    return false;
+  }
+  if (!data || !data.active) return false;
+
+  agentName = data.name || '';
+  var nameEl = document.getElementById('chat-agent-name');
+  if (nameEl) nameEl.textContent = agentName;
+  document.getElementById('phase-start').classList.add('hidden');
+  var banner = document.getElementById('draft-banner');
+  if (banner) banner.classList.add('hidden');
+  document.getElementById('phase-chat').classList.remove('hidden');
+
+  syncHistory(data.history);
+
+  if (data.generating) {
+    // Build still running — reconnect to the live progress stream and wait for it.
+    isGenerating = true;
+    reconnectingBuild = true;
+    showProgress();
+    // Show the current action right away — the SSE channel doesn't replay the
+    // milestones that fired before we reconnected, so without this the panel would
+    // sit on the generic placeholder until the next tool call.
+    if (data.last_progress) {
+      var el = document.getElementById('generation-status');
+      if (el) el.textContent = data.last_progress;
+    }
+    startProgressStream();
+  } else {
+    // Build already finished (or a normal Q&A turn) — let the user approve or reply.
+    applyContext(data.state, data.generation_failed, data.can_keep_as_is);
+    document.getElementById('chat-input').focus();
+  }
+  return true;
+}
+
+// Called when a reconnected build's SSE stream ends. Fetch the final state: if
+// the build actually finished, render the new messages and re-enable the chat;
+// if it's a transient drop, reconnect after a short delay.
+async function onGenerationFinished() {
+  var data;
+  try {
+    var res = await fetch('/dashboard/agents/design/state');
+    data = await res.json();
+  } catch(e) {
+    hideProgress();
+    isGenerating = false;
+    reconnectingBuild = false;
+    return;
+  }
+  if (data && data.active && data.generating) {
+    // False alarm (SSE hiccup) — the build is still going. Reconnect shortly.
+    setTimeout(startProgressStream, 1000);
+    return;
+  }
+  hideProgress();
+  isGenerating = false;
+  reconnectingBuild = false;
+  if (data && data.active) {
+    syncHistory(data.history);
+    applyContext(data.state, data.generation_failed, data.can_keep_as_is);
+    document.getElementById('chat-input').focus();
+  } else {
+    // Session gone (cancelled or finalized elsewhere) — reflect a clean state.
+    appendSystem('This design session has ended. Reload to start again.');
+  }
+}
+
 function showProgress() {
   document.getElementById('chat-spinner').classList.add('hidden');
   document.getElementById('generation-progress').classList.remove('hidden');
-  document.getElementById('approve-bar').classList.add('hidden');
+  hideActions();
+  setStage('build');
+  setCaption('Building your agent — the coder is working below.');
   setInputDisabled(true);
 }
 
@@ -211,12 +348,18 @@ async function doRequest(name, msg, isFirst) {
   if (isFirst) {
     document.getElementById('phase-start').classList.add('hidden');
     document.getElementById('phase-chat').classList.remove('hidden');
+    setStage('design');
+    setCaption('Answer the designer’s questions, then approve to build.');
+    // Render the opening description as a user bubble so the conversation reads
+    // from the start. Subsequent turns append it in sendMessage(); the first turn
+    // (startDesign → doRequest) is the only one that skipped it.
+    appendMessage('user', msg);
   }
 
   // If this is an approval message, switch to generation mode with progress streaming.
   // Open EventSource BEFORE the POST so the SSE handler has time to start polling
   // for the progress channel, which runGeneration() creates when the POST arrives.
-  var generating = !isFirst && isApproval(msg);
+  var generating = !isFirst && triggersBuild(msg);
   if (generating) {
     isGenerating = true;
     showProgress();
@@ -253,13 +396,24 @@ async function doRequest(name, msg, isFirst) {
       }
       return;
     }
+    // Concurrency guard: a build is already running (another tab / earlier turn).
+    // Keep the Build stage and don't offer actions.
+    if (data.building) {
+      appendMessage('assistant', data.response);
+      isGenerating = true;
+      showProgress();
+      startProgressStream();
+      return;
+    }
     appendMessage('assistant', data.response);
     if (data.done) {
+      setStage('saved');
+      setCaption('Saved to your knowledge base.');
       appendSystem('Agent created! Redirecting...');
       setTimeout(function() { window.location.href = '/dashboard/agents/' + data.agent_id; }, 800);
       return;
     }
-    showApproveBar();
+    applyContext(data.state, data.generation_failed, data.can_keep_as_is);
     document.getElementById('chat-input').focus();
   } catch(e) {
     if (generating) {
@@ -289,6 +443,9 @@ async function cancelDesign() {
     stopProgressStream();
     hideProgress();
     isGenerating = false;
+    reconnectingBuild = false;
+    hideActions();
+    setCaption('Build cancelled.');
     appendMessage('assistant', 'Agent creation was cancelled.');
     return;
   }
@@ -356,16 +513,112 @@ function setLoading(on) {
   if (inp) inp.disabled = on;
 }
 
-function showApproveBar() {
-  document.getElementById('approve-bar').classList.remove('hidden');
+// ---- Stage ribbon + context-aware actions -------------------------------
+var STAGE_ORDER = ['describe', 'design', 'build', 'review', 'saved'];
+
+function setStage(key) {
+  var cur = STAGE_ORDER.indexOf(key);
+  var stgs = document.querySelectorAll('#stage-ribbon .stg');
+  for (var i = 0; i < stgs.length; i++) {
+    var pos = STAGE_ORDER.indexOf(stgs[i].getAttribute('data-stage'));
+    stgs[i].classList.remove('active', 'done');
+    if (key === 'saved') { stgs[i].classList.add(pos === cur ? 'active' : 'done'); }
+    else if (pos < cur) stgs[i].classList.add('done');
+    else if (pos === cur) stgs[i].classList.add('active');
+  }
 }
+function setCaption(txt) {
+  var e = document.getElementById('stage-caption');
+  if (e) e.textContent = txt || '';
+}
+
+// applyContext drives the stage ribbon, caption, and the action buttons from the
+// FSM state the backend reports (state + generation_failed + can_keep_as_is). Called
+// after every turn so the UI always reflects "where you are and what to do next".
+// canKeepAsIs is true only when a saveable build exists on disk — "Keep it as-is" is
+// offered solely then, so the button is never a dead end with nothing to save.
+function applyContext(state, genFailed, canKeepAsIs) {
+  if (isGenerating) { setStage('build'); renderActions('__building__', false, false); return; }
+  if (state === 'verifying') {
+    setStage('review');
+    setCaption('Review the built agent above, then save it or ask for a change.');
+  } else if (state === 'designing' && genFailed) {
+    setStage('design');
+    setCaption(canKeepAsIs
+      ? 'The build finished but couldn’t be auto-verified on your model — your call.'
+      : 'The build didn’t finish — ask it to keep going, or describe a change.');
+  } else if (state === 'designing') {
+    setStage('design');
+    setCaption('Answer the designer’s questions, then approve to build.');
+  } else {
+    setStage('design');
+    setCaption('');
+  }
+  renderActions(state, genFailed, canKeepAsIs);
+}
+
+// renderActions builds the button set for the current moment.
+function renderActions(state, genFailed, canKeepAsIs) {
+  var bar = document.getElementById('action-bar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  var cfg = null;
+  if (state === '__building__' || isGenerating) { bar.classList.add('hidden'); return; }
+  if (state === 'verifying') {
+    cfg = { tone: 'success', note: 'Happy with the built agent?', btns: [
+      { t: 'Approve & Save', c: 'btn-success', m: 'approve' },
+      { t: 'Request a change', c: 'btn-ghost', focus: true } ] };
+  } else if (state === 'designing' && genFailed) {
+    // "Keep it as-is" only when there's actually a saveable build on disk (canKeepAsIs).
+    // Without it (e.g. a no-AGENT.md block), it would be a dead button that falls through
+    // to a design-chat turn — so offer only Keep going + Change something there.
+    var btns = [ { t: 'Keep going', c: 'btn-primary', m: 'keep going' } ];
+    if (canKeepAsIs) { btns.push({ t: 'Keep it as-is', c: 'btn-warning', m: 'keep it as-is' }); }
+    btns.push({ t: 'Change something', c: 'btn-ghost', focus: true });
+    cfg = { tone: canKeepAsIs ? 'warning' : 'primary',
+            note: canKeepAsIs
+              ? 'Built, but not confirmed to run on your model.'
+              : 'The build didn’t complete — keep going to retry, or describe a change.',
+            btns: btns };
+  } else if (state === 'designing') {
+    cfg = { tone: 'primary', note: 'Ready to build when you are.', btns: [
+      { t: 'Approve & Build', c: 'btn-primary', m: 'approve' } ] };
+  } else { bar.classList.add('hidden'); return; }
+
+  var wrap = document.createElement('div');
+  wrap.className = 'act-wrap tone-' + cfg.tone;
+  var note = document.createElement('span');
+  note.className = 'act-note';
+  note.textContent = cfg.note;
+  wrap.appendChild(note);
+  var grp = document.createElement('div');
+  grp.className = 'act-btns';
+  cfg.btns.forEach(function (b) {
+    var btn = document.createElement('button');
+    btn.className = 'btn btn-sm ' + b.c;
+    btn.textContent = b.t;
+    if (b.focus) { btn.onclick = function () { var i = document.getElementById('chat-input'); if (i) i.focus(); }; }
+    else { btn.onclick = function () { sendMessage(b.m); }; }
+    grp.appendChild(btn);
+  });
+  wrap.appendChild(grp);
+  bar.appendChild(wrap);
+  bar.classList.remove('hidden');
+}
+function hideActions() { var b = document.getElementById('action-bar'); if (b) { b.innerHTML = ''; b.classList.add('hidden'); } }
 
 function esc(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', async function() {
   document.getElementById('agent-name-input').focus();
+
+  // Restore an in-flight / just-finished live design session first (it survives
+  // page navigation now that generation is detached from the request). If one
+  // exists we replay the conversation and, when still building, reconnect to the
+  // SSE stream — the draft banner + resume flow below is only the restart fallback.
+  if (await restoreLiveSession()) return;
 
   // Resume an unfinished design draft: fetch the saved conversation, replay it
   // into the chat, then enter phase-chat ready to continue.
@@ -400,7 +653,7 @@ document.addEventListener('DOMContentLoaded', function() {
           appendMessage(m.role === 'assistant' ? 'ai' : 'user', m.content);
         });
         appendMessage('ai', data.response);
-        if (data.state === 'verifying') { showApproveBar(); }
+        applyContext(data.state, data.generation_failed, data.can_keep_as_is);
         document.getElementById('chat-input').focus();
       } catch(e) {
         btnResume.disabled = false;

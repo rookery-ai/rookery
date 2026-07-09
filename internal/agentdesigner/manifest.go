@@ -25,6 +25,18 @@ func AgentDir(vaultsBase, workspaceID, agentID string) string {
 	return filepath.Join(vaultsBase, workspaceID, "agents", agentID)
 }
 
+// DraftAgentDir returns the working directory for a create-mode agent that is
+// still being designed/built (before finalize). It is named draft_<slug> from the
+// agent's NAME — not the opaque agent UUID — so a work-in-progress agent is
+// recognizable in the KB browser. The dir is kept there until the user finalizes
+// the agent (finalize reconstitutes the real agent at AgentDir(<uuid>) from the
+// captured content and removes this dir), discards the draft, or deletes the
+// agent — a failed/blocked build never removes it. The slug is stable for a given
+// name so a resumed draft's next generation iterates in the same dir.
+func DraftAgentDir(vaultsBase, workspaceID, agentName string) string {
+	return filepath.Join(vaultsBase, workspaceID, "agents", "draft_"+slugifyAgentName(agentName))
+}
+
 // LoadManifest loads an agent's manifest from agent.json.
 // Falls back to a minimal manifest synthesised from config.json for legacy python agents.
 func LoadManifest(vaultsBase, workspaceID, agentID string) (*AgentManifest, error) {

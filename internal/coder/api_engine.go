@@ -119,7 +119,11 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 				continue
 			}
 			// Final answer.
-			return &Result{Text: resp.Content, Duration: time.Since(start), Usage: total}, nil
+			res := &Result{Text: resp.Content, Duration: time.Since(start), Usage: total}
+			res.ScriptVerified = tools.scriptVerified()
+			res.ScriptOutput = tools.verifiedOutput()
+			res.ScriptRan = tools.authoredScriptRan()
+			return res, nil
 		}
 
 		// Append the assistant turn (text + tool calls), then execute each tool
@@ -142,7 +146,15 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 			})
 		}
 	}
-	return c.graceTurnOnBudgetExhausted(ctx, prov, req, total, start, tools.verifyBuild)
+	res, err := c.graceTurnOnBudgetExhausted(ctx, prov, req, total, start, tools.verifyBuild)
+	if res != nil {
+		// A build whose script the engine already ran must surface that ground truth even
+		// when it exhausted its turn budget — the review path uses it as the sample.
+		res.ScriptVerified = tools.scriptVerified()
+		res.ScriptOutput = tools.verifiedOutput()
+		res.ScriptRan = tools.authoredScriptRan()
+	}
+	return res, err
 }
 
 // graceTurnBudgetNudge is appended as the final message when a BUILD's tool-calling loop

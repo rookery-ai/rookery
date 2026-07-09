@@ -193,6 +193,17 @@ func doJSON(ctx context.Context, client *http.Client, method, url string, header
 		lastCode, lastBody = code, respBody
 		switch {
 		case code >= 200 && code < 300:
+			// A chat-completion 2xx MUST carry a JSON body. Some OpenAI-compatible
+			// providers (seen on OpenRouter) occasionally return 200 OK with an EMPTY
+			// body — an upstream/transport hiccup, not a real completion. Treat that as
+			// transient and retry within this loop, instead of handing an empty body to
+			// the parser (which fails with an opaque "unexpected end of JSON input"). If
+			// it persists across the attempt budget, surface an explicit "empty response"
+			// error below rather than a parse error.
+			if len(strings.TrimSpace(string(respBody))) == 0 {
+				lastErr = fmt.Errorf("llm: empty response body (status %d)", code)
+				continue
+			}
 			return respBody, code, nil
 		case code == 429:
 			// Transient throttle (RPM/TPM window). Retry with backoff; only

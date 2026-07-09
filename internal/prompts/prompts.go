@@ -1281,6 +1281,14 @@ Do not proceed to "create" until this analysis is written in your response.
 <step name="create">
 CREATE THE AGENT FILES in the current directory.
 
+ORDER MATTERS: write AGENT.md FIRST, in its own write_file call, BEFORE you write or run any
+helper script. AGENT.md is the deliverable — a build that ends without AGENT.md on disk is a
+failed build even if the helper script is perfect. Do not get stuck trying to make a helper
+script produce real output before AGENT.md exists: at build time live service calls are
+BLOCKED (this is intentional), so a helper that fetches from an external service will return
+empty/no-data here and that is EXPECTED, not a bug. Write AGENT.md, then write the helper, then
+move on — do not loop on the helper.
+
 ══════════ AGENT.MD — ALWAYS REQUIRED ════════
 
 Line 1 MUST be exactly: # Suggested schedule: <5-part cron expression or "none">

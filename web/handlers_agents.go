@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -102,22 +103,19 @@ func (s *Server) handleResumeDraft(c echo.Context) error {
 		Role    string `json:"role"`
 		Content string `json:"content"`
 	}
-	sess := s.designFlow.GetSession(u.ID)
-	out := map[string]interface{}{
-		"response": resp,
-		"state":    "",
-		"history":  []histEntry{},
-		"agent_id": "",
+	snap := s.designFlow.Snapshot(u.ID)
+	hist := make([]histEntry, 0, len(snap.History))
+	for _, m := range snap.History {
+		hist = append(hist, histEntry{Role: m.Role, Content: m.Content})
 	}
-	if sess != nil {
-		hist := make([]histEntry, 0, len(sess.History))
-		for _, m := range sess.History {
-			hist = append(hist, histEntry{Role: m.Role, Content: m.Content})
-		}
-		out["state"] = sess.State.String()
-		out["history"] = hist
-		out["agent_id"] = sess.AgentID
-		out["agent_name"] = sess.AgentName
+	out := map[string]interface{}{
+		"response":          resp,
+		"state":             snap.State,
+		"history":           hist,
+		"agent_id":          snap.AgentID,
+		"agent_name":        snap.AgentName,
+		"generation_failed": snap.GenerationFailed,
+		"can_keep_as_is":    snap.CanKeepAsIs,
 	}
 	return c.JSON(http.StatusOK, out)
 }
@@ -158,6 +156,19 @@ func (s *Server) handleDesignChat(c echo.Context) error {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent designer not configured"})
 	}
 
+	// Reject concurrent design turns while a build is running. Generation is
+	// detached from the request context, so it keeps running after the user
+	// navigates away — a returning tab must not launch a second coder run on the
+	// same session. The live result surfaces via the SSE progress stream and the
+	// /design/state endpoint, not this POST.
+	if s.designFlow.IsGenerating(u.ID) {
+		return c.JSON(http.StatusOK, map[string]interface{}{
+			"response": "⏳ Still building your agent — I'll show the result here as soon as it's done.",
+			"done":     false,
+			"building": true,
+		})
+	}
+
 	ctx := c.Request().Context()
 
 	// If no active session and a name is provided, start a new design session.
@@ -167,11 +178,16 @@ func (s *Server) handleDesignChat(c echo.Context) error {
 		}
 		response, err := s.designFlow.StartDesign(ctx, u.ID, req.Name, req.Message)
 		if err != nil {
+			slog.Error("agentdesigner: start design failed", "workspace_id", u.ID, "name", req.Name, "err", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
+		snap := s.designFlow.Snapshot(u.ID)
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"response": response,
-			"done":     false,
+			"response":          response,
+			"done":              false,
+			"state":             snap.State,
+			"generation_failed": snap.GenerationFailed,
+			"can_keep_as_is":    snap.CanKeepAsIs,
 		})
 	}
 
@@ -187,6 +203,7 @@ func (s *Server) handleDesignChat(c echo.Context) error {
 
 	response, isDone, agentID, err := s.designFlow.Step(ctx, u.ID, req.Message)
 	if err != nil {
+		slog.Error("agentdesigner: design step failed", "workspace_id", u.ID, "err", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
@@ -203,9 +220,50 @@ func (s *Server) handleDesignChat(c echo.Context) error {
 		})
 	}
 
+	snap := s.designFlow.Snapshot(u.ID)
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"response": response,
-		"done":     false,
+		"response":          response,
+		"done":              false,
+		"state":             snap.State,
+		"generation_failed": snap.GenerationFailed,
+		"can_keep_as_is":    snap.CanKeepAsIs,
+	})
+}
+
+// handleDesignState returns the live in-memory design session (if any) so a
+// reloading page can restore the conversation and, when a build is still running,
+// reconnect to it via the SSE progress stream. When no live session exists the
+// DB draft is the durable fallback (shown as a resume banner) — e.g. after a
+// server restart, which does not preserve the in-memory session.
+// GET /dashboard/agents/design/state
+func (s *Server) handleDesignState(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	if s.designFlow == nil {
+		return c.JSON(http.StatusOK, map[string]interface{}{"active": false})
+	}
+	snap := s.designFlow.Snapshot(u.ID)
+	if !snap.Active {
+		return c.JSON(http.StatusOK, map[string]interface{}{"active": false})
+	}
+	type histEntry struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	hist := make([]histEntry, 0, len(snap.History))
+	for _, m := range snap.History {
+		hist = append(hist, histEntry{Role: m.Role, Content: m.Content})
+	}
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"active":            true,
+		"generating":        snap.Generating,
+		"state":             snap.State,
+		"history":           hist,
+		"name":              snap.AgentName,
+		"agent_id":          snap.AgentID,
+		"is_edit":           snap.IsEdit,
+		"last_progress":     snap.LastProgress,
+		"generation_failed": snap.GenerationFailed,
+		"can_keep_as_is":    snap.CanKeepAsIs,
 	})
 }
 

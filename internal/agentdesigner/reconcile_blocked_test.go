@@ -47,12 +47,40 @@ func TestReconcileBlockedOutcome(t *testing.T) {
 		}
 	})
 
-	t.Run("full coder + not-presentable + no blocker → generic safety note unchanged", func(t *testing.T) {
-		// A genuine guardrail/ethics hard-fail (hasAuthoredScript=false) keeps the generic note.
+	t.Run("full coder + not-presentable + no blocker → uses the per-case steering note (not the old generic safety note)", func(t *testing.T) {
+		// A genuine guardrail/ethics/no-AGENT.md hard-fail now carries an honest, steering
+		// recordFailNote from decideBuildOutcome (e.g. "avoid the blocked construct", "write
+		// AGENT.md first"). reconcileBlockedOutcome must pass it through verbatim so the next
+		// attempt converges — the old generic "rejected by an automated safety/quality check"
+		// note was misleading (it pushed the coder to "take a different approach" and rewrite
+		// clean code, reopening the loop) and is deliberately gone.
+		d := buildDecision{presentable: false, message: "One of the files didn't pass a check",
+			recordFailNote: "a generated tool failed an internal code check. Next attempt: avoid the blocked construct."}
+		got := reconcileBlockedOutcome(d, "", prompts.BackendFullCoder)
+		if got.advance {
+			t.Fatalf("genuine hard-fail must not advance; got advance=true")
+		}
+		if got.recordFailNote != d.recordFailNote {
+			t.Errorf("must use the per-case steering note verbatim; got %q want %q", got.recordFailNote, d.recordFailNote)
+		}
+		if strings.Contains(strings.ToLower(got.recordFailNote), "safety/quality") {
+			t.Errorf("the misleading generic safety/quality note must NOT survive; got %q", got.recordFailNote)
+		}
+	})
+
+	t.Run("full coder + not-presentable + no blocker + no per-case note → plain non-empty fallback", func(t *testing.T) {
+		// If decideBuildOutcome didn't set a recordFailNote, reconcileBlockedOutcome falls back
+		// to a plain, non-jargony note (never the old "safety/quality" wording).
 		d := buildDecision{presentable: false, message: "One of the files didn't pass a check"}
 		got := reconcileBlockedOutcome(d, "", prompts.BackendFullCoder)
-		if got.advance || !strings.Contains(strings.ToLower(got.recordFailNote), "safety/quality") {
-			t.Errorf("genuine hard-fail must keep the generic safety note; got advance=%v note=%q", got.advance, got.recordFailNote)
+		if got.advance {
+			t.Fatalf("non-presentable must not advance; got advance=true")
+		}
+		if got.recordFailNote == "" {
+			t.Fatal("a failure note must still be recorded so a forgiving retry has context")
+		}
+		if strings.Contains(strings.ToLower(got.recordFailNote), "safety/quality") {
+			t.Errorf("fallback must not use the old misleading safety/quality wording; got %q", got.recordFailNote)
 		}
 	})
 

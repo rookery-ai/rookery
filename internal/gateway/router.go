@@ -663,9 +663,11 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 	// If the user has an active design session, route all text there.
 	if r.designFlow != nil && r.designFlow.GetSession(msg.WorkspaceID) != nil {
 		sess := r.designFlow.GetSession(msg.WorkspaceID)
-		// When the user approves generation, register the progress callback so the
-		// Telegram placeholder gets edited with milestone messages during the run.
-		if sess != nil && sess.State == agentdesigner.StateDesigning && isApprovalText(msg.Text) && sendProgress != nil {
+		// Register the progress callback for ANY message while in Designing, so the
+		// Telegram placeholder streams milestones for every build trigger — not only
+		// "approve" but also "keep going", "try again", and "keep it as-is" after a
+		// block. Harmless when the message doesn't launch a build (never called).
+		if sess != nil && sess.State == agentdesigner.StateDesigning && sendProgress != nil {
 			r.designFlow.SetProgressHandler(msg.WorkspaceID, sendProgress)
 		}
 		response, _, _, err := r.designFlow.Step(ctx, msg.WorkspaceID, msg.Text)

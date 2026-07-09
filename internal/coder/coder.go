@@ -39,6 +39,19 @@ type Result struct {
 	Text     string
 	Duration time.Duration
 	Usage    Usage // populated by the API engine; zero for CLI coders
+
+	// ScriptVerified / ScriptOutput carry the API build engine's ground truth: whether an
+	// authored helper script actually RAN with real output this build, and that captured
+	// stdout (secret-redacted). Set only by the API engine during a build (SA_BUILD_PHASE=
+	// generation); zero for CLI coders and for runs/chat. The agent designer uses these so a
+	// build the engine confirmed runs isn't falsely flagged "couldn't confirm the helper".
+	ScriptVerified bool
+	ScriptOutput   string
+
+	// ScriptRan reports whether an authored helper script was executed at least once during a
+	// build (regardless of output). Observability only: it discriminates "ran but produced
+	// nothing" from "never ran" behind a "couldn't confirm" outcome. Zero for CLI/runs/chat.
+	ScriptRan bool
 }
 
 // Usage is a best-effort token accounting for API coders (zero for CLI coders).

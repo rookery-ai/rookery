@@ -51,6 +51,39 @@ func TestParseCoderOutputMultipleChatBlocks(t *testing.T) {
 	}
 }
 
+func TestParseCoderOutputStrayCloseTagStripped(t *testing.T) {
+	// The [CHAT] protocol has no close tag, but weak models emit "[/CHAT]" anyway.
+	// It must NEVER leak into the delivered message — in any of the common forms.
+	t.Run("inline trailing close tag", func(t *testing.T) {
+		out := parseCoderOutput("[CHAT] Here is your quote. [/CHAT]\n")
+		if len(out.chatLines) != 1 || out.chatLines[0] != "Here is your quote." {
+			t.Fatalf("inline [/CHAT] must be stripped; got %q", out.chatLines)
+		}
+	})
+	t.Run("standalone close tag line", func(t *testing.T) {
+		out := parseCoderOutput("[CHAT] Here is your quote.\n[/CHAT]\n")
+		if len(out.chatLines) != 1 || out.chatLines[0] != "Here is your quote." {
+			t.Fatalf("standalone [/CHAT] line must be dropped; got %q", out.chatLines)
+		}
+	})
+	t.Run("multi-line block then close tag", func(t *testing.T) {
+		out := parseCoderOutput(strings.Join([]string{
+			"[CHAT] Line one of the message.",
+			"Line two of the message.",
+			"[/CHAT]",
+		}, "\n"))
+		if len(out.chatLines) != 1 {
+			t.Fatalf("expected one chat block, got %q", out.chatLines)
+		}
+		if strings.Contains(out.chatLines[0], "[/CHAT]") {
+			t.Fatalf("[/CHAT] leaked into message: %q", out.chatLines[0])
+		}
+		if !strings.Contains(out.chatLines[0], "Line two") {
+			t.Fatalf("continuation line lost: %q", out.chatLines[0])
+		}
+	})
+}
+
 func TestParseCoderOutputStateEndsChatBlock(t *testing.T) {
 	// A [STATE] block marker terminates an open [CHAT] block.
 	out := parseCoderOutput(strings.Join([]string{

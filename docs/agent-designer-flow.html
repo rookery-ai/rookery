@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Designer — State &amp; Flow</title>
+<style>
+  :root {
+    --bg: #eef1f3;
+    --surface: #ffffff;
+    --surface-2: #f6f8f9;
+    --ink: #141a20;
+    --muted: #5c6773;
+    --line: #d5dce2;
+    --line-strong: #b9c3cc;
+    --accent: #0b93ac;      /* cyan-teal: the normal forward path */
+    --accent-soft: #0b93ac26;
+    --success: #2c8a63;     /* saved */
+    --warning: #bd7a15;     /* blocked, recoverable */
+    --danger: #cc4b5c;      /* discarded / stopped */
+    --shadow: 0 1px 2px rgba(20,26,32,.06), 0 8px 24px rgba(20,26,32,.05);
+    --radius: 14px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Roboto Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1218;
+      --surface: #141b23;
+      --surface-2: #101720;
+      --ink: #e7edf2;
+      --muted: #8b98a6;
+      --line: #263039;
+      --line-strong: #34424e;
+      --accent: #24c1dc;
+      --accent-soft: #24c1dc22;
+      --success: #45b98a;
+      --warning: #e0a53d;
+      --danger: #e56d7d;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #eef1f3; --surface: #ffffff; --surface-2: #f6f8f9; --ink: #141a20; --muted: #5c6773;
+    --line: #d5dce2; --line-strong: #b9c3cc; --accent: #0b93ac; --accent-soft: #0b93ac26;
+    --success: #2c8a63; --warning: #bd7a15; --danger: #cc4b5c;
+    --shadow: 0 1px 2px rgba(20,26,32,.06), 0 8px 24px rgba(20,26,32,.05);
+  }
+  :root[data-theme="dark"] {
+    --bg: #0d1218; --surface: #141b23; --surface-2: #101720; --ink: #e7edf2; --muted: #8b98a6;
+    --line: #263039; --line-strong: #34424e; --accent: #24c1dc; --accent-soft: #24c1dc22;
+    --success: #45b98a; --warning: #e0a53d; --danger: #e56d7d;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 30px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  .page {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.55;
+    min-height: 100vh;
+    padding: clamp(20px, 4vw, 56px) clamp(16px, 4vw, 40px) 72px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+
+  header.top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 10px;
+  }
+  h1 { font-size: clamp(26px, 4.4vw, 40px); line-height: 1.08; margin: 0 0 12px; letter-spacing: -.02em; text-wrap: balance; font-weight: 680; }
+  .lede { font-size: clamp(15px, 1.6vw, 17px); color: var(--muted); max-width: 60ch; margin: 0; }
+
+  .theme-toggle {
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+    background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+    padding: 7px 13px; cursor: pointer; white-space: nowrap; box-shadow: var(--shadow);
+  }
+  .theme-toggle:hover { border-color: var(--line-strong); color: var(--ink); }
+  .theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  h2 { font-size: clamp(17px, 2vw, 20px); letter-spacing: -.01em; margin: 44px 0 4px; font-weight: 640; }
+  .sec-note { color: var(--muted); font-size: 14px; margin: 0 0 18px; max-width: 66ch; }
+
+  /* ---- Stage ribbon ---- */
+  .ribbon { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+  .stage {
+    flex: 1 1 150px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 13px 14px 12px; box-shadow: var(--shadow); position: relative; min-width: 140px;
+  }
+  .stage .n { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: .1em; }
+  .stage .name { font-weight: 640; font-size: 15px; margin-top: 2px; }
+  .stage .st { font-family: var(--mono); font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+  .stage.loops { border-style: dashed; }
+  .stage .loopflag { position: absolute; top: 11px; right: 12px; font-family: var(--mono); font-size: 10px; color: var(--warning); letter-spacing: .05em; }
+
+  /* ---- Diagram ---- */
+  .diagram-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 8px; overflow-x: auto; }
+  .diagram-inner { min-width: 760px; }
+  svg.flow { width: 100%; height: auto; display: block; }
+  svg.flow text { font-family: var(--mono); }
+  .n-title { font-family: var(--sans); font-weight: 680; font-size: 15px; fill: var(--ink); }
+  .n-sub { font-size: 11px; fill: var(--muted); }
+  .node rect, .node circle { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.5; }
+  .node.start circle { fill: var(--accent-soft); stroke: var(--accent); }
+  .node.saved rect { stroke: var(--success); stroke-width: 2; }
+  .node.saved .n-title { fill: var(--success); }
+  .node.discard rect { stroke: var(--danger); stroke-width: 2; stroke-dasharray: 5 4; }
+  .node.discard .n-title { fill: var(--danger); }
+  .node.draft rect { fill: var(--surface-2); stroke: var(--muted); stroke-dasharray: 5 4; }
+  .node.build rect { stroke: var(--accent); stroke-width: 2; }
+  .node.build .n-title { fill: var(--accent); }
+
+  .edge { fill: none; stroke-width: 2; }
+  .e-accent { stroke: var(--accent); }
+  .e-warn   { stroke: var(--warning); }
+  .e-success{ stroke: var(--success); stroke-dasharray: 6 5; }
+  .e-danger { stroke: var(--danger); stroke-dasharray: 6 5; }
+  .e-muted  { stroke: var(--muted); stroke-dasharray: 5 5; }
+
+  .lbl { font-size: 11px; fill: var(--ink); }
+  .lbl.sub { fill: var(--muted); font-size: 10px; }
+  .lbl.warn { fill: var(--warning); }
+  .lbl.acc { fill: var(--accent); }
+  .lbl.suc { fill: var(--success); }
+  .lbl.dan { fill: var(--danger); }
+  .lbl.mut { fill: var(--muted); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 14px; padding: 0 4px; }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+  .legend i { width: 22px; height: 0; border-top: 2.5px solid; border-radius: 2px; display: inline-block; }
+  .li-accent { color: var(--accent); } .li-warn { color: var(--warning); }
+  .li-success { color: var(--success); } .li-danger { color: var(--danger); } .li-muted { color: var(--muted); }
+  .legend i.dash { border-top-style: dashed; }
+
+  /* ---- Behavior cards ---- */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 18px 16px; border-top: 3px solid var(--tint, var(--accent)); }
+  .card.block { --tint: var(--warning); }
+  .card.stop  { --tint: var(--danger); }
+  .card.cont  { --tint: var(--success); }
+  .card h3 { margin: 0 0 3px; font-size: 16px; display: flex; align-items: center; gap: 9px; }
+  .card h3 .tag { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--tint); border: 1px solid var(--tint); border-radius: 5px; padding: 2px 6px; }
+  .card p.k { color: var(--muted); font-size: 13.5px; margin: 4px 0 12px; }
+  .card ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 9px; }
+  .card li { position: relative; padding-left: 18px; font-size: 13.5px; }
+  .card li::before { content: ""; position: absolute; left: 0; top: 8px; width: 7px; height: 7px; border-radius: 2px; background: var(--tint); }
+  code, .chip { font-family: var(--mono); }
+  .chip { background: var(--surface-2); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-size: 12px; color: var(--ink); white-space: nowrap; }
+  .kept { color: var(--success); font-weight: 600; }
+  .gone { color: var(--danger); font-weight: 600; }
+
+  /* ---- Durability layers ---- */
+  .layers { display: grid; gap: 12px; }
+  .layer { display: grid; grid-template-columns: 46px 1fr; gap: 16px; align-items: start; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 15px 16px; box-shadow: var(--shadow); }
+  .layer .num { font-family: var(--mono); font-size: 22px; font-weight: 600; color: var(--accent); line-height: 1; padding-top: 2px; text-align: center; }
+  .layer h4 { margin: 0 0 3px; font-size: 15px; }
+  .layer h4 code { font-size: 13px; color: var(--muted); font-weight: 500; }
+  .layer p { margin: 0; font-size: 13.5px; color: var(--muted); }
+  .surv { display: inline-flex; gap: 6px 14px; flex-wrap: wrap; margin-top: 8px; font-family: var(--mono); font-size: 11.5px; }
+  .surv b { color: var(--ink); font-weight: 600; }
+
+  footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; font-family: var(--mono); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .stage, .card, .layer { transition: border-color .2s ease; }
+  }
+</style>
+
+<div class="page">
+  <div class="wrap">
+    <header class="top">
+      <div>
+        <p class="eyebrow">Simple Agents · agentdesigner.Flow</p>
+        <h1>How the Agent Designer builds an agent</h1>
+        <p class="lede">A map of every state the designer moves through — and exactly what happens to your work when a build <strong>stops</strong>, <strong>blocks</strong>, or you tell it to <strong>continue</strong>.</p>
+      </div>
+      <button class="theme-toggle" id="themeBtn" aria-label="Toggle light or dark theme">◑ theme</button>
+    </header>
+
+    <h2>The five stages — where you are</h2>
+    <p class="sec-note">Every agent moves left to right. Two of the stages loop back on themselves, which is where it can feel like you've lost your place — you haven't; you've returned to <span class="chip">Design</span> with your built files intact.</p>
+    <div class="ribbon">
+      <div class="stage">
+        <div class="n">01</div><div class="name">Describe</div>
+        <div class="st">name + goal</div>
+      </div>
+      <div class="stage loops">
+        <span class="loopflag">↺ hub</span>
+        <div class="n">02</div><div class="name">Design</div>
+        <div class="st">StateDesigning</div>
+      </div>
+      <div class="stage loops">
+        <span class="loopflag">↺ retry</span>
+        <div class="n">03</div><div class="name">Build</div>
+        <div class="st">runGeneration</div>
+      </div>
+      <div class="stage">
+        <div class="n">04</div><div class="name">Review</div>
+        <div class="st">StateVerifying</div>
+      </div>
+      <div class="stage">
+        <div class="n">05</div><div class="name">Saved</div>
+        <div class="st">in your KB</div>
+      </div>
+    </div>
+
+    <h2>The state machine</h2>
+    <p class="sec-note">Solid <span style="color:var(--accent)">cyan</span> is the normal path forward. The loops back to <span class="chip">Design</span> are what recover a blocked or changed build without losing work. Dashed edges are exits and returns.</p>
+    <div class="diagram-card">
+      <div class="diagram-inner">
+        <svg class="flow" viewBox="0 0 840 500" role="img" aria-label="State diagram of the agent designer">
+          <defs>
+            <marker id="ar-accent" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/></marker>
+            <marker id="ar-warn" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--warning)"/></marker>
+            <marker id="ar-success" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--success)"/></marker>
+            <marker id="ar-danger" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--danger)"/></marker>
+            <marker id="ar-muted" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker>
+          </defs>
+
+          <!-- EDGES (drawn first, under nodes) -->
+          <!-- start -> designing -->
+          <path class="edge e-accent" d="M88,88 L138,88" marker-end="url(#ar-accent)"/>
+          <!-- designing -> building : approve / keep going -->
+          <path class="edge e-accent" d="M226,116 L226,230" marker-end="url(#ar-accent)"/>
+          <text class="lbl acc" x="234" y="168">approve</text>
+          <text class="lbl sub" x="234" y="182">keep going · try again</text>
+          <!-- building -> designing : blocked / error -->
+          <path class="edge e-warn" d="M204,230 L204,116" marker-end="url(#ar-warn)"/>
+          <text class="lbl warn" x="196" y="166" text-anchor="end">blocked / error</text>
+          <text class="lbl sub" x="196" y="180" text-anchor="end">files kept ✓</text>
+          <!-- building -> verifying : built -->
+          <path class="edge e-accent" d="M292,260 L418,260" marker-end="url(#ar-accent)"/>
+          <text class="lbl acc" x="355" y="251" text-anchor="middle">built ✓</text>
+          <!-- verifying -> saved : approve / keep as-is -->
+          <path class="edge e-accent" d="M508,232 C548,168 636,132 694,118" marker-end="url(#ar-accent)"/>
+          <text class="lbl acc" x="612" y="176">approve</text>
+          <text class="lbl sub" x="612" y="190">keep it as-is</text>
+          <!-- verifying -> designing : change (build kept) -->
+          <path class="edge e-muted" d="M418,246 C372,208 330,158 296,118" marker-end="url(#ar-muted)"/>
+          <text class="lbl mut" x="360" y="150" text-anchor="middle">request a change</text>
+          <text class="lbl sub" x="360" y="164" text-anchor="middle">build kept</text>
+          <!-- designing -> saved : force-save (top arc) -->
+          <path class="edge e-success" d="M258,60 C400,6 560,6 690,58" marker-end="url(#ar-success)"/>
+          <text class="lbl suc" x="474" y="20" text-anchor="middle">keep it as-is → force-save</text>
+          <!-- verifying -> discarded : cancel -->
+          <path class="edge e-danger" d="M495,290 L495,408" marker-end="url(#ar-danger)"/>
+          <text class="lbl dan" x="503" y="345">Cancel →</text>
+          <text class="lbl sub" x="503" y="359">Discard</text>
+          <!-- designing <-> draft : leave / resume (double headed) -->
+          <path class="edge e-muted" d="M118,238 L150,120" marker-start="url(#ar-muted)" marker-end="url(#ar-muted)"/>
+          <text class="lbl mut" x="150" y="196" text-anchor="middle">leave ⇄ resume</text>
+
+          <!-- NODES -->
+          <g class="node start">
+            <circle cx="64" cy="88" r="22"/>
+            <text class="n-sub" x="64" y="92" text-anchor="middle" style="fill:var(--accent);font-weight:600">start</text>
+          </g>
+
+          <g class="node">
+            <rect x="140" y="60" width="152" height="56" rx="12"/>
+            <text class="n-title" x="216" y="85" text-anchor="middle">Designing</text>
+            <text class="n-sub" x="216" y="101" text-anchor="middle">the Q&amp;A hub</text>
+          </g>
+
+          <g class="node build">
+            <rect x="140" y="232" width="152" height="56" rx="12"/>
+            <text class="n-title" x="216" y="257" text-anchor="middle">Building</text>
+            <text class="n-sub" x="216" y="273" text-anchor="middle">runGeneration()</text>
+          </g>
+
+          <g class="node">
+            <rect x="420" y="232" width="152" height="56" rx="12"/>
+            <text class="n-title" x="496" y="257" text-anchor="middle">Verifying</text>
+            <text class="n-sub" x="496" y="273" text-anchor="middle">review &amp; approve</text>
+          </g>
+
+          <g class="node saved">
+            <rect x="648" y="60" width="152" height="56" rx="12"/>
+            <text class="n-title" x="724" y="85" text-anchor="middle">Saved ✓</text>
+            <text class="n-sub" x="724" y="101" text-anchor="middle">agent in your KB</text>
+          </g>
+
+          <g class="node discard">
+            <rect x="419" y="408" width="152" height="54" rx="12"/>
+            <text class="n-title" x="495" y="432" text-anchor="middle">Discarded ✕</text>
+            <text class="n-sub" x="495" y="448" text-anchor="middle">files removed</text>
+          </g>
+
+          <g class="node draft">
+            <rect x="20" y="234" width="96" height="54" rx="12"/>
+            <text class="n-title" x="68" y="258" text-anchor="middle" style="font-size:13px">Draft</text>
+            <text class="n-sub" x="68" y="274" text-anchor="middle">saved</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+    <div class="legend">
+      <span class="li-accent"><i></i> normal progress</span>
+      <span class="li-warn"><i></i> blocked — recoverable</span>
+      <span class="li-success"><i class="dash"></i> saved</span>
+      <span class="li-danger"><i class="dash"></i> discarded</span>
+      <span class="li-muted"><i class="dash"></i> leave / resume / change</span>
+    </div>
+
+    <h2>What happens on stop · block · continue</h2>
+    <p class="sec-note">The one rule that governs all of it: <strong>your built files are only ever removed by an explicit Discard, an agent Delete, or draft expiry (7 days).</strong> Nothing a build does to itself deletes them.</p>
+    <div class="cards">
+
+      <div class="card block">
+        <h3><span class="tag">Block</span> The build won't finish</h3>
+        <p class="k">The coder ran but the result wasn't presentable — a failed guardrail, a timeout, a usage limit, or the weak-model gate ("couldn't confirm the script runs").</p>
+        <ul>
+          <li>Returns to <span class="chip">Designing</span> — not a dead end.</li>
+          <li>Files on disk are <span class="kept">kept</span>; the draft records the failure so the next attempt has context.</li>
+          <li>Your move: <span class="chip">keep going</span> (rebuild), <span class="chip">keep it as-is</span> (save anyway), or describe a change.</li>
+          <li>The message tells you which options apply.</li>
+        </ul>
+      </div>
+
+      <div class="card cont">
+        <h3><span class="tag">Continue</span> Move it forward</h3>
+        <p class="k">From Review, or after a block, you push the agent toward Saved.</p>
+        <ul>
+          <li><span class="chip">approve</span> / <span class="chip">keep it as-is</span> → saves: the <span class="chip">draft_&lt;name&gt;</span> dir is promoted to the real agent, draft cleared.</li>
+          <li><span class="chip">keep going</span> / <span class="chip">try again</span> → another build pass, iterating <em>in the same dir</em>.</li>
+          <li>A <em>change request</em> → back to Designing, <span class="kept">keeping</span> the built work; the next build refines it.</li>
+        </ul>
+      </div>
+
+      <div class="card stop">
+        <h3><span class="tag">Stop</span> Step away or cancel</h3>
+        <p class="k">Three very different kinds of "stop" — only one deletes anything.</p>
+        <ul>
+          <li><strong>Navigate away mid-build:</strong> the build <span class="kept">keeps running</span> in the background; on return it reconnects to live progress.</li>
+          <li><strong>Cancel → Save as draft:</strong> session ends, chat + files <span class="kept">kept</span>, resume anytime.</li>
+          <li><strong>Cancel → Discard:</strong> draft + files <span class="gone">removed</span> — the only self-inflicted delete.</li>
+          <li><strong>Server restart:</strong> live session lost, but chat + files persist; resume <span class="kept">recovers</span> the build straight to Review.</li>
+        </ul>
+      </div>
+
+    </div>
+
+    <h2>Where your work actually lives</h2>
+    <p class="sec-note">"Stop / block / continue" only makes sense once you see the three places your progress is held — each survives a different kind of interruption.</p>
+    <div class="layers">
+      <div class="layer">
+        <div class="num">1</div>
+        <div>
+          <h4>Live session <code>Flow.sessions (in-memory)</code></h4>
+          <p>The running build and its streaming progress. Held in RAM on the server.</p>
+          <div class="surv"><span>survives: <b>page navigation</b></span><span>lost on: <b>server restart</b></span></div>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="num">2</div>
+        <div>
+          <h4>Built files <code>vault/agents/draft_&lt;name&gt;/</code></h4>
+          <p>AGENT.md, tools, state — the actual generated agent, under a readable name in your knowledge base.</p>
+          <div class="surv"><span>survives: <b>navigation · restart · block</b></span><span>removed only on: <b>Save · Discard · Delete · 7-day expiry</b></span></div>
+        </div>
+      </div>
+      <div class="layer">
+        <div class="num">3</div>
+        <div>
+          <h4>Draft record <code>agent_drafts (database)</code></h4>
+          <p>The conversation and pending build. The durable anchor that <em>resume</em> reads from.</p>
+          <div class="surv"><span>survives: <b>everything short of Discard / expiry</b></span><span>this is what makes a draft resumable</span></div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      agentdesigner.Flow · states: Idle → Describing/AwaitingResume (Telegram) → Designing ⇄ Building → Verifying → Done ·
+      web enters at Designing · build context is detached so navigation never kills it.
+    </footer>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var btn = document.getElementById('themeBtn');
+    var root = document.documentElement;
+    btn.addEventListener('click', function () {
+      var cur = root.getAttribute('data-theme');
+      if (!cur) cur = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+    });
+  })();
+</script>
+
+</html>

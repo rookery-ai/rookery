@@ -663,7 +663,24 @@ func parseCoderOutput(text string) parsedOutput {
 		if strings.HasPrefix(trimmed, "[CHAT] ") {
 			flushChat()
 			inChat = true
-			chatAcc.WriteString(strings.TrimPrefix(trimmed, "[CHAT] "))
+			// The [CHAT] protocol has NO close tag, but weak models often emit a stray
+			// "[/CHAT]" anyway (e.g. "[CHAT] msg [/CHAT]" on one line). Strip a trailing
+			// close tag here so it never leaks into the delivered message.
+			content := strings.TrimPrefix(trimmed, "[CHAT] ")
+			content = strings.TrimSuffix(content, "[/CHAT]")
+			chatAcc.WriteString(strings.TrimSpace(content))
+			continue
+		}
+
+		// ── [/CHAT] — stray close tag (weak models) ──────────────────────────
+		// Treat a standalone "[/CHAT]" line, or a continuation line ending in
+		// "[/CHAT]", as the end of the chat block and DROP the tag — never deliver it.
+		if inChat && (trimmed == "[/CHAT]" || strings.HasSuffix(trimmed, "[/CHAT]")) {
+			if trimmed != "[/CHAT]" {
+				chatAcc.WriteByte('\n')
+				chatAcc.WriteString(strings.TrimSpace(strings.TrimSuffix(trimmed, "[/CHAT]")))
+			}
+			flushChat()
 			continue
 		}
 

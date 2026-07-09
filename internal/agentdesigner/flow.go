@@ -96,6 +96,13 @@ type DesignSession struct {
 	// (the "approve-loop"). Cleared at the start of every runGeneration attempt.
 	GenerationFailed bool
 
+	// HasSaveableBuild is true when the last generation left a valid AGENT.md + guardrail-
+	// passing tools on disk — i.e. "keep it as-is" can actually save something. Distinct
+	// from GenerationFailed: a weak-backend verify-gate block leaves AGENT.md on disk
+	// (saveable=true, keep-as-is is the escape hatch) while a no-AGENT.md block leaves
+	// nothing (saveable=false, keep-as-is must NOT be offered). Reset each runGeneration.
+	HasSaveableBuild bool
+
 	// pendingName holds the agent name the user originally typed in the
 	// StateAwaitingResume flow, so the "new" branch can start a fresh create
 	// session with that name once the draft is dismissed.
@@ -106,6 +113,9 @@ type DesignSession struct {
 	cancelGenerate context.CancelFunc // cancels the in-flight coder.Generate() call
 	progressFunc   func(string)       // Telegram: edits the placeholder message mid-run
 	progressCh     chan string        // Web SSE: buffered milestone channel
+	lastProgress   string             // most recent milestone string, so a page that
+	// reconnects mid-build can show the CURRENT action immediately instead of the
+	// generic placeholder (the channel doesn't replay already-consumed milestones).
 }
 
 type dbDesignStore interface {
@@ -486,10 +496,83 @@ func (f *Flow) GetSession(workspaceID string) *DesignSession {
 	return f.sessions[workspaceID]
 }
 
+// IsGenerating reports whether a build is currently running for the user's
+// session. progressCh is non-nil only between runGeneration setting it up and
+// closeProgress niling it, so it is an accurate "generation in progress" signal.
+// The web layer uses it to reject concurrent design POSTs (a returning tab must
+// not launch a second coder run on the same session) and to tell a reloading
+// page to reconnect to the live build.
+func (f *Flow) IsGenerating(workspaceID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sess, ok := f.sessions[workspaceID]
+	return ok && sess.progressCh != nil
+}
+
+// DesignSnapshot is a race-free copy of a live session's user-facing state,
+// returned by Snapshot for the web state endpoint. History is a defensive copy
+// so the caller can read it without the mutex while the detached build goroutine
+// keeps appending under lock.
+type DesignSnapshot struct {
+	Active           bool
+	Generating       bool
+	State            string
+	AgentName        string
+	AgentID          string
+	IsEdit           bool
+	History          []db.ChatMessage
+	LastProgress     string // most recent build milestone (for reconnect display)
+	GenerationFailed bool   // last build blocked/soft-failed → offer keep-going/keep-as-is
+	CanKeepAsIs      bool   // a saveable build exists on disk → "keep it as-is" is a real option
+}
+
+// Snapshot returns a race-free view of the user's live in-memory session so a
+// reloading page can restore the conversation and decide whether to reconnect to
+// an in-flight build. Active is false when no session exists (the DB draft is the
+// durable fallback in that case).
+func (f *Flow) Snapshot(workspaceID string) DesignSnapshot {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sess, ok := f.sessions[workspaceID]
+	if !ok {
+		return DesignSnapshot{}
+	}
+	hist := make([]db.ChatMessage, len(sess.History))
+	copy(hist, sess.History)
+	return DesignSnapshot{
+		Active:           true,
+		Generating:       sess.progressCh != nil,
+		State:            sess.State.String(),
+		AgentName:        sess.AgentName,
+		AgentID:          sess.AgentID,
+		IsEdit:           sess.IsEdit,
+		History:          hist,
+		LastProgress:     sess.lastProgress,
+		GenerationFailed: sess.GenerationFailed,
+		CanKeepAsIs:      sess.HasSaveableBuild,
+	}
+}
+
 // ─── Draft save / resume ──────────────────────────────────────────────────────
 
 // draftTTL is how long a saved design draft remains resumable.
 const draftTTL = 7 * 24 * time.Hour
+
+// nonSlugChars matches any run of characters that are not lowercase alphanumerics.
+var nonSlugChars = regexp.MustCompile(`[^a-z0-9]+`)
+
+// slugifyAgentName turns an agent name into a filesystem-safe slug for its draft
+// working directory (draft_<slug>): lowercases, collapses runs of non-alphanumerics
+// to a single '-', trims stray '-'. Falls back to "agent" when nothing usable
+// remains, so the path is always valid.
+func slugifyAgentName(name string) string {
+	s := nonSlugChars.ReplaceAllString(strings.ToLower(strings.TrimSpace(name)), "-")
+	s = strings.Trim(s, "-")
+	if s == "" {
+		return "agent"
+	}
+	return s
+}
 
 // saveDraft serializes the current session and upserts it as the user's draft.
 // Called while the Flow mutex is held; a single SQLite upsert is fast enough that
@@ -540,9 +623,11 @@ func (f *Flow) HasDraft(workspaceID string) *db.AgentDraft {
 	return draft
 }
 
-// DismissDraft deletes the user's draft. For create-mode drafts in "verifying"
-// state it also removes the agent's pre-approved directory so orphaned files don't
-// accumulate on disk — that dir was created by runGeneration but never finalized.
+// DismissDraft deletes the user's draft. For a create-mode draft it also removes
+// the readable draft_<name> working directory (in ANY state — a blocked build now
+// leaves a designing-state dir too), since discarding the draft is one of the two
+// explicit ways WIP files are removed. Edit drafts point their AgentID at the LIVE
+// agent, so their dir is never touched here.
 func (f *Flow) DismissDraft(workspaceID string) error {
 	if f.db == nil {
 		return nil
@@ -552,8 +637,8 @@ func (f *Flow) DismissDraft(workspaceID string) error {
 		return nil
 	}
 	_ = f.db.DeleteAgentDraft(workspaceID)
-	if !draft.IsEdit && draft.State == "verifying" && draft.AgentID != "" {
-		_ = os.RemoveAll(AgentDir(f.designer.agentsDir, workspaceID, draft.AgentID))
+	if !draft.IsEdit && draft.AgentName != "" {
+		_ = os.RemoveAll(DraftAgentDir(f.designer.agentsDir, workspaceID, draft.AgentName))
 	}
 	return nil
 }
@@ -612,10 +697,25 @@ func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string) (string, err
 		sess.ExistingTools = tools
 	}
 
+	recovered := false
 	if draft.State == "verifying" {
 		sess.State = StateVerifying
 	} else {
 		sess.State = StateDesigning
+		// Recover an interrupted create build: if the DB draft captured no build
+		// (empty pending) but the on-disk draft dir holds a valid, guardrail-passing
+		// AGENT.md, the previous build wrote files then errored/was interrupted before
+		// the verifying save. Load that build from disk and present it for review so the
+		// user finishes it — instead of being dropped at the proposal step where approve
+		// would rebuild from scratch and discard the work.
+		if !draft.IsEdit && strings.TrimSpace(sess.PendingAgentMD) == "" {
+			if md, tools, ok := f.recoverBuiltAgentFromDisk(workspaceID, draft.AgentName); ok {
+				sess.PendingAgentMD = md
+				sess.PendingTools = tools
+				sess.State = StateVerifying
+				recovered = true
+			}
+		}
 	}
 
 	f.mu.Lock()
@@ -627,6 +727,12 @@ func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string) (string, err
 		if len(preview) > 600 {
 			preview = preview[:600] + "…"
 		}
+		if recovered {
+			return fmt.Sprintf(
+				"Resuming your draft for **%s**. I recovered the agent your last session built before it was interrupted — its files are intact:\n\n```\n%s\n```\n\nType `approve` to save it as-is, or tell me what to change and I'll refine it from here.",
+				sess.AgentName, preview,
+			), nil
+		}
 		return fmt.Sprintf(
 			"Resuming your draft for **%s**. The coder has already built this version:\n\n```\n%s\n```\n\nType `approve` to save it, or describe any changes you'd like.",
 			sess.AgentName, preview,
@@ -636,6 +742,42 @@ func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string) (string, err
 		"Resuming your draft for **%s**. Here's the conversation so far — continue, or type 'approve' when ready to generate.",
 		sess.AgentName,
 	), nil
+}
+
+// recoverBuiltAgentFromDisk reads a create draft's on-disk working dir and, if it
+// holds a valid built AGENT.md (+ optional tools) that passes the same guardrails
+// finalize enforces, returns them so ResumeDraft can present an interrupted build for
+// review instead of forcing a rebuild. Returns ok=false when there is nothing usable
+// on disk (a fresh, never-built draft) or the content fails a guardrail — in which
+// case the user stays in the design conversation and can rebuild.
+func (f *Flow) recoverBuiltAgentFromDisk(workspaceID, agentName string) (string, map[string]string, bool) {
+	dir := DraftAgentDir(f.designer.agentsDir, workspaceID, agentName)
+	mdBytes, err := os.ReadFile(filepath.Join(dir, "AGENT.md"))
+	if err != nil {
+		return "", nil, false
+	}
+	agentMD := strings.TrimSpace(string(mdBytes))
+	if agentMD == "" {
+		return "", nil, false
+	}
+	if err := CheckEthics(agentMD, ""); err != nil {
+		return "", nil, false
+	}
+	tools, err := readToolsFromDisk(dir)
+	if err != nil {
+		return "", nil, false
+	}
+	for name, code := range tools {
+		// Seeded helpers (composio_*.py) are Go-authored and deterministically written;
+		// they are never vetted (mirrors decideBuildOutcome).
+		if composioassets.IsSeededFilename(filepath.Base(name)) {
+			continue
+		}
+		if err := RunToolGuardrails(name, code); err != nil {
+			return "", nil, false
+		}
+	}
+	return agentMD, tools, true
 }
 
 // OfferDraftResume creates a minimal session in StateAwaitingResume and returns the
@@ -731,6 +873,29 @@ func (f *Flow) stepDesigning(ctx context.Context, workspaceID, input string) (st
 	if isApproval(input) {
 		return f.runGeneration(ctx, workspaceID)
 	}
+	if genFailed && isKeepAsIs(input) {
+		// The weak-backend gate held this build back as "unverified", but the user
+		// accepts it as-is. Recover the built agent from disk and finalize it — SaveAgent
+		// still enforces the ethics/AST guardrails, so only the run-confirmation heuristic
+		// is bypassed. This honors the "or tell me to keep it as-is" the block message
+		// offers (previously a dead end that dropped the user into the design chat).
+		f.mu.Lock()
+		var agentName string
+		if sess := f.sessions[workspaceID]; sess != nil {
+			agentName = sess.AgentName
+		}
+		f.mu.Unlock()
+		if md, tools, ok := f.recoverBuiltAgentFromDisk(workspaceID, agentName); ok {
+			f.mu.Lock()
+			if sess := f.sessions[workspaceID]; sess != nil {
+				sess.PendingAgentMD = md
+				sess.PendingTools = tools
+			}
+			f.mu.Unlock()
+			return f.finalizeAgent(ctx, workspaceID)
+		}
+		// Nothing usable on disk — fall through to a normal design turn.
+	}
 	if genFailed && isRetryApproval(input) {
 		// Capture the retry message in History before re-running, so any instruction it
 		// carries ("fix it by using the results field") reaches the generation coder — a
@@ -748,7 +913,10 @@ func (f *Flow) stepDesigning(ctx context.Context, workspaceID, input string) (st
 
 // stepVerifying: test output was shown; wait for approval or change request.
 func (f *Flow) stepVerifying(ctx context.Context, workspaceID, input string) (string, bool, string, error) {
-	if isVerifyApproval(input) {
+	// isKeepAsIs too: a resumed blocked build lands here (recovery → verifying), and
+	// "keep it as-is" must save it just like "approve" does — the same acceptance the
+	// weak-backend block message offers.
+	if isVerifyApproval(input) || isKeepAsIs(input) {
 		return f.finalizeAgent(ctx, workspaceID)
 	}
 
@@ -841,6 +1009,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// the failure recorded into History so this attempt isn't context-blind — see
 	// recordGenerationFailure). Snapshot History AFTER any prior failure was appended.
 	sess.GenerationFailed = false
+	sess.HasSaveableBuild = false // re-derived from decideBuildOutcome below
 	coderSvc := f.coderFor(workspaceID)
 	agentIDSnap := sess.AgentID
 	agentNameSnap := sess.AgentName
@@ -868,15 +1037,29 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	progressCh := sess.progressCh
 	progressFunc := sess.progressFunc
 
-	// Create a child context so Cancel() can kill the subprocess without
-	// cancelling the outer request context (which would close the SSE stream).
-	genCtx, cancelGenerate := context.WithCancel(ctx)
+	// Detach the generation context from the caller's request context so that
+	// navigating away from (or reloading) the web page does NOT kill the build.
+	// net/http (and Echo) cancel only the request's context on client
+	// disconnect, not the handler goroutine — so the build runs to completion and
+	// saveDraft persists it, and a returning page reconnects to the live session.
+	// Cancel() still stops the build via the stored cancelGenerate, and the
+	// coder re-applies its own timeout inside Generate(), so this stays bounded.
+	// (`ctx` is intentionally no longer used for cancellation — the detach is the fix.)
+	genCtx, cancelGenerate := context.WithCancel(context.Background())
 	sess.cancelGenerate = cancelGenerate
 	f.mu.Unlock()
 
 	// notify sends a milestone string to both the SSE channel (non-blocking)
-	// and the Telegram progress callback.
+	// and the Telegram progress callback. It also records the milestone as the
+	// session's lastProgress (under lock) so a page reconnecting mid-build can
+	// display the current action immediately — the channel drops already-consumed
+	// (and, once full, newer) milestones, so it can't be relied on for that.
 	notify := func(msg string) {
+		f.mu.Lock()
+		if s, ok := f.sessions[workspaceID]; ok {
+			s.lastProgress = msg
+		}
+		f.mu.Unlock()
 		select {
 		case progressCh <- msg:
 		default:
@@ -931,23 +1114,30 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		remove := func() { _ = os.RemoveAll(stagingDir) }
 		cleanupOnFail, cleanupOnSuccess = remove, remove
 	} else {
-		// Create the agent directory structure on disk before the coder runs so it
-		// has a clean workspace to write into.
-		agentDir := AgentDir(f.designer.agentsDir, workspaceID, agentIDSnap)
+		// Create the WIP directory structure before the coder runs. It lives at a
+		// readable draft_<name> path (not the opaque UUID) and is KEPT on every build
+		// outcome — success, block, timeout, cancel — so the user never loses work and
+		// can iterate to completion. Only an explicit discard (DismissDraft), agent
+		// delete, or finalize removes it; hence both cleanup hooks are no-ops here.
+		agentDir := DraftAgentDir(f.designer.agentsDir, workspaceID, agentNameSnap)
 		for _, sub := range []string{".", "tools", "logs", "notes"} {
 			if err := os.MkdirAll(filepath.Join(agentDir, sub), 0o750); err != nil {
 				closeProgress()
 				return "", false, "", fmt.Errorf("create agent dir: %w", err)
 			}
 		}
-		if err := os.WriteFile(filepath.Join(agentDir, "state.json"), []byte("{}"), 0o640); err != nil {
-			closeProgress()
-			return "", false, "", fmt.Errorf("write state.json: %w", err)
+		if _, err := os.Stat(filepath.Join(agentDir, "state.json")); os.IsNotExist(err) {
+			// Seed state.json only if absent, so a re-generation into a kept draft dir
+			// doesn't wipe accumulated state.
+			if err := os.WriteFile(filepath.Join(agentDir, "state.json"), []byte("{}"), 0o640); err != nil {
+				closeProgress()
+				return "", false, "", fmt.Errorf("write state.json: %w", err)
+			}
 		}
 		workDir = agentDir
 		prompt = prompts.BuildImplementationPrompt(agentNameSnap, dbMessagesToPrompt(historySnap), implParams)
-		cleanupOnFail = func() { _ = os.RemoveAll(agentDir) }
-		cleanupOnSuccess = func() {} // the dir IS the pending agent; keep it until finalize/iterate
+		cleanupOnFail = func() {}    // keep the draft dir on failure — user finishes it later
+		cleanupOnSuccess = func() {} // the dir IS the pending agent; kept until finalize
 	}
 
 	// Seed the Composio helper scripts deterministically — never let the coder author
@@ -999,12 +1189,42 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	}
 	generationCoder = generationCoder.WithExtraEnv(extraEnv)
 	result, err := generationCoder.Generate(genCtx, workspaceID, prompt)
-	if err != nil {
-		cleanupOnFail()
+
+	// Ground-truth the build from disk BEFORE branching on the error. decideBuildOutcome is
+	// pure (reads AGENT.md + tools from workDir, no mutation/logging), so computing it up
+	// front lets us SALVAGE a build whose coder finished writing a valid AGENT.md and then
+	// hit a transient late-call error — a network blip, an unclassified 5xx, or a
+	// response-parse failure that isn't one of the soft classes below. The old code treated
+	// EVERY coder error as a hard failure: it wiped the (complete) on-disk build with
+	// cleanupOnFail and 500ed the user back to the design phase, stranding builds that had
+	// actually finished — which is exactly the "I navigated away and it left me at the
+	// design phase with a draft" symptom. Now: if the on-disk build is saveable (AGENT.md
+	// present + guardrails pass), the build is the truth, not the error — log the blip and
+	// fall through to the normal outcome flow. Only a non-saveable error (nothing usable on
+	// disk) takes the soft/hard error paths below.
+	resultText := ""
+	scriptVerified := false
+	scriptOutput := ""
+	if result != nil {
+		resultText = result.Text
+		scriptVerified = result.ScriptVerified
+		scriptOutput = result.ScriptOutput
+	}
+	decision := decideBuildOutcome(workDir, resultText, backendType, scriptVerified, scriptOutput)
+
+	if err != nil && !decision.saveable {
 		closeProgress()
 		if errors.Is(err, context.Canceled) {
+			// Explicit Cancel() (or an abandoned build): the user walked away for good,
+			// so remove the workspace. Navigation no longer reaches here — genCtx is
+			// detached — so context.Canceled now means a deliberate cancel.
+			cleanupOnFail()
 			return "Agent creation was cancelled.", false, "", nil
 		}
+		// Recoverable interruptions (usage/rate limit, out of turns, timeout): KEEP the
+		// files on disk so the user can retry and finish the agent instead of rebuilding
+		// from scratch. The draft (State=designing) protects them from the nightly sweep,
+		// and the next generation iterates in the same dir.
 		if errors.Is(err, coder.ErrUsageLimit) || errors.Is(err, coder.ErrRateLimited) {
 			return fmt.Sprintf("⚠️ %s hit its usage limit during generation. Your design session is still active — try again in a while, or simplify what you asked for.", coderSvc.Name()), false, "", nil
 		}
@@ -1017,16 +1237,30 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		if strings.Contains(err.Error(), "timed out") {
 			return "⚠️ The coder timed out — the task may be too complex to build in one go. Try breaking it into simpler steps, then type approve.", false, "", nil
 		}
+		// Unknown hard error with nothing salvageable on disk — the workspace is likely
+		// broken; remove it.
+		cleanupOnFail()
 		return "", false, "", fmt.Errorf("coder: %w", err)
+	}
+	if err != nil {
+		// decision.saveable == true: a complete build is on disk despite the coder error.
+		// Do NOT discard finished work — fall through to the normal outcome flow using the
+		// on-disk decision. Log the transient error so it is never silent (the old path
+		// returned it as an opaque 500 with no server-side record).
+		slog.Warn("agentdesigner: salvaging finished build after transient coder error", "workspace_id", workspaceID, "agent_id", agentIDSnap, "err", err)
 	}
 
 	notify("🔍 Validating agent safety checks…")
 
-	// Decide, from what the coder actually wrote to disk + its raw output, whether the
-	// build is presentable for review. Pure/file-reading (no cleanup, no state mutation,
-	// no logging) so the transition it drives — the headline convergence fix — is
-	// unit-testable without a coder subprocess (see build_outcome_test.go).
-	decision := decideBuildOutcome(workDir, result.Text, backendType)
+	// Record whether "keep it as-is" is a real option for this build (a saveable AGENT.md +
+	// guardrail-passing tools on disk). The web UI gates the button on this so it's never
+	// offered when there's nothing to save (e.g. a no-AGENT.md block), and always offered
+	// when there is (e.g. a weak-backend verify-gate block — the escape hatch).
+	f.mu.Lock()
+	if s := f.sessions[workspaceID]; s != nil {
+		s.HasSaveableBuild = decision.saveable
+	}
+	f.mu.Unlock()
 
 	// Reconcile a [BLOCKED] marker against ground truth on disk (see reconcileBlockedOutcome).
 	// The turn-budget grace turn (api_engine.go) makes even a completed build emit [BLOCKED];
@@ -1038,39 +1272,70 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		return "", false, "", decision.hardErr
 	}
 
-	blocked := parseBlockedOutput(result.Text)
+	blocked := parseBlockedOutput(resultText)
 	outcome := reconcileBlockedOutcome(decision, blocked, backendType)
 
 	if !outcome.advance {
-		cleanupOnFail()
-		closeProgress()
+		// KEEP the generated files on disk (do NOT cleanupOnFail): a blocked/soft-failed
+		// build is recoverable — the user requests a change and the next generation
+		// iterates on the same dir to finish. recordGenerationFailure below persists the
+		// draft (State=designing), which protects the dir from the nightly sweep. For an
+		// edit, the staging dir is likewise kept until the next attempt overwrites it.
+		//
 		// The specific reason (regex/AST internals, raw endpoint paths, HTTP codes) is an
 		// implementation detail the non-technical user never sees — log it server-side and
 		// show the plain-language message reconcileBlockedOutcome chose.
 		if decision.logReason != "" {
-			slog.Warn("agentdesigner: build not presentable", "workspace_id", workspaceID, "agent_id", agentIDSnap, "reason", decision.logReason)
+			// script_ran discriminates the two causes behind a "couldn't confirm" weak-backend
+			// block: the model executed its script but got no output (broken/outbound-blocked)
+			// vs. it never ran the script at all — which tells us whether the remaining gap is a
+			// verification-surfacing problem or a get-the-model-to-run-it problem.
+			scriptRan := false
+			if result != nil {
+				scriptRan = result.ScriptRan
+			}
+			slog.Warn("agentdesigner: build not presentable", "workspace_id", workspaceID, "agent_id", agentIDSnap, "reason", decision.logReason, "script_ran", scriptRan, "backend", backendType)
 		}
 		// Record the failure so a forgiving retry re-runs generation WITH context of what
-		// went wrong, instead of the user being trapped in an approve-loop (C1/C2).
+		// went wrong, instead of the user being trapped in an approve-loop (C1/C2). This
+		// also appends a note to History + saves the draft, so a page that reconnected to
+		// the live build sees the outcome after the SSE closes below.
 		f.recordGenerationFailure(workspaceID, outcome.recordFailNote)
+		// Close the SSE channel only AFTER History/draft are committed (see the success
+		// path) so the reconnect re-fetch of /design/state finds the updated state.
+		closeProgress()
 		return outcome.message, false, "", nil
 	}
 
 	// Content is captured now — discard the workspace (staging dir for edits; create
 	// mode keeps its pending dir on disk until finalize/iterate).
 	cleanupOnSuccess()
-	closeProgress()
 
 	// Move to StateVerifying so the user can approve or request changes.
 	f.mu.Lock()
 	sess = f.sessions[workspaceID]
-	sess.State = StateVerifying
-	sess.PendingAgentMD = decision.agentMD
-	sess.PendingTools = decision.tools
-	// Persist the generated content so a reload before final approval can resume
-	// without re-running the (quota-consuming) coder generation.
-	f.saveDraft(sess)
+	// Nil-check: with the build detached from the request, a concurrent Cancel()
+	// can delete the session while Generate() is mid-flight. Guard like
+	// closeProgress does before touching session fields.
+	if sess != nil {
+		sess.State = StateVerifying
+		sess.PendingAgentMD = decision.agentMD
+		sess.PendingTools = decision.tools
+		// Record the review prompt in History so a page-load restore (or a draft
+		// resumed after a server restart) replays it. Previously this message only
+		// ever lived in the POST return value, so anyone who navigated away mid-build
+		// never saw the "here's your agent, approve?" prompt on return.
+		sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: outcome.message})
+		// Persist the generated content so a reload before final approval can resume
+		// without re-running the (quota-consuming) coder generation.
+		f.saveDraft(sess)
+	}
 	f.mu.Unlock()
+
+	// Close the SSE channel only AFTER the state + History are committed, so a page
+	// that reconnected to the live build sees the SSE end, re-fetches /design/state,
+	// and finds the verifying state + review message already in place (no race).
+	closeProgress()
 
 	return outcome.message, false, "", nil
 }
@@ -1107,7 +1372,7 @@ func reconcileBlockedOutcome(d buildDecision, blocked, backendType string) recon
 		// script and show real output, or drop it and reason directly — so "keep going"
 		// converges instead of regenerating the same unverified script. Takes priority
 		// over the blocked/safety branches, and keeps decideBuildOutcome's user message.
-		if backendType == prompts.BackendToolCalling && d.hasAuthoredScript {
+		if backendType == prompts.BackendToolCalling && d.hasAuthoredScript && !d.scriptVerified {
 			return reconciledOutcome{
 				message:        d.message,
 				advance:        false,
@@ -1121,22 +1386,25 @@ func reconcileBlockedOutcome(d buildDecision, blocked, backendType string) recon
 				recordFailNote: blocked,
 			}
 		}
-		// No blocker: the note goes into History, which is ALSO replayed to the text-only
-		// design coder that talks to the user. d.logReason is technical (e.g. "generated tool
-		// failed guardrails: ast check: forbidden: subprocess.run()") — recording it verbatim
-		// would let the design coder echo that jargon to a non-technical user (the exact leak
-		// this audit fixes elsewhere). Keep the technical detail in the caller's server-side
-		// slog.Warn (which reads d.logReason directly), and record a PLAIN, still-steering
-		// note here. The generation coder re-runs the guardrails anyway, so it will re-hit the
-		// same wall if it repeats the code — it does not need the guardrail's exact wording.
+		// No blocker: the per-case recordFailNote from decideBuildOutcome is honest and
+		// steering (e.g. "didn't finish AGENT.md — write it first next time"), so the next
+		// attempt converges instead of repeating the same mistake. It is recorded into History
+		// (replayed to the user on reload AND seen by the next generation pass). The technical
+		// detail (regex/AST internals, exact guardrail wording) stays in d.logReason for the
+		// server-side slog.Warn only — never echoed to the user. Fall back to a generic note
+		// only if decideBuildOutcome didn't set one.
+		note := strings.TrimSpace(d.recordFailNote)
+		if note == "" {
+			note = "the last build didn't produce a complete agent"
+		}
 		return reconciledOutcome{
 			message:        d.message,
 			advance:        false,
-			recordFailNote: "the last build was rejected by an automated safety/quality check",
+			recordFailNote: note,
 		}
 	}
 	if blocked != "" {
-		if backendType == prompts.BackendToolCalling && d.hasAuthoredScript {
+		if backendType == prompts.BackendToolCalling && d.hasAuthoredScript && !d.scriptVerified {
 			// Weak backend + a script we never confirmed runs: don't ship it. Stay in
 			// designing so a forgiving retry re-runs with context (same shape as the
 			// not-presentable blocker path above).
@@ -1173,7 +1441,12 @@ func (f *Flow) recordGenerationFailure(workspaceID, detail string) {
 	if strings.TrimSpace(detail) != "" {
 		note += " Reason: " + strings.TrimSpace(detail) + "."
 	}
-	note += " On the next attempt I must diagnose and take a different approach so this does not recur."
+	// "address this and finish" (not "take a different approach"): a blanket "take a
+	// different approach" pushes the coder to rewrite code that was actually fine — e.g. it
+	// rewrote a helper script on every retry instead of writing AGENT.md, creating the
+	// loop. The per-case detail above already says what to fix, so the suffix only needs to
+	// point at finishing the agent.
+	note += " On the next attempt I will address this and finish building the agent."
 	sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: note})
 	f.saveDraft(sess)
 }
@@ -1197,13 +1470,16 @@ func (f *Flow) appendUserHistory(workspaceID, input string) {
 // message, and (when presentable) the AGENT.md + tools to stage as pending.
 type buildDecision struct {
 	presentable       bool              // true → advance to StateVerifying with agentMD/tools
+	saveable          bool              // true → a valid AGENT.md + guardrail-passing tools exist on disk (keep-as-is is a real option), even when presentable=false (weak-backend verify gate)
 	message           string            // user-facing message (soft-fail reason OR review prompt)
 	agentMD           string            // set only when presentable
 	tools             map[string]string // set only when presentable
 	thinProof         bool              // advanced without a clean [TEST_OUTPUT] marker
 	hasAuthoredScript bool              // coder wrote a non-seeded tools/*.py of its own
+	scriptVerified    bool              // API engine confirmed an authored script RAN with real output (ground truth from coder.Result)
 	hardErr           error             // a real Go error (e.g. tools unreadable) — abort the run
 	logReason         string            // server-side detail for a soft failure (never shown to user)
+	recordFailNote    string            // honest, steering failure detail recorded into History for the next attempt (also replayed to the user)
 }
 
 // decideBuildOutcome inspects what the coder wrote to workDir plus its raw output and
@@ -1220,12 +1496,33 @@ type buildDecision struct {
 // rather than shipping a script we never saw work. A pure-reasoning build (no authored
 // script) has nothing to break, so it still advances on that backend too.
 //
+// scriptVerified/scriptOutput are the API engine's ground truth (from coder.Result): whether
+// an authored helper script actually RAN with real output this build, and that captured stdout.
+// When the engine confirms a run, the weak-backend gate below does NOT fire (the engine already
+// proved the script works — trusting a [TEST_OUTPUT] marker the weak model forgot would
+// contradict the finish gate that let the build end), and scriptOutput is used as the review
+// sample so the user sees real output before approve. Both are zero for CLI/basic backends.
+//
 // It performs NO cleanup, state mutation, or logging, so it is pure enough to unit-test.
-func decideBuildOutcome(workDir, resultText, backendType string) buildDecision {
+func decideBuildOutcome(workDir, resultText, backendType string, scriptVerified bool, scriptOutput string) buildDecision {
 	// Ground truth: read what the coder actually wrote to disk.
 	agentMDBytes, err := os.ReadFile(filepath.Join(workDir, "AGENT.md"))
 	if err != nil {
-		return buildDecision{message: "The coder didn't create AGENT.md. Tell me what to change and I'll try again."}
+		// The coder didn't finish the agent's instructions. The most common cause on a
+		// weak tool-calling backend is the build-time verify trap: it authored a helper
+		// script, the verify-finish nudge demanded real output from it, but at build time
+		// (SA_BUILD_PHASE=generation) live service calls are intentionally blocked, so the
+		// script can never produce real output and the coder spends its budget on that
+		// instead of writing AGENT.md. Steer the next attempt to write AGENT.md FIRST and
+		// not block on script verification — this is the lever that breaks the loop.
+		return buildDecision{
+			message: "I wrote the tool but didn't finish the agent's instructions (AGENT.md). Say **keep going** and I'll complete it, or tell me what to change.",
+			recordFailNote: "I didn't finish writing the agent's instructions (AGENT.md) — I got stuck " +
+				"trying to verify the helper tool at build time, when live service calls are intentionally " +
+				"blocked so it can't return real output. Next attempt: write the full AGENT.md FIRST (the " +
+				"agent's complete instructions), then only check the tool if turns remain; at build time the " +
+				"tool's empty output is expected, not a failure — finish and report that.",
+		}
 	}
 	agentMD := strings.TrimSpace(string(agentMDBytes))
 
@@ -1238,6 +1535,9 @@ func decideBuildOutcome(workDir, resultText, backendType string) buildDecision {
 		return buildDecision{
 			message:   "That request tripped a safety check I can't get around. Try describing it differently — for example, avoid destructive or high-risk actions (deleting things in bulk, financial transfers, credentials handling).",
 			logReason: "agent failed safety checks: " + err.Error(),
+			recordFailNote: "the AGENT.md tripped a safety/ethics check. Next attempt: rephrase the agent's " +
+				"goal to avoid destructive or high-risk actions (bulk deletes, financial transfers, " +
+				"credentials handling) and keep it read-only where possible.",
 		}
 	}
 	hasAuthoredScript := false
@@ -1256,15 +1556,24 @@ func decideBuildOutcome(workDir, resultText, backendType string) buildDecision {
 			return buildDecision{
 				message:   "One of the files the build produced didn't pass an internal check, so I held off saving it. Type **approve** to have it rebuilt, or tell me what to change.",
 				logReason: "generated tool failed guardrails: " + filename + ": " + err.Error(),
+				recordFailNote: "a generated tool failed an internal code check (it used a blocked construct " +
+					"like subprocess, eval, exec, or a raw socket). Next attempt: avoid that construct — keep " +
+					"the tool a thin fetch (load its secret from env, make the request, print the raw result) " +
+					"and do the parsing/decisions in the agent's reasoning instead.",
 			}
 		}
 	}
 
-	// Hard gates passed. Prefer a clean [TEST_OUTPUT] as the review sample; fall back to
-	// whatever user-facing prose the coder produced so we still advance.
+	// Hard gates passed. Prefer a clean [TEST_OUTPUT] as the review sample. If the model
+	// didn't emit that marker but the API engine CONFIRMED an authored script ran with real
+	// output (scriptVerified), use that captured stdout as the sample and treat the build as
+	// verified — the engine already proved the script works, so this is not "thin" proof.
+	// Otherwise fall back to whatever user-facing prose the coder produced so we still advance.
 	testOut := parseTestOutput(resultText)
 	thinProof := false
-	if testOut == "" {
+	if testOut == "" && scriptVerified && strings.TrimSpace(scriptOutput) != "" {
+		testOut = scriptOutput
+	} else if testOut == "" {
 		testOut = generationPreviewFallback(resultText)
 		thinProof = true
 	}
@@ -1278,9 +1587,12 @@ func decideBuildOutcome(workDir, resultText, backendType string) buildDecision {
 	// engine's build-time self-verify (verifyFinishNudge) topped out, so we have no proof
 	// the script runs. Stay in StateDesigning and let it keep iterating (the caller records
 	// a retry note). Capable CLI / basic backends keep their lenient advance; a build with
-	// no authored script has nothing unverified to hold back.
-	if backendType == prompts.BackendToolCalling && hasAuthoredScript && thinProof {
+	// no authored script has nothing unverified to hold back. When the engine already
+	// confirmed the script ran (scriptVerified), this gate does NOT fire — presenting it as
+	// unverified would contradict the finish gate that let the build end.
+	if backendType == prompts.BackendToolCalling && hasAuthoredScript && thinProof && !scriptVerified {
 		return buildDecision{
+			saveable:          true, // AGENT.md + tools are on disk and passed ethics/guardrails — keep-as-is can save them
 			hasAuthoredScript: true,
 			message: "I built this, but on your configured model I couldn't confirm the helper it " +
 				"wrote actually runs — so I won't save it as working yet. Say **keep going** and " +
@@ -1303,7 +1615,7 @@ func decideBuildOutcome(workDir, resultText, backendType string) buildDecision {
 			testOut,
 		)
 	}
-	return buildDecision{presentable: true, message: message, agentMD: agentMD, tools: tools, thinProof: thinProof, hasAuthoredScript: hasAuthoredScript}
+	return buildDecision{presentable: true, saveable: true, message: message, agentMD: agentMD, tools: tools, thinProof: thinProof, hasAuthoredScript: hasAuthoredScript, scriptVerified: scriptVerified}
 }
 
 // cleanupTestArtifacts removes downloaded files, run outputs, scratch probes, and caches
@@ -1548,6 +1860,22 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 		skillsSnap = []string{}
 	}
 
+	// Promote the readable draft_<name> working dir to the canonical AgentDir(<uuid>)
+	// by renaming it, so EVERYTHING the build produced (tools/, notes/, any root-level
+	// files like requirements.txt) is preserved — not just the tools/ tree that
+	// PendingTools captures. SaveAgent below then rewrites AGENT.md + tools/ canonically
+	// and creates the DB row on top of the renamed dir. If the draft dir is absent
+	// (e.g. a draft resumed after a restart that never rebuilt on disk), SaveAgent
+	// reconstitutes purely from the captured PendingTools.
+	draftDir := DraftAgentDir(f.designer.agentsDir, workspaceID, agentNameSnap)
+	liveDir := AgentDir(f.designer.agentsDir, workspaceID, agentIDSnap)
+	if _, statErr := os.Stat(draftDir); statErr == nil {
+		_ = os.RemoveAll(liveDir) // a fresh create's UUID never collides; defensive
+		if err := os.Rename(draftDir, liveDir); err != nil {
+			slog.Warn("agentdesigner: promote draft dir to live agent dir", "workspace_id", workspaceID, "err", err)
+		}
+	}
+
 	if err := f.designer.SaveAgent(workspaceID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap, requiredSecrets); err != nil {
 		return "", false, "", fmt.Errorf("save agent: %w", err)
 	}
@@ -1555,7 +1883,10 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 	// Remove test artifacts (downloaded files, scratch probes, run outputs) from the live
 	// agent dir now that the agent is saved. Artifacts persist through StateVerifying so
 	// the user can see real test output as proof; this is the post-approval cleanup.
-	cleanupTestArtifacts(AgentDir(f.designer.agentsDir, workspaceID, agentIDSnap))
+	cleanupTestArtifacts(liveDir)
+	// Defensive: ensure no draft_<name> dir lingers if the rename didn't run (absent
+	// dir) or failed.
+	_ = os.RemoveAll(draftDir)
 
 	// Auto-create schedule if coder embedded a suggested cron expression.
 	scheduleMsg := ""
@@ -1791,12 +2122,27 @@ func isRetryApproval(input string) bool {
 		strings.Contains(s, "wait") || strings.Contains(s, "instead") {
 		return false
 	}
-	for _, phrase := range []string{"try again", "try it again", "fix it", "retry", "another try", "give it another", "have another go"} {
+	for _, phrase := range []string{"try again", "try it again", "fix it", "retry", "another try", "give it another", "have another go", "keep going", "keep trying", "keep at it", "another pass", "take another"} {
 		if strings.Contains(s, phrase) {
 			return true
 		}
 	}
 	return false
+}
+
+// isKeepAsIs matches the user accepting a build the weak-backend verification gate
+// held back ("keep it as-is", "save as is", …) so it is saved despite the
+// unconfirmed self-test. Used only right after a soft-fail (GenerationFailed). The
+// files are on disk and SaveAgent still re-runs the ethics/AST guardrails, so this
+// bypasses only the "is it confirmed to run" heuristic, never a safety check.
+func isKeepAsIs(input string) bool {
+	s := strings.ToLower(strings.TrimSpace(input))
+	if strings.Contains(s, "don't") || strings.Contains(s, "do not") ||
+		strings.Contains(s, "change") || strings.Contains(s, "not yet") {
+		return false
+	}
+	return strings.Contains(s, "as-is") || strings.Contains(s, "as is") ||
+		strings.Contains(s, "keep it as") || strings.Contains(s, "save it as")
 }
 
 // ─── Skills helpers ───────────────────────────────────────────────────────────

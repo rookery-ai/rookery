@@ -71,6 +71,20 @@ type hostToolSet struct {
 	producedOutput  map[string]bool // authored scripts that RAN with real (non-empty) output
 	verifyNudges    int             // how many finish-verification nudges have fired
 
+	// lastVerifiedOutput is the most recent real, non-empty stdout captured from an authored
+	// helper script that RAN successfully this build (set alongside producedOutput). It is
+	// surfaced up to the agent designer (via coder.Result) as the review sample the user sees
+	// before approve — so a build the engine already confirmed runs shows real output even
+	// when the model forgot to wrap it in a [TEST_OUTPUT] marker. Secret values are redacted.
+	lastVerifiedOutput string
+
+	// ranAuthoredScript records whether the model EXECUTED an authored helper script at least
+	// once this build (regardless of whether it produced output). It discriminates the two
+	// "couldn't confirm" causes: the model ran its script but got nothing (broken/blocked) vs.
+	// it never ran the script at all — surfaced via coder.Result.ScriptRan and logged at the
+	// weak-backend gate so a real failure tells us which lever to pull next.
+	ranAuthoredScript bool
+
 	// Loop guard: bounded memory of recent failing calls. A model sometimes re-requests
 	// the exact same call that just failed (e.g. a script that exits 1) — but a weaker
 	// model can also OSCILLATE between a couple of different failing approaches (A fails,
@@ -247,6 +261,8 @@ func (h *hostToolSet) trackScriptProgress(call llm.ToolCall, result string, isEr
 		}
 		h.authoredScripts[key] = true
 	case "run_script":
+		// The model executed an authored script this build (output tracked separately below).
+		h.ranAuthoredScript = true
 		// Only real stdout counts as "the script produced output". A run that printed
 		// nothing to stdout and only logged to stderr returns the "(no stdout; stderr)"
 		// sentinel (see runScript) — that is diagnostic noise, not the real data the
@@ -256,8 +272,47 @@ func (h *hostToolSet) trackScriptProgress(call llm.ToolCall, result string, isEr
 				h.producedOutput = map[string]bool{}
 			}
 			h.producedOutput[key] = true
+			// Keep the real stdout as the review sample shown to the user before approve
+			// (see coder.Result.ScriptOutput). Redact secret values first — we now surface
+			// raw stdout automatically, so we can't rely on the model-curated [TEST_OUTPUT]
+			// path's "never print a secret" nudge to keep credentials off the screen.
+			h.lastVerifiedOutput = h.redactSecrets(result)
 		}
 	}
+}
+
+// redactSecrets replaces any exact secret VALUE from the run env with a placeholder, so an
+// authored script that echoes a token doesn't leak it into the review sample surfaced to the
+// user. Only non-trivial values are matched (short/empty values would over-redact benign text).
+func (h *hostToolSet) redactSecrets(s string) string {
+	for _, v := range h.subprocessEnv {
+		if len(v) < 6 {
+			continue
+		}
+		s = strings.ReplaceAll(s, v, "[redacted]")
+	}
+	return s
+}
+
+// scriptVerified reports whether the model authored at least one helper script this build AND
+// every authored script ran with real output — the engine's ground truth that the build's
+// scripts actually work. Consumed by the agent designer's decideBuildOutcome so it agrees with
+// the finish gate (verifyFinishNudge) instead of re-deriving verification from a [TEST_OUTPUT]
+// marker the weak model may have forgotten.
+func (h *hostToolSet) scriptVerified() bool {
+	return len(h.authoredScripts) > 0 && !h.needsScriptVerification()
+}
+
+// verifiedOutput returns the captured real stdout from a verified authored-script run (empty
+// when nothing was verified).
+func (h *hostToolSet) verifiedOutput() string {
+	return h.lastVerifiedOutput
+}
+
+// authoredScriptRan reports whether the model executed an authored helper script at least once
+// this build (used only for observability — see hostToolSet.ranAuthoredScript).
+func (h *hostToolSet) authoredScriptRan() bool {
+	return h.ranAuthoredScript
 }
 
 // canonScriptPath normalizes a script path so a write_file("tools/x.py") and a later
@@ -317,14 +372,51 @@ func (h *hostToolSet) needsScriptVerification() bool {
 }
 
 // verifyFinishNudge is consulted when the model tries to end a BUILD (emits a final
-// answer with no tool calls). While the model has an unverified script and the nudge
-// budget isn't spent, it returns a message that keeps the loop going — telling the model
-// to actually run, inspect, and FIX the script (and to keep scripts thin, doing the
-// reasoning itself), not to stop. On the final nudge it flips: stop fixing, and report
-// what couldn't be done to the user in PLAIN language with an alternative. Returns "" to
-// allow the finish (no unverified script, verification not applicable, or budget spent).
+// answer with no tool calls). It keeps the loop going — returning a message the model must
+// respond to — until the build is actually finishable. Two gates, in priority order:
+//
+//  1. AGENT.md must exist. A build with no AGENT.md is useless regardless of the helper
+//     script, and the common trap on a weak tool-calling backend is the model burning its
+//     whole turn budget trying to verify a helper script that can't reach the live service
+//     at build time (SA_BUILD_PHASE blocks outbound) — and never writing AGENT.md. So the
+//     FIRST thing the nudge demands is: write AGENT.md, don't keep fixing the script.
+//
+//  2. Once AGENT.md exists, the script-verification gate applies: don't ship a helper
+//     script that silently does nothing. At build time the helper usually CAN'T return real
+//     data (outbound blocked), so this gate is expected to top out — which is fine: the
+//     agent designer then presents the build as "built but not confirmed to run" with a
+//     keep-it-as-is escape hatch (see decideBuildOutcome), rather than looping forever.
+//
+// Returns "" to allow the finish (not a build, AGENT.md present + no unverified script, or
+// the nudge budget is spent — the last resort so a stuck build can still end).
 func (h *hostToolSet) verifyFinishNudge() string {
-	if !h.verifyBuild || !h.needsScriptVerification() || h.verifyNudges >= maxVerifyNudges {
+	if !h.verifyBuild || h.verifyNudges >= maxVerifyNudges {
+		return ""
+	}
+
+	// Gate 1: AGENT.md must be written before the build may finish. This is the lever that
+	// breaks the no-AGENT.md loop: without it a weak model spends every turn re-running a
+	// helper script that's intentionally blocked at build time and never produces the agent
+	// definition. Stat is cheap and only runs at finish attempts (not per tool call).
+	if md, err := os.Stat(filepath.Join(h.workDir, "AGENT.md")); err != nil || md.Size() == 0 {
+		h.verifyNudges++
+		if h.verifyNudges >= maxVerifyNudges {
+			return "You still have not written AGENT.md — the agent's instructions — and you're out of attempts to " +
+				"keep iterating. Write AGENT.md NOW with write_file (the agent's full instructions: what it does step " +
+				"by step, how it calls the helper and uses the result, the [CHAT] message it sends the user, and any " +
+				"schedule), then finish. Do NOT try to run or fix the helper script anymore — at build time it cannot " +
+				"reach the live service (outbound is blocked), so its empty output is expected, not a failure."
+		}
+		return "Before you finish: you wrote a helper script but you have NOT written AGENT.md yet — the agent's full " +
+			"instructions, which are the actual deliverable. Write AGENT.md now with write_file (what the agent does " +
+			"step by step, how it calls the helper and uses the result, the [CHAT] message it sends the user, and any " +
+			"schedule). Then finish. At build time the helper cannot reach the live service (outbound is blocked), so " +
+			"its empty output is EXPECTED — do not keep trying to run or fix it; write AGENT.md and finish."
+	}
+
+	// Gate 2: AGENT.md exists — now refuse to ship an authored helper script that never
+	// returned real output (it may silently do nothing at run time).
+	if !h.needsScriptVerification() {
 		return ""
 	}
 	h.verifyNudges++

@@ -305,8 +305,13 @@ func serveCmd() *cli.Command {
 							continue
 						}
 						for _, d := range expired {
-							if !d.IsEdit && d.State == "verifying" && d.AgentID != "" {
-								_ = os.RemoveAll(agentdesigner.AgentDir(vaultsDir, d.WorkspaceID, d.AgentID))
+							// Create-mode drafts leave a readable draft_<name> working dir on
+							// disk (kept through blocked/designing builds as well as verifying
+							// ones), so sweep it on expiry. Edit drafts point their AgentID at
+							// the LIVE agent (staging is a sibling dir already removed), so never
+							// touch it.
+							if !d.IsEdit && d.AgentName != "" {
+								_ = os.RemoveAll(agentdesigner.DraftAgentDir(vaultsDir, d.WorkspaceID, d.AgentName))
 							}
 							_ = database.DeleteAgentDraft(d.WorkspaceID)
 						}
@@ -390,6 +395,36 @@ func adminCmd() *cli.Command {
 						return err
 					}
 					fmt.Printf("Owner account created: %s (id: %s)\n", o.Username, o.ID)
+					return nil
+				},
+			},
+			{
+				Name:  "reset-password",
+				Usage: "Reset the owner's password (single-owner model — no login required)",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "password", Aliases: []string{"p"}, Required: true},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					cfg, err := config.Load(cmd.Root().String("config"))
+					if err != nil {
+						return fmt.Errorf("load config: %w", err)
+					}
+
+					migrationsDir := resolveDir("migrations")
+					database, err := db.Open(cfg.Database.Path, migrationsDir)
+					if err != nil {
+						return fmt.Errorf("open db: %w", err)
+					}
+					defer database.Close()
+
+					o, err := database.GetOwner()
+					if err != nil {
+						return fmt.Errorf("no owner account found (run 'owner bootstrap' first): %w", err)
+					}
+					if err := auth.ChangePassword(database, o.ID, cmd.String("password")); err != nil {
+						return fmt.Errorf("reset password: %w", err)
+					}
+					fmt.Printf("Password reset for owner: %s\n", o.Username)
 					return nil
 				},
 			},

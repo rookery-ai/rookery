@@ -383,11 +383,12 @@ func TestAPIEngine_BuildVerifyLoopDrivesScriptFix(t *testing.T) {
 	testFake.calls = 0
 	testFake.script = func(call int, req llm.Request) (*llm.Response, error) {
 		switch call {
-		case 0: // author a working script
+		case 0: // author AGENT.md + a working script (AGENT.md first so gate 1 is satisfied)
 			return &llm.Response{ToolCalls: []llm.ToolCall{
+				toolCall("write_file", `{"path":"AGENT.md","content":"# agent\n"}`),
 				toolCall("write_file", `{"path":"tools/fetch.py","content":"print('REAL_DATA')\n"}`),
 			}}, nil
-		case 1: // try to finish WITHOUT running it → must be nudged
+		case 1: // try to finish WITHOUT running the script → gate 2 must nudge
 			return &llm.Response{Content: "[CHAT] all done"}, nil
 		case 2: // responded to the nudge → actually run it
 			if strings.Contains(strings.ToLower(lastUserMessage(req)), "broken") {
@@ -410,6 +411,15 @@ func TestAPIEngine_BuildVerifyLoopDrivesScriptFix(t *testing.T) {
 	}
 	if !strings.Contains(res.Text, "all done") {
 		t.Errorf("expected the build to finish once the script produced output; got %q", res.Text)
+	}
+	// The engine's ground truth must be surfaced on the Result so the agent designer can
+	// present the build as verified with real output — even though the model never emitted
+	// a [TEST_OUTPUT] marker.
+	if !res.ScriptVerified {
+		t.Error("expected Result.ScriptVerified=true after the authored script ran with real output")
+	}
+	if !strings.Contains(res.ScriptOutput, "REAL_DATA") {
+		t.Errorf("expected Result.ScriptOutput to carry the captured stdout; got %q", res.ScriptOutput)
 	}
 }
 
@@ -437,8 +447,9 @@ func TestAPIEngine_SeededScriptDoesNotSatisfyVerification(t *testing.T) {
 	testFake.calls = 0
 	testFake.script = func(call int, req llm.Request) (*llm.Response, error) {
 		switch call {
-		case 0: // author own fetch script (never run)
+		case 0: // author AGENT.md + own fetch script (never run)
 			return &llm.Response{ToolCalls: []llm.ToolCall{
+				toolCall("write_file", `{"path":"AGENT.md","content":"# agent\n"}`),
 				toolCall("write_file", `{"path":"tools/fetch.py","content":"pass\n"}`),
 			}}, nil
 		case 1: // run the SEEDED discovery helper (returns output, must NOT satisfy verification)
@@ -494,6 +505,11 @@ func TestAPIEngine_BuildVerifyLoopIsBounded(t *testing.T) {
 	}
 	if !strings.Contains(res.Text, "giving up") {
 		t.Errorf("expected the build to finish after the nudge budget; got %q", res.Text)
+	}
+	// The script never produced output, so the engine must report it unverified — the agent
+	// designer relies on this to keep the "couldn't confirm" keep-as-is escape.
+	if res.ScriptVerified {
+		t.Error("expected Result.ScriptVerified=false when the authored script never produced output")
 	}
 }
 
@@ -824,6 +840,52 @@ func TestHostTools_StderrOnlyDoesNotCountAsProducedOutput(t *testing.T) {
 	h.trackScriptProgress(toolCall("run_script", `{"path":"tools/fetch.py"}`), `{"emails":[{"id":"1"}]}`, false)
 	if h.needsScriptVerification() {
 		t.Fatal("real stdout should clear the verification gate")
+	}
+}
+
+// TestVerifyFinishNudge_RequiresAgentMDFirst guards the no-AGENT.md loop fix: when a build
+// authored a helper script but AGENT.md is not on disk, the finish nudge must redirect the
+// model to WRITE AGENT.md (not keep fixing the script). Only once AGENT.md exists does the
+// script-verification gate (gate 2) apply. Without this, a weak model burns its whole turn
+// budget trying to verify a helper that's intentionally blocked at build time and never
+// writes AGENT.md — the loop the user hit.
+func TestVerifyFinishNudge_RequiresAgentMDFirst(t *testing.T) {
+	dir := t.TempDir()
+
+	// No AGENT.md, an authored unverified script → gate 1 fires, demands AGENT.md.
+	h := &hostToolSet{verifyBuild: true, workDir: dir}
+	h.trackScriptProgress(toolCall("write_file", `{"path":"tools/fetch.py"}`), "ok", false)
+	nudge := h.verifyFinishNudge()
+	if nudge == "" {
+		t.Fatal("a build with an unverified script and no AGENT.md must be nudged, not allowed to finish")
+	}
+	if !strings.Contains(strings.ToLower(nudge), "agent.md") {
+		t.Errorf("the nudge must redirect to writing AGENT.md first; got %q", nudge)
+	}
+	if strings.Contains(strings.ToLower(nudge), "run it (run_script)") {
+		t.Errorf("gate 1 must NOT tell the model to keep running the blocked script; got %q", nudge)
+	}
+
+	// Write AGENT.md → gate 1 passes, gate 2 (script verification) now applies.
+	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte("# agent\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	h2 := &hostToolSet{verifyBuild: true, workDir: dir}
+	h2.trackScriptProgress(toolCall("write_file", `{"path":"tools/fetch.py"}`), "ok", false)
+	nudge2 := h2.verifyFinishNudge()
+	if nudge2 == "" {
+		t.Fatal("with AGENT.md present + an unverified script, gate 2 must still nudge")
+	}
+	if !strings.Contains(nudge2, "run_script") {
+		t.Errorf("gate 2 should steer toward running the script; got %q", nudge2)
+	}
+
+	// AGENT.md present + script produced real output → no nudge (finish allowed).
+	h3 := &hostToolSet{verifyBuild: true, workDir: dir}
+	h3.trackScriptProgress(toolCall("write_file", `{"path":"tools/fetch.py"}`), "ok", false)
+	h3.trackScriptProgress(toolCall("run_script", `{"path":"tools/fetch.py"}`), `{"data":[1,2]}`, false)
+	if h3.verifyFinishNudge() != "" {
+		t.Fatal("a verified build (AGENT.md + real script output) must be allowed to finish with no nudge")
 	}
 }
 

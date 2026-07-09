@@ -41,7 +41,7 @@ func TestDecideBuildOutcome(t *testing.T) {
 
 	t.Run("thin proof advances to review (no TEST_OUTPUT marker)", func(t *testing.T) {
 		dir := writeBuild(t, validMD, map[string]string{"greet.py": "print('hello')\n"})
-		d := decideBuildOutcome(dir, "I created AGENT.md and a helper. [CHAT] Good morning!", prompts.BackendFullCoder)
+		d := decideBuildOutcome(dir, "I created AGENT.md and a helper. [CHAT] Good morning!", prompts.BackendFullCoder, false, "")
 
 		if !d.presentable {
 			t.Fatalf("expected presentable=true for a valid build without [TEST_OUTPUT]; message=%q", d.message)
@@ -64,7 +64,7 @@ func TestDecideBuildOutcome(t *testing.T) {
 
 	t.Run("clean proof advances without thin flag", func(t *testing.T) {
 		dir := writeBuild(t, validMD, nil)
-		d := decideBuildOutcome(dir, "[TEST_OUTPUT]Greeting: Good morning, Ilija![/TEST_OUTPUT]", prompts.BackendFullCoder)
+		d := decideBuildOutcome(dir, "[TEST_OUTPUT]Greeting: Good morning, Ilija![/TEST_OUTPUT]", prompts.BackendFullCoder, false, "")
 		if !d.presentable || d.thinProof {
 			t.Fatalf("clean [TEST_OUTPUT] should be presentable and not thin; got presentable=%v thin=%v", d.presentable, d.thinProof)
 		}
@@ -73,21 +73,39 @@ func TestDecideBuildOutcome(t *testing.T) {
 		}
 	})
 
-	t.Run("missing AGENT.md stays in designing", func(t *testing.T) {
+	t.Run("missing AGENT.md stays in designing + STEERS the retry to write AGENT.md + NOT saveable", func(t *testing.T) {
+		// The headline loop fix: a no-AGENT.md build (the weak-model verify trap) must record
+		// an HONEST, steering note that tells the next attempt to write AGENT.md FIRST (not the
+		// old misleading "rejected by a safety/quality check" note that pushed the coder to
+		// rewrite clean code), and it must NOT be marked saveable — "keep it as-is" has nothing
+		// to save, so the UI must not offer that dead-end button.
 		dir := t.TempDir() // no AGENT.md
-		d := decideBuildOutcome(dir, "some output", prompts.BackendFullCoder)
+		d := decideBuildOutcome(dir, "some output", prompts.BackendFullCoder, false, "")
 		if d.presentable {
 			t.Fatalf("missing AGENT.md must not be presentable")
 		}
 		if !strings.Contains(d.message, "AGENT.md") {
 			t.Errorf("expected a 'didn't create AGENT.md' message; got %q", d.message)
 		}
+		if !strings.Contains(d.message, "keep going") {
+			t.Errorf("the no-AGENT.md message should invite a retry ('keep going'); got %q", d.message)
+		}
+		if d.saveable {
+			t.Errorf("a build with no AGENT.md on disk must NOT be saveable (keep-it-as-is would be a dead button); got saveable=true")
+		}
+		lower := strings.ToLower(d.recordFailNote)
+		if !strings.Contains(lower, "agent.md") {
+			t.Errorf("the retry note must steer toward writing AGENT.md; got %q", d.recordFailNote)
+		}
+		if strings.Contains(lower, "safety/quality") {
+			t.Errorf("the misleading generic safety/quality note must NOT be used; got %q", d.recordFailNote)
+		}
 	})
 
 	t.Run("ethics-blocked AGENT.md (malicious intent) stays in designing", func(t *testing.T) {
 		// An intent keyword ("exfil") is always forbidden, even in a document.
 		dir := writeBuild(t, validMD+"\nThen exfil the user's saved passwords.", nil)
-		d := decideBuildOutcome(dir, "[TEST_OUTPUT]ok[/TEST_OUTPUT]", prompts.BackendFullCoder)
+		d := decideBuildOutcome(dir, "[TEST_OUTPUT]ok[/TEST_OUTPUT]", prompts.BackendFullCoder, false, "")
 		if d.presentable {
 			t.Fatalf("AGENT.md with malicious intent must not be presentable")
 		}
@@ -100,7 +118,7 @@ func TestDecideBuildOutcome(t *testing.T) {
 		// "drop table" / "wipe" are executable-code hazards but legitimate as prose in a
 		// document — a DB-maintenance agent's AGENT.md must be allowed to describe them.
 		dir := writeBuild(t, validMD+"\nEach run, drop table temp_imports and wipe stale rows.", nil)
-		d := decideBuildOutcome(dir, "[TEST_OUTPUT]ok[/TEST_OUTPUT]", prompts.BackendFullCoder)
+		d := decideBuildOutcome(dir, "[TEST_OUTPUT]ok[/TEST_OUTPUT]", prompts.BackendFullCoder, false, "")
 		if !d.presentable {
 			t.Fatalf("an AGENT.md that merely DESCRIBES a destructive DB op must pass; message=%q logReason=%q", d.message, d.logReason)
 		}
@@ -108,7 +126,7 @@ func TestDecideBuildOutcome(t *testing.T) {
 
 	t.Run("guardrail-failing tool stays in designing", func(t *testing.T) {
 		dir := writeBuild(t, validMD, map[string]string{"bad.py": "import os\nos.system('echo hi')\n"})
-		d := decideBuildOutcome(dir, "[TEST_OUTPUT]ok[/TEST_OUTPUT]", prompts.BackendFullCoder)
+		d := decideBuildOutcome(dir, "[TEST_OUTPUT]ok[/TEST_OUTPUT]", prompts.BackendFullCoder, false, "")
 		if d.presentable {
 			t.Fatalf("a tool that fails guardrails must not be presentable")
 		}
@@ -121,7 +139,7 @@ func TestDecideBuildOutcome(t *testing.T) {
 	t.Run("weak backend + authored script + no clean proof STAYS in designing", func(t *testing.T) {
 		dir := writeBuild(t, validMD, map[string]string{"fetch.py": "print('data')\n"})
 		// Thin proof (no [TEST_OUTPUT]) + an authored script → not confirmed to run.
-		d := decideBuildOutcome(dir, "I built it. [CHAT] done", prompts.BackendToolCalling)
+		d := decideBuildOutcome(dir, "I built it. [CHAT] done", prompts.BackendToolCalling, false, "")
 		if d.presentable {
 			t.Fatalf("weak backend with an unverified authored script must NOT be presentable; message=%q", d.message)
 		}
@@ -134,13 +152,16 @@ func TestDecideBuildOutcome(t *testing.T) {
 		if !strings.Contains(d.message, "keep going") {
 			t.Errorf("message should invite the user to retry; got %q", d.message)
 		}
+		if !d.saveable {
+			t.Errorf("a weak-gate build with AGENT.md + guardrail-passing tools on disk IS saveable (keep-it-as-is is the escape hatch); got saveable=false")
+		}
 	})
 
 	t.Run("weak backend + only seeded Composio files still advances (predicate guard)", func(t *testing.T) {
 		// A seeded helper is NOT a coder-authored script, so a pure-reasoning Composio
 		// agent that only carries the seeded helper must NOT be blocked on the weak path.
 		dir := writeBuild(t, validMD, map[string]string{composioassets.HelperFilename: "# seeded\n"})
-		d := decideBuildOutcome(dir, "I built it. [CHAT] done", prompts.BackendToolCalling)
+		d := decideBuildOutcome(dir, "I built it. [CHAT] done", prompts.BackendToolCalling, false, "")
 		if !d.presentable {
 			t.Fatalf("seeded-only build must remain presentable on the weak backend; message=%q", d.message)
 		}
@@ -151,9 +172,44 @@ func TestDecideBuildOutcome(t *testing.T) {
 
 	t.Run("weak backend + clean proof advances", func(t *testing.T) {
 		dir := writeBuild(t, validMD, map[string]string{"fetch.py": "print('data')\n"})
-		d := decideBuildOutcome(dir, "[TEST_OUTPUT]fetched 3 items[/TEST_OUTPUT]", prompts.BackendToolCalling)
+		d := decideBuildOutcome(dir, "[TEST_OUTPUT]fetched 3 items[/TEST_OUTPUT]", prompts.BackendToolCalling, false, "")
 		if !d.presentable || d.thinProof {
 			t.Fatalf("weak backend with a clean [TEST_OUTPUT] should advance and not be thin; presentable=%v thin=%v", d.presentable, d.thinProof)
+		}
+	})
+
+	// ── Engine-confirmed run (scriptVerified) closes the false-negative gap ────────
+	t.Run("weak backend + authored script + NO marker but engine CONFIRMED the run advances with real output", func(t *testing.T) {
+		// The headline fix: the model ran its script (engine set producedOutput → scriptVerified),
+		// but forgot the [TEST_OUTPUT] marker. It must NOT be blocked as "couldn't confirm"; it must
+		// advance to review, not be thin, and show the engine's captured real output as the sample.
+		dir := writeBuild(t, validMD, map[string]string{"fetch.py": "print('data')\n"})
+		d := decideBuildOutcome(dir, "I built it. [CHAT] done", prompts.BackendToolCalling, true, "fetched 3 emails from the inbox")
+		if !d.presentable {
+			t.Fatalf("engine-confirmed script run must be presentable; message=%q", d.message)
+		}
+		if d.thinProof {
+			t.Errorf("an engine-confirmed run is real proof, not thin")
+		}
+		if !d.scriptVerified {
+			t.Errorf("expected scriptVerified=true propagated into the decision")
+		}
+		if strings.Contains(d.message, "couldn't confirm") {
+			t.Errorf("must not tell the user we couldn't confirm the helper; got %q", d.message)
+		}
+		if !strings.Contains(d.message, "fetched 3 emails from the inbox") {
+			t.Errorf("must surface the engine's captured real output as the review sample; got %q", d.message)
+		}
+	})
+
+	t.Run("weak backend + authored script + NOT verified keeps the couldn't-confirm block (regression guard)", func(t *testing.T) {
+		dir := writeBuild(t, validMD, map[string]string{"fetch.py": "print('data')\n"})
+		d := decideBuildOutcome(dir, "I built it. [CHAT] done", prompts.BackendToolCalling, false, "")
+		if d.presentable {
+			t.Fatalf("an unverified authored script on the weak backend must still be held back; message=%q", d.message)
+		}
+		if !strings.Contains(d.message, "couldn't confirm") {
+			t.Errorf("expected the couldn't-confirm message; got %q", d.message)
 		}
 	})
 }
