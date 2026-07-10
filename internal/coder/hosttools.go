@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/ilijad1/simple-agents/internal/composioassets"
+	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/llm"
 	"github.com/ilijad1/simple-agents/internal/sandbox"
 	"github.com/ilijad1/simple-agents/internal/vault"
@@ -97,6 +98,14 @@ type hostToolSet struct {
 	// budget is silently burned. Per-run state on the toolset (one toolset per run).
 	recentFails      []failedCall
 	consecutiveFails int
+
+	// Self-managed OAuth connector tools. When an agent is bound to service
+	// connections (agent_connections), each connection's curated actions are offered
+	// as native typed tools (connectorTools) and dispatched through connectors.Execute.
+	// Empty for chat / unbound agents. See connectortools.go.
+	connReg    *connectors.Registry
+	connStore  connectors.TokenStore
+	boundConns []connectors.BoundConn
 }
 
 // failedCall identifies one failing tool invocation by name+args for the oscillation guard.
@@ -117,7 +126,7 @@ const consecutiveFailWarnThreshold = 3
 // sees these as native function-calling tools; the host executes them.
 func (h *hostToolSet) tools() []llm.Tool {
 	tools := []llm.Tool{
-		{Name: "read_file", Description: "Read a file from the user's knowledge base (vault). Path is relative to the vault root, or an absolute path inside the vault.", Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string","description":"vault-relative or absolute-within-vault path"}},"required":["path"]}`)},
+		{Name: "read_file", Description: "Read a file from the user's knowledge base (vault). Path is relative to the vault root, or an absolute path inside the vault. Large files are capped; to page through one, pass offset (byte to start at) and optionally limit (max bytes) — the result tells you the next offset when more remains.", Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string","description":"vault-relative or absolute-within-vault path"},"offset":{"type":"integer","description":"byte offset to start reading from (default 0)"},"limit":{"type":"integer","description":"max bytes to return from offset (default: the per-result cap)"}},"required":["path"]}`)},
 		{Name: "write_file", Description: "Create or overwrite a file in the vault (creates parent folders). Path is relative to the vault root, or absolute within the vault.", Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string","description":"full file contents"}},"required":["path","content"]}`)},
 		{Name: "edit_file", Description: "Replace a unique substring in a vault file. old_string must appear exactly once.", Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"}},"required":["path","old_string","new_string"]}`)},
 		{Name: "list_dir", Description: "List entries in a vault directory. Path is relative to the vault root (default \".\" lists the vault root).", Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string","description":"vault-relative directory; defaults to vault root"}}}`)},
@@ -151,7 +160,9 @@ func (h *hostToolSet) tools() []llm.Tool {
 				Description: "Run a Python helper script under your working directory's tools/ folder (e.g. \"tools/foo.py\") and return its stdout. " +
 					"Pass command-line arguments via `args` (e.g. [\"tools/payload.json\"] for a script that reads sys.argv[1]) and/or pipe input via `stdin` — " +
 					"this matches how scripts are invoked on a host CLI coder (python3 tools/foo.py tools/payload.json). " +
-					"The script runs with your working directory as CWD, sandboxed; secrets are available as env vars.",
+					"The script runs with your working directory as CWD, sandboxed; secrets are available as env vars. " +
+					"For LARGE or many-item output, have the script write its results to files itself and print only a " +
+					"short summary — a big stdout dump gets truncated and can't be relayed back through you reliably.",
 				Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string","description":"path to the .py file, relative to your working directory"},"args":{"type":"array","items":{"type":"string"},"description":"command-line arguments to pass to the script (e.g. a payload file path the script reads via sys.argv)"},"stdin":{"type":"string","description":"text to feed to the script's stdin"}},"required":["path"]}`),
 			},
 			llm.Tool{
@@ -163,6 +174,7 @@ func (h *hostToolSet) tools() []llm.Tool {
 			},
 		)
 	}
+	tools = append(tools, h.connectorTools()...)
 	return tools
 }
 
@@ -438,10 +450,13 @@ func (h *hostToolSet) verifyFinishNudge() string {
 	return "Before you finish: you wrote a helper script but it has not yet returned any real data. " +
 		"An empty result almost always means it is BROKEN — do not ship it. Run it (run_script), read exactly " +
 		"what it prints, and fix the cause (print the raw API response, check the field names, correct the " +
-		"logic), then run it again — repeat until it returns real data. Keep the script THIN: it should mainly " +
-		"load its secret from the environment, make the request, and print the raw result; do the parsing, " +
-		"decisions, and formatting YOURSELF in your reasoning from what it printed, rather than cramming all " +
-		"the logic into the script. Never print, log, or return a secret value."
+		"logic), then run it again — repeat until it returns real data. For a SINGLE small result, keep the " +
+		"script THIN — load its secret from the environment, make the request, print the raw result — and do " +
+		"the parsing, decisions, and formatting YOURSELF from what it printed. But when the task processes MANY " +
+		"items or LARGE data (porting pages, exporting a dataset), do the OPPOSITE: have the script do the whole " +
+		"job — fetch AND write each destination file itself (it already has the paths) — and print only a short " +
+		"summary/manifest (counts + file paths), NEVER the full data. Routing a big payload through your reasoning " +
+		"gets truncated and burns the run. Never print, log, or return a secret value."
 }
 
 // execute runs one tool call and returns the result text the engine feeds back to
@@ -461,6 +476,8 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		Command   string            `json:"command"`
 		Query     string            `json:"query"`
 		Pattern   string            `json:"pattern"`
+		Offset    int               `json:"offset"`
+		Limit     int               `json:"limit"`
 	}
 	_ = json.Unmarshal(call.Args, &args) // tolerate missing fields
 
@@ -470,7 +487,7 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		if err != nil {
 			return "error: " + err.Error()
 		}
-		return truncate(string(data))
+		return readFileSlice(string(data), args.Offset, args.Limit)
 	case "write_file":
 		if err := h.writeFile(args.Path, args.Content); err != nil {
 			return "error: " + err.Error()
@@ -503,7 +520,7 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		if err != nil {
 			return "error: " + err.Error()
 		}
-		return truncate(out)
+		return h.spillLargeOutput(out, "run_script")
 	case "web_fetch":
 		if !h.includeExecTools {
 			return "error: web_fetch is not available"
@@ -530,8 +547,13 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		if err != nil {
 			return "error: " + err.Error()
 		}
-		return truncate(out)
+		return h.spillLargeOutput(out, "bash")
 	default:
+		if _, _, ok := h.resolveConnectorTool(call.Name); ok {
+			var cargs map[string]any
+			_ = json.Unmarshal(call.Args, &cargs)
+			return h.executeConnectorTool(ctx, call.Name, cargs)
+		}
 		return "error: unknown tool " + call.Name
 	}
 }
@@ -1274,11 +1296,106 @@ func (h *hostToolSet) runBash(ctx context.Context, command string) (string, erro
 	return out, nil
 }
 
+// spillHeadBytes is how much of an over-cap exec-tool output is shown inline alongside the
+// spill-file pointer — enough to see the shape of the data (is it the expected JSON? an error
+// trace?) without pulling the whole payload into the model context.
+const spillHeadBytes = 2 * 1024
+
+// spillDirName is the dot-prefixed directory (under the agent workDir) where large run_script /
+// bash output is persisted so it can reach the filesystem without transiting the model context.
+// Dot-prefixed on purpose: ReadToolsTree only walks tools/ and skips dot-dirs, cleanupTestArtifacts
+// removes any dot-dir post-save, and vault.List hides dotfiles — so a spill never ships with a
+// built agent nor shows in the KB browser.
+const spillDirName = ".sa_out"
+
+// spillLargeOutput persists an over-cap exec-tool output (run_script / bash stdout) to a file under
+// the agent workDir and returns a compact, STEERING notice: a head of the data plus the file path
+// and an explicit instruction to process that file WITH A SCRIPT rather than reading it all back
+// inline (otherwise the model just read_file's it and we're back to routing the payload through the
+// context). This is the primary fix for "a script's large output has no path to the filesystem
+// except through the model." Falls back to plain truncate() when it can't write the file (e.g. no
+// workDir, or an IO error) so behavior degrades gracefully rather than losing the output. The
+// returned string is non-empty and real, so the build verification bridge (trackScriptProgress)
+// still latches producedOutput/lastVerifiedOutput on it.
+// clearSpillDir removes the spill directory under the agent workDir. Called at the start of a run
+// so spill files from a previous run don't accumulate (the live agent dir is never GC'd the way a
+// build dir is). A no-op when workDir is unset or the dir doesn't exist.
+func (h *hostToolSet) clearSpillDir() {
+	if h.workDir == "" {
+		return
+	}
+	_ = os.RemoveAll(filepath.Join(h.workDir, spillDirName))
+}
+
+func (h *hostToolSet) spillLargeOutput(out, toolName string) string {
+	if len(out) <= maxToolResult || h.workDir == "" {
+		return truncate(out)
+	}
+	dir := filepath.Join(h.workDir, spillDirName)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return truncate(out)
+	}
+	name := fmt.Sprintf("%s_%s.txt", toolName, time.Now().Format("20060102_150405.000"))
+	abs := filepath.Join(dir, name)
+	if err := os.WriteFile(abs, []byte(out), 0o640); err != nil {
+		return truncate(out)
+	}
+	rel := filepath.ToSlash(filepath.Join(spillDirName, name))
+	head := out
+	if len(head) > spillHeadBytes {
+		head = head[:spillHeadBytes]
+	}
+	return fmt.Sprintf("%s\n…[output is %d bytes — saved in full to %s. Do NOT read it all back into "+
+		"context. Write a small Python script that reads that file and does the work directly (e.g. writes "+
+		"each item to its destination path), then print only a short summary.]", head, len(out), rel)
+}
+
+// readFileSlice returns the model-facing view of a file's contents, honoring optional byte-range
+// paging. With offset==0 and limit==0 (what every caller that sends neither produces) it is
+// byte-identical to the previous behavior — a full read followed by truncate(). When offset/limit
+// are given it returns that byte window and, if more bytes remain past the window, appends an
+// explicit next-offset hint so a weak model can deterministically page a large file instead of
+// hitting the flat 8 KiB wall. limit==0 means "no explicit limit" (fall through to the cap), never
+// "read zero bytes". Out-of-range offsets are clamped rather than erroring.
+func readFileSlice(content string, offset, limit int) string {
+	if offset <= 0 && limit <= 0 {
+		return truncate(content)
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(content) {
+		offset = len(content)
+	}
+	window := content[offset:]
+	// A positive limit caps the window; otherwise the shared per-result cap applies.
+	winCap := limit
+	if winCap <= 0 || winCap > maxToolResult {
+		winCap = maxToolResult
+	}
+	remainderNote := ""
+	if len(window) > winCap {
+		next := offset + winCap
+		window = window[:winCap]
+		remainderNote = fmt.Sprintf("\n…[%d more bytes; call read_file again with offset=%d]", len(content)-next, next)
+	}
+	if window == "" {
+		return fmt.Sprintf("(no bytes at offset %d; file is %d bytes)", offset, len(content))
+	}
+	return window + remainderNote
+}
+
 func truncate(s string) string {
 	if len(s) <= maxToolResult {
 		return s
 	}
-	return s[:maxToolResult] + "\n…[truncated]"
+	// State the true total and the escape hatch so a weak model doesn't silently reason over
+	// incomplete data: it can page the rest (read_file offset/limit) or process it with a
+	// script instead of pulling it inline. Kept short (< maxToolResult+512, see the web_fetch
+	// truncation test) and marker-free of anything parsed for logic elsewhere.
+	return fmt.Sprintf("%s\n…[truncated: showing first %d of %d bytes. To get the rest, request a byte "+
+		"range (read_file offset/limit) or process the data with a script instead of reading it inline.]",
+		s[:maxToolResult], maxToolResult, len(s))
 }
 
 // writeFileAtomic mirrors the vault's own unexported atomic-write helper.

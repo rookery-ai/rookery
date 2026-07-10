@@ -50,6 +50,9 @@ func (c *Coder) runAPI(ctx context.Context, workspaceID, prompt string) (*Result
 	}
 
 	tools := c.buildHostTools(workspaceID)
+	// Clear any spill files left by a previous run of this agent so .sa_out can't grow
+	// unbounded across runs (the live agent dir, unlike a build dir, is never cleaned up).
+	tools.clearSpillDir()
 	var offeredTools []llm.Tool
 	if !c.noTools {
 		offeredTools = tools.tools()
@@ -401,6 +404,10 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 		// SA_BUILD_PHASE=generation). A real run must never block on this — an agent that
 		// legitimately has nothing to report must be free to finish silently.
 		verifyBuild: c.extraEnv[composioassets.BuildPhaseEnvVar] == composioassets.BuildPhaseGeneration,
+
+		connReg:    c.connReg,
+		connStore:  c.connStore,
+		boundConns: c.boundConns,
 	}
 }
 

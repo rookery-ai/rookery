@@ -98,9 +98,9 @@ type DesignSystemParams struct {
 // ConnectionRef describes one connected service account (self-managed OAuth) the agent
 // can be bound to. Provider+Label identify it in the "# Connections:" header.
 type ConnectionRef struct {
-	Provider string // e.g. "google"
-	Label    string // user nickname, e.g. "work"
-	Identity string // account identity, e.g. "work@x.com"
+	Provider string   // e.g. "google"
+	Label    string   // user nickname, e.g. "work"
+	Identity string   // account identity, e.g. "work@x.com"
 	Actions  []string // the typed tool names this connection exposes at runtime
 }
 
@@ -1695,6 +1695,40 @@ type CoderPromptParams struct {
 	// (e.g. a slug went stale) had no way to know composio_helper.py / discovery exist,
 	// so it couldn't self-correct. Threading it here closes that gap.
 	ComposioEnabled bool
+	// Connections are the self-managed-OAuth service accounts this agent is bound to.
+	// When non-empty the runtime prompt tells the agent it has NATIVE typed tools for
+	// them (no discovery, no scripts) — the reliability path for weak models.
+	Connections []ConnectionRef
+}
+
+// connectedToolsBlock tells the running agent it has native typed tools for its bound
+// service accounts, so it calls them directly instead of writing scripts or discovering
+// slugs. Deliberately says nothing about "discovery" — the tools ARE the interface.
+func connectedToolsBlock(bound []ConnectionRef) string {
+	if len(bound) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("<connected_service_tools>\n")
+	sb.WriteString("You have NATIVE tools for these connected accounts. Call them directly with typed arguments — do NOT write scripts, fetch OAuth tokens, or look up action names; the tools already ARE the interface.\n")
+	multi := map[string]int{}
+	for _, c := range bound {
+		multi[c.Provider]++
+	}
+	for _, c := range bound {
+		id := c.Identity
+		if id == "" {
+			id = "connected account"
+		}
+		suffix := ""
+		if multi[c.Provider] > 1 {
+			suffix = " (its tools end in `__" + c.Label + "` to target this account)"
+		}
+		fmt.Fprintf(&sb, "- %s account \"%s\" — %s%s\n", c.Provider, c.Label, id, suffix)
+	}
+	sb.WriteString("If a connection needs re-authorization, a tool will say so — report that to the user; do not try to work around it.\n")
+	sb.WriteString("</connected_service_tools>\n\n")
+	return sb.String()
 }
 
 // BuildCoderPrompt returns the prompt sent to the coder when executing a saved
@@ -1829,6 +1863,8 @@ check it before acting on assumptions about the user. Use your available file ca
 		// their slugs; injecting composioServicesBlock() here made agents re-run discovery.
 		sb.WriteString(composioRuntimeNote())
 	}
+
+	sb.WriteString(connectedToolsBlock(p.Connections))
 
 	sb.WriteString(`<output_protocol>
 Run your scheduled task now. Use ONLY the markers below to produce output.

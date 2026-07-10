@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/llm"
 	"github.com/ilijad1/simple-agents/internal/sandbox"
@@ -90,6 +91,21 @@ type Coder struct {
 	secretsLookup SecretsLookup // resolves the provider API key by secret name at run time
 	vlt           *vault.Vault  // vault for host-tool file operations (read/write/edit/list/run_script)
 	progress      func(string)  // optional live-progress sink (per tool-call milestone) for the API engine
+
+	// Self-managed OAuth connectors: when an agent is bound to service connections,
+	// the API engine offers each connection's curated actions as native typed tools.
+	connReg    *connectors.Registry
+	connStore  connectors.TokenStore
+	boundConns []connectors.BoundConn
+}
+
+// WithConnectors returns a shallow copy of the Coder that offers the given bound
+// service connections as native typed tools in the API engine. reg + store are the
+// registry and token store; bound is the set of connections the agent may use.
+func (c *Coder) WithConnectors(reg *connectors.Registry, store connectors.TokenStore, bound []connectors.BoundConn) *Coder {
+	c2 := *c
+	c2.connReg, c2.connStore, c2.boundConns = reg, store, bound
+	return &c2
 }
 
 // WithExtraEnv returns a shallow copy of the Coder with additional environment variables

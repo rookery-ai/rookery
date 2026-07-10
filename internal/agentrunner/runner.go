@@ -18,6 +18,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/composioassets"
+	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/secrets"
@@ -70,6 +71,19 @@ type Runner struct {
 	skillsDir    string           // vaults base: <data>/vaults (skills at <base>/<workspaceID>/skills/<name>)
 	memStore     memoryStore      // optional; nil = no memory injected
 	reflector    *vault.Reflector // optional; mirrors runs into the user's vault
+
+	// Self-managed OAuth connectors: when set, an agent's bound connections
+	// (agent_connections) are exposed as native typed tools in the API engine.
+	connReg   *connectors.Registry
+	connStore connectors.TokenStore
+}
+
+// WithConnectors wires the self-managed-OAuth connector registry + token store so an
+// agent's bound service connections are offered as native typed tools during runs.
+func (r *Runner) WithConnectors(reg *connectors.Registry, store connectors.TokenStore) *Runner {
+	r.connReg = reg
+	r.connStore = store
+	return r
 }
 
 // New creates a Runner.
@@ -263,6 +277,24 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 
 	composioEnabled, _ := r.db.SecretExists(input.WorkspaceID, "COMPOSIO_API_KEY")
 
+	// Load the agent's bound service connections once: they feed both the runtime
+	// prompt (so the agent knows it has native typed tools) and WithConnectors below
+	// (which actually exposes those tools to the API engine).
+	var boundConns []connectors.BoundConn
+	var boundRefs []prompts.ConnectionRef
+	if r.connReg != nil && r.connStore != nil {
+		if conns, err := r.db.ListAgentConnections(ctx, agent.ID); err == nil {
+			for _, c := range conns {
+				boundConns = append(boundConns, connectors.BoundConn{
+					ID: c.ID, Provider: c.Provider, AccountLabel: c.AccountLabel, AccountIdentity: c.AccountIdentity,
+				})
+				boundRefs = append(boundRefs, prompts.ConnectionRef{
+					Provider: c.Provider, Label: c.AccountLabel, Identity: c.AccountIdentity,
+				})
+			}
+		}
+	}
+
 	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
 		AgentMD:         string(agentMD),
 		StateJSON:       string(stateRaw),
@@ -276,6 +308,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		ChatApps:        r.loadChatApps(input.WorkspaceID),
 		BackendType:     backendTypeOf(baseCoder),
 		ComposioEnabled: composioEnabled,
+		Connections:     boundRefs,
 	})
 
 	if baseCoder == nil {
@@ -295,6 +328,13 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	// blocks on interactive permission prompts (--setting-sources "" suppresses
 	// all settings).
 	coderSvc := baseCoder.WithDir(agentDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").WithProgress(input.OnProgress)
+
+	// Expose the agent's bound service connections (loaded above) as native typed tools
+	// (single account → bare tool name; multiple of one provider → __<label> suffixed).
+	// No-op for CLI coders / unbound agents.
+	if len(boundConns) > 0 {
+		coderSvc = coderSvc.WithConnectors(r.connReg, r.connStore, boundConns)
+	}
 
 	// Inject user secrets as env vars when master password is available.
 	if input.MasterPw != "" {
@@ -339,6 +379,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		if input.SendOutput != nil {
 			input.SendOutput(friendly)
 		}
+		r.recordInbox(input, agent, runID, friendly, "error")
 		return errors.New(friendly)
 	}
 
@@ -365,6 +406,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		if input.SendOutput != nil {
 			input.SendOutput(finalOutput)
 		}
+		r.recordInbox(input, agent, runID, finalOutput, "ok")
 		if !streamedLive && input.OnProgress != nil {
 			// Fallback prose wasn't streamed per-turn; show it on the live view too.
 			input.OnProgress(finalOutput)
@@ -374,6 +416,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		if input.SendOutput != nil {
 			input.SendOutput(warn)
 		}
+		r.recordInbox(input, agent, runID, warn, "ok")
 		if input.OnProgress != nil {
 			input.OnProgress(warn)
 		}
@@ -400,6 +443,34 @@ func (r *Runner) reflectRun(input RunInput, agent *db.Agent, runID string, exitC
 		TotalTokens:      rctx.usage.TotalTokens,
 	}); err != nil {
 		slog.Warn("agentrunner: reflect run to vault", "run_id", runID, "err", err)
+	}
+}
+
+// recordInbox drops one inbox notification whose body is the actual message
+// delivered to the user (the friendly error, the [CHAT] output, or the
+// no-notification warning). Best-effort: a failure never affects the run.
+// Silent ([SILENT]) runs never reach a SendOutput site, so they post nothing.
+func (r *Runner) recordInbox(input RunInput, agent *db.Agent, runID, body, status string) {
+	if body == "" || r.db == nil {
+		return
+	}
+	id := uuid.New().String()
+	now := time.Now().UTC()
+	if err := r.db.CreateInboxMessage(&db.InboxMessage{
+		ID: id, WorkspaceID: input.WorkspaceID, Source: "agent_run",
+		AgentID: input.AgentID, AgentName: agent.Name, RefID: runID,
+		Trigger: input.Trigger, Body: body, Status: status, CreatedAt: now,
+	}); err != nil {
+		slog.Warn("inbox: create agent_run", "run_id", runID, "err", err)
+		return
+	}
+	if r.reflector != nil {
+		if err := r.reflector.ReflectInbox(input.WorkspaceID, vault.InboxNote{
+			ID: id, Source: "agent_run", AgentName: agent.Name,
+			Trigger: input.Trigger, Body: body, Status: status, CreatedAt: now,
+		}); err != nil {
+			slog.Warn("inbox: reflect agent_run", "run_id", runID, "err", err)
+		}
 	}
 }
 
@@ -660,15 +731,21 @@ func parseCoderOutput(text string) parsedOutput {
 		}
 
 		// ── [CHAT] — start a new chat block ──────────────────────────────────
-		if strings.HasPrefix(trimmed, "[CHAT] ") {
+		// Matches the marker whether the message is inline ("[CHAT] hello") or the
+		// marker sits alone on its own line with the message on the FOLLOWING lines
+		// ("[CHAT]\nhello\n…") — a common weak-model pattern (e.g. qwen). The earlier
+		// "[CHAT] " (trailing-space) requirement silently dropped a bare-marker block:
+		// inChat never turned on, the message lines were never captured, and a trailing
+		// [SILENT] then suppressed both the prose fallback and the empty-run warning.
+		if strings.HasPrefix(trimmed, "[CHAT]") {
 			flushChat()
 			inChat = true
 			// The [CHAT] protocol has NO close tag, but weak models often emit a stray
 			// "[/CHAT]" anyway (e.g. "[CHAT] msg [/CHAT]" on one line). Strip a trailing
 			// close tag here so it never leaks into the delivered message.
-			content := strings.TrimPrefix(trimmed, "[CHAT] ")
-			content = strings.TrimSuffix(content, "[/CHAT]")
-			chatAcc.WriteString(strings.TrimSpace(content))
+			content := strings.TrimSpace(strings.TrimPrefix(trimmed, "[CHAT]"))
+			content = strings.TrimSpace(strings.TrimSuffix(content, "[/CHAT]"))
+			chatAcc.WriteString(content)
 			continue
 		}
 

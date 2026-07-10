@@ -209,9 +209,19 @@ func serveCmd() *cli.Command {
 				}).
 				WithKBLister(vlt)
 			skillStore := skillstore.New(database, skillsDir)
+			// Self-managed OAuth connectors: the embedded registry + a DB-backed token
+			// store (headless refresh) power both the agent runner's native typed tools
+			// and the background refresh loop.
+			connReg, err := connectors.LoadBundled()
+			if err != nil {
+				return fmt.Errorf("load connectors: %w", err)
+			}
+			connStore := &connectors.DBTokenStore{DB: database, SystemKey: sysKey, Reg: connReg, OAuth: connectors.OAuthClient{}}
+
 			runner := agentrunner.New(database, sysKey, agentsDir, homesDir, cfg.Data.Dir, coderSvc, skillsDir).
 				WithMemory(memStore).
 				WithVault(vlt).
+				WithConnectors(connReg, connStore).
 				WithCoderFactory(func(workspaceID string) *coder.Coder {
 					w, err := database.GetWorkspaceByID(workspaceID)
 					if err != nil || w == nil {
@@ -292,11 +302,7 @@ func serveCmd() *cli.Command {
 			// Self-managed OAuth connector token-refresh loop: proactively renews
 			// service_connections access tokens before they expire so scheduled runs
 			// never hit an expired token. Uses the system key (headless, no master pw).
-			connReg, err := connectors.LoadBundled()
-			if err != nil {
-				return fmt.Errorf("load connectors: %w", err)
-			}
-			connStore := &connectors.DBTokenStore{DB: database, SystemKey: sysKey, Reg: connReg, OAuth: connectors.OAuthClient{}}
+			// connReg/connStore were built above and are shared with the agent runner.
 			go connectors.RunRefreshLoop(ctx, connStore, 5*time.Minute)
 
 			// Nightly GC for expired agent design drafts: drops the draft row and,
