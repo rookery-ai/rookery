@@ -18,11 +18,31 @@ func (h *hostToolSet) providerCounts() map[string]int {
 	return m
 }
 
-// toolName is the bare action name for a single-account provider, or action__<label>
-// when the workspace bound multiple accounts of the same provider.
+// slugLabel reduces a free-text account label to the character set allowed in an LLM
+// tool/function name (^[a-zA-Z0-9_-]{1,64}$). Without this, a label like "My Work" would
+// produce an invalid tool name and the provider would reject the WHOLE tool list.
+func slugLabel(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	out := b.String()
+	if out == "" {
+		out = "acct"
+	}
+	return out
+}
+
+// toolName is the bare action name for a single-account provider, or action__<slug>
+// when the workspace bound multiple accounts of the same provider (slug = safe label).
 func (h *hostToolSet) toolName(action string, b connectors.BoundConn, counts map[string]int) string {
 	if counts[b.Provider] > 1 {
-		return action + "__" + b.AccountLabel
+		return action + "__" + slugLabel(b.AccountLabel)
 	}
 	return action
 }
@@ -66,7 +86,7 @@ func (h *hostToolSet) resolveConnectorTool(name string) (connectors.BoundConn, s
 			continue
 		}
 		if counts[b.Provider] > 1 {
-			if b.AccountLabel == label {
+			if slugLabel(b.AccountLabel) == label {
 				return b, base, true
 			}
 			continue

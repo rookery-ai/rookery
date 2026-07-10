@@ -1704,6 +1704,24 @@ type CoderPromptParams struct {
 // connectedToolsBlock tells the running agent it has native typed tools for its bound
 // service accounts, so it calls them directly instead of writing scripts or discovering
 // slugs. Deliberately says nothing about "discovery" — the tools ARE the interface.
+// slugToolLabel mirrors the coder's slugLabel so the prompt hint names the real
+// multi-account tool suffix (^[a-zA-Z0-9_-]+).
+func slugToolLabel(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	if b.Len() == 0 {
+		return "acct"
+	}
+	return b.String()
+}
+
 func connectedToolsBlock(bound []ConnectionRef) string {
 	if len(bound) == 0 {
 		return ""
@@ -1722,7 +1740,7 @@ func connectedToolsBlock(bound []ConnectionRef) string {
 		}
 		suffix := ""
 		if multi[c.Provider] > 1 {
-			suffix = " (its tools end in `__" + c.Label + "` to target this account)"
+			suffix = " (its tools end in `__" + slugToolLabel(c.Label) + "` to target this account)"
 		}
 		fmt.Fprintf(&sb, "- %s account \"%s\" — %s%s\n", c.Provider, c.Label, id, suffix)
 	}

@@ -192,9 +192,19 @@ func serveCmd() *cli.Command {
 				slog.Info("reconciled stale agent runs", "count", n)
 			}
 
+			// Self-managed OAuth connectors: the embedded registry + a DB-backed token
+			// store (headless refresh) power the agent runner's + the build's native typed
+			// tools and the background refresh loop.
+			connReg, err := connectors.LoadBundled()
+			if err != nil {
+				return fmt.Errorf("load connectors: %w", err)
+			}
+			connStore := &connectors.DBTokenStore{DB: database, SystemKey: sysKey, Reg: connReg, OAuth: connectors.OAuthClient{}}
+
 			designFlow := agentdesigner.NewFlow(coderFor, designer).
 				WithDB(database).
 				WithMemory(memStore).
+				WithConnectors(connReg, connStore).
 				WithSecretsLoader(func(ctx context.Context, workspaceID string) (map[string]string, error) {
 					user, err := database.GetWorkspaceByID(workspaceID)
 					if err != nil || user.EncryptedMasterPassword == "" {
@@ -209,14 +219,6 @@ func serveCmd() *cli.Command {
 				}).
 				WithKBLister(vlt)
 			skillStore := skillstore.New(database, skillsDir)
-			// Self-managed OAuth connectors: the embedded registry + a DB-backed token
-			// store (headless refresh) power both the agent runner's native typed tools
-			// and the background refresh loop.
-			connReg, err := connectors.LoadBundled()
-			if err != nil {
-				return fmt.Errorf("load connectors: %w", err)
-			}
-			connStore := &connectors.DBTokenStore{DB: database, SystemKey: sysKey, Reg: connReg, OAuth: connectors.OAuthClient{}}
 
 			runner := agentrunner.New(database, sysKey, agentsDir, homesDir, cfg.Data.Dir, coderSvc, skillsDir).
 				WithMemory(memStore).

@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/composioassets"
+	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/prompts"
@@ -221,6 +222,38 @@ type Flow struct {
 	memStore      memoryStore // optional; nil = no memory injected
 	kb            kbLister    // optional; nil = no KB manifest injected
 	secretsLoader func(ctx context.Context, workspaceID string) (map[string]string, error)
+
+	// Self-managed OAuth connectors: when set, a build exposes the workspace's service
+	// connections as native typed tools so the coder tests against them for real (mutating
+	// actions are refused by the build-time guard). Mirrors the runner's exposure.
+	connReg   *connectors.Registry
+	connStore connectors.TokenStore
+}
+
+// WithConnectors wires the connector registry + token store so agent BUILDS expose the
+// workspace's service connections as native typed tools (parity with runs). The
+// build-time guard blocks mutating actions during generation.
+func (f *Flow) WithConnectors(reg *connectors.Registry, store connectors.TokenStore) *Flow {
+	f.connReg = reg
+	f.connStore = store
+	return f
+}
+
+// buildBoundConns lists the workspace's service connections as coder BoundConn values
+// for build-time tool exposure (all of them — the agent hasn't declared # Connections yet).
+func (f *Flow) buildBoundConns(ctx context.Context, workspaceID string) []connectors.BoundConn {
+	if f.connReg == nil || f.connStore == nil || f.db == nil {
+		return nil
+	}
+	conns, err := f.db.ListServiceConnections(ctx, workspaceID)
+	if err != nil {
+		return nil
+	}
+	out := make([]connectors.BoundConn, 0, len(conns))
+	for _, c := range conns {
+		out = append(out, connectors.BoundConn{ID: c.ID, Provider: c.Provider, AccountLabel: c.AccountLabel, AccountIdentity: c.AccountIdentity})
+	}
+	return out
 }
 
 // NewFlow creates a Flow. coderResolver maps a workspaceID to the right coder.
@@ -1231,6 +1264,12 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		}
 	}
 	generationCoder = generationCoder.WithExtraEnv(extraEnv)
+	// Expose the workspace's service connections as native typed tools so the build can
+	// test against them for real (reads + create-draft run; the build-time guard refuses
+	// mutating actions like send). Parity with the run path (agentrunner.WithConnectors).
+	if bound := f.buildBoundConns(genCtx, workspaceID); len(bound) > 0 {
+		generationCoder = generationCoder.WithConnectors(f.connReg, f.connStore, bound)
+	}
 	result, err := generationCoder.Generate(genCtx, workspaceID, prompt)
 
 	// Ground-truth the build from disk BEFORE branching on the error. decideBuildOutcome is
