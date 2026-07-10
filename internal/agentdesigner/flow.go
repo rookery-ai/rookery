@@ -137,6 +137,23 @@ type dbDesignStore interface {
 	SetAgentConnections(ctx context.Context, agentID string, connIDs []string) error
 }
 
+// loadConnectionRefs lists the workspace's service connections as prompts.ConnectionRef
+// so the designer can be told which accounts it may bind (via the # Connections: header).
+func (f *Flow) loadConnectionRefs(ctx context.Context, workspaceID string) []prompts.ConnectionRef {
+	if f.db == nil {
+		return nil
+	}
+	conns, err := f.db.ListServiceConnections(ctx, workspaceID)
+	if err != nil {
+		return nil
+	}
+	out := make([]prompts.ConnectionRef, 0, len(conns))
+	for _, c := range conns {
+		out = append(out, prompts.ConnectionRef{Provider: c.Provider, Label: c.AccountLabel, Identity: c.AccountIdentity})
+	}
+	return out
+}
+
 // persistConnections parses the "# Connections:" header against the workspace's
 // available connections and binds the agent to them (agent_connections). A missing
 // header leaves existing bindings untouched (edit) / none (create).
@@ -984,6 +1001,7 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		ConnectedPlatforms: sess.ConnectedPlatforms,
 		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
 		Skills:             sess.Skills,
+		Connections:        f.loadConnectionRefs(ctx, workspaceID),
 		UserProfile:        sess.UserProfile,
 		UserMemory:         sess.UserMemory,
 		ComposioEnabled:    sess.ComposioEnabled,

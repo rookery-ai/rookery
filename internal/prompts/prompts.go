@@ -88,10 +88,20 @@ type DesignSystemParams struct {
 	ConnectedPlatforms []string
 	ChatApps           []ChatAppInfo // connected chat platforms + their commands (drives platform context)
 	Skills             []SkillRef
+	Connections        []ConnectionRef // connected service accounts (Gmail, etc.) available to bind
 	UserProfile        string
 	UserMemory         string
 	ComposioEnabled    bool   // true when user has COMPOSIO_API_KEY in their secrets
 	KBManifest         string // rendered bullet list of the user's existing note paths; "" if empty/unknown
+}
+
+// ConnectionRef describes one connected service account (self-managed OAuth) the agent
+// can be bound to. Provider+Label identify it in the "# Connections:" header.
+type ConnectionRef struct {
+	Provider string // e.g. "google"
+	Label    string // user nickname, e.g. "work"
+	Identity string // account identity, e.g. "work@x.com"
+	Actions  []string // the typed tool names this connection exposes at runtime
 }
 
 // composioServicesBlock returns the authoritative Composio v3 REST API guidance. It is
@@ -679,7 +689,14 @@ TIER DECISION:
   is insufficient for it.
   The design's [TECHNICAL SPEC] proposed a Tier:. Match it, or override toward the LOWER
   tier. You may NOT silently escalate above the design's tier without naming the exact
-  [BULK] task that forces it.` + weakBias + `
+  [BULK] task that forces it.
+
+BULK OUTPUT RULE:
+  When a [BULK] task produces MANY items or LARGE data that must land in files (porting pages,
+  exporting a dataset), the helper script must WRITE those destination files ITSELF (it already
+  has the paths) and print only a short summary/manifest — counts and file paths — never the full
+  data. A big stdout payload gets truncated and cannot be relayed back through your context
+  reliably. Reserve stdout for SMALL final results you actually need to reason over.` + weakBias + `
 
 NOTIFICATION DECISION:
   Does this agent send notifications to the user?
@@ -825,6 +842,22 @@ that makes these agents fail.
 			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", sk.Name, sk.Description))
 		}
 		sb.WriteString("</available_skills>\n\n")
+	}
+
+	// ── Connected service accounts ────────────────────────────────────────────
+	if len(p.Connections) > 0 {
+		sb.WriteString("<available_connections>\n")
+		sb.WriteString("The user has connected these external service accounts. When the agent needs to read or act on one, the runtime gives it NATIVE typed tools for that account (no API keys, no setup) — so prefer these over asking the user for credentials or building integrations from scratch:\n")
+		sb.WriteString("- You MUST add a `# Connections: provider/label, ...` header line in the generated AGENT.md declaring EXACTLY the accounts this agent uses (or `# Connections: none`).\n")
+		sb.WriteString("- Use the `provider/label` form shown below; it is how the agent's connections are recorded.\n\n")
+		for _, cn := range p.Connections {
+			id := cn.Identity
+			if id == "" {
+				id = "unknown account"
+			}
+			sb.WriteString(fmt.Sprintf("- **%s/%s** (%s)\n", cn.Provider, cn.Label, id))
+		}
+		sb.WriteString("</available_connections>\n\n")
 	}
 
 	// ── User context ──────────────────────────────────────────────────────────
