@@ -131,6 +131,31 @@ type dbDesignStore interface {
 	UpsertAgentDraft(d *db.AgentDraft) error
 	GetAgentDraft(workspaceID string) (*db.AgentDraft, error)
 	DeleteAgentDraft(workspaceID string) error
+
+	// Self-managed OAuth service connections (agent binding, mirrors agent_skills).
+	ListServiceConnections(ctx context.Context, workspaceID string) ([]db.ServiceConnection, error)
+	SetAgentConnections(ctx context.Context, agentID string, connIDs []string) error
+}
+
+// persistConnections parses the "# Connections:" header against the workspace's
+// available connections and binds the agent to them (agent_connections). A missing
+// header leaves existing bindings untouched (edit) / none (create).
+func (f *Flow) persistConnections(ctx context.Context, workspaceID, agentID, agentMD string) {
+	if f.db == nil {
+		return
+	}
+	available, err := f.db.ListServiceConnections(ctx, workspaceID)
+	if err != nil {
+		slog.Warn("agentdesigner: list service connections", "workspace_id", workspaceID, "err", err)
+		return
+	}
+	ids := parseConnectionsLine(agentMD, available)
+	if ids == nil {
+		return // no header → don't touch bindings
+	}
+	if err := f.db.SetAgentConnections(ctx, agentID, ids); err != nil {
+		slog.Warn("agentdesigner: set agent connections", "agent_id", agentID, "err", err)
+	}
 }
 
 // memoryStore is satisfied by *memory.Store — kept local to avoid the import.
@@ -1880,6 +1905,9 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 		return "", false, "", fmt.Errorf("save agent: %w", err)
 	}
 
+	// Bind declared service connections (agent_connections), mirroring skills.
+	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD)
+
 	// Remove test artifacts (downloaded files, scratch probes, run outputs) from the live
 	// agent dir now that the agent is saved. Artifacts persist through StateVerifying so
 	// the user can see real test output as proof; this is the post-approval cleanup.
@@ -1943,6 +1971,9 @@ func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string,
 	if err := f.designer.UpdateAgent(workspaceID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap, requiredSecrets); err != nil {
 		return "", false, "", fmt.Errorf("update agent: %w", err)
 	}
+
+	// Bind declared service connections (agent_connections), mirroring skills.
+	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD)
 
 	// Remove any test artifacts left in the live agent dir post-save. For edits the
 	// staging dir is already gone; this cleans root-level scratch from the live dir.
