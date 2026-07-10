@@ -1,0 +1,60 @@
+provider: google
+actions:
+  - name: gmail_search
+    description: "Search the connected Gmail account and return matching message ids + snippets. Use for 'find/search my email', 'do I have mail about X'. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "Gmail search query, e.g. 'from:boss newer_than:7d'"}
+        max:   {type: integer, description: "max messages (default 10)"}
+      required: [query]
+    request:
+      method: GET
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/messages"
+      query:
+        q: "{{query}}"
+        maxResults: "{{max}}"
+    response_extract: "$.messages"
+  - name: gmail_get_message
+    description: "Fetch one Gmail message's headers + body by id (from gmail_search). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        id: {type: string, description: "message id"}
+      required: [id]
+    request:
+      method: GET
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/{{id}}"
+    response_extract: "$"
+  - name: gmail_create_draft
+    description: "Create a Gmail DRAFT (not sent) in the connected account. Use for 'draft/prepare an email for review'. A write, but safe — nothing is delivered."
+    mutating: false
+    params:
+      type: object
+      properties:
+        to:      {type: string}
+        subject: {type: string}
+        body:    {type: string}
+      required: [to, body]
+    request:
+      method: POST
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/drafts"
+      body_builder: gmail_draft
+    response_extract: "$.id"
+  - name: gmail_send_email
+    description: "SEND an email from the connected Gmail account. Use only when the user wants to actually send (not draft). Delivers real mail."
+    mutating: true
+    params:
+      type: object
+      properties:
+        to:      {type: string}
+        subject: {type: string}
+        body:    {type: string}
+      required: [to, body]
+    request:
+      method: POST
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+      body_builder: gmail_rfc822
+    response_extract: "$.id"
