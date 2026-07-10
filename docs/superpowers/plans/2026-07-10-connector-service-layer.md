@@ -4,6 +4,21 @@
 
 **Goal:** Let a workspace connect one or more Gmail accounts via self-managed OAuth and expose their curated actions to agents as native, typed function-calling tools — reliable reads and writes with no discovery or slug/arg guessing.
 
+> **STATUS (2026-07-10): Phases 1–4 implemented, all unit tests green, server boots.**
+> Deviations from this plan (reconciled against the codebase, all intentional):
+> - `db.DB` embeds `*sql.DB` → repositories use `d.ExecContext` etc. (not `d.conn.*`).
+> - Module path is `github.com/ilijad1/simple-agents`; tests are `db_test`/package-internal
+>   using `db.Open(..., "../../migrations")` + `CreateWorkspace`/`CreateAgent` (no `newTestDB`).
+> - OAuth consent-URL method is `Provider.ConsentURL` (the `AuthorizeURL` field name collided).
+> - OAuth callback route is `/dashboard/connectors/services/callback/:provider` (authed group).
+> - `# Connections:` parser does NOT split on `/` (it's the `provider/label` separator).
+> - Multi-account tool labels are **slugified** into tool names (`gmail_send_email__My_Work`)
+>   to satisfy the provider function-name charset; resolver reverses via the same slug.
+> - `Flow.WithConnectors` exposes connections at BUILD time too (post-review fix), so the
+>   build-time mutation guard is live — matching spec §5.
+> **Remaining: the real-Google E2E (Task 13 step 6) needs the user's Google Cloud OAuth app
+> + consent and has NOT been run. The "weak model calls it reliably" claim is unproven until then.**
+
 **Architecture:** A new `internal/connectors` package loads embedded per-provider OAuth configs + action manifests (data files), and exposes `Execute(ctx, conn, action, args)` — validate args against a JSON schema, ensure a fresh access token (refresh + re-encrypt), render the provider request from a template, call it, normalize the result. OAuth tokens live in two new `systemKey`-encrypted tables. The API coder's `hostToolSet` gains one `llm.Tool` per action of the connections an agent is bound to (`agent_connections`, mirroring `agent_skills`), with multi-account tools label-suffixed. A background goroutine refreshes tokens before expiry.
 
 **Tech Stack:** Go, SQLite (`modernc.org/sqlite`), AES-256-GCM (existing `internal/secrets`), Echo v4 web, `internal/llm` tool types, `gopkg.in/yaml.v3` (already a dependency — verify in Task 0).
