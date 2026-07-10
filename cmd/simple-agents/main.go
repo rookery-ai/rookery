@@ -14,6 +14,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/chat"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/config"
+	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/gateway"
 	"github.com/ilijad1/simple-agents/internal/memory"
@@ -287,6 +288,16 @@ func serveCmd() *cli.Command {
 
 			sessionSvc := chat.New(database).WithReflector(vlt.Reflector())
 			go sessionSvc.Run(ctx)
+
+			// Self-managed OAuth connector token-refresh loop: proactively renews
+			// service_connections access tokens before they expire so scheduled runs
+			// never hit an expired token. Uses the system key (headless, no master pw).
+			connReg, err := connectors.LoadBundled()
+			if err != nil {
+				return fmt.Errorf("load connectors: %w", err)
+			}
+			connStore := &connectors.DBTokenStore{DB: database, SystemKey: sysKey, Reg: connReg, OAuth: connectors.OAuthClient{}}
+			go connectors.RunRefreshLoop(ctx, connStore, 5*time.Minute)
 
 			// Nightly GC for expired agent design drafts: drops the draft row and,
 			// for create-mode drafts that reached StateVerifying, removes the

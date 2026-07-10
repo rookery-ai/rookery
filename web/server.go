@@ -19,6 +19,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/audit"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/config"
+	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/gateway"
 	"github.com/ilijad1/simple-agents/internal/memory"
@@ -50,6 +51,7 @@ type Server struct {
 	homesDir   string              // per-user claude HOME directories
 	vault      *vault.Vault        // per-user knowledge base
 	memory     *memory.Store       // per-user structured context (injected into one-off chat)
+	connectors *connectors.Registry // self-managed-OAuth connector registry (embedded data files)
 
 	// runs tracks in-flight manual ("Run Now") agent runs so progress can be
 	// streamed to the browser over SSE while the run executes on a detached
@@ -98,6 +100,12 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 		memory:     memStore,
 		runs:       make(map[string]*agentRunState),
 	}
+
+	connReg, err := connectors.LoadBundled()
+	if err != nil {
+		return nil, fmt.Errorf("load connectors: %w", err)
+	}
+	s.connectors = connReg
 
 	s.echo.HideBanner = true
 	s.echo.HidePort = true
@@ -284,6 +292,12 @@ func (s *Server) setupRoutes() {
 	dash.POST("/connectors", s.handleSaveConnector)
 	dash.POST("/connectors/:platform/delete", s.handleDeleteConnector)
 	dash.POST("/connectors/:platform/test", s.handleTestConnector)
+	// Self-managed OAuth service connections (Google/Gmail, etc.)
+	dash.GET("/connectors/services", s.showServices)
+	dash.POST("/connectors/services/:provider/creds", s.handleSaveProviderCreds)
+	dash.POST("/connectors/services/:provider/connect", s.handleConnectService)
+	dash.GET("/connectors/services/callback/:provider", s.handleOAuthCallback)
+	dash.POST("/connectors/services/:id/delete", s.handleDeleteServiceConnection)
 	dash.GET("/composio", s.showComposio)
 	dash.GET("/chats", s.showChats)
 	dash.POST("/chats", s.handleCreateChat)
@@ -296,6 +310,11 @@ func (s *Server) setupRoutes() {
 	dash.POST("/reminders", s.handleCreateReminder)
 	dash.POST("/reminders/:id/delete", s.handleDeleteReminder)
 	dash.GET("/reminders/poll", s.handlePollReminders)
+	dash.GET("/inbox", s.showInbox)
+	dash.GET("/inbox/poll", s.handleInboxPoll)
+	dash.POST("/inbox/:id/read", s.handleMarkInboxRead)
+	dash.POST("/inbox/read-all", s.handleMarkAllInboxRead)
+	dash.POST("/inbox/:id/delete", s.handleDeleteInboxMessage)
 	dash.GET("/memory", func(c echo.Context) error {
 		return c.Redirect(http.StatusFound, "/dashboard/kb?path=memory")
 	})

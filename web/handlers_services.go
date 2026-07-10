@@ -1,0 +1,248 @@
+package web
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"net/http"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/ilijad1/simple-agents/internal/connectors"
+	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/labstack/echo/v4"
+)
+
+// ── Signed OAuth state ──────────────────────────────────────────────────────
+// The `state` round-trips through the provider, so it must be tamper-proof and
+// time-bounded. Format (before base64): "<unix>|<payload>|<hmac>".
+
+const stateTTL = 10 * time.Minute
+
+func stateMAC(secret []byte, msg string) string {
+	m := hmac.New(sha256.New, secret)
+	m.Write([]byte(msg))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+func signState(secret []byte, payload string, now time.Time) string {
+	ts := strconv.FormatInt(now.Unix(), 10)
+	msg := ts + "|" + payload
+	tok := msg + "|" + stateMAC(secret, msg)
+	return base64.RawURLEncoding.EncodeToString([]byte(tok))
+}
+
+func verifyState(secret []byte, tok string, now time.Time) (string, bool) {
+	b, err := base64.RawURLEncoding.DecodeString(tok)
+	if err != nil {
+		return "", false
+	}
+	parts := strings.SplitN(string(b), "|", 3)
+	if len(parts) != 3 {
+		return "", false
+	}
+	ts, payload, mac := parts[0], parts[1], parts[2]
+	if !hmac.Equal([]byte(mac), []byte(stateMAC(secret, ts+"|"+payload))) {
+		return "", false
+	}
+	sec, err := strconv.ParseInt(ts, 10, 64)
+	if err != nil || now.Sub(time.Unix(sec, 0)) > stateTTL {
+		return "", false
+	}
+	return payload, true
+}
+
+// ── Page ────────────────────────────────────────────────────────────────────
+
+type serviceProviderView struct {
+	Name        string
+	HasCreds    bool
+	RedirectURI string
+	Connections []db.ServiceConnection
+}
+
+type servicesPageData struct {
+	*pageData
+	Providers []serviceProviderView
+}
+
+// availableServiceProviders is the set of providers exposed in the UI (grows as
+// provider data files are added).
+var availableServiceProviders = []string{"google"}
+
+// redirectWithError performs a PRG redirect carrying a user-facing error message in
+// the query string (showServices renders it into the alert).
+func (s *Server) redirectWithError(c echo.Context, path, msg string) error {
+	return c.Redirect(http.StatusSeeOther, path+"?error="+url.QueryEscape(msg))
+}
+
+func (s *Server) showServices(c echo.Context) error {
+	w := c.Get("workspace").(*db.Workspace)
+	ctx := c.Request().Context()
+	all, _ := s.db.ListServiceConnections(ctx, w.ID)
+
+	var views []serviceProviderView
+	for _, provider := range availableServiceProviders {
+		cfg, _ := s.db.GetServiceProviderConfig(ctx, w.ID, provider)
+		var conns []db.ServiceConnection
+		for _, cn := range all {
+			if cn.Provider == provider {
+				conns = append(conns, cn)
+			}
+		}
+		views = append(views, serviceProviderView{
+			Name:        provider,
+			HasCreds:    cfg != nil,
+			RedirectURI: s.callbackURL(c, provider),
+			Connections: conns,
+		})
+	}
+	p := s.page(c, "Service Connections")
+	if e := c.QueryParam("error"); e != "" {
+		p.Error = e
+	}
+	return c.Render(http.StatusOK, "dashboard/services.html", &servicesPageData{
+		pageData:  p,
+		Providers: views,
+	})
+}
+
+// callbackURL is the redirect URI the workspace registers with the provider.
+func (s *Server) callbackURL(c echo.Context, provider string) string {
+	return s.publicBaseURL(c) + "/dashboard/connectors/services/callback/" + provider
+}
+
+func (s *Server) publicBaseURL(c echo.Context) string {
+	if b := os.Getenv("SA_PUBLIC_URL"); b != "" {
+		return strings.TrimRight(b, "/")
+	}
+	scheme := c.Scheme()
+	return scheme + "://" + c.Request().Host
+}
+
+// ── Handlers ────────────────────────────────────────────────────────────────
+
+func (s *Server) handleSaveProviderCreds(c echo.Context) error {
+	w := c.Get("workspace").(*db.Workspace)
+	provider := c.Param("provider")
+	clientID := strings.TrimSpace(c.FormValue("client_id"))
+	clientSecret := strings.TrimSpace(c.FormValue("client_secret"))
+	if clientID == "" || clientSecret == "" {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Client ID and secret are required.")
+	}
+	encID, err := secrets.EncryptWithSystemKey(clientID, s.systemKey)
+	if err != nil {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Failed to store credentials.")
+	}
+	encSec, err := secrets.EncryptWithSystemKey(clientSecret, s.systemKey)
+	if err != nil {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Failed to store credentials.")
+	}
+	if err := s.db.UpsertServiceProviderConfig(c.Request().Context(), db.ServiceProviderConfig{
+		ID: uuid.New().String(), WorkspaceID: w.ID, Provider: provider,
+		EncryptedClientID: encID, EncryptedClientSecret: encSec,
+	}); err != nil {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Failed to save credentials.")
+	}
+	return c.Redirect(http.StatusSeeOther, "/dashboard/connectors/services")
+}
+
+func (s *Server) handleConnectService(c echo.Context) error {
+	w := c.Get("workspace").(*db.Workspace)
+	provider := c.Param("provider")
+	label := strings.TrimSpace(c.FormValue("account_label"))
+	if label == "" {
+		label = "account"
+	}
+	prov, ok := s.connectors.ProviderByName(provider)
+	if !ok {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Unknown provider.")
+	}
+	cfg, _ := s.db.GetServiceProviderConfig(c.Request().Context(), w.ID, provider)
+	if cfg == nil {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Save your OAuth app credentials first.")
+	}
+	clientID, err := secrets.DecryptWithSystemKey(cfg.EncryptedClientID, s.systemKey)
+	if err != nil {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Stored credentials are unreadable; re-enter them.")
+	}
+	nonce := uuid.New().String()
+	payload := strings.Join([]string{w.ID, provider, label, nonce}, "~")
+	state := signState(s.systemKey, payload, time.Now())
+	return c.Redirect(http.StatusSeeOther, prov.ConsentURL(clientID, s.callbackURL(c, provider), state))
+}
+
+func (s *Server) handleOAuthCallback(c echo.Context) error {
+	w := c.Get("workspace").(*db.Workspace)
+	provider := c.Param("provider")
+	ctx := c.Request().Context()
+
+	if errParam := c.QueryParam("error"); errParam != "" {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Authorization was denied: "+errParam)
+	}
+	code := c.QueryParam("code")
+	payload, ok := verifyState(s.systemKey, c.QueryParam("state"), time.Now())
+	if !ok || code == "" {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Invalid or expired authorization request; try again.")
+	}
+	parts := strings.Split(payload, "~")
+	if len(parts) != 4 || parts[0] != w.ID || parts[1] != provider {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Authorization did not match this workspace; try again.")
+	}
+	label := parts[2]
+
+	prov, ok := s.connectors.ProviderByName(provider)
+	if !ok {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Unknown provider.")
+	}
+	cfg, _ := s.db.GetServiceProviderConfig(ctx, w.ID, provider)
+	if cfg == nil {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Missing OAuth app credentials.")
+	}
+	clientID, _ := secrets.DecryptWithSystemKey(cfg.EncryptedClientID, s.systemKey)
+	clientSecret, _ := secrets.DecryptWithSystemKey(cfg.EncryptedClientSecret, s.systemKey)
+
+	oauth := connectors.OAuthClient{}
+	ts, err := oauth.ExchangeCode(ctx, prov, clientID, clientSecret, code, s.callbackURL(c, provider))
+	if err != nil {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Token exchange failed: "+err.Error())
+	}
+	identity, _ := oauth.FetchIdentity(ctx, prov, ts.AccessToken)
+
+	encAccess, _ := secrets.EncryptWithSystemKey(ts.AccessToken, s.systemKey)
+	encRefresh, _ := secrets.EncryptWithSystemKey(ts.RefreshToken, s.systemKey)
+	expiresAt := time.Now().Add(time.Duration(ts.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
+
+	if err := s.db.InsertServiceConnection(ctx, db.ServiceConnection{
+		ID: uuid.New().String(), WorkspaceID: w.ID, Provider: provider,
+		AccountLabel: label, AccountIdentity: identity,
+		Scopes:               strings.Join(prov.DefaultScopes, " "),
+		EncryptedAccessToken: encAccess, EncryptedRefreshToken: encRefresh,
+		ExpiresAt: expiresAt, Status: "ACTIVE",
+	}); err != nil {
+		return s.redirectWithError(c, "/dashboard/connectors/services",
+			"Connected, but saving failed (a connection labeled '"+label+"' may already exist): "+err.Error())
+	}
+	return c.Redirect(http.StatusSeeOther, "/dashboard/connectors/services")
+}
+
+func (s *Server) handleDeleteServiceConnection(c echo.Context) error {
+	w := c.Get("workspace").(*db.Workspace)
+	id := c.Param("id")
+	ctx := c.Request().Context()
+	// Ownership check: the connection must belong to the active workspace.
+	conn, err := s.db.GetServiceConnection(ctx, id)
+	if err != nil || conn == nil || conn.WorkspaceID != w.ID {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Connection not found.")
+	}
+	if err := s.db.DeleteServiceConnection(ctx, id); err != nil {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Failed to delete connection.")
+	}
+	return c.Redirect(http.StatusSeeOther, "/dashboard/connectors/services")
+}

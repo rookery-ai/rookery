@@ -1,0 +1,80 @@
+{{template "head" .}}
+{{template "navbar" .}}
+
+<div class="container mx-auto px-4 py-8 max-w-3xl">
+  {{template "alert" .}}
+
+  <div class="mb-8">
+    <h1 class="text-2xl font-bold">🔌 Service Connections</h1>
+    <p class="text-base-content/50 text-sm mt-1">Connect external accounts (Gmail, etc.) so your agents can read and act on them with native, typed tools. You can connect multiple accounts of the same service.</p>
+  </div>
+
+  {{range .Providers}}
+  <div class="card bg-base-100 shadow-sm border border-base-300 mb-4">
+    <div class="card-body p-5">
+      <div class="flex items-center gap-3 mb-4">
+        <div class="bg-primary/20 text-primary rounded-xl p-3 font-bold uppercase">{{slice .Name 0 1}}</div>
+        <div class="flex-1">
+          <h2 class="font-semibold text-lg capitalize">{{.Name}}</h2>
+          <p class="text-sm text-base-content/50">OAuth app credentials are stored per workspace.</p>
+        </div>
+        {{if .HasCreds}}
+        <span class="badge badge-success">Credentials saved</span>
+        {{else}}
+        <span class="badge badge-ghost">No credentials</span>
+        {{end}}
+      </div>
+
+      <!-- Step 1: OAuth app credentials -->
+      <details class="mb-4" {{if not .HasCreds}}open{{end}}>
+        <summary class="cursor-pointer text-sm font-medium mb-2">Step 1 — OAuth app credentials</summary>
+        <p class="text-xs text-base-content/60 mb-2">
+          In your provider's developer console, create an OAuth client and add this redirect URI:
+          <code class="break-all">{{.RedirectURI}}</code>
+        </p>
+        <form method="POST" action="/dashboard/connectors/services/{{.Name}}/creds" class="space-y-2">
+          <input type="text" name="client_id" placeholder="Client ID" class="input input-bordered input-sm w-full" required>
+          <input type="password" name="client_secret" placeholder="Client Secret" class="input input-bordered input-sm w-full" required>
+          <button type="submit" class="btn btn-sm btn-primary">Save credentials</button>
+        </form>
+      </details>
+
+      <!-- Step 2: Connect an account -->
+      {{if .HasCreds}}
+      <div class="mb-4">
+        <div class="text-sm font-medium mb-2">Step 2 — Connect an account</div>
+        <form method="POST" action="/dashboard/connectors/services/{{.Name}}/connect" class="flex gap-2 items-center">
+          <input type="text" name="account_label" placeholder="Label (e.g. work)" class="input input-bordered input-sm flex-1" required>
+          <button type="submit" class="btn btn-sm btn-secondary">Connect {{.Name}} account</button>
+        </form>
+      </div>
+      {{end}}
+
+      <!-- Connected accounts -->
+      {{if .Connections}}
+      <div class="divider my-2 text-xs">Connected accounts</div>
+      <ul class="space-y-2">
+        {{range .Connections}}
+        <li class="flex items-center justify-between bg-base-200 rounded-lg px-3 py-2">
+          <div>
+            <span class="font-medium">{{.AccountLabel}}</span>
+            <span class="text-base-content/50 text-sm">— {{if .AccountIdentity}}{{.AccountIdentity}}{{else}}(unknown){{end}}</span>
+            <span class="badge badge-sm {{if eq .Status "ACTIVE"}}badge-success{{else}}badge-warning{{end}} ml-2">{{.Status}}</span>
+          </div>
+          <form method="POST" action="/dashboard/connectors/services/{{.ID}}/delete" onsubmit="return confirm('Disconnect this account?');">
+            <button type="submit" class="btn btn-xs btn-ghost text-error">Disconnect</button>
+          </form>
+        </li>
+        {{end}}
+      </ul>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+
+  <div class="text-xs text-base-content/40 mt-4">
+    Tokens are encrypted at rest and refreshed automatically. Attach a connection to an agent from the agent's page.
+  </div>
+</div>
+
+{{template "foot" .}}
