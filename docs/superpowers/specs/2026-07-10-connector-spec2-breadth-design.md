@@ -88,15 +88,20 @@ the end, per the user's plan (Spec 2 + Spec 3 first, then E2E).
 
 ## Implementation status & known caveats (2026-07-13)
 
-Phases A–E implemented + unit-tested (httptest); Phases F/G/H deferred. Two caveats that
-the green unit suite structurally cannot catch — both must be understood before E2E:
+Phases A–F implemented + unit-tested (httptest); Phases G/H deferred. One caveat remains
+that the green unit suite structurally cannot catch:
 
-1. **CLI-coder workspaces lost external-service access (regression, not just a deferral).**
-   Connector tools live only in the API engine's `hostToolSet`; CLI coders (claude-code,
-   opencode) run as subprocesses and never see them. Composio (their old path) is now
-   removed. So a CLI-coder workspace currently has NO external-service access until Phase F
-   (`sa-connect` CLI). The shipped state is **API-engine workspaces only**. The planned
-   weak-model (Mistral/API) E2E is unaffected.
+1. **RESOLVED — connectors are now coder-agnostic (Phase F done).** Auth/execution is fully
+   decoupled from coder type: both converge on `connectors.Execute`. The API engine calls it
+   in-process; CLI coders (claude-code, opencode) shell out to `simple-agents connector exec
+   <tool> --args '<json>'`, which reaches the same `Execute` via a loopback bridge
+   (`internal/connectors/bridge.go`) in the host process — Landlock restricts the filesystem,
+   not loopback TCP, so a sandboxed subprocess can reach `127.0.0.1`, and OAuth tokens never
+   leave the host. Per-run bearer tokens are scoped to the run's bound connections. Verified
+   by a real-subcommand E2E test (`bridge_cli_test.go`). Tool naming/resolution lives once in
+   `connectors/tools.go` (`ToolDefs`/`ResolveTool`), shared by both paths. (Minor residual: a
+   BUILD on a CLI coder doesn't expose connectors at generation time — build-time connection
+   testing is API-engine-only; the RUN path is covered for both.)
 2. **Non-Google provider configs are UNVERIFIED against live docs.** GitHub/Notion/Outlook/
    Jira YAML were hand-authored; the mock-based tests only prove the engine + parsing, not
    that endpoints/scopes/auth/body shapes are correct. Google/Gmail is standard and
