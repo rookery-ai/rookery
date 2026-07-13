@@ -1,0 +1,124 @@
+provider: openai
+actions:
+  - name: openai_chat_completion
+    description: "Call OpenAI chat completions with a messages array. Use for text generation via the user's own OpenAI account."
+    mutating: false
+    params:
+      type: object
+      properties:
+        model:    {type: string, description: "e.g. gpt-4o-mini"}
+        messages: {type: array, items: {type: object}, description: "[{role, content}]"}
+      required: [model, messages]
+    request:
+      method: POST
+      url: "https://api.openai.com/v1/chat/completions"
+      body:
+        model: "{{model}}"
+        messages: "{{messages}}"
+    response_extract: "$"
+  - name: openai_create_embedding
+    description: "Create an embedding vector for input text. Read-like (no external side effect)."
+    mutating: false
+    params:
+      type: object
+      properties:
+        model: {type: string, description: "e.g. text-embedding-3-small"}
+        input: {type: string}
+      required: [model, input]
+    request:
+      method: POST
+      url: "https://api.openai.com/v1/embeddings"
+      body:
+        model: "{{model}}"
+        input: "{{input}}"
+    response_extract: "$"
+  - name: openai_create_image
+    description: "Generate an image from a text prompt (DALL·E / gpt-image). Creates content in the user's account."
+    mutating: false
+    params:
+      type: object
+      properties:
+        model:  {type: string, description: "e.g. gpt-image-1 or dall-e-3"}
+        prompt: {type: string}
+        size:   {type: string, description: "e.g. 1024x1024"}
+      required: [prompt]
+    request:
+      method: POST
+      url: "https://api.openai.com/v1/images/generations"
+      body:
+        model: "{{model}}"
+        prompt: "{{prompt}}"
+        size: "{{size}}"
+    response_extract: "$"
+  - name: openai_moderation
+    description: "Classify whether text is potentially harmful via the moderations endpoint. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        input: {type: string}
+      required: [input]
+    request:
+      method: POST
+      url: "https://api.openai.com/v1/moderations"
+      body:
+        input: "{{input}}"
+    response_extract: "$"
+  - name: openai_list_models
+    description: "List models available to the account. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://api.openai.com/v1/models"
+    response_extract: "$.data"
+  - name: openai_retrieve_model
+    description: "Get details of one model by id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        model: {type: string}
+      required: [model]
+    request:
+      method: GET
+      url: "https://api.openai.com/v1/models/{{model}}"
+    response_extract: "$"
+  - name: openai_list_files
+    description: "List files uploaded to the account. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://api.openai.com/v1/files"
+    response_extract: "$.data"
+  - name: openai_delete_file
+    description: "Delete an uploaded file by id. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        file_id: {type: string}
+      required: [file_id]
+    request:
+      method: DELETE
+      url: "https://api.openai.com/v1/files/{{file_id}}"
+    response_extract: "$"
+  - name: openai_create_assistant
+    description: "Create an Assistant (Assistants API). Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        model:        {type: string}
+        name:         {type: string}
+        instructions: {type: string}
+      required: [model]
+    request:
+      method: POST
+      url: "https://api.openai.com/v1/assistants"
+      body:
+        model: "{{model}}"
+        name: "{{name}}"
+        instructions: "{{instructions}}"
+    response_extract: "$"
