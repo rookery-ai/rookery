@@ -83,6 +83,29 @@ func TestAccessTokenValidReturnsStored(t *testing.T) {
 	}
 }
 
+func TestAccessTokenAPIKeyReturnsStoredKeyNoRefresh(t *testing.T) {
+	d, ws := storeTestDB(t)
+	key := mkKey()
+	reg := testRegistry(t)
+	ctx := context.Background()
+
+	enc, _ := secrets.EncryptWithSystemKey("sk-secret", key)
+	// api_key connection: empty refresh + empty expiry (would normally be treated as expired).
+	d.InsertServiceConnection(ctx, db.ServiceConnection{
+		ID: "k1", WorkspaceID: ws, Provider: "openai", AccountLabel: "default",
+		EncryptedAccessToken: enc, ExpiresAt: "", Status: "ACTIVE",
+	})
+
+	store := &DBTokenStore{DB: d, SystemKey: key, Reg: reg, OAuth: OAuthClient{}}
+	got, err := store.AccessToken(ctx, ConnRef{ID: "k1", Provider: "openai"})
+	if err != nil {
+		t.Fatalf("AccessToken: %v", err)
+	}
+	if got != "sk-secret" {
+		t.Fatalf("got %q, want sk-secret", got)
+	}
+}
+
 func TestAccessTokenRefreshFailureFlipsStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
