@@ -12,8 +12,8 @@ func TestLoadBundledGoogle(t *testing.T) {
 		t.Fatalf("google provider not loaded: %+v", p)
 	}
 	acts := r.Actions("google")
-	if len(acts) != 4 {
-		t.Fatalf("want 4 gmail actions, got %d", len(acts))
+	if len(acts) != 10 {
+		t.Fatalf("want 10 gmail actions, got %d", len(acts))
 	}
 	send, ok := r.Action("google", "gmail_send_email")
 	if !ok || !send.Mutating {

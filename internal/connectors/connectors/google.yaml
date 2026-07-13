@@ -58,3 +58,86 @@ actions:
       url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
       body_builder: gmail_rfc822
     response_extract: "$.id"
+  - name: gmail_list_labels
+    description: "List all Gmail labels (system + user-created) with their ids. Use to resolve a label NAME to its id before gmail_modify_labels. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/labels"
+    response_extract: "$.labels"
+  - name: gmail_list_threads
+    description: "List Gmail threads matching a query (ids + snippets). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "Gmail search query"}
+        max:   {type: integer, description: "max threads (default 10)"}
+      required: [query]
+    request:
+      method: GET
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/threads"
+      query: {q: "{{query}}", maxResults: "{{max}}"}
+    response_extract: "$.threads"
+  - name: gmail_create_label
+    description: "Create a new Gmail label. A write (creates a label), safe — nothing is sent."
+    mutating: false
+    params:
+      type: object
+      properties:
+        name: {type: string, description: "label name"}
+      required: [name]
+    request:
+      method: POST
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/labels"
+      body:
+        name: "{{name}}"
+        labelListVisibility: "labelShow"
+        messageListVisibility: "show"
+    response_extract: "$"
+  - name: gmail_modify_labels
+    description: "Add and/or remove label ids on a Gmail message. Resolve names to ids with gmail_list_labels first. A write to the user's own mailbox; not a send."
+    mutating: false
+    params:
+      type: object
+      properties:
+        id:     {type: string, description: "message id"}
+        add:    {type: array, items: {type: string}, description: "label ids to add"}
+        remove: {type: array, items: {type: string}, description: "label ids to remove"}
+      required: [id]
+    request:
+      method: POST
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/{{id}}/modify"
+      body:
+        addLabelIds:    "{{add}}"
+        removeLabelIds: "{{remove}}"
+    response_extract: "$"
+  - name: gmail_move_to_trash
+    description: "Move a Gmail message to Trash (recoverable). Use for 'delete/archive this email'. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        id: {type: string, description: "message id"}
+      required: [id]
+    request:
+      method: POST
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/{{id}}/trash"
+    response_extract: "$"
+  - name: gmail_reply_to_thread
+    description: "Send a reply within an existing Gmail thread (keeps it in-thread). Delivers real mail. Args: thread_id, to, subject, body."
+    mutating: true
+    params:
+      type: object
+      properties:
+        thread_id: {type: string}
+        to:        {type: string}
+        subject:   {type: string}
+        body:      {type: string}
+      required: [thread_id, to, body]
+    request:
+      method: POST
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+      body_builder: gmail_reply
+    response_extract: "$.id"

@@ -89,6 +89,7 @@ type bodyBuilder func(args map[string]any) (body []byte, contentType string, err
 var bodyBuilders = map[string]bodyBuilder{
 	"gmail_rfc822":     gmailRFC822,
 	"gmail_draft":      gmailDraft,
+	"gmail_reply":      gmailReply,
 	"notion_page":      notionPage,
 	"msgraph_sendmail": msgraphSendMail,
 	"msgraph_draft":    msgraphDraft,
@@ -243,5 +244,13 @@ func gmailRFC822(args map[string]any) ([]byte, string, error) {
 func gmailDraft(args map[string]any) ([]byte, string, error) {
 	raw := base64.URLEncoding.EncodeToString([]byte(rfc822(args)))
 	body, err := json.Marshal(map[string]any{"message": map[string]string{"raw": raw}})
+	return body, "application/json", err
+}
+
+// gmailReply builds a threaded reply: the RFC822 message plus the threadId so Gmail keeps
+// it in-thread. Args: thread_id, to, subject, body.
+func gmailReply(args map[string]any) ([]byte, string, error) {
+	raw := base64.URLEncoding.EncodeToString([]byte(rfc822(args)))
+	body, err := json.Marshal(map[string]any{"raw": raw, "threadId": asString(args["thread_id"])})
 	return body, "application/json", err
 }

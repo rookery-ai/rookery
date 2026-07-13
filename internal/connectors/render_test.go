@@ -95,3 +95,28 @@ func TestRenderBodyNestedAndEmbedded(t *testing.T) {
 		t.Fatalf("nested content wrong: %v", m0["content"])
 	}
 }
+
+func TestRenderGmailReply(t *testing.T) {
+	a := Action{Request: RequestTemplate{Method: "POST", URL: "https://api/threads/send", BodyBuilder: "gmail_reply"}}
+	_, _, body, ct, err := renderRequest(a, map[string]any{
+		"thread_id": "T1", "to": "a@b.com", "subject": "Re: hi", "body": "reply text",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(ct, "application/json") {
+		t.Fatalf("ct=%s", ct)
+	}
+	var env struct {
+		Raw      string `json:"raw"`
+		ThreadID string `json:"threadId"`
+	}
+	json.Unmarshal(body, &env)
+	if env.ThreadID != "T1" {
+		t.Fatalf("threadId missing: %s", body)
+	}
+	dec, _ := base64.URLEncoding.DecodeString(env.Raw)
+	if !strings.Contains(string(dec), "reply text") {
+		t.Fatalf("body missing: %s", dec)
+	}
+}
