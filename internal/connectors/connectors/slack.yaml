@@ -1,0 +1,148 @@
+provider: slack
+actions:
+  - name: slack_send_message
+    description: "Post a message to a Slack channel or DM. Use for 'send/post to Slack'. Delivers a real message."
+    mutating: true
+    params:
+      type: object
+      properties:
+        channel: {type: string, description: "channel id (C...) or user id for a DM"}
+        text:    {type: string, description: "message text"}
+      required: [channel, text]
+    request:
+      method: POST
+      url: "https://slack.com/api/chat.postMessage"
+      body:
+        channel: "{{channel}}"
+        text: "{{text}}"
+    response_extract: "$"
+  - name: slack_list_channels
+    description: "List channels the token can see (id, name). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max channels (default 100)"}
+      required: []
+    request:
+      method: GET
+      url: "https://slack.com/api/conversations.list"
+      query: {limit: "{{limit}}", types: "public_channel,private_channel"}
+    response_extract: "$.channels"
+  - name: slack_fetch_conversation_history
+    description: "Fetch recent messages from a channel by id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        channel: {type: string}
+        limit:   {type: integer, description: "max messages (default 20)"}
+      required: [channel]
+    request:
+      method: GET
+      url: "https://slack.com/api/conversations.history"
+      query: {channel: "{{channel}}", limit: "{{limit}}"}
+    response_extract: "$.messages"
+  - name: slack_fetch_message_thread
+    description: "Fetch replies in a thread (channel id + parent message ts). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        channel: {type: string}
+        ts:      {type: string, description: "parent message timestamp"}
+      required: [channel, ts]
+    request:
+      method: GET
+      url: "https://slack.com/api/conversations.replies"
+      query: {channel: "{{channel}}", ts: "{{ts}}"}
+    response_extract: "$.messages"
+  - name: slack_find_channels
+    description: "Find channels by name (client-side match on conversations.list). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer}
+      required: []
+    request:
+      method: GET
+      url: "https://slack.com/api/conversations.list"
+      query: {limit: "{{limit}}", types: "public_channel,private_channel"}
+    response_extract: "$.channels"
+  - name: slack_find_user_by_email
+    description: "Look up a Slack user by email address. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        email: {type: string}
+      required: [email]
+    request:
+      method: GET
+      url: "https://slack.com/api/users.lookupByEmail"
+      query: {email: "{{email}}"}
+    response_extract: "$.user"
+  - name: slack_list_users
+    description: "List workspace users (id, name, real name). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer}
+      required: []
+    request:
+      method: GET
+      url: "https://slack.com/api/users.list"
+      query: {limit: "{{limit}}"}
+    response_extract: "$.members"
+  - name: slack_add_reaction
+    description: "Add an emoji reaction to a message (channel id + ts + emoji name). Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        channel: {type: string}
+        ts:      {type: string, description: "message timestamp"}
+        name:    {type: string, description: "emoji name without colons, e.g. thumbsup"}
+      required: [channel, ts, name]
+    request:
+      method: POST
+      url: "https://slack.com/api/reactions.add"
+      body:
+        channel: "{{channel}}"
+        timestamp: "{{ts}}"
+        name: "{{name}}"
+    response_extract: "$"
+  - name: slack_create_channel
+    description: "Create a new Slack channel. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        name:       {type: string, description: "channel name (lowercase, no spaces)"}
+        is_private: {type: boolean}
+      required: [name]
+    request:
+      method: POST
+      url: "https://slack.com/api/conversations.create"
+      body:
+        name: "{{name}}"
+        is_private: "{{is_private}}"
+    response_extract: "$.channel"
+  - name: slack_invite_to_channel
+    description: "Invite users (comma-separated user ids) to a channel. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        channel: {type: string}
+        users:   {type: string, description: "comma-separated user ids"}
+      required: [channel, users]
+    request:
+      method: POST
+      url: "https://slack.com/api/conversations.invite"
+      body:
+        channel: "{{channel}}"
+        users: "{{users}}"
+    response_extract: "$.channel"
