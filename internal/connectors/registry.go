@@ -32,6 +32,9 @@ type Provider struct {
 	// TokenAuth is "body" (default) or "basic": how client_id/secret reach the token
 	// endpoint. Notion requires HTTP Basic auth; most providers accept them in the body.
 	TokenAuth string `yaml:"token_auth"`
+	// TokenContentType is "form" (default, application/x-www-form-urlencoded) or "json"
+	// (application/json). Notion's token endpoint requires a JSON body.
+	TokenContentType string `yaml:"token_content_type"`
 	// StaticHeaders are merged into every action request (e.g. Notion-Version, GitHub Accept).
 	StaticHeaders map[string]string `yaml:"static_headers"`
 	// AuthorizeExtra are extra query params on the consent URL (e.g. Atlassian audience/prompt).

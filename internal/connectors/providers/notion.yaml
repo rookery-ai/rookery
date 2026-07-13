@@ -5,6 +5,7 @@ userinfo_url: ""
 identity_path: ""
 token_expiry: never
 token_auth: basic
+token_content_type: json
 authorize_extra:
   owner: user
 static_headers:

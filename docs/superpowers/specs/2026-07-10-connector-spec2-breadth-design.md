@@ -86,6 +86,27 @@ engine bits (non-expiring tokens, basic-auth exchange, static headers, cloudid h
 `{{conn.*}}` templating) each get a focused unit test. Manual E2E (real accounts) deferred to
 the end, per the user's plan (Spec 2 + Spec 3 first, then E2E).
 
+## Implementation status & known caveats (2026-07-13)
+
+Phases A–E implemented + unit-tested (httptest); Phases F/G/H deferred. Two caveats that
+the green unit suite structurally cannot catch — both must be understood before E2E:
+
+1. **CLI-coder workspaces lost external-service access (regression, not just a deferral).**
+   Connector tools live only in the API engine's `hostToolSet`; CLI coders (claude-code,
+   opencode) run as subprocesses and never see them. Composio (their old path) is now
+   removed. So a CLI-coder workspace currently has NO external-service access until Phase F
+   (`sa-connect` CLI). The shipped state is **API-engine workspaces only**. The planned
+   weak-model (Mistral/API) E2E is unaffected.
+2. **Non-Google provider configs are UNVERIFIED against live docs.** GitHub/Notion/Outlook/
+   Jira YAML were hand-authored; the mock-based tests only prove the engine + parsing, not
+   that endpoints/scopes/auth/body shapes are correct. Google/Gmail is standard and
+   trustworthy → **E2E Gmail first** to validate the architecture, then doc-verify each other
+   provider before its own E2E. Known fixes already applied from review: Notion token
+   exchange uses a JSON body (`token_content_type: json`); Jira search uses
+   `/rest/api/3/search/jql` (the old `/search` is deprecated). Still to verify live: Outlook
+   `$search` semantics, Jira create-issue ADF + `/search/jql` param shape, Notion `owner=user`
+   consent param, GitHub scope names.
+
 ## Non-goals
 
 - Discord/Slack/other providers beyond the five named (trivial to add later as data files).

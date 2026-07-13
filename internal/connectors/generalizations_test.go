@@ -15,6 +15,15 @@ func secretsEncryptHelper(v string, key []byte) (string, error) {
 	return secrets.EncryptWithSystemKey(v, key)
 }
 
+func readAllBody(r *http.Request) (string, error) {
+	b := make([]byte, r.ContentLength)
+	if r.ContentLength <= 0 {
+		return "", nil
+	}
+	_, err := r.Body.Read(b)
+	return string(b), err
+}
+
 func dbServiceConn(ws, id, provider, encTok string) db.ServiceConnection {
 	return db.ServiceConnection{
 		ID: id, WorkspaceID: ws, Provider: provider, AccountLabel: "acct",
@@ -61,6 +70,28 @@ func TestTokenAuthBasicAndStaticHeaders(t *testing.T) {
 	}
 	if gotHeader != "2022-06-28" {
 		t.Fatalf("static header not applied, got %q", gotHeader)
+	}
+}
+
+func TestTokenContentTypeJSON(t *testing.T) {
+	var gotCT, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCT = r.Header.Get("Content-Type")
+		b, _ := readAllBody(r)
+		gotBody = b
+		w.Write([]byte(`{"access_token":"AT"}`))
+	}))
+	defer srv.Close()
+	p := Provider{TokenURL: srv.URL + "/token", TokenAuth: "basic", TokenContentType: "json"}
+	_, err := OAuthClient{HTTP: srv.Client()}.ExchangeCode(context.Background(), p, "cid", "csec", "code", "https://cb")
+	if err != nil {
+		t.Fatalf("exchange: %v", err)
+	}
+	if gotCT != "application/json" {
+		t.Fatalf("content-type = %q, want application/json", gotCT)
+	}
+	if !strings.Contains(gotBody, `"grant_type":"authorization_code"`) {
+		t.Fatalf("body should be JSON with grant_type: %s", gotBody)
 	}
 }
 

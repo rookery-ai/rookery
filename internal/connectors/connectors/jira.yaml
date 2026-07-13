@@ -11,7 +11,7 @@ actions:
       required: [jql]
     request:
       method: GET
-      url: "https://api.atlassian.com/ex/jira/{{conn.cloudid}}/rest/api/3/search"
+      url: "https://api.atlassian.com/ex/jira/{{conn.cloudid}}/rest/api/3/search/jql"
       query:
         jql: "{{jql}}"
         maxResults: "{{max}}"

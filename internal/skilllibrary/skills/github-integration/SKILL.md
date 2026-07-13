@@ -15,9 +15,11 @@ metadata:
 
 # GitHub Integration
 
-Act on GitHub repositories. Preferred path is the **GitHub REST API** (token
-from secrets); if the user has Composio connected for GitHub, the
-`composio-toolkit` skill is an alternative (OAuth, no token management).
+Act on GitHub repositories via the **GitHub REST API** (token from secrets). If
+the user has connected a GitHub account under Settings → Connectors, the agent is
+given native typed tools (github_create_issue, github_search_issues, …) — prefer
+those and declare the connection with a `# Connections:` header instead of using a
+personal-access-token secret.
 
 ## Requirements
 

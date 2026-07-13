@@ -1,6 +1,7 @@
 package connectors
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -58,11 +59,28 @@ func (c OAuthClient) tokenRequest(ctx context.Context, p Provider, form url.Valu
 		form.Del("client_id")
 		form.Del("client_secret")
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", p.TokenURL, strings.NewReader(form.Encode()))
+	var bodyReader io.Reader
+	contentType := "application/x-www-form-urlencoded"
+	if p.TokenContentType == "json" {
+		// Notion: the token endpoint wants a JSON object, not a form body.
+		obj := map[string]string{}
+		for k := range form {
+			obj[k] = form.Get(k)
+		}
+		jb, mErr := json.Marshal(obj)
+		if mErr != nil {
+			return TokenSet{}, mErr
+		}
+		bodyReader = bytes.NewReader(jb)
+		contentType = "application/json"
+	} else {
+		bodyReader = strings.NewReader(form.Encode())
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", p.TokenURL, bodyReader)
 	if err != nil {
 		return TokenSet{}, err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
 	if p.TokenAuth == "basic" {
 		req.SetBasicAuth(clientID, clientSecret)
