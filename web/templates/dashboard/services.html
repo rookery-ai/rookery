@@ -16,12 +16,24 @@
         <div class="bg-primary/20 text-primary rounded-xl p-3 font-bold uppercase">{{slice .Name 0 1}}</div>
         <div class="flex-1">
           <h2 class="font-semibold text-lg">{{.Label}}</h2>
+          {{if .IsAPIKey}}
+          <p class="text-sm text-base-content/50">Paste your {{.KeyLabel}} to connect {{.Label}}.</p>
+          {{else}}
           <p class="text-sm text-base-content/50">You create a one-time OAuth app in {{.Label}}'s console, then paste its ID + secret here. Stored per workspace.</p>
+          {{end}}
         </div>
+        {{if .IsAPIKey}}
+        {{if .Connections}}
+        <span class="badge badge-success">Connected</span>
+        {{else}}
+        <span class="badge badge-ghost">Not connected</span>
+        {{end}}
+        {{else}}
         {{if .HasCreds}}
         <span class="badge badge-success">Credentials saved</span>
         {{else}}
         <span class="badge badge-ghost">No credentials</span>
+        {{end}}
         {{end}}
       </div>
 
