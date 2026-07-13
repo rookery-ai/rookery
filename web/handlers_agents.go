@@ -39,6 +39,8 @@ type agentDetailData struct {
 	AttachedSkills []string                 // agent_skills names in DB order; renders the attached-skill badges
 	CoreSkills     []skilllibrary.SkillMeta // core (embedded) checkbox pool, always-on
 	AllSkills      []*db.Skill              // user-installed checkbox pool
+	WorkspaceConns []db.ServiceConnection   // connected service accounts (the checkbox pool)
+	AttachedConns  map[string]bool          // connection IDs bound to this agent → true
 	MissingSecrets []string
 	HasPlatform    bool // user has at least one linked chat platform
 	Running        bool // a run is in flight (manual or scheduled) — drives the badge
@@ -422,6 +424,42 @@ func (s *Server) agentsDir() string {
 }
 
 // renderAgentDetail loads all data needed for the agent detail page and renders it.
+// handleSaveAgentConnections binds/unbinds the agent's service connections from the
+// checkbox card on the agent page. This is the reliable path — independent of whether the
+// design model remembered to emit a "# Connections:" header.
+func (s *Server) handleSaveAgentConnections(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	id := c.Param("id")
+	ctx := c.Request().Context()
+
+	agent, err := s.db.GetAgent(id)
+	if err != nil || agent.WorkspaceID != u.ID {
+		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
+	}
+
+	_ = c.Request().ParseForm()
+	submitted := c.Request().Form["connection_ids"]
+
+	// Only accept connection IDs that belong to this workspace.
+	conns, _ := s.db.ListServiceConnections(ctx, u.ID)
+	valid := make(map[string]bool, len(conns))
+	for _, cn := range conns {
+		valid[cn.ID] = true
+	}
+	var ids []string
+	seen := make(map[string]bool)
+	for _, cid := range submitted {
+		if cid != "" && valid[cid] && !seen[cid] {
+			ids = append(ids, cid)
+			seen[cid] = true
+		}
+	}
+	if err := s.db.SetAgentConnections(ctx, id, ids); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save connections")
+	}
+	return c.Redirect(http.StatusSeeOther, "/dashboard/agents/"+id)
+}
+
 func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, workspaceID string, p *pageData) error {
 	schedule, _ := s.db.GetScheduleForAgent(agent.ID)
 	runs, _ := s.db.ListAgentRuns(agent.ID, 10)
@@ -439,6 +477,18 @@ func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, workspaceID 
 		}
 	}
 
+	// Connections card: the workspace's connected accounts (pool) + which are bound to
+	// this agent (agent_connections). Binding is the source of truth for run-time tools —
+	// not the AGENT.md "# Connections:" header (which the model may forget to emit).
+	ctx := c.Request().Context()
+	wsConns, _ := s.db.ListServiceConnections(ctx, workspaceID)
+	attachedConns := make(map[string]bool)
+	if bound, err := s.db.ListAgentConnections(ctx, agent.ID); err == nil {
+		for _, b := range bound {
+			attachedConns[b.ID] = true
+		}
+	}
+
 	data := &agentDetailData{
 		pageData:       p,
 		Agent:          agent,
@@ -448,6 +498,8 @@ func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, workspaceID 
 		AttachedSkills: attachedSkills,
 		CoreSkills:     skilllibrary.LoadBundled(),
 		AllSkills:      allSkills,
+		WorkspaceConns: wsConns,
+		AttachedConns:  attachedConns,
 		Running:        s.isAgentRunning(agent.ID),
 		LiveRun:        s.isLiveRun(agent.ID),
 	}

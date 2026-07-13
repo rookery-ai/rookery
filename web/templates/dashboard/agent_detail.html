@@ -226,6 +226,33 @@
         </div>
       </div>
 
+      <!-- Connections -->
+      <div class="card bg-base-100 shadow-sm border border-base-300">
+        <div class="card-body p-4">
+          <h2 class="font-semibold text-sm mb-1">🔌 Connections</h2>
+          <p class="text-xs text-base-content/50 mb-3">Which connected accounts this agent may use. It gets native tools (gmail_*, github_*, …) for the ones you check.</p>
+          {{if .WorkspaceConns}}
+          {{$bound := .AttachedConns}}
+          <form method="POST" action="/dashboard/agents/{{.Agent.ID}}/connections">
+            <div class="space-y-1 mb-2 max-h-56 overflow-y-auto">
+              {{range .WorkspaceConns}}
+              <label class="flex items-center gap-2 cursor-pointer text-xs">
+                <input type="checkbox" name="connection_ids" value="{{.ID}}" class="checkbox checkbox-xs"
+                  {{if index $bound .ID}}checked{{end}}>
+                <span class="capitalize">{{.Provider}}</span>
+                <span class="text-base-content/50">{{.AccountLabel}}{{if .AccountIdentity}} — {{.AccountIdentity}}{{end}}</span>
+                {{if ne .Status "ACTIVE"}}<span class="badge badge-warning badge-xs">{{.Status}}</span>{{end}}
+              </label>
+              {{end}}
+            </div>
+            <button type="submit" class="btn btn-ghost btn-xs w-full">Update Connections</button>
+          </form>
+          {{else}}
+          <a href="/dashboard/connectors/services" class="btn btn-ghost btn-xs w-full">Connect a service</a>
+          {{end}}
+        </div>
+      </div>
+
       <!-- Required secrets -->
       {{if .Manifest}}{{if .Manifest.RequiredSecrets}}
       <div class="card bg-base-100 shadow-sm border border-base-300">
