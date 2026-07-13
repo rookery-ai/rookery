@@ -1,0 +1,10 @@
+name: openai
+label: OpenAI
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "OpenAI API key"
+  key_hint: "sk-..."
+  setup_url: https://platform.openai.com/api-keys

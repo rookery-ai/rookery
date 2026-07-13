@@ -27,6 +27,31 @@ func TestLoadBundledGoogle(t *testing.T) {
 	}
 }
 
+func TestLoadParsesAPIKeyAuth(t *testing.T) {
+	r, err := LoadBundled()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, ok := r.ProviderByName("openai")
+	if !ok {
+		t.Fatal("openai provider not loaded")
+	}
+	if !p.IsAPIKey() {
+		t.Fatalf("openai should be api_key, got kind=%q", p.Auth.Kind)
+	}
+	if p.Auth.Placement != "header" || p.Auth.HeaderName != "Authorization" || p.Auth.ValuePrefix != "Bearer " {
+		t.Fatalf("bad auth block: %+v", p.Auth)
+	}
+}
+
+func TestOAuthProviderDefaultsToOAuth(t *testing.T) {
+	r, _ := LoadBundled()
+	p, _ := r.ProviderByName("google")
+	if p.IsAPIKey() {
+		t.Fatal("google must not be api_key")
+	}
+}
+
 func TestAllProvidersLoad(t *testing.T) {
 	r, err := LoadBundled()
 	if err != nil {

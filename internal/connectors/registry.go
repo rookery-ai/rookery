@@ -16,6 +16,20 @@ import (
 //go:embed providers/*.yaml connectors/*.yaml
 var files embed.FS
 
+// AuthConfig declares how a provider authenticates. Absent or kind=="oauth2" → the
+// legacy OAuth Bearer path. kind=="api_key" → a static user-supplied key injected per
+// placement; drives the connect UI (no OAuth app, a paste-key form) too.
+type AuthConfig struct {
+	Kind        string `yaml:"kind"`         // "oauth2" (default) | "api_key"
+	Placement   string `yaml:"placement"`    // "header" | "query" | "basic"
+	HeaderName  string `yaml:"header_name"`  // for placement=header
+	ValuePrefix string `yaml:"value_prefix"` // e.g. "Bearer "
+	ParamName   string `yaml:"param_name"`   // for placement=query
+	KeyLabel    string `yaml:"key_label"`    // UI: "OpenAI API key"
+	KeyHint     string `yaml:"key_hint"`     // UI placeholder: "sk-..."
+	SetupURL    string `yaml:"setup_url"`    // UI: where to get the key
+}
+
 // Provider is one service's OAuth configuration.
 type Provider struct {
 	Name          string   `yaml:"name"`
@@ -48,7 +62,12 @@ type Provider struct {
 	Label      string   `yaml:"label"`       // human-friendly name, e.g. "Google (Gmail)"
 	SetupURL   string   `yaml:"setup_url"`   // link to the provider's developer console
 	SetupSteps []string `yaml:"setup_steps"` // numbered instructions to create the OAuth client
+
+	Auth AuthConfig `yaml:"auth"`
 }
+
+// IsAPIKey reports whether this provider authenticates with a static API key.
+func (p Provider) IsAPIKey() bool { return p.Auth.Kind == "api_key" }
 
 // NonExpiring reports whether this provider's access tokens never expire.
 func (p Provider) NonExpiring() bool { return p.TokenExpiry == "never" }
@@ -60,6 +79,9 @@ type RequestTemplate struct {
 	Query       map[string]string `yaml:"query"`
 	BodyBuilder string            `yaml:"body_builder"`
 	BodyJSON    map[string]string `yaml:"body_json"`
+	// Body is a nested template (maps/arrays) rendered to JSON by renderBody. Preferred over
+	// BodyJSON for anything non-flat. BodyBuilder still wins when set (non-JSON encodings).
+	Body map[string]any `yaml:"body"`
 }
 
 // Action is one curated, typed operation on a provider.
