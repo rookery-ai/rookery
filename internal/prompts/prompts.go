@@ -906,6 +906,12 @@ type ImplementationParams struct {
 	ConnectedPlatforms []string
 	ChatApps           []ChatAppInfo // connected chat platforms + commands (platform context)
 	BackendType        string        // BackendFullCoder | BackendBasicModel | "" (capabilities block)
+	// Connections are the workspace's connected service accounts, exposed to the BUILD
+	// coder as native typed tools. Without telling the coder they exist, a weak model
+	// ignores the tools and flails hunting for API keys/env vars for the service.
+	Connections     []ConnectionRef
+	ConnectionTools []string // the exact tool names those connections expose
+	ConnectorBin    string   // absolute simple-agents path for the CLI connector-exec command
 }
 
 // capabilitySpec renders the authoritative capability blocks shared with the
@@ -922,6 +928,9 @@ func (p ImplementationParams) capabilitySpec() string {
 	if len(p.ConnectedPlatforms) > 0 {
 		sb.WriteString(connectedPlatformsBlock(p.ConnectedPlatforms))
 	}
+	// Tell the BUILD coder about the native connector tools it has for the workspace's
+	// connected accounts — otherwise a weak model ignores them and hunts for API keys.
+	sb.WriteString(connectedToolsBlock(p.Connections, p.ConnectionTools, p.BackendType, p.ConnectorBin))
 	return sb.String()
 }
 

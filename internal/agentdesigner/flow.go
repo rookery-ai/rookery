@@ -1080,10 +1080,26 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	if coderSvc != nil {
 		backendType = prompts.MapCoderBackend(coderSvc.BackendType())
 	}
+	// Surface the workspace's connected accounts to the BUILD coder as native tools, and
+	// tell it (in the prompt) that they exist — else a weak model ignores the tools and
+	// hunts for API keys/env vars for the service.
+	var connRefs []prompts.ConnectionRef
+	var connToolNames []string
+	if bound := f.buildBoundConns(ctx, workspaceID); len(bound) > 0 {
+		for _, b := range bound {
+			connRefs = append(connRefs, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
+		}
+		for _, d := range f.connReg.ToolDefs(bound) {
+			connToolNames = append(connToolNames, d.Name)
+		}
+	}
+
 	implParams := prompts.ImplementationParams{
 		ConnectedPlatforms: sess.ConnectedPlatforms,
 		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
 		BackendType:        backendType,
+		Connections:        connRefs,
+		ConnectionTools:    connToolNames,
 	}
 
 	// Set up a buffered progress channel for SSE and snapshot the Telegram progress func.
