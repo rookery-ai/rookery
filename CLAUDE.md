@@ -53,7 +53,10 @@ AST guardrail tests shell out to `python3`. If Python is not available, those te
 > **Deploy workflow:** When the user says "restart the server", "rebuild", or
 > "deploy", run `make deploy` — it stops the running server, rebuilds, and
 > starts it in the background with logs captured to `logs/server.log`. The
-> server listens on `0.0.0.0:8080` by default (override with `SA_PORT=…`).
+> server listens on `0.0.0.0:8080` by default (override host with `SA_HOST=…`, port
+> with `SA_PORT=…`). Set `SA_PUBLIC_URL` to the externally-reachable base URL so OAuth
+> callbacks are correct. `simple-agents connector exec <tool> --args '<json>'` is the
+> subcommand CLI coders use to reach the connector bridge (not for manual use).
 > Verify with `make status` / `make logs`; smoke-test with
 > `curl -sS http://127.0.0.1:8080/login`.
 
@@ -97,7 +100,8 @@ Telegram adapter (per-workspace bot instance)
 | `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router`, `IdentityResolver`, `TelegramGateway` |
 | `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface abstracts Claude vs. generic CLIs). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host tools (`read_file`/`write_file`/`edit_file`/`list_dir` + read-only discovery `search_files`/`glob` + exec tools `run_script`/`bash`/`web_fetch`/`web_search`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
-| `internal/composioassets` | Single source of truth for the Composio v3 helper scripts (`composio_helper.py`, `composio_discover.py`), `go:embed`ed and **seeded deterministically** into an agent's/skill's working dir by `WriteHelperFiles(dir)` BEFORE the coder runs (build AND real run) — so every generation gets byte-identical, safety-checked code instead of the LLM retyping it. `IsSeededFilename()` skips guardrail vetting on them; `BuildPhaseEnvVar`/`BuildPhaseGeneration` (`SA_BUILD_PHASE=generation`) tells `composio_helper.py` to refuse real outbound/destructive actions at build time. |
+| `internal/connectors` | Self-managed-OAuth connector layer (replaces Composio). Embedded `providers/*.yaml` (OAuth config) + `connectors/*.yaml` (curated action manifests) for google/github/notion/outlook/jira; `Registry`, `Execute` (typed choke point), `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute`), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
+| `internal/buildphase` | Tiny package holding `SA_BUILD_PHASE`/`generation` marker (set during agent/skill builds; the connector `Execute` build-guard refuses mutating actions when present). Its own package so it outlives any one integration. |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal) |
 | `internal/skilldesigner` | Conversational skill-creator wizard mirroring `agentdesigner.Flow` (FSM Idle→AwaitingResume→Describing→Designing→Verifying→Done, SSE progress, 7-day drafts, approval triggers); `SkillSaver` writes SKILL.md+scripts/ to vault + DB upsert; generation runs with the `skill-creator` core skill, vetting runs the `skill-vetter` core skill as a text-only audit; `vettingBlocksSave()` parses the verdict line. Web-wired only (Telegram route not yet added). |
 | `internal/skilllibrary` | Embedded core skill catalog (`go:embed skills/*/SKILL.md`) — always-on for every user, no DB rows, no admin gate. `LoadBundled()`, `CoreSkillContent(slug)`, `IsCoreSkill()`, `ParseMeta()` (Anthropic+openclaw YAML frontmatter: requires.bins/anyBins/env, install specs). Supersedes the admin-catalog approach dropped in migration 009. |
@@ -106,7 +110,7 @@ Telegram adapter (per-workspace bot instance)
 | `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users |
 | `internal/reminder` | Creates/lists/fires reminders; background polling goroutine. Reminders live only in the DB and the reminders UI tab — they are NOT reflected to the vault. |
 | `internal/chat` | `Chat` create/list/stop/resume/delete; 30-min idle auto-stop; `BuildUserContext` (shared **identity-only** context builder for one-off chat — profile/memory/agents/MCP; the broader KB is retrieved on demand via tools, not injected here) |
-| `internal/prompts` | Central home for all LLM prompt construction: `BuildDesignSystemPrompt` (+ `<knowledge_base>` block + `KBManifest`), `BuildImplementationPrompt`, `BuildEditImplementationPrompt` (diagnose-before-fix), `BuildCoderPrompt` (+ `<skill_instructions>` + `<skill_environment>` blocks), `BuildChatSystemPrompt` (chat read+write KB instruction), `BuildChildAgentFollowUpPrompt`, `BuildSkillMetaPrompt`, `BuildReminderParsePrompt`, skill-creator prompts (`BuildSkillDesignSystemPrompt`, `BuildSkillImplementationPrompt`, `BuildSkillVettingPrompt`, `SkillEnvBlock`). `SkillRef`/`SkillBin` types. No inline prompt text exists outside this package. Shared single-source blocks: `agentPhilosophyBlock` (three-tier), `platformContextBlock`, `coderCapabilitiesBlock` (backend-aware), `agentArchitectureGateBlock`, `testingRulesBlock` (one bounded smoke test + dry run; real secrets at build time, no outbound sends), `shellSafetyBlock`, `scriptRobustnessBlock`, `composioServicesBlock`. `ChatAppsForPlatforms` + `MapCoderBackend` bridge callers to prompt params. |
+| `internal/prompts` | Central home for all LLM prompt construction: `BuildDesignSystemPrompt` (+ `<knowledge_base>` block + `KBManifest`), `BuildImplementationPrompt`, `BuildEditImplementationPrompt` (diagnose-before-fix), `BuildCoderPrompt` (+ `<skill_instructions>` + `<skill_environment>` blocks), `BuildChatSystemPrompt` (chat read+write KB instruction), `BuildChildAgentFollowUpPrompt`, `BuildSkillMetaPrompt`, `BuildReminderParsePrompt`, skill-creator prompts (`BuildSkillDesignSystemPrompt`, `BuildSkillImplementationPrompt`, `BuildSkillVettingPrompt`, `SkillEnvBlock`). `SkillRef`/`SkillBin` types. No inline prompt text exists outside this package. Shared single-source blocks: `agentPhilosophyBlock` (three-tier), `platformContextBlock`, `coderCapabilitiesBlock` (backend-aware), `agentArchitectureGateBlock`, `testingRulesBlock` (one bounded smoke test + dry run; real secrets at build time, no outbound sends), `shellSafetyBlock`, `scriptRobustnessBlock`, `connectedToolsBlock` (backend-aware native-tools vs `connector exec` guidance). `ChatAppsForPlatforms` + `MapCoderBackend` bridge callers to prompt params. |
 | `internal/memory` | Per-user structured context store. Memory lives as named `.md` files in `memory/` (`USER.md`, `SOUL.md`, `GENERAL.md`, etc.) — editable via the KB browser. `ContextString()` reads all files, skips placeholder-only ones, and returns sectioned markdown for LLM injection. `Append/List/Delete` target GENERAL.md bullet lines (used by Telegram `/memory` command). `MigrateToStructuredFiles()` consolidates legacy UUID-keyed entries at startup. |
 | `internal/vault` | Per-user Obsidian-style knowledge base: `Vault` (paths + `Resolve` safety + file IO), `Reflector` (chats→markdown+sidecar), `LinkIndex` ([[wikilinks]]), `Searcher` (ripgrep), `Guard` (post-run write-scope enforcement), `MigrateLegacyLayout`, `MigrateSessionsToChats`. |
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
@@ -198,21 +202,61 @@ All prompts live in `internal/prompts` (single source). The designer produces **
 - **`ChatAppsForPlatforms()`** — central platform→`ChatAppInfo` (name + commands) mapping; callers load via `db.ListUserPlatformConnections` (no GatewayManager method needed).
 - Design UX is non-technical: a jargon blocklist (FORBIDDEN: AGENT.md, Python, script, vault, cron, JSON, shell, Bash, webhook, endpoint); asks notification preference + schedule; emits a `[TECHNICAL SPEC]` for the code generator.
 
-### Composio integration
+### Connector service layer (self-managed OAuth; replaces Composio — which is fully removed)
 
-Composio connects agents to 250+ external services via the **v3 REST API** (not the deprecated SDK).
+`internal/connectors` is the platform's own external-service integration: **self-managed OAuth** +
+**native typed tools** per connected account. It is **coder-agnostic** (knows nothing about coders) —
+both coder kinds converge on `connectors.Execute`. **There is no Composio anywhere in the codebase.**
 
-- `composioServicesBlock()` in `internal/prompts/prompts.go` is the **single source** of the v3 spec — injected into design, create, and edit prompts. `composioRuntimeNote()` is the leaner RUN-time variant (agents already know their tool slugs; re-injecting the full discovery spec made them re-run discovery).
-- Base: `https://backend.composio.dev/api/v3` · Auth: `x-api-key` header
-- Connected accounts: `GET /connected_accounts?limit=100` · Execute: `POST /tools/execute/{TOOL_SLUG}`
-- **Helper scripts are seeded, not retyped.** `internal/composioassets.WriteHelperFiles` writes the verified `composio_helper.py`+`composio_discover.py` into `tools/` (agents) / `scripts/` (skills) before the coder runs, so a weaker model can't garble the safety logic. At build time `SA_BUILD_PHASE=generation` makes the helper refuse real outbound/destructive Composio actions (see `internal/composioassets`).
-- Guardrails block: SDK imports (`from composio import`), hardcoded keys (`ak_...`), wrong host (`api.composio.dev`), old versions (`/v1/`, `/v2/`) — the version/host checks are gated per-line on a `composio` reference so an unrelated API's real `/v2/` endpoint isn't flagged; seeded helper files are skipped (`IsSeededFilename`).
+- **Data files, not code.** Adding a service = a `providers/<p>.yaml` (OAuth config) + a
+  `connectors/<p>.yaml` (curated action manifest), both `go:embed`ed. `LoadBundled()` parses them.
+  5 providers: **google (Gmail), github, notion, outlook (MS Graph), jira**. Each action = name +
+  JSON-schema params + `mutating` flag + a request template (method/URL/query/body-builder) +
+  `response_extract`. Body builders (`render.go`): `gmail_rfc822`/`gmail_draft`, `notion_page`,
+  `msgraph_sendmail`/`msgraph_draft`, `jira_issue`/`jira_comment`.
+- **`Execute(ctx, reg, store, client, conn, action, args, buildPhase)`** — the single typed choke
+  point: validate args → refuse `mutating` actions when `buildPhase` (build-time guard, keyed off
+  `internal/buildphase.EnvVar`) → `store.AccessToken` (refresh if near expiry) → render request +
+  `Authorization: Bearer` + provider `static_headers` → call (1 transient retry) → normalize into a
+  `ConnectorError` taxonomy (auth/ratelimit/server/needs-reauth/bad-args/build-blocked).
+- **OAuth** (`oauth.go`): `ConsentURL`/`ExchangeCode`/`Refresh`/`FetchIdentity`. Per-provider config
+  covers the real quirks: `token_expiry: never` (GitHub/Notion — empty `expires_at`, never refreshed),
+  `token_auth: basic` + `token_content_type: json` (Notion), `static_headers` (Notion-Version, GitHub
+  Accept), `authorize_extra` (Atlassian audience/prompt, Google access_type/prompt, Notion owner),
+  `post_connect: atlassian_cloudid` (resolves Jira cloud id into `service_connections.extra`, exposed
+  to URL templates as `{{conn.cloudid}}`). Refresh-token **rotation** is persisted (Atlassian).
+- **Tokens** are `secrets.EncryptWithSystemKey`-encrypted (headless — the background `RunRefreshLoop`
+  and cron runs decrypt without a master password). `DBTokenStore` reads/refreshes/persists them.
+- **Tool exposure** (`tools.go` — single source): `ToolDefs(bound)` builds the tool set (single
+  account → bare `gmail_send_email`; multiple of one provider → `gmail_send_email__<slug(label)>`,
+  slugged to the provider's `^[a-zA-Z0-9_-]{1,64}$`); `ResolveTool(bound, name)` reverses it.
+  - **API engine** exposes them as native function tools in `hostToolSet` (`coder/connectortools.go`).
+  - **CLI coders** reach the SAME `Execute` via a **loopback bridge** (`bridge.go`): a `127.0.0.1`
+    HTTP listener started in `serve`; the runner registers a per-run bearer token scoped to the run's
+    bound connections; the coder runs `simple-agents connector exec <tool> --args '<json>'` (a thin
+    client subcommand) which POSTs to it. Tokens never leave the host; Landlock restricts filesystem,
+    not loopback TCP, so a sandboxed coder can reach it (the `simple-agents` binary dir is granted
+    RO+exec in the sandbox spec so the child can exec it).
+- **Agent binding** (`agent_connections` table, keyed by connection id) is the source of truth for
+  run-time tool exposure — NOT the AGENT.md `# Connections:` header. Two ways to bind: the designer
+  parses a `# Connections:` header (`agentdesigner.parseConnectionsLine`, tolerant of inline OR
+  bullet/comment-list form) into the table; OR the **Attach-connections card** on the agent page
+  (checkboxes → `handleSaveAgentConnections` → `SetAgentConnections`), which is the reliable path when
+  a weak model forgets the header. Builds expose ALL workspace connections; runs expose only bound
+  ones. The build/impl AND runtime prompts inject `connectedToolsBlock` (backend-aware: native tools
+  vs the `connector exec` command) so the coder knows the tools exist and is told there is **no
+  Composio/SDK/service keys** in the env.
+
+**UI:** `/dashboard/connectors/services` — per-workspace OAuth-app creds + connect/callback per
+provider, with per-provider setup guidance (`label`/`setup_url`/`setup_steps` in the provider YAML).
+Callback: `/dashboard/connectors/services/callback/:provider` (HMAC-signed, TTL'd `state`). `SA_PUBLIC_URL`
+sets the callback base (Google rejects non-public-TLD/`http` redirect URIs — use `https://` or `http://localhost`).
 
 ### Skill system (core + user skills)
 
 Two pools of skills, both surfaced to the agent designer and the runner as `[]prompts.SkillRef`:
 
-- **Core skills** — embedded in the binary (`internal/skilllibrary/skills/*/SKILL.md`, `go:embed`). Always-on for every user: no DB rows, no disk seeding, no admin gate. `LoadBundled()` enumerates metadata; `CoreSkillContent(slug)` returns the full SKILL.md (frontmatter+body) for agent-context injection when an agent declares the skill; `IsCoreSkill(slug)` is the reserved-name guard. `ParseMeta()` reads Anthropic+openclaw YAML frontmatter (name, description, version, license, category, `metadata.openclaw.requires.{bins,anyBins,env}`, `metadata.openclaw.install[]`). 12 bundled skills: csv, pdf, docx, pptx, xlsx, markdown, web-search, web-scraper, playwright-browser, google-workspace, github-integration, composio-toolkit, cli-tool-installer, skill-creator, skill-vetter.
+- **Core skills** — embedded in the binary (`internal/skilllibrary/skills/*/SKILL.md`, `go:embed`). Always-on for every user: no DB rows, no disk seeding, no admin gate. `LoadBundled()` enumerates metadata; `CoreSkillContent(slug)` returns the full SKILL.md (frontmatter+body) for agent-context injection when an agent declares the skill; `IsCoreSkill(slug)` is the reserved-name guard. `ParseMeta()` reads Anthropic+openclaw YAML frontmatter (name, description, version, license, category, `metadata.openclaw.requires.{bins,anyBins,env}`, `metadata.openclaw.install[]`). 13 bundled skills: csv, pdf, docx, pptx, xlsx, markdown, web-search, web-scraper, playwright-browser, github-integration, cli-tool-installer, skill-creator, skill-vetter. (The Composio-based composio-toolkit + google-workspace skills were removed; connected services are reached via native connector tools.)
 - **User skills** — created via the skill creator (below) or imported (ZIP/pasted SKILL.md), per-workspace, written to `<vault>/skills/<name>/SKILL.md` (+ `scripts/`), tracked in the `skills` table. Loaded from disk by `skillstore`.
 
 At run time (`agentrunner.runCoderAgent`), the agent's declared skills' content is injected into the coder prompt's `<skill_instructions>` block. Core skill content comes from the embed (`skilllibrary.CoreSkillContent`); user skill content is read from disk. `resolveSkillBins` resolves the absolute path of every CLI tool a declared skill requires (`requires.bins` / `anyBins`: `$HOME/.local/bin/<bin>` then `PATH`) and `prompts.SkillEnvBlock` builds a `<skill_environment>` block telling the agent where each tool lives (or to install it via the cli-tool-installer skill) plus sandbox conventions (invoke by absolute path, use `$TMPDIR` not `/tmp`, secrets are env vars, vault root).
@@ -281,7 +325,7 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
 
 - **Host tools** (`hosttools.go`, `hostToolSet`): `read_file`/`write_file`/`edit_file`/`list_dir` are vault-path-safe (relative to workDir/vault root, escapes rejected). Two **always-on read-only discovery tools** (NOT exec-gated — safe in chat, closing the API-chat gap with the CLI chat's `Grep`/`Glob`): `search_files(query)` exposes the existing `vault.Searcher` (ripgrep + pure-Go fallback, case-insensitive fixed-string, 5 matches/file, skips `.kb`) so "find the note where I mentioned the dentist" is a TIER-1 lookup instead of a `read_file` walk; `glob(pattern)` finds files by name/pattern (`*`/`?`/`**`) across the vault via `compileGlob`→anchored regexp, skipping dotfiles + `.kb`; an **absolute-within-vault** path passed as the pattern is relativized first (mirror `resolveVault`) so a weak model that types the full vault path still matches, and an absolute path outside the vault is rejected. Both search the **whole vault root** (not workDir) and return a non-`error:` empty-result notice on no matches (so they never trip the oscillation guard). Three **exec tools** are gated behind `includeExecTools` (agent builds+runs only — workDir ≠ vault root; excluded from chat for CLI-parity): `run_script` (`python3`) and `bash` both run sandboxed via Landlock (`buildScriptCommand`) with the agent's secrets in env (provider key stripped), reporting stdout+stderr on failure; `web_fetch(url)` is an HTTP(S) client in the **host process** (no sandbox — it adds no capability agents lack via run_script/bash) that returns text (HTML reduced to readable text via a stdlib stripper), **retries transient 429/5xx/network internally** so a blip never trips the loop-guard, and **cannot carry secrets** (authenticated calls use run_script/bash); `web_search(query)` is the discovery complement — a keyless DuckDuckGo HTML scrape (`ddgHTMLEndpoint`, browser `User-Agent`) returning numbered title/url/snippet entries (real URL decoded from the `uddg` redirect param via `parseDDGResults`/`decodeDDGRedirect`, HTML stripped), with the same transient-retry contract as `web_fetch` and a 200-but-no-results page yielding `"(no search results)"` (non-error) so the model falls back to `web_fetch` without tripping the guard. `ddgBaseURL` (empty→production) lets tests point at an httptest server. All results are byte-capped and never empty (an empty tool result breaks strict serializers). This closes the CLI-vs-API capability gap: a simple public fetch/find is now TIER 1 via `web_fetch`/`web_search`/`search_files`/`glob` (see the network-split + file-discovery tier guidance in `prompts.agentArchitectureGateBlock`), matching a CLI coder. **Caveat:** an arbitrary `bash` string is sandboxed but NOT AST-scanned the way an authored `tools/*.py` is at build.
 - **Turn budgets**: `maxAPITurns` (25) for runs/chat; `maxBuildAPITurns` (40) + `buildMaxTokens` (8192) for builds. A budget-exhausted loop gets one grace turn to wrap up: `[BLOCKED]` for a build (parsed by the designer), plain language for a run/chat.
-- **Build-time script verification** (weak-model hardening, build only): the engine refuses to "finish" a build while the model authored a helper script that never once returned real output — `verifyFinishNudge` drives it to run/inspect/fix (bounded by `maxVerifyNudges`), or report the failure in plain language. Seeded Composio helpers don't count as verification. Plus a loop-guard (`recentFails` ring + `consecutiveFails`) that short-circuits repeated/oscillating failing calls.
+- **Build-time script verification** (weak-model hardening, build only): the engine refuses to "finish" a build while the model authored a helper script that never once returned real output — `verifyFinishNudge` drives it to run/inspect/fix (bounded by `maxVerifyNudges`), or report the failure in plain language. Plus a loop-guard (`recentFails` ring + `consecutiveFails`) that short-circuits repeated/oscillating failing calls.
 - **Script-verification bridge → `coder.Result`.** The engine tracks per authored `tools/*.py` whether it RAN with real stdout (`hostToolSet.producedOutput`) and captures that stdout (`lastVerifiedOutput`, secret-redacted via `redactSecrets`). `runToolLoop` surfaces this ground truth on `Result.ScriptVerified` / `Result.ScriptOutput` (+ `Result.ScriptRan` = an authored script was executed at least once, for observability). The agent designer's `decideBuildOutcome(workDir, resultText, backendType, scriptVerified, scriptOutput)` **trusts the engine** instead of re-deriving verification from a `[TEST_OUTPUT]` marker the weak model often forgets: an engine-confirmed run advances to review showing the real captured output as the sample, and the weak-backend gate (`BackendToolCalling && hasAuthoredScript && thinProof && !scriptVerified`) only fires when the engine did NOT confirm a run — fixing the false "I couldn't confirm the helper it wrote actually runs." When that gate DOES fire, the `agentdesigner: build not presentable` slog carries `script_ran` to discriminate "ran but produced nothing" (broken/outbound-blocked) from "never ran". Fields are zero for CLI coders and runs/chat. Covered by `build_outcome_test.go` + `api_engine_test.go`.
 - **Design conversations vs one-off chat** (`Chat` split by `noTools`): `chatAPI` (text-only single completion, real alternating user/assistant turns so the model doesn't re-ask its opening question) vs `chatToolsAPI` (adds the host file tools, minus the exec tools `run_script`/`bash`/`web_fetch`, for on-demand KB read/write — parity with the CLI chat's file-only set).
 - **Providers** (`internal/llm`): `openai`, `openrouter`, `anthropic`, `generic` (any OpenAI-compatible endpoint; base URL required). Not probed — always available in the settings picker via `coder.APIProviders()`.
@@ -295,7 +339,6 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
 `internal/agentdesigner/guardrails.go`:
 - `CheckEthics(code, "")` — blocklist (rm -rf, drop table, bitcoin wallet, etc.). Used on AGENT.md.
 - `RunFullGuardrails(code, "")` — ethics + AST. Used on `tools/*.py`. AST blocks: `eval`, `exec`, `compile`, `__import__`, `os.system`, `subprocess.*`, `socket.socket`.
-- Composio: blocks SDK imports, hardcoded keys, wrong host, v1/v2 endpoints.
 
 ### Per-workspace coder isolation
 
@@ -312,7 +355,7 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
 
 **Mechanism:** `coder.buildCommand()` wraps the real command as `simple-agents __sandbox-exec <base64-spec>`. The helper applies `landlock.V5.BestEffort().RestrictPaths(...)` then `syscall.Exec`s the real command. Inherited by all children (`claude`→`bash`→`python`).
 
-**Allowed:** RW: per-workspace HOME + agent workdir. RO: system paths, coder binary dir, the workspace's vault root. Denied: SQLite DB, config.yaml, other workspaces' vaults.
+**Allowed:** RW: per-workspace HOME + agent workdir. RO: system paths, coder binary dir, the `simple-agents` binary dir (so a confined CLI coder can exec `simple-agents connector exec`), the workspace's vault root. Denied: SQLite DB, config.yaml, other workspaces' vaults.
 
 `config.SandboxConfig.Enabled` (default true; `SA_SANDBOX=0` disables). With Landlock unavailable, the sandbox is not applied and nothing physically prevents writes outside the vault — agents/chat run trusted within the user's own vault.
 
@@ -323,7 +366,7 @@ SQLite via `modernc.org/sqlite` (CGo-free). WAL mode + foreign keys set on open.
 The base schema was consolidated into `migrations/001_initial_schema.up.sql` during the workspace
 refactor (the old incremental migrations were collapsed; data was wiped and re-created fresh);
 incremental migrations resume from there — `002_coder_api` adds `workspaces.coder_base_url`, and
-`003_agent_runs_usage` adds `agent_runs.{prompt,completion,total}_tokens` for the API coder.
+`003_agent_runs_usage` adds `agent_runs.{prompt,completion,total}_tokens` for the API coder; `005_connectors` adds the self-managed-OAuth tables; `006_connection_extra` adds `service_connections.extra` (JSON).
 Tables: `owner` (single row), `workspaces` (replaces `users`; carries `about` + inlined coder
 config: `coder_kind`/`coder_bin`/`coder_timeout_s`/`coder_backend_type` + the now-active API-coder
 fields `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`), `platform_connections`,
@@ -332,6 +375,7 @@ fields `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`), 
 `user_settings`), `system_settings` (owner/system-level, not tenant-scoped, no FK),
 `audit_logs` (records active `workspace_id`; owner is the implicit actor), `schema_migrations`,
 `chat_messages` (FK `chat_id`→`chats`), `skills`, `agent_skills` (keyed by `(agent_id, skill_name)`),
+`service_provider_configs`/`service_connections`/`agent_connections` (self-managed-OAuth connectors — all secret columns encrypted under the system key),
 `agent_drafts`/`skill_drafts` (one row per workspace; 7-day TTL). Every tenant table keys off
 `workspace_id`. There is **no** `coders` table — coder config is inlined on `workspaces`.
 
@@ -340,7 +384,7 @@ fields `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`), 
 ```
 /login, /logout                     # owner login/logout
 /change-password                    # owner password (requireOwner)
-/dashboard/setup                    # per-workspace onboarding wizard (basics → master_password → coder → profile → connector → composio → done)
+/dashboard/setup                    # per-workspace onboarding wizard (basics → master_password → coder → profile → connector → done)
 /workspace/leave                    # POST: leave the active workspace (owner stays logged in)
 /dashboard                          # active-workspace home
 /dashboard/agents                   # list agents
@@ -358,6 +402,7 @@ fields `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`), 
 /dashboard/agents/:id/schedule[/delete]
 /dashboard/agents/:id/agent-md      # POST: save AGENT.md (ethics check)
 /dashboard/agents/:id/skills        # POST: update agent skill assignments
+/dashboard/agents/:id/connections   # POST: bind/unbind service connections (Attach-connections card)
 /dashboard/skills                     # list: your skills + core skills (always-on) + draft-resume card
 /dashboard/skills/new                 # conversational skill creator (chat UI)
 /dashboard/skills/design              # POST: drive skill-creator FSM turn-by-turn (JSON {name,message})
@@ -368,7 +413,12 @@ fields `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`), 
 /dashboard/skills/core/:slug         # GET: read-only view of an embedded core skill
 /dashboard/skills/:id                 # user skill detail (edit/delete)
 /dashboard/secrets
-/dashboard/connectors
+/dashboard/connectors                # chat connectors (Telegram/Discord)
+/dashboard/connectors/services       # GET: self-managed-OAuth service connections (Google/GitHub/Notion/Outlook/Jira)
+/dashboard/connectors/services/:provider/creds     # POST: save per-workspace OAuth app client id/secret
+/dashboard/connectors/services/:provider/connect   # POST: begin OAuth (redirect to provider consent)
+/dashboard/connectors/services/callback/:provider  # GET: OAuth callback → store connection
+/dashboard/connectors/services/:id/delete          # POST: disconnect an account
 /dashboard/chats                     # list chats; per-chat detail has composer (send msg), resume/stop/delete
 /dashboard/chats/:id                # chat detail: history + message composer
 /dashboard/chats/:id/messages        # POST: send one message (AJAX JSON {message} → {response}|{error}; coder one-off-chat path with KB tools, persists turn)
@@ -432,3 +482,7 @@ provider/model/base-url/api-key-secret through `db.UpdateWorkspaceCoder`.
 - **`/remind` list/delete via Telegram** — only create is wired.
 - **Skill creator via Telegram** — `internal/skilldesigner.Flow` supports the Telegram states (`StateDescribing`, `StateAwaitingResume`) but the gateway router has no `/skill` command route; the skill creator is web-only for now (platform-parity gap).
 - **MCP servers** — `mcp_servers` table exists; MCP tool execution not implemented.
+- **Connector provider configs (non-Google) unverified against live APIs** — google/github/notion verified end-to-end against real accounts; outlook/jira were hand-authored (rendering unit-tested only). Verify each against live docs before relying on it. A dev harness for this lives at `cmd/livecheck` (uncommitted; runs `connectors.Execute` against real stored tokens).
+- **Connector native tools for CLI coders** — CLI coders reach connector actions via the `simple-agents connector exec` command (loopback bridge), not as native function tools in their own loop; true native parity for MCP-capable coders (claude-code) would be an MCP transport over the same `connectors.Execute` (not built).
+- **Build-time connector testing exposes ALL workspace connections** (the agent hasn't declared bindings yet); a real run exposes only the agent's bound connections (`agent_connections`).
+- **One-off chat has no connector tools** — connectors are exposed to agent builds/runs, not the chat tool set.
