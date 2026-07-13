@@ -36,6 +36,42 @@ func TestParseCoderOutputChatBlankLineDoesNotDropContent(t *testing.T) {
 	}
 }
 
+func TestParseCoderOutputBareChatMarkerOwnLine(t *testing.T) {
+	// Reproduces the real notion-porter-1 delivery failure: a weak model (qwen) put the
+	// [CHAT] marker ALONE on its own line with the message on the FOLLOWING lines, then
+	// closed with [STATE] and a trailing [SILENT]. The old parser required "[CHAT] " with an
+	// inline space, so it never opened the block — chatLines stayed empty and [SILENT]
+	// suppressed both the prose fallback and the empty-run warning: a silent non-delivery.
+	out := parseCoderOutput(strings.Join([]string{
+		"[CHAT]",
+		"✅ Ported 47 pages from Notion Personal to your knowledge base",
+		"",
+		"• notes/Personal/Personal.md",
+		"• notes/Personal/Finance.md",
+		`[STATE]{"last_ported": "2026-07-10T10:50:12Z"}[/STATE]`,
+		"[SILENT]",
+	}, "\n"))
+
+	if len(out.chatLines) != 1 {
+		t.Fatalf("expected 1 chat line from a bare [CHAT] marker, got %d: %q", len(out.chatLines), out.chatLines)
+	}
+	msg := out.chatLines[0]
+	if !strings.HasPrefix(msg, "✅ Ported 47 pages") {
+		t.Errorf("message on the line(s) after a bare [CHAT] marker was dropped: %q", msg)
+	}
+	if !strings.Contains(msg, "notes/Personal/Finance.md") {
+		t.Errorf("file list was dropped: %q", msg)
+	}
+	if len(out.stateUpdates) != 1 {
+		t.Errorf("state not parsed: %+v", out.stateUpdates)
+	}
+	// A real [CHAT] was captured, so delivery must NOT be suppressed by the trailing [SILENT]
+	// (the runner only honors silent when chatLines is empty).
+	if !out.silent {
+		t.Errorf("the trailing [SILENT] should still be recorded (informational)")
+	}
+}
+
 func TestParseCoderOutputChatSingleLine(t *testing.T) {
 	out := parseCoderOutput("[CHAT] 💭 Stay curious — momentum favors the prepared.\n")
 	if len(out.chatLines) != 1 || out.chatLines[0] != "💭 Stay curious — momentum favors the prepared." {

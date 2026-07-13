@@ -39,6 +39,9 @@ func (p Provider) ConsentURL(clientID, redirectURI, state string) string {
 	q.Set("state", state)
 	q.Set("access_type", "offline")
 	q.Set("prompt", "consent")
+	for k, v := range p.AuthorizeExtra { // provider-specific (e.g. Atlassian audience)
+		q.Set(k, v)
+	}
 	sep := "?"
 	if strings.Contains(p.AuthorizeURL, "?") {
 		sep = "&"
@@ -46,13 +49,22 @@ func (p Provider) ConsentURL(clientID, redirectURI, state string) string {
 	return p.AuthorizeURL + sep + q.Encode()
 }
 
-func (c OAuthClient) tokenRequest(ctx context.Context, p Provider, form url.Values) (TokenSet, error) {
+func (c OAuthClient) tokenRequest(ctx context.Context, p Provider, form url.Values, clientID, clientSecret string) (TokenSet, error) {
+	// token_auth: "basic" sends client creds as HTTP Basic (Notion); default sends them in
+	// the form body (Google, GitHub, MS, Atlassian). For basic, strip them from the body.
+	if p.TokenAuth == "basic" {
+		form.Del("client_id")
+		form.Del("client_secret")
+	}
 	req, err := http.NewRequestWithContext(ctx, "POST", p.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return TokenSet{}, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
+	if p.TokenAuth == "basic" {
+		req.SetBasicAuth(clientID, clientSecret)
+	}
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
 		return TokenSet{}, &ConnectorError{KindNetwork, err.Error()}
@@ -81,7 +93,7 @@ func (c OAuthClient) ExchangeCode(ctx context.Context, p Provider, clientID, cli
 	f.Set("client_id", clientID)
 	f.Set("client_secret", clientSecret)
 	f.Set("redirect_uri", redirectURI)
-	return c.tokenRequest(ctx, p, f)
+	return c.tokenRequest(ctx, p, f, clientID, clientSecret)
 }
 
 // Refresh renews an access token. Google omits a new refresh token on refresh, so the
@@ -92,7 +104,7 @@ func (c OAuthClient) Refresh(ctx context.Context, p Provider, clientID, clientSe
 	f.Set("refresh_token", refreshToken)
 	f.Set("client_id", clientID)
 	f.Set("client_secret", clientSecret)
-	ts, err := c.tokenRequest(ctx, p, f)
+	ts, err := c.tokenRequest(ctx, p, f, clientID, clientSecret)
 	if err != nil {
 		return ts, err
 	}

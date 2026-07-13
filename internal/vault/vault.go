@@ -234,7 +234,7 @@ func (v *Vault) Rename(workspaceID, fromRel, toRel string) error {
 // skills are listed as Skills, the rest is reflected from the database).
 var kbManifestExcluded = map[string]bool{
 	InternalDir: true, "agents": true, "chats": true,
-	"memory": true, "skills": true, "reminders": true,
+	"memory": true, "skills": true, "reminders": true, "inbox": true,
 }
 
 // topSegment returns the first slash-separated segment of a vault-relative path.

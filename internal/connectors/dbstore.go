@@ -41,7 +41,9 @@ func (s *DBTokenStore) AccessToken(ctx context.Context, conn ConnRef) (string, e
 	if row.Status != "ACTIVE" {
 		return "", &ConnectorError{KindNeedsReauth, fmt.Sprintf("connection %s is %s — reconnect it in Settings → Connectors", row.AccountLabel, row.Status)}
 	}
-	if !s.expired(row.ExpiresAt) {
+	// Non-expiring providers (GitHub, Notion) never refresh — use the stored token as-is.
+	prov, _ := s.Reg.ProviderByName(row.Provider)
+	if prov.NonExpiring() || !s.expired(row.ExpiresAt) {
 		tok, err := secrets.DecryptWithSystemKey(row.EncryptedAccessToken, s.SystemKey)
 		if err != nil {
 			return "", &ConnectorError{KindOther, "decrypt access token: " + err.Error()}

@@ -38,6 +38,9 @@ func (e *ConnectorError) Error() string { return e.Msg }
 // ConnRef identifies the connection an action runs against, without importing db.
 type ConnRef struct {
 	ID, Provider, AccountIdentity string
+	// Extra holds per-connection resolved values (e.g. Jira cloudid) exposed to request
+	// URL templates as {{conn.<key>}}. Nil for providers with no post-connect resolution.
+	Extra map[string]string
 }
 
 // TokenStore returns a currently-valid bearer token for a connection, refreshing +
@@ -72,10 +75,11 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 	if err != nil {
 		return Result{}, err // TokenStore returns a typed ConnectorError
 	}
-	method, u, body, contentType, err := renderRequest(a, args)
+	method, u, body, contentType, err := renderRequest(a, args, conn.Extra)
 	if err != nil {
 		return Result{}, &ConnectorError{KindOther, err.Error()}
 	}
+	prov, _ := reg.ProviderByName(conn.Provider) // for static headers (Notion-Version, GitHub Accept)
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -90,6 +94,9 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 		req.Header.Set("Authorization", "Bearer "+token)
 		if contentType != "" {
 			req.Header.Set("Content-Type", contentType)
+		}
+		for hk, hv := range prov.StaticHeaders {
+			req.Header.Set(hk, hv)
 		}
 		resp, e := client.Do(req)
 		if e != nil {

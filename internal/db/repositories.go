@@ -840,6 +840,102 @@ func scanReminder(s scanner) (*Reminder, error) {
 	return &r, nil
 }
 
+// ── Inbox ───────────────────────────────────────────────────────────────────
+
+func (d *DB) CreateInboxMessage(m *InboxMessage) error {
+	// agent_id is a nullable FK: insert NULL (not "") so reminders don't trip
+	// foreign-key enforcement.
+	var agentID any
+	if m.AgentID != "" {
+		agentID = m.AgentID
+	}
+	_, err := d.Exec(`INSERT INTO inbox_messages(id,workspace_id,source,agent_id,agent_name,ref_id,trigger,body,status,read_at,created_at)
+		VALUES(?,?,?,?,?,?,?,?,?,NULL,datetime('now'))`,
+		m.ID, m.WorkspaceID, m.Source, agentID, m.AgentName, m.RefID, m.Trigger, m.Body, m.Status)
+	return err
+}
+
+func (d *DB) ListInboxMessages(workspaceID string, limit, offset int) ([]*InboxMessage, error) {
+	rows, err := d.Query(`SELECT id,workspace_id,source,agent_id,agent_name,ref_id,trigger,body,status,read_at,created_at
+		FROM inbox_messages WHERE workspace_id=? ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?`,
+		workspaceID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*InboxMessage
+	for rows.Next() {
+		m, err := scanInboxMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) UnreadInboxCount(workspaceID string) (int, error) {
+	var n int
+	err := d.QueryRow(`SELECT COUNT(*) FROM inbox_messages WHERE workspace_id=? AND read_at IS NULL`, workspaceID).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (d *DB) MarkInboxRead(id, workspaceID string) error {
+	res, err := d.Exec(`UPDATE inbox_messages SET read_at=datetime('now') WHERE id=? AND workspace_id=? AND read_at IS NULL`,
+		id, workspaceID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (d *DB) MarkAllInboxRead(workspaceID string) error {
+	_, err := d.Exec(`UPDATE inbox_messages SET read_at=datetime('now') WHERE workspace_id=? AND read_at IS NULL`, workspaceID)
+	return err
+}
+
+func (d *DB) DeleteInboxMessage(id, workspaceID string) error {
+	res, err := d.Exec(`DELETE FROM inbox_messages WHERE id=? AND workspace_id=?`, id, workspaceID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func scanInboxMessage(s scanner) (*InboxMessage, error) {
+	var m InboxMessage
+	var agentID sql.NullString
+	var readAt sql.NullString
+	var createdAt string
+	err := s.Scan(&m.ID, &m.WorkspaceID, &m.Source, &agentID, &m.AgentName, &m.RefID, &m.Trigger, &m.Body, &m.Status, &readAt, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	m.AgentID = agentID.String
+	if readAt.Valid && readAt.String != "" {
+		t := scanTime(readAt.String)
+		if !t.IsZero() {
+			m.ReadAt = &t
+		}
+	}
+	m.CreatedAt = scanTime(createdAt)
+	return &m, nil
+}
+
 // ── User permissions ───────────────────────────────────────────────────────
 
 func (d *DB) GrantPermission(p *WorkspacePermission) error {

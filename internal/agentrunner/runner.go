@@ -287,6 +287,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 			for _, c := range conns {
 				boundConns = append(boundConns, connectors.BoundConn{
 					ID: c.ID, Provider: c.Provider, AccountLabel: c.AccountLabel, AccountIdentity: c.AccountIdentity,
+					Extra: connectors.ParseExtra(c.Extra),
 				})
 				boundRefs = append(boundRefs, prompts.ConnectionRef{
 					Provider: c.Provider, Label: c.AccountLabel, Identity: c.AccountIdentity,

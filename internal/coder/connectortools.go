@@ -106,7 +106,7 @@ func (h *hostToolSet) executeConnectorTool(ctx context.Context, name string, arg
 		return "error: unknown connector tool " + name
 	}
 	res, err := connectors.Execute(ctx, h.connReg, h.connStore, h.httpClient,
-		connectors.ConnRef{ID: b.ID, Provider: b.Provider, AccountIdentity: b.AccountIdentity},
+		connectors.ConnRef{ID: b.ID, Provider: b.Provider, AccountIdentity: b.AccountIdentity, Extra: b.Extra},
 		action, args, h.verifyBuild)
 	if err != nil {
 		return "error: " + err.Error() // ConnectorError messages are already actionable

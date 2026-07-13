@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"os"
@@ -215,16 +216,33 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 	}
 	identity, _ := oauth.FetchIdentity(ctx, prov, ts.AccessToken)
 
+	// Post-connect resolution (e.g. Jira cloud id) → stored in extra, exposed to request
+	// templates as {{conn.<key>}}.
+	extraJSON := ""
+	if prov.PostConnect != "" {
+		if vals, perr := connectors.RunPostConnect(ctx, prov.PostConnect, nil, ts.AccessToken); perr != nil {
+			return s.redirectWithError(c, "/dashboard/connectors/services", "Connected, but setup failed: "+perr.Error())
+		} else if len(vals) > 0 {
+			if b, _ := json.Marshal(vals); b != nil {
+				extraJSON = string(b)
+			}
+		}
+	}
+
 	encAccess, _ := secrets.EncryptWithSystemKey(ts.AccessToken, s.systemKey)
 	encRefresh, _ := secrets.EncryptWithSystemKey(ts.RefreshToken, s.systemKey)
-	expiresAt := time.Now().Add(time.Duration(ts.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
+	// Non-expiring providers (GitHub, Notion) store an empty expiry so refresh is never attempted.
+	expiresAt := ""
+	if !prov.NonExpiring() {
+		expiresAt = time.Now().Add(time.Duration(ts.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
+	}
 
 	if err := s.db.InsertServiceConnection(ctx, db.ServiceConnection{
 		ID: uuid.New().String(), WorkspaceID: w.ID, Provider: provider,
 		AccountLabel: label, AccountIdentity: identity,
 		Scopes:               strings.Join(prov.DefaultScopes, " "),
 		EncryptedAccessToken: encAccess, EncryptedRefreshToken: encRefresh,
-		ExpiresAt: expiresAt, Status: "ACTIVE",
+		ExpiresAt: expiresAt, Status: "ACTIVE", Extra: extraJSON,
 	}); err != nil {
 		return s.redirectWithError(c, "/dashboard/connectors/services",
 			"Connected, but saving failed (a connection labeled '"+label+"' may already exist): "+err.Error())

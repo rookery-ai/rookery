@@ -24,7 +24,26 @@ type Provider struct {
 	UserinfoURL   string   `yaml:"userinfo_url"`
 	IdentityPath  string   `yaml:"identity_path"`
 	DefaultScopes []string `yaml:"default_scopes"`
+
+	// TokenExpiry is "expiring" (default) or "never". "never" (GitHub, Notion) means the
+	// access token does not expire and must never be refreshed — connect/refresh store an
+	// empty expires_at and AccessToken treats empty as valid.
+	TokenExpiry string `yaml:"token_expiry"`
+	// TokenAuth is "body" (default) or "basic": how client_id/secret reach the token
+	// endpoint. Notion requires HTTP Basic auth; most providers accept them in the body.
+	TokenAuth string `yaml:"token_auth"`
+	// StaticHeaders are merged into every action request (e.g. Notion-Version, GitHub Accept).
+	StaticHeaders map[string]string `yaml:"static_headers"`
+	// AuthorizeExtra are extra query params on the consent URL (e.g. Atlassian audience/prompt).
+	AuthorizeExtra map[string]string `yaml:"authorize_extra"`
+	// PostConnect names a one-time resolution hook run at callback whose result is stored in
+	// service_connections.extra and exposed to URL templates as {{conn.<key>}}. "" = none.
+	// Supported: "atlassian_cloudid".
+	PostConnect string `yaml:"post_connect"`
 }
+
+// NonExpiring reports whether this provider's access tokens never expire.
+func (p Provider) NonExpiring() bool { return p.TokenExpiry == "never" }
 
 // RequestTemplate describes how to turn typed args into a real provider HTTP request.
 type RequestTemplate struct {
@@ -124,4 +143,5 @@ func (r *Registry) Action(provider, name string) (Action, bool) {
 // BoundConn is a runner/UI-facing view of a connection an agent is bound to.
 type BoundConn struct {
 	ID, Provider, AccountLabel, AccountIdentity string
+	Extra                                       map[string]string // resolved per-connection values (e.g. cloudid)
 }

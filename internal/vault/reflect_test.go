@@ -34,6 +34,52 @@ func TestReflectReminderWritesNoteAndSidecar(t *testing.T) {
 	}
 }
 
+func TestReflectInboxWritesNoteAndSidecar(t *testing.T) {
+	v := New(t.TempDir())
+	const user = "u1"
+	r := v.Reflector()
+
+	when := time.Date(2026, 7, 10, 14, 30, 0, 0, time.UTC)
+	if err := r.ReflectInbox(user, InboxNote{
+		ID: "inb-1", Source: "agent_run", AgentName: "price-tracker",
+		Trigger: "cron", Body: "BTC is $66k", Status: "ok", CreatedAt: when,
+	}); err != nil {
+		t.Fatalf("ReflectInbox: %v", err)
+	}
+
+	note, err := v.ReadNote(user, "inbox/inb-1.md")
+	if err != nil {
+		t.Fatalf("read inbox note: %v", err)
+	}
+	s := string(note)
+	if !strings.Contains(s, "BTC is $66k") || !strings.Contains(s, "type: inbox") ||
+		!strings.Contains(s, "price-tracker") || !strings.Contains(s, "trigger: cron") {
+		t.Errorf("inbox note missing content/frontmatter: %q", s)
+	}
+
+	if _, err := v.ReadNote(user, ".kb/db-export/inbox_messages/inb-1.json"); err != nil {
+		t.Errorf("inbox sidecar missing: %v", err)
+	}
+
+	// A reminder inbox note (no agent) renders the Reminder label, no crash.
+	if err := r.ReflectInbox(user, InboxNote{
+		ID: "inb-2", Source: "reminder", Body: "⏰ Reminder: call the doctor",
+		Status: "ok", CreatedAt: when,
+	}); err != nil {
+		t.Fatalf("ReflectInbox reminder: %v", err)
+	}
+	note2, _ := v.ReadNote(user, "inbox/inb-2.md")
+	if !strings.Contains(string(note2), "⏰ Reminder") {
+		t.Errorf("reminder inbox note missing label: %q", note2)
+	}
+
+	// A nil reflector is a no-op (the reminder service path).
+	var nilR *Reflector
+	if err := nilR.ReflectInbox(user, InboxNote{ID: "x"}); err != nil {
+		t.Errorf("nil reflector should be no-op, got %v", err)
+	}
+}
+
 func TestReflectAgentRunLandsInAgentDir(t *testing.T) {
 	v := New(t.TempDir())
 	const user = "u1"

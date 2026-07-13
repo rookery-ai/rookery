@@ -13,7 +13,7 @@ func TestRenderQuerySubstitution(t *testing.T) {
 		URL:    "https://api/messages",
 		Query:  map[string]string{"q": "{{query}}", "maxResults": "{{max}}"},
 	}}
-	_, u, _, _, err := renderRequest(a, map[string]any{"query": "from:boss", "max": float64(5)})
+	_, u, _, _, err := renderRequest(a, map[string]any{"query": "from:boss", "max": float64(5)}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,7 +24,7 @@ func TestRenderQuerySubstitution(t *testing.T) {
 
 func TestRenderDropsEmptyQuery(t *testing.T) {
 	a := Action{Request: RequestTemplate{Method: "GET", URL: "https://api/m", Query: map[string]string{"q": "{{query}}", "maxResults": "{{max}}"}}}
-	_, u, _, _, _ := renderRequest(a, map[string]any{"query": "hi"}) // max omitted
+	_, u, _, _, _ := renderRequest(a, map[string]any{"query": "hi"}, nil) // max omitted
 	if strings.Contains(u, "maxResults") {
 		t.Fatalf("empty query param should be dropped: %s", u)
 	}
@@ -32,7 +32,7 @@ func TestRenderDropsEmptyQuery(t *testing.T) {
 
 func TestRenderGmailRFC822(t *testing.T) {
 	a := Action{Request: RequestTemplate{Method: "POST", URL: "https://api/send", BodyBuilder: "gmail_rfc822"}}
-	_, _, body, ct, err := renderRequest(a, map[string]any{"to": "a@b.com", "subject": "Hi", "body": "Hello"})
+	_, _, body, ct, err := renderRequest(a, map[string]any{"to": "a@b.com", "subject": "Hi", "body": "Hello"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

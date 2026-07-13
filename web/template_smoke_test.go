@@ -109,3 +109,46 @@ func TestAgentTemplatesRenderWithRunning(t *testing.T) {
 		}
 	}
 }
+
+// TestInboxTemplateRenders renders dashboard/inbox.html across the read/unread,
+// error, reminder, and empty states so a bad {{if}}/field ref in inbox.html
+// can't pass a clean build and then break at Execute time.
+func TestInboxTemplateRenders(t *testing.T) {
+	tmpl, err := parseTemplates("templates")
+	if err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+	ws := &db.Workspace{Name: "ilija"}
+	now := time.Now()
+	readAt := now
+	cases := []struct {
+		name string
+		data *inboxPageData
+	}{
+		{
+			"empty",
+			&inboxPageData{pageData: &pageData{Title: "Inbox", Workspace: ws}, Messages: []*db.InboxMessage{}, Unread: 0},
+		},
+		{
+			"mixed",
+			&inboxPageData{
+				pageData: &pageData{Title: "Inbox", Workspace: ws, UserLoc: time.UTC},
+				Unread:   2,
+				Messages: []*db.InboxMessage{
+					{ID: "m1", WorkspaceID: "w", Source: "agent_run", AgentName: "Price Tracker", Trigger: "cron", Body: "BTC is $66k", Status: "ok", CreatedAt: now},
+					{ID: "m2", WorkspaceID: "w", Source: "agent_run", AgentName: "Price Tracker", Trigger: "manual", Body: "boom", Status: "error", CreatedAt: now},
+					{ID: "m3", WorkspaceID: "w", Source: "reminder", Body: "⏰ Reminder: call", Status: "ok", ReadAt: &readAt, CreatedAt: now},
+				},
+			},
+		},
+	}
+	for _, tc := range cases {
+		var buf bytes.Buffer
+		if err := tmpl.ExecuteTemplate(&buf, "dashboard/inbox.html", tc.data); err != nil {
+			t.Fatalf("%s: execute: %v", tc.name, err)
+		}
+		if buf.Len() == 0 {
+			t.Fatalf("%s: rendered empty", tc.name)
+		}
+	}
+}

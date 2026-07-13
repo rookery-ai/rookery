@@ -58,6 +58,56 @@ func (r *Reflector) ReflectReminder(workspaceID string, n ReminderNote) error {
 	return r.write(workspaceID, filepath.Join("reminders", safeName(n.ID)+".md"), fm+body, "reminders", n.ID, n)
 }
 
+// InboxNote is the reflected view of one inbox notification (an agent run's
+// delivered output/error, or a fired reminder).
+type InboxNote struct {
+	ID        string
+	Source    string // "agent_run" | "reminder"
+	AgentName string // empty for reminders
+	Trigger   string // cron|manual|chat; empty for reminders
+	Body      string // the actual delivered notification
+	Status    string // "ok" | "error"
+	CreatedAt time.Time
+}
+
+// ReflectInbox writes inbox/<id>.md plus its sidecar.
+func (r *Reflector) ReflectInbox(workspaceID string, n InboxNote) error {
+	if r == nil {
+		return nil
+	}
+	fm := frontmatter(map[string]string{
+		"type":       "inbox",
+		"id":         n.ID,
+		"source":     n.Source,
+		"agent":      n.AgentName,
+		"trigger":    n.Trigger,
+		"status":     n.Status,
+		"created_at": ts(n.CreatedAt),
+	})
+	body := fmt.Sprintf("# %s\n\n%s\n", inboxSenderLabel(n), n.Body)
+	return r.write(workspaceID, filepath.Join("inbox", safeName(n.ID)+".md"), fm+body, "inbox_messages", n.ID, n)
+}
+
+// inboxSenderLabel renders the human sender line for the note heading.
+func inboxSenderLabel(n InboxNote) string {
+	switch n.Source {
+	case "reminder":
+		return "⏰ Reminder"
+	case "agent_run":
+		if n.AgentName != "" {
+			label := "🤖 " + n.AgentName
+			if n.Trigger != "" {
+				label += " (" + n.Trigger + ")"
+			}
+			if n.Status == "error" {
+				label += " — run failed"
+			}
+			return label
+		}
+	}
+	return "Inbox"
+}
+
 // ChatNote is the reflected view of a chat and its messages.
 type ChatNote struct {
 	ID        string

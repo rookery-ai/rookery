@@ -163,6 +163,28 @@ type Reminder struct {
 	CreatedAt   time.Time
 }
 
+// InboxMessage is one delivered notification in the cross-agent inbox feed: an
+// agent run's actual output/error message (source "agent_run") or a fired
+// reminder (source "reminder"). The body is exactly what was sent to the user.
+type InboxMessage struct {
+	ID          string
+	WorkspaceID string
+	Source      string // "agent_run" | "reminder"
+	AgentID     string // empty for reminders
+	AgentName   string // denormalized; empty for reminders
+	RefID       string // run_id or reminder_id
+	Trigger     string // cron|manual|chat; empty for reminders
+	Body        string
+	Status      string     // "ok" | "error"
+	ReadAt      *time.Time // nil = unread
+	CreatedAt   time.Time
+}
+
+// Unread reports whether the notification has not been read yet. Exposed for
+// templates (Go's `not` builtin requires a bool, so a nil *time.Time can't be
+// negated directly in a template).
+func (m InboxMessage) Unread() bool { return m.ReadAt == nil }
+
 type WorkspaceSetting struct {
 	ID          string
 	WorkspaceID string

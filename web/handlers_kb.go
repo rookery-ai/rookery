@@ -91,7 +91,7 @@ func (s *Server) enrichKBDisplayNames(workspaceID, parentPath string, nodes []va
 					n.DisplayName = agent.Name
 				}
 			}
-		case "memory", "chats", "reminders":
+		case "memory", "chats", "reminders", "inbox":
 			if !n.IsDir {
 				if title := kbReadFirstHeading(s.vault, workspaceID, n.Path); title != "" {
 					n.DisplayName = title

@@ -251,7 +251,7 @@ func (f *Flow) buildBoundConns(ctx context.Context, workspaceID string) []connec
 	}
 	out := make([]connectors.BoundConn, 0, len(conns))
 	for _, c := range conns {
-		out = append(out, connectors.BoundConn{ID: c.ID, Provider: c.Provider, AccountLabel: c.AccountLabel, AccountIdentity: c.AccountIdentity})
+		out = append(out, connectors.BoundConn{ID: c.ID, Provider: c.Provider, AccountLabel: c.AccountLabel, AccountIdentity: c.AccountIdentity, Extra: connectors.ParseExtra(c.Extra)})
 	}
 	return out
 }

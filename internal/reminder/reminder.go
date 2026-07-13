@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/vault"
 )
@@ -88,8 +89,33 @@ func (s *Service) tick() {
 			slog.Error("reminder: send failed", "reminder_id", r.ID, "user_id", r.WorkspaceID, "err", err)
 			continue
 		}
+		s.recordInbox(r.WorkspaceID, r.ID, msg)
 		if err := s.db.MarkReminderSent(r.ID); err != nil {
 			slog.Error("reminder: mark sent failed", "reminder_id", r.ID, "err", err)
+		}
+	}
+}
+
+// recordInbox drops one inbox notification for a fired reminder whose body is
+// the exact message that was just sent. Best-effort; never blocks the send.
+func (s *Service) recordInbox(workspaceID, reminderID, body string) {
+	if s.db == nil || body == "" {
+		return
+	}
+	id := uuid.New().String()
+	now := time.Now().UTC()
+	if err := s.db.CreateInboxMessage(&db.InboxMessage{
+		ID: id, WorkspaceID: workspaceID, Source: "reminder",
+		RefID: reminderID, Body: body, Status: "ok", CreatedAt: now,
+	}); err != nil {
+		slog.Warn("inbox: create reminder", "reminder_id", reminderID, "err", err)
+		return
+	}
+	if s.reflector != nil {
+		if err := s.reflector.ReflectInbox(workspaceID, vault.InboxNote{
+			ID: id, Source: "reminder", Body: body, Status: "ok", CreatedAt: now,
+		}); err != nil {
+			slog.Warn("inbox: reflect reminder", "reminder_id", reminderID, "err", err)
 		}
 	}
 }

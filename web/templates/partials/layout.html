@@ -68,6 +68,35 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   pollReminders();
   setInterval(pollReminders, 30000);
+
+  // ── Inbox unread-count poller ──────────────────────────────────────────────
+  // Updates the navbar Inbox badge. Only runs on dashboard pages (the badge
+  // element only exists when the workspace navbar is rendered).
+  function setInboxBadge(n) {
+    var count = parseInt(n, 10) || 0;
+    ['inbox-badge-desktop', 'inbox-badge-mobile'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      if (count > 0) {
+        el.textContent = count > 99 ? '99+' : String(count);
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
+      }
+    });
+  }
+
+  function pollInbox() {
+    fetch('/dashboard/inbox/poll', { credentials: 'same-origin' })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) { if (data) setInboxBadge(data.unread); })
+      .catch(function() {});
+  }
+
+  if (document.getElementById('inbox-badge-desktop') || document.getElementById('inbox-badge-mobile')) {
+    pollInbox();
+    setInterval(pollInbox, 30000);
+  }
 });
 </script>
 </body>
@@ -107,6 +136,7 @@ document.addEventListener('DOMContentLoaded', function() {
         <li><a href="/dashboard/composio">🔌 External Services</a></li>
         <li><a href="/dashboard/chats">💬 Chats</a></li>
         <li><a href="/dashboard/reminders">⏰ Reminders</a></li>
+        <li><a href="/dashboard/inbox">📥 Inbox <span id="inbox-badge-mobile" class="badge badge-error badge-xs hidden ml-1">0</span></a></li>
         <li><a href="/dashboard/kb">📚 Knowledge Base</a></li>
       </ul>
     </div>
@@ -121,6 +151,7 @@ document.addEventListener('DOMContentLoaded', function() {
       <li><a href="/dashboard/composio">Services</a></li>
       <li><a href="/dashboard/chats">Chats</a></li>
       <li><a href="/dashboard/reminders">Reminders</a></li>
+      <li><a href="/dashboard/inbox" class="gap-1">Inbox <span id="inbox-badge-desktop" class="badge badge-error badge-xs hidden">0</span></a></li>
       <li><a href="/dashboard/kb">Knowledge</a></li>
     </ul>
   </div>

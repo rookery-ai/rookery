@@ -9,9 +9,9 @@ import (
 // ServiceProviderConfig holds a workspace's OAuth app credentials for one provider
 // (client_id/secret, encrypted under the system key).
 type ServiceProviderConfig struct {
-	ID, WorkspaceID, Provider               string
+	ID, WorkspaceID, Provider                string
 	EncryptedClientID, EncryptedClientSecret string
-	CreatedAt, UpdatedAt                    string
+	CreatedAt, UpdatedAt                     string
 }
 
 // ServiceConnection is one connected account (multi-account = multiple rows per
@@ -20,7 +20,9 @@ type ServiceConnection struct {
 	ID, WorkspaceID, Provider                   string
 	AccountLabel, AccountIdentity, Scopes       string
 	EncryptedAccessToken, EncryptedRefreshToken string
-	ExpiresAt, Status, CreatedAt, UpdatedAt     string
+	ExpiresAt, Status                           string
+	Extra                                       string // JSON of per-connection resolved values (e.g. Jira cloudid)
+	CreatedAt, UpdatedAt                        string
 }
 
 func (d *DB) UpsertServiceProviderConfig(ctx context.Context, c ServiceProviderConfig) error {
@@ -51,14 +53,14 @@ FROM service_provider_configs WHERE workspace_id=? AND provider=?`, workspaceID,
 }
 
 const svcConnCols = `id, workspace_id, provider, account_label, account_identity, scopes,
-	encrypted_access_token, encrypted_refresh_token, expires_at, status, created_at, updated_at`
+	encrypted_access_token, encrypted_refresh_token, expires_at, status, extra, created_at, updated_at`
 
 type rowScanner interface{ Scan(...any) error }
 
 func scanConn(s rowScanner) (ServiceConnection, error) {
 	var c ServiceConnection
 	err := s.Scan(&c.ID, &c.WorkspaceID, &c.Provider, &c.AccountLabel, &c.AccountIdentity, &c.Scopes,
-		&c.EncryptedAccessToken, &c.EncryptedRefreshToken, &c.ExpiresAt, &c.Status, &c.CreatedAt, &c.UpdatedAt)
+		&c.EncryptedAccessToken, &c.EncryptedRefreshToken, &c.ExpiresAt, &c.Status, &c.Extra, &c.CreatedAt, &c.UpdatedAt)
 	return c, err
 }
 
@@ -68,9 +70,9 @@ func (d *DB) InsertServiceConnection(ctx context.Context, c ServiceConnection) e
 	}
 	_, err := d.ExecContext(ctx, `
 INSERT INTO service_connections (`+svcConnCols+`)
-VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))`,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))`,
 		c.ID, c.WorkspaceID, c.Provider, c.AccountLabel, c.AccountIdentity, c.Scopes,
-		c.EncryptedAccessToken, c.EncryptedRefreshToken, c.ExpiresAt, c.Status)
+		c.EncryptedAccessToken, c.EncryptedRefreshToken, c.ExpiresAt, c.Status, c.Extra)
 	return err
 }
 
