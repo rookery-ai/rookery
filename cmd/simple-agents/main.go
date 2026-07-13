@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -47,6 +51,7 @@ func main() {
 			serveCmd(),
 			adminCmd(),
 			sandboxExecCmd(),
+			connectorCmd(),
 		},
 	}
 
@@ -200,6 +205,12 @@ func serveCmd() *cli.Command {
 				return fmt.Errorf("load connectors: %w", err)
 			}
 			connStore := &connectors.DBTokenStore{DB: database, SystemKey: sysKey, Reg: connReg, OAuth: connectors.OAuthClient{}}
+			// Loopback bridge so CLI coders reach connectors.Execute (auth stays host-side,
+			// same path the API engine calls in-process).
+			connBridge := connectors.NewBridge(connReg, connStore, nil)
+			if _, err := connBridge.Start(ctx); err != nil {
+				return fmt.Errorf("start connector bridge: %w", err)
+			}
 
 			designFlow := agentdesigner.NewFlow(coderFor, designer).
 				WithDB(database).
@@ -223,7 +234,7 @@ func serveCmd() *cli.Command {
 			runner := agentrunner.New(database, sysKey, agentsDir, homesDir, cfg.Data.Dir, coderSvc, skillsDir).
 				WithMemory(memStore).
 				WithVault(vlt).
-				WithConnectors(connReg, connStore).
+				WithConnectors(connReg, connStore, connBridge).
 				WithCoderFactory(func(workspaceID string) *coder.Coder {
 					w, err := database.GetWorkspaceByID(workspaceID)
 					if err != nil || w == nil {
@@ -380,6 +391,55 @@ func sandboxExecCmd() *cli.Command {
 			}
 			// On success this never returns (the process image is replaced).
 			return sandbox.Exec(spec)
+		},
+	}
+}
+
+// connectorCmd is how a CLI coder acts on a connected service: it POSTs to the loopback
+// connector bridge in the host process, which runs the SAME connectors.Execute path the
+// API engine uses in-process (auth/token-refresh stay host-side). The bridge URL + a
+// run-scoped token come from the SA_CONNECTOR_URL / SA_CONNECTOR_TOKEN env vars the runner
+// injects. Usage: simple-agents connector exec <tool> --args '<json>'
+func connectorCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "connector",
+		Usage: "Act on a connected service account (used by CLI coders)",
+		Commands: []*cli.Command{
+			{
+				Name:      "exec",
+				Usage:     "Run a connector tool: connector exec <tool> --args '<json-object>'",
+				ArgsUsage: "<tool>",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "args", Usage: "JSON object of arguments", Value: "{}"},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					tool := cmd.Args().First()
+					if tool == "" {
+						return fmt.Errorf("usage: connector exec <tool> --args '<json>'")
+					}
+					base := os.Getenv("SA_CONNECTOR_URL")
+					token := os.Getenv("SA_CONNECTOR_TOKEN")
+					if base == "" || token == "" {
+						return fmt.Errorf("no connected-service bridge available in this run")
+					}
+					var args map[string]any
+					if err := json.Unmarshal([]byte(cmd.String("args")), &args); err != nil {
+						return fmt.Errorf("--args must be a JSON object: %w", err)
+					}
+					body, _ := json.Marshal(map[string]any{"tool": tool, "args": args})
+					req, _ := http.NewRequestWithContext(ctx, "POST", base+"/exec", bytes.NewReader(body))
+					req.Header.Set("Authorization", "Bearer "+token)
+					req.Header.Set("Content-Type", "application/json")
+					resp, err := http.DefaultClient.Do(req)
+					if err != nil {
+						return fmt.Errorf("connector bridge unreachable: %w", err)
+					}
+					defer resp.Body.Close()
+					out, _ := io.ReadAll(resp.Body)
+					fmt.Print(string(out))
+					return nil
+				},
+			},
 		},
 	}
 }

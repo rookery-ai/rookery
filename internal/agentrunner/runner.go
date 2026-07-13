@@ -72,16 +72,21 @@ type Runner struct {
 	reflector    *vault.Reflector // optional; mirrors runs into the user's vault
 
 	// Self-managed OAuth connectors: when set, an agent's bound connections
-	// (agent_connections) are exposed as native typed tools in the API engine.
-	connReg   *connectors.Registry
-	connStore connectors.TokenStore
+	// (agent_connections) are exposed to BOTH coder types — API engine via in-process
+	// tools, CLI coders via the loopback bridge (simple-agents connector exec).
+	connReg    *connectors.Registry
+	connStore  connectors.TokenStore
+	connBridge *connectors.Bridge
 }
 
-// WithConnectors wires the self-managed-OAuth connector registry + token store so an
-// agent's bound service connections are offered as native typed tools during runs.
-func (r *Runner) WithConnectors(reg *connectors.Registry, store connectors.TokenStore) *Runner {
+// WithConnectors wires the self-managed-OAuth connector registry + token store + loopback
+// bridge so an agent's bound service connections are usable by every coder type: the API
+// engine calls connectors.Execute in-process; a CLI coder shells out to
+// `simple-agents connector exec`, which reaches the same Execute via the bridge.
+func (r *Runner) WithConnectors(reg *connectors.Registry, store connectors.TokenStore, bridge *connectors.Bridge) *Runner {
 	r.connReg = reg
 	r.connStore = store
+	r.connBridge = bridge
 	return r
 }
 
@@ -292,6 +297,11 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 			}
 		}
 	}
+	// The exact tool names a CLI coder invokes via `simple-agents connector exec <tool>`.
+	var connToolNames []string
+	for _, d := range r.connReg.ToolDefs(boundConns) {
+		connToolNames = append(connToolNames, d.Name)
+	}
 
 	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
 		AgentMD:         string(agentMD),
@@ -306,6 +316,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		ChatApps:        r.loadChatApps(input.WorkspaceID),
 		BackendType:     backendTypeOf(baseCoder),
 		Connections:     boundRefs,
+		ConnectionTools: connToolNames,
 	})
 
 	if baseCoder == nil {
@@ -318,21 +329,35 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	// all settings).
 	coderSvc := baseCoder.WithDir(agentDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").WithProgress(input.OnProgress)
 
-	// Expose the agent's bound service connections (loaded above) as native typed tools
-	// (single account → bare tool name; multiple of one provider → __<label> suffixed).
-	// No-op for CLI coders / unbound agents.
-	if len(boundConns) > 0 {
-		coderSvc = coderSvc.WithConnectors(r.connReg, r.connStore, boundConns)
-	}
-
-	// Inject user secrets as env vars when master password is available.
+	// Assemble the subprocess env once (WithExtraEnv replaces rather than merges): user
+	// secrets + the connector-bridge vars. Injected for every coder type.
+	extraEnv := map[string]string{}
 	if input.MasterPw != "" {
 		if user, err := r.db.GetWorkspaceByID(input.WorkspaceID); err == nil {
 			svc := secrets.New(r.db, input.WorkspaceID, input.MasterPw, user.SecretsSalt)
-			if allSecrets, err := svc.GetAll(ctx); err == nil && len(allSecrets) > 0 {
-				coderSvc = coderSvc.WithExtraEnv(allSecrets)
+			if allSecrets, err := svc.GetAll(ctx); err == nil {
+				for k, v := range allSecrets {
+					extraEnv[k] = v
+				}
 			}
 		}
+	}
+
+	// Expose the agent's bound service connections to BOTH coder types.
+	if len(boundConns) > 0 {
+		// API engine: native in-process typed tools.
+		coderSvc = coderSvc.WithConnectors(r.connReg, r.connStore, boundConns)
+		// CLI coders: register a run-scoped bridge token + inject the loopback URL so
+		// `simple-agents connector exec <tool>` reaches the same connectors.Execute.
+		if r.connBridge != nil && r.connBridge.Addr() != "" {
+			token := r.connBridge.Register(input.WorkspaceID, boundConns, false)
+			defer r.connBridge.Unregister(token)
+			extraEnv["SA_CONNECTOR_URL"] = r.connBridge.Addr()
+			extraEnv["SA_CONNECTOR_TOKEN"] = token
+		}
+	}
+	if len(extraEnv) > 0 {
+		coderSvc = coderSvc.WithExtraEnv(extraEnv)
 	}
 
 	runID := uuid.New().String()

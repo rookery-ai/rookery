@@ -1532,9 +1532,13 @@ type CoderPromptParams struct {
 	ChatApps        []ChatAppInfo // connected chat platforms + commands (platform context)
 	BackendType     string        // BackendFullCoder | BackendBasicModel | "" (capabilities block)
 	// Connections are the self-managed-OAuth service accounts this agent is bound to.
-	// When non-empty the runtime prompt tells the agent it has NATIVE typed tools for
-	// them (no discovery, no scripts) — the reliability path for weak models.
+	// When non-empty the runtime prompt tells the agent how to act on them: native typed
+	// tools (tool-calling backend) or the `simple-agents connector exec` command (CLI/basic).
 	Connections []ConnectionRef
+	// ConnectionTools are the exact tool names those connections expose (e.g.
+	// gmail_send_email, github_create_issue__work) — listed for CLI/basic backends that
+	// invoke them by name via the connector-exec command.
+	ConnectionTools []string
 }
 
 // connectedToolsBlock tells the running agent it has native typed tools for its bound
@@ -1558,29 +1562,54 @@ func slugToolLabel(s string) string {
 	return b.String()
 }
 
-func connectedToolsBlock(bound []ConnectionRef) string {
+// connectedToolsBlock tells the running agent how to act on its bound service accounts.
+// It is backend-aware: a tool-calling backend gets native function tools; a CLI or basic
+// backend gets the `simple-agents connector exec <tool>` command (which reaches the exact
+// same host-side execution path). Either way, the agent never fetches OAuth tokens or
+// hand-rolls the API call — the platform owns auth regardless of coder type.
+func connectedToolsBlock(bound []ConnectionRef, toolNames []string, backendType string) string {
 	if len(bound) == 0 {
 		return ""
 	}
 	var sb strings.Builder
 	sb.WriteString("<connected_service_tools>\n")
-	sb.WriteString("You have NATIVE tools for these connected accounts. Call them directly with typed arguments — do NOT write scripts, fetch OAuth tokens, or look up action names; the tools already ARE the interface.\n")
+
 	multi := map[string]int{}
 	for _, c := range bound {
 		multi[c.Provider]++
 	}
-	for _, c := range bound {
-		id := c.Identity
-		if id == "" {
-			id = "connected account"
+	accountLine := func() {
+		for _, c := range bound {
+			id := c.Identity
+			if id == "" {
+				id = "connected account"
+			}
+			suffix := ""
+			if multi[c.Provider] > 1 {
+				suffix = " (its tools end in `__" + slugToolLabel(c.Label) + "` to target this account)"
+			}
+			fmt.Fprintf(&sb, "- %s account \"%s\" — %s%s\n", c.Provider, c.Label, id, suffix)
 		}
-		suffix := ""
-		if multi[c.Provider] > 1 {
-			suffix = " (its tools end in `__" + slugToolLabel(c.Label) + "` to target this account)"
-		}
-		fmt.Fprintf(&sb, "- %s account \"%s\" — %s%s\n", c.Provider, c.Label, id, suffix)
 	}
-	sb.WriteString("If a connection needs re-authorization, a tool will say so — report that to the user; do not try to work around it.\n")
+
+	if backendType == BackendToolCalling {
+		sb.WriteString("You have NATIVE tools for these connected accounts. Call them directly with typed arguments — do NOT write scripts, fetch OAuth tokens, or look up action names; the tools already ARE the interface.\n")
+		accountLine()
+	} else {
+		// CLI / basic backends reach the SAME execution path via a command.
+		sb.WriteString("You can act on these connected accounts by running this command (the platform holds the OAuth tokens — you never fetch or handle them):\n")
+		sb.WriteString("  simple-agents connector exec <tool_name> --args '<json-object>'\n")
+		sb.WriteString("It prints a JSON result ({\"data\": …} on success, or {\"error\": …}). Do NOT write your own HTTP/OAuth code for these services — use this command.\n")
+		accountLine()
+		if len(toolNames) > 0 {
+			sb.WriteString("Available tools:\n")
+			for _, n := range toolNames {
+				fmt.Fprintf(&sb, "  - %s\n", n)
+			}
+			sb.WriteString("Example: simple-agents connector exec " + toolNames[0] + " --args '{\"query\":\"...\"}'\n")
+		}
+	}
+	sb.WriteString("If a connection needs re-authorization, the result will say so — report that to the user; do not try to work around it.\n")
 	sb.WriteString("</connected_service_tools>\n\n")
 	return sb.String()
 }
@@ -1692,7 +1721,7 @@ check it before acting on assumptions about the user. Use your available file ca
 `, p.AgentDir, p.VaultRoot))
 	}
 
-	sb.WriteString(connectedToolsBlock(p.Connections))
+	sb.WriteString(connectedToolsBlock(p.Connections, p.ConnectionTools, p.BackendType))
 
 	sb.WriteString(`<output_protocol>
 Run your scheduled task now. Use ONLY the markers below to produce output.
