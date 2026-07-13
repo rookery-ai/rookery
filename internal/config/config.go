@@ -16,7 +16,7 @@ type Config struct {
 	Data     DataConfig     `yaml:"data"`
 	Coder    CoderConfig    `yaml:"coder"`
 	Sandbox  SandboxConfig  `yaml:"sandbox"`
-	Chat     ChatConfig    `yaml:"chat"`
+	Chat     ChatConfig     `yaml:"chat"`
 	Backup   BackupConfig   `yaml:"backup"`
 }
 

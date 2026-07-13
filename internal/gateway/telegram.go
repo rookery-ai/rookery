@@ -11,9 +11,9 @@ import (
 
 // TelegramGateway is one user's Telegram bot instance.
 type TelegramGateway struct {
-	bot         *telebot.Bot
+	bot              *telebot.Bot
 	ownerWorkspaceID string
-	manager     *GatewayManager
+	manager          *GatewayManager
 }
 
 // NewTelegram creates but does not start a Telegram bot adapter.
@@ -27,9 +27,9 @@ func NewTelegram(token, ownerWorkspaceID string, manager *GatewayManager) (*Tele
 		return nil, fmt.Errorf("telegram bot init: %w", err)
 	}
 	return &TelegramGateway{
-		bot:         bot,
+		bot:              bot,
 		ownerWorkspaceID: ownerWorkspaceID,
-		manager:     manager,
+		manager:          manager,
 	}, nil
 }
 
@@ -139,7 +139,7 @@ func (g *TelegramGateway) handle(tc telebot.Context) error {
 	msg := Message{
 		Platform:       "telegram",
 		PlatformUserID: strconv.FormatInt(chat.ID, 10),
-		WorkspaceID:         g.ownerWorkspaceID,
+		WorkspaceID:    g.ownerWorkspaceID,
 		Text:           tc.Text(),
 		MessageID:      tc.Message().ID,
 	}

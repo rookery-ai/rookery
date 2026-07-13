@@ -31,14 +31,14 @@ type agentDetailData struct {
 	Schedule       *db.AgentSchedule
 	Runs           []*db.AgentRun
 	Manifest       *agentdesigner.AgentManifest
-	AgentMD        string   // AGENT.md
-	State          string   // state.json (read-only)
-	Logs           []string // sorted log file names (newest first)
-	LastLog        string   // content of most recent log
-	AttachedSet    map[string]bool       // agent_skills names (core+user) → true; drives checkbox "checked"
-	AttachedSkills []string              // agent_skills names in DB order; renders the attached-skill badges
+	AgentMD        string                   // AGENT.md
+	State          string                   // state.json (read-only)
+	Logs           []string                 // sorted log file names (newest first)
+	LastLog        string                   // content of most recent log
+	AttachedSet    map[string]bool          // agent_skills names (core+user) → true; drives checkbox "checked"
+	AttachedSkills []string                 // agent_skills names in DB order; renders the attached-skill badges
 	CoreSkills     []skilllibrary.SkillMeta // core (embedded) checkbox pool, always-on
-	AllSkills      []*db.Skill           // user-installed checkbox pool
+	AllSkills      []*db.Skill              // user-installed checkbox pool
 	MissingSecrets []string
 	HasPlatform    bool // user has at least one linked chat platform
 	Running        bool // a run is in flight (manual or scheduled) — drives the badge
@@ -440,16 +440,16 @@ func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, workspaceID 
 	}
 
 	data := &agentDetailData{
-		pageData:    p,
-		Agent:       agent,
-		Schedule:    schedule,
-		Runs:        runs,
-		AttachedSet: attached,
+		pageData:       p,
+		Agent:          agent,
+		Schedule:       schedule,
+		Runs:           runs,
+		AttachedSet:    attached,
 		AttachedSkills: attachedSkills,
-		CoreSkills:  skilllibrary.LoadBundled(),
-		AllSkills:   allSkills,
-		Running:     s.isAgentRunning(agent.ID),
-		LiveRun:     s.isLiveRun(agent.ID),
+		CoreSkills:     skilllibrary.LoadBundled(),
+		AllSkills:      allSkills,
+		Running:        s.isAgentRunning(agent.ID),
+		LiveRun:        s.isLiveRun(agent.ID),
 	}
 
 	dir := s.agentsDir()
@@ -600,12 +600,12 @@ func (s *Server) handleSaveSchedule(c echo.Context) error {
 				schedID = existing.ID
 			}
 			row := &db.AgentSchedule{
-				ID:        schedID,
-				AgentID:   agent.ID,
-				WorkspaceID:    u.ID,
-				CronExpr:  cronExpr,
-				NextRunAt: &nextRun,
-				Enabled:   true,
+				ID:          schedID,
+				AgentID:     agent.ID,
+				WorkspaceID: u.ID,
+				CronExpr:    cronExpr,
+				NextRunAt:   &nextRun,
+				Enabled:     true,
 			}
 			if err := s.db.UpsertAgentSchedule(row); err != nil {
 				p.Error = "Failed to save schedule: " + err.Error()

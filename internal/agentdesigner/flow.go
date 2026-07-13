@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ilijad1/simple-agents/internal/buildphase"
 	"github.com/ilijad1/simple-agents/internal/coder"
-	"github.com/ilijad1/simple-agents/internal/composioassets"
 	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/profile"
@@ -66,10 +66,6 @@ type DesignSession struct {
 	UserProfile        string             // rendered "[User profile]" block, loaded once on session start
 	UserMemory         string             // bullet list of saved memory entries, loaded once on session start
 	CreatedAt          time.Time
-
-	// ComposioEnabled is true when the user has stored a COMPOSIO_API_KEY secret,
-	// indicating their agents can use Composio to access external services.
-	ComposioEnabled bool
 
 	// IsEdit distinguishes an edit-of-existing-agent session from a fresh create.
 	// AgentID is the *existing* agent's ID (not a freshly minted one) when true.
@@ -308,7 +304,6 @@ func (f *Flow) Start(workspaceID, agentName string) (string, error) {
 	platforms := f.loadConnectedPlatforms(workspaceID)
 	userProfile := f.loadUserProfile(workspaceID)
 	userMemory := f.loadUserMemory(workspaceID)
-	composioEnabled := f.loadComposioEnabled(workspaceID)
 	f.sessions[workspaceID] = &DesignSession{
 		WorkspaceID:        workspaceID,
 		AgentID:            uuid.New().String(),
@@ -318,7 +313,6 @@ func (f *Flow) Start(workspaceID, agentName string) (string, error) {
 		ConnectedPlatforms: platforms,
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
-		ComposioEnabled:    composioEnabled,
 		CreatedAt:          time.Now(),
 	}
 
@@ -342,7 +336,6 @@ func (f *Flow) StartDesign(ctx context.Context, workspaceID, agentName, firstMes
 	platforms := f.loadConnectedPlatforms(workspaceID)
 	userProfile := f.loadUserProfile(workspaceID)
 	userMemory := f.loadUserMemory(workspaceID)
-	composioEnabled := f.loadComposioEnabled(workspaceID)
 	sess := &DesignSession{
 		WorkspaceID:        workspaceID,
 		AgentID:            uuid.New().String(),
@@ -352,7 +345,6 @@ func (f *Flow) StartDesign(ctx context.Context, workspaceID, agentName, firstMes
 		ConnectedPlatforms: platforms,
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
-		ComposioEnabled:    composioEnabled,
 		CreatedAt:          time.Now(),
 	}
 	f.sessions[workspaceID] = sess
@@ -383,7 +375,6 @@ func (f *Flow) StartEdit(workspaceID, agentID string) (string, error) {
 	platforms := f.loadConnectedPlatforms(workspaceID)
 	userProfile := f.loadUserProfile(workspaceID)
 	userMemory := f.loadUserMemory(workspaceID)
-	composioEnabled := f.loadComposioEnabled(workspaceID)
 	f.sessions[workspaceID] = &DesignSession{
 		WorkspaceID:        workspaceID,
 		AgentID:            agentID,
@@ -393,7 +384,6 @@ func (f *Flow) StartEdit(workspaceID, agentID string) (string, error) {
 		ConnectedPlatforms: platforms,
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
-		ComposioEnabled:    composioEnabled,
 		CreatedAt:          time.Now(),
 		IsEdit:             true,
 		ExistingAgentMD:    reconciledMD,
@@ -428,7 +418,6 @@ func (f *Flow) StartEditDesign(ctx context.Context, workspaceID, agentID, firstM
 	platforms := f.loadConnectedPlatforms(workspaceID)
 	userProfile := f.loadUserProfile(workspaceID)
 	userMemory := f.loadUserMemory(workspaceID)
-	composioEnabled := f.loadComposioEnabled(workspaceID)
 	sess := &DesignSession{
 		WorkspaceID:        workspaceID,
 		AgentID:            agentID,
@@ -438,7 +427,6 @@ func (f *Flow) StartEditDesign(ctx context.Context, workspaceID, agentID, firstM
 		ConnectedPlatforms: platforms,
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
-		ComposioEnabled:    composioEnabled,
 		CreatedAt:          time.Now(),
 		IsEdit:             true,
 		ExistingAgentMD:    reconciledMD,
@@ -749,7 +737,6 @@ func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string) (string, err
 		ConnectedPlatforms: f.loadConnectedPlatforms(workspaceID),
 		UserProfile:        f.loadUserProfile(workspaceID),
 		UserMemory:         f.loadUserMemory(workspaceID),
-		ComposioEnabled:    f.loadComposioEnabled(workspaceID),
 		CreatedAt:          time.Now(),
 	}
 	_ = json.Unmarshal([]byte(draft.HistoryJSON), &sess.History)
@@ -843,11 +830,6 @@ func (f *Flow) recoverBuiltAgentFromDisk(workspaceID, agentName string) (string,
 		return "", nil, false
 	}
 	for name, code := range tools {
-		// Seeded helpers (composio_*.py) are Go-authored and deterministically written;
-		// they are never vetted (mirrors decideBuildOutcome).
-		if composioassets.IsSeededFilename(filepath.Base(name)) {
-			continue
-		}
 		if err := RunToolGuardrails(name, code); err != nil {
 			return "", nil, false
 		}
@@ -1037,7 +1019,6 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		Connections:        f.loadConnectionRefs(ctx, workspaceID),
 		UserProfile:        sess.UserProfile,
 		UserMemory:         sess.UserMemory,
-		ComposioEnabled:    sess.ComposioEnabled,
 		KBManifest:         f.loadKBManifest(workspaceID),
 	})
 
@@ -1100,7 +1081,6 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		backendType = prompts.MapCoderBackend(coderSvc.BackendType())
 	}
 	implParams := prompts.ImplementationParams{
-		ComposioEnabled:    sess.ComposioEnabled,
 		ConnectedPlatforms: sess.ConnectedPlatforms,
 		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
 		BackendType:        backendType,
@@ -1220,14 +1200,6 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// them from prompt text. Overwrites any previous (possibly LLM-corrupted, possibly
 	// stale) copy on every generation/edit pass, so it self-heals and can never drift
 	// from the verified-correct version. Only relevant when the user has Composio
-	// connected, but harmless to write unconditionally too; gated on ComposioEnabled to
-	// avoid noise in agents that never touch it.
-	if implParams.ComposioEnabled {
-		if err := composioassets.WriteHelperFiles(filepath.Join(workDir, "tools")); err != nil {
-			slog.Warn("agentdesigner: seed composio helper files", "workspace_id", workspaceID, "err", err)
-		}
-	}
-
 	notify("🤖 Coder is building your agent — this can take a few minutes…")
 
 	// Run the coder WITH full tools so it can write files, execute them, debug
@@ -1255,7 +1227,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// WithExtraEnv replaces rather than merges, so build the full env map once: secrets
 	// (if any) plus the build-phase marker that tells composio_execute() this is a
 	// generation/verification pass, not a real run — it must never be set for a real run.
-	extraEnv := map[string]string{composioassets.BuildPhaseEnvVar: composioassets.BuildPhaseGeneration}
+	extraEnv := map[string]string{buildphase.EnvVar: buildphase.Generation}
 	if f.secretsLoader != nil {
 		if env, err := f.secretsLoader(genCtx, workspaceID); err == nil {
 			for k, v := range env {
@@ -1624,15 +1596,6 @@ func decideBuildOutcome(workDir, resultText, backendType string, scriptVerified 
 	}
 	hasAuthoredScript := false
 	for filename, code := range tools {
-		if composioassets.IsSeededFilename(filepath.Base(filename)) {
-			// Go-authored, deterministically seeded — nothing to vet. Guarding here also
-			// means a coder that (against instructions) rewrote the file doesn't get a
-			// pass; WriteHelperFiles re-seeds the verified version next generation anyway.
-			// A seeded helper is NOT a coder-authored script, so it must not trip the
-			// weak-backend verification gate below (else a pure-reasoning Composio agent
-			// that only uses the seeded helper would be falsely blocked).
-			continue
-		}
 		hasAuthoredScript = true
 		if err := RunToolGuardrails(filename, code); err != nil {
 			return buildDecision{
@@ -2409,16 +2372,6 @@ func (f *Flow) loadUserProfile(workspaceID string) string {
 		return ""
 	}
 	return profile.Load(f.db, workspaceID).ContextString()
-}
-
-// loadComposioEnabled returns true if the user has stored a COMPOSIO_API_KEY secret.
-// Uses a presence-only check so no master password is required.
-func (f *Flow) loadComposioEnabled(workspaceID string) bool {
-	if f.db == nil {
-		return false
-	}
-	ok, _ := f.db.SecretExists(workspaceID, "COMPOSIO_API_KEY")
-	return ok
 }
 
 // loadUserMemory returns saved memory entries as a bullet list, or "" if none.

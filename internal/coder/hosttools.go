@@ -18,7 +18,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/composioassets"
 	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/llm"
 	"github.com/ilijad1/simple-agents/internal/sandbox"
@@ -353,9 +352,6 @@ func isAgentScriptPath(path string) bool {
 		return false
 	}
 	base := filepath.Base(p)
-	if composioassets.IsSeededFilename(base) {
-		return false
-	}
 	if base == "__init__.py" || base == "conftest.py" ||
 		strings.HasPrefix(base, "test_") || strings.HasSuffix(base, "_test.py") {
 		return false

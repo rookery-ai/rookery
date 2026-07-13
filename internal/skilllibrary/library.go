@@ -60,13 +60,13 @@ type SkillMeta struct {
 }
 
 type frontmatter struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
-	Version     string `yaml:"version"`
-	License     string `yaml:"license"`
-	Category    string `yaml:"category"`
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	Version     string   `yaml:"version"`
+	License     string   `yaml:"license"`
+	Category    string   `yaml:"category"`
 	Topics      []string `yaml:"topics"`
-	Metadata struct {
+	Metadata    struct {
 		Openclaw struct {
 			Requires struct {
 				Bins    []string `yaml:"bins"`

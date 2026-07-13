@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/composioassets"
+	"github.com/ilijad1/simple-agents/internal/buildphase"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/llm"
 	"github.com/ilijad1/simple-agents/internal/vault"
@@ -377,7 +377,7 @@ func TestAPIEngine_BuildVerifyLoopDrivesScriptFix(t *testing.T) {
 
 	c := newTestCoder(t, dir).
 		WithDir(agentDir).
-		WithExtraEnv(map[string]string{composioassets.BuildPhaseEnvVar: composioassets.BuildPhaseGeneration})
+		WithExtraEnv(map[string]string{buildphase.EnvVar: buildphase.Generation})
 
 	nudged := false
 	testFake.calls = 0
@@ -436,12 +436,12 @@ func TestAPIEngine_SeededScriptDoesNotSatisfyVerification(t *testing.T) {
 	ws := "wsSeeded"
 	agentDir := filepath.Join(dir, "vaults", ws, "agents", "a1")
 	mustMkdir(t, agentDir)
-	// The seeded discovery helper exists and returns output when run.
-	mustWrite(t, filepath.Join(agentDir, "tools", composioassets.DiscoverFilename), []byte("print('SLUGS')\n"))
+	// A pre-existing helper (NOT authored during this build) exists and returns output.
+	mustWrite(t, filepath.Join(agentDir, "tools", "preexisting.py"), []byte("print('SLUGS')\n"))
 
 	c := newTestCoder(t, dir).
 		WithDir(agentDir).
-		WithExtraEnv(map[string]string{composioassets.BuildPhaseEnvVar: composioassets.BuildPhaseGeneration})
+		WithExtraEnv(map[string]string{buildphase.EnvVar: buildphase.Generation})
 
 	nudged := false
 	testFake.calls = 0
@@ -452,9 +452,9 @@ func TestAPIEngine_SeededScriptDoesNotSatisfyVerification(t *testing.T) {
 				toolCall("write_file", `{"path":"AGENT.md","content":"# agent\n"}`),
 				toolCall("write_file", `{"path":"tools/fetch.py","content":"pass\n"}`),
 			}}, nil
-		case 1: // run the SEEDED discovery helper (returns output, must NOT satisfy verification)
+		case 1: // run the PRE-EXISTING helper (returns output, must NOT satisfy verification of fetch.py)
 			return &llm.Response{ToolCalls: []llm.ToolCall{
-				toolCall("run_script", `{"path":"tools/`+composioassets.DiscoverFilename+`"}`),
+				toolCall("run_script", `{"path":"tools/preexisting.py"}`),
 			}}, nil
 		default: // try to finish — fetch.py never ran, so must still be nudged
 			if strings.Contains(strings.ToLower(lastUserMessage(req)), "broken") {
@@ -482,7 +482,7 @@ func TestAPIEngine_BuildVerifyLoopIsBounded(t *testing.T) {
 
 	c := newTestCoder(t, dir).
 		WithDir(agentDir).
-		WithExtraEnv(map[string]string{composioassets.BuildPhaseEnvVar: composioassets.BuildPhaseGeneration})
+		WithExtraEnv(map[string]string{buildphase.EnvVar: buildphase.Generation})
 
 	testFake.calls = 0
 	testFake.script = func(call int, _ llm.Request) (*llm.Response, error) {
@@ -798,7 +798,7 @@ func TestAPIEngine_GraceNudge_BuildUsesBlockedAndLargerBudget(t *testing.T) {
 	dir := t.TempDir()
 	ws := "ws-grace-build"
 	c := newTestCoder(t, dir).WithExtraEnv(map[string]string{
-		composioassets.BuildPhaseEnvVar: composioassets.BuildPhaseGeneration,
+		buildphase.EnvVar: buildphase.Generation,
 	})
 	mustMkdir(t, filepath.Join(dir, "vaults", ws))
 
@@ -901,13 +901,12 @@ func TestIsAgentScriptPath_ExcludesLibrariesAndTests(t *testing.T) {
 		}
 	}
 	nonEntry := []string{
-		"tools/lib/pricing.py",       // imported library module
+		"tools/lib/pricing.py",        // imported library module
 		"tools/tests/test_pricing.py", // test file under tests/
 		"tools/test_fetch.py",         // test_-prefixed test file
 		"tools/pricing_test.py",       // _test.py-suffixed test file
 		"tools/__init__.py",           // package marker
 		"tools/conftest.py",           // pytest config
-		"tools/composio_helper.py",    // seeded helper
 		"notes/plan.md",               // not a .py under tools/
 	}
 	for _, p := range nonEntry {

@@ -39,7 +39,7 @@ func (v *Vault) NewGuard() *Guard { return &Guard{v: v} }
 // Snapshot captures the protected region's files and contents prior to a run.
 type Snapshot struct {
 	workspaceID string
-	files  map[string]fileState // vault-relative path → state
+	files       map[string]fileState // vault-relative path → state
 }
 
 type fileState struct {

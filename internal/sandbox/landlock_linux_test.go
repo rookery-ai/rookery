@@ -73,8 +73,8 @@ func TestLandlockNestedWorkdir(t *testing.T) {
 		t.Skip("kernel has no Landlock support")
 	}
 
-	vault := t.TempDir()                  // vaults/<user> — granted RO
-	work := vault + "/agents/a"           // the agent's own dir — granted RW (nested in RO vault)
+	vault := t.TempDir()        // vaults/<user> — granted RO
+	work := vault + "/agents/a" // the agent's own dir — granted RW (nested in RO vault)
 	if err := os.MkdirAll(work, 0o700); err != nil {
 		t.Fatal(err)
 	}

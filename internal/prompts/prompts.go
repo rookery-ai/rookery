@@ -91,7 +91,6 @@ type DesignSystemParams struct {
 	Connections        []ConnectionRef // connected service accounts (Gmail, etc.) available to bind
 	UserProfile        string
 	UserMemory         string
-	ComposioEnabled    bool   // true when user has COMPOSIO_API_KEY in their secrets
 	KBManifest         string // rendered bullet list of the user's existing note paths; "" if empty/unknown
 }
 
@@ -102,132 +101,6 @@ type ConnectionRef struct {
 	Label    string   // user nickname, e.g. "work"
 	Identity string   // account identity, e.g. "work@x.com"
 	Actions  []string // the typed tool names this connection exposes at runtime
-}
-
-// composioServicesBlock returns the authoritative Composio v3 REST API guidance. It is
-// the single source of truth shared by the design conversation, the generation/edit
-// prompts, and the runtime (per-run) prompt, so every phase gives identical instructions
-// regardless of coder type. It deliberately does NOT restate the composio_helper.py
-// implementation or hardcode any service's tool slugs — see the package doc comment on
-// internal/composioassets for why: that boilerplate is now Go-authored and seeded onto
-// disk before the coder ever runs (verified against the live Composio v3 API, not
-// recalled from training data), and a hardcoded slug list can never cover Composio's
-// 250+ services. This block only teaches the coder how to USE what's already there.
-func composioServicesBlock() string {
-	return `<connected_services>
-This user has configured Composio (composio.dev) and connected external services to their
-personal Composio account. Their COMPOSIO_API_KEY is available as an environment variable.
-
-━━━ THE HELPER ALREADY EXISTS — DO NOT WRITE IT ━━━
-tools/composio_helper.py and tools/composio_discover.py already exist in your working
-directory (the platform seeds them, verified against the real Composio v3 API). Do NOT
-recreate, rewrite, or hand-roll requests to backend.composio.dev — import from the
-provided helper instead:
-
-  from composio_helper import get_connection, composio_execute, list_tools, ComposioError
-
-Any edits you make to composio_helper.py are discarded and re-seeded next generation, so
-there is no benefit to changing it — write YOUR OWN scripts that import from it.
-
-FORBIDDEN, always:
-  ❌ from composio import ComposioToolSet, Action   (deprecated composio-core SDK, v1/v2, HTTP 410)
-  ❌ requests.post(".../api/v1/..." or ".../api/v2/...")
-  ❌ requests.post(".../tools/execute/...") written directly in your own script instead of
-     calling composio_execute() — that bypasses the build-time safety guard (see below).
-
-━━━ DISCOVER THE ACTION — FOR ANY SERVICE, NEVER GUESS A SLUG ━━━
-Composio has 250+ services and their tool slugs are not fixed or memorable — do not recall
-one from training data, and do not assume a slug exists because it "sounds right". Before
-writing a script that calls a specific action, find out what's actually available:
-
-  python3 tools/composio_discover.py --toolkit <toolkit_slug> --query "<plain description>"
-
-or equivalently ` + "`list_tools(toolkit_slug, query=\"...\")`" + ` from your own script — this is ONE
-call either way (it costs exactly one run/tool-call turn). It full-text-searches the
-service's real, currently-valid tools and returns {"slug","name","description"} for each
-match. READ the name and description of every candidate before picking one — this is how
-you tell apart similarly-named actions that do very different things (e.g. a service will
-usually have a "create draft"-shaped action AND a separate "send"-shaped action; picking
-the wrong one because the names look similar is exactly the mistake this discovery step
-prevents). Do this once per toolkit per script — do not re-discover the same toolkit
-repeatedly.
-
-Then execute what you found:
-` + "```python" + `
-from composio_helper import get_connection, composio_execute, ComposioError
-import json, sys
-
-try:
-    conn_id, user_id = get_connection("notion")   # ← the toolkit_slug you discovered against
-    result = composio_execute("NOTION_SEARCH_NOTION_PAGE", conn_id, user_id,
-                              {"query": "My Database"})  # ← the exact slug list_tools returned
-except ComposioError as e:
-    print(json.dumps({"error": str(e)}))
-    sys.exit(1)
-
-# Extract response — two patterns (try both):
-resp = result.get("data", {}).get("response_data") or result.get("data", {})
-` + "```" + `
-
-━━━ BUILD-TIME SAFETY GUARD — enforced in code, not just this prompt ━━━
-composio_execute() itself refuses to run an action whose slug looks like it delivers or
-removes something for real (contains SEND/PUBLISH/POST/DELIVER/NOTIFY/DELETE/REMOVE/
-COMMENT/REPLY/INVITE) while a build/verification pass is running — it raises
-BuildTimeSendBlocked with an explanation, it does not silently do it and does not silently
-skip it. This is a real backstop, not just advice: even if you pick the wrong action, the
-platform will not let it actually send/publish/delete during a build-time test.
-  - For an action that legitimately does one of those things (the agent's whole job is to
-    send), being stopped by this guard at build time is SUCCESS, not failure — it proves the
-    pipeline reached the send step correctly. Catch BuildTimeSendBlocked (or just don't call
-    the send-shaped action yet), print the exact content/recipients you WOULD send, put that
-    in [TEST_OUTPUT], and FINISH the build normally. This is a PASSING test. Do NOT report it
-    as a Composio error, an authentication problem, or a build failure, and do NOT retry it or
-    loop — the send runs for real the next time the agent executes on schedule.
-  - For a CREATE/DRAFT-shaped action (a Gmail draft, a Notion page, a calendar event, an
-    issue) — those are not blocked; call them for real at build time, they're the proof the
-    pipeline works. Print the returned id/URL as evidence.
-  - A script that only prints a payload and exits 0 without ever calling composio_execute()
-    does NOT perform the action — no draft is created, nothing happens. Always actually call
-    composio_execute(); never substitute a print statement for the real call.
-  - READ THE USER'S REQUEST carefully: "create a draft" / "prepare for review" means a
-    create/draft-shaped action; "send" / "notify" / "email me" means a send-shaped action.
-    Use list_tools()/composio_discover.py to find the slug that actually matches which one
-    they asked for — do not assume, and if genuinely unsure, ask in the design conversation.
-
-## Error handling
-
-get_connection()/composio_execute() raise ComposioError (or a subclass:
-ComposioConnectionError for a genuine network failure, ComposioServerError for Composio
-responding with persistent 429/5xx — see the docstring at the top of composio_helper.py)
-with an already-actionable message. Catch it (catching ComposioError catches all of them)
-and surface the message directly — do NOT paraphrase or re-summarize it into a different
-diagnosis (e.g. do not describe a ComposioServerError as "unreachable"; the message already
-says exactly what happened, quote it):
-  [CHAT] ❌ Could not access [ServiceName]: {error_message}
-If a report to the user or a [BLOCKED] block needs to explain a failure, include the actual
-exception text, not your own guess at what it means.
-
-## Connection status values
-
-Only proceed when status == "ACTIVE": INITIALIZING, INITIATED — auth in progress; FAILED,
-EXPIRED, REVOKED — re-auth needed; INACTIVE — disabled. All of these → direct the user to
-app.composio.dev/connections (get_connection already does this for you).
-
-## Response data notes
-
-- composio_execute() already raises on ` + "`result.get(\"error\")`" + ` / non-successful results — a
-  returned result is a successful one.
-- Most tools: ` + "`result[\"data\"][\"response_data\"]`" + ` contains the payload.
-- Some tools: ` + "`result[\"data\"]`" + ` directly contains ` + "`http_error`" + `, ` + "`message`" + `, ` + "`status_code`" + `.
-
-## Testing
-
-COMPOSIO_API_KEY IS in your environment. Make REAL API calls through composio_execute() —
-do NOT mock. If a connection is not active, output the guidance in [TEST_OUTPUT]. A
-failed-but-guiding output is better than fake mock success.
-</connected_services>
-
-`
 }
 
 // agentPhilosophyBlock returns the brain-vs-scripts philosophy shared by the
@@ -1006,28 +879,8 @@ there as it runs.
 	}
 	sb.WriteString("</knowledge_base>\n\n")
 
-	// ── Composio (external services) ─────────────────────────────────────────
-	// The DESIGN conversation stays strictly non-technical (see <constraints>: no
-	// "script", "Python", "API key", etc.), so it gets only a plain-language note
-	// that external services are reachable — NEVER the composioServicesBlock()
-	// implementation spec (helper scripts, tool slugs, HTTP endpoints). That spec is
-	// injected only into the generation/edit/runtime prompts where code is written.
-	// Injecting it here previously contradicted the jargon ban and made the designer
-	// leak implementation detail and mix the design phases.
-	if p.ComposioEnabled {
-		sb.WriteString(`<external_services>
-This user can connect external services (Gmail, Slack, Notion, GitHub, calendars, and
-many others) through Composio. The agent you design CAN read from and act on the
-services the user has actually connected — sending a message, creating a draft, posting
-an update, reading records, and so on. Treat such an action as possible, but if the user
-names a specific service, confirm they've connected it (or tell them they can connect it)
-rather than assuming it's already set up. Talk about all of this only in plain terms
-("the agent will email you a summary", "it can post to your Slack") — do NOT explain or
-mention how it works under the hood (no tool names, scripts, API keys, or endpoints).
-</external_services>
-
-`)
-	}
+	// External services the agent can act on are surfaced by the <available_connections>
+	// block above (the user's actually-connected accounts) — no separate Composio note.
 
 	// ── Style ─────────────────────────────────────────────────────────────────
 	sb.WriteString(`<style>
@@ -1050,7 +903,6 @@ mention how it works under the hood (no tool names, scripts, API keys, or endpoi
 // contract — e.g. the Composio v3 spec — has to be restated here or a weaker model
 // will fall back to whatever it learned in training.
 type ImplementationParams struct {
-	ComposioEnabled    bool
 	ConnectedPlatforms []string
 	ChatApps           []ChatAppInfo // connected chat platforms + commands (platform context)
 	BackendType        string        // BackendFullCoder | BackendBasicModel | "" (capabilities block)
@@ -1069,9 +921,6 @@ func (p ImplementationParams) capabilitySpec() string {
 	sb.WriteString(scriptRobustnessBlock())
 	if len(p.ConnectedPlatforms) > 0 {
 		sb.WriteString(connectedPlatformsBlock(p.ConnectedPlatforms))
-	}
-	if p.ComposioEnabled {
-		sb.WriteString(composioServicesBlock())
 	}
 	return sb.String()
 }
@@ -1689,12 +1538,6 @@ type CoderPromptParams struct {
 	AgentDir        string        // absolute path to this agent's own directory (the agent's writable area / CWD)
 	ChatApps        []ChatAppInfo // connected chat platforms + commands (platform context)
 	BackendType     string        // BackendFullCoder | BackendBasicModel | "" (capabilities block)
-	// ComposioEnabled is true when the workspace has a COMPOSIO_API_KEY secret. Without
-	// this the runtime prompt never mentioned Composio at all (only generation-time
-	// prompts did) — an agent whose already-written tools/*.py script fails at run time
-	// (e.g. a slug went stale) had no way to know composio_helper.py / discovery exist,
-	// so it couldn't self-correct. Threading it here closes that gap.
-	ComposioEnabled bool
 	// Connections are the self-managed-OAuth service accounts this agent is bound to.
 	// When non-empty the runtime prompt tells the agent it has NATIVE typed tools for
 	// them (no discovery, no scripts) — the reliability path for weak models.
@@ -1781,26 +1624,6 @@ your job is to DO the task, never to (re)construct or verify the agent itself.
 `
 }
 
-// composioRuntimeNote is the RUN-time Composio guidance — deliberately NOT the full
-// composioServicesBlock() (which teaches build-time discovery: "run composio_discover.py to
-// find the slug"). At run time the scripts already embed the correct slugs, so injecting the
-// discovery workflow made agents re-run discovery every run. This tells them to just run the
-// scripts and never rediscover.
-func composioRuntimeNote() string {
-	return `<connected_services>
-This agent uses Composio to reach external services. Its tools/ scripts already call Composio
-with the correct, verified action slugs via the seeded tools/composio_helper.py, and the
-connection was confirmed when the agent was built. At RUN time: simply run those scripts.
-Do NOT run composio_discover.py, do NOT re-verify the connection, and do NOT hand-roll Composio
-requests or rediscover actions — none of that belongs in a run. COMPOSIO_API_KEY is already in
-the environment for the scripts. If a Composio call fails, report it plainly in [CHAT]; do not
-try to rediscover or rebuild. (For reference only, should you ever need to read the helper: it
-targets the Composio v3 REST API at backend.composio.dev — never the removed v1/v2 endpoints.)
-</connected_services>
-
-`
-}
-
 func BuildCoderPrompt(p CoderPromptParams) string {
 	var sb strings.Builder
 
@@ -1874,12 +1697,6 @@ check it before acting on assumptions about the user. Use your available file ca
 </agent_workspace>
 
 `, p.AgentDir, p.VaultRoot))
-	}
-
-	if p.ComposioEnabled {
-		// Runtime note, NOT the full build-time discovery guide — the scripts already know
-		// their slugs; injecting composioServicesBlock() here made agents re-run discovery.
-		sb.WriteString(composioRuntimeNote())
 	}
 
 	sb.WriteString(connectedToolsBlock(p.Connections))
@@ -2105,7 +1922,6 @@ type SkillDesignParams struct {
 	AvailableSkills    []SkillRef // core + user skills, for the designer's awareness
 	UserProfile        string
 	UserMemory         string
-	ComposioEnabled    bool
 	KBManifest         string
 	ConnectedPlatforms []string
 	ChatApps           []ChatAppInfo
@@ -2179,10 +1995,6 @@ supplies the real absolute path.
 </skill_format>
 
 `)
-	if p.ComposioEnabled {
-		sb.WriteString(composioServicesBlock())
-	}
-
 	if len(p.AvailableSkills) > 0 {
 		sb.WriteString("<existing_skills>\nThe user already has these skills (core + their own). The new skill should complement, not duplicate, them:\n")
 		for _, sk := range p.AvailableSkills {
@@ -2242,10 +2054,6 @@ func BuildSkillImplementationPrompt(skillName string, history []ChatMessage, ski
 		sb.WriteString("<skill_creator_guide>\n")
 		sb.WriteString(skillCreatorBody)
 		sb.WriteString("\n</skill_creator_guide>\n\n")
-	}
-
-	if p.ComposioEnabled {
-		sb.WriteString(composioServicesBlock())
 	}
 
 	sb.WriteString("<design_conversation>\n")

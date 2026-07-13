@@ -49,9 +49,9 @@ const (
 func seedUser(t *testing.T, database *db.DB) {
 	t.Helper()
 	err := database.CreateWorkspace(&db.Workspace{
-		ID:   testUserID,
-		Name: "testuser",
-		SecretsSalt:  testSalt,
+		ID:          testUserID,
+		Name:        "testuser",
+		SecretsSalt: testSalt,
 	})
 	require.NoError(t, err)
 }

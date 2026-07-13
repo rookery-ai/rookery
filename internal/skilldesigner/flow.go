@@ -22,8 +22,8 @@ import (
 	"time"
 
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
+	"github.com/ilijad1/simple-agents/internal/buildphase"
 	"github.com/ilijad1/simple-agents/internal/coder"
-	"github.com/ilijad1/simple-agents/internal/composioassets"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/prompts"
@@ -74,7 +74,6 @@ type DesignSession struct {
 	ConnectedPlatforms []string
 	UserProfile        string
 	UserMemory         string
-	ComposioEnabled    bool
 	KBManifest         string
 	CreatedAt          time.Time
 
@@ -313,7 +312,6 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		AvailableSkills:    sess.Skills,
 		UserProfile:        sess.UserProfile,
 		UserMemory:         sess.UserMemory,
-		ComposioEnabled:    sess.ComposioEnabled,
 		KBManifest:         sess.KBManifest,
 		ConnectedPlatforms: sess.ConnectedPlatforms,
 		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
@@ -370,7 +368,6 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		AvailableSkills:    sess.Skills,
 		ConnectedPlatforms: sess.ConnectedPlatforms,
 		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
-		ComposioEnabled:    sess.ComposioEnabled,
 		BackendType:        backendType,
 	}
 
@@ -423,15 +420,6 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	}
 	cleanupStaging := func() { _ = os.RemoveAll(stagingDir) }
 
-	// Seed the Composio helper scripts deterministically — same rationale as
-	// agentdesigner.Flow.runGeneration: never let the coder author this boilerplate
-	// (and its build-time send-guard) from prompt text.
-	if paramsSnap.ComposioEnabled {
-		if err := composioassets.WriteHelperFiles(filepath.Join(stagingDir, "scripts")); err != nil {
-			slog.Warn("skilldesigner: seed composio helper files", "workspace_id", workspaceID, "err", err)
-		}
-	}
-
 	skillCreatorBody, _ := skilllibrary.CoreSkillContent("skill-creator")
 	prompt := prompts.BuildSkillImplementationPrompt(skillNameSnap, dbMessagesToPrompt(historySnap), skillCreatorBody, paramsSnap)
 
@@ -445,7 +433,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		WithProgress(notify)
 	// WithExtraEnv replaces rather than merges, so build the full env map once: secrets
 	// (if any) plus the build-phase marker composio_helper.py's send-guard checks for.
-	extraEnv := map[string]string{composioassets.BuildPhaseEnvVar: composioassets.BuildPhaseGeneration}
+	extraEnv := map[string]string{buildphase.EnvVar: buildphase.Generation}
 	if f.secretsLoader != nil {
 		if env, err := f.secretsLoader(genCtx, workspaceID); err == nil {
 			for k, v := range env {
@@ -507,10 +495,6 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		return "That request tripped a safety check I can't get around. Try describing it differently — for example, avoid destructive or high-risk actions.", false, "", nil
 	}
 	for filename, code := range scripts {
-		if composioassets.IsSeededFilename(filepath.Base(filename)) {
-			// Go-authored, deterministically seeded — nothing to vet.
-			continue
-		}
 		if err := agentdesigner.RunToolGuardrails(filename, code); err != nil {
 			cleanupStaging()
 			closeProgress()
@@ -809,7 +793,6 @@ func (f *Flow) newSession(workspaceID, skillName string, state DesignState) *Des
 		ConnectedPlatforms: f.loadConnectedPlatforms(workspaceID),
 		UserProfile:        f.loadUserProfile(workspaceID),
 		UserMemory:         f.loadUserMemory(workspaceID),
-		ComposioEnabled:    f.loadComposioEnabled(workspaceID),
 		KBManifest:         f.loadKBManifest(workspaceID),
 		CreatedAt:          time.Now(),
 	}
@@ -874,14 +857,6 @@ func (f *Flow) loadUserMemory(workspaceID string) string {
 		return ""
 	}
 	return mem
-}
-
-func (f *Flow) loadComposioEnabled(workspaceID string) bool {
-	if f.db == nil {
-		return false
-	}
-	ok, err := f.db.SecretExists(workspaceID, "COMPOSIO_API_KEY")
-	return err == nil && ok
 }
 
 func (f *Flow) loadKBManifest(workspaceID string) string {

@@ -145,7 +145,7 @@ func (s *Store) Create(workspaceID, name, description, content string) (*db.Skil
 
 	skill := &db.Skill{
 		ID:          uuid.New().String(),
-		WorkspaceID:      workspaceID,
+		WorkspaceID: workspaceID,
 		Name:        name,
 		Description: description,
 		InstalledAt: time.Now().UTC(),
@@ -237,7 +237,7 @@ func (s *Store) InstallFromZip(workspaceID, name, description string, data []byt
 
 	skill := &db.Skill{
 		ID:          uuid.New().String(),
-		WorkspaceID:      workspaceID,
+		WorkspaceID: workspaceID,
 		Name:        name,
 		Description: description,
 		InstalledAt: time.Now().UTC(),

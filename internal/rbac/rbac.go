@@ -4,10 +4,10 @@ import "github.com/ilijad1/simple-agents/internal/db"
 
 // Known permissions.
 const (
-	PermBash         = "bash"
-	PermWebBrowser   = "web-browser"
-	PermSystemTools  = "system-tools"
-	PermMCPServers   = "mcp-servers"
+	PermBash        = "bash"
+	PermWebBrowser  = "web-browser"
+	PermSystemTools = "system-tools"
+	PermMCPServers  = "mcp-servers"
 )
 
 // CanPerform returns true if the user has been explicitly granted the given permission.

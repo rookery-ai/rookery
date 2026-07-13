@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/composioassets"
+	"github.com/ilijad1/simple-agents/internal/buildphase"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/llm"
 	"github.com/ilijad1/simple-agents/internal/prompts"
@@ -403,7 +403,7 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 		// Enforce script self-verification only during an agent BUILD (the caller sets
 		// SA_BUILD_PHASE=generation). A real run must never block on this — an agent that
 		// legitimately has nothing to report must be free to finish silently.
-		verifyBuild: c.extraEnv[composioassets.BuildPhaseEnvVar] == composioassets.BuildPhaseGeneration,
+		verifyBuild: c.extraEnv[buildphase.EnvVar] == buildphase.Generation,
 
 		connReg:    c.connReg,
 		connStore:  c.connStore,

@@ -41,7 +41,7 @@ var placeholderRe = regexp.MustCompile(`\$\{([A-Za-z0-9_]+)\}`)
 // Service manages per-user encrypted secrets.
 type Service struct {
 	db          *db.DB
-	workspaceID      string
+	workspaceID string
 	masterPw    string // plaintext master password (held in-memory only during operation)
 	salt        string // hex-encoded per-user Argon2id salt from users table
 	systemKey   []byte // 32-byte system key for encrypting master password at rest
@@ -51,10 +51,10 @@ type Service struct {
 // The master password is used to derive the AES key for secret encryption.
 func New(database *db.DB, workspaceID, masterPw, salt string) *Service {
 	return &Service{
-		db:       database,
-		workspaceID:   workspaceID,
-		masterPw: masterPw,
-		salt:     salt,
+		db:          database,
+		workspaceID: workspaceID,
+		masterPw:    masterPw,
+		salt:        salt,
 	}
 }
 
@@ -78,11 +78,11 @@ func (s *Service) Set(ctx context.Context, name, value string) error {
 	}
 
 	return s.db.UpsertSecret(&db.Secret{
-		ID:         uuid.New().String(),
-		WorkspaceID:     s.workspaceID,
-		Name:       name,
-		Ciphertext: base64.StdEncoding.EncodeToString(ciphertext),
-		Nonce:      base64.StdEncoding.EncodeToString(nonce),
+		ID:          uuid.New().String(),
+		WorkspaceID: s.workspaceID,
+		Name:        name,
+		Ciphertext:  base64.StdEncoding.EncodeToString(ciphertext),
+		Nonce:       base64.StdEncoding.EncodeToString(nonce),
 	})
 }
 

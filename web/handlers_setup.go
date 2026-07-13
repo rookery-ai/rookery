@@ -65,9 +65,6 @@ func (s *Server) handleSetup(c echo.Context) error {
 	case "skip_connector":
 		_ = s.db.SetSetting(w.ID, "wizard_connector_skipped", "1")
 		return c.Redirect(http.StatusFound, "/dashboard/setup")
-	case "composio_done", "skip_composio":
-		_ = s.db.SetSetting(w.ID, "composio_setup_seen", "1")
-		return c.Redirect(http.StatusFound, "/dashboard/setup")
 	case "finish":
 		if err := s.db.MarkWorkspaceSetupComplete(w.ID); err != nil {
 			return err
@@ -209,12 +206,6 @@ func setupStep(w *db.Workspace, database *db.DB) int {
 	conns, _ := database.ListWorkspacePlatformConnections(w.ID)
 	if skipped, _ := database.GetSetting(w.ID, "wizard_connector_skipped"); len(conns) == 0 && skipped != "1" {
 		return 5
-	}
-	// Step 6 (optional): Composio — unless the workspace has the key or dismissed it.
-	hasKey, _ := database.SecretExists(w.ID, "COMPOSIO_API_KEY")
-	seen, _ := database.GetSetting(w.ID, "composio_setup_seen")
-	if !hasKey && seen != "1" {
-		return 6
 	}
 	return 7 // Done
 }

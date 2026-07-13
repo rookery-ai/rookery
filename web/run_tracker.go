@@ -72,12 +72,12 @@ func (s *Server) startManualRun(workspaceID string, agent *db.Agent, masterPw st
 		}
 
 		runErr := s.runner.Run(ctx, agentrunner.RunInput{
-			AgentID:    agent.ID,
-			WorkspaceID:     workspaceID,
-			Trigger:    "manual",
-			MasterPw:   masterPw,
-			OnProgress: onProgress,
-			SendOutput: send,
+			AgentID:     agent.ID,
+			WorkspaceID: workspaceID,
+			Trigger:     "manual",
+			MasterPw:    masterPw,
+			OnProgress:  onProgress,
+			SendOutput:  send,
 		})
 
 		rs.mu.Lock()

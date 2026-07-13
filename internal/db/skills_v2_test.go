@@ -51,7 +51,7 @@ func TestSkillLibraryMigrationDropped(t *testing.T) {
 		t.Fatalf("create workspace: %v", err)
 	}
 	draft := &db.SkillDraft{
-		WorkspaceID:         workspaceID,
+		WorkspaceID:    workspaceID,
 		SkillName:      "my-skill",
 		State:          "designing",
 		HistoryJSON:    "[]",

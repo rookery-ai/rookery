@@ -21,7 +21,7 @@ import (
 type Message struct {
 	Platform       string // "telegram"
 	PlatformUserID string // platform-specific user/chat ID
-	WorkspaceID         string // resolved internal user ID (empty if not yet linked)
+	WorkspaceID    string // resolved internal user ID (empty if not yet linked)
 	Text           string
 	MessageID      int // platform message ID (used to delete incoming messages)
 }
@@ -73,7 +73,7 @@ type GatewayManager struct {
 	router    *Router
 
 	mu       sync.RWMutex
-	gateways map[string]Gateway        // key: "platform:workspaceID"
+	gateways map[string]Gateway // key: "platform:workspaceID"
 	cancels  map[string]context.CancelFunc
 }
 

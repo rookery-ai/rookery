@@ -100,7 +100,7 @@ func (s *SkillSaver) SaveSkill(workspaceID, name, description, skillMD string, s
 
 	skill := &db.Skill{
 		ID:          uuid.New().String(),
-		WorkspaceID:      workspaceID,
+		WorkspaceID: workspaceID,
 		Name:        name,
 		Description: description,
 		InstalledAt: time.Now().UTC(),

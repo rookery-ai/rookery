@@ -44,9 +44,9 @@ type Router struct {
 	// regex parser in reminder.ParseNaturalTime fails to understand the input.
 	timeParserFallback reminder.TimeParserFunc
 
-	mu                sync.Mutex
-	challenges        map[string]*secretChallenge // workspaceID → pending master-password challenge
-	pendingCancel     map[string]bool             // workspaceID → waiting for save/discard reply to /agent cancel
+	mu                 sync.Mutex
+	challenges         map[string]*secretChallenge // workspaceID → pending master-password challenge
+	pendingCancel      map[string]bool             // workspaceID → waiting for save/discard reply to /agent cancel
 	pendingReminderMsg map[string]string           // workspaceID → reminder message waiting for a "when" reply
 }
 
@@ -127,7 +127,7 @@ func (r *Router) handleStart(ctx context.Context, msg Message, send func(string)
 
 	if err := r.db.UpsertPlatformIdentity(&db.PlatformIdentity{
 		ID:             uuid.New().String(),
-		WorkspaceID:         msg.WorkspaceID,
+		WorkspaceID:    msg.WorkspaceID,
 		Platform:       msg.Platform,
 		PlatformUserID: msg.PlatformUserID,
 	}); err != nil {
@@ -534,10 +534,10 @@ func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send
 
 func (r *Router) createReminder(ctx context.Context, workspaceID, message string, remindAt time.Time, send func(string)) error {
 	rm := &db.Reminder{
-		ID:       uuid.New().String(),
-		WorkspaceID:   workspaceID,
-		Message:  message,
-		RemindAt: remindAt,
+		ID:          uuid.New().String(),
+		WorkspaceID: workspaceID,
+		Message:     message,
+		RemindAt:    remindAt,
 	}
 	if err := r.db.CreateReminder(rm); err != nil {
 		return fmt.Errorf("create reminder: %w", err)
@@ -730,11 +730,11 @@ func (r *Router) handleChat(ctx context.Context, msg Message, arg string, send f
 			_ = r.db.StopChat(cur.ID)
 		}
 		c := &db.Chat{
-			ID:       uuid.New().String(),
-			WorkspaceID:   msg.WorkspaceID,
-			Name:     rest,
-			Platform: msg.Platform,
-			Active:   true,
+			ID:          uuid.New().String(),
+			WorkspaceID: msg.WorkspaceID,
+			Name:        rest,
+			Platform:    msg.Platform,
+			Active:      true,
 		}
 		if err := r.db.CreateChat(c); err != nil {
 			return fmt.Errorf("create chat: %w", err)

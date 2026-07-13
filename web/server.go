@@ -46,11 +46,11 @@ type Server struct {
 	runner     *agentrunner.Runner     // may be nil in tests
 	designer   *agentdesigner.AgentDesigner
 	skills     *skillstore.Store
-	designFlow *agentdesigner.Flow // shared with Telegram gateway
-	skillFlow  *skilldesigner.Flow // conversational skill-creator (web + Telegram)
-	homesDir   string              // per-user claude HOME directories
-	vault      *vault.Vault        // per-user knowledge base
-	memory     *memory.Store       // per-user structured context (injected into one-off chat)
+	designFlow *agentdesigner.Flow  // shared with Telegram gateway
+	skillFlow  *skilldesigner.Flow  // conversational skill-creator (web + Telegram)
+	homesDir   string               // per-user claude HOME directories
+	vault      *vault.Vault         // per-user knowledge base
+	memory     *memory.Store        // per-user structured context (injected into one-off chat)
 	connectors *connectors.Registry // self-managed-OAuth connector registry (embedded data files)
 
 	// runs tracks in-flight manual ("Run Now") agent runs so progress can be
@@ -298,7 +298,6 @@ func (s *Server) setupRoutes() {
 	dash.POST("/connectors/services/:provider/connect", s.handleConnectService)
 	dash.GET("/connectors/services/callback/:provider", s.handleOAuthCallback)
 	dash.POST("/connectors/services/:id/delete", s.handleDeleteServiceConnection)
-	dash.GET("/composio", s.showComposio)
 	dash.GET("/chats", s.showChats)
 	dash.POST("/chats", s.handleCreateChat)
 	dash.GET("/chats/:id", s.showChatDetail)

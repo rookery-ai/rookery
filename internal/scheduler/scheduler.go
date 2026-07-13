@@ -8,10 +8,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/robfig/cron/v3"
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/robfig/cron/v3"
 )
 
 const pollInterval = 60 * time.Second
@@ -130,11 +130,11 @@ func (s *Scheduler) fire(ctx context.Context, sched *db.AgentSchedule, firedAt t
 	}
 
 	if err := s.runner.Run(ctx, agentrunner.RunInput{
-		AgentID:    sched.AgentID,
-		WorkspaceID:     sched.WorkspaceID,
-		Trigger:    "cron",
-		MasterPw:   masterPw,
-		SendOutput: sendFn,
+		AgentID:     sched.AgentID,
+		WorkspaceID: sched.WorkspaceID,
+		Trigger:     "cron",
+		MasterPw:    masterPw,
+		SendOutput:  sendFn,
 	}); err != nil {
 		slog.Error("scheduler: agent run failed", "agent_id", sched.AgentID, "err", err)
 	}

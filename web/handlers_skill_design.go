@@ -25,7 +25,7 @@ func (s *Server) showNewSkill(c echo.Context) error {
 	}
 	return c.Render(http.StatusOK, "dashboard/skill_new.html", &newSkillPageData{
 		pageData: s.page(c, "Create Skill"),
-		Draft:   draft,
+		Draft:    draft,
 	})
 }
 

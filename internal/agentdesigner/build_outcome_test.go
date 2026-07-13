@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/composioassets"
 	"github.com/ilijad1/simple-agents/internal/prompts"
 )
 
@@ -154,19 +153,6 @@ func TestDecideBuildOutcome(t *testing.T) {
 		}
 		if !d.saveable {
 			t.Errorf("a weak-gate build with AGENT.md + guardrail-passing tools on disk IS saveable (keep-it-as-is is the escape hatch); got saveable=false")
-		}
-	})
-
-	t.Run("weak backend + only seeded Composio files still advances (predicate guard)", func(t *testing.T) {
-		// A seeded helper is NOT a coder-authored script, so a pure-reasoning Composio
-		// agent that only carries the seeded helper must NOT be blocked on the weak path.
-		dir := writeBuild(t, validMD, map[string]string{composioassets.HelperFilename: "# seeded\n"})
-		d := decideBuildOutcome(dir, "I built it. [CHAT] done", prompts.BackendToolCalling, false, "")
-		if !d.presentable {
-			t.Fatalf("seeded-only build must remain presentable on the weak backend; message=%q", d.message)
-		}
-		if d.hasAuthoredScript {
-			t.Errorf("a seeded helper must not count as an authored script")
 		}
 	})
 

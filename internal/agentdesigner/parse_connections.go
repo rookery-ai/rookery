@@ -8,6 +8,7 @@ import (
 )
 
 var connHeaderRE = regexp.MustCompile(`(?im)^#{1,6}\s*connections\s*[:\-=]\s*(.+)$`)
+
 // Note: '/' is NOT a separator here (unlike skills) because "provider/label" uses it.
 var connSplitRE = regexp.MustCompile(`[,;|+&\n]`)
 

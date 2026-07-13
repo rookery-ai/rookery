@@ -17,7 +17,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/coder"
-	"github.com/ilijad1/simple-agents/internal/composioassets"
 	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/prompts"
@@ -275,8 +274,6 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	// description and the actual execution use the same (correct) coder.
 	baseCoder := r.coderForWorkspace(input.WorkspaceID)
 
-	composioEnabled, _ := r.db.SecretExists(input.WorkspaceID, "COMPOSIO_API_KEY")
-
 	// Load the agent's bound service connections once: they feed both the runtime
 	// prompt (so the agent knows it has native typed tools) and WithConnectors below
 	// (which actually exposes those tools to the API engine).
@@ -308,20 +305,11 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		AgentDir:        agentDir,
 		ChatApps:        r.loadChatApps(input.WorkspaceID),
 		BackendType:     backendTypeOf(baseCoder),
-		ComposioEnabled: composioEnabled,
 		Connections:     boundRefs,
 	})
 
 	if baseCoder == nil {
 		return fmt.Errorf("no coder service configured")
-	}
-	// Seed the Composio helper scripts deterministically (same verified-correct code as
-	// generation time) — NOT gated by SA_BUILD_PHASE here: this is a real run, and a real
-	// run must be able to actually send/publish/delete when the agent's job is to do so.
-	if composioEnabled {
-		if err := composioassets.WriteHelperFiles(filepath.Join(agentDir, "tools")); err != nil {
-			slog.Warn("agentrunner: seed composio helper files", "workspace_id", input.WorkspaceID, "agent_id", agent.ID, "err", err)
-		}
 	}
 	// Run inside the agent's own directory (not the shared per-user home) so
 	// tools/*.py and state.json resolve correctly and runs never see other

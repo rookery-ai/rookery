@@ -68,8 +68,8 @@ func (s *Server) showCoreSkill(c echo.Context) error {
 	meta, _ := skilllibrary.ParseMeta(content)
 	return c.Render(http.StatusOK, "dashboard/skill_core.html", &coreSkillData{
 		pageData: s.page(c, "Core Skill: "+meta.Name),
-		Meta:    meta,
-		Content: content,
+		Meta:     meta,
+		Content:  content,
 	})
 }
 
