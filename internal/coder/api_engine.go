@@ -22,13 +22,13 @@ const maxAPITurns = 25
 
 // maxBuildAPITurns is the (larger) bound during an agent BUILD. A build's budget is
 // shared between the actual work, up to maxVerifyNudges finish-verification nudges, and
-// the grace turn — 25 was routinely insufficient for a multi-action Composio agent (work
+// the grace turn — 25 was routinely insufficient for a multi-action agent (work
 // ~11 + drift + up to 5 verify nudges), so a weak model exhausted the budget before
 // finishing. Builds get more headroom; runs/chat keep the tighter bound.
 const maxBuildAPITurns = 40
 
 // buildMaxTokens raises the completion-token cap during a build so a large single
-// write_file (a full AGENT.md plus a Composio script in one call) is not truncated
+// write_file (a full AGENT.md plus a script in one call) is not truncated
 // mid-content at the default 4096, which leaves partial, unparseable Python on disk.
 const buildMaxTokens = 8192
 

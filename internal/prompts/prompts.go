@@ -105,7 +105,7 @@ type ConnectionRef struct {
 
 // agentPhilosophyBlock returns the brain-vs-scripts philosophy shared by the
 // design conversation, the generation/edit prompts, and the runtime prompt. It is
-// the single source of truth (mirrors composioServicesBlock) so the same contract
+// the single source of truth so the same contract
 // is present at every phase: an agent is an LLM with judgment that scripts only the
 // repetitive, deterministic work and reasons about everything ambiguous at runtime.
 //
@@ -842,7 +842,7 @@ External services: none | <service name and what for>
 `)
 	}
 
-	// ── Built-in knowledge base (must come BEFORE Composio so it's preferred) ─
+	// ── Built-in knowledge base (preferred for the user's own knowledge) ─
 	sb.WriteString(`<knowledge_base>
 The built-in knowledge base is the user's OWN personal knowledge graph — an
 Obsidian-style, ever-growing vault of interlinked markdown notes that belongs to
@@ -880,7 +880,7 @@ there as it runs.
 	sb.WriteString("</knowledge_base>\n\n")
 
 	// External services the agent can act on are surfaced by the <available_connections>
-	// block above (the user's actually-connected accounts) — no separate Composio note.
+	// block above (the user's actually-connected accounts).
 
 	// ── Style ─────────────────────────────────────────────────────────────────
 	sb.WriteString(`<style>
@@ -900,7 +900,7 @@ there as it runs.
 // ImplementationParams carries the capability context that MUST be present at
 // code-generation/edit time. The design conversation's system prompt is not
 // visible during generation (it runs via Generate, not Chat), so any binding API
-// contract — e.g. the Composio v3 spec — has to be restated here or a weaker model
+// contract has to be restated here or a weaker model
 // will fall back to whatever it learned in training.
 type ImplementationParams struct {
 	ConnectedPlatforms []string
@@ -1294,8 +1294,8 @@ TIER 2/3 (has code files) — ONE smoke test, then the TIER 1 dry run:
   (d) After scripts pass: complete the TIER 1 dry run steps above to verify end-to-end.
 
 SECRETS: Read all secrets via os.environ.get('SECRET_NAME', '').
-If COMPOSIO_API_KEY is present in the environment, make REAL API calls — produce REAL
-output, not mock data. If a connected-service call fails, output the real error in
+For a connected service account (Gmail, GitHub, Notion, …), use its native tools and make
+REAL calls — produce REAL output, not mock data. If a connected-service call fails, output the real error in
 [TEST_OUTPUT] and guide the user what to fix (e.g. reconnect the account in Settings -> Connectors).
 For a missing secret, substitute a realistic mock value for the test
 only. Do NOT abort.
@@ -1470,8 +1470,8 @@ The test MUST prove the original bug no longer occurs. State this explicitly, e.
 "Verified: the script now returns 3 results instead of empty; [CHAT] contains real data."
 
 SECRETS: Read all secrets via os.environ.get('SECRET_NAME', '').
-If COMPOSIO_API_KEY is present in the environment, make REAL API calls — produce REAL
-output, not mock data. If a connected-service call fails, output the real error in
+For a connected service account (Gmail, GitHub, Notion, …), use its native tools and make
+REAL calls — produce REAL output, not mock data. If a connected-service call fails, output the real error in
 [TEST_OUTPUT] and guide the user to reconnect the account.
 For a missing secret, substitute a realistic mock value for the test
 only. Do NOT abort.
@@ -1626,6 +1626,7 @@ func connectedToolsBlock(bound []ConnectionRef, toolNames []string, backendType,
 		}
 	}
 	sb.WriteString("If a connection needs re-authorization, the result will say so — report that to the user; do not try to work around it.\n")
+	sb.WriteString("There is NO Composio, no external-service SDK, and no service API keys/tokens in your environment — never search for a `composio` binary/package, an env var, or a credentials file for these services. These native tools are the ONLY way to reach the connected accounts.\n")
 	sb.WriteString("</connected_service_tools>\n\n")
 	return sb.String()
 }
@@ -1636,7 +1637,7 @@ func connectedToolsBlock(bound []ConnectionRef, toolNames []string, backendType,
 // runtimeExecutionBlock is injected FIRST at run time. It draws the hard line the build
 // prompts don't need: a run EXECUTES an already-built, already-tested agent — it must not
 // re-explore, re-test, re-discover, or write/modify code like it's building itself. Without
-// this a weaker model, handed write/run tools, re-read all its own code, re-ran Composio
+// this a weaker model, handed write/run tools, re-read all its own code, re-ran external
 // discovery, and wrote a throwaway probe script — burning turns/tokens rebuilding what was
 // already shipped. The scripts exist precisely to keep each run cheap and deterministic.
 func runtimeExecutionBlock() string {
@@ -2016,7 +2017,7 @@ The SKILL.md frontmatter (only name + description are strictly required):
     openclaw:
       requires:
         bins: [pandoc]            # tools that MUST be present (or anyBins: at-least-one)
-        env: [COMPOSIO_API_KEY]   # required env vars
+        env: [SOME_API_KEY]       # required env vars
       install:
         - kind: binary            # static binary download
           bin: pandoc

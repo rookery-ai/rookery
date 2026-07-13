@@ -15,7 +15,7 @@ import (
 // Wizard steps (workspace onboarding, owner-driven):
 //
 //	1=basics (name+about) 2=master_password 3=coder 4=profile
-//	5=connector 6=composio(optional) 7=done
+//	5=connector 7=done
 type setupData struct {
 	*pageData
 	Step           int

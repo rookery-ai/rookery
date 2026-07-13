@@ -253,7 +253,7 @@ const maxVerifyNudges = 5
 
 // trackScriptProgress records, PER SCRIPT, which non-seeded helper scripts the model
 // authored and which of them actually ran with real output. Tracking per-script (not a
-// single flag) matters because a Composio build runs the SEEDED composio_discover.py
+// single flag) matters because a build runs a helper script
 // early — that must NOT count as verifying the model's OWN fetch/send script — and
 // because one working script must not mask a second, broken one. Cheap, side-effect free.
 func (h *hostToolSet) trackScriptProgress(call llm.ToolCall, result string, isErr bool) {
@@ -334,7 +334,7 @@ func canonScriptPath(path string) string {
 
 // isAgentScriptPath reports whether path is an ENTRY-POINT helper script the model authored
 // under tools/ (a non-seeded .py that the agent actually runs to do its work) — the only
-// kind the build-verification gate should require real output from. The seeded Composio
+// kind the build-verification gate should require real output from. A seeded
 // helpers are Go-authored, so writing or running them doesn't count.
 //
 // It deliberately EXCLUDES the multi-file supporting files the testing_rules prompt itself
@@ -369,7 +369,7 @@ func isAgentScriptPath(path string) bool {
 // needsScriptVerification is true when the model authored a helper script this build
 // that has NEVER once returned real output — i.e. it may be about to ship a script that
 // silently does nothing. A seeded helper running does not clear this (see
-// trackScriptProgress), so a Composio agent's own fetch/send script is still checked.
+// trackScriptProgress), so an agent's own fetch/send script is still checked.
 func (h *hostToolSet) needsScriptVerification() bool {
 	for s := range h.authoredScripts {
 		if !h.producedOutput[s] {
@@ -813,7 +813,7 @@ func compileGlob(pattern string) (*regexp.Regexp, error) {
 // Landlock when enabled — the same confinement pattern the CLI coder uses, so
 // agent helper scripts can't reach the DB, config, or other workspaces' vaults.
 // scriptArgs are passed as argv (no shell), matching how a host CLI coder invokes
-// the script (e.g. `python3 tools/foo.py tools/payload.json`); many Composio helper
+// the script (e.g. `python3 tools/foo.py tools/payload.json`); many helper
 // scripts read their payload from sys.argv[1].
 func (h *hostToolSet) runScript(ctx context.Context, rel string, scriptArgs []string, stdin string) (string, error) {
 	clean := filepath.Clean(strings.TrimPrefix(filepath.ToSlash(rel), "/"))

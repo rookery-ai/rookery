@@ -432,7 +432,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		// building…" strings. No-op for the CLI engine.
 		WithProgress(notify)
 	// WithExtraEnv replaces rather than merges, so build the full env map once: secrets
-	// (if any) plus the build-phase marker composio_helper.py's send-guard checks for.
+	// (if any) plus the build-phase marker the connector build-guard checks for.
 	extraEnv := map[string]string{buildphase.EnvVar: buildphase.Generation}
 	if f.secretsLoader != nil {
 		if env, err := f.secretsLoader(genCtx, workspaceID); err == nil {

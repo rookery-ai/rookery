@@ -24,7 +24,8 @@ personal-access-token secret.
 ## Requirements
 
 - `GITHUB_TOKEN` env var (a fine-grained or classic PAT with the needed scopes) —
-  read from `os.environ`, **never hardcode**. If absent, fall back to Composio.
+  read from `os.environ`, **never hardcode**. If the user has connected a GitHub account
+  (Settings → Connectors), prefer its native connector tools over a PAT secret.
 - `requests` (Python) — `python3 -m pip install --user requests`.
 
 The runtime environment block tells you whether `GITHUB_TOKEN` is available.

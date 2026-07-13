@@ -1,7 +1,6 @@
 // Package buildphase defines the marker that tells the coder engine a run is an
 // agent/skill BUILD (generation/verification), not a real scheduled/manual run. It lives
-// in its own tiny package because both the (now-removed) Composio helper and the
-// self-managed-OAuth connector build-guard read it — it must outlive either integration.
+// in its own tiny package because the self-managed-OAuth connector build-guard reads it.
 package buildphase
 
 const (

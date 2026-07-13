@@ -74,4 +74,4 @@ with sync_playwright() as p:
 - Reuse one browser context across multiple pages; close it when done.
 - Write screenshots/extracted data into the vault or `$TMPDIR`, never `/tmp`.
 - For heavy multi-step login flows on a connected service (Gmail, GitHub, …),
-  prefer the `composio-toolkit` skill (OAuth via REST) over scripted logins.
+  prefer the user's native connector tools (if that service is connected) over scripted logins.

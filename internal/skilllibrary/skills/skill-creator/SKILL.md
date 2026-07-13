@@ -28,7 +28,7 @@ metadata:
     requires:
       bins: [pandoc]       # tools that MUST all be installed
       anyBins: [pdftotext, pandoc]  # at least one
-      env: [COMPOSIO_API_KEY]        # required env vars
+      env: [SOME_API_KEY]           # required env vars
     install:
       - kind: binary        # static binary download
         bin: pandoc
@@ -66,7 +66,7 @@ Exclude README/CHANGELOG/install-guides — SKILL.md is the single source.
 - **High freedom** — plain text instructions for flexible tasks (analyze,
   summarize, advise). Most skills are this.
 - **Medium freedom** — pseudocode / parameterized snippets when a preferred
-  pattern exists (parse CSV, send an email via Composio).
+  pattern exists (parse CSV, transform a file).
 - **Low freedom** — exact scripts when the operation is fragile/error-prone
   (PDF merge, binary extraction).
 
@@ -88,8 +88,8 @@ is ideal when the LLM + a few inline snippets suffice.
   skill"). So write tool names **bare** in the body (`pandoc ...`); the env
   block supplies the real path. Never hardcode `/usr/bin/...`.
 - **Secrets are env vars** — read from `os.environ`, never hardcode keys.
-- **Composio** uses only `backend.composio.dev/api/v3` (REST). Never the
-  `composio-core` SDK, never `api.composio.dev`, never `/v1/` or `/v2/`.
+- **Connected services** (Gmail, GitHub, Notion, …) are reached through the platform's
+  native connector tools — never hand-roll OAuth or hit a third-party aggregator.
 - Write outputs into the user's **vault** or `$TMPDIR`, never `/tmp`.
 
 ## The 6-step authoring process
@@ -128,4 +128,4 @@ explicitly in `requires.env` and document why.
 - Prefer the LLM + inline snippets over a script whenever possible.
 - Keep SKILL.md under ~500 lines; move deep reference into `references/`.
 - Use the platform's existing core skills as templates (see `pdf`, `markdown`,
-  `composio-toolkit`).
+  the platform's native connectors).

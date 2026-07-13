@@ -55,5 +55,5 @@ if table:
 - Timeouts always (`timeout=30`) — never hang on a dead host.
 - If the page is empty but looks JS-heavy, switch to `playwright-browser`.
 - Write extracted data into the vault, never `/tmp`.
-- For auth-gated sites, prefer the `composio-toolkit` skill (REST) over scraping
+- For a service the user has connected (Settings → Connectors), prefer its native connector tools over scraping
   brittle login flows.

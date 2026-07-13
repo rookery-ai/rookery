@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strings"
 )
 
@@ -21,8 +20,7 @@ var alwaysForbiddenKeywords = []string{
 // AGENT.md that says "drop the temp table at the end of each run" or "wipe stale entries"
 // is describing behaviour, not executing it — so these are checked in code files ONLY, not
 // in markdown documents. (Before this split they substring-matched AGENT.md prose and
-// hard-blocked legitimate agents; the Composio host/version checks were already
-// line-scoped to avoid the same class of false positive, but the keyword list was not.)
+// hard-blocked legitimate agents.)
 var destructiveCodeKeywords = []string{
 	"rm -rf", "format disk", "mkfs", "dd if=", "shred", "wipe",
 	"drop table", "drop database", "truncate table",
@@ -32,30 +30,8 @@ var destructiveCodeKeywords = []string{
 // ForbiddenKeywords is the union of both lists, retained for reference/back-compat.
 var ForbiddenKeywords = append(append([]string{}, alwaysForbiddenKeywords...), destructiveCodeKeywords...)
 
-// composioKeyLiteral matches a Composio API key (c_live_…, c_test_…, or ak_…) appearing
-// as a string literal instead of being read from os.environ.
-var composioKeyLiteral = regexp.MustCompile(`(?i)(["'])(c_live_|c_test_|ak_)[A-Za-z0-9]{8,}["']`)
-
-// composioSDKImport matches imports of the deprecated composio-core SDK.
-var composioSDKImport = regexp.MustCompile(`(?m)^\s*(from\s+composio\s+import|import\s+composio)`)
-
-// composioRef is a cheap gate so the version/host checks below only fire on a LINE
-// that is actually talking to Composio (avoids flagging some other API's own /v1/ or
-// /v2/ elsewhere in the same file — e.g. a news API's real /v2/everything endpoint —
-// just because the word "composio" appears anywhere else in the file, such as an
-// unrelated `from composio_helper import ...`).
-var composioRef = regexp.MustCompile(`(?i)composio`)
-
-// composioWrongHost matches the removed Composio API host. The only correct host
-// is backend.composio.dev (api.composio.dev returns 410/connection failures).
-var composioWrongHost = regexp.MustCompile(`(?i)\bapi\.composio\.dev`)
-
-// composioOldVersion matches Composio's removed v1/v2 REST endpoints. v3 is the
-// only supported version. Matches /v1/, /v2/, /api/v1/, /api/v2/ but never /v3/.
-var composioOldVersion = regexp.MustCompile(`(?i)/(api/)?v[12]/`)
-
 // CheckEthics is the exported ethics-only guardrail used for MARKDOWN documents (AGENT.md,
-// SKILL.md). It applies the always-forbidden intent keywords + the Composio checks, but NOT
+// SKILL.md). It applies the always-forbidden intent keywords, but NOT
 // the destructive-command keywords, which are legitimate as descriptive prose in a document
 // (see destructiveCodeKeywords). Callers all pass markdown here.
 func CheckEthics(code, _ string) error {
@@ -80,7 +56,7 @@ func RunFullGuardrails(code, _ string) error {
 
 // RunToolGuardrails runs guardrails on a single agent project FILE (tools/*.py,
 // requirements.txt, …) — all code/config, so it applies the full code-context ethics check
-// (intent + destructive commands) + Composio checks to EVERY file, and the Python AST check
+// (intent + destructive commands) to EVERY file, and the Python AST check
 // only on .py files (parsing a non-Python file as Python would spuriously fail). This is the
 // guardrail used for multi-file agent projects.
 func RunToolGuardrails(filename, code string) error {
@@ -104,25 +80,18 @@ func PythonAvailable() bool {
 // ─── Internal checks ──────────────────────────────────────────────────────────
 
 // checkEthicsDoc is the ethics gate for markdown documents: always-forbidden intent
-// keywords + Composio checks only (no destructive-command keywords — those are legitimate
-// prose in a document).
+// keywords only (no destructive-command keywords — those are legitimate prose in a doc).
 func checkEthicsDoc(code string) error {
-	if err := scanForbiddenKeywords(code, alwaysForbiddenKeywords); err != nil {
-		return err
-	}
-	return checkComposioViolations(code)
+	return scanForbiddenKeywords(code, alwaysForbiddenKeywords)
 }
 
 // checkEthicsCode is the ethics gate for code files: the full keyword set (intent +
-// destructive commands) + Composio checks.
+// destructive commands).
 func checkEthicsCode(code string) error {
 	if err := scanForbiddenKeywords(code, alwaysForbiddenKeywords); err != nil {
 		return err
 	}
-	if err := scanForbiddenKeywords(code, destructiveCodeKeywords); err != nil {
-		return err
-	}
-	return checkComposioViolations(code)
+	return scanForbiddenKeywords(code, destructiveCodeKeywords)
 }
 
 // scanForbiddenKeywords reports the first keyword in list that appears (case-insensitively)
@@ -132,46 +101,6 @@ func scanForbiddenKeywords(code string, list []string) error {
 	for _, kw := range list {
 		if strings.Contains(lower, strings.ToLower(kw)) {
 			return fmt.Errorf("code contains forbidden pattern: %q", kw)
-		}
-	}
-	return nil
-}
-
-// checkComposioViolations runs the Composio hardcoded-key, deprecated-SDK, and
-// wrong-host/old-version checks. Applied in both doc and code contexts — a Composio v1/v2
-// URL is wrong wherever it appears.
-func checkComposioViolations(code string) error {
-	if composioKeyLiteral.MatchString(code) {
-		return fmt.Errorf("Composio API key must be read from os.environ['COMPOSIO_API_KEY'], not hardcoded as a string literal")
-	}
-	if composioSDKImport.MatchString(code) {
-		return fmt.Errorf("use the Composio v3 REST API directly (requests library) — the composio-core SDK uses deprecated endpoints. See the agent design guide.")
-	}
-	if err := checkComposioURLLines(code); err != nil {
-		return err
-	}
-	return nil
-}
-
-// checkComposioURLLines scans line by line — NOT the whole file at once — for a
-// Composio wrong-host or old-version violation. A real violation virtually always
-// constructs the offending URL as a single string containing "composio" itself (e.g.
-// `f"https://backend.composio.dev/api/v1/..."`), so requiring composioRef and the
-// host/version pattern to match on the SAME LINE catches real violations while
-// eliminating whole-file false positives: an unrelated third-party API's own /v1/ or
-// /v2/ path elsewhere in the file (e.g. a news API's real /v2/everything endpoint) no
-// longer gets flagged just because the word "composio" appears anywhere else in the
-// file, such as an unrelated `from composio_helper import ...` at the top.
-func checkComposioURLLines(code string) error {
-	for _, line := range strings.Split(code, "\n") {
-		if !composioRef.MatchString(line) {
-			continue
-		}
-		if composioWrongHost.MatchString(line) {
-			return fmt.Errorf("Composio API host must be backend.composio.dev/api/v3 — api.composio.dev is removed and returns HTTP 410. Use https://backend.composio.dev/api/v3")
-		}
-		if composioOldVersion.MatchString(line) {
-			return fmt.Errorf("Composio v1/v2 endpoints are removed (HTTP 410). Use the v3 REST API: GET /api/v3/connected_accounts and POST /api/v3/tools/execute/{TOOL_SLUG}")
 		}
 	}
 	return nil

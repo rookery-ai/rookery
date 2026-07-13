@@ -283,7 +283,7 @@ func (f *Flow) WithKBLister(k kbLister) *Flow {
 }
 
 // WithSecretsLoader attaches a loader that decrypts all secrets for a user.
-// The loader is called during agent generation to inject secrets like COMPOSIO_API_KEY
+// The loader is called during agent generation to inject the workspace's secrets
 // into the coder subprocess so real API calls can be made during validation.
 func (f *Flow) WithSecretsLoader(fn func(ctx context.Context, workspaceID string) (map[string]string, error)) *Flow {
 	f.secretsLoader = fn
@@ -1074,7 +1074,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	existingAgentMD := sess.ExistingAgentMD
 	historySnap := make([]db.ChatMessage, len(sess.History))
 	copy(historySnap, sess.History)
-	// The capability spec (e.g. Composio v3) must travel into the generation prompt
+	// The capability spec must travel into the generation prompt
 	// because Generate() carries no system prompt the way the design Chat() does.
 	var backendType string
 	if coderSvc != nil {
@@ -1212,24 +1212,17 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		cleanupOnSuccess = func() {} // the dir IS the pending agent; kept until finalize
 	}
 
-	// Seed the Composio helper scripts deterministically — never let the coder author
-	// them from prompt text. Overwrites any previous (possibly LLM-corrupted, possibly
-	// stale) copy on every generation/edit pass, so it self-heals and can never drift
-	// from the verified-correct version. Only relevant when the user has Composio
 	notify("🤖 Coder is building your agent — this can take a few minutes…")
 
 	// Run the coder WITH full tools so it can write files, execute them, debug
 	// errors, and confirm the implementation works — all in one session.
 	// genCtx (not ctx) is used so Cancel() can kill the subprocess without
 	// also cancelling the outer HTTP/SSE context.
-	// Inject secrets (e.g., COMPOSIO_API_KEY) so the coder can make real API calls
-	// during validation instead of using mock data.
 	// Same tool set as an agent run (Bash,WebFetch,Read,Write,Edit) so the coder can do
 	// REAL end-to-end tests against the live services during the build — not mock-only.
 	// Secrets are injected below so the real API calls the agent will make at run time are
 	// actually exercised here (the only exception is sending real outbound messages,
-	// enforced by the testing-rules prompt AND, for Composio, a code-level guard in the
-	// seeded composio_helper.py keyed off SA_BUILD_PHASE below).
+	// enforced by the testing-rules prompt).
 	generationCoder := coderSvc.WithDir(workDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").
 		// Stream the API engine's per-tool-call milestones (🔧 web_search(...), 🔧
 		// run_script(...), 🔧 write_file(...)) to the build SSE + Telegram, the same
@@ -1241,7 +1234,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		// never calls the progress sink.
 		WithProgress(notify)
 	// WithExtraEnv replaces rather than merges, so build the full env map once: secrets
-	// (if any) plus the build-phase marker that tells composio_execute() this is a
+	// (if any) plus the build-phase marker that tells the connector build-guard this is a
 	// generation/verification pass, not a real run — it must never be set for a real run.
 	extraEnv := map[string]string{buildphase.EnvVar: buildphase.Generation}
 	if f.secretsLoader != nil {
