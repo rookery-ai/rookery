@@ -7,39 +7,76 @@ import (
 	"github.com/ilijad1/simple-agents/internal/db"
 )
 
-var connHeaderRE = regexp.MustCompile(`(?im)^#{1,6}\s*connections\s*[:\-=]\s*(.+)$`)
+// connHeaderRE matches the "# Connections:" heading and captures the (possibly empty)
+// inline value. An empty inline value means the accounts are listed as bullets on the
+// following lines (a form weak models like to use).
+var connHeaderRE = regexp.MustCompile(`(?im)^#{1,6}\s*connections\s*[:\-=]?\s*(.*)$`)
 
-// Note: '/' is NOT a separator here (unlike skills) because "provider/label" uses it.
+// Note: '/' is NOT a token separator here (unlike skills) because "provider/label" uses it.
 var connSplitRE = regexp.MustCompile(`[,;|+&\n]`)
 
 // parseConnectionsLine reads the "# Connections:" header the designer emits in AGENT.md
-// and returns the connection IDs the agent declared, matched (case-insensitively) by
-// "provider/label", bare label, account identity, or bare provider name (which binds
-// ALL of that provider's connections). Mirrors parseSkillsLine's tolerance.
+// and returns the connection IDs the agent declared. It handles BOTH forms:
+//   - inline:  "# Connections: google/personal, github/work"
+//   - bullets: "# Connections:\n# - google account \"personal\" — me@x.com"
 //
-// Contract: returns nil ONLY when no "# Connections:" header exists at all (caller
-// treats as "declared none"); a present-but-empty/"none" header returns a non-nil
-// empty slice.
+// Matching is tolerant: a connection binds if the header region contains its account
+// identity or "provider/label", or a token equals its provider, label, provider/label,
+// or identity (a bare provider name binds ALL of that provider's connections).
+//
+// Contract: returns nil ONLY when no "# Connections:" header exists at all; a present-but
+// -empty / "none" header returns a non-nil empty slice.
 func parseConnectionsLine(agentMD string, available []db.ServiceConnection) []string {
-	m := connHeaderRE.FindStringSubmatch(agentMD)
-	if m == nil {
+	loc := connHeaderRE.FindStringSubmatchIndex(agentMD)
+	if loc == nil {
 		return nil
 	}
-	rest := strings.TrimSpace(m[1])
-	if rest == "" || strings.EqualFold(rest, "none") {
+	inline := strings.TrimSpace(agentMD[loc[2]:loc[3]])
+
+	// Region = inline value + following bullet/comment list lines (the form weak models
+	// use). parts[0] is the empty boundary right after the header line; start at parts[1]
+	// and collect only list items (-, *, •, #) so prose body lines are never swallowed.
+	region := inline
+	parts := strings.Split(agentMD[loc[1]:], "\n")
+	for i := 1; i < len(parts); i++ {
+		t := strings.TrimSpace(parts[i])
+		if t == "" || !(strings.HasPrefix(t, "-") || strings.HasPrefix(t, "*") || strings.HasPrefix(t, "•") || strings.HasPrefix(t, "#")) {
+			break
+		}
+		region += "\n" + t
+	}
+	if rt := strings.TrimSpace(region); rt == "" || strings.EqualFold(rt, "none") {
 		return []string{}
 	}
+
+	low := strings.ToLower(region)
 	var out []string
 	seen := map[string]bool{}
-	for _, tok := range connSplitRE.Split(rest, -1) {
-		t := strings.Trim(strings.TrimSpace(tok), "`'\"")
-		if t == "" {
+	add := func(id string) {
+		if !seen[id] {
+			out = append(out, id)
+			seen[id] = true
+		}
+	}
+
+	// 1. Robust contains-match: the account identity or "provider/label" appears verbatim
+	//    somewhere in the region (handles the bullet form deepseek writes).
+	for _, c := range available {
+		if c.AccountIdentity != "" && strings.Contains(low, strings.ToLower(c.AccountIdentity)) {
+			add(c.ID)
+		} else if strings.Contains(low, strings.ToLower(c.Provider+"/"+c.AccountLabel)) {
+			add(c.ID)
+		}
+	}
+	// 2. Token match for the inline comma/pipe list form (provider, label, provider/label).
+	for _, tok := range connSplitRE.Split(region, -1) {
+		t := strings.Trim(strings.TrimSpace(tok), "`'\"#-*• ")
+		if t == "" || strings.EqualFold(t, "none") {
 			continue
 		}
-		for _, conn := range available {
-			if !seen[conn.ID] && matchesConn(t, conn) {
-				out = append(out, conn.ID)
-				seen[conn.ID] = true
+		for _, c := range available {
+			if matchesConn(t, c) {
+				add(c.ID)
 			}
 		}
 	}

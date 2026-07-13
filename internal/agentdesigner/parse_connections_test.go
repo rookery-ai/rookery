@@ -47,3 +47,20 @@ func TestParseConnectionsMissingHeader(t *testing.T) {
 		t.Fatalf("missing header must be nil, got %v", got)
 	}
 }
+
+func TestParseConnectionsBulletForm(t *testing.T) {
+	// The form deepseek actually emits: empty inline + a bullet naming the account.
+	md := "# Suggested schedule: none\n\n# Connections:\n# - google account \"work\" — work@x.com\n\nBody"
+	got := parseConnectionsLine(md, avail())
+	if len(got) != 1 || got[0] != "c1" {
+		t.Fatalf("bullet-form header should bind c1 (work@x.com), got %v", got)
+	}
+}
+
+func TestParseConnectionsBulletMultiple(t *testing.T) {
+	md := "# Connections:\n- google/work\n- me@x.com\n"
+	got := parseConnectionsLine(md, avail())
+	if len(got) != 2 {
+		t.Fatalf("both bullet accounts should bind, got %v", got)
+	}
+}
