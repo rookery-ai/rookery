@@ -11,6 +11,10 @@ import (
 
 var placeholderRE = regexp.MustCompile(`\{\{([\w.]+)\}\}`)
 
+// lonePlaceholderRE matches a string that is EXACTLY one {{name}} placeholder, so its
+// substituted value keeps the arg's real type (array/int/bool) instead of stringifying.
+var lonePlaceholderRE = regexp.MustCompile(`^\{\{([\w.]+)\}\}$`)
+
 // asString renders an arg value for substitution (integers without a trailing .0).
 func asString(v any) string {
 	switch t := v.(type) {
@@ -37,6 +41,47 @@ func subst(tmpl string, args map[string]any, connVars map[string]string) string 
 		}
 		return asString(args[name])
 	})
+}
+
+// renderBody walks a nested body template (maps/arrays/scalars). A leaf that is exactly
+// one {{arg}} adopts the arg's real value/type; if that arg is absent/nil the key is
+// OMITTED (present=false). A placeholder embedded in a larger string renders to string.
+// Returned values are real Go values (marshaled by the caller) so user data can never
+// break the JSON.
+func renderBody(node any, args map[string]any, connVars map[string]string) (any, bool) {
+	switch n := node.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(n))
+		for k, v := range n {
+			if rv, ok := renderBody(v, args, connVars); ok {
+				out[k] = rv
+			}
+		}
+		return out, true
+	case []any:
+		out := make([]any, 0, len(n))
+		for _, e := range n {
+			if rv, ok := renderBody(e, args, connVars); ok {
+				out = append(out, rv)
+			}
+		}
+		return out, true
+	case string:
+		if m := lonePlaceholderRE.FindStringSubmatch(n); m != nil {
+			name := m[1]
+			if strings.HasPrefix(name, "conn.") {
+				return connVars[strings.TrimPrefix(name, "conn.")], true
+			}
+			v, present := args[name]
+			if !present || v == nil {
+				return nil, false
+			}
+			return v, true
+		}
+		return subst(n, args, connVars), true
+	default:
+		return n, true // scalar literal (int/bool/float from YAML)
+	}
 }
 
 type bodyBuilder func(args map[string]any) (body []byte, contentType string, err error)
@@ -163,6 +208,10 @@ func renderRequest(a Action, args map[string]any, connVars map[string]string) (m
 			return "", "", nil, "", fmt.Errorf("unknown body_builder %q", a.Request.BodyBuilder)
 		}
 		body, contentType, err = bb(args)
+	case len(a.Request.Body) > 0:
+		rendered, _ := renderBody(a.Request.Body, args, connVars)
+		body, err = json.Marshal(rendered)
+		contentType = "application/json"
 	case len(a.Request.BodyJSON) > 0:
 		m := map[string]any{}
 		for k, tmpl := range a.Request.BodyJSON {

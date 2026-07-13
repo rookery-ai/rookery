@@ -53,3 +53,45 @@ func TestRenderGmailRFC822(t *testing.T) {
 		t.Fatalf("rfc822 missing fields: %s", dec)
 	}
 }
+
+func TestRenderBodyArrayPassthroughAndOmit(t *testing.T) {
+	a := Action{Request: RequestTemplate{Method: "POST", URL: "https://api/modify", Body: map[string]any{
+		"addLabelIds":    "{{add}}",
+		"removeLabelIds": "{{remove}}",
+	}}}
+	_, _, body, ct, err := renderRequest(a, map[string]any{"add": []any{"L1", "L2"}}, nil) // remove omitted
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(ct, "application/json") {
+		t.Fatalf("ct=%s", ct)
+	}
+	var got map[string]any
+	json.Unmarshal(body, &got)
+	arr, ok := got["addLabelIds"].([]any)
+	if !ok || len(arr) != 2 || arr[0] != "L1" {
+		t.Fatalf("addLabelIds not passed through as array: %s", body)
+	}
+	if _, present := got["removeLabelIds"]; present {
+		t.Fatalf("absent optional key must be omitted: %s", body)
+	}
+}
+
+func TestRenderBodyNestedAndEmbedded(t *testing.T) {
+	a := Action{Request: RequestTemplate{Method: "POST", URL: "https://api/chat", Body: map[string]any{
+		"model": "{{model}}",
+		"messages": []any{
+			map[string]any{"role": "user", "content": "{{prompt}}"},
+		},
+	}}}
+	_, _, body, _, _ := renderRequest(a, map[string]any{"model": "gpt-4o", "prompt": "hi \"there\""}, nil)
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("body must be valid json even with quotes in arg: %v (%s)", err, body)
+	}
+	msgs := got["messages"].([]any)
+	m0 := msgs[0].(map[string]any)
+	if m0["content"] != `hi "there"` {
+		t.Fatalf("nested content wrong: %v", m0["content"])
+	}
+}
