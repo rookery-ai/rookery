@@ -6,7 +6,8 @@ import (
 )
 
 type propSchema struct {
-	Type string `json:"type"`
+	Type  string      `json:"type"`
+	Items *propSchema `json:"items"`
 }
 
 type objSchema struct {
@@ -34,6 +35,20 @@ func validateArgs(schema json.RawMessage, args map[string]any) error {
 	for name, val := range args {
 		p, ok := s.Properties[name]
 		if !ok || val == nil {
+			continue
+		}
+		if p.Type == "array" {
+			arr, ok := val.([]any)
+			if !ok {
+				return fmt.Errorf("argument %q must be an array", name)
+			}
+			if p.Items != nil && p.Items.Type != "" {
+				for i, el := range arr {
+					if !typeOK(p.Items.Type, el) {
+						return fmt.Errorf("argument %q[%d] must be %s", name, i, p.Items.Type)
+					}
+				}
+			}
 			continue
 		}
 		if !typeOK(p.Type, val) {
