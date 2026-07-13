@@ -90,6 +90,18 @@ func (s *DBTokenStore) refresh(ctx context.Context, row *db.ServiceConnection) (
 		return "", &ConnectorError{KindOther, "encrypt refreshed token: " + err.Error()}
 	}
 	exp := s.now().Add(time.Duration(ts.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
+	// Refresh-token rotation (Atlassian): when the provider returns a NEW refresh token,
+	// persist it too — the old one is now invalid. OAuthClient.Refresh keeps the old token
+	// when the response omits one (Google), so a change here always means a real rotation.
+	if ts.RefreshToken != refreshTok {
+		encRefresh, encErr := secrets.EncryptWithSystemKey(ts.RefreshToken, s.SystemKey)
+		if encErr == nil {
+			if err := s.DB.UpdateConnectionTokensFull(ctx, row.ID, encNew, encRefresh, exp, "ACTIVE"); err != nil {
+				return "", &ConnectorError{KindOther, err.Error()}
+			}
+			return ts.AccessToken, nil
+		}
+	}
 	if err := s.DB.UpdateConnectionTokens(ctx, row.ID, encNew, exp, "ACTIVE"); err != nil {
 		return "", &ConnectorError{KindOther, err.Error()}
 	}

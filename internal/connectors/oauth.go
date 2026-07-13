@@ -35,11 +35,13 @@ func (p Provider) ConsentURL(clientID, redirectURI, state string) string {
 	q.Set("client_id", clientID)
 	q.Set("redirect_uri", redirectURI)
 	q.Set("response_type", "code")
-	q.Set("scope", strings.Join(p.DefaultScopes, " "))
+	if len(p.DefaultScopes) > 0 { // Notion sends no scope param
+		q.Set("scope", strings.Join(p.DefaultScopes, " "))
+	}
 	q.Set("state", state)
-	q.Set("access_type", "offline")
-	q.Set("prompt", "consent")
-	for k, v := range p.AuthorizeExtra { // provider-specific (e.g. Atlassian audience)
+	// access_type=offline / prompt=consent are Google-isms — providers that need them (or
+	// audience, owner, etc.) declare them in authorize_extra so nothing leaks to others.
+	for k, v := range p.AuthorizeExtra {
 		q.Set(k, v)
 	}
 	sep := "?"
@@ -117,6 +119,9 @@ func (c OAuthClient) Refresh(ctx context.Context, p Provider, clientID, clientSe
 // FetchIdentity reads the connected account's identity (e.g. email) from the provider's
 // userinfo endpoint using the given access token.
 func (c OAuthClient) FetchIdentity(ctx context.Context, p Provider, accessToken string) (string, error) {
+	if p.UserinfoURL == "" { // e.g. Notion — no userinfo endpoint; identity stays blank
+		return "", nil
+	}
 	req, _ := http.NewRequestWithContext(ctx, "GET", p.UserinfoURL, nil)
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	resp, err := c.httpClient().Do(req)

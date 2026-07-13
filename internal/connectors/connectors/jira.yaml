@@ -1,0 +1,60 @@
+provider: jira
+actions:
+  - name: jira_search_issues
+    description: "Search Jira issues with JQL and return matches. Read-only. jql is a Jira Query Language string, e.g. 'project = ENG AND status = \"In Progress\"'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        jql: {type: string, description: "Jira Query Language query"}
+        max: {type: integer, description: "max results (default 20)"}
+      required: [jql]
+    request:
+      method: GET
+      url: "https://api.atlassian.com/ex/jira/{{conn.cloudid}}/rest/api/3/search"
+      query:
+        jql: "{{jql}}"
+        maxResults: "{{max}}"
+    response_extract: "$.issues"
+  - name: jira_get_issue
+    description: "Fetch one Jira issue by key (e.g. ENG-123). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        key: {type: string, description: "issue key, e.g. ENG-123"}
+      required: [key]
+    request:
+      method: GET
+      url: "https://api.atlassian.com/ex/jira/{{conn.cloudid}}/rest/api/3/issue/{{key}}"
+    response_extract: "$"
+  - name: jira_create_issue
+    description: "Create a new Jira issue in a project. A real write — creates a visible issue. issue_type defaults to Task."
+    mutating: true
+    params:
+      type: object
+      properties:
+        project_key: {type: string, description: "project key, e.g. ENG"}
+        summary:     {type: string}
+        description: {type: string}
+        issue_type:  {type: string, description: "e.g. Task, Bug, Story (default Task)"}
+      required: [project_key, summary]
+    request:
+      method: POST
+      url: "https://api.atlassian.com/ex/jira/{{conn.cloudid}}/rest/api/3/issue"
+      body_builder: jira_issue
+    response_extract: "$.key"
+  - name: jira_add_comment
+    description: "Add a comment to an existing Jira issue. A real write — posts a visible comment."
+    mutating: true
+    params:
+      type: object
+      properties:
+        key:  {type: string, description: "issue key, e.g. ENG-123"}
+        body: {type: string}
+      required: [key, body]
+    request:
+      method: POST
+      url: "https://api.atlassian.com/ex/jira/{{conn.cloudid}}/rest/api/3/issue/{{key}}/comment"
+      body_builder: jira_comment
+    response_extract: "$.id"

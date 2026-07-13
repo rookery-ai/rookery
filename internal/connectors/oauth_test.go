@@ -48,7 +48,8 @@ func TestRefreshKeepsExistingRefreshToken(t *testing.T) {
 }
 
 func TestAuthorizeURL(t *testing.T) {
-	p := Provider{AuthorizeURL: "https://accounts/auth", DefaultScopes: []string{"a", "b"}}
+	p := Provider{AuthorizeURL: "https://accounts/auth", DefaultScopes: []string{"a", "b"},
+		AuthorizeExtra: map[string]string{"access_type": "offline", "prompt": "consent"}}
 	u := p.ConsentURL("cid", "https://cb", "state123")
 	for _, want := range []string{"client_id=cid", "state=state123", "access_type=offline", "prompt=consent", "scope=a+b", "response_type=code"} {
 		if !strings.Contains(u, want) {

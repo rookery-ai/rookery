@@ -1,0 +1,55 @@
+provider: notion
+actions:
+  - name: notion_search
+    description: "Search the connected Notion workspace for pages and databases matching a query. Read-only. Use for 'find my Notion page about X'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "text to search page/database titles for"}
+      required: [query]
+    request:
+      method: POST
+      url: "https://api.notion.com/v1/search"
+      body_json:
+        query: "{{query}}"
+    response_extract: "$.results"
+  - name: notion_get_page
+    description: "Fetch a Notion page's properties by id (from notion_search). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        page_id: {type: string}
+      required: [page_id]
+    request:
+      method: GET
+      url: "https://api.notion.com/v1/pages/{{page_id}}"
+    response_extract: "$"
+  - name: notion_get_block_children
+    description: "List the content blocks of a Notion page or block by id. Read-only. Use to read a page's body after notion_get_page."
+    mutating: false
+    params:
+      type: object
+      properties:
+        block_id: {type: string}
+      required: [block_id]
+    request:
+      method: GET
+      url: "https://api.notion.com/v1/blocks/{{block_id}}/children"
+    response_extract: "$.results"
+  - name: notion_create_page
+    description: "Create a new Notion page under a parent PAGE (parent_id = an existing page id). A real write — creates a visible page. title required; content is optional body text."
+    mutating: true
+    params:
+      type: object
+      properties:
+        parent_id: {type: string, description: "id of the parent page this new page is created under"}
+        title:     {type: string}
+        content:   {type: string}
+      required: [parent_id, title]
+    request:
+      method: POST
+      url: "https://api.notion.com/v1/pages"
+      body_builder: notion_page
+    response_extract: "$.id"

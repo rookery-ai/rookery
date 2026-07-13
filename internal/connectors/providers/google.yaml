@@ -3,6 +3,9 @@ authorize_url: https://accounts.google.com/o/oauth2/v2/auth
 token_url: https://oauth2.googleapis.com/token
 userinfo_url: https://www.googleapis.com/oauth2/v2/userinfo
 identity_path: email
+authorize_extra:
+  access_type: offline
+  prompt: consent
 default_scopes:
   - https://www.googleapis.com/auth/gmail.readonly
   - https://www.googleapis.com/auth/gmail.compose

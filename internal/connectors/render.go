@@ -42,8 +42,96 @@ func subst(tmpl string, args map[string]any, connVars map[string]string) string 
 type bodyBuilder func(args map[string]any) (body []byte, contentType string, err error)
 
 var bodyBuilders = map[string]bodyBuilder{
-	"gmail_rfc822": gmailRFC822,
-	"gmail_draft":  gmailDraft,
+	"gmail_rfc822":     gmailRFC822,
+	"gmail_draft":      gmailDraft,
+	"notion_page":      notionPage,
+	"msgraph_sendmail": msgraphSendMail,
+	"msgraph_draft":    msgraphDraft,
+	"jira_issue":       jiraIssue,
+	"jira_comment":     jiraComment,
+}
+
+// adf wraps plain text in a minimal Atlassian Document Format doc (Jira API v3 requires
+// ADF for description/comment bodies, not a plain string).
+func adf(text string) map[string]any {
+	return map[string]any{
+		"type": "doc", "version": 1,
+		"content": []any{map[string]any{
+			"type":    "paragraph",
+			"content": []any{map[string]any{"type": "text", "text": text}},
+		}},
+	}
+}
+
+// jiraIssue builds a create-issue payload. Args: project_key, summary, issue_type, description.
+func jiraIssue(args map[string]any) ([]byte, string, error) {
+	issueType := asString(args["issue_type"])
+	if issueType == "" {
+		issueType = "Task"
+	}
+	fields := map[string]any{
+		"project":   map[string]string{"key": asString(args["project_key"])},
+		"summary":   asString(args["summary"]),
+		"issuetype": map[string]string{"name": issueType},
+	}
+	if desc := asString(args["description"]); desc != "" {
+		fields["description"] = adf(desc)
+	}
+	b, err := json.Marshal(map[string]any{"fields": fields})
+	return b, "application/json", err
+}
+
+// jiraComment builds an add-comment payload (ADF body). Args: body.
+func jiraComment(args map[string]any) ([]byte, string, error) {
+	b, err := json.Marshal(map[string]any{"body": adf(asString(args["body"]))})
+	return b, "application/json", err
+}
+
+// msgraphMessage builds the shared Microsoft Graph message object from flat args.
+func msgraphMessage(args map[string]any) map[string]any {
+	msg := map[string]any{
+		"subject": asString(args["subject"]),
+		"body":    map[string]string{"contentType": "Text", "content": asString(args["body"])},
+	}
+	if to := asString(args["to"]); to != "" {
+		msg["toRecipients"] = []any{map[string]any{"emailAddress": map[string]string{"address": to}}}
+	}
+	return msg
+}
+
+// msgraphSendMail wraps the message for POST /me/sendMail (sends immediately).
+func msgraphSendMail(args map[string]any) ([]byte, string, error) {
+	b, err := json.Marshal(map[string]any{"message": msgraphMessage(args), "saveToSentItems": true})
+	return b, "application/json", err
+}
+
+// msgraphDraft is the bare message for POST /me/messages (creates a draft).
+func msgraphDraft(args map[string]any) ([]byte, string, error) {
+	b, err := json.Marshal(msgraphMessage(args))
+	return b, "application/json", err
+}
+
+// notionPage builds a minimal valid Notion "create page" payload under a page parent:
+// a title property plus one paragraph block for the body. Args: parent_id, title, content.
+func notionPage(args map[string]any) ([]byte, string, error) {
+	payload := map[string]any{
+		"parent": map[string]string{"page_id": asString(args["parent_id"])},
+		"properties": map[string]any{
+			"title": map[string]any{
+				"title": []any{map[string]any{"text": map[string]string{"content": asString(args["title"])}}},
+			},
+		},
+	}
+	if content := asString(args["content"]); content != "" {
+		payload["children"] = []any{map[string]any{
+			"object": "block", "type": "paragraph",
+			"paragraph": map[string]any{
+				"rich_text": []any{map[string]any{"text": map[string]string{"content": content}}},
+			},
+		}}
+	}
+	b, err := json.Marshal(payload)
+	return b, "application/json", err
 }
 
 // renderRequest turns an action + typed args into a concrete HTTP request. It

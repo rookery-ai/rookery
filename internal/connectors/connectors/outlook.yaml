@@ -1,0 +1,74 @@
+provider: outlook
+actions:
+  - name: outlook_search_messages
+    description: "Search the connected Outlook mailbox and return matching messages. Read-only. Use for 'find email about X'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "free-text search over the mailbox"}
+        max:   {type: integer, description: "max messages (default 10)"}
+      required: [query]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/messages"
+      query:
+        $search: "\"{{query}}\""
+        $top: "{{max}}"
+    response_extract: "$.value"
+  - name: outlook_list_messages
+    description: "List recent messages in the connected Outlook inbox (newest first). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        max: {type: integer, description: "max messages (default 10)"}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/messages"
+      query:
+        $top: "{{max}}"
+        $orderby: receivedDateTime desc
+    response_extract: "$.value"
+  - name: outlook_get_message
+    description: "Fetch one Outlook message by id (from a search/list). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        id: {type: string}
+      required: [id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/messages/{{id}}"
+    response_extract: "$"
+  - name: outlook_create_draft
+    description: "Create an Outlook DRAFT message (not sent). Use for 'draft an email for review'. A write, but nothing is delivered."
+    mutating: false
+    params:
+      type: object
+      properties:
+        to:      {type: string}
+        subject: {type: string}
+        body:    {type: string}
+      required: [to, body]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/messages"
+      body_builder: msgraph_draft
+    response_extract: "$.id"
+  - name: outlook_send_mail
+    description: "SEND an email from the connected Outlook account. Use only when the user wants to actually send. Delivers real mail."
+    mutating: true
+    params:
+      type: object
+      properties:
+        to:      {type: string}
+        subject: {type: string}
+        body:    {type: string}
+      required: [to, body]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/sendMail"
+      body_builder: msgraph_sendmail
+    response_extract: "$"

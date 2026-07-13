@@ -1,0 +1,12 @@
+name: github
+authorize_url: https://github.com/login/oauth/authorize
+token_url: https://github.com/login/oauth/access_token
+userinfo_url: https://api.github.com/user
+identity_path: login
+token_expiry: never
+static_headers:
+  Accept: application/vnd.github+json
+  X-GitHub-Api-Version: "2022-11-28"
+default_scopes:
+  - repo
+  - read:user

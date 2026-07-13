@@ -1,0 +1,80 @@
+provider: github
+actions:
+  - name: github_search_issues
+    description: "Search GitHub issues and pull requests across repos you can access. Use for 'find issues about X', 'my open PRs'. Read-only. query is GitHub issue-search syntax, e.g. 'repo:owner/name is:open label:bug'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "GitHub issue search query"}
+        max:   {type: integer, description: "max results (default 20)"}
+      required: [query]
+    request:
+      method: GET
+      url: "https://api.github.com/search/issues"
+      query:
+        q: "{{query}}"
+        per_page: "{{max}}"
+    response_extract: "$.items"
+  - name: github_list_repo_issues
+    description: "List open issues in a specific repository. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        owner: {type: string}
+        repo:  {type: string}
+      required: [owner, repo]
+    request:
+      method: GET
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}/issues"
+    response_extract: "$"
+  - name: github_get_issue
+    description: "Fetch one issue (or PR) by number from a repo. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        owner:  {type: string}
+        repo:   {type: string}
+        number: {type: integer}
+      required: [owner, repo, number]
+    request:
+      method: GET
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}/issues/{{number}}"
+    response_extract: "$"
+  - name: github_create_issue
+    description: "Open a new issue in a repo. A real write — creates a visible issue."
+    mutating: true
+    params:
+      type: object
+      properties:
+        owner: {type: string}
+        repo:  {type: string}
+        title: {type: string}
+        body:  {type: string}
+      required: [owner, repo, title]
+    request:
+      method: POST
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}/issues"
+      body_json:
+        title: "{{title}}"
+        body:  "{{body}}"
+    response_extract: "$.html_url"
+  - name: github_create_comment
+    description: "Add a comment to an existing issue or PR. A real write — posts a visible comment."
+    mutating: true
+    params:
+      type: object
+      properties:
+        owner:  {type: string}
+        repo:   {type: string}
+        number: {type: integer}
+        body:   {type: string}
+      required: [owner, repo, number, body]
+    request:
+      method: POST
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}/issues/{{number}}/comments"
+      body_json:
+        body: "{{body}}"
+    response_extract: "$.html_url"

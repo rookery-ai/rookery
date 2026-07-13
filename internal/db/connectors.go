@@ -111,6 +111,15 @@ UPDATE service_connections SET encrypted_access_token=?, expires_at=?, status=?,
 	return err
 }
 
+// UpdateConnectionTokensFull also persists a rotated refresh token (providers like
+// Atlassian issue a NEW refresh token on every refresh and invalidate the old one).
+func (d *DB) UpdateConnectionTokensFull(ctx context.Context, id, encAccess, encRefresh, expiresAt, status string) error {
+	_, err := d.ExecContext(ctx, `
+UPDATE service_connections SET encrypted_access_token=?, encrypted_refresh_token=?, expires_at=?, status=?, updated_at=datetime('now') WHERE id=?`,
+		encAccess, encRefresh, expiresAt, status, id)
+	return err
+}
+
 func (d *DB) UpdateConnectionStatus(ctx context.Context, id, status string) error {
 	_, err := d.ExecContext(ctx, `UPDATE service_connections SET status=?, updated_at=datetime('now') WHERE id=?`, status, id)
 	return err

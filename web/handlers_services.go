@@ -75,7 +75,7 @@ type servicesPageData struct {
 
 // availableServiceProviders is the set of providers exposed in the UI (grows as
 // provider data files are added).
-var availableServiceProviders = []string{"google"}
+var availableServiceProviders = []string{"google", "github", "notion", "outlook", "jira"}
 
 // redirectWithError performs a PRG redirect carrying a user-facing error message in
 // the query string (showServices renders it into the alert).

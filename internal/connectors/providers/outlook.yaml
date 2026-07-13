@@ -1,0 +1,11 @@
+name: outlook
+authorize_url: https://login.microsoftonline.com/common/oauth2/v2.0/authorize
+token_url: https://login.microsoftonline.com/common/oauth2/v2.0/token
+userinfo_url: https://graph.microsoft.com/v1.0/me
+identity_path: userPrincipalName
+default_scopes:
+  - offline_access
+  - https://graph.microsoft.com/Mail.Read
+  - https://graph.microsoft.com/Mail.Send
+  - https://graph.microsoft.com/Mail.ReadWrite
+  - https://graph.microsoft.com/User.Read
