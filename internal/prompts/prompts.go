@@ -1539,6 +1539,9 @@ type CoderPromptParams struct {
 	// gmail_send_email, github_create_issue__work) — listed for CLI/basic backends that
 	// invoke them by name via the connector-exec command.
 	ConnectionTools []string
+	// ConnectorBin is the absolute path to the simple-agents binary a CLI coder invokes as
+	// `<bin> connector exec …`. Empty falls back to bare "simple-agents" (relies on PATH).
+	ConnectorBin string
 }
 
 // connectedToolsBlock tells the running agent it has native typed tools for its bound
@@ -1567,9 +1570,13 @@ func slugToolLabel(s string) string {
 // backend gets the `simple-agents connector exec <tool>` command (which reaches the exact
 // same host-side execution path). Either way, the agent never fetches OAuth tokens or
 // hand-rolls the API call — the platform owns auth regardless of coder type.
-func connectedToolsBlock(bound []ConnectionRef, toolNames []string, backendType string) string {
+func connectedToolsBlock(bound []ConnectionRef, toolNames []string, backendType, connectorBin string) string {
 	if len(bound) == 0 {
 		return ""
+	}
+	bin := connectorBin
+	if bin == "" {
+		bin = "simple-agents"
 	}
 	var sb strings.Builder
 	sb.WriteString("<connected_service_tools>\n")
@@ -1598,7 +1605,7 @@ func connectedToolsBlock(bound []ConnectionRef, toolNames []string, backendType 
 	} else {
 		// CLI / basic backends reach the SAME execution path via a command.
 		sb.WriteString("You can act on these connected accounts by running this command (the platform holds the OAuth tokens — you never fetch or handle them):\n")
-		sb.WriteString("  simple-agents connector exec <tool_name> --args '<json-object>'\n")
+		fmt.Fprintf(&sb, "  %s connector exec <tool_name> --args '<json-object>'\n", bin)
 		sb.WriteString("It prints a JSON result ({\"data\": …} on success, or {\"error\": …}). Do NOT write your own HTTP/OAuth code for these services — use this command.\n")
 		accountLine()
 		if len(toolNames) > 0 {
@@ -1606,7 +1613,7 @@ func connectedToolsBlock(bound []ConnectionRef, toolNames []string, backendType 
 			for _, n := range toolNames {
 				fmt.Fprintf(&sb, "  - %s\n", n)
 			}
-			sb.WriteString("Example: simple-agents connector exec " + toolNames[0] + " --args '{\"query\":\"...\"}'\n")
+			fmt.Fprintf(&sb, "Example: %s connector exec %s --args '{\"query\":\"...\"}'\n", bin, toolNames[0])
 		}
 	}
 	sb.WriteString("If a connection needs re-authorization, the result will say so — report that to the user; do not try to work around it.\n")
@@ -1721,7 +1728,7 @@ check it before acting on assumptions about the user. Use your available file ca
 `, p.AgentDir, p.VaultRoot))
 	}
 
-	sb.WriteString(connectedToolsBlock(p.Connections, p.ConnectionTools, p.BackendType))
+	sb.WriteString(connectedToolsBlock(p.Connections, p.ConnectionTools, p.BackendType, p.ConnectorBin))
 
 	sb.WriteString(`<output_protocol>
 Run your scheduled task now. Use ONLY the markers below to produce output.

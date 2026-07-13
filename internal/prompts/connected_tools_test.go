@@ -7,7 +7,7 @@ import (
 
 func TestConnectedToolsBlockAPI(t *testing.T) {
 	block := connectedToolsBlock([]ConnectionRef{{Provider: "google", Label: "work", Identity: "w@x.com"}},
-		[]string{"gmail_search"}, BackendToolCalling)
+		[]string{"gmail_search"}, BackendToolCalling, "")
 	if !strings.Contains(block, "work") || !strings.Contains(block, "google") {
 		t.Fatalf("block missing account: %s", block)
 	}
@@ -21,17 +21,25 @@ func TestConnectedToolsBlockAPI(t *testing.T) {
 
 func TestConnectedToolsBlockCLI(t *testing.T) {
 	block := connectedToolsBlock([]ConnectionRef{{Provider: "google", Label: "work", Identity: "w@x.com"}},
-		[]string{"gmail_search", "gmail_send_email"}, BackendFullCoder)
-	if !strings.Contains(block, "simple-agents connector exec") {
-		t.Fatalf("CLI backend should get the connector-exec command: %s", block)
+		[]string{"gmail_search", "gmail_send_email"}, BackendFullCoder, "/opt/sa/simple-agents")
+	if !strings.Contains(block, "/opt/sa/simple-agents connector exec") {
+		t.Fatalf("CLI backend should use the absolute binary path in the command: %s", block)
 	}
 	if !strings.Contains(block, "gmail_search") {
 		t.Fatalf("CLI backend should list the available tool names: %s", block)
 	}
 }
 
+func TestConnectedToolsBlockCLIFallsBackToBareName(t *testing.T) {
+	block := connectedToolsBlock([]ConnectionRef{{Provider: "google", Label: "work"}},
+		[]string{"gmail_search"}, BackendFullCoder, "")
+	if !strings.Contains(block, "simple-agents connector exec") {
+		t.Fatalf("empty bin should fall back to bare name: %s", block)
+	}
+}
+
 func TestConnectedToolsBlockEmpty(t *testing.T) {
-	if connectedToolsBlock(nil, nil, BackendToolCalling) != "" {
+	if connectedToolsBlock(nil, nil, BackendToolCalling, "") != "" {
 		t.Fatal("no connections → empty block")
 	}
 }
@@ -40,7 +48,7 @@ func TestConnectedToolsBlockMultiAccountMentionsSuffix(t *testing.T) {
 	block := connectedToolsBlock([]ConnectionRef{
 		{Provider: "google", Label: "work", Identity: "w@x.com"},
 		{Provider: "google", Label: "home", Identity: "h@x.com"},
-	}, nil, BackendToolCalling)
+	}, nil, BackendToolCalling, "")
 	if !strings.Contains(block, "__work") || !strings.Contains(block, "__home") {
 		t.Fatalf("multi-account block must mention __<label> suffix: %s", block)
 	}

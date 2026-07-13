@@ -317,6 +317,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		BackendType:     backendTypeOf(baseCoder),
 		Connections:     boundRefs,
 		ConnectionTools: connToolNames,
+		ConnectorBin:    connectorBinPath(),
 	})
 
 	if baseCoder == nil {
@@ -1011,4 +1012,14 @@ func addUsage(a, b coder.Usage) coder.Usage {
 	a.CompletionTokens += b.CompletionTokens
 	a.TotalTokens += b.TotalTokens
 	return a
+}
+
+// connectorBinPath is the absolute path to the running simple-agents binary, which a CLI
+// coder invokes as `<bin> connector exec …`. Falls back to "" (bare name via PATH) if
+// os.Executable() fails.
+func connectorBinPath() string {
+	if p, err := os.Executable(); err == nil {
+		return p
+	}
+	return ""
 }
