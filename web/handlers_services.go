@@ -69,6 +69,10 @@ type serviceProviderView struct {
 	HasCreds    bool
 	RedirectURI string
 	Connections []db.ServiceConnection
+	IsAPIKey    bool
+	KeyLabel    string
+	KeyHint     string
+	KeySetupURL string
 }
 
 type servicesPageData struct {
@@ -101,11 +105,16 @@ func (s *Server) showServices(c echo.Context) error {
 			}
 		}
 		label, setupURL, setupSteps := provider, "", []string{}
+		isAPIKey, keyLabel, keyHint, keySetupURL := false, "", "", ""
 		if p, ok := s.connectors.ProviderByName(provider); ok {
 			if p.Label != "" {
 				label = p.Label
 			}
 			setupURL, setupSteps = p.SetupURL, p.SetupSteps
+			if p.IsAPIKey() {
+				isAPIKey = true
+				keyLabel, keyHint, keySetupURL = p.Auth.KeyLabel, p.Auth.KeyHint, p.Auth.SetupURL
+			}
 		}
 		views = append(views, serviceProviderView{
 			Name:        provider,
@@ -115,6 +124,10 @@ func (s *Server) showServices(c echo.Context) error {
 			HasCreds:    cfg != nil,
 			RedirectURI: s.callbackURL(c, provider),
 			Connections: conns,
+			IsAPIKey:    isAPIKey,
+			KeyLabel:    keyLabel,
+			KeyHint:     keyHint,
+			KeySetupURL: keySetupURL,
 		})
 	}
 	p := s.page(c, "Service Connections")
@@ -190,6 +203,37 @@ func (s *Server) handleConnectService(c echo.Context) error {
 	payload := strings.Join([]string{w.ID, provider, label, nonce}, "~")
 	state := signState(s.systemKey, payload, time.Now())
 	return c.Redirect(http.StatusSeeOther, prov.ConsentURL(clientID, s.callbackURL(c, provider), state))
+}
+
+// handleConnectAPIKey stores a static API-key connection for an api_key provider. No OAuth
+// app, no redirect: the pasted key is encrypted into service_connections directly.
+func (s *Server) handleConnectAPIKey(c echo.Context) error {
+	w := c.Get("workspace").(*db.Workspace)
+	provider := c.Param("provider")
+	prov, ok := s.connectors.ProviderByName(provider)
+	if !ok || !prov.IsAPIKey() {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Unknown or non-API-key provider.")
+	}
+	apiKey := strings.TrimSpace(c.FormValue("api_key"))
+	if apiKey == "" {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "API key is required.")
+	}
+	label := strings.TrimSpace(c.FormValue("account_label"))
+	if label == "" {
+		label = "default"
+	}
+	enc, err := secrets.EncryptWithSystemKey(apiKey, s.systemKey)
+	if err != nil {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Failed to store the API key.")
+	}
+	if err := s.db.InsertServiceConnection(c.Request().Context(), db.ServiceConnection{
+		ID: uuid.New().String(), WorkspaceID: w.ID, Provider: provider,
+		AccountLabel: label, AccountIdentity: label,
+		EncryptedAccessToken: enc, Status: "ACTIVE",
+	}); err != nil {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Failed to save the connection: "+err.Error())
+	}
+	return c.Redirect(http.StatusSeeOther, "/dashboard/connectors/services")
 }
 
 func (s *Server) handleOAuthCallback(c echo.Context) error {

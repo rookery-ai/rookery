@@ -297,6 +297,7 @@ func (s *Server) setupRoutes() {
 	dash.GET("/connectors/services", s.showServices)
 	dash.POST("/connectors/services/:provider/creds", s.handleSaveProviderCreds)
 	dash.POST("/connectors/services/:provider/connect", s.handleConnectService)
+	dash.POST("/connectors/services/:provider/apikey", s.handleConnectAPIKey)
 	dash.GET("/connectors/services/callback/:provider", s.handleOAuthCallback)
 	dash.POST("/connectors/services/:id/delete", s.handleDeleteServiceConnection)
 	dash.GET("/chats", s.showChats)
