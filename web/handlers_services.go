@@ -63,6 +63,9 @@ func verifyState(secret []byte, tok string, now time.Time) (string, bool) {
 
 type serviceProviderView struct {
 	Name        string
+	Label       string
+	SetupURL    string
+	SetupSteps  []string
 	HasCreds    bool
 	RedirectURI string
 	Connections []db.ServiceConnection
@@ -97,8 +100,18 @@ func (s *Server) showServices(c echo.Context) error {
 				conns = append(conns, cn)
 			}
 		}
+		label, setupURL, setupSteps := provider, "", []string{}
+		if p, ok := s.connectors.ProviderByName(provider); ok {
+			if p.Label != "" {
+				label = p.Label
+			}
+			setupURL, setupSteps = p.SetupURL, p.SetupSteps
+		}
 		views = append(views, serviceProviderView{
 			Name:        provider,
+			Label:       label,
+			SetupURL:    setupURL,
+			SetupSteps:  setupSteps,
 			HasCreds:    cfg != nil,
 			RedirectURI: s.callbackURL(c, provider),
 			Connections: conns,

@@ -1,4 +1,14 @@
 name: google
+label: Google (Gmail)
+setup_url: https://console.cloud.google.com/apis/credentials
+setup_steps:
+  - "Open the Google Cloud Console and create a project (or pick an existing one)."
+  - "APIs & Services → Library → search \"Gmail API\" → Enable."
+  - "APIs & Services → OAuth consent screen → User type External → fill app name + your email → Save."
+  - "On the OAuth consent screen, add YOUR Gmail address under Test users (required while the app is unverified)."
+  - "APIs & Services → Credentials → Create Credentials → OAuth client ID → Application type: Web application."
+  - "Under Authorized redirect URIs, add the redirect URI shown above exactly, then click Create."
+  - "Copy the Client ID and Client secret and paste them below."
 authorize_url: https://accounts.google.com/o/oauth2/v2/auth
 token_url: https://oauth2.googleapis.com/token
 userinfo_url: https://www.googleapis.com/oauth2/v2/userinfo

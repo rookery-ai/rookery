@@ -43,6 +43,11 @@ type Provider struct {
 	// service_connections.extra and exposed to URL templates as {{conn.<key>}}. "" = none.
 	// Supported: "atlassian_cloudid".
 	PostConnect string `yaml:"post_connect"`
+
+	// UI guidance for obtaining OAuth app credentials (shown on the Services page).
+	Label      string   `yaml:"label"`       // human-friendly name, e.g. "Google (Gmail)"
+	SetupURL   string   `yaml:"setup_url"`   // link to the provider's developer console
+	SetupSteps []string `yaml:"setup_steps"` // numbered instructions to create the OAuth client
 }
 
 // NonExpiring reports whether this provider's access tokens never expire.

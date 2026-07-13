@@ -15,8 +15,8 @@
       <div class="flex items-center gap-3 mb-4">
         <div class="bg-primary/20 text-primary rounded-xl p-3 font-bold uppercase">{{slice .Name 0 1}}</div>
         <div class="flex-1">
-          <h2 class="font-semibold text-lg capitalize">{{.Name}}</h2>
-          <p class="text-sm text-base-content/50">OAuth app credentials are stored per workspace.</p>
+          <h2 class="font-semibold text-lg">{{.Label}}</h2>
+          <p class="text-sm text-base-content/50">You create a one-time OAuth app in {{.Label}}'s console, then paste its ID + secret here. Stored per workspace.</p>
         </div>
         {{if .HasCreds}}
         <span class="badge badge-success">Credentials saved</span>
@@ -27,11 +27,26 @@
 
       <!-- Step 1: OAuth app credentials -->
       <details class="mb-4" {{if not .HasCreds}}open{{end}}>
-        <summary class="cursor-pointer text-sm font-medium mb-2">Step 1 — OAuth app credentials</summary>
-        <p class="text-xs text-base-content/60 mb-2">
-          In your provider's developer console, create an OAuth client and add this redirect URI:
-          <code class="break-all">{{.RedirectURI}}</code>
-        </p>
+        <summary class="cursor-pointer text-sm font-medium mb-2">Step 1 — Create the OAuth app &amp; paste its credentials</summary>
+
+        <!-- Redirect URI to copy -->
+        <div class="bg-base-200 rounded-lg p-3 mb-3">
+          <div class="text-xs font-semibold mb-1">1. Copy this Redirect / Callback URL — you'll paste it into the app:</div>
+          <code class="text-xs break-all select-all block bg-base-100 rounded px-2 py-1">{{.RedirectURI}}</code>
+        </div>
+
+        <!-- Step-by-step guidance -->
+        {{if .SetupSteps}}
+        <div class="text-xs text-base-content/70 mb-3">
+          <div class="font-semibold mb-1">2. In {{.Label}}'s developer console{{if .SetupURL}} (<a href="{{.SetupURL}}" target="_blank" rel="noopener" class="link link-primary">open it ↗</a>){{end}}:</div>
+          <ol class="list-decimal list-inside space-y-1 ml-1">
+            {{range .SetupSteps}}<li>{{.}}</li>{{end}}
+          </ol>
+        </div>
+        {{end}}
+
+        <!-- Credential form -->
+        <div class="text-xs font-semibold mb-1">3. Paste the credentials the app gave you:</div>
         <form method="POST" action="/dashboard/connectors/services/{{.Name}}/creds" class="space-y-2">
           <input type="text" name="client_id" placeholder="Client ID" class="input input-bordered input-sm w-full" required>
           <input type="password" name="client_secret" placeholder="Client Secret" class="input input-bordered input-sm w-full" required>
@@ -45,7 +60,7 @@
         <div class="text-sm font-medium mb-2">Step 2 — Connect an account</div>
         <form method="POST" action="/dashboard/connectors/services/{{.Name}}/connect" class="flex gap-2 items-center">
           <input type="text" name="account_label" placeholder="Label (e.g. work)" class="input input-bordered input-sm flex-1" required>
-          <button type="submit" class="btn btn-sm btn-secondary">Connect {{.Name}} account</button>
+          <button type="submit" class="btn btn-sm btn-secondary">Connect {{.Label}} account</button>
         </form>
       </div>
       {{end}}

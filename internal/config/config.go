@@ -115,6 +115,9 @@ func defaults() *Config {
 }
 
 func applyEnv(cfg *Config) {
+	if v := os.Getenv("SA_HOST"); v != "" {
+		cfg.Server.Host = v // e.g. 127.0.0.1 to bind loopback-only (reachable only via localhost/SSH tunnel)
+	}
 	if v := os.Getenv("SA_PORT"); v != "" {
 		fmt.Sscanf(v, "%d", &cfg.Server.Port)
 	}
