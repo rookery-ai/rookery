@@ -858,7 +858,7 @@ So when the user says "save it to my notes", "keep a journal", "remember this",
 "add to my knowledge base", or anything about THEIR OWN knowledge — design the
 agent to use the BUILT-IN knowledge base. Do NOT suggest Notion, Google Docs,
 Obsidian, or any other external note app for storing the user's own knowledge.
-Reach for Composio / external services ONLY when the data genuinely lives in a
+Reach for external connections/services ONLY when the data genuinely lives in a
 specific external app the user names (e.g. they explicitly say "read my Notion"
 or "post to Slack"). For the user's own notes and knowledge, the built-in vault is
 always the answer. When describing where results go to the USER, say "your notes"
@@ -1003,7 +1003,7 @@ func testingRulesBlock() string {
 		"    IMPORTANT: this forbids SENDS, not CREATES. Creating a DRAFT or RECORD via the real\n" +
 		"    API — a Gmail draft, a Notion page, a calendar event, a GitHub/Linear/Jira issue —\n" +
 		"    is NOT an outbound send (no person receives it), so it IS allowed at build time and\n" +
-		"    IS the test: actually call the API (e.g. composio_execute) to create it, then prove\n" +
+		"    IS the test: actually perform the action (call the native connector tool or the real API) to create it, then prove\n" +
 		"    it worked by printing the returned id/URL. Do NOT 'print the payload and skip the\n" +
 		"    call' for a draft/record-creating agent — that ships a stub that silently does\n" +
 		"    nothing. 'Draft mode' means create a real draft (not send a real email).\n" +
@@ -1150,13 +1150,6 @@ Complete the <architecture_gate> analysis above:
 (b) State your tier decision (TIER 1 / 2 / 3) and why.
 (c) State what files, if any, you will create.
 
-DISCOVERY (if needed): If you need a Composio tool slug that isn't already established in
-the design conversation, run ` + "`tools/composio_discover.py --toolkit <slug> --query \"...\"`" + `
-NOW — this is already-provided, pre-seeded code, so it costs exactly ONE call regardless of
-coder type. Record the slug(s) it returns in your analysis, then stop. Do not iterate or
-explore further; write all code in the "create" step without touching the live service
-again until the "test" step.
-
 Do not proceed to "create" until this analysis is written in your response.
 </step>
 
@@ -1224,12 +1217,12 @@ AGENT.MD WRITING RULES — read carefully:
     last line). OMIT [CHAT] entirely. [SILENT] tells the system the silence is intentional so
     stray prose is NOT delivered to the user. Silent runs are valid.
   ✓ Reference helper scripts (TIER 2/3 only) as: python3 tools/filename.py
-  ✓ External-service actions (Composio: Gmail draft, Notion page, calendar event, issue,
-    etc.) MUST be expressed as "run tools/<script>.py to <do the action>" — name the script
-    that makes the real API call. Do NOT write abstract instructions like "use your
-    connected Gmail account to create a draft" with no script: the runtime AI has no
-    native Composio tool and cannot perform the action from text alone. The script does
-    the call; AGENT.md tells the runtime to run it and report the result.
+  ✓ External-service actions on a CONNECTED account (Gmail, GitHub, Notion, Outlook, Jira,
+    etc.): the runtime gives the agent NATIVE typed tools for each account it declares in a
+    "# Connections:" header (e.g. gmail_send_email, github_create_issue). Express the action
+    in plain terms ("send the summary from the connected Gmail account") and declare the
+    connection — do NOT write a script to hand-roll the API call when a native tool exists.
+    Only fall back to a helper script for a service that has no native connector.
   ✗ DO NOT reference runtime-specific tool names (Write, Read, Bash, WebFetch) — these vary
     by the runtime backend. Say WHAT to do, not which tool to use.
   ✗ DO NOT leave placeholder text like "{the quote}" — tell the agent to include it in full.
@@ -1293,9 +1286,9 @@ TIER 2/3 (has code files) — ONE smoke test, then the TIER 1 dry run:
 
 SECRETS: Read all secrets via os.environ.get('SECRET_NAME', '').
 If COMPOSIO_API_KEY is present in the environment, make REAL API calls — produce REAL
-output, not mock data. If a Composio connection fails, output the real error in
-[TEST_OUTPUT] and guide the user what to fix (e.g. "go to app.composio.dev/connections").
-For other missing secrets (non-Composio), substitute a realistic mock value for the test
+output, not mock data. If a connected-service call fails, output the real error in
+[TEST_OUTPUT] and guide the user what to fix (e.g. reconnect the account in Settings -> Connectors).
+For a missing secret, substitute a realistic mock value for the test
 only. Do NOT abort.
 </step>
 
@@ -1469,9 +1462,9 @@ The test MUST prove the original bug no longer occurs. State this explicitly, e.
 
 SECRETS: Read all secrets via os.environ.get('SECRET_NAME', '').
 If COMPOSIO_API_KEY is present in the environment, make REAL API calls — produce REAL
-output, not mock data. If a Composio connection fails, output the real error in
-[TEST_OUTPUT] and guide the user what to fix.
-For other missing secrets (non-Composio), substitute a realistic mock value for the test
+output, not mock data. If a connected-service call fails, output the real error in
+[TEST_OUTPUT] and guide the user to reconnect the account.
+For a missing secret, substitute a realistic mock value for the test
 only. Do NOT abort.
 </step>
 
@@ -2023,7 +2016,7 @@ Have a focused conversation to understand what capability the user wants the ski
 provide. Ask simple, friendly questions — one or two at a time. Your goal is to understand:
 1. What the skill should DO (read X, create Y, convert A→B, call service Z).
 2. What inputs/outputs are involved (file types, formats, destinations).
-3. What tools or services it needs (CLI tools, Python packages, Composio, secrets).
+3. What tools or services it needs (CLI tools, Python packages, secrets).
 4. Whether it needs scripts/ or is reasoning-only with inline snippets.
 
 Prefer the simplest design that solves the task: a reasoning-only SKILL.md with a few
@@ -2094,7 +2087,6 @@ RULES:
 - Write tool names BARE in the body (pandoc ...). The runtime env block supplies the
   real absolute path — never hardcode /usr/bin/... or $HOME paths in the SKILL.md body.
 - Secrets are env vars (os.environ); never hardcode keys.
-- Composio uses backend.composio.dev/api/v3 only (REST, never the SDK).
 - Keep SKILL.md under ~500 lines; move deep reference into references/.
 - Output to the vault / $TMPDIR, never /tmp.
 - Folder name: %s (lowercase, hyphens, 3-64 chars). Write it to the staging directory
