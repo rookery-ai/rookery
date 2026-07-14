@@ -1,0 +1,53 @@
+provider: intercom
+actions:
+  - name: intercom_list_contacts
+    description: "List Intercom contacts. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://api.intercom.io/contacts"}
+    response_extract: "$.data"
+  - name: intercom_get_contact
+    description: "Get an Intercom contact by id. Read-only."
+    mutating: false
+    params: {type: object, properties: {id: {type: string}}, required: [id]}
+    request: {method: GET, url: "https://api.intercom.io/contacts/{{id}}"}
+    response_extract: "$"
+  - name: intercom_create_contact
+    description: "Create an Intercom contact (role user or lead). Mutating."
+    mutating: true
+    params: {type: object, properties: {email: {type: string}, name: {type: string}, role: {type: string}}, required: [email]}
+    request: {method: POST, url: "https://api.intercom.io/contacts", body: {email: "{{email}}", name: "{{name}}", role: "{{role}}"}}
+    response_extract: "$"
+  - name: intercom_update_contact
+    description: "Update an Intercom contact by id (name/email/phone). Mutating."
+    mutating: true
+    params: {type: object, properties: {id: {type: string}, name: {type: string}, email: {type: string}, phone: {type: string}}, required: [id]}
+    request: {method: PUT, url: "https://api.intercom.io/contacts/{{id}}", body: {name: "{{name}}", email: "{{email}}", phone: "{{phone}}"}}
+    response_extract: "$"
+  - name: intercom_list_conversations
+    description: "List Intercom conversations. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://api.intercom.io/conversations"}
+    response_extract: "$.conversations"
+  - name: intercom_get_conversation
+    description: "Get an Intercom conversation by id. Read-only."
+    mutating: false
+    params: {type: object, properties: {id: {type: string}}, required: [id]}
+    request: {method: GET, url: "https://api.intercom.io/conversations/{{id}}"}
+    response_extract: "$"
+  - name: intercom_reply_conversation
+    description: "Reply to a conversation as an admin. Delivers a real reply. Mutating."
+    mutating: true
+    params: {type: object, properties: {id: {type: string}, admin_id: {type: string}, body: {type: string}}, required: [id, admin_id, body]}
+    request:
+      method: POST
+      url: "https://api.intercom.io/conversations/{{id}}/reply"
+      body: {message_type: "comment", type: "admin", admin_id: "{{admin_id}}", body: "{{body}}"}
+    response_extract: "$"
+  - name: intercom_create_note
+    description: "Add a note to a contact. Mutating."
+    mutating: true
+    params: {type: object, properties: {id: {type: string}, body: {type: string}, admin_id: {type: string}}, required: [id, body]}
+    request: {method: POST, url: "https://api.intercom.io/contacts/{{id}}/notes", body: {body: "{{body}}", admin_id: "{{admin_id}}"}}
+    response_extract: "$"

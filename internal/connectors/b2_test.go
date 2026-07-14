@@ -106,3 +106,17 @@ func TestB2_SendGrid(t *testing.T) {
 		t.Fatalf("nested to.email wrong: %v", m)
 	}
 }
+
+func TestB2_Intercom(t *testing.T) {
+	r := b2Reg(t)
+	p, ok := r.ProviderByName("intercom")
+	if !ok || !p.IsAPIKey() {
+		t.Fatal("intercom must load as api_key")
+	}
+	if p.StaticHeaders["Intercom-Version"] == "" {
+		t.Fatal("intercom must set a static Intercom-Version header")
+	}
+	if len(r.Actions("intercom")) < 8 {
+		t.Fatalf("want >=8 intercom actions, got %d", len(r.Actions("intercom")))
+	}
+}

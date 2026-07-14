@@ -1,0 +1,12 @@
+name: intercom
+label: Intercom
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Intercom access token"
+  key_hint: "dG9r...="
+  setup_url: https://developers.intercom.com/building-apps/docs/authentication-types
+static_headers:
+  Intercom-Version: "2.11"
