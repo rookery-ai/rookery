@@ -126,3 +126,26 @@ func TestB3_ZendeskBasicTemplatedUser(t *testing.T) {
 		t.Fatalf("ticket wrapper wrong: %v", m)
 	}
 }
+
+func TestB3_AllProvidersLoad(t *testing.T) {
+	r := b3Reg(t)
+	for _, name := range []string{"salesforce", "shopify", "mailchimp", "zendesk"} {
+		p, ok := r.ProviderByName(name)
+		if !ok {
+			t.Fatalf("%s not loaded", name)
+		}
+		if len(r.Actions(name)) < 8 {
+			t.Fatalf("%s has <8 actions: %d", name, len(r.Actions(name)))
+		}
+		_ = p
+	}
+	// salesforce is OAuth; the other three are api_key
+	if p, _ := r.ProviderByName("salesforce"); p.IsAPIKey() {
+		t.Fatal("salesforce should be OAuth")
+	}
+	for _, name := range []string{"shopify", "mailchimp", "zendesk"} {
+		if p, _ := r.ProviderByName(name); !p.IsAPIKey() {
+			t.Fatalf("%s should be api_key", name)
+		}
+	}
+}
