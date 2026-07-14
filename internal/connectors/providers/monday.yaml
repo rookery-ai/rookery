@@ -1,0 +1,10 @@
+name: monday
+label: Monday.com
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: ""
+  key_label: "Monday.com API token"
+  key_hint: "eyJ..."
+  setup_url: https://developer.monday.com/api-reference/docs/authentication

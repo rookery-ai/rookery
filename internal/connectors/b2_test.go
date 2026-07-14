@@ -140,3 +140,19 @@ func TestB2_ClickUp(t *testing.T) {
 		t.Fatalf("want >=8 clickup actions, got %d", len(r.Actions("clickup")))
 	}
 }
+
+func TestB2_Monday(t *testing.T) {
+	r := b2Reg(t)
+	p, ok := r.ProviderByName("monday")
+	if !ok || !p.IsAPIKey() || p.Auth.ValuePrefix != "" {
+		t.Fatal("monday must load as api_key with empty value_prefix")
+	}
+	m := renderB2(t, r, "monday", "monday_create_item", map[string]any{"board_id": "1", "item_name": "hi"})
+	if _, ok := m["query"].(string); !ok {
+		t.Fatalf("monday body must carry a graphql query string: %v", m)
+	}
+	v, ok := m["variables"].(map[string]any)
+	if !ok || v["item_name"] != "hi" {
+		t.Fatalf("monday variables not built: %v", m)
+	}
+}

@@ -1,0 +1,89 @@
+provider: monday
+actions:
+  - name: monday_list_boards
+    description: "List Monday.com boards (id, name). Read-only."
+    mutating: false
+    params: {type: object, properties: {limit: {type: integer}}}
+    request:
+      method: POST
+      url: "https://api.monday.com/v2"
+      body:
+        query: "query ($limit: Int) { boards (limit: $limit) { id name state } }"
+        variables: {limit: "{{limit}}"}
+    response_extract: "$.data"
+  - name: monday_list_board_items
+    description: "List items on a board via items_page. Read-only."
+    mutating: false
+    params: {type: object, properties: {board_id: {type: string}}, required: [board_id]}
+    request:
+      method: POST
+      url: "https://api.monday.com/v2"
+      body:
+        query: "query ($board: [ID!]) { boards (ids: $board) { items_page { items { id name } } } }"
+        variables: {board: "{{board_id}}"}
+    response_extract: "$.data"
+  - name: monday_list_groups
+    description: "List groups on a board. Read-only."
+    mutating: false
+    params: {type: object, properties: {board_id: {type: string}}, required: [board_id]}
+    request:
+      method: POST
+      url: "https://api.monday.com/v2"
+      body:
+        query: "query ($board: [ID!]) { boards (ids: $board) { groups { id title } } }"
+        variables: {board: "{{board_id}}"}
+    response_extract: "$.data"
+  - name: monday_list_users
+    description: "List Monday.com users. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: POST
+      url: "https://api.monday.com/v2"
+      body:
+        query: "query { users { id name email } }"
+    response_extract: "$.data"
+  - name: monday_create_item
+    description: "Create an item on a board (optionally in a group). Mutating."
+    mutating: true
+    params: {type: object, properties: {board_id: {type: string}, group_id: {type: string}, item_name: {type: string}}, required: [board_id, item_name]}
+    request:
+      method: POST
+      url: "https://api.monday.com/v2"
+      body:
+        query: "mutation ($board: ID!, $group: String, $item_name: String!) { create_item (board_id: $board, group_id: $group, item_name: $item_name) { id } }"
+        variables: {board: "{{board_id}}", group: "{{group_id}}", item_name: "{{item_name}}"}
+    response_extract: "$.data"
+  - name: monday_update_column_values
+    description: "Update an item's column values. values is a JSON string of {columnId: value}. Mutating."
+    mutating: true
+    params: {type: object, properties: {board_id: {type: string}, item_id: {type: string}, values: {type: string}}, required: [board_id, item_id, values]}
+    request:
+      method: POST
+      url: "https://api.monday.com/v2"
+      body:
+        query: "mutation ($board: ID!, $item: ID!, $vals: JSON!) { change_multiple_column_values (board_id: $board, item_id: $item, column_values: $vals) { id } }"
+        variables: {board: "{{board_id}}", item: "{{item_id}}", vals: "{{values}}"}
+    response_extract: "$.data"
+  - name: monday_create_update
+    description: "Post an update (comment) on an item. Mutating."
+    mutating: true
+    params: {type: object, properties: {item_id: {type: string}, body: {type: string}}, required: [item_id, body]}
+    request:
+      method: POST
+      url: "https://api.monday.com/v2"
+      body:
+        query: "mutation ($item: ID!, $body: String!) { create_update (item_id: $item, body: $body) { id } }"
+        variables: {item: "{{item_id}}", body: "{{body}}"}
+    response_extract: "$.data"
+  - name: monday_archive_item
+    description: "Archive an item by id. Mutating."
+    mutating: true
+    params: {type: object, properties: {item_id: {type: string}}, required: [item_id]}
+    request:
+      method: POST
+      url: "https://api.monday.com/v2"
+      body:
+        query: "mutation ($item: ID!) { archive_item (item_id: $item) { id } }"
+        variables: {item: "{{item_id}}"}
+    response_extract: "$.data"
