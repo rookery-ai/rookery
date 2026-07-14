@@ -95,6 +95,21 @@ var bodyBuilders = map[string]bodyBuilder{
 	"msgraph_draft":    msgraphDraft,
 	"jira_issue":       jiraIssue,
 	"jira_comment":     jiraComment,
+	"drive_folder":     driveFolder,
+}
+
+// driveFolder builds a Drive create-folder body, including parents (as a single-element
+// array) only when parent_id is provided. Args: name, parent_id (optional).
+func driveFolder(args map[string]any) ([]byte, string, error) {
+	m := map[string]any{
+		"name":     asString(args["name"]),
+		"mimeType": "application/vnd.google-apps.folder",
+	}
+	if p := asString(args["parent_id"]); p != "" {
+		m["parents"] = []string{p}
+	}
+	b, err := json.Marshal(m)
+	return b, "application/json", err
 }
 
 // adf wraps plain text in a minimal Atlassian Document Format doc (Jira API v3 requires

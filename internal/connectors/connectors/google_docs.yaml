@@ -34,8 +34,8 @@ actions:
       properties:
         document_id: {type: string}
         text:        {type: string}
-        index:       {type: integer, description: "1-based insertion index (default 1)"}
-      required: [document_id, text]
+        index:       {type: integer, description: "1-based character index to insert text at"}
+      required: [document_id, text, index]
     request:
       method: POST
       url: "https://docs.googleapis.com/v1/documents/{{document_id}}:batchUpdate"

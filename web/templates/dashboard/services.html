@@ -53,6 +53,8 @@
       <!-- Child provider: reuses the parent's OAuth app credentials, no separate creds form. -->
       {{if .HasCreds}}
       <div class="mb-4">
+        <p class="text-sm opacity-70">First add this redirect URI to your {{.ParentLabel}} OAuth app's authorized redirect URIs:</p>
+        <code class="text-xs break-all select-all block bg-base-100 rounded px-2 py-1 mb-2">{{.RedirectURI}}</code>
         <form method="POST" action="/dashboard/connectors/services/{{.Name}}/connect" class="flex gap-2 items-center">
           <input type="text" name="account_label" placeholder="Label (e.g. work)" class="input input-bordered input-sm flex-1" required>
           <button type="submit" class="btn btn-sm btn-primary">Connect</button>
@@ -60,7 +62,8 @@
         <p class="text-sm opacity-70 mt-1">Uses your {{.ParentLabel}} app credentials.</p>
       </div>
       {{else}}
-      <p class="text-sm opacity-70">Set up {{.ParentLabel}} first (on its card above), then Connect here.</p>
+      <p class="text-sm opacity-70">Set up {{.ParentLabel}} first (on its card above), then Connect here. You'll also need to add this redirect URI to your {{.ParentLabel}} OAuth app's authorized redirect URIs:</p>
+      <code class="text-xs break-all select-all block bg-base-100 rounded px-2 py-1 mt-2">{{.RedirectURI}}</code>
       {{end}}
       {{else}}
       <!-- Step 1: OAuth app credentials -->

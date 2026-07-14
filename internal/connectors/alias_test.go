@@ -57,6 +57,39 @@ func TestGoogleDriveActions(t *testing.T) {
 	}
 }
 
+func TestDriveCreateFolderParentsArray(t *testing.T) {
+	r, _ := LoadBundled()
+	a, ok := r.Action("google_drive", "drive_create_folder")
+	if !ok {
+		t.Fatal("drive_create_folder missing")
+	}
+	// With parent_id: parents must be a string array, not a string.
+	_, _, body, _, err := renderRequest(a, map[string]any{"name": "Sub", "parent_id": "F1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatal(err)
+	}
+	parents, ok := got["parents"].([]any)
+	if !ok || len(parents) != 1 || parents[0] != "F1" {
+		t.Fatalf("parents not a 1-element array: %s", body)
+	}
+	// Without parent_id: parents key must be omitted entirely.
+	_, _, body2, _, err := renderRequest(a, map[string]any{"name": "Top"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got2 map[string]any
+	if err := json.Unmarshal(body2, &got2); err != nil {
+		t.Fatal(err)
+	}
+	if _, present := got2["parents"]; present {
+		t.Fatalf("parents key should be omitted when parent_id is absent: %s", body2)
+	}
+}
+
 func TestGoogleSheetsAppendArrayBody(t *testing.T) {
 	r, _ := LoadBundled()
 	if _, ok := r.OAuthProvider("google_sheets"); !ok {

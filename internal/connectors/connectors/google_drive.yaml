@@ -52,10 +52,7 @@ actions:
     request:
       method: POST
       url: "https://www.googleapis.com/drive/v3/files"
-      body:
-        name: "{{name}}"
-        mimeType: "application/vnd.google-apps.folder"
-        parents: "{{parent_id}}"
+      body_builder: drive_folder
     response_extract: "$"
   - name: drive_copy_file
     description: "Copy an existing Drive file. Safe write."
