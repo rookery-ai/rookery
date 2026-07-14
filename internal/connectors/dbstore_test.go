@@ -69,6 +69,46 @@ func TestAccessTokenRefreshesNearExpiry(t *testing.T) {
 	}
 }
 
+func TestAccessTokenRefreshResolvesParentConfig(t *testing.T) {
+	d, ws := storeTestDB(t)
+	key := mkKey()
+	reg := testRegistry(t)
+	ctx := context.Background()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"access_token":"NEW","expires_in":3600}`))
+	}))
+	defer srv.Close()
+
+	// OAuth app creds stored under the PARENT provider "google" only.
+	encID, _ := secrets.EncryptWithSystemKey("cid", key)
+	encSec, _ := secrets.EncryptWithSystemKey("csec", key)
+	d.UpsertServiceProviderConfig(ctx, db.ServiceProviderConfig{ID: "pc1", WorkspaceID: ws, Provider: "google", EncryptedClientID: encID, EncryptedClientSecret: encSec})
+
+	// A child google_drive connection with a stale token + a refresh token.
+	encRefresh, _ := secrets.EncryptWithSystemKey("RT", key)
+	encOld, _ := secrets.EncryptWithSystemKey("OLD", key)
+	past := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	d.InsertServiceConnection(ctx, db.ServiceConnection{
+		ID: "c1", WorkspaceID: ws, Provider: "google_drive", AccountLabel: "work",
+		EncryptedAccessToken: encOld, EncryptedRefreshToken: encRefresh,
+		ExpiresAt: past, Status: "ACTIVE",
+	})
+
+	// Point the PARENT google provider's token endpoint at the test server. Do NOT
+	// override reg.providers["google_drive"] — refresh must resolve it via OAuthProvider.
+	reg.providers["google"] = Provider{Name: "google", TokenURL: srv.URL + "/token"}
+	store := &DBTokenStore{DB: d, SystemKey: key, Reg: reg, OAuth: OAuthClient{HTTP: srv.Client()}}
+
+	tok, err := store.AccessToken(ctx, ConnRef{ID: "c1", Provider: "google_drive"})
+	if err != nil {
+		t.Fatalf("AccessToken: %v", err)
+	}
+	if tok != "NEW" {
+		t.Fatalf("got %q, want NEW (refreshed via parent config)", tok)
+	}
+}
+
 func TestAccessTokenValidReturnsStored(t *testing.T) {
 	d, ws := storeTestDB(t)
 	key := mkKey()

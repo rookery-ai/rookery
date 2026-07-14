@@ -73,13 +73,13 @@ func (s *DBTokenStore) expired(expiresAt string) bool {
 }
 
 func (s *DBTokenStore) refresh(ctx context.Context, row *db.ServiceConnection) (string, error) {
-	prov, ok := s.Reg.ProviderByName(row.Provider)
+	prov, ok := s.Reg.OAuthProvider(row.Provider)
 	if !ok {
 		return "", &ConnectorError{KindOther, "unknown provider " + row.Provider}
 	}
-	cfg, err := s.DB.GetServiceProviderConfig(ctx, row.WorkspaceID, row.Provider)
+	cfg, err := s.DB.GetServiceProviderConfig(ctx, row.WorkspaceID, prov.Name)
 	if err != nil || cfg == nil {
-		return "", &ConnectorError{KindNeedsReauth, "missing OAuth app credentials for " + row.Provider}
+		return "", &ConnectorError{KindNeedsReauth, "missing OAuth app credentials for " + prov.Name}
 	}
 	cid, _ := secrets.DecryptWithSystemKey(cfg.EncryptedClientID, s.SystemKey)
 	csec, _ := secrets.DecryptWithSystemKey(cfg.EncryptedClientSecret, s.SystemKey)
