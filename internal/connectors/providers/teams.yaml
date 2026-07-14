@@ -1,0 +1,13 @@
+name: teams
+label: Microsoft Teams
+auth_parent: outlook
+default_scopes:
+  - Team.ReadBasic.All
+  - Channel.ReadBasic.All
+  - ChannelMessage.Read.All
+  - ChannelMessage.Send
+setup_url: https://portal.azure.com
+setup_steps:
+  - "Teams reuses your Microsoft (Outlook) OAuth app. Set up Outlook first on its card above."
+  - "In the Azure app registration, add the Microsoft Graph delegated permissions listed for this connector."
+  - "Then click Connect here to authorize Teams access on the same Microsoft account."

@@ -97,3 +97,25 @@ func TestGoogleDocsInsertText(t *testing.T) {
 		t.Fatalf("requests[] not built: %s", body)
 	}
 }
+
+func TestTeamsSendMessageBody(t *testing.T) {
+	r, _ := LoadBundled()
+	oauth, ok := r.OAuthProvider("teams")
+	if !ok || oauth.Name != "outlook" {
+		t.Fatalf("teams parent = %q, want outlook", oauth.Name)
+	}
+	a, ok := r.Action("teams", "teams_send_channel_message")
+	if !ok {
+		t.Fatal("teams_send_channel_message missing")
+	}
+	_, _, body, _, err := renderRequest(a, map[string]any{"team_id": "T", "channel_id": "C", "content": "hi"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	json.Unmarshal(body, &got)
+	b, ok := got["body"].(map[string]any)
+	if !ok || b["content"] != "hi" {
+		t.Fatalf("nested body.content missing: %s", body)
+	}
+}

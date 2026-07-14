@@ -1,0 +1,97 @@
+provider: teams
+actions:
+  - name: teams_list_joined_teams
+    description: "List the Teams the connected user is a member of (id, displayName). Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/joinedTeams"
+    response_extract: "$.value"
+  - name: teams_list_channels
+    description: "List channels in a team by team id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        team_id: {type: string}
+      required: [team_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/teams/{{team_id}}/channels"
+    response_extract: "$.value"
+  - name: teams_get_channel
+    description: "Get one channel's metadata by team id + channel id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        team_id:    {type: string}
+        channel_id: {type: string}
+      required: [team_id, channel_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/teams/{{team_id}}/channels/{{channel_id}}"
+    response_extract: "$"
+  - name: teams_send_channel_message
+    description: "Post a message to a Teams channel. Delivers a real message. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        team_id:    {type: string}
+        channel_id: {type: string}
+        content:    {type: string}
+      required: [team_id, channel_id, content]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/teams/{{team_id}}/channels/{{channel_id}}/messages"
+      body:
+        body:
+          content: "{{content}}"
+    response_extract: "$"
+  - name: teams_list_channel_messages
+    description: "List recent messages in a Teams channel. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        team_id:    {type: string}
+        channel_id: {type: string}
+        max:        {type: integer, description: "max messages (default 20)"}
+      required: [team_id, channel_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/teams/{{team_id}}/channels/{{channel_id}}/messages"
+      query: {$top: "{{max}}"}
+    response_extract: "$.value"
+  - name: teams_reply_to_message
+    description: "Reply to a message in a Teams channel. Delivers a real reply. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        team_id:    {type: string}
+        channel_id: {type: string}
+        message_id: {type: string}
+        content:    {type: string}
+      required: [team_id, channel_id, message_id, content]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/teams/{{team_id}}/channels/{{channel_id}}/messages/{{message_id}}/replies"
+      body:
+        body:
+          content: "{{content}}"
+    response_extract: "$"
+  - name: teams_list_members
+    description: "List members of a team by team id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        team_id: {type: string}
+      required: [team_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/teams/{{team_id}}/members"
+    response_extract: "$.value"
