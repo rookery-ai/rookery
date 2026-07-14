@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 )
 
@@ -118,5 +119,24 @@ func TestB2_Intercom(t *testing.T) {
 	}
 	if len(r.Actions("intercom")) < 8 {
 		t.Fatalf("want >=8 intercom actions, got %d", len(r.Actions("intercom")))
+	}
+}
+
+func TestB2_ClickUp(t *testing.T) {
+	r := b2Reg(t)
+	p, ok := r.ProviderByName("clickup")
+	if !ok || !p.IsAPIKey() {
+		t.Fatal("clickup must load as api_key")
+	}
+	if p.Auth.ValuePrefix != "" {
+		t.Fatalf("clickup token must have empty value_prefix, got %q", p.Auth.ValuePrefix)
+	}
+	req, _ := http.NewRequest("GET", "https://api.clickup.com/api/v2/task/x", nil)
+	applyAuth(req, p, "pk_123")
+	if got := req.Header.Get("Authorization"); got != "pk_123" {
+		t.Fatalf("clickup Authorization must be the raw token, got %q", got)
+	}
+	if len(r.Actions("clickup")) < 8 {
+		t.Fatalf("want >=8 clickup actions, got %d", len(r.Actions("clickup")))
 	}
 }

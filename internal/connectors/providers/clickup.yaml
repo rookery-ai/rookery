@@ -1,0 +1,10 @@
+name: clickup
+label: ClickUp
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: ""
+  key_label: "ClickUp personal API token"
+  key_hint: "pk_..."
+  setup_url: https://app.clickup.com/settings/apps

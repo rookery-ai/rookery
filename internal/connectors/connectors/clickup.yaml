@@ -1,0 +1,56 @@
+provider: clickup
+actions:
+  - name: clickup_list_spaces
+    description: "List spaces in a ClickUp team (workspace). Read-only."
+    mutating: false
+    params: {type: object, properties: {team_id: {type: string}}, required: [team_id]}
+    request: {method: GET, url: "https://api.clickup.com/api/v2/team/{{team_id}}/space"}
+    response_extract: "$.spaces"
+  - name: clickup_list_folders
+    description: "List folders in a space. Read-only."
+    mutating: false
+    params: {type: object, properties: {space_id: {type: string}}, required: [space_id]}
+    request: {method: GET, url: "https://api.clickup.com/api/v2/space/{{space_id}}/folder"}
+    response_extract: "$.folders"
+  - name: clickup_list_lists
+    description: "List lists in a folder. Read-only."
+    mutating: false
+    params: {type: object, properties: {folder_id: {type: string}}, required: [folder_id]}
+    request: {method: GET, url: "https://api.clickup.com/api/v2/folder/{{folder_id}}/list"}
+    response_extract: "$.lists"
+  - name: clickup_list_tasks
+    description: "List tasks in a list. Read-only."
+    mutating: false
+    params: {type: object, properties: {list_id: {type: string}}, required: [list_id]}
+    request: {method: GET, url: "https://api.clickup.com/api/v2/list/{{list_id}}/task"}
+    response_extract: "$.tasks"
+  - name: clickup_get_task
+    description: "Get a ClickUp task by id. Read-only."
+    mutating: false
+    params: {type: object, properties: {task_id: {type: string}}, required: [task_id]}
+    request: {method: GET, url: "https://api.clickup.com/api/v2/task/{{task_id}}"}
+    response_extract: "$"
+  - name: clickup_create_task
+    description: "Create a task in a list. Mutating."
+    mutating: true
+    params: {type: object, properties: {list_id: {type: string}, name: {type: string}, description: {type: string}}, required: [list_id, name]}
+    request: {method: POST, url: "https://api.clickup.com/api/v2/list/{{list_id}}/task", body: {name: "{{name}}", description: "{{description}}"}}
+    response_extract: "$"
+  - name: clickup_update_task
+    description: "Update a task by id (name/description/status). Mutating."
+    mutating: true
+    params: {type: object, properties: {task_id: {type: string}, name: {type: string}, description: {type: string}, status: {type: string}}, required: [task_id]}
+    request: {method: PUT, url: "https://api.clickup.com/api/v2/task/{{task_id}}", body: {name: "{{name}}", description: "{{description}}", status: "{{status}}"}}
+    response_extract: "$"
+  - name: clickup_delete_task
+    description: "Delete a task by id. Mutating and irreversible."
+    mutating: true
+    params: {type: object, properties: {task_id: {type: string}}, required: [task_id]}
+    request: {method: DELETE, url: "https://api.clickup.com/api/v2/task/{{task_id}}"}
+    response_extract: "$"
+  - name: clickup_add_comment
+    description: "Add a comment to a task. Mutating."
+    mutating: true
+    params: {type: object, properties: {task_id: {type: string}, comment_text: {type: string}}, required: [task_id, comment_text]}
+    request: {method: POST, url: "https://api.clickup.com/api/v2/task/{{task_id}}/comment", body: {comment_text: "{{comment_text}}"}}
+    response_extract: "$"
