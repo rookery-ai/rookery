@@ -1429,10 +1429,10 @@ func (d *DB) ListMCPServers(workspaceID string) ([]*MCPServer, error) {
 // UpsertAgentDraft saves or overwrites the user's single in-progress design draft.
 func (d *DB) UpsertAgentDraft(dr *AgentDraft) error {
 	_, err := d.Exec(`INSERT OR REPLACE INTO agent_drafts
-		(workspace_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, updated_at, expires_at)
-		VALUES (?,?,?,?,?,?,?,?,datetime('now'),?)`,
+		(workspace_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, pending_used_connections, updated_at, expires_at)
+		VALUES (?,?,?,?,?,?,?,?,?,datetime('now'),?)`,
 		dr.WorkspaceID, dr.AgentID, dr.AgentName, boolToInt(dr.IsEdit), dr.State,
-		dr.HistoryJSON, dr.PendingAgentMD, dr.PendingToolsJSON,
+		dr.HistoryJSON, dr.PendingAgentMD, dr.PendingToolsJSON, dr.PendingUsedConnectionsJSON,
 		dr.ExpiresAt.UTC().Format("2006-01-02 15:04:05"))
 	return err
 }
@@ -1443,10 +1443,10 @@ func (d *DB) GetAgentDraft(workspaceID string) (*AgentDraft, error) {
 	var dr AgentDraft
 	var isEdit int
 	var updatedAt, expiresAt string
-	err := d.QueryRow(`SELECT workspace_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, updated_at, expires_at
+	err := d.QueryRow(`SELECT workspace_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, pending_used_connections, updated_at, expires_at
 		FROM agent_drafts WHERE workspace_id=? AND expires_at > datetime('now')`, workspaceID).
 		Scan(&dr.WorkspaceID, &dr.AgentID, &dr.AgentName, &isEdit, &dr.State, &dr.HistoryJSON,
-			&dr.PendingAgentMD, &dr.PendingToolsJSON, &updatedAt, &expiresAt)
+			&dr.PendingAgentMD, &dr.PendingToolsJSON, &dr.PendingUsedConnectionsJSON, &updatedAt, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -1467,7 +1467,7 @@ func (d *DB) DeleteAgentDraft(workspaceID string) error {
 
 // ListExpiredAgentDrafts returns all drafts past their expiry (for the nightly GC).
 func (d *DB) ListExpiredAgentDrafts() ([]*AgentDraft, error) {
-	rows, err := d.Query(`SELECT workspace_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, updated_at, expires_at
+	rows, err := d.Query(`SELECT workspace_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, pending_used_connections, updated_at, expires_at
 		FROM agent_drafts WHERE expires_at <= datetime('now')`)
 	if err != nil {
 		return nil, err
@@ -1479,7 +1479,7 @@ func (d *DB) ListExpiredAgentDrafts() ([]*AgentDraft, error) {
 		var isEdit int
 		var updatedAt, expiresAt string
 		if err := rows.Scan(&dr.WorkspaceID, &dr.AgentID, &dr.AgentName, &isEdit, &dr.State, &dr.HistoryJSON,
-			&dr.PendingAgentMD, &dr.PendingToolsJSON, &updatedAt, &expiresAt); err != nil {
+			&dr.PendingAgentMD, &dr.PendingToolsJSON, &dr.PendingUsedConnectionsJSON, &updatedAt, &expiresAt); err != nil {
 			return nil, err
 		}
 		dr.IsEdit = isEdit == 1

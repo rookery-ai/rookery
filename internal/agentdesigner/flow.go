@@ -664,20 +664,22 @@ func (f *Flow) saveDraft(sess *DesignSession) {
 	}
 	histJSON, _ := json.Marshal(sess.History)
 	toolsJSON, _ := json.Marshal(sess.PendingTools)
+	usedConnsJSON, _ := json.Marshal(sess.PendingUsedConnections)
 	state := "designing"
 	if sess.State == StateVerifying {
 		state = "verifying"
 	}
 	_ = f.db.UpsertAgentDraft(&db.AgentDraft{
-		WorkspaceID:      sess.WorkspaceID,
-		AgentID:          sess.AgentID,
-		AgentName:        sess.AgentName,
-		IsEdit:           sess.IsEdit,
-		State:            state,
-		HistoryJSON:      string(histJSON),
-		PendingAgentMD:   sess.PendingAgentMD,
-		PendingToolsJSON: string(toolsJSON),
-		ExpiresAt:        time.Now().Add(draftTTL),
+		WorkspaceID:                sess.WorkspaceID,
+		AgentID:                    sess.AgentID,
+		AgentName:                  sess.AgentName,
+		IsEdit:                     sess.IsEdit,
+		State:                      state,
+		HistoryJSON:                string(histJSON),
+		PendingAgentMD:             sess.PendingAgentMD,
+		PendingToolsJSON:           string(toolsJSON),
+		PendingUsedConnectionsJSON: string(usedConnsJSON),
+		ExpiresAt:                  time.Now().Add(draftTTL),
 	})
 }
 
@@ -758,6 +760,9 @@ func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string) (string, err
 	_ = json.Unmarshal([]byte(draft.HistoryJSON), &sess.History)
 	if draft.PendingToolsJSON != "" {
 		_ = json.Unmarshal([]byte(draft.PendingToolsJSON), &sess.PendingTools)
+	}
+	if draft.PendingUsedConnectionsJSON != "" {
+		_ = json.Unmarshal([]byte(draft.PendingUsedConnectionsJSON), &sess.PendingUsedConnections)
 	}
 
 	if draft.IsEdit {

@@ -216,14 +216,15 @@ type AuditLog struct {
 // AgentDraft is a persisted in-progress agent creation/edit session, used to
 // resume after a page reload, browser close, or server restart. One per workspace.
 type AgentDraft struct {
-	WorkspaceID      string
-	AgentID          string // freshly-minted for create; existing agent's ID for edit
-	AgentName        string
-	IsEdit           bool
-	State            string // "designing" or "verifying"
-	HistoryJSON      string
-	PendingAgentMD   string
-	PendingToolsJSON string
-	UpdatedAt        time.Time
-	ExpiresAt        time.Time
+	WorkspaceID                string
+	AgentID                    string // freshly-minted for create; existing agent's ID for edit
+	AgentName                  string
+	IsEdit                     bool
+	State                      string // "designing" or "verifying"
+	HistoryJSON                string
+	PendingAgentMD             string
+	PendingToolsJSON           string
+	PendingUsedConnectionsJSON string
+	UpdatedAt                  time.Time
+	ExpiresAt                  time.Time
 }
