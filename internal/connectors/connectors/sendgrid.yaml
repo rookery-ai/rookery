@@ -1,0 +1,66 @@
+provider: sendgrid
+actions:
+  - name: sendgrid_send_mail
+    description: "Send a plain-text email via SendGrid. Delivers real mail. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        to: {type: string}
+        from: {type: string}
+        subject: {type: string}
+        body: {type: string}
+      required: [to, from, subject, body]
+    request:
+      method: POST
+      url: "https://api.sendgrid.com/v3/mail/send"
+      body:
+        personalizations:
+          - to:
+              - {email: "{{to}}"}
+        from: {email: "{{from}}"}
+        subject: "{{subject}}"
+        content:
+          - {type: "text/plain", value: "{{body}}"}
+    response_extract: "$"
+  - name: sendgrid_list_templates
+    description: "List SendGrid dynamic templates. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://api.sendgrid.com/v3/templates", query: {generations: "dynamic"}}
+    response_extract: "$.result"
+  - name: sendgrid_get_template
+    description: "Get a SendGrid template by id. Read-only."
+    mutating: false
+    params: {type: object, properties: {id: {type: string}}, required: [id]}
+    request: {method: GET, url: "https://api.sendgrid.com/v3/templates/{{id}}"}
+    response_extract: "$"
+  - name: sendgrid_list_lists
+    description: "List SendGrid marketing contact lists. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://api.sendgrid.com/v3/marketing/lists"}
+    response_extract: "$.result"
+  - name: sendgrid_add_contact
+    description: "Add or update a marketing contact by email. Mutating."
+    mutating: true
+    params: {type: object, properties: {email: {type: string}}, required: [email]}
+    request:
+      method: PUT
+      url: "https://api.sendgrid.com/v3/marketing/contacts"
+      body:
+        contacts:
+          - {email: "{{email}}"}
+    response_extract: "$"
+  - name: sendgrid_list_bounces
+    description: "List bounced addresses. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://api.sendgrid.com/v3/suppression/bounces"}
+    response_extract: "$"
+  - name: sendgrid_list_verified_senders
+    description: "List verified sender identities. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://api.sendgrid.com/v3/verified_senders"}
+    response_extract: "$.results"

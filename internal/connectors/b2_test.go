@@ -90,3 +90,19 @@ func TestB2_Airtable(t *testing.T) {
 		t.Fatalf("fields object not passed: %v", m)
 	}
 }
+
+func TestB2_SendGrid(t *testing.T) {
+	r := b2Reg(t)
+	if p, ok := r.ProviderByName("sendgrid"); !ok || !p.IsAPIKey() {
+		t.Fatal("sendgrid must load as api_key")
+	}
+	m := renderB2(t, r, "sendgrid", "sendgrid_send_mail", map[string]any{"to": "a@b.com", "from": "me@x.com", "subject": "S", "body": "hi"})
+	ps, ok := m["personalizations"].([]any)
+	if !ok || len(ps) != 1 {
+		t.Fatalf("personalizations[] missing: %v", m)
+	}
+	to := ps[0].(map[string]any)["to"].([]any)
+	if to[0].(map[string]any)["email"] != "a@b.com" {
+		t.Fatalf("nested to.email wrong: %v", m)
+	}
+}

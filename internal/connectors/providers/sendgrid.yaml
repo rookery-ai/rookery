@@ -1,0 +1,10 @@
+name: sendgrid
+label: SendGrid
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "SendGrid API key"
+  key_hint: "SG...."
+  setup_url: https://app.sendgrid.com/settings/api_keys
