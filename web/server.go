@@ -52,6 +52,7 @@ type Server struct {
 	vault      *vault.Vault         // per-user knowledge base
 	memory     *memory.Store        // per-user structured context (injected into one-off chat)
 	connectors *connectors.Registry // self-managed-OAuth connector registry (embedded data files)
+	connStore  connectors.TokenStore // token store for connector execution (chat + services UI)
 
 	// runs tracks in-flight manual ("Run Now") agent runs so progress can be
 	// streamed to the browser over SSE while the run executes on a detached
@@ -106,6 +107,7 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 		return nil, fmt.Errorf("load connectors: %w", err)
 	}
 	s.connectors = connReg
+	s.connStore = &connectors.DBTokenStore{DB: s.db, SystemKey: s.systemKey, Reg: s.connectors, OAuth: connectors.OAuthClient{}}
 
 	s.echo.HideBanner = true
 	s.echo.HidePort = true

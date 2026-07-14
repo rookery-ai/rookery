@@ -202,7 +202,7 @@ func TestGateToolCallingHasDiscoveryTools(t *testing.T) {
 // tool-calling chat prompt must offer search_files + glob (file-read, safe in chat), but
 // NOT web_search (chat is file-only — web_search/run_script/bash are exec-gated).
 func TestChatToolCallingHasSearchAndGlob(t *testing.T) {
-	p := BuildChatSystemPrompt("/tmp/vault", BackendToolCalling)
+	p := BuildChatSystemPrompt("/tmp/vault", BackendToolCalling, nil, nil, "")
 	for _, want := range []string{"search_files", "glob"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("tool-calling chat prompt must offer %q (parity with CLI chat Grep/Glob)", want)
@@ -213,6 +213,22 @@ func TestChatToolCallingHasSearchAndGlob(t *testing.T) {
 	}
 	if strings.Contains(p, "run_script") {
 		t.Errorf("tool-calling chat prompt must NOT offer run_script (chat is file-only)")
+	}
+}
+
+// TestChatSystemPromptConnectorsNativeTools guards a real bug: BuildChatSystemPrompt must
+// map the raw coder backend string (e.g. "api", what coder.BackendType() actually returns)
+// to the canonical BackendToolCalling constant before handing it to connectedToolsBlock —
+// otherwise the direct string comparison inside that block fails and it wrongly emits the
+// CLI `connector exec` bridge instructions (which chat never wires up) instead of the
+// native-tools instructions.
+func TestChatSystemPromptConnectorsNativeTools(t *testing.T) {
+	p := BuildChatSystemPrompt("/tmp/vault", "api", []ConnectionRef{{Provider: "google", Label: "work", Identity: "a@b.com"}}, []string{"gmail_send_email"}, "")
+	if !strings.Contains(p, "NATIVE tools") {
+		t.Errorf("chat prompt with connections on the API backend must advertise NATIVE tools, got:\n%s", p)
+	}
+	if strings.Contains(p, "connector exec") {
+		t.Errorf("chat prompt with connections on the API backend must NOT advertise the CLI bridge command, got:\n%s", p)
 	}
 }
 

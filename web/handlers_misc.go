@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/chat"
 	"github.com/ilijad1/simple-agents/internal/coder"
+	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/prompts"
@@ -120,7 +121,28 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 		// this flag), so skip it there — matches the Telegram chat path.
 		coder = coder.WithAllowedTools("Read,Write,Edit,Glob,Grep")
 	}
-	sysCtx := prompts.BuildChatSystemPrompt(root, coder.BackendType()) + chat.BuildUserContext(s.db, s.memory, u.ID)
+
+	// Connector wiring is gated on the API engine: it exposes bound connections as
+	// native tools directly. A CLI coder reaches connectors via the loopback bridge,
+	// which is only wired up for agent runs, not chat — so a CLI chat gets no
+	// connector tools/prompt text, exactly as before this feature.
+	var connRefs []prompts.ConnectionRef
+	var connTools []string
+	if coder.IsAPI() && s.connStore != nil {
+		if rows, err := s.db.ListServiceConnections(c.Request().Context(), u.ID); err == nil {
+			bound := connectors.ActiveBoundConns(rows)
+			if len(bound) > 0 {
+				coder = coder.WithConnectors(s.connectors, s.connStore, bound)
+				for _, b := range bound {
+					connRefs = append(connRefs, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
+				}
+				for _, d := range s.connectors.ToolDefs(bound) {
+					connTools = append(connTools, d.Name)
+				}
+			}
+		}
+	}
+	sysCtx := prompts.BuildChatSystemPrompt(root, coder.BackendType(), connRefs, connTools, "") + chat.BuildUserContext(s.db, s.memory, u.ID)
 
 	// Re-activate the chat if it had been stopped, so history keeps flowing.
 	if !ch.Active {

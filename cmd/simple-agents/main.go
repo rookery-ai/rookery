@@ -274,7 +274,27 @@ func serveCmd() *cli.Command {
 				if !cd.IsAPI() {
 					cd = cd.WithAllowedTools("Read,Write,Edit,Glob,Grep")
 				}
-				sysCtx := prompts.BuildChatSystemPrompt(root, cd.BackendType()) + chat.BuildUserContext(database, memStore, workspaceID)
+
+				// Connector wiring is gated on the API engine (see web/handlers_misc.go for
+				// the same rationale): a CLI coder reaches connectors via the loopback bridge,
+				// which isn't wired up for chat, so it gets no connector tools/prompt text.
+				var connRefs []prompts.ConnectionRef
+				var connTools []string
+				if cd.IsAPI() {
+					if rows, err := database.ListServiceConnections(ctx, workspaceID); err == nil {
+						bound := connectors.ActiveBoundConns(rows)
+						if len(bound) > 0 {
+							cd = cd.WithConnectors(connReg, connStore, bound)
+							for _, b := range bound {
+								connRefs = append(connRefs, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
+							}
+							for _, d := range connReg.ToolDefs(bound) {
+								connTools = append(connTools, d.Name)
+							}
+						}
+					}
+				}
+				sysCtx := prompts.BuildChatSystemPrompt(root, cd.BackendType(), connRefs, connTools, "") + chat.BuildUserContext(database, memStore, workspaceID)
 				result, err := cd.Chat(ctx, workspaceID, history, sysCtx, text)
 				if err != nil {
 					send("Sorry, I ran into an error: " + err.Error())

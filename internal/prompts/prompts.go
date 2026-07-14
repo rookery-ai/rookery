@@ -1865,9 +1865,11 @@ User input: %s`, nowStr, timezone, input)
 // write_file/edit_file/list_dir/search_files/glob function calls executed by the host. The
 // tool set is intentionally file-only in both cases — the chat can read, create, and edit
 // notes, but cannot delete, rename, or run shell commands (no web_search/run_script here).
-func BuildChatSystemPrompt(vaultRoot, backendType string) string {
-	if MapCoderBackend(backendType) == BackendToolCalling {
-		return fmt.Sprintf(`You are a helpful assistant chatting with the user. Your working directory
+func BuildChatSystemPrompt(vaultRoot, backendType string, conns []ConnectionRef, connToolNames []string, connectorBin string) string {
+	var sb strings.Builder
+	mappedBackend := MapCoderBackend(backendType)
+	if mappedBackend == BackendToolCalling {
+		sb.WriteString(fmt.Sprintf(`You are a helpful assistant chatting with the user. Your working directory
 is the user's personal knowledge base, an Obsidian-style vault of markdown notes rooted at:
 
   %s
@@ -1909,9 +1911,9 @@ Boundaries:
   list_dir/read_file first, then answer.
 
 The user does not see your tool calls — they see only your final reply, so make sure your
-reply actually answers the question. Respond naturally in the user's language.`, vaultRoot)
-	}
-	return fmt.Sprintf(`You are a helpful assistant chatting with the user. Your working directory
+reply actually answers the question. Respond naturally in the user's language.`, vaultRoot))
+	} else {
+		sb.WriteString(fmt.Sprintf(`You are a helpful assistant chatting with the user. Your working directory
 is the user's personal knowledge base, an Obsidian-style vault of markdown notes rooted at:
 
   %s
@@ -1949,7 +1951,13 @@ Boundaries:
   Glob/Grep/Read first, then answer.
 
 Respond naturally in the user's language. The user does not see your tool calls — they see
-only your final reply, so make sure your reply actually answers the question.`, vaultRoot)
+only your final reply, so make sure your reply actually answers the question.`, vaultRoot))
+	}
+	if len(conns) > 0 {
+		sb.WriteString("\n")
+		sb.WriteString(connectedToolsBlock(conns, connToolNames, mappedBackend, connectorBin))
+	}
+	return sb.String()
 }
 
 // ─── Skill creator prompts ──────────────────────────────────────────────────
