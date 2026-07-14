@@ -1,0 +1,59 @@
+provider: hubspot
+actions:
+  - name: hubspot_list_contacts
+    description: "List HubSpot contacts. Read-only."
+    mutating: false
+    params: {type: object, properties: {limit: {type: integer}}}
+    request: {method: GET, url: "https://api.hubapi.com/crm/v3/objects/contacts", query: {limit: "{{limit}}"}}
+    response_extract: "$.results"
+  - name: hubspot_get_contact
+    description: "Get one HubSpot contact by id. Read-only."
+    mutating: false
+    params: {type: object, properties: {id: {type: string}}, required: [id]}
+    request: {method: GET, url: "https://api.hubapi.com/crm/v3/objects/contacts/{{id}}"}
+    response_extract: "$"
+  - name: hubspot_search_contacts
+    description: "Search HubSpot contacts by a text query. Read-only."
+    mutating: false
+    params: {type: object, properties: {query: {type: string}, limit: {type: integer}}, required: [query]}
+    request:
+      method: POST
+      url: "https://api.hubapi.com/crm/v3/objects/contacts/search"
+      body: {query: "{{query}}", limit: "{{limit}}"}
+    response_extract: "$.results"
+  - name: hubspot_create_contact
+    description: "Create a HubSpot contact. properties is an object of contact fields (email, firstname, …). Mutating."
+    mutating: true
+    params: {type: object, properties: {properties: {type: object}}, required: [properties]}
+    request: {method: POST, url: "https://api.hubapi.com/crm/v3/objects/contacts", body: {properties: "{{properties}}"}}
+    response_extract: "$"
+  - name: hubspot_update_contact
+    description: "Update a HubSpot contact by id. Mutating."
+    mutating: true
+    params: {type: object, properties: {id: {type: string}, properties: {type: object}}, required: [id, properties]}
+    request: {method: PATCH, url: "https://api.hubapi.com/crm/v3/objects/contacts/{{id}}", body: {properties: "{{properties}}"}}
+    response_extract: "$"
+  - name: hubspot_list_companies
+    description: "List HubSpot companies. Read-only."
+    mutating: false
+    params: {type: object, properties: {limit: {type: integer}}}
+    request: {method: GET, url: "https://api.hubapi.com/crm/v3/objects/companies", query: {limit: "{{limit}}"}}
+    response_extract: "$.results"
+  - name: hubspot_create_company
+    description: "Create a HubSpot company. properties is an object (name, domain, …). Mutating."
+    mutating: true
+    params: {type: object, properties: {properties: {type: object}}, required: [properties]}
+    request: {method: POST, url: "https://api.hubapi.com/crm/v3/objects/companies", body: {properties: "{{properties}}"}}
+    response_extract: "$"
+  - name: hubspot_list_deals
+    description: "List HubSpot deals. Read-only."
+    mutating: false
+    params: {type: object, properties: {limit: {type: integer}}}
+    request: {method: GET, url: "https://api.hubapi.com/crm/v3/objects/deals", query: {limit: "{{limit}}"}}
+    response_extract: "$.results"
+  - name: hubspot_create_deal
+    description: "Create a HubSpot deal. properties is an object (dealname, amount, pipeline, dealstage). Mutating."
+    mutating: true
+    params: {type: object, properties: {properties: {type: object}}, required: [properties]}
+    request: {method: POST, url: "https://api.hubapi.com/crm/v3/objects/deals", body: {properties: "{{properties}}"}}
+    response_extract: "$"

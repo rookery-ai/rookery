@@ -1,0 +1,10 @@
+name: hubspot
+label: HubSpot
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "HubSpot private-app access token"
+  key_hint: "pat-..."
+  setup_url: https://developers.hubspot.com/docs/api/private-apps
