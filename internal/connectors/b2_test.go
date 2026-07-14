@@ -60,3 +60,18 @@ func TestB2_Calendly(t *testing.T) {
 		t.Fatalf("cancel body: %v", m)
 	}
 }
+
+func TestB2_Asana(t *testing.T) {
+	r := b2Reg(t)
+	if p, ok := r.ProviderByName("asana"); !ok || !p.IsAPIKey() {
+		t.Fatal("asana must load as api_key")
+	}
+	if len(r.Actions("asana")) < 8 {
+		t.Fatalf("want >=8 asana actions, got %d", len(r.Actions("asana")))
+	}
+	m := renderB2(t, r, "asana", "asana_create_task", map[string]any{"name": "T", "workspace": "W1"})
+	d, ok := m["data"].(map[string]any)
+	if !ok || d["name"] != "T" {
+		t.Fatalf("asana create_task must wrap in data: %v", m)
+	}
+}

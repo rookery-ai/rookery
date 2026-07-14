@@ -1,0 +1,67 @@
+provider: asana
+actions:
+  - name: asana_list_workspaces
+    description: "List Asana workspaces. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://app.asana.com/api/1.0/workspaces"}
+    response_extract: "$.data"
+  - name: asana_list_projects
+    description: "List projects in a workspace. Read-only."
+    mutating: false
+    params: {type: object, properties: {workspace: {type: string}}, required: [workspace]}
+    request: {method: GET, url: "https://app.asana.com/api/1.0/projects", query: {workspace: "{{workspace}}"}}
+    response_extract: "$.data"
+  - name: asana_list_tasks
+    description: "List tasks in a project. Read-only."
+    mutating: false
+    params: {type: object, properties: {project: {type: string}}, required: [project]}
+    request: {method: GET, url: "https://app.asana.com/api/1.0/tasks", query: {project: "{{project}}"}}
+    response_extract: "$.data"
+  - name: asana_get_task
+    description: "Get an Asana task by gid. Read-only."
+    mutating: false
+    params: {type: object, properties: {task_gid: {type: string}}, required: [task_gid]}
+    request: {method: GET, url: "https://app.asana.com/api/1.0/tasks/{{task_gid}}"}
+    response_extract: "$.data"
+  - name: asana_create_task
+    description: "Create an Asana task. Provide workspace (and optionally projects[]). Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        name: {type: string}
+        notes: {type: string}
+        workspace: {type: string}
+        projects: {type: array, items: {type: string}}
+      required: [name]
+    request:
+      method: POST
+      url: "https://app.asana.com/api/1.0/tasks"
+      body:
+        data: {name: "{{name}}", notes: "{{notes}}", workspace: "{{workspace}}", projects: "{{projects}}"}
+    response_extract: "$.data"
+  - name: asana_update_task
+    description: "Update an Asana task by gid. fields is an object of task fields. Mutating."
+    mutating: true
+    params: {type: object, properties: {task_gid: {type: string}, fields: {type: object}}, required: [task_gid, fields]}
+    request: {method: PUT, url: "https://app.asana.com/api/1.0/tasks/{{task_gid}}", body: {data: "{{fields}}"}}
+    response_extract: "$.data"
+  - name: asana_complete_task
+    description: "Mark an Asana task complete. Mutating."
+    mutating: true
+    params: {type: object, properties: {task_gid: {type: string}}, required: [task_gid]}
+    request: {method: PUT, url: "https://app.asana.com/api/1.0/tasks/{{task_gid}}", body: {data: {completed: true}}}
+    response_extract: "$.data"
+  - name: asana_add_comment
+    description: "Add a comment (story) to an Asana task. Mutating."
+    mutating: true
+    params: {type: object, properties: {task_gid: {type: string}, text: {type: string}}, required: [task_gid, text]}
+    request: {method: POST, url: "https://app.asana.com/api/1.0/tasks/{{task_gid}}/stories", body: {data: {text: "{{text}}"}}}
+    response_extract: "$.data"
+  - name: asana_delete_task
+    description: "Delete an Asana task by gid. Mutating and irreversible."
+    mutating: true
+    params: {type: object, properties: {task_gid: {type: string}}, required: [task_gid]}
+    request: {method: DELETE, url: "https://app.asana.com/api/1.0/tasks/{{task_gid}}"}
+    response_extract: "$"

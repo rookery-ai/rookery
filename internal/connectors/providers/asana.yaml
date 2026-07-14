@@ -1,0 +1,10 @@
+name: asana
+label: Asana
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Asana personal access token"
+  key_hint: "1/12...:..."
+  setup_url: https://app.asana.com/0/my-apps
