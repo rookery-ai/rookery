@@ -1,0 +1,10 @@
+name: calendly
+label: Calendly
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Calendly personal access token"
+  key_hint: "eyJ..."
+  setup_url: https://calendly.com/integrations/api_webhooks

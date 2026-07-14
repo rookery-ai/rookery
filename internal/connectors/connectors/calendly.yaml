@@ -1,0 +1,38 @@
+provider: calendly
+actions:
+  - name: calendly_get_current_user
+    description: "Get the authenticated Calendly user (incl. the user URI needed by other actions). Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://api.calendly.com/users/me"}
+    response_extract: "$.resource"
+  - name: calendly_list_event_types
+    description: "List event types for a user URI (from calendly_get_current_user). Read-only."
+    mutating: false
+    params: {type: object, properties: {user: {type: string, description: "user URI"}}, required: [user]}
+    request: {method: GET, url: "https://api.calendly.com/event_types", query: {user: "{{user}}"}}
+    response_extract: "$.collection"
+  - name: calendly_list_scheduled_events
+    description: "List scheduled events for a user URI. Read-only."
+    mutating: false
+    params: {type: object, properties: {user: {type: string}, count: {type: integer}}, required: [user]}
+    request: {method: GET, url: "https://api.calendly.com/scheduled_events", query: {user: "{{user}}", count: "{{count}}"}}
+    response_extract: "$.collection"
+  - name: calendly_get_event
+    description: "Get a scheduled event by uuid. Read-only."
+    mutating: false
+    params: {type: object, properties: {uuid: {type: string}}, required: [uuid]}
+    request: {method: GET, url: "https://api.calendly.com/scheduled_events/{{uuid}}"}
+    response_extract: "$.resource"
+  - name: calendly_list_invitees
+    description: "List invitees for a scheduled event uuid. Read-only."
+    mutating: false
+    params: {type: object, properties: {uuid: {type: string}}, required: [uuid]}
+    request: {method: GET, url: "https://api.calendly.com/scheduled_events/{{uuid}}/invitees"}
+    response_extract: "$.collection"
+  - name: calendly_cancel_event
+    description: "Cancel a scheduled event by uuid with an optional reason. Mutating."
+    mutating: true
+    params: {type: object, properties: {uuid: {type: string}, reason: {type: string}}, required: [uuid]}
+    request: {method: POST, url: "https://api.calendly.com/scheduled_events/{{uuid}}/cancellation", body: {reason: "{{reason}}"}}
+    response_extract: "$.resource"

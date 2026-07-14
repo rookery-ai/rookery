@@ -46,3 +46,17 @@ func TestB2_HubSpot(t *testing.T) {
 		t.Fatalf("properties object not passed through: %v", m)
 	}
 }
+
+func TestB2_Calendly(t *testing.T) {
+	r := b2Reg(t)
+	if p, ok := r.ProviderByName("calendly"); !ok || !p.IsAPIKey() {
+		t.Fatal("calendly must load as api_key")
+	}
+	if len(r.Actions("calendly")) < 6 {
+		t.Fatalf("want >=6 calendly actions, got %d", len(r.Actions("calendly")))
+	}
+	m := renderB2(t, r, "calendly", "calendly_cancel_event", map[string]any{"uuid": "U1", "reason": "x"})
+	if m["reason"] != "x" {
+		t.Fatalf("cancel body: %v", m)
+	}
+}
