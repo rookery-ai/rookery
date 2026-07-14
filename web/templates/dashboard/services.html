@@ -44,6 +44,9 @@
         <form method="POST" action="/dashboard/connectors/services/{{.Name}}/apikey" class="space-y-2">
           <input type="password" name="api_key" placeholder="{{.KeyHint}}" class="input input-bordered input-sm w-full" required>
           <input type="text" name="account_label" placeholder="Label (optional)" class="input input-bordered input-sm w-full">
+          {{range .ConnectInputs}}
+          <input type="text" name="{{.Key}}" placeholder="{{.Label}}{{if .Hint}} ({{.Hint}}){{end}}" class="input input-bordered input-sm w-full"{{if .Required}} required{{end}}>
+          {{end}}
           <button type="submit" class="btn btn-sm btn-primary">Connect</button>
           {{if .KeySetupURL}}<a href="{{.KeySetupURL}}" target="_blank" rel="noopener" class="link link-primary text-xs block">Where do I get this key? ↗</a>{{end}}
         </form>

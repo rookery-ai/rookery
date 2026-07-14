@@ -62,20 +62,21 @@ func verifyState(secret []byte, tok string, now time.Time) (string, bool) {
 // ── Page ────────────────────────────────────────────────────────────────────
 
 type serviceProviderView struct {
-	Name        string
-	Label       string
-	SetupURL    string
-	SetupSteps  []string
-	HasCreds    bool
-	RedirectURI string
-	Connections []db.ServiceConnection
-	IsAPIKey    bool
-	KeyLabel    string
-	KeyHint     string
-	KeySetupURL string
-	IsChild     bool
-	ParentName  string
-	ParentLabel string
+	Name          string
+	Label         string
+	SetupURL      string
+	SetupSteps    []string
+	HasCreds      bool
+	RedirectURI   string
+	Connections   []db.ServiceConnection
+	IsAPIKey      bool
+	KeyLabel      string
+	KeyHint       string
+	KeySetupURL   string
+	IsChild       bool
+	ParentName    string
+	ParentLabel   string
+	ConnectInputs []connectors.ConnectInput
 }
 
 type servicesPageData struct {
@@ -85,7 +86,7 @@ type servicesPageData struct {
 
 // availableServiceProviders is the set of providers exposed in the UI (grows as
 // provider data files are added).
-var availableServiceProviders = []string{"google", "github", "notion", "outlook", "jira", "slack", "openai", "google_drive", "google_sheets", "google_docs", "teams", "hubspot", "calendly", "asana", "airtable", "sendgrid", "intercom", "clickup", "monday", "dropbox", "zoom"}
+var availableServiceProviders = []string{"google", "github", "notion", "outlook", "jira", "slack", "openai", "google_drive", "google_sheets", "google_docs", "teams", "hubspot", "calendly", "asana", "airtable", "sendgrid", "intercom", "clickup", "monday", "dropbox", "zoom", "shopify"}
 
 // redirectWithError performs a PRG redirect carrying a user-facing error message in
 // the query string (showServices renders it into the alert).
@@ -108,6 +109,7 @@ func (s *Server) showServices(c echo.Context) error {
 		}
 		label, setupURL, setupSteps := provider, "", []string{}
 		isAPIKey, keyLabel, keyHint, keySetupURL := false, "", "", ""
+		var connectInputs []connectors.ConnectInput
 		if p, ok := s.connectors.ProviderByName(provider); ok {
 			if p.Label != "" {
 				label = p.Label
@@ -117,6 +119,7 @@ func (s *Server) showServices(c echo.Context) error {
 				isAPIKey = true
 				keyLabel, keyHint, keySetupURL = p.Auth.KeyLabel, p.Auth.KeyHint, p.Auth.SetupURL
 			}
+			connectInputs = p.ConnectInputs
 		}
 		isChild, parentName, parentLabel := false, "", ""
 		credsProvider := provider
@@ -126,20 +129,21 @@ func (s *Server) showServices(c echo.Context) error {
 		}
 		cfgForCreds, _ := s.db.GetServiceProviderConfig(ctx, w.ID, credsProvider)
 		views = append(views, serviceProviderView{
-			Name:        provider,
-			Label:       label,
-			SetupURL:    setupURL,
-			SetupSteps:  setupSteps,
-			HasCreds:    cfgForCreds != nil,
-			RedirectURI: s.callbackURL(c, provider),
-			Connections: conns,
-			IsAPIKey:    isAPIKey,
-			KeyLabel:    keyLabel,
-			KeyHint:     keyHint,
-			KeySetupURL: keySetupURL,
-			IsChild:     isChild,
-			ParentName:  parentName,
-			ParentLabel: parentLabel,
+			Name:          provider,
+			Label:         label,
+			SetupURL:      setupURL,
+			SetupSteps:    setupSteps,
+			HasCreds:      cfgForCreds != nil,
+			RedirectURI:   s.callbackURL(c, provider),
+			Connections:   conns,
+			IsAPIKey:      isAPIKey,
+			KeyLabel:      keyLabel,
+			KeyHint:       keyHint,
+			KeySetupURL:   keySetupURL,
+			IsChild:       isChild,
+			ParentName:    parentName,
+			ParentLabel:   parentLabel,
+			ConnectInputs: connectInputs,
 		})
 	}
 	p := s.page(c, "Service Connections")
@@ -239,6 +243,24 @@ func (s *Server) handleConnectAPIKey(c echo.Context) error {
 	if label == "" {
 		label = "default"
 	}
+
+	extra := map[string]string{}
+	for _, ci := range prov.ConnectInputs {
+		v := strings.TrimSpace(c.FormValue(ci.Key))
+		if ci.Required && v == "" {
+			return s.redirectWithError(c, "/dashboard/connectors/services", ci.Label+" is required.")
+		}
+		if v != "" {
+			extra[ci.Key] = v
+		}
+	}
+	extraJSON := ""
+	if len(extra) > 0 {
+		if b, _ := json.Marshal(extra); b != nil {
+			extraJSON = string(b)
+		}
+	}
+
 	enc, err := secrets.EncryptWithSystemKey(apiKey, s.systemKey)
 	if err != nil {
 		return s.redirectWithError(c, "/dashboard/connectors/services", "Failed to store the API key.")
@@ -246,7 +268,7 @@ func (s *Server) handleConnectAPIKey(c echo.Context) error {
 	if err := s.db.InsertServiceConnection(c.Request().Context(), db.ServiceConnection{
 		ID: uuid.New().String(), WorkspaceID: w.ID, Provider: provider,
 		AccountLabel: label, AccountIdentity: label,
-		EncryptedAccessToken: enc, Status: "ACTIVE",
+		EncryptedAccessToken: enc, Status: "ACTIVE", Extra: extraJSON,
 	}); err != nil {
 		return s.redirectWithError(c, "/dashboard/connectors/services", "Failed to save the connection: "+err.Error())
 	}

@@ -1,0 +1,50 @@
+provider: shopify
+actions:
+  - name: shopify_list_products
+    description: "List products in the store. Read-only."
+    mutating: false
+    params: {type: object, properties: {limit: {type: integer}}}
+    request: {method: GET, url: "https://{{conn.shop}}/admin/api/2024-10/products.json", query: {limit: "{{limit}}"}}
+    response_extract: "$.products"
+  - name: shopify_get_product
+    description: "Get a product by id. Read-only."
+    mutating: false
+    params: {type: object, properties: {id: {type: string}}, required: [id]}
+    request: {method: GET, url: "https://{{conn.shop}}/admin/api/2024-10/products/{{id}}.json"}
+    response_extract: "$.product"
+  - name: shopify_create_product
+    description: "Create a product. product is an object (title, body_html, vendor, variants…). Mutating."
+    mutating: true
+    params: {type: object, properties: {product: {type: object}}, required: [product]}
+    request: {method: POST, url: "https://{{conn.shop}}/admin/api/2024-10/products.json", body: {product: "{{product}}"}}
+    response_extract: "$.product"
+  - name: shopify_update_product
+    description: "Update a product by id. product is an object of fields to change. Mutating."
+    mutating: true
+    params: {type: object, properties: {id: {type: string}, product: {type: object}}, required: [id, product]}
+    request: {method: PUT, url: "https://{{conn.shop}}/admin/api/2024-10/products/{{id}}.json", body: {product: "{{product}}"}}
+    response_extract: "$.product"
+  - name: shopify_list_orders
+    description: "List orders. Read-only."
+    mutating: false
+    params: {type: object, properties: {status: {type: string}, limit: {type: integer}}}
+    request: {method: GET, url: "https://{{conn.shop}}/admin/api/2024-10/orders.json", query: {status: "{{status}}", limit: "{{limit}}"}}
+    response_extract: "$.orders"
+  - name: shopify_get_order
+    description: "Get an order by id. Read-only."
+    mutating: false
+    params: {type: object, properties: {id: {type: string}}, required: [id]}
+    request: {method: GET, url: "https://{{conn.shop}}/admin/api/2024-10/orders/{{id}}.json"}
+    response_extract: "$.order"
+  - name: shopify_list_customers
+    description: "List customers. Read-only."
+    mutating: false
+    params: {type: object, properties: {limit: {type: integer}}}
+    request: {method: GET, url: "https://{{conn.shop}}/admin/api/2024-10/customers.json", query: {limit: "{{limit}}"}}
+    response_extract: "$.customers"
+  - name: shopify_create_draft_order
+    description: "Create a draft order. draft_order is an object (line_items[], customer…). Mutating."
+    mutating: true
+    params: {type: object, properties: {draft_order: {type: object}}, required: [draft_order]}
+    request: {method: POST, url: "https://{{conn.shop}}/admin/api/2024-10/draft_orders.json", body: {draft_order: "{{draft_order}}"}}
+    response_extract: "$.draft_order"

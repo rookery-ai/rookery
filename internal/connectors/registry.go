@@ -69,6 +69,20 @@ type Provider struct {
 	SetupSteps []string `yaml:"setup_steps"` // numbered instructions to create the OAuth client
 
 	Auth AuthConfig `yaml:"auth"`
+
+	// ConnectInputs are extra per-connection fields collected on the api-key connect form
+	// (e.g. Shopify's store domain). Stored in service_connections.extra and exposed to
+	// request templates + auth as {{conn.<key>}}.
+	ConnectInputs []ConnectInput `yaml:"connect_inputs"`
+}
+
+// ConnectInput is a per-connection value collected on the api-key connect form and stored in
+// service_connections.extra (exposed to request templates + auth as {{conn.<key>}}).
+type ConnectInput struct {
+	Key      string `yaml:"key"`
+	Label    string `yaml:"label"`
+	Hint     string `yaml:"hint"`
+	Required bool   `yaml:"required"`
 }
 
 // IsAPIKey reports whether this provider authenticates with a static API key.

@@ -1,0 +1,12 @@
+name: shopify
+label: Shopify
+auth:
+  kind: api_key
+  placement: header
+  header_name: X-Shopify-Access-Token
+  value_prefix: ""
+  key_label: "Shopify Admin API access token"
+  key_hint: "shpat_..."
+  setup_url: https://www.shopify.com/admin/settings/apps/development
+connect_inputs:
+  - {key: shop, label: "Store domain", hint: "mystore.myshopify.com", required: true}
