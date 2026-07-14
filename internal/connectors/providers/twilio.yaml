@@ -1,0 +1,11 @@
+name: twilio
+label: Twilio
+auth:
+  kind: api_key
+  placement: basic
+  basic_user_template: "{{conn.account_sid}}"
+  key_label: "Twilio Auth Token"
+  key_hint: "your account's Auth Token (Console → Account Info)"
+  setup_url: https://console.twilio.com/
+connect_inputs:
+  - {key: account_sid, label: "Account SID", hint: "AC...", required: true}

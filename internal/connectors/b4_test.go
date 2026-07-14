@@ -1,6 +1,7 @@
 package connectors
 
 import (
+	"net/http"
 	"net/url"
 	"testing"
 )
@@ -77,5 +78,29 @@ func TestB4_StripeCreateCustomer(t *testing.T) {
 	_, v := renderB4Form(t, r, "stripe", "stripe_create_customer", map[string]any{"email": "x@y.com", "name": "Acme"}, nil)
 	if v.Get("email") != "x@y.com" || v.Get("name") != "Acme" {
 		t.Fatalf("stripe create_customer form: %v", v)
+	}
+}
+
+func TestB4_TwilioBasicUserAndSMS(t *testing.T) {
+	r := b4Reg(t)
+	p, ok := r.ProviderByName("twilio")
+	if !ok || !p.IsAPIKey() || p.Auth.Placement != "basic" {
+		t.Fatalf("twilio must be api_key basic, got %+v", p.Auth)
+	}
+	// Basic username = account_sid from connExtra; credential = auth token (password)
+	req, _ := http.NewRequest("POST", "https://api.twilio.com/x", nil)
+	applyAuth(req, p, "AUTHTOKEN", map[string]string{"account_sid": "AC123"})
+	u, pw, ok := req.BasicAuth()
+	if !ok || u != "AC123" || pw != "AUTHTOKEN" {
+		t.Fatalf("twilio basic auth: u=%q pw=%q", u, pw)
+	}
+	// send_sms form body + templated base URL
+	url, v := renderB4Form(t, r, "twilio", "twilio_send_sms",
+		map[string]any{"To": "+1555", "From": "+1444", "Body": "hi"}, map[string]string{"account_sid": "AC123"})
+	if v.Get("Body") != "hi" || v.Get("To") != "+1555" {
+		t.Fatalf("twilio send_sms form: %v", v)
+	}
+	if url != "https://api.twilio.com/2010-04-01/Accounts/AC123/Messages.json" {
+		t.Fatalf("twilio url not templated: %s", url)
 	}
 }

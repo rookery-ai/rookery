@@ -1,0 +1,62 @@
+provider: twilio
+actions:
+  - name: twilio_send_sms
+    description: "Send an SMS. From must be a Twilio number. Delivers a real message. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        To: {type: string}
+        From: {type: string}
+        Body: {type: string}
+      required: [To, From, Body]
+    request:
+      method: POST
+      url: "https://api.twilio.com/2010-04-01/Accounts/{{conn.account_sid}}/Messages.json"
+      form: {To: "{{To}}", From: "{{From}}", Body: "{{Body}}"}
+    response_extract: "$"
+  - name: twilio_list_messages
+    description: "List recent SMS/MMS messages. Read-only."
+    mutating: false
+    params: {type: object, properties: {PageSize: {type: integer}}}
+    request: {method: GET, url: "https://api.twilio.com/2010-04-01/Accounts/{{conn.account_sid}}/Messages.json", query: {PageSize: "{{PageSize}}"}}
+    response_extract: "$.messages"
+  - name: twilio_get_message
+    description: "Get a message by SID. Read-only."
+    mutating: false
+    params: {type: object, properties: {sid: {type: string}}, required: [sid]}
+    request: {method: GET, url: "https://api.twilio.com/2010-04-01/Accounts/{{conn.account_sid}}/Messages/{{sid}}.json"}
+    response_extract: "$"
+  - name: twilio_make_call
+    description: "Place an outbound call that fetches TwiML from Url. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        To: {type: string}
+        From: {type: string}
+        Url: {type: string, description: "TwiML URL"}
+      required: [To, From, Url]
+    request:
+      method: POST
+      url: "https://api.twilio.com/2010-04-01/Accounts/{{conn.account_sid}}/Calls.json"
+      form: {To: "{{To}}", From: "{{From}}", Url: "{{Url}}"}
+    response_extract: "$"
+  - name: twilio_list_calls
+    description: "List recent calls. Read-only."
+    mutating: false
+    params: {type: object, properties: {PageSize: {type: integer}}}
+    request: {method: GET, url: "https://api.twilio.com/2010-04-01/Accounts/{{conn.account_sid}}/Calls.json", query: {PageSize: "{{PageSize}}"}}
+    response_extract: "$.calls"
+  - name: twilio_list_incoming_phone_numbers
+    description: "List the account's Twilio phone numbers. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://api.twilio.com/2010-04-01/Accounts/{{conn.account_sid}}/IncomingPhoneNumbers.json"}
+    response_extract: "$.incoming_phone_numbers"
+  - name: twilio_get_account
+    description: "Get the Twilio account details. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://api.twilio.com/2010-04-01/Accounts/{{conn.account_sid}}.json"}
+    response_extract: "$"
