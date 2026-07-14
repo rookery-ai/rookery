@@ -85,6 +85,12 @@ type DesignSession struct {
 	PendingAgentMD string
 	PendingTools   map[string]string
 
+	// PendingUsedConnections lists the service-connection IDs the build's connector tool
+	// calls actually invoked (coder.Result.UsedConnectionIDs), captured alongside
+	// PendingAgentMD. Used by persistConnections to auto-bind when the model omitted the
+	// "# Connections:" header and the agent has no bindings yet.
+	PendingUsedConnections []string
+
 	// GenerationFailed is true when the last generation attempt soft-failed (a blocker
 	// with no presentable build on disk, or a not-presentable/guardrail outcome) and the
 	// session stayed in StateDesigning. While set, a forgiving retry phrase ("try again",
@@ -131,6 +137,7 @@ type dbDesignStore interface {
 
 	// Self-managed OAuth service connections (agent binding, mirrors agent_skills).
 	ListServiceConnections(ctx context.Context, workspaceID string) ([]db.ServiceConnection, error)
+	ListAgentConnections(ctx context.Context, agentID string) ([]db.ServiceConnection, error)
 	SetAgentConnections(ctx context.Context, agentID string, connIDs []string) error
 }
 
@@ -153,8 +160,10 @@ func (f *Flow) loadConnectionRefs(ctx context.Context, workspaceID string) []pro
 
 // persistConnections parses the "# Connections:" header against the workspace's
 // available connections and binds the agent to them (agent_connections). A missing
-// header leaves existing bindings untouched (edit) / none (create).
-func (f *Flow) persistConnections(ctx context.Context, workspaceID, agentID, agentMD string) {
+// header leaves existing bindings untouched UNLESS the agent has none yet, in which
+// case it auto-binds exactly the connections the build's connector tool calls
+// actually used (usedFromBuild) — never all, never clobbering existing bindings.
+func (f *Flow) persistConnections(ctx context.Context, workspaceID, agentID, agentMD string, usedFromBuild []string) {
 	if f.db == nil {
 		return
 	}
@@ -163,9 +172,10 @@ func (f *Flow) persistConnections(ctx context.Context, workspaceID, agentID, age
 		slog.Warn("agentdesigner: list service connections", "workspace_id", workspaceID, "err", err)
 		return
 	}
-	ids := parseConnectionsLine(agentMD, available)
-	if ids == nil {
-		return // no header → don't touch bindings
+	existing, _ := f.db.ListAgentConnections(ctx, agentID)
+	ids, apply := AutoBindTargets(agentMD, available, existing, usedFromBuild)
+	if !apply {
+		return
 	}
 	if err := f.db.SetAgentConnections(ctx, agentID, ids); err != nil {
 		slog.Warn("agentdesigner: set agent connections", "agent_id", agentID, "err", err)
@@ -1268,10 +1278,12 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	resultText := ""
 	scriptVerified := false
 	scriptOutput := ""
+	usedConns := []string(nil)
 	if result != nil {
 		resultText = result.Text
 		scriptVerified = result.ScriptVerified
 		scriptOutput = result.ScriptOutput
+		usedConns = result.UsedConnectionIDs
 	}
 	decision := decideBuildOutcome(workDir, resultText, backendType, scriptVerified, scriptOutput)
 
@@ -1384,6 +1396,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		sess.State = StateVerifying
 		sess.PendingAgentMD = decision.agentMD
 		sess.PendingTools = decision.tools
+		sess.PendingUsedConnections = usedConns
 		// Record the review prompt in History so a page-load restore (or a draft
 		// resumed after a server restart) replays it. Previously this message only
 		// ever lived in the POST return value, so anyone who navigated away mid-build
@@ -1874,6 +1887,7 @@ func (f *Flow) finalizeAgent(ctx context.Context, workspaceID string) (string, b
 	agentMD := sess.PendingAgentMD
 	tools := sess.PendingTools
 	isEdit := sess.IsEdit
+	usedConns := sess.PendingUsedConnections
 	f.mu.Unlock()
 
 	var resp string
@@ -1881,9 +1895,9 @@ func (f *Flow) finalizeAgent(ctx context.Context, workspaceID string) (string, b
 	var agentID string
 	var err error
 	if isEdit {
-		resp, done, agentID, err = f.updateAndFinish(ctx, workspaceID, agentMD, tools)
+		resp, done, agentID, err = f.updateAndFinish(ctx, workspaceID, agentMD, tools, usedConns)
 	} else {
-		resp, done, agentID, err = f.saveAndFinish(ctx, workspaceID, agentMD, tools)
+		resp, done, agentID, err = f.saveAndFinish(ctx, workspaceID, agentMD, tools, usedConns)
 	}
 	// On a successful save the agent is persisted — drop the draft so the resume
 	// prompt never reappears for an already-created/updated agent.
@@ -1894,7 +1908,7 @@ func (f *Flow) finalizeAgent(ctx context.Context, workspaceID string) (string, b
 }
 
 // saveAndFinish writes a brand-new agent to disk/DB and terminates the session.
-func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, tools map[string]string) (string, bool, string, error) {
+func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, tools map[string]string, usedConns []string) (string, bool, string, error) {
 	f.mu.Lock()
 	sess := f.sessions[workspaceID]
 	agentIDSnap := sess.AgentID
@@ -1935,7 +1949,7 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 	}
 
 	// Bind declared service connections (agent_connections), mirroring skills.
-	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD)
+	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD, usedConns)
 
 	// Remove test artifacts (downloaded files, scratch probes, run outputs) from the live
 	// agent dir now that the agent is saved. Artifacts persist through StateVerifying so
@@ -1980,7 +1994,7 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 // schedule row's ID — never minting a new one, since agent_id has no unique
 // constraint and a fresh ID would create a duplicate, double-firing schedule), and
 // "none"/invalid where a schedule previously existed removes it.
-func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string, tools map[string]string) (string, bool, string, error) {
+func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string, tools map[string]string, usedConns []string) (string, bool, string, error) {
 	f.mu.Lock()
 	sess := f.sessions[workspaceID]
 	agentIDSnap := sess.AgentID
@@ -2002,7 +2016,7 @@ func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string,
 	}
 
 	// Bind declared service connections (agent_connections), mirroring skills.
-	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD)
+	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD, usedConns)
 
 	// Remove any test artifacts left in the live agent dir post-save. For edits the
 	// staging dir is already gone; this cleans root-level scratch from the live dir.

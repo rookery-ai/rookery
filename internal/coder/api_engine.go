@@ -126,6 +126,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 			res.ScriptVerified = tools.scriptVerified()
 			res.ScriptOutput = tools.verifiedOutput()
 			res.ScriptRan = tools.authoredScriptRan()
+			res.UsedConnectionIDs = tools.usedConnectionIDs()
 			return res, nil
 		}
 
@@ -156,6 +157,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 		res.ScriptVerified = tools.scriptVerified()
 		res.ScriptOutput = tools.verifiedOutput()
 		res.ScriptRan = tools.authoredScriptRan()
+		res.UsedConnectionIDs = tools.usedConnectionIDs()
 	}
 	return res, err
 }
@@ -408,6 +410,8 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 		connReg:    c.connReg,
 		connStore:  c.connStore,
 		boundConns: c.boundConns,
+
+		usedConnIDs: map[string]bool{},
 	}
 }
 

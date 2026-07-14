@@ -34,6 +34,9 @@ func (h *hostToolSet) executeConnectorTool(ctx context.Context, name string, arg
 	if !ok {
 		return "error: unknown connector tool " + name
 	}
+	if h.usedConnIDs != nil {
+		h.usedConnIDs[b.ID] = true
+	}
 	res, err := connectors.Execute(ctx, h.connReg, h.connStore, h.httpClient,
 		connectors.ConnRef{ID: b.ID, Provider: b.Provider, AccountIdentity: b.AccountIdentity, Extra: b.Extra},
 		action, args, h.verifyBuild)

@@ -53,6 +53,12 @@ type Result struct {
 	// build (regardless of output). Observability only: it discriminates "ran but produced
 	// nothing" from "never ran" behind a "couldn't confirm" outcome. Zero for CLI/runs/chat.
 	ScriptRan bool
+
+	// UsedConnectionIDs lists the service-connection IDs whose connector tools the API engine
+	// actually invoked this build (deduped). The agent designer auto-binds these when the model
+	// omitted the `# Connections:` header. Set only by the API engine; zero for CLI/runs’ callers
+	// that don’t consume it.
+	UsedConnectionIDs []string
 }
 
 // Usage is a best-effort token accounting for API coders (zero for CLI coders).

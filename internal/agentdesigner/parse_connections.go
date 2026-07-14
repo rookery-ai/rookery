@@ -83,6 +83,36 @@ func parseConnectionsLine(agentMD string, available []db.ServiceConnection) []st
 	return out
 }
 
+// AutoBindTargets decides which connection IDs to bind to an agent after a build.
+//   - If AGENT.md has a `# Connections:` header (even empty/"none"), it WINS — return its parse.
+//   - Otherwise (no header): if the agent already has bindings, leave them untouched (return
+//     apply=false); else auto-bind the connections the build actually used, filtered to the
+//     workspace's available connections. Never binds all; never clobbers existing.
+func AutoBindTargets(agentMD string, available, existingBound []db.ServiceConnection, usedFromBuild []string) (ids []string, apply bool) {
+	if parsed := parseConnectionsLine(agentMD, available); parsed != nil {
+		return parsed, true // explicit header wins (incl. empty / "none")
+	}
+	if len(existingBound) > 0 {
+		return nil, false // no header + already bound → don't touch
+	}
+	valid := map[string]bool{}
+	for _, c := range available {
+		valid[c.ID] = true
+	}
+	var used []string
+	seen := map[string]bool{}
+	for _, id := range usedFromBuild {
+		if valid[id] && !seen[id] {
+			used = append(used, id)
+			seen[id] = true
+		}
+	}
+	if len(used) == 0 {
+		return nil, false
+	}
+	return used, true
+}
+
 func matchesConn(tok string, c db.ServiceConnection) bool {
 	tok = strings.ToLower(tok)
 	cands := []string{

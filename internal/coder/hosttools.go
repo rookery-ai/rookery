@@ -105,6 +105,9 @@ type hostToolSet struct {
 	connReg    *connectors.Registry
 	connStore  connectors.TokenStore
 	boundConns []connectors.BoundConn
+
+	// usedConnIDs records connection IDs whose connector tools were invoked (for build auto-bind).
+	usedConnIDs map[string]bool
 }
 
 // failedCall identifies one failing tool invocation by name+args for the oscillation guard.
@@ -324,6 +327,19 @@ func (h *hostToolSet) verifiedOutput() string {
 // this build (used only for observability — see hostToolSet.ranAuthoredScript).
 func (h *hostToolSet) authoredScriptRan() bool {
 	return h.ranAuthoredScript
+}
+
+// usedConnectionIDs returns the sorted, deduped connection IDs whose connector tools were invoked.
+func (h *hostToolSet) usedConnectionIDs() []string {
+	if len(h.usedConnIDs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(h.usedConnIDs))
+	for id := range h.usedConnIDs {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // canonScriptPath normalizes a script path so a write_file("tools/x.py") and a later
