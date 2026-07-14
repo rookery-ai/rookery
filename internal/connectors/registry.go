@@ -58,6 +58,11 @@ type Provider struct {
 	// Supported: "atlassian_cloudid".
 	PostConnect string `yaml:"post_connect"`
 
+	// AuthParent names another provider whose OAuth app + endpoints this provider reuses.
+	// A child (e.g. google_drive → google) declares only its own scopes/actions/label; its
+	// authorize_url/token_url/token settings/app-credentials all resolve from the parent.
+	AuthParent string `yaml:"auth_parent"`
+
 	// UI guidance for obtaining OAuth app credentials (shown on the Services page).
 	Label      string   `yaml:"label"`       // human-friendly name, e.g. "Google (Gmail)"
 	SetupURL   string   `yaml:"setup_url"`   // link to the provider's developer console
@@ -155,6 +160,24 @@ func LoadBundled() (*Registry, error) {
 func (r *Registry) ProviderByName(name string) (Provider, bool) {
 	p, ok := r.providers[name]
 	return p, ok
+}
+
+// OAuthProvider returns the provider whose OAuth config governs authentication for name:
+// the auth_parent when set (one level), else the provider itself. Used for endpoints, token
+// settings, static_headers, authorize_extra, and the app-credentials lookup key. ProviderByName
+// still returns the child itself (its scopes, label, actions, post_connect).
+func (r *Registry) OAuthProvider(name string) (Provider, bool) {
+	p, ok := r.providers[name]
+	if !ok {
+		return Provider{}, false
+	}
+	if p.AuthParent != "" {
+		if parent, ok := r.providers[p.AuthParent]; ok {
+			return parent, true
+		}
+		return Provider{}, false
+	}
+	return p, true
 }
 
 // Actions returns all actions declared for a provider.
