@@ -156,3 +156,18 @@ func TestB2_Monday(t *testing.T) {
 		t.Fatalf("monday variables not built: %v", m)
 	}
 }
+
+func TestB2_Dropbox(t *testing.T) {
+	r := b2Reg(t)
+	p, ok := r.ProviderByName("dropbox")
+	if !ok || p.IsAPIKey() {
+		t.Fatal("dropbox must load as OAuth (not api_key)")
+	}
+	if p.AuthorizeURL == "" || p.TokenURL == "" {
+		t.Fatal("dropbox missing OAuth endpoints")
+	}
+	m := renderB2(t, r, "dropbox", "dropbox_list_folder", map[string]any{"path": "/docs"})
+	if m["path"] != "/docs" {
+		t.Fatalf("dropbox list_folder body: %v", m)
+	}
+}

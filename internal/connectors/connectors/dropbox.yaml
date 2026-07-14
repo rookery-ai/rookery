@@ -1,0 +1,50 @@
+provider: dropbox
+actions:
+  - name: dropbox_list_folder
+    description: "List entries in a Dropbox folder path (use \"\" for the root). Read-only."
+    mutating: false
+    params: {type: object, properties: {path: {type: string}}, required: [path]}
+    request: {method: POST, url: "https://api.dropboxapi.com/2/files/list_folder", body: {path: "{{path}}"}}
+    response_extract: "$.entries"
+  - name: dropbox_get_metadata
+    description: "Get metadata for a file/folder path. Read-only."
+    mutating: false
+    params: {type: object, properties: {path: {type: string}}, required: [path]}
+    request: {method: POST, url: "https://api.dropboxapi.com/2/files/get_metadata", body: {path: "{{path}}"}}
+    response_extract: "$"
+  - name: dropbox_search
+    description: "Search files/folders by query string. Read-only."
+    mutating: false
+    params: {type: object, properties: {query: {type: string}}, required: [query]}
+    request: {method: POST, url: "https://api.dropboxapi.com/2/files/search_v2", body: {query: "{{query}}"}}
+    response_extract: "$.matches"
+  - name: dropbox_create_folder
+    description: "Create a folder at a path. Safe write."
+    mutating: false
+    params: {type: object, properties: {path: {type: string}}, required: [path]}
+    request: {method: POST, url: "https://api.dropboxapi.com/2/files/create_folder_v2", body: {path: "{{path}}"}}
+    response_extract: "$"
+  - name: dropbox_move
+    description: "Move/rename a file or folder. Mutating."
+    mutating: true
+    params: {type: object, properties: {from_path: {type: string}, to_path: {type: string}}, required: [from_path, to_path]}
+    request: {method: POST, url: "https://api.dropboxapi.com/2/files/move_v2", body: {from_path: "{{from_path}}", to_path: "{{to_path}}"}}
+    response_extract: "$"
+  - name: dropbox_copy
+    description: "Copy a file or folder. Safe write."
+    mutating: false
+    params: {type: object, properties: {from_path: {type: string}, to_path: {type: string}}, required: [from_path, to_path]}
+    request: {method: POST, url: "https://api.dropboxapi.com/2/files/copy_v2", body: {from_path: "{{from_path}}", to_path: "{{to_path}}"}}
+    response_extract: "$"
+  - name: dropbox_delete
+    description: "Delete a file or folder at a path. Mutating and irreversible."
+    mutating: true
+    params: {type: object, properties: {path: {type: string}}, required: [path]}
+    request: {method: POST, url: "https://api.dropboxapi.com/2/files/delete_v2", body: {path: "{{path}}"}}
+    response_extract: "$"
+  - name: dropbox_create_shared_link
+    description: "Create a shareable link for a path. Mutating (creates a public-ish link)."
+    mutating: true
+    params: {type: object, properties: {path: {type: string}}, required: [path]}
+    request: {method: POST, url: "https://api.dropboxapi.com/2/sharing/create_shared_link_with_settings", body: {path: "{{path}}"}}
+    response_extract: "$"
