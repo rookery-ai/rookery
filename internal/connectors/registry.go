@@ -28,6 +28,12 @@ type AuthConfig struct {
 	KeyLabel    string `yaml:"key_label"`    // UI: "OpenAI API key"
 	KeyHint     string `yaml:"key_hint"`     // UI placeholder: "sk-..."
 	SetupURL    string `yaml:"setup_url"`    // UI: where to get the key
+
+	// BasicUserTemplate, for placement=="basic", is a {{conn.<key>}} template resolved
+	// against the connection's Extra to produce the HTTP Basic username (the credential
+	// is always the password). Empty means the legacy behavior: credential as username,
+	// empty password (e.g. ClickUp-style bare tokens use placement=header instead).
+	BasicUserTemplate string `yaml:"basic_user_template"`
 }
 
 // Provider is one service's OAuth configuration.

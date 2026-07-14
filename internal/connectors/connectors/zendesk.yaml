@@ -1,0 +1,59 @@
+provider: zendesk
+actions:
+  - name: zendesk_list_tickets
+    description: "List tickets. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://{{conn.subdomain}}.zendesk.com/api/v2/tickets.json"}
+    response_extract: "$.tickets"
+  - name: zendesk_get_ticket
+    description: "Get a ticket by id. Read-only."
+    mutating: false
+    params: {type: object, properties: {id: {type: string}}, required: [id]}
+    request: {method: GET, url: "https://{{conn.subdomain}}.zendesk.com/api/v2/tickets/{{id}}.json"}
+    response_extract: "$.ticket"
+  - name: zendesk_create_ticket
+    description: "Create a ticket. ticket is an object (subject, comment{body}, requester…). Mutating."
+    mutating: true
+    params: {type: object, properties: {ticket: {type: object}}, required: [ticket]}
+    request: {method: POST, url: "https://{{conn.subdomain}}.zendesk.com/api/v2/tickets.json", body: {ticket: "{{ticket}}"}}
+    response_extract: "$.ticket"
+  - name: zendesk_update_ticket
+    description: "Update a ticket by id. ticket is an object of fields to change. Mutating."
+    mutating: true
+    params: {type: object, properties: {id: {type: string}, ticket: {type: object}}, required: [id, ticket]}
+    request: {method: PUT, url: "https://{{conn.subdomain}}.zendesk.com/api/v2/tickets/{{id}}.json", body: {ticket: "{{ticket}}"}}
+    response_extract: "$.ticket"
+  - name: zendesk_add_comment
+    description: "Add a comment to a ticket (public by default). Mutating."
+    mutating: true
+    params: {type: object, properties: {id: {type: string}, body: {type: string}}, required: [id, body]}
+    request:
+      method: PUT
+      url: "https://{{conn.subdomain}}.zendesk.com/api/v2/tickets/{{id}}.json"
+      body: {ticket: {comment: {body: "{{body}}"}}}
+    response_extract: "$.ticket"
+  - name: zendesk_list_users
+    description: "List users. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://{{conn.subdomain}}.zendesk.com/api/v2/users.json"}
+    response_extract: "$.users"
+  - name: zendesk_get_user
+    description: "Get a user by id. Read-only."
+    mutating: false
+    params: {type: object, properties: {id: {type: string}}, required: [id]}
+    request: {method: GET, url: "https://{{conn.subdomain}}.zendesk.com/api/v2/users/{{id}}.json"}
+    response_extract: "$.user"
+  - name: zendesk_create_user
+    description: "Create a user. user is an object (name, email, role…). Mutating."
+    mutating: true
+    params: {type: object, properties: {user: {type: object}}, required: [user]}
+    request: {method: POST, url: "https://{{conn.subdomain}}.zendesk.com/api/v2/users.json", body: {user: "{{user}}"}}
+    response_extract: "$.user"
+  - name: zendesk_search
+    description: "Search across tickets/users/orgs with a query string. Read-only."
+    mutating: false
+    params: {type: object, properties: {query: {type: string}}, required: [query]}
+    request: {method: GET, url: "https://{{conn.subdomain}}.zendesk.com/api/v2/search.json", query: {query: "{{query}}"}}
+    response_extract: "$.results"

@@ -91,7 +91,7 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 		if e != nil {
 			return Result{}, &ConnectorError{KindOther, e.Error()}
 		}
-		applyAuth(req, prov, token)
+		applyAuth(req, prov, token, conn.Extra)
 		if contentType != "" {
 			req.Header.Set("Content-Type", contentType)
 		}

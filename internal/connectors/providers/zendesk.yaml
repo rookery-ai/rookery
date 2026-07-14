@@ -1,0 +1,12 @@
+name: zendesk
+label: Zendesk
+auth:
+  kind: api_key
+  placement: basic
+  basic_user_template: "{{conn.email}}/token"
+  key_label: "Zendesk API token"
+  key_hint: "from Admin → Apps and integrations → APIs → Zendesk API"
+  setup_url: https://support.zendesk.com/hc/en-us/articles/4408889192858
+connect_inputs:
+  - {key: subdomain, label: "Zendesk subdomain", hint: "acme (from acme.zendesk.com)", required: true}
+  - {key: email, label: "Agent email", hint: "you@acme.com", required: true}

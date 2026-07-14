@@ -132,7 +132,7 @@ func TestB2_ClickUp(t *testing.T) {
 		t.Fatalf("clickup token must have empty value_prefix, got %q", p.Auth.ValuePrefix)
 	}
 	req, _ := http.NewRequest("GET", "https://api.clickup.com/api/v2/task/x", nil)
-	applyAuth(req, p, "pk_123")
+	applyAuth(req, p, "pk_123", nil)
 	if got := req.Header.Get("Authorization"); got != "pk_123" {
 		t.Fatalf("clickup Authorization must be the raw token, got %q", got)
 	}

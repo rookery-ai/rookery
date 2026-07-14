@@ -2,6 +2,7 @@ package connectors
 
 import (
 	"encoding/json"
+	"net/http"
 	"testing"
 )
 
@@ -102,5 +103,26 @@ func TestB3_MailchimpKeyExtra(t *testing.T) {
 	u, _ := renderB3(t, r, "mailchimp", "mailchimp_list_audiences", nil, map[string]string{"dc": "us21"})
 	if u != "https://us21.api.mailchimp.com/3.0/lists" {
 		t.Fatalf("dc not substituted into URL: %s", u)
+	}
+}
+
+func TestB3_ZendeskBasicTemplatedUser(t *testing.T) {
+	r := b3Reg(t)
+	p, ok := r.ProviderByName("zendesk")
+	if !ok || !p.IsAPIKey() {
+		t.Fatal("zendesk must load as api_key")
+	}
+	req, _ := http.NewRequest("GET", "https://acme.zendesk.com/api/v2/tickets.json", nil)
+	applyAuth(req, p, "APITOKEN", map[string]string{"email": "me@acme.com"})
+	u, pw, ok := req.BasicAuth()
+	if !ok || u != "me@acme.com/token" || pw != "APITOKEN" {
+		t.Fatalf("zendesk basic auth wrong: u=%q pw=%q ok=%v", u, pw, ok)
+	}
+	// ticket create wraps under {ticket:{}}
+	_, m := renderB3(t, r, "zendesk", "zendesk_create_ticket",
+		map[string]any{"ticket": map[string]any{"subject": "Help"}}, map[string]string{"subdomain": "acme"})
+	tk, _ := m["ticket"].(map[string]any)
+	if tk["subject"] != "Help" {
+		t.Fatalf("ticket wrapper wrong: %v", m)
 	}
 }
