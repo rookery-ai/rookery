@@ -1,0 +1,104 @@
+provider: google_docs
+actions:
+  - name: docs_create_document
+    description: "Create a new Google Doc with a title. Safe write."
+    mutating: false
+    params:
+      type: object
+      properties:
+        title: {type: string}
+      required: [title]
+    request:
+      method: POST
+      url: "https://docs.googleapis.com/v1/documents"
+      body:
+        title: "{{title}}"
+    response_extract: "$"
+  - name: docs_get_document
+    description: "Fetch a Google Doc's content + structure by id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        document_id: {type: string}
+      required: [document_id]
+    request:
+      method: GET
+      url: "https://docs.googleapis.com/v1/documents/{{document_id}}"
+    response_extract: "$"
+  - name: docs_insert_text
+    description: "Insert text at a character index in a doc. Mutating (edits the document)."
+    mutating: true
+    params:
+      type: object
+      properties:
+        document_id: {type: string}
+        text:        {type: string}
+        index:       {type: integer, description: "1-based insertion index (default 1)"}
+      required: [document_id, text]
+    request:
+      method: POST
+      url: "https://docs.googleapis.com/v1/documents/{{document_id}}:batchUpdate"
+      body:
+        requests:
+          - insertText:
+              location:
+                index: "{{index}}"
+              text: "{{text}}"
+    response_extract: "$"
+  - name: docs_replace_text
+    description: "Replace all occurrences of a string in a doc. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        document_id: {type: string}
+        find:        {type: string}
+        replace:     {type: string}
+      required: [document_id, find, replace]
+    request:
+      method: POST
+      url: "https://docs.googleapis.com/v1/documents/{{document_id}}:batchUpdate"
+      body:
+        requests:
+          - replaceAllText:
+              containsText:
+                text: "{{find}}"
+                matchCase: true
+              replaceText: "{{replace}}"
+    response_extract: "$"
+  - name: docs_append_text
+    description: "Append text to the end of a doc (index 1 fallback if body index unknown; prefer docs_insert_text with a known index). Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        document_id: {type: string}
+        text:        {type: string}
+        end_index:   {type: integer, description: "the document body's end index (from docs_get_document)"}
+      required: [document_id, text, end_index]
+    request:
+      method: POST
+      url: "https://docs.googleapis.com/v1/documents/{{document_id}}:batchUpdate"
+      body:
+        requests:
+          - insertText:
+              location:
+                index: "{{end_index}}"
+              text: "{{text}}"
+    response_extract: "$"
+  - name: docs_batch_update
+    description: "Apply a raw batchUpdate requests array (advanced doc edits). Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        document_id: {type: string}
+        requests:    {type: array}
+      required: [document_id, requests]
+    request:
+      method: POST
+      url: "https://docs.googleapis.com/v1/documents/{{document_id}}:batchUpdate"
+      body:
+        requests: "{{requests}}"
+    response_extract: "$"

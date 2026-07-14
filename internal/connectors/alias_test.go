@@ -76,3 +76,24 @@ func TestGoogleSheetsAppendArrayBody(t *testing.T) {
 		t.Fatalf("values not a 2-row array: %s", body)
 	}
 }
+
+func TestGoogleDocsInsertText(t *testing.T) {
+	r, _ := LoadBundled()
+	if _, ok := r.OAuthProvider("google_docs"); !ok {
+		t.Fatal("google_docs not loaded")
+	}
+	a, ok := r.Action("google_docs", "docs_insert_text")
+	if !ok {
+		t.Fatal("docs_insert_text missing")
+	}
+	_, _, body, _, err := renderRequest(a, map[string]any{"document_id": "D1", "text": "hello", "index": float64(1)}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	json.Unmarshal(body, &got)
+	reqs, ok := got["requests"].([]any)
+	if !ok || len(reqs) != 1 {
+		t.Fatalf("requests[] not built: %s", body)
+	}
+}

@@ -1,0 +1,10 @@
+name: google_docs
+label: Google Docs
+auth_parent: google
+default_scopes:
+  - https://www.googleapis.com/auth/documents
+setup_url: https://console.cloud.google.com/apis/credentials
+setup_steps:
+  - "Google Docs reuses your Google (Gmail) OAuth app. Set up Google first on its card above."
+  - "In Google Cloud Console, also enable the Google Docs API."
+  - "Then click Connect here to authorize Docs access on the same Google account."
