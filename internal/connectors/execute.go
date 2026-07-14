@@ -79,7 +79,7 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 	if err != nil {
 		return Result{}, &ConnectorError{KindOther, err.Error()}
 	}
-	prov, _ := reg.ProviderByName(conn.Provider) // for static headers (Notion-Version, GitHub Accept)
+	prov, _ := reg.OAuthProvider(conn.Provider) // static headers + auth config; resolves auth_parent for aliased providers
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}

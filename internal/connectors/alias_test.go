@@ -1,7 +1,11 @@
 package connectors
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -117,5 +121,27 @@ func TestTeamsSendMessageBody(t *testing.T) {
 	b, ok := got["body"].(map[string]any)
 	if !ok || b["content"] != "hi" {
 		t.Fatalf("nested body.content missing: %s", body)
+	}
+}
+
+func TestExecuteChildProviderSendsBearer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer AT" {
+			t.Errorf("bearer missing on child call")
+		}
+		w.Write([]byte(`{"files":[{"id":"f1"}]}`))
+	}))
+	defer srv.Close()
+	reg := testRegistry(t)
+	a, _ := reg.Action("google_drive", "drive_list_files")
+	a.Request.URL = srv.URL + "/files"
+	reg.actions["google_drive"] = []Action{a}
+	res, err := Execute(context.Background(), reg, fakeStore{tok: "AT"}, srv.Client(),
+		ConnRef{ID: "c1", Provider: "google_drive"}, "drive_list_files", map[string]any{}, false)
+	if err != nil {
+		t.Fatalf("execute child: %v", err)
+	}
+	if !strings.Contains(string(res.Data), "f1") {
+		t.Fatalf("extract failed: %s", res.Data)
 	}
 }

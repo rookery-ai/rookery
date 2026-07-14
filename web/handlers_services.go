@@ -73,6 +73,9 @@ type serviceProviderView struct {
 	KeyLabel    string
 	KeyHint     string
 	KeySetupURL string
+	IsChild     bool
+	ParentName  string
+	ParentLabel string
 }
 
 type servicesPageData struct {
@@ -82,7 +85,7 @@ type servicesPageData struct {
 
 // availableServiceProviders is the set of providers exposed in the UI (grows as
 // provider data files are added).
-var availableServiceProviders = []string{"google", "github", "notion", "outlook", "jira", "slack", "openai"}
+var availableServiceProviders = []string{"google", "github", "notion", "outlook", "jira", "slack", "openai", "google_drive", "google_sheets", "google_docs", "teams"}
 
 // redirectWithError performs a PRG redirect carrying a user-facing error message in
 // the query string (showServices renders it into the alert).
@@ -97,7 +100,6 @@ func (s *Server) showServices(c echo.Context) error {
 
 	var views []serviceProviderView
 	for _, provider := range availableServiceProviders {
-		cfg, _ := s.db.GetServiceProviderConfig(ctx, w.ID, provider)
 		var conns []db.ServiceConnection
 		for _, cn := range all {
 			if cn.Provider == provider {
@@ -116,18 +118,28 @@ func (s *Server) showServices(c echo.Context) error {
 				keyLabel, keyHint, keySetupURL = p.Auth.KeyLabel, p.Auth.KeyHint, p.Auth.SetupURL
 			}
 		}
+		isChild, parentName, parentLabel := false, "", ""
+		credsProvider := provider
+		if op, ok := s.connectors.OAuthProvider(provider); ok && op.Name != provider {
+			isChild, parentName, parentLabel = true, op.Name, op.Label
+			credsProvider = op.Name
+		}
+		cfgForCreds, _ := s.db.GetServiceProviderConfig(ctx, w.ID, credsProvider)
 		views = append(views, serviceProviderView{
 			Name:        provider,
 			Label:       label,
 			SetupURL:    setupURL,
 			SetupSteps:  setupSteps,
-			HasCreds:    cfg != nil,
+			HasCreds:    cfgForCreds != nil,
 			RedirectURI: s.callbackURL(c, provider),
 			Connections: conns,
 			IsAPIKey:    isAPIKey,
 			KeyLabel:    keyLabel,
 			KeyHint:     keyHint,
 			KeySetupURL: keySetupURL,
+			IsChild:     isChild,
+			ParentName:  parentName,
+			ParentLabel: parentLabel,
 		})
 	}
 	p := s.page(c, "Service Connections")

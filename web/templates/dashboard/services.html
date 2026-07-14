@@ -49,6 +49,20 @@
         </form>
       </div>
       {{else}}
+      {{if .IsChild}}
+      <!-- Child provider: reuses the parent's OAuth app credentials, no separate creds form. -->
+      {{if .HasCreds}}
+      <div class="mb-4">
+        <form method="POST" action="/dashboard/connectors/services/{{.Name}}/connect" class="flex gap-2 items-center">
+          <input type="text" name="account_label" placeholder="Label (e.g. work)" class="input input-bordered input-sm flex-1" required>
+          <button type="submit" class="btn btn-sm btn-primary">Connect</button>
+        </form>
+        <p class="text-sm opacity-70 mt-1">Uses your {{.ParentLabel}} app credentials.</p>
+      </div>
+      {{else}}
+      <p class="text-sm opacity-70">Set up {{.ParentLabel}} first (on its card above), then Connect here.</p>
+      {{end}}
+      {{else}}
       <!-- Step 1: OAuth app credentials -->
       <details class="mb-4" {{if not .HasCreds}}open{{end}}>
         <summary class="cursor-pointer text-sm font-medium mb-2">Step 1 — Create the OAuth app &amp; paste its credentials</summary>
@@ -87,6 +101,7 @@
           <button type="submit" class="btn btn-sm btn-secondary">Connect {{.Label}} account</button>
         </form>
       </div>
+      {{end}}
       {{end}}
       {{end}}
 
