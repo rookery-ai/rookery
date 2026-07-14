@@ -131,3 +131,19 @@ func TestB4_TrelloKeyAndTokenInQuery(t *testing.T) {
 		t.Fatalf("trello token not added by applyAuth: %s", req.URL.String())
 	}
 }
+
+func TestB4_AllProvidersLoad(t *testing.T) {
+	r := b4Reg(t)
+	for _, name := range []string{"stripe", "twilio", "trello"} {
+		p, ok := r.ProviderByName(name)
+		if !ok {
+			t.Fatalf("%s not loaded", name)
+		}
+		if !p.IsAPIKey() {
+			t.Fatalf("%s should be api_key", name)
+		}
+		if len(r.Actions(name)) < 7 {
+			t.Fatalf("%s has <7 actions: %d", name, len(r.Actions(name)))
+		}
+	}
+}
