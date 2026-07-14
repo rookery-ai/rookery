@@ -1,0 +1,135 @@
+provider: google_drive
+actions:
+  - name: drive_list_files
+    description: "List files in the connected Google Drive (id, name, mimeType). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        max: {type: integer, description: "max files (default 20)"}
+      required: []
+    request:
+      method: GET
+      url: "https://www.googleapis.com/drive/v3/files"
+      query: {pageSize: "{{max}}", fields: "files(id,name,mimeType,modifiedTime,webViewLink)"}
+    response_extract: "$.files"
+  - name: drive_search_files
+    description: "Search Drive files with a Drive query string (e.g. name contains 'report'). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "Drive q query, e.g. \"name contains 'notes'\""}
+        max:   {type: integer}
+      required: [query]
+    request:
+      method: GET
+      url: "https://www.googleapis.com/drive/v3/files"
+      query: {q: "{{query}}", pageSize: "{{max}}", fields: "files(id,name,mimeType,webViewLink)"}
+    response_extract: "$.files"
+  - name: drive_get_file
+    description: "Get a Drive file's metadata (name, mimeType, links) by id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        file_id: {type: string}
+      required: [file_id]
+    request:
+      method: GET
+      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}"
+      query: {fields: "id,name,mimeType,modifiedTime,webViewLink,parents"}
+    response_extract: "$"
+  - name: drive_create_folder
+    description: "Create a folder in Drive. A write, safe (creates a folder)."
+    mutating: false
+    params:
+      type: object
+      properties:
+        name:      {type: string}
+        parent_id: {type: string, description: "optional parent folder id"}
+      required: [name]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/drive/v3/files"
+      body:
+        name: "{{name}}"
+        mimeType: "application/vnd.google-apps.folder"
+        parents: "{{parent_id}}"
+    response_extract: "$"
+  - name: drive_copy_file
+    description: "Copy an existing Drive file. Safe write."
+    mutating: false
+    params:
+      type: object
+      properties:
+        file_id: {type: string}
+        name:    {type: string, description: "name for the copy"}
+      required: [file_id]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}/copy"
+      body:
+        name: "{{name}}"
+    response_extract: "$"
+  - name: drive_rename_file
+    description: "Rename a Drive file. Safe write."
+    mutating: false
+    params:
+      type: object
+      properties:
+        file_id: {type: string}
+        name:    {type: string}
+      required: [file_id, name]
+    request:
+      method: PATCH
+      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}"
+      body:
+        name: "{{name}}"
+    response_extract: "$"
+  - name: drive_move_file
+    description: "Move a Drive file to a new parent folder. Safe write."
+    mutating: false
+    params:
+      type: object
+      properties:
+        file_id:        {type: string}
+        add_parent:     {type: string, description: "destination folder id"}
+        remove_parent:  {type: string, description: "current parent folder id to remove"}
+      required: [file_id, add_parent]
+    request:
+      method: PATCH
+      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}"
+      query: {addParents: "{{add_parent}}", removeParents: "{{remove_parent}}"}
+    response_extract: "$"
+  - name: drive_share_file
+    description: "Grant a person access to a Drive file (creates a permission). Mutating (shares data)."
+    mutating: true
+    params:
+      type: object
+      properties:
+        file_id: {type: string}
+        role:    {type: string, description: "reader | writer | commenter"}
+        type:    {type: string, description: "user | group | domain | anyone"}
+        email:   {type: string, description: "email for user/group"}
+      required: [file_id, role, type]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}/permissions"
+      body:
+        role: "{{role}}"
+        type: "{{type}}"
+        emailAddress: "{{email}}"
+    response_extract: "$"
+  - name: drive_delete_file
+    description: "Permanently delete a Drive file by id. Mutating and irreversible."
+    mutating: true
+    params:
+      type: object
+      properties:
+        file_id: {type: string}
+      required: [file_id]
+    request:
+      method: DELETE
+      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}"
+    response_extract: "$"

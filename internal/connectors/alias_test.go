@@ -1,6 +1,9 @@
 package connectors
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestOAuthProviderResolvesParent(t *testing.T) {
 	r, err := LoadBundled()
@@ -27,5 +30,25 @@ func TestOAuthProviderResolvesParent(t *testing.T) {
 	self, ok := r.OAuthProvider("google")
 	if !ok || self.Name != "google" {
 		t.Fatalf("OAuthProvider(google) = %q, want google", self.Name)
+	}
+}
+
+func TestGoogleDriveActions(t *testing.T) {
+	r, _ := LoadBundled()
+	if n := len(r.Actions("google_drive")); n < 8 {
+		t.Fatalf("expected >=8 drive actions, got %d", n)
+	}
+	a, ok := r.Action("google_drive", "drive_share_file")
+	if !ok {
+		t.Fatal("drive_share_file missing")
+	}
+	_, _, body, _, err := renderRequest(a, map[string]any{"file_id": "F1", "role": "reader", "type": "user", "email": "x@y.com"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	json.Unmarshal(body, &got)
+	if got["role"] != "reader" || got["type"] != "user" {
+		t.Fatalf("bad share body: %s", body)
 	}
 }
