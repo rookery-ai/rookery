@@ -1,0 +1,10 @@
+name: airtable
+label: Airtable
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Airtable personal access token"
+  key_hint: "pat..."
+  setup_url: https://airtable.com/create/tokens

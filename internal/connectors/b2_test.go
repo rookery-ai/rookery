@@ -75,3 +75,18 @@ func TestB2_Asana(t *testing.T) {
 		t.Fatalf("asana create_task must wrap in data: %v", m)
 	}
 }
+
+func TestB2_Airtable(t *testing.T) {
+	r := b2Reg(t)
+	if p, ok := r.ProviderByName("airtable"); !ok || !p.IsAPIKey() {
+		t.Fatal("airtable must load as api_key")
+	}
+	if len(r.Actions("airtable")) < 7 {
+		t.Fatalf("want >=7 airtable actions, got %d", len(r.Actions("airtable")))
+	}
+	m := renderB2(t, r, "airtable", "airtable_create_record", map[string]any{"base_id": "b", "table_id": "t", "fields": map[string]any{"Name": "x"}})
+	f, ok := m["fields"].(map[string]any)
+	if !ok || f["Name"] != "x" {
+		t.Fatalf("fields object not passed: %v", m)
+	}
+}

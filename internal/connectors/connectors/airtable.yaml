@@ -1,0 +1,44 @@
+provider: airtable
+actions:
+  - name: airtable_list_bases
+    description: "List Airtable bases accessible to the token. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://api.airtable.com/v0/meta/bases"}
+    response_extract: "$.bases"
+  - name: airtable_get_base_schema
+    description: "Get a base's tables/fields schema. Read-only."
+    mutating: false
+    params: {type: object, properties: {base_id: {type: string}}, required: [base_id]}
+    request: {method: GET, url: "https://api.airtable.com/v0/meta/bases/{{base_id}}/tables"}
+    response_extract: "$.tables"
+  - name: airtable_list_records
+    description: "List records in a table. Read-only."
+    mutating: false
+    params: {type: object, properties: {base_id: {type: string}, table_id: {type: string}, max: {type: integer}}, required: [base_id, table_id]}
+    request: {method: GET, url: "https://api.airtable.com/v0/{{base_id}}/{{table_id}}", query: {maxRecords: "{{max}}"}}
+    response_extract: "$.records"
+  - name: airtable_get_record
+    description: "Get one record by id. Read-only."
+    mutating: false
+    params: {type: object, properties: {base_id: {type: string}, table_id: {type: string}, record_id: {type: string}}, required: [base_id, table_id, record_id]}
+    request: {method: GET, url: "https://api.airtable.com/v0/{{base_id}}/{{table_id}}/{{record_id}}"}
+    response_extract: "$"
+  - name: airtable_create_record
+    description: "Create a record. fields is an object of column→value. Mutating."
+    mutating: true
+    params: {type: object, properties: {base_id: {type: string}, table_id: {type: string}, fields: {type: object}}, required: [base_id, table_id, fields]}
+    request: {method: POST, url: "https://api.airtable.com/v0/{{base_id}}/{{table_id}}", body: {fields: "{{fields}}"}}
+    response_extract: "$"
+  - name: airtable_update_record
+    description: "Update a record's fields by id (PATCH = partial). Mutating."
+    mutating: true
+    params: {type: object, properties: {base_id: {type: string}, table_id: {type: string}, record_id: {type: string}, fields: {type: object}}, required: [base_id, table_id, record_id, fields]}
+    request: {method: PATCH, url: "https://api.airtable.com/v0/{{base_id}}/{{table_id}}/{{record_id}}", body: {fields: "{{fields}}"}}
+    response_extract: "$"
+  - name: airtable_delete_record
+    description: "Delete a record by id. Mutating and irreversible."
+    mutating: true
+    params: {type: object, properties: {base_id: {type: string}, table_id: {type: string}, record_id: {type: string}}, required: [base_id, table_id, record_id]}
+    request: {method: DELETE, url: "https://api.airtable.com/v0/{{base_id}}/{{table_id}}/{{record_id}}"}
+    response_extract: "$"
