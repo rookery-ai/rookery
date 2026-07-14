@@ -77,6 +77,12 @@ type Provider struct {
 	// (e.g. Shopify's store domain). Stored in service_connections.extra and exposed to
 	// request templates + auth as {{conn.<key>}}.
 	ConnectInputs []ConnectInput `yaml:"connect_inputs"`
+
+	// KeyExtra maps an extra per-connection key to a derive rule applied to the pasted API
+	// key at connect time (e.g. Mailchimp's datacenter from the key suffix). Only "suffix"
+	// is supported. Derived values are merged into service_connections.extra alongside
+	// ConnectInputs and exposed to request templates as {{conn.<key>}}.
+	KeyExtra map[string]string `yaml:"key_extra"`
 }
 
 // ConnectInput is a per-connection value collected on the api-key connect form and stored in

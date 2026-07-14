@@ -1,0 +1,56 @@
+provider: mailchimp
+actions:
+  - name: mailchimp_list_audiences
+    description: "List audiences (lists). Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://{{conn.dc}}.api.mailchimp.com/3.0/lists"}
+    response_extract: "$.lists"
+  - name: mailchimp_get_audience
+    description: "Get an audience by list id. Read-only."
+    mutating: false
+    params: {type: object, properties: {list_id: {type: string}}, required: [list_id]}
+    request: {method: GET, url: "https://{{conn.dc}}.api.mailchimp.com/3.0/lists/{{list_id}}"}
+    response_extract: "$"
+  - name: mailchimp_list_members
+    description: "List members of an audience. Read-only."
+    mutating: false
+    params: {type: object, properties: {list_id: {type: string}, count: {type: integer}}, required: [list_id]}
+    request: {method: GET, url: "https://{{conn.dc}}.api.mailchimp.com/3.0/lists/{{list_id}}/members", query: {count: "{{count}}"}}
+    response_extract: "$.members"
+  - name: mailchimp_get_member
+    description: "Get a member by list id + subscriber hash (MD5 of lowercased email). Read-only."
+    mutating: false
+    params: {type: object, properties: {list_id: {type: string}, subscriber_hash: {type: string}}, required: [list_id, subscriber_hash]}
+    request: {method: GET, url: "https://{{conn.dc}}.api.mailchimp.com/3.0/lists/{{list_id}}/members/{{subscriber_hash}}"}
+    response_extract: "$"
+  - name: mailchimp_add_member
+    description: "Add a member to an audience (status e.g. subscribed). Mutating."
+    mutating: true
+    params: {type: object, properties: {list_id: {type: string}, email: {type: string}, status: {type: string}}, required: [list_id, email, status]}
+    request:
+      method: POST
+      url: "https://{{conn.dc}}.api.mailchimp.com/3.0/lists/{{list_id}}/members"
+      body: {email_address: "{{email}}", status: "{{status}}"}
+    response_extract: "$"
+  - name: mailchimp_list_campaigns
+    description: "List campaigns. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://{{conn.dc}}.api.mailchimp.com/3.0/campaigns"}
+    response_extract: "$.campaigns"
+  - name: mailchimp_create_campaign
+    description: "Create a campaign. recipients {list_id} + settings object. Mutating."
+    mutating: true
+    params: {type: object, properties: {type: {type: string}, list_id: {type: string}, settings: {type: object}}, required: [type, list_id, settings]}
+    request:
+      method: POST
+      url: "https://{{conn.dc}}.api.mailchimp.com/3.0/campaigns"
+      body: {type: "{{type}}", recipients: {list_id: "{{list_id}}"}, settings: "{{settings}}"}
+    response_extract: "$"
+  - name: mailchimp_send_campaign
+    description: "Send a campaign by id. Delivers real email. Mutating."
+    mutating: true
+    params: {type: object, properties: {campaign_id: {type: string}}, required: [campaign_id]}
+    request: {method: POST, url: "https://{{conn.dc}}.api.mailchimp.com/3.0/campaigns/{{campaign_id}}/actions/send"}
+    response_extract: "$"

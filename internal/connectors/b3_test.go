@@ -84,3 +84,23 @@ func TestB3_SalesforceBodyArgAndURL(t *testing.T) {
 		t.Fatalf("instance_url not substituted: %s", u)
 	}
 }
+
+func TestB3_MailchimpKeyExtra(t *testing.T) {
+	r := b3Reg(t)
+	p, ok := r.ProviderByName("mailchimp")
+	if !ok || !p.IsAPIKey() {
+		t.Fatal("mailchimp must load as api_key")
+	}
+	got := DeriveKeyExtra(p, "abcdef0123456789-us21")
+	if got["dc"] != "us21" {
+		t.Fatalf("dc not parsed from key: %v", got)
+	}
+	// a key with no dash yields no dc (empty), not a panic
+	if v := DeriveKeyExtra(p, "nodash"); v["dc"] != "" {
+		t.Fatalf("expected empty dc for dashless key, got %v", v)
+	}
+	u, _ := renderB3(t, r, "mailchimp", "mailchimp_list_audiences", nil, map[string]string{"dc": "us21"})
+	if u != "https://us21.api.mailchimp.com/3.0/lists" {
+		t.Fatalf("dc not substituted into URL: %s", u)
+	}
+}

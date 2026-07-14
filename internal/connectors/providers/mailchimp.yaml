@@ -1,0 +1,12 @@
+name: mailchimp
+label: Mailchimp
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Mailchimp API key"
+  key_hint: "abc123...-us21"
+  setup_url: https://us1.admin.mailchimp.com/account/api/
+key_extra:
+  dc: suffix

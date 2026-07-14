@@ -254,6 +254,9 @@ func (s *Server) handleConnectAPIKey(c echo.Context) error {
 			extra[ci.Key] = v
 		}
 	}
+	for k, v := range connectors.DeriveKeyExtra(prov, apiKey) {
+		extra[k] = v
+	}
 	extraJSON := ""
 	if len(extra) > 0 {
 		if b, _ := json.Marshal(extra); b != nil {
