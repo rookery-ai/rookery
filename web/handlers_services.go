@@ -187,13 +187,18 @@ func (s *Server) handleConnectService(c echo.Context) error {
 	if label == "" {
 		label = "account"
 	}
-	prov, ok := s.connectors.ProviderByName(provider)
+	child, ok := s.connectors.ProviderByName(provider)
 	if !ok {
 		return s.redirectWithError(c, "/dashboard/connectors/services", "Unknown provider.")
 	}
-	cfg, _ := s.db.GetServiceProviderConfig(c.Request().Context(), w.ID, provider)
+	oauth, ok := s.connectors.OAuthProvider(provider) // parent when aliased, else self
+	if !ok {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Unknown provider.")
+	}
+	cfg, _ := s.db.GetServiceProviderConfig(c.Request().Context(), w.ID, oauth.Name)
 	if cfg == nil {
-		return s.redirectWithError(c, "/dashboard/connectors/services", "Save your OAuth app credentials first.")
+		return s.redirectWithError(c, "/dashboard/connectors/services",
+			"Save your "+oauth.Label+" OAuth app credentials first.")
 	}
 	clientID, err := secrets.DecryptWithSystemKey(cfg.EncryptedClientID, s.systemKey)
 	if err != nil {
@@ -202,7 +207,7 @@ func (s *Server) handleConnectService(c echo.Context) error {
 	nonce := uuid.New().String()
 	payload := strings.Join([]string{w.ID, provider, label, nonce}, "~")
 	state := signState(s.systemKey, payload, time.Now())
-	return c.Redirect(http.StatusSeeOther, prov.ConsentURL(clientID, s.callbackURL(c, provider), state))
+	return c.Redirect(http.StatusSeeOther, oauth.ConsentURL(clientID, s.callbackURL(c, provider), state, child.DefaultScopes))
 }
 
 // handleConnectAPIKey stores a static API-key connection for an api_key provider. No OAuth
@@ -259,7 +264,14 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 	if !ok {
 		return s.redirectWithError(c, "/dashboard/connectors/services", "Unknown provider.")
 	}
-	cfg, _ := s.db.GetServiceProviderConfig(ctx, w.ID, provider)
+	// authProv is the OAuth parent when this provider is aliased (e.g. google_drive → google),
+	// else the provider itself. It governs endpoints, token settings, and the app-credentials
+	// lookup key; `prov` (the child) still governs scopes/post_connect/expiry below.
+	authProv, ok := s.connectors.OAuthProvider(provider)
+	if !ok {
+		return s.redirectWithError(c, "/dashboard/connectors/services", "Unknown provider.")
+	}
+	cfg, _ := s.db.GetServiceProviderConfig(ctx, w.ID, authProv.Name)
 	if cfg == nil {
 		return s.redirectWithError(c, "/dashboard/connectors/services", "Missing OAuth app credentials.")
 	}
@@ -267,11 +279,11 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 	clientSecret, _ := secrets.DecryptWithSystemKey(cfg.EncryptedClientSecret, s.systemKey)
 
 	oauth := connectors.OAuthClient{}
-	ts, err := oauth.ExchangeCode(ctx, prov, clientID, clientSecret, code, s.callbackURL(c, provider))
+	ts, err := oauth.ExchangeCode(ctx, authProv, clientID, clientSecret, code, s.callbackURL(c, provider))
 	if err != nil {
 		return s.redirectWithError(c, "/dashboard/connectors/services", "Token exchange failed: "+err.Error())
 	}
-	identity, _ := oauth.FetchIdentity(ctx, prov, ts.AccessToken)
+	identity, _ := oauth.FetchIdentity(ctx, authProv, ts.AccessToken)
 
 	// Post-connect resolution (e.g. Jira cloud id) → stored in extra, exposed to request
 	// templates as {{conn.<key>}}.

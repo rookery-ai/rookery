@@ -30,14 +30,16 @@ type TokenSet struct {
 
 // ConsentURL builds the provider consent (authorization) URL. access_type=offline +
 // prompt=consent ensure a refresh token is issued. Named ConsentURL (not AuthorizeURL)
-// to avoid colliding with the Provider.AuthorizeURL config field.
-func (p Provider) ConsentURL(clientID, redirectURI, state string) string {
+// to avoid colliding with the Provider.AuthorizeURL config field. scopes is passed in
+// explicitly (rather than read from p.DefaultScopes) so a child provider aliased via
+// auth_parent can request ITS OWN scopes against the PARENT's authorize endpoint.
+func (p Provider) ConsentURL(clientID, redirectURI, state string, scopes []string) string {
 	q := url.Values{}
 	q.Set("client_id", clientID)
 	q.Set("redirect_uri", redirectURI)
 	q.Set("response_type", "code")
-	if len(p.DefaultScopes) > 0 { // Notion sends no scope param
-		q.Set("scope", strings.Join(p.DefaultScopes, " "))
+	if len(scopes) > 0 { // Notion sends no scope param
+		q.Set("scope", strings.Join(scopes, " "))
 	}
 	q.Set("state", state)
 	// access_type=offline / prompt=consent are Google-isms — providers that need them (or

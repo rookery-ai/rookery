@@ -47,10 +47,27 @@ func TestRefreshKeepsExistingRefreshToken(t *testing.T) {
 	}
 }
 
+func TestConsentURLUsesExplicitScopes(t *testing.T) {
+	p := Provider{
+		AuthorizeURL:   "https://accounts.google.com/o/oauth2/v2/auth",
+		AuthorizeExtra: map[string]string{"include_granted_scopes": "true"},
+	}
+	u := p.ConsentURL("CID", "https://cb", "STATE", []string{"https://www.googleapis.com/auth/drive"})
+	if !strings.Contains(u, "scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive") {
+		t.Fatalf("scope missing: %s", u)
+	}
+	if !strings.Contains(u, "include_granted_scopes=true") {
+		t.Fatalf("include_granted_scopes missing: %s", u)
+	}
+	if !strings.Contains(u, "client_id=CID") {
+		t.Fatalf("client_id missing: %s", u)
+	}
+}
+
 func TestAuthorizeURL(t *testing.T) {
 	p := Provider{AuthorizeURL: "https://accounts/auth", DefaultScopes: []string{"a", "b"},
 		AuthorizeExtra: map[string]string{"access_type": "offline", "prompt": "consent"}}
-	u := p.ConsentURL("cid", "https://cb", "state123")
+	u := p.ConsentURL("cid", "https://cb", "state123", p.DefaultScopes)
 	for _, want := range []string{"client_id=cid", "state=state123", "access_type=offline", "prompt=consent", "scope=a+b", "response_type=code"} {
 		if !strings.Contains(u, want) {
 			t.Fatalf("authorize url missing %q: %s", want, u)

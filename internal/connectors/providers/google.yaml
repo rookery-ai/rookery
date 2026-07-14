@@ -16,6 +16,7 @@ identity_path: email
 authorize_extra:
   access_type: offline
   prompt: consent
+  include_granted_scopes: "true"
 default_scopes:
   - https://www.googleapis.com/auth/gmail.readonly
   - https://www.googleapis.com/auth/gmail.compose
