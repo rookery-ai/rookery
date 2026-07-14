@@ -313,6 +313,12 @@ func serveCmd() *cli.Command {
 							if p, err := os.Executable(); err == nil {
 								connBin = p
 							}
+							if connBin != "" {
+								// CLI coders reach connectors by running `<bin> connector exec …`
+								// as a shell command; grant a narrowly-scoped Bash permission for
+								// only that command (chat stays file-only otherwise).
+								cd = cd.WithAllowedTools("Read,Write,Edit,Glob,Grep,Bash(" + connBin + " connector exec:*)")
+							}
 						}
 					}
 				}

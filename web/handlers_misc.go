@@ -161,6 +161,12 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 				if p, err := os.Executable(); err == nil {
 					connBin = p
 				}
+				if connBin != "" {
+					// A CLI coder reaches connectors by running `<bin> connector exec …` as a
+					// shell command, so grant a NARROWLY-SCOPED Bash permission for only that
+					// command — chat stays file-only (no arbitrary shell) otherwise.
+					coder = coder.WithAllowedTools("Read,Write,Edit,Glob,Grep,Bash(" + connBin + " connector exec:*)")
+				}
 			}
 		}
 	}
