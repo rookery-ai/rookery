@@ -1,0 +1,8 @@
+name: stripe
+label: Stripe
+auth:
+  kind: api_key
+  placement: basic
+  key_label: "Stripe secret key"
+  key_hint: "sk_live_... or sk_test_..."
+  setup_url: https://dashboard.stripe.com/apikeys

@@ -195,6 +195,30 @@ func notionPage(args map[string]any) ([]byte, string, error) {
 	return b, "application/json", err
 }
 
+// renderForm builds an application/x-www-form-urlencoded body from a flat form map. Each value is
+// a {{arg}} template; empty results are omitted. A lone-placeholder whose arg is an array expands
+// to repeated key=value pairs (form array convention). Keys are used literally (Stripe/Twilio
+// bracket notation like "metadata[source]" is preserved).
+func renderForm(form map[string]string, args map[string]any) ([]byte, string) {
+	v := url.Values{}
+	for k, tmpl := range form {
+		if m := lonePlaceholderRE.FindStringSubmatch(tmpl); m != nil {
+			if arr, ok := args[m[1]].([]any); ok {
+				for _, e := range arr {
+					v.Add(k, asString(e))
+				}
+				continue
+			}
+		}
+		val := subst(tmpl, args, nil)
+		if val == "" {
+			continue
+		}
+		v.Set(k, val)
+	}
+	return []byte(v.Encode()), "application/x-www-form-urlencoded"
+}
+
 // renderRequest turns an action + typed args into a concrete HTTP request. It
 // substitutes {{name}} placeholders in the URL + query (dropping query params whose
 // value resolved empty) and dispatches the configured body_builder / body_json.
@@ -227,6 +251,8 @@ func renderRequest(a Action, args map[string]any, connVars map[string]string) (m
 			return "", "", nil, "", fmt.Errorf("unknown body_builder %q", a.Request.BodyBuilder)
 		}
 		body, contentType, err = bb(args)
+	case len(a.Request.Form) > 0:
+		body, contentType = renderForm(a.Request.Form, args)
 	case len(a.Request.Body) > 0:
 		rendered, _ := renderBody(a.Request.Body, args, connVars)
 		body, err = json.Marshal(rendered)

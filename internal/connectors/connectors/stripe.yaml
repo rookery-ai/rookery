@@ -1,0 +1,84 @@
+provider: stripe
+actions:
+  - name: stripe_create_customer
+    description: "Create a Stripe customer. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        email: {type: string}
+        name: {type: string}
+        description: {type: string}
+      required: []
+    request:
+      method: POST
+      url: "https://api.stripe.com/v1/customers"
+      form: {email: "{{email}}", name: "{{name}}", description: "{{description}}"}
+    response_extract: "$"
+  - name: stripe_list_customers
+    description: "List Stripe customers. Read-only."
+    mutating: false
+    params: {type: object, properties: {limit: {type: integer}, email: {type: string}}}
+    request: {method: GET, url: "https://api.stripe.com/v1/customers", query: {limit: "{{limit}}", email: "{{email}}"}}
+    response_extract: "$.data"
+  - name: stripe_get_customer
+    description: "Get a Stripe customer by id. Read-only."
+    mutating: false
+    params: {type: object, properties: {id: {type: string}}, required: [id]}
+    request: {method: GET, url: "https://api.stripe.com/v1/customers/{{id}}"}
+    response_extract: "$"
+  - name: stripe_create_payment_intent
+    description: "Create a PaymentIntent (amount in the smallest currency unit, e.g. cents). Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        amount: {type: integer}
+        currency: {type: string}
+        customer: {type: string}
+        description: {type: string}
+      required: [amount, currency]
+    request:
+      method: POST
+      url: "https://api.stripe.com/v1/payment_intents"
+      form: {amount: "{{amount}}", currency: "{{currency}}", customer: "{{customer}}", description: "{{description}}"}
+    response_extract: "$"
+  - name: stripe_list_payment_intents
+    description: "List PaymentIntents. Read-only."
+    mutating: false
+    params: {type: object, properties: {limit: {type: integer}}}
+    request: {method: GET, url: "https://api.stripe.com/v1/payment_intents", query: {limit: "{{limit}}"}}
+    response_extract: "$.data"
+  - name: stripe_create_refund
+    description: "Refund a charge or payment_intent (full or partial). Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        charge: {type: string}
+        payment_intent: {type: string}
+        amount: {type: integer}
+      required: []
+    request:
+      method: POST
+      url: "https://api.stripe.com/v1/refunds"
+      form: {charge: "{{charge}}", payment_intent: "{{payment_intent}}", amount: "{{amount}}"}
+    response_extract: "$"
+  - name: stripe_list_charges
+    description: "List charges. Read-only."
+    mutating: false
+    params: {type: object, properties: {limit: {type: integer}, customer: {type: string}}}
+    request: {method: GET, url: "https://api.stripe.com/v1/charges", query: {limit: "{{limit}}", customer: "{{customer}}"}}
+    response_extract: "$.data"
+  - name: stripe_get_charge
+    description: "Get a charge by id. Read-only."
+    mutating: false
+    params: {type: object, properties: {id: {type: string}}, required: [id]}
+    request: {method: GET, url: "https://api.stripe.com/v1/charges/{{id}}"}
+    response_extract: "$"
+  - name: stripe_get_balance
+    description: "Get the account balance. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://api.stripe.com/v1/balance"}
+    response_extract: "$"

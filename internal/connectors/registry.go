@@ -119,6 +119,10 @@ type RequestTemplate struct {
 	// BodyArg names a single object-typed arg whose value becomes the entire request body
 	// (e.g. Salesforce sObject create/update takes the raw fields object, no wrapper key).
 	BodyArg string `yaml:"body_arg"`
+	// Form is a flat map of application/x-www-form-urlencoded field -> {{arg}} template
+	// (e.g. Stripe/Twilio writes). Keys are used literally, so bracket notation like
+	// "metadata[source]" is preserved. Rendered by renderForm.
+	Form map[string]string `yaml:"form"`
 }
 
 // Action is one curated, typed operation on a provider.
