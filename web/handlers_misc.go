@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -122,12 +123,12 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 		coder = coder.WithAllowedTools("Read,Write,Edit,Glob,Grep")
 	}
 
-	// Connector wiring is gated on the API engine: it exposes bound connections as
-	// native tools directly. A CLI coder reaches connectors via the loopback bridge,
-	// which is only wired up for agent runs, not chat — so a CLI chat gets no
-	// connector tools/prompt text, exactly as before this feature.
+	// Connector wiring: the API engine exposes bound connections as native
+	// in-process tools directly. A CLI coder instead reaches them via the loopback
+	// bridge (`simple-agents connector exec <tool>`), the same mechanism agent runs use.
 	var connRefs []prompts.ConnectionRef
 	var connTools []string
+	var connBin string
 	if coder.IsAPI() && s.connStore != nil {
 		if rows, err := s.db.ListServiceConnections(c.Request().Context(), u.ID); err == nil {
 			bound := connectors.ActiveBoundConns(rows)
@@ -141,8 +142,29 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 				}
 			}
 		}
+	} else if !coder.IsAPI() && s.connBridge != nil && s.connBridge.Addr() != "" {
+		if rows, err := s.db.ListServiceConnections(c.Request().Context(), u.ID); err == nil {
+			bound := connectors.ActiveBoundConns(rows)
+			if len(bound) > 0 {
+				tok := s.connBridge.Register(u.ID, bound, false)
+				defer s.connBridge.Unregister(tok)
+				coder = coder.WithExtraEnv(map[string]string{
+					"SA_CONNECTOR_URL":   s.connBridge.Addr(),
+					"SA_CONNECTOR_TOKEN": tok,
+				})
+				for _, b := range bound {
+					connRefs = append(connRefs, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
+				}
+				for _, d := range s.connectors.ToolDefs(bound) {
+					connTools = append(connTools, d.Name)
+				}
+				if p, err := os.Executable(); err == nil {
+					connBin = p
+				}
+			}
+		}
 	}
-	sysCtx := prompts.BuildChatSystemPrompt(root, coder.BackendType(), connRefs, connTools, "") + chat.BuildUserContext(s.db, s.memory, u.ID)
+	sysCtx := prompts.BuildChatSystemPrompt(root, coder.BackendType(), connRefs, connTools, connBin) + chat.BuildUserContext(s.db, s.memory, u.ID)
 
 	// Re-activate the chat if it had been stopped, so history keeps flowing.
 	if !ch.Active {

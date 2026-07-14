@@ -275,11 +275,12 @@ func serveCmd() *cli.Command {
 					cd = cd.WithAllowedTools("Read,Write,Edit,Glob,Grep")
 				}
 
-				// Connector wiring is gated on the API engine (see web/handlers_misc.go for
-				// the same rationale): a CLI coder reaches connectors via the loopback bridge,
-				// which isn't wired up for chat, so it gets no connector tools/prompt text.
+				// Connector wiring: the API engine exposes bound connections as native
+				// in-process tools; a CLI coder instead reaches them via the loopback
+				// bridge (`simple-agents connector exec <tool>`), mirroring agent runs.
 				var connRefs []prompts.ConnectionRef
 				var connTools []string
+				var connBin string
 				if cd.IsAPI() {
 					if rows, err := database.ListServiceConnections(ctx, workspaceID); err == nil {
 						bound := connectors.ActiveBoundConns(rows)
@@ -293,8 +294,29 @@ func serveCmd() *cli.Command {
 							}
 						}
 					}
+				} else if connBridge != nil && connBridge.Addr() != "" {
+					if rows, err := database.ListServiceConnections(ctx, workspaceID); err == nil {
+						bound := connectors.ActiveBoundConns(rows)
+						if len(bound) > 0 {
+							tok := connBridge.Register(workspaceID, bound, false)
+							defer connBridge.Unregister(tok)
+							cd = cd.WithExtraEnv(map[string]string{
+								"SA_CONNECTOR_URL":   connBridge.Addr(),
+								"SA_CONNECTOR_TOKEN": tok,
+							})
+							for _, b := range bound {
+								connRefs = append(connRefs, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
+							}
+							for _, d := range connReg.ToolDefs(bound) {
+								connTools = append(connTools, d.Name)
+							}
+							if p, err := os.Executable(); err == nil {
+								connBin = p
+							}
+						}
+					}
 				}
-				sysCtx := prompts.BuildChatSystemPrompt(root, cd.BackendType(), connRefs, connTools, "") + chat.BuildUserContext(database, memStore, workspaceID)
+				sysCtx := prompts.BuildChatSystemPrompt(root, cd.BackendType(), connRefs, connTools, connBin) + chat.BuildUserContext(database, memStore, workspaceID)
 				result, err := cd.Chat(ctx, workspaceID, history, sysCtx, text)
 				if err != nil {
 					send("Sorry, I ran into an error: " + err.Error())
@@ -385,6 +407,7 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
+			srv = srv.WithBridge(connBridge)
 
 			addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 			slog.Info("listening", "addr", addr)
