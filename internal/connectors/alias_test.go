@@ -52,3 +52,27 @@ func TestGoogleDriveActions(t *testing.T) {
 		t.Fatalf("bad share body: %s", body)
 	}
 }
+
+func TestGoogleSheetsAppendArrayBody(t *testing.T) {
+	r, _ := LoadBundled()
+	if _, ok := r.OAuthProvider("google_sheets"); !ok {
+		t.Fatal("google_sheets not loaded / parent unresolved")
+	}
+	a, ok := r.Action("google_sheets", "sheets_append_values")
+	if !ok {
+		t.Fatal("sheets_append_values missing")
+	}
+	_, _, body, _, err := renderRequest(a, map[string]any{
+		"spreadsheet_id": "S1", "range": "Sheet1!A1",
+		"values": []any{[]any{"a", "b"}, []any{"c", "d"}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	json.Unmarshal(body, &got)
+	rows, ok := got["values"].([]any)
+	if !ok || len(rows) != 2 {
+		t.Fatalf("values not a 2-row array: %s", body)
+	}
+}

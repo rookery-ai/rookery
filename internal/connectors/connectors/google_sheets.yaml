@@ -1,0 +1,123 @@
+provider: google_sheets
+actions:
+  - name: sheets_get_values
+    description: "Read a cell range from a spreadsheet. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        range:          {type: string, description: "A1 notation, e.g. Sheet1!A1:C10"}
+      required: [spreadsheet_id, range]
+    request:
+      method: GET
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}/values/{{range}}"
+    response_extract: "$"
+  - name: sheets_append_values
+    description: "Append rows to a range. values is an array of row arrays. Safe write."
+    mutating: false
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        range:          {type: string}
+        values:         {type: array, items: {type: array}, description: "rows: [[a,b],[c,d]]"}
+      required: [spreadsheet_id, range, values]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}/values/{{range}}:append"
+      query: {valueInputOption: "USER_ENTERED"}
+      body:
+        values: "{{values}}"
+    response_extract: "$"
+  - name: sheets_update_values
+    description: "Overwrite a range with new values (array of row arrays). Mutating (replaces cells)."
+    mutating: true
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        range:          {type: string}
+        values:         {type: array, items: {type: array}}
+      required: [spreadsheet_id, range, values]
+    request:
+      method: PUT
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}/values/{{range}}"
+      query: {valueInputOption: "USER_ENTERED"}
+      body:
+        values: "{{values}}"
+    response_extract: "$"
+  - name: sheets_clear_values
+    description: "Clear a cell range. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        range:          {type: string}
+      required: [spreadsheet_id, range]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}/values/{{range}}:clear"
+    response_extract: "$"
+  - name: sheets_create_spreadsheet
+    description: "Create a new spreadsheet with a title. Safe write."
+    mutating: false
+    params:
+      type: object
+      properties:
+        title: {type: string}
+      required: [title]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets"
+      body:
+        properties:
+          title: "{{title}}"
+    response_extract: "$"
+  - name: sheets_add_sheet
+    description: "Add a tab (sheet) to an existing spreadsheet. Safe write."
+    mutating: false
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        title:          {type: string, description: "new tab name"}
+      required: [spreadsheet_id, title]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}:batchUpdate"
+      body:
+        requests:
+          - addSheet:
+              properties:
+                title: "{{title}}"
+    response_extract: "$"
+  - name: sheets_get_metadata
+    description: "Get spreadsheet metadata (title, sheet/tab list). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+      required: [spreadsheet_id]
+    request:
+      method: GET
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}"
+      query: {fields: "spreadsheetId,properties.title,sheets.properties"}
+    response_extract: "$"
+  - name: sheets_batch_update
+    description: "Apply a raw batchUpdate requests array (advanced formatting/structure changes). Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        requests:       {type: array, description: "array of batchUpdate request objects"}
+      required: [spreadsheet_id, requests]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}:batchUpdate"
+      body:
+        requests: "{{requests}}"
+    response_extract: "$"
