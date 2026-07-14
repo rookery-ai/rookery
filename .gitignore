@@ -5,3 +5,6 @@ logs/
 # Python bytecode (e.g. from running the embedded composio helper scripts)
 __pycache__/
 *.pyc
+
+# compiled binaries
+bin/
