@@ -3,6 +3,7 @@ package connectors
 import (
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -102,5 +103,31 @@ func TestB4_TwilioBasicUserAndSMS(t *testing.T) {
 	}
 	if url != "https://api.twilio.com/2010-04-01/Accounts/AC123/Messages.json" {
 		t.Fatalf("twilio url not templated: %s", url)
+	}
+}
+
+func TestB4_TrelloKeyAndTokenInQuery(t *testing.T) {
+	r := b4Reg(t)
+	p, ok := r.ProviderByName("trello")
+	if !ok || !p.IsAPIKey() || p.Auth.Placement != "query" || p.Auth.ParamName != "token" {
+		t.Fatalf("trello must be api_key query token, got %+v", p.Auth)
+	}
+	if len(r.Actions("trello")) < 8 {
+		t.Fatalf("want >=8 trello actions, got %d", len(r.Actions("trello")))
+	}
+	// key comes from {{conn.trello_key}} in the action query (rendered by renderRequest)
+	a, _ := r.Action("trello", "trello_list_boards")
+	_, u, _, _, err := renderRequest(a, nil, map[string]string{"trello_key": "KEY123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(u, "key=KEY123") {
+		t.Fatalf("trello key not in query: %s", u)
+	}
+	// token is added by applyAuth (query placement)
+	req, _ := http.NewRequest("GET", u, nil)
+	applyAuth(req, p, "TOKEN456", nil)
+	if req.URL.Query().Get("token") != "TOKEN456" {
+		t.Fatalf("trello token not added by applyAuth: %s", req.URL.String())
 	}
 }

@@ -1,0 +1,56 @@
+provider: trello
+actions:
+  - name: trello_list_boards
+    description: "List the authenticated member's boards. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request: {method: GET, url: "https://api.trello.com/1/members/me/boards", query: {key: "{{conn.trello_key}}"}}
+    response_extract: "$"
+  - name: trello_get_board
+    description: "Get a board by id. Read-only."
+    mutating: false
+    params: {type: object, properties: {id: {type: string}}, required: [id]}
+    request: {method: GET, url: "https://api.trello.com/1/boards/{{id}}", query: {key: "{{conn.trello_key}}"}}
+    response_extract: "$"
+  - name: trello_list_lists
+    description: "List the lists on a board. Read-only."
+    mutating: false
+    params: {type: object, properties: {board_id: {type: string}}, required: [board_id]}
+    request: {method: GET, url: "https://api.trello.com/1/boards/{{board_id}}/lists", query: {key: "{{conn.trello_key}}"}}
+    response_extract: "$"
+  - name: trello_list_cards
+    description: "List the cards in a list. Read-only."
+    mutating: false
+    params: {type: object, properties: {list_id: {type: string}}, required: [list_id]}
+    request: {method: GET, url: "https://api.trello.com/1/lists/{{list_id}}/cards", query: {key: "{{conn.trello_key}}"}}
+    response_extract: "$"
+  - name: trello_create_card
+    description: "Create a card in a list. Mutating."
+    mutating: true
+    params: {type: object, properties: {list_id: {type: string}, name: {type: string}, desc: {type: string}}, required: [list_id, name]}
+    request: {method: POST, url: "https://api.trello.com/1/cards", query: {key: "{{conn.trello_key}}", idList: "{{list_id}}", name: "{{name}}", desc: "{{desc}}"}}
+    response_extract: "$"
+  - name: trello_update_card
+    description: "Update a card by id (name/desc/list). Mutating."
+    mutating: true
+    params: {type: object, properties: {id: {type: string}, name: {type: string}, desc: {type: string}, list_id: {type: string}}, required: [id]}
+    request: {method: PUT, url: "https://api.trello.com/1/cards/{{id}}", query: {key: "{{conn.trello_key}}", name: "{{name}}", desc: "{{desc}}", idList: "{{list_id}}"}}
+    response_extract: "$"
+  - name: trello_create_list
+    description: "Create a list on a board. Mutating."
+    mutating: true
+    params: {type: object, properties: {board_id: {type: string}, name: {type: string}}, required: [board_id, name]}
+    request: {method: POST, url: "https://api.trello.com/1/lists", query: {key: "{{conn.trello_key}}", idBoard: "{{board_id}}", name: "{{name}}"}}
+    response_extract: "$"
+  - name: trello_add_comment
+    description: "Add a comment to a card. Mutating."
+    mutating: true
+    params: {type: object, properties: {id: {type: string}, text: {type: string}}, required: [id, text]}
+    request: {method: POST, url: "https://api.trello.com/1/cards/{{id}}/actions/comments", query: {key: "{{conn.trello_key}}", text: "{{text}}"}}
+    response_extract: "$"
+  - name: trello_get_member
+    description: "Get a member by id or username ('me' for self). Read-only."
+    mutating: false
+    params: {type: object, properties: {id: {type: string}}, required: [id]}
+    request: {method: GET, url: "https://api.trello.com/1/members/{{id}}", query: {key: "{{conn.trello_key}}"}}
+    response_extract: "$"

@@ -1,0 +1,11 @@
+name: trello
+label: Trello
+auth:
+  kind: api_key
+  placement: query
+  param_name: token
+  key_label: "Trello API token"
+  key_hint: "the user token (generated alongside your API key)"
+  setup_url: https://trello.com/power-ups/admin
+connect_inputs:
+  - {key: trello_key, label: "Trello API key", hint: "from trello.com/power-ups/admin", required: true}
