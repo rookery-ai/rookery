@@ -19,8 +19,8 @@ actions:
     request: {method: POST, url: "https://api.dropboxapi.com/2/files/search_v2", body: {query: "{{query}}"}}
     response_extract: "$.matches"
   - name: dropbox_create_folder
-    description: "Create a folder at a path. Safe write."
-    mutating: false
+    description: "Create a folder at a path. Mutating (writes to the live Dropbox)."
+    mutating: true
     params: {type: object, properties: {path: {type: string}}, required: [path]}
     request: {method: POST, url: "https://api.dropboxapi.com/2/files/create_folder_v2", body: {path: "{{path}}"}}
     response_extract: "$"
@@ -31,8 +31,8 @@ actions:
     request: {method: POST, url: "https://api.dropboxapi.com/2/files/move_v2", body: {from_path: "{{from_path}}", to_path: "{{to_path}}"}}
     response_extract: "$"
   - name: dropbox_copy
-    description: "Copy a file or folder. Safe write."
-    mutating: false
+    description: "Copy a file or folder. Mutating (writes to the live Dropbox)."
+    mutating: true
     params: {type: object, properties: {from_path: {type: string}, to_path: {type: string}}, required: [from_path, to_path]}
     request: {method: POST, url: "https://api.dropboxapi.com/2/files/copy_v2", body: {from_path: "{{from_path}}", to_path: "{{to_path}}"}}
     response_extract: "$"
