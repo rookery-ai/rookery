@@ -218,6 +218,9 @@ func renderRequest(a Action, args map[string]any, connVars map[string]string) (m
 		}
 	}
 	switch {
+	case a.Request.BodyArg != "":
+		body, err = json.Marshal(args[a.Request.BodyArg])
+		contentType = "application/json"
 	case a.Request.BodyBuilder != "":
 		bb, ok := bodyBuilders[a.Request.BodyBuilder]
 		if !ok {

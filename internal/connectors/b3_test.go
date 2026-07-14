@@ -52,3 +52,35 @@ func TestB3_ShopifyConnectInputsAndURL(t *testing.T) {
 		t.Fatalf("bad shopify auth: %+v", p.Auth)
 	}
 }
+
+func TestB3_TokenExtraCapture(t *testing.T) {
+	// A token response carrying instance_url is captured into TokenSet.Extra for a provider
+	// declaring token_extra: [instance_url].
+	p := Provider{TokenExtra: []string{"instance_url"}}
+	ts, err := parseTokenResponse([]byte(`{"access_token":"AT","expires_in":3600,"instance_url":"https://na1.salesforce.com"}`), p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ts.AccessToken != "AT" || ts.Extra["instance_url"] != "https://na1.salesforce.com" {
+		t.Fatalf("token_extra not captured: %+v", ts)
+	}
+}
+
+func TestB3_SalesforceBodyArgAndURL(t *testing.T) {
+	r := b3Reg(t)
+	if _, ok := r.ProviderByName("salesforce"); !ok {
+		t.Fatal("salesforce not loaded")
+	}
+	// body_arg: whole body is the fields object
+	_, m := renderB3(t, r, "salesforce", "salesforce_create_sobject",
+		map[string]any{"type": "Account", "fields": map[string]any{"Name": "Acme"}}, map[string]string{"instance_url": "https://na1.salesforce.com"})
+	if m["Name"] != "Acme" {
+		t.Fatalf("body_arg should marshal fields as the whole body, got %v", m)
+	}
+	// {{conn.instance_url}} resolves in the URL
+	u, _ := renderB3(t, r, "salesforce", "salesforce_get_sobject",
+		map[string]any{"type": "Account", "id": "001"}, map[string]string{"instance_url": "https://na1.salesforce.com"})
+	if u != "https://na1.salesforce.com/services/data/v60.0/sobjects/Account/001" {
+		t.Fatalf("instance_url not substituted: %s", u)
+	}
+}

@@ -43,6 +43,9 @@ type Provider struct {
 	// access token does not expire and must never be refreshed — connect/refresh store an
 	// empty expires_at and AccessToken treats empty as valid.
 	TokenExpiry string `yaml:"token_expiry"`
+	// TokenExtra names fields to capture from the token endpoint's JSON response into
+	// TokenSet.Extra / service_connections.extra (e.g. Salesforce's instance_url).
+	TokenExtra []string `yaml:"token_extra"`
 	// TokenAuth is "body" (default) or "basic": how client_id/secret reach the token
 	// endpoint. Notion requires HTTP Basic auth; most providers accept them in the body.
 	TokenAuth string `yaml:"token_auth"`
@@ -101,6 +104,9 @@ type RequestTemplate struct {
 	// Body is a nested template (maps/arrays) rendered to JSON by renderBody. Preferred over
 	// BodyJSON for anything non-flat. BodyBuilder still wins when set (non-JSON encodings).
 	Body map[string]any `yaml:"body"`
+	// BodyArg names a single object-typed arg whose value becomes the entire request body
+	// (e.g. Salesforce sObject create/update takes the raw fields object, no wrapper key).
+	BodyArg string `yaml:"body_arg"`
 }
 
 // Action is one curated, typed operation on a provider.

@@ -319,16 +319,25 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 	}
 	identity, _ := oauth.FetchIdentity(ctx, authProv, ts.AccessToken)
 
-	// Post-connect resolution (e.g. Jira cloud id) → stored in extra, exposed to request
-	// templates as {{conn.<key>}}.
-	extraJSON := ""
+	// Post-connect resolution (e.g. Jira cloud id) + token_extra fields (e.g. Salesforce
+	// instance_url) → merged into extra, exposed to request templates as {{conn.<key>}}.
+	extraMap := map[string]string{}
 	if prov.PostConnect != "" {
 		if vals, perr := connectors.RunPostConnect(ctx, prov.PostConnect, nil, ts.AccessToken); perr != nil {
 			return s.redirectWithError(c, "/dashboard/connectors/services", "Connected, but setup failed: "+perr.Error())
-		} else if len(vals) > 0 {
-			if b, _ := json.Marshal(vals); b != nil {
-				extraJSON = string(b)
+		} else {
+			for k, v := range vals {
+				extraMap[k] = v
 			}
+		}
+	}
+	for k, v := range ts.Extra { // token_extra fields (e.g. Salesforce instance_url)
+		extraMap[k] = v
+	}
+	extraJSON := ""
+	if len(extraMap) > 0 {
+		if b, _ := json.Marshal(extraMap); b != nil {
+			extraJSON = string(b)
 		}
 	}
 

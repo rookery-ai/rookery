@@ -26,6 +26,9 @@ type TokenSet struct {
 	AccessToken  string
 	RefreshToken string
 	ExpiresIn    int
+	// Extra captures provider.TokenExtra fields from the token response (e.g. Salesforce
+	// instance_url) for merging into service_connections.extra.
+	Extra map[string]string
 }
 
 // ConsentURL builds the provider consent (authorization) URL. access_type=offline +
@@ -96,6 +99,12 @@ func (c OAuthClient) tokenRequest(ctx context.Context, p Provider, form url.Valu
 	if resp.StatusCode >= 400 {
 		return TokenSet{}, &ConnectorError{KindAuth, fmt.Sprintf("token endpoint %d: %s", resp.StatusCode, string(b))}
 	}
+	return parseTokenResponse(b, p)
+}
+
+// parseTokenResponse decodes a token endpoint JSON body into a TokenSet, also capturing any
+// prov.TokenExtra fields (e.g. Salesforce instance_url) into TokenSet.Extra.
+func parseTokenResponse(b []byte, prov Provider) (TokenSet, error) {
 	var out struct {
 		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
@@ -104,7 +113,19 @@ func (c OAuthClient) tokenRequest(ctx context.Context, p Provider, form url.Valu
 	if err := json.Unmarshal(b, &out); err != nil {
 		return TokenSet{}, err
 	}
-	return TokenSet{AccessToken: out.AccessToken, RefreshToken: out.RefreshToken, ExpiresIn: out.ExpiresIn}, nil
+	ts := TokenSet{AccessToken: out.AccessToken, RefreshToken: out.RefreshToken, ExpiresIn: out.ExpiresIn}
+	if len(prov.TokenExtra) > 0 {
+		var raw map[string]any
+		if json.Unmarshal(b, &raw) == nil {
+			ts.Extra = map[string]string{}
+			for _, k := range prov.TokenExtra {
+				if v, ok := raw[k].(string); ok {
+					ts.Extra[k] = v
+				}
+			}
+		}
+	}
+	return ts, nil
 }
 
 // ExchangeCode swaps an authorization code for tokens.
