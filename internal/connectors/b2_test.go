@@ -186,3 +186,27 @@ func TestB2_Zoom(t *testing.T) {
 		t.Fatalf("zoom create_meeting body: %v", m)
 	}
 }
+
+func TestB2_AllProvidersLoad(t *testing.T) {
+	r := b2Reg(t)
+	apiKey := []string{"hubspot", "calendly", "asana", "airtable", "sendgrid", "intercom", "clickup", "monday"}
+	oauth := []string{"dropbox", "zoom"}
+	for _, name := range apiKey {
+		p, ok := r.ProviderByName(name)
+		if !ok || !p.IsAPIKey() {
+			t.Fatalf("%s should load as api_key", name)
+		}
+		if len(r.Actions(name)) == 0 {
+			t.Fatalf("%s has no actions", name)
+		}
+	}
+	for _, name := range oauth {
+		p, ok := r.ProviderByName(name)
+		if !ok || p.IsAPIKey() {
+			t.Fatalf("%s should load as OAuth", name)
+		}
+		if len(r.Actions(name)) == 0 {
+			t.Fatalf("%s has no actions", name)
+		}
+	}
+}
