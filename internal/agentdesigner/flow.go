@@ -172,7 +172,13 @@ func (f *Flow) persistConnections(ctx context.Context, workspaceID, agentID, age
 		slog.Warn("agentdesigner: list service connections", "workspace_id", workspaceID, "err", err)
 		return
 	}
-	existing, _ := f.db.ListAgentConnections(ctx, agentID)
+	existing, err := f.db.ListAgentConnections(ctx, agentID)
+	if err != nil {
+		// Don't guess: a failed lookup could look like "no bindings" and cause a
+		// replace-all that clobbers an edited agent's real connections.
+		slog.Warn("agentdesigner: list agent connections", "agent_id", agentID, "err", err)
+		return
+	}
 	ids, apply := AutoBindTargets(agentMD, available, existing, usedFromBuild)
 	if !apply {
 		return
@@ -957,6 +963,9 @@ func (f *Flow) stepDesigning(ctx context.Context, workspaceID, input string) (st
 			if sess := f.sessions[workspaceID]; sess != nil {
 				sess.PendingAgentMD = md
 				sess.PendingTools = tools
+				// Content recovered from disk carries no known connector usage — clear any
+				// stale value from an earlier attempt so auto-bind can't bind wrong connections.
+				sess.PendingUsedConnections = nil
 			}
 			f.mu.Unlock()
 			return f.finalizeAgent(ctx, workspaceID)
