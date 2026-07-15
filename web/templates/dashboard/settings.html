@@ -72,32 +72,24 @@
           </div>
           <div class="form-control">
             <label class="label pb-1"><span class="label-text font-medium">Model</span></label>
-            <input type="text" name="coder_model" class="input input-bordered w-full"
-              value="{{if .Workspace}}{{.Workspace.CoderModel}}{{end}}" placeholder="e.g. gpt-4o, anthropic/claude-3.5-sonnet">
+            <input type="text" name="coder_model" id="coder_model" class="input input-bordered w-full"
+              value="{{if .Workspace}}{{.Workspace.CoderModel}}{{end}}" placeholder="e.g. gpt-4o">
           </div>
-          <div class="form-control" id="coder_baseurl_wrap">
-            <label class="label pb-1"><span class="label-text font-medium">Base URL (optional)</span></label>
-            <input type="text" name="coder_base_url" class="input input-bordered w-full"
-              value="{{if .Workspace}}{{.Workspace.CoderBaseURL}}{{end}}" placeholder="https://your-openai-compatible-host/v1">
-            <label class="label pt-1"><span class="label-text-alt text-base-content/30">Override the provider's default endpoint. Required for "Generic OpenAI-compatible".</span></label>
+          <div class="form-control" id="coder_key_wrap">
+            <label class="label pb-1"><span class="label-text font-medium">API key</span></label>
+            <input type="password" name="coder_api_key" id="coder_api_key" class="input input-bordered w-full"
+              autocomplete="off" placeholder="{{if .Workspace.CoderAPIKeySecret}}leave blank to keep current key{{else}}paste your provider API key{{end}}">
+            <label class="label pt-1"><span class="label-text-alt text-base-content/30">Stored securely as a secret automatically. <a id="coder_docs" class="link" href="#" target="_blank" rel="noopener">Get a key ↗</a></span></label>
           </div>
-          <div class="form-control">
-            <label class="label pb-1"><span class="label-text font-medium">API key secret</span></label>
-            {{if .SecretNames}}
-            <select name="coder_api_key_secret" class="select select-bordered w-full">
-              <option value="" {{if eq .Workspace.CoderAPIKeySecret ""}}selected{{end}}>— pick a secret —</option>
-              {{$curSec := ""}}{{if .Workspace}}{{$curSec = .Workspace.CoderAPIKeySecret}}{{end}}
-              {{range .SecretNames}}
-              <option value="{{.}}" {{if eq . $curSec}}selected{{end}}>{{.}}</option>
-              {{end}}
-            </select>
-            <label class="label pt-1"><span class="label-text-alt text-base-content/30">The secret holding the provider API key. Add it under <a class="link" href="/dashboard/secrets">Secrets</a> first.</span></label>
-            {{else}}
-            <input type="text" name="coder_api_key_secret" class="input input-bordered w-full"
-              value="{{if .Workspace}}{{.Workspace.CoderAPIKeySecret}}{{end}}" placeholder="secret name (add it in Secrets first)">
-            <label class="label pt-1"><span class="label-text-alt text-base-content/30">No secrets yet — add one under <a class="link" href="/dashboard/secrets">Secrets</a>, then return here.</span></label>
-            {{end}}
-          </div>
+          <details class="mt-1" id="coder_advanced">
+            <summary class="text-sm cursor-pointer text-base-content/60">Advanced</summary>
+            <div class="form-control mt-2">
+              <label class="label pb-1"><span class="label-text font-medium">Base URL</span></label>
+              <input type="text" name="coder_base_url" id="coder_base_url" class="input input-bordered w-full"
+                value="{{if .Workspace}}{{.Workspace.CoderBaseURL}}{{end}}" placeholder="https://api.example.com/v1">
+              <label class="label pt-1"><span class="label-text-alt text-base-content/30">Auto-filled from the provider. Override for a self-hosted / regional / coding-plan endpoint. Required for Custom.</span></label>
+            </div>
+          </details>
         </div>
 
         <div class="form-control">
@@ -111,12 +103,39 @@
     </div>
   </div>
   <script>
+    const SA_CODER_CATALOG = {{.CoderCatalogJSON}};
+    const SA_CODER_HAS_KEY = {{if .Workspace.CoderAPIKeySecret}}true{{else}}false{{end}};
+    function saCoderProv() {
+      const sel = document.querySelector('#coder_api select[name="coder_provider"]');
+      return (SA_CODER_CATALOG || []).find(p => p.name === (sel && sel.value)) || null;
+    }
+    function saApplyProvider() {
+      const p = saCoderProv();
+      if (!p) return;
+      const model = document.getElementById('coder_model');
+      const keyWrap = document.getElementById('coder_key_wrap');
+      const base = document.getElementById('coder_base_url');
+      const adv = document.getElementById('coder_advanced');
+      const docs = document.getElementById('coder_docs');
+      if (model && p.model) model.placeholder = 'e.g. ' + p.model;
+      if (keyWrap) keyWrap.style.display = p.requiresKey ? '' : 'none';
+      if (docs) { docs.href = p.docs || '#'; docs.style.display = p.docs ? '' : 'none'; }
+      // Prefill base URL from the provider default only when the field is empty
+      // (don't clobber a saved override).
+      if (base && !base.value && p.base) base.placeholder = p.base;
+      if (adv) adv.open = !!p.custom; // Custom expands the base-URL field
+    }
     function saToggleCoderKind() {
       const kind = document.getElementById('coder_kind').value;
       document.getElementById('coder_local').style.display = kind === 'api' ? 'none' : '';
       document.getElementById('coder_api').style.display = kind === 'api' ? '' : 'none';
+      if (kind === 'api') saApplyProvider();
     }
-    saToggleCoderKind();
+    (function () {
+      const sel = document.querySelector('#coder_api select[name="coder_provider"]');
+      if (sel) sel.addEventListener('change', saApplyProvider);
+      saToggleCoderKind();
+    })();
   </script>
 
   <!-- Profile -->
