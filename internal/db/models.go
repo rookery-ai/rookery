@@ -47,13 +47,14 @@ type WorkspacePermission struct {
 }
 
 type PlatformConnection struct {
-	ID             string
-	WorkspaceID    string
-	Platform       string
-	EncryptedToken string
-	Active         bool
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID              string
+	WorkspaceID     string
+	Platform        string
+	EncryptedToken  string
+	EncryptedConfig string
+	Active          bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type PlatformIdentity struct {

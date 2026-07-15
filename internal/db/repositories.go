@@ -251,24 +251,25 @@ func (d *DB) DeleteSecret(workspaceID, name string) error {
 // ── Platform connections ───────────────────────────────────────────────────
 
 func (d *DB) UpsertPlatformConnection(c *PlatformConnection) error {
-	_, err := d.Exec(`INSERT INTO platform_connections(id, workspace_id, platform, encrypted_token, active, created_at, updated_at)
-		VALUES(?,?,?,?,?,datetime('now'),datetime('now'))
+	_, err := d.Exec(`INSERT INTO platform_connections(id, workspace_id, platform, encrypted_token, encrypted_config, active, created_at, updated_at)
+		VALUES(?,?,?,?,?,?,datetime('now'),datetime('now'))
 		ON CONFLICT(workspace_id, platform) DO UPDATE SET
 		  encrypted_token=excluded.encrypted_token,
+		  encrypted_config=excluded.encrypted_config,
 		  active=excluded.active,
 		  updated_at=datetime('now')`,
-		c.ID, c.WorkspaceID, c.Platform, c.EncryptedToken, boolToInt(c.Active))
+		c.ID, c.WorkspaceID, c.Platform, c.EncryptedToken, c.EncryptedConfig, boolToInt(c.Active))
 	return err
 }
 
 func (d *DB) GetPlatformConnection(workspaceID, platform string) (*PlatformConnection, error) {
-	row := d.QueryRow(`SELECT id,workspace_id,platform,encrypted_token,active,created_at,updated_at
+	row := d.QueryRow(`SELECT id,workspace_id,platform,encrypted_token,encrypted_config,active,created_at,updated_at
 		FROM platform_connections WHERE workspace_id=? AND platform=?`, workspaceID, platform)
 	return scanPlatformConnection(row)
 }
 
 func (d *DB) ListActivePlatformConnections() ([]*PlatformConnection, error) {
-	rows, err := d.Query(`SELECT id,workspace_id,platform,encrypted_token,active,created_at,updated_at
+	rows, err := d.Query(`SELECT id,workspace_id,platform,encrypted_token,encrypted_config,active,created_at,updated_at
 		FROM platform_connections WHERE active=1`)
 	if err != nil {
 		return nil, err
@@ -297,7 +298,7 @@ func (d *DB) DeletePlatformConnection(workspaceID, platform string) error {
 }
 
 func (d *DB) ListWorkspacePlatformConnections(workspaceID string) ([]*PlatformConnection, error) {
-	rows, err := d.Query(`SELECT id,workspace_id,platform,encrypted_token,active,created_at,updated_at
+	rows, err := d.Query(`SELECT id,workspace_id,platform,encrypted_token,encrypted_config,active,created_at,updated_at
 		FROM platform_connections WHERE workspace_id=?`, workspaceID)
 	if err != nil {
 		return nil, err
@@ -318,7 +319,7 @@ func scanPlatformConnection(s scanner) (*PlatformConnection, error) {
 	var c PlatformConnection
 	var createdAt, updatedAt string
 	var active int
-	err := s.Scan(&c.ID, &c.WorkspaceID, &c.Platform, &c.EncryptedToken, &active, &createdAt, &updatedAt)
+	err := s.Scan(&c.ID, &c.WorkspaceID, &c.Platform, &c.EncryptedToken, &c.EncryptedConfig, &active, &createdAt, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
