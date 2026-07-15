@@ -9,6 +9,26 @@ import (
 	"strings"
 )
 
+// seedSpec describes one operator credential/config file to copy from the host
+// into a workspace's isolated coder home before each invocation.
+type seedSpec struct {
+	From string      // absolute path in the operator's real config
+	To   string      // absolute path inside the per-workspace isolated home
+	Mode os.FileMode // permissions for the copied file
+}
+
+// forwardEnv returns the subset of the given env var names that are currently
+// set in the host environment (used to pass operator-provided API keys through).
+func forwardEnv(keys ...string) map[string]string {
+	out := make(map[string]string)
+	for _, k := range keys {
+		if v := os.Getenv(k); v != "" {
+			out[k] = v
+		}
+	}
+	return out
+}
+
 // CoderBackend abstracts the coder-specific behaviour so that the Coder struct
 // can drive any compatible CLI tool — not just the Claude CLI.
 //
@@ -22,13 +42,13 @@ type CoderBackend interface {
 	// isError is true when the coder itself reported a non-fatal error in its output.
 	parseOutput(stdout []byte) (text string, isError bool, err error)
 
-	// setupHome performs any one-time per-user setup inside homeDir
-	// (e.g. creating config directories, copying credentials).
-	setupHome(homeDir, sysConfigDir string) error
+	// configEnv returns env vars that redirect this coder's config/state dir into
+	// the per-workspace home (cross-platform: prefers explicit dir env vars over HOME).
+	configEnv(workspaceHome string) map[string]string
 
-	// extraEnvForUser returns env vars that this backend needs injected for
-	// per-user isolation (e.g. CLAUDE_CONFIG_DIR for the Claude backend).
-	extraEnvForUser(homeDir string) map[string]string
+	// seedFiles returns operator credential/config file(s) to copy into the isolated
+	// dir on each invocation. Auth only — never session DBs, history, or logs.
+	seedFiles(workspaceHome string) []seedSpec
 
 	// looksLikeLimit reports whether the subprocess failure looks like a
 	// usage/rate-limit hit rather than a genuine agent or system error.
@@ -59,24 +79,21 @@ func (b *claudeBackend) parseOutput(stdout []byte) (string, bool, error) {
 	return extractClaudeJSON(stdout)
 }
 
-func (b *claudeBackend) setupHome(homeDir, _ string) error {
-	claudeDir := filepath.Join(homeDir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
-		return err
-	}
-	if b.sysClaudeDir != "" {
-		src := filepath.Join(b.sysClaudeDir, ".credentials.json")
-		if data, err := os.ReadFile(src); err == nil {
-			_ = os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), data, 0o600)
-		}
-	}
-	return nil
+func (b *claudeBackend) configEnv(workspaceHome string) map[string]string {
+	env := forwardEnv("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+	env["CLAUDE_CONFIG_DIR"] = filepath.Join(workspaceHome, ".claude")
+	return env
 }
 
-func (b *claudeBackend) extraEnvForUser(homeDir string) map[string]string {
-	return map[string]string{
-		"CLAUDE_CONFIG_DIR": filepath.Join(homeDir, ".claude"),
+func (b *claudeBackend) seedFiles(workspaceHome string) []seedSpec {
+	if b.sysClaudeDir == "" {
+		return nil
 	}
+	return []seedSpec{{
+		From: filepath.Join(b.sysClaudeDir, ".credentials.json"),
+		To:   filepath.Join(workspaceHome, ".claude", ".credentials.json"),
+		Mode: 0o600,
+	}}
 }
 
 func (b *claudeBackend) looksLikeLimit(stdout, stderr string) bool {
@@ -123,20 +140,11 @@ func (b *genericCLIBackend) parseOutput(stdout []byte) (string, bool, error) {
 	return text, false, nil
 }
 
-func (b *genericCLIBackend) setupHome(homeDir, _ string) error {
-	return os.MkdirAll(homeDir, 0o700)
+func (b *genericCLIBackend) configEnv(_ string) map[string]string {
+	return forwardEnv(knownAuthEnvVars...)
 }
 
-func (b *genericCLIBackend) extraEnvForUser(_ string) map[string]string {
-	// Forward any known auth env vars that are set in the system environment.
-	env := make(map[string]string)
-	for _, key := range knownAuthEnvVars {
-		if val := os.Getenv(key); val != "" {
-			env[key] = val
-		}
-	}
-	return env
-}
+func (b *genericCLIBackend) seedFiles(_ string) []seedSpec { return nil }
 
 func (b *genericCLIBackend) looksLikeLimit(stdout, stderr string) bool {
 	// For generic coders we can only rely on keywords — the empty-stdout

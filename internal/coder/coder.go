@@ -497,8 +497,13 @@ func (c *Coder) ensureUserHome(workspaceID string, backend CoderBackend) (string
 	if err := os.MkdirAll(filepath.Join(dir, "tmp"), 0o700); err != nil {
 		return "", err
 	}
-	if err := backend.setupHome(dir, c.sysClaudeDir); err != nil {
-		return "", err
+	for _, s := range backend.seedFiles(dir) {
+		if err := os.MkdirAll(filepath.Dir(s.To), 0o700); err != nil {
+			return "", err
+		}
+		if data, err := os.ReadFile(s.From); err == nil {
+			_ = os.WriteFile(s.To, data, s.Mode)
+		}
 	}
 	return dir, nil
 }
@@ -513,7 +518,7 @@ func (c *Coder) buildEnv(homeDir string, backend CoderBackend) []string {
 		"TMP":    tmpDir,
 		"TEMP":   tmpDir,
 	}
-	for k, v := range backend.extraEnvForUser(homeDir) {
+	for k, v := range backend.configEnv(homeDir) {
 		overrides[k] = v
 	}
 	// Extra env (e.g. decrypted secrets) may not override system keys.
