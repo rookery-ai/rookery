@@ -547,7 +547,7 @@ func (s *Server) handleSaveWorkspaceCoder(c echo.Context) error {
 	} else {
 		kind = "local"
 		bin = c.FormValue("coder_bin")
-		backendType = c.FormValue("coder_backend_type")
+		backendType = coder.BackendForBin(bin) // derive from the chosen binary; empty bin => "" (auto-detect)
 	}
 
 	if err := s.db.UpdateWorkspaceCoder(w.ID, kind, bin, timeoutS, backendType, provider, model, apiKeySecret, baseURL); err != nil {
@@ -563,6 +563,20 @@ func (s *Server) handleSaveWorkspaceCoder(c echo.Context) error {
 		p.Workspace = w
 	}
 	return c.Render(http.StatusOK, "dashboard/settings.html", s.buildSettingsData(p, w))
+}
+
+// handleSmokeCoder runs a fail-loud end-to-end check of the workspace's currently
+// saved coder and returns the result as JSON for the settings page.
+func (s *Server) handleSmokeCoder(c echo.Context) error {
+	w := c.Get("workspace").(*db.Workspace)
+	cd := s.coderForWorkspace(w.ID)
+	ctx, cancel := context.WithTimeout(c.Request().Context(), 100*time.Second)
+	defer cancel()
+	reply, err := cd.Smoke(ctx, w.ID)
+	if err != nil {
+		return c.JSON(http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"ok": true, "reply": reply})
 }
 
 func (s *Server) handleChangeMasterPassword(c echo.Context) error {

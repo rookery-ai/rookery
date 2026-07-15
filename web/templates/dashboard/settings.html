@@ -58,6 +58,19 @@
               value="{{if .Workspace}}{{.Workspace.CoderBin}}{{end}}" placeholder="claude (leave blank for default)">
             {{end}}
           </div>
+          <button type="button" class="btn btn-sm btn-outline" onclick="testCoder()">Test coder</button>
+          <span id="coder_test_result" class="text-sm ml-2"></span>
+          <script>
+          async function testCoder() {
+            const el = document.getElementById('coder_test_result');
+            el.textContent = 'Testing…';
+            try {
+              const r = await fetch('/dashboard/settings/coder/test', {method: 'POST'});
+              const j = await r.json();
+              el.textContent = j.ok ? ('✅ ' + j.reply) : ('❌ ' + j.error);
+            } catch (e) { el.textContent = '❌ ' + e; }
+          }
+          </script>
         </div>
 
         <div id="coder_api" class="space-y-4">

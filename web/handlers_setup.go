@@ -209,7 +209,7 @@ func (s *Server) handleSetupCoder(c echo.Context, w *db.Workspace) error {
 		}
 	} else {
 		bin := c.FormValue("coder_bin")
-		backend := c.FormValue("coder_backend_type")
+		backend := coder.BackendForBin(bin)
 		if err := s.db.UpdateWorkspaceCoder(w.ID, "local", bin, timeoutS, backend, "", "", "", ""); err != nil {
 			return err
 		}

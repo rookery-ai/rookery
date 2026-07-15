@@ -338,6 +338,7 @@ func (s *Server) setupRoutes() {
 	dash.POST("/settings", s.handleSaveSettings)
 	dash.POST("/settings/workspace", s.handleSaveWorkspaceMeta)
 	dash.POST("/settings/coder", s.handleSaveWorkspaceCoder)
+	dash.POST("/settings/coder/test", s.handleSmokeCoder)
 	dash.POST("/settings/master-password", s.handleChangeMasterPassword)
 
 	// Owner management area (relabeled "Workspaces" in the UI). Owner logged in;
