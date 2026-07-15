@@ -89,6 +89,12 @@ type ToolCall struct {
 	ID   string
 	Name string
 	Args json.RawMessage // raw JSON object (the model's arguments)
+	// Extra is opaque provider-specific passthrough attached to a tool call that
+	// MUST be echoed back verbatim when the call is replayed in later turns.
+	// Gemini 3 puts a required `thought_signature` here (the OpenAI-compat
+	// `tool_calls[N].extra_content` object); dropping it makes Gemini reject the
+	// next turn with a 400. Empty for providers that don't use it (OpenAI, Mistral).
+	Extra json.RawMessage `json:"-"`
 }
 
 // Response is one completion result.

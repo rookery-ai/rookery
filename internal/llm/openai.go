@@ -102,7 +102,7 @@ func (p *openaiProvider) buildBody(model string, req Request) []byte {
 	for _, m := range req.Messages {
 		var tc []openAIToolCall
 		for _, c := range m.ToolCalls {
-			tc = append(tc, openAIToolCall{ID: c.ID, Type: "function", Function: openAIToolFn{Name: c.Name, Arguments: string(c.Args)}})
+			tc = append(tc, openAIToolCall{ID: c.ID, Type: "function", Function: openAIToolFn{Name: c.Name, Arguments: string(c.Args)}, ExtraContent: c.Extra})
 		}
 		content := m.Content
 		// A tool-result message MUST carry a content field. `content,omitempty` drops an
@@ -150,6 +150,11 @@ type openAIToolCall struct {
 	ID       string       `json:"id"`
 	Type     string       `json:"type"`
 	Function openAIToolFn `json:"function"`
+	// ExtraContent is a non-standard passthrough field: Gemini 3 returns a required
+	// `thought_signature` here and demands it back verbatim on the next turn. Carried
+	// on both the response (parse) and the request (replay). `omitempty` keeps it off
+	// providers that never send it.
+	ExtraContent json.RawMessage `json:"extra_content,omitempty"`
 }
 type openAIToolFn struct {
 	Name      string `json:"name"`
@@ -202,7 +207,7 @@ func parseOpenAIResponse(data []byte) (*Response, error) {
 		if strings.TrimSpace(id) == "" {
 			id = fmt.Sprintf("call_%d", i)
 		}
-		resp.ToolCalls = append(resp.ToolCalls, ToolCall{ID: id, Name: tc.Function.Name, Args: args})
+		resp.ToolCalls = append(resp.ToolCalls, ToolCall{ID: id, Name: tc.Function.Name, Args: args, Extra: tc.ExtraContent})
 	}
 	return resp, nil
 }

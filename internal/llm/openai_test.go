@@ -45,6 +45,63 @@ func TestOpenAIBuildBody_ToolMessageAlwaysHasContent(t *testing.T) {
 	}
 }
 
+// TestOpenAIToolCall_ThoughtSignatureRoundTrips guards the Gemini-3 tool-calling
+// break: Gemini attaches a required `thought_signature` under a non-standard
+// `tool_calls[N].extra_content` field. If we drop it, the SECOND turn's replayed
+// history is missing the signature and Gemini rejects the whole request with a 400
+// ("Function call is missing a thought_signature"). parseOpenAIResponse must capture
+// extra_content, and buildBody must re-emit it verbatim on the next turn.
+func TestOpenAIToolCall_ThoughtSignatureRoundTrips(t *testing.T) {
+	// 1. Parse a Gemini-style response that carries extra_content on the tool call.
+	respJSON := []byte(`{
+      "choices": [{
+        "message": {
+          "role": "assistant",
+          "tool_calls": [{
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "list_dir", "arguments": "{\"path\":\".\"}"},
+            "extra_content": {"google": {"thought_signature": "SIG_ABC123"}}
+          }]
+        },
+        "finish_reason": "tool_calls"
+      }]
+    }`)
+	resp, err := parseOpenAIResponse(respJSON)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("want 1 tool call, got %d", len(resp.ToolCalls))
+	}
+	if len(resp.ToolCalls[0].Extra) == 0 || !strings.Contains(string(resp.ToolCalls[0].Extra), "SIG_ABC123") {
+		t.Fatalf("extra_content not captured on parse, got %q", string(resp.ToolCalls[0].Extra))
+	}
+
+	// 2. Replay that tool call in the next turn's request — the signature must survive.
+	p := &openaiProvider{model: "gemini-3-flash"}
+	body := p.buildBody("gemini-3-flash", Request{
+		Messages: []Message{
+			{Role: "user", Content: "list files"},
+			{Role: "assistant", ToolCalls: resp.ToolCalls},
+			{Role: "tool", ToolCallID: "call_1", Name: "list_dir", Content: "README.md"},
+		},
+	})
+	if !strings.Contains(string(body), "extra_content") || !strings.Contains(string(body), "SIG_ABC123") {
+		t.Fatalf("replayed request dropped the thought_signature; body: %s", body)
+	}
+
+	// 3. A tool call WITHOUT extra_content (OpenAI/Mistral) must not serialize the field.
+	plain := p.buildBody("gpt-4o", Request{
+		Messages: []Message{
+			{Role: "assistant", ToolCalls: []ToolCall{{ID: "c1", Name: "f", Args: json.RawMessage(`{}`)}}},
+		},
+	})
+	if strings.Contains(string(plain), "extra_content") {
+		t.Errorf("extra_content leaked onto a tool call that had none: %s", plain)
+	}
+}
+
 // TestOpenAIBuildBody_EmptyAssistantContentGetsPlaceholder guards G1: an assistant
 // message with neither content nor tool calls must still serialize a non-empty content
 // field, or a bare {"role":"assistant"} 400s on stricter endpoints. Happens on the
