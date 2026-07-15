@@ -258,6 +258,47 @@ func (b *codexBackend) looksLikeLimit(stdout, stderr string) bool {
 	return containsLimitKeyword(stdout + " " + stderr)
 }
 
+// ─── Gemini CLI backend ────────────────────────────────────────────────────────
+// AUTHORED, UNVERIFIED — not installed on the build host. Invocation from current
+// docs: `gemini -p <prompt> --output-format json --yolo` (--yolo auto-approves
+// tool calls so it does not block). Gemini keys off the home dir (~/.gemini) with
+// no dedicated config-dir env var, so isolation overrides HOME + USERPROFILE.
+// Must pass Coder.Smoke on a host with `gemini` before being relied upon.
+type geminiBackend struct{}
+
+func (b *geminiBackend) buildArgs(prompt string, _ bool, _ string) []string {
+	return []string{"-p", prompt, "--output-format", "json", "--yolo"}
+}
+
+func (b *geminiBackend) parseOutput(stdout []byte) (string, bool, error) {
+	return parseSingleJSONField(stdout, "response")
+}
+
+func (b *geminiBackend) configEnv(workspaceHome string) map[string]string {
+	env := forwardEnv("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS")
+	env["HOME"] = workspaceHome
+	env["USERPROFILE"] = workspaceHome // Windows home
+	return env
+}
+
+func (b *geminiBackend) seedFiles(workspaceHome string) []seedSpec {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	// Seed the operator's ~/.gemini/.env (holds GEMINI_API_KEY) so the workspace
+	// inherits the operator's login.
+	return []seedSpec{{
+		From: filepath.Join(home, ".gemini", ".env"),
+		To:   filepath.Join(workspaceHome, ".gemini", ".env"),
+		Mode: 0o600,
+	}}
+}
+
+func (b *geminiBackend) looksLikeLimit(stdout, stderr string) bool {
+	return containsLimitKeyword(stdout + " " + stderr)
+}
+
 // ─── Claude JSON output parsing ───────────────────────────────────────────────
 
 type claudeJSONResponse struct {

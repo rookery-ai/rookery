@@ -64,6 +64,7 @@ var knownCoders = []struct {
 	{"Claude Code", []string{"claude", "claude-code"}, "claude"},
 	{"OpenCode", []string{"opencode"}, "opencode"},
 	{"Codex", []string{"codex"}, "codex"},
+	{"Gemini CLI", []string{"gemini"}, "gemini"},
 	{"Cursor", []string{"cursor-agent", "cursor"}, "generic"},
 }
 

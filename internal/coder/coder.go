@@ -487,6 +487,8 @@ func (c *Coder) selectBackend() CoderBackend {
 		return &opencodeBackend{model: c.apiModelForCLI()}
 	case "codex":
 		return &codexBackend{}
+	case "gemini":
+		return &geminiBackend{}
 	}
 	// Auto-detect by binary name.
 	if strings.Contains(strings.ToLower(filepath.Base(c.bin)), "claude") {

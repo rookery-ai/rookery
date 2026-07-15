@@ -202,3 +202,32 @@ func TestCodexSeed(t *testing.T) {
 		t.Fatalf("seed dest = %q, want .../.codex/auth.json", seeds[0].To)
 	}
 }
+
+func TestGeminiArgs(t *testing.T) {
+	b := &geminiBackend{}
+	args := b.buildArgs("summarize", false, "")
+	want := []string{"-p", "summarize", "--output-format", "json", "--yolo"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+}
+
+func TestGeminiParseResponse(t *testing.T) {
+	b := &geminiBackend{}
+	text, isErr, err := b.parseOutput([]byte(`{"response":"PONG"}`))
+	if err != nil || isErr || text != "PONG" {
+		t.Fatalf("got (%q,%v,%v)", text, isErr, err)
+	}
+}
+
+func TestGeminiConfigEnvWindows(t *testing.T) {
+	b := &geminiBackend{}
+	home := "/homes/ws1"
+	env := b.configEnv(home)
+	if env["HOME"] != home {
+		t.Fatalf("HOME = %q", env["HOME"])
+	}
+	if env["USERPROFILE"] != home {
+		t.Fatalf("USERPROFILE = %q (needed for Windows isolation)", env["USERPROFILE"])
+	}
+}
