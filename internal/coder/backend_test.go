@@ -231,3 +231,29 @@ func TestGeminiConfigEnvWindows(t *testing.T) {
 		t.Fatalf("USERPROFILE = %q (needed for Windows isolation)", env["USERPROFILE"])
 	}
 }
+
+func TestCursorArgs(t *testing.T) {
+	b := &cursorBackend{}
+	args := b.buildArgs("fix tests", false, "")
+	want := []string{"-p", "fix tests", "--output-format", "json", "--trust"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+}
+
+func TestCursorArgsWithModel(t *testing.T) {
+	b := &cursorBackend{model: "gpt-5"}
+	args := b.buildArgs("x", false, "")
+	want := []string{"-p", "x", "--output-format", "json", "--trust", "--model", "gpt-5"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+}
+
+func TestCursorParseResult(t *testing.T) {
+	b := &cursorBackend{}
+	text, isErr, err := b.parseOutput([]byte(`{"result":"PONG","type":"result"}`))
+	if err != nil || isErr || text != "PONG" {
+		t.Fatalf("got (%q,%v,%v)", text, isErr, err)
+	}
+}

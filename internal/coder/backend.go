@@ -299,6 +299,48 @@ func (b *geminiBackend) looksLikeLimit(stdout, stderr string) bool {
 	return containsLimitKeyword(stdout + " " + stderr)
 }
 
+// ─── Cursor CLI backend ────────────────────────────────────────────────────────
+// AUTHORED, UNVERIFIED — not installed on the build host. Invocation from current
+// docs: `cursor-agent -p <prompt> --output-format json --trust [--model <m>]`
+// (-p is PRINT mode here, not prompt; the prompt is positional). Output is a
+// single aggregated JSON object with "result". Auth via CURSOR_API_KEY env
+// passthrough; the on-disk login store location is unconfirmed, so no seedFiles
+// until verified on a real install. NOTE: cursor-agent has no official native
+// Windows build (community patch only). Must pass Coder.Smoke on a host with
+// `cursor-agent` before being relied upon.
+type cursorBackend struct {
+	model string
+}
+
+func (b *cursorBackend) buildArgs(prompt string, _ bool, _ string) []string {
+	args := []string{"-p", prompt, "--output-format", "json", "--trust"}
+	if b.model != "" {
+		args = append(args, "--model", b.model)
+	}
+	return args
+}
+
+func (b *cursorBackend) parseOutput(stdout []byte) (string, bool, error) {
+	return parseSingleJSONField(stdout, "result", "response")
+}
+
+func (b *cursorBackend) configEnv(workspaceHome string) map[string]string {
+	env := forwardEnv("CURSOR_API_KEY")
+	env["HOME"] = workspaceHome
+	env["USERPROFILE"] = workspaceHome
+	return env
+}
+
+func (b *cursorBackend) seedFiles(_ string) []seedSpec {
+	// TBD: cursor-agent login-store path unconfirmed. Until verified, rely on
+	// CURSOR_API_KEY passthrough (configEnv). Add a seedSpec once confirmed.
+	return nil
+}
+
+func (b *cursorBackend) looksLikeLimit(stdout, stderr string) bool {
+	return containsLimitKeyword(stdout + " " + stderr)
+}
+
 // ─── Claude JSON output parsing ───────────────────────────────────────────────
 
 type claudeJSONResponse struct {

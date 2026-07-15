@@ -65,7 +65,7 @@ var knownCoders = []struct {
 	{"OpenCode", []string{"opencode"}, "opencode"},
 	{"Codex", []string{"codex"}, "codex"},
 	{"Gemini CLI", []string{"gemini"}, "gemini"},
-	{"Cursor", []string{"cursor-agent", "cursor"}, "generic"},
+	{"Cursor", []string{"cursor-agent", "cursor"}, "cursor"},
 }
 
 // DetectInstalled probes PATH and ~/.local/bin for supported coder binaries and

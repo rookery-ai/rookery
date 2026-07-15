@@ -489,6 +489,8 @@ func (c *Coder) selectBackend() CoderBackend {
 		return &codexBackend{}
 	case "gemini":
 		return &geminiBackend{}
+	case "cursor":
+		return &cursorBackend{model: c.cliModel}
 	}
 	// Auto-detect by binary name.
 	if strings.Contains(strings.ToLower(filepath.Base(c.bin)), "claude") {
