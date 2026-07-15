@@ -257,3 +257,46 @@ func TestCursorParseResult(t *testing.T) {
 		t.Fatalf("got (%q,%v,%v)", text, isErr, err)
 	}
 }
+
+// The following exercise the REAL `opencode run --format json` event shape,
+// captured from a live run: the reply text is nested in part.text with
+// part.type=="text" (NOT top-level text), and step-start parts have empty text.
+func TestParseNDJSONEventsOpenCodePartText(t *testing.T) {
+	out := []byte(
+		`{"type":"step_start","part":{"id":"prt_a","type":"step-start","text":""}}` + "\n" +
+			`{"type":"text","part":{"id":"prt_b","type":"text","text":"PONG"}}` + "\n")
+	text, isErr, err := parseNDJSONEvents(out)
+	if err != nil || isErr || text != "PONG" {
+		t.Fatalf("got (%q,%v,%v), want (PONG,false,nil)", text, isErr, err)
+	}
+}
+
+func TestParseNDJSONEventsOpenCodeMultiline(t *testing.T) {
+	out := []byte(`{"type":"text","part":{"id":"prt_x","type":"text","text":"1\n2\n3\n4\n5"}}` + "\n")
+	text, _, err := parseNDJSONEvents(out)
+	if err != nil || text != "1\n2\n3\n4\n5" {
+		t.Fatalf("got %q err=%v", text, err)
+	}
+}
+
+func TestParseNDJSONEventsSnapshotReemit(t *testing.T) {
+	// Same part id re-emitted as a growing snapshot: keep the latest, not concatenated.
+	out := []byte(
+		`{"type":"text","part":{"id":"p1","type":"text","text":"Hel"}}` + "\n" +
+			`{"type":"text","part":{"id":"p1","type":"text","text":"Hello"}}` + "\n")
+	text, _, err := parseNDJSONEvents(out)
+	if err != nil || text != "Hello" {
+		t.Fatalf("got %q err=%v (snapshot re-emit must keep latest, not concat)", text, err)
+	}
+}
+
+func TestParseNDJSONEventsSkipsReasoningPart(t *testing.T) {
+	// A reasoning part must never leak into the delivered answer.
+	out := []byte(
+		`{"type":"text","part":{"id":"r1","type":"reasoning","text":"thinking..."}}` + "\n" +
+			`{"type":"text","part":{"id":"t1","type":"text","text":"answer"}}` + "\n")
+	text, _, err := parseNDJSONEvents(out)
+	if err != nil || text != "answer" {
+		t.Fatalf("got %q err=%v (reasoning part must be skipped)", text, err)
+	}
+}

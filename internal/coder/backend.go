@@ -424,6 +424,15 @@ type ndjsonEvent struct {
 	Type  string `json:"type"`
 	Text  string `json:"text"`
 	Delta string `json:"delta"`
+	// Part carries OpenCode's assistant output: `opencode run --format json` emits
+	// each reply part once as a "text" event whose part.type=="text" holds the FULL
+	// text in part.text (verified against a live run — NOT top-level text, NOT
+	// streamed deltas). Non-text parts (step-start, reasoning, tool) are skipped.
+	Part struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"part"`
 	Error struct {
 		Message string `json:"message"`
 		Data    struct {
@@ -438,9 +447,17 @@ type ndjsonEvent struct {
 // error) for a coder-reported error so looksLikeLimit can classify it.
 func parseNDJSONEvents(stdout []byte) (string, bool, error) {
 	lines := bytes.Split(bytes.TrimSpace(stdout), []byte("\n"))
-	var text strings.Builder
 	var errMsg string
 	var sawError bool
+	// Two output shapes are supported:
+	//   - OpenCode: a "text" event whose part.type=="text" carries the FULL assistant
+	//     text in part.text. Keyed by part.id, keeping the LATEST value (robust if a
+	//     part is re-emitted as a growing snapshot) in first-seen order. Non-text
+	//     parts (step-start, reasoning, tool) are skipped so no chain-of-thought leaks.
+	//   - Other streams (e.g. codex): top-level text/delta fragments, appended in order.
+	var order []string
+	latest := map[string]string{}
+	var anon strings.Builder
 	for _, line := range lines {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
@@ -465,10 +482,19 @@ func parseNDJSONEvents(stdout []byte) (string, bool, error) {
 				}
 			}
 			errMsg = m
+		case ev.Part.Type == "text" && ev.Part.Text != "":
+			key := ev.Part.ID
+			if key == "" {
+				key = fmt.Sprintf("part-%d", len(order))
+			}
+			if _, seen := latest[key]; !seen {
+				order = append(order, key)
+			}
+			latest[key] = ev.Part.Text
 		case ev.Text != "":
-			text.WriteString(ev.Text)
+			anon.WriteString(ev.Text)
 		case ev.Delta != "":
-			text.WriteString(ev.Delta)
+			anon.WriteString(ev.Delta)
 		}
 	}
 	if sawError {
@@ -477,6 +503,11 @@ func parseNDJSONEvents(stdout []byte) (string, bool, error) {
 		}
 		return errMsg, true, nil
 	}
+	var text strings.Builder
+	for _, k := range order {
+		text.WriteString(latest[k])
+	}
+	text.WriteString(anon.String())
 	if text.Len() == 0 {
 		return "", false, fmt.Errorf("no assistant text in event stream")
 	}
