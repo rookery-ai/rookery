@@ -115,9 +115,21 @@ type Factory func(cfg Config) (Provider, error)
 var (
 	providersMu  = make(map[string]Factory)
 	defaultBases = map[string]string{
-		"openai":     "https://api.openai.com/v1",
-		"openrouter": "https://openrouter.ai/api/v1",
-		"anthropic":  "https://api.anthropic.com",
+		"openai":       "https://api.openai.com/v1",
+		"openrouter":   "https://openrouter.ai/api/v1",
+		"anthropic":    "https://api.anthropic.com",
+		"zai":          "https://api.z.ai/api/openai/v1",
+		"ollama":       "https://ollama.com/v1",
+		"ollama_local": "http://localhost:11434/v1",
+		"deepseek":     "https://api.deepseek.com",
+		"groq":         "https://api.groq.com/openai/v1",
+		"xai":          "https://api.x.ai/v1",
+		"mistral":      "https://api.mistral.ai/v1",
+		"gemini":       "https://generativelanguage.googleapis.com/v1beta/openai/",
+		"opencode_zen": "https://opencode.ai/zen/v1",
+		"opencode_go":  "https://opencode.ai/zen/go/v1",
+		"perplexity":   "https://api.perplexity.ai",
+		"moonshot":     "https://api.moonshot.ai/v1",
 	}
 )
 
@@ -125,6 +137,13 @@ var (
 // in each provider file. Adding a new provider is one file + one registration.
 func RegisterProvider(name string, f Factory) {
 	providersMu[name] = f
+}
+
+// DefaultBaseURL returns the registered default endpoint for a provider name,
+// or "" if the provider has no default (e.g. "generic", which requires an
+// explicit base URL). The web layer uses this to prefill the base-URL field.
+func DefaultBaseURL(name string) string {
+	return defaultBases[name]
 }
 
 // New builds the named provider from cfg. Returns a helpful error if the name

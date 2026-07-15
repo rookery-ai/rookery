@@ -216,7 +216,11 @@ func orDefault(v, def int) int {
 
 func init() {
 	factory := newOpenAIProvider()
-	RegisterProvider("openai", factory)
-	RegisterProvider("openrouter", factory)
-	RegisterProvider("generic", factory) // no registry default — New() requires an explicit base_url
+	for _, name := range []string{
+		"openai", "openrouter", "generic", // no registry default for generic — New() requires an explicit base_url
+		"zai", "ollama", "ollama_local", "deepseek", "groq", "xai",
+		"mistral", "gemini", "opencode_zen", "opencode_go", "perplexity", "moonshot",
+	} {
+		RegisterProvider(name, factory)
+	}
 }
