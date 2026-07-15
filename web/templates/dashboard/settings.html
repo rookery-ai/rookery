@@ -133,7 +133,11 @@
     }
     (function () {
       const sel = document.querySelector('#coder_api select[name="coder_provider"]');
-      if (sel) sel.addEventListener('change', saApplyProvider);
+      if (sel) sel.addEventListener('change', function () {
+        const base = document.getElementById('coder_base_url');
+        if (base) base.value = '';
+        saApplyProvider();
+      });
       saToggleCoderKind();
     })();
   </script>
