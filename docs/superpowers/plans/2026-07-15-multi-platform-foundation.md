@@ -32,8 +32,7 @@
   - `type Renderer interface { Render(commonMark string) string }`
   - `type RendererFunc func(string) string` (adapts a func to `Renderer`; `Render` calls it)
   - `func Passthrough() Renderer` — returns the input unchanged (for Discord/Mattermost in later phases)
-  - `var ErrUnknown = errors.New("render: unknown platform")`
-  - `func For(platform string) Renderer` — returns the registered renderer, or `Passthrough()` if none registered (safe default)
+  - `func For(platform string) Renderer` — returns the registered renderer, or `Passthrough()` if none registered (safe default; never errors, so no sentinel error is needed)
   - `func Register(platform string, r Renderer)` — registers a renderer; called from `init()` in platform renderer files
 
 - [ ] **Step 1: Write the failing test**
