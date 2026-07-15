@@ -481,8 +481,7 @@ Each workspace inlines its own coder config on the `workspaces` row (`coder_kind
 `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`). `coder.ForWorkspace(w, …)`
 builds a `*coder.Coder` from it — a **local** CLI coder or the **api** engine — falling back to the
 system defaults when unset; `coder.DetectInstalled()` probes PATH + `~/.local/bin` for supported
-binaries (claude/claude-code, opencode, codex, cursor) and `coder.APIProviders()` lists the direct-API
-providers to populate the picker. The web `coderForWorkspace(id)` and the runner's injected coder
+binaries (claude/claude-code, opencode, codex, cursor) and `coder.APIProviders()` returns a curated catalog of ~16 named providers (OpenAI, Anthropic, OpenRouter, Z.AI, Ollama Cloud/Local, DeepSeek, Groq, xAI, Mistral, Gemini, OpenCode Zen/Go, Perplexity, Moonshot) plus a "Custom (OpenAI-compatible)" escape hatch; base URLs are single-sourced in `internal/llm.DefaultBaseURL(name)` and are not duplicated in the catalog; the coder form accepts an inline API key pasted directly into a settings field, which `coder.PlanKeySecret` transparently stores as an encrypted `CODER_KEY_<PROVIDER>` secret, with an Advanced base-URL override available per provider (required only for Custom). The web `coderForWorkspace(id)` and the runner's injected coder
 factory (`Runner.WithCoderFactory`, wired in `main.go`) both use `ForWorkspace` — as do the agent
 designer, skill creator, and Telegram chat (via the `coderFor(workspaceID)` factory in `main.go`) —
 so scheduled + manual runs, generation, and chat all honor the workspace's coder.
