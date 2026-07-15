@@ -16,10 +16,16 @@ type Installed struct {
 
 // APIProvider describes a direct LLM API provider usable as a coder (the "api"
 // kind). These are not probed — they're always available (no host binary
-// needed), so DetectInstalled surfaces them for the settings picker.
+// needed). Base URLs are NOT stored here; they live in internal/llm.defaultBases
+// (fetch via llm.DefaultBaseURL) so there is one source of truth.
 type APIProvider struct {
-	Name  string // registry name, e.g. "openai"
-	Label string // human label, e.g. "OpenAI"
+	Name             string // registry name, e.g. "zai" — must be registered in internal/llm
+	Label            string // human label, e.g. "Z.AI (GLM)"
+	Schema           string // "openai" | "anthropic" (display/grouping only)
+	ModelPlaceholder string // example model for the free-text hint, e.g. "glm-4.7"
+	DocsURL          string // provider API-key/docs page
+	RequiresKey      bool   // false only for ollama_local
+	Custom           bool   // true only for the Custom (generic) entry
 }
 
 // apiProviders is the catalog of direct-LLM-API coder providers (registry
@@ -28,10 +34,22 @@ type APIProvider struct {
 // (e.g. Azure OpenAI, a private gateway) and is required only for "generic"
 // (enforced by llm.New at call time, not by the form).
 var apiProviders = []APIProvider{
-	{"openai", "OpenAI"},
-	{"openrouter", "OpenRouter"},
-	{"anthropic", "Anthropic"},
-	{"generic", "Generic OpenAI-compatible"},
+	{"openai", "OpenAI", "openai", "gpt-4o", "https://platform.openai.com/api-keys", true, false},
+	{"anthropic", "Anthropic", "anthropic", "claude-sonnet-5", "https://console.anthropic.com/settings/keys", true, false},
+	{"openrouter", "OpenRouter", "openai", "anthropic/claude-3.5-sonnet", "https://openrouter.ai/keys", true, false},
+	{"zai", "Z.AI (GLM)", "openai", "glm-4.7", "https://z.ai/model-api", true, false},
+	{"ollama", "Ollama Cloud", "openai", "qwen3-coder:480b", "https://ollama.com/settings/keys", true, false},
+	{"ollama_local", "Ollama (Local)", "openai", "qwen2.5-coder", "https://docs.ollama.com/api/openai-compatibility", false, false},
+	{"deepseek", "DeepSeek", "openai", "deepseek-chat", "https://platform.deepseek.com/api_keys", true, false},
+	{"groq", "Groq", "openai", "llama-3.3-70b-versatile", "https://console.groq.com/keys", true, false},
+	{"xai", "xAI (Grok)", "openai", "grok-4", "https://console.x.ai", true, false},
+	{"mistral", "Mistral", "openai", "mistral-large-latest", "https://console.mistral.ai/api-keys", true, false},
+	{"gemini", "Google Gemini", "openai", "gemini-2.5-pro", "https://aistudio.google.com/apikey", true, false},
+	{"opencode_zen", "OpenCode Zen", "openai", "opencode/gpt-5.5", "https://opencode.ai/docs/zen/", true, false},
+	{"opencode_go", "OpenCode Go", "openai", "opencode/grok-code", "https://opencode.ai/docs/go/", true, false},
+	{"perplexity", "Perplexity", "openai", "sonar-pro", "https://www.perplexity.ai/settings/api", true, false},
+	{"moonshot", "Moonshot (Kimi)", "openai", "kimi-k2", "https://platform.moonshot.ai/console/api-keys", true, false},
+	{"generic", "Custom (OpenAI-compatible)", "openai", "", "", true, true},
 }
 
 // APIProviders returns the available direct-LLM-API coder providers.
