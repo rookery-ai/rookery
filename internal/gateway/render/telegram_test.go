@@ -31,3 +31,33 @@ func TestRenderTelegramRegistered(t *testing.T) {
 		t.Fatalf("telegram renderer not registered/used, got %q", got)
 	}
 }
+
+func TestEscapeMDV2Link(t *testing.T) {
+	if got := escapeMDV2Link(`a)b\c`); got != `a\)b\\c` {
+		t.Fatalf("escapeMDV2Link = %q", got)
+	}
+}
+
+func TestRenderTelegramFencedCodeBlock(t *testing.T) {
+	got := RenderTelegram("```\nfoo.bar()\nx = 1\n```")
+	want := "```\nfoo.bar()\nx = 1\n```"
+	if got != want {
+		t.Fatalf("code block:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestRenderTelegramBulletList(t *testing.T) {
+	got := RenderTelegram("- one\n- two")
+	want := "• one\n• two"
+	if got != want {
+		t.Fatalf("bullet list:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestRenderTelegramOrderedList(t *testing.T) {
+	got := RenderTelegram("1. alpha\n2. beta")
+	want := "1\\. alpha\n2\\. beta"
+	if got != want {
+		t.Fatalf("ordered list:\n got: %q\nwant: %q", got, want)
+	}
+}

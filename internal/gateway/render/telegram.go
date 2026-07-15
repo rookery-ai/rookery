@@ -1,6 +1,7 @@
 package render
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/yuin/goldmark"
@@ -29,6 +30,24 @@ func escapeMDV2Text(s string) string {
 func escapeMDV2Code(s string) string {
 	r := strings.NewReplacer("\\", "\\\\", "`", "\\`")
 	return r.Replace(s)
+}
+
+// escapeMDV2Link escapes the characters special inside a MarkdownV2 link
+// destination: backslash and the closing paren.
+func escapeMDV2Link(s string) string {
+	return strings.NewReplacer("\\", "\\\\", ")", "\\)").Replace(s)
+}
+
+// writeCodeBlockTelegram emits a ```-fenced MarkdownV2 code block from raw source lines.
+func writeCodeBlockTelegram(b *strings.Builder, lines *text.Segments, src []byte) {
+	var body strings.Builder
+	for i := 0; i < lines.Len(); i++ {
+		seg := lines.At(i)
+		body.WriteString(string(seg.Value(src)))
+	}
+	b.WriteString("```\n")
+	b.WriteString(escapeMDV2Code(strings.TrimRight(body.String(), "\n")))
+	b.WriteString("\n```\n\n")
 }
 
 // RenderTelegram converts neutral CommonMark to Telegram MarkdownV2.
@@ -80,7 +99,7 @@ func renderNodeTelegram(b *strings.Builder, n ast.Node, src []byte) {
 		b.WriteByte('[')
 		renderChildrenTelegram(b, node, src)
 		b.WriteString("](")
-		b.WriteString(string(node.Destination)) // URL: MarkdownV2 needs only ) and \ escaped
+		b.WriteString(escapeMDV2Link(string(node.Destination))) // URL: MarkdownV2 needs only ) and \ escaped
 		b.WriteByte(')')
 		return
 	case *ast.Paragraph:
@@ -92,6 +111,29 @@ func renderNodeTelegram(b *strings.Builder, n ast.Node, src []byte) {
 		b.WriteByte('*')
 		renderChildrenTelegram(b, node, src)
 		b.WriteString("*\n\n")
+		return
+	case *ast.FencedCodeBlock:
+		writeCodeBlockTelegram(b, node.Lines(), src)
+		return
+	case *ast.CodeBlock:
+		writeCodeBlockTelegram(b, node.Lines(), src)
+		return
+	case *ast.List:
+		i := 1
+		for li := node.FirstChild(); li != nil; li = li.NextSibling() {
+			if node.IsOrdered() {
+				b.WriteString(escapeMDV2Text(strconv.Itoa(i)) + "\\. ")
+			} else {
+				b.WriteString("• ")
+			}
+			renderChildrenTelegram(b, li, src) // ListItem children: TextBlock/Paragraph
+			b.WriteString("\n")
+			i++
+		}
+		b.WriteString("\n")
+		return
+	case *ast.Image:
+		renderChildrenTelegram(b, node, src) // emit alt text (its inline children)
 		return
 	}
 	renderChildrenTelegram(b, n, src)
