@@ -75,6 +75,37 @@
         <form method="POST" action="/dashboard/setup" class="space-y-4">
           <input type="hidden" name="action" value="coder">
           <div class="form-control">
+            <label class="label pb-1"><span class="label-text font-medium">Kind</span></label>
+            <select name="coder_kind" id="setup_coder_kind" class="select select-bordered w-full" onchange="setupToggleKind()">
+              <option value="local" selected>Local CLI (claude-code, opencode, codex, cursor)</option>
+              <option value="api">Direct LLM API (OpenAI, Anthropic, Z.AI, Ollama, …)</option>
+            </select>
+          </div>
+          <div id="setup_coder_api" style="display:none" class="space-y-3">
+            <div class="form-control">
+              <label class="label pb-1"><span class="label-text font-medium">Provider</span></label>
+              <select name="coder_provider" id="setup_coder_provider" class="select select-bordered w-full">
+                {{range .APIProviders}}<option value="{{.Name}}">{{.Label}}</option>{{end}}
+              </select>
+            </div>
+            <div class="form-control">
+              <label class="label pb-1"><span class="label-text font-medium">Model</span></label>
+              <input type="text" name="coder_model" id="setup_coder_model" class="input input-bordered w-full" placeholder="e.g. gpt-4o">
+            </div>
+            <div class="form-control" id="setup_coder_key_wrap">
+              <label class="label pb-1"><span class="label-text font-medium">API key</span></label>
+              <input type="password" name="coder_api_key" id="setup_coder_key" autocomplete="off" class="input input-bordered w-full" placeholder="paste your provider API key">
+              <label class="label pt-1"><span class="label-text-alt text-base-content/30">Stored securely as a secret. <a id="setup_coder_docs" class="link" href="#" target="_blank" rel="noopener">Get a key ↗</a></span></label>
+            </div>
+            <details id="setup_coder_advanced"><summary class="text-sm cursor-pointer text-base-content/60">Advanced</summary>
+              <div class="form-control mt-2">
+                <label class="label pb-1"><span class="label-text font-medium">Base URL</span></label>
+                <input type="text" name="coder_base_url" id="setup_coder_base" class="input input-bordered w-full" placeholder="https://api.example.com/v1">
+              </div>
+            </details>
+          </div>
+          <div id="setup_coder_local">
+          <div class="form-control">
             <label class="label pb-1"><span class="label-text font-medium">Coder</span></label>
             {{if .DetectedCoders}}
             <select name="coder_bin" class="select select-bordered w-full">
@@ -94,12 +125,32 @@
             <input type="number" name="coder_timeout_s" min="0" placeholder="Leave blank for default"
               class="input input-bordered w-full">
           </div>
+          </div>
           <button type="submit" class="btn btn-primary w-full">Save Coder →</button>
         </form>
         <form method="POST" action="/dashboard/setup" class="mt-2">
           <input type="hidden" name="action" value="skip_coder">
           <button type="submit" class="btn btn-ghost btn-sm w-full text-base-content/50">Use system default</button>
         </form>
+        <script>
+          const SETUP_CATALOG = {{.CoderCatalogJSON}};
+          function setupApplyProvider(){
+            const sel=document.getElementById('setup_coder_provider');
+            const p=(SETUP_CATALOG||[]).find(x=>x.name===(sel&&sel.value)); if(!p) return;
+            const m=document.getElementById('setup_coder_model'); if(m&&p.model)m.placeholder='e.g. '+p.model;
+            const kw=document.getElementById('setup_coder_key_wrap'); if(kw)kw.style.display=p.requiresKey?'':'none';
+            const d=document.getElementById('setup_coder_docs'); if(d){d.href=p.docs||'#';d.style.display=p.docs?'':'none';}
+            const b=document.getElementById('setup_coder_base'); if(b&&!b.value&&p.base)b.placeholder=p.base;
+            const a=document.getElementById('setup_coder_advanced'); if(a)a.open=!!p.custom;
+          }
+          function setupToggleKind(){
+            const k=document.getElementById('setup_coder_kind').value;
+            document.getElementById('setup_coder_api').style.display=k==='api'?'':'none';
+            document.getElementById('setup_coder_local').style.display=k==='api'?'none':'';
+            if(k==='api')setupApplyProvider();
+          }
+          (function(){const s=document.getElementById('setup_coder_provider');if(s)s.addEventListener('change',setupApplyProvider);setupToggleKind();})();
+        </script>
 
         {{else if eq .Step 4}}
         <h2 class="card-title text-xl mb-1">👤 Workspace Profile</h2>

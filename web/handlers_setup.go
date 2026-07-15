@@ -1,8 +1,11 @@
 package web
 
 import (
+	"context"
+	"html/template"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/coder"
@@ -18,9 +21,11 @@ import (
 //	5=connector 7=done
 type setupData struct {
 	*pageData
-	Step           int
-	BotUsername    string
-	DetectedCoders []coder.Installed
+	Step             int
+	BotUsername      string
+	DetectedCoders   []coder.Installed
+	APIProviders     []coder.APIProvider
+	CoderCatalogJSON template.JS
 }
 
 func (s *Server) showSetup(c echo.Context) error {
@@ -33,6 +38,8 @@ func (s *Server) showSetup(c echo.Context) error {
 	switch step {
 	case 3:
 		sd.DetectedCoders = coder.DetectInstalled()
+		sd.APIProviders = coder.APIProviders()
+		sd.CoderCatalogJSON = s.coderCatalogJSON()
 	case 7:
 		sd.BotUsername, _ = s.db.GetSetting(w.ID, "telegram_bot_username")
 	}
@@ -145,18 +152,68 @@ func (s *Server) handleSetupConnector(c echo.Context, w *db.Workspace) error {
 	return c.Redirect(http.StatusFound, "/dashboard/setup")
 }
 
+// renderSetupCoderErr re-renders step 3 of the setup wizard with a validation
+// error, keeping the provider catalog + detected coders populated so the form
+// stays usable after a failed submit.
+func (s *Server) renderSetupCoderErr(c echo.Context, w *db.Workspace, msg string) error {
+	sd := &setupData{
+		pageData:         s.page(c, "Set Up Workspace"),
+		Step:             3,
+		DetectedCoders:   coder.DetectInstalled(),
+		APIProviders:     coder.APIProviders(),
+		CoderCatalogJSON: s.coderCatalogJSON(),
+	}
+	sd.Error = msg
+	return c.Render(http.StatusBadRequest, "auth/setup.html", sd)
+}
+
+// handleSetupCoder saves the workspace's coder config from the onboarding
+// wizard. Two kinds: "local" (a host CLI binary) or "api" (a direct LLM
+// provider API) — mirrors handleSaveWorkspaceCoder in handlers_misc.go.
 func (s *Server) handleSetupCoder(c echo.Context, w *db.Workspace) error {
-	bin := c.FormValue("coder_bin")
-	backend := c.FormValue("coder_backend_type")
+	kind := c.FormValue("coder_kind")
 	timeoutS := 0
 	if v, err := strconv.Atoi(c.FormValue("coder_timeout_s")); err == nil && v > 0 {
 		timeoutS = v
 	}
-	if err := s.db.UpdateWorkspaceCoder(w.ID, "local", bin, timeoutS, backend, "", "", "", ""); err != nil {
-		return err
+	if kind == "api" {
+		provider := c.FormValue("coder_provider")
+		model := strings.TrimSpace(c.FormValue("coder_model"))
+		baseURL := strings.TrimSpace(c.FormValue("coder_base_url"))
+		if provider == "" || model == "" {
+			return s.renderSetupCoderErr(c, w, "Provider and model are required for an API coder")
+		}
+		if provider == "generic" && baseURL == "" {
+			return s.renderSetupCoderErr(c, w, "A base URL is required for a Custom provider")
+		}
+		plan := coder.PlanKeySecret(provider, strings.TrimSpace(c.FormValue("coder_api_key")), w.CoderAPIKeySecret)
+		if plan.Err != "" {
+			return s.renderSetupCoderErr(c, w, plan.Err)
+		}
+		if plan.WriteSecret {
+			if w.SecretsSalt == "" || w.EncryptedMasterPassword == "" {
+				return s.renderSetupCoderErr(c, w, "Set a master password (step 2) before configuring an API coder")
+			}
+			masterPw, err := secrets.DecryptMasterPassword(w.EncryptedMasterPassword, s.systemKey)
+			if err != nil {
+				return s.renderSetupCoderErr(c, w, "Could not decrypt master password — re-run setup")
+			}
+			if err := secrets.New(s.db, w.ID, masterPw, w.SecretsSalt).Set(context.Background(), plan.SecretName, plan.WriteValue); err != nil {
+				return s.renderSetupCoderErr(c, w, "Failed to store API key: "+err.Error())
+			}
+		}
+		if err := s.db.UpdateWorkspaceCoder(w.ID, "api", "", timeoutS, "api", provider, model, plan.SecretName, baseURL); err != nil {
+			return err
+		}
+	} else {
+		bin := c.FormValue("coder_bin")
+		backend := c.FormValue("coder_backend_type")
+		if err := s.db.UpdateWorkspaceCoder(w.ID, "local", bin, timeoutS, backend, "", "", "", ""); err != nil {
+			return err
+		}
 	}
 	_ = s.db.SetSetting(w.ID, "wizard_coder_done", "1")
-	s.audit.Log(w.ID, "configure_coder", "workspace:"+w.ID, bin, c.RealIP())
+	s.audit.Log(w.ID, "configure_coder", "workspace:"+w.ID, kind, c.RealIP())
 	return c.Redirect(http.StatusFound, "/dashboard/setup")
 }
 

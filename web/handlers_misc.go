@@ -382,6 +382,27 @@ func (s *Server) buildSettingsData(p *pageData, w *db.Workspace) *settingsPageDa
 	}
 	secretNames, _ := s.db.ListSecretNames(w.ID)
 
+	return &settingsPageData{
+		pageData:         p,
+		DisplayName:      dn,
+		Email:            prof.Email,
+		Location:         prof.Location,
+		Timezone:         prof.Timezone,
+		Tone:             prof.Tone,
+		Language:         prof.Language,
+		Notes:            prof.Notes,
+		DetectedCoders:   coder.DetectInstalled(),
+		APIProviders:     coder.APIProviders(),
+		SecretNames:      secretNames,
+		CoderCatalogJSON: s.coderCatalogJSON(),
+	}
+}
+
+// coderCatalogJSON marshals the direct-LLM-API provider catalog (name, default
+// base URL, model placeholder, docs URL, requiresKey, custom) into a JSON array
+// for the coder-form driver JS. Shared by the settings page and the setup wizard
+// so the catalog is built in exactly one place.
+func (s *Server) coderCatalogJSON() template.JS {
 	type provJS struct {
 		Name        string `json:"name"`
 		Base        string `json:"base"`
@@ -399,21 +420,7 @@ func (s *Server) buildSettingsData(p *pageData, w *db.Workspace) *settingsPageDa
 		})
 	}
 	catJSON, _ := json.Marshal(pjs)
-
-	return &settingsPageData{
-		pageData:         p,
-		DisplayName:      dn,
-		Email:            prof.Email,
-		Location:         prof.Location,
-		Timezone:         prof.Timezone,
-		Tone:             prof.Tone,
-		Language:         prof.Language,
-		Notes:            prof.Notes,
-		DetectedCoders:   coder.DetectInstalled(),
-		APIProviders:     cat,
-		SecretNames:      secretNames,
-		CoderCatalogJSON: template.JS(catJSON),
-	}
+	return template.JS(catJSON)
 }
 
 func (s *Server) showSettings(c echo.Context) error {
