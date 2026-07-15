@@ -61,3 +61,19 @@ func TestRenderTelegramOrderedList(t *testing.T) {
 		t.Fatalf("ordered list:\n got: %q\nwant: %q", got, want)
 	}
 }
+
+func TestRenderTelegramOrderedListStart(t *testing.T) {
+	got := RenderTelegram("5. foo\n6. bar")
+	want := "5\\. foo\n6\\. bar"
+	if got != want {
+		t.Fatalf("ordered list start:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+func TestRenderTelegramIndentedCodeBlock(t *testing.T) {
+	got := RenderTelegram("    indented.code()\n    line2")
+	want := "```\nindented.code()\nline2\n```"
+	if got != want {
+		t.Fatalf("indented code block:\n got: %q\nwant: %q", got, want)
+	}
+}

@@ -119,7 +119,10 @@ func renderNodeTelegram(b *strings.Builder, n ast.Node, src []byte) {
 		writeCodeBlockTelegram(b, node.Lines(), src)
 		return
 	case *ast.List:
-		i := 1
+		i := node.Start
+		if i == 0 {
+			i = 1
+		}
 		for li := node.FirstChild(); li != nil; li = li.NextSibling() {
 			if node.IsOrdered() {
 				b.WriteString(escapeMDV2Text(strconv.Itoa(i)) + "\\. ")
