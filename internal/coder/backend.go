@@ -80,9 +80,14 @@ func (b *claudeBackend) parseOutput(stdout []byte) (string, bool, error) {
 }
 
 func (b *claudeBackend) configEnv(workspaceHome string) map[string]string {
-	env := forwardEnv("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
-	env["CLAUDE_CONFIG_DIR"] = filepath.Join(workspaceHome, ".claude")
-	return env
+	// Claude authenticates via the seeded CLAUDE_CONFIG_DIR/.credentials.json. Do
+	// NOT inject ANTHROPIC_API_KEY here: putting it in overrides would let a
+	// host-env key win over a same-named workspace secret (a precedence flip vs
+	// the pre-refactor behavior). The host env still reaches the subprocess via
+	// os.Environ(); workspace secrets still win via the gap-fill in buildEnv.
+	return map[string]string{
+		"CLAUDE_CONFIG_DIR": filepath.Join(workspaceHome, ".claude"),
+	}
 }
 
 func (b *claudeBackend) seedFiles(workspaceHome string) []seedSpec {
