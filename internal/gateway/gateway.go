@@ -65,6 +65,33 @@ type DeletableGateway interface {
 	DeleteMessage(platformUserID string, msgID int) error
 }
 
+// DispatchFunc is the callback an adapter invokes for each inbound message.
+type DispatchFunc func(ctx context.Context, msg Message)
+
+// AdapterFactory builds a Gateway from decrypted credentials. config is the
+// decrypted encrypted_config JSON ("" for single-token platforms).
+type AdapterFactory func(token, config, ownerWorkspaceID string, dispatch DispatchFunc) (Gateway, error)
+
+var (
+	adapterMu       sync.RWMutex
+	adapterRegistry = map[string]AdapterFactory{}
+)
+
+// RegisterAdapter registers a platform's factory. Call from an adapter's init()
+// or from main() during wiring.
+func RegisterAdapter(platform string, f AdapterFactory) {
+	adapterMu.Lock()
+	defer adapterMu.Unlock()
+	adapterRegistry[platform] = f
+}
+
+func adapterFactory(platform string) (AdapterFactory, bool) {
+	adapterMu.RLock()
+	defer adapterMu.RUnlock()
+	f, ok := adapterRegistry[platform]
+	return f, ok
+}
+
 // GatewayManager manages one Gateway per active platform_connection.
 // It is safe for concurrent use.
 type GatewayManager struct {
@@ -168,16 +195,19 @@ func (m *GatewayManager) start(ctx context.Context, conn *db.PlatformConnection)
 	if err != nil {
 		return fmt.Errorf("decrypt token: %w", err)
 	}
-
-	var gw Gateway
-	switch conn.Platform {
-	case "telegram":
-		gw, err = NewTelegram(token, conn.WorkspaceID, m)
-		if err != nil {
-			return fmt.Errorf("new telegram: %w", err)
+	var config string
+	if conn.EncryptedConfig != "" {
+		if config, err = DecryptToken(conn.EncryptedConfig, m.systemKey); err != nil {
+			return fmt.Errorf("decrypt config: %w", err)
 		}
-	default:
+	}
+	factory, ok := adapterFactory(conn.Platform)
+	if !ok {
 		return fmt.Errorf("unsupported platform: %s", conn.Platform)
+	}
+	gw, err := factory(token, config, conn.WorkspaceID, m.dispatchFunc())
+	if err != nil {
+		return fmt.Errorf("new %s: %w", conn.Platform, err)
 	}
 
 	gwCtx, cancel := context.WithCancel(ctx)
@@ -208,6 +238,12 @@ func (m *GatewayManager) stop(workspaceID, platform string) {
 		_ = gw.Stop()
 		delete(m.gateways, k)
 	}
+}
+
+// dispatchFunc returns m.dispatch bound as a DispatchFunc, for injection into
+// adapter factories.
+func (m *GatewayManager) dispatchFunc() DispatchFunc {
+	return func(ctx context.Context, msg Message) { m.dispatch(ctx, msg) }
 }
 
 // dispatch is called by adapters when a message arrives.

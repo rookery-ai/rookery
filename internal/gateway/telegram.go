@@ -14,11 +14,11 @@ import (
 type TelegramGateway struct {
 	bot              *telebot.Bot
 	ownerWorkspaceID string
-	manager          *GatewayManager
+	dispatch         DispatchFunc
 }
 
 // NewTelegram creates but does not start a Telegram bot adapter.
-func NewTelegram(token, ownerWorkspaceID string, manager *GatewayManager) (*TelegramGateway, error) {
+func NewTelegram(token, ownerWorkspaceID string, dispatch DispatchFunc) (*TelegramGateway, error) {
 	settings := telebot.Settings{
 		Token:  token,
 		Poller: &telebot.LongPoller{Timeout: 10 * time.Second},
@@ -30,7 +30,7 @@ func NewTelegram(token, ownerWorkspaceID string, manager *GatewayManager) (*Tele
 	return &TelegramGateway{
 		bot:              bot,
 		ownerWorkspaceID: ownerWorkspaceID,
-		manager:          manager,
+		dispatch:         dispatch,
 	}, nil
 }
 
@@ -156,7 +156,7 @@ func (g *TelegramGateway) handle(tc telebot.Context) error {
 	}
 
 	ctx := context.Background()
-	g.manager.dispatch(ctx, msg)
+	g.dispatch(ctx, msg)
 	return nil
 }
 
@@ -169,6 +169,12 @@ func init() {
 			"Open @BotFather in Telegram", "Send /newbot and follow the prompts",
 			"Copy the token it gives you and paste it here",
 		},
+	})
+}
+
+func init() {
+	RegisterAdapter("telegram", func(token, config, ws string, d DispatchFunc) (Gateway, error) {
+		return NewTelegram(token, ws, d)
 	})
 }
 
