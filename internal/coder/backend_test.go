@@ -91,3 +91,34 @@ func TestParseNDJSONEventsError(t *testing.T) {
 		t.Fatalf("expected error message text")
 	}
 }
+
+func TestParseNDJSONEventsErrorEmptyMessage(t *testing.T) {
+	text, isErr, err := parseNDJSONEvents([]byte(`{"type":"error","error":{}}`))
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !isErr {
+		t.Fatalf("expected isError=true for a type:error event with empty message")
+	}
+	if text == "" {
+		t.Fatalf("expected a non-empty placeholder message")
+	}
+}
+
+func TestParseNDJSONEventsErrorStatusOnly(t *testing.T) {
+	text, isErr, err := parseNDJSONEvents([]byte(`{"type":"error","error":{"data":{"statusCode":500}}}`))
+	if err != nil || !isErr {
+		t.Fatalf("got (%q,%v,%v), want (non-empty,true,nil)", text, isErr, err)
+	}
+	if strings.HasPrefix(text, " ") || text == "" {
+		t.Fatalf("status-only message must not have a leading space: %q", text)
+	}
+}
+
+func TestParseNDJSONEventsDeltaAccumulation(t *testing.T) {
+	out := []byte(`{"type":"text","delta":"PO"}` + "\n" + `{"type":"text","delta":"NG"}` + "\n")
+	text, isErr, err := parseNDJSONEvents(out)
+	if err != nil || isErr || text != "PONG" {
+		t.Fatalf("got (%q,%v,%v), want (PONG,false,nil)", text, isErr, err)
+	}
+}

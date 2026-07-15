@@ -262,6 +262,7 @@ func parseNDJSONEvents(stdout []byte) (string, bool, error) {
 	lines := bytes.Split(bytes.TrimSpace(stdout), []byte("\n"))
 	var text strings.Builder
 	var errMsg string
+	var sawError bool
 	for _, line := range lines {
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
@@ -273,12 +274,17 @@ func parseNDJSONEvents(stdout []byte) (string, bool, error) {
 		}
 		switch {
 		case ev.Type == "error":
+			sawError = true
 			m := ev.Error.Data.Message
 			if m == "" {
 				m = ev.Error.Message
 			}
 			if ev.Error.Data.StatusCode != 0 {
-				m = fmt.Sprintf("%s (status %d)", m, ev.Error.Data.StatusCode)
+				if m == "" {
+					m = fmt.Sprintf("status %d", ev.Error.Data.StatusCode)
+				} else {
+					m = fmt.Sprintf("%s (status %d)", m, ev.Error.Data.StatusCode)
+				}
 			}
 			errMsg = m
 		case ev.Text != "":
@@ -287,7 +293,10 @@ func parseNDJSONEvents(stdout []byte) (string, bool, error) {
 			text.WriteString(ev.Delta)
 		}
 	}
-	if errMsg != "" {
+	if sawError {
+		if errMsg == "" {
+			errMsg = "coder reported an error with no message"
+		}
 		return errMsg, true, nil
 	}
 	if text.Len() == 0 {
