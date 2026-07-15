@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ilijad1/simple-agents/internal/gateway/render"
 	telebot "gopkg.in/telebot.v4"
 )
 
@@ -71,10 +72,11 @@ func (g *TelegramGateway) Send(platformUserID, text string) error {
 		return fmt.Errorf("invalid telegram chat id %q: %w", platformUserID, err)
 	}
 	chat := &telebot.Chat{ID: chatID}
-	_, err = g.bot.Send(chat, text, telebot.ModeMarkdownV2)
+	rendered := render.For("telegram").Render(text)
+	_, err = g.bot.Send(chat, rendered, telebot.ModeMarkdownV2)
 	if err != nil {
 		// Fall back to plain text if MarkdownV2 parsing fails.
-		_, err = g.bot.Send(chat, text)
+		_, err = g.bot.Send(chat, text) // plain-text fallback uses the neutral source
 	}
 	return err
 }
@@ -95,9 +97,10 @@ func (g *TelegramGateway) SendMessageGetID(platformUserID, text string) (int, er
 		return 0, fmt.Errorf("invalid telegram chat id %q: %w", platformUserID, err)
 	}
 	chat := &telebot.Chat{ID: chatID}
-	sent, err := g.bot.Send(chat, text, telebot.ModeMarkdownV2)
+	rendered := render.For("telegram").Render(text)
+	sent, err := g.bot.Send(chat, rendered, telebot.ModeMarkdownV2)
 	if err != nil {
-		sent, err = g.bot.Send(chat, text)
+		sent, err = g.bot.Send(chat, text) // plain-text fallback uses the neutral source
 	}
 	if err != nil {
 		return 0, err
@@ -121,10 +124,11 @@ func (g *TelegramGateway) EditMessage(platformUserID string, msgID int, text str
 		return fmt.Errorf("invalid telegram chat id %q: %w", platformUserID, err)
 	}
 	msg := &telebot.Message{ID: msgID, Chat: &telebot.Chat{ID: chatID}}
-	_, err = g.bot.Edit(msg, text, telebot.ModeMarkdownV2)
+	rendered := render.For("telegram").Render(text)
+	_, err = g.bot.Edit(msg, rendered, telebot.ModeMarkdownV2)
 	if err != nil {
 		// Fall back to plain text if markdown parsing fails on the response.
-		_, err = g.bot.Edit(msg, text)
+		_, err = g.bot.Edit(msg, text) // plain-text fallback uses the neutral source
 	}
 	return err
 }

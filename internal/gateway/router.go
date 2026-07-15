@@ -140,7 +140,7 @@ func (r *Router) handleStart(ctx context.Context, msg Message, send func(string)
 		return nil
 	}
 
-	send(fmt.Sprintf("Hi *%s*\\! Your Telegram account is now linked\\. Send /help to see what you can do\\.", escapeMarkdown(w.Name)))
+	send(fmt.Sprintf("Hi **%s**! Your Telegram account is now linked. Send /help to see what you can do.", w.Name))
 	return nil
 }
 
@@ -162,33 +162,33 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 			return err
 		}
 		if len(agents) == 0 {
-			send("You have no agents yet\\. Use /agent create \\<name\\> to build one\\.")
+			send("You have no agents yet. Use /agent create <name> to build one.")
 			return nil
 		}
 		var b strings.Builder
-		b.WriteString("*Your agents:*\n")
+		b.WriteString("**Your agents:**\n")
 		for _, a := range agents {
 			status := "●"
 			if !a.Active {
 				status = "○"
 			}
-			b.WriteString(fmt.Sprintf("%s *%s*", status, escapeMarkdown(a.Name)))
+			b.WriteString(fmt.Sprintf("%s **%s**", status, a.Name))
 			if a.Description != "" {
-				b.WriteString(" — " + escapeMarkdown(a.Description))
+				b.WriteString(" — " + a.Description)
 			}
 			b.WriteByte('\n')
 		}
-		b.WriteString("\n_/run \\<name\\> to run · /agent create \\<name\\> to build a new one_")
+		b.WriteString("\n_/run <name> to run · /agent create <name> to build a new one_")
 		send(b.String())
 
 	case "create":
 		if r.designFlow == nil {
-			send("Agent creation is not yet available\\.")
+			send("Agent creation is not yet available.")
 			return nil
 		}
 		name := strings.TrimSpace(rest)
 		if name == "" {
-			send("Usage: /agent create \\<name\\>")
+			send("Usage: /agent create <name>")
 			return nil
 		}
 		// If the user has a resumable draft, offer to continue it instead of
@@ -196,7 +196,7 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 		if draft := r.designFlow.HasDraft(msg.WorkspaceID); draft != nil {
 			response, err := r.designFlow.OfferDraftResume(msg.WorkspaceID, name, draft)
 			if err != nil {
-				send(escapeMarkdown(err.Error()))
+				send(err.Error())
 				return nil
 			}
 			send(response)
@@ -204,36 +204,36 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 		}
 		response, err := r.designFlow.Start(msg.WorkspaceID, name)
 		if err != nil {
-			send(escapeMarkdown(err.Error()))
+			send(err.Error())
 			return nil
 		}
 		send(response)
 
 	case "edit":
 		if r.designFlow == nil {
-			send("Agent editing is not yet available\\.")
+			send("Agent editing is not yet available.")
 			return nil
 		}
 		name := strings.TrimSpace(rest)
 		if name == "" {
-			send("Usage: /agent edit \\<name\\>")
+			send("Usage: /agent edit <name>")
 			return nil
 		}
 		agent, err := r.db.GetAgentByName(msg.WorkspaceID, name)
 		if err != nil {
-			send("Agent `" + escapeMarkdown(name) + "` not found\\.")
+			send("Agent `" + name + "` not found.")
 			return nil
 		}
 		response, err := r.designFlow.StartEdit(msg.WorkspaceID, agent.ID)
 		if err != nil {
-			send(escapeMarkdown(err.Error()))
+			send(err.Error())
 			return nil
 		}
 		send(response)
 
 	case "cancel":
 		if r.designFlow == nil {
-			send("Agent design is not yet available\\.")
+			send("Agent design is not yet available.")
 			return nil
 		}
 		// Stop any in-flight generation / drop the active session now. The draft
@@ -243,7 +243,7 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 
 		draft := r.designFlow.HasDraft(msg.WorkspaceID)
 		if draft == nil {
-			send("Agent design session cancelled\\. No draft to save\\.")
+			send("Agent design session cancelled. No draft to save.")
 			return nil
 		}
 		// Ask the user to choose. The reply is handled in handleText (pendingCancel).
@@ -251,12 +251,12 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 		r.pendingCancel[msg.WorkspaceID] = true
 		r.mu.Unlock()
 		send(fmt.Sprintf(
-			"Agent design cancelled\\. You have an unfinished draft: *%s*\n\nReply `save` to keep it as a draft you can resume later, or `discard` to delete it\\.",
-			escapeMarkdown(draft.AgentName),
+			"Agent design cancelled. You have an unfinished draft: **%s**\n\nReply `save` to keep it as a draft you can resume later, or `discard` to delete it.",
+			draft.AgentName,
 		))
 
 	default:
-		send("Usage: /agent list · /agent create \\<name\\> · /agent edit \\<name\\> · /agent cancel")
+		send("Usage: /agent list · /agent create <name> · /agent edit <name> · /agent cancel")
 	}
 	return nil
 }
@@ -264,16 +264,16 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 func (r *Router) handleRun(ctx context.Context, msg Message, arg string, send func(string)) error {
 	name := strings.TrimSpace(arg)
 	if name == "" {
-		send("Usage: /run \\<agent\\_name\\>")
+		send("Usage: /run <agent_name>")
 		return nil
 	}
 
 	if r.onAgentRun == nil {
-		send("Agent execution is not yet available\\. Check back soon\\!")
+		send("Agent execution is not yet available. Check back soon!")
 		return nil
 	}
 
-	send(fmt.Sprintf("Running agent *%s*\\.\\.\\.", escapeMarkdown(name)))
+	send(fmt.Sprintf("Running agent **%s**...", name))
 	return r.onAgentRun(ctx, msg.WorkspaceID, name, send)
 }
 
@@ -295,21 +295,21 @@ func (r *Router) handleSecret(ctx context.Context, msg Message, arg string, send
 			return err
 		}
 		if len(names) == 0 {
-			send("You have no secrets stored yet\\. Add them at the web dashboard → Secrets\\.")
+			send("You have no secrets stored yet. Add them at the web dashboard → Secrets.")
 			return nil
 		}
 		var b strings.Builder
-		b.WriteString("*Stored secrets:*\n")
+		b.WriteString("**Stored secrets:**\n")
 		for _, n := range names {
-			b.WriteString("• `" + escapeMarkdown(n) + "`\n")
+			b.WriteString("• `" + n + "`\n")
 		}
-		b.WriteString("\n_/secret show \\<name\\> · /secret delete \\<name\\>_")
+		b.WriteString("\n_/secret show <name> · /secret delete <name>_")
 		send(b.String())
 
 	case "show", "get":
 		name := strings.TrimSpace(rest)
 		if name == "" {
-			send("Usage: /secret show \\<name\\>")
+			send("Usage: /secret show <name>")
 			return nil
 		}
 		names, _ := r.db.ListSecretNames(msg.WorkspaceID)
@@ -321,18 +321,18 @@ func (r *Router) handleSecret(ctx context.Context, msg Message, arg string, send
 			}
 		}
 		if !found {
-			send("Secret `" + escapeMarkdown(name) + "` not found\\.")
+			send("Secret `" + name + "` not found.")
 			return nil
 		}
 		r.mu.Lock()
 		r.challenges[msg.WorkspaceID] = &secretChallenge{action: "show", name: name}
 		r.mu.Unlock()
-		send("🔐 Enter your master password to reveal `" + escapeMarkdown(name) + "`:\n\n_⚠️ The value will appear in this chat\\. Telegram stores chat history\\._")
+		send("🔐 Enter your master password to reveal `" + name + "`:\n\n_⚠️ The value will appear in this chat. Telegram stores chat history._")
 
 	case "delete":
 		name := strings.TrimSpace(rest)
 		if name == "" {
-			send("Usage: /secret delete \\<name\\>")
+			send("Usage: /secret delete <name>")
 			return nil
 		}
 		names, _ := r.db.ListSecretNames(msg.WorkspaceID)
@@ -344,16 +344,16 @@ func (r *Router) handleSecret(ctx context.Context, msg Message, arg string, send
 			}
 		}
 		if !found {
-			send("Secret `" + escapeMarkdown(name) + "` not found\\.")
+			send("Secret `" + name + "` not found.")
 			return nil
 		}
 		r.mu.Lock()
 		r.challenges[msg.WorkspaceID] = &secretChallenge{action: "delete", name: name}
 		r.mu.Unlock()
-		send("🔐 Enter your master password to confirm deletion of `" + escapeMarkdown(name) + "`:")
+		send("🔐 Enter your master password to confirm deletion of `" + name + "`:")
 
 	default:
-		send("Usage: /secret list · /secret show \\<name\\> · /secret delete \\<name\\>\n\n_To add secrets, use the web dashboard → Secrets_")
+		send("Usage: /secret list · /secret show <name> · /secret delete <name>\n\n_To add secrets, use the web dashboard → Secrets_")
 	}
 	return nil
 }
@@ -368,17 +368,17 @@ func (r *Router) resolveMasterPwChallenge(ctx context.Context, msg Message, ch *
 
 	masterPw := strings.TrimSpace(msg.Text)
 	if masterPw == "" {
-		send("Master password cannot be empty\\. Challenge cancelled\\.")
+		send("Master password cannot be empty. Challenge cancelled.")
 		return nil
 	}
 
 	u, err := r.db.GetWorkspaceByID(msg.WorkspaceID)
 	if err != nil {
-		send("Error: could not load user\\.")
+		send("Error: could not load user.")
 		return err
 	}
 	if u.SecretsSalt == "" {
-		send("Account setup incomplete — no master password configured\\.")
+		send("Account setup incomplete — no master password configured.")
 		return nil
 	}
 
@@ -388,31 +388,31 @@ func (r *Router) resolveMasterPwChallenge(ctx context.Context, msg Message, ch *
 	case "show":
 		val, err := svc.Get(ctx, ch.name)
 		if errors.Is(err, secrets.ErrWrongPassword) {
-			send("❌ Wrong master password\\.")
+			send("❌ Wrong master password.")
 			return nil
 		}
 		if errors.Is(err, secrets.ErrNotFound) {
-			send("Secret `" + escapeMarkdown(ch.name) + "` not found\\.")
+			send("Secret `" + ch.name + "` not found.")
 			return nil
 		}
 		if err != nil {
-			send("Error retrieving secret: " + escapeMarkdown(err.Error()))
+			send("Error retrieving secret: " + err.Error())
 			return nil
 		}
-		sendAutoDelete("🔑 `" + escapeMarkdown(ch.name) + "`:\n`" + escapeMarkdown(val) + "`\n\n_⏱ This message will be deleted in 30 seconds_")
+		sendAutoDelete("🔑 `" + ch.name + "`:\n`" + val + "`\n\n_⏱ This message will be deleted in 30 seconds_")
 
 	case "delete":
 		if _, err := svc.Get(ctx, ch.name); err != nil {
 			if errors.Is(err, secrets.ErrWrongPassword) {
-				send("❌ Wrong master password — secret not deleted\\.")
+				send("❌ Wrong master password — secret not deleted.")
 				return nil
 			}
 		}
 		if err := r.db.DeleteSecret(msg.WorkspaceID, ch.name); err != nil {
-			send("Error deleting secret: " + escapeMarkdown(err.Error()))
+			send("Error deleting secret: " + err.Error())
 			return nil
 		}
-		send("🗑 Secret `" + escapeMarkdown(ch.name) + "` deleted\\.")
+		send("🗑 Secret `" + ch.name + "` deleted.")
 	}
 	return nil
 }
@@ -431,16 +431,16 @@ func (r *Router) resolveCancelChoice(msg Message, send func(string)) error {
 		}
 		_ = r.designFlow.DismissDraft(msg.WorkspaceID)
 		if name != "" {
-			send(fmt.Sprintf("🗑 Draft *%s* discarded\\.", escapeMarkdown(name)))
+			send(fmt.Sprintf("🗑 Draft **%s** discarded.", name))
 		} else {
-			send("🗑 Draft discarded\\.")
+			send("🗑 Draft discarded.")
 		}
 		return nil
 	}
 
 	// "save" (or anything else) → keep the draft. It stays resumable via
 	// /agent create <name> (which will offer to resume) or the web dashboard.
-	send("✅ Draft saved\\. Use `/agent create \\<name\\>` to resume it later\\.")
+	send("✅ Draft saved. Use `/agent create <name>` to resume it later.")
 	return nil
 }
 
@@ -454,7 +454,7 @@ func (r *Router) resolveCancelChoice(msg Message, send func(string)) error {
 func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send func(string)) error {
 	arg = strings.TrimSpace(arg)
 	if arg == "" {
-		send("Usage: /remind \\<when\\> to \\<message\\>\nExamples:\n• /remind in 10 minutes to check the oven\n• /remind tomorrow at 3pm to call doctor\n• /remind next Tuesday to pay bills\n• /remind next Friday evening write note about bitcoin price\n• /remind 30m old format still works")
+		send("Usage: /remind <when> to <message>\nExamples:\n• /remind in 10 minutes to check the oven\n• /remind tomorrow at 3pm to call doctor\n• /remind next Tuesday to pay bills\n• /remind next Friday evening write note about bitcoin price\n• /remind 30m old format still works")
 		return nil
 	}
 
@@ -500,7 +500,7 @@ func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send
 				r.mu.Lock()
 				r.pendingReminderMsg[msg.WorkspaceID] = message
 				r.mu.Unlock()
-				send(fmt.Sprintf("⏰ When should I remind you about *%s*?\nReply with a time, e.g\\. 'in 10 minutes', 'tomorrow at 9am', 'next Friday evening'", escapeMarkdown(message)))
+				send(fmt.Sprintf("⏰ When should I remind you about **%s**?\nReply with a time, e.g. 'in 10 minutes', 'tomorrow at 9am', 'next Friday evening'", message))
 				return nil
 			}
 		}
@@ -520,12 +520,12 @@ func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send
 	}
 
 	if remindAt.IsZero() {
-		send("Couldn't understand that time\\. Try:\n• /remind in 10 minutes to check oven\n• /remind next Tuesday to call doctor\n• /remind next Friday evening write note about bitcoin\n• /remind 30m old format\n• /remind to write a note _(I'll ask when)_")
+		send("Couldn't understand that time. Try:\n• /remind in 10 minutes to check oven\n• /remind next Tuesday to call doctor\n• /remind next Friday evening write note about bitcoin\n• /remind 30m old format\n• /remind to write a note _(I'll ask when)_")
 		return nil
 	}
 
 	if message == "" {
-		send("Please include a reminder message\\. Example: /remind in 10 minutes to check the oven")
+		send("Please include a reminder message. Example: /remind in 10 minutes to check the oven")
 		return nil
 	}
 
@@ -543,7 +543,7 @@ func (r *Router) createReminder(ctx context.Context, workspaceID, message string
 		return fmt.Errorf("create reminder: %w", err)
 	}
 	when := remindAt.Format("Jan 2 at 15:04")
-	send(fmt.Sprintf("⏰ Reminder set for *%s*: _%s_", escapeMarkdown(when), escapeMarkdown(message)))
+	send(fmt.Sprintf("⏰ Reminder set for **%s**: _%s_", when, message))
 	return nil
 }
 
@@ -570,7 +570,7 @@ func (r *Router) resolvePendingReminder(ctx context.Context, msg Message, remind
 	r.mu.Lock()
 	r.pendingReminderMsg[msg.WorkspaceID] = reminderMsg
 	r.mu.Unlock()
-	send("Couldn't understand that time\\. Please try again, e\\.g\\. 'tomorrow at 9am' or 'next Friday'")
+	send("Couldn't understand that time. Please try again, e.g. 'tomorrow at 9am' or 'next Friday'")
 	return nil
 }
 
@@ -672,7 +672,7 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 		}
 		response, _, _, err := r.designFlow.Step(ctx, msg.WorkspaceID, msg.Text)
 		if err != nil {
-			send("Design session error: " + escapeMarkdown(err.Error()))
+			send("Design session error: " + err.Error())
 			return nil
 		}
 		send(response)
@@ -680,7 +680,7 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 	}
 
 	if r.onText == nil {
-		send("Send /agent create \\<name\\> to build an agent, or /help for all commands\\.")
+		send("Send /agent create <name> to build an agent, or /help for all commands.")
 		return nil
 	}
 
@@ -743,7 +743,7 @@ func (r *Router) handleChat(ctx context.Context, msg Message, arg string, send f
 		if label == "" {
 			label = c.ID[:8]
 		}
-		send(fmt.Sprintf("💬 Chat *%s* started \\(`%s`\\)\\. Send /chat stop to end it\\.", escapeMarkdown(label), escapeMarkdown(c.ID[:8])))
+		send(fmt.Sprintf("💬 Chat **%s** started (`%s`). Send /chat stop to end it.", label, c.ID[:8]))
 
 	case "list":
 		chats, err := r.db.ListChats(msg.WorkspaceID)
@@ -751,11 +751,11 @@ func (r *Router) handleChat(ctx context.Context, msg Message, arg string, send f
 			return err
 		}
 		if len(chats) == 0 {
-			send("No chats yet\\. Use /chat start to begin one\\.")
+			send("No chats yet. Use /chat start to begin one.")
 			return nil
 		}
 		var b strings.Builder
-		b.WriteString("*Chats:*\n")
+		b.WriteString("**Chats:**\n")
 		for _, c := range chats {
 			label := c.Name
 			if label == "" {
@@ -765,13 +765,13 @@ func (r *Router) handleChat(ctx context.Context, msg Message, arg string, send f
 			if !c.Active {
 				status = "⚫"
 			}
-			b.WriteString(fmt.Sprintf("%s *%s* `%s` — %s\n",
+			b.WriteString(fmt.Sprintf("%s **%s** `%s` — %s\n",
 				status,
-				escapeMarkdown(label),
-				escapeMarkdown(c.ID[:8]),
-				escapeMarkdown(c.LastSeen.Format("Jan 2 15:04"))))
+				label,
+				c.ID[:8],
+				c.LastSeen.Format("Jan 2 15:04")))
 		}
-		b.WriteString("\n_/chat resume \\<id\\> · /chat delete \\<id\\> · /chat stop_")
+		b.WriteString("\n_/chat resume <id> · /chat delete <id> · /chat stop_")
 		send(b.String())
 
 	case "stop":
@@ -781,19 +781,19 @@ func (r *Router) handleChat(ctx context.Context, msg Message, arg string, send f
 			if label == "" {
 				label = cur.ID[:8]
 			}
-			send(fmt.Sprintf("Chat *%s* stopped\\.", escapeMarkdown(label)))
+			send(fmt.Sprintf("Chat **%s** stopped.", label))
 		} else {
-			send("No active chat to stop\\.")
+			send("No active chat to stop.")
 		}
 
 	case "resume":
 		if rest == "" {
-			send("Usage: /chat resume \\<id\\>")
+			send("Usage: /chat resume <id>")
 			return nil
 		}
 		c, err := r.db.FindChatByPrefix(msg.WorkspaceID, rest)
 		if err != nil {
-			send("Chat not found\\. Use /chat list to see your chats\\.")
+			send("Chat not found. Use /chat list to see your chats.")
 			return nil
 		}
 		// Stop any currently active chat first.
@@ -808,16 +808,16 @@ func (r *Router) handleChat(ctx context.Context, msg Message, arg string, send f
 			label = c.ID[:8]
 		}
 		history, _ := r.db.ListChatMessages(c.ID)
-		send(fmt.Sprintf("💬 Chat *%s* resumed \\(%d messages\\)\\. Continue chatting\\.", escapeMarkdown(label), len(history)))
+		send(fmt.Sprintf("💬 Chat **%s** resumed (%d messages). Continue chatting.", label, len(history)))
 
 	case "delete":
 		if rest == "" {
-			send("Usage: /chat delete \\<id\\>")
+			send("Usage: /chat delete <id>")
 			return nil
 		}
 		c, err := r.db.FindChatByPrefix(msg.WorkspaceID, rest)
 		if err != nil {
-			send("Chat not found\\. Use /chat list to see your chats\\.")
+			send("Chat not found. Use /chat list to see your chats.")
 			return nil
 		}
 		label := c.Name
@@ -827,17 +827,17 @@ func (r *Router) handleChat(ctx context.Context, msg Message, arg string, send f
 		if err := r.db.DeleteChat(c.ID); err != nil {
 			return fmt.Errorf("delete chat: %w", err)
 		}
-		send(fmt.Sprintf("🗑 Chat *%s* deleted\\.", escapeMarkdown(label)))
+		send(fmt.Sprintf("🗑 Chat **%s** deleted.", label))
 
 	default:
-		send("Usage: /chat start \\[name\\] · /chat list · /chat stop · /chat resume \\<id\\> · /chat delete \\<id\\>")
+		send("Usage: /chat start [name] · /chat list · /chat stop · /chat resume <id> · /chat delete <id>")
 	}
 	return nil
 }
 
 func (r *Router) handleMemory(ctx context.Context, msg Message, arg string, send func(string)) error {
 	if r.memory == nil {
-		send("Memory is not available\\.")
+		send("Memory is not available.")
 		return nil
 	}
 
@@ -855,18 +855,18 @@ func (r *Router) handleMemory(ctx context.Context, msg Message, arg string, send
 	case "add":
 		text := strings.TrimSpace(rest)
 		if text == "" {
-			send("Usage: /memory add \\<text\\>")
+			send("Usage: /memory add <text>")
 			return nil
 		}
 		if _, err := r.memory.Append(msg.WorkspaceID, text); err != nil {
 			return fmt.Errorf("append memory: %w", err)
 		}
-		send("✅ Saved: _" + escapeMarkdown(text) + "_")
+		send("✅ Saved: _" + text + "_")
 
 	case "delete":
 		n, err := strconv.Atoi(strings.TrimSpace(rest))
 		if err != nil || n < 1 {
-			send("Usage: /memory delete \\<number\\> — use /memory list to see numbers")
+			send("Usage: /memory delete <number> — use /memory list to see numbers")
 			return nil
 		}
 		entries, err := r.memory.List(msg.WorkspaceID)
@@ -874,13 +874,13 @@ func (r *Router) handleMemory(ctx context.Context, msg Message, arg string, send
 			return fmt.Errorf("list memory: %w", err)
 		}
 		if n > len(entries) {
-			send(fmt.Sprintf("No entry \\#%d\\. You have %d entries\\.", n, len(entries)))
+			send(fmt.Sprintf("No entry #%d. You have %d entries.", n, len(entries)))
 			return nil
 		}
 		if err := r.memory.Delete(msg.WorkspaceID, entries[n-1].ID); err != nil {
 			return fmt.Errorf("delete memory: %w", err)
 		}
-		send(fmt.Sprintf("🗑 Deleted entry \\#%d: _%s_", n, escapeMarkdown(entries[n-1].Content)))
+		send(fmt.Sprintf("🗑 Deleted entry #%d: _%s_", n, entries[n-1].Content))
 
 	default: // "list" or ""
 		entries, err := r.memory.List(msg.WorkspaceID)
@@ -888,18 +888,18 @@ func (r *Router) handleMemory(ctx context.Context, msg Message, arg string, send
 			return fmt.Errorf("list memory: %w", err)
 		}
 		if len(entries) == 0 {
-			send("No memory entries yet\\. Use /memory add \\<text\\> to save one\\.")
+			send("No memory entries yet. Use /memory add <text> to save one.")
 			return nil
 		}
 		var b strings.Builder
-		b.WriteString("*Memory entries:*\n")
+		b.WriteString("**Memory entries:**\n")
 		for i, e := range entries {
-			b.WriteString(fmt.Sprintf("%d\\. _%s_ — `%s`\n",
+			b.WriteString(fmt.Sprintf("%d. _%s_ — `%s`\n",
 				i+1,
-				escapeMarkdown(e.Content),
-				escapeMarkdown(e.CreatedAt.Format("Jan 2"))))
+				e.Content,
+				e.CreatedAt.Format("Jan 2")))
 		}
-		b.WriteString("\n_/memory add \\<text\\> · /memory delete \\<n\\>_")
+		b.WriteString("\n_/memory add <text> · /memory delete <n>_")
 		send(b.String())
 	}
 	return nil
@@ -908,25 +908,25 @@ func (r *Router) handleMemory(ctx context.Context, msg Message, arg string, send
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func helpText() string {
-	return `*Simple Agents — Commands*
+	return `**Simple Agents — Commands**
 
 /agent list — list your agents
-/agent create \<name\> — build a new agent with AI wizard
-/agent edit \<name\> — change an existing agent with AI wizard
+/agent create <name> — build a new agent with AI wizard
+/agent edit <name> — change an existing agent with AI wizard
 /agent cancel — cancel active agent creation or edit
-/run \<name\> — run an agent
+/run <name> — run an agent
 /secret list — list stored secret names
-/secret show \<name\> — reveal a secret value \(requires master password\)
-/secret delete \<name\> — delete a secret \(requires master password\)
-/remind \<when\> to \<message\> — set a reminder \(e\.g\. /remind in 10 minutes to check oven\)
-/chat start \[name\] — start a chat \(saves history\)
+/secret show <name> — reveal a secret value (requires master password)
+/secret delete <name> — delete a secret (requires master password)
+/remind <when> to <message> — set a reminder (e.g. /remind in 10 minutes to check oven)
+/chat start [name] — start a chat (saves history)
 /chat list — list all chats with IDs
 /chat stop — stop current chat
-/chat resume \<id\> — resume a previous chat
-/chat delete \<id\> — delete a chat and its history
+/chat resume <id> — resume a previous chat
+/chat delete <id> — delete a chat and its history
 /memory list — list saved memory entries
-/memory add \<text\> — save a new memory entry
-/memory delete \<n\> — delete entry by number
+/memory add <text> — save a new memory entry
+/memory delete <n> — delete entry by number
 /help — this message
 
 _Add secrets at the web dashboard — no master password needed to add_`
@@ -942,29 +942,4 @@ func isApprovalText(text string) bool {
 		return true
 	}
 	return false
-}
-
-// escapeMarkdown escapes special characters for Telegram MarkdownV2.
-func escapeMarkdown(s string) string {
-	replacer := strings.NewReplacer(
-		"_", "\\_",
-		"*", "\\*",
-		"[", "\\[",
-		"]", "\\]",
-		"(", "\\(",
-		")", "\\)",
-		"~", "\\~",
-		"`", "\\`",
-		">", "\\>",
-		"#", "\\#",
-		"+", "\\+",
-		"-", "\\-",
-		"=", "\\=",
-		"|", "\\|",
-		"{", "\\{",
-		"}", "\\}",
-		".", "\\.",
-		"!", "\\!",
-	)
-	return replacer.Replace(s)
 }
