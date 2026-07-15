@@ -37,9 +37,10 @@ func (s *Server) showSetup(c echo.Context) error {
 	}
 	switch step {
 	case 3:
+		secretNames, _ := s.db.ListSecretNames(w.ID)
 		sd.DetectedCoders = coder.DetectInstalled()
 		sd.APIProviders = coder.APIProviders()
-		sd.CoderCatalogJSON = s.coderCatalogJSON()
+		sd.CoderCatalogJSON = s.coderCatalogJSON(secretNames)
 	case 7:
 		sd.BotUsername, _ = s.db.GetSetting(w.ID, "telegram_bot_username")
 	}
@@ -156,12 +157,13 @@ func (s *Server) handleSetupConnector(c echo.Context, w *db.Workspace) error {
 // error, keeping the provider catalog + detected coders populated so the form
 // stays usable after a failed submit.
 func (s *Server) renderSetupCoderErr(c echo.Context, w *db.Workspace, msg string) error {
+	secretNames, _ := s.db.ListSecretNames(w.ID)
 	sd := &setupData{
 		pageData:         s.page(c, "Set Up Workspace"),
 		Step:             3,
 		DetectedCoders:   coder.DetectInstalled(),
 		APIProviders:     coder.APIProviders(),
-		CoderCatalogJSON: s.coderCatalogJSON(),
+		CoderCatalogJSON: s.coderCatalogJSON(secretNames),
 	}
 	sd.Error = msg
 	return c.Render(http.StatusBadRequest, "auth/setup.html", sd)

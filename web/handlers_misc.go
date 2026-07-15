@@ -394,7 +394,7 @@ func (s *Server) buildSettingsData(p *pageData, w *db.Workspace) *settingsPageDa
 		DetectedCoders:   coder.DetectInstalled(),
 		APIProviders:     coder.APIProviders(),
 		SecretNames:      secretNames,
-		CoderCatalogJSON: s.coderCatalogJSON(),
+		CoderCatalogJSON: s.coderCatalogJSON(secretNames),
 	}
 }
 
@@ -402,7 +402,14 @@ func (s *Server) buildSettingsData(p *pageData, w *db.Workspace) *settingsPageDa
 // base URL, model placeholder, docs URL, requiresKey, custom) into a JSON array
 // for the coder-form driver JS. Shared by the settings page and the setup wizard
 // so the catalog is built in exactly one place.
-func (s *Server) coderCatalogJSON() template.JS {
+// coderCatalogJSON marshals the provider catalog for the coder-form JS. secretNames
+// is the workspace's existing secret names — used to flag providers that already have
+// a stored CODER_KEY_<PROVIDER> key so the form can say "already set, paste to override".
+func (s *Server) coderCatalogJSON(secretNames []string) template.JS {
+	have := make(map[string]bool, len(secretNames))
+	for _, n := range secretNames {
+		have[n] = true
+	}
 	type provJS struct {
 		Name        string `json:"name"`
 		Base        string `json:"base"`
@@ -410,6 +417,7 @@ func (s *Server) coderCatalogJSON() template.JS {
 		Docs        string `json:"docs"`
 		RequiresKey bool   `json:"requiresKey"`
 		Custom      bool   `json:"custom"`
+		HasKey      bool   `json:"hasKey"`
 	}
 	cat := coder.APIProviders()
 	pjs := make([]provJS, 0, len(cat))
@@ -417,6 +425,7 @@ func (s *Server) coderCatalogJSON() template.JS {
 		pjs = append(pjs, provJS{
 			Name: p.Name, Base: llm.DefaultBaseURL(p.Name), Model: p.ModelPlaceholder,
 			Docs: p.DocsURL, RequiresKey: p.RequiresKey, Custom: p.Custom,
+			HasKey: have[coder.CoderKeySecretName(p.Name)],
 		})
 	}
 	catJSON, _ := json.Marshal(pjs)

@@ -95,6 +95,7 @@
             <div class="form-control" id="setup_coder_key_wrap">
               <label class="label pb-1"><span class="label-text font-medium">API key</span></label>
               <input type="password" name="coder_api_key" id="setup_coder_key" autocomplete="off" class="input input-bordered w-full" placeholder="paste your provider API key">
+              <label class="label pt-1" id="setup_coder_key_status" style="display:none"><span class="label-text-alt text-success">✓ An API key is already set for this provider — paste a new one to override, or leave blank to keep it.</span></label>
               <label class="label pt-1"><span class="label-text-alt text-base-content/30">Stored securely as a secret. <a id="setup_coder_docs" class="link" href="#" target="_blank" rel="noopener">Get a key ↗</a></span></label>
             </div>
             <details id="setup_coder_advanced"><summary class="text-sm cursor-pointer text-base-content/60">Advanced</summary>
@@ -139,6 +140,8 @@
             const p=(SETUP_CATALOG||[]).find(x=>x.name===(sel&&sel.value)); if(!p) return;
             const m=document.getElementById('setup_coder_model'); if(m&&p.model)m.placeholder='e.g. '+p.model;
             const kw=document.getElementById('setup_coder_key_wrap'); if(kw)kw.style.display=p.requiresKey?'':'none';
+            const ki=document.getElementById('setup_coder_key'); if(ki)ki.placeholder=p.hasKey?'leave blank to keep current key':'paste your provider API key';
+            const ks=document.getElementById('setup_coder_key_status'); if(ks)ks.style.display=p.hasKey?'':'none';
             const d=document.getElementById('setup_coder_docs'); if(d){d.href=p.docs||'#';d.style.display=p.docs?'':'none';}
             const b=document.getElementById('setup_coder_base'); if(b&&!b.value&&p.base)b.placeholder=p.base;
             const a=document.getElementById('setup_coder_advanced'); if(a)a.open=!!p.custom;

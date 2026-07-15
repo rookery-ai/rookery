@@ -78,7 +78,8 @@
           <div class="form-control" id="coder_key_wrap">
             <label class="label pb-1"><span class="label-text font-medium">API key</span></label>
             <input type="password" name="coder_api_key" id="coder_api_key" class="input input-bordered w-full"
-              autocomplete="off" placeholder="{{if .Workspace.CoderAPIKeySecret}}leave blank to keep current key{{else}}paste your provider API key{{end}}">
+              autocomplete="off" placeholder="paste your provider API key">
+            <label class="label pt-1" id="coder_key_status" style="display:none"><span class="label-text-alt text-success">✓ An API key is already set for this provider — paste a new one to override, or leave blank to keep it.</span></label>
             <label class="label pt-1"><span class="label-text-alt text-base-content/30">Stored securely as a secret automatically. <a id="coder_docs" class="link" href="#" target="_blank" rel="noopener">Get a key ↗</a></span></label>
           </div>
           <details class="mt-1" id="coder_advanced">
@@ -119,6 +120,10 @@
       const docs = document.getElementById('coder_docs');
       if (model && p.model) model.placeholder = 'e.g. ' + p.model;
       if (keyWrap) keyWrap.style.display = p.requiresKey ? '' : 'none';
+      const keyInput = document.getElementById('coder_api_key');
+      const keyStatus = document.getElementById('coder_key_status');
+      if (keyStatus) keyStatus.style.display = p.hasKey ? '' : 'none';
+      if (keyInput) keyInput.placeholder = p.hasKey ? 'leave blank to keep current key' : 'paste your provider API key';
       if (docs) { docs.href = p.docs || '#'; docs.style.display = p.docs ? '' : 'none'; }
       // Prefill base URL from the provider default only when the field is empty
       // (don't clobber a saved override).
