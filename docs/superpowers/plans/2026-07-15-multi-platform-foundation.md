@@ -162,6 +162,11 @@ func TestRenderTelegram(t *testing.T) {
 		{"link", "[docs](https://x.io/a_b)", "[docs](https://x.io/a_b)"},
 		{"hyphen and paren in text", "a-b (c)", "a\\-b \\(c\\)"},
 		{"plus and equals", "1 + 1 = 2", "1 \\+ 1 \\= 2"},
+		// Angle-bracket placeholders: goldmark parses <name> as raw inline HTML
+		// (valid tag name) and <agent_name> as literal text (underscore is not a
+		// valid tag char). Both must survive; > is a MarkdownV2 special and IS escaped, < is not.
+		{"angle placeholder (parses as raw HTML)", "Use /run <name> now.", "Use /run <name\\> now\\."},
+		{"angle placeholder with underscore (literal text)", "Usage: <agent_name>", "Usage: <agent\\_name\\>"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -239,6 +244,17 @@ func renderNodeTelegram(b *strings.Builder, n ast.Node, src []byte) {
 		return
 	case *ast.String:
 		b.WriteString(escapeMDV2Text(string(node.Value)))
+		return
+	case *ast.RawHTML:
+		// Angle-bracket runs like "<name>" parse as raw inline HTML in CommonMark.
+		// Emit their literal source text, MarkdownV2-escaped (so ">" becomes "\>").
+		for i := 0; i < node.Segments.Len(); i++ {
+			seg := node.Segments.At(i)
+			b.WriteString(escapeMDV2Text(string(seg.Value(src))))
+		}
+		return
+	case *ast.AutoLink:
+		b.WriteString(escapeMDV2Text(string(node.URL(src))))
 		return
 	case *ast.CodeSpan:
 		b.WriteByte('`')
@@ -352,7 +368,7 @@ import "testing"
 var corpus = []struct{ neutral, wantTelegram string }{
 	{
 		"You have no agents yet. Use /agent create <name> to build one.",
-		"You have no agents yet\\. Use /agent create <name> to build one\\.",
+		"You have no agents yet\\. Use /agent create <name\\> to build one\\.",
 	},
 	{
 		"Hi **Ilija**! Your Telegram account is now linked. Send /help to see what you can do.",
@@ -360,7 +376,7 @@ var corpus = []struct{ neutral, wantTelegram string }{
 	},
 	{
 		"Usage: /run <agent_name>",
-		"Usage: /run <agent\\_name>",
+		"Usage: /run <agent\\_name\\>",
 	},
 	{
 		"Agent `daily-digest` not found.",
