@@ -85,7 +85,7 @@ Telegram adapter (per-workspace bot instance)
       → /remind → reminder.Service
       → /chat → db.Chat (start/list/stop/resume/delete)
       → /memory → memory.Store (add/list/delete bullets in GENERAL.md)
-      → plain text → one-off chat (coder.Coder with read+write KB tools; see "Chat knowledge-base access")
+      → plain text → one-off chat (coder.Coder with read+write KB tools + the workspace's connector tools; see "Chat knowledge-base access" + "Chat connector access")
 ```
 
 ### Key packages
@@ -100,7 +100,7 @@ Telegram adapter (per-workspace bot instance)
 | `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router`, `IdentityResolver`, `TelegramGateway` |
 | `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface abstracts Claude vs. generic CLIs). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host tools (`read_file`/`write_file`/`edit_file`/`list_dir` + read-only discovery `search_files`/`glob` + exec tools `run_script`/`bash`/`web_fetch`/`web_search`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
-| `internal/connectors` | Self-managed-OAuth connector layer (replaces Composio). Embedded `providers/*.yaml` (OAuth config) + `connectors/*.yaml` (curated action manifests) for google/github/notion/outlook/jira; `Registry`, `Execute` (typed choke point), `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute`), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
+| `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **28 providers** (Google-family, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
 | `internal/buildphase` | Tiny package holding `SA_BUILD_PHASE`/`generation` marker (set during agent/skill builds; the connector `Execute` build-guard refuses mutating actions when present). Its own package so it outlives any one integration. |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal) |
 | `internal/skilldesigner` | Conversational skill-creator wizard mirroring `agentdesigner.Flow` (FSM Idle→AwaitingResume→Describing→Designing→Verifying→Done, SSE progress, 7-day drafts, approval triggers); `SkillSaver` writes SKILL.md+scripts/ to vault + DB upsert; generation runs with the `skill-creator` core skill, vetting runs the `skill-vetter` core skill as a text-only audit; `vettingBlocksSave()` parses the verdict line. Web-wired only (Telegram route not yet added). |
@@ -161,6 +161,8 @@ Key types in `internal/vault`:
 
 **Chat knowledge-base access (on-demand retrieval + editing).** The one-off chat coder runs with `WithDir(vaultRoot).WithAllowedTools("Read,Write,Edit,Glob,Grep")` and a system instruction (`prompts.BuildChatSystemPrompt`) naming the vault root. The LLM retrieves and edits the user's notes **on demand** — only on turns that touch the KB — instead of having the vault injected every prompt. `chat.BuildUserContext` now returns identity-only context (profile/memory/agents/MCP); the old always-on `[Related knowledge base]` keyword-snippet block was removed. The tool set is file-only (no `Bash`/`WebFetch`): the chat can create/edit/read notes but cannot delete, rename, or run shell commands. The same applies to agents (RW over the vault via the sandbox). The detective `Guard` is no longer wired into agent runs — it would revert the KB edits that are now intentional — so agent/chat KB edits persist.
 
+**Chat connector access.** One-off chat (both web `handleChatMessage` and Telegram) also exposes the workspace's **ACTIVE** service connections to the chat coder (`connectors.ActiveBoundConns` — all of them; chat isn't an agent so there's no per-agent binding), wired identically to how the API/CLI split works elsewhere: the **API engine** gets them as native function tools (`coder.WithConnectors`), a **CLI coder** reaches them via the loopback bridge (`bridge.Register` → `SA_CONNECTOR_URL`/`SA_CONNECTOR_TOKEN` env → `simple-agents connector exec`, plus a scoped `Bash(<bin> connector exec:*)` grant since chat is otherwise file-only). Both paths hit the same `connectors.Execute` (mutating allowed — chat is like a run, `buildPhase=false`). `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` appends `connectedToolsBlock` so the model knows the tools exist; with no active connections / no bridge, chat behaves exactly as the file-only default.
+
 **Agent designer KB awareness.** The designer is text-only (`WithNoTools`) but its system prompt (`BuildDesignSystemPrompt`, `<knowledge_base>` block) now knows the app has a built-in vault that agents read/write, and is told to prefer it over Notion/external note apps for the user's own knowledge. Each design turn injects a fresh manifest of the user's existing note paths via `Flow.WithKBLister` → `vault.NotePaths(workspaceID)` → `DesignSystemParams.KBManifest`, so the designer can reference the user's actual notes.
 
 ### Unified conversational agent creation
@@ -196,7 +198,7 @@ Agent creation uses a single `agentdesigner.Flow` FSM shared between Telegram an
 All prompts live in `internal/prompts` (single source). The designer produces **coder-agnostic** AGENT.md — it says WHAT to do, never runtime-specific tool names (so it works on a full coder like claude-code/codex OR a basic model call like OpenRouter GLM). HOW the coder acts on files is injected separately based on `BackendType`:
 
 - **`platformContextBlock(chatApps, vaultRoot)`** — full Simple Agents primer (flexible ever-growing KB with USER-REORGANIZABLE vs SYSTEM-WRITTEN fixed locations, secrets store, chats, reminders, connected chat apps + commands, output protocol, schedule). Injected into design, implementation, and runtime prompts.
-- **`coderCapabilitiesBlock(backendType)`** — three-way: `BackendFullCoder` (CLI) → direct tool access; `BackendToolCalling` (the `api` engine) → native function calls (`read_file`/`write_file`/`edit_file`/`list_dir`/`search_files`/`glob`/`web_search`/`web_fetch`/`run_script`) the host executes, final answer as protocol markers; `BackendBasicModel` → `[READ_FILE]`/`[WRITE_FILE]`/`[RUN_SCRIPT]` output markers. `MapCoderBackend()` maps the coder's backend type (`"api"` → tool-calling) to these. `BuildChatSystemPrompt(vaultRoot, backendType)` is likewise backend-aware (tool-calling chat offers the file tools incl. `search_files`/`glob` but NOT the exec/network tools).
+- **`coderCapabilitiesBlock(backendType)`** — three-way: `BackendFullCoder` (CLI) → direct tool access; `BackendToolCalling` (the `api` engine) → native function calls (`read_file`/`write_file`/`edit_file`/`list_dir`/`search_files`/`glob`/`web_search`/`web_fetch`/`run_script`) the host executes, final answer as protocol markers; `BackendBasicModel` → `[READ_FILE]`/`[WRITE_FILE]`/`[RUN_SCRIPT]` output markers. `MapCoderBackend()` maps the coder's backend type (`"api"` → tool-calling) to these. `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` is likewise backend-aware (tool-calling chat offers the file tools incl. `search_files`/`glob` but NOT the exec/network tools) and appends `connectedToolsBlock` when the workspace has active connections.
 - **`agentPhilosophyBlock()`** — three-tier taxonomy (TIER 1 reasoning-only / TIER 2 one script / TIER 3 multi-file) with NOT-TO-DO lists; forces the coder to pick the simplest tier that solves the task (prevents writing a script for trivial reasoning work).
 - **`agentArchitectureGateBlock()`** — mandatory TASK ANALYSIS → TIER DECISION → NOTIFICATION DECISION → SCHEDULE DECISION before any file is created. Supports no-notification (`[SILENT]`) and no-schedule (`none`) agents.
 - **`ChatAppsForPlatforms()`** — central platform→`ChatAppInfo` (name + commands) mapping; callers load via `db.ListUserPlatformConnections` (no GatewayManager method needed).
@@ -208,17 +210,35 @@ All prompts live in `internal/prompts` (single source). The designer produces **
 **native typed tools** per connected account. It is **coder-agnostic** (knows nothing about coders) —
 both coder kinds converge on `connectors.Execute`. **There is no Composio anywhere in the codebase.**
 
-- **Data files, not code.** Adding a service = a `providers/<p>.yaml` (OAuth config) + a
+- **Data files, not code.** Adding a service = a `providers/<p>.yaml` (auth config) + a
   `connectors/<p>.yaml` (curated action manifest), both `go:embed`ed. `LoadBundled()` parses them.
-  5 providers: **google (Gmail), github, notion, outlook (MS Graph), jira**. Each action = name +
-  JSON-schema params + `mutating` flag + a request template (method/URL/query/body-builder) +
-  `response_extract`. Body builders (`render.go`): `gmail_rfc822`/`gmail_draft`, `notion_page`,
-  `msgraph_sendmail`/`msgraph_draft`, `jira_issue`/`jira_comment`.
+  **28 providers (~214 actions):** the Google family (Gmail/Drive/Sheets/Docs), GitHub, Slack,
+  OpenAI, Notion, Outlook, Teams, Jira, HubSpot, Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable,
+  Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello.
+  (AWS SigV4 + PostgreSQL were scoped but dropped.) Each action = name + JSON-schema params +
+  `mutating` flag + a request template (method/URL/query + one body kind) + `response_extract`.
+- **Auth is declarative + reusable.** A provider is OAuth2 (default) or `auth.kind: api_key`
+  (`placement: header`/`query`/`basic`, `value_prefix`, `basic_user_template` for a two-part Basic
+  username like Twilio's SID). Cross-provider reuse via `auth_parent`: a child (e.g. `google_sheets`)
+  reuses the parent (`google`) OAuth app/token — one consent, per-service connection rows + binding;
+  `Registry.OAuthProvider(name)` resolves the parent for endpoints/creds/refresh, `ProviderByName`
+  keeps the child's scopes/actions. Per-connection values feed `{{conn.<key>}}` in URL/body templates
+  from four sources: `connect_inputs` (fields the paste-key form collects — Shopify shop, Zendesk
+  subdomain/email), `token_extra` (fields captured from the OAuth token response — Salesforce
+  `instance_url`), `key_extra` (parsed from the API key — Mailchimp datacenter), and the `post_connect`
+  hook (Jira cloud id).
+- **Body kinds** (mutually exclusive per action, `render.go`): `body:` nested JSON (`renderBody` —
+  type-preserving, optional-key-omitting, array passthrough), `body_arg:` (the whole body is one
+  object arg — Salesforce sObjects), `form:` (`application/x-www-form-urlencoded` via `renderForm`,
+  bracket-notation keys + array→repeated-key — Stripe/Twilio), or a Go `body_builder` for non-JSON
+  encodings (`gmail_rfc822`/`gmail_reply`/`gmail_draft`, `notion_page`, `msgraph_*`, `jira_*`).
 - **`Execute(ctx, reg, store, client, conn, action, args, buildPhase)`** — the single typed choke
   point: validate args → refuse `mutating` actions when `buildPhase` (build-time guard, keyed off
-  `internal/buildphase.EnvVar`) → `store.AccessToken` (refresh if near expiry) → render request +
-  `Authorization: Bearer` + provider `static_headers` → call (1 transient retry) → normalize into a
-  `ConnectorError` taxonomy (auth/ratelimit/server/needs-reauth/bad-args/build-blocked).
+  `internal/buildphase.EnvVar`) → `store.AccessToken` (refresh if near expiry) → render request →
+  `applyAuth` (`auth.go`: Bearer / api-key header/query/HTTP-Basic / templated-Basic username, per
+  the provider's `auth` block) + provider `static_headers` (resolved via `OAuthProvider` so aliased
+  children inherit the parent's) → call (1 transient retry) → normalize into a `ConnectorError`
+  taxonomy (auth/ratelimit/server/needs-reauth/bad-args/build-blocked).
 - **OAuth** (`oauth.go`): `ConsentURL`/`ExchangeCode`/`Refresh`/`FetchIdentity`. Per-provider config
   covers the real quirks: `token_expiry: never` (GitHub/Notion — empty `expires_at`, never refreshed),
   `token_auth: basic` + `token_content_type: json` (Notion), `static_headers` (Notion-Version, GitHub
@@ -238,9 +258,13 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
     not loopback TCP, so a sandboxed coder can reach it (the `simple-agents` binary dir is granted
     RO+exec in the sandbox spec so the child can exec it).
 - **Agent binding** (`agent_connections` table, keyed by connection id) is the source of truth for
-  run-time tool exposure — NOT the AGENT.md `# Connections:` header. Two ways to bind: the designer
+  run-time tool exposure — NOT the AGENT.md `# Connections:` header. THREE ways to bind: the designer
   parses a `# Connections:` header (`agentdesigner.parseConnectionsLine`, tolerant of inline OR
-  bullet/comment-list form) into the table; OR the **Attach-connections card** on the agent page
+  bullet/comment-list form) into the table; OR **auto-bind** (`agentdesigner.AutoBindTargets`) — when
+  a weak model OMITS the header, the designer binds exactly the connections the build's connector-tool
+  calls actually used (the API engine tracks used connection ids on `coder.Result.UsedConnectionIDs`,
+  persisted across restart/keep-as-is via `agent_drafts.pending_used_connections`) — never all, never
+  clobbering an existing binding, explicit header always wins; OR the **Attach-connections card** on the agent page
   (checkboxes → `handleSaveAgentConnections` → `SetAgentConnections`), which is the reliable path when
   a weak model forgets the header. Builds expose ALL workspace connections; runs expose only bound
   ones. The build/impl AND runtime prompts inject `connectedToolsBlock` (backend-aware: native tools
@@ -366,7 +390,7 @@ SQLite via `modernc.org/sqlite` (CGo-free). WAL mode + foreign keys set on open.
 The base schema was consolidated into `migrations/001_initial_schema.up.sql` during the workspace
 refactor (the old incremental migrations were collapsed; data was wiped and re-created fresh);
 incremental migrations resume from there — `002_coder_api` adds `workspaces.coder_base_url`, and
-`003_agent_runs_usage` adds `agent_runs.{prompt,completion,total}_tokens` for the API coder; `005_connectors` adds the self-managed-OAuth tables; `006_connection_extra` adds `service_connections.extra` (JSON).
+`003_agent_runs_usage` adds `agent_runs.{prompt,completion,total}_tokens` for the API coder; `005_connectors` adds the self-managed-OAuth tables; `006_connection_extra` adds `service_connections.extra` (JSON); `007_draft_used_connections` adds `agent_drafts.pending_used_connections` (persists build-used connections for auto-bind).
 Tables: `owner` (single row), `workspaces` (replaces `users`; carries `about` + inlined coder
 config: `coder_kind`/`coder_bin`/`coder_timeout_s`/`coder_backend_type` + the now-active API-coder
 fields `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`), `platform_connections`,
@@ -485,4 +509,4 @@ provider/model/base-url/api-key-secret through `db.UpdateWorkspaceCoder`.
 - **Connector provider configs (non-Google) unverified against live APIs** — google/github/notion verified end-to-end against real accounts; outlook/jira were hand-authored (rendering unit-tested only). Verify each against live docs before relying on it. A dev harness for this lives at `cmd/livecheck` (uncommitted; runs `connectors.Execute` against real stored tokens).
 - **Connector native tools for CLI coders** — CLI coders reach connector actions via the `simple-agents connector exec` command (loopback bridge), not as native function tools in their own loop; true native parity for MCP-capable coders (claude-code) would be an MCP transport over the same `connectors.Execute` (not built).
 - **Build-time connector testing exposes ALL workspace connections** (the agent hasn't declared bindings yet); a real run exposes only the agent's bound connections (`agent_connections`).
-- **One-off chat has no connector tools** — connectors are exposed to agent builds/runs, not the chat tool set.
+- **CLI-chat connector permission is a scoped Bash grant** — a CLI chat coder is otherwise file-only; when connectors are wired it gets `Bash(<bin> connector exec:*)` (only that command). Relies on the coder CLI honoring command-scoped Bash permissions (claude-code does); a coder that doesn't would need a wider grant.
