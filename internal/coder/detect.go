@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // Installed describes a coder CLI binary detected on the host. The workspace
@@ -106,6 +107,24 @@ func resolveCoderBin(bin string, extraDirs []string) string {
 		cand := filepath.Join(dir, bin)
 		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0 {
 			return cand
+		}
+	}
+	return ""
+}
+
+// BackendForBin returns the coder backend type for a binary name or path by
+// matching its base name against the known-coders catalog. Returns "" if the
+// binary is not a recognized coder (caller falls back to name auto-detection).
+func BackendForBin(bin string) string {
+	if bin == "" {
+		return ""
+	}
+	base := strings.ToLower(filepath.Base(bin))
+	for _, kc := range knownCoders {
+		for _, cand := range kc.Bins {
+			if base == cand || base == cand+".exe" {
+				return kc.Backend
+			}
 		}
 	}
 	return ""
