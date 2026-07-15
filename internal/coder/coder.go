@@ -357,6 +357,28 @@ func (c *Coder) Ping(ctx context.Context, workspaceID string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// Smoke runs a trivial prompt through the full isolated pipeline (seed → env →
+// invoke → parse) and validates a sane structured reply. It is the fail-loud
+// gate for the coder-settings UI: a wrong CLI convention or bad/expired operator
+// auth returns a descriptive error instead of silently feeding garbage into a
+// run. For API coders it delegates to Ping (which resolves the provider key).
+func (c *Coder) Smoke(ctx context.Context, workspaceID string) (string, error) {
+	if c.api != nil {
+		return c.Ping(ctx, workspaceID)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	res, err := c.WithNoTools().Generate(ctx, workspaceID, "Reply with exactly the word PONG and nothing else.")
+	if err != nil {
+		return "", err
+	}
+	reply := strings.TrimSpace(res.Text)
+	if reply == "" {
+		return "", fmt.Errorf("coder %q returned an empty reply", filepath.Base(c.bin))
+	}
+	return reply, nil
+}
+
 // UserHomeDir returns the per-user HOME path without creating it.
 func (c *Coder) UserHomeDir(workspaceID string) string {
 	return filepath.Join(c.homesDir, safeID(workspaceID))
