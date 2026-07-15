@@ -104,7 +104,14 @@ func renderNodeTelegram(b *strings.Builder, n ast.Node, src []byte) {
 		return
 	case *ast.Paragraph:
 		renderChildrenTelegram(b, node, src)
-		b.WriteString("\n\n")
+		// A paragraph immediately followed by a list (CommonMark block
+		// interruption, no blank line in the source) attaches to it with a
+		// single newline, not a blank line — matches pre-refactor Telegram output.
+		if _, ok := node.NextSibling().(*ast.List); ok {
+			b.WriteString("\n")
+		} else {
+			b.WriteString("\n\n")
+		}
 		return
 	case *ast.Heading:
 		// No heading syntax in MarkdownV2: bold the line.

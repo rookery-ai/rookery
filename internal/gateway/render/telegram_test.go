@@ -77,3 +77,11 @@ func TestRenderTelegramIndentedCodeBlock(t *testing.T) {
 		t.Fatalf("indented code block:\n got: %q\nwant: %q", got, want)
 	}
 }
+
+func TestRenderTelegramParagraphBeforeList(t *testing.T) {
+	got := RenderTelegram("**Memory entries:**\n1. remember milk\n2. call mom")
+	want := "*Memory entries:*\n1\\. remember milk\n2\\. call mom"
+	if got != want {
+		t.Fatalf("paragraph before list:\n got: %q\nwant: %q", got, want)
+	}
+}
