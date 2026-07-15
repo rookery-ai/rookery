@@ -27,7 +27,7 @@ type Workspace struct {
 	CoderKind         string // "local" (a host CLI binary) or "api" (direct provider API)
 	CoderBin          string // coder binary name/path when CoderKind == "local"
 	CoderTimeoutS     int    // 0 = use system default
-	CoderBackendType  string // '' = auto-detect, 'claude', or 'generic' (local); 'api' (api kind)
+	CoderBackendType  string // local: '' auto-detect | 'claude' | 'opencode' | 'codex' | 'gemini' | 'cursor' | 'generic'; api kind: 'api'
 	CoderProvider     string // API coder: llm registry name (openai/openrouter/anthropic/generic)
 	CoderModel        string // API coder: model id, e.g. "gpt-4o", "anthropic/claude-3.5-sonnet"
 	CoderAPIKeySecret string // API coder: name of the secret holding the provider API key

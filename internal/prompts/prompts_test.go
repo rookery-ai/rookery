@@ -303,3 +303,19 @@ func TestConnectedPlatformsInGeneration(t *testing.T) {
 		t.Errorf("generation prompt missing connected-platform guidance:\n%s", out)
 	}
 }
+
+// TestMapCoderBackendCLICoders locks the backend-type→capability mapping: every CLI
+// coder backend (claude and the newer opencode/codex/gemini/cursor backends, which
+// fall through the default case) must map to BackendFullCoder, while the API engine
+// maps to BackendToolCalling. Regression guard against a future MapCoderBackend edit
+// silently downgrading a CLI coder's capability tier.
+func TestMapCoderBackendCLICoders(t *testing.T) {
+	for _, bt := range []string{"claude", "opencode", "codex", "gemini", "cursor"} {
+		if got := MapCoderBackend(bt); got != BackendFullCoder {
+			t.Errorf("MapCoderBackend(%q) = %q, want BackendFullCoder", bt, got)
+		}
+	}
+	if MapCoderBackend("api") != BackendToolCalling {
+		t.Errorf("api should map to BackendToolCalling")
+	}
+}
