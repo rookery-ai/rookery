@@ -217,6 +217,47 @@ func opencodeAuthPath(home string) string {
 	return filepath.Join(dataHome, "opencode", "auth.json")
 }
 
+// ─── Codex backend ─────────────────────────────────────────────────────────────
+// AUTHORED, UNVERIFIED — not installed on the build host. Invocation from current
+// docs: `codex exec <prompt> --json`; exec mode auto-downgrades approval to
+// `never` (no TTY), so it will not hang. Isolation via CODEX_HOME. Must pass
+// Coder.Smoke on a host with `codex` before being relied upon.
+type codexBackend struct{}
+
+func (b *codexBackend) buildArgs(prompt string, _ bool, _ string) []string {
+	return []string{"exec", prompt, "--json"}
+}
+
+func (b *codexBackend) parseOutput(stdout []byte) (string, bool, error) {
+	return parseNDJSONEvents(stdout)
+}
+
+func (b *codexBackend) configEnv(workspaceHome string) map[string]string {
+	env := forwardEnv("OPENAI_API_KEY", "CODEX_API_KEY")
+	env["CODEX_HOME"] = filepath.Join(workspaceHome, ".codex")
+	return env
+}
+
+func (b *codexBackend) seedFiles(workspaceHome string) []seedSpec {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	src := os.Getenv("CODEX_HOME")
+	if src == "" {
+		src = filepath.Join(home, ".codex")
+	}
+	return []seedSpec{{
+		From: filepath.Join(src, "auth.json"),
+		To:   filepath.Join(workspaceHome, ".codex", "auth.json"),
+		Mode: 0o600,
+	}}
+}
+
+func (b *codexBackend) looksLikeLimit(stdout, stderr string) bool {
+	return containsLimitKeyword(stdout + " " + stderr)
+}
+
 // ─── Claude JSON output parsing ───────────────────────────────────────────────
 
 type claudeJSONResponse struct {

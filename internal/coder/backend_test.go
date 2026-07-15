@@ -173,3 +173,32 @@ func TestOpencodeLooksLikeLimit(t *testing.T) {
 		t.Fatalf("expected limit detection on rate-limit text")
 	}
 }
+
+func TestCodexArgs(t *testing.T) {
+	b := &codexBackend{}
+	args := b.buildArgs("do it", false, "")
+	want := []string{"exec", "do it", "--json"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+}
+
+func TestCodexConfigEnv(t *testing.T) {
+	b := &codexBackend{}
+	home := "/homes/ws1"
+	env := b.configEnv(home)
+	if env["CODEX_HOME"] != filepath.Join(home, ".codex") {
+		t.Fatalf("CODEX_HOME = %q", env["CODEX_HOME"])
+	}
+}
+
+func TestCodexSeed(t *testing.T) {
+	b := &codexBackend{}
+	seeds := b.seedFiles("/homes/ws1")
+	if len(seeds) != 1 || filepath.Base(seeds[0].To) != "auth.json" {
+		t.Fatalf("seeds = %+v", seeds)
+	}
+	if filepath.Base(filepath.Dir(seeds[0].To)) != ".codex" {
+		t.Fatalf("seed dest = %q, want .../.codex/auth.json", seeds[0].To)
+	}
+}
