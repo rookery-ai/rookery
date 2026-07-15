@@ -58,3 +58,36 @@ func TestBuildEnvWorkspaceSecretWinsForClaude(t *testing.T) {
 		t.Fatalf("ANTHROPIC_API_KEY = %q, want workspace-secret (workspace secret must win over host env)", got)
 	}
 }
+
+func TestParseSingleJSONField(t *testing.T) {
+	out := []byte(`{"response":"PONG","stats":{}}`)
+	text, isErr, err := parseSingleJSONField(out, "response", "result")
+	if err != nil || isErr || text != "PONG" {
+		t.Fatalf("got (%q,%v,%v)", text, isErr, err)
+	}
+}
+
+func TestParseNDJSONEventsText(t *testing.T) {
+	out := []byte(
+		`{"type":"step-start"}` + "\n" +
+			`{"type":"text","text":"PONG"}` + "\n" +
+			`{"type":"step-finish"}` + "\n")
+	text, isErr, err := parseNDJSONEvents(out)
+	if err != nil || isErr || text != "PONG" {
+		t.Fatalf("got (%q,%v,%v)", text, isErr, err)
+	}
+}
+
+func TestParseNDJSONEventsError(t *testing.T) {
+	out := []byte(`{"type":"error","error":{"data":{"message":"User not found.","statusCode":401}}}`)
+	text, isErr, err := parseNDJSONEvents(out)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !isErr {
+		t.Fatalf("expected isError=true")
+	}
+	if text == "" {
+		t.Fatalf("expected error message text")
+	}
+}

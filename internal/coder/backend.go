@@ -214,3 +214,84 @@ func extractClaudeJSON(data []byte) (text string, isError bool, err error) {
 	}
 	return strings.TrimSpace(lastText), lastIsError, nil
 }
+
+// parseSingleJSONField extracts the first present string field from a single JSON
+// object emitted by coders that print one final object (Gemini: "response",
+// Cursor: "result"). If the object is not valid JSON, the raw trimmed text is
+// returned (best-effort for plain-text stragglers).
+func parseSingleJSONField(stdout []byte, fields ...string) (string, bool, error) {
+	trimmed := bytes.TrimSpace(stdout)
+	if len(trimmed) == 0 {
+		return "", false, fmt.Errorf("coder produced no output")
+	}
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(trimmed, &obj) != nil {
+		return string(trimmed), false, nil
+	}
+	for _, f := range fields {
+		raw, ok := obj[f]
+		if !ok {
+			continue
+		}
+		var s string
+		if json.Unmarshal(raw, &s) == nil && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s), false, nil
+		}
+	}
+	return "", false, fmt.Errorf("no text field %v in response", fields)
+}
+
+// ndjsonEvent is the minimal shape shared by OpenCode/Codex event streams.
+type ndjsonEvent struct {
+	Type  string `json:"type"`
+	Text  string `json:"text"`
+	Delta string `json:"delta"`
+	Error struct {
+		Message string `json:"message"`
+		Data    struct {
+			Message    string `json:"message"`
+			StatusCode int    `json:"statusCode"`
+		} `json:"data"`
+	} `json:"error"`
+}
+
+// parseNDJSONEvents scans newline-delimited JSON events, accumulating assistant
+// text and reporting a terminal error event. Returns isError=true (not a Go
+// error) for a coder-reported error so looksLikeLimit can classify it.
+func parseNDJSONEvents(stdout []byte) (string, bool, error) {
+	lines := bytes.Split(bytes.TrimSpace(stdout), []byte("\n"))
+	var text strings.Builder
+	var errMsg string
+	for _, line := range lines {
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			continue
+		}
+		var ev ndjsonEvent
+		if json.Unmarshal(line, &ev) != nil {
+			continue
+		}
+		switch {
+		case ev.Type == "error":
+			m := ev.Error.Data.Message
+			if m == "" {
+				m = ev.Error.Message
+			}
+			if ev.Error.Data.StatusCode != 0 {
+				m = fmt.Sprintf("%s (status %d)", m, ev.Error.Data.StatusCode)
+			}
+			errMsg = m
+		case ev.Text != "":
+			text.WriteString(ev.Text)
+		case ev.Delta != "":
+			text.WriteString(ev.Delta)
+		}
+	}
+	if errMsg != "" {
+		return errMsg, true, nil
+	}
+	if text.Len() == 0 {
+		return "", false, fmt.Errorf("no assistant text in event stream")
+	}
+	return strings.TrimSpace(text.String()), false, nil
+}
