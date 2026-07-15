@@ -159,3 +159,16 @@ func (g *TelegramGateway) handle(tc telebot.Context) error {
 	g.manager.dispatch(ctx, msg)
 	return nil
 }
+
+func init() {
+	RegisterCredSpec(CredSpec{
+		Platform: "telegram",
+		Fields:   []CredField{{Key: "token", Label: "Bot Token", Placeholder: "123456:ABC-...", Secret: true}},
+		SetupURL: "https://t.me/BotFather",
+		SetupSteps: []string{
+			"Open @BotFather in Telegram", "Send /newbot and follow the prompts",
+			"Copy the token it gives you and paste it here",
+		},
+	})
+}
+
