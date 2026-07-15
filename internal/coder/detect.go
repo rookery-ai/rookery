@@ -62,7 +62,7 @@ var knownCoders = []struct {
 	Backend string
 }{
 	{"Claude Code", []string{"claude", "claude-code"}, "claude"},
-	{"OpenCode", []string{"opencode"}, "generic"},
+	{"OpenCode", []string{"opencode"}, "opencode"},
 	{"Codex", []string{"codex"}, "generic"},
 	{"Cursor", []string{"cursor-agent", "cursor"}, "generic"},
 }

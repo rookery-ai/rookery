@@ -88,6 +88,7 @@ type Coder struct {
 	workDir      string            // when non-empty, overrides cmd.Dir (default: per-user home)
 	allowedTools string            // when non-empty, passed as --allowedTools <value>
 	backendType  string            // '' = auto-detect by binary name, 'claude', 'generic', or 'api"
+	cliModel     string            // provider/model for CLI coders that accept -m/--model (opencode, cursor)
 
 	// ── API coder (coder_kind == "api") ──────────────────────────────────────
 	// When api is non-nil, Generate/Ping dispatch to the in-process tool-calling
@@ -164,6 +165,10 @@ func (c *Coder) WithBackendType(t string) *Coder {
 func (c *Coder) BackendType() string {
 	return c.backendType
 }
+
+// apiModelForCLI returns the workspace-configured model for CLI coders that
+// accept one (opencode -m, cursor --model). Empty means "use the coder's default".
+func (c *Coder) apiModelForCLI() string { return c.cliModel }
 
 // WithSandbox returns a shallow copy of the Coder with Landlock confinement
 // toggled. When enabled (and supported by the kernel), every subprocess is
@@ -478,6 +483,8 @@ func (c *Coder) selectBackend() CoderBackend {
 		return &claudeBackend{sysClaudeDir: c.sysClaudeDir}
 	case "generic":
 		return &genericCLIBackend{}
+	case "opencode":
+		return &opencodeBackend{model: c.apiModelForCLI()}
 	}
 	// Auto-detect by binary name.
 	if strings.Contains(strings.ToLower(filepath.Base(c.bin)), "claude") {

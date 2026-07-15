@@ -48,8 +48,12 @@ func ForWorkspace(w *db.Workspace, homesDir, dataDir string, vlt *vault.Vault, d
 		backendType = w.CoderBackendType
 	}
 
-	return New(bin, timeout, homesDir, dataDir).
+	cd := New(bin, timeout, homesDir, dataDir).
 		WithBackendType(backendType).
 		WithSandbox(enableSandbox).
 		WithVault(vlt)
+	if w != nil {
+		cd.cliModel = w.CoderModel
+	}
+	return cd
 }

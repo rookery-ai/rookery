@@ -2,6 +2,7 @@ package coder
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -120,5 +121,55 @@ func TestParseNDJSONEventsDeltaAccumulation(t *testing.T) {
 	text, isErr, err := parseNDJSONEvents(out)
 	if err != nil || isErr || text != "PONG" {
 		t.Fatalf("got (%q,%v,%v), want (PONG,false,nil)", text, isErr, err)
+	}
+}
+
+func TestOpencodeArgs(t *testing.T) {
+	b := &opencodeBackend{}
+	args := b.buildArgs("hello world", false, "")
+	want := []string{"run", "hello world", "--format", "json"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+	// The prompt must NEVER be passed via -p (opencode's -p is basic-auth password).
+	for i, a := range args {
+		if a == "-p" {
+			t.Fatalf("opencode args must not contain -p (found at %d): %v", i, args)
+		}
+	}
+}
+
+func TestOpencodeArgsWithModel(t *testing.T) {
+	b := &opencodeBackend{model: "anthropic/claude-sonnet-5"}
+	args := b.buildArgs("hi", false, "")
+	want := []string{"run", "hi", "--format", "json", "-m", "anthropic/claude-sonnet-5"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+}
+
+func TestOpencodeConfigEnvAndSeed(t *testing.T) {
+	b := &opencodeBackend{}
+	home := "/homes/ws1"
+	env := b.configEnv(home)
+	if env["XDG_DATA_HOME"] != filepath.Join(home, ".local", "share") {
+		t.Fatalf("XDG_DATA_HOME = %q", env["XDG_DATA_HOME"])
+	}
+	if env["XDG_CONFIG_HOME"] != filepath.Join(home, ".config") {
+		t.Fatalf("XDG_CONFIG_HOME = %q", env["XDG_CONFIG_HOME"])
+	}
+	seeds := b.seedFiles(home)
+	if len(seeds) != 1 || filepath.Base(seeds[0].To) != "auth.json" {
+		t.Fatalf("seeds = %+v", seeds)
+	}
+	if filepath.Base(filepath.Dir(seeds[0].To)) != "opencode" {
+		t.Fatalf("seed dest dir = %q, want .../opencode/auth.json", seeds[0].To)
+	}
+}
+
+func TestOpencodeLooksLikeLimit(t *testing.T) {
+	b := &opencodeBackend{}
+	if !b.looksLikeLimit("rate limit exceeded", "") {
+		t.Fatalf("expected limit detection on rate-limit text")
 	}
 }

@@ -104,18 +104,10 @@ func (b *claudeBackend) seedFiles(workspaceHome string) []seedSpec {
 func (b *claudeBackend) looksLikeLimit(stdout, stderr string) bool {
 	// Claude CLI's signature for hitting the usage limit: non-zero exit with
 	// completely empty stdout and stderr (verified empirically).
-	stdout = strings.TrimSpace(stdout)
-	stderr = strings.TrimSpace(stderr)
-	if stdout == "" && stderr == "" {
+	if strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) == "" {
 		return true
 	}
-	combined := strings.ToLower(stdout + " " + stderr)
-	for _, kw := range []string{"usage limit", "rate limit", "rate_limit", "quota exceeded", "limit reached"} {
-		if strings.Contains(combined, kw) {
-			return true
-		}
-	}
-	return false
+	return containsLimitKeyword(stdout + " " + stderr)
 }
 
 // ─── Generic CLI backend ──────────────────────────────────────────────────────
@@ -154,13 +146,75 @@ func (b *genericCLIBackend) seedFiles(_ string) []seedSpec { return nil }
 func (b *genericCLIBackend) looksLikeLimit(stdout, stderr string) bool {
 	// For generic coders we can only rely on keywords — the empty-stdout
 	// heuristic is Claude-specific.
-	combined := strings.ToLower(stdout + " " + stderr)
-	for _, kw := range []string{"usage limit", "rate limit", "rate_limit", "quota exceeded", "limit reached"} {
+	return containsLimitKeyword(stdout + " " + stderr)
+}
+
+// containsLimitKeyword reports whether the combined output text contains a
+// known usage/rate-limit signal, shared across backends.
+func containsLimitKeyword(s string) bool {
+	combined := strings.ToLower(s)
+	for _, kw := range []string{"usage limit", "rate limit", "rate_limit", "quota exceeded", "limit reached", "429"} {
 		if strings.Contains(combined, kw) {
 			return true
 		}
 	}
 	return false
+}
+
+// ─── OpenCode backend ──────────────────────────────────────────────────────────
+// Verified end-to-end on this host. Invocation: `opencode run <prompt> --format json`.
+// NOTE: opencode's -p flag is basic-auth PASSWORD, not prompt — the prompt is a
+// positional arg after the `run` subcommand.
+type opencodeBackend struct {
+	model string // provider/model, from workspace CoderModel; passed as -m when set
+}
+
+func (b *opencodeBackend) buildArgs(prompt string, _ bool, _ string) []string {
+	args := []string{"run", prompt, "--format", "json"}
+	if b.model != "" {
+		args = append(args, "-m", b.model)
+	}
+	return args
+}
+
+func (b *opencodeBackend) parseOutput(stdout []byte) (string, bool, error) {
+	return parseNDJSONEvents(stdout)
+}
+
+func (b *opencodeBackend) configEnv(workspaceHome string) map[string]string {
+	env := forwardEnv(knownAuthEnvVars...)
+	// opencode resolves auth/state under XDG_DATA_HOME and config under XDG_CONFIG_HOME.
+	env["XDG_DATA_HOME"] = filepath.Join(workspaceHome, ".local", "share")
+	env["XDG_CONFIG_HOME"] = filepath.Join(workspaceHome, ".config")
+	return env
+}
+
+func (b *opencodeBackend) seedFiles(workspaceHome string) []seedSpec {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	// Operator auth lives at ~/.local/share/opencode/auth.json (XDG_DATA_HOME default).
+	src := opencodeAuthPath(home)
+	return []seedSpec{{
+		From: src,
+		To:   filepath.Join(workspaceHome, ".local", "share", "opencode", "auth.json"),
+		Mode: 0o600,
+	}}
+}
+
+func (b *opencodeBackend) looksLikeLimit(stdout, stderr string) bool {
+	return containsLimitKeyword(stdout + " " + stderr)
+}
+
+// opencodeAuthPath returns the operator's opencode auth file, honoring an explicit
+// XDG_DATA_HOME override, else ~/.local/share.
+func opencodeAuthPath(home string) string {
+	dataHome := os.Getenv("XDG_DATA_HOME")
+	if dataHome == "" {
+		dataHome = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(dataHome, "opencode", "auth.json")
 }
 
 // ─── Claude JSON output parsing ───────────────────────────────────────────────
