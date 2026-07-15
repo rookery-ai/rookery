@@ -10,6 +10,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/gateway"
 	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
@@ -134,12 +135,19 @@ func (s *Server) handleSetupMasterPassword(c echo.Context, w *db.Workspace) erro
 // is still 1 mid-wizard); posting to /dashboard/connectors would just redirect back.
 func (s *Server) handleSetupConnector(c echo.Context, w *db.Workspace) error {
 	platform := c.FormValue("platform")
-	token := c.FormValue("token")
-	if platform == "" || token == "" {
+
+	values := map[string]string{}
+	if spec, ok := gateway.CredSpecFor(platform); ok {
+		for _, f := range spec.Fields {
+			values[f.Key] = c.FormValue(f.Key)
+		}
+	}
+
+	if platform == "" || values["token"] == "" {
 		return c.Redirect(http.StatusFound, "/dashboard/setup")
 	}
 	sd := &setupData{pageData: s.page(c, "Set Up Workspace"), Step: 5}
-	botUsername, botStartErr, err := s.saveConnector(w.ID, platform, token)
+	identity, botStartErr, err := s.saveConnector(w.ID, platform, values)
 	if err != nil {
 		sd.Error = err.Error()
 		return c.Render(http.StatusBadRequest, "auth/setup.html", sd)
@@ -149,7 +157,7 @@ func (s *Server) handleSetupConnector(c echo.Context, w *db.Workspace) error {
 		sd.Error = "Connector saved but bot failed to start: " + botStartErr.Error()
 		return c.Render(http.StatusBadRequest, "auth/setup.html", sd)
 	}
-	_ = botUsername
+	_ = identity
 	return c.Redirect(http.StatusFound, "/dashboard/setup")
 }
 

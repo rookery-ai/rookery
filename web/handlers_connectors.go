@@ -19,12 +19,21 @@ type connectorsPageData struct {
 	Platforms   []string
 }
 
-var supportedPlatforms = []string{"telegram", "discord"}
+// supportedPlatformNames derives the list of connectable platforms from the
+// registered credential specs, so adding an adapter needs no UI/handler edit.
+func supportedPlatformNames() []string {
+	var out []string
+	for _, sp := range gateway.CredSpecs() {
+		out = append(out, sp.Platform)
+	}
+	return out
+}
 
 func (s *Server) showConnectors(c echo.Context) error {
 	u := c.Get("workspace").(*db.Workspace)
+	platforms := supportedPlatformNames()
 	var connections []*db.PlatformConnection
-	for _, p := range supportedPlatforms {
+	for _, p := range platforms {
 		if conn, err := s.db.GetPlatformConnection(u.ID, p); err == nil {
 			connections = append(connections, conn)
 		}
@@ -32,39 +41,56 @@ func (s *Server) showConnectors(c echo.Context) error {
 	return c.Render(http.StatusOK, "dashboard/connectors.html", &connectorsPageData{
 		pageData:    s.page(c, "Chat Connectors"),
 		Connections: connections,
-		Platforms:   supportedPlatforms,
+		Platforms:   platforms,
 	})
 }
 
-// saveConnector validates + encrypts + persists a platform token for a workspace,
-// stores the bot username, and (re)starts the gateway adapter. Shared by the
-// connectors page and the setup wizard's connector step. botStartErr is non-nil
-// only when the token saved but the bot failed to start (non-fatal).
-func (s *Server) saveConnector(workspaceID, platform, token string) (botUsername string, botStartErr error, err error) {
-	if platform == "telegram" {
-		botUsername, err = testTelegramToken(token)
-		if err != nil {
-			return "", nil, fmt.Errorf("invalid bot token: %w", err)
+// saveConnector validates + encrypts + persists a platform's credentials for a
+// workspace, stores the bot username (Telegram), and (re)starts the gateway
+// adapter. Shared by the connectors page and the setup wizard's connector step.
+// Driven entirely by the platform's registered gateway.CredSpec, so a new
+// adapter needs no new save logic here. botStartErr is non-nil only when the
+// credentials saved but the bot failed to start (non-fatal).
+func (s *Server) saveConnector(workspaceID, platform string, values map[string]string) (identity string, botStartErr error, err error) {
+	spec, ok := gateway.CredSpecFor(platform)
+	if !ok {
+		return "", nil, fmt.Errorf("unsupported platform: %s", platform)
+	}
+	if spec.Validate != nil {
+		if identity, err = spec.Validate(values); err != nil {
+			return "", nil, fmt.Errorf("invalid credentials: %w", err)
 		}
+	}
+
+	token, configJSON, err := gateway.SplitCreds(spec, values)
+	if err != nil {
+		return "", nil, err
 	}
 
 	encToken, err := gateway.EncryptToken(token, s.systemKey)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to encrypt token: %w", err)
 	}
+	encConfig := ""
+	if configJSON != "" {
+		if encConfig, err = gateway.EncryptToken(configJSON, s.systemKey); err != nil {
+			return "", nil, fmt.Errorf("failed to encrypt config: %w", err)
+		}
+	}
 
 	if err := s.db.UpsertPlatformConnection(&db.PlatformConnection{
-		ID:             uuid.New().String(),
-		WorkspaceID:    workspaceID,
-		Platform:       platform,
-		EncryptedToken: encToken,
-		Active:         true,
+		ID:              uuid.New().String(),
+		WorkspaceID:     workspaceID,
+		Platform:        platform,
+		EncryptedToken:  encToken,
+		EncryptedConfig: encConfig,
+		Active:          true,
 	}); err != nil {
 		return "", nil, fmt.Errorf("failed to save connector: %w", err)
 	}
 
-	if botUsername != "" {
-		_ = s.db.SetSetting(workspaceID, "telegram_bot_username", "@"+botUsername)
+	if platform == "telegram" && identity != "" {
+		_ = s.db.SetSetting(workspaceID, "telegram_bot_username", "@"+identity)
 	}
 
 	if s.gateway != nil {
@@ -72,21 +98,27 @@ func (s *Server) saveConnector(workspaceID, platform, token string) (botUsername
 			botStartErr = e // token is valid but bot may be temporarily unreachable
 		}
 	}
-	return botUsername, botStartErr, nil
+	return identity, botStartErr, nil
 }
 
 func (s *Server) handleSaveConnector(c echo.Context) error {
 	u := c.Get("workspace").(*db.Workspace)
 	platform := c.FormValue("platform")
-	token := c.FormValue("token")
 
-	if token == "" || platform == "" {
+	values := map[string]string{}
+	if spec, ok := gateway.CredSpecFor(platform); ok {
+		for _, f := range spec.Fields {
+			values[f.Key] = c.FormValue(f.Key)
+		}
+	}
+
+	if platform == "" || values["token"] == "" {
 		p := s.page(c, "Chat Connectors")
 		p.Error = "Platform and token are required"
 		return s.renderConnectors(c, u, p)
 	}
 
-	botUsername, botStartErr, err := s.saveConnector(u.ID, platform, token)
+	identity, botStartErr, err := s.saveConnector(u.ID, platform, values)
 	if err != nil {
 		p := s.page(c, "Chat Connectors")
 		p.Error = err.Error()
@@ -106,8 +138,8 @@ func (s *Server) handleSaveConnector(c echo.Context) error {
 	}
 
 	botDisplay := ""
-	if botUsername != "" {
-		botDisplay = "@" + botUsername
+	if identity != "" {
+		botDisplay = "@" + identity
 	}
 	p := s.page(c, "Chat Connectors")
 	if botDisplay != "" {
@@ -195,8 +227,9 @@ func testTelegramToken(token string) (string, error) {
 }
 
 func (s *Server) renderConnectors(c echo.Context, u *db.Workspace, p *pageData) error {
+	platforms := supportedPlatformNames()
 	var connections []*db.PlatformConnection
-	for _, pl := range supportedPlatforms {
+	for _, pl := range platforms {
 		if conn, err := s.db.GetPlatformConnection(u.ID, pl); err == nil {
 			connections = append(connections, conn)
 		}
@@ -204,6 +237,6 @@ func (s *Server) renderConnectors(c echo.Context, u *db.Workspace, p *pageData) 
 	return c.Render(http.StatusOK, "dashboard/connectors.html", &connectorsPageData{
 		pageData:    p,
 		Connections: connections,
-		Platforms:   supportedPlatforms,
+		Platforms:   platforms,
 	})
 }
