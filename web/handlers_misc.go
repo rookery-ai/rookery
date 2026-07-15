@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"html/template"
 	"net/http"
 	"os"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/llm"
 	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/reminder"
@@ -365,6 +367,8 @@ type settingsPageData struct {
 	DetectedCoders []coder.Installed
 	APIProviders   []coder.APIProvider
 	SecretNames    []string // workspace's secret names, for the API-key dropdown
+
+	CoderCatalogJSON template.JS // JSON array of the provider catalog for the coder-form JS
 }
 
 // buildSettingsData assembles the settings page view model (profile + detected
@@ -377,18 +381,38 @@ func (s *Server) buildSettingsData(p *pageData, w *db.Workspace) *settingsPageDa
 		dn = w.Name
 	}
 	secretNames, _ := s.db.ListSecretNames(w.ID)
+
+	type provJS struct {
+		Name        string `json:"name"`
+		Base        string `json:"base"`
+		Model       string `json:"model"`
+		Docs        string `json:"docs"`
+		RequiresKey bool   `json:"requiresKey"`
+		Custom      bool   `json:"custom"`
+	}
+	cat := coder.APIProviders()
+	pjs := make([]provJS, 0, len(cat))
+	for _, p := range cat {
+		pjs = append(pjs, provJS{
+			Name: p.Name, Base: llm.DefaultBaseURL(p.Name), Model: p.ModelPlaceholder,
+			Docs: p.DocsURL, RequiresKey: p.RequiresKey, Custom: p.Custom,
+		})
+	}
+	catJSON, _ := json.Marshal(pjs)
+
 	return &settingsPageData{
-		pageData:       p,
-		DisplayName:    dn,
-		Email:          prof.Email,
-		Location:       prof.Location,
-		Timezone:       prof.Timezone,
-		Tone:           prof.Tone,
-		Language:       prof.Language,
-		Notes:          prof.Notes,
-		DetectedCoders: coder.DetectInstalled(),
-		APIProviders:   coder.APIProviders(),
-		SecretNames:    secretNames,
+		pageData:         p,
+		DisplayName:      dn,
+		Email:            prof.Email,
+		Location:         prof.Location,
+		Timezone:         prof.Timezone,
+		Tone:             prof.Tone,
+		Language:         prof.Language,
+		Notes:            prof.Notes,
+		DetectedCoders:   coder.DetectInstalled(),
+		APIProviders:     cat,
+		SecretNames:      secretNames,
+		CoderCatalogJSON: template.JS(catJSON),
 	}
 }
 
@@ -465,7 +489,6 @@ func (s *Server) handleSaveWorkspaceCoder(c echo.Context) error {
 	if kind == "api" {
 		provider = c.FormValue("coder_provider")
 		model = strings.TrimSpace(c.FormValue("coder_model"))
-		apiKeySecret = c.FormValue("coder_api_key_secret")
 		baseURL = strings.TrimSpace(c.FormValue("coder_base_url"))
 		backendType = "api"
 		if provider == "" {
@@ -476,10 +499,35 @@ func (s *Server) handleSaveWorkspaceCoder(c echo.Context) error {
 			p.Error = "Model is required for an API coder"
 			return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, w))
 		}
-		if apiKeySecret == "" {
-			p.Error = "Pick (or create) the secret holding the provider API key"
+		// Custom (generic) requires an explicit base URL; catalog providers resolve theirs from llm.
+		isCustom := provider == "generic"
+		if isCustom && baseURL == "" {
+			p.Error = "A base URL is required for a Custom (OpenAI-compatible) provider"
 			return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, w))
 		}
+		// Decide the API-key secret from the pasted key + existing reference.
+		plan := coder.PlanKeySecret(provider, strings.TrimSpace(c.FormValue("coder_api_key")), w.CoderAPIKeySecret)
+		if plan.Err != "" {
+			p.Error = plan.Err
+			return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, w))
+		}
+		if plan.WriteSecret {
+			if w.SecretsSalt == "" || w.EncryptedMasterPassword == "" {
+				p.Error = "Complete workspace setup before configuring an API coder"
+				return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, w))
+			}
+			masterPw, err := secrets.DecryptMasterPassword(w.EncryptedMasterPassword, s.systemKey)
+			if err != nil {
+				p.Error = "Could not decrypt master password — re-run workspace setup"
+				return c.Render(http.StatusInternalServerError, "dashboard/settings.html", s.buildSettingsData(p, w))
+			}
+			svc := secrets.New(s.db, w.ID, masterPw, w.SecretsSalt)
+			if err := svc.Set(context.Background(), plan.SecretName, plan.WriteValue); err != nil {
+				p.Error = "Failed to store API key: " + err.Error()
+				return c.Render(http.StatusInternalServerError, "dashboard/settings.html", s.buildSettingsData(p, w))
+			}
+		}
+		apiKeySecret = plan.SecretName
 	} else {
 		kind = "local"
 		bin = c.FormValue("coder_bin")
