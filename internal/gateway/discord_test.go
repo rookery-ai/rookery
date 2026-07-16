@@ -38,3 +38,26 @@ func TestDiscordSpecRegistered(t *testing.T) {
 		t.Fatalf("unexpected discord spec: %+v", spec)
 	}
 }
+
+func TestMapDiscordDM(t *testing.T) {
+	// A real DM from a human → dispatched.
+	msg, ok := mapDiscordDM("user-1", "", "hello", "msg-9", "bot-1", false)
+	if !ok {
+		t.Fatal("human DM should dispatch")
+	}
+	if msg.Platform != "discord" || msg.PlatformUserID != "user-1" || msg.Text != "hello" || msg.MessageID != "msg-9" {
+		t.Fatalf("bad mapping: %+v", msg)
+	}
+	// The bot's own message → skipped.
+	if _, ok := mapDiscordDM("bot-1", "", "echo", "m", "bot-1", false); ok {
+		t.Fatal("bot's own message must be skipped")
+	}
+	// Another bot → skipped.
+	if _, ok := mapDiscordDM("user-2", "", "x", "m", "bot-1", true); ok {
+		t.Fatal("other bots must be skipped")
+	}
+	// A guild (non-DM) message → skipped (GuildID non-empty).
+	if _, ok := mapDiscordDM("user-1", "guild-1", "x", "m", "bot-1", false); ok {
+		t.Fatal("guild messages must be skipped (DM-only)")
+	}
+}
