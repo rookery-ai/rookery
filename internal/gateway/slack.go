@@ -118,8 +118,14 @@ func (g *SlackGateway) Start(ctx context.Context) error {
 		g.mu.Lock()
 		g.botUserID = resp.UserID
 		g.mu.Unlock()
+	} else {
+		// Non-fatal: the bot_id filter in mapSlackDM is the primary self-message
+		// guard; botUserID is a secondary check. Log so it isn't silent.
+		fmt.Printf("gateway: slack AuthTest failed for workspace %s (self-message filter relies on bot_id only): %v\n", g.ownerWorkspaceID, err)
 	}
-	go g.readLoop(ctx)
+	loopCtx, cancel := context.WithCancel(ctx)
+	defer cancel() // when RunContext returns (ctx-cancel OR reconnect failure), stop readLoop
+	go g.readLoop(loopCtx)
 	return g.sm.RunContext(ctx)
 }
 
