@@ -171,6 +171,8 @@ func (g *TelegramGateway) handle(tc telebot.Context) error {
 func init() {
 	RegisterCredSpec(CredSpec{
 		Platform: "telegram",
+		Label:    "Telegram",
+		Blurb:    "Chat with your agents via a personal Telegram bot",
 		Fields:   []CredField{{Key: "token", Label: "Bot Token", Placeholder: "123456:ABC-...", Secret: true}},
 		SetupURL: "https://t.me/BotFather",
 		SetupSteps: []string{

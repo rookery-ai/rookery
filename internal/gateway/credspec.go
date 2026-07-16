@@ -13,6 +13,8 @@ type CredField struct {
 
 type CredSpec struct {
 	Platform   string
+	Label      string // human display name, e.g. "Discord"
+	Blurb      string // one-line description for the connector card
 	Fields     []CredField
 	SetupURL   string
 	SetupSteps []string
