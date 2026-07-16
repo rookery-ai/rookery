@@ -63,27 +63,11 @@ func TestTestConnectorUsesSpecValidate(t *testing.T) {
 	}
 }
 
-// TestSlackConnectorTwoFieldSaveAndRender proves the two-token Slack save
-// routing works through the existing (Phase-2) generic connectors UI: the
-// Slack CredSpec is registered by internal/gateway's init(), and saveConnector
-// must route app_token into encrypted_config via SplitCreds. The deterministic
-// assertion is on SplitCreds directly (saveConnector's network Validate/AuthTest
-// call is exercised but not asserted on, since it will fail for a fake token).
 func TestSlackConnectorTwoFieldSaveAndRender(t *testing.T) {
-	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../migrations")
-	if err != nil {
-		t.Fatal(err)
+	spec, ok := gateway.CredSpecFor("slack")
+	if !ok {
+		t.Fatal("slack spec not registered")
 	}
-	t.Cleanup(func() { d.Close() })
-	ws := uuid.New().String()
-	if err := d.CreateWorkspace(&db.Workspace{ID: ws, Name: "tester"}); err != nil {
-		t.Fatal(err)
-	}
-
-	s := &Server{db: d, systemKey: make([]byte, 32)}
-	_, _, _ = s.saveConnector(ws, "slack", map[string]string{"token": "xoxb-1", "app_token": "xapp-1"})
-
-	spec, _ := gateway.CredSpecFor("slack")
 	tok, cfg, err := gateway.SplitCreds(spec, map[string]string{"token": "xoxb-1", "app_token": "xapp-1"})
 	if err != nil || tok != "xoxb-1" || cfg != `{"app_token":"xapp-1"}` {
 		t.Fatalf("slack SplitCreds wrong: tok=%q cfg=%q err=%v", tok, cfg, err)

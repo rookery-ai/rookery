@@ -20,6 +20,9 @@ func TestSlackSpecRegistered(t *testing.T) {
 }
 
 func TestValidateSlackTokenBadPrefix(t *testing.T) {
+	if testing.Short() {
+		t.Skip("makes a live network call to slack auth.test")
+	}
 	// AuthTest with an obviously invalid token must error (no network dependency
 	// on the error path — slack lib returns "invalid_auth" style error offline too;
 	// if this proves flaky offline, skip via testing.Short()).
