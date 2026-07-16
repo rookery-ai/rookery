@@ -366,6 +366,7 @@ func (s *Server) setupRoutes() {
 	s.echo.POST("/workspace/leave", s.handleLeaveWorkspace, s.requireOwner)
 
 	s.setupAPIRoutes()
+	s.setupSPARoutes()
 }
 
 // ── Auth helpers ───────────────────────────────────────────────────────────
