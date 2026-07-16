@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -40,6 +41,94 @@ func TestAPIEnterWorkspaceWrongPassword(t *testing.T) {
 		map[string]string{"master_password": "nope"}, cookies)
 	if rec.Code != http.StatusUnauthorized || !contains(rec.Body.String(), "wrong_master_password") {
 		t.Fatalf("enter wrong pw: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAPIEnterWorkspaceNeedsSetup(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+
+	// Create → 201, becomes active with needs_setup=true (no master password yet).
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/workspaces",
+		map[string]string{"name": "ws-needs-setup"}, cookies)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	cookies = append(cookies, rec.Result().Cookies()...)
+	var created apiWorkspace
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+	wsID := created.ID
+
+	// Leave, then re-enter with NO master_password. Since the workspace still
+	// needs setup, the enter handler must accept an empty body and report
+	// needs_setup=true rather than requiring/verifying a password.
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/workspaces/leave", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("leave: %d %s", rec.Code, rec.Body.String())
+	}
+	cookies = append(cookies, rec.Result().Cookies()...)
+
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/workspaces/"+wsID+"/enter", nil, cookies)
+	if rec.Code != http.StatusOK || !contains(rec.Body.String(), `"needs_setup":true`) {
+		t.Fatalf("enter needs-setup: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAPIWorkspaceDeleteActiveClearsSession(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodDelete, "/api/v1/workspaces/"+wsID, nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete active: %d %s", rec.Code, rec.Body.String())
+	}
+	cookies = append(cookies, rec.Result().Cookies()...)
+
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/auth/session", nil, cookies)
+	if rec.Code != http.StatusOK || !contains(rec.Body.String(), `"workspace":null`) {
+		t.Fatalf("session after deleting active workspace: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAPIWorkspaceDeleteInactiveKeepsSession(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsA := createAndEnterWorkspace(t, s, cookies)
+
+	// Create workspace B — creation sets it active (knocking A out momentarily).
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/workspaces",
+		map[string]string{"name": "ws-b"}, cookies)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create ws-b: %d %s", rec.Code, rec.Body.String())
+	}
+	cookies = append(cookies, rec.Result().Cookies()...)
+	var created apiWorkspace
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode ws-b response: %v", err)
+	}
+	wsB := created.ID
+
+	// Re-enter workspace A (master password set by createAndEnterWorkspace).
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/workspaces/"+wsA+"/enter",
+		map[string]string{"master_password": "master-pw-1"}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("re-enter A: %d %s", rec.Code, rec.Body.String())
+	}
+	cookies = append(cookies, rec.Result().Cookies()...)
+
+	// Delete B (not the active workspace) → session must still show A.
+	rec = doJSON(t, s, http.MethodDelete, "/api/v1/workspaces/"+wsB, nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete inactive B: %d %s", rec.Code, rec.Body.String())
+	}
+	cookies = append(cookies, rec.Result().Cookies()...)
+
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/auth/session", nil, cookies)
+	if rec.Code != http.StatusOK || !contains(rec.Body.String(), `"id":"`+wsA+`"`) {
+		t.Fatalf("session after deleting inactive workspace: %d %s", rec.Code, rec.Body.String())
 	}
 }
 
