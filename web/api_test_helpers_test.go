@@ -74,9 +74,6 @@ func bootstrapAndLogin(t *testing.T, s *Server) []*http.Cookie {
 
 // createAndEnterWorkspace makes a workspace, marks setup complete with a known
 // master password ("master-pw-1"), and enters it. Returns updated cookies + ws id.
-//
-// NOTE: depends on Task 3's POST /api/v1/workspaces/:id/enter, which doesn't exist
-// yet — kept compiling-but-unused via the guard below until a later task calls it.
 func createAndEnterWorkspace(t *testing.T, s *Server, cookies []*http.Cookie) ([]*http.Cookie, string) {
 	t.Helper()
 	w, err := auth.CreateWorkspace(s.db, "ws1", "test workspace")
@@ -105,7 +102,3 @@ func createAndEnterWorkspace(t *testing.T, s *Server, cookies []*http.Cookie) ([
 	// Session cookie is rewritten on enter — merge the fresh cookie.
 	return rec.Result().Cookies(), w.ID
 }
-
-// Unused-until-Task-3 guard: createAndEnterWorkspace references the not-yet-built
-// /api/v1/workspaces/:id/enter endpoint, so no test calls it yet.
-var _ = createAndEnterWorkspace

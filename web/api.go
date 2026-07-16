@@ -77,7 +77,7 @@ func (s *Server) setupAPIRoutes() {
 
 	// Owner-gated (no workspace needed): workspaces, admin, audit.
 	owner := api.Group("", s.requireOwnerAPI)
-	_ = owner // used from Task 3 on
+	s.registerWorkspacesAPI(owner)
 
 	// Workspace-gated: everything tenant-scoped.
 	dash := api.Group("", s.requireOwnerAPI, s.requireActiveWorkspaceAPI, s.requireSetupCompleteAPI)
