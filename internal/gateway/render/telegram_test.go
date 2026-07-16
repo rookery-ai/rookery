@@ -85,3 +85,20 @@ func TestRenderTelegramParagraphBeforeList(t *testing.T) {
 		t.Fatalf("paragraph before list:\n got: %q\nwant: %q", got, want)
 	}
 }
+
+// TestRenderTelegramDispatchStringsEquivalence locks in that the neutral
+// CommonMark literals now used in gateway.dispatch() render byte-identically
+// on Telegram to the old pre-escaped MarkdownV2 literals they replaced.
+func TestRenderTelegramDispatchStringsEquivalence(t *testing.T) {
+	cases := []struct{ name, neutral, wantOldEscaped string }{
+		{"thinking placeholder", "⏳ _Thinking..._", "⏳ _Thinking\\.\\.\\._"},
+		{"secret deleted notice", "🔐 Secret message was automatically deleted.", "🔐 Secret message was automatically deleted\\."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := For("telegram").Render(tc.neutral); got != tc.wantOldEscaped {
+				t.Fatalf("Render(%q)\n got: %q\nwant: %q", tc.neutral, got, tc.wantOldEscaped)
+			}
+		})
+	}
+}

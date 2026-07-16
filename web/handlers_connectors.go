@@ -143,7 +143,7 @@ func (s *Server) handleSaveConnector(c echo.Context) error {
 	}
 	p := s.page(c, "Chat Connectors")
 	if botDisplay != "" {
-		p.Success = "Bot " + botDisplay + " connected! Send /start to it in Telegram to link your account."
+		p.Success = "Bot " + botDisplay + " connected! Send /start to your bot to link your account."
 	} else {
 		p.Success = "Connected to " + platform + " successfully! Send /start to your bot to link your account."
 	}

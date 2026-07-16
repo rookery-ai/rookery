@@ -121,7 +121,7 @@ func (r *Router) handleStart(ctx context.Context, msg Message, send func(string)
 	// If a different chat ID is already linked, reject.
 	rows, _ := r.db.ListPlatformIdentities(msg.WorkspaceID, msg.Platform)
 	if len(rows) > 0 {
-		send("This bot is already linked to another Telegram account. Contact your administrator to reset the link.")
+		send("This bot is already linked to another account. Contact your administrator to reset the link.")
 		return nil
 	}
 
