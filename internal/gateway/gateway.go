@@ -23,7 +23,7 @@ type Message struct {
 	PlatformUserID string // platform-specific user/chat ID
 	WorkspaceID    string // resolved internal user ID (empty if not yet linked)
 	Text           string
-	MessageID      int // platform message ID (used to delete incoming messages)
+	MessageID      string // platform message ID (used to delete incoming messages)
 }
 
 // ParseCommand splits "/cmd arg1 arg2 ..." into (name, remainder).
@@ -55,14 +55,14 @@ type Gateway interface {
 // this interface at dispatch time to provide the "⏳ Thinking… → edit" UX.
 type TypingGateway interface {
 	SendTyping(platformUserID string) error
-	SendMessageGetID(platformUserID, text string) (int, error)
-	EditMessage(platformUserID string, msgID int, text string) error
+	SendMessageGetID(platformUserID, text string) (string, error)
+	EditMessage(platformUserID, msgID, text string) error
 }
 
 // DeletableGateway is an optional interface for gateways that can delete
 // incoming messages (e.g. to redact a typed master password from chat history).
 type DeletableGateway interface {
-	DeleteMessage(platformUserID string, msgID int) error
+	DeleteMessage(platformUserID, msgID string) error
 }
 
 // DispatchFunc is the callback an adapter invokes for each inbound message.
@@ -266,7 +266,7 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 
 	// For plain-text messages (not commands), use typing indicator + placeholder
 	// message that gets edited with the final response, if the gateway supports it.
-	var placeholderID int
+	var placeholderID string
 	isPlainText := !strings.HasPrefix(msg.Text, "/")
 	if isPlainText {
 		m.mu.RLock()
@@ -284,7 +284,7 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 	// final send() call can still do the definitive edit. Used by the router to
 	// push mid-generation progress updates (milestones) to the Telegram chat.
 	updatePlaceholder := func(text string) {
-		if placeholderID == 0 {
+		if placeholderID == "" {
 			return
 		}
 		m.mu.RLock()
@@ -298,19 +298,19 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 	}
 
 	send := func(text string) {
-		if placeholderID != 0 {
+		if placeholderID != "" {
 			m.mu.RLock()
 			gw, ok := m.gateways[key(msg.Platform, msg.WorkspaceID)]
 			m.mu.RUnlock()
 			if ok {
 				if tg, ok := gw.(TypingGateway); ok {
 					if err := tg.EditMessage(msg.PlatformUserID, placeholderID, text); err == nil {
-						placeholderID = 0 // mark used so subsequent sends go through normally
+						placeholderID = "" // mark used so subsequent sends go through normally
 						return
 					}
 				}
 			}
-			placeholderID = 0
+			placeholderID = ""
 		}
 		if err := m.Send(msg.Platform, msg.WorkspaceID, msg.PlatformUserID, text); err != nil {
 			fmt.Printf("gateway: send error: %v\n", err)
@@ -319,7 +319,7 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 	// deleteIncoming silently removes the user's incoming message from chat.
 	// Used to redact typed master passwords from the visible chat history.
 	deleteIncoming := func() {
-		if msg.MessageID == 0 {
+		if msg.MessageID == "" {
 			return
 		}
 		m.mu.RLock()
@@ -336,7 +336,7 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 	// deletion after 30 s followed by a notification to the user.
 	// Used for messages containing sensitive values (e.g. revealed secrets).
 	sendAutoDelete := func(text string) {
-		var sentMsgID int
+		var sentMsgID string
 
 		m.mu.RLock()
 		gw, ok := m.gateways[key(msg.Platform, msg.WorkspaceID)]
@@ -344,22 +344,22 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 
 		if ok {
 			if tg, ok2 := gw.(TypingGateway); ok2 {
-				if placeholderID != 0 {
+				if placeholderID != "" {
 					if err := tg.EditMessage(msg.PlatformUserID, placeholderID, text); err == nil {
 						sentMsgID = placeholderID
 					}
-					placeholderID = 0
+					placeholderID = ""
 				} else {
 					sentMsgID, _ = tg.SendMessageGetID(msg.PlatformUserID, text)
 				}
 			}
 		}
-		if sentMsgID == 0 {
+		if sentMsgID == "" {
 			_ = m.Send(msg.Platform, msg.WorkspaceID, msg.PlatformUserID, text)
 			return
 		}
 
-		go func(id int) {
+		go func(id string) {
 			time.Sleep(30 * time.Second)
 			m.mu.RLock()
 			gw2, ok2 := m.gateways[key(msg.Platform, msg.WorkspaceID)]

@@ -91,10 +91,10 @@ func (g *TelegramGateway) SendTyping(platformUserID string) error {
 }
 
 // SendMessageGetID sends a message and returns its Telegram message ID.
-func (g *TelegramGateway) SendMessageGetID(platformUserID, text string) (int, error) {
+func (g *TelegramGateway) SendMessageGetID(platformUserID, text string) (string, error) {
 	chatID, err := strconv.ParseInt(platformUserID, 10, 64)
 	if err != nil {
-		return 0, fmt.Errorf("invalid telegram chat id %q: %w", platformUserID, err)
+		return "", fmt.Errorf("invalid telegram chat id %q: %w", platformUserID, err)
 	}
 	chat := &telebot.Chat{ID: chatID}
 	rendered := render.For("telegram").Render(text)
@@ -103,27 +103,35 @@ func (g *TelegramGateway) SendMessageGetID(platformUserID, text string) (int, er
 		sent, err = g.bot.Send(chat, text) // plain-text fallback uses the neutral source
 	}
 	if err != nil {
-		return 0, err
+		return "", err
 	}
-	return sent.ID, nil
+	return strconv.Itoa(sent.ID), nil
 }
 
 // DeleteMessage removes a message from the chat (e.g. to redact a typed password).
-func (g *TelegramGateway) DeleteMessage(platformUserID string, msgID int) error {
+func (g *TelegramGateway) DeleteMessage(platformUserID, msgID string) error {
 	chatID, err := strconv.ParseInt(platformUserID, 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid telegram chat id %q: %w", platformUserID, err)
 	}
-	return g.bot.Delete(&telebot.Message{ID: msgID, Chat: &telebot.Chat{ID: chatID}})
+	id, err := strconv.Atoi(msgID)
+	if err != nil {
+		return fmt.Errorf("invalid telegram message id %q: %w", msgID, err)
+	}
+	return g.bot.Delete(&telebot.Message{ID: id, Chat: &telebot.Chat{ID: chatID}})
 }
 
 // EditMessage replaces the text of an existing message.
-func (g *TelegramGateway) EditMessage(platformUserID string, msgID int, text string) error {
+func (g *TelegramGateway) EditMessage(platformUserID, msgID, text string) error {
 	chatID, err := strconv.ParseInt(platformUserID, 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid telegram chat id %q: %w", platformUserID, err)
 	}
-	msg := &telebot.Message{ID: msgID, Chat: &telebot.Chat{ID: chatID}}
+	id, err := strconv.Atoi(msgID)
+	if err != nil {
+		return fmt.Errorf("invalid telegram message id %q: %w", msgID, err)
+	}
+	msg := &telebot.Message{ID: id, Chat: &telebot.Chat{ID: chatID}}
 	rendered := render.For("telegram").Render(text)
 	_, err = g.bot.Edit(msg, rendered, telebot.ModeMarkdownV2)
 	if err != nil {
@@ -145,7 +153,7 @@ func (g *TelegramGateway) handle(tc telebot.Context) error {
 		PlatformUserID: strconv.FormatInt(chat.ID, 10),
 		WorkspaceID:    g.ownerWorkspaceID,
 		Text:           tc.Text(),
-		MessageID:      tc.Message().ID,
+		MessageID:      strconv.Itoa(tc.Message().ID),
 	}
 
 	// Commands arrive as "/cmd" from telebot — ensure leading slash is present.
