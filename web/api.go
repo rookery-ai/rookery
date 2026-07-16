@@ -85,4 +85,5 @@ func (s *Server) setupAPIRoutes() {
 	s.registerSkillsAPI(dash)
 	s.registerSecretsAPI(dash)
 	s.registerConnectorsAPI(dash)
+	s.registerServicesAPI(dash)
 }

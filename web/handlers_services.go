@@ -196,6 +196,44 @@ func (s *Server) handleSaveProviderCreds(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/dashboard/connectors/services")
 }
 
+// consentURLError classifies a failure building an OAuth consent URL so both
+// the template handler (redirect + flash message) and the JSON API
+// (status + code) can render it their own way without duplicating the
+// underlying resolution logic.
+type consentURLError struct {
+	Code string // "unknown_provider" | "missing_creds" | "unreadable_creds"
+	Msg  string
+}
+
+func (e *consentURLError) Error() string { return e.Msg }
+
+// buildConsentURL resolves a provider's saved OAuth app credentials and
+// constructs the signed-state consent URL the user visits to authorize this
+// workspace. Shared by handleConnectService (redirect) and apiConnectService
+// (JSON) — the only two callers.
+func (s *Server) buildConsentURL(c echo.Context, w *db.Workspace, provider, label string) (string, error) {
+	child, ok := s.connectors.ProviderByName(provider)
+	if !ok {
+		return "", &consentURLError{"unknown_provider", "Unknown provider."}
+	}
+	oauth, ok := s.connectors.OAuthProvider(provider) // parent when aliased, else self
+	if !ok {
+		return "", &consentURLError{"unknown_provider", "Unknown provider."}
+	}
+	cfg, _ := s.db.GetServiceProviderConfig(c.Request().Context(), w.ID, oauth.Name)
+	if cfg == nil {
+		return "", &consentURLError{"missing_creds", "Save your " + oauth.Label + " OAuth app credentials first."}
+	}
+	clientID, err := secrets.DecryptWithSystemKey(cfg.EncryptedClientID, s.systemKey)
+	if err != nil {
+		return "", &consentURLError{"unreadable_creds", "Stored credentials are unreadable; re-enter them."}
+	}
+	nonce := uuid.New().String()
+	payload := strings.Join([]string{w.ID, provider, label, nonce}, "~")
+	state := signState(s.systemKey, payload, time.Now())
+	return oauth.ConsentURL(clientID, s.callbackURL(c, provider), state, child.DefaultScopes), nil
+}
+
 func (s *Server) handleConnectService(c echo.Context) error {
 	w := c.Get("workspace").(*db.Workspace)
 	provider := c.Param("provider")
@@ -203,27 +241,11 @@ func (s *Server) handleConnectService(c echo.Context) error {
 	if label == "" {
 		label = "account"
 	}
-	child, ok := s.connectors.ProviderByName(provider)
-	if !ok {
-		return s.redirectWithError(c, "/dashboard/connectors/services", "Unknown provider.")
-	}
-	oauth, ok := s.connectors.OAuthProvider(provider) // parent when aliased, else self
-	if !ok {
-		return s.redirectWithError(c, "/dashboard/connectors/services", "Unknown provider.")
-	}
-	cfg, _ := s.db.GetServiceProviderConfig(c.Request().Context(), w.ID, oauth.Name)
-	if cfg == nil {
-		return s.redirectWithError(c, "/dashboard/connectors/services",
-			"Save your "+oauth.Label+" OAuth app credentials first.")
-	}
-	clientID, err := secrets.DecryptWithSystemKey(cfg.EncryptedClientID, s.systemKey)
+	url, err := s.buildConsentURL(c, w, provider, label)
 	if err != nil {
-		return s.redirectWithError(c, "/dashboard/connectors/services", "Stored credentials are unreadable; re-enter them.")
+		return s.redirectWithError(c, "/dashboard/connectors/services", err.Error())
 	}
-	nonce := uuid.New().String()
-	payload := strings.Join([]string{w.ID, provider, label, nonce}, "~")
-	state := signState(s.systemKey, payload, time.Now())
-	return c.Redirect(http.StatusSeeOther, oauth.ConsentURL(clientID, s.callbackURL(c, provider), state, child.DefaultScopes))
+	return c.Redirect(http.StatusSeeOther, url)
 }
 
 // handleConnectAPIKey stores a static API-key connection for an api_key provider. No OAuth
