@@ -47,7 +47,7 @@ func init() {
 		Platform: "discord",
 		Label:    "Discord",
 		Blurb:    "Chat with your agents via a personal Discord bot (DMs)",
-		Fields:   []CredField{{Key: "token", Label: "Bot Token", Placeholder: "your bot token", Secret: false}},
+		Fields:   []CredField{{Key: "token", Label: "Bot Token", Placeholder: "your bot token", Secret: true}},
 		SetupURL: "https://discord.com/developers/applications",
 		SetupSteps: []string{
 			"Open the Discord Developer Portal and create a New Application",

@@ -16,7 +16,7 @@ import (
 type connectorsPageData struct {
 	*pageData
 	Connections []*db.PlatformConnection
-	Platforms   []string
+	Specs       []gateway.CredSpec
 }
 
 // supportedPlatformNames derives the list of connectable platforms from the
@@ -41,7 +41,7 @@ func (s *Server) showConnectors(c echo.Context) error {
 	return c.Render(http.StatusOK, "dashboard/connectors.html", &connectorsPageData{
 		pageData:    s.page(c, "Chat Connectors"),
 		Connections: connections,
-		Platforms:   platforms,
+		Specs:       gateway.CredSpecs(),
 	})
 }
 
@@ -169,35 +169,51 @@ func (s *Server) handleDeleteConnector(c echo.Context) error {
 	return c.Redirect(http.StatusFound, "/dashboard/connectors")
 }
 
+// testConnectorIdentity decrypts a saved connection's credentials and runs the
+// platform's CredSpec.Validate, returning the bot identity (e.g. username).
+func (s *Server) testConnectorIdentity(workspaceID, platform string) (string, error) {
+	spec, ok := gateway.CredSpecFor(platform)
+	if !ok {
+		return "", fmt.Errorf("unsupported platform")
+	}
+	conn, err := s.db.GetPlatformConnection(workspaceID, platform)
+	if err != nil {
+		return "", fmt.Errorf("connector not found")
+	}
+	token, err := gateway.DecryptToken(conn.EncryptedToken, s.systemKey)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt token")
+	}
+	values := map[string]string{"token": token}
+	if conn.EncryptedConfig != "" {
+		cfg, err := gateway.DecryptToken(conn.EncryptedConfig, s.systemKey)
+		if err == nil {
+			var extra map[string]string
+			if json.Unmarshal([]byte(cfg), &extra) == nil {
+				for k, v := range extra {
+					values[k] = v
+				}
+			}
+		}
+	}
+	if spec.Validate == nil {
+		return "", nil // nothing to probe; treat as ok
+	}
+	return spec.Validate(values)
+}
+
 func (s *Server) handleTestConnector(c echo.Context) error {
 	u := c.Get("workspace").(*db.Workspace)
 	platform := c.Param("platform")
-
-	conn, err := s.db.GetPlatformConnection(u.ID, platform)
+	ident, err := s.testConnectorIdentity(u.ID, platform)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"status": "error", "message": "connector not found"})
+		return c.JSON(http.StatusBadRequest, map[string]string{"status": "error", "message": err.Error()})
 	}
-
-	token, err := gateway.DecryptToken(conn.EncryptedToken, s.systemKey)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"status": "error", "message": "failed to decrypt token"})
+	out := map[string]string{"status": "ok", "platform": platform}
+	if ident != "" {
+		out["bot"] = "@" + ident
 	}
-
-	switch platform {
-	case "telegram":
-		// Validate token by hitting the Telegram getMe endpoint.
-		botUser, err := testTelegramToken(token)
-		if err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"status": "error", "message": err.Error()})
-		}
-		return c.JSON(http.StatusOK, map[string]string{
-			"status":   "ok",
-			"platform": platform,
-			"bot":      "@" + botUser,
-		})
-	default:
-		return c.JSON(http.StatusBadRequest, map[string]string{"status": "error", "message": "unsupported platform"})
-	}
+	return c.JSON(http.StatusOK, out)
 }
 
 // testTelegramToken calls Telegram's getMe API to validate the bot token.
@@ -237,6 +253,6 @@ func (s *Server) renderConnectors(c echo.Context, u *db.Workspace, p *pageData) 
 	return c.Render(http.StatusOK, "dashboard/connectors.html", &connectorsPageData{
 		pageData:    p,
 		Connections: connections,
-		Platforms:   platforms,
+		Specs:       gateway.CredSpecs(),
 	})
 }

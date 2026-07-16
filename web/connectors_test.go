@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"path/filepath"
 	"testing"
 
@@ -34,5 +35,60 @@ func TestSaveConnectorStoresConfigForMultiField(t *testing.T) {
 	}
 	if conn.EncryptedConfig == "" {
 		t.Fatal("expected encrypted_config to be populated")
+	}
+}
+
+func TestTestConnectorUsesSpecValidate(t *testing.T) {
+	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { d.Close() })
+	ws := uuid.New().String()
+	if err := d.CreateWorkspace(&db.Workspace{ID: ws, Name: "tester"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// A spec whose Validate echoes a fixed identity, no network.
+	gateway.RegisterCredSpec(gateway.CredSpec{Platform: "cs-validate", Label: "CSV", Fields: []gateway.CredField{{Key: "token"}},
+		Validate: func(v map[string]string) (string, error) { return "bot-ident", nil }})
+	enc, _ := gateway.EncryptToken("tok", make([]byte, 32))
+	if err := d.UpsertPlatformConnection(&db.PlatformConnection{ID: uuid.New().String(), WorkspaceID: ws, Platform: "cs-validate", EncryptedToken: enc, Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{db: d, systemKey: make([]byte, 32)}
+	id, err := s.testConnectorIdentity(ws, "cs-validate")
+	if err != nil || id != "bot-ident" {
+		t.Fatalf("testConnectorIdentity = %q, %v", id, err)
+	}
+}
+
+// TestConnectorsTemplateRenders renders dashboard/connectors.html with a
+// populated connectorsPageData (Specs from the real registry, both a
+// connected and an unconnected platform) so an execute-time reference to the
+// new .Specs range (replacing the old hardcoded Telegram/Discord cards)
+// can't silently break.
+func TestConnectorsTemplateRenders(t *testing.T) {
+	tmpl, err := parseTemplates("templates")
+	if err != nil {
+		t.Fatalf("parseTemplates: %v", err)
+	}
+	specs := gateway.CredSpecs()
+	if len(specs) == 0 {
+		t.Fatal("expected at least one registered CredSpec (telegram/discord)")
+	}
+	data := &connectorsPageData{
+		pageData: &pageData{Title: "Chat Connectors", Workspace: &db.Workspace{Name: "ilija"}},
+		Specs:    specs,
+		Connections: []*db.PlatformConnection{
+			{Platform: specs[0].Platform, Active: true},
+		},
+	}
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "dashboard/connectors.html", data); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if buf.Len() == 0 {
+		t.Fatal("rendered empty output")
 	}
 }
