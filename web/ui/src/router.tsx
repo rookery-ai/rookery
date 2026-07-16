@@ -1,5 +1,6 @@
 import { createBrowserRouter, Navigate, Outlet } from "react-router";
 import { useSession } from "@/lib/session";
+import { AppShell } from "@/components/shell/AppShell";
 import Placeholder from "@/pages/Placeholder";
 import Login from "@/pages/Login";
 import ChangePassword from "@/pages/ChangePassword";
@@ -23,8 +24,7 @@ export const router = createBrowserRouter(
       element: <RequireAuth />,
       children: [
         {
-          // AppShell mounts here in Task 6.
-          element: <Outlet />,
+          element: <AppShell />,
           children: [
             { path: "/", element: <Placeholder title="Home" /> },
             { path: "/kb", element: <Placeholder title="Knowledge Base" /> },
