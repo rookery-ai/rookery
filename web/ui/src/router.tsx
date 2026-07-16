@@ -5,6 +5,7 @@ import Placeholder from "@/pages/Placeholder";
 import Login from "@/pages/Login";
 import ChangePassword from "@/pages/ChangePassword";
 import Workspaces from "@/pages/Workspaces";
+import KBPage from "@/pages/kb/KBPage";
 
 function RequireAuth() {
   const { data: session, isLoading } = useSession();
@@ -30,7 +31,7 @@ export const router = createBrowserRouter(
           element: <AppShell />,
           children: [
             { path: "/", element: <Placeholder title="Home" /> },
-            { path: "/kb", element: <Placeholder title="Knowledge Base" /> },
+            { path: "/kb", element: <KBPage /> },
             { path: "/agents", element: <Placeholder title="Agents" /> },
             { path: "/skills", element: <Placeholder title="Skills" /> },
             { path: "/connections", element: <Placeholder title="Connections" /> },
