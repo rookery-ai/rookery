@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
@@ -18,6 +18,13 @@ export function EnterWorkspaceDialog({
   const [busy, setBusy] = useState(false);
   const nav = useNavigate();
   const qc = useQueryClient();
+
+  // Reset stale password/error when the target workspace changes (including
+  // reopening for a different workspace after a failed attempt).
+  useEffect(() => {
+    setPassword("");
+    setError("");
+  }, [ws?.id]);
 
   async function enter(e: React.FormEvent) {
     e.preventDefault();
@@ -110,10 +117,23 @@ export default function Workspaces() {
   const { data: session } = useSession();
   const [entering, setEntering] = useState<Workspace | null>(null);
   const [creating, setCreating] = useState(false);
+  const [directEnterError, setDirectEnterError] = useState("");
   const [params] = useSearchParams();
   const setupID = params.get("setup");
 
   const list = session?.workspaces ?? [];
+
+  function directEnter(ws: Workspace) {
+    setDirectEnterError("");
+    api
+      .post(`/api/v1/workspaces/${ws.id}/enter`, {})
+      .then(() => {
+        window.location.href = "/app/workspaces?setup=" + ws.id;
+      })
+      .catch((err) => {
+        setDirectEnterError(err instanceof ApiError ? err.message : "Something went wrong");
+      });
+  }
 
   return (
     <div className="min-h-screen bg-chrome flex items-center justify-center p-4">
@@ -129,17 +149,14 @@ export default function Workspaces() {
             (the guided setup moves here in a later phase).
           </p>
         )}
+        {directEnterError && (
+          <p className="text-danger text-sm mb-4">{directEnterError}</p>
+        )}
         <ul className="space-y-2">
           {list.map((ws) => (
             <li key={ws.id}>
               <button
-                onClick={() =>
-                  ws.needs_setup
-                    ? api
-                        .post(`/api/v1/workspaces/${ws.id}/enter`, {})
-                        .then(() => (window.location.href = "/app/workspaces?setup=" + ws.id))
-                    : setEntering(ws)
-                }
+                onClick={() => (ws.needs_setup ? directEnter(ws) : setEntering(ws))}
                 className="w-full text-left border border-border rounded-lg px-4 py-3 hover:bg-chrome transition-colors"
               >
                 <span className="font-semibold">{ws.name}</span>
