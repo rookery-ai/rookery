@@ -17,7 +17,6 @@ import (
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/llm"
 	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/reminder"
@@ -400,37 +399,13 @@ func (s *Server) buildSettingsData(p *pageData, w *db.Workspace) *settingsPageDa
 	}
 }
 
-// coderCatalogJSON marshals the direct-LLM-API provider catalog (name, default
-// base URL, model placeholder, docs URL, requiresKey, custom) into a JSON array
-// for the coder-form driver JS. Shared by the settings page and the setup wizard
-// so the catalog is built in exactly one place.
 // coderCatalogJSON marshals the provider catalog for the coder-form JS. secretNames
 // is the workspace's existing secret names — used to flag providers that already have
 // a stored CODER_KEY_<PROVIDER> key so the form can say "already set, paste to override".
+// The catalog-slice construction itself lives in coderCatalogSlice (api_settings.go)
+// so the template path and the JSON API build it in exactly one place.
 func (s *Server) coderCatalogJSON(secretNames []string) template.JS {
-	have := make(map[string]bool, len(secretNames))
-	for _, n := range secretNames {
-		have[n] = true
-	}
-	type provJS struct {
-		Name        string `json:"name"`
-		Base        string `json:"base"`
-		Model       string `json:"model"`
-		Docs        string `json:"docs"`
-		RequiresKey bool   `json:"requiresKey"`
-		Custom      bool   `json:"custom"`
-		HasKey      bool   `json:"hasKey"`
-	}
-	cat := coder.APIProviders()
-	pjs := make([]provJS, 0, len(cat))
-	for _, p := range cat {
-		pjs = append(pjs, provJS{
-			Name: p.Name, Base: llm.DefaultBaseURL(p.Name), Model: p.ModelPlaceholder,
-			Docs: p.DocsURL, RequiresKey: p.RequiresKey, Custom: p.Custom,
-			HasKey: have[coder.CoderKeySecretName(p.Name)],
-		})
-	}
-	catJSON, _ := json.Marshal(pjs)
+	catJSON, _ := json.Marshal(s.coderCatalogSlice(secretNames))
 	return template.JS(catJSON)
 }
 
