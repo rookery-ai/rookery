@@ -83,4 +83,5 @@ func (s *Server) setupAPIRoutes() {
 	dash := api.Group("", s.requireOwnerAPI, s.requireActiveWorkspaceAPI, s.requireSetupCompleteAPI)
 	s.registerAgentsAPI(dash)
 	s.registerSkillsAPI(dash)
+	s.registerSecretsAPI(dash)
 }
