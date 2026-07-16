@@ -46,6 +46,11 @@ make stop      # stop the running server
 make logs      # tail -f logs/server.log
 make status    # show running server process
 make test      # run the unit tests
+
+# Frontend (web/ui): build the SPA into the binary
+make ui        # npm ci + vite build → web/ui/dist (embedded on next go build)
+make build     # ui + go build (full artifact); make build-go for Go-only
+# Dev loop: cd web/ui && npm run dev  (Vite on :5173, proxies /api to :8080)
 ```
 
 AST guardrail tests shell out to `python3`. If Python is not available, those tests self-skip.
@@ -488,6 +493,7 @@ exhaustive route inventory is the `want` table in `web/api_parity_test.go`
 - **kb** — tree, note read/write/new/delete/rename, search, raw
 - **settings + setup** — profile/workspace/coder/master-password settings, coder test, setup wizard
 - **search** — global search
+- `GET /app, /app/*` — embedded SPA (React; 503 when built without make ui); moves to / in sub-plan 6.
 
 ### Owner vs. workspace separation
 
