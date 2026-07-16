@@ -12,34 +12,30 @@ function RequireAuth() {
 }
 
 // Tasks 5-7 replace these placeholder elements with real screens.
-export function createRouter() {
-  return createBrowserRouter(
-    [
-      { path: "/login", element: <Placeholder title="Login" /> },
-      { path: "/change-password", element: <Placeholder title="Change password" /> },
-      { path: "/workspaces", element: <Placeholder title="Workspaces" /> },
-      {
-        element: <RequireAuth />,
-        children: [
-          {
-            // AppShell mounts here in Task 6.
-            element: <Outlet />,
-            children: [
-              { path: "/", element: <Placeholder title="Home" /> },
-              { path: "/kb", element: <Placeholder title="Knowledge Base" /> },
-              { path: "/agents", element: <Placeholder title="Agents" /> },
-              { path: "/skills", element: <Placeholder title="Skills" /> },
-              { path: "/connections", element: <Placeholder title="Connections" /> },
-              { path: "/chats", element: <Placeholder title="Chats" /> },
-              { path: "/secrets", element: <Placeholder title="Secrets" /> },
-              { path: "/settings", element: <Placeholder title="Settings" /> },
-            ],
-          },
-        ],
-      },
-    ],
-    { basename: "/app" },
-  );
-}
-
-export const router = createRouter();
+export const router = createBrowserRouter(
+  [
+    { path: "/login", element: <Placeholder title="Login" /> },
+    { path: "/change-password", element: <Placeholder title="Change password" /> },
+    { path: "/workspaces", element: <Placeholder title="Workspaces" /> },
+    {
+      element: <RequireAuth />,
+      children: [
+        {
+          // AppShell mounts here in Task 6.
+          element: <Outlet />,
+          children: [
+            { path: "/", element: <Placeholder title="Home" /> },
+            { path: "/kb", element: <Placeholder title="Knowledge Base" /> },
+            { path: "/agents", element: <Placeholder title="Agents" /> },
+            { path: "/skills", element: <Placeholder title="Skills" /> },
+            { path: "/connections", element: <Placeholder title="Connections" /> },
+            { path: "/chats", element: <Placeholder title="Chats" /> },
+            { path: "/secrets", element: <Placeholder title="Secrets" /> },
+            { path: "/settings", element: <Placeholder title="Settings" /> },
+          ],
+        },
+      ],
+    },
+  ],
+  { basename: "/app" },
+);
