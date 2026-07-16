@@ -82,6 +82,7 @@ func (s *Server) setupAPIRoutes() {
 	// Workspace-gated: everything tenant-scoped.
 	dash := api.Group("", s.requireOwnerAPI, s.requireActiveWorkspaceAPI, s.requireSetupCompleteAPI)
 	s.registerAgentsAPI(dash)
+	s.registerChatsAPI(dash)
 	s.registerSkillsAPI(dash)
 	s.registerSecretsAPI(dash)
 	s.registerConnectorsAPI(dash)
