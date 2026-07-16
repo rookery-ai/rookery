@@ -364,6 +364,8 @@ func (s *Server) setupRoutes() {
 
 	// Leaving the active workspace (back to the owner's workspace list).
 	s.echo.POST("/workspace/leave", s.handleLeaveWorkspace, s.requireOwner)
+
+	s.setupAPIRoutes()
 }
 
 // ── Auth helpers ───────────────────────────────────────────────────────────
