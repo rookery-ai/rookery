@@ -469,6 +469,26 @@ fields `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`), 
 /admin/audit
 ```
 
+#### `/api/v1` (JSON API)
+
+A parallel JSON API mirrors the dashboard/admin surface above (spec §12). The authoritative,
+exhaustive route inventory is the `want` table in `web/api_parity_test.go`
+(`TestAPIParityInventory`) — a merge gate asserting every planned route is registered via
+`s.echo.Routes()`; consult it directly rather than duplicating the full list here. Route groups:
+
+- **auth** — session, login, logout, change-password
+- **workspaces + admin** — list/create/enter/leave/delete workspaces, permissions, admin overview/audit/settings
+- **agents + design** — CRUD, run + run-progress SSE, schedule, agent-md, skills, connections, and the full conversational design FSM (design/cancel/resume/dismiss/progress/state, edit/start)
+- **skills** — CRUD, core-skill read, and the conversational skill-design FSM (design/cancel/resume/dismiss/progress)
+- **secrets** — list/create/delete
+- **connectors** — chat-platform connections (Telegram/Discord/Slack): list/create/delete/test
+- **services** — self-managed-OAuth service connections: list, per-provider creds/connect/apikey, delete
+- **chats** — CRUD, messages, resume/stop
+- **reminders + inbox** — reminders CRUD + poll; inbox list/poll/read/read-all/delete
+- **kb** — tree, note read/write/new/delete/rename, search, raw
+- **settings + setup** — profile/workspace/coder/master-password settings, coder test, setup wizard
+- **search** — global search
+
 ### Owner vs. workspace separation
 
 - **Owner**: only `/admin/*` (guarded by `requireOwner`) — manages workspaces, system settings, audit.
