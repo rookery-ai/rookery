@@ -5,6 +5,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSession } from "@/lib/session";
+import WorkspaceMenu from "./WorkspaceMenu";
 
 export const railItems = [
   { to: "/", label: "Home", icon: House },
@@ -16,21 +17,6 @@ export const railItems = [
   { to: "/secrets", label: "Secrets", icon: KeyRound },
 ];
 
-// WorkspaceButton is a plain initial-badge here; Task 7 replaces it with the
-// workspace menu (switch/create/leave).
-function WorkspaceButton() {
-  const { data } = useSession();
-  const initial = data?.workspace?.name?.[0]?.toUpperCase() ?? "?";
-  return (
-    <div
-      aria-label="Workspace"
-      className="size-9 rounded-lg bg-foreground text-background flex items-center justify-center font-bold"
-    >
-      {initial}
-    </div>
-  );
-}
-
 export default function IconRail() {
   return (
     <nav
@@ -38,8 +24,8 @@ export default function IconRail() {
       className="fixed bottom-0 inset-x-0 z-20 flex flex-row items-center justify-around border-t border-border bg-chrome px-2 py-1
                  md:static md:h-full md:w-14 md:flex-col md:justify-start md:border-t-0 md:border-r md:py-3 md:gap-1.5"
     >
-      <div className="hidden md:block mb-2">
-        <WorkspaceButton />
+      <div className="md:mb-2">
+        <WorkspaceMenu />
       </div>
       {railItems.map(({ to, label, icon: Icon }) => (
         <Tooltip key={to}>

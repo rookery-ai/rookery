@@ -4,6 +4,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import Placeholder from "@/pages/Placeholder";
 import Login from "@/pages/Login";
 import ChangePassword from "@/pages/ChangePassword";
+import Workspaces from "@/pages/Workspaces";
 
 function RequireAuth() {
   const { data: session, isLoading } = useSession();
@@ -14,12 +15,12 @@ function RequireAuth() {
   return <Outlet />;
 }
 
-// Tasks 5-7 replace these placeholder elements with real screens.
+// Later tasks replace these placeholder elements with real screens.
 export const router = createBrowserRouter(
   [
     { path: "/login", element: <Login /> },
     { path: "/change-password", element: <ChangePassword /> },
-    { path: "/workspaces", element: <Placeholder title="Workspaces" /> },
+    { path: "/workspaces", element: <Workspaces /> },
     {
       element: <RequireAuth />,
       children: [

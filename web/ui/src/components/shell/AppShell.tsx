@@ -17,6 +17,8 @@ export function useSlideOver() {
   return { open: openPanel, close: closePanel };
 }
 
+// Call the returned setter only from an effect (useEffect), never during
+// render — the argument is a ReactNode and setting state during render loops.
 export function useContextPane() {
   return useContext(ShellCtx).setContextPane;
 }
