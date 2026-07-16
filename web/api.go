@@ -90,4 +90,5 @@ func (s *Server) setupAPIRoutes() {
 	s.registerHomeAPI(dash)
 	s.registerKBAPI(dash)
 	s.registerSettingsAPI(dash)
+	s.registerSearchAPI(dash)
 }
