@@ -6,6 +6,8 @@ import { ApiError } from "@/lib/api";
 import { useKBNote, useSaveNote, rawURL } from "@/lib/kb";
 import { Button } from "@/components/ui/button";
 import { buildExtensions, toMarkdown, checkFidelity } from "./editor";
+import { slashSuggestion } from "./SlashMenu";
+import BubbleToolbar from "./BubbleToolbar";
 import "./editor.css";
 
 export type SaveState = "saved" | "saving" | "dirty" | "error" | "raw";
@@ -28,7 +30,11 @@ function WysiwygEditor({
   registerGetContent: (fn: () => string) => void;
 }) {
   const editor = useEditor({
-    extensions: buildExtensions(),
+    // buildExtensions()'s `extra` param exists precisely so UI-only
+    // extensions can be appended here without editor.ts knowing about them
+    // — checkFidelity's headless round-trip (buildExtensions() with no
+    // args) is unaffected by the slash-menu suggestion plugin.
+    extensions: buildExtensions([slashSuggestion()]),
     content,
     onUpdate: () => onDirty(),
   });
@@ -38,7 +44,12 @@ function WysiwygEditor({
     registerGetContent(() => toMarkdown(editor));
   }, [editor, registerGetContent]);
 
-  return <EditorContent editor={editor} className="note-editor-content" />;
+  return (
+    <>
+      <BubbleToolbar editor={editor} />
+      <EditorContent editor={editor} className="note-editor-content" />
+    </>
+  );
 }
 
 export default function NoteEditor({
