@@ -12,6 +12,8 @@ function RequireAuth() {
   if (!session?.authenticated) return <Navigate to="/login" replace />;
   if (session.owner?.must_change_password) return <Navigate to="/change-password" replace />;
   if (!session.workspace) return <Navigate to="/workspaces" replace />;
+  if (session.workspace?.needs_setup)
+    return <Navigate to={`/workspaces?setup=${session.workspace.id}`} replace />;
   return <Outlet />;
 }
 
