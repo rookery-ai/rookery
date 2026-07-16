@@ -4,6 +4,7 @@ import { Plus, FileText } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
 import { Button } from "@/components/ui/button";
 import FileTree, { NewEntryDialog } from "./FileTree";
+import NoteEditor from "./NoteEditor";
 
 function KBPaneHeader() {
   const [newOpen, setNewOpen] = useState(false);
@@ -29,11 +30,6 @@ function KBEmptyState() {
       <p className="text-sm">Select a note or create one.</p>
     </div>
   );
-}
-
-// Stub for this task — Task 3 replaces this with the TipTap editor.
-function NoteEditor({ path }: { path: string }) {
-  return <div className="p-8">editor: {path}</div>;
 }
 
 export default function KBPage() {
