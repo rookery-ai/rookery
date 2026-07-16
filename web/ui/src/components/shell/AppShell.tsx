@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Outlet } from "react-router";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -23,18 +23,34 @@ export function useContextPane() {
   return useContext(ShellCtx).setContextPane;
 }
 
+// Declarative wrapper around useContextPane: mount to publish content into
+// the shell's context pane, unmount to clear it. Prefer this over the raw
+// useContextPane escape hatch in page components.
+export function ContextPane({ children }: { children: React.ReactNode }) {
+  const setContextPane = useContextPane();
+  useEffect(() => {
+    setContextPane(children);
+    return () => setContextPane(null);
+  }, [children, setContextPane]);
+  return null;
+}
+
 export function AppShell() {
   const [panel, setPanel] = useState<SlideOverState>(null);
   const [contextPane, setContextPane] = useState<React.ReactNode | null>(null);
 
+  const openPanel = useCallback(
+    (node: React.ReactNode, opts?: { title?: string }) => setPanel({ node, title: opts?.title }),
+    [],
+  );
+  const closePanel = useCallback(() => setPanel(null), []);
+  const value = useMemo(
+    () => ({ openPanel, closePanel, setContextPane }),
+    [openPanel, closePanel, setContextPane],
+  );
+
   return (
-    <ShellCtx.Provider
-      value={{
-        openPanel: (node, opts) => setPanel({ node, title: opts?.title }),
-        closePanel: () => setPanel(null),
-        setContextPane,
-      }}
-    >
+    <ShellCtx.Provider value={value}>
       <TooltipProvider>
         <div className="h-screen flex flex-col md:flex-row bg-background">
           <IconRail />

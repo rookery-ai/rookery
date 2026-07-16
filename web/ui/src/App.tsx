@@ -7,7 +7,8 @@ const AUTH_ERROR_CODES = ["not_authenticated", "no_workspace", "needs_setup", "m
 
 const qc: QueryClient = new QueryClient({
   queryCache: new QueryCache({
-    onError: (err) => {
+    onError: (err, query) => {
+      if (query.queryKey[0] === "session") return;
       if (err instanceof ApiError && AUTH_ERROR_CODES.includes(err.code)) {
         qc.invalidateQueries({ queryKey: ["session"] });
       }

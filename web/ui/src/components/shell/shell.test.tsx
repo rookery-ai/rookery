@@ -2,7 +2,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router";
-import { AppShell, useSlideOver } from "./AppShell";
+import { useState } from "react";
+import { AppShell, ContextPane, useSlideOver } from "./AppShell";
 
 function Page() {
   const { open } = useSlideOver();
@@ -13,7 +14,21 @@ function Page() {
   );
 }
 
-function wrap() {
+function PaneToggle() {
+  const [shown, setShown] = useState(true);
+  return (
+    <div>
+      <button onClick={() => setShown(false)}>hide pane</button>
+      {shown && (
+        <ContextPane>
+          <div>PANE</div>
+        </ContextPane>
+      )}
+    </div>
+  );
+}
+
+function wrap(page = <Page />) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   vi.stubGlobal(
     "fetch",
@@ -34,7 +49,7 @@ function wrap() {
       <MemoryRouter initialEntries={["/"]}>
         <Routes>
           <Route element={<AppShell />}>
-            <Route path="/" element={<Page />} />
+            <Route path="/" element={page} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -49,4 +64,11 @@ test("renders rail items and opens the slide-over", async () => {
   await userEvent.click(screen.getByText("open panel"));
   expect(await screen.findByText("PANEL-CONTENT")).toBeInTheDocument();
   expect(screen.getByText("Details")).toBeInTheDocument();
+});
+
+test("ContextPane mounts content into the shell and clears it on unmount", async () => {
+  wrap(<PaneToggle />);
+  expect(await screen.findByText("PANE")).toBeInTheDocument();
+  await userEvent.click(screen.getByText("hide pane"));
+  expect(screen.queryByText("PANE")).not.toBeInTheDocument();
 });
