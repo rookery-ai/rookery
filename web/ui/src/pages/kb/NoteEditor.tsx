@@ -60,6 +60,9 @@ export default function NoteEditor({
 
   const initializedRef = useRef(false);
   const dirtyRef = useRef(false);
+  const savingRef = useRef(false);
+  const pendingReflushRef = useRef(false);
+  const mountedRef = useRef(true);
   const timerRef = useRef<number | undefined>(undefined);
   const rawTextRef = useRef("");
   const getContentRef = useRef<() => string>(() => "");
@@ -68,6 +71,15 @@ export default function NoteEditor({
   useEffect(() => {
     modeRef.current = mode;
   }, [mode]);
+
+  // mountedRef guards state updates from async save callbacks that resolve
+  // after the component (or this note's instance — KBPage keys NoteEditor
+  // by path) has already unmounted.
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Determine WYSIWYG-vs-raw once, the first time the note loads.
   useEffect(() => {
@@ -87,6 +99,7 @@ export default function NoteEditor({
 
   const report = useCallback(
     (s: SaveState) => {
+      if (!mountedRef.current) return;
       setSaveState(s);
       onStateChange?.(s);
     },
@@ -95,22 +108,61 @@ export default function NoteEditor({
 
   const idleState = useCallback((): SaveState => (modeRef.current === "raw" ? "raw" : "saved"), []);
 
+  // Note on the dirty/saving contract (fixes a data-loss bug from an earlier
+  // version that cleared dirtyRef unconditionally before the PUT resolved —
+  // a failed save left the flag falsely clean, so Ctrl/Cmd+S became a silent
+  // no-op and unmount-flush skipped, permanently dropping the edit):
+  //  - dirtyRef is cleared ONLY inside onSuccess, and only if nothing else
+  //    changed the content while the request was in flight (compared by
+  //    value against the snapshot this call sent).
+  //  - onError never touches dirtyRef — the edit stays pending so the next
+  //    Ctrl/Cmd+S or the unmount-flush effect retries with fresh content.
+  //  - savingRef prevents two concurrent PUTs; a flush() call that arrives
+  //    while one is already in flight (e.g. Ctrl+S mid-save) doesn't get
+  //    dropped — it sets pendingReflushRef, and the in-flight request's
+  //    completion handler re-invokes flush() once it's done.
   const flush = useCallback(() => {
+    if (savingRef.current) {
+      pendingReflushRef.current = true;
+      return;
+    }
     if (timerRef.current !== undefined) {
       window.clearTimeout(timerRef.current);
       timerRef.current = undefined;
     }
     if (!dirtyRef.current) return;
-    dirtyRef.current = false;
+    savingRef.current = true;
     const content = getContentRef.current();
     report("saving");
     saveNote.mutate(
       { path, content },
       {
-        onSuccess: () => report(idleState()),
+        onSuccess: () => {
+          savingRef.current = false;
+          if (getContentRef.current() === content) {
+            dirtyRef.current = false;
+            report(idleState());
+          } else {
+            // A newer edit landed while this save was in flight — stay
+            // dirty and let the reflush below (or the debounce timer that
+            // edit already rescheduled) pick it up.
+            report("dirty");
+          }
+          if (pendingReflushRef.current) {
+            pendingReflushRef.current = false;
+            flush();
+          }
+        },
         onError: (err) => {
-          setErrorMessage(err instanceof ApiError ? err.message : "Failed to save");
+          savingRef.current = false;
+          if (mountedRef.current) {
+            setErrorMessage(err instanceof ApiError ? err.message : "Failed to save");
+          }
           report("error");
+          if (pendingReflushRef.current) {
+            pendingReflushRef.current = false;
+            flush();
+          }
         },
       },
     );
@@ -137,12 +189,15 @@ export default function NoteEditor({
   }, [flush]);
 
   // Flush any pending save on unmount (e.g. navigating to another note)
-  // rather than losing it to a cancelled debounce timer.
+  // rather than losing it to a cancelled debounce timer. Fire-and-forget:
+  // there's no component left to receive onSuccess/onError, and no need to
+  // touch dirtyRef here — this instance is going away either way, and if a
+  // save is already in flight this fires anyway in case a newer edit landed
+  // after that request's content snapshot was taken.
   useEffect(() => {
     return () => {
       if (timerRef.current !== undefined) window.clearTimeout(timerRef.current);
       if (dirtyRef.current) {
-        dirtyRef.current = false;
         saveNote.mutate({ path, content: getContentRef.current() });
       }
     };
