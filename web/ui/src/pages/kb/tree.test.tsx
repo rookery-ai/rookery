@@ -10,11 +10,15 @@ function jsonResponse(body: unknown) {
   });
 }
 
-function mockFetch() {
+// `intercept` lets a test short-circuit specific requests (e.g. a DELETE
+// that should error) while every other call still hits the tree fixtures.
+function mockFetch(intercept?: (url: string, init?: RequestInit) => Response | undefined) {
   vi.stubGlobal(
     "fetch",
-    vi.fn((input: RequestInfo | URL) => {
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const custom = intercept?.(url, init);
+      if (custom) return Promise.resolve(custom);
       if (url === "/api/v1/kb/tree?path=") {
         return Promise.resolve(
           jsonResponse({
@@ -117,4 +121,53 @@ test("New note… on a directory opens the dialog and creates the entry", async 
   );
   const call = vi.mocked(fetch).mock.calls.find((c) => String(c[0]) === "/api/v1/kb/new")!;
   expect(JSON.parse(String((call[1] as RequestInit).body))).toEqual({ path: "notes/b.md", is_dir: false });
+});
+
+test("Delete… on a file shows the path, confirms, DELETEs, and closes on success", async () => {
+  mockFetch();
+  renderTree();
+
+  await userEvent.click(await screen.findByLabelText("Actions for README.md"));
+  await userEvent.click(await screen.findByText("Delete…"));
+
+  const heading = await screen.findByRole("heading", { name: /^Delete\s/ });
+  expect(heading.textContent).toContain("README.md");
+
+  await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+  await waitFor(() =>
+    expect(
+      vi.mocked(fetch).mock.calls.some(
+        (c) =>
+          String(c[0]) === "/api/v1/kb/note?path=README.md" &&
+          (c[1] as RequestInit | undefined)?.method === "DELETE",
+      ),
+    ).toBe(true),
+  );
+  await waitFor(() =>
+    expect(screen.queryByRole("heading", { name: /^Delete\s/ })).not.toBeInTheDocument(),
+  );
+});
+
+test("Delete… surfaces a 400 error inline and keeps the dialog open", async () => {
+  mockFetch((url, init) => {
+    if (init?.method === "DELETE" && url.startsWith("/api/v1/kb/note")) {
+      return new Response(
+        JSON.stringify({ error: { code: "invalid_path", message: "cannot delete this" } }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return undefined;
+  });
+  renderTree();
+
+  await userEvent.click(await screen.findByLabelText("Actions for README.md"));
+  await userEvent.click(await screen.findByText("Delete…"));
+  await screen.findByRole("heading", { name: /^Delete\s/ });
+
+  await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+  expect(await screen.findByText("cannot delete this")).toBeInTheDocument();
+  // Error keeps the dialog open — the confirm didn't silently succeed.
+  expect(screen.getByRole("heading", { name: /^Delete\s/ })).toBeInTheDocument();
 });
