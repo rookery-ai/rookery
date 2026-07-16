@@ -106,14 +106,36 @@ describe("slashItems run() against a headless editor", () => {
     editor.destroy();
   });
 
-  test("Table inserts a 3x3 table node", () => {
+  test("Table inserts a 3x3 table node with a header row", () => {
     const editor = headlessEditor();
     findItem("Table").run(editor);
-    const json = editor.getJSON();
-    const str = JSON.stringify(json);
-    expect(str).toContain('"type":"table"');
+    // editor.getJSON()'s real return type is a recursive NodeType/TextType
+    // union keyed off the editor's exact registered schema, which TS can't
+    // narrow through plain `.content` chaining below. This is a doc-shape
+    // assertion, not a schema-typed consumer, so a loose structural view is
+    // the right tool here.
+    type SimpleNode = { type?: string; content?: SimpleNode[] };
+    const json = editor.getJSON() as unknown as SimpleNode;
+    expect(JSON.stringify(json)).toContain('"type":"table"');
+
+    const table = json.content?.[0];
+    expect(table?.type).toBe("table");
+    const rows = table?.content ?? [];
     // 3 rows
-    expect((json.content?.[0]?.content ?? [])).toHaveLength(3);
+    expect(rows).toHaveLength(3);
+    // each row has exactly 3 cells (column count)
+    for (const row of rows) {
+      expect(row.content ?? []).toHaveLength(3);
+    }
+    // header row present: first row's cells are tableHeader, the rest tableCell
+    for (const cell of rows[0].content ?? []) {
+      expect(cell.type).toBe("tableHeader");
+    }
+    for (const row of rows.slice(1)) {
+      for (const cell of row.content ?? []) {
+        expect(cell.type).toBe("tableCell");
+      }
+    }
     editor.destroy();
   });
 });
