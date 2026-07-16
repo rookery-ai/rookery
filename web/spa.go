@@ -56,6 +56,11 @@ func serveFile(c echo.Context, file string, filesystem fs.FS) error {
 		return c.String(http.StatusInternalServerError, "file does not implement io.ReadSeeker")
 	}
 
-	http.ServeContent(c.Response().Writer, c.Request(), fi.Name(), fi.ModTime(), ff)
+	// Pass *echo.Response (implements http.ResponseWriter), not the raw
+	// http.ResponseWriter.Writer — this keeps Echo's logger status/size
+	// accounting correct. echo.Context has no FileFS method in v4.15.2 (it's
+	// on the concrete *echo.Echo/Group, not the interface), so we can't use
+	// c.FileFS here.
+	http.ServeContent(c.Response(), c.Request(), fi.Name(), fi.ModTime(), ff)
 	return nil
 }
