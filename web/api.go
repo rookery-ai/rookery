@@ -81,7 +81,5 @@ func (s *Server) setupAPIRoutes() {
 
 	// Workspace-gated: everything tenant-scoped.
 	dash := api.Group("", s.requireOwnerAPI, s.requireActiveWorkspaceAPI, s.requireSetupCompleteAPI)
-	dash.GET("/agents", func(c echo.Context) error { // stub — replaced in Task 4
-		return jsonErr(c, http.StatusNotImplemented, "not_implemented", "coming in Task 4")
-	})
+	s.registerAgentsAPI(dash)
 }

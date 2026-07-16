@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -460,7 +461,10 @@ func (s *Server) handleSaveAgentConnections(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, "/dashboard/agents/"+id)
 }
 
-func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, workspaceID string, p *pageData) error {
+// loadAgentDetail loads all data needed for the agent detail page/API without
+// rendering — the pageData field is left nil (callers set it before rendering
+// a template; the JSON API doesn't need it at all).
+func (s *Server) loadAgentDetail(ctx context.Context, agent *db.Agent, workspaceID string) *agentDetailData {
 	schedule, _ := s.db.GetScheduleForAgent(agent.ID)
 	runs, _ := s.db.ListAgentRuns(agent.ID, 10)
 	allSkills, _ := s.db.ListSkills(workspaceID)
@@ -480,7 +484,6 @@ func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, workspaceID 
 	// Connections card: the workspace's connected accounts (pool) + which are bound to
 	// this agent (agent_connections). Binding is the source of truth for run-time tools —
 	// not the AGENT.md "# Connections:" header (which the model may forget to emit).
-	ctx := c.Request().Context()
 	wsConns, _ := s.db.ListServiceConnections(ctx, workspaceID)
 	attachedConns := make(map[string]bool)
 	if bound, err := s.db.ListAgentConnections(ctx, agent.ID); err == nil {
@@ -490,7 +493,6 @@ func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, workspaceID 
 	}
 
 	data := &agentDetailData{
-		pageData:       p,
 		Agent:          agent,
 		Schedule:       schedule,
 		Runs:           runs,
@@ -553,6 +555,12 @@ func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, workspaceID 
 		}
 	}
 
+	return data
+}
+
+func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, workspaceID string, p *pageData) error {
+	data := s.loadAgentDetail(c.Request().Context(), agent, workspaceID)
+	data.pageData = p
 	return c.Render(http.StatusOK, "dashboard/agent_detail.html", data)
 }
 
