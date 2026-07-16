@@ -27,7 +27,6 @@ func TestAPIMiddlewareUnauthenticated(t *testing.T) {
 }
 
 func TestAPIMiddlewareNoWorkspace(t *testing.T) {
-	t.Skip("needs Task 2 login endpoint")
 	s, _ := newAPITestServer(t)
 	cookies := bootstrapAndLogin(t, s)
 	rec := doJSON(t, s, http.MethodGet, "/api/v1/agents", nil, cookies)
