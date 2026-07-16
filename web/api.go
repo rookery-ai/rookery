@@ -89,4 +89,5 @@ func (s *Server) setupAPIRoutes() {
 	s.registerServicesAPI(dash)
 	s.registerHomeAPI(dash)
 	s.registerKBAPI(dash)
+	s.registerSettingsAPI(dash)
 }

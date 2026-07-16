@@ -3,6 +3,8 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"html/template"
 	"net/http"
 	"os"
@@ -482,20 +484,30 @@ func (s *Server) handleSaveWorkspaceMeta(c echo.Context) error {
 	return c.Render(http.StatusOK, "dashboard/settings.html", s.buildSettingsData(p, w))
 }
 
-// handleSaveWorkspaceCoder updates the workspace's coder config from settings.
-// Two kinds: "local" (a host CLI binary) or "api" (a direct LLM provider API).
-func (s *Server) handleSaveWorkspaceCoder(c echo.Context) error {
-	w := c.Get("workspace").(*db.Workspace)
-	kind := c.FormValue("coder_kind")
+// coderForm is the generic (transport-agnostic) input to saveWorkspaceCoderCore —
+// mirrors the settings-page form fields exactly (TimeoutS stays a string, parsed
+// inside the core), so both the template handler and the JSON API can feed it
+// straight from their respective request formats.
+type coderForm struct {
+	Kind, Bin, TimeoutS, Provider, Model, BaseURL, APIKey string
+}
+
+// saveWorkspaceCoderCore validates and persists a workspace's coder config. Two
+// kinds: "local" (a host CLI binary) or "api" (a direct LLM provider API).
+// userErrMsg is a user-facing validation problem (400-class, e.g. missing
+// provider/model, bad API-key plan); err is an unexpected failure (500-class,
+// e.g. can't decrypt the master password, can't write the secret, can't save
+// to the DB). Persists the coder config on success; does not audit-log (the
+// caller does, since only it has request context like IP).
+func (s *Server) saveWorkspaceCoderCore(w *db.Workspace, f coderForm) (string, error) {
+	kind := f.Kind
 	if kind == "" {
 		kind = "local"
 	}
 	timeoutS := 0
-	if v, err := strconv.Atoi(c.FormValue("coder_timeout_s")); err == nil && v > 0 {
+	if v, err := strconv.Atoi(f.TimeoutS); err == nil && v > 0 {
 		timeoutS = v
 	}
-
-	p := s.page(c, "Settings")
 
 	var (
 		bin, backendType      string
@@ -503,65 +515,89 @@ func (s *Server) handleSaveWorkspaceCoder(c echo.Context) error {
 		apiKeySecret, baseURL string
 	)
 	if kind == "api" {
-		provider = c.FormValue("coder_provider")
-		model = strings.TrimSpace(c.FormValue("coder_model"))
-		baseURL = strings.TrimSpace(c.FormValue("coder_base_url"))
+		provider = f.Provider
+		model = strings.TrimSpace(f.Model)
+		baseURL = strings.TrimSpace(f.BaseURL)
 		backendType = "api"
 		if provider == "" {
-			p.Error = "Provider is required for an API coder"
-			return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, w))
+			return "Provider is required for an API coder", nil
 		}
 		if model == "" {
-			p.Error = "Model is required for an API coder"
-			return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, w))
+			return "Model is required for an API coder", nil
 		}
 		// Custom (generic) requires an explicit base URL; catalog providers resolve theirs from llm.
 		isCustom := provider == "generic"
 		if isCustom && baseURL == "" {
-			p.Error = "A base URL is required for a Custom (OpenAI-compatible) provider"
-			return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, w))
+			return "A base URL is required for a Custom (OpenAI-compatible) provider", nil
 		}
 		// Decide the API-key secret from the pasted key + existing reference.
-		plan := coder.PlanKeySecret(provider, strings.TrimSpace(c.FormValue("coder_api_key")), w.CoderAPIKeySecret)
+		plan := coder.PlanKeySecret(provider, strings.TrimSpace(f.APIKey), w.CoderAPIKeySecret)
 		if plan.Err != "" {
-			p.Error = plan.Err
-			return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, w))
+			return plan.Err, nil
 		}
 		if plan.WriteSecret {
 			if w.SecretsSalt == "" || w.EncryptedMasterPassword == "" {
-				p.Error = "Complete workspace setup before configuring an API coder"
-				return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, w))
+				return "Complete workspace setup before configuring an API coder", nil
 			}
 			masterPw, err := secrets.DecryptMasterPassword(w.EncryptedMasterPassword, s.systemKey)
 			if err != nil {
-				p.Error = "Could not decrypt master password — re-run workspace setup"
-				return c.Render(http.StatusInternalServerError, "dashboard/settings.html", s.buildSettingsData(p, w))
+				return "", errors.New("Could not decrypt master password — re-run workspace setup")
 			}
 			svc := secrets.New(s.db, w.ID, masterPw, w.SecretsSalt)
 			if err := svc.Set(context.Background(), plan.SecretName, plan.WriteValue); err != nil {
-				p.Error = "Failed to store API key: " + err.Error()
-				return c.Render(http.StatusInternalServerError, "dashboard/settings.html", s.buildSettingsData(p, w))
+				return "", fmt.Errorf("Failed to store API key: %w", err)
 			}
 		}
 		apiKeySecret = plan.SecretName
 	} else {
 		kind = "local"
-		bin = c.FormValue("coder_bin")
+		bin = f.Bin
 		backendType = coder.BackendForBin(bin) // derive from the chosen binary; empty bin => "" (auto-detect)
 	}
 
 	if err := s.db.UpdateWorkspaceCoder(w.ID, kind, bin, timeoutS, backendType, provider, model, apiKeySecret, baseURL); err != nil {
-		p.Error = "Failed to save coder: " + err.Error()
-	} else {
-		detail := bin
-		if kind == "api" {
-			detail = provider + "/" + model
-		}
-		s.audit.Log(w.ID, "configure_coder", "workspace:"+w.ID, kind+":"+detail, c.RealIP())
-		p.Success = "Coder settings saved"
-		w, _ = s.db.GetWorkspaceByID(w.ID)
-		p.Workspace = w
+		return "", fmt.Errorf("Failed to save coder: %w", err)
 	}
+	return "", nil
+}
+
+// handleSaveWorkspaceCoder updates the workspace's coder config from settings.
+// Two kinds: "local" (a host CLI binary) or "api" (a direct LLM provider API).
+func (s *Server) handleSaveWorkspaceCoder(c echo.Context) error {
+	w := c.Get("workspace").(*db.Workspace)
+	f := coderForm{
+		Kind:     c.FormValue("coder_kind"),
+		Bin:      c.FormValue("coder_bin"),
+		TimeoutS: c.FormValue("coder_timeout_s"),
+		Provider: c.FormValue("coder_provider"),
+		Model:    c.FormValue("coder_model"),
+		BaseURL:  c.FormValue("coder_base_url"),
+		APIKey:   c.FormValue("coder_api_key"),
+	}
+
+	p := s.page(c, "Settings")
+	userErrMsg, err := s.saveWorkspaceCoderCore(w, f)
+	if userErrMsg != "" {
+		p.Error = userErrMsg
+		return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, w))
+	}
+	if err != nil {
+		p.Error = err.Error()
+		return c.Render(http.StatusInternalServerError, "dashboard/settings.html", s.buildSettingsData(p, w))
+	}
+
+	// Reload so the audit detail + rendered view reflect exactly what was saved
+	// (the core may have normalized kind to "local"/"api" and resolved the secret name).
+	if w2, err := s.db.GetWorkspaceByID(w.ID); err == nil {
+		w = w2
+	}
+	detail := w.CoderBin
+	if w.CoderKind == "api" {
+		detail = w.CoderProvider + "/" + w.CoderModel
+	}
+	s.audit.Log(w.ID, "configure_coder", "workspace:"+w.ID, w.CoderKind+":"+detail, c.RealIP())
+	p.Success = "Coder settings saved"
+	p.Workspace = w
 	return c.Render(http.StatusOK, "dashboard/settings.html", s.buildSettingsData(p, w))
 }
 
@@ -577,6 +613,54 @@ func (s *Server) handleSmokeCoder(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"ok": true, "reply": reply})
+}
+
+// changeMasterPasswordCore verifies the old master password (trusting it when
+// there are no secrets to check against, to avoid lockout), re-encrypts every
+// stored secret under the new one, and persists the new encrypted master
+// password. Confirmation-matching and length are the caller's job (they need
+// the raw "confirm" value, which isn't part of this signature). userErrMsg is
+// a user-facing validation problem (400-class; "Old master password is
+// incorrect" specifically is the one callers may want to surface as 401); err
+// is an unexpected failure (500-class). Does not audit-log (the caller does).
+func (s *Server) changeMasterPasswordCore(u *db.Workspace, oldPw, newPw string) (string, error) {
+	if u.SecretsSalt == "" {
+		return "Account setup not complete", nil
+	}
+
+	// Verify old password by attempting to decrypt an existing secret.
+	// If there are no secrets, trust the provided old password to avoid lockout.
+	ctx := context.Background()
+	names, _ := s.db.ListSecretNames(u.ID)
+	if len(names) > 0 {
+		oldSvc := secrets.New(s.db, u.ID, oldPw, u.SecretsSalt)
+		if _, err := oldSvc.Get(ctx, names[0]); err != nil {
+			return "Old master password is incorrect", nil
+		}
+	}
+
+	// Re-encrypt all secrets with the new key (same salt, new password → new derived key).
+	oldSvc := secrets.New(s.db, u.ID, oldPw, u.SecretsSalt)
+	newSvc := secrets.New(s.db, u.ID, newPw, u.SecretsSalt)
+	for _, name := range names {
+		val, err := oldSvc.Get(ctx, name)
+		if err != nil {
+			return "Failed to re-encrypt secrets: " + err.Error(), nil
+		}
+		if err := newSvc.Set(ctx, name, val); err != nil {
+			return "Failed to re-encrypt secrets: " + err.Error(), nil
+		}
+	}
+
+	// Update encrypted master password stored for scheduler.
+	encMasterPw, err := secrets.EncryptMasterPassword(newPw, s.systemKey)
+	if err != nil {
+		return "", err
+	}
+	if err := s.db.UpdateWorkspaceSetup(u.ID, encMasterPw, u.SecretsSalt); err != nil {
+		return "", err
+	}
+	return "", nil
 }
 
 func (s *Server) handleChangeMasterPassword(c echo.Context) error {
@@ -600,41 +684,13 @@ func (s *Server) handleChangeMasterPassword(c echo.Context) error {
 	if newPw != confirm {
 		return renderErr("New passwords do not match")
 	}
-	if u.SecretsSalt == "" {
-		return renderErr("Account setup not complete")
-	}
 
-	// Verify old password by attempting to decrypt an existing secret.
-	// If there are no secrets, trust the provided old password to avoid lockout.
-	ctx := context.Background()
-	names, _ := s.db.ListSecretNames(u.ID)
-	if len(names) > 0 {
-		oldSvc := secrets.New(s.db, u.ID, oldPw, u.SecretsSalt)
-		if _, err := oldSvc.Get(ctx, names[0]); err != nil {
-			return renderErr("Old master password is incorrect")
-		}
-	}
-
-	// Re-encrypt all secrets with the new key (same salt, new password → new derived key).
-	oldSvc := secrets.New(s.db, u.ID, oldPw, u.SecretsSalt)
-	newSvc := secrets.New(s.db, u.ID, newPw, u.SecretsSalt)
-	for _, name := range names {
-		val, err := oldSvc.Get(ctx, name)
-		if err != nil {
-			return renderErr("Failed to re-encrypt secrets: " + err.Error())
-		}
-		if err := newSvc.Set(ctx, name, val); err != nil {
-			return renderErr("Failed to re-encrypt secrets: " + err.Error())
-		}
-	}
-
-	// Update encrypted master password stored for scheduler.
-	encMasterPw, err := secrets.EncryptMasterPassword(newPw, s.systemKey)
+	userErrMsg, err := s.changeMasterPasswordCore(u, oldPw, newPw)
 	if err != nil {
 		return err
 	}
-	if err := s.db.UpdateWorkspaceSetup(u.ID, encMasterPw, u.SecretsSalt); err != nil {
-		return err
+	if userErrMsg != "" {
+		return renderErr(userErrMsg)
 	}
 
 	s.audit.Log(u.ID, "change_master_password", "workspace:"+u.ID, "", c.RealIP())
