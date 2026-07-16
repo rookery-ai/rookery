@@ -1,13 +1,11 @@
 package web
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
@@ -231,40 +229,16 @@ func (s *Server) apiConnectAPIKey(c echo.Context) error {
 		return jsonErr(c, http.StatusBadRequest, "missing_field", "key is required")
 	}
 	label := strings.TrimSpace(req.Label)
-	if label == "" {
-		label = "default"
-	}
 
-	extra := map[string]string{}
-	for _, ci := range prov.ConnectInputs {
-		v := strings.TrimSpace(req.Inputs[ci.Key])
-		if ci.Required && v == "" {
-			return jsonErr(c, http.StatusBadRequest, "missing_field", ci.Label+" is required")
-		}
-		if v != "" {
-			extra[ci.Key] = v
-		}
+	_, userErrMsg, err := s.connectAPIKeyCore(c.Request().Context(), w, prov, provider, apiKey, label, req.Inputs)
+	if userErrMsg != "" {
+		return jsonErr(c, http.StatusBadRequest, "missing_field", userErrMsg)
 	}
-	for k, v := range connectors.DeriveKeyExtra(prov, apiKey) {
-		extra[k] = v
-	}
-	extraJSON := ""
-	if len(extra) > 0 {
-		if b, _ := json.Marshal(extra); b != nil {
-			extraJSON = string(b)
-		}
-	}
-
-	enc, err := secrets.EncryptWithSystemKey(apiKey, s.systemKey)
 	if err != nil {
-		return jsonErr(c, http.StatusInternalServerError, "internal", "failed to store the API key")
-	}
-	if err := s.db.InsertServiceConnection(c.Request().Context(), db.ServiceConnection{
-		ID: uuid.New().String(), WorkspaceID: w.ID, Provider: provider,
-		AccountLabel: label, AccountIdentity: label,
-		EncryptedAccessToken: enc, Status: "ACTIVE", Extra: extraJSON,
-	}); err != nil {
-		return jsonErr(c, http.StatusBadRequest, "save_failed", "failed to save the connection: "+err.Error())
+		// DB-write/encryption failures are treated as internal errors here, same
+		// as every sibling handler (previously this specific path returned 400
+		// save_failed — an inconsistency fixed as part of this extraction).
+		return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
 	}
 	s.audit.Log(w.ID, "connect_service_apikey", "provider:"+provider, "", c.RealIP())
 	return c.JSON(http.StatusOK, apiOKResponse{OK: true})

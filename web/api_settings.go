@@ -271,7 +271,7 @@ func (s *Server) apiPutSettingsMasterPassword(c echo.Context) error {
 		return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
 	}
 	if userErrMsg != "" {
-		if userErrMsg == "Old master password is incorrect" {
+		if userErrMsg == msgWrongMasterPassword {
 			return jsonErr(c, http.StatusUnauthorized, "wrong_master_password", userErrMsg)
 		}
 		return jsonErr(c, http.StatusBadRequest, "invalid_master_password_change", userErrMsg)

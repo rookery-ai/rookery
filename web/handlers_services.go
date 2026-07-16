@@ -1,11 +1,14 @@
 package web
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -248,6 +251,56 @@ func (s *Server) handleConnectService(c echo.Context) error {
 	return c.Redirect(http.StatusSeeOther, url)
 }
 
+// connectAPIKeyCore validates the connect-input fields, derives any
+// provider-specific extra values (DeriveKeyExtra), encrypts the API key, and
+// inserts the service connection row. Shared by handleConnectAPIKey (redirect)
+// and apiConnectAPIKey (JSON) — the only two callers. Provider lookup/validation
+// and the "key is required" check are the caller's job (their not-found/empty-key
+// wording differs), as is auditing (only the caller has request IP). userErrMsg
+// is a user-facing validation problem (400-class: a required connect-input is
+// missing); err is an unexpected failure (500-class: key encryption or the
+// DB insert failed) — both callers treat a non-nil err as an internal error.
+func (s *Server) connectAPIKeyCore(ctx context.Context, w *db.Workspace, prov connectors.Provider, provider, apiKey, label string, inputs map[string]string) (conn *db.ServiceConnection, userErrMsg string, err error) {
+	if label == "" {
+		label = "default"
+	}
+
+	extra := map[string]string{}
+	for _, ci := range prov.ConnectInputs {
+		v := strings.TrimSpace(inputs[ci.Key])
+		if ci.Required && v == "" {
+			return nil, ci.Label + " is required.", nil
+		}
+		if v != "" {
+			extra[ci.Key] = v
+		}
+	}
+	for k, v := range connectors.DeriveKeyExtra(prov, apiKey) {
+		extra[k] = v
+	}
+	extraJSON := ""
+	if len(extra) > 0 {
+		if b, jerr := json.Marshal(extra); jerr == nil {
+			extraJSON = string(b)
+		}
+	}
+
+	enc, encErr := secrets.EncryptWithSystemKey(apiKey, s.systemKey)
+	if encErr != nil {
+		return nil, "", errors.New("Failed to store the API key.")
+	}
+
+	row := db.ServiceConnection{
+		ID: uuid.New().String(), WorkspaceID: w.ID, Provider: provider,
+		AccountLabel: label, AccountIdentity: label,
+		EncryptedAccessToken: enc, Status: "ACTIVE", Extra: extraJSON,
+	}
+	if insErr := s.db.InsertServiceConnection(ctx, row); insErr != nil {
+		return nil, "", fmt.Errorf("Failed to save the connection: %w", insErr)
+	}
+	return &row, "", nil
+}
+
 // handleConnectAPIKey stores a static API-key connection for an api_key provider. No OAuth
 // app, no redirect: the pasted key is encrypted into service_connections directly.
 func (s *Server) handleConnectAPIKey(c echo.Context) error {
@@ -262,40 +315,18 @@ func (s *Server) handleConnectAPIKey(c echo.Context) error {
 		return s.redirectWithError(c, "/dashboard/connectors/services", "API key is required.")
 	}
 	label := strings.TrimSpace(c.FormValue("account_label"))
-	if label == "" {
-		label = "default"
-	}
 
-	extra := map[string]string{}
+	inputs := make(map[string]string, len(prov.ConnectInputs))
 	for _, ci := range prov.ConnectInputs {
-		v := strings.TrimSpace(c.FormValue(ci.Key))
-		if ci.Required && v == "" {
-			return s.redirectWithError(c, "/dashboard/connectors/services", ci.Label+" is required.")
-		}
-		if v != "" {
-			extra[ci.Key] = v
-		}
-	}
-	for k, v := range connectors.DeriveKeyExtra(prov, apiKey) {
-		extra[k] = v
-	}
-	extraJSON := ""
-	if len(extra) > 0 {
-		if b, _ := json.Marshal(extra); b != nil {
-			extraJSON = string(b)
-		}
+		inputs[ci.Key] = c.FormValue(ci.Key)
 	}
 
-	enc, err := secrets.EncryptWithSystemKey(apiKey, s.systemKey)
-	if err != nil {
-		return s.redirectWithError(c, "/dashboard/connectors/services", "Failed to store the API key.")
+	_, userErrMsg, err := s.connectAPIKeyCore(c.Request().Context(), w, prov, provider, apiKey, label, inputs)
+	if userErrMsg != "" {
+		return s.redirectWithError(c, "/dashboard/connectors/services", userErrMsg)
 	}
-	if err := s.db.InsertServiceConnection(c.Request().Context(), db.ServiceConnection{
-		ID: uuid.New().String(), WorkspaceID: w.ID, Provider: provider,
-		AccountLabel: label, AccountIdentity: label,
-		EncryptedAccessToken: enc, Status: "ACTIVE", Extra: extraJSON,
-	}); err != nil {
-		return s.redirectWithError(c, "/dashboard/connectors/services", "Failed to save the connection: "+err.Error())
+	if err != nil {
+		return s.redirectWithError(c, "/dashboard/connectors/services", err.Error())
 	}
 	return c.Redirect(http.StatusSeeOther, "/dashboard/connectors/services")
 }

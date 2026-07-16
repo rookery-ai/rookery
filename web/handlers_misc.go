@@ -590,14 +590,22 @@ func (s *Server) handleSmokeCoder(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"ok": true, "reply": reply})
 }
 
+// msgWrongMasterPassword is the exact user-facing text produced by
+// changeMasterPasswordCore when the supplied current password fails to
+// decrypt an existing secret. It is a single source shared by the core (which
+// emits it) and apiPutSettingsMasterPassword (which compares against it to
+// decide 401 wrong_master_password vs 400 invalid_master_password_change) so
+// the two never drift apart the way a duplicated string literal could.
+const msgWrongMasterPassword = "Old master password is incorrect"
+
 // changeMasterPasswordCore verifies the old master password (trusting it when
 // there are no secrets to check against, to avoid lockout), re-encrypts every
 // stored secret under the new one, and persists the new encrypted master
 // password. Confirmation-matching and length are the caller's job (they need
 // the raw "confirm" value, which isn't part of this signature). userErrMsg is
-// a user-facing validation problem (400-class; "Old master password is
-// incorrect" specifically is the one callers may want to surface as 401); err
-// is an unexpected failure (500-class). Does not audit-log (the caller does).
+// a user-facing validation problem (400-class; msgWrongMasterPassword
+// specifically is the one callers may want to surface as 401); err is an
+// unexpected failure (500-class). Does not audit-log (the caller does).
 func (s *Server) changeMasterPasswordCore(u *db.Workspace, oldPw, newPw string) (string, error) {
 	if u.SecretsSalt == "" {
 		return "Account setup not complete", nil
@@ -610,7 +618,7 @@ func (s *Server) changeMasterPasswordCore(u *db.Workspace, oldPw, newPw string) 
 	if len(names) > 0 {
 		oldSvc := secrets.New(s.db, u.ID, oldPw, u.SecretsSalt)
 		if _, err := oldSvc.Get(ctx, names[0]); err != nil {
-			return "Old master password is incorrect", nil
+			return msgWrongMasterPassword, nil
 		}
 	}
 
