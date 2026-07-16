@@ -35,6 +35,31 @@ Each platform is a **private 1:1 DM assistant** (matching Telegram today): one l
 | Viber/WhatsApp/Teams/… | ❌ deferred | webhook | Separate webhook project |
 | Signal | ❌ rejected | daemon | Phone-number-per-workspace |
 
+### Implementation status (updated 2026-07-16)
+
+- **Shipped to `main` + deployed:** Phase 1 Foundation, Phase 2 **Discord**, Phase 3 **Slack** (Socket Mode). All three built on the framework below; live WebSocket round-trips are operator-verified. The `/dashboard/connectors` UI is now `CredSpec`-driven (one card per registered platform, forms + setup steps from data — a new adapter needs no web change).
+- **Scoped but deferred by owner:**
+  - **Mattermost** — build a **hand-rolled thin client** (REST `/api/v4` + `gorilla/websocket`, already a dep), *not* the official `mattermost/server/public/model` SDK: it drags in ~34 transitive deps and force-upgrades gRPC/protobuf module-wide.
+  - **Matrix** — full E2EE via `maunium.net/go/mautrix`. Compiles **CGo-free only with `-tags goolm`** (default backend is CGo libolm; verified `CGO_ENABLED=0 go build -tags goolm …/crypto/cryptohelper` succeeds). Requires applying that tag project-wide (recommend `go env -w GOFLAGS=-tags=goolm`). Renderer is easy (goldmark → HTML `formatted_body`); complexity is DM rooms + key sharing + on-disk crypto store + replacement-event edits.
+
+### Why outbound-only is a security property (not just a convenience)
+
+Every shipped/scoped adapter uses an **outbound** connection: the bot dials out to the platform over TLS, authenticated by its own token, and receives messages over a connection *it* initiated. The gateway exposes **no inbound port**. This is a first-class security feature for a **self-hosted / home-installed** product — the primary target here:
+
+- **Zero inbound exposure, works behind NAT.** No router port-forwarding, no public endpoint, nothing for the internet to scan or forge. The only public surfaces remain the login-gated dashboard and the HMAC-signed OAuth callback.
+- **Home firewalls can drop-by-default.** The dashboard can be (and typically is) restricted to LAN + Tailscale with the default zone dropped. A webhook endpoint *cannot* be firewalled that way — it must accept connections from the platform's cloud, so it can never hide behind the same posture.
+- **Ingestion trust is structural, not implementation-dependent.** `dispatch()` trusts `platform_user_id` for identity resolution because it arrived over the platform-authenticated socket. A webhook would make *us* responsible for verifying every inbound POST (per-provider HMAC/JWT + replay window); a missing/incorrect check = user impersonation = full command access.
+
+**Consequence for the roadmap:** the webhook tier (WhatsApp/Viber/LINE/Teams/Messenger/Google Chat) stays **out of the home-install core**. If pursued, it must be **tunnel-first** (Cloudflare Tunnel / Tailscale Funnel — the home box dials *out*, no router port) or via an outbound relay/broker, gated as an explicit "exposes your instance" advanced option — never a raw open port. Where a platform offers *both* modes, always take the socket (as Slack Socket Mode does).
+
+### Future outbound-only candidates (no inbound exposure)
+
+Beyond Mattermost + Matrix, these fit the model and are the clean way to extend reach without exposing anything:
+
+- **Zulip** — event-queue long-poll (`register` → `GET /events`), self-serve bot, native DMs. Strongest new add; near-Discord/Slack effort.
+- **XMPP / Jabber** — persistent TLS socket (JID + password), DM-native, mature Go libs; the open-protocol companion to Matrix, simpler (no mandatory E2EE).
+- Marginal (outbound but niche/library-risk): Rocket.Chat (DDP WS, stale Go SDK), Revolt (WS gateway, tiny audience), Mastodon (streaming WS; awkward DM model), IRC (perfect outbound fit but weak identity), Bluesky (DM poll-only).
+
 ---
 
 ## 2. Current architecture (what already works)
