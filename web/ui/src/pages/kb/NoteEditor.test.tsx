@@ -1,6 +1,7 @@
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router";
 import NoteEditor from "./NoteEditor";
 
 function jsonResponse(body: unknown, status = 200) {
@@ -49,9 +50,11 @@ test("a failed autosave keeps the edit dirty; Ctrl/Cmd+S retries with a fresh PU
   const qc = new QueryClient();
   const user = userEvent.setup();
   render(
-    <QueryClientProvider client={qc}>
-      <NoteEditor path="memory/USER.md" onStateChange={(s) => states.push(s)} />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={qc}>
+        <NoteEditor path="memory/USER.md" onStateChange={(s) => states.push(s)} />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 
   // HTML-comment content is lossy -> raw mode, giving a plain textarea to
@@ -102,9 +105,11 @@ test("a successful autosave transitions dirty -> saving -> raw with exactly one 
   const qc = new QueryClient();
   const user = userEvent.setup();
   render(
-    <QueryClientProvider client={qc}>
-      <NoteEditor path="memory/USER.md" onStateChange={(s) => states.push(s)} />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={qc}>
+        <NoteEditor path="memory/USER.md" onStateChange={(s) => states.push(s)} />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 
   await waitFor(() => expect(screen.getByText(/protect formatting/)).toBeInTheDocument());

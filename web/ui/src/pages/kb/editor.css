@@ -52,3 +52,28 @@
 .note-editor-content .tiptap table { border-collapse: collapse; width: 100%; }
 .note-editor-content .tiptap th,
 .note-editor-content .tiptap td { border: 1px solid var(--color-border); padding: 0.4em 0.6em; }
+
+/* Wikilink pills — used both for the [[wikilink]] node inside the editor
+   (wikilinks.ts) and the backlinks strip above the editor (NoteEditor.tsx),
+   so the two visually read as the same kind of "note reference" affordance. */
+.wikilink-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.375rem;
+  padding: 0.05em 0.45em;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.note-editor-content .tiptap .wikilink-pill {
+  font-size: 0.9em;
+}
+.wikilink-pill-button {
+  border: none;
+  font: inherit;
+  line-height: inherit;
+}
+.wikilink-pill:hover {
+  filter: brightness(1.08);
+}

@@ -31,6 +31,7 @@ func (s *Server) registerKBAPI(g *echo.Group) {
 	g.DELETE("/kb/note", s.apiDeleteKBNoteAPI)
 	g.POST("/kb/rename", s.apiRenameKBNote)
 	g.GET("/kb/search", s.apiSearchKB)
+	g.GET("/kb/resolve", s.apiResolveKBLink)
 	g.GET("/kb/raw", s.rawKBNote)
 }
 
@@ -277,6 +278,30 @@ func (s *Server) apiRenameKBNote(c echo.Context) error {
 		return jsonErr(c, status, code, "rename failed: "+err.Error())
 	}
 	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
+}
+
+// apiResolveKBLink resolves a [[wikilink]] target to the note it points at,
+// reusing the exact same LinkIndex the vault builds for backlinks/rendering
+// (internal/vault/links.go) — no resolution logic is duplicated here.
+// GET /api/v1/kb/resolve?link=<target> → 200 {"path":"notes/target.md"} or 404 not_found.
+func (s *Server) apiResolveKBLink(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	if s.vault == nil {
+		return s.kbUnavailable(c)
+	}
+	link := strings.TrimSpace(c.QueryParam("link"))
+	if link == "" {
+		return jsonErr(c, http.StatusBadRequest, "invalid_link", "link is required")
+	}
+	idx, err := s.vault.BuildLinkIndex(u.ID)
+	if err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", "could not build link index: "+err.Error())
+	}
+	rel := idx.Resolve(link)
+	if rel == "" {
+		return jsonErr(c, http.StatusNotFound, "not_found", "no note matches ["+link+"]")
+	}
+	return c.JSON(http.StatusOK, map[string]string{"path": rel})
 }
 
 // apiSearchKB ports searchKB.

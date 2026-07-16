@@ -99,6 +99,46 @@ func TestAPIKBDeleteAndRename(t *testing.T) {
 	}
 }
 
+func TestAPIKBResolve(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/kb/new",
+		map[string]any{"path": "notes/other-note.md", "is_dir": false}, cookies)
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Fatalf("new: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/kb/new",
+		map[string]any{"path": "notes/hello.md", "is_dir": false}, cookies)
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Fatalf("new: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/kb/note",
+		map[string]string{"path": "notes/hello.md", "content": "See [[other-note]].\n"}, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Resolve by bare name.
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/kb/resolve?link=other-note", nil, cookies)
+	if rec.Code != 200 || !contains(rec.Body.String(), "notes/other-note.md") {
+		t.Fatalf("resolve by name: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Resolve by full path form.
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/kb/resolve?link=notes/other-note", nil, cookies)
+	if rec.Code != 200 || !contains(rec.Body.String(), "notes/other-note.md") {
+		t.Fatalf("resolve by path: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Unknown target -> 404 not_found.
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/kb/resolve?link=nonexistent-note", nil, cookies)
+	if rec.Code != http.StatusNotFound || !contains(rec.Body.String(), "not_found") {
+		t.Fatalf("unknown resolve: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAPIKBRaw(t *testing.T) {
 	s, _ := newAPITestServer(t)
 	cookies := bootstrapAndLogin(t, s)

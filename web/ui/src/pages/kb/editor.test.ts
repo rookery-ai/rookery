@@ -41,20 +41,23 @@ test("a list mixing plain bullets and task items in one block is detected as los
   expect(checkFidelity("- a list\n- [ ] a todo\n- [x] done\n")).toBe(false);
 });
 
-// HEADLINE FINDING (deviates from this task's binding failing-test contract,
-// which asserted `true` here — see task-3-report.md for the full writeup):
-// prosemirror-markdown's serializer backslash-escapes the literal "["s in
-// "[[other-note]]" on the way back out ("\[\[other-note\]\]") to avoid
-// ambiguity with real link syntax on re-parse. That's a visual no-op, but
-// internal/vault/links.go's wikilinkRE matches literal "[[...]]" only — it
-// will NOT match the escaped form. If checkFidelity treated this as safe
-// (by unescaping before comparing, as an earlier version of editor.ts did),
-// the first WYSIWYG save of any note containing a [[wikilink]] would
-// silently rewrite it into dead text, breaking backlinks/graph resolution
-// without the user ever touching that line. checkFidelity must NOT paper
-// over this — a note containing [[wikilinks]] correctly opens in raw mode.
-test("wikilinks are detected as lossy (raw-mode fallback — escaping would break vault link resolution)", () => {
-  expect(checkFidelity("See [[other-note]] and [[notes/deep]].\n")).toBe(false);
+// UPDATE (task 5, supersedes the task-3 finding above): the round-trip-unsafe
+// behaviour documented below was fixed by modeling [[wikilinks]] as a proper
+// TipTap node (see wikilinks.ts) instead of leaving them as plain text for
+// prosemirror-markdown's generic serializer to escape. The node's
+// `markdown.serialize` writes "[[target]]" literally via `state.write`
+// (bypassing the escaping `state.text` would apply), so a note containing
+// wikilinks now round-trips byte-for-byte and is safe to edit in WYSIWYG —
+// internal/vault/links.go's wikilinkRE (literal-bracket match only) sees
+// exactly what it saw on disk. wikilinks.test.ts covers the node's
+// parse/serialize contract in more detail; this test just confirms the
+// gate itself no longer forces these notes into raw mode.
+test("wikilinks round-trip losslessly as a wikilink node (WYSIWYG-safe)", () => {
+  expect(checkFidelity("See [[other-note]] and [[notes/deep]].\n")).toBe(true);
+  const out = fidelityRoundTrip("See [[other-note]] and [[notes/deep]].\n");
+  expect(out).toContain("[[other-note]]");
+  expect(out).toContain("[[notes/deep]]");
+  expect(out).not.toContain("\\[\\[");
 });
 
 test("HTML comments are detected as lossy (raw-mode fallback)", () => {

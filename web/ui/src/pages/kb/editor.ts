@@ -9,6 +9,7 @@ import TableRow from "@tiptap/extension-table-row";
 import TableCell from "@tiptap/extension-table-cell";
 import TableHeader from "@tiptap/extension-table-header";
 import { Markdown, type MarkdownStorage } from "tiptap-markdown";
+import { Wikilink } from "./wikilinks";
 
 // tiptap-markdown ships types for its own extension but doesn't merge them
 // into @tiptap/core's Storage interface, so `editor.storage.markdown` is
@@ -33,6 +34,7 @@ export function buildExtensions(extra: AnyExtension[] = []): AnyExtension[] {
     TableCell,
     TableHeader,
     Markdown.configure({ html: false, linkify: false, breaks: false }),
+    Wikilink,
     ...extra,
   ];
 }
@@ -43,14 +45,22 @@ export function toMarkdown(editor: Editor): string {
 
 // NOTE: prosemirror-markdown's serializer backslash-escapes CommonMark
 // punctuation in literal text (e.g. "[" -> "\["), which is visually a no-op
-// on render but is NOT safe to normalize away here: the vault's [[wikilink]]
-// index (internal/vault/links.go, wikilinkRE) matches literal "[[...]]" and
-// will NOT match the escaped "\[\[...\]\]" the editor would write back on
-// save. An earlier version of this file unescaped both sides before
-// comparing, which made checkFidelity report wikilink notes as safe for
-// WYSIWYG — but the first WYSIWYG save of such a note silently breaks every
-// [[link]] in it into dead text. Do not add an unescape step back here
-// without also fixing (or verifying) the vault-side link matcher.
+// on render but is NOT safe to normalize away here in general: the vault's
+// [[wikilink]] index (internal/vault/links.go, wikilinkRE) matches literal
+// "[[...]]" and will NOT match an escaped "\[\[...\]\]". An earlier version
+// of this file unescaped both sides before comparing to paper over exactly
+// this for wikilinks, which made checkFidelity falsely report them as
+// WYSIWYG-safe — the first WYSIWYG save of such a note silently broke every
+// [[link]] in it into dead text. Do NOT add a blanket unescape step back
+// here to "fix" some other punctuation-escaping mismatch without checking
+// it can't paper over a real, vault-meaningful loss the way that did.
+//
+// Wikilinks specifically are now fixed correctly (not by normalizing this
+// comparison, but by giving [[wikilink]] its own atom node — see
+// wikilinks.ts — whose custom `markdown.serialize` writes the brackets back
+// literally via `state.write`, never going through the escaping text
+// serializer at all). See wikilinks.ts's top comment and editor.test.ts for
+// the fidelity contract this establishes.
 
 // tiptap-markdown's TaskItem serializer always renders "loose" (a blank line
 // between sibling items), regardless of whether the source was tight — a

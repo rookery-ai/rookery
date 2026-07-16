@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router";
 import { useEditor, EditorContent } from "@tiptap/react";
-import { Download, FileCode, AlertTriangle, Loader2 } from "lucide-react";
+import { Download, FileCode, AlertTriangle, Loader2, Link2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ApiError } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { useKBNote, useSaveNote, rawURL } from "@/lib/kb";
 import { Button } from "@/components/ui/button";
 import { buildExtensions, toMarkdown, checkFidelity } from "./editor";
+import { splitAlias } from "./wikilinks";
 import { slashSuggestion } from "./SlashMenu";
 import BubbleToolbar from "./BubbleToolbar";
 import "./editor.css";
@@ -23,10 +25,12 @@ const RAW_BANNER =
 function WysiwygEditor({
   content,
   onDirty,
+  onNavigate,
   registerGetContent,
 }: {
   content: string;
   onDirty: () => void;
+  onNavigate: (target: string) => void;
   registerGetContent: (fn: () => string) => void;
 }) {
   const editor = useEditor({
@@ -37,6 +41,17 @@ function WysiwygEditor({
     extensions: buildExtensions([slashSuggestion()]),
     content,
     onUpdate: () => onDirty(),
+    // Click-to-navigate for wikilink pills: handled here via editorProps
+    // rather than inside the Wikilink node itself (see wikilinks.ts's top
+    // comment) — this is the "click handler lives in NoteEditor via editor
+    // props" option the task brief called out.
+    editorProps: {
+      handleClickOn(_view, _pos, node) {
+        if (node.type.name !== "wikilink") return false;
+        onNavigate(splitAlias(node.attrs.target as string).target);
+        return true;
+      },
+    },
   });
 
   useEffect(() => {
@@ -61,6 +76,12 @@ export default function NoteEditor({
 }) {
   const { data, isLoading, isError } = useKBNote(path);
   const saveNote = useSaveNote();
+  // KBPage already owns the "path" search param and keys NoteEditor by it
+  // (key={path}), so a navigation from inside this component can just write
+  // the same param directly — no prop needs threading down from KBPage for
+  // this; setSearchParams here and setParams there touch the same router
+  // state and KBPage remounts a fresh NoteEditor instance either way.
+  const [, setSearchParams] = useSearchParams();
 
   const [mode, setMode] = useState<"wysiwyg" | "raw" | null>(null);
   const [fidelityFailed, setFidelityFailed] = useState(false);
@@ -68,6 +89,7 @@ export default function NoteEditor({
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rawText, setRawText] = useState("");
+  const [notFoundHint, setNotFoundHint] = useState<string | null>(null);
 
   const initializedRef = useRef(false);
   const dirtyRef = useRef(false);
@@ -219,6 +241,43 @@ export default function NoteEditor({
     getContentRef.current = fn;
   }, []);
 
+  // Auto-dismiss the "note not found" hint so a stale warning doesn't linger
+  // once the user has moved on.
+  useEffect(() => {
+    if (!notFoundHint) return;
+    const t = window.setTimeout(() => setNotFoundHint(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [notFoundHint]);
+
+  // Backlinks are already resolved vault paths (data.backlinks, from
+  // vault.Backlinks — see web/api_kb.go) — navigate straight there, no
+  // resolve round-trip needed.
+  const navigateToPath = useCallback(
+    (p: string) => {
+      setNotFoundHint(null);
+      setSearchParams({ path: p });
+    },
+    [setSearchParams],
+  );
+
+  // Wikilink pills carry raw [[target]] text, which needs the resolve
+  // endpoint (internal/vault's LinkIndex, same lookup backlinks/rendering
+  // use) to turn into an actual note path.
+  const handleNavigate = useCallback(
+    (target: string) => {
+      setNotFoundHint(null);
+      api
+        .get<{ path: string }>(`/api/v1/kb/resolve?link=${encodeURIComponent(target)}`)
+        .then(({ path: resolved }) => setSearchParams({ path: resolved }))
+        .catch((err) => {
+          if (err instanceof ApiError && err.status === 404) {
+            setNotFoundHint(target);
+          }
+        });
+    },
+    [setSearchParams],
+  );
+
   const handleRawChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     rawTextRef.current = value;
@@ -296,12 +355,22 @@ export default function NoteEditor({
         </div>
       )}
 
+      {notFoundHint && (
+        <div className="flex items-center gap-2 border-b border-warn-soft bg-warn-soft px-4 py-2 text-sm text-warn">
+          <AlertTriangle className="size-4 shrink-0" />
+          <span>note not found: {notFoundHint}</span>
+        </div>
+      )}
+
+      <BacklinksStrip backlinks={data.backlinks} onNavigate={navigateToPath} />
+
       <div className="min-h-0 flex-1 overflow-y-auto">
         {mode === "wysiwyg" ? (
           <div className="mx-auto max-w-3xl px-6 py-8">
             <WysiwygEditor
               content={rawText}
               onDirty={markDirty}
+              onNavigate={handleNavigate}
               registerGetContent={registerGetContent}
             />
           </div>
@@ -314,6 +383,36 @@ export default function NoteEditor({
           />
         )}
       </div>
+    </div>
+  );
+}
+
+// BacklinksStrip lists the notes that [[link]] to the one currently open
+// (data.backlinks, already computed server-side by apiGetKBNote via
+// vault.Backlinks — see web/api_kb.go). Hidden entirely when empty, per the
+// task brief.
+function BacklinksStrip({
+  backlinks,
+  onNavigate,
+}: {
+  backlinks: string[];
+  onNavigate: (target: string) => void;
+}) {
+  if (backlinks.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-4 py-2 text-xs">
+      <Link2 className="size-3.5 shrink-0 text-muted-2" />
+      <span className="mr-1 text-muted-2">Linked from:</span>
+      {backlinks.map((p) => (
+        <button
+          key={p}
+          type="button"
+          className="wikilink-pill wikilink-pill-button"
+          onClick={() => onNavigate(p)}
+        >
+          {p}
+        </button>
+      ))}
     </div>
   );
 }
