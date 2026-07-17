@@ -14,6 +14,7 @@ import AgentEditPage from "@/pages/agents/AgentEditPage";
 import SkillsPage from "@/pages/skills/SkillsPage";
 import SkillNewPage from "@/pages/skills/SkillNewPage";
 import SkillDetailPage, { CoreSkillViewPage } from "@/pages/skills/SkillDetailPage";
+import ConnectionsPage from "@/pages/connections/ConnectionsPage";
 
 function RequireAuth() {
   const { data: session, isLoading } = useSession();
@@ -48,7 +49,7 @@ export const router = createBrowserRouter(
             { path: "/skills/new", element: <SkillNewPage /> },
             { path: "/skills/core/:slug", element: <CoreSkillViewPage /> },
             { path: "/skills/:id", element: <SkillDetailPage /> },
-            { path: "/connections", element: <Placeholder title="Connections" /> },
+            { path: "/connections", element: <ConnectionsPage /> },
             { path: "/chats", element: <ChatsPage /> },
             { path: "/secrets", element: <Placeholder title="Secrets" /> },
             { path: "/settings", element: <Placeholder title="Settings" /> },
