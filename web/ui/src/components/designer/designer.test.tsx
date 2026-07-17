@@ -165,27 +165,24 @@ test("designing-state Build button posts the literal phrase 'build it' and attac
   await screen.findByText("Built it!");
 });
 
-test("SSE completing before the pending build POST resolves does not corrupt the transcript (regression)", async () => {
-  let resolveBuild!: (r: Response) => void;
+test("SSE completing AFTER the build POST already resolved does not refetch or corrupt the transcript (regression, round 2)", async () => {
+  // This is the realistic ordering for the design/progress endpoint: it has
+  // no named "done" event, so completion is detected via reconnect -> 404 ->
+  // onerror(readyState CLOSED) — which typically lands strictly after the
+  // blocking design POST (bound to the very same generation) has already
+  // resolved and updated the transcript. A round-1 fix that only guarded
+  // "POST still pending" missed this ordering: onDone still refetched here,
+  // and a stale `{active:false}` snapshot silently wiped the "build it"
+  // bubble and the freshly-rendered "Built it!" response after the fact.
   let stateCalls = 0;
   const calls = mockFetch({
     "/x/design": (body: any) => {
       if (body.message === "describe") return jsonResponse({ response: "sounds good", done: false, state: "designing" });
-      return new Promise<Response>((resolve) => {
-        resolveBuild = resolve;
-      });
+      return jsonResponse({ response: "Built it!", done: false, state: "verifying" });
     },
-    // Mount recovery's first call must be benign (no draft, not active) so
-    // the surface starts fresh; a second call would only happen if the
-    // buggy unconditional refetch fires — its stale snapshot is the proof.
     "/x/state": () => {
       stateCalls += 1;
-      if (stateCalls === 1) return jsonResponse({ active: false });
-      return jsonResponse({
-        active: true,
-        state: "verifying",
-        history: [{ role: "assistant", content: "WRONG — stale snapshot from a racing refetch" }],
-      });
+      return jsonResponse({ active: false });
     },
   });
   wrap(
@@ -197,43 +194,36 @@ test("SSE completing before the pending build POST resolves does not corrupt the
     />,
   );
 
-  await screen.findByRole("textbox"); // mount recovery settled
+  await screen.findByRole("textbox"); // mount recovery settled — 1st GET /x/state
   await sendViaComposer("describe");
   const buildBtn = await screen.findByRole("button", { name: LABELS.buildButton });
   fireEvent.click(buildBtn);
 
+  // The build POST resolves fully FIRST.
+  expect(await screen.findByText("Built it!")).toBeInTheDocument();
+  expect(screen.getByText("build it")).toBeInTheDocument();
+
+  // THEN the SSE stream closes.
   await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
   const es = FakeEventSource.instances[0]!;
   es.readyState = FakeEventSource.OPEN;
   es.onopen?.();
-  // Server closes the design/progress stream (no named "done" event on this
-  // endpoint — a plain close, which openSSE reports via onerror) BEFORE the
-  // hanging build POST resolves.
   es.readyState = FakeEventSource.CLOSED;
   es.onerror?.();
 
-  // Give any (buggy) racing refetch a chance to land before the POST does.
+  // Give any (buggy) refetch a chance to land.
   await new Promise((r) => setTimeout(r, 0));
 
-  // The optimistic "build it" user bubble must have survived the SSE close.
+  // Transcript unchanged — no refetch fired at all past the initial mount GET.
   expect(screen.getByText("build it")).toBeInTheDocument();
-  expect(screen.queryByText(/WRONG/)).not.toBeInTheDocument();
-
-  resolveBuild(jsonResponse({ response: "Built it!", done: false, state: "verifying" }));
-
-  expect(await screen.findByText("Built it!")).toBeInTheDocument();
-  expect(screen.getAllByText("Built it!")).toHaveLength(1); // not duplicated
-  expect(screen.getByText("build it")).toBeInTheDocument(); // still there
-  expect(screen.queryByText(/WRONG/)).not.toBeInTheDocument();
+  expect(screen.getAllByText("Built it!")).toHaveLength(1);
+  expect(stateCalls).toBe(1); // only the mount-recovery GET — none from SSE onDone
 
   const designCalls = calls.filter((c) => c.url === "/x/design");
   expect(designCalls[1]!.body).toEqual({ message: "build it" });
-  // The buggy behavior would have issued a second GET /x/state from inside
-  // the SSE onDone handler while the build POST was still pending.
-  expect(stateCalls).toBe(1);
 });
 
-test("a plain message answered with building:true attaches the SSE and renders ActivityCard lines", async () => {
+test("a plain message answered with building:true attaches the SSE, renders ActivityCard lines, and advances the stepper to Build", async () => {
   mockFetch({
     "/x/design": () =>
       jsonResponse({
@@ -247,6 +237,10 @@ test("a plain message answered with building:true attaches the SSE and renders A
   await sendViaComposer("are you done yet");
 
   expect(await screen.findByTestId("activity-card")).toBeInTheDocument();
+  const buildStep = screen.getByTestId("stepper").querySelectorAll("li")[2]!;
+  expect(buildStep).toHaveTextContent("Build");
+  expect(buildStep.querySelector("span")).toHaveClass("border-foreground");
+
   await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
   const es = FakeEventSource.instances[0]!;
   es.readyState = FakeEventSource.OPEN;

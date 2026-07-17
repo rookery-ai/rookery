@@ -126,22 +126,32 @@ export function DesignerSurface({
   const doneRef = useRef(false);
   const dismissedRef = useRef(false);
   const autoResumeTriedRef = useRef(false);
-  // True for the duration of a design POST's await. The design POST is the
-  // authoritative source of the outcome for anything IT triggered (e.g. the
-  // "build it" approval) — if the SSE stream happens to close first (it can:
-  // progressCh closes the moment generation finishes, which races the POST's
-  // own return), a concurrent refetchState() would clobber the optimistic
-  // "build it" user bubble with a stale/incomplete server snapshot and the
-  // POST would then append a duplicate assistant message on top. Gating the
-  // SSE-done refetch on this flag makes the POST win that race every time.
-  const postInFlightRef = useRef(false);
+  // How the currently-attached SSE stream got attached, decided once at the
+  // moment of attachment (see ensureSSE's early-return guard — later calls
+  // with a different source are no-ops while a stream is live):
+  //   - "recovery": mount-recovery found a session already generating, with
+  //     NO pending local POST. Nothing else will ever tell this tab the
+  //     outcome, so onDone must resync via GET state.
+  //   - "live": this tab itself is driving the generation (a "build it"
+  //     click, or a "still building" placeholder response to a message this
+  //     tab sent). The design POST that triggered/reported it is always the
+  //     authoritative source of the eventual outcome — REGARDLESS of which
+  //     resolves first, the POST or the SSE close (both orderings are
+  //     possible: progressCh can close slightly before or after the POST
+  //     that's blocked on the same generation returns). Refetching here
+  //     would race that POST in either ordering and can silently replace
+  //     locally-optimistic messages (e.g. the "build it" bubble) with a
+  //     stale/incomplete server snapshot — so "live" NEVER refetches on
+  //     done, it only clears the live-build UI state.
+  const attachSourceRef = useRef<"recovery" | "live" | null>(null);
 
   function focusComposer() {
     setFocusSignal((n) => n + 1);
   }
 
-  function ensureSSE(seedLine?: string) {
+  function ensureSSE(source: "recovery" | "live", seedLine?: string) {
     if (sseHandleRef.current) return;
+    attachSourceRef.current = source;
     sseStartedAtRef.current = Date.now();
     setSse({ lines: seedLine ? [seedLine] : [], status: "live" });
     const handle = openSSE(endpoints.progress, {
@@ -150,13 +160,9 @@ export function DesignerSurface({
         setSse((s) => (s ? { ...s, status: "done" } : s));
         sseHandleRef.current = null;
         setGenerating(false);
-        // A build recovered on mount (no pending POST here) only tells us it
-        // finished via this stream closing — resync with the server to learn
-        // the outcome (verifying / generation_failed / final message). But
-        // if a design POST from THIS component is in flight (e.g. the user
-        // just clicked "build it"), that POST is the authoritative source —
-        // skip the refetch so it can't race the POST's own state update.
-        if (!doneRef.current && !postInFlightRef.current && endpoints.state) void refetchState();
+        if (attachSourceRef.current === "recovery" && !doneRef.current && endpoints.state) {
+          void refetchState();
+        }
       },
       onError: () => {
         setSse((s) => (s ? { ...s, status: "error" } : s));
@@ -182,7 +188,7 @@ export function DesignerSurface({
         setGenerationFailed(!!snap.generation_failed);
         setCanKeepAsIs(!!snap.can_keep_as_is);
         setGenerating(!!snap.generating);
-        if (snap.generating) ensureSSE(snap.last_progress || undefined);
+        if (snap.generating) ensureSSE("recovery", snap.last_progress || undefined);
       } else {
         setGenerating(false);
         if (!dismissedRef.current && draft) {
@@ -252,7 +258,12 @@ export function DesignerSurface({
     setError(null);
     setMessages((m) => [...m, { role: "user", content: text }]);
     setBusy(true);
-    postInFlightRef.current = true;
+    // Set when this POST reports the generation is STILL running elsewhere
+    // (the "still building" placeholder) — in that case a real build is
+    // still in flight and `generating` must stay true until the live SSE
+    // (attached below) reports completion; every other outcome is final as
+    // of this POST resolving, so `generating` is cleared unconditionally.
+    let stillBuilding = false;
     try {
       const isFirstMessage = messages.length === 0 && fsmState === null && !resumeBanner;
       const body: Record<string, unknown> = { message: text };
@@ -272,18 +283,21 @@ export function DesignerSurface({
       if (res.state) setFsmState(res.state as FsmState);
       setGenerationFailed(!!res.generation_failed);
       setCanKeepAsIs(!!res.can_keep_as_is);
-      if (res.building) ensureSSE();
+      if (res.building) {
+        stillBuilding = true;
+        ensureSSE("live"); // no-op if mount-recovery already attached it
+        setGenerating(true); // stepper still shows "Build" while it runs
+      }
     } catch (err) {
       setError(errMessage(err));
     } finally {
       setBusy(false);
-      postInFlightRef.current = false;
-      setGenerating(false);
+      if (!stillBuilding) setGenerating(false);
     }
   }
 
   function handleBuildClick() {
-    ensureSSE(); // attach BEFORE the POST resolves — generation runs long
+    ensureSSE("live"); // attach BEFORE the POST resolves — generation runs long
     setGenerating(true); // stepper shows "Build" (index 2) while this POST is in flight
     void handleSend(BUILD_PHRASE);
   }
