@@ -1,0 +1,375 @@
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
+import { AlertTriangle } from "lucide-react";
+import { api, ApiError } from "@/lib/api";
+import { openSSE, type SSEHandle } from "@/lib/sse";
+import { ChatScroll } from "@/components/chat/ChatScroll";
+import { ChatMessageBubble, TypingIndicator } from "@/components/chat/Bubbles";
+import { Composer } from "@/components/chat/Composer";
+import { ActivityCard, type ActivityStatus } from "@/components/chat/ActivityCard";
+import { Button } from "@/components/ui/button";
+import { Stepper } from "./Stepper";
+
+// ── Binding interfaces (Task 8 — the skill creator — reuses this component
+// via these exact shapes; see .superpowers/sdd/task-6-brief.md) ──────────────
+
+export type DesignerEndpoints = {
+  design: string; // POST {name?,message} → legacy {response,done,state?,building?,generation_failed?,can_keep_as_is?,agent_id?}
+  cancel: string; // POST → {status}
+  resume: string; // POST → {response,state,history,agent_id?,agent_name?,generation_failed?,can_keep_as_is?}
+  dismiss: string; // POST → {status}
+  progress: string; // GET SSE
+  state?: string; // GET recovery — ABSENT for the skill designer
+};
+
+export type DesignerLabels = {
+  steps: [string, string, string, string];
+  buildButton: string;
+  saveButton: string;
+  entityName: string;
+};
+
+// Additive, optional props beyond the binding signature — Task 8 either
+// passes its own equivalents or ignores them; none change the required
+// (endpoints, labels, startPayload?, onDone) contract.
+export type DesignerDraft = { name?: string } | null | undefined;
+
+export type DesignerSurfaceProps = {
+  endpoints: DesignerEndpoints;
+  labels: DesignerLabels;
+  startPayload?: Record<string, unknown>; // merged into the very first design POST (e.g. {name})
+  onDone: (id?: string) => void;
+  // The draft that would show a resume banner (agent case: useAgents().draft
+  // from the caller's own query — kept OUT of this component so it stays
+  // entity-agnostic; the skill creator will pass its own draft shape).
+  draft?: DesignerDraft;
+  // AgentNewPage's `?resume=1`: skip the banner and resume immediately.
+  autoResume?: boolean;
+};
+
+type Role = "user" | "assistant";
+type HistEntry = { role: Role; content: string };
+type FsmState = "describing" | "designing" | "verifying" | "done" | null;
+
+type DesignResponse = {
+  response: string;
+  done: boolean;
+  state?: string;
+  building?: boolean;
+  generation_failed?: boolean;
+  can_keep_as_is?: boolean;
+  agent_id?: string;
+  skill_id?: string; // forward-compatible: Task 8's completion id field
+};
+
+type StateSnapshot = {
+  active: boolean;
+  generating?: boolean;
+  state?: string;
+  history?: HistEntry[];
+  name?: string;
+  agent_id?: string;
+  is_edit?: boolean;
+  last_progress?: string;
+  generation_failed?: boolean;
+  can_keep_as_is?: boolean;
+};
+
+type ResumeResponse = {
+  response: string;
+  state?: string;
+  history?: HistEntry[];
+  agent_id?: string;
+  agent_name?: string;
+  generation_failed?: boolean;
+  can_keep_as_is?: boolean;
+};
+
+const STATE_INDEX: Record<string, number> = { describing: 0, designing: 1, verifying: 3 };
+
+const BUILD_PHRASE = "build it";
+const SAVE_PHRASE = "save";
+const KEEP_AS_IS_PHRASE = "keep it as-is";
+
+function errMessage(err: unknown): string {
+  return err instanceof ApiError ? err.message : "Something went wrong";
+}
+
+export function DesignerSurface({
+  endpoints,
+  labels,
+  startPayload,
+  onDone,
+  draft,
+  autoResume,
+}: DesignerSurfaceProps) {
+  const [messages, setMessages] = useState<HistEntry[]>([]);
+  const [fsmState, setFsmState] = useState<FsmState>(null);
+  const [generating, setGenerating] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [recovering, setRecovering] = useState(!!endpoints.state);
+  const [error, setError] = useState<string | null>(null);
+  const [generationFailed, setGenerationFailed] = useState(false);
+  const [canKeepAsIs, setCanKeepAsIs] = useState(false);
+  const [resumeBanner, setResumeBanner] = useState<{ name?: string } | null>(null);
+  const [sse, setSse] = useState<{ lines: string[]; status: ActivityStatus } | null>(null);
+  const [focusSignal, setFocusSignal] = useState(0);
+  const navigate = useNavigate();
+
+  const sseHandleRef = useRef<SSEHandle | null>(null);
+  const sseStartedAtRef = useRef(0);
+  const doneRef = useRef(false);
+  const dismissedRef = useRef(false);
+  const autoResumeTriedRef = useRef(false);
+
+  function focusComposer() {
+    setFocusSignal((n) => n + 1);
+  }
+
+  function ensureSSE(seedLine?: string) {
+    if (sseHandleRef.current) return;
+    sseStartedAtRef.current = Date.now();
+    setSse({ lines: seedLine ? [seedLine] : [], status: "live" });
+    const handle = openSSE(endpoints.progress, {
+      onMessage: (line) => setSse((s) => (s ? { ...s, lines: [...s.lines, line] } : s)),
+      onDone: () => {
+        setSse((s) => (s ? { ...s, status: "done" } : s));
+        sseHandleRef.current = null;
+        // A build recovered on mount (no pending POST here) only tells us it
+        // finished via this stream closing — resync with the server to learn
+        // the outcome (verifying / generation_failed / final message).
+        if (!doneRef.current && endpoints.state) void refetchState();
+      },
+      onError: () => {
+        setSse((s) => (s ? { ...s, status: "error" } : s));
+        sseHandleRef.current = null;
+      },
+    });
+    sseHandleRef.current = handle;
+  }
+
+  async function refetchState() {
+    if (!endpoints.state) {
+      setRecovering(false);
+      return;
+    }
+    try {
+      const snap = await api.get<StateSnapshot>(endpoints.state);
+      if (doneRef.current) return;
+      if (snap.active) {
+        setResumeBanner(null);
+        setMessages(snap.history ?? []);
+        setFsmState((snap.state as FsmState) ?? null);
+        setGenerationFailed(!!snap.generation_failed);
+        setCanKeepAsIs(!!snap.can_keep_as_is);
+        setGenerating(!!snap.generating);
+        if (snap.generating) ensureSSE(snap.last_progress || undefined);
+      } else {
+        setGenerating(false);
+        if (!dismissedRef.current && draft) {
+          if (autoResume && !autoResumeTriedRef.current) {
+            autoResumeTriedRef.current = true;
+            await handleResume();
+          } else {
+            setResumeBanner({ name: draft.name });
+          }
+        }
+      }
+    } catch {
+      // Non-critical — recovery failing just leaves a fresh composer.
+    } finally {
+      setRecovering(false);
+    }
+  }
+
+  // Mount recovery — step 1 of the behavior spec. Runs once.
+  useEffect(() => {
+    void refetchState();
+    return () => {
+      sseHandleRef.current?.close();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleResume() {
+    setResumeBanner(null);
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.post<ResumeResponse>(endpoints.resume);
+      const hist = res.history ?? [];
+      setMessages([...hist, { role: "assistant", content: res.response }]);
+      setFsmState((res.state as FsmState) ?? null);
+      setGenerationFailed(!!res.generation_failed);
+      setCanKeepAsIs(!!res.can_keep_as_is);
+    } catch (err) {
+      setError(errMessage(err));
+      setResumeBanner({ name: draft?.name });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDiscard() {
+    dismissedRef.current = true;
+    setResumeBanner(null);
+    try {
+      await api.post(endpoints.dismiss);
+    } catch {
+      // Best-effort — the banner is already gone locally either way.
+    }
+  }
+
+  async function handleCancel() {
+    try {
+      await api.post(endpoints.cancel);
+    } catch {
+      // Ignore — we're navigating away regardless.
+    }
+    // Entity-specific for now (agents only); Task 8 will need its own target.
+    navigate("/agents");
+  }
+
+  async function handleSend(text: string) {
+    setError(null);
+    setMessages((m) => [...m, { role: "user", content: text }]);
+    setBusy(true);
+    try {
+      const isFirstMessage = messages.length === 0 && fsmState === null && !resumeBanner;
+      const body: Record<string, unknown> = { message: text };
+      if (isFirstMessage && startPayload) Object.assign(body, startPayload);
+
+      const res = await api.post<DesignResponse>(endpoints.design, body);
+
+      if (res.done) {
+        doneRef.current = true;
+        setMessages((m) => [...m, { role: "assistant", content: res.response }]);
+        setFsmState("done");
+        onDone(res.agent_id ?? res.skill_id);
+        return;
+      }
+
+      setMessages((m) => [...m, { role: "assistant", content: res.response }]);
+      if (res.state) setFsmState(res.state as FsmState);
+      setGenerationFailed(!!res.generation_failed);
+      setCanKeepAsIs(!!res.can_keep_as_is);
+      if (res.building) ensureSSE();
+    } catch (err) {
+      setError(errMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleBuildClick() {
+    ensureSSE(); // attach BEFORE the POST resolves — generation runs long
+    void handleSend(BUILD_PHRASE);
+  }
+
+  const stepIndex = generating ? 2 : fsmState ? (STATE_INDEX[fsmState] ?? 0) : 0;
+  const composerBusy = busy || recovering;
+  const lastIsAssistant = messages.length > 0 && messages[messages.length - 1]!.role === "assistant";
+  const showDesigningActions = fsmState === "designing" && !generating && !busy && lastIsAssistant;
+  const showVerifyingActions = fsmState === "verifying" && !generating && !busy && lastIsAssistant;
+
+  if (resumeBanner) {
+    return (
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
+          <Stepper steps={labels.steps} activeIndex={0} />
+          <Button variant="ghost" size="sm" onClick={handleCancel}>
+            Cancel
+          </Button>
+        </div>
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+          <p className="text-sm text-muted-2">
+            You have an unfinished draft{resumeBanner.name ? `: ${resumeBanner.name}` : ""}
+          </p>
+          <div className="flex gap-2">
+            <Button onClick={() => void handleResume()} disabled={busy}>
+              Resume
+            </Button>
+            <Button variant="outline" onClick={() => void handleDiscard()}>
+              Discard
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
+        <Stepper steps={labels.steps} activeIndex={stepIndex} />
+        <Button variant="ghost" size="sm" onClick={() => void handleCancel()}>
+          Cancel
+        </Button>
+      </div>
+
+      <ChatScroll>
+        {messages.map((m, i) => (
+          <ChatMessageBubble key={i} role={m.role} content={m.content} />
+        ))}
+
+        {sse && (
+          <div className="max-w-[78%] self-start">
+            <ActivityCard
+              title={`Building your ${labels.entityName}…`}
+              lines={sse.lines}
+              status={sse.status}
+              startedAt={sseStartedAtRef.current}
+              collapsible
+            />
+          </div>
+        )}
+
+        {busy && <TypingIndicator />}
+
+        {showDesigningActions && (
+          <div className="flex gap-2 pl-1">
+            <Button size="sm" onClick={handleBuildClick}>
+              {labels.buildButton}
+            </Button>
+            <Button size="sm" variant="outline" onClick={focusComposer}>
+              Make changes
+            </Button>
+          </div>
+        )}
+
+        {showVerifyingActions && (
+          <div className="flex gap-2 pl-1">
+            <Button size="sm" onClick={() => void handleSend(SAVE_PHRASE)}>
+              {labels.saveButton}
+            </Button>
+            <Button size="sm" variant="outline" onClick={focusComposer}>
+              Request changes
+            </Button>
+          </div>
+        )}
+      </ChatScroll>
+
+      {generationFailed && (
+        <div className="flex items-center justify-between gap-2 border-t border-warn/30 bg-warn/10 px-4 py-2 text-xs text-warn">
+          <span>The build hit a problem — describe a change or say &quot;try again&quot;.</span>
+          {canKeepAsIs && (
+            <Button size="xs" variant="outline" onClick={() => void handleSend(KEEP_AS_IS_PHRASE)}>
+              Keep it as-is
+            </Button>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <div className="flex items-center gap-2 border-t border-danger/30 bg-danger/10 px-4 py-1.5 text-xs text-danger">
+          <AlertTriangle className="size-3.5 shrink-0" />
+          {error}
+        </div>
+      )}
+
+      <Composer onSend={(v) => void handleSend(v)} busy={composerBusy} focusSignal={focusSignal} />
+    </div>
+  );
+}
+
+export default DesignerSurface;

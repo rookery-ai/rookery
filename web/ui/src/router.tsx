@@ -8,6 +8,8 @@ import Workspaces from "@/pages/Workspaces";
 import KBPage from "@/pages/kb/KBPage";
 import ChatsPage from "@/pages/chats/ChatsPage";
 import AgentsPage from "@/pages/agents/AgentsPage";
+import AgentNewPage from "@/pages/agents/AgentNewPage";
+import AgentEditPage from "@/pages/agents/AgentEditPage";
 
 function RequireAuth() {
   const { data: session, isLoading } = useSession();
@@ -35,9 +37,9 @@ export const router = createBrowserRouter(
             { path: "/", element: <Placeholder title="Home" /> },
             { path: "/kb", element: <KBPage /> },
             { path: "/agents", element: <AgentsPage /> },
-            { path: "/agents/new", element: <Placeholder title="New agent" /> },
+            { path: "/agents/new", element: <AgentNewPage /> },
             { path: "/agents/:id", element: <Placeholder title="Agent" /> },
-            { path: "/agents/:id/edit", element: <Placeholder title="Edit agent" /> },
+            { path: "/agents/:id/edit", element: <AgentEditPage /> },
             { path: "/skills", element: <Placeholder title="Skills" /> },
             { path: "/connections", element: <Placeholder title="Connections" /> },
             { path: "/chats", element: <ChatsPage /> },

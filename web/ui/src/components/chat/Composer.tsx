@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
 
 const MIN_ROWS = 1;
@@ -9,11 +9,25 @@ type ComposerProps = {
   busy?: boolean;
   placeholder?: string;
   autoFocus?: boolean;
+  // Bump this (e.g. a counter) to imperatively focus the textarea — used by
+  // DesignerSurface's "Make changes"/"Request changes" quick-action buttons,
+  // which live outside the composer and have no ref of their own to grab.
+  // Optional + additive: existing callers (ChatWindow, GlobalChatPanel) never
+  // pass it and see no behavior change.
+  focusSignal?: number;
 };
 
-export function Composer({ onSend, busy, placeholder, autoFocus }: ComposerProps) {
+export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal }: ComposerProps) {
   const [value, setValue] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (focusSignal === undefined) return;
+    ref.current?.focus();
+    // Only re-run when the signal itself changes — mount-time autoFocus is a
+    // separate concern handled by the autoFocus prop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusSignal]);
 
   function autosize(el: HTMLTextAreaElement) {
     const style = window.getComputedStyle(el);
