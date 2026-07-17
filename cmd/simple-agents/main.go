@@ -75,14 +75,6 @@ func serveCmd() *cli.Command {
 				return fmt.Errorf("create data dir: %w", err)
 			}
 
-			// Resolve template and static dirs relative to binary location.
-			if cfg.Server.TemplatesDir == "" {
-				cfg.Server.TemplatesDir = resolveDir("web/templates")
-			}
-			if cfg.Server.StaticDir == "" {
-				cfg.Server.StaticDir = resolveDir("web/static")
-			}
-
 			migrationsDir := resolveDir("migrations")
 			database, err := db.Open(cfg.Database.Path, migrationsDir)
 			if err != nil {

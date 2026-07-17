@@ -3,15 +3,9 @@ package web
 import (
 	"context"
 	"fmt"
-	"html/template"
-	"io"
-	"io/fs"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"sync"
-	"time"
 
 	"github.com/gorilla/sessions"
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
@@ -23,7 +17,6 @@ import (
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/gateway"
 	"github.com/ilijad1/simple-agents/internal/memory"
-	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/ilijad1/simple-agents/internal/skilldesigner"
 	"github.com/ilijad1/simple-agents/internal/skillstore"
@@ -46,12 +39,12 @@ type Server struct {
 	runner     *agentrunner.Runner     // may be nil in tests
 	designer   *agentdesigner.AgentDesigner
 	skills     *skillstore.Store
-	designFlow *agentdesigner.Flow  // shared with Telegram gateway
-	skillFlow  *skilldesigner.Flow  // conversational skill-creator (web + Telegram)
-	homesDir   string               // per-user claude HOME directories
-	vault      *vault.Vault         // per-user knowledge base
-	memory     *memory.Store        // per-user structured context (injected into one-off chat)
-	connectors *connectors.Registry // self-managed-OAuth connector registry (embedded data files)
+	designFlow *agentdesigner.Flow   // shared with Telegram gateway
+	skillFlow  *skilldesigner.Flow   // conversational skill-creator (web + Telegram)
+	homesDir   string                // per-user claude HOME directories
+	vault      *vault.Vault          // per-user knowledge base
+	memory     *memory.Store         // per-user structured context (injected into one-off chat)
+	connectors *connectors.Registry  // self-managed-OAuth connector registry (embedded data files)
 	connStore  connectors.TokenStore // token store for connector execution (chat + services UI)
 	connBridge *connectors.Bridge    // loopback bridge so CLI chat coders can reach connectors
 
@@ -113,10 +106,6 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 	s.echo.HideBanner = true
 	s.echo.HidePort = true
 
-	if err := s.setupTemplates(); err != nil {
-		return nil, err
-	}
-
 	s.setupMiddleware()
 	s.setupRoutes()
 
@@ -135,92 +124,6 @@ func (s *Server) Start(addr string) error {
 // WithBridge attaches the loopback connector bridge so CLI chat coders can reach connectors.
 func (s *Server) WithBridge(b *connectors.Bridge) *Server { s.connBridge = b; return s }
 
-// ── Templates ──────────────────────────────────────────────────────────────
-
-type TemplateRenderer struct {
-	tmpl *template.Template
-}
-
-func (t *TemplateRenderer) Render(w io.Writer, name string, data interface{}, c echo.Context) error {
-	return t.tmpl.ExecuteTemplate(w, name, data)
-}
-
-func (s *Server) setupTemplates() error {
-	tmplDir := s.cfg.Server.TemplatesDir
-	if tmplDir == "" {
-		// Fall back to relative paths if not configured.
-		for _, d := range []string{
-			filepath.Join(filepath.Dir(os.Args[0]), "web/templates"),
-			"web/templates",
-			"templates",
-		} {
-			if _, err := os.Stat(d); err == nil {
-				tmplDir = d
-				break
-			}
-		}
-	}
-	if tmplDir == "" {
-		return fmt.Errorf("web templates directory not found; set SA_TEMPLATES_DIR or templates_dir in config")
-	}
-
-	tmpl, err := parseTemplates(tmplDir)
-	if err != nil {
-		return err
-	}
-	s.echo.Renderer = &TemplateRenderer{tmpl: tmpl}
-	return nil
-}
-
-func parseTemplates(dir string) (*template.Template, error) {
-	funcMap := template.FuncMap{
-		"truncate": func(s string, n int) string {
-			if len(s) <= n {
-				return s
-			}
-			return s[:n] + "..."
-		},
-		"derefInt": func(p *int) int {
-			if p == nil {
-				return -1
-			}
-			return *p
-		},
-		"not": func(b bool) bool { return !b },
-		"initials": func(s string) string {
-			if len(s) == 0 {
-				return "?"
-			}
-			return string([]rune(s)[:1])
-		},
-		"fmtTZ": func(loc *time.Location, t time.Time, layout string) string {
-			if loc == nil {
-				loc = time.UTC
-			}
-			return t.In(loc).Format(layout)
-		},
-	}
-
-	tmpl := template.New("").Funcs(funcMap)
-
-	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || filepath.Ext(path) != ".html" {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		// Template name = relative path from dir (e.g. "auth/login.html")
-		name, _ := filepath.Rel(dir, path)
-		if _, err := tmpl.New(name).Parse(string(data)); err != nil {
-			return err
-		}
-		return nil
-	})
-	return tmpl, err
-}
-
 // ── Middleware ─────────────────────────────────────────────────────────────
 
 func (s *Server) setupMiddleware() {
@@ -237,133 +140,19 @@ func (s *Server) setupMiddleware() {
 // ── Routes ─────────────────────────────────────────────────────────────────
 
 func (s *Server) setupRoutes() {
-	// Static assets
-	staticDir := s.cfg.Server.StaticDir
-	if staticDir == "" {
-		staticDir = "web/static"
-	}
-	s.echo.Static("/static", staticDir)
-
-	// Public routes. Root (/) is served by the SPA catch-all registered last in
-	// setupSPARoutes — it is no longer a template redirect.
-	s.echo.GET("/login", s.showLogin)
-	s.echo.POST("/login", s.handleLogin)
-	s.echo.GET("/logout", s.handleLogout)
-
-	// Owner-authenticated routes (no active workspace required)
-	authed := s.echo.Group("")
-	authed.Use(s.requireOwner)
-	authed.GET("/change-password", s.showChangePassword)
-	authed.POST("/change-password", s.handleChangePassword)
-
-	// Workspace context (owner logged in AND a workspace entered).
-	// The create/onboarding wizard runs here so a not-yet-set-up workspace can
-	// still be configured, but every other dashboard route requires setup complete.
-	dash := s.echo.Group("/dashboard")
-	dash.Use(s.requireOwner)
-	dash.Use(s.requireActiveWorkspace)
-	dash.GET("/setup", s.showSetup)
-	dash.POST("/setup", s.handleSetup)
-	dash.Use(s.requireSetupComplete)
-	dash.GET("", s.showDashboard)
-	dash.GET("/agents", s.showAgents)
-	dash.GET("/agents/new", s.showNewAgent)
-	dash.POST("/agents/design", s.handleDesignChat)
-	dash.POST("/agents/design/cancel", s.handleCancelDesign)
-	dash.POST("/agents/design/resume", s.handleResumeDraft)
-	dash.POST("/agents/design/dismiss", s.handleDismissDraft)
-	dash.GET("/agents/design/progress", s.handleDesignProgress)
-	dash.GET("/agents/design/state", s.handleDesignState)
-	dash.GET("/agents/:id", s.showAgentDetail)
-	dash.GET("/agents/:id/edit", s.showEditAgent)
-	dash.POST("/agents/:id/edit/start", s.handleStartEditDesign)
-	dash.POST("/agents/:id/delete", s.handleDeleteAgent)
-	dash.POST("/agents/:id/run", s.handleRunAgent)
-	dash.GET("/agents/:id/run/progress", s.handleRunProgress)
-	dash.POST("/agents/:id/schedule", s.handleSaveSchedule)
-	dash.POST("/agents/:id/schedule/delete", s.handleDeleteSchedule)
-	dash.POST("/agents/:id/agent-md", s.handleSaveAgentMD)
-	dash.POST("/agents/:id/skills", s.handleSaveAgentSkills)
-	dash.POST("/agents/:id/connections", s.handleSaveAgentConnections)
-	dash.GET("/skills", s.showSkills)
-	dash.GET("/skills/new", s.showNewSkill)
-	dash.POST("/skills/design", s.handleSkillDesignChat)
-	dash.POST("/skills/design/cancel", s.handleCancelSkillDesign)
-	dash.POST("/skills/design/resume", s.handleResumeSkillDraft)
-	dash.POST("/skills/design/dismiss", s.handleDismissSkillDraft)
-	dash.GET("/skills/design/progress", s.handleSkillDesignProgress)
-	dash.POST("/skills", s.handleCreateSkill)
-	dash.GET("/skills/core/:slug", s.showCoreSkill)
-	dash.GET("/skills/:id", s.showSkillDetail)
-	dash.POST("/skills/:id", s.handleSaveSkill)
-	dash.POST("/skills/:id/delete", s.handleDeleteSkill)
-	dash.GET("/secrets", s.showSecrets)
-	dash.POST("/secrets", s.handleCreateSecret)
-	dash.POST("/secrets/:name/delete", s.handleDeleteSecret)
-	dash.GET("/connectors", s.showConnectors)
-	dash.POST("/connectors", s.handleSaveConnector)
-	dash.POST("/connectors/:platform/delete", s.handleDeleteConnector)
-	dash.POST("/connectors/:platform/test", s.handleTestConnector)
-	// Self-managed OAuth service connections (Google/Gmail, etc.)
-	dash.GET("/connectors/services", s.showServices)
-	dash.POST("/connectors/services/:provider/creds", s.handleSaveProviderCreds)
-	dash.POST("/connectors/services/:provider/connect", s.handleConnectService)
-	dash.POST("/connectors/services/:provider/apikey", s.handleConnectAPIKey)
-	dash.GET("/connectors/services/callback/:provider", s.handleOAuthCallback)
-	dash.POST("/connectors/services/:id/delete", s.handleDeleteServiceConnection)
-	dash.GET("/chats", s.showChats)
-	dash.POST("/chats", s.handleCreateChat)
-	dash.GET("/chats/:id", s.showChatDetail)
-	dash.POST("/chats/:id/messages", s.handleChatMessage)
-	dash.POST("/chats/:id/resume", s.handleResumeChat)
-	dash.POST("/chats/:id/stop", s.handleStopChat)
-	dash.POST("/chats/:id/delete", s.handleDeleteChat)
-	dash.GET("/reminders", s.showReminders)
-	dash.POST("/reminders", s.handleCreateReminder)
-	dash.POST("/reminders/:id/delete", s.handleDeleteReminder)
-	dash.GET("/reminders/poll", s.handlePollReminders)
-	dash.GET("/inbox", s.showInbox)
-	dash.GET("/inbox/poll", s.handleInboxPoll)
-	dash.POST("/inbox/:id/read", s.handleMarkInboxRead)
-	dash.POST("/inbox/read-all", s.handleMarkAllInboxRead)
-	dash.POST("/inbox/:id/delete", s.handleDeleteInboxMessage)
-	dash.GET("/memory", func(c echo.Context) error {
-		return c.Redirect(http.StatusFound, "/dashboard/kb?path=memory")
-	})
-	dash.GET("/kb", s.showKB)
-	dash.GET("/kb/view", s.viewKBNote)
-	dash.GET("/kb/edit", s.editKBNote)
-	dash.POST("/kb/save", s.handleSaveKBNote)
-	dash.POST("/kb/new", s.handleNewKBNote)
-	dash.POST("/kb/delete", s.handleDeleteKBNote)
-	dash.POST("/kb/rename", s.handleRenameKBNote)
-	dash.GET("/kb/search", s.searchKB)
-	dash.GET("/kb/raw", s.rawKBNote)
-	dash.GET("/settings", s.showSettings)
-	dash.POST("/settings", s.handleSaveSettings)
-	dash.POST("/settings/workspace", s.handleSaveWorkspaceMeta)
-	dash.POST("/settings/coder", s.handleSaveWorkspaceCoder)
-	dash.POST("/settings/coder/test", s.handleSmokeCoder)
-	dash.POST("/settings/master-password", s.handleChangeMasterPassword)
-
-	// Owner management area (relabeled "Workspaces" in the UI). Owner logged in;
-	// no active workspace required.
-	admin := s.echo.Group("/admin")
-	admin.Use(s.requireOwner)
-	admin.GET("", s.showAdminDashboard)
-	admin.GET("/workspaces", s.showAdminWorkspaces)
-	admin.POST("/workspaces", s.handleAdminCreateWorkspace)
-	admin.GET("/workspaces/:id", s.showAdminWorkspace)
-	admin.POST("/workspaces/:id/enter", s.handleEnterWorkspace)
-	admin.POST("/workspaces/:id/delete", s.handleAdminDeleteWorkspace)
-	admin.POST("/workspaces/:id/permissions", s.handleAdminGrantPermission)
-	admin.POST("/workspaces/:id/permissions/:perm/revoke", s.handleAdminRevokePermission)
-	admin.GET("/settings", s.showAdminSettings)
-	admin.POST("/settings", s.handleAdminSaveSettings)
-	admin.GET("/audit", s.showAuditLog)
-
-	// Leaving the active workspace (back to the owner's workspace list).
-	s.echo.POST("/workspace/leave", s.handleLeaveWorkspace, s.requireOwner)
+	// The entire template UI has been deleted — the embedded SPA (served at / by
+	// setupSPARoutes) plus the JSON API (/api/v1, setupAPIRoutes) are the only two
+	// HTTP surfaces. The one exception below is the OAuth callback.
+	//
+	// FROZEN: this exact path is the redirect URI registered in external OAuth
+	// apps (Google, GitHub, …), so it must NOT change even though the rest of the
+	// /dashboard template tree is gone. It is registered standalone (not the JSON
+	// API) because the provider redirects a browser here and we finish with an
+	// HTTP redirect, not a JSON body. It reads c.Get("workspace"), so it carries
+	// the same owner → active-workspace → setup-complete guard chain the old
+	// /dashboard group applied.
+	s.echo.GET("/dashboard/connectors/services/callback/:provider", s.handleOAuthCallback,
+		s.requireOwner, s.requireActiveWorkspace, s.requireSetupComplete)
 
 	s.setupAPIRoutes()
 	s.setupSPARoutes()
@@ -497,28 +286,4 @@ func (s *Server) secretsLookup(ctx context.Context, workspaceID, name string) (s
 	}
 	svc := secrets.New(s.db, workspaceID, masterPw, w.SecretsSalt)
 	return svc.Get(ctx, name)
-}
-
-type pageData struct {
-	Owner      *db.Owner
-	Workspace  *db.Workspace   // active workspace (nil on owner-only pages)
-	Workspaces []*db.Workspace // all workspaces, for the switcher dropdown
-	Title      string
-	Error      string
-	Success    string
-	Data       any
-	UserLoc    *time.Location
-}
-
-func (s *Server) page(c echo.Context, title string) *pageData {
-	o, _ := s.currentOwner(c)
-	p := &pageData{Owner: o, Title: title, UserLoc: time.UTC}
-	if o != nil {
-		p.Workspaces, _ = s.db.ListWorkspaces()
-	}
-	if w, ok := s.activeWorkspace(c); ok {
-		p.Workspace = w
-		p.UserLoc = profile.LoadLocation(s.db, w.ID)
-	}
-	return p
 }

@@ -10,24 +10,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/ilijad1/simple-agents/internal/skilllibrary"
 	"github.com/labstack/echo/v4"
-	"github.com/robfig/cron/v3"
 )
 
-type agentsPageData struct {
-	*pageData
-	Agents  []*db.Agent
-	Running map[string]bool // agentID → true if a run is currently in flight
-	Draft   *db.AgentDraft  // unfinished design draft, or nil
-}
-
+// agentDetailData is the agent-detail view model, assembled by loadAgentDetail and
+// consumed by the JSON agents API (api_agents.go → toAPIAgentDetail).
 type agentDetailData struct {
-	*pageData
 	Agent          *db.Agent
 	Schedule       *db.AgentSchedule
 	Runs           []*db.AgentRun
@@ -46,46 +37,6 @@ type agentDetailData struct {
 	HasPlatform    bool // user has at least one linked chat platform
 	Running        bool // a run is in flight (manual or scheduled) — drives the badge
 	LiveRun        bool // a manual run is in flight on THIS server — gates the SSE stream
-}
-
-type newAgentPageData struct {
-	*pageData
-	HasPlatform bool
-	Draft       *db.AgentDraft // unfinished design draft, or nil
-}
-
-func (s *Server) showAgents(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	agents, _ := s.db.ListAgents(u.ID)
-	running := make(map[string]bool, len(agents))
-	for _, a := range agents {
-		if s.isAgentRunning(a.ID) {
-			running[a.ID] = true
-		}
-	}
-	var draft *db.AgentDraft
-	if s.designFlow != nil {
-		draft = s.designFlow.HasDraft(u.ID)
-	}
-	return c.Render(http.StatusOK, "dashboard/agents.html", &agentsPageData{
-		pageData: s.page(c, "My Agents"),
-		Agents:   agents,
-		Running:  running,
-		Draft:    draft,
-	})
-}
-
-func (s *Server) showNewAgent(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	var draft *db.AgentDraft
-	if s.designFlow != nil {
-		draft = s.designFlow.HasDraft(u.ID)
-	}
-	return c.Render(http.StatusOK, "dashboard/agent_new.html", &newAgentPageData{
-		pageData:    s.page(c, "Create Agent"),
-		HasPlatform: s.db.HasPlatformIdentity(u.ID),
-		Draft:       draft,
-	})
 }
 
 // handleResumeDraft reconstructs the user's saved design draft as an active
@@ -336,32 +287,6 @@ func (s *Server) handleDesignProgress(c echo.Context) error {
 	}
 }
 
-// showEditAgent renders the conversational edit UI for an existing agent.
-// GET /dashboard/agents/:id/edit
-func (s *Server) showEditAgent(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	id := c.Param("id")
-
-	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.WorkspaceID != u.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
-	}
-
-	var agentMD string
-	if dir := s.agentsDir(); dir != "" {
-		if raw, err := os.ReadFile(agentdesigner.AgentDescPath(dir, u.ID, id)); err == nil {
-			agentMD = string(raw)
-		}
-	}
-
-	return c.Render(http.StatusOK, "dashboard/agent_edit.html", &agentDetailData{
-		pageData:    s.page(c, "Edit Agent: "+agent.Name),
-		Agent:       agent,
-		AgentMD:     agentMD,
-		HasPlatform: s.db.HasPlatformIdentity(u.ID),
-	})
-}
-
 // handleStartEditDesign starts a new edit session for an existing agent and
 // returns the coder's first response. Continuation reuses handleDesignChat /
 // handleCancelDesign — the session, once created, is keyed by workspaceID like any
@@ -403,18 +328,6 @@ func (s *Server) handleStartEditDesign(c echo.Context) error {
 	})
 }
 
-func (s *Server) showAgentDetail(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	id := c.Param("id")
-
-	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.WorkspaceID != u.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
-	}
-
-	return s.renderAgentDetail(c, agent, u.ID, s.page(c, "Agent: "+agent.Name))
-}
-
 // agentsDir returns the vaults base directory from config (or empty string in
 // tests). Agent dirs live at <base>/<workspaceID>/agents/<agentID>.
 func (s *Server) agentsDir() string {
@@ -424,46 +337,8 @@ func (s *Server) agentsDir() string {
 	return filepath.Join(s.cfg.Data.Dir, "vaults")
 }
 
-// renderAgentDetail loads all data needed for the agent detail page and renders it.
-// handleSaveAgentConnections binds/unbinds the agent's service connections from the
-// checkbox card on the agent page. This is the reliable path — independent of whether the
-// design model remembered to emit a "# Connections:" header.
-func (s *Server) handleSaveAgentConnections(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	id := c.Param("id")
-	ctx := c.Request().Context()
-
-	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.WorkspaceID != u.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
-	}
-
-	_ = c.Request().ParseForm()
-	submitted := c.Request().Form["connection_ids"]
-
-	// Only accept connection IDs that belong to this workspace.
-	conns, _ := s.db.ListServiceConnections(ctx, u.ID)
-	valid := make(map[string]bool, len(conns))
-	for _, cn := range conns {
-		valid[cn.ID] = true
-	}
-	var ids []string
-	seen := make(map[string]bool)
-	for _, cid := range submitted {
-		if cid != "" && valid[cid] && !seen[cid] {
-			ids = append(ids, cid)
-			seen[cid] = true
-		}
-	}
-	if err := s.db.SetAgentConnections(ctx, id, ids); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to save connections")
-	}
-	return c.Redirect(http.StatusSeeOther, "/dashboard/agents/"+id)
-}
-
-// loadAgentDetail loads all data needed for the agent detail page/API without
-// rendering — the pageData field is left nil (callers set it before rendering
-// a template; the JSON API doesn't need it at all).
+// loadAgentDetail loads all data needed for the agent detail JSON API without
+// rendering. Consumed by api_agents.go (toAPIAgentDetail).
 func (s *Server) loadAgentDetail(ctx context.Context, agent *db.Agent, workspaceID string) *agentDetailData {
 	schedule, _ := s.db.GetScheduleForAgent(agent.ID)
 	runs, _ := s.db.ListAgentRuns(agent.ID, 10)
@@ -556,139 +431,4 @@ func (s *Server) loadAgentDetail(ctx context.Context, agent *db.Agent, workspace
 	}
 
 	return data
-}
-
-func (s *Server) renderAgentDetail(c echo.Context, agent *db.Agent, workspaceID string, p *pageData) error {
-	data := s.loadAgentDetail(c.Request().Context(), agent, workspaceID)
-	data.pageData = p
-	return c.Render(http.StatusOK, "dashboard/agent_detail.html", data)
-}
-
-func (s *Server) handleDeleteAgent(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	id := c.Param("id")
-
-	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.WorkspaceID != u.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
-	}
-
-	if err := s.db.DeleteAgent(id); err != nil {
-		return err
-	}
-
-	// Remove the agent's directory from the user's vault so no orphaned files
-	// linger (otherwise the deleted agent keeps showing up in the knowledge base).
-	if dir := s.agentsDir(); dir != "" {
-		_ = os.RemoveAll(agentdesigner.AgentDir(dir, u.ID, id))
-	}
-
-	s.audit.Log(u.ID, "delete_agent", "agent:"+id, agent.Name, c.RealIP())
-	return c.Redirect(http.StatusFound, "/dashboard/agents")
-}
-
-func (s *Server) handleRunAgent(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	id := c.Param("id")
-
-	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.WorkspaceID != u.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
-	}
-
-	s.audit.Log(u.ID, "run_agent", "agent:"+id, agent.Name, c.RealIP())
-
-	p := s.page(c, "Agent: "+agent.Name)
-
-	if s.runner == nil {
-		p.Error = "Agent runner is not configured"
-		return s.renderAgentDetail(c, agent, u.ID, p)
-	}
-
-	// Decrypt the user's stored master password the same way the scheduler does for
-	// cron runs, so manual "Run Now" gets secret injection too. There is no
-	// password-entry field on this form — agent execution (unlike viewing secret
-	// values) doesn't require live re-entry.
-	var masterPw string
-	if u.EncryptedMasterPassword != "" {
-		if pw, err := secrets.DecryptMasterPassword(u.EncryptedMasterPassword, s.systemKey); err == nil {
-			masterPw = pw
-		}
-	}
-
-	// Fire the run in the background on a detached context so it survives the user
-	// navigating away (the old synchronous path was tied to the request context and
-	// got SIGKILLed on navigation, surfacing as "exit -1"). Progress streams to the
-	// detail page over SSE; the final result is also delivered to the user's chat.
-	//
-	// MUST redirect (303 See Other) rather than render the page in response to the
-	// POST. Rendering left the browser on a POST-loaded page; the detail-page JS
-	// reloads when the SSE run completes, and on a POST-loaded page `reload()` replays
-	// the POST — firing "Run Now" again in an infinite loop, one run per ~15-30s,
-	// burning tokens. Post/Redirect/Get breaks the loop: the browser lands on a
-	// GET-loaded page so reload is a safe GET. The running badge + live-progress
-	// panel convey "started"/"already running" visually, so no flash message is lost.
-	s.startManualRun(u.ID, agent, masterPw)
-	return c.Redirect(http.StatusSeeOther, "/dashboard/agents/"+id)
-}
-
-func (s *Server) handleSaveSchedule(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	id := c.Param("id")
-
-	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.WorkspaceID != u.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
-	}
-
-	cronExpr := strings.TrimSpace(c.FormValue("cron_expr"))
-	p := s.page(c, "Agent: "+agent.Name)
-
-	if cronExpr == "" {
-		p.Error = "Cron expression is required"
-	} else {
-		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-		sched, parseErr := parser.Parse(cronExpr)
-		if parseErr != nil {
-			p.Error = "Invalid cron expression: " + parseErr.Error()
-		} else {
-			nextRun := sched.Next(time.Now())
-			// Reuse existing schedule ID so ON CONFLICT(id) updates rather than inserts.
-			existing, _ := s.db.GetScheduleForAgent(agent.ID)
-			schedID := uuid.New().String()
-			if existing != nil {
-				schedID = existing.ID
-			}
-			row := &db.AgentSchedule{
-				ID:          schedID,
-				AgentID:     agent.ID,
-				WorkspaceID: u.ID,
-				CronExpr:    cronExpr,
-				NextRunAt:   &nextRun,
-				Enabled:     true,
-			}
-			if err := s.db.UpsertAgentSchedule(row); err != nil {
-				p.Error = "Failed to save schedule: " + err.Error()
-			} else {
-				p.Success = "Schedule saved"
-				s.audit.Log(u.ID, "save_schedule", "agent:"+id, cronExpr, c.RealIP())
-			}
-		}
-	}
-
-	return s.renderAgentDetail(c, agent, u.ID, p)
-}
-
-func (s *Server) handleDeleteSchedule(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	id := c.Param("id")
-
-	agent, err := s.db.GetAgent(id)
-	if err != nil || agent.WorkspaceID != u.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "agent not found")
-	}
-
-	_ = s.db.DeleteAgentSchedule(id)
-	s.audit.Log(u.ID, "delete_schedule", "agent:"+id, "", c.RealIP())
-	return c.Redirect(http.StatusFound, "/dashboard/agents/"+id)
 }

@@ -1,7 +1,6 @@
 package web
 
 import (
-	"bytes"
 	"path/filepath"
 	"testing"
 
@@ -71,35 +70,5 @@ func TestSlackConnectorTwoFieldSaveAndRender(t *testing.T) {
 	tok, cfg, err := gateway.SplitCreds(spec, map[string]string{"token": "xoxb-1", "app_token": "xapp-1"})
 	if err != nil || tok != "xoxb-1" || cfg != `{"app_token":"xapp-1"}` {
 		t.Fatalf("slack SplitCreds wrong: tok=%q cfg=%q err=%v", tok, cfg, err)
-	}
-}
-
-// TestConnectorsTemplateRenders renders dashboard/connectors.html with a
-// populated connectorsPageData (Specs from the real registry, both a
-// connected and an unconnected platform) so an execute-time reference to the
-// new .Specs range (replacing the old hardcoded Telegram/Discord cards)
-// can't silently break.
-func TestConnectorsTemplateRenders(t *testing.T) {
-	tmpl, err := parseTemplates("templates")
-	if err != nil {
-		t.Fatalf("parseTemplates: %v", err)
-	}
-	specs := gateway.CredSpecs()
-	if len(specs) == 0 {
-		t.Fatal("expected at least one registered CredSpec (telegram/discord)")
-	}
-	data := &connectorsPageData{
-		pageData: &pageData{Title: "Chat Connectors", Workspace: &db.Workspace{Name: "ilija"}},
-		Specs:    specs,
-		Connections: []*db.PlatformConnection{
-			{Platform: specs[0].Platform, Active: true},
-		},
-	}
-	var buf bytes.Buffer
-	if err := tmpl.ExecuteTemplate(&buf, "dashboard/connectors.html", data); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if buf.Len() == 0 {
-		t.Fatal("rendered empty output")
 	}
 }

@@ -159,14 +159,18 @@ func TestSPACatchAllPrecedence(t *testing.T) {
 		}
 	}
 
-	// (f) the template /login still renders the template (coexistence phase),
-	// not the SPA. "Sign in" is the login template's heading.
+	// (f) the template UI is gone — /login now falls through to the SPA
+	// catch-all and serves index.html (or 503 when the UI isn't built). The old
+	// login template that used to win this exact path no longer exists.
 	{
 		req := httptest.NewRequest(http.MethodGet, "/login", nil)
 		rec := httptest.NewRecorder()
 		s.echo.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Sign in") {
-			t.Fatalf("/login did not render the template (shadowed by catch-all?): %d %q", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusOK && rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("/login did not reach the SPA handler (got %d) — expected SPA index or 503", rec.Code)
+		}
+		if rec.Code == http.StatusOK && strings.Contains(rec.Body.String(), "Sign in") {
+			t.Fatalf("/login still served a login template heading — template UI should be deleted: %q", rec.Body.String())
 		}
 	}
 

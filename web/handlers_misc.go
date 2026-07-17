@@ -5,19 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/chat"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/reminder"
 	"github.com/ilijad1/simple-agents/internal/secrets"
@@ -26,66 +23,9 @@ import (
 
 // ── Chats ───────────────────────────────────────────────────────────────────
 
-type chatsPageData struct {
-	*pageData
-	Chats []*db.Chat
-}
-
-func (s *Server) showChats(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	chats, _ := s.db.ListChats(u.ID)
-	return c.Render(http.StatusOK, "dashboard/chats.html", &chatsPageData{
-		pageData: s.page(c, "Chats"),
-		Chats:    chats,
-	})
-}
-
-func (s *Server) handleCreateChat(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	name := c.FormValue("name")
-	if name == "" {
-		loc := profile.LoadLocation(s.db, u.ID)
-		name = "Chat " + time.Now().In(loc).Format("2006-01-02 15:04")
-	}
-	ch := &db.Chat{
-		ID:          uuid.New().String(),
-		WorkspaceID: u.ID,
-		Name:        name,
-		Platform:    "web",
-		Active:      true,
-	}
-	if err := s.db.CreateChat(ch); err != nil {
-		return err
-	}
-	s.audit.Log(u.ID, "create_chat", "chat:"+ch.ID, name, c.RealIP())
-	return c.Redirect(http.StatusFound, "/dashboard/chats/"+ch.ID)
-}
-
-type chatDetailPageData struct {
-	*pageData
-	Chat     *db.Chat
-	Messages []db.ChatMessage
-}
-
-// showChatDetail renders a chat's full message history plus a composer.
-func (s *Server) showChatDetail(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	id := c.Param("id")
-	ch, err := s.db.GetChat(id)
-	if err != nil || ch.WorkspaceID != u.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "chat not found")
-	}
-	msgs, _ := s.db.ListChatMessages(id)
-	return c.Render(http.StatusOK, "dashboard/chat_detail.html", &chatDetailPageData{
-		pageData: s.page(c, "Chat"),
-		Chat:     ch,
-		Messages: msgs,
-	})
-}
-
 // handleChatMessage sends one user message through the coder one-off-chat path,
-// persists both turns, and returns the assistant reply as JSON. Used by the
-// chat detail page's AJAX composer (mirrors the agent-designer chat flow).
+// persists both turns, and returns the assistant reply as JSON. Shared by the
+// JSON chats API (mirrors the agent-designer chat flow).
 func (s *Server) handleChatMessage(c echo.Context) error {
 	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
@@ -193,103 +133,11 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"response": result.Text})
 }
 
-// handleResumeChat re-activates a previously stopped chat.
-func (s *Server) handleResumeChat(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	id := c.Param("id")
-	ch, err := s.db.GetChat(id)
-	if err != nil || ch.WorkspaceID != u.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "chat not found")
-	}
-	_ = s.db.ResumeChat(id)
-	s.audit.Log(u.ID, "resume_chat", "chat:"+id, ch.Name, c.RealIP())
-	return c.Redirect(http.StatusFound, "/dashboard/chats/"+id)
-}
-
-func (s *Server) handleStopChat(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	id := c.Param("id")
-	ch, err := s.db.GetChat(id)
-	if err != nil || ch.WorkspaceID != u.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "chat not found")
-	}
-	_ = s.db.StopChat(id)
-	s.audit.Log(u.ID, "stop_chat", "chat:"+id, ch.Name, c.RealIP())
-	return c.Redirect(http.StatusFound, "/dashboard/chats")
-}
-
-func (s *Server) handleDeleteChat(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	id := c.Param("id")
-	ch, err := s.db.GetChat(id)
-	if err != nil || ch.WorkspaceID != u.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "chat not found")
-	}
-	_ = s.db.DeleteChat(id)
-	s.audit.Log(u.ID, "delete_chat", "chat:"+id, ch.Name, c.RealIP())
-	return c.Redirect(http.StatusFound, "/dashboard/chats")
-}
-
 // ── Reminders ──────────────────────────────────────────────────────────────
-
-type remindersPageData struct {
-	*pageData
-	Reminders []*db.Reminder
-}
-
-func (s *Server) showReminders(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	reminders, _ := s.db.ListReminders(u.ID)
-	return c.Render(http.StatusOK, "dashboard/reminders.html", &remindersPageData{
-		pageData:  s.page(c, "Reminders"),
-		Reminders: reminders,
-	})
-}
-
-func (s *Server) handleCreateReminder(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	message := c.FormValue("message")
-	whenStr := strings.TrimSpace(c.FormValue("when"))
-
-	p := s.page(c, "Reminders")
-	renderErr := func(msg string) error {
-		p.Error = msg
-		rs, _ := s.db.ListReminders(u.ID)
-		return c.Render(http.StatusBadRequest, "dashboard/reminders.html", &remindersPageData{pageData: p, Reminders: rs})
-	}
-
-	if message == "" {
-		return renderErr("Reminder message is required")
-	}
-	if whenStr == "" {
-		return renderErr(`When would you like to be reminded? Try: "in 10 minutes", "tomorrow at 3pm", "next Friday morning"`)
-	}
-
-	now := time.Now()
-	loc := profile.LoadLocation(s.db, u.ID)
-	llmFn := buildLLMTimeParser(s.coderForWorkspace(u.ID))
-
-	remindAt, _, err := reminder.ParseNaturalTimeFull(c.Request().Context(), whenStr, now, loc, llmFn, u.ID)
-	if err != nil {
-		return renderErr(`Couldn't understand that time. Try: "in 10 minutes", "tomorrow at 3pm", "next Tuesday", "July 15 at 2pm"`)
-	}
-	if remindAt.IsZero() {
-		return renderErr(`No time found in "` + whenStr + `". Try: "in 10 minutes", "tomorrow at 3pm", "next Friday"`)
-	}
-
-	r := &db.Reminder{
-		ID:          uuid.New().String(),
-		WorkspaceID: u.ID,
-		Message:     message,
-		RemindAt:    remindAt,
-	}
-	_ = s.db.CreateReminder(r)
-	s.audit.Log(u.ID, "create_reminder", "reminder:"+r.ID, message, c.RealIP())
-	return c.Redirect(http.StatusFound, "/dashboard/reminders")
-}
 
 // buildLLMTimeParser returns a reminder.TimeParserFunc backed by the given coder.
 // It calls BuildReminderParsePrompt and parses the JSON response via ParseLLMReminderJSON.
+// Shared by the JSON reminders API (api_home.go).
 func buildLLMTimeParser(coderSvc *coder.Coder) reminder.TimeParserFunc {
 	if coderSvc == nil {
 		return nil
@@ -313,7 +161,7 @@ func buildLLMTimeParser(coderSvc *coder.Coder) reminder.TimeParserFunc {
 // handlePollReminders returns due unsent reminders for the current user.
 // For web-only users (no platform connected) it also marks them sent — this IS the delivery.
 // For users with Telegram connected, it returns them for info display but does NOT mark sent
-// so the server-side tick() can still deliver via Telegram.
+// so the server-side tick() can still deliver via Telegram. Shared by the JSON reminders API.
 func (s *Server) handlePollReminders(c echo.Context) error {
 	u := c.Get("workspace").(*db.Workspace)
 	due, err := s.db.ListDueReminders(time.Now())
@@ -343,126 +191,11 @@ func (s *Server) handlePollReminders(c echo.Context) error {
 	return c.JSON(http.StatusOK, result)
 }
 
-func (s *Server) handleDeleteReminder(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	id := c.Param("id")
-	r, err := s.db.GetReminder(id)
-	if err != nil || r.WorkspaceID != u.ID {
-		return echo.NewHTTPError(http.StatusNotFound, "reminder not found")
-	}
-	_ = s.db.DeleteReminder(id)
-	return c.Redirect(http.StatusFound, "/dashboard/reminders")
-}
-
-// ── Settings ───────────────────────────────────────────────────────────────
-
-type settingsPageData struct {
-	*pageData
-	DisplayName    string
-	Email          string
-	Location       string
-	Timezone       string
-	Tone           string
-	Language       string
-	Notes          string
-	DetectedCoders []coder.Installed
-	APIProviders   []coder.APIProvider
-	SecretNames    []string // workspace's secret names, for the API-key dropdown
-
-	CoderCatalogJSON template.JS // JSON array of the provider catalog for the coder-form JS
-}
-
-// buildSettingsData assembles the settings page view model (profile + detected
-// coders + API providers + secret names). The active workspace comes through
-// pageData.Workspace.
-func (s *Server) buildSettingsData(p *pageData, w *db.Workspace) *settingsPageData {
-	prof := profile.Load(s.db, w.ID)
-	dn := prof.DisplayName
-	if dn == "" {
-		dn = w.Name
-	}
-	secretNames, _ := s.db.ListSecretNames(w.ID)
-
-	return &settingsPageData{
-		pageData:         p,
-		DisplayName:      dn,
-		Email:            prof.Email,
-		Location:         prof.Location,
-		Timezone:         prof.Timezone,
-		Tone:             prof.Tone,
-		Language:         prof.Language,
-		Notes:            prof.Notes,
-		DetectedCoders:   coder.DetectInstalled(),
-		APIProviders:     coder.APIProviders(),
-		SecretNames:      secretNames,
-		CoderCatalogJSON: s.coderCatalogJSON(secretNames),
-	}
-}
-
-// coderCatalogJSON marshals the provider catalog for the coder-form JS. secretNames
-// is the workspace's existing secret names — used to flag providers that already have
-// a stored CODER_KEY_<PROVIDER> key so the form can say "already set, paste to override".
-// The catalog-slice construction itself lives in coderCatalogSlice (api_settings.go)
-// so the template path and the JSON API build it in exactly one place.
-func (s *Server) coderCatalogJSON(secretNames []string) template.JS {
-	catJSON, _ := json.Marshal(s.coderCatalogSlice(secretNames))
-	return template.JS(catJSON)
-}
-
-func (s *Server) showSettings(c echo.Context) error {
-	w := c.Get("workspace").(*db.Workspace)
-	return c.Render(http.StatusOK, "dashboard/settings.html", s.buildSettingsData(s.page(c, "Settings"), w))
-}
-
-func (s *Server) handleSaveSettings(c echo.Context) error {
-	w := c.Get("workspace").(*db.Workspace)
-	tone := c.FormValue("tone_custom")
-	if tone == "" {
-		tone = c.FormValue("tone")
-	}
-	prof := profile.Profile{
-		DisplayName: c.FormValue("display_name"),
-		Email:       c.FormValue("email"),
-		Location:    c.FormValue("location"),
-		Timezone:    c.FormValue("timezone"),
-		Tone:        tone,
-		Language:    c.FormValue("language"),
-		Notes:       c.FormValue("notes"),
-	}
-	p := s.page(c, "Settings")
-
-	if err := profile.Save(s.db, w.ID, prof); err != nil {
-		p.Error = "Failed to save settings: " + err.Error()
-	} else {
-		s.audit.Log(w.ID, "update_settings", "workspace:"+w.ID, "profile", c.RealIP())
-		p.Success = "Settings saved"
-	}
-	return c.Render(http.StatusOK, "dashboard/settings.html", s.buildSettingsData(p, w))
-}
-
-// handleSaveWorkspaceMeta updates the workspace name + about from the settings page.
-func (s *Server) handleSaveWorkspaceMeta(c echo.Context) error {
-	w := c.Get("workspace").(*db.Workspace)
-	name := c.FormValue("name")
-	about := c.FormValue("about")
-	p := s.page(c, "Settings")
-	if name == "" {
-		p.Error = "Workspace name is required"
-	} else if err := s.db.UpdateWorkspaceMeta(w.ID, name, about); err != nil {
-		p.Error = "Failed to save: " + err.Error()
-	} else {
-		s.audit.Log(w.ID, "update_workspace_meta", "workspace:"+w.ID, "", c.RealIP())
-		p.Success = "Workspace details saved"
-		w, _ = s.db.GetWorkspaceByID(w.ID) // reflect new values in the view
-		p.Workspace = w
-	}
-	return c.Render(http.StatusOK, "dashboard/settings.html", s.buildSettingsData(p, w))
-}
+// ── Settings (shared cores) ──────────────────────────────────────────────────
 
 // coderForm is the generic (transport-agnostic) input to saveWorkspaceCoderCore —
 // mirrors the settings-page form fields exactly (TimeoutS stays a string, parsed
-// inside the core), so both the template handler and the JSON API can feed it
-// straight from their respective request formats.
+// inside the core), so the JSON API can feed it straight from its request format.
 type coderForm struct {
 	Kind, Bin, TimeoutS, Provider, Model, BaseURL, APIKey string
 }
@@ -473,7 +206,8 @@ type coderForm struct {
 // provider/model, bad API-key plan); err is an unexpected failure (500-class,
 // e.g. can't decrypt the master password, can't write the secret, can't save
 // to the DB). Persists the coder config on success; does not audit-log (the
-// caller does, since only it has request context like IP).
+// caller does, since only it has request context like IP). Shared by the JSON
+// settings API (api_settings.go).
 func (s *Server) saveWorkspaceCoderCore(w *db.Workspace, f coderForm) (string, error) {
 	kind := f.Kind
 	if kind == "" {
@@ -554,48 +288,8 @@ func (s *Server) saveWorkspaceCoderCore(w *db.Workspace, f coderForm) (string, e
 	return "", nil
 }
 
-// handleSaveWorkspaceCoder updates the workspace's coder config from settings.
-// Two kinds: "local" (a host CLI binary) or "api" (a direct LLM provider API).
-func (s *Server) handleSaveWorkspaceCoder(c echo.Context) error {
-	w := c.Get("workspace").(*db.Workspace)
-	f := coderForm{
-		Kind:     c.FormValue("coder_kind"),
-		Bin:      c.FormValue("coder_bin"),
-		TimeoutS: c.FormValue("coder_timeout_s"),
-		Provider: c.FormValue("coder_provider"),
-		Model:    c.FormValue("coder_model"),
-		BaseURL:  c.FormValue("coder_base_url"),
-		APIKey:   c.FormValue("coder_api_key"),
-	}
-
-	p := s.page(c, "Settings")
-	userErrMsg, err := s.saveWorkspaceCoderCore(w, f)
-	if userErrMsg != "" {
-		p.Error = userErrMsg
-		return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, w))
-	}
-	if err != nil {
-		p.Error = err.Error()
-		return c.Render(http.StatusInternalServerError, "dashboard/settings.html", s.buildSettingsData(p, w))
-	}
-
-	// Reload so the audit detail + rendered view reflect exactly what was saved
-	// (the core may have normalized kind to "local"/"api" and resolved the secret name).
-	if w2, err := s.db.GetWorkspaceByID(w.ID); err == nil {
-		w = w2
-	}
-	detail := w.CoderBin
-	if w.CoderKind == "api" {
-		detail = w.CoderProvider + "/" + w.CoderModel
-	}
-	s.audit.Log(w.ID, "configure_coder", "workspace:"+w.ID, w.CoderKind+":"+detail, c.RealIP())
-	p.Success = "Coder settings saved"
-	p.Workspace = w
-	return c.Render(http.StatusOK, "dashboard/settings.html", s.buildSettingsData(p, w))
-}
-
 // handleSmokeCoder runs a fail-loud end-to-end check of the workspace's currently
-// saved coder and returns the result as JSON for the settings page.
+// saved coder and returns the result as JSON. Shared by the JSON settings API.
 func (s *Server) handleSmokeCoder(c echo.Context) error {
 	w := c.Get("workspace").(*db.Workspace)
 	cd := s.coderForWorkspace(w.ID)
@@ -625,14 +319,13 @@ const msgWrongMasterPassword = "Old master password is incorrect"
 // specifically is the one callers may want to surface as 401); err is an
 // unexpected failure (500-class). Does not audit-log (the caller does).
 //
-// Also reused by the setup wizard's step-2 handlers (apiSetupMasterPassword /
-// handleSetupMasterPassword) for a Back-then-resubmit-with-a-different-
-// password re-post — which is why this persists via UpdateWorkspaceMasterPassword,
-// which leaves needs_setup untouched, rather than also flipping it to 0: that
-// would be premature and wrong mid-wizard (setup only completes at the
-// wizard's own "finish" step). For the settings-page callers (post-setup,
-// needs_setup already 0) this is behavior-identical — it just no longer
-// re-asserts a flag that's already unset.
+// Also reused by the setup wizard's step-2 handler (apiSetupMasterPassword) for
+// a Back-then-resubmit-with-a-different-password re-post — which is why this
+// persists via UpdateWorkspaceMasterPassword, which leaves needs_setup
+// untouched, rather than also flipping it to 0: that would be premature and
+// wrong mid-wizard (setup only completes at the wizard's own "finish" step).
+// For the settings-page callers (post-setup, needs_setup already 0) this is
+// behavior-identical — it just no longer re-asserts a flag that's already unset.
 func (s *Server) changeMasterPasswordCore(u *db.Workspace, oldPw, newPw string) (string, error) {
 	if u.SecretsSalt == "" {
 		return "Account setup not complete", nil
@@ -687,7 +380,7 @@ func (s *Server) changeMasterPasswordCore(u *db.Workspace, oldPw, newPw string) 
 //     changeMasterPasswordCore, so a genuine password change mid-wizard
 //     isn't silently discarded
 //
-// Shared by apiSetupMasterPassword and handleSetupMasterPassword.
+// Shared by apiSetupMasterPassword.
 func (s *Server) resubmitPasswordOverExistingSecrets(w *db.Workspace, newPw string) (string, error) {
 	oldPw, err := secrets.DecryptMasterPassword(w.EncryptedMasterPassword, s.systemKey)
 	if err != nil {
@@ -697,40 +390,4 @@ func (s *Server) resubmitPasswordOverExistingSecrets(w *db.Workspace, newPw stri
 		return "", nil
 	}
 	return s.changeMasterPasswordCore(w, oldPw, newPw)
-}
-
-func (s *Server) handleChangeMasterPassword(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	oldPw := c.FormValue("current")
-	newPw := c.FormValue("new_password")
-	confirm := c.FormValue("confirm")
-
-	renderErr := func(msg string) error {
-		p := s.page(c, "Settings")
-		p.Error = msg
-		return c.Render(http.StatusBadRequest, "dashboard/settings.html", s.buildSettingsData(p, u))
-	}
-
-	if oldPw == "" || newPw == "" {
-		return renderErr("Old and new master passwords are required")
-	}
-	if len(newPw) < 8 {
-		return renderErr("New master password must be at least 8 characters")
-	}
-	if newPw != confirm {
-		return renderErr("New passwords do not match")
-	}
-
-	userErrMsg, err := s.changeMasterPasswordCore(u, oldPw, newPw)
-	if err != nil {
-		return err
-	}
-	if userErrMsg != "" {
-		return renderErr(userErrMsg)
-	}
-
-	s.audit.Log(u.ID, "change_master_password", "workspace:"+u.ID, "", c.RealIP())
-	p := s.page(c, "Settings")
-	p.Success = "Master password changed successfully"
-	return c.Render(http.StatusOK, "dashboard/settings.html", s.buildSettingsData(p, u))
 }

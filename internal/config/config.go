@@ -30,11 +30,9 @@ type BackupConfig struct {
 }
 
 type ServerConfig struct {
-	Host         string `yaml:"host"`
-	Port         int    `yaml:"port"`
-	SessionKey   string `yaml:"session_key"` // hex-encoded 32-byte key
-	TemplatesDir string `yaml:"templates_dir"`
-	StaticDir    string `yaml:"static_dir"`
+	Host       string `yaml:"host"`
+	Port       int    `yaml:"port"`
+	SessionKey string `yaml:"session_key"` // hex-encoded 32-byte key
 }
 
 type DatabaseConfig struct {
@@ -130,12 +128,6 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("SA_CLAUDE_BIN"); v != "" {
 		cfg.Coder.ClaudeBin = v
-	}
-	if v := os.Getenv("SA_TEMPLATES_DIR"); v != "" {
-		cfg.Server.TemplatesDir = v
-	}
-	if v := os.Getenv("SA_STATIC_DIR"); v != "" {
-		cfg.Server.StaticDir = v
 	}
 	if v := os.Getenv("SA_SANDBOX"); v != "" {
 		cfg.Sandbox.Enabled = !(v == "0" || strings.EqualFold(v, "false") || strings.EqualFold(v, "off"))

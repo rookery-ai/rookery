@@ -10,44 +10,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/gateway"
-	"github.com/labstack/echo/v4"
 )
-
-type connectorsPageData struct {
-	*pageData
-	Connections []*db.PlatformConnection
-	Specs       []gateway.CredSpec
-}
-
-// supportedPlatformNames derives the list of connectable platforms from the
-// registered credential specs, so adding an adapter needs no UI/handler edit.
-func supportedPlatformNames() []string {
-	var out []string
-	for _, sp := range gateway.CredSpecs() {
-		out = append(out, sp.Platform)
-	}
-	return out
-}
-
-func (s *Server) showConnectors(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	platforms := supportedPlatformNames()
-	var connections []*db.PlatformConnection
-	for _, p := range platforms {
-		if conn, err := s.db.GetPlatformConnection(u.ID, p); err == nil {
-			connections = append(connections, conn)
-		}
-	}
-	return c.Render(http.StatusOK, "dashboard/connectors.html", &connectorsPageData{
-		pageData:    s.page(c, "Chat Connectors"),
-		Connections: connections,
-		Specs:       gateway.CredSpecs(),
-	})
-}
 
 // saveConnector validates + encrypts + persists a platform's credentials for a
 // workspace, stores the bot username (Telegram), and (re)starts the gateway
-// adapter. Shared by the connectors page and the setup wizard's connector step.
+// adapter. Shared by the JSON connectors API and the setup-wizard connector step.
 // Driven entirely by the platform's registered gateway.CredSpec, so a new
 // adapter needs no new save logic here. botStartErr is non-nil only when the
 // credentials saved but the bot failed to start (non-fatal).
@@ -101,76 +68,9 @@ func (s *Server) saveConnector(workspaceID, platform string, values map[string]s
 	return identity, botStartErr, nil
 }
 
-func (s *Server) handleSaveConnector(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	platform := c.FormValue("platform")
-
-	values := map[string]string{}
-	if spec, ok := gateway.CredSpecFor(platform); ok {
-		for _, f := range spec.Fields {
-			values[f.Key] = c.FormValue(f.Key)
-		}
-	}
-
-	if platform == "" || values["token"] == "" {
-		p := s.page(c, "Chat Connectors")
-		p.Error = "Platform and token are required"
-		return s.renderConnectors(c, u, p)
-	}
-
-	identity, botStartErr, err := s.saveConnector(u.ID, platform, values)
-	if err != nil {
-		p := s.page(c, "Chat Connectors")
-		p.Error = err.Error()
-		return s.renderConnectors(c, u, p)
-	}
-	s.audit.Log(u.ID, "connect_platform", "platform:"+platform, "", c.RealIP())
-
-	if botStartErr != nil {
-		p := s.page(c, "Chat Connectors")
-		p.Error = "Connector saved but bot failed to start: " + botStartErr.Error()
-		return s.renderConnectors(c, u, p)
-	}
-
-	// Allow setup wizard to redirect back to its flow.
-	if next := c.FormValue("next"); next != "" && len(next) > 0 && next[0] == '/' {
-		return c.Redirect(http.StatusFound, next)
-	}
-
-	botDisplay := ""
-	if identity != "" {
-		botDisplay = "@" + identity
-	}
-	p := s.page(c, "Chat Connectors")
-	if botDisplay != "" {
-		p.Success = "Bot " + botDisplay + " connected! Send /start to your bot to link your account."
-	} else {
-		p.Success = "Connected to " + platform + " successfully! Send /start to your bot to link your account."
-	}
-	return s.renderConnectors(c, u, p)
-}
-
-func (s *Server) handleDeleteConnector(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	platform := c.Param("platform")
-
-	if s.gateway != nil {
-		if err := s.gateway.Reload(context.Background(), u.ID, platform); err != nil {
-			// Log but don't block deletion.
-			_ = err
-		}
-	}
-
-	if err := s.db.DeletePlatformConnection(u.ID, platform); err != nil {
-		return err
-	}
-
-	s.audit.Log(u.ID, "disconnect_platform", "platform:"+platform, "", c.RealIP())
-	return c.Redirect(http.StatusFound, "/dashboard/connectors")
-}
-
 // testConnectorIdentity decrypts a saved connection's credentials and runs the
 // platform's CredSpec.Validate, returning the bot identity (e.g. username).
+// Shared by the JSON connectors API.
 func (s *Server) testConnectorIdentity(workspaceID, platform string) (string, error) {
 	spec, ok := gateway.CredSpecFor(platform)
 	if !ok {
@@ -202,20 +102,6 @@ func (s *Server) testConnectorIdentity(workspaceID, platform string) (string, er
 	return spec.Validate(values)
 }
 
-func (s *Server) handleTestConnector(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	platform := c.Param("platform")
-	ident, err := s.testConnectorIdentity(u.ID, platform)
-	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"status": "error", "message": err.Error()})
-	}
-	out := map[string]string{"status": "ok", "platform": platform}
-	if ident != "" {
-		out["bot"] = "@" + ident
-	}
-	return c.JSON(http.StatusOK, out)
-}
-
 // testTelegramToken calls Telegram's getMe API to validate the bot token.
 // Returns the bot username on success.
 func testTelegramToken(token string) (string, error) {
@@ -240,19 +126,4 @@ func testTelegramToken(token string) (string, error) {
 		return "", fmt.Errorf("telegram rejected token: %s", result.Description)
 	}
 	return result.Result.Username, nil
-}
-
-func (s *Server) renderConnectors(c echo.Context, u *db.Workspace, p *pageData) error {
-	platforms := supportedPlatformNames()
-	var connections []*db.PlatformConnection
-	for _, pl := range platforms {
-		if conn, err := s.db.GetPlatformConnection(u.ID, pl); err == nil {
-			connections = append(connections, conn)
-		}
-	}
-	return c.Render(http.StatusOK, "dashboard/connectors.html", &connectorsPageData{
-		pageData:    p,
-		Connections: connections,
-		Specs:       gateway.CredSpecs(),
-	})
 }

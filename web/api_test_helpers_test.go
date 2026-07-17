@@ -30,7 +30,6 @@ func newAPITestServer(t *testing.T) (*Server, *db.DB) {
 	t.Cleanup(func() { database.Close() })
 	cfg := &config.Config{}
 	cfg.Data.Dir = dir
-	cfg.Server.TemplatesDir = "templates"
 	s, err := NewServer(cfg, database, nil, nil, nil, filepath.Join(dir, "homes"), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)

@@ -30,7 +30,6 @@ func newAPITestServerWithSkills(t *testing.T) (*Server, *db.DB) {
 	t.Cleanup(func() { database.Close() })
 	cfg := &config.Config{}
 	cfg.Data.Dir = dir
-	cfg.Server.TemplatesDir = "templates"
 	store := skillstore.New(database, filepath.Join(dir, "skills"))
 	s, err := NewServer(cfg, database, nil, nil, nil, filepath.Join(dir, "homes"), store, nil, nil, nil)
 	if err != nil {

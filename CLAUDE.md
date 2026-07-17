@@ -62,8 +62,11 @@ AST guardrail tests shell out to `python3`. If Python is not available, those te
 > with `SA_PORT=…`). Set `SA_PUBLIC_URL` to the externally-reachable base URL so OAuth
 > callbacks are correct. `simple-agents connector exec <tool> --args '<json>'` is the
 > subcommand CLI coders use to reach the connector bridge (not for manual use).
-> Verify with `make status` / `make logs`; smoke-test with
-> `curl -sS http://127.0.0.1:8080/login`.
+> The UI is the embedded React SPA served at `http://host:8080/` (build it into the
+> binary with `make ui` before `go build`; `/app` + `/app/*` 301-redirect to `/`).
+> Verify with `make status` / `make logs`; smoke-test the SPA + API with
+> `curl -sS http://127.0.0.1:8080/` (200 HTML) and
+> `curl -sS http://127.0.0.1:8080/api/v1/auth/session` (200 JSON).
 
 ## Architecture
 
@@ -102,7 +105,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/auth` | `BootstrapOwner`, `Authenticate` (owner login), `ChangePassword` (owner), `CreateWorkspace(name, about)`, `GenerateSecretsSalt`, bcrypt |
 | `internal/rbac` | `CanPerform(db, workspaceID, permission)` — reads `workspace_permissions` table |
 | `internal/secrets` | AES-256-GCM store; Argon2id key derivation; `GetAll()` decrypts all for env injection; `Proxy()` resolves `${NAME}` in-memory only |
-| `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router`, `IdentityResolver`; adapters `TelegramGateway` + `DiscordGateway` (DM-only, discordgo, user-id identity + DM-channel resolution, mandatory delete; opaque **string** message IDs throughout) + `SlackGateway` (DM-only, Socket Mode, two-token credentials — bot token + app-level token routed via `encrypted_config` — mrkdwn renderer, mandatory delete). An **adapter registry** (`RegisterAdapter`/`AdapterFactory`/`DispatchFunc`) replaced the hard-coded platform `switch` in `GatewayManager.start()` — a new platform registers its factory from an `init()`. A **render subsystem** (`internal/gateway/render`: `Renderer` interface + registry + `render.For(platform)`) decouples formatting from the router: `Router.Handle()` emits neutral CommonMark and each adapter renders on send — Telegram via a goldmark-AST MarkdownV2 renderer, Discord via CommonMark passthrough (native support). A declarative **`CredSpec`** framework (`credspec.go`: fields + `Label`/`Blurb`/`SetupSteps` + `SplitCreds` token/`encrypted_config` split) drives both the connect flow and the `/dashboard/connectors` UI (one card per registered platform). |
+| `internal/gateway` | `Gateway` interface, `GatewayManager`, `Router`, `IdentityResolver`; adapters `TelegramGateway` + `DiscordGateway` (DM-only, discordgo, user-id identity + DM-channel resolution, mandatory delete; opaque **string** message IDs throughout) + `SlackGateway` (DM-only, Socket Mode, two-token credentials — bot token + app-level token routed via `encrypted_config` — mrkdwn renderer, mandatory delete). An **adapter registry** (`RegisterAdapter`/`AdapterFactory`/`DispatchFunc`) replaced the hard-coded platform `switch` in `GatewayManager.start()` — a new platform registers its factory from an `init()`. A **render subsystem** (`internal/gateway/render`: `Renderer` interface + registry + `render.For(platform)`) decouples formatting from the router: `Router.Handle()` emits neutral CommonMark and each adapter renders on send — Telegram via a goldmark-AST MarkdownV2 renderer, Discord via CommonMark passthrough (native support). A declarative **`CredSpec`** framework (`credspec.go`: fields + `Label`/`Blurb`/`SetupSteps` + `SplitCreds` token/`encrypted_config` split) drives both the connect flow and the SPA connectors page (backed by the `/api/v1/connectors` JSON endpoints; one card per registered platform). |
 | `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface: one struct per coder — Claude/OpenCode/Codex/Gemini/Cursor, plus a generic fallback). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host tools (`read_file`/`write_file`/`edit_file`/`list_dir` + read-only discovery `search_files`/`glob` + exec tools `run_script`/`bash`/`web_fetch`/`web_search`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
 | `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **28 providers** (Google-family, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
@@ -121,7 +124,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
 | `internal/profile` | Per-user personalization (name, email, location, timezone, tone, language, notes); stored in the generic `settings` table; `Load()`/`Save()`/`ContextString()` for LLM injection; `LoadLocation()` for timezone-aware reminder parsing |
 | `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per workspace. `SkillDir(base, workspaceID, name)` is the path helper shared with the skill designer (staging dirs use the `.staging-<name>` convention). |
-| `web/` | Echo v4 web server; full user dashboard + admin UI |
+| `web/` | Echo v4 web server: the `/api/v1` JSON API + the embedded React SPA (`web/ui`, served at `/`). The old server-rendered template UI was deleted — the SPA is the only front end. Handler files now hold API handlers + shared cores (e.g. `saveConnector`, `loadAgentDetail`, `saveWorkspaceCoderCore`, `handleOAuthCallback`) reused by the JSON layer. |
 
 ### Per-user knowledge base (vault)
 
@@ -276,10 +279,13 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
   vs the `connector exec` command) so the coder knows the tools exist and is told there is **no
   Composio/SDK/service keys** in the env.
 
-**UI:** `/dashboard/connectors/services` — per-workspace OAuth-app creds + connect/callback per
-provider, with per-provider setup guidance (`label`/`setup_url`/`setup_steps` in the provider YAML).
-Callback: `/dashboard/connectors/services/callback/:provider` (HMAC-signed, TTL'd `state`). `SA_PUBLIC_URL`
-sets the callback base (Google rejects non-public-TLD/`http` redirect URIs — use `https://` or `http://localhost`).
+**UI:** the SPA connections page (backed by the `/api/v1/services` JSON endpoints) — per-workspace
+OAuth-app creds + connect per provider, with per-provider setup guidance
+(`label`/`setup_url`/`setup_steps` in the provider YAML). The OAuth **callback** is the one
+server-rendered redirect route that survives the SPA cutover: `GET /dashboard/connectors/services/callback/:provider`
+(HMAC-signed, TTL'd `state`; path FROZEN because it's the registered external redirect URI; it finishes
+with an HTTP redirect back to the SPA). `SA_PUBLIC_URL` sets the callback base (Google rejects
+non-public-TLD/`http` redirect URIs — use `https://` or `http://localhost`).
 
 ### Skill system (core + user skills)
 
@@ -292,7 +298,7 @@ At run time (`agentrunner.runCoderAgent`), the agent's declared skills' content 
 
 **Skill format.** `skills/<name>/SKILL.md` (required: YAML frontmatter + markdown body) + optional `scripts/` (deterministic code) + `references/` (on-demand docs). Only `name`+`description` are strictly required; `description` is the trigger — it must say what the skill does AND the contexts that activate it. Tool names are written BARE in the body (the runtime env block supplies the real path).
 
-**Conversational skill creator** (`internal/skilldesigner`, web `/dashboard/skills/new`): mirrors `agentdesigner.Flow`'s shape — FSM (`StateIdle → StateAwaitingResume → StateDescribing → StateDesigning → StateVerifying → StateDone`), SSE progress, 7-day drafts (`skill_drafts` table, one per user), strict/forgiving approval triggers (same split as the agent designer). Flow:
+**Conversational skill creator** (`internal/skilldesigner`, driven by the SPA via the `/api/v1/skills/design` FSM endpoints): mirrors `agentdesigner.Flow`'s shape — FSM (`StateIdle → StateAwaitingResume → StateDescribing → StateDesigning → StateVerifying → StateDone`), SSE progress, 7-day drafts (`skill_drafts` table, one per user), strict/forgiving approval triggers (same split as the agent designer). Flow:
 1. Design conversation (text-only coder, `BuildSkillDesignSystemPrompt`) — focused Q&A, proposes a plan, asks for `approve`. Drafts are persisted on every turn so the conversation survives reloads/restarts (even on usage-limit).
 2. Generation (`runGeneration`, `BuildSkillImplementationPrompt` with the `skill-creator` core skill body) — coder writes SKILL.md (+ `scripts/`) into a staging dir (`<vault>/skills/.staging-<name>/`, live folder touched only on approval), tests scripts, emits `[TEST_OUTPUT]`. Guardrails (`CheckEthics` + `RunToolGuardrails`) run on the actual generated content.
 3. Vetting (`vetSkill`, `BuildSkillVettingPrompt` with the `skill-vetter` core skill body as the system prompt) — a second text-only coder call audits the skill for malicious behaviour (exfil of vault notes/USER.md/SOUL.md/secrets, raw-IP network calls, obfuscated payloads, sudo, destructive ops, …) and emits a structured report. `vettingBlocksSave()` parses the authoritative `Verdict:` line (a pure `❌ do not save` blocks save; an echoed `✅ safe to save | ⚠️ … | ❌ do not save` alternation does NOT — guards against a literal model echoing the option list). A blocking verdict keeps the user in `StateDesigning` and the skill is NOT saved. Covered by `flow_test.go`.
@@ -412,74 +418,29 @@ fields `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`), 
 
 ### Web UI routes
 
+**The server-rendered template UI has been deleted (big-bang cutover).** There are now exactly
+**two** HTTP surfaces: the embedded **React SPA** at `/` and the **`/api/v1` JSON API**. All the old
+`/dashboard/*` and `/admin/*` HTML routes, the `TemplateRenderer`/`setupTemplates`/`parseTemplates`
+machinery, the `web/templates/` + `web/static/` directories, and the `templates_dir`/`static_dir` +
+`SA_TEMPLATES_DIR`/`SA_STATIC_DIR` config are gone. The SPA talks to the JSON API for everything.
+
 ```
-/login, /logout                     # owner login/logout
-/change-password                    # owner password (requireOwner)
-/dashboard/setup                    # per-workspace onboarding wizard (basics → master_password → coder → profile → connector → done)
-/workspace/leave                    # POST: leave the active workspace (owner stays logged in)
-/dashboard                          # active-workspace home
-/dashboard/agents                   # list agents
-/dashboard/agents/new               # conversational agent creation
-/dashboard/agents/design            # POST: drives design FSM turn-by-turn
-/dashboard/agents/design/cancel     # POST: cancel active design session
-/dashboard/agents/design/progress   # GET SSE: generation milestone events
-/dashboard/agents/design/state      # GET: live in-memory design session (state, is_edit) for browser recovery after reload
-/dashboard/agents/:id               # detail: AGENT.md editor, state, logs, schedule, skills
-/dashboard/agents/:id/edit          # conversational agent editing
-/dashboard/agents/:id/edit/start    # POST: starts an edit design session
-/dashboard/agents/:id/delete
-/dashboard/agents/:id/run           # POST: starts background run, 303-redirects (PRG)
-/dashboard/agents/:id/run/progress  # GET SSE: live [CHAT] output
-/dashboard/agents/:id/schedule[/delete]
-/dashboard/agents/:id/agent-md      # POST: save AGENT.md (ethics check)
-/dashboard/agents/:id/skills        # POST: update agent skill assignments
-/dashboard/agents/:id/connections   # POST: bind/unbind service connections (Attach-connections card)
-/dashboard/skills                     # list: your skills + core skills (always-on) + draft-resume card
-/dashboard/skills/new                 # conversational skill creator (chat UI)
-/dashboard/skills/design              # POST: drive skill-creator FSM turn-by-turn (JSON {name,message})
-/dashboard/skills/design/cancel       # POST: cancel active skill-design session
-/dashboard/skills/design/resume       # POST: resume a saved skill draft
-/dashboard/skills/design/dismiss      # POST: discard a saved skill draft
-/dashboard/skills/design/progress     # GET SSE: skill-generation milestone events
-/dashboard/skills/core/:slug         # GET: read-only view of an embedded core skill
-/dashboard/skills/:id                 # user skill detail (edit/delete)
-/dashboard/secrets
-/dashboard/connectors                # chat connectors (Telegram/Discord)
-/dashboard/connectors/services       # GET: self-managed-OAuth service connections (Google/GitHub/Notion/Outlook/Jira)
-/dashboard/connectors/services/:provider/creds     # POST: save per-workspace OAuth app client id/secret
-/dashboard/connectors/services/:provider/connect   # POST: begin OAuth (redirect to provider consent)
-/dashboard/connectors/services/callback/:provider  # GET: OAuth callback → store connection; redirects land on /app/connections
-/dashboard/connectors/services/:id/delete          # POST: disconnect an account
-/dashboard/chats                     # list chats; per-chat detail has composer (send msg), resume/stop/delete
-/dashboard/chats/:id                # chat detail: history + message composer
-/dashboard/chats/:id/messages        # POST: send one message (AJAX JSON {message} → {response}|{error}; coder one-off-chat path with KB tools, persists turn)
-/dashboard/chats/:id/resume          # POST: resume a stopped chat
-/dashboard/reminders
-/dashboard/memory                   # redirects to /dashboard/kb?path=memory
-/dashboard/kb                       # knowledge-base file browser
-/dashboard/kb/view|edit|raw         # GET: render / edit / download note
-/dashboard/kb/save|new|delete|rename# POST: mutate notes/folders
-/dashboard/kb/search                # GET: ripgrep full-text search
-/dashboard/settings                 # user profile + change master password
-/dashboard/settings                 # workspace profile + name/about + coder config + change master password
-/dashboard/settings/workspace       # POST: save workspace name + about
-/dashboard/settings/coder           # POST: save workspace coder config
-/dashboard/settings/master-password # POST: change workspace master password (re-encrypts secrets)
-/admin                              # owner dashboard: workspace cards + stats + recent audit
-/admin/workspaces, /admin/workspaces/:id
-/admin/workspaces/:id/enter         # POST: master-password gate → set active workspace
-/admin/workspaces/:id/delete
-/admin/workspaces/:id/permissions[/:perm/revoke]
-/admin/settings                    # system settings
-/admin/audit
+/                        # embedded React SPA (index.html); every unmatched deep path falls through
+/*                       #   to the SPA catch-all (client-side routing). 503 if built without `make ui`.
+/app, /app/*             # 301 → the same path with /app stripped (legacy; SPA moved from /app to /)
+/dashboard/connectors/services/callback/:provider   # GET: OAuth callback — the ONE non-SPA, non-API
+                         #   route. Registered standalone (guarded requireOwner → requireActiveWorkspace
+                         #   → requireSetupComplete). FROZEN: this exact path is the redirect URI
+                         #   registered in external OAuth apps, so it must never change. Finishes with an
+                         #   HTTP redirect back to the SPA connections page (/connections?...), not JSON.
 ```
 
-#### `/api/v1` (JSON API)
+#### `/api/v1` (JSON API — the SPA's only backend)
 
-A parallel JSON API mirrors the dashboard/admin surface above (spec §12). The authoritative,
-exhaustive route inventory is the `want` table in `web/api_parity_test.go`
-(`TestAPIParityInventory`) — a merge gate asserting every planned route is registered via
-`s.echo.Routes()`; consult it directly rather than duplicating the full list here. Route groups:
+The JSON API is the whole application surface (spec §12). The authoritative, exhaustive route
+inventory is the `want` table in `web/api_parity_test.go` (`TestAPIParityInventory`) — a merge gate
+asserting every planned route is registered via `s.echo.Routes()`; consult it directly rather than
+duplicating the full list here. Route groups:
 
 - **auth** — session, login, logout, change-password
 - **workspaces + admin** — list/create/enter/leave/delete workspaces, permissions, admin overview/audit/settings
@@ -493,14 +454,28 @@ exhaustive route inventory is the `want` table in `web/api_parity_test.go`
 - **kb** — tree, note read/write/new/delete/rename, search, raw, resolve
 - **settings + setup** — profile/workspace/coder/master-password settings, coder test, setup wizard
 - **search** — global search
-- `GET /app, /app/*` — embedded SPA (React; 503 when built without make ui); moves to / in sub-plan 6.
+
+The embedded SPA is served at `/` (see above); `/app` + `/app/*` 301-redirect to their `/app`-stripped
+equivalents. Serving/redirect wiring lives in `web/spa.go` (`setupSPARoutes`), not the JSON API group.
 
 ### Owner vs. workspace separation
 
-- **Owner**: only `/admin/*` (guarded by `requireOwner`) — manages workspaces, system settings, audit.
-- **Active workspace**: `/dashboard/*` (guarded by `requireOwner` + `requireActiveWorkspace`) — agents, secrets, connectors, chats, reminders, KB, scoped to the entered workspace.
-- Middleware (`web/server.go`): `requireOwner` (session `owner_id` → `c.Set("owner")`), `requireActiveWorkspace` (session `active_workspace_id` → `c.Set("workspace")`; redirects to `/admin` if none), `requireSetupComplete` (redirects to `/dashboard/setup` while `needs_setup`). Handlers read `c.Get("workspace").(*db.Workspace)`.
-- Entering/switching: `handleEnterWorkspace` decrypts the workspace's `encrypted_master_password` with the system key and compares to the typed one (an access gate — the stored form must remain so the scheduler can decrypt for headless cron runs). Re-prompts on every switch; `handleLeaveWorkspace` clears the active workspace.
+The two-level session (`owner_id` logged in + `active_workspace_id` entered) is unchanged; only the
+guard mechanism moved to the JSON API now that the template routes are gone.
+
+- **Owner-scoped** endpoints (`/api/v1/admin/*`, workspace management) are guarded by `requireOwnerAPI`
+  (session `owner_id` → `c.Set("owner")`, 401 JSON if absent).
+- **Workspace-scoped** endpoints (agents, secrets, connectors, chats, reminders, KB) add
+  `requireActiveWorkspaceAPI` (session `active_workspace_id` → `c.Set("workspace")`, 409 JSON if none)
+  + `requireSetupCompleteAPI`. Handlers read `c.Get("workspace").(*db.Workspace)`.
+- The template middlewares `requireOwner` / `requireActiveWorkspace` / `requireSetupComplete`
+  (redirect variants, in `web/server.go`) still exist but now guard **only** the standalone OAuth
+  callback route (the one browser-facing, non-API endpoint that needs workspace context).
+- Entering/switching + leaving are JSON-API actions (`POST /api/v1/workspaces/:id/enter` /
+  `.../leave`). `verifyWorkspaceMasterPassword` (shared core in `web/handlers_admin.go`) decrypts the
+  workspace's `encrypted_master_password` with the system key and compares to the typed one (an access
+  gate — the stored form must remain so the scheduler can decrypt for headless cron runs). Re-prompts
+  on every switch.
 
 ### Per-workspace coder
 

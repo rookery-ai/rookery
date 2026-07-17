@@ -10,25 +10,6 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// newSkillPageData drives the conversational skill-creator page.
-type newSkillPageData struct {
-	*pageData
-	Draft *db.SkillDraft // unfinished skill design draft, or nil
-}
-
-// GET /dashboard/skills/new
-func (s *Server) showNewSkill(c echo.Context) error {
-	u := c.Get("workspace").(*db.Workspace)
-	var draft *db.SkillDraft
-	if s.skillFlow != nil {
-		draft = s.skillFlow.HasDraft(u.ID)
-	}
-	return c.Render(http.StatusOK, "dashboard/skill_new.html", &newSkillPageData{
-		pageData: s.page(c, "Create Skill"),
-		Draft:    draft,
-	})
-}
-
 // handleSkillDesignChat drives the conversational skill-creator via JSON API.
 // POST /dashboard/skills/design
 // Body: {"name": "my-skill", "message": "..."}
