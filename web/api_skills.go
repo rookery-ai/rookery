@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -271,6 +272,9 @@ func (s *Server) apiCreateSkillMultipart(c echo.Context, u *db.Workspace) error 
 		if name == "" {
 			return jsonErr(c, http.StatusBadRequest, "invalid_request", "could not determine skill name from SKILL.md frontmatter or zip folder name")
 		}
+		if skilllibrary.IsCoreSkill(name) {
+			return jsonErr(c, http.StatusBadRequest, "reserved_name", fmt.Sprintf("%q is a core skill name — pick another", name))
+		}
 
 		skill, err := s.skills.InstallFromZip(u.ID, name, description, data)
 		if err != nil {
@@ -305,6 +309,9 @@ func (s *Server) apiCreateSkillFromContent(c echo.Context, u *db.Workspace, cont
 	}
 	if name == "" {
 		return jsonErr(c, http.StatusBadRequest, "invalid_request", "could not determine skill name from SKILL.md frontmatter")
+	}
+	if skilllibrary.IsCoreSkill(name) {
+		return jsonErr(c, http.StatusBadRequest, "reserved_name", fmt.Sprintf("%q is a core skill name — pick another", name))
 	}
 
 	skill, err := s.skills.Create(u.ID, name, description, content)

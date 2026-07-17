@@ -32,7 +32,8 @@ func (s *Server) showNewSkill(c echo.Context) error {
 // handleSkillDesignChat drives the conversational skill-creator via JSON API.
 // POST /dashboard/skills/design
 // Body: {"name": "my-skill", "message": "..."}
-// Response: {"response": "...", "done": false} or {"response": "...", "done": true, "skill_id": "..."}
+// Response: {"response": "...", "done": false, "state": "...", "generation_failed": false}
+// or {"response": "...", "done": true, "skill_id": "..."}
 func (s *Server) handleSkillDesignChat(c echo.Context) error {
 	u := c.Get("workspace").(*db.Workspace)
 
@@ -64,9 +65,16 @@ func (s *Server) handleSkillDesignChat(c echo.Context) error {
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
+		state, generationFailed := "", false
+		if sess := s.skillFlow.GetSession(u.ID); sess != nil {
+			state = sess.State.String()
+			generationFailed = sess.GenerationFailed
+		}
 		return c.JSON(http.StatusOK, map[string]interface{}{
-			"response": response,
-			"done":     false,
+			"response":          response,
+			"done":              false,
+			"state":             state,
+			"generation_failed": generationFailed,
 		})
 	}
 
@@ -89,9 +97,16 @@ func (s *Server) handleSkillDesignChat(c echo.Context) error {
 		})
 	}
 
+	state, generationFailed := "", false
+	if sess := s.skillFlow.GetSession(u.ID); sess != nil {
+		state = sess.State.String()
+		generationFailed = sess.GenerationFailed
+	}
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"response": response,
-		"done":     false,
+		"response":          response,
+		"done":              false,
+		"state":             state,
+		"generation_failed": generationFailed,
 	})
 }
 
@@ -120,13 +135,15 @@ func (s *Server) handleResumeSkillDraft(c echo.Context) error {
 	}
 	sess := s.skillFlow.GetSession(u.ID)
 	out := map[string]interface{}{
-		"response":   resp,
-		"state":      "",
-		"history":    []histEntry{},
-		"skill_id":   "",
-		"skill_name": "",
+		"response":          resp,
+		"state":             "",
+		"history":           []histEntry{},
+		"skill_id":          "",
+		"skill_name":        "",
+		"generation_failed": false,
 	}
 	if sess != nil {
+		out["generation_failed"] = sess.GenerationFailed
 		hist := make([]histEntry, 0, len(sess.History))
 		for _, m := range sess.History {
 			hist = append(hist, histEntry{Role: m.Role, Content: m.Content})

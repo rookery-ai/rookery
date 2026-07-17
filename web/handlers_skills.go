@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -125,6 +126,9 @@ func (s *Server) handleCreateSkill(c echo.Context) error {
 		if name == "" {
 			return renderErr("Could not determine skill name from SKILL.md frontmatter or zip folder name")
 		}
+		if skilllibrary.IsCoreSkill(name) {
+			return renderErr(fmt.Sprintf("%q is a core skill name — pick another", name))
+		}
 
 		skill, err := s.skills.InstallFromZip(u.ID, name, description, data)
 		if err != nil {
@@ -154,6 +158,9 @@ func (s *Server) handleCreateSkill(c echo.Context) error {
 
 	if name == "" {
 		return renderErr("Could not determine skill name from SKILL.md frontmatter")
+	}
+	if skilllibrary.IsCoreSkill(name) {
+		return renderErr(fmt.Sprintf("%q is a core skill name — pick another", name))
 	}
 
 	skill, err := s.skills.Create(u.ID, name, description, content)

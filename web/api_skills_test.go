@@ -184,6 +184,63 @@ func TestAPISkillsCreateSaveDeleteWithStore(t *testing.T) {
 	}
 }
 
+// TestAPISkillsCreateReservedName verifies the core-skill-name guard added in
+// the SP4 final review (mirroring skilldesigner.SkillSaver.SaveSkill's check):
+// a paste/import whose frontmatter name collides with a bundled core skill
+// (e.g. "pdf") must be rejected with 400 reserved_name, not silently shadow
+// the core skill. A non-reserved name in the same store must still succeed.
+func TestAPISkillsCreateReservedName(t *testing.T) {
+	s, _ := newAPITestServerWithSkills(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	reservedMD := `---
+name: pdf
+description: A skill that collides with the bundled "pdf" core skill.
+---
+
+# PDF
+
+Body content.
+`
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/skills", map[string]string{"content": reservedMD}, cookies)
+	if rec.Code != http.StatusBadRequest || !contains(rec.Body.String(), "reserved_name") {
+		t.Fatalf("expected 400 reserved_name, got: %d %s", rec.Code, rec.Body.String())
+	}
+	skills, err := s.db.ListSkills(wsID)
+	if err != nil || len(skills) != 0 {
+		t.Fatalf("expected no skill persisted for reserved name, got %v err=%v", skills, err)
+	}
+
+	// A non-reserved name in the same store still succeeds (guard isn't
+	// over-broad).
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/skills", map[string]string{"content": testSkillMD}, cookies)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected non-reserved create to succeed, got: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAPISkillsCreateReservedNameNilStore documents that the reserved-name
+// check runs before the nil-store 503 short-circuit is even reachable in
+// practice — with a nil store, apiCreateSkill's own not_configured guard
+// fires first (name parsing never runs), so this pins that ordering rather
+// than the reserved-name message itself.
+func TestAPISkillsCreateReservedNameNilStore(t *testing.T) {
+	s, _ := newAPITestServer(t) // nil skillStore
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/skills", map[string]string{"content": `---
+name: pdf
+description: collides with core.
+---
+Body.
+`}, cookies)
+	if rec.Code != http.StatusServiceUnavailable || !contains(rec.Body.String(), "not_configured") {
+		t.Fatalf("expected 503 not_configured (store check precedes name parsing), got: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 // TestAPISkillsCreateMultipart exercises the multipart/form-data "content"
 // field path (the same field the dashboard's paste-import form posts).
 func TestAPISkillsCreateMultipart(t *testing.T) {
