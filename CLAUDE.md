@@ -448,7 +448,7 @@ fields `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`), 
 /dashboard/connectors/services       # GET: self-managed-OAuth service connections (Google/GitHub/Notion/Outlook/Jira)
 /dashboard/connectors/services/:provider/creds     # POST: save per-workspace OAuth app client id/secret
 /dashboard/connectors/services/:provider/connect   # POST: begin OAuth (redirect to provider consent)
-/dashboard/connectors/services/callback/:provider  # GET: OAuth callback → store connection
+/dashboard/connectors/services/callback/:provider  # GET: OAuth callback → store connection; redirects land on /app/connections
 /dashboard/connectors/services/:id/delete          # POST: disconnect an account
 /dashboard/chats                     # list chats; per-chat detail has composer (send msg), resume/stop/delete
 /dashboard/chats/:id                # chat detail: history + message composer
