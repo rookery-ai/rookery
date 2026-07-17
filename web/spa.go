@@ -47,7 +47,7 @@ func redirectAppPath(c echo.Context) error {
 
 // spaHandler serves real files from the embedded dist and falls back to
 // index.html for client-side routes. With no built UI it answers 503 so a
-// node-less build still runs the API + template UI cleanly.
+// node-less build still runs the API cleanly (SPA serves a 503 until built).
 func (s *Server) spaHandler(distFS fs.FS, ok bool) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		if !ok {

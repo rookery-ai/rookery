@@ -466,7 +466,7 @@ guard mechanism moved to the JSON API now that the template routes are gone.
 - **Owner-scoped** endpoints (`/api/v1/admin/*`, workspace management) are guarded by `requireOwnerAPI`
   (session `owner_id` → `c.Set("owner")`, 401 JSON if absent).
 - **Workspace-scoped** endpoints (agents, secrets, connectors, chats, reminders, KB) add
-  `requireActiveWorkspaceAPI` (session `active_workspace_id` → `c.Set("workspace")`, 409 JSON if none)
+  `requireActiveWorkspaceAPI` (session `active_workspace_id` → `c.Set("workspace")`, 403 `no_workspace` JSON if none)
   + `requireSetupCompleteAPI`. Handlers read `c.Get("workspace").(*db.Workspace)`.
 - The template middlewares `requireOwner` / `requireActiveWorkspace` / `requireSetupComplete`
   (redirect variants, in `web/server.go`) still exist but now guard **only** the standalone OAuth
