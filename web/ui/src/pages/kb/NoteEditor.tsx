@@ -94,6 +94,11 @@ export default function NoteEditor({
   const [notFoundHint, setNotFoundHint] = useState<string | null>(null);
   const [renameError, setRenameError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // The note we had loaded successfully is now gone — most likely deleted
+  // from the FileTree row while this editor was still open (SP3 final
+  // review: the header's own delete disarms correctly, but a tree-delete of
+  // the currently-open note bypassed that machinery entirely).
+  const [vanished, setVanished] = useState(false);
 
   const initializedRef = useRef(false);
   const dirtyRef = useRef(false);
@@ -104,6 +109,13 @@ export default function NoteEditor({
   const rawTextRef = useRef("");
   const getContentRef = useRef<() => string>(() => "");
   const modeRef = useRef<"wysiwyg" | "raw" | null>(null);
+  // The currently in-flight save's completion, set by `flush()` (the
+  // debounce/Ctrl+S path) and awaited by `flushForHandoff()` — without this,
+  // a rename/delete that starts while a debounce PUT is already in flight
+  // would fire a SECOND concurrent PUT, and the earlier one could land
+  // server-side AFTER the rename's POST, resurrecting the old path (upsert)
+  // (SP3 final review).
+  const inFlightSaveRef = useRef<Promise<void> | null>(null);
   // Set right before a rename/delete mutation fires, checked by the
   // unmount-flush cleanup below. Without this, a dirty edit + rename/delete
   // races the debounce/unmount machinery: setSearchParams (on success)
@@ -143,6 +155,26 @@ export default function NoteEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
+  // The note loaded successfully once (initializedRef true) and the query
+  // has now transitioned to error — it didn't fail to load, it disappeared
+  // out from under an already-open editor (e.g. deleted via its FileTree
+  // row). Disarm exactly like our own delete's onSuccess would: cancel any
+  // pending debounce, discard the (possibly stuck-dirty-from-an-earlier
+  // failed-autosave) edit, and suppress the unmount-flush — there is no
+  // path left to PUT to. A first-load failure (initializedRef still false)
+  // is unaffected and keeps showing the plain "Couldn't load this note."
+  useEffect(() => {
+    if (!isError || !initializedRef.current || vanished) return;
+    if (timerRef.current !== undefined) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = undefined;
+    }
+    dirtyRef.current = false;
+    intentionallyInvalidatedRef.current = true;
+    setVanished(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isError]);
+
   const report = useCallback(
     (s: SaveState) => {
       if (!mountedRef.current) return;
@@ -167,6 +199,11 @@ export default function NoteEditor({
   //    while one is already in flight (e.g. Ctrl+S mid-save) doesn't get
   //    dropped — it sets pendingReflushRef, and the in-flight request's
   //    completion handler re-invokes flush() once it's done.
+  //  - inFlightSaveRef mirrors that same in-flight window as an awaitable
+  //    promise (settles on success OR failure, never rejects) so
+  //    flushForHandoff (rename/delete) can wait for THIS save to finish
+  //    before deciding whether it needs to fire its own — otherwise it
+  //    would race a second concurrent PUT against this one.
   const flush = useCallback(() => {
     if (savingRef.current) {
       pendingReflushRef.current = true;
@@ -180,6 +217,10 @@ export default function NoteEditor({
     savingRef.current = true;
     const content = getContentRef.current();
     report("saving");
+    let resolveInFlight!: () => void;
+    inFlightSaveRef.current = new Promise<void>((resolve) => {
+      resolveInFlight = resolve;
+    });
     saveNote.mutate(
       { path, content },
       {
@@ -194,6 +235,8 @@ export default function NoteEditor({
             // edit already rescheduled) pick it up.
             report("dirty");
           }
+          inFlightSaveRef.current = null;
+          resolveInFlight();
           if (pendingReflushRef.current) {
             pendingReflushRef.current = false;
             flush();
@@ -205,6 +248,8 @@ export default function NoteEditor({
             setErrorMessage(err instanceof ApiError ? err.message : "Failed to save");
           }
           report("error");
+          inFlightSaveRef.current = null;
+          resolveInFlight();
           if (pendingReflushRef.current) {
             pendingReflushRef.current = false;
             flush();
@@ -321,8 +366,10 @@ export default function NoteEditor({
   };
 
   // Used by rename right before it relocates the note: cancels the debounce
-  // timer and, if dirty, performs the PUT to the CURRENT (soon-to-be-old)
-  // path directly — bypassing the debounce so the edit is committed to disk
+  // timer, waits out any save ALREADY in flight (see inFlightSaveRef above
+  // — otherwise this would race a second concurrent PUT against it), then,
+  // if still dirty, performs the PUT to the CURRENT (soon-to-be-old) path
+  // directly — bypassing the debounce so the edit is committed to disk
   // before the rename moves that file. Returns whether it's now SAFE to
   // proceed (nothing was dirty, or the PUT succeeded) vs. must ABORT (the
   // PUT failed — proceeding would move stale content and silently drop the
@@ -333,11 +380,19 @@ export default function NoteEditor({
       window.clearTimeout(timerRef.current);
       timerRef.current = undefined;
     }
+    if (inFlightSaveRef.current) {
+      await inFlightSaveRef.current;
+    }
+    // dirtyRef may have just been cleared BY that in-flight save (its
+    // content snapshot already covered everything up to this point) — only
+    // fire our own PUT if there's still something it didn't cover.
     if (!dirtyRef.current) return true;
+    savingRef.current = true;
     const content = getContentRef.current();
     report("saving");
     try {
       await saveNote.mutateAsync({ path, content });
+      savingRef.current = false;
       if (getContentRef.current() === content) {
         dirtyRef.current = false;
         report(idleState());
@@ -347,6 +402,7 @@ export default function NoteEditor({
       // the newer edit will simply need saving again post-rename.
       return true;
     } catch (err) {
+      savingRef.current = false;
       if (mountedRef.current) {
         setErrorMessage(err instanceof ApiError ? err.message : "Failed to save");
       }
@@ -428,6 +484,14 @@ export default function NoteEditor({
       },
     );
   };
+
+  if (vanished) {
+    return (
+      <div className="flex h-full items-center justify-center p-8 text-sm text-muted-2">
+        This note was deleted elsewhere.
+      </div>
+    );
+  }
 
   if (isLoading || mode === null) {
     return (

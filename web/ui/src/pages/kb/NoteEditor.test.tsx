@@ -15,6 +15,17 @@ function errorResponse(status = 500, message = "boom") {
   });
 }
 
+// A manually-resolvable Promise — used to hold a mocked PUT "in flight"
+// until the test decides to let it settle, so tests can assert on the
+// window WHILE a save is pending rather than only on its eventual outcome.
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 // Mirrors KBPage's real wiring (`?path=` search param + `key={path}` remount,
 // gated on the ".md" extension) rather than a static `path` prop — the
 // rename/delete review-fix tests below need a REAL unmount of the old
@@ -28,8 +39,7 @@ function PathBoundEditor() {
   return isFile ? <NoteEditor path={path} key={path} /> : <div data-testid="kb-empty-state" />;
 }
 
-function renderAtPath(initialPath: string) {
-  const qc = new QueryClient();
+function renderAtPath(initialPath: string, qc: QueryClient = new QueryClient()) {
   return render(
     <MemoryRouter initialEntries={[`/?path=${encodeURIComponent(initialPath)}`]}>
       <QueryClientProvider client={qc}>
@@ -369,4 +379,180 @@ test("a failed delete re-arms dirtyRef for the edit it discarded (chip reports d
   fireEvent.keyDown(window, { key: "s", ctrlKey: true });
   await waitFor(() => expect(putBodies).toHaveLength(1));
   expect(putBodies[0]).toContain("extra");
+});
+
+// SP3 final review, item 1: deleting the currently-open note from the
+// FileTree row (NOT via the header's own delete) used to leave dirtyRef
+// (possibly stuck true from an earlier failed autosave) and the
+// suppression ref untouched — a later unmount would fire the unmount-flush
+// PUT and resurrect the file the tree-delete had just removed.
+test("the open note vanishing elsewhere (tree-delete) disarms dirty/suppression and shows a dedicated notice — zero PUTs ever fire", async () => {
+  let noteExists = true;
+  const calls: Array<{ method: string; url: string }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ method, url });
+      if (method === "PUT") return Promise.resolve(jsonResponse({ ok: true }));
+      if (url.startsWith("/api/v1/kb/note")) {
+        if (!noteExists) return Promise.resolve(errorResponse(404, "not found"));
+        return Promise.resolve(jsonResponse(TRIP_NOTE_FIXTURE));
+      }
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const user = userEvent.setup();
+  renderAtPath("notes/trip plan.md", qc);
+
+  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  await user.click(textarea);
+  // Simulate a stuck-dirty edit (e.g. from an earlier failed autosave) —
+  // it's still dirty, but no debounce/Ctrl+S has fired yet.
+  await user.type(textarea, "extra");
+  expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
+
+  // The note is deleted elsewhere (a FileTree row) — simulate the query
+  // refetching into a 404, exactly as invalidating the tree query would
+  // eventually surface here.
+  noteExists = false;
+  await qc.refetchQueries({ queryKey: ["kb-note", "notes/trip plan.md"] });
+
+  expect(await screen.findByText(/deleted elsewhere/i)).toBeInTheDocument();
+
+  // Past the 1s autosave debounce window — if disarming hadn't cancelled
+  // the timer and cleared dirtyRef, a stray PUT would land right about now.
+  await new Promise((r) => setTimeout(r, 1100));
+  expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
+}, 10000);
+
+// SP3 final review, item 2: flushForHandoff used to ignore an
+// already-in-flight save (e.g. the natural debounce, or a Ctrl+S the user
+// fired moments before renaming). It would fire a SECOND concurrent PUT,
+// and the earlier one could land server-side AFTER the rename's POST,
+// resurrecting the old path (an upsert).
+test("flushForHandoff awaits an in-flight save first — no second concurrent PUT when nothing new was typed", async () => {
+  const putDeferreds: Array<ReturnType<typeof deferred<Response>>> = [];
+  const calls: Array<{ method: string; url: string }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ method, url });
+      if (method === "PUT") {
+        const d = deferred<Response>();
+        putDeferreds.push(d);
+        return d.promise;
+      }
+      if (method === "POST" && url === "/api/v1/kb/rename") return Promise.resolve(jsonResponse({ ok: true }));
+      if (url.startsWith("/api/v1/kb/note")) return Promise.resolve(jsonResponse(TRIP_NOTE_FIXTURE));
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  const user = userEvent.setup({ delay: null });
+  renderAtPath("notes/trip plan.md");
+
+  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  await user.click(textarea);
+  await user.type(textarea, "extra");
+
+  // Force an in-flight PUT immediately (Ctrl+S) instead of waiting out the
+  // 1s debounce — it stays pending until its deferred is resolved.
+  fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+  await waitFor(() => expect(putDeferreds).toHaveLength(1));
+
+  // Rename WHILE that PUT is still in flight.
+  const titleInput = screen.getByLabelText("Note title");
+  await user.clear(titleInput);
+  await user.type(titleInput, "summer");
+  await user.keyboard("{Enter}");
+
+  // handleRename's flushForHandoff must be awaiting the in-flight promise
+  // right now, NOT firing a second PUT.
+  await new Promise((r) => setTimeout(r, 50));
+  expect(putDeferreds).toHaveLength(1);
+  expect(calls.some((c) => c.method === "POST" && c.url === "/api/v1/kb/rename")).toBe(false);
+
+  // Content didn't change mid-flight, so resolving it clears dirtyRef —
+  // flushForHandoff finds nothing left to flush and proceeds straight to
+  // the rename with no second PUT.
+  putDeferreds[0].resolve(jsonResponse({ ok: true }));
+
+  await waitFor(() =>
+    expect(calls.some((c) => c.method === "POST" && c.url === "/api/v1/kb/rename")).toBe(true),
+  );
+  expect(putDeferreds).toHaveLength(1);
+  const putIndex = calls.findIndex((c) => c.method === "PUT");
+  const renameIndex = calls.findIndex((c) => c.method === "POST" && c.url === "/api/v1/kb/rename");
+  expect(putIndex).toBeLessThan(renameIndex);
+});
+
+test("flushForHandoff issues exactly one more PUT when content changed while the earlier save was in flight", async () => {
+  const putDeferreds: Array<ReturnType<typeof deferred<Response>>> = [];
+  const putBodies: string[] = [];
+  const calls: Array<{ method: string; url: string }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ method, url });
+      if (method === "PUT") {
+        putBodies.push(JSON.parse(String(init?.body)).content);
+        const d = deferred<Response>();
+        putDeferreds.push(d);
+        return d.promise;
+      }
+      if (method === "POST" && url === "/api/v1/kb/rename") return Promise.resolve(jsonResponse({ ok: true }));
+      if (url.startsWith("/api/v1/kb/note")) return Promise.resolve(jsonResponse(TRIP_NOTE_FIXTURE));
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  const user = userEvent.setup({ delay: null });
+  renderAtPath("notes/trip plan.md");
+
+  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  await user.click(textarea);
+  await user.type(textarea, "first");
+
+  fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+  await waitFor(() => expect(putDeferreds).toHaveLength(1));
+
+  // More content lands WHILE that first PUT is still in flight.
+  await user.type(textarea, "-more");
+
+  const titleInput = screen.getByLabelText("Note title");
+  await user.clear(titleInput);
+  await user.type(titleInput, "summer");
+  await user.keyboard("{Enter}");
+
+  await new Promise((r) => setTimeout(r, 50));
+  expect(putDeferreds).toHaveLength(1); // still just the original in-flight one
+
+  // Resolve the first PUT — its content snapshot is stale (missing
+  // "-more"), so flushForHandoff must issue exactly one more PUT with the
+  // latest content before the rename.
+  putDeferreds[0].resolve(jsonResponse({ ok: true }));
+
+  await waitFor(() => expect(putDeferreds).toHaveLength(2));
+  expect(calls.some((c) => c.method === "POST" && c.url === "/api/v1/kb/rename")).toBe(false);
+  putDeferreds[1].resolve(jsonResponse({ ok: true }));
+
+  await waitFor(() =>
+    expect(calls.some((c) => c.method === "POST" && c.url === "/api/v1/kb/rename")).toBe(true),
+  );
+  expect(putDeferreds).toHaveLength(2);
+  expect(putBodies[1]).toContain("-more");
+  // Both PUTs settled strictly before the rename POST (a GET for the
+  // renamed path follows it once the remount fires — irrelevant here).
+  const renameIndex = calls.findIndex((c) => c.method === "POST" && c.url === "/api/v1/kb/rename");
+  const putIndices = calls.reduce<number[]>((acc, c, i) => (c.method === "PUT" ? [...acc, i] : acc), []);
+  expect(putIndices).toHaveLength(2);
+  expect(Math.max(...putIndices)).toBeLessThan(renameIndex);
 });
