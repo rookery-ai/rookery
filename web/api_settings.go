@@ -33,8 +33,8 @@ func (s *Server) registerSettingsAPI(g *echo.Group) {
 
 // ── Shared catalog builder ───────────────────────────────────────────────────
 
-// apiCoderCatalogEntry mirrors the JSON shape the settings-page/setup-wizard
-// coder-form JS already expects (see coderCatalogJSON in handlers_misc.go).
+// apiCoderCatalogEntry mirrors the JSON shape the SPA settings/setup pages
+// consume (see coderCatalogSlice below — the sole surviving builder).
 type apiCoderCatalogEntry struct {
 	Name        string `json:"name"`
 	Base        string `json:"base"`
@@ -46,8 +46,9 @@ type apiCoderCatalogEntry struct {
 }
 
 // coderCatalogSlice builds the direct-LLM-API provider catalog as a plain slice.
-// This is the single source used both by coderCatalogJSON (template.JS-wrapped,
-// for the settings/setup templates) and apiGetSettings (plain JSON array).
+// This is the single source used by apiGetSettings and apiGetSetup (plain JSON
+// array) — the template-era coderCatalogJSON wrapper was removed in the SPA
+// cutover (Task 8).
 func (s *Server) coderCatalogSlice(secretNames []string) []apiCoderCatalogEntry {
 	have := make(map[string]bool, len(secretNames))
 	for _, n := range secretNames {
