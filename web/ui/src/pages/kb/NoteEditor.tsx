@@ -93,6 +93,7 @@ export default function NoteEditor({
   const [rawText, setRawText] = useState("");
   const [notFoundHint, setNotFoundHint] = useState<string | null>(null);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const initializedRef = useRef(false);
   const dirtyRef = useRef(false);
@@ -103,6 +104,15 @@ export default function NoteEditor({
   const rawTextRef = useRef("");
   const getContentRef = useRef<() => string>(() => "");
   const modeRef = useRef<"wysiwyg" | "raw" | null>(null);
+  // Set right before a rename/delete mutation fires, checked by the
+  // unmount-flush cleanup below. Without this, a dirty edit + rename/delete
+  // races the debounce/unmount machinery: setSearchParams (on success)
+  // remounts NoteEditor at the new path/away entirely, and the OLD
+  // instance's unmount cleanup would fire an unmount-flush PUT to the OLD
+  // path — an upsert, so it silently resurrects a file a delete just
+  // removed, or writes stray content back to the path a rename just moved
+  // away from (review fix — see task-6-report.md).
+  const intentionallyInvalidatedRef = useRef(false);
 
   useEffect(() => {
     modeRef.current = mode;
@@ -233,7 +243,7 @@ export default function NoteEditor({
   useEffect(() => {
     return () => {
       if (timerRef.current !== undefined) window.clearTimeout(timerRef.current);
-      if (dirtyRef.current) {
+      if (dirtyRef.current && !intentionallyInvalidatedRef.current) {
         saveNote.mutate({ path, content: getContentRef.current() });
       }
     };
@@ -310,24 +320,88 @@ export default function NoteEditor({
     else switchToWysiwyg();
   };
 
-  const handleRename = (to: string) => {
+  // Used by rename right before it relocates the note: cancels the debounce
+  // timer and, if dirty, performs the PUT to the CURRENT (soon-to-be-old)
+  // path directly — bypassing the debounce so the edit is committed to disk
+  // before the rename moves that file. Resolves once settled either way
+  // (success or failure) and never rejects, so the caller can always await
+  // it without a try/catch — matching "flush and await it settling, THEN
+  // fire the rename" rather than "await it succeeding" (review fix).
+  const flushForHandoff = useCallback(async (): Promise<void> => {
+    if (timerRef.current !== undefined) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = undefined;
+    }
+    if (!dirtyRef.current) return;
+    const content = getContentRef.current();
+    report("saving");
+    try {
+      await saveNote.mutateAsync({ path, content });
+      if (getContentRef.current() === content) {
+        dirtyRef.current = false;
+        report(idleState());
+      }
+      // else: a newer edit landed mid-flight — leave dirtyRef true. We still
+      // proceed with the rename below (the spec is "settling", not
+      // "succeeding"); the edit will simply need saving again post-rename.
+    } catch (err) {
+      if (mountedRef.current) {
+        setErrorMessage(err instanceof ApiError ? err.message : "Failed to save");
+      }
+      report("error");
+    }
+  }, [path, saveNote, report, idleState]);
+
+  const handleRename = async (to: string) => {
     setRenameError(null);
+    setDeleteError(null);
+    // Content must move WITH the file: flush any pending edit to the old
+    // path first, then rename (review fix — previously a dirty edit could
+    // be silently dropped, or resurrect the old path after the rename via
+    // the unmount-flush effect below).
+    await flushForHandoff();
+    intentionallyInvalidatedRef.current = true;
     renameNote.mutate(
       { from: path, to },
       {
         onSuccess: () => setSearchParams({ path: to }),
-        onError: (err) => setRenameError(err instanceof ApiError ? err.message : "Rename failed"),
+        onError: (err) => {
+          // The rename didn't happen — this instance isn't going anywhere,
+          // so restore normal unmount-flush behavior for future edits.
+          intentionallyInvalidatedRef.current = false;
+          setRenameError(err instanceof ApiError ? err.message : "Rename failed");
+        },
       },
     );
   };
 
   const handleDelete = () => {
+    setRenameError(null);
+    setDeleteError(null);
+    if (timerRef.current !== undefined) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = undefined;
+    }
+    // The user confirmed destruction — discard any pending edit rather than
+    // persisting it; a PUT here (via debounce or unmount-flush) would
+    // silently resurrect the note the delete is about to remove (review
+    // fix). No PUT may fire in this sequence.
+    dirtyRef.current = false;
+    intentionallyInvalidatedRef.current = true;
     deleteNote.mutate(
       { path },
       {
         onSuccess: () => {
           const parent = path.split("/").slice(0, -1).join("/");
           setSearchParams(parent ? { path: parent } : {});
+        },
+        onError: (err) => {
+          // The delete didn't happen — this instance stays mounted at the
+          // same path, so restore normal unmount-flush behavior.
+          intentionallyInvalidatedRef.current = false;
+          setDeleteError(
+            err instanceof ApiError ? `Delete failed: ${err.message}` : "Delete failed",
+          );
         },
       },
     );
@@ -361,6 +435,7 @@ export default function NoteEditor({
         onDelete={handleDelete}
         rawMode={mode === "raw"}
         onToggleRaw={handleToggleRaw}
+        renameError={renameError}
       />
 
       {errorMessage && saveState === "error" && (
@@ -369,10 +444,12 @@ export default function NoteEditor({
         </div>
       )}
 
-      {renameError && (
+      {/* Shared banner slot for rename/delete failures — at most one of
+          these is set at a time (both handlers clear the other on start). */}
+      {(renameError || deleteError) && (
         <div className="flex items-center gap-2 border-b border-danger/30 bg-danger/10 px-4 py-1.5 text-xs text-danger">
           <AlertTriangle className="size-3.5 shrink-0" />
-          {renameError}
+          {renameError || deleteError}
         </div>
       )}
 

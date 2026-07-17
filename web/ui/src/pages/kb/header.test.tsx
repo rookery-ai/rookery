@@ -91,6 +91,86 @@ test("typing a new title + Enter fires the rename mutation with {from, to}", asy
   });
 });
 
+// Review fix (Important 1): the title field always appends ".md" — typing
+// the extension explicitly used to double it up ("summer.md" -> to =
+// "summer.md.md").
+test("typing the .md extension in the title doesn't double it up", async () => {
+  const onRename = vi.fn();
+  const user = userEvent.setup();
+  renderHeader({ onRename, path: "notes/trip plan.md" });
+
+  const input = screen.getByDisplayValue("trip plan");
+  await user.clear(input);
+  await user.type(input, "summer.md");
+  await user.keyboard("{Enter}");
+
+  expect(onRename).toHaveBeenCalledWith("notes/summer.md");
+});
+
+// Review fix (Important 2): the title field is a filename, not a path —
+// moving a note between directories goes through the tree's rename dialog,
+// not this field.
+test("a title containing / is rejected inline and does not fire a rename", async () => {
+  const onRename = vi.fn();
+  const user = userEvent.setup();
+  renderHeader({ onRename, path: "notes/trip plan.md" });
+
+  const input = screen.getByDisplayValue("trip plan");
+  await user.clear(input);
+  await user.type(input, "sub/summer");
+  await user.keyboard("{Enter}");
+
+  expect(await screen.findByText("Title can't contain /")).toBeInTheDocument();
+  expect(onRename).not.toHaveBeenCalled();
+  // Focus stays in the field so the user can fix it immediately.
+  expect(input).toHaveFocus();
+});
+
+// Review fix (minor): a failed rename used to leave committedRef stuck
+// true, so a plain Enter retry silently no-op'd forever.
+test("after a rename error, a plain Enter retries", async () => {
+  const onRename = vi.fn();
+  const user = userEvent.setup();
+  const qc = new QueryClient();
+  const baseProps = {
+    path: "notes/trip plan.md",
+    state: "saved" as const,
+    backlinksCount: 0,
+    onRename,
+    onDelete: vi.fn(),
+    rawMode: false,
+    onToggleRaw: vi.fn(),
+  };
+  const { rerender } = render(
+    <MemoryRouter>
+      <QueryClientProvider client={qc}>
+        <NoteHeader {...baseProps} renameError={null} />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+
+  const input = screen.getByDisplayValue("trip plan");
+  await user.clear(input);
+  await user.type(input, "summer");
+  await user.keyboard("{Enter}");
+  expect(onRename).toHaveBeenCalledTimes(1);
+
+  // The rename failed — the parent surfaces renameError as a prop.
+  rerender(
+    <MemoryRouter>
+      <QueryClientProvider client={qc}>
+        <NoteHeader {...baseProps} renameError="boom" />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+
+  // Enter blurred the field after the first attempt — refocus before
+  // retrying (the value, "summer", is unchanged since `path` didn't change).
+  await user.click(screen.getByDisplayValue("summer"));
+  await user.keyboard("{Enter}");
+  expect(onRename).toHaveBeenCalledTimes(2);
+});
+
 test("Escape reverts the title without firing a rename", async () => {
   const onRename = vi.fn();
   const user = userEvent.setup();

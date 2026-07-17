@@ -23,6 +23,13 @@ const STATE_LABEL: Record<EditorSaveState, string> = {
   raw: "Raw mode",
 };
 
+// The title field is a filename, not a path — a typed ".md" (any case) is
+// redundant with the fixed suffix we already append, not a second segment
+// to keep (review fix: typing "summer.md" used to rename to "summer.md.md").
+function stripMdExt(s: string): string {
+  return /\.md$/i.test(s) ? s.slice(0, -3) : s;
+}
+
 export default function NoteHeader({
   path,
   state,
@@ -31,6 +38,7 @@ export default function NoteHeader({
   onDelete,
   rawMode,
   onToggleRaw,
+  renameError,
 }: {
   path: string;
   state: EditorSaveState;
@@ -39,6 +47,13 @@ export default function NoteHeader({
   onDelete: () => void;
   rawMode: boolean;
   onToggleRaw: () => void;
+  // Fed back from NoteEditor when its rename mutation fails — resets
+  // committedRef so a plain Enter retries instead of staying a no-op
+  // (review fix — "minor": the alternative considered was onRename
+  // returning the mutation promise, but that would widen the onRename
+  // contract from `(to: string): void` to something Promise-aware for
+  // every caller; a one-way error signal is a smaller, additive change).
+  renameError?: string | null;
 }) {
   const [, setParams] = useSearchParams();
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -49,6 +64,7 @@ export default function NoteHeader({
   const originalTitle = filename.replace(/\.md$/, "");
 
   const [value, setValue] = useState(originalTitle);
+  const [titleError, setTitleError] = useState<string | null>(null);
   // A commit already fired for the current value (Enter blurs the input,
   // which would otherwise fire the blur handler's commit a second time with
   // the same {to} — this dedupes that without needing the actual rename to
@@ -58,25 +74,46 @@ export default function NoteHeader({
 
   useEffect(() => {
     setValue(originalTitle);
+    setTitleError(null);
     committedRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
-  function commit() {
-    if (committedRef.current) return;
-    const trimmed = value.trim();
-    if (!trimmed || trimmed === originalTitle) return;
+  // The rename this instance fired came back as an error (still the same
+  // `path` — no remount happened) — let a plain Enter retry instead of
+  // silently no-op'ing forever because committedRef is stuck true.
+  useEffect(() => {
+    if (renameError) committedRef.current = false;
+  }, [renameError]);
+
+  // Returns whether the field is now in a "resolved" state (nothing to fix
+  // — either a rename fired, or there was nothing to do) vs. blocked on a
+  // validation error the user still needs to correct. Callers use this to
+  // decide whether blurring the input is appropriate.
+  function commit(): boolean {
+    if (committedRef.current) return true;
+    const trimmed = stripMdExt(value.trim());
+    if (!trimmed || trimmed === originalTitle) {
+      setTitleError(null);
+      return true;
+    }
+    if (trimmed.includes("/")) {
+      setTitleError("Title can't contain /");
+      return false;
+    }
+    setTitleError(null);
     committedRef.current = true;
     onRename(dir ? `${dir}/${trimmed}.md` : `${trimmed}.md`);
+    return true;
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === "Enter") {
       e.preventDefault();
-      commit();
-      e.currentTarget.blur();
+      if (commit()) e.currentTarget.blur();
     } else if (e.key === "Escape") {
       committedRef.current = true;
+      setTitleError(null);
       setValue(originalTitle);
       e.currentTarget.blur();
     }
@@ -84,34 +121,38 @@ export default function NoteHeader({
 
   return (
     <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        {segments.slice(0, -1).map((seg, i) => {
-          const target = segments.slice(0, i + 1).join("/");
-          return (
-            <span key={target} className="flex shrink-0 items-center gap-1.5 text-xs text-muted-2">
-              <button
-                type="button"
-                onClick={() => setParams({ path: target })}
-                className="hover:text-foreground hover:underline"
-              >
-                {seg}
-              </button>
-              <span>/</span>
-            </span>
-          );
-        })}
-        <input
-          value={value}
-          onChange={(e) => {
-            committedRef.current = false;
-            setValue(e.target.value);
-          }}
-          onKeyDown={handleKeyDown}
-          onBlur={commit}
-          className="min-w-0 flex-1 truncate rounded border border-transparent bg-transparent px-1 text-sm font-semibold outline-none hover:border-border focus:border-ring focus:ring-[3px] focus:ring-ring/50"
-          aria-label="Note title"
-        />
-        <span className="shrink-0 text-xs text-muted-2">.md</span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex items-center gap-1.5">
+          {segments.slice(0, -1).map((seg, i) => {
+            const target = segments.slice(0, i + 1).join("/");
+            return (
+              <span key={target} className="flex shrink-0 items-center gap-1.5 text-xs text-muted-2">
+                <button
+                  type="button"
+                  onClick={() => setParams({ path: target })}
+                  className="hover:text-foreground hover:underline"
+                >
+                  {seg}
+                </button>
+                <span>/</span>
+              </span>
+            );
+          })}
+          <input
+            value={value}
+            onChange={(e) => {
+              committedRef.current = false;
+              setTitleError(null);
+              setValue(e.target.value);
+            }}
+            onKeyDown={handleKeyDown}
+            onBlur={() => commit()}
+            className="min-w-0 flex-1 truncate rounded border border-transparent bg-transparent px-1 text-sm font-semibold outline-none hover:border-border focus:border-ring focus:ring-[3px] focus:ring-ring/50"
+            aria-label="Note title"
+          />
+          <span className="shrink-0 text-xs text-muted-2">.md</span>
+        </div>
+        {titleError && <span className="pl-1 text-xs text-danger">{titleError}</span>}
       </div>
 
       <div className="flex shrink-0 items-center gap-3">
