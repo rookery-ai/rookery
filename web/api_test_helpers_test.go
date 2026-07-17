@@ -81,8 +81,10 @@ func createAndEnterWorkspace(t *testing.T, s *Server, cookies []*http.Cookie) ([
 		t.Fatalf("create workspace: %v", err)
 	}
 	// Complete "setup" directly in the DB: store encrypted master pw + salt,
-	// which also clears needs_setup — mirrors what the setup wizard does
-	// (see web/handlers_setup.go:100-131 and internal/db.UpdateWorkspaceSetup).
+	// which also clears needs_setup — mirrors what the setup wizard does (see
+	// web/handlers_setup.go:100-131). UpdateWorkspaceSetup (the production
+	// helper this used to call) was dead outside this one test call site and
+	// was removed — inline its SQL here directly.
 	encPw, err := secrets.EncryptMasterPassword("master-pw-1", s.systemKey)
 	if err != nil {
 		t.Fatalf("encrypt master pw: %v", err)
@@ -91,7 +93,8 @@ func createAndEnterWorkspace(t *testing.T, s *Server, cookies []*http.Cookie) ([
 	if err != nil {
 		t.Fatalf("generate salt: %v", err)
 	}
-	if err := s.db.UpdateWorkspaceSetup(w.ID, encPw, salt); err != nil {
+	if _, err := s.db.Exec(`UPDATE workspaces SET encrypted_master_password=?, secrets_salt=?, needs_setup=0, updated_at=datetime('now') WHERE id=?`,
+		encPw, salt, w.ID); err != nil {
 		t.Fatalf("workspace setup: %v", err)
 	}
 	rec := doJSON(t, s, http.MethodPost, "/api/v1/workspaces/"+w.ID+"/enter",

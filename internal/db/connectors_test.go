@@ -113,6 +113,61 @@ func TestInsertServiceConnectionReconnectUpsertsPreservingID(t *testing.T) {
 	}
 }
 
+// TestInsertServiceConnectionReconnectWithEmptyRefreshTokenKeepsOld covers
+// the SP3-5 ledger fix: a provider that doesn't re-issue a refresh token on
+// every OAuth consent (or an API-key reconnect that never carries one) must
+// not blank out the existing refresh token on reconnect — that would brick
+// background token refresh the moment the current access token expires.
+func TestInsertServiceConnectionReconnectWithEmptyRefreshTokenKeepsOld(t *testing.T) {
+	d, _, ws := connTestDB(t)
+	ctx := context.Background()
+
+	first := db.ServiceConnection{
+		ID: "c1", WorkspaceID: ws, Provider: "google", AccountLabel: "work",
+		AccountIdentity: "old@x.com", EncryptedAccessToken: "enc-old",
+		EncryptedRefreshToken: "enc-r-old", ExpiresAt: "2000-01-01T00:00:00Z",
+		Status: "ACTIVE",
+	}
+	if err := d.InsertServiceConnection(ctx, first); err != nil {
+		t.Fatalf("initial insert: %v", err)
+	}
+
+	// Reconnect with a fresh access token but an EMPTY refresh token.
+	reconnect := db.ServiceConnection{
+		ID: "c2-fresh-uuid", WorkspaceID: ws, Provider: "google", AccountLabel: "work",
+		AccountIdentity: "new@x.com", EncryptedAccessToken: "enc-new",
+		EncryptedRefreshToken: "", ExpiresAt: "2999-01-01T00:00:00Z",
+		Status: "ACTIVE",
+	}
+	if err := d.InsertServiceConnection(ctx, reconnect); err != nil {
+		t.Fatalf("reconnect: %v", err)
+	}
+
+	got, err := d.GetServiceConnection(ctx, "c1")
+	if err != nil || got == nil {
+		t.Fatalf("get: %v %v", got, err)
+	}
+	if got.EncryptedAccessToken != "enc-new" {
+		t.Fatalf("access token should still refresh: %q", got.EncryptedAccessToken)
+	}
+	if got.EncryptedRefreshToken != "enc-r-old" {
+		t.Fatalf("expected the OLD refresh token to be preserved, got %q", got.EncryptedRefreshToken)
+	}
+
+	// A reconnect that DOES carry a new refresh token still overwrites it.
+	if err := d.InsertServiceConnection(ctx, db.ServiceConnection{
+		ID: "c3", WorkspaceID: ws, Provider: "google", AccountLabel: "work",
+		EncryptedAccessToken: "enc-new2", EncryptedRefreshToken: "enc-r-new2",
+		ExpiresAt: "2999-01-01T00:00:00Z", Status: "ACTIVE",
+	}); err != nil {
+		t.Fatalf("reconnect with new refresh token: %v", err)
+	}
+	got, _ = d.GetServiceConnection(ctx, "c1")
+	if got.EncryptedRefreshToken != "enc-r-new2" {
+		t.Fatalf("expected a non-empty new refresh token to overwrite the old one, got %q", got.EncryptedRefreshToken)
+	}
+}
+
 // TestReconnectPreservesAgentBinding verifies an agent bound to a connection
 // (agent_connections, keyed by connection id) stays bound after that
 // connection is reconnected — a naive delete+insert would mint a new id and

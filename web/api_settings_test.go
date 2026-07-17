@@ -262,6 +262,70 @@ func TestAPISettingsCoderProviderSwitchPrefersMatchingSecret(t *testing.T) {
 	}
 }
 
+// TestAPISetupCoderStep3PrefersProviderMatchedSecret is the setup-wizard
+// counterpart of TestAPISettingsCoderProviderSwitchPrefersMatchingSecret:
+// apiSetupCoder (step 3) must apply the same provider-matched
+// CODER_KEY_<PROVIDER> precedence saveWorkspaceCoderCore already has —
+// a workspace with a pre-saved key for a DIFFERENT provider than the one
+// currently being configured (w.CoderAPIKeySecret = CODER_KEY_OPENAI, stale
+// from an earlier step-3 post in this same wizard run) must, when step 3 is
+// posted AGAIN for provider=openrouter with NO pasted key but a matching
+// CODER_KEY_OPENROUTER secret already on record, pick up CODER_KEY_OPENROUTER
+// — not silently keep the stale CODER_KEY_OPENAI reference.
+func TestAPISetupCoderStep3PrefersProviderMatchedSecret(t *testing.T) {
+	s, database := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := freshUnsetupWorkspace(t, s, cookies, "wizard-precedence-ws")
+
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{
+		"step": 2, "master_password": "wizard-pw-1", "confirm": "wizard-pw-1",
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("step2: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// First pass: configure as openai with a pasted key — leaves
+	// w.CoderAPIKeySecret = CODER_KEY_OPENAI on record.
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{
+		"step": 3, "coder_kind": "api", "coder_provider": "openai", "coder_model": "gpt-x",
+		"coder_api_key": "sk-openai-test",
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("step3 (openai): %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Seed a CODER_KEY_OPENROUTER secret directly (the wizard can't reach
+	// /api/v1/secrets while needs_setup is still true — see apiSetupCoder's
+	// doc comment), mirroring "saved directly via the secrets API earlier".
+	w, err := database.GetWorkspaceByID(wsID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	masterPw, err := secrets.DecryptMasterPassword(w.EncryptedMasterPassword, s.systemKey)
+	if err != nil {
+		t.Fatalf("decrypt master pw: %v", err)
+	}
+	if err := secrets.New(database, wsID, masterPw, w.SecretsSalt).Set(context.Background(), "CODER_KEY_OPENROUTER", "sk-or-existing"); err != nil {
+		t.Fatalf("seed openrouter secret: %v", err)
+	}
+
+	// Second pass: switch to openrouter with NO pasted key.
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{
+		"step": 3, "coder_kind": "api", "coder_provider": "openrouter", "coder_model": "glm-5.2",
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("step3 (openrouter, no pasted key): %d %s", rec.Code, rec.Body.String())
+	}
+
+	w, err = database.GetWorkspaceByID(wsID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if w.CoderAPIKeySecret != "CODER_KEY_OPENROUTER" {
+		t.Fatalf("expected coder_api_key_secret to switch to CODER_KEY_OPENROUTER, got %q", w.CoderAPIKeySecret)
+	}
+}
+
 // TestAPISetupGetAndCoderTestRegistered is a light smoke test that the setup
 // GET and coder/test endpoints are wired and respond (not exercising the
 // coder subprocess itself — see Task 10's warning about the host's real

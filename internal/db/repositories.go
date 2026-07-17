@@ -125,12 +125,6 @@ func (d *DB) ListWorkspaces() ([]*Workspace, error) {
 	return workspaces, rows.Err()
 }
 
-func (d *DB) UpdateWorkspaceSetup(id, encMasterPw, salt string) error {
-	_, err := d.Exec(`UPDATE workspaces SET encrypted_master_password=?, secrets_salt=?, needs_setup=0, updated_at=datetime('now') WHERE id=?`,
-		encMasterPw, salt, id)
-	return err
-}
-
 func (d *DB) UpdateWorkspaceMasterPassword(id, encMasterPw, salt string) error {
 	_, err := d.Exec(`UPDATE workspaces SET encrypted_master_password=?, secrets_salt=?, updated_at=datetime('now') WHERE id=?`,
 		encMasterPw, salt, id)

@@ -499,7 +499,26 @@ func (s *Server) apiSetupCoder(c echo.Context, w *db.Workspace, req apiSetupRequ
 		if provider == "generic" && baseURL == "" {
 			return jsonErr(c, http.StatusBadRequest, "invalid_coder_config", "A base URL is required for a Custom provider")
 		}
-		plan := coder.PlanKeySecret(provider, strings.TrimSpace(req.CoderAPIKey), w.CoderAPIKeySecret)
+		// Same provider-matched precedence as saveWorkspaceCoderCore: a pasted
+		// key always wins; otherwise prefer a secret that already matches THIS
+		// provider's reserved name (CODER_KEY_<PROVIDER>) over w.CoderAPIKeySecret,
+		// which may be a stale reference left over from a DIFFERENT provider
+		// (switching openai -> openrouter mid-wizard must not silently keep
+		// CODER_KEY_OPENAI); only fall back to the current reference when no
+		// provider-matched secret exists.
+		currentSecret := w.CoderAPIKeySecret
+		if strings.TrimSpace(req.CoderAPIKey) == "" {
+			if names, lerr := s.db.ListSecretNames(w.ID); lerr == nil {
+				want := coder.CoderKeySecretName(provider)
+				for _, n := range names {
+					if n == want {
+						currentSecret = want
+						break
+					}
+				}
+			}
+		}
+		plan := coder.PlanKeySecret(provider, strings.TrimSpace(req.CoderAPIKey), currentSecret)
 		if plan.Err != "" {
 			return jsonErr(c, http.StatusBadRequest, "invalid_coder_config", plan.Err)
 		}
