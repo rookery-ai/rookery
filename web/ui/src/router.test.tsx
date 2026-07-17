@@ -66,3 +66,57 @@ test("a must_change_password owner is redirected to /change-password even for a 
   render(<App />);
   expect(await screen.findByRole("heading", { name: /change password/i })).toBeInTheDocument();
 });
+
+// /kb is route-split (React.lazy + Suspense in router.tsx) because it pulls
+// in the whole TipTap editor. Proves the split works end to end through the
+// real app router + auth guard: the Suspense fallback shows first, then the
+// real KB page content resolves once the chunk's dynamic import settles.
+test("navigating to /kb shows the Suspense fallback, then resolves to the KB page", async () => {
+  vi.resetModules();
+  const SESSION_FIXTURE = {
+    authenticated: true,
+    owner: { id: "1", username: "admin", must_change_password: false },
+    workspace: { id: "ws1", name: "Test WS", about: "", needs_setup: false, created_at: "" },
+    workspaces: [{ id: "ws1", name: "Test WS", about: "", needs_setup: false, created_at: "" }],
+  };
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/v1/kb/tree")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ path: "", nodes: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (url === "/api/v1/inbox/poll") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ unread: 0, recent: [] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify(SESSION_FIXTURE), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }),
+  );
+
+  window.history.pushState({}, "", "/app/kb");
+  const { default: App } = await import("./App");
+  render(<App />);
+
+  // The fallback appears while the session resolves and/or the lazy KBPage
+  // chunk is still importing — same loading affordance the auth guards use.
+  expect(await screen.findByText("Loading…")).toBeInTheDocument();
+
+  // Once the dynamic import settles, the real page replaces the fallback.
+  expect(await screen.findByText("Knowledge Base")).toBeInTheDocument();
+  expect(screen.getByText("Select a note or create one.")).toBeInTheDocument();
+});
