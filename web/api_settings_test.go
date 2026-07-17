@@ -302,15 +302,13 @@ func TestAPISetupStep5ReturnsConnectorPlatforms(t *testing.T) {
 	}
 }
 
-// TestAPISetupMasterPasswordNoOpOnceSecretsExist covers the destructive-Back-
-// navigation guard: after step 3 has written a secret (a coder API key) under
-// the workspace's salt, re-posting step 2 (as a wizard "Back" then re-submit
-// would do) must NOT regenerate the salt — that would leave the just-written
-// secret permanently undecryptable. The re-post should succeed as a no-op.
-func TestAPISetupMasterPasswordNoOpOnceSecretsExist(t *testing.T) {
-	s, database := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
-	cookies, wsID := freshUnsetupWorkspace(t, s, cookies, "guard-ws")
+// setupToStep3WithSecret drives a fresh workspace through steps 1-3, ending
+// with a CODER_KEY_OPENROUTER secret written under master password
+// "wizard-pw-1" — the shared starting point for both re-post guard tests
+// below (a wizard "Back to step 2, then resubmit" scenario).
+func setupToStep3WithSecret(t *testing.T, s *Server, cookies []*http.Cookie, wsName string) ([]*http.Cookie, string) {
+	t.Helper()
+	cookies, wsID := freshUnsetupWorkspace(t, s, cookies, wsName)
 
 	rec := doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{
 		"step": 2, "master_password": "wizard-pw-1", "confirm": "wizard-pw-1",
@@ -325,6 +323,18 @@ func TestAPISetupMasterPasswordNoOpOnceSecretsExist(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("step3: %d %s", rec.Code, rec.Body.String())
 	}
+	return cookies, wsID
+}
+
+// TestAPISetupMasterPasswordSamePasswordResubmitIsNoOp covers the common
+// Back-then-Next case: the user goes Back to step 2 and resubmits the SAME
+// password they already set. Must not regenerate the salt (which would
+// orphan the step-3 secret) and must leave the secret decryptable under that
+// same password.
+func TestAPISetupMasterPasswordSamePasswordResubmitIsNoOp(t *testing.T) {
+	s, database := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := setupToStep3WithSecret(t, s, cookies, "guard-ws-same")
 
 	before, err := database.GetWorkspaceByID(wsID)
 	if err != nil {
@@ -334,12 +344,11 @@ func TestAPISetupMasterPasswordNoOpOnceSecretsExist(t *testing.T) {
 		t.Fatalf("expected a salt to already be set")
 	}
 
-	// Simulate Back-to-step-2, re-submitting a DIFFERENT password.
-	rec = doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{
-		"step": 2, "master_password": "different-pw-2", "confirm": "different-pw-2",
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{
+		"step": 2, "master_password": "wizard-pw-1", "confirm": "wizard-pw-1",
 	}, cookies)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("step2 re-post: %d %s", rec.Code, rec.Body.String())
+		t.Fatalf("step2 same-password re-post: %d %s", rec.Code, rec.Body.String())
 	}
 
 	after, err := database.GetWorkspaceByID(wsID)
@@ -347,14 +356,62 @@ func TestAPISetupMasterPasswordNoOpOnceSecretsExist(t *testing.T) {
 		t.Fatalf("reload workspace: %v", err)
 	}
 	if after.SecretsSalt != before.SecretsSalt {
-		t.Fatalf("salt changed after re-posting step 2 with secrets already present: before=%q after=%q",
-			before.SecretsSalt, after.SecretsSalt)
+		t.Fatalf("salt changed on a same-password resubmit: before=%q after=%q", before.SecretsSalt, after.SecretsSalt)
+	}
+	if after.EncryptedMasterPassword != before.EncryptedMasterPassword {
+		t.Fatalf("encrypted master password changed on a same-password resubmit")
 	}
 
-	// The original secret must still be readable under the original password.
 	secretStore := secrets.New(database, wsID, "wizard-pw-1", after.SecretsSalt)
 	val, err := secretStore.Get(context.Background(), "CODER_KEY_OPENROUTER")
 	if err != nil || val != "sk-or-test" {
-		t.Fatalf("expected original secret to remain decryptable with the original password: val=%q err=%v", val, err)
+		t.Fatalf("expected secret to remain decryptable with the same password: val=%q err=%v", val, err)
+	}
+}
+
+// TestAPISetupMasterPasswordDifferentPasswordResubmitReEncrypts covers a
+// genuine password change mid-wizard (Back to step 2, resubmit a DIFFERENT
+// password): the salt stays the same, but every existing secret must be
+// re-encrypted under the NEW password (and become undecryptable under the
+// old one), and the stored encrypted master password must be updated.
+func TestAPISetupMasterPasswordDifferentPasswordResubmitReEncrypts(t *testing.T) {
+	s, database := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := setupToStep3WithSecret(t, s, cookies, "guard-ws-diff")
+
+	before, err := database.GetWorkspaceByID(wsID)
+	if err != nil {
+		t.Fatalf("load workspace: %v", err)
+	}
+
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{
+		"step": 2, "master_password": "different-pw-2", "confirm": "different-pw-2",
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("step2 different-password re-post: %d %s", rec.Code, rec.Body.String())
+	}
+
+	after, err := database.GetWorkspaceByID(wsID)
+	if err != nil {
+		t.Fatalf("reload workspace: %v", err)
+	}
+	if after.SecretsSalt != before.SecretsSalt {
+		t.Fatalf("salt should stay the same on a re-encrypt (only the derived key changes): before=%q after=%q",
+			before.SecretsSalt, after.SecretsSalt)
+	}
+	if after.EncryptedMasterPassword == before.EncryptedMasterPassword {
+		t.Fatalf("expected the stored encrypted master password to be updated after a password change")
+	}
+
+	// Old password must no longer decrypt the secret...
+	oldStore := secrets.New(database, wsID, "wizard-pw-1", after.SecretsSalt)
+	if _, err := oldStore.Get(context.Background(), "CODER_KEY_OPENROUTER"); err == nil {
+		t.Fatalf("expected the secret to NOT be decryptable under the old password after re-encryption")
+	}
+	// ...but the NEW password must.
+	newStore := secrets.New(database, wsID, "different-pw-2", after.SecretsSalt)
+	val, err := newStore.Get(context.Background(), "CODER_KEY_OPENROUTER")
+	if err != nil || val != "sk-or-test" {
+		t.Fatalf("expected secret to be decryptable under the NEW password: val=%q err=%v", val, err)
 	}
 }

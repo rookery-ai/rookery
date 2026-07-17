@@ -426,9 +426,12 @@ func (s *Server) apiSetupBasics(c echo.Context, w *db.Workspace, req apiSetupReq
 // the user navigate Back to step 2 after step 3 has already written a secret
 // (e.g. a coder API key) under the current salt. Re-generating the salt at
 // that point would leave those secrets permanently undecryptable, even though
-// the step itself "succeeds". Once secrets exist, step 2 is a no-op that just
-// reports the (unchanged) current step forward — the master password can
-// still be changed later from Settings, which re-encrypts existing secrets.
+// the step itself "succeeds".
+//
+// Once secrets exist, a re-post is handled by resubmitPasswordOverExistingSecrets
+// (shared with handleSetupMasterPassword): resubmitting the SAME password is a
+// no-op; a DIFFERENT password re-encrypts every existing secret in place (via
+// changeMasterPasswordCore) instead of silently discarding the change.
 func (s *Server) apiSetupMasterPassword(c echo.Context, w *db.Workspace, req apiSetupRequest) error {
 	if len(req.MasterPassword) < 8 {
 		return jsonErr(c, http.StatusBadRequest, "password_too_short", "master password must be at least 8 characters")
@@ -439,6 +442,14 @@ func (s *Server) apiSetupMasterPassword(c echo.Context, w *db.Workspace, req api
 
 	if w.SecretsSalt != "" {
 		if names, _ := s.db.ListSecretNames(w.ID); len(names) > 0 {
+			userErrMsg, err := s.resubmitPasswordOverExistingSecrets(w, req.MasterPassword)
+			if err != nil {
+				return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
+			}
+			if userErrMsg != "" {
+				return jsonErr(c, http.StatusBadRequest, "invalid_master_password_change", userErrMsg)
+			}
+			s.audit.Log(w.ID, "set_master_password", "workspace:"+w.ID, "resubmit", c.RealIP())
 			return s.apiSetupOK(c, w)
 		}
 	}

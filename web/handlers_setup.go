@@ -111,6 +111,26 @@ func (s *Server) handleSetupMasterPassword(c echo.Context, w *db.Workspace) erro
 		return c.Render(http.StatusBadRequest, "auth/setup.html", sd)
 	}
 
+	// A re-post (e.g. the browser Back button, then re-submitting the form)
+	// once secrets already exist under the current salt must not blindly
+	// regenerate the salt — that would orphan those secrets. Mirrors
+	// apiSetupMasterPassword (web/api_settings.go): same password → no-op,
+	// different password → re-encrypt in place via the shared core.
+	if w.SecretsSalt != "" {
+		if names, _ := s.db.ListSecretNames(w.ID); len(names) > 0 {
+			userErrMsg, err := s.resubmitPasswordOverExistingSecrets(w, masterPw)
+			if err != nil {
+				return err
+			}
+			if userErrMsg != "" {
+				sd.Error = userErrMsg
+				return c.Render(http.StatusBadRequest, "auth/setup.html", sd)
+			}
+			s.audit.Log(w.ID, "set_master_password", "workspace:"+w.ID, "resubmit", c.RealIP())
+			return c.Redirect(http.StatusFound, "/dashboard/setup")
+		}
+	}
+
 	salt, err := auth.GenerateSecretsSalt()
 	if err != nil {
 		return err

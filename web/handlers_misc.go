@@ -621,6 +621,15 @@ const msgWrongMasterPassword = "Old master password is incorrect"
 // a user-facing validation problem (400-class; msgWrongMasterPassword
 // specifically is the one callers may want to surface as 401); err is an
 // unexpected failure (500-class). Does not audit-log (the caller does).
+//
+// Also reused by the setup wizard's step-2 handlers (apiSetupMasterPassword /
+// handleSetupMasterPassword) for a Back-then-resubmit-with-a-different-
+// password re-post — which is why this persists via UpdateWorkspaceMasterPassword
+// rather than UpdateWorkspaceSetup: the latter also flips needs_setup to 0,
+// which would be premature and wrong mid-wizard (setup only completes at the
+// wizard's own "finish" step). For the settings-page callers (post-setup,
+// needs_setup already 0) this is behavior-identical — it just no longer
+// re-asserts a flag that's already unset.
 func (s *Server) changeMasterPasswordCore(u *db.Workspace, oldPw, newPw string) (string, error) {
 	if u.SecretsSalt == "" {
 		return "Account setup not complete", nil
@@ -655,10 +664,36 @@ func (s *Server) changeMasterPasswordCore(u *db.Workspace, oldPw, newPw string) 
 	if err != nil {
 		return "", err
 	}
-	if err := s.db.UpdateWorkspaceSetup(u.ID, encMasterPw, u.SecretsSalt); err != nil {
+	if err := s.db.UpdateWorkspaceMasterPassword(u.ID, encMasterPw, u.SecretsSalt); err != nil {
 		return "", err
 	}
 	return "", nil
+}
+
+// resubmitPasswordOverExistingSecrets handles a setup-wizard step-2 re-post
+// once secrets already exist under the workspace's current salt (e.g. the
+// user went Back to step 2 after step 3 wrote a coder API key). The old
+// destructive behavior silently regenerated the salt, orphaning those
+// secrets. This decrypts the CURRENT master password (via the system key —
+// the wizard's step-2 form has no "current password" field, unlike the
+// Settings page's change-password form) and compares it to the resubmitted
+// one:
+//   - same password → no-op (nothing to do, matches the old "silent" outcome
+//     for the common case of a user just clicking Back and Next again)
+//   - different password → re-encrypts every existing secret in place via
+//     changeMasterPasswordCore, so a genuine password change mid-wizard
+//     isn't silently discarded
+//
+// Shared by apiSetupMasterPassword and handleSetupMasterPassword.
+func (s *Server) resubmitPasswordOverExistingSecrets(w *db.Workspace, newPw string) (string, error) {
+	oldPw, err := secrets.DecryptMasterPassword(w.EncryptedMasterPassword, s.systemKey)
+	if err != nil {
+		return "", fmt.Errorf("could not decrypt current master password: %w", err)
+	}
+	if newPw == oldPw {
+		return "", nil
+	}
+	return s.changeMasterPasswordCore(w, oldPw, newPw)
 }
 
 func (s *Server) handleChangeMasterPassword(c echo.Context) error {
