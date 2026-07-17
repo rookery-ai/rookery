@@ -61,3 +61,27 @@ test("title attribute falls back to the raw name for unknown slugs", () => {
   render(<ProviderLogo name="mattermost" />);
   expect(screen.getByTitle("mattermost")).toBeTruthy();
 });
+
+function hexToRgb(hex: string): string {
+  const n = parseInt(hex, 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+}
+
+test("a very light brand color (mailchimp) renders brand-on-white, not white-on-brand", () => {
+  // mailchimp's hex (#FFE01B) is light enough to fail contrast as a
+  // white-glyph-on-brand tile — the component should flip to a white tile
+  // with the brand color carried by the glyph instead.
+  const { container } = render(<ProviderLogo name="mailchimp" />);
+  const tile = container.firstElementChild as HTMLElement;
+  expect(tile.style.backgroundColor).toBe("rgb(255, 255, 255)");
+  const svg = tile.querySelector("svg");
+  expect(svg?.getAttribute("fill")).toBe(`#${PROVIDER_LOGOS.mailchimp.hex}`);
+});
+
+test("a dark/saturated brand color (telegram) renders white-on-brand", () => {
+  const { container } = render(<ProviderLogo name="telegram" />);
+  const tile = container.firstElementChild as HTMLElement;
+  expect(tile.style.backgroundColor).toBe(hexToRgb(PROVIDER_LOGOS.telegram.hex));
+  const svg = tile.querySelector("svg");
+  expect(svg?.getAttribute("fill")).toBe("#ffffff");
+});

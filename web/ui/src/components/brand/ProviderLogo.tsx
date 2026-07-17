@@ -48,15 +48,19 @@ export function ProviderLogo({ name, size = 32 }: { name: string; size?: number 
   const logo = PROVIDER_LOGOS[name.toLowerCase()];
 
   if (logo) {
+    // Very light brand colors (e.g. Mailchimp's #FFE01B) read poorly as a
+    // solid tile with a white glyph — flip to a white tile with the brand
+    // color carried by the glyph instead.
     const isLight = hexLuminance(logo.hex) > 0.7;
-    const glyphColor = isLight ? "#000000" : "#ffffff";
+    const tileBg = isLight ? "#ffffff" : `#${logo.hex}`;
+    const glyphColor = isLight ? `#${logo.hex}` : "#ffffff";
     return (
       <div
         role="img"
         aria-label={logo.title}
         title={logo.title}
-        className="inline-flex shrink-0 items-center justify-center rounded-lg"
-        style={{ width: size, height: size, backgroundColor: `#${logo.hex}` }}
+        className={cn("inline-flex shrink-0 items-center justify-center rounded-lg", isLight && "border border-black/10")}
+        style={{ width: size, height: size, backgroundColor: tileBg }}
       >
         <svg
           viewBox="0 0 24 24"
