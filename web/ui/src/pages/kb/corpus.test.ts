@@ -33,10 +33,16 @@ import { checkFidelity } from "./editor";
 //   - reference-style-links: `[a][ref]` + a `[ref]: url "title"` definition
 //     is rewritten to an inline link `[a](url "title")` — same rendered
 //     result, different source bytes.
-//   - image: `![alt](url)` — no Image extension is registered in
-//     buildExtensions() (editor.ts), so an image node has nowhere to parse
-//     into and the content is dropped entirely on round-trip. Correctly
-//     caught by the gate rather than silently eating the image on save.
+//   - image-alt-brackets: `@tiptap/extension-image` (editor.ts) round-trips
+//     plain images (`![alt](url)`, `![](url)`, `![alt](url "title")`, alt
+//     text with quotes/pipes/parens/relative URLs — all pinned clean below)
+//     losslessly via prosemirror-markdown's default image serializer. But an
+//     image node's `alt` is a plain-string ATTRIBUTE, not inline content, so
+//     literal `[`/`]` bytes inside it go through the same backslash-escaping
+//     text serializer as regular prose (see the top-of-file NOTE in
+//     editor.ts) — `![a[b]c](url)` re-serializes as `![a\[b\]c](url)`.
+//     CommonMark-equivalent, different bytes, correctly caught as lossy
+//     (raw-mode fallback) rather than silently rewriting the alt text.
 //   - hard-line-break: a two-space trailing hard break is re-serialized as
 //     a backslash hard break (`\` at end of line) — CommonMark-equivalent
 //     rendering, different literal bytes.
@@ -53,7 +59,7 @@ const EXPECTED_LOSSY = new Set([
   "table-with-alignment",
   "code-fence-tilde",
   "reference-style-links",
-  "image",
+  "image-alt-brackets",
   "hard-line-break",
   "setext-heading",
   "html-inline-tag",
@@ -121,6 +127,31 @@ const CORPUS: CorpusEntry[] = [
   {
     name: "image",
     md: "![alt text](https://example.com/img.png)\n",
+    expectLossy: false,
+  },
+  {
+    name: "image-no-alt",
+    md: "![](https://example.com/img.png)\n",
+    expectLossy: false,
+  },
+  {
+    name: "image-with-title",
+    md: '![alt](https://example.com/img.png "a title")\n',
+    expectLossy: false,
+  },
+  {
+    name: "image-pipe-alt-and-title",
+    md: '![a|b](https://example.com/img.png "t")\n',
+    expectLossy: false,
+  },
+  {
+    name: "image-alt-quotes",
+    md: '![a "quote" b](https://example.com/img.png)\n',
+    expectLossy: false,
+  },
+  {
+    name: "image-alt-brackets",
+    md: "![a[b]c](https://example.com/img.png)\n",
     expectLossy: true,
   },
   {

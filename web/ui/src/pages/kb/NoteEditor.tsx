@@ -540,7 +540,12 @@ export default function NoteEditor({
         renameError={renameError}
       />
 
-      {errorMessage && saveState === "error" && (
+      {/* Suppressed while renameError is shown: flushForHandoff's onError
+          sets errorMessage/saveState:"error" right before handleRename sets
+          renameError and aborts — without this, a failed pre-rename flush
+          rendered both the generic autosave banner and the rename-specific
+          one at once. The rename-specific message is more actionable. */}
+      {errorMessage && saveState === "error" && !renameError && (
         <div className="border-b border-danger/30 bg-danger/10 px-4 py-1.5 text-xs text-danger">
           {errorMessage}
         </div>

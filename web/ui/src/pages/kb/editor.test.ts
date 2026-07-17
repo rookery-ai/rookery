@@ -1,4 +1,5 @@
-import { fidelityRoundTrip, checkFidelity } from "./editor";
+import { Editor } from "@tiptap/core";
+import { fidelityRoundTrip, checkFidelity, buildExtensions } from "./editor";
 
 const CLEAN = `# Title
 
@@ -69,4 +70,23 @@ test("HTML comments are detected as lossy (raw-mode fallback)", () => {
 
 test("fidelityRoundTrip returns the re-serialized markdown", () => {
   expect(fidelityRoundTrip(CLEAN).trim().length).toBeGreaterThan(0);
+});
+
+// @tiptap/extension-image is registered in buildExtensions()'s default set
+// (editor.ts) — the same schema NoteEditor's WYSIWYG editor mounts (via
+// WysiwygEditor's buildExtensions([slashSuggestion()])). Locks in the
+// registration itself, not just the round-trip behavior corpus.test.ts pins.
+test("buildExtensions() registers an image node and markdown round-trips a plain image", () => {
+  const editor = new Editor({
+    element: document.createElement("div"),
+    extensions: buildExtensions(),
+    content: "<p></p>",
+  });
+  expect(editor.schema.nodes.image).toBeDefined();
+  editor.destroy();
+
+  const md = "![alt text](https://example.com/img.png)\n";
+  expect(checkFidelity(md)).toBe(true);
+  const out = fidelityRoundTrip(md);
+  expect(out).toContain("![alt text](https://example.com/img.png)");
 });

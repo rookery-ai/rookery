@@ -78,6 +78,49 @@ test("renders root nodes with muted system rows, lazy-loads a directory, and sel
   expect(onSelect).toHaveBeenCalledWith("notes/a.md", false);
 });
 
+// Spec §6: "user notes and memory/ first". The backend marks memory/
+// system:true (web/api_kb.go's kbSystemDirs — it's DB-reflected/system-
+// managed alongside agents/chats/skills), but memory/ is actually the
+// user's own editable knowledge and should sort/style WITH user content,
+// not muted alongside agents/chats/skills. FileTree overrides the flag by
+// name for exactly this one directory.
+test("memory/ sorts before muted system dirs and is NOT styled muted, despite the backend marking it system:true", async () => {
+  mockFetch((url) => {
+    if (url === "/api/v1/kb/tree?path=") {
+      return jsonResponse({
+        path: "",
+        nodes: [
+          { name: "chats", display_name: "Chats", path: "chats", is_dir: true, system: true },
+          { name: "memory", display_name: "Memory", path: "memory", is_dir: true, system: true },
+          { name: "notes", display_name: "Notes", path: "notes", is_dir: true, system: false },
+        ],
+      });
+    }
+    return undefined;
+  });
+  renderTree();
+
+  const memoryRow = (await screen.findByText("Memory")).closest("div");
+  const notesRow = screen.getByText("Notes").closest("div");
+  const chatsRow = screen.getByText("Chats").closest("div");
+
+  // memory/ is NOT muted — it keeps its Brain icon (unchanged) but drops the
+  // system-styling class, same as an ordinary (never-system) user dir.
+  expect(memoryRow?.className).not.toMatch(/text-muted-2/);
+  expect(notesRow?.className).not.toMatch(/text-muted-2/);
+  // chats/ is untouched — still muted, as a real system dir should be.
+  expect(chatsRow?.className).toMatch(/text-muted-2/);
+
+  // Sort order: user content (notes, memory) before system (chats), dirs
+  // alphabetical within each group -> memory, notes, chats.
+  const rows = screen.getAllByRole("button").map((el) => el.textContent);
+  const memoryIndex = rows.findIndex((t) => t?.includes("Memory"));
+  const notesIndex = rows.findIndex((t) => t?.includes("Notes"));
+  const chatsIndex = rows.findIndex((t) => t?.includes("Chats"));
+  expect(memoryIndex).toBeLessThan(chatsIndex);
+  expect(notesIndex).toBeLessThan(chatsIndex);
+});
+
 test("row dropdown opens a dialog (rename) and the tree stays interactive after closing it", async () => {
   mockFetch();
   const onSelect = renderTree();

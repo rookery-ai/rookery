@@ -367,6 +367,47 @@ test("dirty edit + rename: a failed pre-flush ABORTS the rename; retry after a s
   expect(lastPutIndex).toBeLessThan(renameIndex);
 });
 
+// Bug: flushForHandoff's own onError sets errorMessage+saveState:"error" (the
+// generic autosave-failure banner) BEFORE handleRename sets renameError and
+// aborts — so a failed pre-flush rendered BOTH the generic "put boom" banner
+// AND the "rename cancelled" banner at once. Only one banner should show;
+// the specific rename-abort message takes priority over the generic one.
+test("a failed pre-flush rename shows exactly one red banner (the rename-abort message, not the duplicate generic autosave one)", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "PUT") return Promise.resolve(errorResponse(500, "put boom"));
+      if (url.startsWith("/api/v1/kb/note")) return Promise.resolve(jsonResponse(TRIP_NOTE_FIXTURE));
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  const user = userEvent.setup({ delay: null });
+  renderAtPath("notes/trip plan.md");
+
+  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  await user.click(textarea);
+  await user.type(textarea, "extra");
+
+  const titleInput = screen.getByLabelText("Note title");
+  await user.clear(titleInput);
+  await user.type(titleInput, "summer");
+  await user.keyboard("{Enter}");
+
+  expect(await screen.findByText(/rename cancelled/i)).toBeInTheDocument();
+  // The generic autosave-error banner (surfacing the raw "put boom" message)
+  // must be suppressed while the rename-specific banner is shown — not a
+  // second banner stacked underneath it.
+  expect(screen.queryByText("put boom")).not.toBeInTheDocument();
+
+  // Belt-and-braces: exactly one danger banner element is present, not two
+  // stacked border-danger divs.
+  const banners = document.querySelectorAll(".border-danger\\/30");
+  expect(banners).toHaveLength(1);
+});
+
 // Re-review minor: a failed delete must re-arm the dirty/"Unsaved" contract
 // for the edit it discarded — otherwise the chip lies "saved" and Ctrl+S
 // silently no-ops for content that was never actually persisted anywhere.

@@ -1,6 +1,10 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import { Extension, type AnyExtension, type Editor } from "@tiptap/core";
-import Suggestion, { type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
+import Suggestion, {
+  exitSuggestion,
+  type SuggestionKeyDownProps,
+  type SuggestionProps,
+} from "@tiptap/suggestion";
 import { ReactRenderer } from "@tiptap/react";
 import {
   Heading1,
@@ -157,6 +161,14 @@ export function slashSuggestion(): AnyExtension {
               },
               onKeyDown: (props) => {
                 if (props.event.key === "Escape") {
+                  // @tiptap/suggestion's own plugin (createSuggestionProps,
+                  // node_modules/@tiptap/suggestion) happens to force-exit on
+                  // Escape internally too — but that's an implementation
+                  // detail of the library, not a contract this component
+                  // should depend on. Close it ourselves explicitly so the
+                  // popup closing doesn't silently regress on a future
+                  // @tiptap/suggestion upgrade that drops that behavior.
+                  exitSuggestion(props.view);
                   return true;
                 }
                 return renderer?.ref?.onKeyDown(props) ?? false;

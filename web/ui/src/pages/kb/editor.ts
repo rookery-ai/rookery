@@ -1,6 +1,7 @@
 import { Editor, type AnyExtension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
+import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
@@ -26,6 +27,7 @@ export function buildExtensions(extra: AnyExtension[] = []): AnyExtension[] {
     // copy so our own Link.configure() below doesn't collide with it.
     StarterKit.configure({ link: false }),
     Link.configure({ openOnClick: false }),
+    Image,
     Placeholder.configure({ placeholder: "Type / for blocks…" }),
     TaskList,
     TaskItem.configure({ nested: true }),

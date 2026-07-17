@@ -52,6 +52,7 @@
 .note-editor-content .tiptap table { border-collapse: collapse; width: 100%; }
 .note-editor-content .tiptap th,
 .note-editor-content .tiptap td { border: 1px solid var(--color-border); padding: 0.4em 0.6em; }
+.note-editor-content .tiptap img { max-width: 100%; height: auto; border-radius: 0.5rem; }
 
 /* Wikilink pills — used both for the [[wikilink]] node inside the editor
    (wikilinks.ts) and the backlinks strip above the editor (NoteEditor.tsx),

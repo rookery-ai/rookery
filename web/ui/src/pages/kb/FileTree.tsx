@@ -14,11 +14,23 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+// The backend (web/api_kb.go's kbSystemDirs) marks the root-level `memory`
+// dir system:true — it groups it with agents/chats/skills/reminders/inbox as
+// "not user-authored knowledge". But spec §6 explicitly calls out memory/ as
+// user-facing knowledge ("user notes and memory/ first") that should sort
+// and style WITH user content, not muted alongside the others. Rather than
+// special-casing memory/ in the backend's kbSystemDirs (which DOES want the
+// system treatment for the rest of that set), override the flag here by
+// name — memory/ stays fully editable and keeps its Brain icon either way.
+function isEffectivelySystem(node: KBNode): boolean {
+  return node.system && node.name !== "memory";
+}
+
 // Root-content-first ordering (spec §6): user content sorts before system
 // dirs, dirs before files within a group, then alphabetically.
 function sortNodes(nodes: KBNode[]): KBNode[] {
   return [...nodes].sort((a, b) => {
-    const sysA = a.system ? 1 : 0, sysB = b.system ? 1 : 0;
+    const sysA = isEffectivelySystem(a) ? 1 : 0, sysB = isEffectivelySystem(b) ? 1 : 0;
     if (sysA !== sysB) return sysA - sysB;
     const dirA = a.is_dir ? 0 : 1, dirB = b.is_dir ? 0 : 1;
     if (dirA !== dirB) return dirA - dirB;
@@ -224,7 +236,7 @@ function TreeRow({
         className={cn(
           "group flex items-center gap-1.5 rounded px-1.5 py-1 pr-1 text-sm cursor-pointer",
           selected ? "bg-border" : "hover:bg-chrome",
-          node.system && "text-muted-2",
+          isEffectivelySystem(node) && "text-muted-2",
         )}
       >
         {node.is_dir ? (
