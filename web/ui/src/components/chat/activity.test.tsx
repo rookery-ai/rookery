@@ -58,6 +58,17 @@ test("stops ticking once status is done", () => {
   expect(screen.getByTestId("activity-elapsed")).toHaveTextContent("0:05");
 });
 
+test("unmount clears the tick interval (not redundant with the status-change test above — that one exercises the effect's dep-change cleanup, this one exercises unmount cleanup)", () => {
+  const clearSpy = vi.spyOn(globalThis, "clearInterval");
+  const { unmount } = render(
+    <ActivityCard title="Building your agent…" lines={[]} status="live" startedAt={Date.now()} />,
+  );
+  const callsBeforeUnmount = clearSpy.mock.calls.length;
+  unmount();
+  expect(clearSpy.mock.calls.length).toBeGreaterThan(callsBeforeUnmount);
+  clearSpy.mockRestore();
+});
+
 test("collapsible: collapsed shows only the last line, expanded shows all", () => {
   render(
     <ActivityCard

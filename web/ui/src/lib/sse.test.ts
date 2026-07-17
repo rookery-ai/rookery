@@ -16,10 +16,22 @@ class FakeEventSource {
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
+  private listeners: Record<string, Array<() => void>> = {};
 
   constructor(url: string) {
     this.url = url;
     FakeEventSource.instances.push(this);
+  }
+
+  // Named-event support (run_tracker.go's handleRunProgress emits
+  // `event: done` before closing) — mirrors the real EventSource
+  // addEventListener API rather than the plain onmessage property.
+  addEventListener(type: string, listener: () => void) {
+    (this.listeners[type] ??= []).push(listener);
+  }
+
+  dispatchNamedEvent(type: string) {
+    this.listeners[type]?.forEach((l) => l());
   }
 
   close() {
@@ -77,6 +89,51 @@ test("server closing the stream (error with readyState CLOSED after a successful
   expect(onDone).toHaveBeenCalledTimes(1);
   expect(onError).not.toHaveBeenCalled();
   expect(es.closed).toBe(true);
+});
+
+test("run endpoint's named `done` event calls onDone exactly once and closes the source", () => {
+  const onMessage = vi.fn();
+  const onDone = vi.fn();
+  const onError = vi.fn();
+  openSSE("/api/v1/agents/abc/run/progress", { onMessage, onDone, onError });
+
+  const es = FakeEventSource.instances[0];
+  es.readyState = FakeEventSource.OPEN;
+  es.onopen?.();
+  es.onmessage?.({ data: "🔧 running…" });
+
+  // handleRunProgress writes `event: done\ndata: 1\n\n` right before closing
+  // — a named event, not a plain `data:` line, so it must NOT go through
+  // onMessage.
+  es.dispatchNamedEvent("done");
+
+  expect(onDone).toHaveBeenCalledTimes(1);
+  expect(onError).not.toHaveBeenCalled();
+  expect(es.closed).toBe(true);
+  expect(onMessage).toHaveBeenCalledTimes(1); // only the run_script line, not "done"
+});
+
+test("named `done` followed by the browser's own error-on-close event still fires onDone only once", () => {
+  const onMessage = vi.fn();
+  const onDone = vi.fn();
+  const onError = vi.fn();
+  openSSE("/api/v1/agents/abc/run/progress", { onMessage, onDone, onError });
+
+  const es = FakeEventSource.instances[0];
+  es.readyState = FakeEventSource.OPEN;
+  es.onopen?.();
+
+  es.dispatchNamedEvent("done");
+  expect(onDone).toHaveBeenCalledTimes(1);
+
+  // The connection drop that follows the server closing the stream still
+  // reaches the browser as an `error` event — must be a no-op here since
+  // the handle already closed itself off the named event.
+  es.readyState = FakeEventSource.CLOSED;
+  es.onerror?.();
+
+  expect(onDone).toHaveBeenCalledTimes(1);
+  expect(onError).not.toHaveBeenCalled();
 });
 
 test("two connect failures (never opened) trigger one silent retry then onError", () => {
