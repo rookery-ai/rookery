@@ -87,6 +87,7 @@ export default function AgentNewPage() {
         startPayload={{ name: name.trim() }}
         draft={draft ? { name: draft.agent_name } : null}
         autoResume={resumeParam}
+        cancelTo="/agents"
         onDone={(id) => navigate(id ? `/agents/${id}` : "/agents")}
       />
     </div>

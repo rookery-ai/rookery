@@ -45,6 +45,10 @@ export type DesignerSurfaceProps = {
   draft?: DesignerDraft;
   // AgentNewPage's `?resume=1`: skip the banner and resume immediately.
   autoResume?: boolean;
+  // Where the header Cancel button navigates. Required (not defaulted)
+  // because the destination is entity-specific — the agent pages pass
+  // "/agents"; Task 8's skill pages will pass their own.
+  cancelTo: string;
 };
 
 type Role = "user" | "assistant";
@@ -102,6 +106,7 @@ export function DesignerSurface({
   onDone,
   draft,
   autoResume,
+  cancelTo,
 }: DesignerSurfaceProps) {
   const [messages, setMessages] = useState<HistEntry[]>([]);
   const [fsmState, setFsmState] = useState<FsmState>(null);
@@ -121,6 +126,15 @@ export function DesignerSurface({
   const doneRef = useRef(false);
   const dismissedRef = useRef(false);
   const autoResumeTriedRef = useRef(false);
+  // True for the duration of a design POST's await. The design POST is the
+  // authoritative source of the outcome for anything IT triggered (e.g. the
+  // "build it" approval) — if the SSE stream happens to close first (it can:
+  // progressCh closes the moment generation finishes, which races the POST's
+  // own return), a concurrent refetchState() would clobber the optimistic
+  // "build it" user bubble with a stale/incomplete server snapshot and the
+  // POST would then append a duplicate assistant message on top. Gating the
+  // SSE-done refetch on this flag makes the POST win that race every time.
+  const postInFlightRef = useRef(false);
 
   function focusComposer() {
     setFocusSignal((n) => n + 1);
@@ -135,14 +149,19 @@ export function DesignerSurface({
       onDone: () => {
         setSse((s) => (s ? { ...s, status: "done" } : s));
         sseHandleRef.current = null;
+        setGenerating(false);
         // A build recovered on mount (no pending POST here) only tells us it
         // finished via this stream closing — resync with the server to learn
-        // the outcome (verifying / generation_failed / final message).
-        if (!doneRef.current && endpoints.state) void refetchState();
+        // the outcome (verifying / generation_failed / final message). But
+        // if a design POST from THIS component is in flight (e.g. the user
+        // just clicked "build it"), that POST is the authoritative source —
+        // skip the refetch so it can't race the POST's own state update.
+        if (!doneRef.current && !postInFlightRef.current && endpoints.state) void refetchState();
       },
       onError: () => {
         setSse((s) => (s ? { ...s, status: "error" } : s));
         sseHandleRef.current = null;
+        setGenerating(false);
       },
     });
     sseHandleRef.current = handle;
@@ -226,14 +245,14 @@ export function DesignerSurface({
     } catch {
       // Ignore — we're navigating away regardless.
     }
-    // Entity-specific for now (agents only); Task 8 will need its own target.
-    navigate("/agents");
+    navigate(cancelTo);
   }
 
   async function handleSend(text: string) {
     setError(null);
     setMessages((m) => [...m, { role: "user", content: text }]);
     setBusy(true);
+    postInFlightRef.current = true;
     try {
       const isFirstMessage = messages.length === 0 && fsmState === null && !resumeBanner;
       const body: Record<string, unknown> = { message: text };
@@ -258,11 +277,14 @@ export function DesignerSurface({
       setError(errMessage(err));
     } finally {
       setBusy(false);
+      postInFlightRef.current = false;
+      setGenerating(false);
     }
   }
 
   function handleBuildClick() {
     ensureSSE(); // attach BEFORE the POST resolves — generation runs long
+    setGenerating(true); // stepper shows "Build" (index 2) while this POST is in flight
     void handleSend(BUILD_PHRASE);
   }
 

@@ -96,7 +96,7 @@ test("send appends a user bubble then an assistant bubble from the response", as
   mockFetch({
     "/x/design": () => jsonResponse({ response: "What should I call it?", done: false, state: "designing" }),
   });
-  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} onDone={vi.fn()} />);
+  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />);
 
   await sendViaComposer("Build me a thing");
 
@@ -112,7 +112,7 @@ test("startPayload is merged into the very first design POST only", async () => 
     },
   });
   wrap(
-    <DesignerSurface endpoints={ENDPOINTS} labels={LABELS} startPayload={{ name: "MyAgent" }} onDone={vi.fn()} />,
+    <DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" startPayload={{ name: "MyAgent" }} onDone={vi.fn()} />,
   );
 
   await sendViaComposer("first");
@@ -127,7 +127,7 @@ test("startPayload is merged into the very first design POST only", async () => 
 
 test("designing-state Build button posts the literal phrase 'build it' and attaches the SSE card before the POST resolves", async () => {
   let resolveBuild!: (r: Response) => void;
-  mockFetch({
+  const calls = mockFetch({
     "/x/design": (body: any) => {
       if (body.message === "describe") return jsonResponse({ response: "sounds good", done: false, state: "designing" });
       // The build POST intentionally hangs so the test can assert the
@@ -137,7 +137,7 @@ test("designing-state Build button posts the literal phrase 'build it' and attac
       });
     },
   });
-  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} onDone={vi.fn()} />);
+  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />);
 
   await sendViaComposer("describe");
   const buildBtn = await screen.findByRole("button", { name: LABELS.buildButton });
@@ -145,6 +145,14 @@ test("designing-state Build button posts the literal phrase 'build it' and attac
 
   // SSE card attached immediately — before the design POST resolves.
   expect(screen.getByTestId("activity-card")).toBeInTheDocument();
+  // Stepper shows "Build" (index 2) while the build POST is in flight.
+  const buildStep = screen.getByTestId("stepper").querySelectorAll("li")[2]!;
+  expect(buildStep).toHaveTextContent("Build");
+  expect(buildStep.querySelector("span")).toHaveClass("border-foreground");
+
+  const designCalls = () => calls.filter((c) => c.url === "/x/design");
+  await waitFor(() => expect(designCalls()).toHaveLength(2));
+  expect(designCalls()[1]!.body).toEqual({ message: "build it" });
 
   await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
   const es = FakeEventSource.instances[0]!;
@@ -157,6 +165,74 @@ test("designing-state Build button posts the literal phrase 'build it' and attac
   await screen.findByText("Built it!");
 });
 
+test("SSE completing before the pending build POST resolves does not corrupt the transcript (regression)", async () => {
+  let resolveBuild!: (r: Response) => void;
+  let stateCalls = 0;
+  const calls = mockFetch({
+    "/x/design": (body: any) => {
+      if (body.message === "describe") return jsonResponse({ response: "sounds good", done: false, state: "designing" });
+      return new Promise<Response>((resolve) => {
+        resolveBuild = resolve;
+      });
+    },
+    // Mount recovery's first call must be benign (no draft, not active) so
+    // the surface starts fresh; a second call would only happen if the
+    // buggy unconditional refetch fires — its stale snapshot is the proof.
+    "/x/state": () => {
+      stateCalls += 1;
+      if (stateCalls === 1) return jsonResponse({ active: false });
+      return jsonResponse({
+        active: true,
+        state: "verifying",
+        history: [{ role: "assistant", content: "WRONG — stale snapshot from a racing refetch" }],
+      });
+    },
+  });
+  wrap(
+    <DesignerSurface
+      endpoints={{ ...ENDPOINTS, state: "/x/state" }}
+      labels={LABELS}
+      cancelTo="/agents"
+      onDone={vi.fn()}
+    />,
+  );
+
+  await screen.findByRole("textbox"); // mount recovery settled
+  await sendViaComposer("describe");
+  const buildBtn = await screen.findByRole("button", { name: LABELS.buildButton });
+  fireEvent.click(buildBtn);
+
+  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+  const es = FakeEventSource.instances[0]!;
+  es.readyState = FakeEventSource.OPEN;
+  es.onopen?.();
+  // Server closes the design/progress stream (no named "done" event on this
+  // endpoint — a plain close, which openSSE reports via onerror) BEFORE the
+  // hanging build POST resolves.
+  es.readyState = FakeEventSource.CLOSED;
+  es.onerror?.();
+
+  // Give any (buggy) racing refetch a chance to land before the POST does.
+  await new Promise((r) => setTimeout(r, 0));
+
+  // The optimistic "build it" user bubble must have survived the SSE close.
+  expect(screen.getByText("build it")).toBeInTheDocument();
+  expect(screen.queryByText(/WRONG/)).not.toBeInTheDocument();
+
+  resolveBuild(jsonResponse({ response: "Built it!", done: false, state: "verifying" }));
+
+  expect(await screen.findByText("Built it!")).toBeInTheDocument();
+  expect(screen.getAllByText("Built it!")).toHaveLength(1); // not duplicated
+  expect(screen.getByText("build it")).toBeInTheDocument(); // still there
+  expect(screen.queryByText(/WRONG/)).not.toBeInTheDocument();
+
+  const designCalls = calls.filter((c) => c.url === "/x/design");
+  expect(designCalls[1]!.body).toEqual({ message: "build it" });
+  // The buggy behavior would have issued a second GET /x/state from inside
+  // the SSE onDone handler while the build POST was still pending.
+  expect(stateCalls).toBe(1);
+});
+
 test("a plain message answered with building:true attaches the SSE and renders ActivityCard lines", async () => {
   mockFetch({
     "/x/design": () =>
@@ -166,7 +242,7 @@ test("a plain message answered with building:true attaches the SSE and renders A
         building: true,
       }),
   });
-  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} onDone={vi.fn()} />);
+  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />);
 
   await sendViaComposer("are you done yet");
 
@@ -187,7 +263,7 @@ test("verifying-state Save button posts the literal phrase 'save'", async () => 
     },
   });
   const onDone = vi.fn();
-  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} onDone={onDone} />);
+  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" onDone={onDone} />);
 
   await sendViaComposer("describe");
   const saveBtn = await screen.findByRole("button", { name: LABELS.saveButton });
@@ -203,7 +279,7 @@ test("done:true response calls onDone with the agent id", async () => {
     "/x/design": () => jsonResponse({ response: "All set!", done: true, agent_id: "agent-42" }),
   });
   const onDone = vi.fn();
-  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} onDone={onDone} />);
+  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" onDone={onDone} />);
 
   await sendViaComposer("approve");
 
@@ -214,7 +290,7 @@ test("a thrown ApiError renders a red banner and re-enables the composer", async
   mockFetch({
     "/x/design": () => jsonResponse({ error: "name is required to start a new session" }, 400),
   });
-  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} onDone={vi.fn()} />);
+  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />);
 
   await sendViaComposer("hello");
 
@@ -237,7 +313,7 @@ test("mount recovery replays history from an active session", async () => {
       }),
   });
   wrap(
-    <DesignerSurface endpoints={{ ...ENDPOINTS, state: "/x/state" }} labels={LABELS} onDone={vi.fn()} />,
+    <DesignerSurface endpoints={{ ...ENDPOINTS, state: "/x/state" }} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />,
   );
 
   expect(await screen.findByText("hey there")).toBeInTheDocument();
@@ -261,7 +337,7 @@ test("resume banner shows when not active and a draft is present; Resume replays
   wrap(
     <DesignerSurface
       endpoints={{ ...ENDPOINTS, state: "/x/state" }}
-      labels={LABELS}
+      labels={LABELS} cancelTo="/agents"
       onDone={vi.fn()}
       draft={{ name: "Draft X" }}
     />,

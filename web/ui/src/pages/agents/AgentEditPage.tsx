@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { AlertTriangle } from "lucide-react";
 import {
   DesignerSurface,
@@ -65,11 +65,16 @@ export default function AgentEditPage() {
   if (!showSurface) {
     return (
       <div className="flex h-full flex-col">
-        <div className="border-b border-border px-6 py-4">
-          <h1 className="text-lg font-bold">
-            Edit {detail?.agent.name ?? "agent"}
-          </h1>
-          <p className="text-sm text-muted-2">What would you like to change?</p>
+        <div className="flex items-start justify-between gap-3 border-b border-border px-6 py-4">
+          <div>
+            <h1 className="text-lg font-bold">
+              Edit {detail?.agent.name ?? "agent"}
+            </h1>
+            <p className="text-sm text-muted-2">What would you like to change?</p>
+          </div>
+          <Link to={`/agents/${id}`} className="shrink-0 text-sm font-medium text-muted-2 hover:text-foreground">
+            Cancel
+          </Link>
         </div>
         <div className="flex-1" />
         {startError && (
@@ -94,6 +99,7 @@ export default function AgentEditPage() {
         endpoints={ENDPOINTS}
         labels={LABELS}
         draft={draft && draft.is_edit ? { name: draft.agent_name } : null}
+        cancelTo="/agents"
         onDone={() => navigate(`/agents/${id}`)}
       />
     </div>
