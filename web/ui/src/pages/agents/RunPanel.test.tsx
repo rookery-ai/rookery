@@ -81,6 +81,30 @@ test("already_running: shows an informational note (not an error banner) and att
   expect(FakeEventSource.instances[0]!.url).toBe("/api/v1/agents/a1/run/progress");
 });
 
+test("already_running whose SSE 404s (a scheduled/cron run — no in-memory producer) shows an info card, not an error card", async () => {
+  mockRun(() => jsonResponse({ status: "already_running" }, 202));
+  wrap();
+
+  await userEvent.click(screen.getByRole("button", { name: /run now/i }));
+  expect(await screen.findByText("A run is already in progress")).toBeInTheDocument();
+
+  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+  // openSSE retries once on a never-opened connection before giving up.
+  FakeEventSource.instances[0]!.onerror?.();
+  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
+  FakeEventSource.instances[1]!.onerror?.();
+
+  const info = await screen.findByText(/scheduled run is in progress/i);
+  expect(info).toBeInTheDocument();
+  expect(info.className).not.toMatch(/text-danger/);
+
+  // No ActivityCard error state — the collision note replaces it entirely.
+  expect(screen.queryByTestId("activity-card")).not.toBeInTheDocument();
+  // The original "already in progress" note is superseded by the more
+  // specific collision message, not duplicated alongside it.
+  expect(screen.queryByText("A run is already in progress")).not.toBeInTheDocument();
+});
+
 test("started: does not show the already-running note", async () => {
   mockRun(() => jsonResponse({ status: "started" }, 202));
   wrap();

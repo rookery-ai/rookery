@@ -34,6 +34,14 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
 
   const sseHandleRef = useRef<SSEHandle | null>(null);
   const startedAtRef = useRef(0);
+  // Which situation the CURRENTLY-attaching SSE stream is for. "collision"
+  // means attach() was called right after an already_running response — the
+  // in-flight run may be a scheduled (cron) one, which has no in-memory SSE
+  // producer (see web/run_tracker.go's isLiveRun vs isAgentRunning split), so
+  // the stream 404s. That 404 isn't a real failure; onError below reads this
+  // ref to render a muted informational note instead of the ActivityCard's
+  // red error state.
+  const attachContextRef = useRef<"own" | "collision">("own");
   // Guards state updates in handleRun's post-await continuation so a run
   // kicked off just before navigating away doesn't setState on an unmounted
   // component. Reset to false at the start of the mount effect (not just set
@@ -41,8 +49,9 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
   // (setup→cleanup→setup) doesn't leave it stuck true after the second setup.
   const unmountedRef = useRef(false);
 
-  function attach() {
+  function attach(context: "own" | "collision" = "own") {
     if (sseHandleRef.current) return;
+    attachContextRef.current = context;
     startedAtRef.current = Date.now();
     setSse({ lines: [], status: "live" });
     const handle = openSSE(`/api/v1/agents/${agentId}/run/progress`, {
@@ -53,8 +62,22 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
         qc.invalidateQueries({ queryKey: ["agent", agentId] });
       },
       onError: () => {
-        setSse((s) => (s ? { ...s, status: "error" } : s));
         sseHandleRef.current = null;
+        if (attachContextRef.current === "collision") {
+          // No in-memory producer for this run (it was started by the
+          // scheduler, not this tab) — the endpoint 404s, which is expected,
+          // not a failure. Drop the activity card and show a plain note
+          // instead of an error card under an "in progress" note that would
+          // otherwise contradict each other. No polling here (simplest
+          // option) — the run-history list picks up the finished run on the
+          // next manual refresh/navigation, same as any other out-of-band run.
+          setSse(null);
+          setNote(
+            "A scheduled run is in progress — live progress isn't available for runs started by the scheduler. Refresh the page to check its status.",
+          );
+        } else {
+          setSse((s) => (s ? { ...s, status: "error" } : s));
+        }
       },
     });
     sseHandleRef.current = handle;
@@ -90,8 +113,10 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
       if (unmountedRef.current) return;
       if (res.status === "already_running") {
         setNote("A run is already in progress");
+        attach("collision");
+      } else {
+        attach("own");
       }
-      attach();
     } catch (err) {
       if (unmountedRef.current) return;
       setError(err instanceof ApiError ? err.message : "Something went wrong");
