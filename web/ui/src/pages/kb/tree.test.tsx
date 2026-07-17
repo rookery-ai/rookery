@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import FileTree from "./FileTree";
@@ -190,6 +190,29 @@ test("Delete… on a file shows the path, confirms, DELETEs, and closes on succe
   await waitFor(() =>
     expect(screen.queryByRole("heading", { name: /^Delete\s/ })).not.toBeInTheDocument(),
   );
+});
+
+test("Space activates a row the same as Enter (a11y)", async () => {
+  mockFetch();
+  const onSelect = renderTree();
+
+  await screen.findByText("README.md");
+  const row = screen.getByText("README.md").closest('[role="button"]')!;
+  (row as HTMLElement).focus();
+  fireEvent.keyDown(row, { key: " " });
+
+  expect(onSelect).toHaveBeenCalledWith("README.md", false);
+});
+
+test("the dropdown trigger is NOT nested inside the row's role=button element", async () => {
+  mockFetch();
+  renderTree();
+
+  await screen.findByText("README.md");
+  const row = screen.getByText("README.md").closest('[role="button"]')!;
+  const trigger = screen.getByLabelText("Actions for README.md");
+
+  expect(row.contains(trigger)).toBe(false);
 });
 
 test("Delete… surfaces a 400 error inline and keeps the dialog open", async () => {

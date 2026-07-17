@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
@@ -106,11 +106,20 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// Scoped to the workspace-card name element specifically (not text-only
+// getByText) — the audit log's Workspace column now also resolves w1 to
+// "Home Server", so a plain getByText would match twice.
+function workspaceCardNames() {
+  return Array.from(document.querySelectorAll(".truncate.font-semibold")).map((el) => el.textContent);
+}
+
 test("renders workspace cards from the session", async () => {
   mockFetch();
   wrap();
-  expect(await screen.findByText("Home Server")).toBeInTheDocument();
-  expect(screen.getByText("Side Project")).toBeInTheDocument();
+  await waitFor(() => expect(workspaceCardNames().length).toBeGreaterThan(0));
+  const names = workspaceCardNames();
+  expect(names.some((t) => t?.includes("Home Server"))).toBe(true);
+  expect(names.some((t) => t?.includes("Side Project"))).toBe(true);
 });
 
 test("System settings form prefills from GET and renders sandbox/landlock indicators", async () => {
@@ -155,11 +164,37 @@ test("Audit log renders rows from the last-100 GET", async () => {
   expect(screen.getByText("workspace:w1")).toBeInTheDocument();
 });
 
+test("Audit log Workspace column resolves a known workspace_id to its name via the session, and falls back to a short uuid for a deleted workspace", async () => {
+  mockFetch({
+    "GET /api/v1/admin/audit?limit=100": () =>
+      jsonResponse({
+        logs: [
+          { workspace_id: "w1", action: "configure_coder", target: "workspace:w1", detail: "", ip: "127.0.0.1", created_at: "2026-07-16T12:00:00Z" },
+          { workspace_id: "deadbeef-0000-0000-0000-000000000000", action: "delete_workspace", target: "workspace:x", detail: "", ip: "127.0.0.1", created_at: "2026-07-15T09:00:00Z" },
+          { workspace_id: "", action: "system_event", target: "system", detail: "", ip: "127.0.0.1", created_at: "2026-07-14T09:00:00Z" },
+        ],
+      }),
+  });
+  wrap();
+
+  await screen.findByText("configure_coder");
+  const table = screen.getByRole("table");
+
+  // Known workspace_id (present in session.workspaces) resolves to its name
+  // in the Workspace column (scoped to the table — "Home Server" also
+  // appears in the Workspaces card above).
+  expect(within(table).getByText("Home Server")).toBeInTheDocument();
+  // Unknown/deleted workspace_id falls back to a short uuid.
+  expect(within(table).getByText("deadbeef")).toBeInTheDocument();
+  // Empty workspace_id (owner-level event) still shows the placeholder.
+  expect(within(table).getByText("—")).toBeInTheDocument();
+});
+
 test("Workspace permissions: expanding loads checkboxes and Save PUTs grant/revoke", async () => {
   const calls = mockFetch();
   wrap();
 
-  await screen.findByText("Home Server");
+  await screen.findAllByText("Home Server");
   const user = userEvent.setup();
   const permButtons = screen.getAllByRole("button", { name: /permissions/i });
   await user.click(permButtons[0]);
@@ -187,7 +222,7 @@ test("Delete workspace: confirm flow warns extra for the ACTIVE workspace and ca
   const calls = mockFetch();
   wrap();
 
-  await screen.findByText("Home Server");
+  await screen.findAllByText("Home Server");
   const user = userEvent.setup();
   const deleteButtons = screen.getAllByRole("button", { name: /^delete$/i });
   // First card is Home Server (the active workspace, w1).

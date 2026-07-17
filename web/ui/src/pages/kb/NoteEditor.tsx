@@ -273,6 +273,11 @@ export default function NoteEditor({
   const markDirty = useCallback(() => {
     dirtyRef.current = true;
     setErrorMessage(null);
+    // A stale rename-abort banner (see handleRename) must not linger once
+    // the user has resumed editing — otherwise it sticks around and
+    // suppresses a LATER, distinct autosave failure's banner (the render
+    // below only shows errorMessage when !renameError).
+    setRenameError(null);
     report("dirty");
     if (timerRef.current !== undefined) window.clearTimeout(timerRef.current);
     timerRef.current = window.setTimeout(flush, AUTOSAVE_MS);

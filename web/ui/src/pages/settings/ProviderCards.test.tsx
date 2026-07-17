@@ -119,7 +119,9 @@ test("saving posts the CODER_KEY_<PROVIDER> convention name and invalidates sett
   await user.type(screen.getByLabelText("OpenRouter API key"), "sk-abc123");
   await user.click(screen.getByRole("button", { name: /save key/i }));
 
-  await waitFor(() => expect(screen.getByText("Saved ✓")).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
+  // The Check icon already conveys success — no duplicate literal checkmark.
+  expect(screen.queryByText("Saved ✓")).not.toBeInTheDocument();
 
   const postCall = calls.find((c) => c.url === "/api/v1/secrets" && c.method === "POST");
   expect(postCall).toBeDefined();

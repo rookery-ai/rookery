@@ -77,7 +77,7 @@ function ProviderCard({ entry, label }: { entry: CoderCatalogEntry; label: strin
         </div>
         {justSaved ? (
           <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-ok">
-            <Check className="size-3" /> Saved ✓
+            <Check className="size-3" /> Saved
           </span>
         ) : noKeyNeeded ? (
           <span className="shrink-0 text-xs text-muted-2">No key needed</span>

@@ -301,6 +301,7 @@ export function CoderSection({
 
         {!hideTest && (
           <>
+            <p className="text-xs text-muted-2">Tests the last saved configuration.</p>
             {test.isPending && (
               <p className="text-xs text-muted-2">
                 Running a live test call — this can take up to a minute…

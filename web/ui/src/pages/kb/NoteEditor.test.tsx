@@ -408,6 +408,53 @@ test("a failed pre-flush rename shows exactly one red banner (the rename-abort m
   expect(banners).toHaveLength(1);
 });
 
+// Task-4 review follow-up: markDirty must clear a stale renameError, or a
+// LATER, distinct autosave failure gets silently swallowed by the render
+// gate (`errorMessage && saveState === "error" && !renameError`) — the old
+// rename-abort banner would keep suppressing it forever.
+test("rename-abort: typing again clears the stale renameError, so a later distinct autosave failure shows the generic banner", async () => {
+  let putShouldFail = true;
+  let putMessage = "put boom";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "PUT") {
+        return Promise.resolve(putShouldFail ? errorResponse(500, putMessage) : jsonResponse({ ok: true }));
+      }
+      if (url.startsWith("/api/v1/kb/note")) return Promise.resolve(jsonResponse(TRIP_NOTE_FIXTURE));
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  const user = userEvent.setup({ delay: null });
+  renderAtPath("notes/trip plan.md");
+
+  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  await user.click(textarea);
+  await user.type(textarea, "extra");
+
+  // Trigger the rename-abort path: pre-flush PUT fails, rename never fires.
+  const titleInput = screen.getByLabelText("Note title");
+  await user.clear(titleInput);
+  await user.type(titleInput, "summer");
+  await user.keyboard("{Enter}");
+
+  expect(await screen.findByText(/rename cancelled/i)).toBeInTheDocument();
+
+  // Resume editing — markDirty must clear the stale rename-abort banner.
+  putMessage = "second boom";
+  await user.click(textarea);
+  await user.type(textarea, " more");
+  expect(screen.queryByText(/rename cancelled/i)).not.toBeInTheDocument();
+
+  // A later, distinct autosave failure must render ITS OWN banner — not be
+  // suppressed by the (now-cleared) stale renameError.
+  fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+  expect(await screen.findByText("second boom")).toBeInTheDocument();
+});
+
 // Re-review minor: a failed delete must re-arm the dirty/"Unsaved" contract
 // for the edit it discarded — otherwise the chip lies "saved" and Ctrl+S
 // silently no-ops for content that was never actually persisted anywhere.

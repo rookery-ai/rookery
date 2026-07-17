@@ -51,7 +51,7 @@ export default function Login() {
           </div>
           {error && <p className="text-danger text-sm">{error}</p>}
           <Button type="submit" className="w-full" disabled={busy}>
-            {busy ? "Signing in…" : "Login"}
+            {busy ? "Signing in…" : "Log in"}
           </Button>
         </div>
       </form>

@@ -271,7 +271,18 @@ function SystemSettingsSection() {
 
 function AuditLogSection() {
   const { data, isLoading, isError, error } = useAuditLog(100);
+  const { data: session } = useSession();
   const logs = data?.logs ?? [];
+  const workspaceNameById = new Map(
+    (session?.workspaces ?? []).map((w) => [w.id, w.name] as const),
+  );
+
+  function workspaceLabel(id: string) {
+    if (!id) return "—";
+    // A deleted workspace no longer appears in session.workspaces — fall
+    // back to a short uuid rather than an empty/undefined cell.
+    return workspaceNameById.get(id) ?? id.slice(0, 8);
+  }
 
   return (
     <div>
@@ -298,7 +309,7 @@ function AuditLogSection() {
                 <tr key={i} className="border-t border-border">
                   <td className="whitespace-nowrap px-3 py-2 text-muted-2">{timeAgo(l.created_at)}</td>
                   <td className="whitespace-nowrap px-3 py-2 font-mono text-muted-2">
-                    {l.workspace_id ? l.workspace_id.slice(0, 8) : "—"}
+                    {workspaceLabel(l.workspace_id)}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2">{l.action}</td>
                   <td className="px-3 py-2 text-muted-2">{l.target}</td>

@@ -94,7 +94,7 @@ test("already_running whose SSE 404s (a scheduled/cron run — no in-memory prod
   await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
   FakeEventSource.instances[1]!.onerror?.();
 
-  const info = await screen.findByText(/scheduled run is in progress/i);
+  const info = await screen.findByText(/another run is in progress/i);
   expect(info).toBeInTheDocument();
   expect(info.className).not.toMatch(/text-danger/);
 

@@ -170,6 +170,13 @@ test("Test button: failure shows a red error", async () => {
   expect(await screen.findByText(/connection refused/i)).toBeInTheDocument();
 });
 
+test("shows a hint that Test exercises the last saved configuration, not unsaved form edits", () => {
+  mockFetch();
+  wrap(LOCAL_CODER);
+
+  expect(screen.getByText(/tests the last saved configuration/i)).toBeInTheDocument();
+});
+
 // ── Wizard-mode props (hideTest / saveOverride / showApiKeyInput) ──────────
 // These back the onboarding wizard's coder step (SetupWizard), which posts
 // through /api/v1/setup instead of /api/v1/settings/coder and can't reach
@@ -184,6 +191,7 @@ test("hideTest=true hides the Test button and its result area", () => {
     </QueryClientProvider>,
   );
   expect(screen.queryByRole("button", { name: /^test$/i })).not.toBeInTheDocument();
+  expect(screen.queryByText(/tests the last saved configuration/i)).not.toBeInTheDocument();
 });
 
 // Regression test for the real wizard path: NO pre-seeded `coder` prop (a

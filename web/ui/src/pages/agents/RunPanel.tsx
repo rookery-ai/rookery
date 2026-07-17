@@ -73,7 +73,7 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
           // next manual refresh/navigation, same as any other out-of-band run.
           setSse(null);
           setNote(
-            "A scheduled run is in progress — live progress isn't available for runs started by the scheduler. Refresh the page to check its status.",
+            "Another run is in progress — live progress isn't available for it. Refresh the page to check its status.",
           );
         } else {
           setSse((s) => (s ? { ...s, status: "error" } : s));

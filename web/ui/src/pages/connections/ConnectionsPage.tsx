@@ -30,6 +30,19 @@ function errorMessage(error: unknown) {
     : "Something went wrong";
 }
 
+// The OAuth callback's ?error= param is server-controlled but can still carry
+// an arbitrary provider error string (or something malformed) — prefix it so
+// it's unambiguously scoped to the connection attempt (not a page-level
+// error), and cap its displayed length so a pathological/huge value can't
+// blow out the banner layout.
+const MAX_ERROR_PARAM_LEN = 200;
+
+function formatConnectionError(raw: string): string {
+  const trimmed =
+    raw.length > MAX_ERROR_PARAM_LEN ? raw.slice(0, MAX_ERROR_PARAM_LEN) + "…" : raw;
+  return `Connection failed: ${trimmed}`;
+}
+
 function ErrorBanner({ message }: { message: string }) {
   return (
     <div className="mb-3 rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">{message}</div>
@@ -191,7 +204,7 @@ export default function ConnectionsPage() {
   const landingBanner = bannerDismissed
     ? null
     : initialErrorParam.current
-      ? { kind: "error" as const, message: initialErrorParam.current }
+      ? { kind: "error" as const, message: formatConnectionError(initialErrorParam.current) }
       : initialConnected.current
         ? {
             kind: "success" as const,

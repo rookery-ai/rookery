@@ -227,38 +227,53 @@ function TreeRow({
 
   return (
     <div>
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={handleClick}
-        onKeyDown={(e) => e.key === "Enter" && handleClick()}
-        style={{ paddingLeft: 6 + depth * 14 }}
-        className={cn(
-          "group flex items-center gap-1.5 rounded px-1.5 py-1 pr-1 text-sm cursor-pointer",
-          selected ? "bg-border" : "hover:bg-chrome",
-          isEffectivelySystem(node) && "text-muted-2",
-        )}
-      >
-        {node.is_dir ? (
-          <ChevronRight
-            className={cn("size-3.5 shrink-0 text-muted-2 transition-transform", expanded && "rotate-90")}
-          />
-        ) : (
-          <span className="size-3.5 shrink-0" />
-        )}
-        <Icon className="size-4 shrink-0" />
-        <span className="flex-1 truncate">{node.display_name}</span>
+      {/* The dropdown trigger is a SIBLING of the role=button row, not nested
+          inside it (a11y fix — a <button> descendant of a role="button"
+          element is an invalid/ambiguous nested-interactive structure, and
+          it also meant the trigger's click had to stopPropagation to avoid
+          re-triggering row selection). "group" lives on this wrapper so the
+          existing hover-reveal styling (opacity-0 group-hover:opacity-100 on
+          the trigger) keeps working — CSS :hover on a descendant still
+          matches its ancestors, so hovering the row still reveals the
+          trigger. */}
+      <div className="group flex items-center gap-1.5 pr-1">
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={handleClick}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              handleClick();
+            }
+          }}
+          style={{ paddingLeft: 6 + depth * 14 }}
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-1 text-sm cursor-pointer",
+            selected ? "bg-border" : "hover:bg-chrome",
+            isEffectivelySystem(node) && "text-muted-2",
+          )}
+        >
+          {node.is_dir ? (
+            <ChevronRight
+              className={cn("size-3.5 shrink-0 text-muted-2 transition-transform", expanded && "rotate-90")}
+            />
+          ) : (
+            <span className="size-3.5 shrink-0" />
+          )}
+          <Icon className="size-4 shrink-0" />
+          <span className="flex-1 truncate">{node.display_name}</span>
+        </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               aria-label={`Actions for ${node.display_name}`}
-              onClick={(e) => e.stopPropagation()}
               className="shrink-0 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-border focus-visible:opacity-100"
             >
               <MoreHorizontal className="size-3.5" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" onClick={(e) => e.stopPropagation()}>
+          <DropdownMenuContent align="start">
             {node.is_dir && (
               <>
                 <DropdownMenuItem onSelect={() => setDialog("new-note")}>New note…</DropdownMenuItem>

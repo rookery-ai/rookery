@@ -330,14 +330,25 @@ test("?connected=<unknown-slug> falls back to the raw slug when no matching prov
   expect(await screen.findByText("some-unlisted-provider connected ✓")).toBeInTheDocument();
 });
 
-test("?error=<msg> shows an error banner and clears the param", async () => {
+test("?error=<msg> shows an error banner prefixed with 'Connection failed: ' and clears the param", async () => {
   mockFetch();
   wrap("/?error=" + encodeURIComponent("Authorization was denied: access_denied"));
 
   expect(
-    await screen.findByText("Authorization was denied: access_denied"),
+    await screen.findByText("Connection failed: Authorization was denied: access_denied"),
   ).toBeInTheDocument();
   await waitFor(() =>
     expect(screen.getByTestId("search-params-debug").textContent).not.toContain("error"),
   );
+});
+
+test("?error=<huge msg> caps the displayed length instead of blowing out the banner", async () => {
+  mockFetch();
+  const huge = "x".repeat(500);
+  wrap("/?error=" + encodeURIComponent(huge));
+
+  const banner = await screen.findByText(/^Connection failed: x+…$/);
+  expect(banner).toBeInTheDocument();
+  // "Connection failed: " (20 chars) + 200 capped chars + the ellipsis.
+  expect(banner.textContent!.length).toBeLessThanOrEqual(20 + 200 + 1);
 });

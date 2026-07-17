@@ -26,7 +26,7 @@ test("shows API error message on bad credentials", async () => {
   wrap(<Login />);
   await userEvent.type(screen.getByLabelText(/username/i), "admin");
   await userEvent.type(screen.getByLabelText(/password/i), "wrong");
-  await userEvent.click(screen.getByRole("button", { name: /login/i }));
+  await userEvent.click(screen.getByRole("button", { name: /log in/i }));
   await waitFor(() =>
     expect(screen.getByText(/invalid username or password/i)).toBeInTheDocument(),
   );
