@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import type { UseMutationResult } from "@tanstack/react-query";
 import { AlertTriangle, Check, ChevronDown, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +13,7 @@ import {
   type CoderCatalogEntry,
   type CoderConfig,
   type DetectedCoder,
+  type SaveCoderInput,
 } from "@/lib/settings";
 
 function errMsg(err: unknown) {
@@ -32,10 +34,30 @@ export function CoderSection({
   coder,
   detectedCoders,
   catalog,
+  saveOverride,
+  hideTest = false,
+  showApiKeyInput = false,
 }: {
   coder: CoderConfig | undefined;
   detectedCoders: DetectedCoder[];
   catalog: CoderCatalogEntry[];
+  // Wizard-mode overrides (all optional; omitted ⇒ identical to the
+  // settings-page behavior). saveOverride lets a caller point Save at a
+  // different endpoint (the setup wizard posts through /api/v1/setup, not
+  // /api/v1/settings/coder — see SetupWizard's coderSaveMutation) while
+  // reusing this component's form + validation. showApiKeyInput renders an
+  // inline API-key field next to Provider/Model — the setup wizard can't
+  // reach ProviderCards' /api/v1/secrets endpoint (blocked while
+  // needs_setup is true), so the key has to travel in the same POST as the
+  // rest of the coder config, exactly like the classic template wizard does.
+  // `any` for TData/TError is deliberate: the setup wizard's mutation
+  // resolves a different response shape ({ok, next_step}) than the
+  // settings-page save ({ok}) — this prop only needs mutateAsync/isPending/
+  // isError/error, so pinning those two type params would just fight duck
+  // typing for no benefit.
+  saveOverride?: UseMutationResult<any, any, SaveCoderInput>;
+  hideTest?: boolean;
+  showApiKeyInput?: boolean;
 }) {
   const [engine, setEngine] = useState<Engine>("local");
   const [bin, setBin] = useState("");
@@ -43,11 +65,13 @@ export function CoderSection({
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
   const [baseURL, setBaseURL] = useState("");
+  const [apiKey, setApiKey] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [baseURLError, setBaseURLError] = useState("");
   const [saved, setSaved] = useState(false);
 
-  const save = useSaveCoder();
+  const internalSave = useSaveCoder();
+  const save = saveOverride ?? internalSave;
   const test = useTestCoder();
 
   useEffect(() => {
@@ -80,7 +104,7 @@ export function CoderSection({
         provider: engine === "api" ? provider : "",
         model: engine === "api" ? model : "",
         base_url: engine === "api" ? baseURL : "",
-        api_key: "",
+        api_key: showApiKeyInput && engine === "api" ? apiKey.trim() : "",
       });
       setSaved(true);
     } catch {
@@ -187,6 +211,39 @@ export function CoderSection({
               />
             </div>
 
+            {showApiKeyInput && (selectedEntry?.requiresKey ?? true) && (
+              <div className="space-y-1.5">
+                <Label htmlFor="coder_api_key">API key</Label>
+                <Input
+                  id="coder_api_key"
+                  type="password"
+                  autoComplete="off"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={
+                    selectedEntry?.hasKey ? "leave blank to keep current key" : "paste your provider API key"
+                  }
+                />
+                <p className="text-xs text-muted-2">
+                  Stored securely as a secret.
+                  {selectedEntry?.hasKey && " Already set — leave blank to keep it."}
+                  {selectedEntry?.docs && (
+                    <>
+                      {" "}
+                      <a
+                        href={selectedEntry.docs}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline"
+                      >
+                        Get a key ↗
+                      </a>
+                    </>
+                  )}
+                </p>
+              </div>
+            )}
+
             <div>
               <button
                 type="button"
@@ -230,26 +287,32 @@ export function CoderSection({
           <Button type="submit" disabled={save.isPending}>
             {save.isPending ? "Saving…" : "Save coder"}
           </Button>
-          <Button type="button" variant="outline" onClick={() => test.mutate()} disabled={test.isPending}>
-            {test.isPending && <Loader2 className="size-3.5 animate-spin" />}
-            {test.isPending ? "Testing…" : "Test"}
-          </Button>
+          {!hideTest && (
+            <Button type="button" variant="outline" onClick={() => test.mutate()} disabled={test.isPending}>
+              {test.isPending && <Loader2 className="size-3.5 animate-spin" />}
+              {test.isPending ? "Testing…" : "Test"}
+            </Button>
+          )}
         </div>
 
-        {test.isPending && (
-          <p className="text-xs text-muted-2">
-            Running a live test call — this can take up to a minute…
-          </p>
+        {!hideTest && (
+          <>
+            {test.isPending && (
+              <p className="text-xs text-muted-2">
+                Running a live test call — this can take up to a minute…
+              </p>
+            )}
+            {test.data && test.data.ok && (
+              <p className="flex items-center gap-1 text-sm text-ok">
+                <Check className="size-3.5" /> {test.data.reply ?? "OK"}
+              </p>
+            )}
+            {test.data && !test.data.ok && (
+              <p className="text-sm text-danger">{test.data.error ?? "Test failed"}</p>
+            )}
+            {test.isError && <p className="text-sm text-danger">{errMsg(test.error)}</p>}
+          </>
         )}
-        {test.data && test.data.ok && (
-          <p className="flex items-center gap-1 text-sm text-ok">
-            <Check className="size-3.5" /> {test.data.reply ?? "OK"}
-          </p>
-        )}
-        {test.data && !test.data.ok && (
-          <p className="text-sm text-danger">{test.data.error ?? "Test failed"}</p>
-        )}
-        {test.isError && <p className="text-sm text-danger">{errMsg(test.error)}</p>}
       </form>
     </section>
   );

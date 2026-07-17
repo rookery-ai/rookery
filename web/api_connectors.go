@@ -65,7 +65,15 @@ type apiTestConnectorResponse struct {
 // this workspace's connection state. GET /api/v1/connectors → {"platforms":[...]}
 func (s *Server) apiListConnectors(c echo.Context) error {
 	u := c.Get("workspace").(*db.Workspace)
+	return c.JSON(http.StatusOK, apiConnectorListResponse{Platforms: s.connectorPlatformList(u)})
+}
 
+// connectorPlatformList builds the CredSpec-driven platform catalog annotated
+// with this workspace's connection state. Shared by apiListConnectors and the
+// setup wizard's step-5 (chat app) payload (apiGetSetup) — the setup wizard
+// runs while needs_setup is still true, when GET /api/v1/connectors itself is
+// blocked by requireSetupCompleteAPI, so it needs this same data inline.
+func (s *Server) connectorPlatformList(u *db.Workspace) []apiConnectorPlatform {
 	specs := gateway.CredSpecs()
 	out := make([]apiConnectorPlatform, 0, len(specs))
 	for _, spec := range specs {
@@ -98,8 +106,7 @@ func (s *Server) apiListConnectors(c echo.Context) error {
 
 		out = append(out, entry)
 	}
-
-	return c.JSON(http.StatusOK, apiConnectorListResponse{Platforms: out})
+	return out
 }
 
 // apiSaveConnector validates + saves a platform's credentials, reusing

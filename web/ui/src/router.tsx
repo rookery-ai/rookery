@@ -16,6 +16,7 @@ import SkillNewPage from "@/pages/skills/SkillNewPage";
 import SkillDetailPage, { CoreSkillViewPage } from "@/pages/skills/SkillDetailPage";
 import ConnectionsPage from "@/pages/connections/ConnectionsPage";
 import SettingsPage from "@/pages/settings/SettingsPage";
+import SetupWizard from "@/pages/setup/SetupWizard";
 
 function RequireAuth() {
   const { data: session, isLoading } = useSession();
@@ -23,8 +24,19 @@ function RequireAuth() {
   if (!session?.authenticated) return <Navigate to="/login" replace />;
   if (session.owner?.must_change_password) return <Navigate to="/change-password" replace />;
   if (!session.workspace) return <Navigate to="/workspaces" replace />;
-  if (session.workspace?.needs_setup)
-    return <Navigate to={`/workspaces?setup=${session.workspace.id}`} replace />;
+  if (session.workspace?.needs_setup) return <Navigate to="/setup" replace />;
+  return <Outlet />;
+}
+
+// Guards the full-screen onboarding wizard: must be an authenticated owner
+// with an active workspace that still needs setup — otherwise there's
+// nothing for /setup to do, so bounce to "/" (which itself redirects
+// appropriately via RequireAuth for every other unmet precondition).
+function RequireSetupWorkspace() {
+  const { data: session, isLoading } = useSession();
+  if (isLoading) return <div className="p-8 text-muted-2">Loading…</div>;
+  if (!session?.authenticated) return <Navigate to="/login" replace />;
+  if (!session.workspace?.needs_setup) return <Navigate to="/" replace />;
   return <Outlet />;
 }
 
@@ -34,6 +46,10 @@ export const router = createBrowserRouter(
     { path: "/login", element: <Login /> },
     { path: "/change-password", element: <ChangePassword /> },
     { path: "/workspaces", element: <Workspaces /> },
+    {
+      element: <RequireSetupWorkspace />,
+      children: [{ path: "/setup", element: <SetupWizard /> }],
+    },
     {
       element: <RequireAuth />,
       children: [

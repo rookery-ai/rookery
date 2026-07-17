@@ -347,6 +347,8 @@ func (s *Server) apiGetSetup(c echo.Context) error {
 		resp["detected_coders"] = detOut
 		resp["api_providers"] = provOut
 		resp["coder_catalog"] = s.coderCatalogSlice(secretNames)
+	case 5:
+		resp["platforms"] = s.connectorPlatformList(w)
 	case 7:
 		botUsername, _ := s.db.GetSetting(w.ID, "telegram_bot_username")
 		resp["bot_username"] = botUsername
@@ -419,13 +421,26 @@ func (s *Server) apiSetupBasics(c echo.Context, w *db.Workspace, req apiSetupReq
 	return s.apiSetupOK(c, w)
 }
 
-// apiSetupMasterPassword ports handleSetupMasterPassword.
+// apiSetupMasterPassword ports handleSetupMasterPassword. Unlike the template
+// handler, this one guards against a destructive re-post: the SPA wizard lets
+// the user navigate Back to step 2 after step 3 has already written a secret
+// (e.g. a coder API key) under the current salt. Re-generating the salt at
+// that point would leave those secrets permanently undecryptable, even though
+// the step itself "succeeds". Once secrets exist, step 2 is a no-op that just
+// reports the (unchanged) current step forward — the master password can
+// still be changed later from Settings, which re-encrypts existing secrets.
 func (s *Server) apiSetupMasterPassword(c echo.Context, w *db.Workspace, req apiSetupRequest) error {
 	if len(req.MasterPassword) < 8 {
 		return jsonErr(c, http.StatusBadRequest, "password_too_short", "master password must be at least 8 characters")
 	}
 	if req.MasterPassword != req.Confirm {
 		return jsonErr(c, http.StatusBadRequest, "password_mismatch", "passwords do not match")
+	}
+
+	if w.SecretsSalt != "" {
+		if names, _ := s.db.ListSecretNames(w.ID); len(names) > 0 {
+			return s.apiSetupOK(c, w)
+		}
 	}
 
 	salt, err := auth.GenerateSecretsSalt()

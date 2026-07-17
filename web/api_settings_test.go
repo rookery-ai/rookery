@@ -1,8 +1,12 @@
 package web
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"testing"
+
+	"github.com/ilijad1/simple-agents/internal/secrets"
 )
 
 // TestAPISettingsGetNeverLeaksSecretValues seeds a secret then checks the
@@ -222,5 +226,135 @@ func TestAPISetupGetRegistered(t *testing.T) {
 	}
 	if !contains(rec.Body.String(), `"step"`) {
 		t.Fatalf("expected step field: %s", rec.Body.String())
+	}
+}
+
+// freshUnsetupWorkspace creates a brand-new workspace via the API (auto-
+// activated, needs_setup still true — no master password / coder / profile /
+// connector yet) and returns updated cookies + its id.
+func freshUnsetupWorkspace(t *testing.T, s *Server, cookies []*http.Cookie, name string) ([]*http.Cookie, string) {
+	t.Helper()
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/workspaces", map[string]string{"name": name}, cookies)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create workspace: %d %s", rec.Code, rec.Body.String())
+	}
+	var ws struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &ws); err != nil {
+		t.Fatalf("decode workspace: %v", err)
+	}
+	return rec.Result().Cookies(), ws.ID
+}
+
+// TestAPISetupStep5ReturnsConnectorPlatforms walks a fresh workspace through
+// steps 1-4 and confirms the step-5 GET response carries the CredSpec-driven
+// platform catalog (telegram/discord/slack) — the SPA wizard's chat-app
+// picker has no other reachable source for this data while needs_setup is
+// still true (GET /api/v1/connectors is itself blocked by
+// requireSetupCompleteAPI until setup finishes).
+func TestAPISetupStep5ReturnsConnectorPlatforms(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = freshUnsetupWorkspace(t, s, cookies, "wizard-ws")
+
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{"step": 1, "name": "wizard-ws"}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("step1: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{
+		"step": 2, "master_password": "wizard-pw-1", "confirm": "wizard-pw-1",
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("step2: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{"step": 3, "skip": true}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("step3 skip: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{"step": 4, "skip": true}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("step4 skip: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/setup", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get setup: %d %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !contains(body, `"step":5`) {
+		t.Fatalf("expected to land on step 5: %s", body)
+	}
+	if !contains(body, `"platforms"`) || !contains(body, `"telegram"`) || !contains(body, `"discord"`) || !contains(body, `"slack"`) {
+		t.Fatalf("expected connector platform catalog in step-5 response: %s", body)
+	}
+
+	// An empty/missing token is a silent no-op per apiSetupConnector (mirrors
+	// the template handler) — confirms the step doesn't error out, without
+	// making a real network call to validate a fake bot token.
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{"step": 5, "skip": true}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("step5 skip: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/setup", nil, cookies)
+	if rec.Code != http.StatusOK || !contains(rec.Body.String(), `"step":7`) {
+		t.Fatalf("expected skip to land on Done (step 7): %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAPISetupMasterPasswordNoOpOnceSecretsExist covers the destructive-Back-
+// navigation guard: after step 3 has written a secret (a coder API key) under
+// the workspace's salt, re-posting step 2 (as a wizard "Back" then re-submit
+// would do) must NOT regenerate the salt — that would leave the just-written
+// secret permanently undecryptable. The re-post should succeed as a no-op.
+func TestAPISetupMasterPasswordNoOpOnceSecretsExist(t *testing.T) {
+	s, database := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := freshUnsetupWorkspace(t, s, cookies, "guard-ws")
+
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{
+		"step": 2, "master_password": "wizard-pw-1", "confirm": "wizard-pw-1",
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("step2: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{
+		"step": 3, "coder_kind": "api", "coder_provider": "openrouter", "coder_model": "glm-5.2",
+		"coder_api_key": "sk-or-test",
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("step3: %d %s", rec.Code, rec.Body.String())
+	}
+
+	before, err := database.GetWorkspaceByID(wsID)
+	if err != nil {
+		t.Fatalf("load workspace: %v", err)
+	}
+	if before.SecretsSalt == "" {
+		t.Fatalf("expected a salt to already be set")
+	}
+
+	// Simulate Back-to-step-2, re-submitting a DIFFERENT password.
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{
+		"step": 2, "master_password": "different-pw-2", "confirm": "different-pw-2",
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("step2 re-post: %d %s", rec.Code, rec.Body.String())
+	}
+
+	after, err := database.GetWorkspaceByID(wsID)
+	if err != nil {
+		t.Fatalf("reload workspace: %v", err)
+	}
+	if after.SecretsSalt != before.SecretsSalt {
+		t.Fatalf("salt changed after re-posting step 2 with secrets already present: before=%q after=%q",
+			before.SecretsSalt, after.SecretsSalt)
+	}
+
+	// The original secret must still be readable under the original password.
+	secretStore := secrets.New(database, wsID, "wizard-pw-1", after.SecretsSalt)
+	val, err := secretStore.Get(context.Background(), "CODER_KEY_OPENROUTER")
+	if err != nil || val != "sk-or-test" {
+		t.Fatalf("expected original secret to remain decryptable with the original password: val=%q err=%v", val, err)
 	}
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router";
+import { useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
 import { useSession, type Workspace } from "@/lib/session";
@@ -81,9 +81,11 @@ export function CreateWorkspaceDialog({
   async function create(e: React.FormEvent) {
     e.preventDefault();
     try {
-      const ws = await api.post<Workspace>("/api/v1/workspaces", { name, about });
+      await api.post<Workspace>("/api/v1/workspaces", { name, about });
       await qc.invalidateQueries({ queryKey: ["session"] });
-      nav(`/workspaces?setup=${ws.id}`, { replace: true });
+      // A freshly created workspace is auto-activated and needs_setup — just
+      // navigate home and let RequireAuth route to /setup.
+      nav("/", { replace: true });
       onClose();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong");
@@ -118,21 +120,23 @@ export default function Workspaces() {
   const [entering, setEntering] = useState<Workspace | null>(null);
   const [creating, setCreating] = useState(false);
   const [directEnterError, setDirectEnterError] = useState("");
-  const [params] = useSearchParams();
-  const setupID = params.get("setup");
+  const nav = useNavigate();
+  const qc = useQueryClient();
 
   const list = session?.workspaces ?? [];
 
-  function directEnter(ws: Workspace) {
+  // needs_setup workspaces skip the master-password dialog (they don't have
+  // one yet) — enter directly, then let RequireAuth route to /setup once the
+  // session reflects the newly active workspace.
+  async function directEnter(ws: Workspace) {
     setDirectEnterError("");
-    api
-      .post(`/api/v1/workspaces/${ws.id}/enter`, {})
-      .then(() => {
-        window.location.href = "/app/workspaces?setup=" + ws.id;
-      })
-      .catch((err) => {
-        setDirectEnterError(err instanceof ApiError ? err.message : "Something went wrong");
-      });
+    try {
+      await api.post(`/api/v1/workspaces/${ws.id}/enter`, {});
+      await qc.invalidateQueries({ queryKey: ["session"] });
+      nav("/", { replace: true });
+    } catch (err) {
+      setDirectEnterError(err instanceof ApiError ? err.message : "Something went wrong");
+    }
   }
 
   return (
@@ -142,13 +146,6 @@ export default function Workspaces() {
         <p className="text-muted-2 text-sm mb-6">
           Pick a workspace to enter — its master password is required every time.
         </p>
-        {setupID && (
-          <p className="text-sm bg-warn-soft text-foreground rounded-lg p-3 mb-4">
-            This workspace still needs onboarding. Finish setup in the classic UI
-            at <a className="underline" href="/dashboard/setup">/dashboard/setup</a>{" "}
-            (the guided setup moves here in a later phase).
-          </p>
-        )}
         {directEnterError && (
           <p className="text-danger text-sm mb-4">{directEnterError}</p>
         )}
@@ -156,7 +153,7 @@ export default function Workspaces() {
           {list.map((ws) => (
             <li key={ws.id}>
               <button
-                onClick={() => (ws.needs_setup ? directEnter(ws) : setEntering(ws))}
+                onClick={() => (ws.needs_setup ? void directEnter(ws) : setEntering(ws))}
                 className="w-full text-left border border-border rounded-lg px-4 py-3 hover:bg-chrome transition-colors"
               >
                 <span className="font-semibold">{ws.name}</span>

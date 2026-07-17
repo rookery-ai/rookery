@@ -1,8 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useMutation } from "@tanstack/react-query";
 import { CoderSection } from "./CoderSection";
-import type { CoderCatalogEntry, CoderConfig, DetectedCoder } from "@/lib/settings";
+import type { CoderCatalogEntry, CoderConfig, DetectedCoder, SaveCoderInput } from "@/lib/settings";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -168,4 +168,90 @@ test("Test button: failure shows a red error", async () => {
   await user.click(screen.getByRole("button", { name: /^test$/i }));
 
   expect(await screen.findByText(/connection refused/i)).toBeInTheDocument();
+});
+
+// ── Wizard-mode props (hideTest / saveOverride / showApiKeyInput) ──────────
+// These back the onboarding wizard's coder step (SetupWizard), which posts
+// through /api/v1/setup instead of /api/v1/settings/coder and can't reach
+// ProviderCards' /api/v1/secrets endpoint while needs_setup is still true.
+
+test("hideTest=true hides the Test button and its result area", () => {
+  mockFetch();
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={qc}>
+      <CoderSection coder={LOCAL_CODER} detectedCoders={DETECTED} catalog={CATALOG} hideTest />
+    </QueryClientProvider>,
+  );
+  expect(screen.queryByRole("button", { name: /^test$/i })).not.toBeInTheDocument();
+});
+
+test("showApiKeyInput renders an API key field (api engine only) and includes it in the save payload", async () => {
+  const calls = mockFetch();
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={qc}>
+      <CoderSection
+        coder={{ kind: "api", bin: "", timeout_s: 120, provider: "openrouter", model: "glm-5.2", base_url: "", api_key_secret: "" }}
+        detectedCoders={DETECTED}
+        catalog={CATALOG}
+        showApiKeyInput
+      />
+    </QueryClientProvider>,
+  );
+
+  await waitFor(() => expect(screen.getByLabelText(/api key/i)).toBeInTheDocument());
+
+  const user = userEvent.setup();
+  await user.type(screen.getByLabelText(/api key/i), "sk-or-secret");
+  await user.click(screen.getByRole("button", { name: /save coder/i }));
+
+  await waitFor(() => {
+    const putCall = calls.find((c) => c.url === "/api/v1/settings/coder" && c.method === "PUT");
+    expect(putCall).toBeDefined();
+  });
+  const putCall = calls.find((c) => c.url === "/api/v1/settings/coder" && c.method === "PUT")!;
+  expect((putCall.body as { api_key: string }).api_key).toBe("sk-or-secret");
+});
+
+test("saveOverride: Save posts through the override mutation instead of /api/v1/settings/coder", async () => {
+  mockFetch();
+  const posted: unknown[] = [];
+  function Wrapper() {
+    const override = useMutation({
+      mutationFn: async (input: SaveCoderInput) => {
+        posted.push(input);
+        return { ok: true, next_step: 4 };
+      },
+    });
+    return (
+      <CoderSection
+        coder={LOCAL_CODER}
+        detectedCoders={DETECTED}
+        catalog={CATALOG}
+        saveOverride={override}
+        hideTest
+      />
+    );
+  }
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={qc}>
+      <Wrapper />
+    </QueryClientProvider>,
+  );
+
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: /save coder/i }));
+
+  await waitFor(() => expect(posted).toHaveLength(1));
+  expect(posted[0]).toEqual({
+    kind: "local",
+    bin: "/usr/bin/claude",
+    timeout_s: 120,
+    provider: "",
+    model: "",
+    base_url: "",
+    api_key: "",
+  });
 });

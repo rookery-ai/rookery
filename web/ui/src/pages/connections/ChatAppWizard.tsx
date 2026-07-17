@@ -4,8 +4,6 @@ import { AlertTriangle, Check, Loader2 } from "lucide-react";
 import { useSlideOver } from "@/components/shell/AppShell";
 import { PanelBody } from "@/components/shell/PanelBody";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { Linkify } from "@/lib/linkify";
@@ -15,6 +13,7 @@ import {
   useDeleteConnector,
   type ConnectorPlatform,
 } from "@/lib/connections";
+import { ConnectorCredentialsFields } from "./ConnectorCredentialsFields";
 
 type ChatAppWizardProps = { platform: ConnectorPlatform };
 
@@ -176,18 +175,11 @@ function ConnectWizard({ platform }: { platform: ConnectorPlatform }) {
 
       {step === "credentials" && (
         <div className="space-y-3">
-          {platform.fields.map((f) => (
-            <div key={f.name} className="space-y-1">
-              <Label htmlFor={`field-${f.name}`}>{f.label}</Label>
-              <Input
-                id={`field-${f.name}`}
-                type={f.secret ? "password" : "text"}
-                value={values[f.name] ?? ""}
-                onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
-                autoComplete="off"
-              />
-            </div>
-          ))}
+          <ConnectorCredentialsFields
+            fields={platform.fields}
+            values={values}
+            onChange={(name, value) => setValues((v) => ({ ...v, [name]: value }))}
+          />
           {saveError && <ErrorNote>{saveError}</ErrorNote>}
           <div className="flex justify-between">
             <Button variant="outline" onClick={() => setStep("setup")}>
