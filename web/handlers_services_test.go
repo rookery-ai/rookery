@@ -46,7 +46,7 @@ func doForm(t *testing.T, s *Server, path string, form url.Values, cookies []*ht
 // The services template dashboard handlers (web/handlers_services.go) used to
 // redirect back to the server-rendered "/dashboard/connectors/services" page
 // on every outcome. The SPA replaces that page, so every redirect — success
-// and error alike — now lands on "/app/connections" (the old template page
+// and error alike — now lands on "/connections" (the old template page
 // itself stays reachable directly via GET, only the POST-handler redirect
 // targets changed). See task-5 brief.
 
@@ -63,8 +63,8 @@ func TestServicesRedirect_SaveCreds_MissingFields_GoesToApp(t *testing.T) {
 		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
 	}
 	loc := rec.Header().Get("Location")
-	if !strings.HasPrefix(loc, "/app/connections?error=") {
-		t.Fatalf("expected redirect to /app/connections?error=..., got %q", loc)
+	if !strings.HasPrefix(loc, "/connections?error=") {
+		t.Fatalf("expected redirect to /connections?error=..., got %q", loc)
 	}
 }
 
@@ -82,8 +82,8 @@ func TestServicesRedirect_SaveCreds_Success_GoesToApp(t *testing.T) {
 		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
 	}
 	loc := rec.Header().Get("Location")
-	if loc != "/app/connections" {
-		t.Fatalf("expected redirect to /app/connections, got %q", loc)
+	if loc != "/connections" {
+		t.Fatalf("expected redirect to /connections, got %q", loc)
 	}
 }
 
@@ -100,8 +100,8 @@ func TestServicesRedirect_ConnectAPIKey_UnknownProvider_GoesToApp(t *testing.T) 
 		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
 	}
 	loc := rec.Header().Get("Location")
-	if !strings.HasPrefix(loc, "/app/connections?error=") {
-		t.Fatalf("expected redirect to /app/connections?error=..., got %q", loc)
+	if !strings.HasPrefix(loc, "/connections?error=") {
+		t.Fatalf("expected redirect to /connections?error=..., got %q", loc)
 	}
 }
 
@@ -118,8 +118,8 @@ func TestServicesRedirect_ConnectAPIKey_Success_GoesToApp(t *testing.T) {
 		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
 	}
 	loc := rec.Header().Get("Location")
-	if loc != "/app/connections" {
-		t.Fatalf("expected redirect to /app/connections, got %q", loc)
+	if loc != "/connections" {
+		t.Fatalf("expected redirect to /connections, got %q", loc)
 	}
 }
 
@@ -134,8 +134,8 @@ func TestServicesRedirect_DeleteConnection_NotFound_GoesToApp(t *testing.T) {
 		t.Fatalf("expected 303, got %d: %s", rec.Code, rec.Body.String())
 	}
 	loc := rec.Header().Get("Location")
-	if !strings.HasPrefix(loc, "/app/connections?error=") {
-		t.Fatalf("expected redirect to /app/connections?error=..., got %q", loc)
+	if !strings.HasPrefix(loc, "/connections?error=") {
+		t.Fatalf("expected redirect to /connections?error=..., got %q", loc)
 	}
 }
 
@@ -160,7 +160,7 @@ func TestServicesRedirect_OAuthCallback_ErrorPath_GoesToApp(t *testing.T) {
 		t.Fatalf("expected 303, got %d: %s", rec2.Code, rec2.Body.String())
 	}
 	loc := rec2.Header().Get("Location")
-	if !strings.HasPrefix(loc, "/app/connections?error=") {
-		t.Fatalf("expected redirect to /app/connections?error=..., got %q", loc)
+	if !strings.HasPrefix(loc, "/connections?error=") {
+		t.Fatalf("expected redirect to /connections?error=..., got %q", loc)
 	}
 }

@@ -36,7 +36,7 @@ export default function WorkspaceMenu() {
     api
       .post(`/api/v1/workspaces/${w.id}/enter`, {})
       .then(() => {
-        window.location.href = "/app/workspaces?setup=" + w.id;
+        window.location.href = "/workspaces?setup=" + w.id;
       })
       .catch((err) => {
         setSwitchError(err instanceof ApiError ? err.message : "Something went wrong");

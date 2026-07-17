@@ -180,23 +180,23 @@ func (s *Server) handleSaveProviderCreds(c echo.Context) error {
 	clientID := strings.TrimSpace(c.FormValue("client_id"))
 	clientSecret := strings.TrimSpace(c.FormValue("client_secret"))
 	if clientID == "" || clientSecret == "" {
-		return s.redirectWithError(c, "/app/connections", "Client ID and secret are required.")
+		return s.redirectWithError(c, "/connections", "Client ID and secret are required.")
 	}
 	encID, err := secrets.EncryptWithSystemKey(clientID, s.systemKey)
 	if err != nil {
-		return s.redirectWithError(c, "/app/connections", "Failed to store credentials.")
+		return s.redirectWithError(c, "/connections", "Failed to store credentials.")
 	}
 	encSec, err := secrets.EncryptWithSystemKey(clientSecret, s.systemKey)
 	if err != nil {
-		return s.redirectWithError(c, "/app/connections", "Failed to store credentials.")
+		return s.redirectWithError(c, "/connections", "Failed to store credentials.")
 	}
 	if err := s.db.UpsertServiceProviderConfig(c.Request().Context(), db.ServiceProviderConfig{
 		ID: uuid.New().String(), WorkspaceID: w.ID, Provider: provider,
 		EncryptedClientID: encID, EncryptedClientSecret: encSec,
 	}); err != nil {
-		return s.redirectWithError(c, "/app/connections", "Failed to save credentials.")
+		return s.redirectWithError(c, "/connections", "Failed to save credentials.")
 	}
-	return c.Redirect(http.StatusSeeOther, "/app/connections")
+	return c.Redirect(http.StatusSeeOther, "/connections")
 }
 
 // consentURLError classifies a failure building an OAuth consent URL so both
@@ -246,7 +246,7 @@ func (s *Server) handleConnectService(c echo.Context) error {
 	}
 	url, err := s.buildConsentURL(c, w, provider, label)
 	if err != nil {
-		return s.redirectWithError(c, "/app/connections", err.Error())
+		return s.redirectWithError(c, "/connections", err.Error())
 	}
 	return c.Redirect(http.StatusSeeOther, url)
 }
@@ -308,11 +308,11 @@ func (s *Server) handleConnectAPIKey(c echo.Context) error {
 	provider := c.Param("provider")
 	prov, ok := s.connectors.ProviderByName(provider)
 	if !ok || !prov.IsAPIKey() {
-		return s.redirectWithError(c, "/app/connections", "Unknown or non-API-key provider.")
+		return s.redirectWithError(c, "/connections", "Unknown or non-API-key provider.")
 	}
 	apiKey := strings.TrimSpace(c.FormValue("api_key"))
 	if apiKey == "" {
-		return s.redirectWithError(c, "/app/connections", "API key is required.")
+		return s.redirectWithError(c, "/connections", "API key is required.")
 	}
 	label := strings.TrimSpace(c.FormValue("account_label"))
 
@@ -323,12 +323,12 @@ func (s *Server) handleConnectAPIKey(c echo.Context) error {
 
 	_, userErrMsg, err := s.connectAPIKeyCore(c.Request().Context(), w, prov, provider, apiKey, label, inputs)
 	if userErrMsg != "" {
-		return s.redirectWithError(c, "/app/connections", userErrMsg)
+		return s.redirectWithError(c, "/connections", userErrMsg)
 	}
 	if err != nil {
-		return s.redirectWithError(c, "/app/connections", err.Error())
+		return s.redirectWithError(c, "/connections", err.Error())
 	}
-	return c.Redirect(http.StatusSeeOther, "/app/connections")
+	return c.Redirect(http.StatusSeeOther, "/connections")
 }
 
 func (s *Server) handleOAuthCallback(c echo.Context) error {
@@ -337,33 +337,33 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 	ctx := c.Request().Context()
 
 	if errParam := c.QueryParam("error"); errParam != "" {
-		return s.redirectWithError(c, "/app/connections", "Authorization was denied: "+errParam)
+		return s.redirectWithError(c, "/connections", "Authorization was denied: "+errParam)
 	}
 	code := c.QueryParam("code")
 	payload, ok := verifyState(s.systemKey, c.QueryParam("state"), time.Now())
 	if !ok || code == "" {
-		return s.redirectWithError(c, "/app/connections", "Invalid or expired authorization request; try again.")
+		return s.redirectWithError(c, "/connections", "Invalid or expired authorization request; try again.")
 	}
 	parts := strings.Split(payload, "~")
 	if len(parts) != 4 || parts[0] != w.ID || parts[1] != provider {
-		return s.redirectWithError(c, "/app/connections", "Authorization did not match this workspace; try again.")
+		return s.redirectWithError(c, "/connections", "Authorization did not match this workspace; try again.")
 	}
 	label := parts[2]
 
 	prov, ok := s.connectors.ProviderByName(provider)
 	if !ok {
-		return s.redirectWithError(c, "/app/connections", "Unknown provider.")
+		return s.redirectWithError(c, "/connections", "Unknown provider.")
 	}
 	// authProv is the OAuth parent when this provider is aliased (e.g. google_drive → google),
 	// else the provider itself. It governs endpoints, token settings, and the app-credentials
 	// lookup key; `prov` (the child) still governs scopes/post_connect/expiry below.
 	authProv, ok := s.connectors.OAuthProvider(provider)
 	if !ok {
-		return s.redirectWithError(c, "/app/connections", "Unknown provider.")
+		return s.redirectWithError(c, "/connections", "Unknown provider.")
 	}
 	cfg, _ := s.db.GetServiceProviderConfig(ctx, w.ID, authProv.Name)
 	if cfg == nil {
-		return s.redirectWithError(c, "/app/connections", "Missing OAuth app credentials.")
+		return s.redirectWithError(c, "/connections", "Missing OAuth app credentials.")
 	}
 	clientID, _ := secrets.DecryptWithSystemKey(cfg.EncryptedClientID, s.systemKey)
 	clientSecret, _ := secrets.DecryptWithSystemKey(cfg.EncryptedClientSecret, s.systemKey)
@@ -371,7 +371,7 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 	oauth := connectors.OAuthClient{}
 	ts, err := oauth.ExchangeCode(ctx, authProv, clientID, clientSecret, code, s.callbackURL(c, provider))
 	if err != nil {
-		return s.redirectWithError(c, "/app/connections", "Token exchange failed: "+err.Error())
+		return s.redirectWithError(c, "/connections", "Token exchange failed: "+err.Error())
 	}
 	identity, _ := oauth.FetchIdentity(ctx, authProv, ts.AccessToken)
 
@@ -380,7 +380,7 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 	extraMap := map[string]string{}
 	if prov.PostConnect != "" {
 		if vals, perr := connectors.RunPostConnect(ctx, prov.PostConnect, nil, ts.AccessToken); perr != nil {
-			return s.redirectWithError(c, "/app/connections", "Connected, but setup failed: "+perr.Error())
+			return s.redirectWithError(c, "/connections", "Connected, but setup failed: "+perr.Error())
 		} else {
 			for k, v := range vals {
 				extraMap[k] = v
@@ -415,9 +415,9 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 		// A duplicate label is no longer a plausible cause here — InsertServiceConnection
 		// upserts on (workspace_id, provider, account_label), so reconnecting under the
 		// same label refreshes the existing connection instead of erroring.
-		return s.redirectWithError(c, "/app/connections", "Connected, but saving failed: "+err.Error())
+		return s.redirectWithError(c, "/connections", "Connected, but saving failed: "+err.Error())
 	}
-	return c.Redirect(http.StatusSeeOther, "/app/connections?connected="+url.QueryEscape(provider))
+	return c.Redirect(http.StatusSeeOther, "/connections?connected="+url.QueryEscape(provider))
 }
 
 func (s *Server) handleDeleteServiceConnection(c echo.Context) error {
@@ -427,10 +427,10 @@ func (s *Server) handleDeleteServiceConnection(c echo.Context) error {
 	// Ownership check: the connection must belong to the active workspace.
 	conn, err := s.db.GetServiceConnection(ctx, id)
 	if err != nil || conn == nil || conn.WorkspaceID != w.ID {
-		return s.redirectWithError(c, "/app/connections", "Connection not found.")
+		return s.redirectWithError(c, "/connections", "Connection not found.")
 	}
 	if err := s.db.DeleteServiceConnection(ctx, id); err != nil {
-		return s.redirectWithError(c, "/app/connections", "Failed to delete connection.")
+		return s.redirectWithError(c, "/connections", "Failed to delete connection.")
 	}
-	return c.Redirect(http.StatusSeeOther, "/app/connections")
+	return c.Redirect(http.StatusSeeOther, "/connections")
 }

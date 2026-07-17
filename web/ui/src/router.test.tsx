@@ -30,7 +30,7 @@ test("redirects an authenticated needs_setup workspace to the setup wizard", asy
       );
     }),
   );
-  window.history.pushState({}, "", "/app/");
+  window.history.pushState({}, "", "/");
   const { default: App } = await import("./App");
   render(<App />);
   expect(await screen.findByRole("heading", { name: /workspace basics/i })).toBeInTheDocument();
@@ -61,7 +61,7 @@ test("a must_change_password owner is redirected to /change-password even for a 
       ),
     ),
   );
-  window.history.pushState({}, "", "/app/setup");
+  window.history.pushState({}, "", "/setup");
   const { default: App } = await import("./App");
   render(<App />);
   expect(await screen.findByRole("heading", { name: /change password/i })).toBeInTheDocument();
@@ -108,7 +108,7 @@ test("navigating to /kb shows the Suspense fallback, then resolves to the KB pag
     }),
   );
 
-  window.history.pushState({}, "", "/app/kb");
+  window.history.pushState({}, "", "/kb");
   const { default: App } = await import("./App");
   render(<App />);
 

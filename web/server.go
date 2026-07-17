@@ -244,8 +244,8 @@ func (s *Server) setupRoutes() {
 	}
 	s.echo.Static("/static", staticDir)
 
-	// Public routes
-	s.echo.GET("/", s.redirectRoot)
+	// Public routes. Root (/) is served by the SPA catch-all registered last in
+	// setupSPARoutes — it is no longer a template redirect.
 	s.echo.GET("/login", s.showLogin)
 	s.echo.POST("/login", s.handleLogin)
 	s.echo.GET("/logout", s.handleLogout)
@@ -474,13 +474,6 @@ func (s *Server) requireSetupComplete(next echo.HandlerFunc) echo.HandlerFunc {
 }
 
 // ── Utility ────────────────────────────────────────────────────────────────
-
-func (s *Server) redirectRoot(c echo.Context) error {
-	if _, ok := s.currentOwner(c); ok {
-		return c.Redirect(http.StatusFound, "/admin")
-	}
-	return c.Redirect(http.StatusFound, "/login")
-}
 
 // coderForWorkspace returns a Coder configured from the workspace's inlined coder
 // settings, falling back to the system defaults when unset.

@@ -10,13 +10,39 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// setupSPARoutes mounts the embedded SPA at /app. Until sub-plan 6 removes the
-// template UI, /app is the only SPA mount point; the cutover to / happens there.
+// setupSPARoutes mounts the embedded SPA at the site root. The catch-all
+// GET /* is registered LAST (after every API, static, callback, and template
+// route) so it only handles genuinely-unmatched paths — Echo gives explicit
+// routes precedence over the /* param route. The legacy /app and /app/* paths
+// 301-redirect to their /app-stripped equivalents (the SPA moved from /app to
+// /), preserving the query string.
 func (s *Server) setupSPARoutes() {
 	distFS, ok := ui.DistFS()
 	h := s.spaHandler(distFS, ok)
-	s.echo.GET("/app", h)
-	s.echo.GET("/app/*", h)
+	s.echo.GET("/app", redirectAppPath)
+	s.echo.GET("/app/*", redirectAppPath)
+	// Echo's /* param route does not match the bare root path "/", so register
+	// the exact root explicitly; the catch-all handles every deeper path.
+	s.echo.GET("/", h)
+	s.echo.GET("/*", h)
+}
+
+// redirectAppPath 301-redirects a legacy /app or /app/* request to the same
+// path with the /app prefix stripped, preserving the raw query string. It is a
+// pure path rewrite and fires regardless of whether the UI is built.
+//
+//	/app            → /
+//	/app/kb         → /kb
+//	/app/kb?path=z  → /kb?path=z
+func redirectAppPath(c echo.Context) error {
+	target := strings.TrimPrefix(c.Request().URL.Path, "/app")
+	if target == "" {
+		target = "/"
+	}
+	if q := c.Request().URL.RawQuery; q != "" {
+		target += "?" + q
+	}
+	return c.Redirect(http.StatusMovedPermanently, target)
 }
 
 // spaHandler serves real files from the embedded dist and falls back to
@@ -27,8 +53,7 @@ func (s *Server) spaHandler(distFS fs.FS, ok bool) echo.HandlerFunc {
 		if !ok {
 			return c.String(http.StatusServiceUnavailable, "UI not built — run `make ui`, then rebuild the binary")
 		}
-		p := strings.TrimPrefix(c.Request().URL.Path, "/app")
-		p = strings.TrimPrefix(p, "/")
+		p := strings.TrimPrefix(c.Request().URL.Path, "/")
 		if p != "" {
 			if st, err := fs.Stat(distFS, p); err == nil && !st.IsDir() {
 				return serveFile(c, p, distFS)
