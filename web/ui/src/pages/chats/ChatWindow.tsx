@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
-import { useChatDetail, useChatAction, sendChatMessage, type ChatMessage } from "@/lib/chats";
+import { useChatDetail, useChatAction, sendChatMessage, type Chat, type ChatMessage } from "@/lib/chats";
 import { ChatScroll } from "@/components/chat/ChatScroll";
 import { ChatMessageBubble, TypingIndicator } from "@/components/chat/Bubbles";
 import { Composer } from "@/components/chat/Composer";
@@ -33,8 +33,8 @@ export function ChatWindow({ chatId }: { chatId: string }) {
   const qc = useQueryClient();
   const action = useChatAction();
   // Optimistic-append pattern: pending holds messages not yet reflected in
-  // the query cache. Merged after the fetched history on render, cleared
-  // once invalidateQueries confirms the server has them (its promise
+  // the query cache. Merged after the fetched history on render, filtered
+  // out once invalidateQueries confirms the server has them (its promise
   // resolves after the refetch completes for an active query).
   const [pending, setPending] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
@@ -49,7 +49,18 @@ export function ChatWindow({ chatId }: { chatId: string }) {
       const response = await sendChatMessage(chatId, text);
       setPending((p) => [...p, { role: "assistant", content: response }]);
       await qc.invalidateQueries({ queryKey: ["chat", chatId] });
-      setPending([]);
+      // Also refresh the session list so its updated_at/ordering doesn't go
+      // stale after a send (list is a separate query keyed by ["chats"]).
+      qc.invalidateQueries({ queryKey: ["chats"] });
+      // Dedupe rather than blindly clear: filter out pending entries that
+      // already appear in the freshly-fetched history (matched by
+      // {role, content}) instead of setPending([]) unconditionally — closes
+      // a transient window where a blind clear could drop a message that
+      // hadn't actually landed in the cache yet.
+      const fresh = qc.getQueryData<{ chat: Chat; messages: ChatMessage[] }>(["chat", chatId]);
+      setPending((p) =>
+        p.filter((m) => !fresh?.messages.some((fm) => fm.role === m.role && fm.content === m.content)),
+      );
     } catch (err) {
       // The user bubble already pushed above stays visible — the failure
       // is on the assistant's turn, not the user's message.

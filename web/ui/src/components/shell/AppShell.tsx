@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { Outlet } from "react-router";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { GlobalChatButton } from "@/components/chat/GlobalChatButton";
 import IconRail from "./IconRail";
 
 type SlideOverState = { node: React.ReactNode; title?: string } | null;
@@ -62,12 +63,17 @@ export function AppShell() {
           <main className="flex-1 min-w-0 overflow-y-auto pb-16 md:pb-0">
             <Outlet />
           </main>
+          <GlobalChatButton />
           <Sheet open={panel !== null} onOpenChange={(o) => !o && setPanel(null)}>
-            <SheetContent side="right" className="w-full sm:max-w-md p-0 flex flex-col">
+            {/* gap-0 + no padding on the content well: panel content owns its
+                own inner padding (see ChatWindow's "container-agnostic"
+                note) — a shell-level p-4/gap-4 would double up chrome for
+                any full-height embed like the global chat panel. */}
+            <SheetContent side="right" className="w-full sm:max-w-md p-0 gap-0 flex flex-col">
               <SheetHeader className="border-b border-border px-4 py-3">
                 <SheetTitle className="text-sm font-bold">{panel?.title ?? ""}</SheetTitle>
               </SheetHeader>
-              <div className="flex-1 overflow-y-auto p-4">{panel?.node}</div>
+              <div className="flex-1 min-h-0 overflow-y-auto">{panel?.node}</div>
             </SheetContent>
           </Sheet>
         </div>

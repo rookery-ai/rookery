@@ -163,6 +163,10 @@ test("send round-trip: optimistic user bubble appears immediately, assistant bub
   wrap("/?chat=c1");
   await screen.findByText("hi");
 
+  const chatsCallsBefore = vi.mocked(fetch).mock.calls.filter(
+    (c) => String(c[0]) === "/api/v1/chats" && (c[1] as RequestInit | undefined)?.method === "GET",
+  ).length;
+
   const box = screen.getByRole("textbox");
   await userEvent.type(box, "what's up");
   fireEvent.keyDown(box, { key: "Enter", code: "Enter" });
@@ -172,6 +176,21 @@ test("send round-trip: optimistic user bubble appears immediately, assistant bub
 
   // Composer re-enabled once the round trip settles.
   await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled());
+
+  // The pending bubbles are deduped against the freshly-fetched history
+  // rather than blindly cleared — still exactly one of each after settling.
+  expect(screen.getAllByText("what's up")).toHaveLength(1);
+  expect(screen.getAllByText("echo: what's up")).toHaveLength(1);
+
+  // A send also invalidates the ["chats"] list query so the session list's
+  // timestamp/order refreshes (the list is mounted alongside ChatWindow via
+  // ChatsPage's ContextPane in this harness).
+  await waitFor(() => {
+    const chatsCallsAfter = vi.mocked(fetch).mock.calls.filter(
+      (c) => String(c[0]) === "/api/v1/chats" && (c[1] as RequestInit | undefined)?.method === "GET",
+    ).length;
+    expect(chatsCallsAfter).toBeGreaterThan(chatsCallsBefore);
+  });
 });
 
 test("a 200-with-error response shows an inline banner, keeps the user bubble, and re-enables the composer", async () => {
