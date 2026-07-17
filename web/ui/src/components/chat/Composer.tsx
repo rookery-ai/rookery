@@ -33,8 +33,18 @@ export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, in
 
   useEffect(() => {
     if (initialText === undefined) return;
-    setValue(initialText);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Only seed an EMPTY composer. GlobalChatPanel isn't remounted when the
+    // slide-over's content is swapped for another <GlobalChatPanel
+    // initialText=.../> (AppShell re-renders the same node in place, same
+    // component type, new props) — so re-invoking the ⌘K palette's "Ask
+    // assistant" with a different query while a draft is already sitting in
+    // the composer must never clobber it. A functional update (reading
+    // `current` from React, not the closed-over `value`) keeps this correct
+    // without needing `value` in the dependency array — depending on `value`
+    // directly would re-run (and re-check) on every keystroke, which is
+    // unnecessary since only a change to `initialText` itself should ever
+    // trigger a seed attempt.
+    setValue((current) => (current.trim() === "" ? initialText : current));
   }, [initialText]);
 
   useEffect(() => {

@@ -250,3 +250,36 @@ test("'Ask assistant' only appears once the query is non-empty, and opens the ch
   const composer = await screen.findByPlaceholderText(/message/i);
   await waitFor(() => expect((composer as HTMLTextAreaElement).value).toBe("trip"));
 });
+
+test("'Ask assistant' with a new query does NOT clobber an in-progress draft in an already-open chat panel", async () => {
+  // GlobalChatPanel is NOT remounted when the slide-over's content is
+  // swapped for another <GlobalChatPanel initialText=.../> — AppShell just
+  // re-renders panel.node in place, same component type, new props. If the
+  // Composer's initialText effect unconditionally overwrote `value`, a
+  // second "Ask assistant" invocation while the chat panel is already open
+  // would silently wipe out whatever the user had been typing.
+  mockFetch();
+  const user = userEvent.setup();
+  wrap();
+
+  // Open the chat panel the normal way (floating button's Ctrl+J) and type
+  // a draft that was never sent.
+  fireEvent.keyDown(window, { key: "j", ctrlKey: true });
+  const composer = await screen.findByPlaceholderText(/message/i);
+  await user.type(composer, "my unsent draft");
+  expect((composer as HTMLTextAreaElement).value).toBe("my unsent draft");
+
+  // Now invoke the palette's "Ask assistant" with a DIFFERENT query while
+  // that draft is still sitting in the composer.
+  fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+  const paletteInput = await screen.findByPlaceholderText(/search or run a command/i);
+  await user.type(paletteInput, "differentquery");
+  const askItem = await screen.findByText("Ask assistant about 'differentquery'");
+  await user.click(askItem);
+
+  // The chat panel is still showing the same chat (proving no remount)...
+  expect(await screen.findByRole("heading", { name: "Chat One" })).toBeInTheDocument();
+  // ...and the draft must have survived, not been replaced by the new query.
+  const composerAfter = await screen.findByPlaceholderText(/message/i);
+  await waitFor(() => expect((composerAfter as HTMLTextAreaElement).value).toBe("my unsent draft"));
+});

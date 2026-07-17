@@ -79,3 +79,29 @@ test("Composer: Enter during IME composition does not send", async () => {
   fireEvent.keyDown(box, { key: "Enter", code: "Enter", isComposing: true });
   expect(onSend).not.toHaveBeenCalled();
 });
+
+test("Composer: initialText seeds an empty composer", () => {
+  const onSend = vi.fn();
+  render(<Composer onSend={onSend} initialText="hello from search" />);
+  expect(screen.getByRole("textbox")).toHaveValue("hello from search");
+});
+
+// Reproduces the CommandPalette "Ask assistant" draft-clobber bug: the
+// composer is NOT remounted when its parent (GlobalChatPanel) re-renders
+// with a new `initialText` prop (React reconciles the same component type
+// in the same position) — rerender() here is the faithful way to exercise
+// that same-instance prop update, as opposed to render() which would mount
+// a fresh instance every time.
+test("Composer: a new initialText does NOT clobber an in-progress draft", async () => {
+  const onSend = vi.fn();
+  const { rerender } = render(<Composer onSend={onSend} initialText="first query" />);
+  const box = screen.getByRole("textbox");
+  expect(box).toHaveValue("first query");
+
+  await userEvent.clear(box);
+  await userEvent.type(box, "my unsent draft");
+  expect(box).toHaveValue("my unsent draft");
+
+  rerender(<Composer onSend={onSend} initialText="second query" />);
+  expect(box).toHaveValue("my unsent draft");
+});

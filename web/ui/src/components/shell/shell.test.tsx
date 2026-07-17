@@ -82,18 +82,25 @@ test("ContextPane mounts content into the shell and clears it on unmount", async
   expect(screen.queryByText("PANE")).not.toBeInTheDocument();
 });
 
-test("Home rail icon shows an unread badge with the poll count", async () => {
+// The badge itself must NOT carry its own aria-label: a nested element's
+// aria-label is ignored by the accessible-name algorithm once an ancestor
+// (the NavLink) already has an explicit aria-label — so the unread count
+// has to be folded into the LINK's own label, not the badge's.
+test("Home rail icon shows an unread badge with the poll count in the link's accessible name", async () => {
   wrap(<Page />, 3);
-  expect(await screen.findByLabelText("3 unread")).toHaveTextContent("3");
+  const link = await screen.findByLabelText("Home (3 unread)");
+  expect(link).toHaveTextContent("3");
 });
 
-test("Home rail icon shows no badge when the poll count is 0", async () => {
+test("Home rail icon shows no badge when the poll count is 0, and the accessible name has no unread suffix", async () => {
   wrap(<Page />, 0);
-  await screen.findByLabelText(/agents/i); // wait for the rail to settle
+  const link = await screen.findByLabelText("Home");
+  expect(link.textContent).not.toMatch(/unread/i);
   expect(screen.queryByLabelText(/unread/i)).not.toBeInTheDocument();
 });
 
-test("Home rail icon caps the badge label at '9+' for large counts", async () => {
+test("Home rail icon caps the visible badge label at '9+' but states the real count in the accessible name", async () => {
   wrap(<Page />, 42);
-  expect(await screen.findByLabelText("42 unread")).toHaveTextContent("9+");
+  const link = await screen.findByLabelText("Home (42 unread)");
+  expect(link).toHaveTextContent("9+");
 });
