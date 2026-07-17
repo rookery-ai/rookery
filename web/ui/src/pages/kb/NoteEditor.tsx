@@ -74,7 +74,7 @@ export default function NoteEditor({
   path: string;
   onStateChange?: (state: SaveState) => void;
 }) {
-  const { data, isLoading, isError } = useKBNote(path);
+  const { data, isLoading, isError, error } = useKBNote(path);
   const saveNote = useSaveNote();
   const renameNote = useRenameNote();
   const deleteNote = useDeleteNote();
@@ -99,6 +99,10 @@ export default function NoteEditor({
   // review: the header's own delete disarms correctly, but a tree-delete of
   // the currently-open note bypassed that machinery entirely).
   const [vanished, setVanished] = useState(false);
+  // Whatever unsaved text existed at the moment we disarmed — shown
+  // read-only in the vanished notice so it isn't just silently dropped
+  // (delta-review nicety).
+  const [vanishedContent, setVanishedContent] = useState<string | null>(null);
 
   const initializedRef = useRef(false);
   const dirtyRef = useRef(false);
@@ -156,24 +160,31 @@ export default function NoteEditor({
   }, [data]);
 
   // The note loaded successfully once (initializedRef true) and the query
-  // has now transitioned to error — it didn't fail to load, it disappeared
-  // out from under an already-open editor (e.g. deleted via its FileTree
-  // row). Disarm exactly like our own delete's onSuccess would: cancel any
-  // pending debounce, discard the (possibly stuck-dirty-from-an-earlier
-  // failed-autosave) edit, and suppress the unmount-flush — there is no
-  // path left to PUT to. A first-load failure (initializedRef still false)
-  // is unaffected and keeps showing the plain "Couldn't load this note."
+  // has now transitioned to error — but ONLY a 404 means it actually
+  // disappeared (e.g. deleted via its FileTree row); any other error is a
+  // TRANSIENT failure (a server restart mid-edit, a network blip — the note
+  // query refetches after every successful autosave too, since the save
+  // mutation invalidates it). Delta review: gating on bare `isError`
+  // falsely fired "deleted elsewhere" on a transient error AND discarded
+  // the edit — worse than doing nothing, since pre-fix a transient error at
+  // least left dirtyRef/the debounce timer untouched for the unmount-flush
+  // to eventually pick up. A first-load failure (initializedRef still
+  // false) is unaffected either way and keeps showing the plain "Couldn't
+  // load this note."
   useEffect(() => {
     if (!isError || !initializedRef.current || vanished) return;
+    const isNotFound = error instanceof ApiError && error.status === 404;
+    if (!isNotFound) return;
     if (timerRef.current !== undefined) {
       window.clearTimeout(timerRef.current);
       timerRef.current = undefined;
     }
+    if (dirtyRef.current) setVanishedContent(getContentRef.current());
     dirtyRef.current = false;
     intentionallyInvalidatedRef.current = true;
     setVanished(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isError]);
+  }, [isError, error]);
 
   const report = useCallback(
     (s: SaveState) => {
@@ -487,8 +498,13 @@ export default function NoteEditor({
 
   if (vanished) {
     return (
-      <div className="flex h-full items-center justify-center p-8 text-sm text-muted-2">
-        This note was deleted elsewhere.
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-sm text-muted-2">
+        <p>This note was deleted elsewhere.</p>
+        {vanishedContent && (
+          <pre className="max-h-64 w-full max-w-2xl overflow-auto rounded border border-border bg-chrome p-3 text-left text-xs whitespace-pre-wrap text-foreground">
+            {vanishedContent}
+          </pre>
+        )}
       </div>
     );
   }

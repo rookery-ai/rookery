@@ -429,6 +429,61 @@ test("the open note vanishing elsewhere (tree-delete) disarms dirty/suppression 
   expect(calls.filter((c) => c.method === "PUT")).toHaveLength(0);
 }, 10000);
 
+// Delta review: gating the disarm on bare `isError` (rather than
+// specifically a 404) meant a TRANSIENT refetch failure — e.g. `make
+// deploy` restarting the server mid-edit, which the operator's daily loop
+// hits routinely — falsely showed "deleted elsewhere" AND discarded the
+// dirty edit. A non-404 error must leave dirtyRef/the debounce machinery
+// untouched, exactly as it did before the vanish fix existed.
+test("a transient (non-404) refetch error does NOT disarm the editor — the dirty edit survives and a later flush still PUTs it", async () => {
+  let noteShouldFail = false;
+  const putBodies: string[] = [];
+  const calls: Array<{ method: string; url: string }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ method, url });
+      if (method === "PUT") {
+        putBodies.push(JSON.parse(String(init?.body)).content);
+        return Promise.resolve(jsonResponse({ ok: true }));
+      }
+      if (url.startsWith("/api/v1/kb/note")) {
+        if (noteShouldFail) return Promise.resolve(errorResponse(500, "server restarting"));
+        return Promise.resolve(jsonResponse(TRIP_NOTE_FIXTURE));
+      }
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  renderAtPath("notes/trip plan.md", qc);
+
+  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  const user = userEvent.setup();
+  await user.click(textarea);
+  await user.type(textarea, "extra");
+
+  // A transient server hiccup — the note refetches (a successful autosave
+  // would also trigger this, via its own query invalidation) and gets a
+  // 500, NOT a 404.
+  noteShouldFail = true;
+  await qc.refetchQueries({ queryKey: ["kb-note", "notes/trip plan.md"] });
+  await waitFor(() =>
+    expect(qc.getQueryState(["kb-note", "notes/trip plan.md"])?.status).toBe("error"),
+  );
+
+  expect(screen.queryByText(/deleted elsewhere/i)).not.toBeInTheDocument();
+
+  // The server recovers — Ctrl+S must still issue a PUT with the edit
+  // intact, proving dirtyRef/the debounce machinery were never disarmed.
+  noteShouldFail = false;
+  fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+  await waitFor(() => expect(putBodies).toHaveLength(1));
+  expect(putBodies[0]).toContain("extra");
+});
+
 // SP3 final review, item 2: flushForHandoff used to ignore an
 // already-in-flight save (e.g. the natural debounce, or a Ctrl+S the user
 // fired moments before renaming). It would fire a SECOND concurrent PUT,
