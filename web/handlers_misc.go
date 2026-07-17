@@ -627,9 +627,9 @@ const msgWrongMasterPassword = "Old master password is incorrect"
 //
 // Also reused by the setup wizard's step-2 handlers (apiSetupMasterPassword /
 // handleSetupMasterPassword) for a Back-then-resubmit-with-a-different-
-// password re-post — which is why this persists via UpdateWorkspaceMasterPassword
-// rather than UpdateWorkspaceSetup: the latter also flips needs_setup to 0,
-// which would be premature and wrong mid-wizard (setup only completes at the
+// password re-post — which is why this persists via UpdateWorkspaceMasterPassword,
+// which leaves needs_setup untouched, rather than also flipping it to 0: that
+// would be premature and wrong mid-wizard (setup only completes at the
 // wizard's own "finish" step). For the settings-page callers (post-setup,
 // needs_setup already 0) this is behavior-identical — it just no longer
 // re-asserts a flag that's already unset.
