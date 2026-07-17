@@ -6,6 +6,7 @@ import Login from "@/pages/Login";
 import ChangePassword from "@/pages/ChangePassword";
 import Workspaces from "@/pages/Workspaces";
 import KBPage from "@/pages/kb/KBPage";
+import ChatsPage from "@/pages/chats/ChatsPage";
 
 function RequireAuth() {
   const { data: session, isLoading } = useSession();
@@ -35,7 +36,7 @@ export const router = createBrowserRouter(
             { path: "/agents", element: <Placeholder title="Agents" /> },
             { path: "/skills", element: <Placeholder title="Skills" /> },
             { path: "/connections", element: <Placeholder title="Connections" /> },
-            { path: "/chats", element: <Placeholder title="Chats" /> },
+            { path: "/chats", element: <ChatsPage /> },
             { path: "/secrets", element: <Placeholder title="Secrets" /> },
             { path: "/settings", element: <Placeholder title="Settings" /> },
           ],

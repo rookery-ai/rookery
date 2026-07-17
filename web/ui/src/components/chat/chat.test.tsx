@@ -70,3 +70,12 @@ test("Composer: whitespace-only send is a no-op", async () => {
   fireEvent.keyDown(box, { key: "Enter", code: "Enter" });
   expect(onSend).not.toHaveBeenCalled();
 });
+
+test("Composer: Enter during IME composition does not send", async () => {
+  const onSend = vi.fn();
+  render(<Composer onSend={onSend} />);
+  const box = screen.getByRole("textbox");
+  await userEvent.type(box, "hello");
+  fireEvent.keyDown(box, { key: "Enter", code: "Enter", isComposing: true });
+  expect(onSend).not.toHaveBeenCalled();
+});

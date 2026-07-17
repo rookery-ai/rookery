@@ -36,7 +36,9 @@ export function Composer({ onSend, busy, placeholder, autoFocus }: ComposerProps
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // isComposing guards IME composition (e.g. Japanese/Chinese input
+    // methods use Enter to confirm a candidate, not to submit).
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       send();
     }
