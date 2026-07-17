@@ -1,10 +1,18 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Routes, Route } from "react-router";
+import { MemoryRouter, Routes, Route, useSearchParams } from "react-router";
 import { AppShell } from "@/components/shell/AppShell";
 import ConnectionsPage from "./ConnectionsPage";
 import type { ConnectorPlatform, ServiceProvider } from "@/lib/connections";
+
+// MemoryRouter keeps its own in-memory history, decoupled from
+// window.location — so "the params got cleared" has to be observed through
+// react-router's own search-params state, not window.location.search.
+function SearchParamsDebug() {
+  const [params] = useSearchParams();
+  return <div data-testid="search-params-debug">{params.toString()}</div>;
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -109,14 +117,22 @@ function mockFetch() {
   );
 }
 
-function wrap() {
+function wrap(initialPath = "/") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={["/"]}>
+      <MemoryRouter initialEntries={[initialPath]}>
         <Routes>
           <Route element={<AppShell />}>
-            <Route path="/" element={<ConnectionsPage />} />
+            <Route
+              path="/"
+              element={
+                <>
+                  <ConnectionsPage />
+                  <SearchParamsDebug />
+                </>
+              }
+            />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -249,7 +265,7 @@ test("clicking Manage on a connected chat-app card opens the manage wizard", asy
   expect(within(dialog).getByRole("button", { name: /test connection/i })).toBeInTheDocument();
 });
 
-test("clicking a service tile opens the slide-over stub with the provider", async () => {
+test("clicking a connected service tile opens the Manage-titled wizard for that provider", async () => {
   mockFetch();
   const user = userEvent.setup();
   wrap();
@@ -257,8 +273,22 @@ test("clicking a service tile opens the slide-over stub with the provider", asyn
   const gmailTile = await screen.findByText("Gmail");
   await user.click(gmailTile.closest("button")!);
 
-  expect(await screen.findByText("Connect Gmail")).toBeInTheDocument();
-  expect(screen.getByText("wizard: gmail")).toBeInTheDocument();
+  // Gmail already has a connection in the fixture, so the wizard opens in
+  // "Manage" mode (mirrors the chat-app wizard's connected/not-connected
+  // title split) and shows the connected account.
+  expect(await screen.findByText("Manage Gmail")).toBeInTheDocument();
+  expect(screen.getByText("me@gmail.com")).toBeInTheDocument();
+});
+
+test("clicking a not-yet-connected service tile opens the Connect-titled wizard", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap();
+
+  const notionTile = await screen.findByText("Notion");
+  await user.click(notionTile.closest("button")!);
+
+  expect(await screen.findByText("Connect Notion")).toBeInTheDocument();
 });
 
 test("shows an error banner when the connectors list fails to load", async () => {
@@ -275,4 +305,39 @@ test("shows an error banner when the services list fails to load", async () => {
   wrap();
 
   expect(await screen.findByText("could not load services")).toBeInTheDocument();
+});
+
+// ── Landing banner (after the OAuth callback's full-page redirect) ────────
+
+test("?connected=<provider> shows a success banner resolving the label, clears the param, and can be dismissed", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap("/?connected=gmail");
+
+  expect(await screen.findByText("Gmail connected ✓")).toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.getByTestId("search-params-debug").textContent).not.toContain("connected"),
+  );
+
+  await user.click(screen.getByRole("button", { name: "Dismiss" }));
+  expect(screen.queryByText("Gmail connected ✓")).not.toBeInTheDocument();
+});
+
+test("?connected=<unknown-slug> falls back to the raw slug when no matching provider label is found", async () => {
+  mockFetch();
+  wrap("/?connected=some-unlisted-provider");
+
+  expect(await screen.findByText("some-unlisted-provider connected ✓")).toBeInTheDocument();
+});
+
+test("?error=<msg> shows an error banner and clears the param", async () => {
+  mockFetch();
+  wrap("/?error=" + encodeURIComponent("Authorization was denied: access_denied"));
+
+  expect(
+    await screen.findByText("Authorization was denied: access_denied"),
+  ).toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.getByTestId("search-params-debug").textContent).not.toContain("error"),
+  );
 });

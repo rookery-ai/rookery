@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { ContextPane, useSlideOver } from "@/components/shell/AppShell";
 import { Button } from "@/components/ui/button";
@@ -7,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { ProviderLogo } from "@/components/brand/ProviderLogo";
 import { ChatAppWizard } from "./ChatAppWizard";
+import { ServiceWizard } from "./ServiceWizard";
 import {
   useConnectors,
   useServices,
@@ -30,6 +33,33 @@ function errorMessage(error: unknown) {
 function ErrorBanner({ message }: { message: string }) {
   return (
     <div className="mb-3 rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">{message}</div>
+  );
+}
+
+// ── Landing banner (after the OAuth full-page round trip lands back here) ──
+
+function LandingBanner({
+  kind,
+  message,
+  onDismiss,
+}: {
+  kind: "success" | "error";
+  message: string;
+  onDismiss: () => void;
+}) {
+  const tone = kind === "success" ? "bg-ok-soft text-ok" : "bg-danger-soft text-danger";
+  return (
+    <div className={cn("mb-4 flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm", tone)}>
+      <span>{message}</span>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+        className="shrink-0 opacity-70 hover:opacity-100"
+      >
+        ✕
+      </button>
+    </div>
   );
 }
 
@@ -116,6 +146,30 @@ export default function ConnectionsPage() {
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
   const { open } = useSlideOver();
+  const qc = useQueryClient();
+
+  // Landing banner: the OAuth callback (a full-page server redirect) lands
+  // back here with ?connected=<provider> on success or ?error=<msg> on
+  // failure. Capture the initial values once via refs (before we clear the
+  // params below) so the banner survives the URLSearchParams object itself
+  // changing on every render.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialConnected = useRef(searchParams.get("connected"));
+  const initialErrorParam = useRef(searchParams.get("error"));
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+
+  useEffect(() => {
+    if (!initialConnected.current && !initialErrorParam.current) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("connected");
+    next.delete("error");
+    setSearchParams(next, { replace: true });
+    if (initialConnected.current) {
+      qc.invalidateQueries({ queryKey: ["services"] });
+    }
+    // Only ever runs once, off the params present at mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const t = window.setTimeout(() => setQuery(input), SEARCH_DEBOUNCE_MS);
@@ -129,6 +183,21 @@ export default function ConnectionsPage() {
 
   const platforms = connectorsQuery.data?.platforms ?? [];
   const services = servicesQuery.data?.providers ?? [];
+
+  // Resolved lazily off `services` (re-derived on every render, not stored in
+  // state) so the label upgrades from the raw slug to the real provider
+  // label the moment the services list finishes loading/refetching, without
+  // extra effect wiring.
+  const landingBanner = bannerDismissed
+    ? null
+    : initialErrorParam.current
+      ? { kind: "error" as const, message: initialErrorParam.current }
+      : initialConnected.current
+        ? {
+            kind: "success" as const,
+            message: `${services.find((p) => p.name === initialConnected.current)?.label ?? initialConnected.current} connected ✓`,
+          }
+        : null;
 
   const filteredPlatforms = useMemo(
     () => platforms.filter((p) => matches(q, p.platform, p.label)),
@@ -158,8 +227,8 @@ export default function ConnectionsPage() {
   }
 
   function openServiceWizard(provider: ServiceProvider) {
-    open(<div>wizard: {provider.name}</div>, {
-      title: `Connect ${provider.label}`,
+    open(<ServiceWizard provider={provider} />, {
+      title: `${provider.connections.length > 0 ? "Manage" : "Connect"} ${provider.label}`,
     });
   }
 
@@ -211,6 +280,14 @@ export default function ConnectionsPage() {
       </ContextPane>
 
       <div className="mx-auto max-w-5xl p-6">
+        {landingBanner && (
+          <LandingBanner
+            kind={landingBanner.kind}
+            message={landingBanner.message}
+            onDismiss={() => setBannerDismissed(true)}
+          />
+        )}
+
         <section ref={chatAppsRef} className="mb-10 scroll-mt-4">
           <h2 className="text-lg font-bold">Chat apps</h2>
           <p className="mb-4 text-sm text-muted-2">
