@@ -191,11 +191,15 @@ export function CoderSection({
               >
                 <option value="">Select a provider…</option>
                 {catalog.map((c) => {
-                  const usable = c.hasKey || !c.requiresKey;
+                  // In wizard mode (showApiKeyInput) there's no ProviderCards
+                  // section to "add key above" — the inline API-key field
+                  // below supplies it, so every provider stays selectable
+                  // regardless of hasKey.
+                  const usable = c.hasKey || !c.requiresKey || showApiKeyInput;
                   return (
                     <option key={c.name} value={c.name} disabled={!usable}>
                       {c.name}
-                      {!usable ? " (add key above)" : ""}
+                      {!usable ? (showApiKeyInput ? " (enter your API key below)" : " (add key above)") : ""}
                     </option>
                   );
                 })}

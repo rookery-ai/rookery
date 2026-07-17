@@ -36,6 +36,7 @@ function RequireSetupWorkspace() {
   const { data: session, isLoading } = useSession();
   if (isLoading) return <div className="p-8 text-muted-2">Loading…</div>;
   if (!session?.authenticated) return <Navigate to="/login" replace />;
+  if (session.owner?.must_change_password) return <Navigate to="/change-password" replace />;
   if (!session.workspace?.needs_setup) return <Navigate to="/" replace />;
   return <Outlet />;
 }

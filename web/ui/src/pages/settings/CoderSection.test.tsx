@@ -186,24 +186,33 @@ test("hideTest=true hides the Test button and its result area", () => {
   expect(screen.queryByRole("button", { name: /^test$/i })).not.toBeInTheDocument();
 });
 
-test("showApiKeyInput renders an API key field (api engine only) and includes it in the save payload", async () => {
+// Regression test for the real wizard path: NO pre-seeded `coder` prop (a
+// fresh workspace has no coder configured yet), and the provider is picked
+// by actually driving the <select> — not by pre-setting `provider` via the
+// `coder` prop's useEffect, which would bypass the disabled-option bug
+// entirely. "zai" has hasKey:false in CATALOG (no key saved yet, exactly the
+// first-time-setup scenario), so this only passes if wizard mode makes every
+// provider selectable regardless of hasKey (the inline key field supplies
+// it instead of ProviderCards).
+test("showApiKeyInput: a provider with no saved key yet is still selectable, and its save payload carries provider/model/api_key", async () => {
   const calls = mockFetch();
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={qc}>
-      <CoderSection
-        coder={{ kind: "api", bin: "", timeout_s: 120, provider: "openrouter", model: "glm-5.2", base_url: "", api_key_secret: "" }}
-        detectedCoders={DETECTED}
-        catalog={CATALOG}
-        showApiKeyInput
-      />
+      <CoderSection coder={undefined} detectedCoders={DETECTED} catalog={CATALOG} showApiKeyInput />
     </QueryClientProvider>,
   );
 
-  await waitFor(() => expect(screen.getByLabelText(/api key/i)).toBeInTheDocument());
-
   const user = userEvent.setup();
-  await user.type(screen.getByLabelText(/api key/i), "sk-or-secret");
+  await user.click(screen.getByRole("radio", { name: /^api$/i }));
+
+  const zaiOption = screen.getByRole("option", { name: /zai/i }) as HTMLOptionElement;
+  expect(zaiOption.disabled).toBe(false);
+
+  await user.selectOptions(screen.getByLabelText(/^provider$/i), "zai");
+  await user.type(screen.getByLabelText(/^model$/i), "glm-4.7");
+  await waitFor(() => expect(screen.getByLabelText(/api key/i)).toBeInTheDocument());
+  await user.type(screen.getByLabelText(/api key/i), "sk-zai-secret");
   await user.click(screen.getByRole("button", { name: /save coder/i }));
 
   await waitFor(() => {
@@ -211,7 +220,10 @@ test("showApiKeyInput renders an API key field (api engine only) and includes it
     expect(putCall).toBeDefined();
   });
   const putCall = calls.find((c) => c.url === "/api/v1/settings/coder" && c.method === "PUT")!;
-  expect((putCall.body as { api_key: string }).api_key).toBe("sk-or-secret");
+  expect(putCall.body).toEqual({
+    kind: "api", bin: "", timeout_s: 120,
+    provider: "zai", model: "glm-4.7", base_url: "", api_key: "sk-zai-secret",
+  });
 });
 
 test("saveOverride: Save posts through the override mutation instead of /api/v1/settings/coder", async () => {

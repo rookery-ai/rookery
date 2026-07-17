@@ -242,6 +242,42 @@ test("Coder step never renders a Test button (dropped in-wizard — the settings
   expect(screen.queryByRole("button", { name: /^test$/i })).not.toBeInTheDocument();
 });
 
+// Regression test: during setup no provider has a saved key yet (the
+// step-3 coder_catalog fixture below has hasKey:false for openrouter, just
+// like the real backend on a fresh workspace). The provider <select> must
+// stay usable regardless — the inline API-key field supplies the key
+// instead of ProviderCards (which is unreachable during setup: its
+// /api/v1/secrets endpoint is also blocked by requireSetupCompleteAPI).
+test("Coder step (API engine, no keys saved yet): selecting a provider via the real <select>, typing model + inline API key, and saving posts step:3 coder_provider/coder_model/coder_api_key", async () => {
+  const state = freshState();
+  state.basicsDone = true;
+  state.secretsSalt = true;
+  const posts: { url: string; body: unknown }[] = [];
+  mockFetch(state, posts);
+  wrap();
+
+  expect(await screen.findByText(/choose a coder/i)).toBeInTheDocument();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("radio", { name: /^api$/i }));
+
+  const openrouterOption = screen.getByRole("option", { name: /openrouter/i });
+  expect(openrouterOption).not.toBeDisabled();
+
+  await user.selectOptions(screen.getByLabelText(/^provider$/i), "openrouter");
+  await user.type(screen.getByLabelText(/^model$/i), "glm-5.2");
+  await waitFor(() => expect(screen.getByLabelText(/api key/i)).toBeInTheDocument());
+  await user.type(screen.getByLabelText(/api key/i), "sk-or-live-test");
+  await user.click(screen.getByRole("button", { name: /^save coder$/i }));
+
+  await waitFor(() => expect(posts).toHaveLength(1));
+  expect(posts[0].body).toEqual({
+    step: 3, coder_kind: "api", coder_bin: "", coder_timeout_s: 120,
+    coder_provider: "openrouter", coder_model: "glm-5.2", coder_base_url: "",
+    coder_api_key: "sk-or-live-test",
+  });
+  expect(await screen.findByText(/workspace profile/i)).toBeInTheDocument();
+});
+
 test("Profile step: Skip posts {step:4,skip:true} and advances to Chat app", async () => {
   const state = freshState();
   state.basicsDone = true;
