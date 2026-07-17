@@ -126,6 +126,13 @@ export function DesignerSurface({
   const doneRef = useRef(false);
   const dismissedRef = useRef(false);
   const autoResumeTriedRef = useRef(false);
+  // Guards state updates (and ensureSSE attachment) in async functions'
+  // post-await continuations — handleSend's design POST and refetchState's
+  // state GET both resolve well after the triggering event, and the user may
+  // have navigated away by then. Reset to false at the start of the mount
+  // effect (not just set true in its cleanup) so React 18 StrictMode's dev
+  // double-invoke (setup→cleanup→setup) doesn't leave it stuck true.
+  const unmountedRef = useRef(false);
   // How the currently-attached SSE stream got attached, decided once at the
   // moment of attachment (see ensureSSE's early-return guard — later calls
   // with a different source are no-ops while a stream is live):
@@ -193,7 +200,7 @@ export function DesignerSurface({
     }
     try {
       const snap = await api.get<StateSnapshot>(endpoints.state);
-      if (doneRef.current) return;
+      if (doneRef.current || unmountedRef.current) return;
       if (snap.active) {
         setResumeBanner(null);
         setMessages(snap.history ?? []);
@@ -216,14 +223,16 @@ export function DesignerSurface({
     } catch {
       // Non-critical — recovery failing just leaves a fresh composer.
     } finally {
-      setRecovering(false);
+      if (!unmountedRef.current) setRecovering(false);
     }
   }
 
   // Mount recovery — step 1 of the behavior spec. Runs once.
   useEffect(() => {
+    unmountedRef.current = false;
     void refetchState();
     return () => {
+      unmountedRef.current = true;
       sseHandleRef.current?.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -283,6 +292,7 @@ export function DesignerSurface({
       if (isFirstMessage && startPayload) Object.assign(body, startPayload);
 
       const res = await api.post<DesignResponse>(endpoints.design, body);
+      if (unmountedRef.current) return;
 
       if (res.done) {
         doneRef.current = true;
@@ -302,10 +312,12 @@ export function DesignerSurface({
         setGenerating(true); // stepper still shows "Build" while it runs
       }
     } catch (err) {
-      setError(errMessage(err));
+      if (!unmountedRef.current) setError(errMessage(err));
     } finally {
-      setBusy(false);
-      if (!stillBuilding) setGenerating(false);
+      if (!unmountedRef.current) {
+        setBusy(false);
+        if (!stillBuilding) setGenerating(false);
+      }
     }
   }
 

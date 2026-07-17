@@ -27,9 +27,19 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [sse, setSse] = useState<{ lines: string[]; status: ActivityStatus } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Distinct from `error`: an "already running" response is informational
+  // (this tab attaches to the live run), not a failure — it must not render
+  // the red AlertTriangle banner.
+  const [note, setNote] = useState<string | null>(null);
 
   const sseHandleRef = useRef<SSEHandle | null>(null);
   const startedAtRef = useRef(0);
+  // Guards state updates in handleRun's post-await continuation so a run
+  // kicked off just before navigating away doesn't setState on an unmounted
+  // component. Reset to false at the start of the mount effect (not just set
+  // true in its cleanup) so React 18 StrictMode's dev double-invoke
+  // (setup→cleanup→setup) doesn't leave it stuck true after the second setup.
+  const unmountedRef = useRef(false);
 
   function attach() {
     if (sseHandleRef.current) return;
@@ -57,8 +67,10 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
   // cleanup below, right as it starts). If a run is live elsewhere at the
   // moment this page mounts, attach; the click path handles everything else.
   useEffect(() => {
+    unmountedRef.current = false;
     if (liveRun) attach();
     return () => {
+      unmountedRef.current = true;
       // Also null out the ref (not just close()) — StrictMode double-invokes
       // mount effects in dev, and this synchronous attach() would otherwise
       // see a stale non-null ref on the second setup and no-op, leaving the
@@ -71,14 +83,20 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
 
   async function handleRun() {
     setError(null);
+    setNote(null);
     setIsRunning(true);
     try {
-      await run(agentId);
+      const res = await run(agentId);
+      if (unmountedRef.current) return;
+      if (res.status === "already_running") {
+        setNote("A run is already in progress");
+      }
       attach();
     } catch (err) {
+      if (unmountedRef.current) return;
       setError(err instanceof ApiError ? err.message : "Something went wrong");
     } finally {
-      setIsRunning(false);
+      if (!unmountedRef.current) setIsRunning(false);
     }
   }
 
@@ -98,6 +116,10 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
           <AlertTriangle className="size-3.5 shrink-0" />
           {error}
         </div>
+      )}
+
+      {note && (
+        <div className="rounded-md bg-muted px-3 py-2 text-xs text-muted-2">{note}</div>
       )}
 
       {sse && (
