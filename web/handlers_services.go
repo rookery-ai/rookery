@@ -412,8 +412,10 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 		EncryptedAccessToken: encAccess, EncryptedRefreshToken: encRefresh,
 		ExpiresAt: expiresAt, Status: "ACTIVE", Extra: extraJSON,
 	}); err != nil {
-		return s.redirectWithError(c, "/app/connections",
-			"Connected, but saving failed (a connection labeled '"+label+"' may already exist): "+err.Error())
+		// A duplicate label is no longer a plausible cause here — InsertServiceConnection
+		// upserts on (workspace_id, provider, account_label), so reconnecting under the
+		// same label refreshes the existing connection instead of erroring.
+		return s.redirectWithError(c, "/app/connections", "Connected, but saving failed: "+err.Error())
 	}
 	return c.Redirect(http.StatusSeeOther, "/app/connections?connected="+url.QueryEscape(provider))
 }

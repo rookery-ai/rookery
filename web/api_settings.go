@@ -368,6 +368,13 @@ func (s *Server) apiSetupOK(c echo.Context, w *db.Workspace) error {
 
 func (s *Server) apiPostSetup(c echo.Context) error {
 	w := c.Get("workspace").(*db.Workspace)
+	if !w.NeedsSetup {
+		// Setup already finished — a live session must not be able to replay a
+		// setup step (e.g. step 2 rotating the master password) outside the
+		// Settings flow, which requires proving the CURRENT password. GET stays
+		// open (harmless: it only reads/recomputes the step).
+		return jsonErr(c, http.StatusForbidden, "setup_complete", "setup is already complete — use Settings")
+	}
 	var req apiSetupRequest
 	if err := bindAPI(c, &req); err != nil {
 		return err

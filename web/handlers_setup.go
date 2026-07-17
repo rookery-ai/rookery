@@ -50,6 +50,13 @@ func (s *Server) showSetup(c echo.Context) error {
 
 func (s *Server) handleSetup(c echo.Context) error {
 	w := c.Get("workspace").(*db.Workspace)
+	if !w.NeedsSetup {
+		// Setup already finished — a live session must not be able to replay a
+		// setup step (e.g. step 2 rotating the master password) outside the
+		// Settings flow, which requires proving the CURRENT password. GET
+		// (showSetup) stays open — it only reads/recomputes the step.
+		return c.Redirect(http.StatusFound, "/dashboard")
+	}
 	action := c.FormValue("action")
 
 	switch action {

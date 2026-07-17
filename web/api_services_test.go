@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -154,5 +155,72 @@ func TestAPIServices_APIKEY_OpenAI_HappyPath(t *testing.T) {
 	}
 	if contains(rec.Body.String(), "sk-test-key") {
 		t.Fatalf("response must never leak the api key, got: %s", rec.Body.String())
+	}
+}
+
+// TestAPIServices_APIKEY_ReconnectSameLabelPreservesID is the SP5 final
+// review fix exercised end-to-end through the HTTP API: connecting the same
+// provider+label twice (a reconnect) must succeed both times — not fail the
+// (workspace_id, provider, account_label) UNIQUE constraint — and the
+// connection's id must stay the same across the reconnect, since
+// agent_connections bindings reference it by id.
+func TestAPIServices_APIKEY_ReconnectSameLabelPreservesID(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	connect := func(key string) apiServicesListResponse {
+		rec := doJSON(t, s, http.MethodPost, "/api/v1/services/openai/apikey", map[string]any{
+			"key":   key,
+			"label": "work",
+		}, cookies)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("connect: expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		rec = doJSON(t, s, http.MethodGet, "/api/v1/services", nil, cookies)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list: expected 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+		var out apiServicesListResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode: %v: %s", err, rec.Body.String())
+		}
+		return out
+	}
+
+	findOpenAIConn := func(resp apiServicesListResponse) *apiServiceConnection {
+		for _, p := range resp.Providers {
+			if p.Name != "openai" {
+				continue
+			}
+			if len(p.Connections) == 0 {
+				return nil
+			}
+			return &p.Connections[0]
+		}
+		return nil
+	}
+
+	first := findOpenAIConn(connect("sk-first-key"))
+	if first == nil {
+		t.Fatal("expected one openai connection after first connect")
+	}
+
+	second := findOpenAIConn(connect("sk-second-key"))
+	if second == nil {
+		t.Fatal("expected one openai connection after reconnect")
+	}
+	if second.ID != first.ID {
+		t.Fatalf("reconnect must keep the same connection id: first=%q second=%q", first.ID, second.ID)
+	}
+	if second.Status != "ACTIVE" {
+		t.Fatalf("reconnect must bring status back to ACTIVE: %q", second.Status)
+	}
+
+	// Still exactly one openai connection, not two rows.
+	for _, p := range connect("sk-second-key").Providers {
+		if p.Name == "openai" && len(p.Connections) != 1 {
+			t.Fatalf("expected exactly 1 openai connection after reconnects, got %d", len(p.Connections))
+		}
 	}
 }

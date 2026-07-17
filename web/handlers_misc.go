@@ -506,22 +506,25 @@ func (s *Server) saveWorkspaceCoderCore(w *db.Workspace, f coderForm) (string, e
 			return "A base URL is required for a Custom (OpenAI-compatible) provider", nil
 		}
 		// Decide the API-key secret from the pasted key + existing reference.
-		plan := coder.PlanKeySecret(provider, strings.TrimSpace(f.APIKey), w.CoderAPIKeySecret)
-		if plan.Err != "" {
-			// No pasted key and no coder_api_key_secret already on record — but a
-			// secret matching this provider's reserved name may still exist (e.g.
-			// saved directly via the secrets API, or left over from switching away
-			// from this provider and back). Reuse it instead of forcing a re-paste.
+		// Precedence: a pasted key always wins; otherwise prefer a secret that
+		// already matches THIS provider's reserved name (CODER_KEY_<PROVIDER>)
+		// over w.CoderAPIKeySecret — which may be a stale reference left over
+		// from a DIFFERENT provider (switching openai -> openrouter must not
+		// silently keep CODER_KEY_OPENAI); only fall back to the current
+		// reference when no provider-matched secret exists.
+		currentSecret := w.CoderAPIKeySecret
+		if strings.TrimSpace(f.APIKey) == "" {
 			if names, lerr := s.db.ListSecretNames(w.ID); lerr == nil {
 				want := coder.CoderKeySecretName(provider)
 				for _, n := range names {
 					if n == want {
-						plan = coder.KeySecretPlan{SecretName: want}
+						currentSecret = want
 						break
 					}
 				}
 			}
 		}
+		plan := coder.PlanKeySecret(provider, strings.TrimSpace(f.APIKey), currentSecret)
 		if plan.Err != "" {
 			return plan.Err, nil
 		}

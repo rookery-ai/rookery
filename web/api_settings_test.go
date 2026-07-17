@@ -211,6 +211,57 @@ func TestAPISettingsCoderNoKeyNoExistingSecretErrors(t *testing.T) {
 	}
 }
 
+// TestAPISettingsCoderProviderSwitchPrefersMatchingSecret is the SP5 final
+// review fix: a workspace configured as coder=api/openai (coder_api_key_secret
+// = CODER_KEY_OPENAI) that also has a CODER_KEY_OPENROUTER secret on record
+// (e.g. saved directly via the secrets API) must, when switched to
+// provider=openrouter with no pasted key, pick up CODER_KEY_OPENROUTER — not
+// silently keep the stale CODER_KEY_OPENAI reference from the old provider.
+func TestAPISettingsCoderProviderSwitchPrefersMatchingSecret(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	// Seed the openai key and configure the coder as openai first, so
+	// coder_api_key_secret = CODER_KEY_OPENAI is on record.
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/secrets",
+		map[string]string{"name": "CODER_KEY_OPENAI", "value": "sk-openai-existing"}, cookies)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("seed openai secret: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/settings/coder", map[string]any{
+		"kind":     "api",
+		"provider": "openai",
+		"model":    "gpt-x",
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("put coder (openai): %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Now seed an openrouter key too, and switch the provider without pasting a key.
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/secrets",
+		map[string]string{"name": "CODER_KEY_OPENROUTER", "value": "sk-or-existing"}, cookies)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("seed openrouter secret: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/settings/coder", map[string]any{
+		"kind":     "api",
+		"provider": "openrouter",
+		"model":    "y",
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("put coder (openrouter): %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/settings", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get settings: %d %s", rec.Code, rec.Body.String())
+	}
+	if !contains(rec.Body.String(), `"api_key_secret":"CODER_KEY_OPENROUTER"`) {
+		t.Fatalf("expected coder.api_key_secret to switch to CODER_KEY_OPENROUTER, not stay stale: %s", rec.Body.String())
+	}
+}
+
 // TestAPISetupGetAndCoderTestRegistered is a light smoke test that the setup
 // GET and coder/test endpoints are wired and respond (not exercising the
 // coder subprocess itself — see Task 10's warning about the host's real
@@ -226,6 +277,35 @@ func TestAPISetupGetRegistered(t *testing.T) {
 	}
 	if !contains(rec.Body.String(), `"step"`) {
 		t.Fatalf("expected step field: %s", rec.Body.String())
+	}
+}
+
+// TestAPISetupPostBlockedAfterCompletion is the SP5 final review fix: a
+// workspace whose setup is already complete (needs_setup=0, the normal state
+// for any live session) must reject POST /api/v1/setup — otherwise a step-2
+// resubmit can rotate the master password without the caller proving they
+// know the current one. GET stays open (harmless, used for step recompute).
+func TestAPISetupPostBlockedAfterCompletion(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{
+		"step":            2,
+		"master_password": "sneaky-new-password",
+		"confirm":         "sneaky-new-password",
+	}, cookies)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 once setup is complete, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !contains(rec.Body.String(), "setup_complete") {
+		t.Fatalf("expected setup_complete error code: %s", rec.Body.String())
+	}
+
+	// GET must still work (harmless, used for step recompute in the wizard).
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/setup", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET setup should still succeed after completion: %d %s", rec.Code, rec.Body.String())
 	}
 }
 
