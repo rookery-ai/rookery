@@ -9,12 +9,16 @@ const Ctx = createContext<{ theme: Theme; setTheme: (t: Theme) => void }>({
 });
 
 function apply(theme: Theme) {
-  const dark =
+  // classList.toggle's second arg must be a real boolean — passing `undefined`
+  // (e.g. when window.matchMedia doesn't exist, as in jsdom test envs) makes
+  // it flip current state instead of force-setting it. Coerce explicitly.
+  const dark = Boolean(
     theme === "dark" ||
-    (theme === "system" &&
-      typeof window !== "undefined" &&
-      window.matchMedia &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches);
+      (theme === "system" &&
+        typeof window !== "undefined" &&
+        window.matchMedia &&
+        window.matchMedia("(prefers-color-scheme: dark)").matches),
+  );
   document.documentElement.classList.toggle("dark", dark);
 }
 
