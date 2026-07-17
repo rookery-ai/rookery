@@ -21,6 +21,7 @@ import { StatusChip } from "./StatusChip";
 import { RunPanel } from "./RunPanel";
 import { AgentMDCard } from "./AgentMDCard";
 import { ScheduleCard } from "./ScheduleCard";
+import { SkillsCard, ConnectionsCard } from "./AttachmentCards";
 
 function RunStatusChip({ status }: { status: AgentRun["status"] }) {
   if (status === "running") {
@@ -97,7 +98,19 @@ export default function AgentDetailPage() {
 
   if (!detail) return <div className="p-8 text-muted-2">Loading…</div>;
 
-  const { agent, schedule, runs, agent_md, missing_secrets, live_run } = detail;
+  const {
+    agent,
+    schedule,
+    runs,
+    agent_md,
+    missing_secrets,
+    live_run,
+    attached_skills,
+    core_skills,
+    all_skills,
+    workspace_connections,
+    attached_connection_ids,
+  } = detail;
 
   async function handleDelete() {
     setDeleting(true);
@@ -166,7 +179,17 @@ export default function AgentDetailPage() {
 
         <div className="flex flex-col gap-6">
           <ScheduleCard agentId={id} schedule={schedule} />
-          {/* Task 8: attachment cards */}
+          <SkillsCard
+            agentId={id}
+            attachedSkills={attached_skills}
+            coreSkills={core_skills}
+            allSkills={all_skills}
+          />
+          <ConnectionsCard
+            agentId={id}
+            attachedConnectionIds={attached_connection_ids}
+            connections={workspace_connections}
+          />
         </div>
       </div>
 

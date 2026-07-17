@@ -295,6 +295,79 @@ test("delete agent: confirm dialog fires DELETE and navigates to /agents", async
   expect(await screen.findByTestId("agents-list-page")).toBeInTheDocument();
 });
 
+test("Skills card Save PUTs the checked skill_names", async () => {
+  detail = baseDetail({
+    core_skills: [{ name: "pdf", description: "PDF handling" }],
+    all_skills: [{ id: "s1", name: "csv", description: "CSV handling", installed_at: "2026-07-01T00:00:00Z" }],
+    attached_skills: ["pdf"],
+  });
+  const calls = mockFetch({
+    "PUT /api/v1/agents/a1/skills": (body) => {
+      detail = { ...detail, attached_skills: (body as { skill_names: string[] }).skill_names };
+      return jsonResponse(detail);
+    },
+  });
+  wrap();
+
+  await screen.findByText("Skills (1)");
+  await userEvent.click(screen.getByRole("checkbox", { name: "csv" }));
+  expect(screen.getByText("Skills (2)")).toBeInTheDocument();
+
+  const skillsSave = screen.getByRole("button", { name: "Save skills" });
+  await userEvent.click(skillsSave);
+
+  await waitFor(() => {
+    const put = calls.find((c) => c.url === "/api/v1/agents/a1/skills" && c.method === "PUT");
+    expect(put).toBeTruthy();
+    expect(put!.body).toEqual({ skill_names: ["pdf", "csv"] });
+  });
+});
+
+test("Connections card Save PUTs the checked connection_ids", async () => {
+  detail = baseDetail({
+    workspace_connections: [
+      {
+        id: "c1",
+        provider: "gmail",
+        account_label: "work@example.com",
+        account_identity: "work@example.com",
+        status: "active",
+        created_at: "2026-07-01T00:00:00Z",
+      },
+    ],
+    attached_connection_ids: [],
+  });
+  const calls = mockFetch({
+    "PUT /api/v1/agents/a1/connections": (body) => {
+      detail = { ...detail, attached_connection_ids: (body as { connection_ids: string[] }).connection_ids };
+      return jsonResponse(detail);
+    },
+  });
+  wrap();
+
+  await screen.findByText("Connections (0)");
+  await userEvent.click(screen.getByRole("checkbox", { name: /gmail/i }));
+
+  const connectionsSave = await screen.findByRole("button", { name: "Save connections" });
+  await userEvent.click(connectionsSave);
+
+  await waitFor(() => {
+    const put = calls.find((c) => c.url === "/api/v1/agents/a1/connections" && c.method === "PUT");
+    expect(put).toBeTruthy();
+    expect(put!.body).toEqual({ connection_ids: ["c1"] });
+  });
+});
+
+test("Connections card with an empty pool shows a Connect-services-first note instead of Save", async () => {
+  detail = baseDetail({ workspace_connections: [], attached_connection_ids: [] });
+  mockFetch();
+  wrap();
+
+  expect(await screen.findByText(/connect services first/i)).toBeInTheDocument();
+  const link = screen.getByRole("link", { name: /connect services first/i });
+  expect(link.getAttribute("href")).toBe("/connections");
+});
+
 test("run history renders status, trigger, and expandable output", async () => {
   mockFetch();
   wrap();
