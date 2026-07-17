@@ -508,6 +508,21 @@ func (s *Server) saveWorkspaceCoderCore(w *db.Workspace, f coderForm) (string, e
 		// Decide the API-key secret from the pasted key + existing reference.
 		plan := coder.PlanKeySecret(provider, strings.TrimSpace(f.APIKey), w.CoderAPIKeySecret)
 		if plan.Err != "" {
+			// No pasted key and no coder_api_key_secret already on record — but a
+			// secret matching this provider's reserved name may still exist (e.g.
+			// saved directly via the secrets API, or left over from switching away
+			// from this provider and back). Reuse it instead of forcing a re-paste.
+			if names, lerr := s.db.ListSecretNames(w.ID); lerr == nil {
+				want := coder.CoderKeySecretName(provider)
+				for _, n := range names {
+					if n == want {
+						plan = coder.KeySecretPlan{SecretName: want}
+						break
+					}
+				}
+			}
+		}
+		if plan.Err != "" {
 			return plan.Err, nil
 		}
 		if plan.WriteSecret {

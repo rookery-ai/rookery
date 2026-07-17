@@ -167,10 +167,15 @@ func LoadBundled() []SkillMeta {
 }
 
 // IsCoreSkill reports whether slug names a core skill (an embedded folder).
+// Folder names are lowercase, but callers pass slugs from varied sources
+// (URL params typed by hand, LLM-parsed "# Skills:" headers, …) that don't
+// always match case — normalize once here so every call site gets
+// case-insensitive matching for free.
 func IsCoreSkill(slug string) bool {
 	if slug == "" {
 		return false
 	}
+	slug = strings.ToLower(slug)
 	_, err := fs.Stat(skillsFS, filepath.ToSlash(filepath.Join("skills", slug, "SKILL.md")))
 	return err == nil
 }

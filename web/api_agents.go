@@ -268,7 +268,12 @@ func (s *Server) apiRunAgent(c echo.Context) error {
 		}
 	}
 
-	s.startManualRun(u.ID, agent, masterPw)
+	if !s.startManualRun(u.ID, agent, masterPw) {
+		// A run for this agent is already in flight (manual or scheduled) — not
+		// an error, just informational; the client should attach to the
+		// existing SSE stream rather than show a failure.
+		return c.JSON(http.StatusAccepted, map[string]any{"status": "already_running"})
+	}
 	return c.JSON(http.StatusAccepted, map[string]any{"status": "started"})
 }
 

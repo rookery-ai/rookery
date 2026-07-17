@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,6 +95,13 @@ func TestRunGeneration_BlockedMarkerSetsGenerationFailed(t *testing.T) {
 	if !sess.GenerationFailed {
 		t.Error("GenerationFailed should be set so the web handler reports it and the UI can show the soft-fail banner")
 	}
+	last := sess.History[len(sess.History)-1]
+	if last.Role != "assistant" || !strings.Contains(last.Content, "did not succeed") {
+		t.Errorf("expected a failure note appended to History, got: %+v", last)
+	}
+	if !strings.Contains(last.Content, "couldn't figure out how to build this") {
+		t.Errorf("expected the failure note to carry the blocker detail so a retry isn't context-blind: %q", last.Content)
+	}
 }
 
 // TestRunGeneration_EthicsFailureSetsGenerationFailed covers the other soft-fail
@@ -120,6 +128,52 @@ func TestRunGeneration_EthicsFailureSetsGenerationFailed(t *testing.T) {
 	}
 	if !sess.GenerationFailed {
 		t.Error("GenerationFailed should be set after a failed safety check")
+	}
+	last := sess.History[len(sess.History)-1]
+	if last.Role != "assistant" || !strings.Contains(last.Content, "did not succeed") {
+		t.Errorf("expected a failure note appended to History, got: %+v", last)
+	}
+}
+
+// TestMarkGenerationFailed_AppendsHistoryNote is a focused unit test on
+// markGenerationFailed itself (mirrors agentdesigner's recordGenerationFailure
+// message shape): it must set GenerationFailed, append an assistant-role
+// failure note carrying the detail, and persist via saveDraft (nil db here —
+// saveDraft no-ops, exercised only for panic-safety).
+func TestMarkGenerationFailed_AppendsHistoryNote(t *testing.T) {
+	flow, workspaceID := newGenSkillFlow(t, nil)
+	sess := newDesigningSession(workspaceID, "my-skill")
+	before := len(sess.History)
+	flow.sessions[workspaceID] = sess
+
+	flow.markGenerationFailed(workspaceID, "the coder didn't create SKILL.md")
+
+	got := flow.GetSession(workspaceID)
+	if !got.GenerationFailed {
+		t.Fatal("GenerationFailed should be set")
+	}
+	if len(got.History) != before+1 {
+		t.Fatalf("History length = %d, want %d (one note appended)", len(got.History), before+1)
+	}
+	last := got.History[len(got.History)-1]
+	if last.Role != "assistant" {
+		t.Fatalf("failure note role = %q, want assistant", last.Role)
+	}
+	if !strings.Contains(last.Content, "did not succeed") ||
+		!strings.Contains(last.Content, "the coder didn't create SKILL.md") ||
+		!strings.Contains(last.Content, "skill") {
+		t.Errorf("failure note missing expected shape: %q", last.Content)
+	}
+}
+
+// TestMarkGenerationFailed_NoSessionIsNoop guards the existing nil-session
+// tolerance (a cancelled-mid-build session) now that the function also
+// touches History/saveDraft — it must still no-op cleanly, not panic.
+func TestMarkGenerationFailed_NoSessionIsNoop(t *testing.T) {
+	flow, workspaceID := newGenSkillFlow(t, nil)
+	flow.markGenerationFailed(workspaceID, "some detail")
+	if flow.GetSession(workspaceID) != nil {
+		t.Fatal("expected no session to be created")
 	}
 }
 

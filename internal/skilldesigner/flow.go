@@ -237,14 +237,27 @@ func (f *Flow) GetProgressChan(workspaceID string) (<-chan string, bool) {
 }
 
 // markGenerationFailed flags the user's session so the web handler can report
-// generation_failed to a reloading/polling client. No-op if the session is gone
-// (e.g. cancelled mid-build).
-func (f *Flow) markGenerationFailed(workspaceID string) {
+// generation_failed to a reloading/polling client, and appends a note to
+// History so the next generation attempt is aware the previous one failed and
+// why — mirrors agentdesigner.Flow.recordGenerationFailure's message shape;
+// without this a retry repeats the same build context-blind (see that
+// function's doc comment for the full rationale). No-op if the session is
+// gone (e.g. cancelled mid-build).
+func (f *Flow) markGenerationFailed(workspaceID, detail string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if sess, ok := f.sessions[workspaceID]; ok {
-		sess.GenerationFailed = true
+	sess, ok := f.sessions[workspaceID]
+	if !ok {
+		return
 	}
+	sess.GenerationFailed = true
+	note := "I attempted to build the skill but it did not succeed."
+	if strings.TrimSpace(detail) != "" {
+		note += " Reason: " + strings.TrimSpace(detail) + "."
+	}
+	note += " On the next attempt I will address this and finish building the skill."
+	sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: note})
+	f.saveDraft(sess)
 }
 
 // GetSession returns the user's active session, or nil.
@@ -486,7 +499,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	if blocked := parseBlockedOutput(result.Text); blocked != "" {
 		cleanupStaging()
 		closeProgress()
-		f.markGenerationFailed(workspaceID)
+		f.markGenerationFailed(workspaceID, blocked)
 		return "The coder ran into a blocker:\n\n" + blocked + "\n\nTell me how you'd like to proceed, or describe a different approach.", false, "", nil
 	}
 
@@ -497,7 +510,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	if err != nil {
 		cleanupStaging()
 		closeProgress()
-		f.markGenerationFailed(workspaceID)
+		f.markGenerationFailed(workspaceID, "the coder didn't create SKILL.md")
 		return "The coder didn't create SKILL.md. Tell me what to change and I'll try again.", false, "", nil
 	}
 	skillMD := strings.TrimSpace(string(skillMDBytes))
@@ -516,7 +529,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		cleanupStaging()
 		closeProgress()
 		slog.Warn("skilldesigner: skill failed safety checks", "workspace_id", workspaceID, "skill_name", skillNameSnap, "err", err)
-		f.markGenerationFailed(workspaceID)
+		f.markGenerationFailed(workspaceID, "the generated SKILL.md failed a safety check: "+err.Error())
 		return "That request tripped a safety check I can't get around. Try describing it differently — for example, avoid destructive or high-risk actions.", false, "", nil
 	}
 	for filename, code := range scripts {
@@ -524,7 +537,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 			cleanupStaging()
 			closeProgress()
 			slog.Warn("skilldesigner: generated script failed guardrails", "workspace_id", workspaceID, "skill_name", skillNameSnap, "file", filename, "err", err)
-			f.markGenerationFailed(workspaceID)
+			f.markGenerationFailed(workspaceID, "the generated file "+filename+" failed an internal safety check: "+err.Error())
 			return "One of the files the build produced didn't pass an internal check, so I held off saving it. Type **approve** to have it rebuilt, or tell me what to change.", false, "", nil
 		}
 	}

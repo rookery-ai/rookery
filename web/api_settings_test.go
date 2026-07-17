@@ -150,6 +150,63 @@ func TestAPISettingsMasterPasswordHappyPath(t *testing.T) {
 	}
 }
 
+// TestAPISettingsCoderReusesExistingSecretForProvider covers the SP4 carry-over
+// fallback: a workspace that already has a CODER_KEY_<PROVIDER> secret (e.g.
+// saved directly via the secrets API, bypassing the coder form) can switch its
+// coder to that provider without re-pasting the key — saveWorkspaceCoderCore
+// must find and reuse the existing secret by its reserved name instead of
+// erroring "API key is required for this provider".
+func TestAPISettingsCoderReusesExistingSecretForProvider(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/secrets",
+		map[string]string{"name": "CODER_KEY_OPENROUTER", "value": "sk-or-existing"}, cookies)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("seed secret: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/settings/coder", map[string]any{
+		"kind":     "api",
+		"provider": "openrouter",
+		"model":    "x",
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("put coder: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/settings", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get settings: %d %s", rec.Code, rec.Body.String())
+	}
+	if !contains(rec.Body.String(), `"api_key_secret":"CODER_KEY_OPENROUTER"`) {
+		t.Fatalf("expected coder.api_key_secret to reuse CODER_KEY_OPENROUTER: %s", rec.Body.String())
+	}
+}
+
+// TestAPISettingsCoderNoKeyNoExistingSecretErrors is the negative counterpart:
+// no pasted key, no prior coder_api_key_secret, and no matching CODER_KEY_*
+// secret already saved — the handler must still reject the save (the fallback
+// only reuses a secret that actually exists).
+func TestAPISettingsCoderNoKeyNoExistingSecretErrors(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodPut, "/api/v1/settings/coder", map[string]any{
+		"kind":     "api",
+		"provider": "openrouter",
+		"model":    "x",
+	}, cookies)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 with no key and no existing secret: %d %s", rec.Code, rec.Body.String())
+	}
+	if !contains(rec.Body.String(), "API key is required") {
+		t.Fatalf("expected the missing-key message: %s", rec.Body.String())
+	}
+}
+
 // TestAPISetupGetAndCoderTestRegistered is a light smoke test that the setup
 // GET and coder/test endpoints are wired and respond (not exercising the
 // coder subprocess itself — see Task 10's warning about the host's real
