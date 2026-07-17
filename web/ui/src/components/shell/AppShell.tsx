@@ -3,6 +3,7 @@ import { Outlet } from "react-router";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { GlobalChatButton } from "@/components/chat/GlobalChatButton";
+import { CommandPalette } from "@/components/search/CommandPalette";
 import IconRail from "./IconRail";
 
 type SlideOverState = { node: React.ReactNode; title?: string } | null;
@@ -64,6 +65,7 @@ export function AppShell() {
             <Outlet />
           </main>
           <GlobalChatButton />
+          <CommandPalette />
           <Sheet open={panel !== null} onOpenChange={(o) => !o && setPanel(null)}>
             {/* gap-0 + no padding on the content well: panel content owns its
                 own inner padding (see ChatWindow's "container-agnostic"

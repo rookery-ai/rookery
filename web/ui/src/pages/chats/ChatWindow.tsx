@@ -52,7 +52,9 @@ function StatusChip({ active }: { active: boolean }) {
 
 // Container-agnostic: no page margins/max-width here — Task 3's slide-over
 // mounts this directly, KBPage-style embedding would double up chrome.
-export function ChatWindow({ chatId }: { chatId: string }) {
+// initialText: optional prefill forwarded to the Composer — the ⌘K palette's
+// "Ask assistant" action passes the search query through GlobalChatPanel.
+export function ChatWindow({ chatId, initialText }: { chatId: string; initialText?: string }) {
   const { data, isLoading } = useChatDetail(chatId);
   const qc = useQueryClient();
   const action = useChatAction();
@@ -152,7 +154,7 @@ export function ChatWindow({ chatId }: { chatId: string }) {
         </div>
       )}
 
-      <Composer onSend={handleSend} busy={busy} />
+      <Composer onSend={handleSend} busy={busy} initialText={initialText} />
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="max-w-sm">

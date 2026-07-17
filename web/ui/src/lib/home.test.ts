@@ -10,6 +10,7 @@ import {
   useMarkInboxRead,
   useMarkAllInboxRead,
   useDeleteInboxMessage,
+  useInboxPoll,
   greeting,
 } from "./home";
 import { ApiError } from "./api";
@@ -156,4 +157,12 @@ test("useDeleteInboxMessage DELETEs by id", async () => {
   const call = vi.mocked(fetch).mock.calls[0];
   expect(call[0]).toBe("/api/v1/inbox/m1");
   expect((call[1] as RequestInit).method).toBe("DELETE");
+});
+
+test("useInboxPoll fetches the poll endpoint and normalizes nil recent", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ unread: 3, recent: null })));
+  const { result } = renderHook(() => useInboxPoll(), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.data?.unread).toBe(3));
+  expect(result.current.data?.recent).toEqual([]);
+  expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/v1/inbox/poll");
 });

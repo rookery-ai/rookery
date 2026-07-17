@@ -15,11 +15,27 @@ type ComposerProps = {
   // Optional + additive: existing callers (ChatWindow, GlobalChatPanel) never
   // pass it and see no behavior change.
   focusSignal?: number;
+  // Seeds (and re-seeds) the textarea's text — used by the ⌘K command
+  // palette's "Ask assistant about '<query>'" action to prefill the global
+  // chat composer. Same signal-on-change contract as focusSignal: an effect
+  // keyed on this value, not plain useState initial-value, so it also fires
+  // when the CALLER passes a new string into an already-mounted Composer
+  // (e.g. the palette re-opened with a different query while the chat panel
+  // stayed mounted) — a lazy useState initializer would only apply on the
+  // very first mount and miss that case. Undefined (the default for every
+  // existing caller) never touches `value`, so this is purely additive.
+  initialText?: string;
 };
 
-export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal }: ComposerProps) {
+export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, initialText }: ComposerProps) {
   const [value, setValue] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (initialText === undefined) return;
+    setValue(initialText);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialText]);
 
   useEffect(() => {
     if (focusSignal === undefined) return;

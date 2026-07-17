@@ -22,7 +22,7 @@ let createChatInFlight = false;
 // creates within the same mount; the module-level flag above covers the
 // close/reopen case across mounts) and waits for it to land in the
 // (now-invalidated) chats list.
-export function GlobalChatPanel() {
+export function GlobalChatPanel({ initialText }: { initialText?: string } = {}) {
   const { close } = useSlideOver();
   const { data } = useChats();
   const createChat = useCreateChat();
@@ -49,7 +49,7 @@ export function GlobalChatPanel() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1">
-        <ChatWindow chatId={mostRecent.id} />
+        <ChatWindow chatId={mostRecent.id} initialText={initialText} />
       </div>
       <div className="shrink-0 border-t border-border px-4 py-2 text-center">
         <Link

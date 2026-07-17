@@ -5,6 +5,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSession } from "@/lib/session";
+import { useInboxPoll } from "@/lib/home";
 import WorkspaceMenu from "./WorkspaceMenu";
 
 export const railItems = [
@@ -17,7 +18,25 @@ export const railItems = [
   { to: "/secrets", label: "Secrets", icon: KeyRound },
 ];
 
+// Small accent dot + count shown on the Home rail icon when there's unread
+// inbox activity. Caps the label at "9+" rather than growing the pill for
+// arbitrarily large counts. Renders nothing at 0 — no badge, not a "0" badge.
+function UnreadBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      aria-label={`${count} unread`}
+      className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold leading-none text-accent-foreground"
+    >
+      {count > 9 ? "9+" : count}
+    </span>
+  );
+}
+
 export default function IconRail() {
+  const { data: poll } = useInboxPoll();
+  const unread = poll?.unread ?? 0;
+
   return (
     <nav
       aria-label="Primary"
@@ -34,12 +53,13 @@ export default function IconRail() {
               to={to}
               aria-label={label}
               className={({ isActive }) =>
-                `flex size-9 items-center justify-center rounded-lg transition-colors ${
+                `relative flex size-9 items-center justify-center rounded-lg transition-colors ${
                   isActive ? "bg-border text-foreground" : "text-muted hover:bg-border/60"
                 }`
               }
             >
               <Icon className="size-[18px]" />
+              {to === "/" && <UnreadBadge count={unread} />}
             </NavLink>
           </TooltipTrigger>
           <TooltipContent side="right">{label}</TooltipContent>

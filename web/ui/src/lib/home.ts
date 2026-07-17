@@ -136,3 +136,35 @@ export function useDeleteInboxMessage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["inbox"] }),
   });
 }
+
+// Lightweight poll DTO — mirrors web/handlers_inbox.go's handleInboxPoll,
+// a cheaper endpoint than useInbox's full list (unread count + a handful of
+// recent items) meant to be polled on an interval for a rail badge.
+export type InboxPollItem = {
+  id: string;
+  source: string;
+  agent_name: string;
+  trigger: string;
+  status: string;
+  read: boolean;
+  preview: string;
+  created_at: string;
+};
+
+export type InboxPoll = {
+  unread: number;
+  recent: InboxPollItem[];
+};
+
+// Own query key (["inbox-poll"], distinct from ["inbox"]) so its 30s
+// refetchInterval doesn't bleed into the full inbox list/page query.
+export function useInboxPoll() {
+  return useQuery({
+    queryKey: ["inbox-poll"],
+    queryFn: () => api.get<InboxPoll>("/api/v1/inbox/poll").then((d) => ({
+      unread: d.unread ?? 0,
+      recent: d.recent ?? [],
+    })),
+    refetchInterval: 30_000,
+  });
+}
