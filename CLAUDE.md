@@ -490,7 +490,7 @@ exhaustive route inventory is the `want` table in `web/api_parity_test.go`
 - **services** — self-managed-OAuth service connections: list, per-provider creds/connect/apikey, delete
 - **chats** — CRUD, messages, resume/stop
 - **reminders + inbox** — reminders CRUD + poll; inbox list/poll/read/read-all/delete
-- **kb** — tree, note read/write/new/delete/rename, search, raw
+- **kb** — tree, note read/write/new/delete/rename, search, raw, resolve
 - **settings + setup** — profile/workspace/coder/master-password settings, coder test, setup wizard
 - **search** — global search
 - `GET /app, /app/*` — embedded SPA (React; 503 when built without make ui); moves to / in sub-plan 6.
