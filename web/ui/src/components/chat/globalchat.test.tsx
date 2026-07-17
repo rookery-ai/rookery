@@ -1,7 +1,7 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Routes, Route } from "react-router";
+import { MemoryRouter, Routes, Route, createMemoryRouter, RouterProvider } from "react-router";
 import { AppShell } from "@/components/shell/AppShell";
 import type { Chat, ChatMessage } from "@/lib/chats";
 
@@ -89,6 +89,35 @@ function wrap(initialEntry = "/") {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+}
+
+// Data-router variant used only for the "navigate away by other means" test:
+// a real browser back/forward/address-bar navigation is an imperative
+// history change, not a click on some in-page element — and while the
+// slide-over is open, Radix marks the rest of the app aria-hidden (correct
+// modal a11y behavior), so a simulated click on a background button
+// wouldn't be reachable via role queries anyway. router.navigate() is the
+// faithful way to drive that.
+function wrapWithRouter(initialEntry = "/") {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const router = createMemoryRouter(
+    [
+      {
+        element: <AppShell />,
+        children: [
+          { path: "/", element: <HomePage /> },
+          { path: "/chats", element: <ChatsRoutePlaceholder /> },
+        ],
+      },
+    ],
+    { initialEntries: [initialEntry] },
+  );
+  render(
+    <QueryClientProvider client={qc}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
+  return router;
 }
 
 beforeEach(() => {
@@ -181,6 +210,70 @@ test("no active chat: creates one on first open and renders it", async () => {
   ).toBe(1);
 });
 
+test("closing and reopening before an in-flight create resolves does not double-create", async () => {
+  // GlobalChatPanel unmounts on close (AppShell renders panel?.node, which
+  // goes away when panel state clears), so a plain per-mount ref can't
+  // catch this — the create must be guarded at module scope. Uses a
+  // deferred POST response so the request is still in flight across the
+  // close/reopen.
+  chats = [];
+  messages = {};
+  let resolveCreate: ((res: Response) => void) | undefined;
+  const deferred = new Promise<Response>((resolve) => {
+    resolveCreate = resolve;
+  });
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url === "/api/v1/auth/session") return Promise.resolve(jsonResponse(SESSION_FIXTURE));
+      if (url === "/api/v1/chats" && method === "GET") return Promise.resolve(jsonResponse({ chats }));
+      if (url === "/api/v1/chats" && method === "POST") return deferred;
+      const detail = url.match(/^\/api\/v1\/chats\/([^/]+)$/);
+      if (detail && method === "GET") {
+        const chat = chats.find((c) => c.id === detail[1]);
+        if (!chat) return Promise.resolve(jsonResponse({ error: { code: "not_found", message: "not found" } }, 404));
+        return Promise.resolve(jsonResponse({ chat, messages: messages[detail[1]] ?? [] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  wrap();
+  const openBtn = await screen.findByRole("button", { name: /open chat/i });
+  await userEvent.click(openBtn);
+
+  await waitFor(() => {
+    expect(
+      vi.mocked(fetch).mock.calls.some(
+        (c) => String(c[0]) === "/api/v1/chats" && (c[1] as RequestInit | undefined)?.method === "POST",
+      ),
+    ).toBe(true);
+  });
+
+  // Close (unmounts the panel) and reopen (fresh mount) while the first
+  // create is still unresolved.
+  await userEvent.click(screen.getByRole("button", { name: "Close" }));
+  await userEvent.click(openBtn);
+
+  const created: Chat = {
+    id: "c-new", name: "New chat", platform: "web", active: true,
+    created_at: "2026-07-17T07:10:00Z", updated_at: "2026-07-17T07:10:00Z",
+  };
+  chats = [...chats, created];
+  messages[created.id] = [];
+  resolveCreate?.(jsonResponse(created));
+
+  expect(await screen.findByRole("heading", { name: "New chat" })).toBeInTheDocument();
+
+  const postCalls = vi.mocked(fetch).mock.calls.filter(
+    (c) => String(c[0]) === "/api/v1/chats" && (c[1] as RequestInit | undefined)?.method === "POST",
+  );
+  expect(postCalls).toHaveLength(1);
+});
+
 test("open full page link navigates to /chats?chat=<id> and closes the panel", async () => {
   mockFetch();
   wrap();
@@ -189,6 +282,21 @@ test("open full page link navigates to /chats?chat=<id> and closes the panel", a
   await screen.findByRole("heading", { name: "Chat One" });
 
   await userEvent.click(screen.getByRole("link", { name: /open full page/i }));
+
+  expect(await screen.findByText("Chats route")).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Chat One" })).not.toBeInTheDocument();
+});
+
+test("navigating to /chats by other means (browser back/forward/address bar) still closes the panel", async () => {
+  mockFetch();
+  const router = wrapWithRouter();
+  const btn = await screen.findByRole("button", { name: /open chat/i });
+  await userEvent.click(btn);
+  await screen.findByRole("heading", { name: "Chat One" });
+
+  await act(async () => {
+    await router.navigate("/chats");
+  });
 
   expect(await screen.findByText("Chats route")).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Chat One" })).not.toBeInTheDocument();

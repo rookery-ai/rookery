@@ -7,10 +7,21 @@ import { ChatWindow } from "@/pages/chats/ChatWindow";
 
 const CHATS_PATH = "/chats";
 
+// Module-level (not component-level) in-flight guard: GlobalChatPanel is
+// unmounted whenever the slide-over closes (panel?.node in AppShell goes
+// away), so a plain useRef resets on every close/reopen. If the create POST
+// from a first open hasn't resolved yet, closing and reopening before then
+// would otherwise mount a fresh instance that sees no active chat and fires
+// a second create. This flag survives across that unmount/remount (it's
+// process-lifetime, reset once the in-flight request settles either way).
+let createChatInFlight = false;
+
 // Renders inside the shell's slide-over. Picks the most recently updated
 // ACTIVE chat; if there isn't one, kicks off a single create on mount (ref
 // guard so React 18 StrictMode's double-invoke of the effect can't fire two
-// creates) and waits for it to land in the (now-invalidated) chats list.
+// creates within the same mount; the module-level flag above covers the
+// close/reopen case across mounts) and waits for it to land in the
+// (now-invalidated) chats list.
 export function GlobalChatPanel() {
   const { close } = useSlideOver();
   const { data } = useChats();
@@ -24,9 +35,10 @@ export function GlobalChatPanel() {
     : undefined;
 
   useEffect(() => {
-    if (!data || mostRecent || attemptedCreate.current) return;
+    if (!data || mostRecent || attemptedCreate.current || createChatInFlight) return;
     attemptedCreate.current = true;
-    createChat.mutate(undefined);
+    createChatInFlight = true;
+    createChat.mutate(undefined, { onSettled: () => { createChatInFlight = false; } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, mostRecent]);
 
@@ -54,12 +66,21 @@ export function GlobalChatPanel() {
 
 export function GlobalChatButton() {
   const location = useLocation();
-  const { open } = useSlideOver();
+  const { open, close } = useSlideOver();
   const hidden = location.pathname === CHATS_PATH;
 
   function openPanel() {
     open(<GlobalChatPanel />, { title: "Chat" });
   }
+
+  // The panel's own "Open full page" link closes itself before navigating,
+  // but /chats can also be reached other ways (browser back/forward,
+  // address bar, a bookmark) that bypass that handler — without this, the
+  // global panel and the full ChatsPage could end up stacked. close() on an
+  // already-closed panel is a no-op (setPanel(null) when already null).
+  useEffect(() => {
+    if (hidden) close();
+  }, [hidden, close]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {

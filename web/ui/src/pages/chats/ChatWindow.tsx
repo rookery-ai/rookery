@@ -13,6 +13,30 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+// Count-based reconciliation: consumes one fetched-message match per pending
+// entry instead of an existence check. An existence-based filter
+// (`fresh.some(fm => fm.role===m.role && fm.content===m.content)`) would drop
+// BOTH copies of a legitimately-repeated pending message when only one of
+// the two has actually landed server-side yet. Exported for direct unit
+// testing (see reconcile.test.ts) — the scenario it guards is awkward to
+// reproduce end-to-end.
+export function reconcilePending(pending: ChatMessage[], freshMessages: ChatMessage[]): ChatMessage[] {
+  const remaining = new Map<string, number>();
+  for (const fm of freshMessages) {
+    const key = `${fm.role}::${fm.content}`;
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+  return pending.filter((m) => {
+    const key = `${m.role}::${m.content}`;
+    const count = remaining.get(key) ?? 0;
+    if (count > 0) {
+      remaining.set(key, count - 1);
+      return false; // this copy is accounted for in the fetched history
+    }
+    return true; // no unconsumed match — keep it pending
+  });
+}
+
 function StatusChip({ active }: { active: boolean }) {
   return (
     <span
@@ -52,15 +76,12 @@ export function ChatWindow({ chatId }: { chatId: string }) {
       // Also refresh the session list so its updated_at/ordering doesn't go
       // stale after a send (list is a separate query keyed by ["chats"]).
       qc.invalidateQueries({ queryKey: ["chats"] });
-      // Dedupe rather than blindly clear: filter out pending entries that
-      // already appear in the freshly-fetched history (matched by
-      // {role, content}) instead of setPending([]) unconditionally — closes
+      // Dedupe rather than blindly clear: reconcile against the freshly-
+      // fetched history instead of setPending([]) unconditionally — closes
       // a transient window where a blind clear could drop a message that
       // hadn't actually landed in the cache yet.
       const fresh = qc.getQueryData<{ chat: Chat; messages: ChatMessage[] }>(["chat", chatId]);
-      setPending((p) =>
-        p.filter((m) => !fresh?.messages.some((fm) => fm.role === m.role && fm.content === m.content)),
-      );
+      setPending((p) => reconcilePending(p, fresh?.messages ?? []));
     } catch (err) {
       // The user bubble already pushed above stays visible — the failure
       // is on the assistant's turn, not the user's message.
