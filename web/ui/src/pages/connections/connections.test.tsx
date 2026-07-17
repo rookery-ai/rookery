@@ -217,7 +217,7 @@ test("search debounces before filtering, then filters both galleries by name/lab
   expect(screen.getByText("Gmail")).toBeInTheDocument();
 });
 
-test("clicking Connect on a chat-app card opens the slide-over stub with the platform", async () => {
+test("clicking Connect on a chat-app card opens the connect wizard for the platform", async () => {
   mockFetch();
   const user = userEvent.setup();
   wrap();
@@ -227,10 +227,12 @@ test("clicking Connect on a chat-app card opens the slide-over stub with the pla
   await user.click(within(slackCard).getByRole("button", { name: "Connect" }));
 
   expect(await screen.findByText("Connect Slack")).toBeInTheDocument();
-  expect(screen.getByText("wizard: slack")).toBeInTheDocument();
+  // ChatAppWizard's not-connected flow opens on the "Setup" step.
+  expect(screen.getByText("Setup")).toBeInTheDocument();
+  expect(screen.getByText("Credentials")).toBeInTheDocument();
 });
 
-test("clicking Manage on a connected chat-app card opens the slide-over stub", async () => {
+test("clicking Manage on a connected chat-app card opens the manage wizard", async () => {
   mockFetch();
   const user = userEvent.setup();
   wrap();
@@ -240,7 +242,11 @@ test("clicking Manage on a connected chat-app card opens the slide-over stub", a
   await user.click(within(telegramCard).getByRole("button", { name: "Manage" }));
 
   expect(await screen.findByText("Manage Telegram")).toBeInTheDocument();
-  expect(screen.getByText("wizard: telegram")).toBeInTheDocument();
+  // ChatAppWizard's connected (Manage) flow shows the saved identity inside
+  // the slide-over panel (the source card behind it shows the same text).
+  const dialog = screen.getByRole("dialog");
+  expect(within(dialog).getByText("@rookie_assistant_bot")).toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: /test connection/i })).toBeInTheDocument();
 });
 
 test("clicking a service tile opens the slide-over stub with the provider", async () => {

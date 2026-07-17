@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { ProviderLogo } from "@/components/brand/ProviderLogo";
+import { ChatAppWizard } from "./ChatAppWizard";
 import {
   useConnectors,
   useServices,
@@ -151,7 +152,7 @@ export default function ConnectionsPage() {
   }
 
   function openChatWizard(platform: ConnectorPlatform) {
-    open(<div>wizard: {platform.platform}</div>, {
+    open(<ChatAppWizard platform={platform} />, {
       title: `${platform.connected ? "Manage" : "Connect"} ${platform.label}`,
     });
   }
