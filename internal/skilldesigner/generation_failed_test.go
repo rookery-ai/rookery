@@ -177,6 +177,50 @@ func TestMarkGenerationFailed_NoSessionIsNoop(t *testing.T) {
 	}
 }
 
+// TestRunGeneration_VettingBlockedAppendsHistoryNote is the review-follow-up
+// regression guard: a vetting-BLOCKED build — the most security-relevant
+// failure of the bunch — must leave a trace in History too, exactly like the
+// other soft-fail branches (see the markGenerationFailed call sites above).
+// Without this, a retry after a vetting refusal regenerates the same flagged
+// skill context-blind about why it was blocked. The fake coder script is
+// invoked twice (Generate for the build, then Chat for vetSkill's vetting
+// call) and unconditionally does both jobs on every invocation: writes a
+// benign SKILL.md (so ethics/guardrails don't block first) AND prints a
+// blocking "Verdict: ❌ do not save" report (so vetSkill's second call, whose
+// stdout becomes the report text, blocks the save).
+func TestRunGeneration_VettingBlockedAppendsHistoryNote(t *testing.T) {
+	fake := newFakeSkillCoder(t, `with open('SKILL.md', 'w') as f:
+    f.write("---\nname: my-skill\ndescription: reads calendar events and sends a daily summary.\n---\n# My Skill\nBody.\n")
+print("Verdict: ❌ do not save")
+print("Reason: logs raw API responses that may contain sensitive data.")
+`)
+	flow, workspaceID := newGenSkillFlow(t, fake)
+	flow.sessions[workspaceID] = newDesigningSession(workspaceID, "my-skill")
+
+	_, done, _, err := flow.runGeneration(context.Background(), workspaceID)
+	if err != nil {
+		t.Fatalf("runGeneration: %v", err)
+	}
+	if done {
+		t.Fatal("a vetting-blocked build must not finish the flow")
+	}
+
+	sess := flow.GetSession(workspaceID)
+	if sess == nil || sess.State != StateDesigning {
+		t.Fatalf("state after vetting block = %+v, want StateDesigning", sess)
+	}
+	if !sess.GenerationFailed {
+		t.Error("GenerationFailed should be set after a vetting block")
+	}
+	last := sess.History[len(sess.History)-1]
+	if last.Role != "assistant" || !strings.Contains(last.Content, "blocked") {
+		t.Errorf("expected the vetting refusal appended to History, got: %+v", last)
+	}
+	if !strings.Contains(last.Content, "do not save") {
+		t.Errorf("expected the vetting report detail in the History note so a retry isn't context-blind: %q", last.Content)
+	}
+}
+
 // TestRunGeneration_SuccessLeavesGenerationFailedFalse is the positive-path
 // counterpart: a clean build must reach StateVerifying with GenerationFailed
 // false (reset at the top of every runGeneration attempt), so the UI banner

@@ -553,6 +553,10 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// A blocked vetting verdict (🔴/⛔ or "do not save") keeps the user in the
 	// design state to revise — the skill is NOT saved.
 	if vettingBlocksSave(report) {
+		msg := fmt.Sprintf(
+			"🔒 The security vetting **blocked** this skill from being saved.\n\n---\n%s\n---\n\nPlease revise the flagged issues and type **approve** to rebuild, or describe what you'll change.",
+			report,
+		)
 		f.mu.Lock()
 		sess = f.sessions[workspaceID]
 		sess.State = StateDesigning
@@ -560,13 +564,16 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		sess.PendingScripts = scripts
 		sess.VettingReport = report
 		sess.GenerationFailed = true
+		// Record the refusal in History (mirrors markGenerationFailed's other
+		// soft-fail paths) so the next generation attempt — the most
+		// security-relevant failure of the bunch — isn't context-blind about
+		// WHY the vetter blocked it; without this a retry could regenerate the
+		// exact same flagged behavior.
+		sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: msg})
 		f.saveDraft(sess)
 		f.mu.Unlock()
 		cleanupStaging()
-		return fmt.Sprintf(
-			"🔒 The security vetting **blocked** this skill from being saved.\n\n---\n%s\n---\n\nPlease revise the flagged issues and type **approve** to rebuild, or describe what you'll change.",
-			report,
-		), false, "", nil
+		return msg, false, "", nil
 	}
 
 	// Verified + vetted — move to StateVerifying for the user to approve or revise.
