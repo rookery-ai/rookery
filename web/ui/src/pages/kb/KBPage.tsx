@@ -5,6 +5,7 @@ import { ContextPane } from "@/components/shell/AppShell";
 import { Button } from "@/components/ui/button";
 import FileTree, { NewEntryDialog } from "./FileTree";
 import NoteEditor from "./NoteEditor";
+import SearchBox from "./SearchBox";
 
 function KBPaneHeader() {
   const [newOpen, setNewOpen] = useState(false);
@@ -17,7 +18,6 @@ function KBPaneHeader() {
       >
         <Plus className="size-4" />
       </Button>
-      {/* Task 6 fills this pane with a KB SearchBox (ripgrep search-as-you-type). */}
       <NewEntryDialog dirPath="" kind="note" open={newOpen} onOpenChange={setNewOpen} />
     </div>
   );
@@ -42,8 +42,10 @@ export default function KBPage() {
       <ContextPane>
         <div className="flex h-full flex-col">
           <KBPaneHeader />
-          <div className="flex-1 overflow-y-auto">
-            <FileTree selectedPath={path} onSelect={(p) => setParams({ path: p })} />
+          <div className="min-h-0 flex-1">
+            <SearchBox onSelect={(p) => setParams({ path: p })}>
+              <FileTree selectedPath={path} onSelect={(p) => setParams({ path: p })} />
+            </SearchBox>
           </div>
         </div>
       </ContextPane>

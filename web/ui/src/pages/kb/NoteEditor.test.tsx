@@ -60,7 +60,7 @@ test("a failed autosave keeps the edit dirty; Ctrl/Cmd+S retries with a fresh PU
   // HTML-comment content is lossy -> raw mode, giving a plain textarea to
   // drive without needing a real TipTap DOM round-trip.
   await waitFor(() => expect(screen.getByText(/protect formatting/)).toBeInTheDocument());
-  const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+  const textarea = screen.getByRole("textbox", { name: "Raw markdown" }) as HTMLTextAreaElement;
   await user.click(textarea);
   await user.type(textarea, "extra");
 
@@ -113,7 +113,7 @@ test("a successful autosave transitions dirty -> saving -> raw with exactly one 
   );
 
   await waitFor(() => expect(screen.getByText(/protect formatting/)).toBeInTheDocument());
-  const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+  const textarea = screen.getByRole("textbox", { name: "Raw markdown" }) as HTMLTextAreaElement;
   await user.click(textarea);
   await user.type(textarea, "extra");
 

@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useEditor, EditorContent } from "@tiptap/react";
-import { Download, FileCode, AlertTriangle, Loader2, Link2 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { AlertTriangle, Loader2, Link2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { useKBNote, useSaveNote, rawURL } from "@/lib/kb";
+import { useKBNote, useSaveNote, useRenameNote, useDeleteNote } from "@/lib/kb";
 import { Button } from "@/components/ui/button";
 import { buildExtensions, toMarkdown, checkFidelity } from "./editor";
 import { splitAlias } from "./wikilinks";
 import { slashSuggestion } from "./SlashMenu";
 import BubbleToolbar from "./BubbleToolbar";
+import NoteHeader from "./NoteHeader";
 import "./editor.css";
 
 export type SaveState = "saved" | "saving" | "dirty" | "error" | "raw";
@@ -76,6 +76,8 @@ export default function NoteEditor({
 }) {
   const { data, isLoading, isError } = useKBNote(path);
   const saveNote = useSaveNote();
+  const renameNote = useRenameNote();
+  const deleteNote = useDeleteNote();
   // KBPage already owns the "path" search param and keys NoteEditor by it
   // (key={path}), so a navigation from inside this component can just write
   // the same param directly — no prop needs threading down from KBPage for
@@ -90,6 +92,7 @@ export default function NoteEditor({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rawText, setRawText] = useState("");
   const [notFoundHint, setNotFoundHint] = useState<string | null>(null);
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   const initializedRef = useRef(false);
   const dirtyRef = useRef(false);
@@ -302,6 +305,34 @@ export default function NoteEditor({
     if (!dirtyRef.current) report("saved");
   };
 
+  const handleToggleRaw = () => {
+    if (modeRef.current === "wysiwyg") switchToRaw();
+    else switchToWysiwyg();
+  };
+
+  const handleRename = (to: string) => {
+    setRenameError(null);
+    renameNote.mutate(
+      { from: path, to },
+      {
+        onSuccess: () => setSearchParams({ path: to }),
+        onError: (err) => setRenameError(err instanceof ApiError ? err.message : "Rename failed"),
+      },
+    );
+  };
+
+  const handleDelete = () => {
+    deleteNote.mutate(
+      { path },
+      {
+        onSuccess: () => {
+          const parent = path.split("/").slice(0, -1).join("/");
+          setSearchParams(parent ? { path: parent } : {});
+        },
+      },
+    );
+  };
+
   if (isLoading || mode === null) {
     return (
       <div className="flex h-full items-center justify-center p-8 text-muted-2">
@@ -322,28 +353,28 @@ export default function NoteEditor({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2">
-        <div className="min-w-0 truncate text-xs text-muted-2">{path}</div>
-        <div className="flex items-center gap-2">
-          <StatusIndicator state={saveState} errorMessage={errorMessage} />
-          {mode === "wysiwyg" ? (
-            <Button variant="ghost" size="sm" onClick={switchToRaw}>
-              <FileCode className="size-4" />
-              Raw
-            </Button>
-          ) : (
-            <Button variant="ghost" size="sm" onClick={switchToWysiwyg}>
-              {fidelityFailed && !overrideAccepted ? "Try WYSIWYG anyway" : "Rich text"}
-            </Button>
-          )}
-          <Button variant="ghost" size="sm" asChild>
-            <a href={rawURL(path)} download>
-              <Download className="size-4" />
-              Download
-            </a>
-          </Button>
+      <NoteHeader
+        path={path}
+        state={saveState}
+        backlinksCount={data.backlinks.length}
+        onRename={handleRename}
+        onDelete={handleDelete}
+        rawMode={mode === "raw"}
+        onToggleRaw={handleToggleRaw}
+      />
+
+      {errorMessage && saveState === "error" && (
+        <div className="border-b border-danger/30 bg-danger/10 px-4 py-1.5 text-xs text-danger">
+          {errorMessage}
         </div>
-      </div>
+      )}
+
+      {renameError && (
+        <div className="flex items-center gap-2 border-b border-danger/30 bg-danger/10 px-4 py-1.5 text-xs text-danger">
+          <AlertTriangle className="size-3.5 shrink-0" />
+          {renameError}
+        </div>
+      )}
 
       {showBanner && (
         <div className="flex items-center gap-2 border-b border-warn-soft bg-warn-soft px-4 py-2 text-sm text-warn">
@@ -376,6 +407,7 @@ export default function NoteEditor({
           </div>
         ) : (
           <textarea
+            aria-label="Raw markdown"
             className="h-full w-full resize-none bg-background px-6 py-8 font-mono text-sm text-foreground outline-none"
             value={rawText}
             onChange={handleRawChange}
@@ -417,28 +449,3 @@ function BacklinksStrip({
   );
 }
 
-function StatusIndicator({
-  state,
-  errorMessage,
-}: {
-  state: SaveState;
-  errorMessage: string | null;
-}) {
-  const label: Record<SaveState, string> = {
-    saved: "Saved",
-    saving: "Saving…",
-    dirty: "Unsaved changes",
-    error: errorMessage ? `Error: ${errorMessage}` : "Error saving",
-    raw: "Raw mode",
-  };
-  return (
-    <span
-      className={cn(
-        "text-xs",
-        state === "error" ? "text-danger" : "text-muted-2",
-      )}
-    >
-      {label[state]}
-    </span>
-  );
-}
