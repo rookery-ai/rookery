@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
+import { Linkify } from "@/lib/linkify";
 import {
   useSaveConnector,
   useTestConnector,
@@ -16,35 +17,6 @@ import {
 } from "@/lib/connections";
 
 type ChatAppWizardProps = { platform: ConnectorPlatform };
-
-// ── Setup-step linkify ──────────────────────────────────────────────────────
-// Bare URLs in setup_steps copy become clickable links — no dependency, a
-// plain split on a capturing URL regex alternates [text, url, text, url, ...].
-
-const URL_PATTERN = /(https?:\/\/[^\s]+)/g;
-
-function Linkify({ text }: { text: string }) {
-  const parts = text.split(URL_PATTERN);
-  return (
-    <>
-      {parts.map((part, i) =>
-        /^https?:\/\//.test(part) ? (
-          <a
-            key={i}
-            href={part}
-            target="_blank"
-            rel="noreferrer"
-            className="text-primary underline underline-offset-2"
-          >
-            {part}
-          </a>
-        ) : (
-          <span key={i}>{part}</span>
-        ),
-      )}
-    </>
-  );
-}
 
 // ── Step chips (1 Setup — 2 Credentials — 3 Test) ───────────────────────────
 
