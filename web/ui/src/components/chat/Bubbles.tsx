@@ -24,11 +24,13 @@ export function ChatMessageBubble({ role, content }: ChatMessageBubbleProps) {
       >
         <div
           className={cn(
-            "prose prose-sm max-w-none",
+            "max-w-none",
             "[&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0",
             "[&_pre]:my-2 [&_pre]:overflow-x-auto [&_code]:break-words",
-            "[&_ul]:my-1 [&_ol]:my-1",
-            isUser ? "prose-invert [&_a]:text-background" : "[&_a]:text-accent",
+            "[&_ul]:my-1 [&_ul]:list-disc [&_ul]:pl-5",
+            "[&_ol]:my-1 [&_ol]:list-decimal [&_ol]:pl-5",
+            "[&_strong]:font-semibold [&_a]:underline",
+            isUser ? "[&_a]:text-background" : "[&_a]:text-accent",
           )}
         >
           <ReactMarkdown

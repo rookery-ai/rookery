@@ -18,6 +18,12 @@ test("ChatMessageBubble renders markdown (bold + link target=_blank)", () => {
   expect(link).toHaveAttribute("rel", expect.stringContaining("noreferrer"));
 });
 
+test("ChatMessageBubble never renders raw HTML (no rehype-raw)", () => {
+  render(<ChatMessageBubble role="assistant" content={"<img src=x onerror=alert(1)>"} />);
+  expect(document.querySelector("img")).not.toBeInTheDocument();
+  expect(screen.getByText(/onerror=alert\(1\)/)).toBeInTheDocument();
+});
+
 test("ChatMessageBubble alignment differs for user vs assistant", () => {
   const { rerender } = render(<ChatMessageBubble role="user" content="hi" />);
   const userRow = screen.getByTestId("bubble-row");
