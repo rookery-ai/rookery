@@ -323,16 +323,17 @@ export default function NoteEditor({
   // Used by rename right before it relocates the note: cancels the debounce
   // timer and, if dirty, performs the PUT to the CURRENT (soon-to-be-old)
   // path directly — bypassing the debounce so the edit is committed to disk
-  // before the rename moves that file. Resolves once settled either way
-  // (success or failure) and never rejects, so the caller can always await
-  // it without a try/catch — matching "flush and await it settling, THEN
-  // fire the rename" rather than "await it succeeding" (review fix).
-  const flushForHandoff = useCallback(async (): Promise<void> => {
+  // before the rename moves that file. Returns whether it's now SAFE to
+  // proceed (nothing was dirty, or the PUT succeeded) vs. must ABORT (the
+  // PUT failed — proceeding would move stale content and silently drop the
+  // edit, the last live data-loss path in this flow per re-review). Never
+  // throws, so the caller never needs a try/catch either way.
+  const flushForHandoff = useCallback(async (): Promise<boolean> => {
     if (timerRef.current !== undefined) {
       window.clearTimeout(timerRef.current);
       timerRef.current = undefined;
     }
-    if (!dirtyRef.current) return;
+    if (!dirtyRef.current) return true;
     const content = getContentRef.current();
     report("saving");
     try {
@@ -341,14 +342,16 @@ export default function NoteEditor({
         dirtyRef.current = false;
         report(idleState());
       }
-      // else: a newer edit landed mid-flight — leave dirtyRef true. We still
-      // proceed with the rename below (the spec is "settling", not
-      // "succeeding"); the edit will simply need saving again post-rename.
+      // else: a newer edit landed mid-flight — leave dirtyRef true, but the
+      // PUT itself succeeded, so it's still safe for the caller to proceed;
+      // the newer edit will simply need saving again post-rename.
+      return true;
     } catch (err) {
       if (mountedRef.current) {
         setErrorMessage(err instanceof ApiError ? err.message : "Failed to save");
       }
       report("error");
+      return false;
     }
   }, [path, saveNote, report, idleState]);
 
@@ -359,7 +362,17 @@ export default function NoteEditor({
     // path first, then rename (review fix — previously a dirty edit could
     // be silently dropped, or resurrect the old path after the rename via
     // the unmount-flush effect below).
-    await flushForHandoff();
+    const flushed = await flushForHandoff();
+    if (!flushed) {
+      // The pending edit couldn't be saved — ABORT the rename rather than
+      // moving stale content (re-review ruling: proceeding here was the
+      // last live data-loss path, since the "Save failed" signal would die
+      // with this instance once the rename's navigation unmounted it).
+      // dirtyRef is still true and intentionallyInvalidatedRef is still
+      // false, so Ctrl+S or the next debounce tick retries normally.
+      setRenameError("Couldn't save your latest edit — rename cancelled. Try again.");
+      return;
+    }
     intentionallyInvalidatedRef.current = true;
     renameNote.mutate(
       { from: path, to },
@@ -382,6 +395,7 @@ export default function NoteEditor({
       window.clearTimeout(timerRef.current);
       timerRef.current = undefined;
     }
+    const hadPendingEdit = dirtyRef.current;
     // The user confirmed destruction — discard any pending edit rather than
     // persisting it; a PUT here (via debounce or unmount-flush) would
     // silently resurrect the note the delete is about to remove (review
@@ -399,6 +413,14 @@ export default function NoteEditor({
           // The delete didn't happen — this instance stays mounted at the
           // same path, so restore normal unmount-flush behavior.
           intentionallyInvalidatedRef.current = false;
+          // Re-arm: the edit we discarded above is still sitting unsaved in
+          // the editor (the delete that would have removed it never
+          // happened), so the dirty/"Unsaved" contract must reflect that
+          // again instead of lying "saved" (re-review minor fix).
+          if (hadPendingEdit) {
+            dirtyRef.current = true;
+            report("dirty");
+          }
           setDeleteError(
             err instanceof ApiError ? `Delete failed: ${err.message}` : "Delete failed",
           );

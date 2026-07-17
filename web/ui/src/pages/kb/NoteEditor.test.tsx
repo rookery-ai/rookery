@@ -265,3 +265,108 @@ test("a failed delete surfaces 'Delete failed: <message>' and the note stays (no
   expect(screen.getByDisplayValue("trip plan")).toBeInTheDocument();
   expect(screen.queryByTestId("kb-empty-state")).not.toBeInTheDocument();
 });
+
+// Re-review ruling: a failed pre-flush must ABORT the rename outright — the
+// earlier fix let it proceed after a failed flush ("settling" not
+// "succeeding"), which meant a network blip could rename the file with
+// stale server-side content while the actual edit died with the unmounting
+// instance. This was the last live data-loss path in the flow.
+test("dirty edit + rename: a failed pre-flush ABORTS the rename; retry after a successful flush proceeds PUT-then-rename", async () => {
+  let putShouldFail = true;
+  const calls: Array<{ method: string; url: string }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ method, url });
+      if (method === "PUT") {
+        return Promise.resolve(putShouldFail ? errorResponse(500, "put boom") : jsonResponse({ ok: true }));
+      }
+      if (method === "POST" && url === "/api/v1/kb/rename") return Promise.resolve(jsonResponse({ ok: true }));
+      if (url.startsWith("/api/v1/kb/note")) return Promise.resolve(jsonResponse(TRIP_NOTE_FIXTURE));
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  const user = userEvent.setup({ delay: null });
+  renderAtPath("notes/trip plan.md");
+
+  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  await user.click(textarea);
+  await user.type(textarea, "extra");
+
+  const titleInput = screen.getByLabelText("Note title");
+  await user.clear(titleInput);
+  await user.type(titleInput, "summer");
+  await user.keyboard("{Enter}");
+
+  // First attempt: the pre-flush PUT fails — no rename POST must fire.
+  await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
+  expect(await screen.findByText(/rename cancelled/i)).toBeInTheDocument();
+  await new Promise((r) => setTimeout(r, 50));
+  expect(calls.some((c) => c.method === "POST" && c.url === "/api/v1/kb/rename")).toBe(false);
+  // Still on the same note — the rename never happened.
+  expect(screen.getByDisplayValue("summer")).toBeInTheDocument();
+
+  // Retry: the PUT now succeeds — flush lands, THEN the rename POST fires.
+  putShouldFail = false;
+  await user.click(screen.getByDisplayValue("summer"));
+  await user.keyboard("{Enter}");
+
+  await waitFor(() =>
+    expect(calls.some((c) => c.method === "POST" && c.url === "/api/v1/kb/rename")).toBe(true),
+  );
+  const putCalls = calls.filter((c) => c.method === "PUT");
+  expect(putCalls).toHaveLength(2);
+  const lastPutIndex = calls.lastIndexOf(putCalls[1]);
+  const renameIndex = calls.findIndex((c) => c.method === "POST" && c.url === "/api/v1/kb/rename");
+  expect(lastPutIndex).toBeLessThan(renameIndex);
+});
+
+// Re-review minor: a failed delete must re-arm the dirty/"Unsaved" contract
+// for the edit it discarded — otherwise the chip lies "saved" and Ctrl+S
+// silently no-ops for content that was never actually persisted anywhere.
+test("a failed delete re-arms dirtyRef for the edit it discarded (chip reports dirty, Ctrl+S retries)", async () => {
+  const putBodies: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "DELETE") return Promise.resolve(errorResponse(500, "boom"));
+      if (method === "PUT") {
+        putBodies.push(JSON.parse(String(init?.body)).content);
+        return Promise.resolve(jsonResponse({ ok: true }));
+      }
+      if (url.startsWith("/api/v1/kb/note")) return Promise.resolve(jsonResponse(TRIP_NOTE_FIXTURE));
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  const states: string[] = [];
+  const user = userEvent.setup();
+  const qc = new QueryClient();
+  render(
+    <MemoryRouter initialEntries={["/?path=notes%2Ftrip%20plan.md"]}>
+      <QueryClientProvider client={qc}>
+        <NoteEditor path="notes/trip plan.md" onStateChange={(s) => states.push(s)} />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+
+  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  await user.click(textarea);
+  await user.type(textarea, "extra");
+
+  await user.click(screen.getByLabelText("Note actions"));
+  await user.click(await screen.findByText("Delete…"));
+  await user.click(screen.getByRole("button", { name: "Delete" }));
+
+  await screen.findByText("Delete failed: boom");
+  expect(states[states.length - 1]).toBe("dirty");
+
+  fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+  await waitFor(() => expect(putBodies).toHaveLength(1));
+  expect(putBodies[0]).toContain("extra");
+});
