@@ -608,6 +608,47 @@ func (d *DB) DeleteAgentSchedule(agentID string) error {
 	return err
 }
 
+// ScheduleWithName embeds AgentSchedule with the agent name joined in, for
+// the "upcoming" list on the home dashboard.
+type ScheduleWithName struct {
+	AgentSchedule
+	AgentName string
+}
+
+// ListWorkspaceSchedulesWithNames returns every ENABLED schedule for active
+// agents in the workspace, agent name joined in, ordered by next_run_at
+// ascending (soonest first; schedules with no next_run_at yet sort last).
+// Mirrors ListDueSchedules' `s.enabled=1 JOIN agents a ON ... AND a.active=1`
+// semantics — a paused agent's schedule will never fire, so it isn't
+// "upcoming".
+func (d *DB) ListWorkspaceSchedulesWithNames(workspaceID string) ([]*ScheduleWithName, error) {
+	rows, err := d.Query(`SELECT s.id,s.agent_id,s.workspace_id,s.cron_expr,s.next_run_at,s.last_run_at,s.enabled,s.created_at,a.name
+		FROM agent_schedules s
+		JOIN agents a ON a.id = s.agent_id AND a.active = 1
+		WHERE s.workspace_id=? AND s.enabled=1
+		ORDER BY (s.next_run_at IS NULL), s.next_run_at ASC`, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*ScheduleWithName{}
+	for rows.Next() {
+		var s ScheduleWithName
+		var nextRunAt, lastRunAt sql.NullString
+		var createdAt string
+		var enabled int
+		if err := rows.Scan(&s.ID, &s.AgentID, &s.WorkspaceID, &s.CronExpr, &nextRunAt, &lastRunAt, &enabled, &createdAt, &s.AgentName); err != nil {
+			return nil, err
+		}
+		s.NextRunAt = scanTimePtr(nullToPtr(nextRunAt))
+		s.LastRunAt = scanTimePtr(nullToPtr(lastRunAt))
+		s.Enabled = enabled == 1
+		s.CreatedAt = scanTime(createdAt)
+		out = append(out, &s)
+	}
+	return out, rows.Err()
+}
+
 // ── Chats ──────────────────────────────────────────────────────────────────
 
 func (d *DB) CreateChat(c *Chat) error {

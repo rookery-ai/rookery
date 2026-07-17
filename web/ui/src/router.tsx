@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate, Outlet } from "react-router";
 import { useSession } from "@/lib/session";
 import { AppShell } from "@/components/shell/AppShell";
 import Placeholder from "@/pages/Placeholder";
+import HomePage from "@/pages/home/HomePage";
 import Login from "@/pages/Login";
 import ChangePassword from "@/pages/ChangePassword";
 import Workspaces from "@/pages/Workspaces";
@@ -57,7 +58,7 @@ export const router = createBrowserRouter(
         {
           element: <AppShell />,
           children: [
-            { path: "/", element: <Placeholder title="Home" /> },
+            { path: "/", element: <HomePage /> },
             { path: "/kb", element: <KBPage /> },
             { path: "/agents", element: <AgentsPage /> },
             { path: "/agents/new", element: <AgentNewPage /> },

@@ -53,6 +53,7 @@ func TestAPIParityInventory(t *testing.T) {
 		"PUT /api/v1/settings/master-password",
 		"GET /api/v1/setup", "POST /api/v1/setup",
 		"GET /api/v1/search",
+		"GET /api/v1/dashboard",
 	}
 	have := make(map[string]bool)
 	for _, r := range s.echo.Routes() {
