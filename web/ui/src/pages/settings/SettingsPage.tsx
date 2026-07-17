@@ -16,6 +16,9 @@ import {
   type Profile,
   type WorkspaceMeta,
 } from "@/lib/settings";
+import { ProviderCards } from "./ProviderCards";
+import { CoderSection } from "./CoderSection";
+import { OwnerSections } from "./OwnerSections";
 
 // Section navigation is driven by a `?section=` query param (not scroll
 // anchors) — plain to unit-test (assert the param + the rendered section)
@@ -56,18 +59,6 @@ function SavedChip({ show, label = "Saved" }: { show: boolean; label?: string })
     <span className="inline-flex items-center gap-1 rounded-full bg-ok-soft px-2 py-0.5 text-xs font-medium text-ok">
       <Check className="size-3" /> {label}
     </span>
-  );
-}
-
-function ComingSoon({ title, blurb }: { title: string; blurb: string }) {
-  return (
-    <section>
-      <h2 className="text-lg font-bold">{title}</h2>
-      <p className="mt-1 text-sm text-muted-2">{blurb}</p>
-      <p className="mt-4 rounded-md border border-dashed border-border p-4 text-sm text-muted-2">
-        Coming in the next task.
-      </p>
-    </section>
   );
 }
 
@@ -377,7 +368,7 @@ export default function SettingsPage() {
   const rawSection = searchParams.get("section");
   const section: SectionSlug = isSectionSlug(rawSection) ? rawSection : DEFAULT_SECTION;
 
-  const { data: settings, isLoading } = useSettings();
+  const { data: settings, isLoading, isError, error } = useSettings();
 
   function goTo(slug: SectionSlug) {
     const next = new URLSearchParams(searchParams);
@@ -411,6 +402,7 @@ export default function SettingsPage() {
       </ContextPane>
 
       <div className="mx-auto max-w-3xl p-6">
+        {isError && <ErrorBanner message={errMessage(error)} />}
         {isLoading ? (
           <div className="text-sm text-muted-2">Loading…</div>
         ) : (
@@ -418,19 +410,30 @@ export default function SettingsPage() {
             {section === "profile" && <ProfileSection profile={settings?.profile} />}
             {section === "workspace" && <WorkspaceSection workspace={settings?.workspace} />}
             {section === "ai-providers" && (
-              <ComingSoon
-                title="AI Providers"
-                blurb="Connect the LLM providers your coder can use."
-              />
+              <section>
+                <h2 className="text-lg font-bold">AI Providers</h2>
+                <p className="mt-1 text-sm text-muted-2">
+                  Connect the LLM providers your coder can use — add a key once, then pick a
+                  provider under Coder.
+                </p>
+                <div className="mt-4">
+                  <ProviderCards
+                    catalog={settings?.coder_catalog ?? []}
+                    providers={settings?.api_providers ?? []}
+                  />
+                </div>
+              </section>
             )}
             {section === "coder" && (
-              <ComingSoon title="Coder" blurb="Pick which engine and model runs your agents." />
+              <CoderSection
+                coder={settings?.coder}
+                detectedCoders={settings?.detected_coders ?? []}
+                catalog={settings?.coder_catalog ?? []}
+              />
             )}
             {section === "master-password" && <MasterPasswordSection />}
             {section === "appearance" && <AppearanceSection />}
-            {section === "owner" && (
-              <ComingSoon title="Owner" blurb="Workspaces, audit log, and system settings." />
-            )}
+            {section === "owner" && <OwnerSections />}
           </>
         )}
       </div>

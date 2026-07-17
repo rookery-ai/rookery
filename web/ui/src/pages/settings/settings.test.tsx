@@ -240,5 +240,15 @@ test("Section nav switches the visible section via ?section= param", async () =>
   await user.click(screen.getByRole("button", { name: /ai providers/i }));
 
   expect(await screen.findByRole("heading", { name: "AI Providers" })).toBeInTheDocument();
-  expect(screen.getByText(/coming in the next task/i)).toBeInTheDocument();
+  expect(screen.getByText(/no providers available/i)).toBeInTheDocument();
+});
+
+test("Settings load error shows an inline banner", async () => {
+  mockFetch({
+    "GET /api/v1/settings": () =>
+      jsonResponse({ error: { code: "internal", message: "database unreachable" } }, 500),
+  });
+  wrap();
+
+  expect(await screen.findByText(/database unreachable/i)).toBeInTheDocument();
 });

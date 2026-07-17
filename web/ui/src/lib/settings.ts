@@ -129,3 +129,89 @@ export function useChangeMasterPassword() {
       api.put<{ ok: boolean }>("/api/v1/settings/master-password", input),
   });
 }
+
+// ── Owner sections (workspaces / permissions / system settings / audit) ────
+// Mirrors web/api_workspaces.go's DTOs. These endpoints are owner-gated
+// (requireOwnerAPI, not requireActiveWorkspaceAPI) — no workspace-master-
+// password re-entry is needed to read/write them.
+
+export type AdminSettings = {
+  claude_bin: string;
+  coder_timeout: string;
+  agent_timeout: string;
+  memory_mb: string;
+  sandbox_on: boolean;
+  landlock_ready: boolean;
+};
+
+export function useAdminSettings() {
+  return useQuery({
+    queryKey: ["admin-settings"],
+    queryFn: () => api.get<AdminSettings>("/api/v1/admin/settings"),
+  });
+}
+
+export type SaveAdminSettingsInput = {
+  claude_bin: string;
+  coder_timeout: string;
+  agent_timeout: string;
+  memory_mb: string;
+};
+
+export function useSaveAdminSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: SaveAdminSettingsInput) =>
+      api.put<AdminSettings>("/api/v1/admin/settings", input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-settings"] }),
+  });
+}
+
+// Mirrors apiAuditLog.
+export type AuditLogEntry = {
+  workspace_id: string;
+  action: string;
+  target: string;
+  detail: string;
+  ip: string;
+  created_at: string;
+};
+
+export function useAuditLog(limit = 100) {
+  return useQuery({
+    queryKey: ["audit-log", limit],
+    queryFn: () => api.get<{ logs: AuditLogEntry[] }>(`/api/v1/admin/audit?limit=${limit}`),
+  });
+}
+
+// Mirrors apiPermEntry.
+export type PermissionEntry = { name: string; granted: boolean };
+
+export function useWorkspacePermissions(workspaceID: string | null) {
+  return useQuery({
+    queryKey: ["workspace-permissions", workspaceID],
+    queryFn: () =>
+      api.get<{ permissions: PermissionEntry[] }>(
+        `/api/v1/workspaces/${workspaceID}/permissions`,
+      ),
+    enabled: !!workspaceID,
+  });
+}
+
+export function useSaveWorkspacePermissions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, grant, revoke }: { id: string; grant: string[]; revoke: string[] }) =>
+      api.put<{ ok: boolean }>(`/api/v1/workspaces/${id}/permissions`, { grant, revoke }),
+    onSuccess: (_data, vars) =>
+      qc.invalidateQueries({ queryKey: ["workspace-permissions", vars.id] }),
+  });
+}
+
+export function useDeleteWorkspaceAdmin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.del<{ ok: boolean }>(`/api/v1/workspaces/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["session"] }),
+  });
+}

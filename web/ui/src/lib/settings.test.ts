@@ -8,6 +8,12 @@ import {
   useSaveCoder,
   useTestCoder,
   useChangeMasterPassword,
+  useAdminSettings,
+  useSaveAdminSettings,
+  useAuditLog,
+  useWorkspacePermissions,
+  useSaveWorkspacePermissions,
+  useDeleteWorkspaceAdmin,
 } from "./settings";
 import { useSession } from "./session";
 
@@ -201,4 +207,111 @@ test("useChangeMasterPassword PUTs current/new_password/confirm", async () => {
     new_password: "new-pw-123",
     confirm: "new-pw-123",
   });
+});
+
+// ── Owner-section hooks ──────────────────────────────────────────────────
+
+test("useAdminSettings fetches /api/v1/admin/settings", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      jsonResponse({
+        claude_bin: "/usr/bin/claude",
+        coder_timeout: "120",
+        agent_timeout: "300",
+        memory_mb: "512",
+        sandbox_on: true,
+        landlock_ready: true,
+      }),
+    ),
+  );
+  const { result } = renderHook(() => useAdminSettings(), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/v1/admin/settings");
+  expect(result.current.data?.claude_bin).toBe("/usr/bin/claude");
+});
+
+test("useSaveAdminSettings PUTs claude_bin/coder_timeout/agent_timeout/memory_mb", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ claude_bin: "/usr/bin/claude" })));
+  const { result } = renderHook(() => useSaveAdminSettings(), { wrapper: wrapper() });
+  await act(async () => {
+    await result.current.mutateAsync({
+      claude_bin: "/usr/bin/claude",
+      coder_timeout: "120",
+      agent_timeout: "300",
+      memory_mb: "512",
+    });
+  });
+  const [url, init] = vi.mocked(fetch).mock.calls[0];
+  expect(url).toBe("/api/v1/admin/settings");
+  expect((init as RequestInit).method).toBe("PUT");
+  expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+    claude_bin: "/usr/bin/claude",
+    coder_timeout: "120",
+    agent_timeout: "300",
+    memory_mb: "512",
+  });
+});
+
+test("useAuditLog fetches /api/v1/admin/audit with a limit param", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      jsonResponse({
+        logs: [
+          {
+            workspace_id: "w1",
+            action: "configure_coder",
+            target: "workspace:w1",
+            detail: "api:openrouter/glm-5.2",
+            ip: "127.0.0.1",
+            created_at: "2026-07-17T00:00:00Z",
+          },
+        ],
+      }),
+    ),
+  );
+  const { result } = renderHook(() => useAuditLog(100), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/v1/admin/audit?limit=100");
+  expect(result.current.data?.logs[0].action).toBe("configure_coder");
+});
+
+test("useWorkspacePermissions fetches /api/v1/workspaces/:id/permissions", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      jsonResponse({ permissions: [{ name: "bash", granted: true }, { name: "mcp-servers", granted: false }] }),
+    ),
+  );
+  const { result } = renderHook(() => useWorkspacePermissions("w1"), { wrapper: wrapper() });
+  await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/v1/workspaces/w1/permissions");
+  expect(result.current.data?.permissions).toHaveLength(2);
+});
+
+test("useSaveWorkspacePermissions PUTs {grant,revoke}", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ ok: true })));
+  const { result } = renderHook(() => useSaveWorkspacePermissions(), { wrapper: wrapper() });
+  await act(async () => {
+    await result.current.mutateAsync({ id: "w1", grant: ["bash"], revoke: ["mcp-servers"] });
+  });
+  const [url, init] = vi.mocked(fetch).mock.calls[0];
+  expect(url).toBe("/api/v1/workspaces/w1/permissions");
+  expect((init as RequestInit).method).toBe("PUT");
+  expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+    grant: ["bash"],
+    revoke: ["mcp-servers"],
+  });
+});
+
+test("useDeleteWorkspaceAdmin DELETEs /api/v1/workspaces/:id", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ ok: true })));
+  const { result } = renderHook(() => useDeleteWorkspaceAdmin(), { wrapper: wrapper() });
+  await act(async () => {
+    await result.current.mutateAsync("w1");
+  });
+  const [url, init] = vi.mocked(fetch).mock.calls[0];
+  expect(url).toBe("/api/v1/workspaces/w1");
+  expect((init as RequestInit).method).toBe("DELETE");
 });
