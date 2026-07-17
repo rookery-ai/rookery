@@ -36,6 +36,43 @@ func TestAPIKBRoundTrip(t *testing.T) {
 	}
 }
 
+// TestAPIKBNoteBacklinksEmptyArrayNotNull is a regression test for a
+// user-reported SPA crash: `TypeError: Cannot read properties of null
+// (reading 'length')` on clicking any KB note. vault.Backlinks returns
+// `var out []string` (nil, not `[]string{}`) when a note has no incoming
+// [[wikilinks]] — apiGetKBNote used to assign that nil straight over the
+// pre-initialized `[]string{}` default, so a note with no backlinks
+// serialized "backlinks":null. The frontend does `data.backlinks.length`
+// unconditionally, so null throws.
+func TestAPIKBNoteBacklinksEmptyArrayNotNull(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/kb/new",
+		map[string]any{"path": "notes/lonely.md", "is_dir": false}, cookies)
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Fatalf("new: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/kb/note",
+		map[string]string{"path": "notes/lonely.md", "content": "# Lonely\n\nno links here"}, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/kb/note?path=notes/lonely.md", nil, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("read: %d %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if contains(body, `"backlinks":null`) {
+		t.Fatalf("backlinks serialized as null, not []: %s", body)
+	}
+	if !contains(body, `"backlinks":[]`) {
+		t.Fatalf("backlinks missing or not an empty array: %s", body)
+	}
+}
+
 func TestAPIKBSearch(t *testing.T) {
 	s, _ := newAPITestServer(t)
 	cookies := bootstrapAndLogin(t, s)

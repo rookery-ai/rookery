@@ -86,7 +86,7 @@ func (s *Server) connectorPlatformList(u *db.Workspace) []apiConnectorPlatform {
 			Platform:   spec.Platform,
 			Label:      spec.Label,
 			Blurb:      spec.Blurb,
-			SetupSteps: spec.SetupSteps,
+			SetupSteps: orEmpty(spec.SetupSteps),
 			Fields:     fields,
 		}
 

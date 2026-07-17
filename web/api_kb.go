@@ -171,7 +171,7 @@ func (s *Server) apiGetKBNote(c echo.Context) error {
 	if strings.EqualFold(path.Ext(rel), ".md") {
 		resp.HTML = string(s.renderMarkdown(u.ID, resp.Content))
 		if back, err := s.vault.Backlinks(u.ID, rel); err == nil {
-			resp.Backlinks = back
+			resp.Backlinks = orEmpty(back)
 		}
 	}
 	return c.JSON(http.StatusOK, resp)

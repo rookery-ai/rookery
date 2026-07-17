@@ -29,6 +29,20 @@ func bindAPI(c echo.Context, v any) error {
 	return nil
 }
 
+// orEmpty returns s unchanged when non-nil, or a non-nil empty slice when s
+// is nil. Go nil slices marshal to JSON `null`; every array-typed field in an
+// API response must marshal to `[]` instead — the frontend unconditionally
+// does `.length`/`.map` on these fields and a `null` throws a TypeError. Wrap
+// any slice field at DTO-construction time whose source (a DB helper that
+// declares `var x []T` and only appends, or a vault/library call with the
+// same shape) can produce a nil slice.
+func orEmpty[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
+}
+
 // requireOwnerAPI is requireOwner with JSON responses instead of redirects.
 func (s *Server) requireOwnerAPI(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c echo.Context) error {

@@ -56,6 +56,54 @@ func TestAPIAgentsListDetailSchedule(t *testing.T) {
 	}
 }
 
+// TestAPIAgentDetailFreshAgentNeverNullArrays is a regression test for a
+// user-reported SPA crash: `TypeError: Cannot read properties of null
+// (reading 'length')` on clicking any agent. A freshly-created agent (no
+// runs, no attached skills, no agent-dir log files, no manifest-declared
+// secrets) leaves several agentDetailData slice fields (Logs,
+// AttachedSkills, MissingSecrets) as Go nil slices — `var x []T` that's
+// only ever appended to. json.Marshal renders a nil slice as `null`, and the
+// frontend unconditionally does `.length`/`.map` on every array field in the
+// AgentDetail DTO, so `null` throws. Assert EVERY array key is `[]`, not
+// just the three fields the fix touches — the rest were already safe
+// (`make([]T, 0, ...)`) and this guards them against regressing back to nil.
+func TestAPIAgentDetailFreshAgentNeverNullArrays(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+	a := seedAgent(t, s, wsID)
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/agents/"+a.ID, nil, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("detail: %d %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	// None of the array fields may ever serialize as JSON null — that's what
+	// throws `.length`/`.map` client-side. core_skills is asserted separately
+	// below (non-empty: 13 bundled core skills always populate it).
+	for _, field := range []string{
+		"runs", "logs", "attached_skills", "core_skills", "all_skills",
+		"workspace_connections", "attached_connection_ids", "missing_secrets",
+	} {
+		if contains(body, `"`+field+`":null`) {
+			t.Fatalf("field %q serialized as null, not an array: %s", field, body)
+		}
+	}
+	// A fresh agent has none of these — assert the concretely-empty ones
+	// render as "[]", not just "not null".
+	for _, field := range []string{
+		"runs", "logs", "attached_skills", "all_skills",
+		"workspace_connections", "attached_connection_ids", "missing_secrets",
+	} {
+		if !contains(body, `"`+field+`":[]`) {
+			t.Fatalf("field %q missing or not an empty array: %s", field, body)
+		}
+	}
+	if !contains(body, `"core_skills":[{`) {
+		t.Fatalf("core_skills missing the bundled core-skill catalog: %s", body)
+	}
+}
+
 // TestAPIRunAgentAlreadyRunning verifies apiRunAgent honors startManualRun's
 // bool: when a run for this agent is already in flight, the endpoint reports
 // 202 {"status":"already_running"} instead of silently discarding the signal
