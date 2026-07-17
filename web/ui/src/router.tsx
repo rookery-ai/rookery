@@ -1,7 +1,6 @@
 import { createBrowserRouter, Navigate, Outlet } from "react-router";
 import { useSession } from "@/lib/session";
 import { AppShell } from "@/components/shell/AppShell";
-import Placeholder from "@/pages/Placeholder";
 import HomePage from "@/pages/home/HomePage";
 import Login from "@/pages/Login";
 import ChangePassword from "@/pages/ChangePassword";
@@ -16,6 +15,7 @@ import SkillsPage from "@/pages/skills/SkillsPage";
 import SkillNewPage from "@/pages/skills/SkillNewPage";
 import SkillDetailPage, { CoreSkillViewPage } from "@/pages/skills/SkillDetailPage";
 import ConnectionsPage from "@/pages/connections/ConnectionsPage";
+import SecretsPage from "@/pages/secrets/SecretsPage";
 import SettingsPage from "@/pages/settings/SettingsPage";
 import SetupWizard from "@/pages/setup/SetupWizard";
 
@@ -70,7 +70,7 @@ export const router = createBrowserRouter(
             { path: "/skills/:id", element: <SkillDetailPage /> },
             { path: "/connections", element: <ConnectionsPage /> },
             { path: "/chats", element: <ChatsPage /> },
-            { path: "/secrets", element: <Placeholder title="Secrets" /> },
+            { path: "/secrets", element: <SecretsPage /> },
             { path: "/settings", element: <SettingsPage /> },
           ],
         },
