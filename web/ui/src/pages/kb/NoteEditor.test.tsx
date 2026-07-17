@@ -56,6 +56,39 @@ const TRIP_NOTE_FIXTURE = {
   backlinks: [] as string[],
 };
 
+// Regression test for a user-reported crash: `TypeError: Cannot read
+// properties of null (reading 'length')` on clicking any KB note. Before the
+// fix, GET /api/v1/kb/note could serialize "backlinks":null for a note with
+// no incoming [[wikilinks]] (vault.Backlinks's nil `var out []string`).
+// useKBNote's queryFn now normalizes it with `?? []` as a belt-and-braces
+// guard alongside the backend fix (web/api_kb.go's orEmpty). Mock the OLD
+// broken (null) response shape directly — bypassing the KBNote TS type,
+// which the real fetch response isn't checked against either — to prove the
+// editor renders without throwing.
+test("a note response with backlinks:null (pre-fix API shape) renders without throwing", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/v1/kb/note")) {
+        return Promise.resolve(
+          jsonResponse({
+            path: "notes/lonely.md",
+            content: "# Lonely\n\nno links here",
+            html: "<h1>Lonely</h1>\n<p>no links here</p>\n",
+            backlinks: null,
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  renderAtPath("notes/lonely.md");
+
+  expect(await screen.findByDisplayValue("lonely")).toBeInTheDocument();
+});
+
 // Regression test for a review-caught bug: flush() used to clear dirtyRef
 // BEFORE the PUT resolved, so a failed save left the flag falsely clean —
 // Ctrl/Cmd+S became a silent no-op and the unmount-flush skipped, losing the

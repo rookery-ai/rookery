@@ -368,6 +368,60 @@ test("Connections card with an empty pool shows a Connect-services-first note in
   expect(link.getAttribute("href")).toBe("/connections");
 });
 
+// Regression test for a user-reported crash: `TypeError: Cannot read
+// properties of null (reading 'length')` on clicking any agent. Before the
+// fix, the API could serialize logs/attached_skills/missing_secrets (nil Go
+// slices) as JSON null; useAgentDetail's queryFn now normalizes every array
+// field with `?? []` as a belt-and-braces guard alongside the backend fix
+// (web/api.go's orEmpty). Mock the OLD broken (null) response shape directly
+// — bypassing the AgentDetail TS type, which the real fetch response isn't
+// checked against either — to prove the page renders without throwing.
+test("a detail response with null arrays (pre-fix API shape) renders without throwing", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/auth/session") return Promise.resolve(jsonResponse(SESSION_FIXTURE));
+      if (url === "/api/v1/agents/a1") {
+        return Promise.resolve(
+          jsonResponse({
+            agent: {
+              id: "a1",
+              name: "Inbox Triager",
+              description: "",
+              active: true,
+              created_at: "2026-07-01T00:00:00Z",
+              running: false,
+            },
+            schedule: null,
+            runs: null,
+            agent_md: "",
+            state: "",
+            logs: null,
+            last_log: "",
+            attached_skills: null,
+            core_skills: null,
+            all_skills: null,
+            workspace_connections: null,
+            attached_connection_ids: null,
+            missing_secrets: null,
+            running: false,
+            live_run: false,
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  wrap();
+
+  expect(await screen.findByText("Inbox Triager")).toBeInTheDocument();
+  expect(screen.getByText("No runs yet.")).toBeInTheDocument();
+  expect(screen.getByText("No skills available.")).toBeInTheDocument();
+  expect(screen.getByText(/connect services first/i)).toBeInTheDocument();
+});
+
 test("run history renders status, trigger, and expandable output", async () => {
   mockFetch();
   wrap();

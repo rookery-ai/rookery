@@ -86,10 +86,29 @@ export function useAgents() {
   });
 }
 
+// normalizeAgentDetail guards against nil Go slices reaching a component as
+// JSON null: json.Marshal renders a nil []T as `null`, and every array field
+// here is unconditionally `.length`/`.map`'d by AgentDetailPage and its
+// cards. Belt-and-braces alongside the backend fix (web/api.go's orEmpty) —
+// normalize once here so no component needs its own null guard.
+function normalizeAgentDetail(d: AgentDetail): AgentDetail {
+  return {
+    ...d,
+    runs: d.runs ?? [],
+    logs: d.logs ?? [],
+    attached_skills: d.attached_skills ?? [],
+    core_skills: d.core_skills ?? [],
+    all_skills: d.all_skills ?? [],
+    workspace_connections: d.workspace_connections ?? [],
+    attached_connection_ids: d.attached_connection_ids ?? [],
+    missing_secrets: d.missing_secrets ?? [],
+  };
+}
+
 export function useAgentDetail(id: string | null) {
   return useQuery({
     queryKey: ["agent", id],
-    queryFn: () => api.get<AgentDetail>(`/api/v1/agents/${id}`),
+    queryFn: () => api.get<AgentDetail>(`/api/v1/agents/${id}`).then(normalizeAgentDetail),
     enabled: !!id,
   });
 }

@@ -27,7 +27,13 @@ export function useKBTree(path: string) {
 export function useKBNote(path: string | null) {
   return useQuery({
     queryKey: ["kb-note", path],
-    queryFn: () => api.get<KBNote>(`/api/v1/kb/note?path=${encodeURIComponent(path!)}`),
+    queryFn: () =>
+      api
+        .get<KBNote>(`/api/v1/kb/note?path=${encodeURIComponent(path!)}`)
+        // Belt-and-braces alongside the backend fix (web/api.go's orEmpty):
+        // a nil Go []string marshals to JSON null, and NoteEditor
+        // unconditionally does `data.backlinks.length`/`.map`.
+        .then((note) => ({ ...note, backlinks: note.backlinks ?? [] })),
     enabled: !!path,
   });
 }
