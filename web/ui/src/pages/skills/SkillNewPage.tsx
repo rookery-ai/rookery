@@ -38,16 +38,28 @@ export default function SkillNewPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const resumeParam = params.get("resume") === "1";
-  const { data } = useSkills();
+  const { data, isLoading } = useSkills();
   const draft = data?.draft ?? null;
 
   const [name, setName] = useState("");
   const [nameConfirmed, setNameConfirmed] = useState(false);
 
   const showNameGate = !resumeParam && !draft && !nameConfirmed;
+  // DesignerSurface decides whether to show its resume banner / auto-resume
+  // ONCE, on its own mount effect — it never re-checks a `draft` prop that
+  // arrives later. Normal navigation (Resume link from /skills, where the
+  // ["skills"] query is already cached) never hits this; a direct load of
+  // ?resume=1 before the draft has fetched would otherwise mount
+  // DesignerSurface with `draft` still null. Hold off mounting it until the
+  // query settles so it always sees the real draft on its first (only) check.
+  const waitingForDraft = resumeParam && isLoading;
 
   function confirmName() {
     if (name.trim()) setNameConfirmed(true);
+  }
+
+  if (waitingForDraft) {
+    return <div className="p-8 text-muted-2">Loading…</div>;
   }
 
   if (showNameGate) {

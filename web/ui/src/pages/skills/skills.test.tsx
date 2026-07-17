@@ -185,6 +185,30 @@ test("SkillNewPage with ?resume=1 mounts DesignerSurface without any GET to a de
   expect(stateCalls).toHaveLength(0);
 });
 
+test("SkillNewPage with ?resume=1 and an existing draft POSTs the skill resume endpoint and replays history", async () => {
+  draft = { skill_name: "Draft Skill", state: "designing", updated_at: "2026-07-16T00:00:00Z" };
+  const calls = mockFetch({
+    "POST /api/v1/skills/design/resume": () =>
+      jsonResponse({
+        response: "Resuming your draft for **Draft Skill**. Continue, or approve.",
+        state: "designing",
+        history: [
+          { role: "user", content: "make it check invoices" },
+          { role: "assistant", content: "got it, anything else?" },
+        ],
+        skill_name: "Draft Skill",
+      }),
+  });
+  wrap("/skills/new?resume=1");
+
+  expect(await screen.findByText("make it check invoices")).toBeInTheDocument();
+  expect(screen.getByText("got it, anything else?")).toBeInTheDocument();
+  expect(screen.getByText(/Resuming your draft for/)).toBeInTheDocument();
+
+  const resumeCalls = calls.filter((c) => c.url === "/api/v1/skills/design/resume");
+  expect(resumeCalls).toHaveLength(1);
+});
+
 test("SkillDetailPage Save PUTs the edited content", async () => {
   const calls = mockFetch();
   wrap("/skills/s1");

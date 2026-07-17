@@ -175,7 +175,20 @@ export function DesignerSurface({
 
   async function refetchState() {
     if (!endpoints.state) {
+      // No state-recovery endpoint (the skill designer) — there's nothing to
+      // GET, but a draft can still exist server-side (persisted every design
+      // turn) and the caller can still pass `draft`/`autoResume`, so the
+      // resume-banner/auto-resume behavior below must still run rather than
+      // silently no-op.
       setRecovering(false);
+      if (!dismissedRef.current && draft) {
+        if (autoResume && !autoResumeTriedRef.current) {
+          autoResumeTriedRef.current = true;
+          await handleResume();
+        } else {
+          setResumeBanner({ name: draft.name });
+        }
+      }
       return;
     }
     try {
