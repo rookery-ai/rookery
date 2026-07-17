@@ -34,7 +34,7 @@ export default function AgentNewPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const resumeParam = params.get("resume") === "1";
-  const { data } = useAgents();
+  const { data, isLoading } = useAgents();
   const draft = data?.draft ?? null;
 
   const [name, setName] = useState("");
@@ -46,8 +46,21 @@ export default function AgentNewPage() {
   // takes over immediately. Likewise ?resume=1 goes straight there.
   const showNameGate = !resumeParam && !draft && !nameConfirmed;
 
+  // DesignerSurface's mount-recovery effect (refetchState) reads `draft` only
+  // ONCE, when the request to endpoints.state resolves to "no live session" —
+  // it never re-checks a `draft` prop that arrives later. On a cold cache,
+  // useAgents() hasn't settled yet, so `draft` is still null at that moment
+  // and a direct load of ?resume=1 would silently skip the resume banner /
+  // auto-resume. Hold off mounting DesignerSurface until the query settles so
+  // it always sees the real draft (mirrors SkillNewPage's waitingForDraft).
+  const waitingForDraft = resumeParam && isLoading;
+
   function confirmName() {
     if (name.trim()) setNameConfirmed(true);
+  }
+
+  if (waitingForDraft) {
+    return <div className="p-8 text-muted-2">Loading…</div>;
   }
 
   if (showNameGate) {

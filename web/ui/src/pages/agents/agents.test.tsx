@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router";
 import { AppShell } from "@/components/shell/AppShell";
 import AgentsPage from "./AgentsPage";
+import AgentNewPage from "./AgentNewPage";
 import type { Agent, AgentDraft } from "@/lib/agents";
 
 function jsonResponse(body: unknown, status = 200) {
@@ -67,6 +68,7 @@ function wrap(initialEntry = "/") {
         <Routes>
           <Route element={<AppShell />}>
             <Route path="/" element={<AgentsPage />} />
+            <Route path="/agents/new" element={<AgentNewPage />} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -154,4 +156,67 @@ test("draft card shows Resume link and Discard posts dismiss + refreshes the lis
     expect(listCalls.length).toBeGreaterThan(1);
   });
   await waitFor(() => expect(screen.queryByText("Draft Agent")).not.toBeInTheDocument());
+});
+
+// SP4 final review fix: AgentNewPage must not mount DesignerSurface with a
+// still-null draft on a cold query cache. DesignerSurface decides whether to
+// show its resume banner / auto-resume ONCE, on its own mount effect — it
+// never re-checks a `draft` prop that arrives later (see SkillNewPage's
+// identical waitingForDraft gate and skills.test.tsx). A direct load of
+// /agents/new?resume=1 before useAgents() has settled would otherwise mount
+// DesignerSurface with draft=null and silently skip the resume.
+test("AgentNewPage on a cold cache shows loading, then resumes once the draft query resolves", async () => {
+  draft = { agent_id: undefined, agent_name: "Draft Agent", is_edit: false, state: "designing", updated_at: "2026-07-16T00:00:00Z" };
+
+  let resolveAgentsGet!: (res: Response) => void;
+  const agentsGetPromise = new Promise<Response>((resolve) => {
+    resolveAgentsGet = resolve;
+  });
+
+  const calls: Array<{ url: string; method: string }> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      calls.push({ url, method });
+
+      if (url === "/api/v1/auth/session") return Promise.resolve(jsonResponse(SESSION_FIXTURE));
+      // The agents list (and its embedded `draft`) never resolves until the
+      // test explicitly does so below — simulating a cold query cache.
+      if (url === "/api/v1/agents" && method === "GET") return agentsGetPromise;
+      if (url === "/api/v1/agents/design/state" && method === "GET") {
+        return Promise.resolve(jsonResponse({ active: false }));
+      }
+      if (url === "/api/v1/agents/design/resume" && method === "POST") {
+        return Promise.resolve(
+          jsonResponse({
+            response: "Resuming your draft for **Draft Agent**. Continue, or approve.",
+            state: "designing",
+            history: [
+              { role: "user", content: "watch my inbox" },
+              { role: "assistant", content: "got it, anything else?" },
+            ],
+            agent_id: "",
+            agent_name: "Draft Agent",
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  wrap("/agents/new?resume=1");
+
+  // Cold cache: the loading gate is shown, and nothing has tried to auto-resume yet.
+  expect(await screen.findByText(/loading/i)).toBeInTheDocument();
+  expect(calls.some((c) => c.url === "/api/v1/agents/design/resume")).toBe(false);
+
+  // The draft query resolves...
+  resolveAgentsGet(jsonResponse({ agents: [], draft }));
+
+  // ...and DesignerSurface now mounts with the real draft and auto-resumes.
+  await waitFor(() => expect(calls.some((c) => c.url === "/api/v1/agents/design/resume")).toBe(true));
+  expect(await screen.findByText("watch my inbox")).toBeInTheDocument();
+  expect(screen.getByText(/Resuming your draft for/)).toBeInTheDocument();
 });
