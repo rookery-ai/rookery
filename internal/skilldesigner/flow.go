@@ -82,6 +82,14 @@ type DesignSession struct {
 	PendingScripts map[string]string
 	VettingReport  string
 
+	// GenerationFailed is true when the last generation attempt soft-failed (a
+	// blocker, missing SKILL.md, a failed safety/guardrail check, or a blocking
+	// vetting verdict) and the session stayed in StateDesigning instead of
+	// advancing to StateVerifying. Reset to false at the start of every
+	// runGeneration attempt. Mirrors agentdesigner.DesignSession.GenerationFailed
+	// (narrower: skills have no "keep it as-is" partial-build concept).
+	GenerationFailed bool
+
 	// pendingName holds the skill name the user originally typed in the
 	// StateAwaitingResume flow, so the "new" branch can start a fresh session
 	// with that name once the draft is dismissed.
@@ -228,6 +236,30 @@ func (f *Flow) GetProgressChan(workspaceID string) (<-chan string, bool) {
 	return sess.progressCh, true
 }
 
+// markGenerationFailed flags the user's session so the web handler can report
+// generation_failed to a reloading/polling client, and appends a note to
+// History so the next generation attempt is aware the previous one failed and
+// why — mirrors agentdesigner.Flow.recordGenerationFailure's message shape;
+// without this a retry repeats the same build context-blind (see that
+// function's doc comment for the full rationale). No-op if the session is
+// gone (e.g. cancelled mid-build).
+func (f *Flow) markGenerationFailed(workspaceID, detail string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sess, ok := f.sessions[workspaceID]
+	if !ok {
+		return
+	}
+	sess.GenerationFailed = true
+	note := "I attempted to build the skill but it did not succeed."
+	if strings.TrimSpace(detail) != "" {
+		note += " Reason: " + strings.TrimSpace(detail) + "."
+	}
+	note += " On the next attempt I will address this and finish building the skill."
+	sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: note})
+	f.saveDraft(sess)
+}
+
 // GetSession returns the user's active session, or nil.
 func (f *Flow) GetSession(workspaceID string) *DesignSession {
 	f.mu.Lock()
@@ -353,6 +385,9 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, bool, string, error) {
 	f.mu.Lock()
 	sess := f.sessions[workspaceID]
+	// Reset the failure flag for this fresh attempt; a soft-fail below re-sets it
+	// (mirrors agentdesigner.Flow.runGeneration).
+	sess.GenerationFailed = false
 	coderSvc := f.coderFor(workspaceID)
 	skillNameSnap := sess.SkillName
 	historySnap := make([]db.ChatMessage, len(sess.History))
@@ -464,6 +499,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	if blocked := parseBlockedOutput(result.Text); blocked != "" {
 		cleanupStaging()
 		closeProgress()
+		f.markGenerationFailed(workspaceID, blocked)
 		return "The coder ran into a blocker:\n\n" + blocked + "\n\nTell me how you'd like to proceed, or describe a different approach.", false, "", nil
 	}
 
@@ -474,6 +510,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	if err != nil {
 		cleanupStaging()
 		closeProgress()
+		f.markGenerationFailed(workspaceID, "the coder didn't create SKILL.md")
 		return "The coder didn't create SKILL.md. Tell me what to change and I'll try again.", false, "", nil
 	}
 	skillMD := strings.TrimSpace(string(skillMDBytes))
@@ -492,6 +529,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		cleanupStaging()
 		closeProgress()
 		slog.Warn("skilldesigner: skill failed safety checks", "workspace_id", workspaceID, "skill_name", skillNameSnap, "err", err)
+		f.markGenerationFailed(workspaceID, "the generated SKILL.md failed a safety check: "+err.Error())
 		return "That request tripped a safety check I can't get around. Try describing it differently — for example, avoid destructive or high-risk actions.", false, "", nil
 	}
 	for filename, code := range scripts {
@@ -499,6 +537,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 			cleanupStaging()
 			closeProgress()
 			slog.Warn("skilldesigner: generated script failed guardrails", "workspace_id", workspaceID, "skill_name", skillNameSnap, "file", filename, "err", err)
+			f.markGenerationFailed(workspaceID, "the generated file "+filename+" failed an internal safety check: "+err.Error())
 			return "One of the files the build produced didn't pass an internal check, so I held off saving it. Type **approve** to have it rebuilt, or tell me what to change.", false, "", nil
 		}
 	}
@@ -514,19 +553,27 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// A blocked vetting verdict (🔴/⛔ or "do not save") keeps the user in the
 	// design state to revise — the skill is NOT saved.
 	if vettingBlocksSave(report) {
+		msg := fmt.Sprintf(
+			"🔒 The security vetting **blocked** this skill from being saved.\n\n---\n%s\n---\n\nPlease revise the flagged issues and type **approve** to rebuild, or describe what you'll change.",
+			report,
+		)
 		f.mu.Lock()
 		sess = f.sessions[workspaceID]
 		sess.State = StateDesigning
 		sess.PendingSkillMD = skillMD
 		sess.PendingScripts = scripts
 		sess.VettingReport = report
+		sess.GenerationFailed = true
+		// Record the refusal in History (mirrors markGenerationFailed's other
+		// soft-fail paths) so the next generation attempt — the most
+		// security-relevant failure of the bunch — isn't context-blind about
+		// WHY the vetter blocked it; without this a retry could regenerate the
+		// exact same flagged behavior.
+		sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: msg})
 		f.saveDraft(sess)
 		f.mu.Unlock()
 		cleanupStaging()
-		return fmt.Sprintf(
-			"🔒 The security vetting **blocked** this skill from being saved.\n\n---\n%s\n---\n\nPlease revise the flagged issues and type **approve** to rebuild, or describe what you'll change.",
-			report,
-		), false, "", nil
+		return msg, false, "", nil
 	}
 
 	// Verified + vetted — move to StateVerifying for the user to approve or revise.

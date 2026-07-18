@@ -15,11 +15,18 @@ LOG := logs/server.log
 PID := logs/server.pid
 SHELL := /bin/bash
 
-.PHONY: build stop start deploy restart logs status clean test
+.PHONY: ui build-go build stop start deploy restart logs status clean test
 
-## build: compile the binary to bin/simple-agents
-build:
+## ui: build the SPA (web/ui/dist) — requires node; run before `build`
+ui:
+	cd web/ui && npm ci && npm run build
+
+## build-go: compile the binary only (embeds whatever dist/ currently holds)
+build-go:
 	go build -o $(BIN) $(PKG)
+
+## build: full artifact — SPA + binary (spec §2)
+build: ui build-go
 
 ## stop: stop the running server (pidfile first, pkill fallback)
 stop:

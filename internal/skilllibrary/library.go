@@ -167,10 +167,15 @@ func LoadBundled() []SkillMeta {
 }
 
 // IsCoreSkill reports whether slug names a core skill (an embedded folder).
+// Folder names are lowercase, but callers pass slugs from varied sources
+// (URL params typed by hand, LLM-parsed "# Skills:" headers, …) that don't
+// always match case — normalize once here so every call site gets
+// case-insensitive matching for free.
 func IsCoreSkill(slug string) bool {
 	if slug == "" {
 		return false
 	}
+	slug = strings.ToLower(slug)
 	_, err := fs.Stat(skillsFS, filepath.ToSlash(filepath.Join("skills", slug, "SKILL.md")))
 	return err == nil
 }
@@ -185,7 +190,7 @@ func CoreSkillContent(slug string) (string, bool) {
 	}
 	// Fall back: try matching by frontmatter name.
 	for slug2, meta := range coreMetaByName() {
-		if meta == slug {
+		if strings.EqualFold(meta, slug) {
 			if content, ok := readCoreSkill(slug2); ok {
 				return content, true
 			}
@@ -194,8 +199,11 @@ func CoreSkillContent(slug string) (string, bool) {
 	return "", false
 }
 
+// readCoreSkill's folder lookup is case-insensitive, matching IsCoreSkill —
+// callers (URL params typed by hand, LLM-parsed "# Skills:" headers) don't
+// always match the embed's lowercase folder names.
 func readCoreSkill(slug string) (string, bool) {
-	data, err := fs.ReadFile(skillsFS, filepath.ToSlash(filepath.Join("skills", slug, "SKILL.md")))
+	data, err := fs.ReadFile(skillsFS, filepath.ToSlash(filepath.Join("skills", strings.ToLower(slug), "SKILL.md")))
 	if err != nil {
 		return "", false
 	}

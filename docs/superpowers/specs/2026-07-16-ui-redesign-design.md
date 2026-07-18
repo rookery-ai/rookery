@@ -139,7 +139,7 @@ Every current route maps to a new surface. Implementation of each sub-plan check
 | `/dashboard/agents/:id/agent-md` | AGENT.md editor (ethics check preserved) |
 | `/dashboard/agents/:id/skills` | Agent page skills card |
 | `/dashboard/agents/:id/connections` | Agent page attach-connections card |
-| Agent import (`agent_import.html`) | Agents page → Import action |
+| Agent import (`agent_import.html` — orphaned template, no registered route or handler exists today) | No API port (dead surface); delete the orphan template in sub-plan 6, or scope an import endpoint deliberately if wanted |
 | `/dashboard/skills`, `/skills/new`, `/skills/design*`, `/skills/core/:slug`, `/skills/:id` | Skills page, skill-creator chat, core-skill viewer, skill detail |
 | `/dashboard/secrets` | Secrets page (write-only edit, master-password gates) |
 | `/dashboard/connectors` | Connections → Chat apps |

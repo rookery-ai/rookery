@@ -9,3 +9,7 @@ __pycache__/
 # compiled binaries
 bin/
 .superpowers/
+
+web/ui/node_modules/
+web/ui/dist/*
+!web/ui/dist/.gitkeep

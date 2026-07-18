@@ -64,13 +64,39 @@ func scanConn(s rowScanner) (ServiceConnection, error) {
 	return c, err
 }
 
+// InsertServiceConnection inserts a new connected account, or — when a row
+// already exists for the same (workspace_id, provider, account_label), which
+// is UNIQUE — UPSERTs onto it instead of erroring. Reconnecting under the
+// same label (OAuth re-consent or re-pasting an API key) is a normal flow,
+// not a conflict: it must refresh the stored tokens/extra/status but MUST
+// KEEP THE EXISTING id, since `agent_connections` bindings reference
+// connections by id — replacing the row/id on reconnect would silently
+// unbind every agent that had this connection attached. `c.ID` is therefore
+// only used for the initial insert; a conflicting reconnect ignores it.
+//
+// Refresh-token guard: some reconnect flows (e.g. a provider that doesn't
+// re-issue a refresh token on every consent) legitimately pass an empty
+// EncryptedRefreshToken. Overwriting the existing one with empty would brick
+// the connection's background token refresh the moment the current access
+// token expires — so the UPSERT only replaces encrypted_refresh_token when
+// the incoming value is non-empty; otherwise it keeps whatever was already
+// stored.
 func (d *DB) InsertServiceConnection(ctx context.Context, c ServiceConnection) error {
 	if c.Status == "" {
 		c.Status = "ACTIVE"
 	}
 	_, err := d.ExecContext(ctx, `
 INSERT INTO service_connections (`+svcConnCols+`)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))`,
+VALUES (?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))
+ON CONFLICT(workspace_id, provider, account_label) DO UPDATE SET
+  account_identity=excluded.account_identity,
+  scopes=excluded.scopes,
+  encrypted_access_token=excluded.encrypted_access_token,
+  encrypted_refresh_token=CASE WHEN excluded.encrypted_refresh_token != '' THEN excluded.encrypted_refresh_token ELSE encrypted_refresh_token END,
+  expires_at=excluded.expires_at,
+  status=excluded.status,
+  extra=excluded.extra,
+  updated_at=datetime('now')`,
 		c.ID, c.WorkspaceID, c.Provider, c.AccountLabel, c.AccountIdentity, c.Scopes,
 		c.EncryptedAccessToken, c.EncryptedRefreshToken, c.ExpiresAt, c.Status, c.Extra)
 	return err
