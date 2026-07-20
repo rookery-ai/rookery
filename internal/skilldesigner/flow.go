@@ -154,6 +154,32 @@ func (f *Flow) WithSecretsLoader(fn func(ctx context.Context, workspaceID string
 
 // StartDesign is the web path: creates a session already in StateDesigning with
 // the user's first message and returns the coder's first response.
+// Start opens a session in StateDescribing and asks the user what the skill should
+// do. It deliberately does NOT call the coder: the description arrives as the next
+// message and Step → stepDescribing carries it into StateDesigning.
+//
+// This is the chat-platform entry point. The web UI uses StartDesign instead,
+// because its form collects the description up front and so can skip this turn.
+// Mirrors agentdesigner.Flow.Start.
+func (f *Flow) Start(workspaceID, skillName string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if _, exists := f.sessions[workspaceID]; exists {
+		return "", fmt.Errorf("you already have an active skill session; send /skill cancel to start over")
+	}
+	if err := f.validateSkillName(workspaceID, skillName); err != nil {
+		return "", err
+	}
+
+	f.sessions[workspaceID] = f.newSession(workspaceID, skillName, StateDescribing)
+
+	return fmt.Sprintf(
+		"Starting skill \"%s\".\n\nDescribe what this skill should do. Be specific: what task does it handle, and when should it kick in?",
+		skillName,
+	), nil
+}
+
 func (f *Flow) StartDesign(ctx context.Context, workspaceID, skillName, firstMessage string) (string, error) {
 	f.mu.Lock()
 	if _, exists := f.sessions[workspaceID]; exists {

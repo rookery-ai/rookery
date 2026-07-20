@@ -332,8 +332,12 @@ func serveCmd() *cli.Command {
 				return runner.RunByName(ctx, workspaceID, agentName, "", send)
 			}
 
+			// The SAME skillFlow instance the web layer uses — two would each hold
+			// their own session map, and the one-session-at-a-time guarantee would
+			// not hold across the web and chat surfaces.
 			router := gateway.NewRouter(database, textHandler, agentRunHandler, designFlow, memStore).
-				WithTimeParserFallback(buildLLMTimeParserFn(coderSvc))
+				WithTimeParserFallback(buildLLMTimeParserFn(coderSvc)).
+				WithSkillFlow(skillFlow)
 			gwManager := gateway.New(database, sysKey, router)
 
 			go func() {
