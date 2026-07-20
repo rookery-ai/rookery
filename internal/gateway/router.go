@@ -628,6 +628,25 @@ func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send
 		return nil
 	}
 
+	// Subcommands are matched EXACTLY, never by prefix: "list" and "delete" are
+	// ordinary English words, and "/remind in 10 minutes to list the groceries"
+	// must keep creating a reminder. Anything that isn't an exact match falls
+	// through to the creation path untouched.
+	if fields := strings.Fields(arg); len(fields) > 0 {
+		switch strings.ToLower(fields[0]) {
+		case "list":
+			if len(fields) == 1 {
+				return r.listReminders(msg.WorkspaceID, send)
+			}
+		case "delete":
+			if len(fields) == 2 {
+				if n, err := strconv.Atoi(fields[1]); err == nil && n >= 1 {
+					return r.deleteReminderByIndex(msg.WorkspaceID, n, send)
+				}
+			}
+		}
+	}
+
 	// Strip optional leading "me "
 	arg = strings.TrimPrefix(arg, "me ")
 	arg = strings.TrimSpace(arg)
@@ -700,6 +719,53 @@ func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send
 	}
 
 	return r.createReminder(ctx, msg.WorkspaceID, message, remindAt, send)
+}
+
+// listReminders renders the workspace's pending reminders, numbered. The numbers
+// are what /remind delete <n> indexes, so both use db.ListReminders' ordering.
+// Times render in the workspace's timezone — a UTC listing is wrong for every
+// install that isn't on UTC.
+func (r *Router) listReminders(workspaceID string, send func(string)) error {
+	items, err := r.db.ListReminders(workspaceID)
+	if err != nil {
+		return fmt.Errorf("list reminders: %w", err)
+	}
+	if len(items) == 0 {
+		send("No reminders set. Use /remind <when> to <message> to add one.")
+		return nil
+	}
+
+	loc := profile.LoadLocation(r.db, workspaceID)
+	var b strings.Builder
+	b.WriteString("**Your reminders:**\n")
+	for i, rm := range items {
+		b.WriteString(fmt.Sprintf("%d. _%s_ — `%s`",
+			i+1, rm.Message, rm.RemindAt.In(loc).Format("Mon Jan 2, 15:04")))
+		if rm.Sent {
+			b.WriteString(" ✓")
+		}
+		b.WriteByte('\n')
+	}
+	b.WriteString("\n_/remind delete <number> to remove one_")
+	send(b.String())
+	return nil
+}
+
+func (r *Router) deleteReminderByIndex(workspaceID string, n int, send func(string)) error {
+	items, err := r.db.ListReminders(workspaceID)
+	if err != nil {
+		return fmt.Errorf("list reminders: %w", err)
+	}
+	if n > len(items) {
+		send(fmt.Sprintf("No reminder #%d. You have %d.", n, len(items)))
+		return nil
+	}
+	target := items[n-1]
+	if err := r.db.DeleteReminder(target.ID); err != nil {
+		return fmt.Errorf("delete reminder: %w", err)
+	}
+	send(fmt.Sprintf("🗑 Deleted reminder #%d: _%s_", n, target.Message))
+	return nil
 }
 
 func (r *Router) createReminder(ctx context.Context, workspaceID, message string, remindAt time.Time, send func(string)) error {
@@ -1108,6 +1174,8 @@ func helpText() string {
 /secret show <name> — reveal a secret value (requires master password)
 /secret delete <name> — delete a secret (requires master password)
 /remind <when> to <message> — set a reminder (e.g. /remind in 10 minutes to check oven)
+/remind list — list your reminders
+/remind delete <n> — delete a reminder by number
 /chat start [name] — start a chat (saves history)
 /chat list — list all chats with IDs
 /chat stop — stop current chat
