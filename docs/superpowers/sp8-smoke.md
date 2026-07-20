@@ -134,3 +134,30 @@ timestamp can look inconsistent. Cosmetic, not a data bug.
    `animation-duration`, not `transition-duration`/`scroll-behavior` — a future edit
    could drop those two and the test suite would still pass. Watching the toast
    actually not animate in is the only check that would currently catch that.
+
+## 9. Cross-feature interactions
+
+These exercise the seams where the toast, deferred-delete, and inbox features meet at
+runtime — the part unit tests can't fully reach. Surfaced by the whole-branch review.
+
+1. **Undo survives a background poll.** The inbox auto-polls every ~30s. Delete an inbox
+   item and keep watching it for ~6 seconds (through the 5s undo window) without touching
+   anything.
+   - Good result: the row stays hidden the whole time; a poll firing mid-window does not
+     make it flash back. On a fresh delete, Undo still restores the row.
+   - If the row reappears on its own before the 5s expiry, or Undo stops working after a
+     poll, that's a regression in the deferred-delete timer — report it.
+
+2. **Undo-after-navigation is a no-op (known, NOT a bug).** Delete an inbox item, then
+   immediately click Chats (or any other page) before the toast fades. The toast lingers
+   with a still-clickable Undo. Click it.
+   - Good result: nothing comes back, and nothing crashes. Navigating away already
+     committed the delete (that's intentional — a delete you walked away from is meant to
+     stick), so Undo at that point does nothing. This is a documented limitation, not a
+     defect to file. It's only worth noting if it *crashes* rather than no-ops.
+
+3. **Two pending deletes at once.** Within the same ~5 seconds, delete one inbox item and
+   one reminder. Let both windows expire, then reload.
+   - Good result: both are gone after reload, and neither toast/undo affected the other
+     (undoing one must not resurrect or commit the other). The two lists track their
+     pending deletes independently.
