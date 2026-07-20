@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { ContextPane, useSlideOver } from "@/components/shell/AppShell";
+import { ContextPaneHeader } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -248,46 +249,48 @@ export default function ConnectionsPage() {
   return (
     <>
       <ContextPane>
-        <div className="flex h-full flex-col gap-3 p-3">
-          <h2 className="px-1 text-sm font-bold">Connections</h2>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-2" />
-            <Input
-              aria-label="Search providers"
-              placeholder="Search providers…"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              className="h-8 pl-8 text-sm"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <button
-              type="button"
-              onClick={() => scrollTo(chatAppsRef)}
-              className="flex items-center justify-between rounded-md px-2.5 py-1.5 text-sm font-medium hover:bg-chrome"
-            >
-              <span>💬 Chat apps</span>
-              <span className="text-muted-2">{platforms.length}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollTo(servicesRef)}
-              className="flex items-center justify-between rounded-md px-2.5 py-1.5 text-sm font-medium hover:bg-chrome"
-            >
-              <span>🧩 Services</span>
-              <span className="text-muted-2">
-                {connectedServicesCount} of {services.length}
-              </span>
-            </button>
-          </div>
-          <div className="rounded-lg bg-muted p-3 text-xs leading-relaxed text-muted-2">
-            <p>
-              <b className="text-foreground">Chat apps</b> are where you talk to your assistant.
-            </p>
-            <p className="mt-2">
-              <b className="text-foreground">Services</b> are the accounts your agents can act on
-              — Gmail, Notion, GitHub…
-            </p>
+        <div className="flex h-full flex-col">
+          <ContextPaneHeader title="Connections" />
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3 pt-0">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-2" />
+              <Input
+                aria-label="Search providers"
+                placeholder="Search providers…"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                className="h-8 pl-8 text-sm"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                onClick={() => scrollTo(chatAppsRef)}
+                className="flex items-center justify-between rounded-md px-2.5 py-1.5 text-sm font-medium hover:bg-chrome"
+              >
+                <span>💬 Chat apps</span>
+                <span className="text-muted-2">{platforms.length}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollTo(servicesRef)}
+                className="flex items-center justify-between rounded-md px-2.5 py-1.5 text-sm font-medium hover:bg-chrome"
+              >
+                <span>🧩 Services</span>
+                <span className="text-muted-2">
+                  {connectedServicesCount} of {services.length}
+                </span>
+              </button>
+            </div>
+            <div className="rounded-lg bg-muted p-3 text-xs leading-relaxed text-muted-2">
+              <p>
+                <b className="text-foreground">Chat apps</b> are where you talk to your assistant.
+              </p>
+              <p className="mt-2">
+                <b className="text-foreground">Services</b> are the accounts your agents can act on
+                — Gmail, Notion, GitHub…
+              </p>
+            </div>
           </div>
         </div>
       </ContextPane>

@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Bell, Bot, Trash2, Clock, AlertTriangle, Plus } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
+import { ContextPaneHeader, ContextSection } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, timeAgo } from "@/lib/utils";
@@ -78,34 +79,35 @@ function InboxSection() {
 
   return (
     <div className="border-b border-border pb-3">
-      <div className="mb-1.5 flex items-center justify-between px-1">
-        <h3 className="text-[11px] font-bold uppercase tracking-wide text-muted-2">
-          Inbox{unread > 0 ? ` · ${unread} new` : ""}
-        </h3>
-        {unread > 0 && (
-          <button
-            type="button"
-            className="text-[11px] text-muted-2 hover:text-foreground"
-            onClick={() => markAll.mutate()}
-          >
-            Mark all read
-          </button>
+      <ContextSection
+        title={`Inbox${unread > 0 ? ` · ${unread} new` : ""}`}
+        action={
+          unread > 0 ? (
+            <button
+              type="button"
+              className="text-[11px] text-muted-2 hover:text-foreground"
+              onClick={() => markAll.mutate()}
+            >
+              Mark all read
+            </button>
+          ) : undefined
+        }
+      >
+        {messages.length === 0 ? (
+          <div className="px-1 text-xs text-muted-2">
+            <p>No notifications yet.</p>
+            {dash && !dash.has_connector && (
+              <p className="mt-0.5 text-muted-2/70">
+                Connect a chat app so agents can reach you here too.
+              </p>
+            )}
+          </div>
+        ) : (
+          messages.map((m) => (
+            <InboxCard key={m.id} msg={m} onDelete={() => schedule(m.id, "Notification deleted")} />
+          ))
         )}
-      </div>
-      {messages.length === 0 ? (
-        <div className="px-1 text-xs text-muted-2">
-          <p>No notifications yet.</p>
-          {dash && !dash.has_connector && (
-            <p className="mt-0.5 text-muted-2/70">
-              Connect a chat app so agents can reach you here too.
-            </p>
-          )}
-        </div>
-      ) : (
-        messages.map((m) => (
-          <InboxCard key={m.id} msg={m} onDelete={() => schedule(m.id, "Notification deleted")} />
-        ))
-      )}
+      </ContextSection>
     </div>
   );
 }
@@ -191,17 +193,16 @@ function RemindersSection() {
   const reminders = (data?.reminders ?? []).filter((r) => !pending.has(r.id));
   return (
     <div className="pt-3">
-      <h3 className="mb-1.5 px-1 text-[11px] font-bold uppercase tracking-wide text-muted-2">
-        Reminders
-      </h3>
-      {reminders.length === 0 ? (
-        <p className="px-1 text-xs text-muted-2">No reminders yet.</p>
-      ) : (
-        reminders.map((r) => (
-          <ReminderRow key={r.id} r={r} onDelete={() => schedule(r.id, "Reminder deleted")} />
-        ))
-      )}
-      <AddReminderForm />
+      <ContextSection title="Reminders">
+        {reminders.length === 0 ? (
+          <p className="px-1 text-xs text-muted-2">No reminders yet.</p>
+        ) : (
+          reminders.map((r) => (
+            <ReminderRow key={r.id} r={r} onDelete={() => schedule(r.id, "Reminder deleted")} />
+          ))
+        )}
+        <AddReminderForm />
+      </ContextSection>
     </div>
   );
 }
@@ -307,7 +308,7 @@ export default function HomePage() {
     <>
       <ContextPane>
         <div className="flex h-full flex-col">
-          <h2 className="px-4 pt-3 pb-1 text-sm font-bold">Home</h2>
+          <ContextPaneHeader title="Home" />
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
             <InboxSection />
             <RemindersSection />

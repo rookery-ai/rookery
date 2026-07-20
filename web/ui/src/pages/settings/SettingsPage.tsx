@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router";
 import { AlertTriangle, Check } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
+import { ContextPaneHeader } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -379,9 +380,9 @@ export default function SettingsPage() {
   return (
     <>
       <ContextPane>
-        <div className="flex h-full flex-col gap-3 p-3">
-          <h2 className="px-1 text-sm font-bold">Settings</h2>
-          <nav className="flex flex-col gap-1">
+        <div className="flex h-full flex-col">
+          <ContextPaneHeader title="Settings" />
+          <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-3 pt-0">
             {SECTIONS.map((s) => (
               <button
                 key={s.slug}

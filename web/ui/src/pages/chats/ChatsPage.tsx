@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useSearchParams } from "react-router";
 import { MessageSquare } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
+import { ContextPaneHeader } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
 import { cn, timeAgo } from "@/lib/utils";
 import { useChats, useCreateChat } from "@/lib/chats";
@@ -42,12 +43,14 @@ export default function ChatsPage() {
     <>
       <ContextPane>
         <div className="flex h-full flex-col">
-          <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
-            <h2 className="text-sm font-bold">Chats</h2>
-            <Button variant="outline" size="sm" onClick={handleNew} disabled={createChat.isPending}>
-              + New chat
-            </Button>
-          </div>
+          <ContextPaneHeader
+            title="Chats"
+            action={
+              <Button variant="outline" size="sm" onClick={handleNew} disabled={createChat.isPending}>
+                + New chat
+              </Button>
+            }
+          />
           <div className="min-h-0 flex-1 overflow-y-auto">
             {chats.map((c) => (
               <button
