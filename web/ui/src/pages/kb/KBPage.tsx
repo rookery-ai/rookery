@@ -5,6 +5,7 @@ import { ContextPane } from "@/components/shell/AppShell";
 import { Button } from "@/components/ui/button";
 import FileTree, { NewEntryDialog } from "./FileTree";
 import NoteEditor from "./NoteEditor";
+import FileViewer from "./FileViewer";
 import SearchBox from "./SearchBox";
 
 function KBPaneHeader() {
@@ -32,10 +33,26 @@ function KBEmptyState() {
   );
 }
 
+// A path "opens" as a document if its last segment looks like a file
+// (contains a dot) rather than a bare directory name. Every top-level and
+// agent/skill-scoped directory in the vault's layout (notes, memory, agents,
+// <agentID>, tools, chats, …) is dot-free, so this is a safe, purely
+// client-side approximation used ONLY to decide whether to render a content
+// pane at all — it is not the kind decision. Which document component to use
+// (the WYSIWYG/raw NoteEditor vs the read-only FileViewer) mirrors the
+// backend's own unconditional rule (web/api_kb.go's apiGetKBNote): exactly
+// ".md" is "markdown", everything else is content-sniffed server-side into
+// "code" or "binary" by FileViewer's own fetch.
+function looksLikeFile(path: string): boolean {
+  const last = path.split("/").pop() ?? "";
+  return last.includes(".");
+}
+
 export default function KBPage() {
   const [params, setParams] = useSearchParams();
   const path = params.get("path");
-  const isFile = !!path && path.endsWith(".md");
+  const isFile = !!path && looksLikeFile(path);
+  const isMarkdown = !!path && path.toLowerCase().endsWith(".md");
 
   return (
     <>
@@ -49,7 +66,15 @@ export default function KBPage() {
           </div>
         </div>
       </ContextPane>
-      {isFile ? <NoteEditor path={path} key={path} /> : <KBEmptyState />}
+      {isFile ? (
+        isMarkdown ? (
+          <NoteEditor path={path} key={path} />
+        ) : (
+          <FileViewer path={path} key={path} />
+        )
+      ) : (
+        <KBEmptyState />
+      )}
     </>
   );
 }

@@ -8,11 +8,19 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/vault"
 	"github.com/labstack/echo/v4"
 )
+
+// kbInlineMax is the size cap (bytes) under which a non-markdown file's
+// content is sniffed and inlined as kind:"code". At or above it, the file is
+// always kind:"binary" regardless of its content — a large valid-UTF-8 text
+// file is still not something we want to dump into a JSON response body /
+// render into the DOM as a live-edited <pre>. See spec §7.
+const kbInlineMax = 1 << 20 // 1 MiB
 
 // registerKBAPI registers the JSON knowledge-base endpoints on the given group
 // (already guarded by requireOwnerAPI + requireActiveWorkspaceAPI +
@@ -67,6 +75,12 @@ type apiKBNoteResponse struct {
 	Content   string   `json:"content"`
 	HTML      string   `json:"html"`
 	Backlinks []string `json:"backlinks"`
+	// Kind discriminates how the SPA renders this file: "markdown" (the
+	// WYSIWYG/raw editor, unchanged), "code" (read-only monospace view —
+	// any non-markdown file whose bytes are valid UTF-8 and under
+	// kbInlineMax), or "binary" (a Download-only panel; Content is omitted).
+	// Decided by content sniffing, not an extension allowlist — see spec §7.
+	Kind string `json:"kind"`
 }
 
 type apiSaveKBNoteRequest struct {
@@ -148,31 +162,70 @@ func (s *Server) apiKBTree(c echo.Context) error {
 
 // apiGetKBNote ports viewKBNote (+editKBNote's raw-content read for non-markdown
 // files). Markdown notes get rendered HTML + backlinks (via s.vault.Backlinks,
-// same call viewKBNote makes); non-markdown files return content only, HTML
-// empty and backlinks an empty array.
-// GET /api/v1/kb/note?path= → 200 {"path","content","html","backlinks":[...]}
+// same call viewKBNote makes) and are always kind:"markdown", unconditionally
+// (unchanged behavior — no size cap applies to notes, matching the editor's
+// pre-existing full-read path). Any other file is content-sniffed (NOT judged
+// by extension — agents invent file types, see spec §7): kind:"code" when its
+// bytes are valid UTF-8 and it's under kbInlineMax, else kind:"binary" with
+// Content left empty (the SPA falls back to the raw-download link for it).
+// The size check comes from a Stat, before any full read, so an oversize file
+// is never pulled into memory just to be discarded.
+// GET /api/v1/kb/note?path= → 200 {"path","content","html","backlinks":[...],"kind"}
 func (s *Server) apiGetKBNote(c echo.Context) error {
 	u := c.Get("workspace").(*db.Workspace)
 	if s.vault == nil {
 		return s.kbUnavailable(c)
 	}
 	rel := cleanKBParam(c.QueryParam("path"))
-	data, err := s.vault.ReadNote(u.ID, rel)
+
+	if strings.EqualFold(path.Ext(rel), ".md") {
+		data, err := s.vault.ReadNote(u.ID, rel)
+		if err != nil {
+			status, code := vaultErrStatus(err)
+			return jsonErr(c, status, code, "could not open note: "+err.Error())
+		}
+		resp := apiKBNoteResponse{
+			Path:      rel,
+			Content:   string(data),
+			Backlinks: []string{},
+			Kind:      "markdown",
+		}
+		resp.HTML = string(s.renderMarkdown(u.ID, resp.Content))
+		if back, err := s.vault.Backlinks(u.ID, rel); err == nil {
+			resp.Backlinks = orEmpty(back)
+		}
+		return c.JSON(http.StatusOK, resp)
+	}
+
+	// Non-markdown: resolve + Stat first so an oversize file is classified
+	// binary without ever reading its bytes into memory.
+	abs, err := s.vault.Resolve(u.ID, rel)
+	if err != nil {
+		status, code := vaultErrStatus(err)
+		return jsonErr(c, status, code, "could not open note: "+err.Error())
+	}
+	fi, err := os.Stat(abs)
 	if err != nil {
 		status, code := vaultErrStatus(err)
 		return jsonErr(c, status, code, "could not open note: "+err.Error())
 	}
 
-	resp := apiKBNoteResponse{
-		Path:      rel,
-		Content:   string(data),
-		Backlinks: []string{},
+	resp := apiKBNoteResponse{Path: rel, Backlinks: []string{}}
+	if fi.Size() > kbInlineMax {
+		resp.Kind = "binary"
+		return c.JSON(http.StatusOK, resp)
 	}
-	if strings.EqualFold(path.Ext(rel), ".md") {
-		resp.HTML = string(s.renderMarkdown(u.ID, resp.Content))
-		if back, err := s.vault.Backlinks(u.ID, rel); err == nil {
-			resp.Backlinks = orEmpty(back)
-		}
+
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		status, code := vaultErrStatus(err)
+		return jsonErr(c, status, code, "could not open note: "+err.Error())
+	}
+	if utf8.Valid(data) {
+		resp.Kind = "code"
+		resp.Content = string(data)
+	} else {
+		resp.Kind = "binary"
 	}
 	return c.JSON(http.StatusOK, resp)
 }

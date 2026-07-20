@@ -1,7 +1,9 @@
 package web
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -173,6 +175,136 @@ func TestAPIKBResolve(t *testing.T) {
 	rec = doJSON(t, s, http.MethodGet, "/api/v1/kb/resolve?link=nonexistent-note", nil, cookies)
 	if rec.Code != http.StatusNotFound || !contains(rec.Body.String(), "not_found") {
 		t.Fatalf("unknown resolve: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAPIKBNoteKindMarkdown is a regression guard: a .md file must keep
+// returning kind:"markdown" (with rendered HTML) unchanged by the kind
+// discriminator added for code/binary files.
+func TestAPIKBNoteKindMarkdown(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/kb/new",
+		map[string]any{"path": "notes/kind.md", "is_dir": false}, cookies)
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Fatalf("new: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/kb/note",
+		map[string]string{"path": "notes/kind.md", "content": "# Hello\n"}, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/kb/note?path=notes/kind.md", nil, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("read: %d %s", rec.Code, rec.Body.String())
+	}
+	var resp apiKBNoteResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Kind != "markdown" {
+		t.Fatalf("kind = %q, want markdown", resp.Kind)
+	}
+	if resp.HTML == "" {
+		t.Fatalf("expected rendered HTML for a markdown note")
+	}
+}
+
+// TestAPIKBNoteKindCode covers a non-markdown, valid-UTF-8, under-cap file —
+// the exact shape an agent's tools/*.py is written as. It must open
+// read-only as kind:"code" with its content intact, not be treated as
+// binary just because the extension isn't allowlisted (content sniffing,
+// not an extension allowlist — see spec §7).
+func TestAPIKBNoteKindCode(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodPut, "/api/v1/kb/note",
+		map[string]string{"path": "agents/demo/tools/script.py", "content": "print('hello')\n"}, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/kb/note?path=agents/demo/tools/script.py", nil, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("read: %d %s", rec.Code, rec.Body.String())
+	}
+	var resp apiKBNoteResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Kind != "code" {
+		t.Fatalf("kind = %q, want code", resp.Kind)
+	}
+	if !contains(resp.Content, "print('hello')") {
+		t.Fatalf("content missing script body: %s", resp.Content)
+	}
+	if resp.HTML != "" {
+		t.Fatalf("expected no rendered HTML for a code file, got %q", resp.HTML)
+	}
+}
+
+// TestAPIKBNoteKindBinaryInvalidUTF8 writes raw invalid-UTF-8 bytes directly
+// to the vault (bypassing the JSON note-save path, which can't carry
+// arbitrary bytes) and asserts the note endpoint classifies it as
+// kind:"binary" with content omitted.
+func TestAPIKBNoteKindBinaryInvalidUTF8(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	invalid := []byte{0x50, 0x4b, 0x03, 0x04, 0xff, 0xfe, 0x00, 0x01} // not valid UTF-8
+	if err := s.vault.WriteNote(wsID, "agents/demo/data.bin", invalid); err != nil {
+		t.Fatalf("write raw: %v", err)
+	}
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/kb/note?path=agents/demo/data.bin", nil, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("read: %d %s", rec.Code, rec.Body.String())
+	}
+	var resp apiKBNoteResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Kind != "binary" {
+		t.Fatalf("kind = %q, want binary", resp.Kind)
+	}
+	if resp.Content != "" {
+		t.Fatalf("expected empty content for a binary file, got %d bytes", len(resp.Content))
+	}
+}
+
+// TestAPIKBNoteKindBinaryOversize writes a file over the 1 MB inline cap
+// whose bytes ARE valid UTF-8 — it must still classify as binary. This is
+// the case that distinguishes "content sniffing" from a naive utf8.Valid-
+// only check: a 1 MB+ text file is not inlined either.
+func TestAPIKBNoteKindBinaryOversize(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	big := []byte(strings.Repeat("a", (1<<20)+10)) // > 1 MiB, valid UTF-8
+	if err := s.vault.WriteNote(wsID, "agents/demo/big.txt", big); err != nil {
+		t.Fatalf("write raw: %v", err)
+	}
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/kb/note?path=agents/demo/big.txt", nil, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("read: %d %s", rec.Code, rec.Body.String())
+	}
+	var resp apiKBNoteResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Kind != "binary" {
+		t.Fatalf("kind = %q, want binary (oversize)", resp.Kind)
+	}
+	if resp.Content != "" {
+		t.Fatalf("expected empty content for an oversize file, got %d bytes", len(resp.Content))
 	}
 }
 
