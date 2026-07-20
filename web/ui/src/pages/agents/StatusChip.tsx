@@ -16,7 +16,7 @@ export function StatusChip({ agent }: { agent: Agent }) {
     <span
       className={cn(
         "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium",
-        agent.active ? "bg-ok-soft text-ok" : "bg-muted text-muted-2",
+        agent.active ? "bg-ok-soft text-ok" : "bg-muted-surface text-foreground",
       )}
     >
       {agent.active ? "Active" : "Paused"}

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { Plus, FileText } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
+import { ContextPaneHeader } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
 import FileTree, { NewEntryDialog } from "./FileTree";
 import NoteEditor from "./NoteEditor";
@@ -11,16 +12,20 @@ import SearchBox from "./SearchBox";
 function KBPaneHeader() {
   const [newOpen, setNewOpen] = useState(false);
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2.5">
-      <h2 className="text-sm font-bold">Knowledge Base</h2>
-      <Button
-        variant="ghost" size="icon-sm" aria-label="New note"
-        onClick={() => setNewOpen(true)}
-      >
-        <Plus className="size-4" />
-      </Button>
-      <NewEntryDialog dirPath="" kind="note" open={newOpen} onOpenChange={setNewOpen} />
-    </div>
+    <ContextPaneHeader
+      title="Knowledge Base"
+      action={
+        <>
+          <Button
+            variant="ghost" size="icon-sm" aria-label="New note"
+            onClick={() => setNewOpen(true)}
+          >
+            <Plus className="size-4" />
+          </Button>
+          <NewEntryDialog dirPath="" kind="note" open={newOpen} onOpenChange={setNewOpen} />
+        </>
+      }
+    />
   );
 }
 

@@ -9,15 +9,20 @@
   --chrome: #f7f6f3;
   --foreground: #37352f;
   --border: #e9e7e3;
-  --muted: #787671;
-  --muted-2: #9b9891;
+  --muted: #716f6b;
+  --muted-2: #726f6a;
+  --muted-surface: #e3dfd7;
   --accent: #2d5a74;
   --accent-soft: #e7f0f5;
-  --ok: #448361;
+  /* --ok/--warn/--danger darkened (same hue/sat, lower lightness) so they
+     hold 4.5:1+ as text against --background, --chrome, AND their own
+     -soft fill (the tightest constraint) — SP8 review flagged --ok at
+     3.68:1 on --ok-soft; --warn/--danger were below 4.5:1 the same way. */
+  --ok: #3b7154;
   --ok-soft: #dbeddb;
-  --warn: #c77d48;
+  --warn: #985a2e;
   --warn-soft: #fdecc8;
-  --danger: #d44c47;
+  --danger: #be322c;
   --danger-soft: #ffe2dd;
   /* shadcn variables for component compatibility */
   --radius: 0.625rem;
@@ -29,9 +34,9 @@
   --primary-foreground: #ffffff;
   --secondary: #f7f6f3;
   --secondary-foreground: #37352f;
-  --muted-foreground: #787671;
+  --muted-foreground: #716f6b;
   --accent-foreground: #ffffff;
-  --destructive: #d44c47;
+  --destructive: #be322c;
   --input: #e9e7e3;
   --ring: #2d5a74;
   --chart-1: #2d5a74;
@@ -55,7 +60,8 @@
   --foreground: #e6e4e0;
   --border: #333330;
   --muted: #a3a09a;
-  --muted-2: #7c7972;
+  --muted-2: #8b8882;
+  --muted-surface: #33332f;
   --accent: #6fa2bd;
   --accent-soft: #24313a;
   --ok: #6fbf8f;
@@ -109,6 +115,7 @@
   --color-border: var(--border);
   --color-muted: var(--muted);
   --color-muted-2: var(--muted-2);
+  --color-muted-surface: var(--muted-surface);
   --color-accent: var(--accent);
   --color-accent-soft: var(--accent-soft);
   --color-ok: var(--ok);
@@ -157,5 +164,17 @@ body {
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+}
+
+/* Accessibility floor — spec §8: a global reduced-motion rule disables
+   transitions and animations for users who have asked the OS not to move
+   things. Task 2's toast (`motion-safe:` variants) composes with this. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

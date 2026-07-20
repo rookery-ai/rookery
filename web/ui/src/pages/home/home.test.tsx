@@ -56,6 +56,7 @@ function resetFixtures() {
     {
       id: "m1",
       source: "agent_run",
+      agent_id: "agent-1",
       agent_name: "Digest Bot",
       trigger: "manual",
       status: "ok",
@@ -197,10 +198,10 @@ test("inbox: click marks as read, expands body, and delete removes it", async ()
   wrap();
 
   const card = await screen.findByText("Digest Bot");
-  expect(screen.getByText(/1 new/)).toBeInTheDocument();
+  expect(screen.getByLabelText(/1 unread/)).toBeInTheDocument();
 
   await userEvent.click(card);
-  await waitFor(() => expect(screen.queryByText(/1 new/)).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByLabelText(/unread/)).not.toBeInTheDocument());
 
   const del = screen.getByRole("button", { name: "Delete" });
   await userEvent.click(del);
@@ -211,9 +212,9 @@ test("inbox: click marks as read, expands body, and delete removes it", async ()
 test("inbox: mark all read clears the unread count", async () => {
   mockFetch();
   wrap();
-  await screen.findByText(/1 new/);
+  await screen.findByLabelText(/1 unread/);
   await userEvent.click(screen.getByRole("button", { name: /mark all read/i }));
-  await waitFor(() => expect(screen.queryByText(/1 new/)).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByLabelText(/unread/)).not.toBeInTheDocument());
 });
 
 test("reminders: delete removes a reminder", async () => {

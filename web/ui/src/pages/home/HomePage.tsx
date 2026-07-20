@@ -1,12 +1,15 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { Bell, Bot, Trash2, Clock, AlertTriangle, Plus } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
+import { ContextPaneHeader, ContextSection } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, timeAgo } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { useServices } from "@/lib/connections";
+import { useDeferredDelete } from "@/lib/useDeferredDelete";
 import {
   useDashboard,
   greeting,
@@ -25,11 +28,78 @@ import {
 
 // ── Context pane: Inbox ─────────────────────────────────────────────────────
 
-function InboxCard({ msg }: { msg: InboxMessage }) {
+export type DayGroup = { label: string; messages: InboxMessage[] };
+
+const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+// Midnight (local time) of the given instant, as an epoch ms — the bucket
+// key for "which calendar day does this message belong to."
+function startOfDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+// Deliberately not Intl/toLocaleDateString: locale + ICU data availability
+// varies by environment, and a test asserting an exact label (spec §5.2's
+// "Mon, 14 Jul") needs a format that doesn't drift with the runtime's
+// default locale.
+function dayLabel(dayMs: number): string {
+  const d = new Date(dayMs);
+  return `${WEEKDAY_NAMES[d.getDay()]}, ${d.getDate()} ${MONTH_NAMES[d.getMonth()]}`;
+}
+
+// groupByDay buckets inbox messages under day headers — spec §5.2's single
+// highest-value change: it turns an undifferentiated stream into a timeline.
+// Pure and exported so it's unit-testable with a fixed clock, independent of
+// rendering. Messages within a day keep the order they arrived in (the API's
+// newest-first) — they are never re-sorted relative to each other. The day
+// GROUPS are sorted newest-first explicitly: bucketing is keyed by day, so an
+// out-of-order input could never split a day in two, but it could render the
+// headers themselves inverted ("Yesterday" above "Today"). ListInboxMessages
+// orders by created_at DESC today, so this is belt-and-braces.
+export function groupByDay(messages: InboxMessage[], now: Date): DayGroup[] {
+  const todayMs = startOfDay(now);
+  // Not todayMs - 24h: on the day after a DST spring-forward the previous
+  // local day is only 23h long, so the fixed-offset arithmetic misses and
+  // "Yesterday" silently renders as a date. Europe/Skopje observes DST.
+  const yesterdayMs = startOfDay(
+    new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1),
+  );
+  const order: number[] = [];
+  const buckets = new Map<number, InboxMessage[]>();
+  for (const m of messages) {
+    const key = startOfDay(new Date(m.created_at));
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = [];
+      buckets.set(key, bucket);
+      order.push(key);
+    }
+    bucket.push(m);
+  }
+  order.sort((a, b) => b - a);
+  return order.map((key) => ({
+    label: key === todayMs ? "Today" : key === yesterdayMs ? "Yesterday" : dayLabel(key),
+    messages: buckets.get(key)!,
+  }));
+}
+
+function DayHeader({ label }: { label: string }) {
+  return (
+    <div className="sticky top-0 z-10 mb-1 bg-chrome/95 px-1 py-1 text-[11px] font-semibold text-muted-2 backdrop-blur">
+      {label}
+    </div>
+  );
+}
+
+function InboxCard({ msg, onDelete }: { msg: InboxMessage; onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const markRead = useMarkInboxRead();
-  const del = useDeleteInboxMessage();
   const Icon = msg.source === "reminder" ? Bell : Bot;
+  const name = msg.agent_name || (msg.source === "reminder" ? "Reminder" : "Notification");
 
   function handleClick() {
     setExpanded((v) => !v);
@@ -37,31 +107,56 @@ function InboxCard({ msg }: { msg: InboxMessage }) {
   }
 
   return (
-    <div className="mb-1.5 rounded-lg border border-border bg-background px-2.5 py-2 text-xs">
-      <button type="button" onClick={handleClick} className="flex w-full items-start gap-2 text-left">
-        <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-2" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="truncate font-semibold">{msg.agent_name || "Notification"}</span>
-            {!msg.read && <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-label="unread" />}
-          </div>
-          <p className={cn("text-muted-2", !expanded && "line-clamp-2")}>{msg.body}</p>
-          <span className="text-[10px] text-muted-2/70">{timeAgo(msg.created_at)}</span>
-        </div>
+    <div
+      className={cn(
+        "mb-1.5 rounded-lg border border-border bg-background px-2.5 py-2 text-xs",
+        // Unread: a whole-card signal (a 2px accent bar), not the old 6px
+        // dot you had to hunt for — spec §5.2.
+        !msg.read && "border-l-2 border-l-primary",
+      )}
+    >
+      <button type="button" onClick={handleClick} className="flex w-full flex-col gap-1 text-left">
+        <span className="flex items-center gap-1.5">
+          <Icon className="size-3.5 shrink-0 text-muted-2" />
+          <span className={cn("truncate", !msg.read && "font-medium")}>{name}</span>
+          {msg.status === "error" && (
+            <span className="shrink-0 rounded-full bg-danger-soft px-1.5 py-0.5 text-[10px] font-medium text-danger">
+              Failed
+            </span>
+          )}
+          <span className="ml-auto shrink-0 text-[10px] text-muted-2">{timeAgo(msg.created_at)}</span>
+        </span>
+        {/* Body carries the primary foreground token, not muted-2 — spec §9:
+            muted-2 is for metadata (timestamps, counts), not content. */}
+        <p className={cn("text-foreground", !expanded && "line-clamp-3")}>{msg.body}</p>
       </button>
       {expanded && (
-        <div className="mt-1 flex justify-end">
-          <Button
-            variant="ghost"
-            size="xs"
-            className="text-danger"
-            onClick={() => del.mutate(msg.id)}
-          >
-            <Trash2 /> Delete
-          </Button>
+        <div className="mt-1.5">
+          {msg.trigger && <p className="mb-1.5 text-[11px] text-muted-2">Trigger: {msg.trigger}</p>}
+          <div className="flex items-center justify-end gap-1">
+            {msg.agent_id && (
+              <Button variant="ghost" size="xs" asChild>
+                <Link to={`/agents/${msg.agent_id}`}>View agent</Link>
+              </Button>
+            )}
+            <Button variant="ghost" size="xs" className="text-danger" onClick={onDelete}>
+              <Trash2 /> Delete
+            </Button>
+          </div>
         </div>
       )}
     </div>
+  );
+}
+
+function InboxCountBadge({ count }: { count: number }) {
+  return (
+    <span
+      aria-label={`${count} unread`}
+      className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold leading-none text-accent-foreground"
+    >
+      {count > 9 ? "9+" : count}
+    </span>
   );
 }
 
@@ -69,45 +164,60 @@ function InboxSection() {
   const { data } = useInbox();
   const { data: dash } = useDashboard();
   const markAll = useMarkAllInboxRead();
-  const messages = data?.messages ?? [];
+  const del = useDeleteInboxMessage();
+  const qc = useQueryClient();
+  // Deferred-commit undo (§6.2): delete hides the row immediately, but the
+  // DELETE call itself only fires if the 5s toast expires without Undo.
+  const { schedule, pending } = useDeferredDelete({
+    commit: (id) => del.mutateAsync(id),
+    onRestore: () => qc.invalidateQueries({ queryKey: ["inbox"] }),
+  });
+  const messages = (data?.messages ?? []).filter((m) => !pending.has(m.id));
   const unread = data?.unread ?? 0;
+  const groups = groupByDay(messages, new Date());
 
   return (
     <div className="border-b border-border pb-3">
-      <div className="mb-1.5 flex items-center justify-between px-1">
-        <h3 className="text-[11px] font-bold uppercase tracking-wide text-muted-2">
-          Inbox{unread > 0 ? ` · ${unread} new` : ""}
-        </h3>
-        {unread > 0 && (
-          <button
-            type="button"
-            className="text-[11px] text-muted-2 hover:text-foreground"
-            onClick={() => markAll.mutate()}
-          >
-            Mark all read
-          </button>
+      <ContextSection
+        title="Inbox"
+        action={
+          unread > 0 ? (
+            <div className="flex items-center gap-2">
+              <InboxCountBadge count={unread} />
+              <Button variant="ghost" size="xs" onClick={() => markAll.mutate()}>
+                Mark all read
+              </Button>
+            </div>
+          ) : undefined
+        }
+      >
+        {messages.length === 0 ? (
+          <div className="px-1 text-xs text-muted-2">
+            <p>No notifications yet.</p>
+            {dash && !dash.has_connector && (
+              <p className="mt-0.5 text-muted-2/70">
+                Connect a chat app so agents can reach you here too.
+              </p>
+            )}
+          </div>
+        ) : (
+          groups.map((g, i) => (
+            <div key={`${g.label}-${i}`}>
+              <DayHeader label={g.label} />
+              {g.messages.map((m) => (
+                <InboxCard key={m.id} msg={m} onDelete={() => schedule(m.id, "Notification deleted")} />
+              ))}
+            </div>
+          ))
         )}
-      </div>
-      {messages.length === 0 ? (
-        <div className="px-1 text-xs text-muted-2">
-          <p>No notifications yet.</p>
-          {dash && !dash.has_connector && (
-            <p className="mt-0.5 text-muted-2/70">
-              Connect a chat app so agents can reach you here too.
-            </p>
-          )}
-        </div>
-      ) : (
-        messages.map((m) => <InboxCard key={m.id} msg={m} />)
-      )}
+      </ContextSection>
     </div>
   );
 }
 
 // ── Context pane: Reminders ──────────────────────────────────────────────────
 
-function ReminderRow({ r }: { r: Reminder }) {
-  const del = useDeleteReminder();
+function ReminderRow({ r, onDelete }: { r: Reminder; onDelete: () => void }) {
   return (
     <div className="mb-1.5 flex items-start justify-between gap-2 rounded-lg border border-border bg-background px-2.5 py-2 text-xs">
       <div className="min-w-0">
@@ -116,7 +226,7 @@ function ReminderRow({ r }: { r: Reminder }) {
       </div>
       <button
         type="button"
-        onClick={() => del.mutate(r.id)}
+        onClick={onDelete}
         aria-label="Delete reminder"
         className="shrink-0 text-muted-2 hover:text-danger"
       >
@@ -176,18 +286,26 @@ function AddReminderForm() {
 
 function RemindersSection() {
   const { data } = useReminders();
-  const reminders = data?.reminders ?? [];
+  const del = useDeleteReminder();
+  const qc = useQueryClient();
+  // Same deferred-commit undo pattern as the inbox — see InboxSection.
+  const { schedule, pending } = useDeferredDelete({
+    commit: (id) => del.mutateAsync(id),
+    onRestore: () => qc.invalidateQueries({ queryKey: ["reminders"] }),
+  });
+  const reminders = (data?.reminders ?? []).filter((r) => !pending.has(r.id));
   return (
     <div className="pt-3">
-      <h3 className="mb-1.5 px-1 text-[11px] font-bold uppercase tracking-wide text-muted-2">
-        Reminders
-      </h3>
-      {reminders.length === 0 ? (
-        <p className="px-1 text-xs text-muted-2">No reminders yet.</p>
-      ) : (
-        reminders.map((r) => <ReminderRow key={r.id} r={r} />)
-      )}
-      <AddReminderForm />
+      <ContextSection title="Reminders">
+        {reminders.length === 0 ? (
+          <p className="px-1 text-xs text-muted-2">No reminders yet.</p>
+        ) : (
+          reminders.map((r) => (
+            <ReminderRow key={r.id} r={r} onDelete={() => schedule(r.id, "Reminder deleted")} />
+          ))
+        )}
+        <AddReminderForm />
+      </ContextSection>
     </div>
   );
 }
@@ -293,7 +411,7 @@ export default function HomePage() {
     <>
       <ContextPane>
         <div className="flex h-full flex-col">
-          <h2 className="px-4 pt-3 pb-1 text-sm font-bold">Home</h2>
+          <ContextPaneHeader title="Home" />
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
             <InboxSection />
             <RemindersSection />

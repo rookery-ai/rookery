@@ -84,7 +84,13 @@ export function useCreateReminder() {
 export function useDeleteReminder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.del<{ ok: boolean }>(`/api/v1/reminders/${id}`),
+    // keepalive: this mutation is also what useDeferredDelete's flushAll
+    // fires from a `beforeunload` handler on tab close — without it, a
+    // browser may abort the in-flight DELETE when the page is torn down,
+    // silently losing the delete. Scoped to this call site only; see
+    // RequestOptions in lib/api.ts for why it isn't the default.
+    mutationFn: (id: string) =>
+      api.del<{ ok: boolean }>(`/api/v1/reminders/${id}`, undefined, { keepalive: true }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["reminders"] }),
   });
 }
@@ -95,6 +101,7 @@ export function useDeleteReminder() {
 export type InboxMessage = {
   id: string;
   source: string;
+  agent_id: string;
   agent_name: string;
   trigger: string;
   status: string;
@@ -132,7 +139,10 @@ export function useMarkAllInboxRead() {
 export function useDeleteInboxMessage() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.del<{ ok: boolean }>(`/api/v1/inbox/${id}`),
+    // keepalive: see useDeleteReminder above — this is the other mutation
+    // useDeferredDelete's `beforeunload` flush can fire on tab close.
+    mutationFn: (id: string) =>
+      api.del<{ ok: boolean }>(`/api/v1/inbox/${id}`, undefined, { keepalive: true }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["inbox"] }),
   });
 }

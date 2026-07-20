@@ -430,6 +430,29 @@ fields `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`), 
 machinery, the `web/templates/` + `web/static/` directories, and the `templates_dir`/`static_dir` +
 `SA_TEMPLATES_DIR`/`SA_STATIC_DIR` config are gone. The SPA talks to the JSON API for everything.
 
+**Shell primitives** (`web/ui/src/components/shell/`): every page renders inside `AppShell` —
+an icon rail + list panel + a `ContextPane` slot. The context pane is user-resizable —
+`usePaneWidth`/`PaneResizeHandle` (`usePaneWidth.tsx`) persist a 200–560px width to `localStorage`
+(`sa.paneWidth`; a corrupt or out-of-range stored value falls back to the 256px default rather than
+being clamped), draggable via pointer events or fully keyboard-operable (`role="separator"`, arrow
+keys step 16px, Home/End jump to the extremes, double-click resets). `ContextPaneHeader`/
+`ContextSection` (`ContextPaneParts.tsx`) are the shared title/section primitives all five context
+panes (Home, Chats, Connections, KB, Settings) are built from, so heading case/padding/the header's
+bottom border don't drift per-page. `ToastProvider`/`ToastHost` (`Toast.tsx`) is the app's toast
+system and its one `aria-live="polite"` region — mounted once regardless of whether a toast is
+showing, so screen readers don't miss the first announcement; a toast carries an optional action
+(e.g. "Undo") and auto-dismisses after 5s. `useDeferredDelete` (`lib/useDeferredDelete.ts`) builds
+the inbox's and reminders' delete-with-undo on top of it: clicking delete hides the row immediately
+and shows an Undo toast, but the real DELETE call is deferred 5s — it fires only on expiry (or on
+`beforeunload`/route-away, which flush every pending delete so none is silently dropped), never on
+click; Undo cancels the timer so the call is never made at all. No soft-delete schema needed — the
+"delete" is a pending client-side timer, committed or cancelled.
+
+Home's inbox (`pages/home/HomePage.tsx`) groups notifications under calendar-day headers
+(Today/Yesterday/`Weekday, D Mon`, bucketed in local time), flags a failed agent run with a "Failed"
+status badge, marks unread rows with a left accent bar, and deep-links each card to its source agent;
+deleting a message or a reminder goes through the deferred-delete/undo flow above.
+
 ```
 /                        # embedded React SPA (index.html); every unmatched deep path falls through
 /*                       #   to the SPA catch-all (client-side routing). 503 if built without `make ui`.

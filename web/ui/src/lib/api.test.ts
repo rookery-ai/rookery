@@ -33,3 +33,21 @@ test("parses legacy string errors", async () => {
   expect(err.code).toBe("legacy");
   expect(err.message).toBe("name is required");
 });
+
+// keepalive must stay opt-in, not the request-wrapper default: it shares a
+// combined ~64KB body budget across the page, so an unconditional default
+// could make an unrelated large PUT/POST start failing. Confirm a plain
+// api.del() call doesn't set it, and that passing it through does.
+test("del omits keepalive by default", async () => {
+  mockFetchOnce(200, { ok: true });
+  await api.del("/api/v1/x");
+  const init = vi.mocked(fetch).mock.calls[0][1] as RequestInit;
+  expect(init.keepalive).toBeUndefined();
+});
+
+test("del sets keepalive when explicitly requested", async () => {
+  mockFetchOnce(200, { ok: true });
+  await api.del("/api/v1/x", undefined, { keepalive: true });
+  const init = vi.mocked(fetch).mock.calls[0][1] as RequestInit;
+  expect(init.keepalive).toBe(true);
+});
