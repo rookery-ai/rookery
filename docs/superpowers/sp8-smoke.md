@@ -86,6 +86,12 @@ at a glance — say so.** The point of this redesign was to fix exactly that com
 day headers, the Failed badge, and the unread bar should all be visually obvious
 without hunting.
 
+**Known, not-fixed-here gap:** for a card older than 7 days, its own per-card timestamp
+(`timeAgo`, e.g. "Jul 14") uses the browser's locale formatting, while the day header
+above it (`dayLabel`, e.g. "Mon, 14 Jul") uses a fixed weekday/day/month order. In a
+locale where the two disagree on day-vs-month order, an old card's header and its own
+timestamp can look inconsistent. Cosmetic, not a data bug.
+
 ## 6. Light and dark theme
 
 1. Go to Settings and switch the theme to Light, then to Dark (System also picks up
@@ -94,8 +100,23 @@ without hunting.
    - Good result: text stays legible against its background in both themes — in
      particular, check any small pill/badge/chip-style backgrounds (status badges,
      unread counts) aren't washed out or invisible against the surrounding surface in
-     either theme. This was the subject of a contrast retune plus a same-day follow-up
-     fix, so it's worth a deliberate look rather than a glance.
+     either theme. The light-theme `--ok`/`--warn`/`--danger`/`--destructive` tokens
+     were darkened specifically so status text (the inbox "Failed" badge, agent status
+     chips) clears 4.5:1 against their own soft-fill background — look at those in
+     particular, in Light theme.
+3. On the Agents page (or an agent's detail page), compare an **Active** chip against a
+   **Paused** one.
+   - Known, not-fixed-here gap: Active (`bg-ok-soft`/`text-ok`) now passes contrast, but
+     Paused (`bg-muted-surface`/`text-foreground`, i.e. near-black on a light chip) will
+     still look visually *louder* than Active — it numerically out-contrasts it. This is
+     structural (a neutral near-black chip will always read stronger than a same-hue
+     colored one) and was called out, not silently left in place — it doesn't need a bug
+     report if you spot it.
+   - Also known and pre-existing (not introduced by this branch): a few components
+     (the onboarding/connector-wizard step indicators) put white text directly on a
+     `bg-ok`/`bg-warn`/`bg-danger` fill rather than the soft-fill pattern above. In dark
+     theme those fall below 4.5:1. If you notice pale text on a colored step dot in dark
+     mode, that's this — not a regression from this branch.
 
 ## 7. Reduced motion
 
@@ -107,3 +128,9 @@ without hunting.
    - Good result: the toast appears without a slide/fade-in animation — it should just
      show up, not animate in.
 3. Turn "reduce motion" back off afterward if you don't want it system-wide.
+
+   This manual check matters more than usual here: the automated test for this rule
+   only asserts the `@media (prefers-reduced-motion: reduce)` block exists and pins
+   `animation-duration`, not `transition-duration`/`scroll-behavior` — a future edit
+   could drop those two and the test suite would still pass. Watching the toast
+   actually not animate in is the only check that would currently catch that.
