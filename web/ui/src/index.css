@@ -9,8 +9,8 @@
   --chrome: #f7f6f3;
   --foreground: #37352f;
   --border: #e9e7e3;
-  --muted: #787671;
-  --muted-2: #9b9891;
+  --muted: #716f6b;
+  --muted-2: #726f6a;
   --accent: #2d5a74;
   --accent-soft: #e7f0f5;
   --ok: #448361;
@@ -29,7 +29,7 @@
   --primary-foreground: #ffffff;
   --secondary: #f7f6f3;
   --secondary-foreground: #37352f;
-  --muted-foreground: #787671;
+  --muted-foreground: #716f6b;
   --accent-foreground: #ffffff;
   --destructive: #d44c47;
   --input: #e9e7e3;
@@ -55,7 +55,7 @@
   --foreground: #e6e4e0;
   --border: #333330;
   --muted: #a3a09a;
-  --muted-2: #7c7972;
+  --muted-2: #8b8882;
   --accent: #6fa2bd;
   --accent-soft: #24313a;
   --ok: #6fbf8f;
@@ -157,5 +157,17 @@ body {
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+}
+
+/* Accessibility floor — spec §8: a global reduced-motion rule disables
+   transitions and animations for users who have asked the OS not to move
+   things. Task 2's toast (`motion-safe:` variants) composes with this. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
