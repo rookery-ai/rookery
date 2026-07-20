@@ -31,8 +31,16 @@ export function useDeferredDelete({ commit, onRestore }: UseDeferredDeleteOption
   onRestoreRef.current = onRestore;
 
   // run() is idempotent: if the id isn't in the timers map anymore (already
-  // committed, or cancelled via Undo) this is a no-op. That's what makes
-  // expiry racing a flush (or a flush racing a second flush) safe.
+  // committed, or cancelled via Undo) this is a no-op.
+  //
+  // What actually makes expiry-racing-a-flush safe is schedule()'s dedup plus
+  // the synchronous clear-and-delete below, which together mean at most one
+  // live timer per id ever reaches this function — so as written, the early
+  // return is unreachable through the current call graph. It stays as
+  // defence in depth: it is what keeps the documented idempotency contract
+  // true for a future caller that reaches run() without going through
+  // schedule(). Deliberately untested — exercising it would require reaching
+  // into internals, i.e. testing implementation rather than behaviour.
   const run = useCallback(
     async (id: string) => {
       const timer = timers.current.get(id);
