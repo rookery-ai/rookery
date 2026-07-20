@@ -1,4 +1,4 @@
-import { createElement, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export const PANE_MIN = 200;
 export const PANE_MAX = 560;
@@ -47,6 +47,20 @@ export function PaneResizeHandle({
 }) {
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
+  // If the handle unmounts mid-drag (e.g. a route change collapses the
+  // context pane while the pointer is still down), onPointerUp/onPointerCancel
+  // never fire and userSelect would otherwise stay "none" on document.body
+  // permanently. This cleanup only restores it when a drag was actually in
+  // progress at unmount time, so it never clobbers the style when no drag
+  // was ever started.
+  useEffect(() => {
+    return () => {
+      if (dragRef.current) {
+        document.body.style.userSelect = "";
+      }
+    };
+  }, []);
+
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     // jsdom (unit tests) doesn't implement pointer capture; real browsers
     // always do, so this guard only ever skips in the test environment.
@@ -89,23 +103,22 @@ export function PaneResizeHandle({
     }
   };
 
-  // This file is .ts, not .tsx (per the module layout this task specifies),
-  // so the element is built with createElement rather than JSX syntax.
-  return createElement("div", {
-    role: "separator",
-    "aria-orientation": "vertical",
-    "aria-label": "Resize sidebar",
-    "aria-valuenow": width,
-    "aria-valuemin": PANE_MIN,
-    "aria-valuemax": PANE_MAX,
-    tabIndex: 0,
-    className:
-      "absolute top-0 right-0 h-full w-1 cursor-col-resize touch-none select-none hover:bg-primary/30 active:bg-primary/50",
-    onPointerDown,
-    onPointerMove,
-    onPointerUp: endDrag,
-    onPointerCancel: endDrag,
-    onKeyDown,
-    onDoubleClick: reset,
-  });
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize sidebar"
+      aria-valuenow={width}
+      aria-valuemin={PANE_MIN}
+      aria-valuemax={PANE_MAX}
+      tabIndex={0}
+      className="absolute top-0 right-0 h-full w-1 cursor-col-resize touch-none select-none hover:bg-primary/30 active:bg-primary/50"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onKeyDown={onKeyDown}
+      onDoubleClick={reset}
+    />
+  );
 }

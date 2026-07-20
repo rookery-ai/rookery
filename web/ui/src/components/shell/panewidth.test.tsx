@@ -2,7 +2,14 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router";
-import { clampPaneWidth, PANE_MIN, PANE_MAX, PANE_DEFAULT, readStoredWidth } from "./usePaneWidth";
+import {
+  clampPaneWidth,
+  PANE_MIN,
+  PANE_MAX,
+  PANE_DEFAULT,
+  readStoredWidth,
+  PaneResizeHandle,
+} from "./usePaneWidth";
 import { AppShell, ContextPane } from "./AppShell";
 
 test("clamps to range", () => {
@@ -121,5 +128,21 @@ test("pointer drag resizes via pointer capture", async () => {
 
   fireEvent.pointerUp(sep, { pointerId: 1, clientX: 150 });
   expect(release).toHaveBeenCalledWith(1);
+  expect(document.body.style.userSelect).toBe("");
+});
+
+test("restores user-select if the handle unmounts mid-drag", () => {
+  const { unmount } = render(
+    <PaneResizeHandle width={PANE_DEFAULT} setWidth={() => {}} reset={() => {}} />,
+  );
+  const sep = screen.getByRole("separator", { name: /resize sidebar/i });
+
+  fireEvent.pointerDown(sep, { pointerId: 1, clientX: 100 });
+  expect(document.body.style.userSelect).toBe("none");
+
+  // No pointerup/pointercancel — the handle is torn out from under the
+  // pointer (e.g. a route change collapses the context pane mid-drag).
+  unmount();
+
   expect(document.body.style.userSelect).toBe("");
 });
