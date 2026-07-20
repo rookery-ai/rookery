@@ -27,6 +27,140 @@ func TestAgentStatePersistsAcrossRunsAsMarkdown(t *testing.T) {
 	}
 }
 
+// ─── saveState / mergeState (post-run save path) ──────────────────────────
+//
+// These pin the highest-risk part of SP7: the merge-and-save path a real run
+// hits after every [STATE] update. state.json round-tripping (above) does not
+// exercise saveState/mergeState at all, so a regression there (e.g. saveState
+// clobbering hand-written "## Notes" prose, or mergeState failing to honor a
+// null-delete) would previously go undetected.
+
+// TestSaveStateFirstRunCreatesWellFormedDocument covers scenario 1: saving
+// state onto a nonexistent state.md creates a well-formed document (heading +
+// fenced json) and the state reads back through the public ReadState API.
+func TestSaveStateFirstRunCreatesWellFormedDocument(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.md")
+
+	state := map[string]interface{}{"cursor": "abc", "count": float64(3)}
+	if err := saveState(dir, "My Agent", state); err != nil {
+		t.Fatalf("saveState: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("state.md not created: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "# State — My Agent") {
+		t.Fatalf("missing heading in fresh document:\n%s", text)
+	}
+	if !strings.Contains(text, "```json") {
+		t.Fatalf("missing json fence in fresh document:\n%s", text)
+	}
+
+	got, err := agentdesigner.ReadState(path)
+	if err != nil {
+		t.Fatalf("ReadState: %v", err)
+	}
+	if got["cursor"] != "abc" || got["count"] != float64(3) {
+		t.Fatalf("state did not read back: %#v", got)
+	}
+}
+
+// TestSaveStatePreservesHandWrittenNotes covers scenario 2 — the one that
+// matters most: a pre-existing state.md with a "## Notes" section containing
+// hand-written prose must survive a save byte-for-byte, while only the fenced
+// machine-state block changes.
+func TestSaveStatePreservesHandWrittenNotes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.md")
+
+	notesBlock := "## Notes\n\nDo not touch the cursor manually — it tracks the last\nprocessed message ID from the source inbox.\n"
+	seed := agentdesigner.RenderStateTemplate("My Agent", `{
+  "cursor": "old-value"
+}`) + "\n" + notesBlock
+	if err := os.WriteFile(path, []byte(seed), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := saveState(dir, "My Agent", map[string]interface{}{"cursor": "new-value"}); err != nil {
+		t.Fatalf("saveState: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+
+	if !strings.Contains(text, notesBlock) {
+		t.Fatalf("Notes section (heading + prose) was not preserved byte-for-byte.\ngot:\n%s", text)
+	}
+
+	got, err := agentdesigner.ReadState(path)
+	if err != nil {
+		t.Fatalf("ReadState: %v", err)
+	}
+	if got["cursor"] != "new-value" {
+		t.Fatalf("fenced state was not updated: %#v", got)
+	}
+}
+
+// TestMergeStateNullDeletesKey covers scenario 3: a [STATE] update whose value
+// is nil removes that key from the merged state, leaving the surviving keys
+// intact, and that merged result persists correctly through saveState.
+func TestMergeStateNullDeletesKey(t *testing.T) {
+	existing := map[string]interface{}{
+		"cursor": "abc",
+		"count":  float64(3),
+		"stale":  "drop-me",
+	}
+	update := map[string]interface{}{
+		"cursor": "def",
+		"stale":  nil,
+	}
+
+	mergeState(existing, update)
+
+	if _, ok := existing["stale"]; ok {
+		t.Fatalf("stale key was not deleted: %#v", existing)
+	}
+	if existing["cursor"] != "def" {
+		t.Fatalf("cursor not updated: %#v", existing)
+	}
+	if existing["count"] != float64(3) {
+		t.Fatalf("unrelated key count was not preserved: %#v", existing)
+	}
+
+	// Persist the merged result and confirm it round-trips through the real
+	// save path too — merge correctness alone doesn't guarantee the deletion
+	// survives the write.
+	dir := t.TempDir()
+	if err := saveState(dir, "My Agent", existing); err != nil {
+		t.Fatalf("saveState: %v", err)
+	}
+	got, err := agentdesigner.ReadState(filepath.Join(dir, "state.md"))
+	if err != nil {
+		t.Fatalf("ReadState: %v", err)
+	}
+	if _, ok := got["stale"]; ok {
+		t.Fatalf("deleted key resurfaced after save/read round-trip: %#v", got)
+	}
+	if got["cursor"] != "def" {
+		t.Fatalf("cursor not persisted: %#v", got)
+	}
+}
+
+// Scenario 4 ("no [STATE] emitted → file not rewritten at all") is NOT
+// covered here. The guard that skips saveState when there are no state
+// updates lives caller-side in runCoderTurns (runner.go: `if
+// len(parsed.stateUpdates) > 0 { ... saveState(...) }`), not inside saveState
+// itself — saveState/WriteState always write when called. Reaching that guard
+// requires driving runCoderTurns through a real coder.Coder.Generate call
+// (CLI subprocess or API HTTP loop), which the task explicitly rules out
+// building here. See the fix report for the full reasoning.
+
 func TestParseCoderOutputChatBlankLineDoesNotDropContent(t *testing.T) {
 	// Reproduces the real failure: the runtime emitted a header, a blank line,
 	// then the actual content. The old parser ended the [CHAT] block at the
