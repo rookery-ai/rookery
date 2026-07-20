@@ -18,12 +18,16 @@ func StateFilePath(vaultsBase, workspaceID, agentID string) string {
 
 // RenderStateTemplate builds a fresh state.md. The intro is italic prose, never
 // an HTML comment: comments do not round-trip through the KB editor and would
-// pin the file in raw mode forever.
+// pin the file in raw mode forever. Two details matter for that round-trip:
+// asterisk emphasis (*..*), not underscore (tiptap-markdown always re-emits
+// emphasis with asterisks, so underscore delimiters would flip on save and
+// register as lossy), and the intro stays on one physical source line (a
+// soft line break within the paragraph collapses to a single space on
+// serialize, which would likewise register as lossy).
 func RenderStateTemplate(agentName, jsonBody string) string {
 	return fmt.Sprintf(`# State — %s
 
-_Managed by Simple Agents. The block below is this agent's memory between runs —
-edit it if you need to fix something by hand._
+*Managed by Simple Agents. The block below is this agent's memory between runs — edit it if you need to fix something by hand.*
 
 `+"```json\n%s\n```"+`
 `, agentName, jsonBody)
