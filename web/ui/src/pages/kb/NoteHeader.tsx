@@ -129,7 +129,11 @@ export default function NoteHeader({
               <span key={target} className="flex shrink-0 items-center gap-1.5 text-xs text-muted-2">
                 <button
                   type="button"
-                  onClick={() => setParams({ path: target })}
+                  // Breadcrumb ancestors are always directories by
+                  // construction — carry that as an explicit `dir=1` hint
+                  // (review fix) so KBPage doesn't have to re-derive it from
+                  // the path string.
+                  onClick={() => setParams({ path: target, dir: "1" })}
                   className="hover:text-foreground hover:underline"
                 >
                   {seg}

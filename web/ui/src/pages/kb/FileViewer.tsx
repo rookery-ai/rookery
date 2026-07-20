@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router";
-import { Download, FileWarning, Loader2, MoreHorizontal } from "lucide-react";
+import { AlertTriangle, Download, FileWarning, Loader2, MoreHorizontal } from "lucide-react";
+import { ApiError } from "@/lib/api";
 import { rawURL, useKBNote, useDeleteNote } from "@/lib/kb";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -39,7 +40,11 @@ function FileViewerHeader({ path, onDelete }: { path: string; onDelete: () => vo
             <span key={target} className="flex shrink-0 items-center gap-1.5 text-xs text-muted-2">
               <button
                 type="button"
-                onClick={() => setParams({ path: target })}
+                // Breadcrumb ancestors are always directories by
+                // construction — carry that as an explicit `dir=1` hint
+                // (review fix) so KBPage doesn't have to re-derive it from
+                // the path string.
+                onClick={() => setParams({ path: target, dir: "1" })}
                 className="hover:text-foreground hover:underline"
               >
                 {seg}
@@ -105,14 +110,25 @@ export default function FileViewer({ path }: { path: string }) {
   const { data, isLoading, isError } = useKBNote(path);
   const [, setSearchParams] = useSearchParams();
   const deleteNote = useDeleteNote();
+  // Review fix: the confirm dialog closes synchronously before the mutation
+  // settles, and this had no onError — a failed DELETE looked identical to a
+  // successful one (dialog closes, nothing else happens), so the user
+  // reasonably believed the file was gone when it wasn't. Follows the
+  // established pattern in NoteEditor.tsx's handleDelete (~:484-499) rather
+  // than inventing a new one.
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   function handleDelete() {
+    setDeleteError(null);
     deleteNote.mutate(
       { path },
       {
         onSuccess: () => {
           const parent = path.split("/").slice(0, -1).join("/");
           setSearchParams(parent ? { path: parent } : {});
+        },
+        onError: (err) => {
+          setDeleteError(err instanceof ApiError ? `Delete failed: ${err.message}` : "Delete failed");
         },
       },
     );
@@ -137,6 +153,12 @@ export default function FileViewer({ path }: { path: string }) {
   return (
     <div className="flex h-full flex-col">
       <FileViewerHeader path={path} onDelete={handleDelete} />
+      {deleteError && (
+        <div className="flex items-center gap-2 border-b border-danger/30 bg-danger/10 px-4 py-1.5 text-xs text-danger">
+          <AlertTriangle className="size-3.5 shrink-0" />
+          {deleteError}
+        </div>
+      )}
       <div className="min-h-0 flex-1 overflow-auto">
         {data.kind === "binary" ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-2">

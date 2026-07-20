@@ -33,26 +33,46 @@ function KBEmptyState() {
   );
 }
 
-// A path "opens" as a document if its last segment looks like a file
-// (contains a dot) rather than a bare directory name. Every top-level and
-// agent/skill-scoped directory in the vault's layout (notes, memory, agents,
-// <agentID>, tools, chats, …) is dot-free, so this is a safe, purely
-// client-side approximation used ONLY to decide whether to render a content
-// pane at all — it is not the kind decision. Which document component to use
-// (the WYSIWYG/raw NoteEditor vs the read-only FileViewer) mirrors the
-// backend's own unconditional rule (web/api_kb.go's apiGetKBNote): exactly
-// ".md" is "markdown", everything else is content-sniffed server-side into
-// "code" or "binary" by FileViewer's own fetch.
-function looksLikeFile(path: string): boolean {
-  const last = path.split("/").pop() ?? "";
-  return last.includes(".");
-}
+// Whether a path "opens" as a document (vs. staying on the empty state) is
+// decided from a `dir=1` query-param hint that travels WITH the navigation
+// event, never guessed from the filename (review fix: a "last segment
+// contains a dot" heuristic silently refused to open real, legitimately
+// extensionless files an agent writes — a skill script named `run`,
+// Makefile, Dockerfile, LICENSE, a shebang shim — because the backend sniffs
+// content, not extensions, and the frontend never even asked).
+//
+// Every navigation call site knows on the spot whether it points at a
+// directory, so each one carries that fact explicitly instead of KBPage
+// inferring it after the fact:
+//   - FileTree.onSelect(path, isDir) already has the truth from the tree data.
+//   - SearchBox only ever matches file *content* (internal/vault/search.go
+//     skips directories), so its onSelect is always isDir=false.
+//   - Breadcrumb clicks in NoteHeader/FileViewerHeader target only
+//     *ancestors* of the currently open file, which are directories by
+//     construction — they set `dir=1` themselves in the same setParams call.
+// Residual case: a hand-typed or bookmarked URL with no `dir` hint at all
+// defaults to ATTEMPTING TO OPEN the file, not the empty state — a stray
+// directory hit already degrades gracefully (the backend's os.ReadFile on a
+// directory errors and FileViewer renders "Couldn't load this file."), which
+// is a strictly better failure mode than silently refusing to open a real
+// file.
+//
+// Which document component to use (the WYSIWYG/raw NoteEditor vs the
+// read-only FileViewer) is unrelated to this and still mirrors the backend's
+// own unconditional rule (web/api_kb.go's apiGetKBNote): exactly ".md" is
+// "markdown", everything else is content-sniffed server-side into "code" or
+// "binary" by FileViewer's own fetch.
 
 export default function KBPage() {
   const [params, setParams] = useSearchParams();
   const path = params.get("path");
-  const isFile = !!path && looksLikeFile(path);
+  const isDirHint = params.get("dir") === "1";
+  const isFile = !!path && !isDirHint;
   const isMarkdown = !!path && path.toLowerCase().endsWith(".md");
+
+  function openPath(p: string, isDir: boolean) {
+    setParams(isDir ? { path: p, dir: "1" } : { path: p });
+  }
 
   return (
     <>
@@ -60,8 +80,8 @@ export default function KBPage() {
         <div className="flex h-full flex-col">
           <KBPaneHeader />
           <div className="min-h-0 flex-1">
-            <SearchBox onSelect={(p) => setParams({ path: p })}>
-              <FileTree selectedPath={path} onSelect={(p) => setParams({ path: p })} />
+            <SearchBox onSelect={(p) => openPath(p, false)}>
+              <FileTree selectedPath={path} onSelect={openPath} />
             </SearchBox>
           </div>
         </div>
