@@ -125,7 +125,12 @@ export default function FileViewer({ path }: { path: string }) {
       {
         onSuccess: () => {
           const parent = path.split("/").slice(0, -1).join("/");
-          setSearchParams(parent ? { path: parent } : {});
+          // `parent` is provably a directory when non-empty — carry the
+          // `dir=1` hint like every other directory-targeting navigation in
+          // this file (review fix: this site was missed when the default
+          // flipped to "attempt to open the file", so deleting almost any
+          // nested file landed on "Couldn't load this file.").
+          setSearchParams(parent ? { path: parent, dir: "1" } : {});
         },
         onError: (err) => {
           setDeleteError(err instanceof ApiError ? `Delete failed: ${err.message}` : "Delete failed");
