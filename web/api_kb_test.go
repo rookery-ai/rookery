@@ -323,3 +323,79 @@ func TestAPIKBRaw(t *testing.T) {
 		t.Fatalf("raw: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestAPISaveKBNoteBlockedWhileAgentRunning is spec §4.3's core case: the
+// runner writes agents/<id>/state.md at the end of every run, so a save to
+// that same path while a run is in flight must be refused (409 agent_running)
+// rather than racing the runner's write. A save to any OTHER note is
+// unaffected — the guard is scoped to exactly agents/<id>/state.md.
+func TestAPISaveKBNoteBlockedWhileAgentRunning(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+	a := seedAgent(t, s, wsID)
+	s.runs[a.ID] = &agentRunState{} // in-flight, mirrors TestAPIRunAgentAlreadyRunning
+
+	path := "agents/" + a.ID + "/state.md"
+	rec := doJSON(t, s, http.MethodPut, "/api/v1/kb/note",
+		map[string]string{"path": path, "content": "# State\n"}, cookies)
+	if rec.Code != http.StatusConflict || !contains(rec.Body.String(), "agent_running") {
+		t.Fatalf("expected 409 agent_running, got %d %s", rec.Code, rec.Body.String())
+	}
+
+	// A different note is unaffected.
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/kb/note",
+		map[string]string{"path": "notes/free.md", "content": "hi"}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unrelated note should save: %d", rec.Code)
+	}
+
+	// A different file inside the SAME running agent's own dir (e.g. a note
+	// or a tool script) is not blocked — only state.md is guarded.
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/kb/note",
+		map[string]string{"path": "agents/" + a.ID + "/notes/scratch.md", "content": "hi"}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("other file in the running agent's dir should save: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAPISaveKBNoteIdleAgentStateSaves is the negative control: the same
+// path, for an agent that is NOT running, saves normally.
+func TestAPISaveKBNoteIdleAgentStateSaves(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+	a := seedAgent(t, s, wsID)
+
+	path := "agents/" + a.ID + "/state.md"
+	rec := doJSON(t, s, http.MethodPut, "/api/v1/kb/note",
+		map[string]string{"path": path, "content": "# State\n"}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("idle agent's state.md should save: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAPISaveKBNoteBlockedWhileAgentRunningPathVariants checks the path
+// match survives the kinds of drift a real client/browser can introduce —
+// a leading slash, a "./" prefix, and a trailing slash — without being
+// fooled into matching something it shouldn't.
+func TestAPISaveKBNoteBlockedWhileAgentRunningPathVariants(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+	a := seedAgent(t, s, wsID)
+	s.runs[a.ID] = &agentRunState{}
+
+	variants := []string{
+		"/agents/" + a.ID + "/state.md",
+		"agents/" + a.ID + "/state.md/",
+		"./agents/" + a.ID + "/state.md",
+	}
+	for _, p := range variants {
+		rec := doJSON(t, s, http.MethodPut, "/api/v1/kb/note",
+			map[string]string{"path": p, "content": "# State\n"}, cookies)
+		if rec.Code != http.StatusConflict || !contains(rec.Body.String(), "agent_running") {
+			t.Fatalf("path %q: expected 409 agent_running, got %d %s", p, rec.Code, rec.Body.String())
+		}
+	}
+}

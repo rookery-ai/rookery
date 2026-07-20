@@ -230,6 +230,30 @@ func (s *Server) apiGetKBNote(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
+// agentIDFromStatePath reports whether rel (already cleaned by cleanKBParam)
+// points at an agent's state.md — i.e. matches agents/<id>/state.md with a
+// non-empty <id> and no deeper nesting — and if so returns that id. It uses
+// path.Clean first so a trailing slash or a "./" prefix doesn't defeat the
+// match, and compares the fixed segments case-insensitively (a real vault
+// path is lowercase, but this guard is a safety net, not a path-safety
+// primitive — vault.Resolve still owns actual containment).
+func agentIDFromStatePath(rel string) (string, bool) {
+	cleaned := path.Clean("/" + rel) // leading slash makes Clean fold "." to "/"
+	cleaned = strings.TrimPrefix(cleaned, "/")
+	parts := strings.Split(cleaned, "/")
+	if len(parts) != 3 {
+		return "", false
+	}
+	if !strings.EqualFold(parts[0], "agents") || !strings.EqualFold(parts[2], "state.md") {
+		return "", false
+	}
+	id := parts[1]
+	if id == "" || id == "." || id == ".." {
+		return "", false
+	}
+	return id, true
+}
+
 // apiSaveKBNote ports handleSaveKBNote.
 // PUT /api/v1/kb/note {path,content} → 200 {"ok":true}
 func (s *Server) apiSaveKBNote(c echo.Context) error {
@@ -244,6 +268,19 @@ func (s *Server) apiSaveKBNote(c echo.Context) error {
 	rel := cleanKBParam(req.Path)
 	if rel == "" {
 		return jsonErr(c, http.StatusBadRequest, "invalid_path", "a note path is required")
+	}
+	// The runner writes agents/<id>/state.md at the end of every run (see
+	// internal/agentdesigner/statefile.go); racing that write with a manual
+	// KB edit would corrupt whichever one lands second. Refuse the save
+	// while that agent has a run in flight — checked via the SAME tracker
+	// the agent detail page's "Running…" badge and the run-already-running
+	// 202 use (web/run_tracker.go's isAgentRunning), not a new mechanism.
+	// A draft build dir (agents/draft_<slug>/state.md) never matches a live
+	// agent id in s.runs or agent_runs, so isAgentRunning naturally returns
+	// false for it — no special-casing needed.
+	if agentID, ok := agentIDFromStatePath(rel); ok && s.isAgentRunning(agentID) {
+		return jsonErr(c, http.StatusConflict, "agent_running",
+			"this agent is running right now — its state.md will be overwritten when the run finishes. Wait for it to finish, then save your edit.")
 	}
 	if !strings.Contains(path.Base(rel), ".") {
 		rel += ".md" // default new notes to markdown, matching handleSaveKBNote
