@@ -114,6 +114,32 @@ test("groupByDay buckets messages under Today / Yesterday / a dated label", () =
   expect(groups[2].messages).toEqual([c]);
 });
 
+// The day after a DST spring-forward, the previous local day is 23h long, so
+// deriving "yesterday" as todayMs - 24h lands mid-day-before-yesterday and the
+// label silently degrades to a date. Europe/Skopje springs forward 2026-03-29.
+test("groupByDay labels Yesterday correctly across a DST spring-forward", () => {
+  const now = new Date("2026-03-30T12:00:00+02:00");
+  const y = msg({ id: "y", created_at: "2026-03-29T12:00:00+01:00" });
+
+  const groups = groupByDay([y], now);
+
+  expect(groups.map((g) => g.label)).toEqual(["Yesterday"]);
+});
+
+// Bucketing is keyed by day, so out-of-order input can never split a day —
+// but the HEADERS would render inverted if their order came from
+// first-appearance. Groups are sorted newest-first explicitly.
+test("groupByDay orders day groups newest-first regardless of input order", () => {
+  const now = new Date("2026-07-20T12:00:00Z");
+  const older = msg({ id: "o", created_at: "2026-07-14T09:00:00Z" });
+  const yesterday = msg({ id: "y", created_at: "2026-07-19T09:00:00Z" });
+  const today = msg({ id: "t", created_at: "2026-07-20T09:00:00Z" });
+
+  const groups = groupByDay([older, yesterday, today], now);
+
+  expect(groups.map((g) => g.label)).toEqual(["Today", "Yesterday", "Tue, 14 Jul"]);
+});
+
 test("groupByDay keeps same-day messages in one bucket, in their given order", () => {
   const now = new Date("2026-07-20T12:00:00Z");
   const a = msg({ id: "a", created_at: "2026-07-20T10:00:00Z" });

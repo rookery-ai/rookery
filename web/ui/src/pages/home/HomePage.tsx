@@ -54,12 +54,20 @@ function dayLabel(dayMs: number): string {
 // groupByDay buckets inbox messages under day headers — spec §5.2's single
 // highest-value change: it turns an undifferentiated stream into a timeline.
 // Pure and exported so it's unit-testable with a fixed clock, independent of
-// rendering. Assumes `messages` arrives newest-first (the API's order) —
-// buckets are built by first-appearance rather than re-sorted, so a day's
-// messages never get reordered relative to each other.
+// rendering. Messages within a day keep the order they arrived in (the API's
+// newest-first) — they are never re-sorted relative to each other. The day
+// GROUPS are sorted newest-first explicitly: bucketing is keyed by day, so an
+// out-of-order input could never split a day in two, but it could render the
+// headers themselves inverted ("Yesterday" above "Today"). ListInboxMessages
+// orders by created_at DESC today, so this is belt-and-braces.
 export function groupByDay(messages: InboxMessage[], now: Date): DayGroup[] {
   const todayMs = startOfDay(now);
-  const yesterdayMs = todayMs - 24 * 60 * 60 * 1000;
+  // Not todayMs - 24h: on the day after a DST spring-forward the previous
+  // local day is only 23h long, so the fixed-offset arithmetic misses and
+  // "Yesterday" silently renders as a date. Europe/Skopje observes DST.
+  const yesterdayMs = startOfDay(
+    new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1),
+  );
   const order: number[] = [];
   const buckets = new Map<number, InboxMessage[]>();
   for (const m of messages) {
@@ -72,6 +80,7 @@ export function groupByDay(messages: InboxMessage[], now: Date): DayGroup[] {
     }
     bucket.push(m);
   }
+  order.sort((a, b) => b - a);
   return order.map((key) => ({
     label: key === todayMs ? "Today" : key === yesterdayMs ? "Yesterday" : dayLabel(key),
     messages: buckets.get(key)!,
