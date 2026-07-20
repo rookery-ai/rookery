@@ -447,7 +447,7 @@ function ChatAppStep({
                   key={i}
                   className="flex gap-3 rounded-lg border border-border bg-background p-3 text-sm"
                 >
-                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-semibold">
+                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted-surface text-[11px] font-semibold">
                     {i + 1}
                   </span>
                   <span className="leading-relaxed">

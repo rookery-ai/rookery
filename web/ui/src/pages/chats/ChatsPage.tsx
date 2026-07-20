@@ -67,7 +67,7 @@ export default function ChatsPage() {
                   <span
                     className={cn(
                       "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium",
-                      c.active ? "bg-ok-soft text-ok" : "bg-muted text-muted-2",
+                      c.active ? "bg-ok-soft text-ok" : "bg-muted-surface text-foreground",
                     )}
                   >
                     {c.active ? "Active" : "Stopped"}

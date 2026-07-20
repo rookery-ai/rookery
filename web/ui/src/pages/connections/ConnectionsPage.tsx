@@ -282,7 +282,7 @@ export default function ConnectionsPage() {
                 </span>
               </button>
             </div>
-            <div className="rounded-lg bg-muted p-3 text-xs leading-relaxed text-muted-2">
+            <div className="rounded-lg bg-muted-surface p-3 text-xs leading-relaxed text-foreground">
               <p>
                 <b className="text-foreground">Chat apps</b> are where you talk to your assistant.
               </p>

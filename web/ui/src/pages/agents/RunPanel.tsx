@@ -144,7 +144,7 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
       )}
 
       {note && (
-        <div className="rounded-md bg-muted px-3 py-2 text-xs text-muted-2">{note}</div>
+        <div className="rounded-md bg-muted-surface px-3 py-2 text-xs text-foreground">{note}</div>
       )}
 
       {sse && (

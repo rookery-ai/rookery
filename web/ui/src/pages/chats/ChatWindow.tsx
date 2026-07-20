@@ -42,7 +42,7 @@ function StatusChip({ active }: { active: boolean }) {
     <span
       className={cn(
         "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
-        active ? "bg-ok-soft text-ok" : "bg-muted text-muted-2",
+        active ? "bg-ok-soft text-ok" : "bg-muted-surface text-foreground",
       )}
     >
       {active ? "Active" : "Stopped"}
