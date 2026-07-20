@@ -373,7 +373,8 @@ func platformContextBlock(chatApps []ChatAppInfo, vaultRoot string) string {
 	sb.WriteString("  Merges the JSON object into the json block in your state.md — the system does the\n")
 	sb.WriteString("  write; you never edit that block yourself. Set a key to null to delete it. state.md\n")
 	sb.WriteString("  also has an optional \"## Notes\" section that is yours to write plain human-readable\n")
-	sb.WriteString("  context into (it is never machine-parsed).\n\n")
+	sb.WriteString("  context into (it is never machine-parsed). Add to Notes with a targeted edit, never\n")
+	sb.WriteString("  by rewriting the whole file — a full overwrite would destroy the json block above it.\n\n")
 	sb.WriteString("  [CALL: agent-name]\n")
 	sb.WriteString("  Invokes another agent synchronously and waits for its result.\n\n")
 	sb.WriteString("  [SILENT]\n")
@@ -1761,7 +1762,8 @@ line inside the block.
 Merges the JSON object into the json block in your state.md — the system does the write;
 you never edit that block yourself. Set a key to null to delete it. state.md also has an
 optional "## Notes" section that is yours to write plain human-readable context into (it
-is never machine-parsed).
+is never machine-parsed). Add to Notes with a targeted edit, never by rewriting the whole
+file — a full overwrite would destroy the json block above it.
 Inline form also accepted: [STATE]{"key":"value"}[/STATE]
 
 [CALL: agent-name]
