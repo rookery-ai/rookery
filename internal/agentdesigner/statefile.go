@@ -30,7 +30,7 @@ edit it if you need to fix something by hand._
 
 // fenceLoc describes where (if anywhere) the state fence lives.
 type fenceLoc struct {
-	Open, Close int  // line indices of the ```json and ``` lines; valid only when OK
+	Open, Close int // line indices of the ```json and ``` lines; valid only when OK
 	OK          bool
 	OrphanOpen  int // index of the first ```json line when OK is false; -1 when there is none
 }
