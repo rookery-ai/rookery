@@ -100,11 +100,6 @@ func AgentMDPath(vaultsBase, workspaceID, agentID string) string {
 	return AgentDescPath(vaultsBase, workspaceID, agentID)
 }
 
-// AgentStatePath returns the path to an agent's state.json file.
-func AgentStatePath(vaultsBase, workspaceID, agentID string) string {
-	return filepath.Join(AgentDir(vaultsBase, workspaceID, agentID), "state.json")
-}
-
 // AgentLogsDir returns the path to an agent's logs directory.
 func AgentLogsDir(vaultsBase, workspaceID, agentID string) string {
 	return filepath.Join(AgentDir(vaultsBase, workspaceID, agentID), "logs")

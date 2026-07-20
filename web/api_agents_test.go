@@ -2,11 +2,14 @@ package web
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/db"
 )
@@ -135,5 +138,52 @@ func TestAPIRunAgentAlreadyRunning(t *testing.T) {
 	}
 	if !contains(rec.Body.String(), `"status":"already_running"`) {
 		t.Fatalf("expected already_running status: %s", rec.Body.String())
+	}
+}
+
+// TestAPIAgentDetailReadsStateMarkdown verifies the agent-detail endpoint
+// shows state.md verbatim (it is a document now, not a JSON blob to
+// re-marshal) and no longer looks at state.json at all.
+func TestAPIAgentDetailReadsStateMarkdown(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+	a := seedAgent(t, s, wsID)
+
+	path := agentdesigner.StateFilePath(s.agentsDir(), wsID, a.ID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatalf("mkdir agent dir: %v", err)
+	}
+	if err := agentdesigner.WriteState(path, a.Name, map[string]any{"cursor": "abc123"}); err != nil {
+		t.Fatalf("seed state.md: %v", err)
+	}
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/agents/"+a.ID, nil, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("detail: %d %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !contains(body, "cursor") || !contains(body, "abc123") {
+		t.Fatalf("state.md content not surfaced verbatim: %s", body)
+	}
+	if !contains(body, "State — "+a.Name) {
+		t.Fatalf("expected the state.md heading to survive verbatim: %s", body)
+	}
+}
+
+// TestAPIAgentDetailNoStateFileIsEmptyNotError verifies a missing state.md
+// (a brand-new agent) yields an empty state string, not a 500.
+func TestAPIAgentDetailNoStateFileIsEmptyNotError(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+	a := seedAgent(t, s, wsID)
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/agents/"+a.ID, nil, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("detail: %d %s", rec.Code, rec.Body.String())
+	}
+	if !contains(rec.Body.String(), `"state":""`) {
+		t.Fatalf(`expected empty "state":"" for a missing state.md: %s`, rec.Body.String())
 	}
 }

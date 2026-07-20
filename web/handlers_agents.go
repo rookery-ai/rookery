@@ -24,7 +24,7 @@ type agentDetailData struct {
 	Runs           []*db.AgentRun
 	Manifest       *agentdesigner.AgentManifest
 	AgentMD        string                   // AGENT.md
-	State          string                   // state.json (read-only)
+	State          string                   // state.md, verbatim (read-only)
 	Logs           []string                 // sorted log file names (newest first)
 	LastLog        string                   // content of most recent log
 	AttachedSet    map[string]bool          // agent_skills names (core+user) → true; drives checkbox "checked"
@@ -393,8 +393,9 @@ func (s *Server) loadAgentDetail(ctx context.Context, agent *db.Agent, workspace
 			data.AgentMD = string(raw)
 		}
 
-		// Load state.json.
-		if raw, err := os.ReadFile(agentdesigner.AgentStatePath(dir, workspaceID, agent.ID)); err == nil {
+		// Load state.md verbatim — it is a document now, shown as-is (not
+		// re-marshalled). Missing file → empty string, not an error.
+		if raw, err := os.ReadFile(agentdesigner.StateFilePath(dir, workspaceID, agent.ID)); err == nil {
 			data.State = string(raw)
 		}
 

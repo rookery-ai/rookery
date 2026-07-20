@@ -1,9 +1,31 @@
 package agentrunner
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 )
+
+// TestAgentStatePersistsAcrossRunsAsMarkdown proves the runner's state-loading
+// path (agentdesigner.ReadState/WriteState) round-trips state through
+// state.md rather than state.json — state.json must never be created.
+func TestAgentStatePersistsAcrossRunsAsMarkdown(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "state.md")
+	if err := agentdesigner.WriteState(p, "T", map[string]any{"cursor": "abc"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "state.json")); !os.IsNotExist(err) {
+		t.Fatal("state.json must not be created any more")
+	}
+	got, err := agentdesigner.ReadState(p)
+	if err != nil || got["cursor"] != "abc" {
+		t.Fatalf("state not readable: %#v %v", got, err)
+	}
+}
 
 func TestParseCoderOutputChatBlankLineDoesNotDropContent(t *testing.T) {
 	// Reproduces the real failure: the runtime emitted a header, a blank line,

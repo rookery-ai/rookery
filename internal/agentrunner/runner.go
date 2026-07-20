@@ -186,8 +186,8 @@ func (r *Runner) TestRunFromContent(ctx context.Context, workspaceID, agentMD st
 	if err := os.WriteFile(filepath.Join(tmpDir, "AGENT.md"), []byte(agentMD), 0o640); err != nil {
 		return "", fmt.Errorf("write AGENT.md: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "state.json"), []byte("{}"), 0o640); err != nil {
-		return "", fmt.Errorf("write state.json: %w", err)
+	if err := agentdesigner.WriteState(filepath.Join(tmpDir, "state.md"), "Test Agent", map[string]any{}); err != nil {
+		return "", fmt.Errorf("write state.md: %w", err)
 	}
 	if len(tools) > 0 {
 		// Reproduce the full nested project tree (helper modules, tests, …).
@@ -245,10 +245,16 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		}
 	}
 
-	// Read state (default empty object).
-	stateRaw, err := os.ReadFile(filepath.Join(agentDir, "state.json"))
+	// Read state (default empty object). ReadState already degrades a
+	// missing file/damaged fence to an empty map, but guard against a
+	// genuine I/O error too.
+	stateMap, err := agentdesigner.ReadState(agentdesigner.StateFilePath(r.agentsDir, input.WorkspaceID, input.AgentID))
 	if err != nil {
-		stateRaw = []byte("{}")
+		stateMap = map[string]interface{}{}
+	}
+	stateJSON, err := json.MarshalIndent(stateMap, "", "  ")
+	if err != nil {
+		stateJSON = []byte("{}")
 	}
 
 	// Load skills context. The available pool is core skills (always-on, embedded)
@@ -305,7 +311,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 
 	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
 		AgentMD:         string(agentMD),
-		StateJSON:       string(stateRaw),
+		StateJSON:       string(stateJSON),
 		UserMemory:      userMemory,
 		AllSkills:       skillRefs,
 		DeclaredSkills:  declaredSkills,
@@ -324,7 +330,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		return fmt.Errorf("no coder service configured")
 	}
 	// Run inside the agent's own directory (not the shared per-user home) so
-	// tools/*.py and state.json resolve correctly and runs never see other
+	// tools/*.py and state.md resolve correctly and runs never see other
 	// agents' files. Pre-approve the tools agents need so the subprocess never
 	// blocks on interactive permission prompts (--setting-sources "" suppresses
 	// all settings).
@@ -371,7 +377,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	}
 
 	rctx := &coderRunContext{}
-	runErr := r.runCoderTurns(ctx, agent, manifest, input, agentDir, stateRaw, prompt, coderSvc, rctx)
+	runErr := r.runCoderTurns(ctx, agent, manifest, input, agentDir, stateMap, prompt, coderSvc, rctx)
 
 	exitCode := 0
 	if runErr != nil {
@@ -496,7 +502,7 @@ func (r *Runner) runCoderTurns(
 	manifest *agentdesigner.AgentManifest,
 	input RunInput,
 	agentDir string,
-	stateRaw []byte,
+	currentState map[string]interface{},
 	initialPrompt string,
 	coderSvc *coder.Coder,
 	rctx *coderRunContext,
@@ -505,9 +511,6 @@ func (r *Runner) runCoderTurns(
 		return fmt.Errorf("no coder service configured for md/hybrid agents")
 	}
 
-	// Load current state so we can merge updates.
-	var currentState map[string]interface{}
-	_ = json.Unmarshal(stateRaw, &currentState)
 	if currentState == nil {
 		currentState = make(map[string]interface{})
 	}
@@ -546,7 +549,7 @@ func (r *Runner) runCoderTurns(
 			for _, update := range parsed.stateUpdates {
 				mergeState(currentState, update)
 			}
-			if err := saveState(agentDir, currentState); err != nil {
+			if err := saveState(agentDir, agent.Name, currentState); err != nil {
 				rctx.warnings = append(rctx.warnings, "state save failed: "+err.Error())
 			}
 		}
@@ -900,8 +903,9 @@ func mergeState(existing map[string]interface{}, update map[string]interface{}) 
 	}
 }
 
-// saveState atomically writes state.json.
-func saveState(agentDir string, state map[string]interface{}) error {
+// saveState writes state.md, replacing only the machine-state json fence and
+// preserving any prose an agent (or the user) has written around it.
+func saveState(agentDir, agentName string, state map[string]interface{}) error {
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
@@ -909,11 +913,7 @@ func saveState(agentDir string, state map[string]interface{}) error {
 	if len(data) > maxStateSize {
 		return fmt.Errorf("state too large (%d bytes > %d limit)", len(data), maxStateSize)
 	}
-	tmpPath := filepath.Join(agentDir, "state.json.tmp")
-	if err := os.WriteFile(tmpPath, data, 0o640); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, filepath.Join(agentDir, "state.json"))
+	return agentdesigner.WriteState(filepath.Join(agentDir, "state.md"), agentName, state)
 }
 
 // ─── Skills loading ───────────────────────────────────────────────────────────
