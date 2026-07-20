@@ -1,9 +1,16 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useSearchParams } from "react-router";
 import { useRenameNote } from "@/lib/kb";
 import NoteHeader from "./NoteHeader";
+
+// Reads back the live URL search params so a test can assert on what a
+// setParams() call inside NoteHeader actually produced.
+function ParamsProbe() {
+  const [params] = useSearchParams();
+  return <div data-testid="params-probe">{params.toString()}</div>;
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -242,4 +249,32 @@ test("delete menu item opens a confirm dialog and calls onDelete on confirm", as
 
   await user.click(screen.getByRole("button", { name: "Delete" }));
   expect(onDelete).toHaveBeenCalled();
+});
+
+// Review fix: breadcrumb ancestors bypass FileTree's onSelect(path, isDir)
+// entirely — NoteHeader navigates directly via setParams(). Ancestors of an
+// open file are always directories, so this must carry a `dir=1` hint
+// itself rather than leaving KBPage to guess from the path string.
+test("clicking a breadcrumb ancestor routes path + a dir=1 hint (not just path)", async () => {
+  const user = userEvent.setup();
+  const qc = new QueryClient();
+  render(
+    <MemoryRouter initialEntries={["/?path=notes%2Ftrip%20plan.md"]}>
+      <QueryClientProvider client={qc}>
+        <NoteHeader
+          path="notes/trip plan.md"
+          state="saved"
+          backlinksCount={0}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          rawMode={false}
+          onToggleRaw={vi.fn()}
+        />
+        <ParamsProbe />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+
+  await user.click(screen.getByText("notes"));
+  expect(screen.getByTestId("params-probe").textContent).toBe("path=notes&dir=1");
 });

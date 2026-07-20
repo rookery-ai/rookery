@@ -11,7 +11,13 @@ export type KBNode = {
 
 export type KBTree = { path: string; nodes: KBNode[] };
 
-export type KBNote = { path: string; content: string; html: string; backlinks: string[] };
+// "markdown" -> NoteEditor (WYSIWYG/raw); "code" -> FileViewer's read-only
+// <pre>; "binary" -> FileViewer's Download-only panel (content is "").
+// Decided server-side by content sniffing, not by extension — see
+// web/api_kb.go's apiGetKBNote.
+export type KBNoteKind = "markdown" | "code" | "binary";
+
+export type KBNote = { path: string; content: string; html: string; backlinks: string[]; kind: KBNoteKind };
 
 export type KBSearchHit = { path: string; line: number; snippet: string };
 

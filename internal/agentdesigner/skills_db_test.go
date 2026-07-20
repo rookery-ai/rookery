@@ -45,11 +45,13 @@ func TestSaveAgent_PersistsDeclaredSkillsToDB(t *testing.T) {
 
 	designer := NewDesigner(database, agentsDir)
 	if err := designer.SaveAgent(workspaceID, agentID, "test-agent", "desc",
-		agentMD, nil, declared, nil); err != nil {
+		agentMD, nil, declared); err != nil {
 		t.Fatalf("SaveAgent: %v", err)
 	}
 
-	// The DB must now hold both declared skills — core + user, by name.
+	// The DB must now hold both declared skills — core + user, by name. There is
+	// no manifest/agent.json any more to duplicate this into: agent_skills is the
+	// only place an agent's skills are recorded.
 	got, err := database.ListAgentSkillNames(agentID)
 	if err != nil {
 		t.Fatalf("ListAgentSkillNames: %v", err)
@@ -68,16 +70,6 @@ func TestSaveAgent_PersistsDeclaredSkillsToDB(t *testing.T) {
 		if !found {
 			t.Errorf("skill %q not persisted to agent_skills (got %v)", n, got)
 		}
-	}
-
-	// The manifest on disk must NOT carry the skills (DB is the source of truth;
-	// AGENT.md is for the LLM).
-	m, err := LoadManifest(agentsDir, workspaceID, agentID)
-	if err != nil {
-		t.Fatalf("LoadManifest: %v", err)
-	}
-	if len(m.Skills) != 0 {
-		t.Errorf("manifest.Skills = %v, want empty (DB is the source of truth)", m.Skills)
 	}
 }
 
@@ -107,7 +99,7 @@ func TestSaveAgent_NoSkillsLinePersistsNothing(t *testing.T) {
 
 	designer := NewDesigner(database, agentsDir)
 	if err := designer.SaveAgent(workspaceID, agentID, "test-agent", "desc",
-		agentMD, nil, declared, nil); err != nil {
+		agentMD, nil, declared); err != nil {
 		t.Fatalf("SaveAgent: %v", err)
 	}
 

@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/db"
@@ -40,7 +39,7 @@ func seedAgent(t *testing.T, database *db.DB, vaultsBase, workspaceID, agentID, 
 	if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte(agentMD), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(`{"counter":42}`), 0o640); err != nil {
+	if err := WriteState(StateFilePath(vaultsBase, workspaceID, agentID), "test-agent", map[string]any{"counter": 42}); err != nil {
 		t.Fatal(err)
 	}
 	for name, content := range tools {
@@ -48,10 +47,8 @@ func seedAgent(t *testing.T, database *db.DB, vaultsBase, workspaceID, agentID, 
 			t.Fatal(err)
 		}
 	}
-	manifest := &AgentManifest{ID: agentID, Name: "test-agent", CreatedAt: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)}
-	if err := SaveManifest(vaultsBase, workspaceID, agentID, manifest); err != nil {
-		t.Fatal(err)
-	}
+	// CreatedAt lives only in the agents DB row now (agent.json/AgentManifest
+	// are gone) — set at INSERT time by CreateAgent and never touched again.
 	if err := database.CreateAgent(&db.Agent{ID: agentID, WorkspaceID: workspaceID, Name: "test-agent", Description: "d", Active: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -198,14 +195,17 @@ func TestCopyAgentWorkspace_NeverTouchesLive(t *testing.T) {
 	stagingDir := filepath.Join(t.TempDir(), "staging") // doesn't exist yet
 
 	staleAgentMD := "# Suggested schedule: */10 * * * *\nOld stale body."
-	liveState := `{"counter":7}`
 	if err := os.MkdirAll(filepath.Join(liveDir, "tools"), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(liveDir, "AGENT.md"), []byte(staleAgentMD), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(liveDir, "state.json"), []byte(liveState), 0o640); err != nil {
+	if err := WriteState(filepath.Join(liveDir, "state.md"), "test-agent", map[string]any{"counter": 7}); err != nil {
+		t.Fatal(err)
+	}
+	liveState, err := os.ReadFile(filepath.Join(liveDir, "state.md"))
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(liveDir, "tools", "a.py"), []byte("print('a')"), 0o640); err != nil {
@@ -225,9 +225,9 @@ func TestCopyAgentWorkspace_NeverTouchesLive(t *testing.T) {
 	if err != nil || string(stagedMD) != reconciledMD {
 		t.Errorf("staging AGENT.md = %q, err=%v, want reconciled %q", stagedMD, err, reconciledMD)
 	}
-	stagedState, err := os.ReadFile(filepath.Join(stagingDir, "state.json"))
-	if err != nil || string(stagedState) != liveState {
-		t.Errorf("staging state.json = %q, err=%v, want %q", stagedState, err, liveState)
+	stagedState, err := os.ReadFile(filepath.Join(stagingDir, "state.md"))
+	if err != nil || string(stagedState) != string(liveState) {
+		t.Errorf("staging state.md = %q, err=%v, want %q", stagedState, err, liveState)
 	}
 	for _, name := range []string{"a.py", "b.py"} {
 		data, err := os.ReadFile(filepath.Join(stagingDir, "tools", name))
@@ -245,9 +245,38 @@ func TestCopyAgentWorkspace_NeverTouchesLive(t *testing.T) {
 	if err != nil || string(liveMDAfter) != staleAgentMD {
 		t.Errorf("liveDir AGENT.md changed: got %q, want untouched stale %q", liveMDAfter, staleAgentMD)
 	}
-	liveStateAfter, err := os.ReadFile(filepath.Join(liveDir, "state.json"))
-	if err != nil || string(liveStateAfter) != liveState {
-		t.Errorf("liveDir state.json changed: got %q, want untouched %q", liveStateAfter, liveState)
+	liveStateAfter, err := os.ReadFile(filepath.Join(liveDir, "state.md"))
+	if err != nil || string(liveStateAfter) != string(liveState) {
+		t.Errorf("liveDir state.md changed: got %q, want untouched %q", liveStateAfter, liveState)
+	}
+}
+
+// TestCopyAgentWorkspace_NoStateFileMeansNoSeed locks in the deliberate choice
+// for a never-run live agent (no state.md yet): copyAgentWorkspace must not
+// synthesize a placeholder state.md in staging. ReadState already treats a
+// missing file as empty memory, so there is nothing useful to seed, and
+// state.json (the old placeholder format) must never be written anywhere.
+func TestCopyAgentWorkspace_NoStateFileMeansNoSeed(t *testing.T) {
+	liveDir := t.TempDir()
+	stagingDir := filepath.Join(t.TempDir(), "staging")
+
+	if err := os.MkdirAll(filepath.Join(liveDir, "tools"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(liveDir, "AGENT.md"), []byte("body"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately no state.md in liveDir.
+
+	if err := copyAgentWorkspace(liveDir, stagingDir, "body"); err != nil {
+		t.Fatalf("copyAgentWorkspace: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(stagingDir, "state.md")); !os.IsNotExist(err) {
+		t.Errorf("staging state.md should not exist when live has none, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stagingDir, "state.json")); !os.IsNotExist(err) {
+		t.Errorf("staging state.json must never be created, stat err = %v", err)
 	}
 }
 
@@ -262,22 +291,35 @@ func TestUpdateAgent_PreservesStateAndCreatedAtAndWipesRemovedTools(t *testing.T
 		"# Suggested schedule: none\nOld body.",
 		map[string]string{"keep.py": "print('keep')", "remove.py": "print('remove')"})
 
+	before, err := database.GetAgent(agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stateBefore, err := os.ReadFile(StateFilePath(agentsDir, workspaceID, agentID))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	designer := NewDesigner(database, agentsDir)
 	newTools := map[string]string{"keep.py": "print('keep updated')"}
 	if err := designer.UpdateAgent(workspaceID, agentID, "test-agent", "new description",
-		"# Suggested schedule: none\nNew body.", newTools, nil, nil); err != nil {
+		"# Suggested schedule: none\nNew body.", newTools, nil); err != nil {
 		t.Fatalf("UpdateAgent: %v", err)
 	}
 
 	dir := AgentDir(agentsDir, workspaceID, agentID)
 
-	// state.json must be byte-identical to what was there before the edit.
-	state, err := os.ReadFile(filepath.Join(dir, "state.json"))
+	// state.md must be byte-identical to what was there before the edit —
+	// writeAgentContent must never touch a live agent's persisted state.
+	stateAfter, err := os.ReadFile(StateFilePath(agentsDir, workspaceID, agentID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(state) != `{"counter":42}` {
-		t.Errorf("state.json = %q, want untouched original", state)
+	if string(stateAfter) != string(stateBefore) {
+		t.Errorf("state.md changed across UpdateAgent: got %q, want untouched %q", stateAfter, stateBefore)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "state.json")); !os.IsNotExist(err) {
+		t.Errorf("state.json must never be (re)created by UpdateAgent, stat err = %v", err)
 	}
 
 	// Removed tool must be gone; kept tool must reflect the new content.
@@ -289,21 +331,19 @@ func TestUpdateAgent_PreservesStateAndCreatedAtAndWipesRemovedTools(t *testing.T
 		t.Errorf("tools/keep.py = %q, err=%v, want updated content", keep, err)
 	}
 
-	// Manifest CreatedAt must survive the edit.
-	manifest, err := LoadManifest(agentsDir, workspaceID, agentID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !manifest.CreatedAt.Equal(time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)) {
-		t.Errorf("manifest.CreatedAt = %v, want preserved original 2020-01-01", manifest.CreatedAt)
-	}
-
-	// DB description must be updated; this must be an UPDATE not an INSERT (a
-	// second CreateAgent on this ID/name would violate the PK/unique constraint).
+	// CreatedAt must survive the edit. There is no manifest any more to
+	// duplicate this into — the agents DB row (set once at CreateAgent, never
+	// touched by UpdateAgentDescription) is the only record of it.
 	agent, err := database.GetAgent(agentID)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !agent.CreatedAt.Equal(before.CreatedAt) {
+		t.Errorf("agent.CreatedAt = %v, want preserved original %v", agent.CreatedAt, before.CreatedAt)
+	}
+
+	// DB description must be updated; this must be an UPDATE not an INSERT (a
+	// second CreateAgent on this ID/name would violate the PK/unique constraint).
 	if agent.Description != "new description" {
 		t.Errorf("agent.Description = %q, want %q", agent.Description, "new description")
 	}

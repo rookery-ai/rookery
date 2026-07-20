@@ -119,7 +119,7 @@ func agentPhilosophyBlock(backendType string) string {
 ## What an agent is
 
 An agent is YOU — an AI — invoked on a schedule or manually. You have no persistent memory
-except what you read from the knowledge base or state.json each run. Your job each run:
+except what you read from the knowledge base or your state.md each run. Your job each run:
 read context, think, decide, act, output results.
 
 You are NOT a Python script. You are the reasoning layer. Helper scripts and tools are
@@ -289,9 +289,10 @@ func platformContextBlock(chatApps []ChatAppInfo, vaultRoot string) string {
 	sb.WriteString("    SOUL.md            — communication style and tone preferences\n")
 	sb.WriteString("    GENERAL.md         — quick notes appended via the /memory command\n")
 	sb.WriteString("    <other>.md         — any additional context files the user creates\n")
-	sb.WriteString("  agents/<id>/         — each agent's own workspace (AGENT.md, tools/, state.json,\n")
-	sb.WriteString("                         logs/). Per-agent, not shared notes; each agent stays in its\n")
-	sb.WriteString("                         own dir.\n")
+	sb.WriteString("  agents/<id>/         — each agent's own workspace (AGENT.md, tools/, state.md,\n")
+	sb.WriteString("                         logs/). state.md is your memory between runs (see the\n")
+	sb.WriteString("                         [STATE] marker below). Per-agent, not shared notes; each\n")
+	sb.WriteString("                         agent stays in its own dir.\n")
 	sb.WriteString("  chats/               — conversation transcripts reflected from the database (read-\n")
 	sb.WriteString("                         only for agents — the system writes these; agents read for\n")
 	sb.WriteString("                         context).\n")
@@ -369,7 +370,11 @@ func platformContextBlock(chatApps []ChatAppInfo, vaultRoot string) string {
 	sb.WriteString("  preserved as paragraph breaks, so use them where you WANT a break and avoid a\n")
 	sb.WriteString("  leading or trailing blank line (which would show as an empty gap).\n\n")
 	sb.WriteString("  [STATE]{\"key\": \"value\"}[/STATE]\n")
-	sb.WriteString("  Merges the JSON object into state.json. Set a key to null to delete it.\n\n")
+	sb.WriteString("  Merges the JSON object into the json block in your state.md — the system does the\n")
+	sb.WriteString("  write; you never edit that block yourself. Set a key to null to delete it. state.md\n")
+	sb.WriteString("  also has an optional \"## Notes\" section that is yours to write plain human-readable\n")
+	sb.WriteString("  context into (it is never machine-parsed). Add to Notes with a targeted edit, never\n")
+	sb.WriteString("  by rewriting the whole file — a full overwrite would destroy the json block above it.\n\n")
 	sb.WriteString("  [CALL: agent-name]\n")
 	sb.WriteString("  Invokes another agent synchronously and waits for its result.\n\n")
 	sb.WriteString("  [SILENT]\n")
@@ -406,7 +411,7 @@ and feeds back as tool results. Call tools to do real work; your final answer is
 text. The available tools are:
 
 - read_file(path): read a file. A RELATIVE path is resolved against your current working
-  directory (your own agent directory: AGENT.md, tools/, state.json, logs/ live there).
+  directory (your own agent directory: AGENT.md, tools/, state.md, logs/ live there).
   The USER's knowledge base (notes/, memory/, chats/) lives at the vault root — the
   prompt names that absolute path; use it (an absolute path) when you read or write the
   user's notes. An absolute path anywhere inside the vault is accepted.
@@ -635,7 +640,7 @@ NEVER do any of the following — no exceptions:
   Python, script, vault, cron, JSON, shell, subprocess, Bash, webhook, endpoint, API key
   (unless you immediately explain it in one plain sentence). Translate everything:
   "run schedule" not "cron"; "your notes" not "vault"; "the assistant will remember this"
-  not "write to state.json".
+  not "write to state.md".
 </constraints>
 
 `)
@@ -1210,7 +1215,7 @@ AGENT.MD WRITING RULES — read carefully:
     honest answer is "it depends — look and decide".
   ✓ Output protocol (the ONLY way to produce output) — make it explicit in AGENT.md:
       [CHAT] <text>        — sends a message to the user (include the actual content inline)
-      [STATE]...[/STATE]   — JSON block merged into state.json for persistence
+      [STATE]...[/STATE]   — JSON block merged into the json fence in state.md for persistence
     If the agent notifies the user: [CHAT] MUST contain the real content, not a label with a
     blank. WRONG: "[CHAT] Today's quote:". RIGHT: "[CHAT] 💭 <the full generated quote>".
     NEVER split a [CHAT] message with a blank line — the header and the content must be on
@@ -1260,9 +1265,9 @@ If creating scripts:
   does subprocess.run(['python3', ...]) WILL be blocked. To verify the whole workflow
   end-to-end, run the script yourself in the shell (the test step) instead.
 - Read secrets via: os.environ.get('SECRET_NAME', '').
-- Do NOT read or write state.json directly — use [STATE] blocks in AGENT.md output.
+- Do NOT read or write state.md directly — use [STATE] blocks in AGENT.md output.
 
-Do NOT create or modify state.json — it already exists and is managed by the system.
+Do NOT create or modify state.md — it already exists and is managed by the system.
 </step>
 
 <step name="test">
@@ -1443,7 +1448,7 @@ Apply the same AGENT.md writing rules as the create prompt:
   verify end-to-end by running the script yourself in the shell instead.
 - Read secrets via: os.environ.get('SECRET_NAME', '').
 
-Do NOT create or modify state.json — it reflects the agent's live persisted state and is
+Do NOT create or modify state.md — it reflects the agent's live persisted state and is
 managed by the system. Use [STATE] blocks in AGENT.md output to update it.
 </step>
 
@@ -1720,7 +1725,7 @@ func BuildCoderPrompt(p CoderPromptParams) string {
 	if p.VaultRoot != "" {
 		sb.WriteString(fmt.Sprintf(`<agent_workspace>
 Your current working directory is your OWN agent directory, where you keep your own
-files (AGENT.md, tools/, state.json, logs/):
+files (AGENT.md, tools/, state.md, logs/):
   %s
 You may write here. Do NOT write under .kb/ (internal indexes/sidecars), chats/
 (transcripts reflected from the database), or another agent's directory under agents/ —
@@ -1754,7 +1759,11 @@ line inside the block.
   "key": "value"
 }
 [/STATE]
-Merges the JSON object into state.json. Set a key to null to delete it.
+Merges the JSON object into the json block in your state.md — the system does the write;
+you never edit that block yourself. Set a key to null to delete it. state.md also has an
+optional "## Notes" section that is yours to write plain human-readable context into (it
+is never machine-parsed). Add to Notes with a targeted edit, never by rewriting the whole
+file — a full overwrite would destroy the json block above it.
 Inline form also accepted: [STATE]{"key":"value"}[/STATE]
 
 [CALL: agent-name]
@@ -1771,7 +1780,7 @@ any other prose you leave behind may be delivered to the user as the message.
 - [CHAT] is the ONLY notification channel. Emit it when AGENT.md instructs you to notify the user. If AGENT.md says the agent is silent (notes-only, state-only): do NOT emit [CHAT] — emit [SILENT] as your last line instead. Silent runs are valid and correct. Do not call Telegram APIs, webhooks, or any messaging service directly.
 - When you do emit [CHAT]: it MUST contain the actual content — never an empty label (e.g. "[CHAT] Quote:" with nothing after it sends a blank notification). If content generation fails, emit [CHAT] explaining what went wrong, not a blank message. Note: if you write a user-facing message as plain prose WITHOUT the [CHAT] marker, the system will deliver that prose as the message anyway (fallback) — but always prefer the explicit [CHAT] marker so formatting is clean.
 - Secrets are injected as environment variables. Access them via your language's env API (e.g. os.environ.get('KEY') in Python, process.env.KEY in Node). Never hardcode credential values. Never print or echo a secret's value (in [CHAT], state, or logs).
-- Use [STATE] blocks for your structured state (state.json is machine-merged — do not hand-edit it). You MAY write durable markdown notes inside your own directory AND in the user's knowledge base; do not write under .kb/, chats/, or another agent's directory.
+- Use [STATE] blocks for your structured state (state.md's json fence is machine-merged — do not hand-edit that fence yourself). You MAY write durable markdown notes inside your own directory AND in the user's knowledge base; do not write under .kb/, chats/, or another agent's directory.
 - When writing a note or file: use your available file capability (see <coder_capabilities>) directly — do NOT invoke a helper script just to write a file. Read the target note first so you merge/append rather than blindly overwriting the user's existing content.
 - Do not set up or modify cron jobs or external schedulers — this subprocess is invoked by the built-in scheduler.
 - Run your helper scripts under tools/ via the shell to do the repetitive fetching/processing, then YOU make the judgment calls on the results (see <agent_philosophy>) — do not reimplement deterministic logic inline, and do not blindly trust a hardcoded rule where reasoning is needed.

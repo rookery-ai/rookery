@@ -732,3 +732,73 @@ test("flushForHandoff issues exactly one more PUT when content changed while the
   expect(putIndices).toHaveLength(2);
   expect(Math.max(...putIndices)).toBeLessThan(renameIndex);
 });
+
+// web/api_kb.go's apiSaveKBNote refuses a save to an agent's state.md while
+// that agent has a run in flight (409 {"error":{"code":"agent_running",...}})
+// so the manual edit doesn't race the runner's own end-of-run write. This is
+// the generic "a failed autosave keeps the edit dirty" contract exercised
+// against that SPECIFIC envelope: the banner must show the server's message
+// verbatim, and — same as any other save failure — the buffer must stay
+// dirty (not silently marked clean) so the user's edit survives and Ctrl/Cmd+S
+// retries once the run finishes.
+test("a 409 agent_running save shows the server message and leaves the edit dirty", async () => {
+  const AGENT_RUNNING_MESSAGE =
+    "this agent is running right now — its state.md will be overwritten when the run finishes. Wait for it to finish, then save your edit.";
+  let putCount = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "PUT") {
+        putCount += 1;
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ error: { code: "agent_running", message: AGENT_RUNNING_MESSAGE } }),
+            { status: 409, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      if (url.startsWith("/api/v1/kb/note")) {
+        return Promise.resolve(
+          jsonResponse({
+            path: "agents/agent-1/state.md",
+            content: "# State\n\n<!-- placeholder -->\n",
+            html: "",
+            backlinks: [],
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  const states: string[] = [];
+  const qc = new QueryClient();
+  const user = userEvent.setup();
+  render(
+    <MemoryRouter>
+      <QueryClientProvider client={qc}>
+        <NoteEditor path="agents/agent-1/state.md" onStateChange={(s) => states.push(s)} />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+
+  await waitFor(() => expect(screen.getByText(/protect formatting/)).toBeInTheDocument());
+  const textarea = screen.getByRole("textbox", { name: "Raw markdown" }) as HTMLTextAreaElement;
+  await user.click(textarea);
+  await user.type(textarea, "extra");
+
+  // The 1000ms debounce fires the PUT, which 409s.
+  await waitFor(() => expect(putCount).toBe(1), { timeout: 3000 });
+  await waitFor(() => expect(states[states.length - 1]).toBe("error"));
+
+  // The 409's message is surfaced verbatim in the inline banner...
+  await waitFor(() => expect(screen.getByText(AGENT_RUNNING_MESSAGE)).toBeInTheDocument());
+  // ...and the user's edit is still in the textarea, not reverted/cleared.
+  expect(textarea.value).toContain("extra");
+
+  // The buffer is still dirty (not silently marked clean by the rejection):
+  // Ctrl/Cmd+S issues a fresh retry PUT instead of being a silent no-op.
+  fireEvent.keyDown(window, { key: "s", ctrlKey: true });
+  await waitFor(() => expect(putCount).toBe(2));
+});

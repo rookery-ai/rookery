@@ -51,6 +51,17 @@ import { checkFidelity } from "./editor";
 //   - html-inline-tag: literal inline HTML (e.g. `<kbd>`) is escaped to
 //     entities by the same `html: false` Markdown config as the memory
 //     scaffolds' comments.
+//
+// agent-state-md-template (internal/agentdesigner/statefile.go's
+// RenderStateTemplate) is deliberately NOT in EXPECTED_LOSSY — it is pinned
+// CLEAN. It was briefly lossy for two independent reasons (underscore
+// emphasis re-serializing as asterisk; a soft line break inside the intro
+// paragraph collapsing to a plain space), both fixed by authoring the
+// template with asterisk emphasis on a single physical source line. See
+// task-7-report.md's "Fix: template round-trip" section for the empirical
+// before/after. This entry stays in the corpus specifically so a future
+// tiptap-markdown upgrade that reopens either failure mode fails loudly
+// instead of silently pinning every agent's state.md into raw mode again.
 const EXPECTED_LOSSY = new Set([
   "memory-scaffold-user",
   "memory-scaffold-soul",
@@ -183,6 +194,26 @@ const CORPUS: CorpusEntry[] = [
     name: "html-inline-tag",
     md: "Press <kbd>Ctrl</kbd>+<kbd>S</kbd> to save.\n",
     expectLossy: true,
+  },
+  // Pins internal/agentdesigner/statefile.go's RenderStateTemplate("Gmail Digest",
+  // "{\n  \"a\": 1\n}") output. Pinned CLEAN — the template's intro uses asterisk
+  // emphasis (matches what tiptap-markdown always re-emits) on a single physical
+  // source line (no soft line break to collapse), so it round-trips WYSIWYG-safe.
+  // This is the fix for the real finding this entry originally pinned as LOSSY
+  // (underscore-emphasis normalization + soft-line-break collapse) — see git
+  // history / task-7-report.md for that finding and the follow-up fix.
+  //
+  // This literal is NOT hand-maintained truth — it is a drift trap. It must stay
+  // byte-for-byte identical to the live template output, so
+  // internal/agentdesigner/statefile_corpus_test.go reads THIS file at Go test
+  // time, extracts this exact string, and asserts it equals a live call to
+  // RenderStateTemplate. Changing the Go template, or editing this literal so it
+  // no longer matches, fails that Go test — do not hand-edit this string without
+  // also running `go test ./internal/agentdesigner/...`.
+  {
+    name: "agent-state-md-template",
+    md: '# State — Gmail Digest\n\n*Managed by Simple Agents. The block below is this agent\'s memory between runs — edit it if you need to fix something by hand.*\n\n```json\n{\n  "a": 1\n}\n```\n',
+    expectLossy: false,
   },
 ];
 

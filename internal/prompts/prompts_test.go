@@ -319,3 +319,56 @@ func TestMapCoderBackendCLICoders(t *testing.T) {
 		t.Errorf("api should map to BackendToolCalling")
 	}
 }
+
+// TestNoStateJSONMentionsAnywhere guards the state.json → state.md rename (spec
+// §8): agent memory now lives in state.md (a json fence + an agent-writable
+// "## Notes" section), but the [STATE] output marker is UNCHANGED — agents still
+// emit [STATE], the runner still does the write. No built prompt string — design,
+// create, edit, or runtime, on any backend — should still tell a model its memory
+// file is called state.json. The runtime prompt (and the shared platform-context
+// block it's built from) must positively mention state.md so the rename is actually
+// communicated, not just the old name removed.
+func TestNoStateJSONMentionsAnywhere(t *testing.T) {
+	history := []ChatMessage{{Role: "user", Content: "track something and remember it"}}
+
+	prompts := map[string]string{
+		"design_create":      BuildDesignSystemPrompt(DesignSystemParams{AgentName: "x"}),
+		"design_edit":        BuildDesignSystemPrompt(DesignSystemParams{AgentName: "x", IsEdit: true, ExistingAgentMD: "# Suggested schedule: none"}),
+		"create_full":        BuildImplementationPrompt("x", history, ImplementationParams{BackendType: BackendFullCoder}),
+		"create_toolcalling": BuildImplementationPrompt("x", history, ImplementationParams{BackendType: BackendToolCalling}),
+		"edit_full":          BuildEditImplementationPrompt("x", history, ImplementationParams{BackendType: BackendFullCoder}),
+		"edit_toolcalling":   BuildEditImplementationPrompt("x", history, ImplementationParams{BackendType: BackendToolCalling}),
+		"runtime_full": BuildCoderPrompt(CoderPromptParams{
+			AgentMD: "# Suggested schedule: none\ndo a thing", BackendType: BackendFullCoder,
+			VaultRoot: "/tmp/vault", AgentDir: "/tmp/vault/agents/1",
+		}),
+		"runtime_toolcalling": BuildCoderPrompt(CoderPromptParams{
+			AgentMD: "# Suggested schedule: none\ndo a thing", BackendType: BackendToolCalling,
+			VaultRoot: "/tmp/vault", AgentDir: "/tmp/vault/agents/1",
+		}),
+		"philosophy_full":   agentPhilosophyBlock(BackendFullCoder),
+		"platform_context":  platformContextBlock(nil, "/tmp/vault"),
+		"capabilities_tool": coderCapabilitiesBlock(BackendToolCalling),
+		"capabilities_full": coderCapabilitiesBlock(BackendFullCoder),
+	}
+
+	for name, out := range prompts {
+		if strings.Contains(out, "state.json") {
+			t.Errorf("[%s] prompt still mentions state.json (memory now lives in state.md):\n%s", name, out)
+		}
+	}
+
+	for name := range map[string]string{"runtime_full": "", "runtime_toolcalling": ""} {
+		if !strings.Contains(prompts[name], "state.md") {
+			t.Errorf("[%s] runtime prompt must positively mention state.md", name)
+		}
+	}
+	if !strings.Contains(prompts["platform_context"], "state.md") {
+		t.Errorf("platform context block must positively mention state.md")
+	}
+
+	// The [STATE] output marker itself must be untouched by the rename.
+	if !strings.Contains(prompts["runtime_full"], "[STATE]") {
+		t.Errorf("runtime prompt must still document the [STATE] output marker")
+	}
+}

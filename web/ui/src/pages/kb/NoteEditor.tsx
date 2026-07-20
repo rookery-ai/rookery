@@ -479,7 +479,14 @@ export default function NoteEditor({
       {
         onSuccess: () => {
           const parent = path.split("/").slice(0, -1).join("/");
-          setSearchParams(parent ? { path: parent } : {});
+          // `parent` is provably a directory when non-empty (it's
+          // everything left of the last "/") — carry the `dir=1` hint like
+          // every other directory-targeting navigation in this file/its
+          // siblings, so KBPage doesn't attempt to fetch it as a note
+          // (review fix: the default flipped to "attempt to open" and this
+          // site wasn't updated, so deleting almost any nested file landed
+          // on "Couldn't load this file.").
+          setSearchParams(parent ? { path: parent, dir: "1" } : {});
         },
         onError: (err) => {
           // The delete didn't happen — this instance stays mounted at the

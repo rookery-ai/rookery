@@ -3,6 +3,7 @@
 package agentrunner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -149,12 +150,7 @@ func (r *Runner) Run(ctx context.Context, input RunInput) error {
 		return fmt.Errorf("agent not found")
 	}
 
-	manifest, _ := agentdesigner.LoadManifest(r.agentsDir, input.WorkspaceID, input.AgentID)
-	if manifest == nil {
-		manifest = &agentdesigner.AgentManifest{ID: agent.ID, Name: agent.Name}
-	}
-
-	return r.runCoderAgent(ctx, agent, manifest, input)
+	return r.runCoderAgent(ctx, agent, input)
 }
 
 // RunByName looks up an agent by name and runs it.
@@ -186,8 +182,8 @@ func (r *Runner) TestRunFromContent(ctx context.Context, workspaceID, agentMD st
 	if err := os.WriteFile(filepath.Join(tmpDir, "AGENT.md"), []byte(agentMD), 0o640); err != nil {
 		return "", fmt.Errorf("write AGENT.md: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "state.json"), []byte("{}"), 0o640); err != nil {
-		return "", fmt.Errorf("write state.json: %w", err)
+	if err := agentdesigner.WriteState(filepath.Join(tmpDir, "state.md"), "Test Agent", map[string]any{}); err != nil {
+		return "", fmt.Errorf("write state.md: %w", err)
 	}
 	if len(tools) > 0 {
 		// Reproduce the full nested project tree (helper modules, tests, …).
@@ -232,7 +228,7 @@ type coderRunContext struct {
 	usage          coder.Usage // accumulated token usage (API coder); zero for CLI coders
 }
 
-func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *agentdesigner.AgentManifest, input RunInput) error {
+func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunInput) error {
 	agentDir := agentdesigner.AgentDir(r.agentsDir, input.WorkspaceID, input.AgentID)
 
 	// Read AGENT.md instructions (fall back to CLAUDE.md for legacy agents).
@@ -245,10 +241,21 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		}
 	}
 
-	// Read state (default empty object).
-	stateRaw, err := os.ReadFile(filepath.Join(agentDir, "state.json"))
+	// Read state (default empty object). ReadState already degrades a
+	// missing file/damaged fence to an empty map, but guard against a
+	// genuine read failure too — either a real I/O error, or a well-formed
+	// fence whose JSON body doesn't parse. stateReadOK tracks that outcome
+	// so the end-of-turn self-heal write (below) never mistakes a synthetic
+	// {} for "this agent's state really is empty" and overwrites
+	// hand-recoverable bad content with nothing.
+	stateMap, err := agentdesigner.ReadState(agentdesigner.StateFilePath(r.agentsDir, input.WorkspaceID, input.AgentID))
+	stateReadOK := err == nil
 	if err != nil {
-		stateRaw = []byte("{}")
+		stateMap = map[string]interface{}{}
+	}
+	stateJSON, err := json.MarshalIndent(stateMap, "", "  ")
+	if err != nil {
+		stateJSON = []byte("{}")
 	}
 
 	// Load skills context. The available pool is core skills (always-on, embedded)
@@ -305,7 +312,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 
 	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
 		AgentMD:         string(agentMD),
-		StateJSON:       string(stateRaw),
+		StateJSON:       string(stateJSON),
 		UserMemory:      userMemory,
 		AllSkills:       skillRefs,
 		DeclaredSkills:  declaredSkills,
@@ -324,7 +331,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 		return fmt.Errorf("no coder service configured")
 	}
 	// Run inside the agent's own directory (not the shared per-user home) so
-	// tools/*.py and state.json resolve correctly and runs never see other
+	// tools/*.py and state.md resolve correctly and runs never see other
 	// agents' files. Pre-approve the tools agents need so the subprocess never
 	// blocks on interactive permission prompts (--setting-sources "" suppresses
 	// all settings).
@@ -371,7 +378,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	}
 
 	rctx := &coderRunContext{}
-	runErr := r.runCoderTurns(ctx, agent, manifest, input, agentDir, stateRaw, prompt, coderSvc, rctx)
+	runErr := r.runCoderTurns(ctx, agent, input, agentDir, stateMap, stateReadOK, prompt, coderSvc, rctx)
 
 	exitCode := 0
 	if runErr != nil {
@@ -493,10 +500,10 @@ func (r *Runner) recordInbox(input RunInput, agent *db.Agent, runID, body, statu
 func (r *Runner) runCoderTurns(
 	ctx context.Context,
 	agent *db.Agent,
-	manifest *agentdesigner.AgentManifest,
 	input RunInput,
 	agentDir string,
-	stateRaw []byte,
+	currentState map[string]interface{},
+	stateReadOK bool,
 	initialPrompt string,
 	coderSvc *coder.Coder,
 	rctx *coderRunContext,
@@ -505,9 +512,6 @@ func (r *Runner) runCoderTurns(
 		return fmt.Errorf("no coder service configured for md/hybrid agents")
 	}
 
-	// Load current state so we can merge updates.
-	var currentState map[string]interface{}
-	_ = json.Unmarshal(stateRaw, &currentState)
 	if currentState == nil {
 		currentState = make(map[string]interface{})
 	}
@@ -541,14 +545,14 @@ func (r *Runner) runCoderTurns(
 			input.OnProgress(strings.Join(parsed.chatLines, "\n"))
 		}
 
-		// Merge state updates.
-		if len(parsed.stateUpdates) > 0 {
-			for _, update := range parsed.stateUpdates {
-				mergeState(currentState, update)
-			}
-			if err := saveState(agentDir, currentState); err != nil {
-				rctx.warnings = append(rctx.warnings, "state save failed: "+err.Error())
-			}
+		// Merge and persist state — unconditionally, not just when this turn
+		// emitted [STATE]. See applyAndSaveState for why: a turn's own file
+		// tools can mangle or drop state.md's json fence (e.g. while making a
+		// legitimate "## Notes" edit) without emitting [STATE] that same turn,
+		// and skipping the save on a no-update turn would leave that damage
+		// standing for the next run's ReadState to silently see as {}.
+		if err := applyAndSaveState(agentDir, agent.Name, currentState, parsed.stateUpdates, stateReadOK); err != nil {
+			rctx.warnings = append(rctx.warnings, "state save failed: "+err.Error())
 		}
 
 		// Accumulate raw output; the run note (markdown, in the vault) is written
@@ -704,8 +708,17 @@ func parseCoderOutput(text string) parsedOutput {
 	}
 
 	parseStateJSON := func(raw string) {
+		// UseNumber: this is the decode site a live [STATE] update from the
+		// coder actually goes through. A coder emitting
+		// [STATE]{"last_id": 9007199254740993}[/STATE] (a 64-bit Discord
+		// snowflake, or any ID above 2^53) would otherwise be rounded here,
+		// before mergeState/saveState ever run — fixing only ReadState and the
+		// migration would leave this, the single most common live-run case,
+		// still lossy.
+		dec := json.NewDecoder(bytes.NewReader([]byte(raw)))
+		dec.UseNumber()
 		var update map[string]interface{}
-		if err := json.Unmarshal([]byte(raw), &update); err != nil {
+		if err := dec.Decode(&update); err != nil {
 			out.warnings = append(out.warnings,
 				fmt.Sprintf("state parse error: %s (json: %.200s)", err, raw))
 		} else {
@@ -900,8 +913,9 @@ func mergeState(existing map[string]interface{}, update map[string]interface{}) 
 	}
 }
 
-// saveState atomically writes state.json.
-func saveState(agentDir string, state map[string]interface{}) error {
+// saveState writes state.md, replacing only the machine-state json fence and
+// preserving any prose an agent (or the user) has written around it.
+func saveState(agentDir, agentName string, state map[string]interface{}) error {
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
@@ -909,11 +923,43 @@ func saveState(agentDir string, state map[string]interface{}) error {
 	if len(data) > maxStateSize {
 		return fmt.Errorf("state too large (%d bytes > %d limit)", len(data), maxStateSize)
 	}
-	tmpPath := filepath.Join(agentDir, "state.json.tmp")
-	if err := os.WriteFile(tmpPath, data, 0o640); err != nil {
-		return err
+	return agentdesigner.WriteState(filepath.Join(agentDir, "state.md"), agentName, state)
+}
+
+// applyAndSaveState merges this turn's [STATE] updates (if any) into
+// currentState and persists it to state.md.
+//
+// When there ARE updates, the write always happens — the long-standing
+// contract that an explicit [STATE] emission always wins is unchanged, even
+// over an unreadable prior file (currentState degrades to {} and this turn's
+// update becomes the new baseline).
+//
+// When there are NO updates this turn, the write STILL happens — unless the
+// run's initial ReadState failed (stateReadOK == false). This is the
+// self-heal fix for the state-loss vector: an agent's own file tools (the API
+// engine's write_file is a full-file overwrite) can mangle or drop state.md's
+// json fence — e.g. while making a legitimate edit to "## Notes" — without
+// ever emitting [STATE] that same turn. Because currentState was read from
+// disk before this run's coder turns could touch the file, writing it back
+// here repairs any such damage; WriteState only ever splices the fence, so a
+// legitimate prose edit made this turn survives untouched.
+//
+// The stateReadOK guard exists because ReadState can itself fail — either a
+// genuine I/O error, or a well-formed fence whose JSON body doesn't parse. In
+// both cases currentState is a synthetic {} standing in for content we could
+// never make sense of. Writing that {} back unconditionally on a no-update
+// turn would silently replace hand-recoverable bad state with nothing — the
+// exact failure mode this fix exists to prevent, just moved one level up. So
+// a no-update turn is a strict no-op when the initial read failed, leaving
+// the malformed file for a human (or a later explicit [STATE]) to fix.
+func applyAndSaveState(agentDir, agentName string, currentState map[string]interface{}, updates []map[string]interface{}, stateReadOK bool) error {
+	for _, update := range updates {
+		mergeState(currentState, update)
 	}
-	return os.Rename(tmpPath, filepath.Join(agentDir, "state.json"))
+	if len(updates) == 0 && !stateReadOK {
+		return nil
+	}
+	return saveState(agentDir, agentName, currentState)
 }
 
 // ─── Skills loading ───────────────────────────────────────────────────────────
