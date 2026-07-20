@@ -6,6 +6,7 @@ import { GlobalChatButton } from "@/components/chat/GlobalChatButton";
 import { CommandPalette } from "@/components/search/CommandPalette";
 import IconRail from "./IconRail";
 import { PaneResizeHandle, usePaneWidth } from "./usePaneWidth";
+import { ToastProvider, ToastHost } from "./Toast";
 
 type SlideOverState = { node: React.ReactNode; title?: string } | null;
 
@@ -55,37 +56,40 @@ export function AppShell() {
 
   return (
     <ShellCtx.Provider value={value}>
-      <TooltipProvider>
-        <div className="h-screen flex flex-col md:flex-row bg-background">
-          <IconRail />
-          {contextPane && (
-            <aside
-              className="hidden md:flex relative shrink-0 flex-col border-r border-border bg-chrome/60 overflow-y-auto"
-              style={{ width }}
-            >
-              {contextPane}
-              <PaneResizeHandle width={width} setWidth={setWidth} reset={reset} />
-            </aside>
-          )}
-          <main className="flex-1 min-w-0 overflow-y-auto pb-16 md:pb-0">
-            <Outlet />
-          </main>
-          <GlobalChatButton />
-          <CommandPalette />
-          <Sheet open={panel !== null} onOpenChange={(o) => !o && setPanel(null)}>
-            {/* gap-0 + no padding on the content well: panel content owns its
-                own inner padding (see ChatWindow's "container-agnostic"
-                note) — a shell-level p-4/gap-4 would double up chrome for
-                any full-height embed like the global chat panel. */}
-            <SheetContent side="right" className="w-full sm:max-w-md p-0 gap-0 flex flex-col">
-              <SheetHeader className="border-b border-border px-4 py-3">
-                <SheetTitle className="text-sm font-bold">{panel?.title ?? ""}</SheetTitle>
-              </SheetHeader>
-              <div className="flex-1 min-h-0 overflow-y-auto">{panel?.node}</div>
-            </SheetContent>
-          </Sheet>
-        </div>
-      </TooltipProvider>
+      <ToastProvider>
+        <TooltipProvider>
+          <div className="h-screen flex flex-col md:flex-row bg-background">
+            <IconRail />
+            {contextPane && (
+              <aside
+                className="hidden md:flex relative shrink-0 flex-col border-r border-border bg-chrome/60 overflow-y-auto"
+                style={{ width }}
+              >
+                {contextPane}
+                <PaneResizeHandle width={width} setWidth={setWidth} reset={reset} />
+              </aside>
+            )}
+            <main className="flex-1 min-w-0 overflow-y-auto pb-16 md:pb-0">
+              <Outlet />
+            </main>
+            <GlobalChatButton />
+            <CommandPalette />
+            <ToastHost />
+            <Sheet open={panel !== null} onOpenChange={(o) => !o && setPanel(null)}>
+              {/* gap-0 + no padding on the content well: panel content owns its
+                  own inner padding (see ChatWindow's "container-agnostic"
+                  note) — a shell-level p-4/gap-4 would double up chrome for
+                  any full-height embed like the global chat panel. */}
+              <SheetContent side="right" className="w-full sm:max-w-md p-0 gap-0 flex flex-col">
+                <SheetHeader className="border-b border-border px-4 py-3">
+                  <SheetTitle className="text-sm font-bold">{panel?.title ?? ""}</SheetTitle>
+                </SheetHeader>
+                <div className="flex-1 min-h-0 overflow-y-auto">{panel?.node}</div>
+              </SheetContent>
+            </Sheet>
+          </div>
+        </TooltipProvider>
+      </ToastProvider>
     </ShellCtx.Provider>
   );
 }
