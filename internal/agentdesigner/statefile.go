@@ -1,6 +1,7 @@
 package agentdesigner
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -88,8 +89,15 @@ func ReadState(path string) (map[string]any, error) {
 	if len(body) == 0 {
 		return map[string]any{}, nil
 	}
+	// UseNumber preserves integer fidelity: plain json.Unmarshal decodes every
+	// JSON number as float64, silently rounding any integer above 2^53 (e.g. a
+	// 64-bit Discord snowflake ID — the single most common thing an agent
+	// stashes in state). json.Number round-trips through MarshalIndent as the
+	// original literal digits, so state.md ends up byte-identical either way.
+	dec := json.NewDecoder(bytes.NewReader([]byte(body)))
+	dec.UseNumber()
 	var st map[string]any
-	if err := json.Unmarshal([]byte(body), &st); err != nil {
+	if err := dec.Decode(&st); err != nil {
 		return nil, fmt.Errorf("state.md json block: %w", err)
 	}
 	if st == nil {

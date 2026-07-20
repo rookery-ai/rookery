@@ -1,8 +1,10 @@
 package agentdesigner
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -47,11 +49,55 @@ func TestMigrateConvertsStateAndDeletesManifest(t *testing.T) {
 		t.Fatal("agent.json should be gone")
 	}
 	got, err := ReadState(filepath.Join(agentDir, "state.md"))
-	if err != nil || got["cursor"] != "xyz" || got["n"] != float64(3) {
+	if err != nil || got["cursor"] != "xyz" || got["n"] != json.Number("3") {
 		t.Fatalf("state not migrated: %#v %v", got, err)
 	}
 	if len(db.seeded["a1"]) != 1 || db.seeded["a1"][0] != "pdf" {
 		t.Fatalf("skills not reconciled before deletion: %#v", db.seeded)
+	}
+}
+
+// TestMigrateConvertsLargeIntegerWithoutLoss is the migration-level regression
+// test for the reviewer-reported bug: a legacy state.json holding a value
+// above 2^53 (a Discord snowflake ID, the most common thing an agent stores)
+// must convert to state.md with the exact original digits. Before the fix,
+// migrateAgentState's own json.Unmarshal into map[string]any already rounded
+// the value on the FIRST decode — so the later reflect.DeepEqual verify step
+// compared two equally-rounded values, reported success, and deleted
+// state.json having silently lost precision.
+func TestMigrateConvertsLargeIntegerWithoutLoss(t *testing.T) {
+	base := t.TempDir()
+	agentDir := filepath.Join(base, "ws1", "agents", "a1")
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const bigID = "9007199254740993" // 2^53 + 1
+	os.WriteFile(filepath.Join(agentDir, "state.json"), []byte(`{"last_id":`+bigID+`}`), 0o640)
+
+	db := &fakeSkillDB{}
+	n, err := MigrateAgentFilesToMarkdown(db, base, nil)
+	if err != nil || n != 1 {
+		t.Fatalf("migrate: n=%d err=%v", n, err)
+	}
+	if _, err := os.Stat(filepath.Join(agentDir, "state.json")); !os.IsNotExist(err) {
+		t.Fatal("state.json should be gone after a verified, lossless migration")
+	}
+
+	got, err := ReadState(filepath.Join(agentDir, "state.md"))
+	if err != nil {
+		t.Fatalf("read migrated state: %v", err)
+	}
+	num, ok := got["last_id"].(json.Number)
+	if !ok {
+		t.Fatalf("last_id decoded as %T, not json.Number: %#v", got["last_id"], got["last_id"])
+	}
+	if num.String() != bigID {
+		t.Fatalf("migration lost precision: got %s, want %s", num.String(), bigID)
+	}
+
+	raw, _ := os.ReadFile(filepath.Join(agentDir, "state.md"))
+	if !strings.Contains(string(raw), bigID) {
+		t.Fatalf("state.md does not hold the exact literal digits %s:\n%s", bigID, raw)
 	}
 }
 
@@ -86,7 +132,7 @@ func TestMigrateKeepsBothFilesWhenStateMdAlreadyExists(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := ReadState(filepath.Join(agentDir, "state.md"))
-	if got["new"] != float64(2) {
+	if got["new"] != json.Number("2") {
 		t.Fatalf("existing state.md was clobbered: %#v", got)
 	}
 	// state.json is left in place too: the rule only ever converts json→md when
@@ -110,7 +156,7 @@ func TestMigrateHandlesDraftDirs(t *testing.T) {
 		t.Fatalf("migrate draft dir: n=%d err=%v", n, err)
 	}
 	got, err := ReadState(filepath.Join(draftDir, "state.md"))
-	if err != nil || got["step"] != float64(1) {
+	if err != nil || got["step"] != json.Number("1") {
 		t.Fatalf("draft dir state not migrated: %#v %v", got, err)
 	}
 	if _, err := os.Stat(filepath.Join(draftDir, "state.json")); !os.IsNotExist(err) {

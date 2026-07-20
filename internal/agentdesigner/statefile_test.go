@@ -1,6 +1,7 @@
 package agentdesigner
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,12 +17,73 @@ func TestStateRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if got["last_seen_id"] != "abc" || got["count"] != float64(4) {
+	if got["last_seen_id"] != "abc" || got["count"] != json.Number("4") {
 		t.Fatalf("round-trip mismatch: %#v", got)
 	}
 	raw, _ := os.ReadFile(p)
 	if !strings.Contains(string(raw), "# State — Gmail Digest") {
 		t.Fatalf("template heading missing:\n%s", raw)
+	}
+}
+
+// TestStateRoundTripLargeIntegerPreservesFidelity is the direct regression
+// test for the reviewer-reported bug: a plain json.Unmarshal into
+// map[string]any decodes every JSON number as float64, and float64 cannot
+// represent integers above 2^53 exactly — 9007199254740993 (2^53+1) silently
+// rounds to 9007199254740992. Discord snowflake IDs are 64-bit and routinely
+// exceed 2^53, and "remember the last ID I saw" is the most common thing an
+// agent stores in state, so this is not a theoretical edge case. ReadState
+// must hand back the exact literal digits, not a rounded float.
+func TestStateRoundTripLargeIntegerPreservesFidelity(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "state.md")
+	const bigID = "9007199254740993" // 2^53 + 1 — the smallest int float64 cannot represent exactly
+	if err := WriteState(p, "X", map[string]any{"last_id": json.Number(bigID)}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := ReadState(p)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	n, ok := got["last_id"].(json.Number)
+	if !ok {
+		t.Fatalf("last_id decoded as %T, not json.Number: %#v", got["last_id"], got["last_id"])
+	}
+	if n.String() != bigID {
+		t.Fatalf("large integer lost precision: got %s, want %s", n.String(), bigID)
+	}
+	// Also assert against the literal bytes on disk, independent of ReadState's
+	// own decode — this is what a human (or the KB editor) would see.
+	raw, _ := os.ReadFile(p)
+	if !strings.Contains(string(raw), bigID) {
+		t.Fatalf("state.md does not contain the exact literal digits %s:\n%s", bigID, raw)
+	}
+}
+
+// TestStateRoundTripFractionalFloatSurvives guards the other direction: a
+// genuinely fractional value must keep round-tripping correctly after the
+// UseNumber fix — it must not regress to strings or integers.
+func TestStateRoundTripFractionalFloatSurvives(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "state.md")
+	if err := WriteState(p, "X", map[string]any{"ratio": 1.5}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := ReadState(p)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	n, ok := got["ratio"].(json.Number)
+	if !ok {
+		t.Fatalf("ratio decoded as %T, not json.Number: %#v", got["ratio"], got["ratio"])
+	}
+	f, err := n.Float64()
+	if err != nil {
+		t.Fatalf("ratio is not a valid float: %v", err)
+	}
+	if f != 1.5 {
+		t.Fatalf("fractional value did not round-trip: got %v, want 1.5", f)
+	}
+	if n.String() != "1.5" {
+		t.Fatalf("fractional literal mangled: got %q, want %q", n.String(), "1.5")
 	}
 }
 
@@ -42,7 +104,7 @@ func TestWriteStatePreservesProseOutsideFence(t *testing.T) {
 		t.Fatalf("intro lost:\n%s", raw)
 	}
 	got, _ := ReadState(p)
-	if got["a"] != float64(2) {
+	if got["a"] != json.Number("2") {
 		t.Fatalf("state not updated: %#v", got)
 	}
 }
@@ -286,7 +348,7 @@ func TestWriteStateLeavesNotesFenceByteIdentical(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if got["a"] != float64(1) {
+	if got["a"] != json.Number("1") {
 		t.Fatalf("expected first fence's object: %#v", got)
 	}
 	if err := WriteState(p, "X", map[string]any{"a": float64(9)}); err != nil {

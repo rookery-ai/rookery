@@ -1,6 +1,7 @@
 package agentdesigner
 
 import (
+	"bytes"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -108,8 +109,17 @@ func migrateAgentState(agentDir, agentID string) bool {
 		return false // no state.json (or unreadable) — nothing to convert
 	}
 
+	// UseNumber here is what the verify-then-delete gate below depends on: the
+	// legacy state.json is the ONE source of truth for the original values, so
+	// if this first decode already rounds a large integer to float64, the
+	// later reflect.DeepEqual(original, readBack) compares two equally-rounded
+	// values and passes — the migration would report success and delete
+	// state.json having already lost precision before the "verify" step ever
+	// ran. Decoding both sides with UseNumber keeps the comparison honest.
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
 	var original map[string]any
-	if err := json.Unmarshal(raw, &original); err != nil {
+	if err := dec.Decode(&original); err != nil {
 		slog.Error("agent state migration: state.json is not valid JSON; leaving both files",
 			"agent", agentID, "path", statePath, "err", err)
 		return false

@@ -1,6 +1,7 @@
 package agentrunner
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,7 +64,7 @@ func TestSaveStateFirstRunCreatesWellFormedDocument(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadState: %v", err)
 	}
-	if got["cursor"] != "abc" || got["count"] != float64(3) {
+	if got["cursor"] != "abc" || got["count"] != json.Number("3") {
 		t.Fatalf("state did not read back: %#v", got)
 	}
 }
@@ -149,6 +150,78 @@ func TestMergeStateNullDeletesKey(t *testing.T) {
 	}
 	if got["cursor"] != "def" {
 		t.Fatalf("cursor not persisted: %#v", got)
+	}
+}
+
+// TestStateMergePathPreservesLargeIntAndNullDelete drives the FULL live-run
+// path a real [STATE] update actually takes: parseCoderOutput (the decode
+// site closest to the coder's raw text) -> mergeState -> saveState ->
+// ReadState. This is deliberately NOT the same as
+// TestMergeStateNullDeletesKey, which hands mergeState a pre-built
+// map[string]interface{} literal (still float64 in Go source) and so can
+// never catch a decode-site regression. A coder emitting
+// [STATE]{"last_id": 9007199254740993}[/STATE] — a 64-bit Discord snowflake,
+// the single most common thing an agent stashes in state — must survive
+// intact through every hop, and the merge's null-delete semantics (a key
+// removed by a null value) must be unaffected by the json.Number change,
+// since only numbers change decoded type; null still decodes to a plain nil
+// interface.
+func TestStateMergePathPreservesLargeIntAndNullDelete(t *testing.T) {
+	dir := t.TempDir()
+	const bigID = "9007199254740993" // 2^53 + 1
+
+	// Seed existing state (as if from a prior run) with the large ID already
+	// present, plus a key this turn's update will delete.
+	existing := map[string]interface{}{}
+	if err := saveState(dir, "My Agent", map[string]interface{}{
+		"last_id": json.Number(bigID),
+		"stale":   "drop-me",
+	}); err != nil {
+		t.Fatalf("seed saveState: %v", err)
+	}
+	seeded, err := agentdesigner.ReadState(filepath.Join(dir, "state.md"))
+	if err != nil {
+		t.Fatalf("seed ReadState: %v", err)
+	}
+	for k, v := range seeded {
+		existing[k] = v
+	}
+
+	// Coder emits a [STATE] update: re-affirms the same large ID (as a live
+	// coder would when re-emitting unchanged state) and nulls out "stale".
+	out := parseCoderOutput(strings.Join([]string{
+		"[CHAT] processed",
+		"[STATE]",
+		`{"last_id": ` + bigID + `, "stale": null}`,
+		"[/STATE]",
+	}, "\n"))
+	if len(out.stateUpdates) != 1 {
+		t.Fatalf("expected exactly one state update: %+v", out.stateUpdates)
+	}
+
+	for _, update := range out.stateUpdates {
+		mergeState(existing, update)
+	}
+	if _, ok := existing["stale"]; ok {
+		t.Fatalf("null-value delete did not remove stale key: %#v", existing)
+	}
+
+	if err := saveState(dir, "My Agent", existing); err != nil {
+		t.Fatalf("saveState: %v", err)
+	}
+	got, err := agentdesigner.ReadState(filepath.Join(dir, "state.md"))
+	if err != nil {
+		t.Fatalf("final ReadState: %v", err)
+	}
+	if _, ok := got["stale"]; ok {
+		t.Fatalf("deleted key resurfaced after full merge/save/read round-trip: %#v", got)
+	}
+	num, ok := got["last_id"].(json.Number)
+	if !ok {
+		t.Fatalf("last_id decoded as %T, not json.Number: %#v", got["last_id"], got["last_id"])
+	}
+	if num.String() != bigID {
+		t.Fatalf("large integer lost precision through the merge path: got %s, want %s", num.String(), bigID)
 	}
 }
 
@@ -287,7 +360,7 @@ func TestParseCoderOutputStateEndsChatBlock(t *testing.T) {
 	if len(out.chatLines) != 1 || out.chatLines[0] != "done" {
 		t.Fatalf("chat not flushed at [STATE]: %q", out.chatLines)
 	}
-	if len(out.stateUpdates) != 1 || out.stateUpdates[0]["k"] != float64(1) {
+	if len(out.stateUpdates) != 1 || out.stateUpdates[0]["k"] != json.Number("1") {
 		t.Fatalf("state not parsed: %+v", out.stateUpdates)
 	}
 }

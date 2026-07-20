@@ -3,6 +3,7 @@
 package agentrunner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -707,8 +708,17 @@ func parseCoderOutput(text string) parsedOutput {
 	}
 
 	parseStateJSON := func(raw string) {
+		// UseNumber: this is the decode site a live [STATE] update from the
+		// coder actually goes through. A coder emitting
+		// [STATE]{"last_id": 9007199254740993}[/STATE] (a 64-bit Discord
+		// snowflake, or any ID above 2^53) would otherwise be rounded here,
+		// before mergeState/saveState ever run — fixing only ReadState and the
+		// migration would leave this, the single most common live-run case,
+		// still lossy.
+		dec := json.NewDecoder(bytes.NewReader([]byte(raw)))
+		dec.UseNumber()
 		var update map[string]interface{}
-		if err := json.Unmarshal([]byte(raw), &update); err != nil {
+		if err := dec.Decode(&update); err != nil {
 			out.warnings = append(out.warnings,
 				fmt.Sprintf("state parse error: %s (json: %.200s)", err, raw))
 		} else {
