@@ -2,10 +2,9 @@ import type { ReactNode } from "react";
 
 // Shared primitives for the middle "context pane" column every page renders
 // via <ContextPane>. Fixing the header/section treatment in one place stops
-// per-page drift in padding, heading case, and spacing (spec §7). Values here
-// are exactly what HomePage used before this refactor — the canonical
-// reference — so adopting them there is a no-op; other pages may visibly
-// change (that's the point, and it's reported per-page).
+// per-page drift in padding, heading case, and spacing (spec §7). Values are
+// HomePage's, which was the canonical reference — with one deliberate
+// exception, the header's bottom border (see below).
 
 interface ContextPaneHeaderProps {
   title: string;
@@ -14,9 +13,17 @@ interface ContextPaneHeaderProps {
 
 // The pane's title row: a bold h2 plus an optional right-aligned action
 // (e.g. a "new note" icon button).
+//
+// The bottom border is canonical even though HomePage had none. In all five
+// panes the header is a flex sibling sitting above an independent
+// overflow-y-auto region, and that region's top padding only spaces things
+// out at scrollTop 0 — it scrolls away with the content. Mid-scroll, rows
+// abut the header in every pane, so the boundary needs to be drawn. KB and
+// Chats (the densest, most-scrolled panes) already carried it; Home was the
+// drift, not them.
 export function ContextPaneHeader({ title, action }: ContextPaneHeaderProps) {
   return (
-    <div className="flex items-center justify-between px-4 pt-3 pb-1">
+    <div className="flex items-center justify-between border-b border-border px-4 pt-3 pb-1">
       <h2 className="text-sm font-bold">{title}</h2>
       {action}
     </div>
