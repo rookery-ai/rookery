@@ -177,7 +177,7 @@ func serveCmd() *cli.Command {
 			}
 			if n, err := agentdesigner.MigrateAgentFilesToMarkdown(database, vaultsDir, coreSkillNames); err != nil {
 				slog.Warn("migrate agent files to markdown", "err", err)
-			} else {
+			} else if n > 0 {
 				slog.Info("agent files migrated", "agents", n)
 			}
 

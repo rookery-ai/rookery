@@ -106,7 +106,13 @@ func migrateAgentState(agentDir, agentID string) bool {
 	}
 	raw, err := os.ReadFile(statePath)
 	if err != nil {
-		return false // no state.json (or unreadable) — nothing to convert
+		if !os.IsNotExist(err) {
+			// Unreadable is not the same as absent: a permissions problem would
+			// otherwise block this agent's migration silently and forever.
+			slog.Error("agent state migration: state.json unreadable; leaving it in place",
+				"agent", agentID, "path", statePath, "err", err)
+		}
+		return false
 	}
 
 	// UseNumber here is what the verify-then-delete gate below depends on: the
@@ -183,7 +189,11 @@ func migrateAgentManifest(database skillDB, agentDir, agentID string, coreSet ma
 	manifestPath := filepath.Join(agentDir, "agent.json")
 	data, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return false // no agent.json — nothing to reconcile/delete
+		if !os.IsNotExist(err) {
+			slog.Error("agent manifest migration: agent.json unreadable; leaving it in place",
+				"agent", agentID, "path", manifestPath, "err", err)
+		}
+		return false // absent — nothing to reconcile/delete
 	}
 
 	var m legacyManifest
