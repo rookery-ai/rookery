@@ -51,6 +51,31 @@ import { checkFidelity } from "./editor";
 //   - html-inline-tag: literal inline HTML (e.g. `<kbd>`) is escaped to
 //     entities by the same `html: false` Markdown config as the memory
 //     scaffolds' comments.
+//   - agent-state-md-template: internal/agentdesigner/statefile.go's
+//     RenderStateTemplate — a REAL FINDING, not a design choice. Two
+//     independent, unrelated causes, each sufficient on its own:
+//     (a) the intro's `_..._` underscore emphasis is re-serialized as
+//     `*...*` — same delimiter-substitution class as code-fence-tilde
+//     above, just for emphasis instead of code fences; (b) the intro
+//     sentence is written across two source lines joined by a single `\n`
+//     (a soft line break within one paragraph, not a hard break — no
+//     trailing spaces) and tiptap-markdown collapses that to one line
+//     joined by a plain space — same "same render, different bytes" class
+//     as hard-line-break above, just for soft breaks instead of hard ones.
+//     Both are verified independently (isolated single-cause repros) and
+//     together on the exact template bytes. This means the design intent
+//     at docs/superpowers/specs/2026-07-17-agent-files-as-documents-design.md
+//     §4.1 ("Italic prose round-trips clean") is NOT actually true for the
+//     template as authored: every fresh agent's state.md opens in RAW mode,
+//     not WYSIWYG. A trivial fix exists (asterisk delimiter + keep the
+//     intro on one line — verified clean in isolation) but is deliberately
+//     NOT applied here: it would need pairing with a migration pass for
+//     every already-written state.md (the Task 3 migration already wrote
+//     the current, lossy bytes for existing agents), which is a follow-up
+//     decision, not a Task 7 edit. Pinning this lossy is the honest
+//     baseline — it still catches a FUTURE regression (e.g. the editor
+//     upgrade making things worse, or a template edit that changes which
+//     bytes are lossy) even though it isn't clean today.
 const EXPECTED_LOSSY = new Set([
   "memory-scaffold-user",
   "memory-scaffold-soul",
@@ -63,6 +88,7 @@ const EXPECTED_LOSSY = new Set([
   "hard-line-break",
   "setext-heading",
   "html-inline-tag",
+  "agent-state-md-template",
 ]);
 
 interface CorpusEntry {
@@ -182,6 +208,26 @@ const CORPUS: CorpusEntry[] = [
   {
     name: "html-inline-tag",
     md: "Press <kbd>Ctrl</kbd>+<kbd>S</kbd> to save.\n",
+    expectLossy: true,
+  },
+  // Pins internal/agentdesigner/statefile.go's RenderStateTemplate("Gmail Digest",
+  // "{\n  \"a\": 1\n}") output. Pinned LOSSY — see the "agent-state-md-template" entry
+  // in the EXPECTED_LOSSY doc block above for why (underscore-emphasis
+  // normalization + soft-line-break collapse in the intro paragraph; the json
+  // fence itself round-trips fine). Still a real regression guard: it fails
+  // loudly if a future editor upgrade changes WHICH bytes are lossy, or makes
+  // things worse, even though it does not start from clean today.
+  //
+  // This literal is NOT hand-maintained truth — it is a drift trap. It must stay
+  // byte-for-byte identical to the live template output, so
+  // internal/agentdesigner/statefile_corpus_test.go reads THIS file at Go test
+  // time, extracts this exact string, and asserts it equals a live call to
+  // RenderStateTemplate. Changing the Go template, or editing this literal so it
+  // no longer matches, fails that Go test — do not hand-edit this string without
+  // also running `go test ./internal/agentdesigner/...`.
+  {
+    name: "agent-state-md-template",
+    md: '# State — Gmail Digest\n\n_Managed by Simple Agents. The block below is this agent\'s memory between runs —\nedit it if you need to fix something by hand._\n\n```json\n{\n  "a": 1\n}\n```\n',
     expectLossy: true,
   },
 ];
