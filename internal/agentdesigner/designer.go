@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/ilijad1/simple-agents/internal/db"
 )
@@ -21,12 +20,13 @@ func NewDesigner(database *db.DB, agentsDir string) *AgentDesigner {
 }
 
 // SaveAgent writes a brand-new agent's files to disk and inserts a DB row.
-// agentMD is the full AGENT.md content.
+// agentMD is the full AGENT.md content — including any "# Required secrets:"
+// block, which callers read on demand via ParseRequiredSecrets rather than
+// having this function cache it anywhere.
 // tools is a map of filename→content for Python helper scripts (written to tools/).
 // skills is a slice of skill names declared by the agent.
-// requiredSecrets is a slice of secret names required by the agent.
-func (d *AgentDesigner) SaveAgent(workspaceID, agentID, name, description string, agentMD string, tools map[string]string, skills []string, requiredSecrets []string) error {
-	if err := d.writeAgentContent(workspaceID, agentID, name, agentMD, tools, skills, requiredSecrets); err != nil {
+func (d *AgentDesigner) SaveAgent(workspaceID, agentID, name, description string, agentMD string, tools map[string]string, skills []string) error {
+	if err := d.writeAgentContent(workspaceID, agentID, name, agentMD, tools, skills); err != nil {
 		return err
 	}
 
@@ -51,10 +51,10 @@ func (d *AgentDesigner) SaveAgent(workspaceID, agentID, name, description string
 }
 
 // UpdateAgent overwrites an existing agent's files in place and updates its DB row.
-// Identity (ID, name) is immutable here — only content (AGENT.md, tools, manifest
-// metadata, description) changes. Used by the edit flow's finalize step.
-func (d *AgentDesigner) UpdateAgent(workspaceID, agentID, name, description string, agentMD string, tools map[string]string, skills []string, requiredSecrets []string) error {
-	if err := d.writeAgentContent(workspaceID, agentID, name, agentMD, tools, skills, requiredSecrets); err != nil {
+// Identity (ID, name) is immutable here — only content (AGENT.md, tools,
+// description) changes. Used by the edit flow's finalize step.
+func (d *AgentDesigner) UpdateAgent(workspaceID, agentID, name, description string, agentMD string, tools map[string]string, skills []string) error {
+	if err := d.writeAgentContent(workspaceID, agentID, name, agentMD, tools, skills); err != nil {
 		return err
 	}
 
@@ -70,10 +70,10 @@ func (d *AgentDesigner) UpdateAgent(workspaceID, agentID, name, description stri
 	return nil
 }
 
-// writeAgentContent is shared by SaveAgent and UpdateAgent: guardrails, file writes,
-// and manifest. It never touches the agents DB row — callers do that themselves
+// writeAgentContent is shared by SaveAgent and UpdateAgent: guardrails and file
+// writes. It never touches the agents DB row — callers do that themselves
 // (INSERT vs UPDATE) since that's the only part that differs between create and edit.
-func (d *AgentDesigner) writeAgentContent(workspaceID, agentID, name string, agentMD string, tools map[string]string, skills []string, requiredSecrets []string) error {
+func (d *AgentDesigner) writeAgentContent(workspaceID, agentID, name string, agentMD string, tools map[string]string, skills []string) error {
 	if err := CheckEthics(agentMD, ""); err != nil {
 		return fmt.Errorf("guardrails: %w", err)
 	}
@@ -112,31 +112,11 @@ func (d *AgentDesigner) writeAgentContent(workspaceID, agentID, name string, age
 		return err
 	}
 
-	// Write state.json only if it doesn't exist yet — never clobber a running agent's
-	// persisted state, whether this is a fresh create or an edit of a live agent.
-	statePath := filepath.Join(dir, "state.json")
-	if _, err := os.Stat(statePath); os.IsNotExist(err) {
-		if err := os.WriteFile(statePath, []byte("{}"), 0o640); err != nil {
-			return fmt.Errorf("write state.json: %w", err)
-		}
-	}
-
-	// Preserve the original creation timestamp across edits.
-	createdAt := time.Now().UTC()
-	if existing, err := LoadManifest(d.agentsDir, workspaceID, agentID); err == nil && existing != nil && !existing.CreatedAt.IsZero() {
-		createdAt = existing.CreatedAt
-	}
-
-	manifest := &AgentManifest{
-		ID:              agentID,
-		Name:            name,
-		RequiredSecrets: requiredSecrets,
-		Skills:          nil, // skills live in the agent_skills DB table (source of truth); AGENT.md is for the LLM.
-		CreatedAt:       createdAt,
-	}
-	if err := SaveManifest(d.agentsDir, workspaceID, agentID, manifest); err != nil {
-		return fmt.Errorf("write manifest: %w", err)
-	}
+	// No state file is written here: a missing state.md degrades to empty memory
+	// (ReadState), and this function must never clobber a running agent's
+	// persisted state on an edit — the safest seed is no seed at all. Required
+	// secrets are likewise not cached anywhere — they live only in AGENT.md's
+	// "# Required secrets:" block, re-parsed on demand via ParseRequiredSecrets.
 
 	return nil
 }

@@ -9,8 +9,9 @@ import (
 )
 
 // fakeSkillDB is a minimal in-memory stand-in for the skillDB interface, used
-// by both the reconciler-absorption tests here and (previously) the
-// reconciler's own tests.
+// by the tests in this file that exercise the skills-reconciliation step
+// MigrateAgentFilesToMarkdown absorbed from the now-deleted
+// ReconcileSkillAttachmentsToDB (which never had its own dedicated test fixture).
 type fakeSkillDB struct {
 	seeded map[string][]string
 }
@@ -36,7 +37,7 @@ func TestMigrateConvertsStateAndDeletesManifest(t *testing.T) {
 	os.WriteFile(filepath.Join(agentDir, "state.json"), []byte(`{"cursor":"xyz","n":3}`), 0o640)
 	os.WriteFile(filepath.Join(agentDir, "agent.json"), []byte(`{"id":"a1","name":"A","skills":["pdf"]}`), 0o640)
 
-	db := &fakeSkillDB{} // reuse the fake from the existing reconciler test
+	db := &fakeSkillDB{}
 	n, err := MigrateAgentFilesToMarkdown(db, base, []string{"pdf", "csv"})
 	if err != nil || n != 1 {
 		t.Fatalf("migrate: n=%d err=%v", n, err)

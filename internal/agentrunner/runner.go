@@ -150,12 +150,7 @@ func (r *Runner) Run(ctx context.Context, input RunInput) error {
 		return fmt.Errorf("agent not found")
 	}
 
-	manifest, _ := agentdesigner.LoadManifest(r.agentsDir, input.WorkspaceID, input.AgentID)
-	if manifest == nil {
-		manifest = &agentdesigner.AgentManifest{ID: agent.ID, Name: agent.Name}
-	}
-
-	return r.runCoderAgent(ctx, agent, manifest, input)
+	return r.runCoderAgent(ctx, agent, input)
 }
 
 // RunByName looks up an agent by name and runs it.
@@ -233,7 +228,7 @@ type coderRunContext struct {
 	usage          coder.Usage // accumulated token usage (API coder); zero for CLI coders
 }
 
-func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *agentdesigner.AgentManifest, input RunInput) error {
+func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunInput) error {
 	agentDir := agentdesigner.AgentDir(r.agentsDir, input.WorkspaceID, input.AgentID)
 
 	// Read AGENT.md instructions (fall back to CLAUDE.md for legacy agents).
@@ -378,7 +373,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, manifest *a
 	}
 
 	rctx := &coderRunContext{}
-	runErr := r.runCoderTurns(ctx, agent, manifest, input, agentDir, stateMap, prompt, coderSvc, rctx)
+	runErr := r.runCoderTurns(ctx, agent, input, agentDir, stateMap, prompt, coderSvc, rctx)
 
 	exitCode := 0
 	if runErr != nil {
@@ -500,7 +495,6 @@ func (r *Runner) recordInbox(input RunInput, agent *db.Agent, runID, body, statu
 func (r *Runner) runCoderTurns(
 	ctx context.Context,
 	agent *db.Agent,
-	manifest *agentdesigner.AgentManifest,
 	input RunInput,
 	agentDir string,
 	currentState map[string]interface{},

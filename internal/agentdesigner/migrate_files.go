@@ -10,8 +10,9 @@ import (
 )
 
 // legacyManifest is a private, minimal decode of agent.json used only by the
-// migration. It deliberately does not depend on AgentManifest/LoadManifest —
-// those are deleted in a later task, and the migration must survive that.
+// migration. It deliberately does not depend on the old AgentManifest/LoadManifest
+// types — those were deleted once this migration made them obsolete (agent.json
+// is gone; AGENT.md is the only record of an agent's secrets/skills now).
 type legacyManifest struct {
 	ID     string   `json:"id"`
 	Name   string   `json:"name"`

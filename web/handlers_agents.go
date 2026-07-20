@@ -22,7 +22,6 @@ type agentDetailData struct {
 	Agent          *db.Agent
 	Schedule       *db.AgentSchedule
 	Runs           []*db.AgentRun
-	Manifest       *agentdesigner.AgentManifest
 	AgentMD        string                   // AGENT.md
 	State          string                   // state.md, verbatim (read-only)
 	Logs           []string                 // sorted log file names (newest first)
@@ -383,9 +382,6 @@ func (s *Server) loadAgentDetail(ctx context.Context, agent *db.Agent, workspace
 
 	dir := s.agentsDir()
 	if dir != "" {
-		manifest, _ := agentdesigner.LoadManifest(dir, workspaceID, agent.ID)
-		data.Manifest = manifest
-
 		// Load AGENT.md (fall back to CLAUDE.md for legacy agents).
 		if raw, err := os.ReadFile(agentdesigner.AgentDescPath(dir, workspaceID, agent.ID)); err == nil {
 			data.AgentMD = string(raw)
@@ -416,14 +412,16 @@ func (s *Server) loadAgentDetail(ctx context.Context, agent *db.Agent, workspace
 			}
 		}
 
-		// Compute missing secrets for manifest-declared requirements.
-		if manifest != nil && len(manifest.RequiredSecrets) > 0 {
+		// Compute missing secrets declared in AGENT.md's "# Required secrets:"
+		// block. agent.json (the old cache of this) is gone — AGENT.md, already
+		// loaded above, is the only record of what an agent needs.
+		if requiredSecrets := agentdesigner.ParseRequiredSecrets(data.AgentMD); len(requiredSecrets) > 0 {
 			knownNames, _ := s.db.ListSecretNames(workspaceID)
 			knownSet := make(map[string]bool, len(knownNames))
 			for _, n := range knownNames {
 				knownSet[n] = true
 			}
-			for _, req := range manifest.RequiredSecrets {
+			for _, req := range requiredSecrets {
 				if !knownSet[req] {
 					data.MissingSecrets = append(data.MissingSecrets, req)
 				}

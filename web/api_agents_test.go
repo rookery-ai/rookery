@@ -171,6 +171,42 @@ func TestAPIAgentDetailReadsStateMarkdown(t *testing.T) {
 	}
 }
 
+// TestAPIAgentDetailMissingSecretsFromAgentMD is the branch's merge-gate
+// regression test. agent.json is gone (Task 3's startup migration deletes it
+// from every agent dir), so the "missing secrets" warning must be derived
+// straight from AGENT.md's "# Required secrets:" block, not a cached
+// manifest — before the fix, loadAgentDetail called
+// agentdesigner.LoadManifest, which returns nil when agent.json is absent,
+// silently emptying missing_secrets for every migrated agent.
+func TestAPIAgentDetailMissingSecretsFromAgentMD(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+	a := seedAgent(t, s, wsID)
+
+	path := agentdesigner.AgentDescPath(s.agentsDir(), wsID, a.ID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatalf("mkdir agent dir: %v", err)
+	}
+	md := "# Agent\n\n# Required secrets:\n# - SENDGRID_KEY: for sending\n"
+	if err := os.WriteFile(path, []byte(md), 0o640); err != nil {
+		t.Fatalf("write AGENT.md: %v", err)
+	}
+	// Deliberately no agent.json written — this is the whole point of the test.
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/agents/"+a.ID, nil, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("detail: %d %s", rec.Code, rec.Body.String())
+	}
+	// Check the missing_secrets array specifically, not just any substring
+	// match — AGENT.md's raw text is echoed back in the agent_md field too,
+	// which would contain "SENDGRID_KEY" regardless of whether the
+	// missing-secrets computation works.
+	if !contains(rec.Body.String(), `"missing_secrets":["SENDGRID_KEY"]`) {
+		t.Fatalf("missing_secrets should come from AGENT.md, not agent.json: %s", rec.Body.String())
+	}
+}
+
 // TestAPIAgentDetailNoStateFileIsEmptyNotError verifies a missing state.md
 // (a brand-new agent) yields an empty state string, not a 500.
 func TestAPIAgentDetailNoStateFileIsEmptyNotError(t *testing.T) {

@@ -1222,14 +1222,9 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 				return "", false, "", fmt.Errorf("create agent dir: %w", err)
 			}
 		}
-		if _, err := os.Stat(filepath.Join(agentDir, "state.json")); os.IsNotExist(err) {
-			// Seed state.json only if absent, so a re-generation into a kept draft dir
-			// doesn't wipe accumulated state.
-			if err := os.WriteFile(filepath.Join(agentDir, "state.json"), []byte("{}"), 0o640); err != nil {
-				closeProgress()
-				return "", false, "", fmt.Errorf("write state.json: %w", err)
-			}
-		}
+		// No state file is seeded here: ReadState treats a missing state.md as
+		// empty memory, and state.json is no longer written anywhere in this
+		// codebase (agent state lives only in state.md — see internal/agentdesigner/statefile.go).
 		workDir = agentDir
 		prompt = prompts.BuildImplementationPrompt(agentNameSnap, dbMessagesToPrompt(historySnap), implParams)
 		cleanupOnFail = func() {}    // keep the draft dir on failure — user finishes it later
@@ -1705,7 +1700,10 @@ func decideBuildOutcome(workDir, resultText, backendType string, scriptVerified 
 // artifacts persist through StateVerifying as proof for the user, then are cleaned up once
 // the agent is persisted. Uses isTestArtifact (toolstree.go) as the shared classifier.
 // Also removes root-level scratch .json files (e.g. acc.json, probe.json) that are direct
-// children of agentDir but are not state.json or agent.json.
+// children of agentDir but are not state.json — the one .json name still deliberately
+// excluded here, purely as a defensive belt-and-suspenders guard against ever deleting a
+// live agent's state even though nothing in this codebase writes state.json any more
+// (state lives in state.md; see internal/agentdesigner/statefile.go).
 func cleanupTestArtifacts(agentDir string) {
 	toolsDir := filepath.Join(agentDir, "tools")
 	absAgentDir, _ := filepath.Abs(agentDir)
@@ -1730,7 +1728,7 @@ func cleanupTestArtifacts(agentDir string) {
 		}
 		// Root-level scratch .json (e.g. acc.json, probe.json) — direct children of the
 		// agent dir only; files in subdirs (tools/, notes/, logs/) are unaffected.
-		if filepath.Ext(name) == ".json" && name != "state.json" && name != "agent.json" {
+		if filepath.Ext(name) == ".json" && name != "state.json" {
 			parent, err2 := filepath.Abs(filepath.Dir(path))
 			if err2 == nil && parent == absAgentDir {
 				_ = os.Remove(path)
@@ -1742,10 +1740,18 @@ func cleanupTestArtifacts(agentDir string) {
 
 // copyAgentWorkspace creates a fresh staging directory containing the editable
 // surface of a live agent: AGENT.md (the reconciled version, not the raw on-disk
-// one), state.json, and the full tools/ project tree (nested modules, tests,
-// requirements.txt, …). Used so an edit's test generation never touches the live
-// agent. liveDir's logs/ and agent.json are intentionally not copied — the coder
-// doesn't need them to make or test changes.
+// one), state.md (if the live agent has one), and the full tools/ project tree
+// (nested modules, tests, requirements.txt, …). Used so an edit's test generation
+// never touches the live agent. liveDir's logs/ is intentionally not copied — the
+// coder doesn't need it to make or test changes.
+//
+// state.md is copied (not dropped) rather than seeded fresh: an edit's test
+// generation may reasonably need to see the agent's actual current memory (e.g.
+// to write/verify behaviour against real accumulated state), and copying keeps
+// that read-only view isolated from the live file exactly like AGENT.md and
+// tools/ already are. A brand-new/never-run agent has no state.md yet — that's
+// fine, ReadState treats a missing file as empty memory, so nothing is seeded
+// when there is nothing to copy. state.json is never written or read any more.
 func copyAgentWorkspace(liveDir, stagingDir, reconciledAgentMD string) error {
 	if err := os.RemoveAll(stagingDir); err != nil {
 		return err
@@ -1758,11 +1764,11 @@ func copyAgentWorkspace(liveDir, stagingDir, reconciledAgentMD string) error {
 		return err
 	}
 
-	state, err := os.ReadFile(filepath.Join(liveDir, "state.json"))
-	if err != nil {
-		state = []byte("{}")
-	}
-	if err := os.WriteFile(filepath.Join(stagingDir, "state.json"), state, 0o640); err != nil {
+	if state, err := os.ReadFile(filepath.Join(liveDir, "state.md")); err == nil {
+		if err := os.WriteFile(filepath.Join(stagingDir, "state.md"), state, 0o640); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
 		return err
 	}
 
@@ -1930,15 +1936,14 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 	skillRefs := sess.Skills
 	f.mu.Unlock()
 
-	requiredSecrets := parseRequiredSecrets(agentMD)
 	description := extractDescription(agentMD, agentNameSnap)
 
 	skillsSnap := parseSkillsLine(agentMD, skillRefs)
 	if skillsSnap == nil {
 		// No "# Skills:" line in AGENT.md → the agent declared no skills. Leave
-		// the manifest empty (the user can assign skills on the agent page).
+		// agent_skills empty (the user can assign skills on the agent page).
 		// Previously this fell back to ALL installed skills, which polluted the
-		// manifest and made the agent page show every skill as assigned.
+		// attachment list and made the agent page show every skill as assigned.
 		skillsSnap = []string{}
 	}
 
@@ -1958,7 +1963,7 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 		}
 	}
 
-	if err := f.designer.SaveAgent(workspaceID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap, requiredSecrets); err != nil {
+	if err := f.designer.SaveAgent(workspaceID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap); err != nil {
 		return "", false, "", fmt.Errorf("save agent: %w", err)
 	}
 
@@ -2016,7 +2021,6 @@ func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string,
 	skillRefs := sess.Skills
 	f.mu.Unlock()
 
-	requiredSecrets := parseRequiredSecrets(agentMD)
 	description := extractDescription(agentMD, agentNameSnap)
 
 	skillsSnap := parseSkillsLine(agentMD, skillRefs)
@@ -2025,7 +2029,7 @@ func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string,
 		skillsSnap = []string{}
 	}
 
-	if err := f.designer.UpdateAgent(workspaceID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap, requiredSecrets); err != nil {
+	if err := f.designer.UpdateAgent(workspaceID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap); err != nil {
 		return "", false, "", fmt.Errorf("update agent: %w", err)
 	}
 
@@ -2108,8 +2112,10 @@ func parseSuggestedSchedule(agentMD string) string {
 	return expr
 }
 
-// parseRequiredSecrets extracts SECRET_NAME from "# - SECRET_NAME: description" header lines.
-func parseRequiredSecrets(agentMD string) []string {
+// ParseRequiredSecrets extracts SECRET_NAME from "# - SECRET_NAME: description" header lines.
+// AGENT.md is the single source of truth for an agent's declared secret requirements
+// (agent.json used to cache this; it is gone — every consumer parses AGENT.md directly).
+func ParseRequiredSecrets(agentMD string) []string {
 	var secrets []string
 	inBlock := false
 	for _, line := range strings.Split(agentMD, "\n") {
