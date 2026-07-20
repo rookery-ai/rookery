@@ -57,6 +57,7 @@ type apiCreateReminderRequest struct {
 type apiInboxMessage struct {
 	ID        string    `json:"id"`
 	Source    string    `json:"source"`
+	AgentID   string    `json:"agent_id"`
 	AgentName string    `json:"agent_name"`
 	Trigger   string    `json:"trigger"`
 	Status    string    `json:"status"`
@@ -69,6 +70,7 @@ func toAPIInboxMessage(m *db.InboxMessage) apiInboxMessage {
 	return apiInboxMessage{
 		ID:        m.ID,
 		Source:    m.Source,
+		AgentID:   m.AgentID,
 		AgentName: m.AgentName,
 		Trigger:   m.Trigger,
 		Status:    m.Status,

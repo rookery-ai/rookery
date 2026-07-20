@@ -159,9 +159,13 @@ func TestAPIInboxCRUD(t *testing.T) {
 	}
 
 	// Seed a second message, then mark-all-read.
+	agentID := uuid.New().String()
+	if err := database.CreateAgent(&db.Agent{ID: agentID, WorkspaceID: wsID, Name: "my-agent"}); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
 	msg2 := &db.InboxMessage{
 		ID: uuid.New().String(), WorkspaceID: wsID, Source: "agent_run",
-		AgentName: "my-agent", RefID: "run-1", Trigger: "cron",
+		AgentID: agentID, AgentName: "my-agent", RefID: "run-1", Trigger: "cron",
 		Body: "second message", Status: "ok",
 	}
 	if err := database.CreateInboxMessage(msg2); err != nil {
@@ -170,6 +174,14 @@ func TestAPIInboxCRUD(t *testing.T) {
 	rec = doJSON(t, s, http.MethodGet, "/api/v1/inbox", nil, cookies)
 	if !contains(rec.Body.String(), `"unread":1`) {
 		t.Fatalf("expected unread=1 before read-all, got: %s", rec.Body.String())
+	}
+	// Deep-linking to the agent (spec §5.3): agent_id must be exposed for an
+	// agent-sourced message, and empty for the reminder-sourced msg above.
+	if !contains(rec.Body.String(), `"agent_id":"`+agentID+`"`) {
+		t.Fatalf("expected agent_id %q in agent-sourced message, got: %s", agentID, rec.Body.String())
+	}
+	if !contains(rec.Body.String(), `"agent_id":""`) {
+		t.Fatalf("expected empty agent_id for reminder-sourced message, got: %s", rec.Body.String())
 	}
 	rec = doJSON(t, s, http.MethodPost, "/api/v1/inbox/read-all", nil, cookies)
 	if rec.Code != http.StatusOK || !contains(rec.Body.String(), `"ok":true`) {

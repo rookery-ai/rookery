@@ -101,6 +101,7 @@ export function useDeleteReminder() {
 export type InboxMessage = {
   id: string;
   source: string;
+  agent_id: string;
   agent_name: string;
   trigger: string;
   status: string;

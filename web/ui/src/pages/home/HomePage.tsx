@@ -28,10 +28,69 @@ import {
 
 // ── Context pane: Inbox ─────────────────────────────────────────────────────
 
+export type DayGroup = { label: string; messages: InboxMessage[] };
+
+const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+// Midnight (local time) of the given instant, as an epoch ms — the bucket
+// key for "which calendar day does this message belong to."
+function startOfDay(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+// Deliberately not Intl/toLocaleDateString: locale + ICU data availability
+// varies by environment, and a test asserting an exact label (spec §5.2's
+// "Mon, 14 Jul") needs a format that doesn't drift with the runtime's
+// default locale.
+function dayLabel(dayMs: number): string {
+  const d = new Date(dayMs);
+  return `${WEEKDAY_NAMES[d.getDay()]}, ${d.getDate()} ${MONTH_NAMES[d.getMonth()]}`;
+}
+
+// groupByDay buckets inbox messages under day headers — spec §5.2's single
+// highest-value change: it turns an undifferentiated stream into a timeline.
+// Pure and exported so it's unit-testable with a fixed clock, independent of
+// rendering. Assumes `messages` arrives newest-first (the API's order) —
+// buckets are built by first-appearance rather than re-sorted, so a day's
+// messages never get reordered relative to each other.
+export function groupByDay(messages: InboxMessage[], now: Date): DayGroup[] {
+  const todayMs = startOfDay(now);
+  const yesterdayMs = todayMs - 24 * 60 * 60 * 1000;
+  const order: number[] = [];
+  const buckets = new Map<number, InboxMessage[]>();
+  for (const m of messages) {
+    const key = startOfDay(new Date(m.created_at));
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = [];
+      buckets.set(key, bucket);
+      order.push(key);
+    }
+    bucket.push(m);
+  }
+  return order.map((key) => ({
+    label: key === todayMs ? "Today" : key === yesterdayMs ? "Yesterday" : dayLabel(key),
+    messages: buckets.get(key)!,
+  }));
+}
+
+function DayHeader({ label }: { label: string }) {
+  return (
+    <div className="sticky top-0 z-10 mb-1 bg-chrome/95 px-1 py-1 text-[11px] font-semibold text-muted-2 backdrop-blur">
+      {label}
+    </div>
+  );
+}
+
 function InboxCard({ msg, onDelete }: { msg: InboxMessage; onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const markRead = useMarkInboxRead();
   const Icon = msg.source === "reminder" ? Bell : Bot;
+  const name = msg.agent_name || (msg.source === "reminder" ? "Reminder" : "Notification");
 
   function handleClick() {
     setExpanded((v) => !v);
@@ -39,26 +98,56 @@ function InboxCard({ msg, onDelete }: { msg: InboxMessage; onDelete: () => void 
   }
 
   return (
-    <div className="mb-1.5 rounded-lg border border-border bg-background px-2.5 py-2 text-xs">
-      <button type="button" onClick={handleClick} className="flex w-full items-start gap-2 text-left">
-        <Icon className="mt-0.5 size-3.5 shrink-0 text-muted-2" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="truncate font-semibold">{msg.agent_name || "Notification"}</span>
-            {!msg.read && <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-label="unread" />}
-          </div>
-          <p className={cn("text-muted-2", !expanded && "line-clamp-2")}>{msg.body}</p>
-          <span className="text-[10px] text-muted-2/70">{timeAgo(msg.created_at)}</span>
-        </div>
+    <div
+      className={cn(
+        "mb-1.5 rounded-lg border border-border bg-background px-2.5 py-2 text-xs",
+        // Unread: a whole-card signal (a 2px accent bar), not the old 6px
+        // dot you had to hunt for — spec §5.2.
+        !msg.read && "border-l-2 border-l-primary",
+      )}
+    >
+      <button type="button" onClick={handleClick} className="flex w-full flex-col gap-1 text-left">
+        <span className="flex items-center gap-1.5">
+          <Icon className="size-3.5 shrink-0 text-muted-2" />
+          <span className={cn("truncate", !msg.read && "font-medium")}>{name}</span>
+          {msg.status === "error" && (
+            <span className="shrink-0 rounded-full bg-danger-soft px-1.5 py-0.5 text-[10px] font-medium text-danger">
+              Failed
+            </span>
+          )}
+          <span className="ml-auto shrink-0 text-[10px] text-muted-2">{timeAgo(msg.created_at)}</span>
+        </span>
+        {/* Body carries the primary foreground token, not muted-2 — spec §9:
+            muted-2 is for metadata (timestamps, counts), not content. */}
+        <p className={cn("text-foreground", !expanded && "line-clamp-3")}>{msg.body}</p>
       </button>
       {expanded && (
-        <div className="mt-1 flex justify-end">
-          <Button variant="ghost" size="xs" className="text-danger" onClick={onDelete}>
-            <Trash2 /> Delete
-          </Button>
+        <div className="mt-1.5">
+          {msg.trigger && <p className="mb-1.5 text-[11px] text-muted-2">Trigger: {msg.trigger}</p>}
+          <div className="flex items-center justify-end gap-1">
+            {msg.agent_id && (
+              <Button variant="ghost" size="xs" asChild>
+                <Link to={`/agents/${msg.agent_id}`}>View agent</Link>
+              </Button>
+            )}
+            <Button variant="ghost" size="xs" className="text-danger" onClick={onDelete}>
+              <Trash2 /> Delete
+            </Button>
+          </div>
         </div>
       )}
     </div>
+  );
+}
+
+function InboxCountBadge({ count }: { count: number }) {
+  return (
+    <span
+      aria-label={`${count} unread`}
+      className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold leading-none text-accent-foreground"
+    >
+      {count > 9 ? "9+" : count}
+    </span>
   );
 }
 
@@ -76,20 +165,20 @@ function InboxSection() {
   });
   const messages = (data?.messages ?? []).filter((m) => !pending.has(m.id));
   const unread = data?.unread ?? 0;
+  const groups = groupByDay(messages, new Date());
 
   return (
     <div className="border-b border-border pb-3">
       <ContextSection
-        title={`Inbox${unread > 0 ? ` · ${unread} new` : ""}`}
+        title="Inbox"
         action={
           unread > 0 ? (
-            <button
-              type="button"
-              className="text-[11px] text-muted-2 hover:text-foreground"
-              onClick={() => markAll.mutate()}
-            >
-              Mark all read
-            </button>
+            <div className="flex items-center gap-2">
+              <InboxCountBadge count={unread} />
+              <Button variant="ghost" size="xs" onClick={() => markAll.mutate()}>
+                Mark all read
+              </Button>
+            </div>
           ) : undefined
         }
       >
@@ -103,8 +192,13 @@ function InboxSection() {
             )}
           </div>
         ) : (
-          messages.map((m) => (
-            <InboxCard key={m.id} msg={m} onDelete={() => schedule(m.id, "Notification deleted")} />
+          groups.map((g, i) => (
+            <div key={`${g.label}-${i}`}>
+              <DayHeader label={g.label} />
+              {g.messages.map((m) => (
+                <InboxCard key={m.id} msg={m} onDelete={() => schedule(m.id, "Notification deleted")} />
+              ))}
+            </div>
           ))
         )}
       </ContextSection>
