@@ -164,20 +164,21 @@ func serveCmd() *cli.Command {
 				}
 			}
 
-			// One-time cutover: make the agent_skills DB table the single source of
-			// truth for an agent's skills. Pre-refactor agents had their declared
-			// skills in manifest.Skills (agent.json) only; the designer never wrote the
-			// DB table. Seed the DB from each manifest (skipping the legacy "all skills"
-			// fallback bloat), then clear manifest.Skills. AGENT.md is for the LLM; the
-			// DB is the skill record. Idempotent — a no-op once manifest.Skills is empty.
+			// Idempotent startup migration: converts each agent's state.json to the
+			// new markdown state.md format (readable in the KB), and absorbs the old
+			// one-time skills-attachment cutover (agent_skills DB table becomes the
+			// single source of truth for an agent's skills, seeded from legacy
+			// manifest.Skills, skipping the legacy "all skills" fallback bloat) before
+			// retiring agent.json. Must run before the scheduler starts: scheduled
+			// runs read state.md via the new runner path.
 			coreSkillNames := make([]string, 0)
 			for _, s := range skilllibrary.LoadBundled() {
 				coreSkillNames = append(coreSkillNames, s.Name)
 			}
-			if n, err := agentdesigner.ReconcileSkillAttachmentsToDB(database, vaultsDir, coreSkillNames); err != nil {
-				slog.Warn("reconcile skill attachments to db", "err", err)
-			} else if n > 0 {
-				slog.Info("reconciled skill attachments to db", "count", n)
+			if n, err := agentdesigner.MigrateAgentFilesToMarkdown(database, vaultsDir, coreSkillNames); err != nil {
+				slog.Warn("migrate agent files to markdown", "err", err)
+			} else {
+				slog.Info("agent files migrated", "agents", n)
 			}
 
 			// Any run still flagged in-progress is a leftover from a crash/shutdown
