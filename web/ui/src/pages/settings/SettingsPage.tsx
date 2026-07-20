@@ -382,7 +382,7 @@ export default function SettingsPage() {
       <ContextPane>
         <div className="flex h-full flex-col">
           <ContextPaneHeader title="Settings" />
-          <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-3 pt-0">
+          <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-3">
             {SECTIONS.map((s) => (
               <button
                 key={s.slug}

@@ -251,7 +251,7 @@ export default function ConnectionsPage() {
       <ContextPane>
         <div className="flex h-full flex-col">
           <ContextPaneHeader title="Connections" />
-          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3 pt-0">
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-2" />
               <Input
