@@ -1,21 +1,13 @@
 package agentdesigner
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
-
-// stateFenceRE matches a fenced json block with a line-anchored closing fence.
-// Non-greedy so the FIRST block wins: an agent's own "## Notes" prose may
-// legitimately contain another fence. Requires closing ``` on its own line to
-// prevent matching unterminated/damaged openers.
-var stateFenceRE = regexp.MustCompile("(?s)```json[ \\t]*\\n(.*?)\\n```(?:\\n|$)")
 
 // StateFilePath returns the path to an agent's state.md — its memory between
 // runs, kept as a markdown document so it is readable in the knowledge base.
@@ -36,6 +28,46 @@ edit it if you need to fix something by hand._
 `, agentName, jsonBody)
 }
 
+// fenceLoc describes where (if anywhere) the state fence lives.
+type fenceLoc struct {
+	Open, Close int  // line indices of the ```json and ``` lines; valid only when OK
+	OK          bool
+	OrphanOpen  int // index of the first ```json line when OK is false; -1 when there is none
+}
+
+// findStateFence locates the FIRST well-formed json fence: an opener line
+// (trimmed == "```json") terminated by a closer line (trimmed == "```") with no
+// other fence-opener line in between.
+//
+// If the first opener is not cleanly terminated — because the file ends, or
+// because another fence opener appears first — the file is damaged and we report
+// OK=false rather than searching on. The state fence is by construction the FIRST
+// fence; if it is malformed, nothing later in the document may be mistaken for it.
+func findStateFence(lines []string) fenceLoc {
+	openIdx := -1
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "```json" {
+			openIdx = i
+			break
+		}
+	}
+	if openIdx == -1 {
+		return fenceLoc{OK: false, OrphanOpen: -1}
+	}
+	for i := openIdx + 1; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "```" {
+			return fenceLoc{Open: openIdx, Close: i, OK: true}
+		}
+		if strings.HasPrefix(trimmed, "```") {
+			// Another fence opener before this one closed: damaged.
+			return fenceLoc{OK: false, OrphanOpen: openIdx}
+		}
+	}
+	// Ran off the end without a closer: damaged.
+	return fenceLoc{OK: false, OrphanOpen: openIdx}
+}
+
 // ReadState returns the state object held in the first json fence of state.md.
 // A missing file, a missing fence, or an empty fence all yield an empty map so a
 // damaged file degrades to "no memory" instead of failing the run.
@@ -47,16 +79,17 @@ func ReadState(path string) (map[string]any, error) {
 		}
 		return nil, err
 	}
-	m := stateFenceRE.FindSubmatch(raw)
-	if m == nil {
+	lines := strings.Split(string(raw), "\n")
+	loc := findStateFence(lines)
+	if !loc.OK {
 		return map[string]any{}, nil
 	}
-	body := bytes.TrimSpace(m[1])
+	body := strings.TrimSpace(strings.Join(lines[loc.Open+1:loc.Close], "\n"))
 	if len(body) == 0 {
 		return map[string]any{}, nil
 	}
 	var st map[string]any
-	if err := json.Unmarshal(body, &st); err != nil {
+	if err := json.Unmarshal([]byte(body), &st); err != nil {
 		return nil, fmt.Errorf("state.md json block: %w", err)
 	}
 	if st == nil {
@@ -67,14 +100,15 @@ func ReadState(path string) (map[string]any, error) {
 
 // WriteState replaces only the first json fence, leaving the heading, intro and
 // any agent-written prose untouched. A file with no fence gains one; a missing
-// file is created from the template. Strips orphaned json-fence openers to
-// prevent ambiguous fence matches on damaged files.
+// file is created from the template. An orphaned (unterminated) json-fence
+// opener is deleted — and only that one line — so a legitimate later fence
+// (e.g. in an agent-written "## Notes" section) is never touched.
 func WriteState(path, agentName string, state map[string]any) error {
 	body, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return err
 	}
-	fence := "```json\n" + string(body) + "\n```"
+	fenceLines := []string{"```json", string(body), "```"}
 
 	raw, readErr := os.ReadFile(path)
 	if readErr != nil {
@@ -85,59 +119,55 @@ func WriteState(path, agentName string, state map[string]any) error {
 		return os.WriteFile(path, []byte(RenderStateTemplate(agentName, string(body))), 0o640)
 	}
 
-	if len(bytes.TrimSpace(raw)) == 0 {
+	if len(strings.TrimSpace(string(raw))) == 0 {
 		return os.WriteFile(path, []byte(RenderStateTemplate(agentName, string(body))), 0o640)
 	}
 
-	loc := stateFenceRE.FindIndex(raw)
-	if loc == nil {
-		// Strip any orphaned ```json openers (from damaged fences) to prevent
-		// ambiguous matches when a new fence is appended.
-		content := stripOrphanedJSONOpeners(string(raw))
-		out := strings.TrimRight(content, "\n") + "\n\n" + fence + "\n"
-		return os.WriteFile(path, []byte(out), 0o640)
+	lines := strings.Split(string(raw), "\n")
+	loc := findStateFence(lines)
+
+	var out []string
+	switch {
+	case loc.OK:
+		// Line splice: replace lines[Open..Close] inclusive. Everything
+		// before Open and after Close survives byte-for-byte.
+		out = make([]string, 0, len(lines)-(loc.Close-loc.Open+1)+len(fenceLines))
+		out = append(out, lines[:loc.Open]...)
+		out = append(out, fenceLines...)
+		out = append(out, lines[loc.Close+1:]...)
+	case loc.OrphanOpen >= 0:
+		// Replace only the one orphaned opener line, in place, with the new
+		// fence. Never strip any other ```json line — that is what protects
+		// a legitimate fence further down (e.g. in Notes).
+		//
+		// The new fence goes HERE, not appended at the end of the file: if a
+		// legitimate fence already exists later in the document (e.g. in
+		// Notes), appending after it would make that later fence the new
+		// "first" fence. ReadState would then return the Notes fence's data
+		// instead of the state we just wrote, and a SECOND WriteState call
+		// would hit the loc.OK branch and splice over the Notes fence —
+		// destroying it. Writing in place keeps the new fence first and
+		// leaves everything after it byte-for-byte untouched.
+		out = make([]string, 0, len(lines)+len(fenceLines))
+		out = append(out, lines[:loc.OrphanOpen]...)
+		out = append(out, fenceLines...)
+		out = append(out, lines[loc.OrphanOpen+1:]...)
+	default:
+		out = appendFence(append([]string{}, lines...), fenceLines)
 	}
 
-	// Index splice, never ReplaceAll: JSON containing "$1"/"${x}" would be
-	// mangled by regexp template expansion.
-	out := make([]byte, 0, len(raw)+len(fence))
-	out = append(out, raw[:loc[0]]...)
-	out = append(out, []byte(fence)...)
-	out = append(out, raw[loc[1]:]...)
-	return os.WriteFile(path, out, 0o640)
+	return os.WriteFile(path, []byte(strings.Join(out, "\n")), 0o640)
 }
 
-// stripOrphanedJSONOpeners removes lines that are orphaned ```json openers
-// (without a matching closing fence on the same line or later). This prevents
-// a new fence appended to a damaged file from creating an ambiguous match.
-func stripOrphanedJSONOpeners(content string) string {
-	lines := strings.Split(content, "\n")
-	var result []string
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		// Skip lines that are orphaned ```json openers.
-		if strings.HasPrefix(trimmed, "```json") {
-			// Check if there's a matching closing ``` on this line or a later line.
-			// A properly terminated fence has ``` on its own line later.
-			hasClosing := false
-			// Look for ``` on the rest of this line or subsequent lines
-			if strings.Contains(line, "```") && strings.LastIndex(line, "```") > strings.Index(line, "```json") {
-				hasClosing = true
-			} else {
-				// Look ahead for closing ```
-				for j := i + 1; j < len(lines); j++ {
-					if strings.TrimSpace(lines[j]) == "```" || strings.HasPrefix(strings.TrimSpace(lines[j]), "```") {
-						hasClosing = true
-						break
-					}
-				}
-			}
-			if !hasClosing {
-				// This is an orphaned opener; skip it.
-				continue
-			}
-		}
-		result = append(result, line)
+// appendFence appends a blank separator line and the fence lines to the end
+// of the document, trimming any trailing blank lines first so spacing is
+// consistent regardless of how much trailing whitespace the source had.
+func appendFence(lines []string, fenceLines []string) []string {
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
 	}
-	return strings.Join(result, "\n")
+	lines = append(lines, "")
+	lines = append(lines, fenceLines...)
+	lines = append(lines, "")
+	return lines
 }
