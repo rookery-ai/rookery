@@ -269,6 +269,9 @@ func (s *Server) apiSaveKBNote(c echo.Context) error {
 	if rel == "" {
 		return jsonErr(c, http.StatusBadRequest, "invalid_path", "a note path is required")
 	}
+	if !strings.Contains(path.Base(rel), ".") {
+		rel += ".md" // default new notes to markdown, matching handleSaveKBNote
+	}
 	// The runner writes agents/<id>/state.md at the end of every run (see
 	// internal/agentdesigner/statefile.go); racing that write with a manual
 	// KB edit would corrupt whichever one lands second. Refuse the save
@@ -278,12 +281,15 @@ func (s *Server) apiSaveKBNote(c echo.Context) error {
 	// A draft build dir (agents/draft_<slug>/state.md) never matches a live
 	// agent id in s.runs or agent_runs, so isAgentRunning naturally returns
 	// false for it — no special-casing needed.
+	//
+	// This MUST run on the finalized rel, AFTER the .md default above: a PUT
+	// to agents/<id>/state (no extension) lands on state.md, so guarding the
+	// raw input let any direct API caller write a running agent's state with
+	// a 200. The spec's whole premise is that the frontend cannot be trusted,
+	// so the check belongs on the path actually about to be written.
 	if agentID, ok := agentIDFromStatePath(rel); ok && s.isAgentRunning(agentID) {
 		return jsonErr(c, http.StatusConflict, "agent_running",
 			"this agent is running right now — its state.md will be overwritten when the run finishes. Wait for it to finish, then save your edit.")
-	}
-	if !strings.Contains(path.Base(rel), ".") {
-		rel += ".md" // default new notes to markdown, matching handleSaveKBNote
 	}
 	content := normalizeNewlines(req.Content)
 	if err := s.vault.WriteNote(u.ID, rel, []byte(content)); err != nil {

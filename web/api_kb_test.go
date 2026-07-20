@@ -399,3 +399,24 @@ func TestAPISaveKBNoteBlockedWhileAgentRunningPathVariants(t *testing.T) {
 		}
 	}
 }
+
+// TestAPISaveKBNoteBlockedWhileAgentRunningDotlessPath pins the guard against
+// an extension bypass. A dotless basename gets ".md" appended by the handler,
+// so a PUT to agents/<id>/state lands on the very state.md the guard exists to
+// protect. Checking the raw input instead of the finalized path let any direct
+// API caller write a running agent's state and get a 200 back — the guard is
+// specified to live in the backend precisely because the frontend cannot be
+// trusted to send the well-behaved form.
+func TestAPISaveKBNoteBlockedWhileAgentRunningDotlessPath(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+	a := seedAgent(t, s, wsID)
+	s.runs[a.ID] = &agentRunState{}
+
+	rec := doJSON(t, s, http.MethodPut, "/api/v1/kb/note",
+		map[string]string{"path": "agents/" + a.ID + "/state", "content": "{\"pwned\":true}\n"}, cookies)
+	if rec.Code != http.StatusConflict || !contains(rec.Body.String(), "agent_running") {
+		t.Fatalf("dotless state path bypassed the guard: got %d %s", rec.Code, rec.Body.String())
+	}
+}
