@@ -245,6 +245,122 @@ func TestSkillListIncludesCoreSkills(t *testing.T) {
 	}
 }
 
+func seedReminder(t *testing.T, database *db.DB, id, message string, at time.Time) {
+	t.Helper()
+	err := database.CreateReminder(&db.Reminder{
+		ID:          id,
+		WorkspaceID: testWorkspaceID,
+		Message:     message,
+		RemindAt:    at,
+	})
+	if err != nil {
+		t.Fatalf("seed reminder: %v", err)
+	}
+}
+
+func TestRemindList(t *testing.T) {
+	r, database, _, _ := newTestRouter(t)
+
+	future := time.Now().Add(24 * time.Hour)
+	seedReminder(t, database, "rem-1", "check the oven", future)
+	seedReminder(t, database, "rem-2", "call the doctor", future.Add(time.Hour))
+
+	send, replies := collect()
+	if err := r.Handle(t.Context(), testMsg("/remind list"), send, nil, nil, nil); err != nil {
+		t.Fatalf("/remind list: %v", err)
+	}
+	joined := strings.Join(*replies, " ")
+	for _, want := range []string{"check the oven", "call the doctor", "1.", "2."} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("listing missing %q, got:\n%s", want, joined)
+		}
+	}
+}
+
+func TestRemindListEmpty(t *testing.T) {
+	r, _, _, _ := newTestRouter(t)
+
+	send, replies := collect()
+	if err := r.Handle(t.Context(), testMsg("/remind list"), send, nil, nil, nil); err != nil {
+		t.Fatalf("/remind list: %v", err)
+	}
+	joined := strings.Join(*replies, " ")
+	if !strings.Contains(strings.ToLower(joined), "no reminders") {
+		t.Errorf("want an empty-state message, got %q", joined)
+	}
+}
+
+// TestRemindDelete: the number must index the same ordering /remind list rendered.
+func TestRemindDelete(t *testing.T) {
+	r, database, _, _ := newTestRouter(t)
+
+	future := time.Now().Add(24 * time.Hour)
+	seedReminder(t, database, "rem-1", "check the oven", future)
+	seedReminder(t, database, "rem-2", "call the doctor", future.Add(time.Hour))
+
+	listed, err := database.ListReminders(testWorkspaceID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	first := listed[0]
+
+	send, replies := collect()
+	if err := r.Handle(t.Context(), testMsg("/remind delete 1"), send, nil, nil, nil); err != nil {
+		t.Fatalf("/remind delete: %v", err)
+	}
+	if !strings.Contains(strings.Join(*replies, " "), first.Message) {
+		t.Errorf("reply should name the deleted reminder %q, got %q", first.Message, *replies)
+	}
+
+	remaining, _ := database.ListReminders(testWorkspaceID)
+	if len(remaining) != 1 {
+		t.Fatalf("want 1 reminder left, got %d", len(remaining))
+	}
+	if remaining[0].ID == first.ID {
+		t.Errorf("deleted the wrong reminder: %q survived", first.Message)
+	}
+}
+
+func TestRemindDeleteOutOfRange(t *testing.T) {
+	r, database, _, _ := newTestRouter(t)
+	seedReminder(t, database, "rem-1", "check the oven", time.Now().Add(24*time.Hour))
+
+	send, replies := collect()
+	if err := r.Handle(t.Context(), testMsg("/remind delete 9"), send, nil, nil, nil); err != nil {
+		t.Fatalf("/remind delete 9: %v", err)
+	}
+	if !strings.Contains(strings.Join(*replies, " "), "1") {
+		t.Errorf("want a message saying how many exist, got %q", *replies)
+	}
+	if got, _ := database.ListReminders(testWorkspaceID); len(got) != 1 {
+		t.Errorf("out-of-range delete removed something: %d left", len(got))
+	}
+}
+
+// TestRemindSubcommandsDoNotShadowCreation is the regression guard for this
+// feature. "list" and "delete" are ordinary English words: /remind list the
+// groceries is a legitimate reminder today and must stay one. Subcommand
+// matching is exact, never prefix-based.
+func TestRemindSubcommandsDoNotShadowCreation(t *testing.T) {
+	for _, text := range []string{
+		"/remind in 10 minutes to list the groceries",
+		"/remind in 10 minutes to delete the old note",
+	} {
+		t.Run(text, func(t *testing.T) {
+			r, database, _, _ := newTestRouter(t)
+
+			send, _ := collect()
+			if err := r.Handle(t.Context(), testMsg(text), send, nil, nil, nil); err != nil {
+				t.Fatalf("handle: %v", err)
+			}
+			got, _ := database.ListReminders(testWorkspaceID)
+			if len(got) != 1 {
+				t.Fatalf("%q should have created a reminder, got %d", text, len(got))
+			}
+		})
+	}
+}
+
 // TestAgentCancelDiscardSparesSkillDraft is the mirror: the agent path must not
 // reach into the skill flow either.
 func TestAgentCancelDiscardSparesSkillDraft(t *testing.T) {
