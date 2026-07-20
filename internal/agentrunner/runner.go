@@ -243,8 +243,13 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 
 	// Read state (default empty object). ReadState already degrades a
 	// missing file/damaged fence to an empty map, but guard against a
-	// genuine I/O error too.
+	// genuine read failure too — either a real I/O error, or a well-formed
+	// fence whose JSON body doesn't parse. stateReadOK tracks that outcome
+	// so the end-of-turn self-heal write (below) never mistakes a synthetic
+	// {} for "this agent's state really is empty" and overwrites
+	// hand-recoverable bad content with nothing.
 	stateMap, err := agentdesigner.ReadState(agentdesigner.StateFilePath(r.agentsDir, input.WorkspaceID, input.AgentID))
+	stateReadOK := err == nil
 	if err != nil {
 		stateMap = map[string]interface{}{}
 	}
@@ -373,7 +378,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	}
 
 	rctx := &coderRunContext{}
-	runErr := r.runCoderTurns(ctx, agent, input, agentDir, stateMap, prompt, coderSvc, rctx)
+	runErr := r.runCoderTurns(ctx, agent, input, agentDir, stateMap, stateReadOK, prompt, coderSvc, rctx)
 
 	exitCode := 0
 	if runErr != nil {
@@ -498,6 +503,7 @@ func (r *Runner) runCoderTurns(
 	input RunInput,
 	agentDir string,
 	currentState map[string]interface{},
+	stateReadOK bool,
 	initialPrompt string,
 	coderSvc *coder.Coder,
 	rctx *coderRunContext,
@@ -539,14 +545,14 @@ func (r *Runner) runCoderTurns(
 			input.OnProgress(strings.Join(parsed.chatLines, "\n"))
 		}
 
-		// Merge state updates.
-		if len(parsed.stateUpdates) > 0 {
-			for _, update := range parsed.stateUpdates {
-				mergeState(currentState, update)
-			}
-			if err := saveState(agentDir, agent.Name, currentState); err != nil {
-				rctx.warnings = append(rctx.warnings, "state save failed: "+err.Error())
-			}
+		// Merge and persist state — unconditionally, not just when this turn
+		// emitted [STATE]. See applyAndSaveState for why: a turn's own file
+		// tools can mangle or drop state.md's json fence (e.g. while making a
+		// legitimate "## Notes" edit) without emitting [STATE] that same turn,
+		// and skipping the save on a no-update turn would leave that damage
+		// standing for the next run's ReadState to silently see as {}.
+		if err := applyAndSaveState(agentDir, agent.Name, currentState, parsed.stateUpdates, stateReadOK); err != nil {
+			rctx.warnings = append(rctx.warnings, "state save failed: "+err.Error())
 		}
 
 		// Accumulate raw output; the run note (markdown, in the vault) is written
@@ -918,6 +924,42 @@ func saveState(agentDir, agentName string, state map[string]interface{}) error {
 		return fmt.Errorf("state too large (%d bytes > %d limit)", len(data), maxStateSize)
 	}
 	return agentdesigner.WriteState(filepath.Join(agentDir, "state.md"), agentName, state)
+}
+
+// applyAndSaveState merges this turn's [STATE] updates (if any) into
+// currentState and persists it to state.md.
+//
+// When there ARE updates, the write always happens — the long-standing
+// contract that an explicit [STATE] emission always wins is unchanged, even
+// over an unreadable prior file (currentState degrades to {} and this turn's
+// update becomes the new baseline).
+//
+// When there are NO updates this turn, the write STILL happens — unless the
+// run's initial ReadState failed (stateReadOK == false). This is the
+// self-heal fix for the state-loss vector: an agent's own file tools (the API
+// engine's write_file is a full-file overwrite) can mangle or drop state.md's
+// json fence — e.g. while making a legitimate edit to "## Notes" — without
+// ever emitting [STATE] that same turn. Because currentState was read from
+// disk before this run's coder turns could touch the file, writing it back
+// here repairs any such damage; WriteState only ever splices the fence, so a
+// legitimate prose edit made this turn survives untouched.
+//
+// The stateReadOK guard exists because ReadState can itself fail — either a
+// genuine I/O error, or a well-formed fence whose JSON body doesn't parse. In
+// both cases currentState is a synthetic {} standing in for content we could
+// never make sense of. Writing that {} back unconditionally on a no-update
+// turn would silently replace hand-recoverable bad state with nothing — the
+// exact failure mode this fix exists to prevent, just moved one level up. So
+// a no-update turn is a strict no-op when the initial read failed, leaving
+// the malformed file for a human (or a later explicit [STATE]) to fix.
+func applyAndSaveState(agentDir, agentName string, currentState map[string]interface{}, updates []map[string]interface{}, stateReadOK bool) error {
+	for _, update := range updates {
+		mergeState(currentState, update)
+	}
+	if len(updates) == 0 && !stateReadOK {
+		return nil
+	}
+	return saveState(agentDir, agentName, currentState)
 }
 
 // ─── Skills loading ───────────────────────────────────────────────────────────

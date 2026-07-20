@@ -225,14 +225,282 @@ func TestStateMergePathPreservesLargeIntAndNullDelete(t *testing.T) {
 	}
 }
 
-// Scenario 4 ("no [STATE] emitted → file not rewritten at all") is NOT
-// covered here. The guard that skips saveState when there are no state
-// updates lives caller-side in runCoderTurns (runner.go: `if
-// len(parsed.stateUpdates) > 0 { ... saveState(...) }`), not inside saveState
-// itself — saveState/WriteState always write when called. Reaching that guard
-// requires driving runCoderTurns through a real coder.Coder.Generate call
-// (CLI subprocess or API HTTP loop), which the task explicitly rules out
-// building here. See the fix report for the full reasoning.
+// ─── applyAndSaveState (end-of-turn self-heal) ─────────────────────────────
+//
+// A prior version of the runner only called saveState when a turn's
+// [STATE]updates were non-empty (`if len(parsed.stateUpdates) > 0 { ...
+// saveState(...) }`). A turn where the coder overwrote state.md via a
+// full-file write_file (e.g. editing "## Notes") and mangled or dropped the
+// json fence WITHOUT emitting [STATE] that same turn hit no branch at all —
+// the damage stood, and the next run's ReadState silently returned {}, total
+// silent memory loss. applyAndSaveState is the fix: the runner now calls it
+// on every turn regardless of whether that turn had updates, so a mangled
+// fence self-heals from the state read at the top of the run. The one carve
+// -out (stateReadOK) is for when that initial read itself failed — see the
+// function's own doc comment.
+//
+// runCoderTurns's ACTUAL call to applyAndSaveState (runner.go, inside the
+// turn loop) is exercised by driving a real coder.Coder.Generate call, which
+// is out of scope here — these tests instead call applyAndSaveState directly,
+// which is the same code path since the loop's own guard around it was
+// removed entirely (the call is now an unconditional one-liner, verifiable by
+// inspection of the diff rather than requiring a live coder harness).
+
+// TestApplyAndSaveStateHealsManagedFenceWithNoUpdates covers Test 1: a run
+// that emits NO [STATE] but whose state.md fence was mangled/removed mid-run
+// (e.g. a full-file write_file editing "## Notes") leaves the file with a
+// valid fence containing the PRE-RUN state — i.e. it self-heals instead of
+// losing memory.
+func TestApplyAndSaveStateHealsManagedFenceWithNoUpdates(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.md")
+
+	// Seed a well-formed state.md as a prior run would have left it.
+	if err := saveState(dir, "My Agent", map[string]interface{}{"cursor": "abc"}); err != nil {
+		t.Fatalf("seed saveState: %v", err)
+	}
+
+	// The runner reads state at the START of the run, before the agent's
+	// turns can touch the file.
+	currentState, err := agentdesigner.ReadState(path)
+	if err != nil {
+		t.Fatalf("seed ReadState: %v", err)
+	}
+	if currentState["cursor"] != "abc" {
+		t.Fatalf("seed state not as expected: %#v", currentState)
+	}
+
+	// Mid-run: the coder's write_file overwrites the whole document — e.g.
+	// while editing "## Notes" — and in doing so drops the json fence
+	// entirely. It does NOT emit [STATE] this turn.
+	mangled := "# State — My Agent\n\n## Notes\n\nadded a note, oops no fence anymore\n"
+	if err := os.WriteFile(path, []byte(mangled), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	// The runner calls this unconditionally at the end of the turn, even
+	// though parsed.stateUpdates is empty this turn.
+	if err := applyAndSaveState(dir, "My Agent", currentState, nil, true); err != nil {
+		t.Fatalf("applyAndSaveState: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "```json") {
+		t.Fatalf("fence was not restored:\n%s", string(raw))
+	}
+	// The Notes edit the agent made this turn must survive the heal.
+	if !strings.Contains(string(raw), "added a note, oops no fence anymore") {
+		t.Fatalf("agent's Notes edit was lost during the heal:\n%s", string(raw))
+	}
+
+	got, err := agentdesigner.ReadState(path)
+	if err != nil {
+		t.Fatalf("ReadState after heal: %v", err)
+	}
+	if got["cursor"] != "abc" {
+		t.Fatalf("pre-run state not recovered after heal: %#v", got)
+	}
+}
+
+// TestApplyAndSaveStateNoUpdatesIsByteIdenticalOnCanonicalFile covers half of
+// Test 2 and confirms the "rewrite is content-identical on a well-formed
+// file" claim: a no-update turn against a state.md already in the exact form
+// WriteState itself produces (heading, italic intro, canonical fenced JSON)
+// must leave the file byte-for-byte unchanged.
+func TestApplyAndSaveStateNoUpdatesIsByteIdenticalOnCanonicalFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.md")
+
+	if err := saveState(dir, "My Agent", map[string]interface{}{"cursor": "abc", "count": float64(3)}); err != nil {
+		t.Fatalf("seed saveState: %v", err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	currentState, err := agentdesigner.ReadState(path)
+	if err != nil {
+		t.Fatalf("ReadState: %v", err)
+	}
+
+	if err := applyAndSaveState(dir, "My Agent", currentState, nil, true); err != nil {
+		t.Fatalf("applyAndSaveState: %v", err)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("no-op save on a canonical file was not byte-identical.\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+// TestApplyAndSaveStateNoUpdatesPreservesOutsideFenceContentByteForByte
+// covers the other half of Test 2: a no-update turn against an untouched,
+// well-formed state.md must not corrupt it, and everything OUTSIDE the fence
+// (heading, italic intro, "## Notes" prose) survives byte-for-byte — even
+// though the fenced JSON itself is hand-formatted with different key order
+// and spacing than WriteState would produce, so it's expected to be
+// re-serialized (sorted keys, canonical indent — assessed elsewhere in this
+// work as functionally inert, since it doesn't change what the state means).
+func TestApplyAndSaveStateNoUpdatesPreservesOutsideFenceContentByteForByte(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.md")
+
+	notesBlock := "## Notes\n\nDo not touch the cursor manually — it tracks the last\nprocessed message ID from the source inbox.\n"
+	intro := "*Managed by Simple Agents. The block below is this agent's memory between runs — edit it if you need to fix something by hand.*\n"
+	heading := "# State — My Agent\n"
+	// Hand-formatted fence: single line, keys in non-alphabetical order —
+	// deliberately NOT what MarshalIndent would produce, so a byte-for-byte
+	// check on the WHOLE file would be the wrong assertion here.
+	seed := heading + "\n" + intro + "\n```json\n{\"stale\": \"drop-me\", \"cursor\": \"old-value\"}\n```\n" + notesBlock
+	if err := os.WriteFile(path, []byte(seed), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	currentState, err := agentdesigner.ReadState(path)
+	if err != nil {
+		t.Fatalf("ReadState: %v", err)
+	}
+
+	if err := applyAndSaveState(dir, "My Agent", currentState, nil, true); err != nil {
+		t.Fatalf("applyAndSaveState: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+
+	if !strings.HasPrefix(text, heading+"\n"+intro+"\n") {
+		t.Fatalf("heading/intro were not preserved byte-for-byte:\n%s", text)
+	}
+	if !strings.Contains(text, notesBlock) {
+		t.Fatalf("Notes section was not preserved byte-for-byte:\n%s", text)
+	}
+
+	got, err := agentdesigner.ReadState(path)
+	if err != nil {
+		t.Fatalf("ReadState after no-op save: %v", err)
+	}
+	if got["cursor"] != "old-value" || got["stale"] != "drop-me" {
+		t.Fatalf("state content changed on a no-update save: %#v", got)
+	}
+}
+
+// TestApplyAndSaveStateSkipsWriteWhenInitialReadFailed is the abort/failure-
+// path guard: if the run's initial ReadState failed (a well-formed fence
+// containing malformed JSON, or a genuine I/O error), currentState is a
+// synthetic {} standing in for content we could never parse. A no-update turn
+// must NOT write that {} back — doing so would silently replace
+// hand-recoverable bad state with nothing, exactly the failure mode this fix
+// exists to prevent, just moved up one level. The file must be left exactly
+// as it was.
+func TestApplyAndSaveStateSkipsWriteWhenInitialReadFailed(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.md")
+
+	// A well-formed fence (clean delimiters) whose JSON body does not parse —
+	// findStateFence reports loc.OK (it only checks delimiters), but
+	// ReadState's json.Decode fails, so ReadState returns a non-nil error.
+	seed := "# State — My Agent\n\n```json\n{\"cursor\": \n```\n"
+	if err := os.WriteFile(path, []byte(seed), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := agentdesigner.ReadState(path); err == nil {
+		t.Fatal("test setup invalid: expected ReadState to fail on malformed JSON in a well-formed fence")
+	}
+
+	// The runner's fallback for a failed read (runCoderAgent): stateMap
+	// becomes {}, stateReadOK becomes false.
+	currentState := map[string]interface{}{}
+
+	if err := applyAndSaveState(dir, "My Agent", currentState, nil, false); err != nil {
+		t.Fatalf("applyAndSaveState: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != seed {
+		t.Fatalf("malformed state.md was overwritten despite a failed initial read.\nwant (unchanged):\n%s\ngot:\n%s", seed, raw)
+	}
+}
+
+// TestApplyAndSaveStateExplicitUpdateAlwaysWritesEvenAfterFailedRead pins the
+// other half of the stateReadOK contract: when the coder DOES emit an
+// explicit [STATE] update this turn, the write always happens — even if the
+// initial read had failed — because an explicit update is the agent
+// deliberately establishing a new baseline, not an incidental no-op turn.
+// This is the pre-existing behavior and must be unchanged by the fix.
+func TestApplyAndSaveStateExplicitUpdateAlwaysWritesEvenAfterFailedRead(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.md")
+
+	seed := "# State — My Agent\n\n```json\n{\"cursor\": \n```\n"
+	if err := os.WriteFile(path, []byte(seed), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	currentState := map[string]interface{}{} // the runner's failed-read fallback
+	updates := []map[string]interface{}{{"cursor": "fresh-value"}}
+
+	if err := applyAndSaveState(dir, "My Agent", currentState, updates, false); err != nil {
+		t.Fatalf("applyAndSaveState: %v", err)
+	}
+
+	got, err := agentdesigner.ReadState(path)
+	if err != nil {
+		t.Fatalf("ReadState after explicit update: %v", err)
+	}
+	if got["cursor"] != "fresh-value" {
+		t.Fatalf("explicit [STATE] update was not written: %#v", got)
+	}
+}
+
+// TestApplyAndSaveStateMergeAndNullDeleteUnchanged covers Test 3 through the
+// NEW code path: the existing [STATE]-emitted merge behavior — including
+// null-key deletion — is unchanged now that applyAndSaveState (not an inline
+// block in runCoderTurns) is what the runner calls for every turn.
+func TestApplyAndSaveStateMergeAndNullDeleteUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.md")
+
+	if err := saveState(dir, "My Agent", map[string]interface{}{
+		"cursor": "old-value",
+		"stale":  "drop-me",
+	}); err != nil {
+		t.Fatalf("seed saveState: %v", err)
+	}
+	currentState, err := agentdesigner.ReadState(path)
+	if err != nil {
+		t.Fatalf("seed ReadState: %v", err)
+	}
+
+	updates := []map[string]interface{}{{"cursor": "new-value", "stale": nil}}
+	if err := applyAndSaveState(dir, "My Agent", currentState, updates, true); err != nil {
+		t.Fatalf("applyAndSaveState: %v", err)
+	}
+
+	got, err := agentdesigner.ReadState(path)
+	if err != nil {
+		t.Fatalf("ReadState after update: %v", err)
+	}
+	if got["cursor"] != "new-value" {
+		t.Fatalf("cursor not updated: %#v", got)
+	}
+	if _, ok := got["stale"]; ok {
+		t.Fatalf("null-deleted key resurfaced: %#v", got)
+	}
+}
 
 func TestParseCoderOutputChatBlankLineDoesNotDropContent(t *testing.T) {
 	// Reproduces the real failure: the runtime emitted a header, a blank line,
