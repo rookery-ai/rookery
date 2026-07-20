@@ -1,5 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { Bell, Bot, Trash2, Clock, AlertTriangle, Plus } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { cn, timeAgo } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { useServices } from "@/lib/connections";
+import { useDeferredDelete } from "@/lib/useDeferredDelete";
 import {
   useDashboard,
   greeting,
@@ -25,10 +27,9 @@ import {
 
 // ── Context pane: Inbox ─────────────────────────────────────────────────────
 
-function InboxCard({ msg }: { msg: InboxMessage }) {
+function InboxCard({ msg, onDelete }: { msg: InboxMessage; onDelete: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const markRead = useMarkInboxRead();
-  const del = useDeleteInboxMessage();
   const Icon = msg.source === "reminder" ? Bell : Bot;
 
   function handleClick() {
@@ -51,12 +52,7 @@ function InboxCard({ msg }: { msg: InboxMessage }) {
       </button>
       {expanded && (
         <div className="mt-1 flex justify-end">
-          <Button
-            variant="ghost"
-            size="xs"
-            className="text-danger"
-            onClick={() => del.mutate(msg.id)}
-          >
+          <Button variant="ghost" size="xs" className="text-danger" onClick={onDelete}>
             <Trash2 /> Delete
           </Button>
         </div>
@@ -69,7 +65,15 @@ function InboxSection() {
   const { data } = useInbox();
   const { data: dash } = useDashboard();
   const markAll = useMarkAllInboxRead();
-  const messages = data?.messages ?? [];
+  const del = useDeleteInboxMessage();
+  const qc = useQueryClient();
+  // Deferred-commit undo (§6.2): delete hides the row immediately, but the
+  // DELETE call itself only fires if the 5s toast expires without Undo.
+  const { schedule, pending } = useDeferredDelete({
+    commit: (id) => del.mutateAsync(id),
+    onRestore: () => qc.invalidateQueries({ queryKey: ["inbox"] }),
+  });
+  const messages = (data?.messages ?? []).filter((m) => !pending.has(m.id));
   const unread = data?.unread ?? 0;
 
   return (
@@ -98,7 +102,9 @@ function InboxSection() {
           )}
         </div>
       ) : (
-        messages.map((m) => <InboxCard key={m.id} msg={m} />)
+        messages.map((m) => (
+          <InboxCard key={m.id} msg={m} onDelete={() => schedule(m.id, "Notification deleted")} />
+        ))
       )}
     </div>
   );
@@ -106,8 +112,7 @@ function InboxSection() {
 
 // ── Context pane: Reminders ──────────────────────────────────────────────────
 
-function ReminderRow({ r }: { r: Reminder }) {
-  const del = useDeleteReminder();
+function ReminderRow({ r, onDelete }: { r: Reminder; onDelete: () => void }) {
   return (
     <div className="mb-1.5 flex items-start justify-between gap-2 rounded-lg border border-border bg-background px-2.5 py-2 text-xs">
       <div className="min-w-0">
@@ -116,7 +121,7 @@ function ReminderRow({ r }: { r: Reminder }) {
       </div>
       <button
         type="button"
-        onClick={() => del.mutate(r.id)}
+        onClick={onDelete}
         aria-label="Delete reminder"
         className="shrink-0 text-muted-2 hover:text-danger"
       >
@@ -176,7 +181,14 @@ function AddReminderForm() {
 
 function RemindersSection() {
   const { data } = useReminders();
-  const reminders = data?.reminders ?? [];
+  const del = useDeleteReminder();
+  const qc = useQueryClient();
+  // Same deferred-commit undo pattern as the inbox — see InboxSection.
+  const { schedule, pending } = useDeferredDelete({
+    commit: (id) => del.mutateAsync(id),
+    onRestore: () => qc.invalidateQueries({ queryKey: ["reminders"] }),
+  });
+  const reminders = (data?.reminders ?? []).filter((r) => !pending.has(r.id));
   return (
     <div className="pt-3">
       <h3 className="mb-1.5 px-1 text-[11px] font-bold uppercase tracking-wide text-muted-2">
@@ -185,7 +197,9 @@ function RemindersSection() {
       {reminders.length === 0 ? (
         <p className="px-1 text-xs text-muted-2">No reminders yet.</p>
       ) : (
-        reminders.map((r) => <ReminderRow key={r.id} r={r} />)
+        reminders.map((r) => (
+          <ReminderRow key={r.id} r={r} onDelete={() => schedule(r.id, "Reminder deleted")} />
+        ))
       )}
       <AddReminderForm />
     </div>
