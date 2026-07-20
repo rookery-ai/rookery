@@ -8,12 +8,23 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+export type RequestOptions = {
+  /** Survive the request past page/tab teardown (`beforeunload` handlers).
+   *  Scope this per call site, never set it as the default: keepalive
+   *  requests share a combined ~64KB body budget across the whole page, so
+   *  turning it on unconditionally here could make an unrelated large
+   *  PUT/POST (e.g. a KB note save) start failing outside any unload
+   *  scenario. */
+  keepalive?: boolean;
+};
+
+async function request<T>(method: string, path: string, body?: unknown, options?: RequestOptions): Promise<T> {
   const res = await fetch(path, {
     method,
     headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
     credentials: "same-origin",
+    ...(options?.keepalive ? { keepalive: true } : {}),
   });
   const text = await res.text();
   let data: unknown = null;
@@ -36,5 +47,5 @@ export const api = {
   get: <T>(path: string) => request<T>("GET", path),
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
   put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
-  del: <T>(path: string, body?: unknown) => request<T>("DELETE", path, body),
+  del: <T>(path: string, body?: unknown, options?: RequestOptions) => request<T>("DELETE", path, body, options),
 };

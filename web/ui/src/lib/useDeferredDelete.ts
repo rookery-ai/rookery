@@ -72,6 +72,16 @@ export function useDeferredDelete({ commit, onRestore }: UseDeferredDeleteOption
 
   const schedule = useCallback(
     (id: string, label: string) => {
+      // Clear any timer already scheduled for this id before setting a new
+      // one. Without this, scheduling the same id twice (e.g. a second
+      // delete click racing a flush) leaves the first timer alive but
+      // unreferenced in `timers` — it still fires 5s later and calls
+      // `commit` again. The `run()` guard above (`timer === undefined`)
+      // covers that as defence in depth, but a reusable primitive shouldn't
+      // rely on the guard alone to stay idempotent.
+      const existing = timers.current.get(id);
+      if (existing !== undefined) clearTimeout(existing);
+
       setPending((prev) => new Set(prev).add(id));
       toast({
         message: label,
@@ -111,5 +121,21 @@ export function useDeferredDelete({ commit, onRestore }: UseDeferredDeleteOption
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { schedule, flushAll, pending };
+  return {
+    schedule,
+    flushAll,
+    /**
+     * Ids to filter out of the caller's rendered list — NOT "delete still in
+     * flight." An id is added here the moment `schedule()` is called and is
+     * only ever removed by `cancel()` (Undo) or the failure branch of
+     * `run()`; a *successful* commit leaves it in `pending` for the rest of
+     * this hook instance's lifetime. That's deliberate, not an oversight:
+     * removing it on success would let a lagging background refetch
+     * momentarily resurrect the just-deleted row (a one-frame flash) before
+     * the caller's own query invalidation catches up and drops it for real.
+     * Do not drive a "deleting…" spinner off this set — it never clears on
+     * the success path, so the spinner would never turn off.
+     */
+    pending,
+  };
 }

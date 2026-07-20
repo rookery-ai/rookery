@@ -131,6 +131,30 @@ test("flushAll commits pending deletes immediately (navigation/unmount)", () => 
   expect(commit).toHaveBeenCalledWith("m1");
 });
 
+test("scheduling the same id twice does not orphan a timer that double-commits", () => {
+  vi.useFakeTimers();
+  const commit = vi.fn();
+  const onRestore = vi.fn();
+  wrap(<Harness commit={commit} onRestore={onRestore} />);
+
+  // Two schedule() calls for the same id (e.g. a second delete click racing
+  // a flush). Before the fix, the first timer is left in place but
+  // unreferenced once the map entry is overwritten by the second.
+  fireEvent.click(screen.getByRole("button", { name: "delete m1" }));
+  fireEvent.click(screen.getByRole("button", { name: "delete m1" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "flush" }));
+  expect(commit).toHaveBeenCalledTimes(1);
+
+  // Advance past the 5s window so the orphaned first timer, if it still
+  // exists, fires and calls commit a second time.
+  act(() => {
+    vi.advanceTimersByTime(5000);
+  });
+
+  expect(commit).toHaveBeenCalledTimes(1);
+});
+
 test("unmounting the component (route change away) flushes a pending delete", () => {
   vi.useFakeTimers();
   const commit = vi.fn();

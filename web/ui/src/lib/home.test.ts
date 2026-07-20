@@ -119,6 +119,9 @@ test("useDeleteReminder DELETEs by id", async () => {
   const call = vi.mocked(fetch).mock.calls[0];
   expect(call[0]).toBe("/api/v1/reminders/r1");
   expect((call[1] as RequestInit).method).toBe("DELETE");
+  // keepalive lets the beforeunload-triggered flush (useDeferredDelete)
+  // survive tab close instead of being aborted mid-flight.
+  expect((call[1] as RequestInit).keepalive).toBe(true);
 });
 
 // ── Inbox ────────────────────────────────────────────────────────────────────
@@ -157,6 +160,7 @@ test("useDeleteInboxMessage DELETEs by id", async () => {
   const call = vi.mocked(fetch).mock.calls[0];
   expect(call[0]).toBe("/api/v1/inbox/m1");
   expect((call[1] as RequestInit).method).toBe("DELETE");
+  expect((call[1] as RequestInit).keepalive).toBe(true);
 });
 
 test("useInboxPoll fetches the poll endpoint and normalizes nil recent", async () => {
