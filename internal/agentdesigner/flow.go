@@ -489,6 +489,8 @@ func (f *Flow) loadAgentForEdit(workspaceID, agentID string) (agentName, reconci
 		agentMD = scheduleLine + "\n" + agentMD
 	}
 
+	agentMD = reconcileSkillsLine(agentMD, f.skillNamesForAgent(agentID))
+
 	// Load the existing tool scripts so the edit *conversation* can see the actual
 	// code (not just AGENT.md). Without this the coder has no file access during Q&A
 	// and asks the user where the scripts are. Best-effort: missing tools/ is fine.
@@ -2331,15 +2333,26 @@ func parseSkillsLine(agentMD string, installed []prompts.SkillRef) []string {
 //
 // The return is always non-nil.
 func (f *Flow) resolveAgentSkills(ctx context.Context, workspaceID, agentID, agentMD string, pool []prompts.SkillRef, existing []string, isEdit bool) []string {
-	if isEdit && len(existing) > 0 {
-		return existing
-	}
-
+	// An explicit header always wins. It is the model's declaration for THIS build, and
+	// on an edit it is how a requested change ("also make it read CSVs") takes effect.
+	// Checking `existing` first instead would mean that once an agent has any skill, every
+	// later edit's header is silently discarded — the user asks for a change, the designer
+	// declares it, and nothing happens. Hand-curation is protected upstream instead:
+	// loadAgentForEdit rewrites the header from agent_skills before the coder ever sees
+	// AGENT.md, exactly as it already does for the schedule line, so an edit starts from
+	// what is actually attached rather than a stale header.
 	if declared := parseSkillsLine(agentMD, pool); declared != nil {
 		return declared
 	}
 
-	// No header at all — the common case on a weak build model. Ask directly.
+	// No header. On an edit, keep what is attached rather than re-deriving it — the user
+	// may have curated the set on the agent page, and a re-edit must not undo that. Same
+	// rule AutoBindTargets uses for connections.
+	if isEdit && len(existing) > 0 {
+		return existing
+	}
+
+	// No header and nothing attached — the common case on a weak build model. Ask directly.
 	var coderSvc *coder.Coder
 	if f.coderFor != nil {
 		coderSvc = f.coderFor(workspaceID)
@@ -2496,4 +2509,53 @@ func codePreview(code string, maxLines int) string {
 		return code
 	}
 	return strings.Join(lines[:maxLines], "\n") + "\n# ... (truncated)"
+}
+
+// skillNamesForAgent returns the skills currently attached to an agent, or nil.
+func (f *Flow) skillNamesForAgent(agentID string) []string {
+	if f.db == nil {
+		return nil
+	}
+	names, err := f.db.ListAgentSkillNames(agentID)
+	if err != nil {
+		return nil
+	}
+	return names
+}
+
+// reconcileSkillsLine rewrites AGENT.md's `# Skills:` header to match what is actually
+// attached in agent_skills, mirroring what loadAgentForEdit already does for the
+// `# Suggested schedule:` line.
+//
+// Without this the two drift. agent_skills is the source of truth and the agent page
+// writes to it directly, but hand-curating there never touches AGENT.md — so a skill the
+// user removed in the UI still sits in the file's header. Since an explicit header wins
+// at save time (see resolveAgentSkills), that stale header would resurrect the removed
+// skill on the next edit. Rewriting it here means an edit starts from the truth, and the
+// header-wins rule stays safe.
+//
+// The canonical line replaces the first header parseSkillsLine would recognise, wherever
+// it sits and however the model spelled it. With no such line, it is inserted directly
+// after the schedule line — position matters, because parseSkillsLine returns on the
+// FIRST header it finds, so ours must precede any drifted one further down.
+func reconcileSkillsLine(agentMD string, attached []string) string {
+	canonical := "# Skills: none"
+	if len(attached) > 0 {
+		canonical = "# Skills: " + strings.Join(attached, ", ")
+	}
+
+	lines := strings.Split(agentMD, "\n")
+	for i, line := range lines {
+		if _, ok := skillsHeaderInline(line); ok {
+			lines[i] = canonical
+			return strings.Join(lines, "\n")
+		}
+	}
+
+	// No header present. Insert after the schedule line if there is one, else at the top.
+	if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[0]), "# Suggested schedule:") {
+		out := append([]string{lines[0], canonical}, lines[1:]...)
+		return strings.Join(out, "\n")
+	}
+	return canonical + "\n" + agentMD
 }
