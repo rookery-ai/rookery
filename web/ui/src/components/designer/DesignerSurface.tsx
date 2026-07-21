@@ -8,7 +8,9 @@ import { ChatMessageBubble, TypingIndicator } from "@/components/chat/Bubbles";
 import { Composer } from "@/components/chat/Composer";
 import { ActivityCard, type ActivityStatus } from "@/components/chat/ActivityCard";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Stepper } from "./Stepper";
+import { SpecPanel } from "./SpecPanel";
 
 // ── Binding interfaces (Task 8 — the skill creator — reuses this component
 // via these exact shapes; see .superpowers/sdd/task-6-brief.md) ──────────────
@@ -77,6 +79,12 @@ type StateSnapshot = {
   last_progress?: string;
   generation_failed?: boolean;
   can_keep_as_is?: boolean;
+  // Present ONLY when active is true — omitted entirely (undefined, not {})
+  // on the inactive-session branch. Every read of these two fields must go
+  // through the `?? ""` / `?? {}` defaults below; never trust them present
+  // just because the response parsed.
+  pending_agent_md?: string;
+  pending_tools?: Record<string, string>;
 };
 
 type ResumeResponse = {
@@ -119,6 +127,9 @@ export function DesignerSurface({
   const [resumeBanner, setResumeBanner] = useState<{ name?: string } | null>(null);
   const [sse, setSse] = useState<{ lines: string[]; status: ActivityStatus } | null>(null);
   const [focusSignal, setFocusSignal] = useState(0);
+  const [view, setView] = useState<"transcript" | "spec">("transcript");
+  const [pendingAgentMD, setPendingAgentMD] = useState("");
+  const [pendingTools, setPendingTools] = useState<Record<string, string>>({});
   const navigate = useNavigate();
 
   const sseHandleRef = useRef<SSEHandle | null>(null);
@@ -208,6 +219,13 @@ export function DesignerSurface({
         setGenerationFailed(!!snap.generation_failed);
         setCanKeepAsIs(!!snap.can_keep_as_is);
         setGenerating(!!snap.generating);
+        // pending_agent_md/pending_tools only exist on this branch of the
+        // response (see StateSnapshot) — defended anyway, since an
+        // undefined slipping through to SpecPanel's .trim()/Object.entries
+        // is exactly the nil-slice-to-null-to-.length crash this codebase
+        // already shipped once.
+        setPendingAgentMD(snap.pending_agent_md ?? "");
+        setPendingTools(snap.pending_tools ?? {});
         if (snap.generating) ensureSSE("recovery", snap.last_progress || undefined);
       } else {
         setGenerating(false);
@@ -327,6 +345,32 @@ export function DesignerSurface({
     void handleSend(BUILD_PHRASE);
   }
 
+  // Deliberately NOT threaded through refetchState/ensureSSE: the "live"
+  // build path's design POST is the sole authoritative source for the
+  // transcript (see attachSourceRef's comment above) and a regression test
+  // pins ZERO extra /state calls across a same-tab build. This is a fully
+  // separate, user-triggered GET — fired only when the person opens the Spec
+  // tab — that updates ONLY pendingAgentMD/pendingTools, never touching
+  // messages/fsmState/generating, so it can't race or clobber anything that
+  // logic protects. Also the one spot pending_agent_md/pending_tools cross
+  // the JSON boundary — both are ABSENT (undefined) whenever `active` is
+  // false, never `{}` — so this always gates on `snap.active` and defends
+  // with `?? ""` / `?? {}` besides.
+  async function openSpecView() {
+    setView("spec");
+    if (!endpoints.state) return;
+    try {
+      const snap = await api.get<StateSnapshot>(endpoints.state);
+      if (unmountedRef.current) return;
+      if (snap.active) {
+        setPendingAgentMD(snap.pending_agent_md ?? "");
+        setPendingTools(snap.pending_tools ?? {});
+      }
+    } catch {
+      // Best-effort — the panel just keeps showing whatever it last had.
+    }
+  }
+
   const stepIndex = generating ? 2 : fsmState ? (STATE_INDEX[fsmState] ?? 0) : 0;
   const composerBusy = busy || recovering;
   const lastIsAssistant = messages.length > 0 && messages[messages.length - 1]!.role === "assistant";
@@ -362,53 +406,83 @@ export function DesignerSurface({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
-        <Stepper steps={labels.steps} activeIndex={stepIndex} />
+        <div className="flex items-center gap-4">
+          <Stepper steps={labels.steps} activeIndex={stepIndex} />
+          <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
+            <button
+              type="button"
+              onClick={() => setView("transcript")}
+              className={cn(
+                "rounded px-2.5 py-1 text-xs",
+                view === "transcript" ? "bg-chrome font-medium text-foreground" : "text-muted-2",
+              )}
+            >
+              Transcript
+            </button>
+            <button
+              type="button"
+              onClick={() => void openSpecView()}
+              className={cn(
+                "rounded px-2.5 py-1 text-xs",
+                view === "spec" ? "bg-chrome font-medium text-foreground" : "text-muted-2",
+              )}
+            >
+              Spec
+            </button>
+          </div>
+        </div>
         <Button variant="ghost" size="sm" onClick={() => void handleCancel()}>
           Cancel
         </Button>
       </div>
 
-      <ChatScroll>
-        {messages.map((m, i) => (
-          <ChatMessageBubble key={i} role={m.role} content={m.content} />
-        ))}
+      {view === "spec" ? (
+        <div className="min-h-0 flex-1">
+          <SpecPanel agentMD={pendingAgentMD} tools={pendingTools} />
+        </div>
+      ) : (
+        <ChatScroll>
+          {messages.map((m, i) => (
+            <ChatMessageBubble key={i} role={m.role} content={m.content} />
+          ))}
 
-        {sse && (
-          <div className="max-w-[78%] self-start">
-            <ActivityCard
-              title={`Building your ${labels.entityName}…`}
-              lines={sse.lines}
-              status={sse.status}
-              startedAt={sseStartedAtRef.current}
-              collapsible
-            />
-          </div>
-        )}
+          {sse && (
+            <div className="max-w-[78%] self-start">
+              <ActivityCard
+                title={`Building your ${labels.entityName}…`}
+                lines={sse.lines}
+                status={sse.status}
+                startedAt={sseStartedAtRef.current}
+                collapsible
+              />
+            </div>
+          )}
 
-        {busy && <TypingIndicator />}
+          {busy && <TypingIndicator />}
 
-        {showDesigningActions && (
-          <div className="flex gap-2 pl-1">
-            <Button size="sm" onClick={handleBuildClick}>
-              {labels.buildButton}
-            </Button>
-            <Button size="sm" variant="outline" onClick={focusComposer}>
-              Make changes
-            </Button>
-          </div>
-        )}
+          {showDesigningActions && (
+            <div className="flex gap-2 pl-1">
+              <Button size="sm" onClick={handleBuildClick}>
+                {labels.buildButton}
+              </Button>
+              <Button size="sm" variant="outline" onClick={focusComposer}>
+                Make changes
+              </Button>
+            </div>
+          )}
 
-        {showVerifyingActions && (
-          <div className="flex gap-2 pl-1">
-            <Button size="sm" onClick={() => void handleSend(SAVE_PHRASE)}>
-              {labels.saveButton}
-            </Button>
-            <Button size="sm" variant="outline" onClick={focusComposer}>
-              Request changes
-            </Button>
-          </div>
-        )}
-      </ChatScroll>
+          {showVerifyingActions && (
+            <div className="flex gap-2 pl-1">
+              <Button size="sm" onClick={() => void handleSend(SAVE_PHRASE)}>
+                {labels.saveButton}
+              </Button>
+              <Button size="sm" variant="outline" onClick={focusComposer}>
+                Request changes
+              </Button>
+            </div>
+          )}
+        </ChatScroll>
+      )}
 
       {generationFailed && (
         <div className="flex items-center justify-between gap-2 border-t border-warn/30 bg-warn/10 px-4 py-2 text-xs text-warn">

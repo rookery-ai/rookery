@@ -346,3 +346,46 @@ test("resume banner shows when not active and a draft is present; Resume replays
   expect(screen.getByText(/Resuming your draft for/)).toBeInTheDocument();
   expect(screen.queryByText(/unfinished draft/)).not.toBeInTheDocument();
 });
+
+// Task 2 (power-and-creation SP9): the Spec tab. The state endpoint omits
+// pending_agent_md/pending_tools ENTIRELY (undefined, not {}/"") whenever
+// active is false — this is the exact trap a prior sub-plan already hit once
+// (nil slice -> JSON null -> frontend `.length` crash) reached through a
+// different branch. These two tests pin that the Spec tab never crashes on
+// that shape, and that it DOES show real content once a build exists.
+test("Spec tab empty-states and does not crash when the state endpoint has no active session", async () => {
+  mockFetch({
+    "/x/state": () => jsonResponse({ active: false }), // no pending_agent_md/pending_tools keys at all
+  });
+  wrap(
+    <DesignerSurface endpoints={{ ...ENDPOINTS, state: "/x/state" }} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />,
+  );
+
+  await screen.findByRole("textbox"); // mount recovery settled
+  fireEvent.click(screen.getByRole("button", { name: "Spec" }));
+
+  expect(await screen.findByText(/nothing built yet/i)).toBeInTheDocument();
+});
+
+test("Spec tab renders the built brief and tool files once the state endpoint reports them", async () => {
+  mockFetch({
+    "/x/state": () =>
+      jsonResponse({
+        active: true,
+        generating: false,
+        state: "verifying",
+        history: [],
+        pending_agent_md: "# Daily digest\n\nSummarises your mail.",
+        pending_tools: { "tools/main.py": "print('hi')" },
+      }),
+  });
+  wrap(
+    <DesignerSurface endpoints={{ ...ENDPOINTS, state: "/x/state" }} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />,
+  );
+
+  await screen.findByRole("textbox");
+  fireEvent.click(screen.getByRole("button", { name: "Spec" }));
+
+  expect(await screen.findByRole("heading", { name: "Daily digest" })).toBeInTheDocument();
+  expect(screen.getByText("tools/main.py")).toBeInTheDocument();
+});
