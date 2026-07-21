@@ -354,17 +354,28 @@ test("resume banner shows when not active and a draft is present; Resume replays
 // different branch. These two tests pin that the Spec tab never crashes on
 // that shape, and that it DOES show real content once a build exists.
 test("Spec tab empty-states and does not crash when the state endpoint has no active session", async () => {
+  // The click's own GET must actually fire — asserted directly via the call
+  // count below, since both the mount snapshot and the click snapshot are
+  // legitimately `{active:false}` here (there's nothing built yet either
+  // way). See "Spec tab renders the built brief..." below for the sibling
+  // case where the response itself changes between mount and click.
+  let calls = 0;
   mockFetch({
-    "/x/state": () => jsonResponse({ active: false }), // no pending_agent_md/pending_tools keys at all
+    "/x/state": () => {
+      calls += 1;
+      // no pending_agent_md/pending_tools keys at all, on every call
+      return jsonResponse({ active: false });
+    },
   });
   wrap(
     <DesignerSurface endpoints={{ ...ENDPOINTS, state: "/x/state" }} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />,
   );
 
-  await screen.findByRole("textbox"); // mount recovery settled
+  await screen.findByRole("textbox"); // mount recovery settled (1st GET)
   fireEvent.click(screen.getByRole("button", { name: "Spec" }));
 
   expect(await screen.findByText(/nothing built yet/i)).toBeInTheDocument();
+  expect(calls).toBeGreaterThanOrEqual(2); // the click fired its own GET
 });
 
 test("no Spec tab renders when the caller has no state endpoint (the skill designer's shape)", async () => {
@@ -383,24 +394,93 @@ test("no Spec tab renders when the caller has no state endpoint (the skill desig
 });
 
 test("Spec tab renders the built brief and tool files once the state endpoint reports them", async () => {
+  // Regression for a red-verified false-positive: a mock that returns the
+  // SAME populated snapshot on every /x/state call lets this test pass even
+  // with the Spec button's onClick gutted to a no-op `setView("spec")` —
+  // mount-time recovery alone already populates pendingAgentMD/pendingTools
+  // before the click ever happens, so the click's own fetch is redundant in
+  // that scenario. Sequencing the mock (mount = unpopulated/inactive, click
+  // = populated) means the brief can ONLY appear once the click's own GET
+  // has actually run.
+  let calls = 0;
   mockFetch({
-    "/x/state": () =>
-      jsonResponse({
+    "/x/state": () => {
+      calls += 1;
+      if (calls === 1) return jsonResponse({ active: false }); // mount recovery: nothing yet
+      return jsonResponse({
         active: true,
         generating: false,
         state: "verifying",
         history: [],
         pending_agent_md: "# Daily digest\n\nSummarises your mail.",
         pending_tools: { "tools/main.py": "print('hi')" },
-      }),
+      });
+    },
   });
   wrap(
     <DesignerSurface endpoints={{ ...ENDPOINTS, state: "/x/state" }} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />,
   );
 
-  await screen.findByRole("textbox");
-  fireEvent.click(screen.getByRole("button", { name: "Spec" }));
+  await screen.findByRole("textbox"); // mount recovery settled (call 1: inactive)
+  fireEvent.click(screen.getByRole("button", { name: "Spec" })); // triggers call 2: populated
 
   expect(await screen.findByRole("heading", { name: "Daily digest" })).toBeInTheDocument();
   expect(screen.getByText("tools/main.py")).toBeInTheDocument();
+  expect(calls).toBeGreaterThanOrEqual(2);
+});
+
+test("a build finishing while the Spec tab is already open refreshes it automatically, with an in-progress note beforehand", async () => {
+  // The Composer renders below both views, so the user can click Build (or
+  // type "build it") while sitting on the Spec tab. Nothing used to refetch
+  // pendingAgentMD/pendingTools until the Spec button was clicked again, so
+  // the exact "does this look right?" moment could show stale/empty content
+  // with no signal. This pins the `generating`-driven auto-refetch effect —
+  // triggered only by `generating` flipping false while view === "spec" —
+  // and the "build in progress" note shown meanwhile.
+  let resolveBuild!: (r: Response) => void;
+  let stateCalls = 0;
+  mockFetch({
+    "/x/design": (body: any) => {
+      if (body.message === "describe") return jsonResponse({ response: "sounds good", done: false, state: "designing" });
+      return new Promise<Response>((resolve) => {
+        resolveBuild = resolve;
+      });
+    },
+    "/x/state": () => {
+      stateCalls += 1;
+      // Only the LAST call (after the build POST resolves and `generating`
+      // flips false) should see the populated snapshot — every call while
+      // the build is still in flight reports nothing built yet.
+      if (stateCalls <= 2) return jsonResponse({ active: false });
+      return jsonResponse({
+        active: true,
+        generating: false,
+        state: "verifying",
+        history: [],
+        pending_agent_md: "# Daily digest\n\nSummarises your mail.",
+        pending_tools: {},
+      });
+    },
+  });
+  wrap(
+    <DesignerSurface endpoints={{ ...ENDPOINTS, state: "/x/state" }} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />,
+  );
+
+  await screen.findByRole("textbox"); // mount recovery settled (state call 1)
+  await sendViaComposer("describe");
+
+  const buildBtn = await screen.findByRole("button", { name: LABELS.buildButton });
+  fireEvent.click(buildBtn); // generating -> true; build POST hangs
+
+  fireEvent.click(screen.getByRole("button", { name: "Spec" })); // state call 2 (still inactive)
+  expect(await screen.findByText(/nothing built yet/i)).toBeInTheDocument();
+  expect(screen.getByText(/build is in progress/i)).toBeInTheDocument();
+
+  // The build POST resolves -> generating flips false -> the effect
+  // refetches automatically, with no further click on the Spec button.
+  resolveBuild(jsonResponse({ response: "Built it!", done: false, state: "verifying" }));
+
+  expect(await screen.findByRole("heading", { name: "Daily digest" })).toBeInTheDocument();
+  expect(screen.queryByText(/build is in progress/i)).not.toBeInTheDocument();
+  expect(stateCalls).toBeGreaterThanOrEqual(3);
 });

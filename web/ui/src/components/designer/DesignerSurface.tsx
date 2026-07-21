@@ -371,6 +371,19 @@ export function DesignerSurface({
     }
   }
 
+  // A build that finishes while the user is already sitting on the Spec tab
+  // leaves it showing stale (or empty) content with no signal — nothing else
+  // refetches pendingAgentMD/pendingTools once the click that first opened
+  // the tab is done. Reacting to `generating` flipping false is the one
+  // signal available that's orthogonal to the SSE/transcript machinery
+  // above: it never touches attachSourceRef/doneRef/ensureSSE, and it only
+  // fires when Spec is the active view, so the zero-extra-/state-calls
+  // regression test (which never visits the Spec view) is unaffected.
+  useEffect(() => {
+    if (!generating && view === "spec" && endpoints.state) void openSpecView();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generating]);
+
   const stepIndex = generating ? 2 : fsmState ? (STATE_INDEX[fsmState] ?? 0) : 0;
   const composerBusy = busy || recovering;
   const lastIsAssistant = messages.length > 0 && messages[messages.length - 1]!.role === "assistant";
@@ -443,8 +456,15 @@ export function DesignerSurface({
       </div>
 
       {view === "spec" ? (
-        <div className="min-h-0 flex-1">
-          <SpecPanel agentMD={pendingAgentMD} tools={pendingTools} />
+        <div className="flex min-h-0 flex-1 flex-col">
+          {generating && (
+            <div className="border-b border-border bg-chrome px-4 py-2 text-xs text-muted-2">
+              A new build is in progress — this may not reflect it yet.
+            </div>
+          )}
+          <div className="min-h-0 flex-1">
+            <SpecPanel agentMD={pendingAgentMD} tools={pendingTools} />
+          </div>
         </div>
       ) : (
         <ChatScroll>

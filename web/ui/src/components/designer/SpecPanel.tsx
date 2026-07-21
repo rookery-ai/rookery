@@ -22,6 +22,15 @@ const WEEKDAYS = [
 // cron, because the user has no way to tell it's wrong. Anything outside
 // these four shapes falls back to the raw expression. Deliberately not a
 // general cron parser.
+//
+// The regexes below match *shape* only — they don't bound the captured
+// digits — so every branch re-checks the captured value against the field's
+// real range before trusting it: minute step 1–59 (a step of 0 isn't an
+// interval at all, and a step >59 in a 0-59 minute field only ever matches
+// minute 0 — i.e. it actually runs HOURLY, not "every 90 minutes"), hour
+// 0–23, weekday 0–7 (cron allows both 0 and 7 for Sunday). Out-of-range
+// values fall through to the raw-expression fallback rather than emitting
+// confidently wrong prose.
 export function parseSchedule(md: string): string | null {
   const m = md.match(/^#\s*Suggested schedule:\s*(.+?)\s*$/im);
   if (!m) return null;
@@ -29,17 +38,32 @@ export function parseSchedule(md: string): string | null {
   if (!cron || /^none$/i.test(cron)) return null;
 
   let mm = cron.match(/^\*\/(\d+)\s+\*\s+\*\s+\*\s+\*$/);
-  if (mm) return `every ${mm[1]} minutes`;
+  if (mm) {
+    const step = Number(mm[1]);
+    if (step >= 1 && step <= 59) {
+      return step === 1 ? "every minute" : `every ${step} minutes`;
+    }
+    return `schedule: ${cron}`;
+  }
 
   if (/^0\s+\*\s+\*\s+\*\s+\*$/.test(cron)) return "every hour";
 
   mm = cron.match(/^0\s+(\d{1,2})\s+\*\s+\*\s+\*$/);
-  if (mm) return `every day at ${mm[1]!.padStart(2, "0")}:00`;
+  if (mm) {
+    const hour = Number(mm[1]);
+    if (hour >= 0 && hour <= 23) return `every day at ${mm[1]!.padStart(2, "0")}:00`;
+    return `schedule: ${cron}`;
+  }
 
   mm = cron.match(/^0\s+(\d{1,2})\s+\*\s+\*\s+(\d)$/);
   if (mm) {
-    const day = WEEKDAYS[Number(mm[2])];
-    if (day) return `every ${day} at ${mm[1]!.padStart(2, "0")}:00`;
+    const hour = Number(mm[1]);
+    const weekday = Number(mm[2]);
+    if (hour >= 0 && hour <= 23 && weekday >= 0 && weekday <= 7) {
+      const day = WEEKDAYS[weekday % 7]; // cron allows both 0 and 7 for Sunday
+      if (day) return `every ${day} at ${mm[1]!.padStart(2, "0")}:00`;
+    }
+    return `schedule: ${cron}`;
   }
 
   return `schedule: ${cron}`;

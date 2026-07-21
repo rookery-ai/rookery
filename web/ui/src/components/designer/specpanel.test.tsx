@@ -91,6 +91,60 @@ describe("parseSchedule", () => {
   test("no header at all returns null", () => {
     expect(parseSchedule("Just a body, no header.")).toBeNull();
   });
+
+  test("every-1-minute shape uses singular grammar, not 'every 1 minutes'", () => {
+    expect(parseSchedule("# Suggested schedule: */1 * * * *\nbody")).toBe("every minute");
+  });
+
+  // Bound-checking regressions (reviewer-verified failures): the shape
+  // regexes match digits without range-checking them, so an out-of-range
+  // step/hour/weekday must fall through to the raw-cron fallback instead of
+  // emitting confidently wrong prose.
+  test("step of 0 is not an interval — falls back to raw cron, not 'every 0 minutes'", () => {
+    expect(parseSchedule("# Suggested schedule: */0 * * * *\nbody")).toBe(
+      "schedule: */0 * * * *",
+    );
+  });
+
+  test("step of 90 in a 0-59 minute field actually runs hourly — falls back, not 'every 90 minutes'", () => {
+    expect(parseSchedule("# Suggested schedule: */90 * * * *\nbody")).toBe(
+      "schedule: */90 * * * *",
+    );
+  });
+
+  test("step of 61 in a 0-59 minute field actually runs hourly — falls back, not 'every 61 minutes'", () => {
+    expect(parseSchedule("# Suggested schedule: */61 * * * *\nbody")).toBe(
+      "schedule: */61 * * * *",
+    );
+  });
+
+  test("hour 25 doesn't exist — falls back, not 'every day at 25:00'", () => {
+    expect(parseSchedule("# Suggested schedule: 0 25 * * *\nbody")).toBe(
+      "schedule: 0 25 * * *",
+    );
+  });
+
+  test("hour 99 doesn't exist — falls back, not 'every day at 99:00'", () => {
+    expect(parseSchedule("# Suggested schedule: 0 99 * * *\nbody")).toBe(
+      "schedule: 0 99 * * *",
+    );
+  });
+
+  test("hour 24 doesn't exist — falls back, not 'every day at 24:00'", () => {
+    expect(parseSchedule("# Suggested schedule: 0 24 * * *\nbody")).toBe(
+      "schedule: 0 24 * * *",
+    );
+  });
+
+  test("weekday 7 (cron's alternate Sunday) is in-range and resolves to Sunday", () => {
+    expect(parseSchedule("# Suggested schedule: 0 9 * * 7\nbody")).toMatch(/every sunday at 09:00/i);
+  });
+
+  test("weekday 8 is out of range — falls back to raw cron", () => {
+    expect(parseSchedule("# Suggested schedule: 0 9 * * 8\nbody")).toBe(
+      "schedule: 0 9 * * 8",
+    );
+  });
 });
 
 describe("parseSkills", () => {
