@@ -367,6 +367,21 @@ test("Spec tab empty-states and does not crash when the state endpoint has no ac
   expect(await screen.findByText(/nothing built yet/i)).toBeInTheDocument();
 });
 
+test("no Spec tab renders when the caller has no state endpoint (the skill designer's shape)", async () => {
+  // ENDPOINTS (module-level fixture) omits `state` by default — mirrors
+  // SkillNewPage's real ENDPOINTS, which never sets it (DesignerSurface's own
+  // binding comment: "state?: ... ABSENT for the skill designer"). A Spec tab
+  // here would be permanently dead — it has no state endpoint to fetch from.
+  mockFetch({
+    "/x/design": () => jsonResponse({ response: "sounds good", done: false, state: "designing" }),
+  });
+  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/skills" onDone={vi.fn()} />);
+
+  await sendViaComposer("describe");
+
+  expect(screen.queryByRole("button", { name: "Spec" })).not.toBeInTheDocument();
+});
+
 test("Spec tab renders the built brief and tool files once the state endpoint reports them", async () => {
   mockFetch({
     "/x/state": () =>

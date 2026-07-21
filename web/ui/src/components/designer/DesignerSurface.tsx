@@ -408,28 +408,34 @@ export function DesignerSurface({
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
         <div className="flex items-center gap-4">
           <Stepper steps={labels.steps} activeIndex={stepIndex} />
-          <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
-            <button
-              type="button"
-              onClick={() => setView("transcript")}
-              className={cn(
-                "rounded px-2.5 py-1 text-xs",
-                view === "transcript" ? "bg-chrome font-medium text-foreground" : "text-muted-2",
-              )}
-            >
-              Transcript
-            </button>
-            <button
-              type="button"
-              onClick={() => void openSpecView()}
-              className={cn(
-                "rounded px-2.5 py-1 text-xs",
-                view === "spec" ? "bg-chrome font-medium text-foreground" : "text-muted-2",
-              )}
-            >
-              Spec
-            </button>
-          </div>
+          {/* The Spec tab depends on GET .../design/state, which the skill
+              designer (Task 8's SkillNewPage) never wires up — endpoints.state
+              is documented as "ABSENT for the skill designer". Without this
+              gate a dead, permanently-empty tab would ship there too. */}
+          {endpoints.state && (
+            <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
+              <button
+                type="button"
+                onClick={() => setView("transcript")}
+                className={cn(
+                  "rounded px-2.5 py-1 text-xs",
+                  view === "transcript" ? "bg-chrome font-medium text-foreground" : "text-muted-2",
+                )}
+              >
+                Transcript
+              </button>
+              <button
+                type="button"
+                onClick={() => void openSpecView()}
+                className={cn(
+                  "rounded px-2.5 py-1 text-xs",
+                  view === "spec" ? "bg-chrome font-medium text-foreground" : "text-muted-2",
+                )}
+              >
+                Spec
+              </button>
+            </div>
+          )}
         </div>
         <Button variant="ghost" size="sm" onClick={() => void handleCancel()}>
           Cancel
