@@ -459,7 +459,7 @@ export function DesignerSurface({
         <div className="flex min-h-0 flex-1 flex-col">
           {generating && (
             <div className="border-b border-border bg-chrome px-4 py-2 text-xs text-muted-2">
-              A new build is in progress — this may not reflect it yet.
+              A new build is in progress — this will update automatically when it's done.
             </div>
           )}
           <div className="min-h-0 flex-1">
