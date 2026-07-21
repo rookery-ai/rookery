@@ -3,7 +3,6 @@ package agentdesigner
 import (
 	"context"
 	"log/slog"
-	"regexp"
 	"strings"
 
 	"github.com/ilijad1/simple-agents/internal/coder"
@@ -58,12 +57,21 @@ func SelectSkills(ctx context.Context, c *coder.Coder, workspaceID, agentMD stri
 // the same tolerant matcher parseSkillsLine uses so formatting drift (backticks, bullets,
 // prose wrapping, alternate delimiters) is already handled and unknown names are dropped.
 //
-// A model that ignores the "answer with only a list" instruction sometimes wraps the
-// answer in a sentence ("This agent reads PDFs, so: pdf") instead of returning a clean
-// list. Neither the bullet nor the full-string split recognises that shape (the
-// candidate token is "so: pdf", not "pdf"), so as a last resort — only when both
-// stricter strategies find nothing — lastLineCandidate takes just the final token of
-// the last non-empty line, which is where a model states its actual answer.
+// Deliberate limit: a single-line answer that buries the name behind a colon
+// ("This agent reads PDFs, so: pdf") is NOT recovered, and that is the safe choice. An
+// earlier version split the last line on a widened separator set including ":" to catch
+// it. That strategy could not tell an affirmative tail from a negated one, so
+// "This agent explicitly does NOT use: pdf" returned ["pdf"] — the model said no and the
+// parser heard yes, attaching a skill to a live agent against an explicit refusal.
+//
+// The colon split was its only marginal value: splitSkillCandidates already separates on
+// newlines, so every other realistic shape is covered without it — a clean list
+// ("pdf, csv"), a prose preamble with the list on the next line, and a lone name on its
+// own line all parse correctly. Guarding the tail with a negation-word blocklist was
+// rejected: natural-language negation is unbounded ("hardly", "instead of", "no need
+// for", "rather than"), so that is a whack-a-mole race, and this function's contract is
+// to fail closed. Losing one prose shape costs recall on a fallback-of-a-fallback;
+// attaching a rejected skill costs correctness on a live agent.
 func parseSelectorResponse(resp string, pool []prompts.SkillRef) []string {
 	byLower := make(map[string]string, len(pool))
 	for _, s := range pool {
@@ -78,37 +86,5 @@ func parseSelectorResponse(resp string, pool []prompts.SkillRef) []string {
 	if names := matchSkillNames(bulletCandidates(lines), byLower); len(names) > 0 {
 		return names
 	}
-	if names := matchSkillNames(splitSkillCandidates(resp), byLower); len(names) > 0 {
-		return names
-	}
-	return matchSkillNames(lastLineCandidate(resp), byLower)
-}
-
-// lastLineSepRe widens splitSkillCandidates' separator set with a colon — deliberately
-// excluded there because skill names are matched whole first, but needed here to split
-// a trailing clause like "...so: pdf".
-var lastLineSepRe = regexp.MustCompile(`(?i)\s*,\s*|\s*;\s*|\s*\|\s*|\s*\+\s*|\s*&\s*|\s*/\s*|\s+and\s+|\s+or\s+|\s*:\s*`)
-
-// lastLineCandidate returns a single best-guess candidate: the last token of the last
-// non-empty line, split on the widened separator set above. It exists only as the final
-// fallback in parseSelectorResponse, after the stricter strategies have already found
-// nothing — tokenising an entire prose sentence as a list of candidates would produce
-// garbage like "This agent reads PDFs" as a candidate name, so only the tail is tried.
-func lastLineCandidate(resp string) []string {
-	lines := strings.Split(resp, "\n")
-	var last string
-	for i := len(lines) - 1; i >= 0; i-- {
-		if t := strings.TrimSpace(lines[i]); t != "" {
-			last = t
-			break
-		}
-	}
-	if last == "" {
-		return nil
-	}
-	tokens := lastLineSepRe.Split(last, -1)
-	if len(tokens) == 0 {
-		return nil
-	}
-	return []string{tokens[len(tokens)-1]}
+	return matchSkillNames(splitSkillCandidates(resp), byLower)
 }

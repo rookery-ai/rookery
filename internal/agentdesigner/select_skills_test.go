@@ -20,7 +20,24 @@ func TestParseSelectorResponse(t *testing.T) {
 		want []string
 	}{
 		{"bare list", "pdf, csv", []string{"pdf", "csv"}},
-		{"prose wrapped", "This agent reads PDFs, so: pdf", []string{"pdf"}},
+		// Shapes the newline-aware splitter handles without any colon heuristic.
+		{"prose preamble then list", "Based on the agent's instructions, it needs:\npdf, csv", []string{"pdf", "csv"}},
+		{"prose line then lone name", "The agent processes documents.\npdf", []string{"pdf"}},
+
+		// DELIBERATE LIMIT, not an oversight: a single-line answer that buries the name
+		// behind a colon is not recovered. Recovering it required splitting the tail on
+		// ":", which cannot distinguish an affirmative tail from a negated one — see the
+		// negation cases below, which that strategy got actively wrong.
+		{"colon-buried single line is not recovered", "This agent reads PDFs, so: pdf", []string{}},
+
+		// The reason for that limit. Each of these once returned ["pdf"]: the model
+		// refused the skill and the parser attached it anyway. Attaching a rejected skill
+		// to a live agent is the exact failure this function's fail-closed contract exists
+		// to prevent, so a missed affirmative is the cheaper error.
+		{"negation with colon", "This agent explicitly does NOT use: pdf", []string{}},
+		{"negation terse", "Definitely not: pdf", []string{}},
+		{"negation avoid", "The agent should avoid using: pdf", []string{}},
+		{"negation plain", "This agent does not need pdf", []string{}},
 		{"bullet list", "- pdf\n- web-research\n", []string{"pdf", "web-research"}},
 		{"backticked", "`pdf`, `csv`", []string{"pdf", "csv"}},
 		{"none", "none", []string{}},
