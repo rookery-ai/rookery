@@ -66,3 +66,47 @@ func TestLocateSkillRootPrefersRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, dir, root)
 }
+
+func TestReadSkillTreeKeepsEveryShippingFile(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "SKILL.md"), "---\nname: x\n---\n")
+	writeFile(t, filepath.Join(dir, "scripts", "extract.py"), "print('hi')\n")
+	writeFile(t, filepath.Join(dir, "scripts", "install.sh"), "#!/bin/bash\necho hi\n")
+	writeFile(t, filepath.Join(dir, "scripts", "lib", "parse.py"), "X = 1\n")
+	writeFile(t, filepath.Join(dir, "references", "api.md"), "# API\n")
+
+	tree, err := ReadSkillTree(dir)
+	require.NoError(t, err)
+
+	require.Equal(t, map[string]string{
+		"scripts/extract.py":   "print('hi')\n",
+		"scripts/install.sh":   "#!/bin/bash\necho hi\n",
+		"scripts/lib/parse.py": "X = 1\n",
+		"references/api.md":    "# API\n",
+	}, tree)
+}
+
+func TestReadSkillTreeExcludesSkillMDAndTestArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "SKILL.md"), "---\nname: x\n---\n")
+	writeFile(t, filepath.Join(dir, "scripts", "run.py"), "print(1)\n")
+	writeFile(t, filepath.Join(dir, "sample.pdf"), "%PDF-1.4 binary\n")
+	writeFile(t, filepath.Join(dir, "run.out"), "stdout capture\n")
+
+	tree, err := ReadSkillTree(dir)
+	require.NoError(t, err)
+
+	require.Contains(t, tree, "scripts/run.py")
+	require.NotContains(t, tree, "SKILL.md")
+	require.NotContains(t, tree, "sample.pdf")
+	require.NotContains(t, tree, "run.out")
+}
+
+func TestReadSkillTreeEmpty(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "SKILL.md"), "---\nname: x\n---\n")
+
+	tree, err := ReadSkillTree(dir)
+	require.NoError(t, err)
+	require.Empty(t, tree)
+}

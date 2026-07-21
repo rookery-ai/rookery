@@ -1716,7 +1716,7 @@ func decideBuildOutcome(workDir, resultText, backendType string, scriptVerified 
 // left in agentDir by the coder's real end-to-end test step, so only the agent's own
 // source remains on disk after the build. Called post-save (after user approves) so
 // artifacts persist through StateVerifying as proof for the user, then are cleaned up once
-// the agent is persisted. Uses isTestArtifact (toolstree.go) as the shared classifier.
+// the agent is persisted. Uses IsTestArtifact (toolstree.go) as the shared classifier.
 // Also removes root-level scratch .json files (e.g. acc.json, probe.json) that are direct
 // children of agentDir but are not state.json — the one .json name still deliberately
 // excluded here, purely as a defensive belt-and-suspenders guard against ever deleting a
@@ -1740,7 +1740,7 @@ func cleanupTestArtifacts(agentDir string) {
 			return nil
 		}
 		name := info.Name()
-		if isTestArtifact(path, name, toolsDir) {
+		if IsTestArtifact(path, name, toolsDir) {
 			_ = os.Remove(path)
 			return nil
 		}

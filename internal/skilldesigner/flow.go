@@ -555,11 +555,11 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	}
 	skillMD := strings.TrimSpace(string(skillMDBytes))
 
-	scripts, err := readScriptsFromDisk(filepath.Join(stagingDir, "scripts"))
+	scripts, err := ReadSkillTree(skillRoot)
 	if err != nil {
 		cleanupStaging()
 		closeProgress()
-		return "", false, "", fmt.Errorf("read scripts: %w", err)
+		return "", false, "", fmt.Errorf("read skill files: %w", err)
 	}
 
 	// Guardrails on the actual content the coder wrote. The specific reason (regex/AST
@@ -632,32 +632,48 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	), false, "", nil
 }
 
-// runTests smoke-runs each script (py_compile to confirm no syntax errors) and
-// combines the result with the coder's own [TEST_OUTPUT]. For prompt-only skills
-// (no scripts) it synthesizes a frontmatter-validation note so a verifying
-// preview is always present.
-func (f *Flow) runTests(stagingDir string, scripts map[string]string, coderTestOut string) string {
+// runTests smoke-runs each checkable script (py_compile for .py, bash -n for .sh) and
+// combines the result with the coder's own [TEST_OUTPUT]. For prompt-only skills (no
+// checkable scripts) it synthesizes a frontmatter-validation note so a verifying preview
+// is always present. Files it cannot statically check (references/*.md, data fixtures,
+// …) are skipped rather than reported as failures.
+func (f *Flow) runTests(skillRoot string, scripts map[string]string, coderTestOut string) string {
 	var sb strings.Builder
 	if coderTestOut != "" {
 		sb.WriteString("Coder test output:\n")
 		sb.WriteString(coderTestOut)
 		sb.WriteString("\n\n")
 	}
-	if len(scripts) == 0 {
+
+	// Only files we can statically check are reported. A references/*.md must never
+	// appear as a failed test just because it isn't code.
+	var checkable []string
+	for _, name := range sortedScriptNames(scripts) {
+		if strings.HasSuffix(name, ".py") || strings.HasSuffix(name, ".sh") {
+			checkable = append(checkable, name)
+		}
+	}
+	if len(checkable) == 0 {
 		if sb.Len() == 0 {
 			sb.WriteString("Prompt-only skill — no scripts to run. Validated frontmatter parses and the description reads as a trigger.\n")
 		}
 		return strings.TrimSpace(sb.String())
 	}
-	sb.WriteString("Script smoke check (py_compile):\n")
-	for _, name := range sortedScriptNames(scripts) {
-		path := filepath.Join(stagingDir, "scripts", name)
-		cmd := exec.Command("python3", "-m", "py_compile", path)
+
+	sb.WriteString("Script smoke check:\n")
+	for _, name := range checkable {
+		path := filepath.Join(skillRoot, name)
+		var cmd *exec.Cmd
+		if strings.HasSuffix(name, ".sh") {
+			cmd = exec.Command("bash", "-n", path)
+		} else {
+			cmd = exec.Command("python3", "-m", "py_compile", path)
+		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			sb.WriteString(fmt.Sprintf("- ❌ %s: %s\n", name, strings.TrimSpace(string(out))))
 		} else {
-			sb.WriteString(fmt.Sprintf("- ✅ %s: compiles cleanly\n", name))
+			sb.WriteString(fmt.Sprintf("- ✅ %s: parses cleanly\n", name))
 		}
 	}
 	return strings.TrimSpace(sb.String())
@@ -1036,30 +1052,6 @@ func parseBlockedOutput(text string) string {
 		return strings.TrimSpace(text[start:])
 	}
 	return strings.TrimSpace(text[start : start+end])
-}
-
-// readScriptsFromDisk reads every .py file under scriptsDir (one level) as a
-// relpath→content map. Non-.py files are ignored.
-func readScriptsFromDisk(scriptsDir string) (map[string]string, error) {
-	entries, err := os.ReadDir(scriptsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]string{}, nil
-		}
-		return nil, err
-	}
-	scripts := map[string]string{}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".py") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(scriptsDir, e.Name()))
-		if err != nil {
-			return nil, err
-		}
-		scripts[e.Name()] = string(data)
-	}
-	return scripts, nil
 }
 
 func sortedScriptNames(scripts map[string]string) []string {

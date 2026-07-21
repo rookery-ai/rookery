@@ -30,11 +30,12 @@ func NewSaver(database *db.DB, skillsDir string) *SkillSaver {
 // SkillsDir returns the vaults base the saver writes under.
 func (s *SkillSaver) SkillsDir() string { return s.skillsDir }
 
-// SaveSkill writes a generated skill's SKILL.md (+ scripts/) to the user's vault
-// and upserts its DB row. If a skill with the same name already exists for the
-// user, its files are overwritten in place and the description is updated; the
-// row ID is preserved. The skill name must not collide with a core skill — the
-// caller (the creator flow) enforces that before reaching here.
+// SaveSkill writes a generated skill's SKILL.md plus its full generated tree
+// (scripts/, references/, and any other files the build produced) to the user's
+// vault and upserts its DB row. If a skill with the same name already exists for
+// the user, its files are overwritten in place and the description is updated;
+// the row ID is preserved. The skill name must not collide with a core skill —
+// the caller (the creator flow) enforces that before reaching here.
 func (s *SkillSaver) SaveSkill(workspaceID, name, description, skillMD string, scripts map[string]string) (*db.Skill, error) {
 	if skilllibrary.IsCoreSkill(name) {
 		return nil, fmt.Errorf("the name %q is reserved by a core skill; choose a different name", name)
@@ -53,35 +54,35 @@ func (s *SkillSaver) SaveSkill(workspaceID, name, description, skillMD string, s
 		return nil, fmt.Errorf("create skill dir: %w", err)
 	}
 
-	// Wipe and recreate scripts/ so revisions that drop a script take effect —
-	// the generated set is the full intended set, not a merge with the prior one.
-	scriptsDir := filepath.Join(skillDir, "scripts")
-	if err := os.RemoveAll(scriptsDir); err != nil {
-		return nil, fmt.Errorf("clear scripts dir: %w", err)
+	// Wipe and recreate the generated subtrees so a revision that drops a file takes
+	// effect — the generated set is the full intended set, not a merge with the prior
+	// one. SKILL.md is rewritten below; everything else lives under these dirs.
+	for _, sub := range []string{"scripts", "references"} {
+		if err := os.RemoveAll(filepath.Join(skillDir, sub)); err != nil {
+			return nil, fmt.Errorf("clear %s dir: %w", sub, err)
+		}
 	}
-	if len(scripts) > 0 {
-		if err := os.MkdirAll(scriptsDir, 0o750); err != nil {
-			return nil, fmt.Errorf("create scripts dir: %w", err)
+	names := make([]string, 0, len(scripts))
+	for n := range scripts {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		// Reject any path escape; generated files must stay inside the skill dir.
+		clean := filepath.Clean(n)
+		if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
+			return nil, fmt.Errorf("unsafe skill file path: %s", n)
 		}
-		// Sort for deterministic write order; paths are relative to scripts/.
-		names := make([]string, 0, len(scripts))
-		for n := range scripts {
-			names = append(names, n)
+		dest := filepath.Join(skillDir, clean)
+		if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
+			return nil, fmt.Errorf("create skill subdir: %w", err)
 		}
-		sort.Strings(names)
-		for _, n := range names {
-			// Reject any path escape; scripts must stay inside scripts/.
-			clean := filepath.Clean(n)
-			if strings.HasPrefix(clean, "..") || filepath.IsAbs(clean) {
-				return nil, fmt.Errorf("unsafe script path: %s", n)
-			}
-			dest := filepath.Join(scriptsDir, clean)
-			if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
-				return nil, fmt.Errorf("create script subdir: %w", err)
-			}
-			if err := os.WriteFile(dest, []byte(scripts[n]), 0o640); err != nil {
-				return nil, fmt.Errorf("write script %s: %w", n, err)
-			}
+		mode := os.FileMode(0o640)
+		if strings.HasSuffix(clean, ".sh") {
+			mode = 0o750 // a shell helper must be executable to be invokable
+		}
+		if err := os.WriteFile(dest, []byte(scripts[n]), mode); err != nil {
+			return nil, fmt.Errorf("write skill file %s: %w", n, err)
 		}
 	}
 

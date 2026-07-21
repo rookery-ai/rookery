@@ -1,16 +1,10 @@
 package skilldesigner
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/ilijad1/simple-agents/internal/skilllibrary"
 )
-
-func writeTestFile(dir, name, content string) error {
-	return os.WriteFile(filepath.Join(dir, name), []byte(content), 0o640)
-}
 
 // skillFrontmatterName mirrors the finalize step's name extraction (frontmatter
 // name, if present).
@@ -52,35 +46,6 @@ func TestParseTestOutput(t *testing.T) {
 	}
 	if got := parseTestOutput("[TEST_OUTPUT]unclosed"); got != "unclosed" {
 		t.Errorf("got %q", got)
-	}
-}
-
-func TestReadScriptsFromDisk(t *testing.T) {
-	dir := t.TempDir()
-	if err := writeTestFile(dir, "a.py", "print('hi')"); err != nil {
-		t.Fatal(err)
-	}
-	if err := writeTestFile(dir, "b.txt", "ignored"); err != nil {
-		t.Fatal(err)
-	}
-	scripts, err := readScriptsFromDisk(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(scripts) != 1 {
-		t.Fatalf("expected 1 script, got %d", len(scripts))
-	}
-	if scripts["a.py"] != "print('hi')" {
-		t.Errorf("unexpected content: %q", scripts["a.py"])
-	}
-
-	// Missing scripts dir → empty map, no error.
-	scripts, err = readScriptsFromDisk(dir + "/does-not-exist")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(scripts) != 0 {
-		t.Errorf("expected empty map, got %d", len(scripts))
 	}
 }
 
