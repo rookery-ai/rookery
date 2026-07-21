@@ -132,11 +132,24 @@ const (
 //
 // What this is NOT: a security boundary. It is a static pattern match over one parse of the
 // source, not a data-flow or taint analysis, and it can be defeated by anything that hides
-// the call shape from a simple AST walk. The known, NOT-fixed-here bypass: an aliased import
-// (`import subprocess as sp; sp.run(..., shell=True)`, `import os as o; o.system(...)`)
-// slips past every rule in this file, in BOTH profiles — the checker only recognizes the
-// literal names `subprocess`/`os`/`socket`. This is pre-existing, out of scope for this
-// change, and logged for triage; do not assume this checker stops it.
+// the call shape from a simple AST walk.
+//
+// The known, NOT-fixed-here bypass is aliased imports, and it applies to SOME rules and not
+// others — which half matters, so be precise about it:
+//
+//   - Rules keyed on the RECEIVER's literal name are defeated by an alias. `import
+//     subprocess as sp; sp.run(['rm', '-rf', '/'])` escapes the outright subprocess ban and
+//     the `**` spread rule, both of which test `val == 'subprocess'`. Aliased
+//     `socket.socket()` escapes the socket ban the same way.
+//   - Rules keyed on the CALLED name are not. `import os as o; o.system('ls')` is still
+//     caught, because the os rule tests the attribute (`system`) rather than the receiver —
+//     as a side effect it also fires on any unrelated object's `.system()` method. The
+//     builtin bans (eval/exec/compile/__import__) and the `shell=` keyword rule are
+//     likewise receiver-agnostic, so an aliased `sp.run(..., shell=True)` IS caught by the
+//     shell rule even though the subprocess ban misses it.
+//
+// This is pre-existing and out of scope for this change; it is logged for triage. Do not
+// assume this checker stops an aliased subprocess or socket call.
 //
 // ** spread rule: a `**something` keyword (subprocess.run(['ls'], **something)) is an
 // ast.keyword node whose .arg is None — it doesn't name `shell` directly, so a per-call walk
