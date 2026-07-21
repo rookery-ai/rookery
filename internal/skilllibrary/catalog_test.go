@@ -116,3 +116,36 @@ func TestLoadBundledMatchesDisk(t *testing.T) {
 	}
 	require.Len(t, skilllibrary.LoadBundled(), onDisk)
 }
+
+// TestCoreSkillsShipNoScripts pins an architectural constraint that is invisible from the
+// source tree alone.
+//
+// A core skill reaches an agent through skilllibrary.CoreSkillContent, which returns the
+// embedded SKILL.md text and nothing else — agentrunner.loadDeclaredSkillContent has no
+// path that materializes a core skill's scripts/ onto disk, and this package's own docs
+// state there is "no disk seeding". So a shipped scripts/helper.py is dead weight: the
+// body could tell an agent to run `python3 scripts/helper.py`, and at run time that file
+// would not exist in its working directory.
+//
+// User skills are the opposite — they live in the vault on disk, scripts included — which
+// is why the skill guardrails still validate script content.
+//
+// Core skills must therefore teach through inline commands and snippets the agent can run
+// or adapt directly. Lifting this restriction means materializing the embedded scripts at
+// run time; until that exists, shipping them would promise a file that never arrives.
+func TestCoreSkillsShipNoScripts(t *testing.T) {
+	entries, err := os.ReadDir(skillsRoot)
+	require.NoError(t, err)
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		scriptsDir := filepath.Join(skillsRoot, e.Name(), "scripts")
+		if _, statErr := os.Stat(scriptsDir); statErr == nil {
+			t.Errorf("core skill %q ships a scripts/ directory, but core-skill scripts are "+
+				"never written to disk at run time — teach through inline snippets instead, "+
+				"or implement runtime materialization first", e.Name())
+		}
+	}
+}

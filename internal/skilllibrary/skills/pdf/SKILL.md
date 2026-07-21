@@ -78,13 +78,31 @@ for i, page in enumerate(r.pages):
     with open(f"page-{i+1}.pdf", "wb") as fh: o.write(fh)
 ```
 
-## Helper script
+## Extracting text
 
-`scripts/pdf_text.py` extracts text with `pdftotext` and falls back to `pdfplumber`:
+`pdftotext` is the fastest path and preserves layout:
 
 ```bash
-python3 scripts/pdf_text.py report.pdf --pages 1-5
+"$HOME/.local/bin/pdftotext" -layout report.pdf -          # whole document to stdout
+"$HOME/.local/bin/pdftotext" -layout -f 1 -l 5 report.pdf - # pages 1-5 only
 ```
+
+Resolve the tool at `$HOME/.local/bin/<tool>` first (that is where the
+cli-tool-installer skill puts it, and it is NOT on the sandboxed PATH), then fall back to
+whatever `command -v pdftotext` finds.
+
+If `pdftotext` is unavailable, `pdfplumber` handles the same job in Python and also reads
+scanned-but-OCR'd files:
+
+```python
+import pdfplumber
+with pdfplumber.open("report.pdf") as pdf:
+    text = "\n\n".join(p.extract_text() or "" for p in pdf.pages[:5])
+print(text)
+```
+
+Install it with `python3 -m pip install --user pdfplumber` if it is missing. If neither is
+available, say which tool is missing and how to install it — do not guess at the content.
 
 ## Notes
 
