@@ -145,10 +145,14 @@ class Checker(ast.NodeVisitor):
     def visit_Call(self, node):
         if isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN_NAMES:
             violations.append(f"forbidden call: {node.func.id}()")
-        # shell=True evaluates a shell string in ANY profile — same surface as os.system.
+        # shell=<anything but literal False> evaluates a shell string in ANY profile — same
+        # surface as os.system. subprocess treats shell= by truthiness, not identity, so
+        # shell=1, shell=<a variable>, shell=(1==1) etc. are all equally dangerous; only a
+        # provably-False literal (or omitting shell entirely) is safe. A ** spread keyword
+        # has kw.arg is None, so guard the comparison against that.
         for kw in node.keywords:
-            if kw.arg == 'shell' and isinstance(kw.value, ast.Constant) and kw.value.value is True:
-                violations.append("forbidden: shell=True")
+            if kw.arg == 'shell' and not (isinstance(kw.value, ast.Constant) and kw.value.value is False):
+                violations.append("forbidden: shell=<non-False>")
         if isinstance(node.func, ast.Attribute):
             attr = node.func.attr
             if attr in FORBIDDEN_OS_ATTRS:

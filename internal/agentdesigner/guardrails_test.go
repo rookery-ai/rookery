@@ -145,6 +145,24 @@ func TestGuardrailProfiles(t *testing.T) {
 			skillOK: false,
 		},
 		{
+			name:    "subprocess with shell=1 (truthy non-literal-True bypass)",
+			code:    "import subprocess\nsubprocess.run(['ls'], shell=1)\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "subprocess with shell=<variable> (non-Constant bypass)",
+			code:    "import subprocess\nflag = True\nsubprocess.run(['ls'], shell=flag)\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "subprocess list form with shell=False explicit",
+			code:    "import subprocess\nsubprocess.run(['ls'], shell=False)\n",
+			agentOK: false,
+			skillOK: true,
+		},
+		{
 			name:    "os.system",
 			code:    "import os\nos.system('ls')\n",
 			agentOK: false,
