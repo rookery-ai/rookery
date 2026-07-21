@@ -210,7 +210,7 @@ func TestReconcileSkillsLine(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			require.Equal(t, tc.want, reconcileSkillsLine(tc.md, tc.attached))
+			require.Equal(t, tc.want, reconcileSkillsLine(tc.md, tc.attached, true))
 		})
 	}
 }
@@ -222,11 +222,39 @@ func TestReconciledHeaderRoundTripsThroughParse(t *testing.T) {
 		{Name: "pdf", Description: "Read PDFs."},
 		{Name: "csv", Description: "Read CSVs."},
 	}
-	md := reconcileSkillsLine("# Suggested schedule: none\n\nBody.\n", []string{"pdf", "csv"})
+	md := reconcileSkillsLine("# Suggested schedule: none\n\nBody.\n", []string{"pdf", "csv"}, true)
 	require.Equal(t, []string{"pdf", "csv"}, parseSkillsLine(md, pool))
 
-	none := reconcileSkillsLine("# Suggested schedule: none\n\nBody.\n", nil)
+	none := reconcileSkillsLine("# Suggested schedule: none\n\nBody.\n", nil, true)
 	got := parseSkillsLine(none, pool)
 	require.NotNil(t, got, "an explicit none must parse as non-nil empty, not as absent")
 	require.Empty(t, got)
+}
+
+// If the attached set cannot be read, reconciliation must leave AGENT.md untouched.
+// Writing "# Skills: none" for an unreadable DB forges a declaration, and because an
+// explicit header wins at save time that forgery would persist as an EMPTY skill set —
+// silently wiping curated attachments over a transient SQLITE_BUSY.
+func TestReconcileSkillsLineLeavesFileAloneWhenUnknown(t *testing.T) {
+	md := "# Suggested schedule: none\n# Skills: pdf, csv\n\nBody.\n"
+	require.Equal(t, md, reconcileSkillsLine(md, nil, false))
+
+	pool := []prompts.SkillRef{{Name: "pdf", Description: "x"}, {Name: "csv", Description: "y"}}
+	require.Equal(t, []string{"pdf", "csv"}, parseSkillsLine(reconcileSkillsLine(md, nil, false), pool),
+		"the real attachments must survive an unreadable DB, not be zeroed")
+}
+
+// parseSkillsLine accepts a bare heading followed by bullets. Reconciliation must replace
+// that whole block, not insert a second header above it and strand the stale bullets as
+// contradictory prose.
+func TestReconcileSkillsLineReplacesBulletListShape(t *testing.T) {
+	md := "# Suggested schedule: none\n\n## Skills\n- pdf\n- csv\n\nBody.\n"
+
+	got := reconcileSkillsLine(md, []string{"csv"}, true)
+
+	require.Equal(t, "# Suggested schedule: none\n\n# Skills: csv\n\nBody.\n", got)
+	require.NotContains(t, got, "- pdf", "the stale bullet list must be gone, not merely outranked")
+
+	pool := []prompts.SkillRef{{Name: "pdf", Description: "x"}, {Name: "csv", Description: "y"}}
+	require.Equal(t, []string{"csv"}, parseSkillsLine(got, pool))
 }

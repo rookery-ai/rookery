@@ -489,7 +489,8 @@ func (f *Flow) loadAgentForEdit(workspaceID, agentID string) (agentName, reconci
 		agentMD = scheduleLine + "\n" + agentMD
 	}
 
-	agentMD = reconcileSkillsLine(agentMD, f.skillNamesForAgent(agentID))
+	attachedSkills, skillsKnown := f.skillNamesForAgent(agentID)
+	agentMD = reconcileSkillsLine(agentMD, attachedSkills, skillsKnown)
 
 	// Load the existing tool scripts so the edit *conversation* can see the actual
 	// code (not just AGENT.md). Without this the coder has no file access during Q&A
@@ -2512,15 +2513,17 @@ func codePreview(code string, maxLines int) string {
 }
 
 // skillNamesForAgent returns the skills currently attached to an agent, or nil.
-func (f *Flow) skillNamesForAgent(agentID string) []string {
+func (f *Flow) skillNamesForAgent(agentID string) ([]string, bool) {
 	if f.db == nil {
-		return nil
+		return nil, false
 	}
 	names, err := f.db.ListAgentSkillNames(agentID)
 	if err != nil {
-		return nil
+		slog.Warn("agentdesigner: could not read attached skills; leaving AGENT.md's header alone",
+			"agent_id", agentID, "err", err)
+		return nil, false
 	}
-	return names
+	return names, true
 }
 
 // reconcileSkillsLine rewrites AGENT.md's `# Skills:` header to match what is actually
@@ -2538,7 +2541,15 @@ func (f *Flow) skillNamesForAgent(agentID string) []string {
 // it sits and however the model spelled it. With no such line, it is inserted directly
 // after the schedule line — position matters, because parseSkillsLine returns on the
 // FIRST header it finds, so ours must precede any drifted one further down.
-func reconcileSkillsLine(agentMD string, attached []string) string {
+func reconcileSkillsLine(agentMD string, attached []string, known bool) string {
+	// Could not read what is attached. Leave the file alone: writing "none" here would be
+	// a forged declaration, and since an explicit header wins at save time it would
+	// persist as an empty skill set, wiping real attachments over a transient DB error.
+	// Doing nothing degrades to the pre-reconciliation behaviour, which loses nothing.
+	if !known {
+		return agentMD
+	}
+
 	canonical := "# Skills: none"
 	if len(attached) > 0 {
 		canonical = "# Skills: " + strings.Join(attached, ", ")
@@ -2549,6 +2560,20 @@ func reconcileSkillsLine(agentMD string, attached []string) string {
 		if _, ok := skillsHeaderInline(line); ok {
 			lines[i] = canonical
 			return strings.Join(lines, "\n")
+		}
+		// parseSkillsLine also accepts a bare "## Skills" heading followed by a bullet
+		// list. Replacing just the heading would strand the bullets as contradictory
+		// prose, so the heading AND the list it introduces are replaced together.
+		if skillsListHeading(line) {
+			j := i + 1
+			for j < len(lines) && bulletItemRe.MatchString(lines[j]) {
+				j++
+			}
+			out := make([]string, 0, len(lines))
+			out = append(out, lines[:i]...)
+			out = append(out, canonical)
+			out = append(out, lines[j:]...)
+			return strings.Join(out, "\n")
 		}
 	}
 
