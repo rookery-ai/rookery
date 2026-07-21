@@ -49,3 +49,22 @@ func TestSelectSkillsEmptyPool(t *testing.T) {
 	require.NotNil(t, got)
 	require.Empty(t, got)
 }
+
+// TestSelectSkills_Success drives the real Chat/Generate loop end to end (via the
+// package's existing fake-CLI-coder harness) rather than only unit-testing the parser,
+// closing the gap the brief's three tests leave: the loop that calls the coder at all.
+func TestSelectSkills_Success(t *testing.T) {
+	fake := newFakeCoder(t, "print('pdf, csv')\n")
+	got := SelectSkills(t.Context(), fake, "ws", "# Agent\nReads PDFs and CSVs.\n", testPool)
+	require.Equal(t, []string{"pdf", "csv"}, got)
+}
+
+// TestSelectSkills_CoderErrorFailsClosed exercises the retry-then-fail-closed path: the
+// coder call itself errors on every attempt, and SelectSkills must still return a
+// non-nil empty slice (never propagate the error, never attach a guess).
+func TestSelectSkills_CoderErrorFailsClosed(t *testing.T) {
+	fake := newFakeCoder(t, "import sys\nsys.exit(1)\n")
+	got := SelectSkills(t.Context(), fake, "ws", "# Agent\nReads PDFs.\n", testPool)
+	require.NotNil(t, got)
+	require.Empty(t, got)
+}
