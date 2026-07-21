@@ -1142,6 +1142,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		BackendType:        backendType,
 		Connections:        connRefs,
 		ConnectionTools:    connToolNames,
+		Skills:             sess.Skills,
 	}
 
 	// Set up a buffered progress channel for SSE and snapshot the Telegram progress func.

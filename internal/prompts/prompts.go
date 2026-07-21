@@ -593,6 +593,35 @@ Write your analysis (3-5 sentences) before proceeding to file creation.
 `
 }
 
+// availableSkillsBlock renders the skill catalog and the header contract. It is the
+// SINGLE source shared by the design prompt and both implementation prompts.
+//
+// The header requirement used to live only in the design system prompt — the text-only
+// conversation that writes nothing to disk — while the prompt that actually authors
+// AGENT.md never mentioned skills at all. parseSkillsLine was therefore looking for
+// something no prompt had asked the file's author to produce, and no agent on the install
+// had a single skill attached.
+//
+// The text below is the design prompt's pre-existing wording, preserved verbatim on
+// extraction so BuildDesignSystemPrompt's rendered output does not change.
+func availableSkillsBlock(skills []SkillRef) string {
+	if len(skills) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("<available_skills>\n")
+	sb.WriteString("The user has these pre-built skills installed. When the task clearly benefits from one, use it:\n")
+	sb.WriteString("- Mention it naturally in the conversation (e.g. \"I'll use the pdf-reader skill to extract the text\").\n")
+	sb.WriteString("- You MUST include a `# Skills: skill-one, skill-two` header line in the generated AGENT.md (alongside the schedule line) declaring EXACTLY the skills this agent needs.\n")
+	sb.WriteString("- List ONLY the specific skills the agent actually uses at runtime — never list all available skills, and never omit the line. If the agent genuinely needs none, write `# Skills: none`.\n")
+	sb.WriteString("- The names must match the skill names below exactly; they are how the agent's skills are recorded.\n\n")
+	for _, sk := range skills {
+		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", sk.Name, sk.Description))
+	}
+	sb.WriteString("</available_skills>\n\n")
+	return sb.String()
+}
+
 // BuildDesignSystemPrompt returns the system prompt for the conversational agent
 // design/edit wizard. It guides the coder to act as a design assistant that asks
 // focused questions and proposes an implementation plan before any code is written.
@@ -709,18 +738,7 @@ that makes these agents fail.
 	}
 
 	// ── Skills ────────────────────────────────────────────────────────────────
-	if len(p.Skills) > 0 {
-		sb.WriteString("<available_skills>\n")
-		sb.WriteString("The user has these pre-built skills installed. When the task clearly benefits from one, use it:\n")
-		sb.WriteString("- Mention it naturally in the conversation (e.g. \"I'll use the pdf-reader skill to extract the text\").\n")
-		sb.WriteString("- You MUST include a `# Skills: skill-one, skill-two` header line in the generated AGENT.md (alongside the schedule line) declaring EXACTLY the skills this agent needs.\n")
-		sb.WriteString("- List ONLY the specific skills the agent actually uses at runtime — never list all available skills, and never omit the line. If the agent genuinely needs none, write `# Skills: none`.\n")
-		sb.WriteString("- The names must match the skill names below exactly; they are how the agent's skills are recorded.\n\n")
-		for _, sk := range p.Skills {
-			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", sk.Name, sk.Description))
-		}
-		sb.WriteString("</available_skills>\n\n")
-	}
+	sb.WriteString(availableSkillsBlock(p.Skills))
 
 	// ── Connected service accounts ────────────────────────────────────────────
 	if len(p.Connections) > 0 {
@@ -917,6 +935,9 @@ type ImplementationParams struct {
 	Connections     []ConnectionRef
 	ConnectionTools []string // the exact tool names those connections expose
 	ConnectorBin    string   // absolute simple-agents path for the CLI connector-exec command
+	// Skills is the pool (core + user) offered to the build coder so it can declare the
+	// agent's `# Skills:` header. Without this the header is never emitted.
+	Skills []SkillRef
 }
 
 // capabilitySpec renders the authoritative capability blocks shared with the
@@ -936,6 +957,7 @@ func (p ImplementationParams) capabilitySpec() string {
 	// Tell the BUILD coder about the native connector tools it has for the workspace's
 	// connected accounts — otherwise a weak model ignores them and hunts for API keys.
 	sb.WriteString(connectedToolsBlock(p.Connections, p.ConnectionTools, p.BackendType, p.ConnectorBin))
+	sb.WriteString(availableSkillsBlock(p.Skills))
 	return sb.String()
 }
 
