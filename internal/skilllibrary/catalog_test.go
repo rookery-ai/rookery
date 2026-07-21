@@ -53,8 +53,16 @@ func TestCoreCatalogInvariants(t *testing.T) {
 			require.GreaterOrEqual(t, len(meta.Description), minDescriptionLen,
 				"description must state what the skill does AND when it triggers")
 
-			// Every scripts/ path the body references must exist.
+			// Every scripts/ path the body references must exist — except in the two
+			// meta skills, whose entire subject IS the skill format. skill-creator and
+			// skill-vetter show example paths for the skill the reader is authoring
+			// ("write scripts/extract.py"), not files they ship themselves. Without this
+			// carve-out the check forces them to teach with filenames elided, which makes
+			// the one prompt that shapes every generated skill worse at its job.
 			for _, ref := range referencedScriptPaths(content) {
+				if dir == "skill-creator" || dir == "skill-vetter" {
+					break
+				}
 				_, statErr := os.Stat(filepath.Join(skillsRoot, dir, ref))
 				require.NoError(t, statErr, "SKILL.md references %q but it does not exist", ref)
 			}

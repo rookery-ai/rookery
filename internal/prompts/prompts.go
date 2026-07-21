@@ -31,6 +31,7 @@ type ChatMessage struct {
 type SkillRef struct {
 	Name        string
 	Description string
+	Category    string // e.g. "File Processing"; empty renders under "Other"
 }
 
 // ChatAppInfo describes a connected chat platform and the commands available in it.
@@ -625,8 +626,35 @@ func availableSkillsBlock(skills []SkillRef) string {
 	sb.WriteString("- You MUST include a `# Skills: skill-one, skill-two` header line in the generated AGENT.md (alongside the schedule line) declaring EXACTLY the skills this agent needs.\n")
 	sb.WriteString("- List ONLY the specific skills the agent actually uses at runtime — never list all available skills, and never omit the line. If the agent genuinely needs none, write `# Skills: none`.\n")
 	sb.WriteString("- The names must match the skill names below exactly; they are how the agent's skills are recorded.\n\n")
+
+	// Grouped by category so the model scans a structured list rather than a flat wall.
+	// With 22 core skills the descriptions alone run to ~900 words; they stay at full
+	// length because the trigger phrases ARE the matching signal, and truncating them
+	// would undercut the selector that depends on them.
+	byCat := map[string][]SkillRef{}
+	var order []string
 	for _, sk := range skills {
-		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", sk.Name, sk.Description))
+		cat := sk.Category
+		if cat == "" {
+			cat = "Other"
+		}
+		if _, seen := byCat[cat]; !seen {
+			order = append(order, cat)
+		}
+		byCat[cat] = append(byCat[cat], sk)
+	}
+	sort.Strings(order)
+	for _, cat := range order {
+		sb.WriteString("\n")
+		sb.WriteString(cat)
+		sb.WriteString(":\n")
+		for _, sk := range byCat[cat] {
+			sb.WriteString("- **")
+			sb.WriteString(sk.Name)
+			sb.WriteString("** — ")
+			sb.WriteString(sk.Description)
+			sb.WriteString("\n")
+		}
 	}
 	sb.WriteString("</available_skills>\n\n")
 	return sb.String()

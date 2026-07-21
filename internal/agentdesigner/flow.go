@@ -2262,14 +2262,14 @@ func (f *Flow) loadSkillNames(workspaceID string) []prompts.SkillRef {
 	// Core skills are always-on for every user — always available to the designer.
 	refs := make([]prompts.SkillRef, 0, 16)
 	for _, s := range skilllibrary.LoadBundled() {
-		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description})
+		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description, Category: s.Category})
 	}
 	if f.db == nil {
 		return refs
 	}
 	skills, _ := f.db.ListSkills(workspaceID)
 	for _, s := range skills {
-		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description})
+		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description, Category: "User skills"})
 	}
 	return refs
 }

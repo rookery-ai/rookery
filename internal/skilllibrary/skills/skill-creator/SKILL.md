@@ -59,7 +59,7 @@ and the build cannot be saved.
 
 ```
 SKILL.md               ← at the root, right here
-scripts/                ← optional: deterministic code (.py or .sh)
+scripts/extract.py      ← optional: deterministic code (.py or .sh)
 references/             ← optional: docs loaded on demand (one level deep)
 assets/                 ← optional: templates, sample files
 ```
@@ -140,7 +140,7 @@ is ideal when the LLM + a few inline snippets suffice.
    does it `requires`? Which secrets/env? Draft the frontmatter.
 3. **Write SKILL.md + scripts** — frontmatter first (a strong `description`!),
    then the body (concise, imperative voice, copy-pasteable examples). If
-   scripts/, implement them and keep them minimal.
+   scripts/, implement them and keep them minimal (e.g. scripts/extract.py).
 4. **Test** — run every script you authored (see "## Testing" above — a
    script never seen to run must not ship) and confirm it doesn't crash.
    Validate the frontmatter parses and the `description` reads as a clear

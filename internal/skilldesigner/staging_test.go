@@ -152,17 +152,17 @@ func TestStartSlugifiesTheSessionNameAndReply(t *testing.T) {
 		"the reply must show the name the skill will actually have, not what was typed")
 }
 
-// The reserved-name check runs on the slug, not the raw input. Before this, "Web Scraper"
+// The reserved-name check runs on the slug, not the raw input. Before this, "Web Research"
 // sailed past a check that only ever compared against "web-scraper", so a user could
 // shadow a core skill just by typing it with a space and a capital.
 func TestValidateSkillNameRejectsCoreSkillViaSlug(t *testing.T) {
 	f := NewSkillFlow(nil, nil)
 
-	_, err := f.validateSkillName("ws-1", "Web Scraper")
+	_, err := f.validateSkillName("ws-1", "Web Research")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "reserved")
 
-	_, err = f.Start("ws-1", "Web Scraper")
+	_, err = f.Start("ws-1", "Web Research")
 	require.Error(t, err, "the FSM entry point must refuse it too, not just the validator")
 	require.Nil(t, f.GetSession("ws-1"), "a refused name must not leave a session behind")
 }
