@@ -2124,6 +2124,14 @@ func BuildSkillImplementationPrompt(skillName string, history []ChatMessage, ski
 	}
 	sb.WriteString("</design_conversation>\n\n")
 
+	sb.WriteString("<output_layout>\n")
+	sb.WriteString("Write SKILL.md at the ROOT of your current working directory. Do NOT create a folder named after the skill — the folder already exists and you are inside it.\n")
+	sb.WriteString("- SKILL.md            ← at the root, right here\n")
+	sb.WriteString("- scripts/<name>.py   ← only if the skill needs deterministic code\n")
+	sb.WriteString("- references/<name>.md ← only if the skill needs on-demand reference docs\n")
+	sb.WriteString("A published skill lives at <name>/SKILL.md, but you are ALREADY inside that <name> folder. Creating another one nests the skill and the build cannot be saved.\n")
+	sb.WriteString("</output_layout>\n\n")
+
 	sb.WriteString(fmt.Sprintf(`<task>
 Follow these steps in EXACT order.
 

@@ -472,10 +472,12 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	notify("⚙️ Preparing skill workspace…")
 
 	// Staging dir under the user's vault: <vault>/<workspaceID>/skills/.staging-<name>/.
-	// The live skill folder is only written in finalizeSkill after approval.
+	// The live skill folder is only written in finalizeSkill after approval. No scripts/
+	// dir is pre-created: it did not steer the model (it wrote its own tree anyway) and an
+	// empty dir is indistinguishable from one the model chose to leave empty.
 	stagingDir := skillstore.SkillDir(f.saver.SkillsDir(), workspaceID, ".staging-"+skillNameSnap)
 	_ = os.RemoveAll(stagingDir)
-	if err := os.MkdirAll(filepath.Join(stagingDir, "scripts"), 0o750); err != nil {
+	if err := os.MkdirAll(stagingDir, 0o750); err != nil {
 		closeProgress()
 		return "", false, "", fmt.Errorf("create staging dir: %w", err)
 	}
@@ -535,8 +537,16 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 
 	notify("🔍 Validating skill safety checks…")
 
-	// Ground truth: read what the coder actually wrote.
-	skillMDBytes, err := os.ReadFile(filepath.Join(stagingDir, "SKILL.md"))
+	// Ground truth: read what the coder actually wrote. The model may have nested the
+	// skill one level down (see LocateSkillRoot).
+	skillRoot, err := LocateSkillRoot(stagingDir)
+	if err != nil {
+		cleanupStaging()
+		closeProgress()
+		f.markGenerationFailed(workspaceID, "the coder didn't create SKILL.md")
+		return "The coder didn't create SKILL.md. Tell me what to change and I'll try again.", false, "", nil
+	}
+	skillMDBytes, err := os.ReadFile(filepath.Join(skillRoot, "SKILL.md"))
 	if err != nil {
 		cleanupStaging()
 		closeProgress()
@@ -573,7 +583,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	}
 
 	notify("🧪 Testing scripts…")
-	testOut := f.runTests(stagingDir, scripts, parseTestOutput(result.Text))
+	testOut := f.runTests(skillRoot, scripts, parseTestOutput(result.Text))
 
 	notify("🔒 Security vetting the skill…")
 	report := f.vetSkill(ctx, workspaceID, coderSvc, skillNameSnap, skillMD, scripts)
