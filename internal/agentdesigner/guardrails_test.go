@@ -27,13 +27,13 @@ if __name__ == "__main__":
 `
 
 func TestGuardrails_ValidCode(t *testing.T) {
-	err := agentdesigner.RunFullGuardrails(validCode, "")
+	err := agentdesigner.RunFullGuardrails(validCode, agentdesigner.ProfileAgentTool)
 	require.NoError(t, err)
 }
 
 func TestGuardrails_EthicsFilter(t *testing.T) {
 	code := validCode + "\n# rm -rf /\n"
-	err := agentdesigner.RunFullGuardrails(code, "")
+	err := agentdesigner.RunFullGuardrails(code, agentdesigner.ProfileAgentTool)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ethics filter")
 }
@@ -47,7 +47,7 @@ def fetch_price(symbol):
     r = requests.get(f"https://api.example.com/price/{symbol}")
     return r.json()["price"]
 `
-	err := agentdesigner.RunFullGuardrails(code, "")
+	err := agentdesigner.RunFullGuardrails(code, agentdesigner.ProfileAgentTool)
 	require.NoError(t, err)
 }
 
@@ -56,7 +56,7 @@ func TestGuardrails_ASTBlocksEval(t *testing.T) {
 		t.Skip("python3 not available")
 	}
 	code := validCode + "\nresult = eval('1+1')\n"
-	err := agentdesigner.RunFullGuardrails(code, "")
+	err := agentdesigner.RunFullGuardrails(code, agentdesigner.ProfileAgentTool)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ast check")
 }
@@ -66,7 +66,7 @@ func TestGuardrails_ASTBlocksOsSystem(t *testing.T) {
 		t.Skip("python3 not available")
 	}
 	code := validCode + "\nimport os\nos.system('ls')\n"
-	err := agentdesigner.RunFullGuardrails(code, "")
+	err := agentdesigner.RunFullGuardrails(code, agentdesigner.ProfileAgentTool)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ast check")
 }
@@ -76,7 +76,7 @@ func TestGuardrails_ASTBlocksSubprocess(t *testing.T) {
 		t.Skip("python3 not available")
 	}
 	code := validCode + "\nimport subprocess\nsubprocess.run(['ls'])\n"
-	err := agentdesigner.RunFullGuardrails(code, "")
+	err := agentdesigner.RunFullGuardrails(code, agentdesigner.ProfileAgentTool)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ast check")
 }
@@ -101,7 +101,7 @@ func TestEthics_DocVsCodeScoping(t *testing.T) {
 		"import os\nos.remove('x')\n# rm -rf /tmp/data\n",
 		"cur.execute('drop table users')\n",
 	} {
-		if err := agentdesigner.RunToolGuardrails("tools/x.py", code); err == nil {
+		if err := agentdesigner.RunToolGuardrails("tools/x.py", code, agentdesigner.ProfileAgentTool); err == nil {
 			t.Errorf("RunToolGuardrails must still block destructive code: %q", code)
 		}
 	}
@@ -113,5 +113,88 @@ func TestEthics_DocVsCodeScoping(t *testing.T) {
 		if err := agentdesigner.CheckEthics(doc, ""); err == nil {
 			t.Errorf("CheckEthics must block malicious intent even in a document: %q", doc)
 		}
+	}
+}
+
+func TestGuardrailProfiles(t *testing.T) {
+	if !agentdesigner.PythonAvailable() {
+		t.Skip("python3 not available")
+	}
+	cases := []struct {
+		name    string
+		code    string
+		agentOK bool
+		skillOK bool
+	}{
+		{
+			name:    "subprocess list form",
+			code:    "import subprocess\nsubprocess.run(['pdftotext', 'a.pdf', '-'], check=True)\n",
+			agentOK: false,
+			skillOK: true,
+		},
+		{
+			name:    "subprocess check_output list form",
+			code:    "import subprocess\nout = subprocess.check_output(['jq', '.'])\n",
+			agentOK: false,
+			skillOK: true,
+		},
+		{
+			name:    "subprocess with shell=True",
+			code:    "import subprocess\nsubprocess.run('ls | wc -l', shell=True)\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "os.system",
+			code:    "import os\nos.system('ls')\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "os.popen",
+			code:    "import os\nos.popen('ls').read()\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "eval",
+			code:    "eval('1+1')\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "__import__",
+			code:    "__import__('os')\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "socket",
+			code:    "import socket\ns = socket.socket()\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "plain code",
+			code:    "import json\nprint(json.dumps({'a': 1}))\n",
+			agentOK: true,
+			skillOK: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			agentErr := agentdesigner.RunFullGuardrails(tc.code, agentdesigner.ProfileAgentTool)
+			if tc.agentOK {
+				require.NoError(t, agentErr, "agent profile should allow")
+			} else {
+				require.Error(t, agentErr, "agent profile should block")
+			}
+			skillErr := agentdesigner.RunFullGuardrails(tc.code, agentdesigner.ProfileSkillScript)
+			if tc.skillOK {
+				require.NoError(t, skillErr, "skill profile should allow")
+			} else {
+				require.Error(t, skillErr, "skill profile should block")
+			}
+		})
 	}
 }

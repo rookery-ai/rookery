@@ -38,33 +38,31 @@ func CheckEthics(code, _ string) error {
 	return checkEthicsDoc(code)
 }
 
-// RunFullGuardrails runs ethics + AST checks on free-form Python tool scripts (CODE), so it
-// applies the FULL keyword set (intent + destructive commands). The template marker check is
-// intentionally omitted — tool scripts in tools/ are plain helpers, not the old main.py
-// template format.
-func RunFullGuardrails(code, _ string) error {
+// RunFullGuardrails runs ethics + AST checks on free-form Python (CODE), so it applies
+// the FULL keyword set (intent + destructive commands). profile selects the AST rules
+// (see GuardrailProfile).
+func RunFullGuardrails(code string, profile GuardrailProfile) error {
 	if err := checkEthicsCode(code); err != nil {
 		return fmt.Errorf("ethics filter: %w", err)
 	}
 	if PythonAvailable() {
-		if err := checkAST(code); err != nil {
+		if err := checkAST(code, profile); err != nil {
 			return fmt.Errorf("ast check: %w", err)
 		}
 	}
 	return nil
 }
 
-// RunToolGuardrails runs guardrails on a single agent project FILE (tools/*.py,
-// requirements.txt, …) — all code/config, so it applies the full code-context ethics check
-// (intent + destructive commands) to EVERY file, and the Python AST check
-// only on .py files (parsing a non-Python file as Python would spuriously fail). This is the
-// guardrail used for multi-file agent projects.
-func RunToolGuardrails(filename, code string) error {
+// RunToolGuardrails runs guardrails on a single generated FILE (an agent's tools/*.py or
+// requirements.txt, a skill's scripts/*). All of it is code/config, so the full code-context
+// ethics check applies to EVERY file; the Python AST check applies only to .py files (parsing
+// a non-Python file as Python would spuriously fail). profile selects the AST rules.
+func RunToolGuardrails(filename, code string, profile GuardrailProfile) error {
 	if err := checkEthicsCode(code); err != nil {
 		return fmt.Errorf("ethics filter: %w", err)
 	}
 	if strings.HasSuffix(filename, ".py") && PythonAvailable() {
-		if err := checkAST(code); err != nil {
+		if err := checkAST(code, profile); err != nil {
 			return fmt.Errorf("ast check: %w", err)
 		}
 	}
@@ -106,8 +104,28 @@ func scanForbiddenKeywords(code string, list []string) error {
 	return nil
 }
 
-// astCheckScript is inlined Python that checks for forbidden AST nodes.
-const astCheckScript = `
+// GuardrailProfile selects which AST rules apply to a piece of generated Python.
+//
+// ProfileAgentTool is the historical behaviour for an agent's tools/*.py: no
+// subprocess at all, because an agent shells out through its coder's Bash tool
+// rather than from inside a helper script.
+//
+// ProfileSkillScript applies to a skill's scripts/. A skill's entire purpose can be
+// to drive an installed CLI tool (pdftotext, pandoc, tesseract), so list-form
+// subprocess is permitted. Shell-string execution stays banned in BOTH profiles:
+// os.system, os.popen and subprocess(..., shell=True) all evaluate a shell string,
+// which is the injection surface the ban exists for. Skills carry two defences an
+// agent tool does not — the skill-vetter LLM audit and the Landlock sandbox — which
+// is what makes the wider profile acceptable at this boundary and not the other.
+type GuardrailProfile int
+
+const (
+	ProfileAgentTool GuardrailProfile = iota
+	ProfileSkillScript
+)
+
+// astCheckBody is the AST checker. ALLOW_SUBPROCESS is prepended by astCheckScript.
+const astCheckBody = `
 import ast, sys
 
 code = sys.stdin.read()
@@ -127,13 +145,17 @@ class Checker(ast.NodeVisitor):
     def visit_Call(self, node):
         if isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN_NAMES:
             violations.append(f"forbidden call: {node.func.id}()")
+        # shell=True evaluates a shell string in ANY profile — same surface as os.system.
+        for kw in node.keywords:
+            if kw.arg == 'shell' and isinstance(kw.value, ast.Constant) and kw.value.value is True:
+                violations.append("forbidden: shell=True")
         if isinstance(node.func, ast.Attribute):
             attr = node.func.attr
             if attr in FORBIDDEN_OS_ATTRS:
                 violations.append(f"forbidden: os.{attr}()")
             if isinstance(node.func.value, ast.Name):
                 val = node.func.value.id
-                if val == 'subprocess':
+                if val == 'subprocess' and not ALLOW_SUBPROCESS:
                     violations.append(f"forbidden: subprocess.{attr}()")
                 if val == 'socket' and attr == 'socket':
                     violations.append(f"forbidden: socket.socket()")
@@ -146,8 +168,16 @@ if violations:
 sys.exit(0)
 `
 
-func checkAST(code string) error {
-	cmd := exec.Command("python3", "-c", astCheckScript)
+func astCheckScript(p GuardrailProfile) string {
+	allow := "False"
+	if p == ProfileSkillScript {
+		allow = "True"
+	}
+	return "ALLOW_SUBPROCESS = " + allow + "\n" + astCheckBody
+}
+
+func checkAST(code string, p GuardrailProfile) error {
+	cmd := exec.Command("python3", "-c", astCheckScript(p))
 	cmd.Stdin = strings.NewReader(code)
 	var out bytes.Buffer
 	cmd.Stdout = &out

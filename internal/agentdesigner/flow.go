@@ -869,7 +869,7 @@ func (f *Flow) recoverBuiltAgentFromDisk(workspaceID, agentName string) (string,
 		return "", nil, false
 	}
 	for name, code := range tools {
-		if err := RunToolGuardrails(name, code); err != nil {
+		if err := RunToolGuardrails(name, code, ProfileAgentTool); err != nil {
 			return "", nil, false
 		}
 	}
@@ -1646,7 +1646,7 @@ func decideBuildOutcome(workDir, resultText, backendType string, scriptVerified 
 	hasAuthoredScript := false
 	for filename, code := range tools {
 		hasAuthoredScript = true
-		if err := RunToolGuardrails(filename, code); err != nil {
+		if err := RunToolGuardrails(filename, code, ProfileAgentTool); err != nil {
 			return buildDecision{
 				message:   "One of the files the build produced didn't pass an internal check, so I held off saving it. Type **approve** to have it rebuilt, or tell me what to change.",
 				logReason: "generated tool failed guardrails: " + filename + ": " + err.Error(),
