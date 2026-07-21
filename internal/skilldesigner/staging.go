@@ -95,3 +95,27 @@ func ReadSkillTree(skillRoot string) (map[string]string, error) {
 	}
 	return out, nil
 }
+
+// SlugifySkillName normalises a user-typed or model-generated skill name into the
+// lowercase-hyphen form the skill convention (and the filesystem) expect.
+//
+// The name becomes a directory name and the frontmatter `name:` field, so a value like
+// "pretty printer" produces a path with a space in it and frontmatter that does not match
+// the convention. Everything outside [a-z0-9-] is collapsed to a single hyphen.
+func SlugifySkillName(name string) string {
+	var sb strings.Builder
+	lastHyphen := false
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			sb.WriteRune(r)
+			lastHyphen = false
+		default:
+			if !lastHyphen && sb.Len() > 0 {
+				sb.WriteByte('-')
+				lastHyphen = true
+			}
+		}
+	}
+	return strings.Trim(sb.String(), "-")
+}

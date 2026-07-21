@@ -110,3 +110,19 @@ func TestReadSkillTreeEmpty(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, tree)
 }
+
+func TestSlugifySkillName(t *testing.T) {
+	cases := map[string]string{
+		"pretty printer":     "pretty-printer",
+		"Pretty Printer":     "pretty-printer",
+		"PDF → Email":        "pdf-email",
+		"my_skill":           "my-skill",
+		"  spaced  out  ":    "spaced-out",
+		"already-fine":       "already-fine",
+		"a--b":               "a-b",
+		"CSV/JSON converter": "csv-json-converter",
+	}
+	for in, want := range cases {
+		require.Equal(t, want, SlugifySkillName(in), "input %q", in)
+	}
+}

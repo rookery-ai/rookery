@@ -168,15 +168,16 @@ func (f *Flow) Start(workspaceID, skillName string) (string, error) {
 	if _, exists := f.sessions[workspaceID]; exists {
 		return "", fmt.Errorf("you already have an active skill session; send /skill cancel to start over")
 	}
-	if err := f.validateSkillName(workspaceID, skillName); err != nil {
+	slug, err := f.validateSkillName(workspaceID, skillName)
+	if err != nil {
 		return "", err
 	}
 
-	f.sessions[workspaceID] = f.newSession(workspaceID, skillName, StateDescribing)
+	f.sessions[workspaceID] = f.newSession(workspaceID, slug, StateDescribing)
 
 	return fmt.Sprintf(
 		"Starting skill \"%s\".\n\nDescribe what this skill should do. Be specific: what task does it handle, and when should it kick in?",
-		skillName,
+		slug,
 	), nil
 }
 
@@ -186,11 +187,12 @@ func (f *Flow) StartDesign(ctx context.Context, workspaceID, skillName, firstMes
 		f.mu.Unlock()
 		return "", fmt.Errorf("a skill design session is already active; cancel it first")
 	}
-	if err := f.validateSkillName(workspaceID, skillName); err != nil {
+	slug, err := f.validateSkillName(workspaceID, skillName)
+	if err != nil {
 		f.mu.Unlock()
 		return "", err
 	}
-	sess := f.newSession(workspaceID, skillName, StateDesigning)
+	sess := f.newSession(workspaceID, slug, StateDesigning)
 	f.sessions[workspaceID] = sess
 	f.mu.Unlock()
 
@@ -737,8 +739,11 @@ func (f *Flow) finalizeSkill(ctx context.Context, workspaceID string) (string, b
 	}
 
 	meta, _ := skilllibrary.ParseMeta(skillMD)
-	name := meta.Name
-	if name == "" {
+	// The generated frontmatter name is not the validated one: re-slugify it, and fall
+	// back to the session's name if the model produced nothing usable. SaveSkill's
+	// core-skill check remains the backstop.
+	name := SlugifySkillName(meta.Name)
+	if name == "" || skilllibrary.IsCoreSkill(name) {
 		name = skillName
 	}
 	description := meta.Description
@@ -901,16 +906,17 @@ func (f *Flow) newSession(workspaceID, skillName string, state DesignState) *Des
 	}
 }
 
-// validateSkillName rejects reserved core-skill names and empty/invalid names.
-func (f *Flow) validateSkillName(workspaceID, name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return fmt.Errorf("give the skill a name first")
+// validateSkillName normalises the name to its slug form and rejects reserved core-skill
+// names and empty/invalid names. The slug is what every path and the frontmatter use.
+func (f *Flow) validateSkillName(workspaceID, name string) (string, error) {
+	slug := SlugifySkillName(name)
+	if slug == "" {
+		return "", fmt.Errorf("give the skill a name first")
 	}
-	if skilllibrary.IsCoreSkill(name) {
-		return fmt.Errorf("%q is a reserved core-skill name; choose a different name", name)
+	if skilllibrary.IsCoreSkill(slug) {
+		return "", fmt.Errorf("%q is a reserved core-skill name; choose a different name", slug)
 	}
-	return nil
+	return slug, nil
 }
 
 func (f *Flow) loadSkillNames(workspaceID string) []prompts.SkillRef {
