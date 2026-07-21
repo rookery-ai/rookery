@@ -78,6 +78,14 @@ for i, page in enumerate(r.pages):
     with open(f"page-{i+1}.pdf", "wb") as fh: o.write(fh)
 ```
 
+## Helper script
+
+`scripts/pdf_text.py` extracts text with `pdftotext` and falls back to `pdfplumber`:
+
+```bash
+python3 scripts/pdf_text.py report.pdf --pages 1-5
+```
+
 ## Notes
 
 - Scanned/image-only PDFs return empty text — they need OCR (tesseract + the

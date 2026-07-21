@@ -72,6 +72,14 @@ for para in doc.paragraphs:
 doc.save(sys.argv[1])
 ```
 
+## Helper script
+
+`scripts/docx_convert.py` converts a .docx through pandoc:
+
+```bash
+python3 scripts/docx_convert.py notes.docx --to markdown
+```
+
 ## Best practices
 
 - For tracked changes, comments, and fidelity beyond text, pandoc's `--track-changes=all`

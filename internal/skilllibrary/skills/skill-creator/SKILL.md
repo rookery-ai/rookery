@@ -103,8 +103,9 @@ is ideal when the LLM + a few inline snippets suffice.
 3. **Write SKILL.md + scripts** — frontmatter first (a strong `description`!),
    then the body (concise, imperative voice, copy-pasteable examples). If
    scripts/, implement them and keep them minimal.
-4. **Test** — run every script (`python3 scripts/x.py --help` / smoke against a
-   sample) to confirm it doesn't crash. Validate the frontmatter parses and the
+4. **Test** — run every script you authored (invoke it from inside `scripts/`,
+   e.g. `python3 <your_script>.py --help` / smoke against a sample) to confirm
+   it doesn't crash. Validate the frontmatter parses and the
    `description` reads as a clear trigger. Emit results in a
    `[TEST_OUTPUT]...[/TEST_OUTPUT]` block.
 5. **Package** — ensure the folder is self-contained: SKILL.md present, frontmatter
