@@ -51,6 +51,12 @@ export type DesignerSurfaceProps = {
   // because the destination is entity-specific — the agent pages pass
   // "/agents"; Task 8's skill pages will pass their own.
   cancelTo: string;
+  // Pre-fills (but does not send) the composer's very first message — e.g.
+  // AgentNewPage's template picker seeding an editable starting brief.
+  // Forwarded verbatim to Composer's own `initialText`, which already only
+  // seeds an EMPTY composer, so this is purely additive: callers that don't
+  // pass it (every existing one) see no behavior change.
+  initialText?: string;
 };
 
 type Role = "user" | "assistant";
@@ -115,6 +121,7 @@ export function DesignerSurface({
   draft,
   autoResume,
   cancelTo,
+  initialText,
 }: DesignerSurfaceProps) {
   const [messages, setMessages] = useState<HistEntry[]>([]);
   const [fsmState, setFsmState] = useState<FsmState>(null);
@@ -528,7 +535,12 @@ export function DesignerSurface({
         </div>
       )}
 
-      <Composer onSend={(v) => void handleSend(v)} busy={composerBusy} focusSignal={focusSignal} />
+      <Composer
+        onSend={(v) => void handleSend(v)}
+        busy={composerBusy}
+        focusSignal={focusSignal}
+        initialText={initialText}
+      />
     </div>
   );
 }
