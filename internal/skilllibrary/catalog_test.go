@@ -68,6 +68,13 @@ func TestCoreCatalogInvariants(t *testing.T) {
 			}
 
 			// Every shipped script must pass the skill guardrail profile.
+			//
+			// NOTE: this loop currently iterates nothing. TestCoreSkillsShipNoScripts
+			// guarantees no core skill has a scripts/ dir, so the check is aspirational —
+			// it exists so that if runtime materialization is ever built and core skills
+			// start shipping scripts, they are held to the same bar as user skills from
+			// the first commit. The widened ProfileSkillScript has no dogfood in the
+			// shipped catalog today; it is covered by unit tests only.
 			scriptsDir := filepath.Join(skillsRoot, dir, "scripts")
 			walkErr := filepath.Walk(scriptsDir, func(path string, info os.FileInfo, err error) error {
 				if err != nil {
