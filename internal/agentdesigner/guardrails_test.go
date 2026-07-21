@@ -211,9 +211,33 @@ func TestGuardrailProfiles(t *testing.T) {
 			skillOK: false,
 		},
 		{
-			name:    "subprocess with benign kwargs spread (must not be over-blocked)",
+			// Intentional over-block: the checker no longer attempts to resolve what's
+			// inside a ** spread, so even a benign dict literal is rejected under the
+			// skill profile — the trade-off documented on astCheckBody.
+			name:    "subprocess with benign kwargs spread (intentionally over-blocked)",
 			code:    "import subprocess\nopts = {'capture_output': True}\nsubprocess.run(['ls'], **opts)\n",
 			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "subprocess with shell=True via subscript-assignment spread (kwargs bypass)",
+			code:    "import subprocess\nkw = {}\nkw['shell'] = True\nsubprocess.run(['ls'], **kw)\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "subprocess with shell=True via .update() spread (kwargs bypass)",
+			code:    "import subprocess\nkw = {'capture_output': True}\nkw.update({'shell': True})\nsubprocess.run(['ls'], **kw)\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			// Regression test for the constraint this round fixes: the spread rule is
+			// scoped to subprocess.* only, so an unresolvable ** spread into an os.* call
+			// must NOT be newly blocked under the agent profile.
+			name:    "os.makedirs with unresolvable kwargs spread (must not be broadened)",
+			code:    "import os\ndef ensure_dir(p, **kw):\n    os.makedirs(p, **kw)\n",
+			agentOK: true,
 			skillOK: true,
 		},
 	}
