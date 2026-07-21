@@ -2242,6 +2242,34 @@ by the protocol (the "SKILL VETTING REPORT" block). Do not emit anything else.
 	return sb.String()
 }
 
+// BuildSkillSelectionPrompt asks a model to pick, from the catalog, the skills an agent
+// needs — the fallback for when the build coder omitted the `# Skills:` header.
+//
+// It is deliberately narrow: one job, no conversation, output constrained to a single
+// line of names so the tolerant parser has the least possible drift to absorb.
+func BuildSkillSelectionPrompt(agentMD string, skills []SkillRef) string {
+	var sb strings.Builder
+	sb.WriteString("You are selecting which reusable skills an automated agent needs.\n\n")
+	sb.WriteString("Here are the available skills:\n\n")
+	for _, sk := range skills {
+		sb.WriteString("- ")
+		sb.WriteString(sk.Name)
+		sb.WriteString(": ")
+		sb.WriteString(sk.Description)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\nHere are the agent's instructions:\n\n---\n")
+	sb.WriteString(agentMD)
+	sb.WriteString("\n---\n\n")
+	sb.WriteString("Which of the skills above does this agent actually need to do its job?\n\n")
+	sb.WriteString("Rules:\n")
+	sb.WriteString("- Answer with ONLY a comma-separated list of skill names, copied exactly from the list above.\n")
+	sb.WriteString("- Include a skill only if the agent's work genuinely requires it. Most agents need none or one or two.\n")
+	sb.WriteString("- Do not invent names. Do not explain. Do not add any other text.\n")
+	sb.WriteString("- If the agent needs no skills at all, answer exactly: none\n")
+	return sb.String()
+}
+
 // SkillBin is one declared tool binary and its resolved path (or empty if missing).
 type SkillBin struct {
 	Skill string // owning skill name
