@@ -53,7 +53,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     label: "Reminder with context",
     blurb: "Nudge me about something, with the latest details attached",
     description:
-      "Remind me about something at the time I choose, and include the latest relevant details at that moment — not just a bare nudge, but what's actually going on right now.",
+      "Before an appointment or deadline I've set, remind me at the right time — and pull in anything that's changed since I set it, so it's not just a bare nudge.",
   },
   {
     id: "start-from-scratch",
