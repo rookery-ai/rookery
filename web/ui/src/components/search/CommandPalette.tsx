@@ -1,12 +1,14 @@
-import { useEffect, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useState, type ComponentType } from "react";
 import { useNavigate } from "react-router";
 import {
-  Bell, Bot, FileText, KeyRound, Loader2, MessageCircleQuestion, MessageSquare, Plug, Plus, Settings, Sparkles,
+  Bell, Bot, FileText, KeyRound, Loader2, MessageCircleQuestion, MessageSquare, Plug, Plus,
+  Search, Settings, Sparkles,
 } from "lucide-react";
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator,
 } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSlideOver } from "@/components/shell/AppShell";
 import { GlobalChatPanel } from "@/components/chat/GlobalChatButton";
 import { useGlobalSearch, type SearchItem } from "@/lib/search";
@@ -65,8 +67,52 @@ function highlight(text: string, query: string) {
   );
 }
 
-export function CommandPalette() {
-  const [open, setOpen] = useState(false);
+// The floating trigger for the palette. The palette itself has existed since
+// the shell landed, but only on ⌘/Ctrl+K — with no visible affordance it read
+// as "there is no global search". Positioning is NOT set here: AppShell owns
+// the FAB stack so this can sit alongside the chat button and collapse with
+// it (the chat button hides itself on /chats).
+export function GlobalSearchButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label="Search everything"
+          onClick={onClick}
+          className="flex size-12 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-lg transition-colors hover:bg-chrome"
+        >
+          <Search className="size-5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="left">
+        Search everything <kbd className="ml-1 font-mono text-[10px]">⌘K</kbd>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+// `open`/`onOpenChange` are OPTIONAL: passing them lets an outside trigger
+// (AppShell's search FAB) drive the dialog, while omitting them keeps the
+// original fully self-contained behavior. The ⌘K listener below lives here
+// either way and routes through the same setter, so both modes stay in sync.
+export function CommandPalette({
+  open: openProp,
+  onOpenChange,
+}: {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+} = {}) {
+  const [openState, setOpenState] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : openState;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (!controlled) setOpenState(next);
+      onOpenChange?.(next);
+    },
+    [controlled, onOpenChange],
+  );
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
   const navigate = useNavigate();
@@ -85,7 +131,7 @@ export function CommandPalette() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [setOpen]);
 
   // Reset the query whenever the palette closes so reopening starts fresh
   // instead of showing stale results for a moment.

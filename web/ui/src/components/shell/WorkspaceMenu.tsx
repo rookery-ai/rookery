@@ -7,7 +7,9 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { EnterWorkspaceDialog, CreateWorkspaceDialog } from "@/pages/Workspaces";
+import {
+  EnterWorkspaceDialog, CreateWorkspaceDialog, resetWorkspaceScopedCache,
+} from "@/pages/Workspaces";
 
 export default function WorkspaceMenu() {
   const { data: session } = useSession();
@@ -20,7 +22,7 @@ export default function WorkspaceMenu() {
 
   async function leave() {
     await api.post("/api/v1/workspaces/leave");
-    await qc.invalidateQueries({ queryKey: ["session"] });
+    await resetWorkspaceScopedCache(qc);
     nav("/workspaces", { replace: true });
   }
 

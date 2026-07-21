@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -135,6 +136,118 @@ func TestAPIKBDeleteAndRename(t *testing.T) {
 	rec = doJSON(t, s, http.MethodGet, "/api/v1/kb/note?path=notes/moved.md", nil, cookies)
 	if rec.Code == 200 {
 		t.Fatalf("expected note to be gone after delete, got 200")
+	}
+}
+
+// decodeJSON unmarshals a recorder body, failing the test on a parse error.
+func decodeJSON(t *testing.T, rec *httptest.ResponseRecorder, out any) {
+	t.Helper()
+	if err := json.Unmarshal(rec.Body.Bytes(), out); err != nil {
+		t.Fatalf("decode %T: %v (body %s)", out, err, rec.Body.String())
+	}
+}
+
+// vault.Rename is an os.Rename, which silently clobbers an existing
+// destination. Drag-to-move in the tree makes that a one-slip data-loss path,
+// so the handler refuses the collision outright.
+func TestAPIKBRenameRefusesExistingDestination(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	for _, p := range []string{"notes/one.md", "notes/two.md"} {
+		rec := doJSON(t, s, http.MethodPost, "/api/v1/kb/new",
+			map[string]any{"path": p, "is_dir": false}, cookies)
+		if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+			t.Fatalf("new %s: %d %s", p, rec.Code, rec.Body.String())
+		}
+	}
+
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/kb/rename",
+		map[string]string{"from": "notes/one.md", "to": "notes/two.md"}, cookies)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("rename onto existing: want 409, got %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Both files must still be there — neither overwritten nor consumed.
+	for _, p := range []string{"notes/one.md", "notes/two.md"} {
+		rec = doJSON(t, s, http.MethodGet, "/api/v1/kb/note?path="+p, nil, cookies)
+		if rec.Code != 200 {
+			t.Fatalf("%s should survive a refused rename: %d", p, rec.Code)
+		}
+	}
+
+	// A no-op rename (same path) is not a collision.
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/kb/rename",
+		map[string]string{"from": "notes/one.md", "to": "notes/one.md"}, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("self-rename: want 200, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAPIKBOrderRoundTrip(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/kb/tree?path=notes", nil, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("tree: %d %s", rec.Code, rec.Body.String())
+	}
+	var initial apiKBTreeResponse
+	decodeJSON(t, rec, &initial)
+	if initial.Order == nil {
+		t.Fatalf("order must serialize as [] not null when unset")
+	}
+	if len(initial.Order) != 0 {
+		t.Fatalf("expected no stored order, got %v", initial.Order)
+	}
+
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/kb/order",
+		map[string]any{"dir": "notes", "names": []string{"b.md", "a.md"}}, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("save order: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/kb/tree?path=notes", nil, cookies)
+	var saved apiKBTreeResponse
+	decodeJSON(t, rec, &saved)
+	if len(saved.Order) != 2 || saved.Order[0] != "b.md" || saved.Order[1] != "a.md" {
+		t.Fatalf("order not round-tripped: %v", saved.Order)
+	}
+
+	// A different dir keeps its own (absent) order — the blob is a map, not a
+	// single list.
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/kb/tree", nil, cookies)
+	var root apiKBTreeResponse
+	decodeJSON(t, rec, &root)
+	if len(root.Order) != 0 {
+		t.Fatalf("root order should be untouched, got %v", root.Order)
+	}
+
+	// An empty list clears the entry rather than storing [].
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/kb/order",
+		map[string]any{"dir": "notes", "names": []string{}}, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("clear order: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/kb/tree?path=notes", nil, cookies)
+	var cleared apiKBTreeResponse
+	decodeJSON(t, rec, &cleared)
+	if len(cleared.Order) != 0 {
+		t.Fatalf("expected cleared order, got %v", cleared.Order)
+	}
+}
+
+func TestAPIKBOrderRejectsEscapingDir(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodPut, "/api/v1/kb/order",
+		map[string]any{"dir": "../../etc", "names": []string{"passwd"}}, cookies)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("want 400 for escaping dir, got %d %s", rec.Code, rec.Body.String())
 	}
 }
 

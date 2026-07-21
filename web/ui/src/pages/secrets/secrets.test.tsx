@@ -207,3 +207,51 @@ test("delete: success removes the row and closes the dialog", async () => {
   await waitFor(() => expect(screen.queryByText("OPENAI_API_KEY")).not.toBeInTheDocument());
   expect(screen.getByText("GITHUB_TOKEN")).toBeInTheDocument();
 });
+
+// GitHub-Actions-style rotation: a secret's value can be REPLACED without ever
+// being shown. The endpoint is the same POST as create (the DB write is an
+// upsert), and no master password is asked for — matching create, and matching
+// how every other secret store handles a rotation.
+test("update: replaces a secret's value without ever revealing it", async () => {
+  const calls = mockFetch();
+  wrap();
+  await screen.findByText("OPENAI_API_KEY");
+
+  const row = screen.getByText("OPENAI_API_KEY").closest("li")!;
+  await userEvent.click(within(row).getByRole("button", { name: /update/i }));
+
+  const dialog = await screen.findByRole("dialog");
+  // The name is shown but not editable, and no existing value is fetched or
+  // pre-filled anywhere.
+  expect(within(dialog).getByLabelText("Name")).toHaveValue("OPENAI_API_KEY");
+  expect(within(dialog).getByLabelText("Name")).toBeDisabled();
+  const valueField = within(dialog).getByLabelText(/new value/i);
+  expect(valueField).toHaveValue("");
+  expect(within(dialog).queryByLabelText(/master password/i)).not.toBeInTheDocument();
+
+  await userEvent.type(valueField, "sk-rotated");
+  await userEvent.click(within(dialog).getByRole("button", { name: "Update" }));
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  const post = calls.filter((c) => c.url === "/api/v1/secrets" && c.method === "POST");
+  expect(post).toHaveLength(1);
+  expect(post[0]!.body).toEqual({ name: "OPENAI_API_KEY", value: "sk-rotated" });
+  // The new value must never appear on the page.
+  expect(screen.queryByText("sk-rotated")).not.toBeInTheDocument();
+});
+
+// The create endpoint upserts, so an existing name typed into the Add form
+// would silently replace a secret the user can't see. Rotating is a deliberate
+// act with its own dialog — send them there instead of overwriting by accident.
+test("add: refuses a name that already exists and points at Update", async () => {
+  const calls = mockFetch();
+  wrap();
+  await screen.findByText("OPENAI_API_KEY");
+
+  await userEvent.type(screen.getByLabelText("Name"), "OPENAI_API_KEY");
+  await userEvent.type(screen.getByLabelText("Value"), "clobber");
+
+  expect(screen.getByText(/already exists/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+  expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
+});

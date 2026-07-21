@@ -79,6 +79,15 @@ export default function KBPage() {
     setParams(isDir ? { path: p, dir: "1" } : { path: p });
   }
 
+  // A drag-move in the tree is a rename underneath, so the open document's
+  // path is stale the moment it lands. Follow it rather than leaving the
+  // editor pointed at a path that no longer exists (which reads as the note
+  // having been deleted).
+  function handleMoved(from: string, to: string) {
+    if (path !== from) return;
+    setParams(isDirHint ? { path: to, dir: "1" } : { path: to });
+  }
+
   return (
     <>
       <ContextPane>
@@ -86,7 +95,7 @@ export default function KBPage() {
           <KBPaneHeader />
           <div className="min-h-0 flex-1">
             <SearchBox onSelect={(p) => openPath(p, false)}>
-              <FileTree selectedPath={path} onSelect={openPath} />
+              <FileTree selectedPath={path} onSelect={openPath} onMoved={handleMoved} />
             </SearchBox>
           </div>
         </div>

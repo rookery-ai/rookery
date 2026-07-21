@@ -283,3 +283,23 @@ test("'Ask assistant' with a new query does NOT clobber an in-progress draft in 
   const composerAfter = await screen.findByPlaceholderText(/message/i);
   await waitFor(() => expect((composerAfter as HTMLTextAreaElement).value).toBe("my unsent draft"));
 });
+
+// The palette has existed since the shell landed, but ⌘K was its only trigger
+// — with no visible affordance it read as "this app has no global search".
+test("the search button opens the palette, and ⌘K still works alongside it", async () => {
+  mockFetch();
+  wrap();
+  await screen.findByText("Home");
+
+  await userEvent.click(screen.getByRole("button", { name: /search everything/i }));
+  expect(await screen.findByPlaceholderText(/search or run a command/i)).toBeInTheDocument();
+
+  // Close, then reopen with the keyboard — the button and the shortcut drive
+  // the same state, so neither can strand the other.
+  await userEvent.keyboard("{Escape}");
+  await waitFor(() =>
+    expect(screen.queryByPlaceholderText(/search or run a command/i)).not.toBeInTheDocument(),
+  );
+  fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+  expect(await screen.findByPlaceholderText(/search or run a command/i)).toBeInTheDocument();
+});

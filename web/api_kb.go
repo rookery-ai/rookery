@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -41,6 +42,79 @@ func (s *Server) registerKBAPI(g *echo.Group) {
 	g.GET("/kb/search", s.apiSearchKB)
 	g.GET("/kb/resolve", s.apiResolveKBLink)
 	g.GET("/kb/raw", s.rawKBNote)
+	g.PUT("/kb/order", s.apiSaveKBOrder)
+}
+
+// ── Tree ordering ────────────────────────────────────────────────────────────
+//
+// The vault is a plain directory tree, so it carries no user-chosen ordering of
+// its own — the browser derives one (user content before system dirs, dirs
+// before files, then alphabetically). Drag-to-reorder needs that choice to
+// survive a reload, so it is stored OUT of band, as one JSON blob per
+// workspace in the existing workspace_settings table: no migration, no new
+// table, and nothing written into the vault itself (a stray ordering file
+// would show up in the tree and in agents' reads of the KB).
+//
+// Shape: {"<dir rel path>": ["name1","name2", …]}, where "" is the vault root.
+// Names, not paths — a rename moves the entry out of the list, which is
+// exactly right: an unlisted name falls back to the derived ordering rather
+// than pinning a stale position.
+const kbOrderSettingKey = "kb_order"
+
+type apiKBOrderRequest struct {
+	Dir   string   `json:"dir"`
+	Names []string `json:"names"`
+}
+
+// loadKBOrder reads the whole ordering map. A missing or corrupt value is not
+// an error: ordering is a preference, and losing it degrades to the derived
+// sort rather than breaking the tree.
+func (s *Server) loadKBOrder(workspaceID string) map[string][]string {
+	out := map[string][]string{}
+	raw, err := s.db.GetSetting(workspaceID, kbOrderSettingKey)
+	if err != nil || raw == "" {
+		return out
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return map[string][]string{}
+	}
+	return out
+}
+
+// apiSaveKBOrder records the sibling order for a single directory.
+// PUT /api/v1/kb/order {dir,names} → 200 {"ok":true}
+func (s *Server) apiSaveKBOrder(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	if s.vault == nil {
+		return s.kbUnavailable(c)
+	}
+	var req apiKBOrderRequest
+	if err := bindAPI(c, &req); err != nil {
+		return err
+	}
+	// cleanKBParam + Resolve so a traversal attempt can't be used to plant an
+	// arbitrary key, even though nothing here touches the filesystem — the
+	// same path discipline every other handler in this file follows.
+	dir := cleanKBParam(req.Dir)
+	if _, err := s.vault.Resolve(u.ID, dir); err != nil {
+		status, code := vaultErrStatus(err)
+		return jsonErr(c, status, code, "invalid folder: "+err.Error())
+	}
+
+	order := s.loadKBOrder(u.ID)
+	if len(req.Names) == 0 {
+		delete(order, dir)
+	} else {
+		order[dir] = req.Names
+	}
+	blob, err := json.Marshal(order)
+	if err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", "could not encode order")
+	}
+	if err := s.db.SetSetting(u.ID, kbOrderSettingKey, string(blob)); err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", "could not save order")
+	}
+	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
 }
 
 // kbSystemDirs are the top-level vault directories that are system-managed
@@ -68,6 +142,13 @@ type apiKBNode struct {
 type apiKBTreeResponse struct {
 	Path  string      `json:"path"`
 	Nodes []apiKBNode `json:"nodes"`
+	// Order is the user's drag-chosen sibling order for this directory, by
+	// node NAME, or empty when they've never reordered it. Served alongside
+	// the nodes rather than from a second endpoint so opening a folder stays
+	// one round trip. The client treats it as the primary sort key and falls
+	// back to its own derived ordering for anything not listed (e.g. a file
+	// an agent wrote since the last drag).
+	Order []string `json:"order"`
 }
 
 type apiKBNoteResponse struct {
@@ -157,7 +238,11 @@ func (s *Server) apiKBTree(c echo.Context) error {
 			System:      isRoot && n.IsDir && kbSystemDirs[n.Name],
 		})
 	}
-	return c.JSON(http.StatusOK, apiKBTreeResponse{Path: rel, Nodes: out})
+	return c.JSON(http.StatusOK, apiKBTreeResponse{
+		Path:  rel,
+		Nodes: out,
+		Order: orEmpty(s.loadKBOrder(u.ID)[rel]),
+	})
 }
 
 // apiGetKBNote ports viewKBNote (+editKBNote's raw-content read for non-markdown
@@ -368,6 +453,19 @@ func (s *Server) apiRenameKBNote(c echo.Context) error {
 	to := cleanKBParam(req.To)
 	if from == "" || to == "" {
 		return jsonErr(c, http.StatusBadRequest, "invalid_path", "both source and destination are required")
+	}
+	// vault.Rename bottoms out in os.Rename, which SILENTLY replaces an
+	// existing destination. That was survivable while renaming was a typed,
+	// deliberate act; it is not once a mis-aimed drag in the tree can trigger
+	// it, so refuse the collision instead of destroying the file already
+	// there. Resolve (not raw path joining) keeps the containment guarantee.
+	if to != from {
+		if abs, err := s.vault.Resolve(u.ID, to); err == nil {
+			if _, statErr := os.Stat(abs); statErr == nil {
+				return jsonErr(c, http.StatusConflict, "already_exists",
+					"“"+to+"” already exists — rename or move it somewhere else.")
+			}
+		}
 	}
 	if err := s.vault.Rename(u.ID, from, to); err != nil {
 		status, code := vaultErrStatus(err)

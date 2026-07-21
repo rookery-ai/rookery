@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { AlertTriangle, Check, KeyRound, Search, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Check, KeyRound, Pencil, Search, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +11,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ApiError } from "@/lib/api";
-import { useSecrets, useAddSecret, useDeleteSecret, type Secret } from "@/lib/secrets";
+import {
+  useSecrets, useAddSecret, useUpdateSecret, useDeleteSecret, type Secret,
+} from "@/lib/secrets";
 
 function errMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : "Something went wrong";
@@ -28,14 +30,21 @@ function ErrorBanner({ message }: { message: string }) {
 
 // ── Add secret ───────────────────────────────────────────────────────────
 
-function AddSecretCard() {
+function AddSecretCard({ existing }: { existing: string[] }) {
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
   const [saved, setSaved] = useState(false);
   const add = useAddSecret();
 
+  // The create endpoint upserts, so submitting an existing name here would
+  // silently replace a secret the user can't see and may not have meant to
+  // touch. Rotating a value is a deliberate action with its own dialog —
+  // route them there instead of overwriting by accident.
+  const collides = existing.some((n) => n === name.trim());
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (collides) return;
     setSaved(false);
     try {
       await add.mutateAsync({ name: name.trim(), value });
@@ -73,9 +82,15 @@ function AddSecretCard() {
             onChange={(e) => setName(e.target.value)}
             placeholder="OPENAI_API_KEY"
           />
-          <p className="text-xs text-muted-2">
-            UPPER_SNAKE_CASE recommended — agents see these as environment variables.
-          </p>
+          {collides ? (
+            <p className="text-xs text-danger">
+              That secret already exists — use Update to change its value.
+            </p>
+          ) : (
+            <p className="text-xs text-muted-2">
+              UPPER_SNAKE_CASE recommended — agents see these as environment variables.
+            </p>
+          )}
         </div>
         <div className="flex-1 space-y-1.5">
           <Label htmlFor="secret-value">Value</Label>
@@ -90,11 +105,103 @@ function AddSecretCard() {
             Write-only: values are never displayed after saving.
           </p>
         </div>
-        <Button type="submit" disabled={!name.trim() || !value || add.isPending}>
+        <Button type="submit" disabled={!name.trim() || !value || collides || add.isPending}>
           {add.isPending ? "Adding…" : "Add"}
         </Button>
       </form>
     </section>
+  );
+}
+
+// ── Update value ─────────────────────────────────────────────────────────
+
+// Write-only rotation, in the shape of GitHub Actions secrets: the name is
+// fixed and the current value is never fetched, shown, or pre-filled — there
+// is no client-side representation of a secret value anywhere (see the header
+// comment in lib/secrets.ts). Overwriting goes through the same POST as
+// creating, which upserts server-side.
+function UpdateSecretDialog({
+  secret,
+  onClose,
+}: {
+  secret: Secret | null;
+  onClose: () => void;
+}) {
+  const [value, setValue] = useState("");
+  const [error, setError] = useState("");
+  const update = useUpdateSecret();
+
+  // Reset between openings so a half-typed value never carries over to a
+  // different secret.
+  useEffect(() => {
+    setValue("");
+    setError("");
+  }, [secret?.name]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!secret) return;
+    setError("");
+    try {
+      await update.mutateAsync({ name: secret.name, value });
+      onClose();
+    } catch (err) {
+      setError(errMessage(err));
+    }
+  }
+
+  function handleOpenChange(open: boolean) {
+    if (!open) onClose();
+  }
+
+  return (
+    <Dialog open={secret !== null} onOpenChange={handleOpenChange}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Update &ldquo;{secret?.name}&rdquo;</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="update-secret-name">Name</Label>
+            <Input
+              id="update-secret-name"
+              value={secret?.name ?? ""}
+              readOnly
+              disabled
+              className="font-mono"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="update-secret-value">New value</Label>
+            <Input
+              id="update-secret-value"
+              type="password"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              autoComplete="off"
+              autoFocus
+            />
+            <p className="text-xs text-muted-2">
+              The current value can&rsquo;t be shown — entering a new one replaces it.
+            </p>
+          </div>
+          {error && <ErrorBanner message={error} />}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleOpenChange(false)}
+              disabled={update.isPending}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!value || update.isPending}>
+              {update.isPending ? "Saving…" : "Update"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -184,6 +291,7 @@ export default function SecretsPage() {
   const { data } = useSecrets();
   const [query, setQuery] = useState("");
   const [pendingDelete, setPendingDelete] = useState<Secret | null>(null);
+  const [pendingUpdate, setPendingUpdate] = useState<Secret | null>(null);
 
   const secrets = data?.secrets ?? [];
 
@@ -221,7 +329,7 @@ export default function SecretsPage() {
       </div>
 
       <div className="mb-6">
-        <AddSecretCard />
+        <AddSecretCard existing={secrets.map((s) => s.name)} />
       </div>
 
       {showEmpty ? (
@@ -234,19 +342,25 @@ export default function SecretsPage() {
                 <KeyRound className="size-4 shrink-0 text-muted-2" />
                 <span className="truncate font-mono text-sm">{s.name}</span>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-danger"
-                onClick={() => setPendingDelete(s)}
-              >
-                <Trash2 className="size-4" /> Delete
-              </Button>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button variant="ghost" size="sm" onClick={() => setPendingUpdate(s)}>
+                  <Pencil className="size-4" /> Update
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-danger"
+                  onClick={() => setPendingDelete(s)}
+                >
+                  <Trash2 className="size-4" /> Delete
+                </Button>
+              </div>
             </li>
           ))}
         </ul>
       )}
 
+      <UpdateSecretDialog secret={pendingUpdate} onClose={() => setPendingUpdate(null)} />
       <DeleteSecretDialog secret={pendingDelete} onClose={() => setPendingDelete(null)} />
     </div>
   );

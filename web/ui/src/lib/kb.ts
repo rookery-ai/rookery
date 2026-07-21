@@ -9,7 +9,10 @@ export type KBNode = {
   system: boolean;
 };
 
-export type KBTree = { path: string; nodes: KBNode[] };
+// `order` is the user's drag-chosen sibling order for this directory, by node
+// NAME — empty when they've never reordered it. Served with the nodes (see
+// web/api_kb.go's apiKBTreeResponse) so opening a folder stays one request.
+export type KBTree = { path: string; nodes: KBNode[]; order: string[] };
 
 // "markdown" -> NoteEditor (WYSIWYG/raw); "code" -> FileViewer's read-only
 // <pre>; "binary" -> FileViewer's Download-only panel (content is "").
@@ -26,7 +29,25 @@ export const rawURL = (path: string) => `/api/v1/kb/raw?path=${encodeURIComponen
 export function useKBTree(path: string) {
   return useQuery({
     queryKey: ["kb-tree", path],
-    queryFn: () => api.get<KBTree>(`/api/v1/kb/tree?path=${encodeURIComponent(path)}`),
+    queryFn: () =>
+      api
+        .get<KBTree>(`/api/v1/kb/tree?path=${encodeURIComponent(path)}`)
+        // Same defence as backlinks below: a nil Go slice marshals to null,
+        // and every consumer here indexes into `order` unconditionally.
+        .then((tree) => ({ ...tree, order: tree.order ?? [] })),
+  });
+}
+
+// Persists a single directory's sibling order. Sending an empty list clears
+// the stored order for that directory (back to the derived one).
+export function useSaveKBOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ dir, names }: { dir: string; names: string[] }) =>
+      api.put<{ ok: boolean }>("/api/v1/kb/order", { dir, names }),
+    onSuccess: (_data, { dir }) => {
+      qc.invalidateQueries({ queryKey: ["kb-tree", dir] });
+    },
   });
 }
 

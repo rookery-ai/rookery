@@ -105,3 +105,53 @@ test("Composer: a new initialText does NOT clobber an in-progress draft", async 
   rerender(<Composer onSend={onSend} initialText="second query" />);
   expect(box).toHaveValue("my unsent draft");
 });
+
+// Regression: `disabled={busy}` blurs the focused textarea (a browser
+// behavior), and re-enabling never restored focus — so every Enter-to-send
+// cost the caret and the next message needed a click first. Affects chat, the
+// agent designer, and the skill designer alike (one shared Composer).
+test("Composer: focus returns to the textarea after an Enter-send finishes", async () => {
+  const onSend = vi.fn();
+  // A focusable element outside the composer, used to park focus while busy.
+  const Harness = ({ busy }: { busy?: boolean }) => (
+    <>
+      <button type="button">elsewhere</button>
+      <Composer onSend={onSend} busy={busy} />
+    </>
+  );
+  const { rerender } = render(<Harness />);
+  const box = screen.getByRole("textbox");
+
+  await userEvent.click(box);
+  await userEvent.type(box, "hi");
+  expect(box).toHaveFocus();
+  fireEvent.keyDown(box, { key: "Enter", code: "Enter" });
+  expect(onSend).toHaveBeenCalledWith("hi");
+
+  // The send puts the surface into its busy state, which disables the box.
+  // Real browsers blur a disabled element; jsdom does not, so focus is moved
+  // away explicitly — otherwise this would pass even if the component never
+  // restored focus at all.
+  rerender(<Harness busy />);
+  screen.getByRole("button", { name: "elsewhere" }).focus();
+  expect(box).not.toHaveFocus();
+
+  rerender(<Harness />);
+  expect(box).toHaveFocus();
+});
+
+// The mirror case: clicking Send means focus was on the BUTTON, and stealing
+// it back to the textarea afterwards would be the component grabbing focus the
+// user didn't put there.
+test("Composer: clicking Send does not pull focus into the textarea", async () => {
+  const onSend = vi.fn();
+  const { rerender } = render(<Composer onSend={onSend} />);
+  const box = screen.getByRole("textbox");
+  await userEvent.type(box, "hi");
+  await userEvent.click(screen.getByRole("button", { name: "Send" }));
+  expect(onSend).toHaveBeenCalledWith("hi");
+
+  rerender(<Composer onSend={onSend} busy />);
+  rerender(<Composer onSend={onSend} />);
+  expect(box).not.toHaveFocus();
+});

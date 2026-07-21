@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
 import { useSession, type Workspace } from "@/lib/session";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,21 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+
+// Every tenant-scoped query key in the app (["agents"], ["skills"],
+// ["kb-tree", …], ["secrets"], …) is keyed by RESOURCE, not by workspace — so
+// after switching workspaces the previous tenant's rows stay in cache and
+// render until each query happens to refetch. Drop them all on the way in.
+//
+// Deliberately NOT qc.clear(): that also evicts ["session"], and RequireAuth
+// (router.tsx) renders a full-page loading fallback whenever the session query
+// is pending — clearing it flashes the entire app. The session is refreshed by
+// invalidation instead, so the guard keeps its last-known-good value while the
+// new one lands.
+export async function resetWorkspaceScopedCache(qc: QueryClient) {
+  qc.removeQueries({ predicate: (query) => query.queryKey[0] !== "session" });
+  await qc.invalidateQueries({ queryKey: ["session"] });
+}
 
 export function EnterWorkspaceDialog({
   ws, onClose,
@@ -36,7 +51,12 @@ export function EnterWorkspaceDialog({
         `/api/v1/workspaces/${ws.id}/enter`,
         { master_password: password },
       );
-      await qc.invalidateQueries({ queryKey: ["session"] });
+      await resetWorkspaceScopedCache(qc);
+      // Close BEFORE navigating. This dialog is also rendered by WorkspaceMenu,
+      // which lives in the always-mounted icon rail — there, nav("/") doesn't
+      // unmount it, so without this the master-password modal stayed on screen
+      // over the workspace the user just entered.
+      onClose();
       nav("/", { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong");
@@ -82,7 +102,9 @@ export function CreateWorkspaceDialog({
     e.preventDefault();
     try {
       await api.post<Workspace>("/api/v1/workspaces", { name, about });
-      await qc.invalidateQueries({ queryKey: ["session"] });
+      // A freshly created workspace is auto-activated — same tenant switch as
+      // entering one, so the previous workspace's cached rows must go too.
+      await resetWorkspaceScopedCache(qc);
       // A freshly created workspace is auto-activated and needs_setup — just
       // navigate home and let RequireAuth route to /setup.
       nav("/", { replace: true });
@@ -132,7 +154,7 @@ export default function Workspaces() {
     setDirectEnterError("");
     try {
       await api.post(`/api/v1/workspaces/${ws.id}/enter`, {});
-      await qc.invalidateQueries({ queryKey: ["session"] });
+      await resetWorkspaceScopedCache(qc);
       nav("/", { replace: true });
     } catch (err) {
       setDirectEnterError(err instanceof ApiError ? err.message : "Something went wrong");

@@ -484,3 +484,61 @@ test("a build finishing while the Spec tab is already open refreshes it automati
   expect(screen.queryByText(/build is in progress/i)).not.toBeInTheDocument();
   expect(stateCalls).toBeGreaterThanOrEqual(3);
 });
+
+// A fresh session used to render an empty transcript with a chatbox under it —
+// no signal that anything had started, or what to type. The intro is a static
+// affordance, NOT a fabricated assistant turn: it must never be posted back and
+// must disappear once a real message exists.
+test("intro shows on a fresh session and is replaced by the real transcript", async () => {
+  const calls = mockFetch({
+    "/x/design": () => jsonResponse({ response: "What should it do?", done: false, state: "designing" }),
+  });
+  wrap(
+    <DesignerSurface
+      endpoints={ENDPOINTS}
+      labels={LABELS}
+      cancelTo="/agents"
+      onDone={vi.fn()}
+      intro={<div>Tell me what you want</div>}
+    />,
+  );
+
+  expect(await screen.findByText("Tell me what you want")).toBeInTheDocument();
+
+  await sendViaComposer("a daily digest");
+  expect(await screen.findByText("What should it do?")).toBeInTheDocument();
+  expect(screen.queryByText("Tell me what you want")).not.toBeInTheDocument();
+
+  // The intro is presentation only — the first POST carries the user's own
+  // message and nothing else.
+  const design = calls.filter((c) => c.url === "/x/design");
+  expect(design).toHaveLength(1);
+  expect(design[0]!.body).toEqual({ message: "a daily digest" });
+});
+
+test("no intro is rendered when the caller doesn't supply one (edit mode)", async () => {
+  mockFetch({});
+  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />);
+  await screen.findByRole("textbox");
+  expect(screen.queryByText("Tell me what you want")).not.toBeInTheDocument();
+});
+
+// The resume banner is a different screen entirely — showing a "start here"
+// card in front of a session that's about to be restored would be worse than
+// the blank page it replaces.
+test("intro is suppressed while the resume banner is showing", async () => {
+  mockFetch({});
+  wrap(
+    <DesignerSurface
+      endpoints={{ ...ENDPOINTS, state: "/x/state" }}
+      labels={LABELS}
+      cancelTo="/agents"
+      onDone={vi.fn()}
+      draft={{ name: "Half-built" }}
+      intro={<div>Tell me what you want</div>}
+    />,
+  );
+
+  expect(await screen.findByText(/unfinished draft/i)).toBeInTheDocument();
+  expect(screen.queryByText("Tell me what you want")).not.toBeInTheDocument();
+});

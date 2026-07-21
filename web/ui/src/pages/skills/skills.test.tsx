@@ -134,9 +134,40 @@ test("empty state shows create-first-skill CTA when there are no skills or draft
   mockFetch();
   wrap();
 
-  expect(await screen.findByText(/no skills yet/i)).toBeInTheDocument();
+  expect(await screen.findByText(/no skills of your own yet/i)).toBeInTheDocument();
   const cta = screen.getByRole("link", { name: /create.*first skill/i });
   expect(cta.getAttribute("href")).toBe("/skills/new");
+});
+
+// Regression: the empty state used to gate the ENTIRE page body, so a fresh
+// workspace with no user skills saw only the CTA and the always-available
+// built-in skills were invisible until a draft happened to exist.
+test("core skills render even when the user has no skills of their own", async () => {
+  skills = [];
+  draft = null;
+  mockFetch();
+  wrap();
+
+  expect(await screen.findByText(/no skills of your own yet/i)).toBeInTheDocument();
+  expect(screen.getByText("Core skills")).toBeInTheDocument();
+  const coreCard = screen.getByRole("link", { name: /pdf/i });
+  expect(coreCard.getAttribute("href")).toBe("/skills/core/pdf");
+});
+
+test("the search box filters both user skills and core skills", async () => {
+  mockFetch();
+  wrap();
+  await screen.findByText("Invoice Formatter");
+
+  const box = screen.getByLabelText(/search skills/i);
+  await userEvent.type(box, "invoice");
+
+  expect(screen.getByText("Invoice Formatter")).toBeInTheDocument();
+  expect(screen.queryByText("Core skills")).not.toBeInTheDocument();
+
+  await userEvent.clear(box);
+  await userEvent.type(box, "zzznomatchzzz");
+  expect(screen.getByText(/no skills match/i)).toBeInTheDocument();
 });
 
 test("draft banner shows Resume link and Discard posts dismiss + refreshes the list", async () => {

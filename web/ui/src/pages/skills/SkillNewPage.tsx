@@ -5,6 +5,7 @@ import {
   type DesignerEndpoints,
   type DesignerLabels,
 } from "@/components/designer/DesignerSurface";
+import { DesignerIntro } from "@/components/designer/DesignerIntro";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -97,6 +98,17 @@ export default function SkillNewPage() {
         endpoints={ENDPOINTS}
         labels={LABELS}
         startPayload={{ name: name.trim() }}
+        intro={
+          <DesignerIntro
+            title="Tell me what this skill should teach your agents"
+            blurb="A skill is a reusable capability any of your agents can call on. Describe what it should do and when it should kick in — I'll ask a few questions, then build and check it before you save it."
+            examples={[
+              "Turn a messy invoice into a tidy summary with the total, due date, and who sent it.",
+              "Whenever I share a long article, pull out the key points as short bullets.",
+              "Format a set of numbers into a clean table I can drop into a note.",
+            ]}
+          />
+        }
         draft={draft ? { name: draft.skill_name } : null}
         autoResume={resumeParam}
         cancelTo="/skills"

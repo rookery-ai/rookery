@@ -30,6 +30,12 @@ type ComposerProps = {
 export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, initialText }: ComposerProps) {
   const [value, setValue] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
+  // Set by send() when the textarea itself was the active element at the
+  // moment of sending — i.e. the user pressed Enter, not clicked Send. The
+  // `disabled={busy}` below blurs a focused textarea (a browser behavior, not
+  // ours) and re-enabling never restores focus, so an Enter-send silently
+  // cost the caret. Restored by the effect below when busy clears.
+  const wasFocusedRef = useRef(false);
 
   useEffect(() => {
     if (initialText === undefined) return;
@@ -55,6 +61,18 @@ export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, in
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusSignal]);
 
+  // Deliberately separate from the caller-driven `focusSignal` above: this is
+  // internal restoration of focus the component itself took away, not a
+  // caller asking for focus. Clicking Send never triggers it (activeElement
+  // was the button at send time), so the button doesn't steal focus back —
+  // which is exactly the asymmetry we want.
+  useEffect(() => {
+    if (busy) return;
+    if (!wasFocusedRef.current) return;
+    wasFocusedRef.current = false;
+    ref.current?.focus();
+  }, [busy]);
+
   function autosize(el: HTMLTextAreaElement) {
     const style = window.getComputedStyle(el);
     const lineHeight = parseFloat(style.lineHeight || "20") || 20;
@@ -67,6 +85,10 @@ export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, in
     if (busy) return;
     const trimmed = value.trim();
     if (!trimmed) return;
+    // Captured BEFORE onSend, which may synchronously flip `busy` true and
+    // blur the textarea — by the time the effect above runs, activeElement is
+    // already gone.
+    wasFocusedRef.current = document.activeElement === ref.current;
     onSend(trimmed);
     setValue("");
     const el = ref.current;

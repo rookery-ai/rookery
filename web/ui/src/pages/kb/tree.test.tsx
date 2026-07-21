@@ -1,6 +1,7 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, createEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ToastProvider, ToastHost } from "@/components/shell/Toast";
 import FileTree from "./FileTree";
 
 function jsonResponse(body: unknown) {
@@ -46,14 +47,59 @@ function mockFetch(intercept?: (url: string, init?: RequestInit) => Response | u
   );
 }
 
-function renderTree(onSelect = vi.fn()) {
+// FileTree reports move/reorder failures through the shell's toast system, so
+// it needs a ToastProvider in scope exactly as it has in the real app.
+function renderTree(onSelect = vi.fn(), onMoved?: (from: string, to: string) => void) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={qc}>
-      <FileTree selectedPath={null} onSelect={onSelect} />
+      <ToastProvider>
+        <FileTree selectedPath={null} onSelect={onSelect} onMoved={onMoved} />
+        <ToastHost />
+      </ToastProvider>
     </QueryClientProvider>,
   );
   return onSelect;
+}
+
+// jsdom gives DragEvent no DataTransfer, and getBoundingClientRect always
+// returns zeroes — both are needed to drive the drop-position logic, so they
+// are supplied explicitly here.
+function dataTransfer() {
+  const store = new Map<string, string>();
+  return {
+    effectAllowed: "",
+    dropEffect: "",
+    setData: (k: string, v: string) => void store.set(k, v),
+    getData: (k: string) => store.get(k) ?? "",
+  };
+}
+
+// Rows are 20px tall in this harness; `y` picks which band of the row the
+// pointer is over (top edge = before, middle = into, bottom edge = after).
+function stubRect(el: Element, top = 0, height = 20) {
+  vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
+    top, height, bottom: top + height, left: 0, right: 100, width: 100, x: 0, y: top, toJSON: () => ({}),
+  } as DOMRect);
+}
+
+// jsdom has no constructible DragEvent, so testing-library falls back to a
+// plain Event for drag types — which silently drops `clientY`, the very thing
+// the drop-position logic reads. Build the event and define the coordinate on
+// it explicitly. (A missing clientY is now REFUSED by hintFor rather than
+// defaulting to a move, so without this every reorder test would just see
+// nothing happen.)
+function dragEventAt(type: string, el: Element, dt: unknown, clientY: number) {
+  const ev = createEvent[type === "drop" ? "drop" : "dragOver"](el, { dataTransfer: dt });
+  Object.defineProperty(ev, "clientY", { value: clientY });
+  return ev;
+}
+
+// The element carrying the drag handlers is the row's draggable ancestor.
+// Found by attribute rather than by counting parentElement hops, so a wrapper
+// added for layout doesn't silently retarget these to the wrong node.
+function rowWrapper(name: string): HTMLElement {
+  return screen.getByText(name).closest("[draggable]") as HTMLElement;
 }
 
 test("renders root nodes with muted system rows, lazy-loads a directory, and selects a file", async () => {
@@ -236,4 +282,216 @@ test("Delete… surfaces a 400 error inline and keeps the dialog open", async ()
   expect(await screen.findByText("cannot delete this")).toBeInTheDocument();
   // Error keeps the dialog open — the confirm didn't silently succeed.
   expect(screen.getByRole("heading", { name: /^Delete\s/ })).toBeInTheDocument();
+});
+
+// ── Drag to move / reorder ───────────────────────────────────────────────────
+
+// Drops the row named `from` onto the row named `to`, at the vertical band
+// given by `band` (0 = top edge, 0.5 = middle, 1 = bottom edge).
+async function dragOnto(from: string, to: string, band: number) {
+  const src = rowWrapper(from);
+  const dst = rowWrapper(to);
+  stubRect(dst);
+  const dt = dataTransfer();
+  fireEvent.dragStart(src, { dataTransfer: dt });
+  fireEvent(dst, dragEventAt("dragover", dst, dt, band * 20));
+  fireEvent(dst, dragEventAt("drop", dst, dt, band * 20));
+  await waitFor(() => {});
+}
+
+test("dropping a file in the middle of a folder row moves it into that folder", async () => {
+  const calls: Array<{ url: string; method: string; body: unknown }> = [];
+  mockFetch((url, init) => {
+    calls.push({ url, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    if (url === "/api/v1/kb/rename") return jsonResponse({ ok: true });
+    return undefined;
+  });
+  const onMoved = vi.fn();
+  renderTree(vi.fn(), onMoved);
+  await screen.findByText("README.md");
+
+  await dragOnto("README.md", "Notes", 0.5);
+
+  const rename = calls.find((c) => c.url === "/api/v1/kb/rename");
+  expect(rename?.body).toEqual({ from: "README.md", to: "notes/README.md" });
+  // The open note has to follow its file, or the editor points at a path that
+  // no longer exists and reads as a deletion.
+  await waitFor(() => expect(onMoved).toHaveBeenCalledWith("README.md", "notes/README.md"));
+});
+
+test("dropping on the edge of a sibling reorders and persists the new order", async () => {
+  const calls: Array<{ url: string; method: string; body: unknown }> = [];
+  mockFetch((url, init) => {
+    calls.push({ url, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    if (url === "/api/v1/kb/order") return jsonResponse({ ok: true });
+    return undefined;
+  });
+  renderTree();
+  await screen.findByText("README.md");
+
+  // README.md dropped on the TOP edge of the Notes row → before it.
+  await dragOnto("README.md", "Notes", 0.05);
+
+  const order = calls.find((c) => c.url === "/api/v1/kb/order");
+  expect(order?.method).toBe("PUT");
+  // chats/ is a system dir and is deliberately left out of the saved order —
+  // see the dedicated regression test below.
+  expect(order?.body).toEqual({ dir: "", names: ["README.md", "notes"] });
+});
+
+test("dropping a file onto another file does nothing at all", async () => {
+  const calls: string[] = [];
+  mockFetch((url, init) => {
+    if (init?.method && init.method !== "GET") calls.push(url);
+    return undefined;
+  });
+  renderTree();
+  await screen.findByText("README.md");
+
+  // Expand notes/ so a second FILE row exists to aim at.
+  await userEvent.click(screen.getByText("Notes"));
+  await screen.findByText("a.md");
+
+  // a.md is in notes/, README.md is at the root — different parents, so
+  // neither a reorder (edge) nor a move-into (it's a file) is legal.
+  await dragOnto("README.md", "a.md", 0.5);
+  await dragOnto("README.md", "a.md", 0.05);
+
+  expect(calls).toEqual([]);
+});
+
+test("a folder can't be dropped into itself", async () => {
+  const calls: string[] = [];
+  mockFetch((url, init) => {
+    if (init?.method && init.method !== "GET") calls.push(url);
+    return undefined;
+  });
+  renderTree();
+  await screen.findByText("Notes");
+
+  await dragOnto("Notes", "Notes", 0.5);
+  expect(calls).toEqual([]);
+});
+
+test("a failed move surfaces the server message as a toast and doesn't move anything", async () => {
+  mockFetch((url) => {
+    if (url === "/api/v1/kb/rename") {
+      return new Response(
+        JSON.stringify({ error: { code: "already_exists", message: "“notes/README.md” already exists" } }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      );
+    }
+    return undefined;
+  });
+  const onMoved = vi.fn();
+  renderTree(vi.fn(), onMoved);
+  await screen.findByText("README.md");
+
+  await dragOnto("README.md", "Notes", 0.5);
+
+  // findAll: the toast host renders the message twice (visible + its
+  // aria-live announcement).
+  expect((await screen.findAllByText(/already exists/)).length).toBeGreaterThan(0);
+  expect(onMoved).not.toHaveBeenCalled();
+});
+
+test("a stored order wins over the derived sort, and unlisted nodes fall to the end", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/kb/tree?path=") {
+        return Promise.resolve(
+          jsonResponse({
+            path: "",
+            // chats is system:true, so the derived sort would put it LAST;
+            // the stored order pins it first. z.md is not listed at all and
+            // must land after the ordered block, not be silently pinned.
+            order: ["chats", "README.md"],
+            nodes: [
+              { name: "notes", display_name: "Notes", path: "notes", is_dir: true, system: false },
+              { name: "README.md", display_name: "README.md", path: "README.md", is_dir: false, system: false },
+              { name: "chats", display_name: "Chats", path: "chats", is_dir: true, system: true },
+              { name: "z.md", display_name: "z.md", path: "z.md", is_dir: false, system: false },
+            ],
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse({ path: url, nodes: [], order: [] }));
+    }),
+  );
+  renderTree();
+  await screen.findByText("Chats");
+
+  const labels = screen.getAllByRole("button")
+    .filter((el) => el.getAttribute("role") === "button")
+    .map((el) => el.textContent?.trim());
+  expect(labels).toEqual(["Chats", "README.md", "Notes", "z.md"]);
+});
+
+// Regression: the persisted order used to include system dirs. Ranked names
+// sort ahead of unranked ones, so reordering root ONCE pinned chats/agents
+// above every note created afterwards — using the feature demoted your own new
+// notes below the system block.
+test("reordering persists only the user's own rows, not system dirs", async () => {
+  const calls: Array<{ url: string; body: unknown }> = [];
+  mockFetch((url, init) => {
+    calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    if (url === "/api/v1/kb/order") return jsonResponse({ ok: true });
+    return undefined;
+  });
+  renderTree();
+  await screen.findByText("README.md");
+
+  await dragOnto("README.md", "Notes", 0.05);
+
+  const order = calls.find((c) => c.url === "/api/v1/kb/order");
+  expect(order?.body).toEqual({ dir: "", names: ["README.md", "notes"] });
+});
+
+test("a newly created note still sorts above system dirs after a reorder", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      const body =
+        url === "/api/v1/kb/tree?path="
+          ? {
+              path: "",
+              // What a reorder now saves: user rows only.
+              order: ["README.md", "notes"],
+              nodes: [
+                { name: "notes", display_name: "Notes", path: "notes", is_dir: true, system: false },
+                { name: "README.md", display_name: "README.md", path: "README.md", is_dir: false, system: false },
+                { name: "chats", display_name: "Chats", path: "chats", is_dir: true, system: true },
+                // Created after the drag, so it isn't in `order`.
+                { name: "brand-new.md", display_name: "brand-new.md", path: "brand-new.md", is_dir: false, system: false },
+              ],
+            }
+          : { path: url, nodes: [], order: [] };
+      return Promise.resolve(jsonResponse(body));
+    }),
+  );
+  renderTree();
+  await screen.findByText("Chats");
+
+  const labels = screen.getAllByRole("button").map((el) => el.textContent?.trim()).filter(Boolean);
+  expect(labels).toEqual(["README.md", "Notes", "brand-new.md", "Chats"]);
+});
+
+// System dirs are excluded from the saved order, so a reorder aimed at one
+// could never be persisted — the affordance must not be offered at all rather
+// than appearing to work and doing nothing.
+test("a system dir is not a reorder target", async () => {
+  const calls: string[] = [];
+  mockFetch((url, init) => {
+    if (init?.method && init.method !== "GET") calls.push(url);
+    return undefined;
+  });
+  renderTree();
+  await screen.findByText("Chats");
+
+  await dragOnto("README.md", "Chats", 0.05);
+  await dragOnto("README.md", "Chats", 0.95);
+  expect(calls).toEqual([]);
 });

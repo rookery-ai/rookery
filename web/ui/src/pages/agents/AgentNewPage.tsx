@@ -5,6 +5,7 @@ import {
   type DesignerEndpoints,
   type DesignerLabels,
 } from "@/components/designer/DesignerSurface";
+import { DesignerIntro } from "@/components/designer/DesignerIntro";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,6 +28,13 @@ const LABELS: DesignerLabels = {
   saveButton: "✅ Save agent",
   entityName: "agent",
 };
+
+// Reused verbatim from the template briefs so the examples shown here and the
+// text a template drops into the composer are the same non-technical register
+// (templates.ts enforces that with a banned-jargon test).
+const INTRO_EXAMPLES = ["daily-digest", "watch-for-changes", "inbox-triage"]
+  .map((id) => AGENT_TEMPLATES.find((t) => t.id === id)?.description ?? "")
+  .filter(Boolean);
 
 // Conversational agent creation. A new agent needs a name before the design
 // POST can start a session — that's collected here (once, up front) rather
@@ -184,6 +192,13 @@ export default function AgentNewPage() {
         // still just a starting point the user can edit or clear before
         // sending, never auto-sent on their behalf.
         initialText={description.trim() ? description : undefined}
+        intro={
+          <DesignerIntro
+            title="Tell me what you want this agent to do"
+            blurb="Describe it in your own words — no need to be technical. I'll ask a few questions, then build it and test it for real before you save it."
+            examples={INTRO_EXAMPLES}
+          />
+        }
         draft={draft ? { name: draft.agent_name } : null}
         autoResume={resumeParam}
         cancelTo="/agents"

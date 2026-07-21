@@ -3,7 +3,7 @@ import { Outlet } from "react-router";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { GlobalChatButton } from "@/components/chat/GlobalChatButton";
-import { CommandPalette } from "@/components/search/CommandPalette";
+import { CommandPalette, GlobalSearchButton } from "@/components/search/CommandPalette";
 import { useRailShortcuts } from "@/lib/useKeyboardNav";
 import IconRail from "./IconRail";
 import { PaneResizeHandle, usePaneWidth } from "./usePaneWidth";
@@ -44,6 +44,10 @@ export function ContextPane({ children }: { children: React.ReactNode }) {
 export function AppShell() {
   const [panel, setPanel] = useState<SlideOverState>(null);
   const [contextPane, setContextPane] = useState<React.ReactNode | null>(null);
+  // Held here rather than inside CommandPalette so the search FAB — which
+  // lives in this subtree, stacked with the chat button — can open it. The
+  // palette keeps its own ⌘K listener and routes it through this setter.
+  const [searchOpen, setSearchOpen] = useState(false);
   const { width, setWidth, reset } = usePaneWidth();
   useRailShortcuts();
 
@@ -75,8 +79,15 @@ export function AppShell() {
             <main className="flex-1 min-w-0 overflow-y-auto pb-16 md:pb-0">
               <Outlet />
             </main>
-            <GlobalChatButton />
-            <CommandPalette />
+            {/* flex-col-reverse: the chat button is the primary action and
+                stays anchored at the bottom, with search sitting above it.
+                GlobalChatButton renders null on /chats, and the stack simply
+                closes up rather than leaving a hole. */}
+            <div className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-30 flex flex-col-reverse gap-3">
+              <GlobalChatButton />
+              <GlobalSearchButton onClick={() => setSearchOpen(true)} />
+            </div>
+            <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
             <ShortcutsOverlay />
             <ToastHost />
             <Sheet open={panel !== null} onOpenChange={(o) => !o && setPanel(null)}>

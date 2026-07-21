@@ -104,7 +104,10 @@ export function GlobalChatButton() {
       type="button"
       aria-label="Open chat"
       onClick={openPanel}
-      className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-30 flex size-12 items-center justify-center rounded-full bg-accent text-accent-foreground shadow-lg transition-colors hover:bg-accent/90"
+      // Positioning lives in AppShell's FAB stack, not here — the stack also
+      // holds the search button, and this component returns null on /chats,
+      // which must collapse the stack rather than leave a gap.
+      className="flex size-12 items-center justify-center rounded-full bg-accent text-accent-foreground shadow-lg transition-colors hover:bg-accent/90"
     >
       <MessageSquarePlus className="size-5" />
     </button>

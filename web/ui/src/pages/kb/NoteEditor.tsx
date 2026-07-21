@@ -16,8 +16,15 @@ export type SaveState = "saved" | "saving" | "dirty" | "error" | "raw";
 
 const AUTOSAVE_MS = 1000;
 
+// Notes open in the rich text editor by default. This banner explains the one
+// exception: a note whose markdown doesn't survive a round trip through the
+// editor (checkFidelity in ./editor.ts). Saving such a note from rich text
+// re-serializes the WHOLE document, so it would rewrite formatting in parts
+// the user never touched — hence raw markdown, and hence spelling out WHY
+// rather than just announcing the mode.
 const RAW_BANNER =
-  "Opened in raw markdown to protect formatting this editor can't represent yet.";
+  "This note uses formatting the rich text editor can't reproduce exactly, so it opened as raw " +
+  "markdown. Editing it in rich text would rewrite those parts, including ones you didn't touch.";
 
 // Isolated so `useEditor` is only ever called while WYSIWYG mode is active —
 // mounting/unmounting this component is how we avoid running the TipTap
@@ -550,6 +557,7 @@ export default function NoteEditor({
         rawMode={mode === "raw"}
         onToggleRaw={handleToggleRaw}
         renameError={renameError}
+        lossyInRichText={fidelityFailed && mode === "wysiwyg"}
       />
 
       {/* Suppressed while renameError is shown: flushForHandoff's onError
@@ -576,8 +584,8 @@ export default function NoteEditor({
         <div className="flex items-center gap-2 border-b border-warn-soft bg-warn-soft px-4 py-2 text-sm text-warn">
           <AlertTriangle className="size-4 shrink-0" />
           <span className="flex-1">{RAW_BANNER}</span>
-          <Button variant="outline" size="sm" onClick={switchToWysiwyg}>
-            Try WYSIWYG anyway
+          <Button variant="outline" size="sm" className="shrink-0" onClick={switchToWysiwyg}>
+            Edit as rich text anyway
           </Button>
         </div>
       )}

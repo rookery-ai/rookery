@@ -57,6 +57,13 @@ export type DesignerSurfaceProps = {
   // seeds an EMPTY composer, so this is purely additive: callers that don't
   // pass it (every existing one) see no behavior change.
   initialText?: string;
+  // Rendered in the transcript before the first message exists, so a fresh
+  // session reads as "started, your turn" rather than a blank page with a
+  // chatbox. Deliberately a ReactNode rendered OUTSIDE `messages` — it is not
+  // a fabricated assistant turn: it never enters the transcript, is never
+  // sent to the server, and vanishes the moment a real message lands. Left
+  // out by callers that resume an existing transcript (agent EDIT mode).
+  intro?: React.ReactNode;
 };
 
 type Role = "user" | "assistant";
@@ -122,6 +129,7 @@ export function DesignerSurface({
   autoResume,
   cancelTo,
   initialText,
+  intro,
 }: DesignerSurfaceProps) {
   const [messages, setMessages] = useState<HistEntry[]>([]);
   const [fsmState, setFsmState] = useState<FsmState>(null);
@@ -475,6 +483,12 @@ export function DesignerSurface({
         </div>
       ) : (
         <ChatScroll>
+          {/* Only while the transcript is genuinely empty AND nothing is in
+              flight — mount recovery may still be about to populate it, and
+              flashing a "start here" card in front of a session that's about
+              to restore would be worse than the blank page it replaces. */}
+          {intro && messages.length === 0 && !busy && !recovering && <>{intro}</>}
+
           {messages.map((m, i) => (
             <ChatMessageBubble key={i} role={m.role} content={m.content} />
           ))}

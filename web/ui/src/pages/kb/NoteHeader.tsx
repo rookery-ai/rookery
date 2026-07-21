@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
-import { Download, FileCode, Link2, MoreHorizontal } from "lucide-react";
+import { AlertTriangle, Download, FileCode, Link2, MoreHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { rawURL } from "@/lib/kb";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -39,6 +40,7 @@ export default function NoteHeader({
   rawMode,
   onToggleRaw,
   renameError,
+  lossyInRichText,
 }: {
   path: string;
   state: EditorSaveState;
@@ -47,6 +49,12 @@ export default function NoteHeader({
   onDelete: () => void;
   rawMode: boolean;
   onToggleRaw: () => void;
+  // True when this note failed the round-trip fidelity check but is being
+  // edited in rich text anyway (the user took the override). The one-time
+  // banner is gone by then, so the risk needs a permanent home — saving will
+  // rewrite formatting elsewhere in the note, and that has to stay visible
+  // for as long as it's true, not just until the banner is dismissed.
+  lossyInRichText?: boolean;
   // Fed back from NoteEditor when its rename mutation fails — resets
   // committedRef so a plain Enter retries instead of staying a no-op
   // (review fix — "minor": the alternative considered was onRename
@@ -160,6 +168,20 @@ export default function NoteHeader({
       </div>
 
       <div className="flex shrink-0 items-center gap-3">
+        {lossyInRichText && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="flex items-center gap-1 rounded-full bg-warn-soft px-2 py-0.5 text-xs text-warn">
+                <AlertTriangle className="size-3" />
+                May reformat
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="max-w-64">
+              This note uses formatting the rich editor can&rsquo;t reproduce exactly. Saving from
+              rich text will rewrite those parts. Switch to Raw to edit it as-is.
+            </TooltipContent>
+          </Tooltip>
+        )}
         <span className={cn("text-xs", state === "error" ? "text-danger" : "text-muted-2")}>
           {STATE_LABEL[state]}
         </span>
