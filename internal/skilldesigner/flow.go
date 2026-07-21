@@ -487,6 +487,10 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	notify("🤖 Coder is building your skill — this can take a few minutes…")
 
 	generationCoder := coderSvc.WithDir(stagingDir).WithAllowedTools("Bash,Write,Edit,Read").
+		// This build produces SKILL.md, not AGENT.md. Without the spec the API engine's
+		// finish gate demands the agent definition and the build can never end correctly
+		// (SP10 spec §1.1). No-op for the CLI engine.
+		WithBuildSpec(coder.SkillBuildSpec).
 		// Stream the API engine's per-tool-call milestones (🔧 run_script(...), 🔧
 		// write_file(...)) to the build SSE, mirroring agentdesigner.runGeneration +
 		// agent runs. Without this a skill build only emits the fixed "🤖 Coder is
