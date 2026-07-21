@@ -38,7 +38,36 @@ and instructs the model to write a file that is not part of a skill, burning the
 finds no `SKILL.md`, and soft-fails.
 
 The same agent-shaped assumption appears in gate 2: `isAgentScriptPath` (`hosttools.go:362`) only
-recognises `tools/*.py`, so a skill's `scripts/` are never script-verified.
+recognises `tools/*.py`, so a skill's `scripts/` are never script-verified. The progress string at
+`api_engine.go:116` is likewise agent-worded ("verifying the agent's script actually works…"). The
+other three `verifyBuild` sites were checked and are deliverable-agnostic: the raised token cap
+(`:63`), the larger turn budget (`:88`), and the `[BLOCKED]` grace turn (`:153`) are all correct for
+skill builds as-is.
+
+### 1.1a A second, independent cause: SKILL.md written one level deep
+
+The recovered staging dir for that draft shows what the model actually produced:
+
+```
+.staging-pretty printer/
+├── scripts/                  ← empty, pre-created by Go
+└── pretty-printer/           ← the model created its own subdirectory
+    ├── SKILL.md              ← valid: correct frontmatter, name, description, triggers
+    └── AGENT.md              ← written in response to the misfiring gate-1 nudge
+```
+
+Two things are confirmed here. The model **did** comply with the AGENT.md demand, which is direct
+evidence for §1.1. And it wrote a **valid SKILL.md** — which was still discarded, because
+`runGeneration` reads `filepath.Join(stagingDir, "SKILL.md")` as an exact path. The model nested it
+under `<name>/` because that is the layout `skill-creator/SKILL.md` documents (`<name>/SKILL.md`)
+and nothing in the implementation prompt pins the output to the working directory root.
+
+So "the coder didn't create SKILL.md" was wrong twice over: the coder created it, and the file was
+good.
+
+**Timeline reconciliation.** Gate 1 was introduced in `ad2c3d8` (2026-07-09). The one skill that
+has ever saved on this install, `pdf-to-email-summarizer`, was created 2026-07-02 — a week earlier.
+Skill creation worked before that commit and has been broken since.
 
 ### 1.2 Skill scripts cannot invoke CLI tools
 
@@ -114,6 +143,21 @@ type buildSpec struct {
 `skilldesigner.runGeneration` the skill spec. With no spec set, the agent spec is the default, so
 existing behaviour is unchanged for every current caller.
 
+The blast radius is small and bounded: the three other `verifyBuild` sites (`api_engine.go:63`,
+`:88`, `:153`) are deliverable-agnostic and need no change (§1.1). Only `verifyFinishNudge`,
+`isAgentScriptPath`, and the progress string at `api_engine.go:116` read the spec.
+
+**Gate 2 for skills — kept, with the nudge text from the spec.** A skill script is a reusable tool
+invoked later with real inputs, not the work itself, so an argument-less build-time run may
+legitimately produce nothing — which argues for disabling gate 2. But `skill-creator` already
+mandates a smoke run (`python3 scripts/x.py --help`, or against a fixture), and such a run does
+produce stdout and does satisfy the gate. Gate 2 therefore *enforces the smoke test the skill
+contract already requires*, and disabling it would drop that for no gain. What must change is the
+wording: today's nudge is agent-shaped ("at build time it cannot reach the live service", "fetch AND
+write each destination file"), which on a skill build would burn the nudge budget chasing live data
+the script was never meant to fetch. The nudge text moves into `buildSpec`, so the skill variant
+says "run it with `--help` or a small fixture and show the output" instead.
+
 Rejected alternatives:
 
 - **Disable the guard for skill builds** (`WithVerifyBuild(false)`). Two lines, but skills lose
@@ -161,6 +205,24 @@ boundary and is retained unchanged.
 statically check rather than reporting them as failures — a `references/*.md` must not appear as a
 failed test.
 
+### 4.3a Locating SKILL.md
+
+`runGeneration` reads `filepath.Join(stagingDir, "SKILL.md")` as an exact path, so the one-level
+nesting in §1.1a is fatal even though the file is valid. Fixed on both sides:
+
+- **Prompt.** `BuildSkillImplementationPrompt` states explicitly that `SKILL.md` and `scripts/` go
+  at the root of the working directory — do not create a `<name>/` folder, the folder already
+  exists. `skill-creator/SKILL.md` documents the *published* layout (`<name>/SKILL.md`), which is
+  what misled the model; §6.2 aligns its wording.
+- **Read.** If the root `SKILL.md` is absent, search one level down for exactly one `SKILL.md` and,
+  on a unique hit, treat that directory as the skill root — the whole subtree is hoisted, so
+  `pretty-printer/scripts/x.py` becomes `scripts/x.py`. Zero or multiple hits keep today's
+  soft-fail. A build must not be thrown away over a directory level.
+
+The pre-created empty `scripts/` dir at the staging root is dropped: it does not steer the model
+(it wrote its own tree anyway) and an empty dir is indistinguishable from one the model chose to
+leave empty.
+
 ### 4.4 Skill naming
 
 `validateSkillName` slugifies before use: lowercase, spaces and underscores to hyphens, strip
@@ -181,6 +243,9 @@ core-skill collision check in `SaveSkill` remains as the backstop.
   `eval`/`exec`/`__import__` fail under both.
 - Script round-trip: a staging dir containing `.py`, `.sh`, a nested module and a `references/` file
   survives read → save with its tree intact; a test artifact is dropped.
+- SKILL.md location: root hit; single one-level-down hit (subtree hoisted, `scripts/` paths
+  rewritten); no hit and two ambiguous hits both soft-fail. The recovered `pretty printer` staging
+  tree from §1.1a is the fixture for the hoist case.
 - Slugification: names with spaces, mixed case, and punctuation.
 
 ---
@@ -247,7 +312,9 @@ These drive the designer itself; if they lag the code, every generated skill inh
 
 - **`skill-creator`** — teach the widened contract: scripts may be `.py` or `.sh`; CLI tools are
   invoked via `subprocess` with an argument list, never `shell=True`; tools are named bare in the
-  body and called by absolute path in scripts; `references/` holds on-demand docs.
+  body and called by absolute path in scripts; `references/` holds on-demand docs. Also separate the
+  *published* layout (`<name>/SKILL.md`) from the *authoring* layout — files go at the working
+  directory root, no `<name>/` folder — since conflating the two is what produced §1.1a.
 - **`skill-vetter`** — matching audit criteria: `shell=True`, raw-IP network calls, obfuscated
   payloads, and any read of `USER.md` / `SOUL.md` / secrets.
 
@@ -333,10 +400,12 @@ The last item holds the core catalog to the same bar as user-generated skills.
 ## 8. Acceptance
 
 1. The `pretty printer` draft (or an equivalent) builds to `StateVerifying` and saves on the
-   `api`/Mistral workspace.
+   `api`/Mistral workspace, with no `AGENT.md` in the staging dir.
 2. A generated skill containing `subprocess.run([...])` passes guardrails and saves; the same script
    with `shell=True` is rejected.
 3. A skill with a `.sh` helper and a `references/` file saves with its tree intact.
-4. A newly created agent that processes PDFs has `pdf` attached without the user opening the agent
-   page, with the `# Skills:` header absent from AGENT.md.
+4. A newly created agent that processes PDFs has `pdf` attached **without the user opening the agent
+   page**, in the case where AGENT.md carries no `# Skills:` header — i.e. the selector fired and
+   wrote the row. Asserting the row exists is the test; asserting the code path exists is not.
+   `agent_skills` being empty across the install (§1.3) is the baseline this must move.
 5. An `image-ocr` agent installs `tesseract` via `cli-tool-installer` and reads text from an image.
