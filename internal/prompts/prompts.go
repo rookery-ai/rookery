@@ -602,8 +602,18 @@ Write your analysis (3-5 sentences) before proceeding to file creation.
 // something no prompt had asked the file's author to produce, and no agent on the install
 // had a single skill attached.
 //
-// The text below is the design prompt's pre-existing wording, preserved verbatim on
-// extraction so BuildDesignSystemPrompt's rendered output does not change.
+// The text below is the design prompt's pre-existing wording, preserved on extraction so
+// BuildDesignSystemPrompt's rendered output did not change — with ONE deliberate edit. The
+// original first bullet said "Mention it naturally in the conversation", which only makes
+// sense in the design chat. Once shared, it also reached the two implementation prompts,
+// where there is no live conversation — the design transcript they carry is history, and
+// the coder's job is to author AGENT.md, not to converse. It is reworded to say the same
+// thing in a way that holds in both contexts.
+//
+// The block is deliberately NOT split into design-only and implementation-only variants.
+// Unlike connections, which have AutoBindTargets as a fallback, the `# Skills:` header is
+// the ONLY path by which skills get attached, so it must reach the prompt that writes the
+// file. Splitting risks pulling it back out and reintroducing the bug above.
 func availableSkillsBlock(skills []SkillRef) string {
 	if len(skills) == 0 {
 		return ""
@@ -611,7 +621,7 @@ func availableSkillsBlock(skills []SkillRef) string {
 	var sb strings.Builder
 	sb.WriteString("<available_skills>\n")
 	sb.WriteString("The user has these pre-built skills installed. When the task clearly benefits from one, use it:\n")
-	sb.WriteString("- Mention it naturally in the conversation (e.g. \"I'll use the pdf-reader skill to extract the text\").\n")
+	sb.WriteString("- Rely on the skill rather than re-deriving what it already does: name it as the way the step is handled instead of restating its instructions.\n")
 	sb.WriteString("- You MUST include a `# Skills: skill-one, skill-two` header line in the generated AGENT.md (alongside the schedule line) declaring EXACTLY the skills this agent needs.\n")
 	sb.WriteString("- List ONLY the specific skills the agent actually uses at runtime — never list all available skills, and never omit the line. If the agent genuinely needs none, write `# Skills: none`.\n")
 	sb.WriteString("- The names must match the skill names below exactly; they are how the agent's skills are recorded.\n\n")
