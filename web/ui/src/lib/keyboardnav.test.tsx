@@ -2,6 +2,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router";
 import { AppShell } from "@/components/shell/AppShell";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useListNav } from "./useKeyboardNav";
 
 // AppShell's rail-shortcut hook calls react-router's useNavigate() — spy on
@@ -59,6 +60,19 @@ function AppShellWithContentEditable() {
   );
 }
 
+// A page with a real <select>, mounted inside AppShell — a bare "j"/"k" on a
+// focused <select> also drives the browser's native type-ahead (jumps to
+// the next option starting with that letter), so it needs the same
+// suppression as input/textarea/contenteditable.
+function AppShellWithSelect() {
+  return (
+    <select aria-label="scratch-select">
+      <option value="a">A</option>
+      <option value="b">B</option>
+    </select>
+  );
+}
+
 function wrap(page = <AppShellWithInput />) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   vi.stubGlobal(
@@ -104,6 +118,14 @@ test("? does not open the shortcuts overlay while typing in the WYSIWYG note edi
   // editability (not a tag/attribute check on this exact element) can
   // catch it.
   fireEvent.keyDown(child, { key: "?" });
+  expect(screen.queryByRole("dialog", { name: /shortcuts/i })).not.toBeInTheDocument();
+});
+
+test("? does not open the shortcuts overlay while a <select> is focused", async () => {
+  wrap(<AppShellWithSelect />);
+  const select = await screen.findByRole("combobox");
+  select.focus();
+  fireEvent.keyDown(select, { key: "?" });
   expect(screen.queryByRole("dialog", { name: /shortcuts/i })).not.toBeInTheDocument();
 });
 
@@ -216,5 +238,71 @@ test("j/k do not move the highlight while typing in a contenteditable region (WY
   fireEvent.keyDown(child, { key: "j" });
   expect(screen.getByText("Alpha").closest("li")).toHaveAttribute("data-highlighted", "true");
   fireEvent.keyDown(child, { key: "Enter" });
+  expect(onOpen).not.toHaveBeenCalled();
+});
+
+test("j/k do not move the highlight while a <select> is focused", () => {
+  const rows: Row[] = [{ id: "a", label: "Alpha" }, { id: "b", label: "Bravo" }];
+  const onOpen = vi.fn();
+  render(
+    <div>
+      <select aria-label="scratch-select">
+        <option value="a">A</option>
+      </select>
+      <ListFixture rows={rows} onOpen={onOpen} />
+    </div>,
+  );
+  const select = screen.getByRole("combobox");
+  select.focus();
+  fireEvent.keyDown(select, { key: "j" });
+  expect(screen.getByText("Alpha").closest("li")).toHaveAttribute("data-highlighted", "true");
+  fireEvent.keyDown(select, { key: "Enter" });
+  expect(onOpen).not.toHaveBeenCalled();
+});
+
+// The listener is window-level and unscoped, so an Enter keydown while
+// focus sits on a real <button> (e.g. Home's "Mark all read") would
+// otherwise ALSO call onActivate on top of that button's own native click —
+// neither <button> nor document.body is a typing target, so isTypingTarget
+// alone doesn't catch this.
+test("Enter does not double-fire onActivate when focus is on a real button", () => {
+  const rows: Row[] = [{ id: "a", label: "Alpha" }];
+  const onOpen = vi.fn();
+  render(
+    <div>
+      <button type="button">Mark all read</button>
+      <ListFixture rows={rows} onOpen={onOpen} />
+    </div>,
+  );
+  const button = screen.getByRole("button", { name: "Mark all read" });
+  button.focus();
+  fireEvent.keyDown(button, { key: "Enter" });
+  expect(onOpen).not.toHaveBeenCalled();
+});
+
+// A Dialog/Sheet sitting on top of the list (⌘K palette, "?" overlay, a
+// slide-over) should own j/k/Enter while it's open — verified against the
+// REAL Radix Dialog primitive (not a hand-rolled role="dialog" stand-in),
+// since that's what actually determines whether the guard's DOM query
+// matches in production.
+test("j/k/Enter do nothing while a real Dialog is open over the list", () => {
+  const rows: Row[] = [{ id: "a", label: "Alpha" }, { id: "b", label: "Bravo" }];
+  const onOpen = vi.fn();
+  render(
+    <div>
+      <Dialog open>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Some modal</DialogTitle>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
+      <ListFixture rows={rows} onOpen={onOpen} />
+    </div>,
+  );
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  fireEvent.keyDown(document.body, { key: "j" });
+  expect(screen.getByText("Alpha").closest("li")).toHaveAttribute("data-highlighted", "true");
+  fireEvent.keyDown(document.body, { key: "Enter" });
   expect(onOpen).not.toHaveBeenCalled();
 });

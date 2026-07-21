@@ -10,6 +10,7 @@ import { cn, timeAgo } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { useServices } from "@/lib/connections";
 import { useDeferredDelete } from "@/lib/useDeferredDelete";
+import { useListNav } from "@/lib/useKeyboardNav";
 import {
   useDashboard,
   greeting,
@@ -95,27 +96,38 @@ function DayHeader({ label }: { label: string }) {
   );
 }
 
-function InboxCard({ msg, onDelete }: { msg: InboxMessage; onDelete: () => void }) {
-  const [expanded, setExpanded] = useState(false);
-  const markRead = useMarkInboxRead();
+function InboxCard({
+  msg,
+  expanded,
+  highlighted,
+  onActivate,
+  onDelete,
+}: {
+  msg: InboxMessage;
+  expanded: boolean;
+  highlighted: boolean;
+  onActivate: () => void;
+  onDelete: () => void;
+}) {
   const Icon = msg.source === "reminder" ? Bell : Bot;
   const name = msg.agent_name || (msg.source === "reminder" ? "Reminder" : "Notification");
 
-  function handleClick() {
-    setExpanded((v) => !v);
-    if (!msg.read) markRead.mutate(msg.id);
-  }
-
   return (
     <div
+      data-highlighted={highlighted}
       className={cn(
         "mb-1.5 rounded-lg border border-border bg-background px-2.5 py-2 text-xs",
         // Unread: a whole-card signal (a 2px accent bar), not the old 6px
         // dot you had to hunt for — spec §5.2.
         !msg.read && "border-l-2 border-l-primary",
+        // The keyboard-nav highlight (j/k from useListNav) needs its own
+        // visible signal distinct from the unread bar — an invisible
+        // highlight isn't a feature. A ring reads at a glance even stacked
+        // with the unread accent.
+        highlighted && "ring-2 ring-primary ring-offset-1 ring-offset-background",
       )}
     >
-      <button type="button" onClick={handleClick} className="flex w-full flex-col gap-1 text-left">
+      <button type="button" onClick={onActivate} className="flex w-full flex-col gap-1 text-left">
         <span className="flex items-center gap-1.5">
           <Icon className="size-3.5 shrink-0 text-muted-2" />
           <span className={cn("truncate", !msg.read && "font-medium")}>{name}</span>
@@ -164,6 +176,7 @@ function InboxSection() {
   const { data } = useInbox();
   const { data: dash } = useDashboard();
   const markAll = useMarkAllInboxRead();
+  const markRead = useMarkInboxRead();
   const del = useDeleteInboxMessage();
   const qc = useQueryClient();
   // Deferred-commit undo (§6.2): delete hides the row immediately, but the
@@ -175,6 +188,35 @@ function InboxSection() {
   const messages = (data?.messages ?? []).filter((m) => !pending.has(m.id));
   const unread = data?.unread ?? 0;
   const groups = groupByDay(messages, new Date());
+
+  // Expansion used to live inside InboxCard as local state. It's lifted up
+  // here so keyboard activation (Enter, via useListNav below) has somewhere
+  // to call into — a card no longer decides its own open/closed state.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // The one action both a mouse click on a card AND a keyboard Enter run —
+  // kept as a single function so the two input methods can't drift apart
+  // (a card no longer has its own handleClick).
+  function activate(msg: InboxMessage) {
+    setExpandedId((id) => (id === msg.id ? null : msg.id));
+    if (!msg.read) markRead.mutate(msg.id);
+  }
+
+  // The list renders grouped by day (groupByDay), but useListNav wants one
+  // flat, index-addressable array — flatten the already-computed groups
+  // (not `messages` directly) so the index this hook tracks always lines up
+  // with render order group-by-group, regardless of how the grouping itself
+  // sorts. When the highlighted item is deleted, `pending` above has
+  // already filtered it out of `messages` (and so `flatMessages`) by the
+  // time this re-renders — useListNav's own length-clamp effect then keeps
+  // `highlightedIndex` in range, which in practice moves the highlight onto
+  // whatever row shifted into that slot (the next row down), or the new
+  // last row if the deleted item was last. See useKeyboardNav.ts for why
+  // that's the deliberate policy, not an accident.
+  const flatMessages = groups.flatMap((g) => g.messages);
+  const { highlightedIndex } = useListNav(flatMessages, activate);
+
+  let indexOffset = 0;
 
   return (
     <div className="border-b border-border pb-3">
@@ -201,14 +243,25 @@ function InboxSection() {
             )}
           </div>
         ) : (
-          groups.map((g, i) => (
-            <div key={`${g.label}-${i}`}>
-              <DayHeader label={g.label} />
-              {g.messages.map((m) => (
-                <InboxCard key={m.id} msg={m} onDelete={() => schedule(m.id, "Notification deleted")} />
-              ))}
-            </div>
-          ))
+          groups.map((g, gi) => {
+            const startIndex = indexOffset;
+            indexOffset += g.messages.length;
+            return (
+              <div key={`${g.label}-${gi}`}>
+                <DayHeader label={g.label} />
+                {g.messages.map((m, mi) => (
+                  <InboxCard
+                    key={m.id}
+                    msg={m}
+                    expanded={expandedId === m.id}
+                    highlighted={startIndex + mi === highlightedIndex}
+                    onActivate={() => activate(m)}
+                    onDelete={() => schedule(m.id, "Notification deleted")}
+                  />
+                ))}
+              </div>
+            );
+          })
         )}
       </ContextSection>
     </div>

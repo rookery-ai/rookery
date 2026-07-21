@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router";
@@ -81,8 +81,12 @@ function mockFetch() {
       if (url === "/api/v1/services") return Promise.resolve(jsonResponse({ providers: [] }));
 
       if (url === "/api/v1/inbox" && method === "GET") return Promise.resolve(jsonResponse({ messages, unread }));
-      if (url === "/api/v1/inbox/m1/read" && method === "POST") {
-        messages = messages.map((m) => (m.id === "m1" ? { ...m, read: true } : m));
+      // Generalized to any id (not just "m1") so multi-message fixtures used
+      // by the keyboard-nav wiring tests can mark-read/delete any row.
+      const inboxReadMatch = url.match(/^\/api\/v1\/inbox\/([^/]+)\/read$/);
+      if (inboxReadMatch && method === "POST") {
+        const id = inboxReadMatch[1];
+        messages = messages.map((m) => (m.id === id ? { ...m, read: true } : m));
         unread = messages.filter((m) => !m.read).length;
         return Promise.resolve(jsonResponse({ ok: true }));
       }
@@ -91,8 +95,10 @@ function mockFetch() {
         unread = 0;
         return Promise.resolve(jsonResponse({ ok: true }));
       }
-      if (url === "/api/v1/inbox/m1" && method === "DELETE") {
-        messages = messages.filter((m) => m.id !== "m1");
+      const inboxDeleteMatch = url.match(/^\/api\/v1\/inbox\/([^/]+)$/);
+      if (inboxDeleteMatch && method === "DELETE") {
+        const id = inboxDeleteMatch[1];
+        messages = messages.filter((m) => m.id !== id);
         unread = messages.filter((m) => !m.read).length;
         return Promise.resolve(jsonResponse({ ok: true }));
       }
@@ -249,4 +255,144 @@ test("reminders: adding with a valid time clears the form and shows the new remi
   await userEvent.click(screen.getByRole("button", { name: /add reminder/i }));
 
   await waitFor(() => expect(screen.getByLabelText(/reminder message/i)).toHaveValue(""));
+});
+
+// ── Keyboard nav wiring (useListNav) ─────────────────────────────────────────
+
+function threeDayGroupMessages(): InboxMessage[] {
+  // Two messages "Today" (2026-07-17, per the fixed system time above) and
+  // one "Yesterday" — exercises groupByDay's day-boundary grouping plus the
+  // index-offset accumulator that maps a flat useListNav index onto a
+  // specific day group + row.
+  return [
+    {
+      id: "m1",
+      source: "agent_run",
+      agent_id: "agent-1",
+      agent_name: "Digest Bot",
+      trigger: "manual",
+      status: "ok",
+      body: "Alpha message today.",
+      read: true,
+      created_at: "2026-07-17T07:00:00Z",
+    },
+    {
+      id: "m2",
+      source: "agent_run",
+      agent_id: "agent-1",
+      agent_name: "Digest Bot",
+      trigger: "manual",
+      status: "ok",
+      body: "Bravo message today.",
+      read: true,
+      created_at: "2026-07-17T06:00:00Z",
+    },
+    {
+      id: "m3",
+      source: "reminder",
+      agent_id: "",
+      agent_name: "",
+      trigger: "",
+      status: "ok",
+      body: "Charlie message yesterday.",
+      read: true,
+      created_at: "2026-07-16T07:00:00Z",
+    },
+  ];
+}
+
+test("inbox: j/k move a visibly-highlighted row across day-group boundaries", async () => {
+  messages = threeDayGroupMessages();
+  unread = 0;
+  mockFetch();
+  wrap();
+
+  await screen.findByText("Alpha message today.");
+  const row = (text: string) => screen.getByText(text).closest("[data-highlighted]")!;
+
+  // Starts on the first row, with a visible (not just DOM-only) signal.
+  expect(row("Alpha message today.")).toHaveAttribute("data-highlighted", "true");
+  expect(row("Alpha message today.")).toHaveClass("ring-2");
+
+  fireEvent.keyDown(document.body, { key: "j" });
+  expect(row("Bravo message today.")).toHaveAttribute("data-highlighted", "true");
+  expect(row("Alpha message today.")).toHaveAttribute("data-highlighted", "false");
+
+  // Crossing from the "Today" group into "Yesterday" — this only works if
+  // the index-offset accumulator carries across group boundaries.
+  fireEvent.keyDown(document.body, { key: "j" });
+  expect(row("Charlie message yesterday.")).toHaveAttribute("data-highlighted", "true");
+});
+
+test("inbox: Enter activates the highlighted row — expands it and marks it read, same as a click", async () => {
+  mockFetch();
+  wrap();
+  await screen.findByText("Digest Bot");
+  expect(screen.getByLabelText(/1 unread/)).toBeInTheDocument();
+
+  fireEvent.keyDown(document.body, { key: "Enter" });
+
+  await waitFor(() => expect(screen.queryByLabelText(/unread/)).not.toBeInTheDocument());
+  expect(await screen.findByRole("button", { name: "Delete" })).toBeInTheDocument();
+});
+
+test("inbox: deleting the highlighted row moves the highlight to the next row", async () => {
+  messages = threeDayGroupMessages();
+  unread = 0;
+  mockFetch();
+  wrap();
+  await screen.findByText("Alpha message today.");
+
+  // Highlight Bravo (index 1), then activate it via Enter to reveal its
+  // Delete button (mirrors how a real user would delete the highlighted
+  // row: highlight it, open it, delete it).
+  fireEvent.keyDown(document.body, { key: "j" });
+  expect(screen.getByText("Bravo message today.").closest("[data-highlighted]")).toHaveAttribute(
+    "data-highlighted",
+    "true",
+  );
+  fireEvent.keyDown(document.body, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+
+  // Bravo is hidden immediately (useDeferredDelete's optimistic `pending`
+  // filter, before the 5s undo window even starts) — the highlighted INDEX
+  // (1) is left as-is by useListNav's clamp effect, so it now names
+  // whatever shifted up into that slot: Charlie. This is the deliberate
+  // "moves to the next row" policy documented in useKeyboardNav.ts, not an
+  // accidental drift.
+  await waitFor(() => expect(screen.queryByText("Bravo message today.")).not.toBeInTheDocument());
+  expect(screen.getByText("Charlie message yesterday.").closest("[data-highlighted]")).toHaveAttribute(
+    "data-highlighted",
+    "true",
+  );
+});
+
+test("inbox: Enter on 'Mark all read' does not also activate the highlighted row (no double-fire)", async () => {
+  mockFetch();
+  wrap();
+  await screen.findByLabelText(/1 unread/);
+
+  const markAllBtn = screen.getByRole("button", { name: /mark all read/i });
+  markAllBtn.focus();
+  fireEvent.keyDown(markAllBtn, { key: "Enter" });
+
+  // If this Enter had ALSO reached useListNav's onActivate, the highlighted
+  // row (the only message, index 0) would have expanded and shown its
+  // Delete button. It must not.
+  expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+});
+
+test("inbox: j/Enter do nothing to the list while the shortcuts overlay is open over it", async () => {
+  mockFetch();
+  wrap();
+  await screen.findByText("Digest Bot");
+
+  fireEvent.keyDown(document.body, { key: "?" });
+  expect(await screen.findByRole("dialog", { name: /shortcuts/i })).toBeInTheDocument();
+
+  // With the guard bypassed this Enter would expand the background row
+  // (the sole message starts highlighted) and reveal its Delete button.
+  fireEvent.keyDown(document.body, { key: "j" });
+  fireEvent.keyDown(document.body, { key: "Enter" });
+  expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
 });

@@ -31,6 +31,11 @@ export function isTypingTarget(el: EventTarget | null): boolean {
   return (
     tag === "input" ||
     tag === "textarea" ||
+    // A real <select> (CoderSection.tsx, SetupWizard.tsx) has native
+    // type-ahead on a bare keystroke (typing "j" jumps to the next option
+    // starting with j) — without this, a bare "j"/"k" fires both that
+    // native behaviour AND the app's navigation at once.
+    tag === "select" ||
     el.isContentEditable ||
     el.closest('[contenteditable="true"], [contenteditable=""]') !== null ||
     el.closest("[cmdk-root]") !== null
@@ -64,6 +69,28 @@ export function useRailShortcuts() {
   }, [navigate]);
 }
 
+// Any node with role="dialog" and an OPEN Radix data-state sitting over the
+// page (the ⌘K palette, the "?" shortcuts overlay, a Sheet/slide-over) means
+// the background list must not react to j/k/Enter meant for that modal.
+// Radix's own Dialog/Sheet primitives stamp both attributes on the same
+// content node (confirmed against the real primitive in
+// keyboardnav.test.tsx, not a hand-rolled stand-in) — this is a plain DOM
+// query rather than a registry every modal must opt into.
+function isOpenDialogPresent(): boolean {
+  return document.querySelector('[role="dialog"][data-state="open"]') !== null;
+}
+
+// The listener is window-level (unscoped), so an Enter keydown while focus
+// sits on a real activating control (a <button>, a link, anything
+// role="button" — e.g. Home's "Mark all read") would otherwise ALSO invoke
+// onActivate on top of that control's own native click: a genuine
+// double-fire. Neither of those tags is a typing target, so isTypingTarget
+// alone doesn't catch this — the control should handle its own Enter.
+function isActivatingControl(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  return el.closest("button, a, [role='button']") !== null;
+}
+
 // Opt-in hook for a context-pane list: j/k move a highlighted index, Enter
 // activates the highlighted row. Deliberately a hook each list mounts for
 // itself, not a global registry every list must register with.
@@ -76,6 +103,19 @@ export function useListNav<T>(items: T[], onActivate: (item: T) => void, active 
   const [highlightedIndex, setHighlightedIndex] = useState(0);
 
   // Keep the index in range as the list shrinks/grows (e.g. after a filter).
+  // This is also the (deliberate) policy for "the highlighted item itself
+  // got deleted": deletion shrinks `items` in place (the caller filters it
+  // out before it ever reaches this hook), so the same clamp that handles
+  // ordinary shrinkage also decides what happens here — the numeric index
+  // is left alone, and since removing a row shifts everything after it up
+  // by one slot, that index now names whatever row moved into it (the item
+  // that used to be immediately below the deleted one), or the new last row
+  // if the deleted item was last. In effect: deleting the highlighted row
+  // moves the highlight to the next row down. This is index-tracking, not
+  // identity-tracking — deleting a row ABOVE the highlighted one silently
+  // shifts which item that same index now points at too. That's a known,
+  // out-of-scope limitation of an index-based hook, not something this
+  // change tries to solve.
   useEffect(() => {
     setHighlightedIndex((i) => Math.min(Math.max(i, 0), Math.max(items.length - 1, 0)));
   }, [items.length]);
@@ -84,6 +124,7 @@ export function useListNav<T>(items: T[], onActivate: (item: T) => void, active 
     if (!active) return;
     function onKeyDown(e: KeyboardEvent) {
       if (isTypingTarget(e.target)) return;
+      if (isOpenDialogPresent()) return;
       if (e.key === "j") {
         if (items.length === 0) return;
         e.preventDefault();
@@ -93,6 +134,7 @@ export function useListNav<T>(items: T[], onActivate: (item: T) => void, active 
         e.preventDefault();
         setHighlightedIndex((i) => Math.max(0, i - 1));
       } else if (e.key === "Enter") {
+        if (isActivatingControl(e.target)) return;
         const item = items[highlightedIndex];
         if (item === undefined) return;
         e.preventDefault();
