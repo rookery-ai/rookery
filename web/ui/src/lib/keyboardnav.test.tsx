@@ -31,6 +31,34 @@ function AppShellWithInput() {
   return <input aria-label="scratch" />;
 }
 
+// A page with a contenteditable region, mounted inside AppShell — exercises
+// the guard against the shape the WYSIWYG note editor actually takes: a
+// SINGLE explicitly-contenteditable root (ProseMirror sets
+// `element.contentEditable = "true"` once, on its own root view element —
+// see prosemirror-view/dist/index.js) with plain, non-contenteditable child
+// nodes (<p>, <span>, …) that inherit editability per the DOM spec rather
+// than each declaring it themselves. The keydown target we assert against
+// is the nested child, not the root, precisely because that inheritance is
+// the thing under test — a check that only recognised the root itself would
+// still pass a same-element test but miss this one.
+//
+// Note: jsdom does not implement `HTMLElement.isContentEditable` — the
+// property getter always returns `undefined`, confirmed by probing both a
+// bare DOM contenteditable div and a real mounted TipTap/ProseMirror editor
+// in this same environment. So `isTypingTarget`'s attribute-based
+// `.closest('[contenteditable="true"], [contenteditable=""]')` fallback is
+// not a redundant belt-and-braces check — in this test suite, it is the
+// ONLY thing that can make this test (and thus this hazard) pass or fail.
+// Relying on `el.isContentEditable` alone left this exact branch with zero
+// regression coverage: deleting it left all 6 pre-existing tests green.
+function AppShellWithContentEditable() {
+  return (
+    <div contentEditable="true" data-testid="editable-root">
+      <p data-testid="editable-child">Some note text the user is composing.</p>
+    </div>
+  );
+}
+
 function wrap(page = <AppShellWithInput />) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   vi.stubGlobal(
@@ -65,6 +93,17 @@ test("single-key shortcuts do not fire while typing", async () => {
   fireEvent.keyDown(input, { key: "j" });
   expect(navigateSpy).not.toHaveBeenCalled();
   fireEvent.keyDown(input, { key: "?" });
+  expect(screen.queryByRole("dialog", { name: /shortcuts/i })).not.toBeInTheDocument();
+});
+
+test("? does not open the shortcuts overlay while typing in the WYSIWYG note editor's contenteditable region", async () => {
+  wrap(<AppShellWithContentEditable />);
+  const child = await screen.findByTestId("editable-child");
+  // Target the CHILD <p>, not the contenteditable root — this is the node
+  // ProseMirror's own DOM actually nests text in; only inherited
+  // editability (not a tag/attribute check on this exact element) can
+  // catch it.
+  fireEvent.keyDown(child, { key: "?" });
   expect(screen.queryByRole("dialog", { name: /shortcuts/i })).not.toBeInTheDocument();
 });
 
@@ -156,5 +195,26 @@ test("j/k do not move the highlight while typing in an input", () => {
   fireEvent.keyDown(input, { key: "j" });
   expect(screen.getByText("Alpha").closest("li")).toHaveAttribute("data-highlighted", "true");
   fireEvent.keyDown(input, { key: "Enter" });
+  expect(onOpen).not.toHaveBeenCalled();
+});
+
+test("j/k do not move the highlight while typing in a contenteditable region (WYSIWYG note editor)", () => {
+  const rows: Row[] = [{ id: "a", label: "Alpha" }, { id: "b", label: "Bravo" }];
+  const onOpen = vi.fn();
+  render(
+    <div>
+      <div contentEditable="true" data-testid="editable-root">
+        <p data-testid="editable-child">Some note text the user is composing.</p>
+      </div>
+      <ListFixture rows={rows} onOpen={onOpen} />
+    </div>,
+  );
+  // Same rationale as the overlay test above: target the nested child, the
+  // shape a real ProseMirror document actually has, not the contenteditable
+  // root itself.
+  const child = screen.getByTestId("editable-child");
+  fireEvent.keyDown(child, { key: "j" });
+  expect(screen.getByText("Alpha").closest("li")).toHaveAttribute("data-highlighted", "true");
+  fireEvent.keyDown(child, { key: "Enter" });
   expect(onOpen).not.toHaveBeenCalled();
 });

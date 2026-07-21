@@ -11,6 +11,20 @@ import { railItems } from "@/components/shell/IconRail";
 // root, so any keystroke that lands inside the open palette is exempt too).
 // Modifier shortcuts (⌘1–7) do NOT use this guard — they stay active
 // everywhere, including while typing.
+//
+// `el.isContentEditable` is checked first (the real-browser-correct signal,
+// and the one that also transparently follows the spec's inheritance rules
+// for any element nested inside an editable host). It is deliberately
+// backed up by an attribute-based `.closest()` walk: jsdom does not
+// implement the `isContentEditable` getter at all (it's `undefined`
+// unconditionally, confirmed against both a bare contenteditable div and a
+// real mounted TipTap/ProseMirror editor), so without this fallback the
+// guard's most safety-critical branch — the one protecting the WYSIWYG note
+// editor, a `<div>` that `tag === "input"`/`"textarea"` never catches — had
+// zero regression coverage: every test in this suite passed even with the
+// `isContentEditable` check deleted outright. The attribute selector works
+// in jsdom (unlike the property) and is what `keyboardnav.test.tsx`'s
+// contenteditable-region tests actually pin.
 export function isTypingTarget(el: EventTarget | null): boolean {
   if (!(el instanceof HTMLElement)) return false;
   const tag = el.tagName.toLowerCase();
@@ -18,6 +32,7 @@ export function isTypingTarget(el: EventTarget | null): boolean {
     tag === "input" ||
     tag === "textarea" ||
     el.isContentEditable ||
+    el.closest('[contenteditable="true"], [contenteditable=""]') !== null ||
     el.closest("[cmdk-root]") !== null
   );
 }
