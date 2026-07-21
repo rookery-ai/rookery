@@ -4,8 +4,10 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { GlobalChatButton } from "@/components/chat/GlobalChatButton";
 import { CommandPalette } from "@/components/search/CommandPalette";
+import { useRailShortcuts } from "@/lib/useKeyboardNav";
 import IconRail from "./IconRail";
 import { PaneResizeHandle, usePaneWidth } from "./usePaneWidth";
+import { ShortcutsOverlay } from "./ShortcutsOverlay";
 import { ToastProvider, ToastHost } from "./Toast";
 
 type SlideOverState = { node: React.ReactNode; title?: string } | null;
@@ -43,6 +45,7 @@ export function AppShell() {
   const [panel, setPanel] = useState<SlideOverState>(null);
   const [contextPane, setContextPane] = useState<React.ReactNode | null>(null);
   const { width, setWidth, reset } = usePaneWidth();
+  useRailShortcuts();
 
   const openPanel = useCallback(
     (node: React.ReactNode, opts?: { title?: string }) => setPanel({ node, title: opts?.title }),
@@ -74,6 +77,7 @@ export function AppShell() {
             </main>
             <GlobalChatButton />
             <CommandPalette />
+            <ShortcutsOverlay />
             <ToastHost />
             <Sheet open={panel !== null} onOpenChange={(o) => !o && setPanel(null)}>
               {/* gap-0 + no padding on the content well: panel content owns its
