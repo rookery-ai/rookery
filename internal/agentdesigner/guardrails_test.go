@@ -198,6 +198,24 @@ func TestGuardrailProfiles(t *testing.T) {
 			agentOK: true,
 			skillOK: true,
 		},
+		{
+			name:    "subprocess with shell=True via literal-dict spread (kwargs bypass)",
+			code:    "import subprocess\nsubprocess.run(['ls'], **{'shell': True})\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "subprocess with shell=True via variable-dict spread (kwargs bypass)",
+			code:    "import subprocess\nkw = {'shell': True}\nsubprocess.run(['ls'], **kw)\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "subprocess with benign kwargs spread (must not be over-blocked)",
+			code:    "import subprocess\nopts = {'capture_output': True}\nsubprocess.run(['ls'], **opts)\n",
+			agentOK: false,
+			skillOK: true,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
