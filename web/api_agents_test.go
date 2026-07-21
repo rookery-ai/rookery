@@ -223,3 +223,36 @@ func TestAPIAgentDetailNoStateFileIsEmptyNotError(t *testing.T) {
 		t.Fatalf(`expected empty "state":"" for a missing state.md: %s`, rec.Body.String())
 	}
 }
+
+// TestAPIDesignStateExposesPendingBuild verifies GET /api/v1/agents/design/state
+// carries the reviewable build artifacts (pending_agent_md, pending_tools) so
+// the frontend can show the user what the coder actually produced before they
+// approve it. Critically, pending_tools must serialize as `{}` — never `null`
+// — when no build has run yet, because the frontend maps over it; a nil Go map
+// would marshal to JSON null and crash that panel (the same class of bug fixed
+// in TestAPIAgentDetailFreshAgentNeverNullArrays above).
+func TestAPIDesignStateExposesPendingBuild(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	s.designFlow = agentdesigner.NewFlow(nil, nil).WithDB(s.db)
+	if _, err := s.designFlow.Start(wsID, "TestAgent"); err != nil {
+		t.Fatalf("start design session: %v", err)
+	}
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/agents/design/state", nil, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("design state: %d %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !contains(body, `"pending_agent_md":""`) {
+		t.Fatalf(`expected empty "pending_agent_md":"" before any build: %s`, body)
+	}
+	if !contains(body, `"pending_tools":{}`) {
+		t.Fatalf(`expected "pending_tools":{} (not null) before any build: %s`, body)
+	}
+	if contains(body, `"pending_tools":null`) {
+		t.Fatalf("pending_tools must never serialize as null: %s", body)
+	}
+}

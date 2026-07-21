@@ -603,6 +603,14 @@ type DesignSnapshot struct {
 	LastProgress     string // most recent build milestone (for reconnect display)
 	GenerationFailed bool   // last build blocked/soft-failed → offer keep-going/keep-as-is
 	CanKeepAsIs      bool   // a saveable build exists on disk → "keep it as-is" is a real option
+
+	// PendingAgentMD and PendingTools expose the last generated build (the
+	// session's PendingAgentMD/PendingTools) so a review UI can show the user
+	// what the coder actually produced before they approve it. PendingTools is
+	// always non-nil (even when empty) so it serializes to JSON `{}`, never
+	// `null` — the frontend maps over it.
+	PendingAgentMD string
+	PendingTools   map[string]string
 }
 
 // Snapshot returns a race-free view of the user's live in-memory session so a
@@ -618,6 +626,14 @@ func (f *Flow) Snapshot(workspaceID string) DesignSnapshot {
 	}
 	hist := make([]db.ChatMessage, len(sess.History))
 	copy(hist, sess.History)
+	// Defensive copy: the flow mutates sess.PendingTools under the mutex during
+	// generation, so handing out the session's own map would be a data race.
+	// Always allocate (even when sess.PendingTools is nil/empty) so this
+	// serializes to JSON `{}`, never `null`.
+	tools := make(map[string]string, len(sess.PendingTools))
+	for k, v := range sess.PendingTools {
+		tools[k] = v
+	}
 	return DesignSnapshot{
 		Active:           true,
 		Generating:       sess.progressCh != nil,
@@ -629,6 +645,8 @@ func (f *Flow) Snapshot(workspaceID string) DesignSnapshot {
 		LastProgress:     sess.lastProgress,
 		GenerationFailed: sess.GenerationFailed,
 		CanKeepAsIs:      sess.HasSaveableBuild,
+		PendingAgentMD:   sess.PendingAgentMD,
+		PendingTools:     tools,
 	}
 }
 

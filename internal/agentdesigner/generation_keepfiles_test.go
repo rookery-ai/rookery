@@ -263,6 +263,64 @@ func TestSnapshot_ExposesLastProgress(t *testing.T) {
 	}
 }
 
+// TestSnapshotExposesPendingBuild verifies the reviewable-build artifacts
+// (PendingAgentMD, PendingTools) set on a session after generation are exposed
+// on the snapshot, so the design-state endpoint (and Task 2's review panel) can
+// show the user what the coder actually produced before they approve it.
+func TestSnapshotExposesPendingBuild(t *testing.T) {
+	database, workspaceID := testDB(t)
+	flow := &Flow{sessions: make(map[string]*DesignSession), db: database}
+
+	flow.sessions[workspaceID] = &DesignSession{
+		WorkspaceID:    workspaceID,
+		State:          StateVerifying,
+		PendingAgentMD: "# Test agent\n",
+		PendingTools: map[string]string{
+			"tools/main.py": "print('hi')\n",
+		},
+	}
+
+	snap := flow.Snapshot(workspaceID)
+	if snap.PendingAgentMD != "# Test agent\n" {
+		t.Fatalf("PendingAgentMD not exposed: %q", snap.PendingAgentMD)
+	}
+	if snap.PendingTools["tools/main.py"] != "print('hi')\n" {
+		t.Fatalf("PendingTools not exposed: %#v", snap.PendingTools)
+	}
+
+	// Mutating the session's own map after the snapshot was taken must not
+	// affect the copy handed to the caller — Snapshot runs under the flow's
+	// mutex but the returned map escapes it, so it must be a defensive copy,
+	// the same way History already is.
+	flow.sessions[workspaceID].PendingTools["tools/extra.py"] = "added later\n"
+	if _, ok := snap.PendingTools["tools/extra.py"]; ok {
+		t.Fatal("snapshot's PendingTools must be a copy, not the session's live map")
+	}
+}
+
+// TestSnapshotPendingEmptyBeforeBuild verifies that a session which has not
+// generated yet reports empty pending fields, and critically that PendingTools
+// is a non-nil empty map — not nil — so it serialises to JSON `{}` rather than
+// `null` (the frontend maps over it; a nil map would marshal to null and crash
+// Task 2's panel).
+func TestSnapshotPendingEmptyBeforeBuild(t *testing.T) {
+	database, workspaceID := testDB(t)
+	flow := &Flow{sessions: make(map[string]*DesignSession), db: database}
+
+	flow.sessions[workspaceID] = &DesignSession{
+		WorkspaceID: workspaceID,
+		State:       StateDesigning,
+	}
+
+	snap := flow.Snapshot(workspaceID)
+	if snap.PendingAgentMD != "" || len(snap.PendingTools) != 0 {
+		t.Fatal("pending fields must be empty before a build")
+	}
+	if snap.PendingTools == nil {
+		t.Fatal("PendingTools must be a non-nil empty map, not nil (would marshal to JSON null)")
+	}
+}
+
 // TestRunGeneration_DetachedFromCallerContext is the discriminating guard for the
 // navigation-survival fix: generation must run to completion even when the CALLER's
 // context is already cancelled (which is what a client disconnect does to the HTTP

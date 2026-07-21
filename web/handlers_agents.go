@@ -217,6 +217,8 @@ func (s *Server) handleDesignState(c echo.Context) error {
 		"last_progress":     snap.LastProgress,
 		"generation_failed": snap.GenerationFailed,
 		"can_keep_as_is":    snap.CanKeepAsIs,
+		"pending_agent_md":  snap.PendingAgentMD,
+		"pending_tools":     snap.PendingTools,
 	})
 }
 
