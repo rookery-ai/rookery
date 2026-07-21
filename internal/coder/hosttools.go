@@ -66,7 +66,11 @@ type hostToolSet struct {
 	// helper script it never once got real output from (see verifyFinishNudge +
 	// runToolLoop), driving it to actually run, inspect, and fix the script — or, after a
 	// bounded number of attempts, report the failure to the user in plain language.
-	verifyBuild     bool
+	verifyBuild bool
+	// spec describes what this build must produce (deliverable file + which paths are
+	// entry-point scripts + the nudge wording). The zero value is treated as
+	// AgentBuildSpec, so an unset spec keeps the historical agent behaviour.
+	spec            BuildSpec
 	authoredScripts map[string]bool // non-seeded tools/*.py the model WROTE this build (by canonical path)
 	producedOutput  map[string]bool // authored scripts that RAN with real (non-empty) output
 	verifyNudges    int             // how many finish-verification nudges have fired
@@ -264,7 +268,7 @@ func (h *hostToolSet) trackScriptProgress(call llm.ToolCall, result string, isEr
 		Path string `json:"path"`
 	}
 	_ = json.Unmarshal(call.Args, &a)
-	if !isAgentScriptPath(a.Path) { // ignores non-.py, non-tools, and seeded helpers
+	if !h.buildSpec().IsScript(a.Path) { // ignores non-.py, non-tools, and seeded helpers
 		return
 	}
 	key := canonScriptPath(a.Path)
@@ -395,80 +399,53 @@ func (h *hostToolSet) needsScriptVerification() bool {
 	return false
 }
 
+// buildSpec returns the build spec in force, defaulting to the agent shape so a caller
+// that never sets one behaves exactly as before.
+func (h *hostToolSet) buildSpec() BuildSpec {
+	if h.spec.Deliverable == "" {
+		return AgentBuildSpec
+	}
+	return h.spec
+}
+
 // verifyFinishNudge is consulted when the model tries to end a BUILD (emits a final
 // answer with no tool calls). It keeps the loop going — returning a message the model must
 // respond to — until the build is actually finishable. Two gates, in priority order:
 //
-//  1. AGENT.md must exist. A build with no AGENT.md is useless regardless of the helper
-//     script, and the common trap on a weak tool-calling backend is the model burning its
-//     whole turn budget trying to verify a helper script that can't reach the live service
-//     at build time (SA_BUILD_PHASE blocks outbound) — and never writing AGENT.md. So the
-//     FIRST thing the nudge demands is: write AGENT.md, don't keep fixing the script.
+//  1. the build's deliverable must exist. A build with no deliverable is useless
+//     regardless of the helper script, and the common trap on a weak tool-calling backend
+//     is the model burning its whole turn budget trying to verify a helper script that
+//     can't reach the live service at build time (SA_BUILD_PHASE blocks outbound) — and
+//     never writing the deliverable. So the FIRST thing the nudge demands is: write it,
+//     don't keep fixing the script.
 //
-//  2. Once AGENT.md exists, the script-verification gate applies: don't ship a helper
-//     script that silently does nothing. At build time the helper usually CAN'T return real
-//     data (outbound blocked), so this gate is expected to top out — which is fine: the
-//     agent designer then presents the build as "built but not confirmed to run" with a
-//     keep-it-as-is escape hatch (see decideBuildOutcome), rather than looping forever.
+//  2. Once the deliverable exists, the script-verification gate applies: don't ship a
+//     helper script that silently does nothing. At build time the helper usually CAN'T
+//     return real data (outbound blocked), so this gate is expected to top out — which is
+//     fine: the agent designer then presents the build as "built but not confirmed to run"
+//     with a keep-it-as-is escape hatch (see decideBuildOutcome), rather than looping
+//     forever.
 //
-// Returns "" to allow the finish (not a build, AGENT.md present + no unverified script, or
-// the nudge budget is spent — the last resort so a stuck build can still end).
+// Returns "" to allow the finish (not a build, deliverable present + no unverified script,
+// or the nudge budget is spent — the last resort so a stuck build can still end).
 func (h *hostToolSet) verifyFinishNudge() string {
 	if !h.verifyBuild || h.verifyNudges >= maxVerifyNudges {
 		return ""
 	}
+	spec := h.buildSpec()
 
-	// Gate 1: AGENT.md must be written before the build may finish. This is the lever that
-	// breaks the no-AGENT.md loop: without it a weak model spends every turn re-running a
-	// helper script that's intentionally blocked at build time and never produces the agent
-	// definition. Stat is cheap and only runs at finish attempts (not per tool call).
-	if md, err := os.Stat(filepath.Join(h.workDir, "AGENT.md")); err != nil || md.Size() == 0 {
+	// Gate 1: the deliverable must exist before the build may finish.
+	if md, err := os.Stat(filepath.Join(h.workDir, spec.Deliverable)); err != nil || md.Size() == 0 {
 		h.verifyNudges++
-		if h.verifyNudges >= maxVerifyNudges {
-			return "You still have not written AGENT.md — the agent's instructions — and you're out of attempts to " +
-				"keep iterating. Write AGENT.md NOW with write_file (the agent's full instructions: what it does step " +
-				"by step, how it calls the helper and uses the result, the [CHAT] message it sends the user, and any " +
-				"schedule), then finish. Do NOT try to run or fix the helper script anymore — at build time it cannot " +
-				"reach the live service (outbound is blocked), so its empty output is expected, not a failure."
-		}
-		return "Before you finish: you wrote a helper script but you have NOT written AGENT.md yet — the agent's full " +
-			"instructions, which are the actual deliverable. Write AGENT.md now with write_file (what the agent does " +
-			"step by step, how it calls the helper and uses the result, the [CHAT] message it sends the user, and any " +
-			"schedule). Then finish. At build time the helper cannot reach the live service (outbound is blocked), so " +
-			"its empty output is EXPECTED — do not keep trying to run or fix it; write AGENT.md and finish."
+		return spec.MissingDeliverableNudge(h.verifyNudges >= maxVerifyNudges)
 	}
 
-	// Gate 2: AGENT.md exists — now refuse to ship an authored helper script that never
-	// returned real output (it may silently do nothing at run time).
+	// Gate 2: refuse to ship an authored entry-point script that never returned real output.
 	if !h.needsScriptVerification() {
 		return ""
 	}
 	h.verifyNudges++
-	if h.verifyNudges >= maxVerifyNudges {
-		// Last nudge: this IS the model's chance to stop. The engine allows the next
-		// finish regardless (budget spent), so give BOTH honest exits — a plain-language
-		// failure report, or an explicit "legitimately nothing to report" — so a valid
-		// but empty-result agent is NOT forced into a false [BLOCKED].
-		return "You have tried several times and the helper script still isn't returning real data. " +
-			"Stop trying to fix it now and finish. Choose the honest option:\n" +
-			"- If this genuinely cannot be done, emit a [BLOCKED] block explaining in PLAIN, NON-TECHNICAL " +
-			"language what could not be done (for example: \"I wasn't able to read your emails\") and suggest " +
-			"ONE alternative — no code, no file names, no technical terms.\n" +
-			"- If the empty result is actually CORRECT right now (there truly is nothing to report), say that " +
-			"plainly and finish normally.\n" +
-			"- Or, if you can accomplish the goal WITHOUT that script (doing the work yourself from data you can " +
-			"already obtain with a minimal fetch), do that now."
-	}
-	return "Before you finish: you wrote a helper script but it has not yet returned any real data. " +
-		"An empty result almost always means it is BROKEN — do not ship it. Run it (run_script), read exactly " +
-		"what it prints, and fix the cause (print the raw API response, check the field names, correct the " +
-		"logic), then run it again — repeat until it returns real data. For a SINGLE small result, keep the " +
-		"script THIN — load its secret from the environment, make the request, print the raw result — and do " +
-		"the parsing, decisions, and formatting YOURSELF from what it printed. But when the task processes MANY " +
-		"items or LARGE data (porting pages, exporting a dataset), do the OPPOSITE: have the script do the whole " +
-		"job — fetch AND write each destination file itself (it already has the paths) — and print only a short " +
-		"summary/manifest (counts + file paths), NEVER the full data. Routing a big payload through your reasoning " +
-		"gets truncated and burns the run. Never print, log, or return a secret value."
+	return spec.UnverifiedScriptNudge(h.verifyNudges >= maxVerifyNudges)
 }
 
 // execute runs one tool call and returns the result text the engine feeds back to

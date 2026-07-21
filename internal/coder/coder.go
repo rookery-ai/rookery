@@ -98,6 +98,7 @@ type Coder struct {
 	secretsLookup SecretsLookup // resolves the provider API key by secret name at run time
 	vlt           *vault.Vault  // vault for host-tool file operations (read/write/edit/list/run_script)
 	progress      func(string)  // optional live-progress sink (per tool-call milestone) for the API engine
+	buildSpec     BuildSpec     // what a BUILD must produce; zero value = AgentBuildSpec
 
 	// Self-managed OAuth connectors: when an agent is bound to service connections,
 	// the API engine offers each connection's curated actions as native typed tools.
@@ -178,6 +179,14 @@ func (c *Coder) apiModelForCLI() string { return c.cliModel }
 func (c *Coder) WithSandbox(enabled bool) *Coder {
 	c2 := *c
 	c2.sandbox = enabled
+	return &c2
+}
+
+// WithBuildSpec returns a shallow copy of the Coder whose API-engine build gates check
+// the given deliverable and script shape. Unset means the agent build (see BuildSpec).
+func (c *Coder) WithBuildSpec(spec BuildSpec) *Coder {
+	c2 := *c
+	c2.buildSpec = spec
 	return &c2
 }
 
