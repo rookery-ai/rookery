@@ -256,3 +256,36 @@ func TestAPIDesignStateExposesPendingBuild(t *testing.T) {
 		t.Fatalf("pending_tools must never serialize as null: %s", body)
 	}
 }
+
+// TestAPIDesignStateExposesPopulatedPendingBuild is the other half of the case
+// above: once a build HAS produced artifacts, they must actually reach the
+// wire. The empty-case test would still pass if Snapshot() dropped the fields
+// entirely, so without this one the endpoint's whole purpose is unpinned.
+func TestAPIDesignStateExposesPopulatedPendingBuild(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	s.designFlow = agentdesigner.NewFlow(nil, nil).WithDB(s.db)
+	if _, err := s.designFlow.Start(wsID, "TestAgent"); err != nil {
+		t.Fatalf("start design session: %v", err)
+	}
+	sess := s.designFlow.GetSession(wsID)
+	if sess == nil {
+		t.Fatal("no design session after Start")
+	}
+	sess.PendingAgentMD = "# Daily digest\n\nSummarises your mail.\n"
+	sess.PendingTools = map[string]string{"tools/main.py": "print('hi')\n"}
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/agents/design/state", nil, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("design state: %d %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !contains(body, "Daily digest") {
+		t.Fatalf("pending_agent_md did not reach the wire: %s", body)
+	}
+	if !contains(body, "tools/main.py") || !contains(body, `print('hi')`) {
+		t.Fatalf("pending_tools content did not reach the wire: %s", body)
+	}
+}
