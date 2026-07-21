@@ -130,6 +130,7 @@ type dbDesignStore interface {
 	DeleteAgentSchedule(agentID string) error
 	GetSetting(workspaceID, key string) (string, error)
 	SecretExists(workspaceID, name string) (bool, error)
+	ListAgentSkillNames(agentID string) ([]string, error)
 
 	UpsertAgentDraft(d *db.AgentDraft) error
 	GetAgentDraft(workspaceID string) (*db.AgentDraft, error)
@@ -1957,14 +1958,8 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 
 	description := extractDescription(agentMD, agentNameSnap)
 
-	skillsSnap := parseSkillsLine(agentMD, skillRefs)
-	if skillsSnap == nil {
-		// No "# Skills:" line in AGENT.md → the agent declared no skills. Leave
-		// agent_skills empty (the user can assign skills on the agent page).
-		// Previously this fell back to ALL installed skills, which polluted the
-		// attachment list and made the agent page show every skill as assigned.
-		skillsSnap = []string{}
-	}
+	// A brand-new agent has no existing attachments, so no clobber check is needed.
+	skillsSnap := f.resolveAgentSkills(ctx, workspaceID, agentIDSnap, agentMD, skillRefs, nil, false)
 
 	// Promote the readable draft_<name> working dir to the canonical AgentDir(<uuid>)
 	// by renaming it, so EVERYTHING the build produced (tools/, notes/, any root-level
@@ -2042,11 +2037,11 @@ func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string,
 
 	description := extractDescription(agentMD, agentNameSnap)
 
-	skillsSnap := parseSkillsLine(agentMD, skillRefs)
-	if skillsSnap == nil {
-		// No "# Skills:" line in AGENT.md → the agent declared no skills.
-		skillsSnap = []string{}
+	var existingSkills []string
+	if f.db != nil {
+		existingSkills, _ = f.db.ListAgentSkillNames(agentIDSnap)
 	}
+	skillsSnap := f.resolveAgentSkills(ctx, workspaceID, agentIDSnap, agentMD, skillRefs, existingSkills, true)
 
 	if err := f.designer.UpdateAgent(workspaceID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap); err != nil {
 		return "", false, "", fmt.Errorf("update agent: %w", err)
@@ -2318,6 +2313,38 @@ func parseSkillsLine(agentMD string, installed []prompts.SkillRef) []string {
 		}
 	}
 	return nil
+}
+
+// resolveAgentSkills decides which skills to attach to an agent at save time.
+//
+// Three contracts, each a place this could go subtly wrong:
+//
+//  1. nil vs empty is load-bearing. parseSkillsLine returns nil ONLY when no header
+//     exists at all; a present "# Skills: none" returns a non-nil empty slice. The
+//     selector fires on nil only — an explicit "none" is a decision, and silently
+//     overriding it would make attachment unpredictable.
+//  2. An edit never clobbers. If the agent already has attachments, they stand: the user
+//     may have curated them on the agent page, and a re-edit must not undo that. Same
+//     rule AutoBindTargets uses for connections.
+//  3. It fails closed. SelectSkills returns empty on any failure, which is today's
+//     behaviour — not a guess.
+//
+// The return is always non-nil.
+func (f *Flow) resolveAgentSkills(ctx context.Context, workspaceID, agentID, agentMD string, pool []prompts.SkillRef, existing []string, isEdit bool) []string {
+	if isEdit && len(existing) > 0 {
+		return existing
+	}
+
+	if declared := parseSkillsLine(agentMD, pool); declared != nil {
+		return declared
+	}
+
+	// No header at all — the common case on a weak build model. Ask directly.
+	var coderSvc *coder.Coder
+	if f.coderFor != nil {
+		coderSvc = f.coderFor(workspaceID)
+	}
+	return SelectSkills(ctx, coderSvc, workspaceID, agentMD, pool)
 }
 
 // skillsHeaderInline matches a line that declares skills inline, e.g.

@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/skilllibrary"
+	"github.com/stretchr/testify/require"
 )
 
 // TestSaveAgent_PersistsDeclaredSkillsToDB verifies the auto-detected skills path
@@ -71,6 +72,49 @@ func TestSaveAgent_PersistsDeclaredSkillsToDB(t *testing.T) {
 			t.Errorf("skill %q not persisted to agent_skills (got %v)", n, got)
 		}
 	}
+}
+
+// An explicit "# Skills: none" is a decision. Overriding it would make attachment
+// unpredictable, so the selector must not fire.
+func TestResolveAgentSkillsRespectsExplicitNone(t *testing.T) {
+	f := &Flow{}
+	pool := []prompts.SkillRef{{Name: "pdf", Description: "Read PDFs."}}
+
+	got := f.resolveAgentSkills(t.Context(), "ws", "agent-1", "# Skills: none\n\nDo a thing.\n", pool, nil, false)
+	require.NotNil(t, got)
+	require.Empty(t, got)
+}
+
+// A present header is used verbatim; no selector call.
+func TestResolveAgentSkillsUsesHeader(t *testing.T) {
+	f := &Flow{}
+	pool := []prompts.SkillRef{
+		{Name: "pdf", Description: "Read PDFs."},
+		{Name: "csv", Description: "Read CSVs."},
+	}
+
+	got := f.resolveAgentSkills(t.Context(), "ws", "agent-1", "# Skills: pdf\n\nDo a thing.\n", pool, nil, false)
+	require.Equal(t, []string{"pdf"}, got)
+}
+
+// On an edit, existing attachments the user may have curated by hand are never replaced.
+func TestResolveAgentSkillsEditKeepsExisting(t *testing.T) {
+	f := &Flow{}
+	pool := []prompts.SkillRef{{Name: "pdf", Description: "Read PDFs."}}
+	existing := []string{"csv"}
+
+	got := f.resolveAgentSkills(t.Context(), "ws", "agent-1", "Do a thing with no header.\n", pool, existing, true)
+	require.Equal(t, []string{"csv"}, got)
+}
+
+// With no coder wired, the selector degrades to attaching nothing rather than panicking.
+func TestResolveAgentSkillsNoCoderAttachesNothing(t *testing.T) {
+	f := &Flow{}
+	pool := []prompts.SkillRef{{Name: "pdf", Description: "Read PDFs."}}
+
+	got := f.resolveAgentSkills(t.Context(), "ws", "agent-1", "Do a thing with no header.\n", pool, nil, false)
+	require.NotNil(t, got)
+	require.Empty(t, got)
 }
 
 // TestSaveAgent_NoSkillsLinePersistsNothing confirms that when the coder forgets
