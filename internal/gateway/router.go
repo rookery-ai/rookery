@@ -16,6 +16,8 @@ import (
 	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/reminder"
 	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/simple-agents/internal/skilldesigner"
+	"github.com/ilijad1/simple-agents/internal/skilllibrary"
 )
 
 // TextHandler is called for non-command messages (one-off chat or within a chat).
@@ -38,6 +40,7 @@ type Router struct {
 	onText     TextHandler
 	onAgentRun AgentRunHandler
 	designFlow *agentdesigner.Flow
+	skillFlow  *skilldesigner.Flow
 	memory     *memory.Store
 
 	// timeParserFallback is an optional LLM-backed time parser used when the
@@ -46,9 +49,19 @@ type Router struct {
 
 	mu                 sync.Mutex
 	challenges         map[string]*secretChallenge // workspaceID → pending master-password challenge
-	pendingCancel      map[string]bool             // workspaceID → waiting for save/discard reply to /agent cancel
+	pendingCancel      map[string]cancelKind       // workspaceID → which flow is waiting for a save/discard reply
 	pendingReminderMsg map[string]string           // workspaceID → reminder message waiting for a "when" reply
 }
+
+// cancelKind records WHICH design flow asked for a save/discard choice, so the
+// reply is resolved against that flow. Without it, replying "discard" to a skill
+// cancel would dismiss the user's agent draft.
+type cancelKind string
+
+const (
+	cancelAgent cancelKind = "agent"
+	cancelSkill cancelKind = "skill"
+)
 
 // NewRouter creates a Router. textHandler, agentRunHandler, and designFlow may be nil
 // until the corresponding phases are wired in; the router will reply with stub messages.
@@ -60,9 +73,17 @@ func NewRouter(database *db.DB, textHandler TextHandler, agentRunHandler AgentRu
 		designFlow:         flow,
 		memory:             mem,
 		challenges:         make(map[string]*secretChallenge),
-		pendingCancel:      make(map[string]bool),
+		pendingCancel:      make(map[string]cancelKind),
 		pendingReminderMsg: make(map[string]string),
 	}
+}
+
+// WithSkillFlow attaches the conversational skill creator so /skill is available on
+// chat platforms. Leaving it nil keeps /skill responding "not available" rather than
+// panicking — the same contract designFlow has.
+func (r *Router) WithSkillFlow(f *skilldesigner.Flow) *Router {
+	r.skillFlow = f
+	return r
 }
 
 // WithTimeParserFallback sets an LLM-backed time parser to use when the built-in
@@ -88,6 +109,8 @@ func (r *Router) Handle(ctx context.Context, msg Message, send func(string), del
 		return nil
 	case "agent":
 		return r.handleAgent(ctx, msg, arg, send)
+	case "skill":
+		return r.handleSkill(ctx, msg, arg, send)
 	case "secret":
 		return r.handleSecret(ctx, msg, arg, send)
 	case "remind":
@@ -191,6 +214,10 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 			send("Usage: /agent create <name>")
 			return nil
 		}
+		if blocked := r.otherSessionBlock(msg.WorkspaceID, "agent"); blocked != "" {
+			send(blocked)
+			return nil
+		}
 		// If the user has a resumable draft, offer to continue it instead of
 		// starting fresh. Subsequent text routes through Step → stepAwaitingResume.
 		if draft := r.designFlow.HasDraft(msg.WorkspaceID); draft != nil {
@@ -217,6 +244,10 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 		name := strings.TrimSpace(rest)
 		if name == "" {
 			send("Usage: /agent edit <name>")
+			return nil
+		}
+		if blocked := r.otherSessionBlock(msg.WorkspaceID, "agent"); blocked != "" {
+			send(blocked)
 			return nil
 		}
 		agent, err := r.db.GetAgentByName(msg.WorkspaceID, name)
@@ -248,7 +279,7 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 		}
 		// Ask the user to choose. The reply is handled in handleText (pendingCancel).
 		r.mu.Lock()
-		r.pendingCancel[msg.WorkspaceID] = true
+		r.pendingCancel[msg.WorkspaceID] = cancelAgent
 		r.mu.Unlock()
 		send(fmt.Sprintf(
 			"Agent design cancelled. You have an unfinished draft: **%s**\n\nReply `save` to keep it as a draft you can resume later, or `discard` to delete it.",
@@ -257,6 +288,123 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 
 	default:
 		send("Usage: /agent list · /agent create <name> · /agent edit <name> · /agent cancel")
+	}
+	return nil
+}
+
+// otherSessionBlock reports a refusal message when the *other* conversational design
+// flow already owns this workspace. At most one design session may be active at a
+// time: both consume plain text from the same stream, so two live sessions would
+// leave the user with no way to say which one a message is for.
+// Returns "" when nothing is in the way.
+func (r *Router) otherSessionBlock(workspaceID, starting string) string {
+	if starting != "agent" && r.designFlow != nil {
+		if s := r.designFlow.GetSession(workspaceID); s != nil {
+			return fmt.Sprintf(
+				"You're in the middle of building the agent **%s**. Finish it, or send `/agent cancel`, then try again.",
+				s.AgentName)
+		}
+	}
+	if starting != "skill" && r.skillFlow != nil {
+		if s := r.skillFlow.GetSession(workspaceID); s != nil {
+			return fmt.Sprintf(
+				"You're in the middle of building the skill **%s**. Finish it, or send `/skill cancel`, then try again.",
+				s.SkillName)
+		}
+	}
+	return ""
+}
+
+func (r *Router) handleSkill(ctx context.Context, msg Message, arg string, send func(string)) error {
+	parts := strings.Fields(arg)
+	sub := ""
+	if len(parts) > 0 {
+		sub = strings.ToLower(parts[0])
+	}
+	rest := ""
+	if len(parts) > 1 {
+		rest = strings.Join(parts[1:], " ")
+	}
+
+	switch sub {
+	case "list", "":
+		var b strings.Builder
+		b.WriteString("**Your skills:**\n")
+		userSkills, err := r.db.ListSkills(msg.WorkspaceID)
+		if err != nil {
+			return err
+		}
+		if len(userSkills) == 0 {
+			b.WriteString("_none yet_\n")
+		}
+		for _, s := range userSkills {
+			b.WriteString(fmt.Sprintf("• **%s**", s.Name))
+			if s.Description != "" {
+				b.WriteString(" — " + s.Description)
+			}
+			b.WriteByte('\n')
+		}
+		// Core skills are always available to every agent, so listing only the
+		// user's own would misrepresent what an agent can actually reach.
+		b.WriteString("\n**Built-in skills** _(always available)_:\n")
+		for _, s := range skilllibrary.LoadBundled() {
+			b.WriteString(fmt.Sprintf("• %s\n", s.Name))
+		}
+		b.WriteString("\n_/skill create <name> to build a new one_")
+		send(b.String())
+
+	case "create":
+		if r.skillFlow == nil {
+			send("Skill creation is not yet available.")
+			return nil
+		}
+		name := strings.TrimSpace(rest)
+		if name == "" {
+			send("Usage: /skill create <name>")
+			return nil
+		}
+		if blocked := r.otherSessionBlock(msg.WorkspaceID, "skill"); blocked != "" {
+			send(blocked)
+			return nil
+		}
+		if draft := r.skillFlow.HasDraft(msg.WorkspaceID); draft != nil {
+			response, err := r.skillFlow.OfferDraftResume(msg.WorkspaceID, name, draft)
+			if err != nil {
+				send(err.Error())
+				return nil
+			}
+			send(response)
+			return nil
+		}
+		response, err := r.skillFlow.Start(msg.WorkspaceID, name)
+		if err != nil {
+			send(err.Error())
+			return nil
+		}
+		send(response)
+
+	case "cancel":
+		if r.skillFlow == nil {
+			send("Skill design is not yet available.")
+			return nil
+		}
+		r.skillFlow.Cancel(msg.WorkspaceID)
+
+		draft := r.skillFlow.HasDraft(msg.WorkspaceID)
+		if draft == nil {
+			send("Skill design session cancelled. No draft to save.")
+			return nil
+		}
+		r.mu.Lock()
+		r.pendingCancel[msg.WorkspaceID] = cancelSkill
+		r.mu.Unlock()
+		send(fmt.Sprintf(
+			"Skill design cancelled. You have an unfinished draft: **%s**\n\nReply `save` to keep it as a draft you can resume later, or `discard` to delete it.",
+			draft.SkillName,
+		))
+
+	default:
+		send("Usage: /skill list · /skill create <name> · /skill cancel")
 	}
 	return nil
 }
@@ -421,10 +569,32 @@ func (r *Router) resolveMasterPwChallenge(ctx context.Context, msg Message, ch *
 // prompt. "discard" deletes the draft (and the orphaned pre-approved agent
 // directory if generation had reached verifying); anything else keeps the draft
 // as resumable. The active session was already cancelled when /agent cancel ran.
-func (r *Router) resolveCancelChoice(msg Message, send func(string)) error {
+// resolveCancelChoice applies a save/discard reply to the flow that asked for it.
+// kind is what makes that safe: a user can hold an agent draft and a skill draft at
+// the same time, and dismissing the wrong one destroys unfinished work.
+func (r *Router) resolveCancelChoice(msg Message, kind cancelKind, send func(string)) error {
 	lower := strings.ToLower(strings.TrimSpace(msg.Text))
+	discard := lower == "discard" || lower == "delete" || lower == "drop"
 
-	if lower == "discard" || lower == "delete" || lower == "drop" {
+	if kind == cancelSkill {
+		if !discard {
+			send("✅ Draft saved. Use `/skill create <name>` to resume it later.")
+			return nil
+		}
+		name := ""
+		if d := r.skillFlow.HasDraft(msg.WorkspaceID); d != nil {
+			name = d.SkillName
+		}
+		_ = r.skillFlow.DismissDraft(msg.WorkspaceID)
+		if name != "" {
+			send(fmt.Sprintf("🗑 Draft **%s** discarded.", name))
+		} else {
+			send("🗑 Draft discarded.")
+		}
+		return nil
+	}
+
+	if discard {
 		name := ""
 		if d := r.designFlow.HasDraft(msg.WorkspaceID); d != nil {
 			name = d.AgentName
@@ -456,6 +626,25 @@ func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send
 	if arg == "" {
 		send("Usage: /remind <when> to <message>\nExamples:\n• /remind in 10 minutes to check the oven\n• /remind tomorrow at 3pm to call doctor\n• /remind next Tuesday to pay bills\n• /remind next Friday evening write note about bitcoin price\n• /remind 30m old format still works")
 		return nil
+	}
+
+	// Subcommands are matched EXACTLY, never by prefix: "list" and "delete" are
+	// ordinary English words, and "/remind in 10 minutes to list the groceries"
+	// must keep creating a reminder. Anything that isn't an exact match falls
+	// through to the creation path untouched.
+	if fields := strings.Fields(arg); len(fields) > 0 {
+		switch strings.ToLower(fields[0]) {
+		case "list":
+			if len(fields) == 1 {
+				return r.listReminders(msg.WorkspaceID, send)
+			}
+		case "delete":
+			if len(fields) == 2 {
+				if n, err := strconv.Atoi(fields[1]); err == nil && n >= 1 {
+					return r.deleteReminderByIndex(msg.WorkspaceID, n, send)
+				}
+			}
+		}
 	}
 
 	// Strip optional leading "me "
@@ -530,6 +719,53 @@ func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send
 	}
 
 	return r.createReminder(ctx, msg.WorkspaceID, message, remindAt, send)
+}
+
+// listReminders renders the workspace's pending reminders, numbered. The numbers
+// are what /remind delete <n> indexes, so both use db.ListReminders' ordering.
+// Times render in the workspace's timezone — a UTC listing is wrong for every
+// install that isn't on UTC.
+func (r *Router) listReminders(workspaceID string, send func(string)) error {
+	items, err := r.db.ListReminders(workspaceID)
+	if err != nil {
+		return fmt.Errorf("list reminders: %w", err)
+	}
+	if len(items) == 0 {
+		send("No reminders set. Use /remind <when> to <message> to add one.")
+		return nil
+	}
+
+	loc := profile.LoadLocation(r.db, workspaceID)
+	var b strings.Builder
+	b.WriteString("**Your reminders:**\n")
+	for i, rm := range items {
+		b.WriteString(fmt.Sprintf("%d. _%s_ — `%s`",
+			i+1, rm.Message, rm.RemindAt.In(loc).Format("Mon Jan 2, 15:04")))
+		if rm.Sent {
+			b.WriteString(" ✓")
+		}
+		b.WriteByte('\n')
+	}
+	b.WriteString("\n_/remind delete <number> to remove one_")
+	send(b.String())
+	return nil
+}
+
+func (r *Router) deleteReminderByIndex(workspaceID string, n int, send func(string)) error {
+	items, err := r.db.ListReminders(workspaceID)
+	if err != nil {
+		return fmt.Errorf("list reminders: %w", err)
+	}
+	if n > len(items) {
+		send(fmt.Sprintf("No reminder #%d. You have %d.", n, len(items)))
+		return nil
+	}
+	target := items[n-1]
+	if err := r.db.DeleteReminder(target.ID); err != nil {
+		return fmt.Errorf("delete reminder: %w", err)
+	}
+	send(fmt.Sprintf("🗑 Deleted reminder #%d: _%s_", n, target.Message))
+	return nil
 }
 
 func (r *Router) createReminder(ctx context.Context, workspaceID, message string, remindAt time.Time, send func(string)) error {
@@ -639,13 +875,13 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 	// Check for a pending /agent cancel save/discard choice. This runs before the
 	// design-session routing because Cancel() already dropped any active session.
 	r.mu.Lock()
-	hasCancelChoice := r.pendingCancel[msg.WorkspaceID]
+	cancelFlow, hasCancelChoice := r.pendingCancel[msg.WorkspaceID]
 	if hasCancelChoice {
 		delete(r.pendingCancel, msg.WorkspaceID)
 	}
 	r.mu.Unlock()
 	if hasCancelChoice {
-		return r.resolveCancelChoice(msg, send)
+		return r.resolveCancelChoice(msg, cancelFlow, send)
 	}
 
 	// Check for a pending reminder "when?" prompt — the user is supplying a time
@@ -673,6 +909,22 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 		response, _, _, err := r.designFlow.Step(ctx, msg.WorkspaceID, msg.Text)
 		if err != nil {
 			send("Design session error: " + err.Error())
+			return nil
+		}
+		send(response)
+		return nil
+	}
+
+	// Same for an active skill design session. The two are mutually exclusive (see
+	// otherSessionBlock), so the order of these two branches never decides anything.
+	if r.skillFlow != nil && r.skillFlow.GetSession(msg.WorkspaceID) != nil {
+		sess := r.skillFlow.GetSession(msg.WorkspaceID)
+		if sess != nil && sess.State == skilldesigner.StateDesigning && sendProgress != nil {
+			r.skillFlow.SetProgressHandler(msg.WorkspaceID, sendProgress)
+		}
+		response, _, _, err := r.skillFlow.Step(ctx, msg.WorkspaceID, msg.Text)
+		if err != nil {
+			send("Skill session error: " + err.Error())
 			return nil
 		}
 		send(response)
@@ -914,11 +1166,16 @@ func helpText() string {
 /agent create <name> — build a new agent with AI wizard
 /agent edit <name> — change an existing agent with AI wizard
 /agent cancel — cancel active agent creation or edit
+/skill list — list your skills and the built-in ones
+/skill create <name> — build a new skill with AI wizard
+/skill cancel — cancel active skill creation
 /run <name> — run an agent
 /secret list — list stored secret names
 /secret show <name> — reveal a secret value (requires master password)
 /secret delete <name> — delete a secret (requires master password)
 /remind <when> to <message> — set a reminder (e.g. /remind in 10 minutes to check oven)
+/remind list — list your reminders
+/remind delete <n> — delete a reminder by number
 /chat start [name] — start a chat (saves history)
 /chat list — list all chats with IDs
 /chat stop — stop current chat
