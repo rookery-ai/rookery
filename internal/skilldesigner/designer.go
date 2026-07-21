@@ -44,7 +44,7 @@ func (s *SkillSaver) SaveSkill(workspaceID, name, description, skillMD string, s
 		return nil, fmt.Errorf("guardrails: %w", err)
 	}
 	for filename, code := range scripts {
-		if err := agentdesigner.RunToolGuardrails(filename, code, agentdesigner.ProfileSkillScript); err != nil {
+		if err := guardrailsForGeneratedFile(filename, code); err != nil {
 			return nil, fmt.Errorf("guardrails (%s): %w", filename, err)
 		}
 	}

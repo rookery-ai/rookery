@@ -573,7 +573,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		return "That request tripped a safety check I can't get around. Try describing it differently — for example, avoid destructive or high-risk actions.", false, "", nil
 	}
 	for filename, code := range scripts {
-		if err := agentdesigner.RunToolGuardrails(filename, code, agentdesigner.ProfileSkillScript); err != nil {
+		if err := guardrailsForGeneratedFile(filename, code); err != nil {
 			cleanupStaging()
 			closeProgress()
 			slog.Warn("skilldesigner: generated script failed guardrails", "workspace_id", workspaceID, "skill_name", skillNameSnap, "file", filename, "err", err)
