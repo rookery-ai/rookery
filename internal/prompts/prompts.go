@@ -2160,8 +2160,9 @@ RULES:
 - Secrets are env vars (os.environ); never hardcode keys.
 - Keep SKILL.md under ~500 lines; move deep reference into references/.
 - Output to the vault / $TMPDIR, never /tmp.
-- Folder name: %s (lowercase, hyphens, 3-64 chars). Write it to the staging directory
-  you were given.
+- The skill's canonical name is %s (lowercase, hyphens, 3-64 chars). Use it as the
+  `+"`name`"+` field in SKILL.md's frontmatter. It is NOT a folder for you to create —
+  see <output_layout> above.
 </task>
 `, skillName))
 	return sb.String()
