@@ -254,3 +254,66 @@ func TestGlobSchemaIsSimple(t *testing.T) {
 		t.Errorf("glob must require a pattern; got %s", schema)
 	}
 }
+
+// ── ranked passages (BM25 index) ────────────────────────────────────────────
+
+func TestSearchFilesReturnsRankedChunks(t *testing.T) {
+	v := vault.New(t.TempDir())
+	const ws = "ws1"
+	if err := v.EnsureScaffold(ws); err != nil {
+		t.Fatalf("scaffold: %v", err)
+	}
+	v.WriteNote(ws, "notes/health.md", []byte("# Health\n\n## Appointments\n\nBooked an orthodontist visit for Tuesday.\n"))
+	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws)}
+
+	out, err := h.searchFiles(context.Background(), "dentist appointment")
+	if err != nil {
+		t.Fatalf("searchFiles: %v", err)
+	}
+	if !strings.Contains(out, "notes/health.md") {
+		t.Errorf("ranked retrieval should find the note, got:\n%s", out)
+	}
+	if !strings.Contains(out, "orthodontist") {
+		t.Errorf("the result should carry the passage text, not just a path, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Appointments") {
+		t.Errorf("the heading trail should be shown, got:\n%s", out)
+	}
+}
+
+// Exact matching must not regress: BM25 is worse than literal search for a UUID
+// or an error string, so both run and exact hits come first.
+func TestSearchFilesKeepsExactMatching(t *testing.T) {
+	v := vault.New(t.TempDir())
+	const ws = "ws1"
+	v.EnsureScaffold(ws)
+	const id = "7f3a91e2-4c8b-4d2e-9a11-6b0f5c2d8e41"
+	v.WriteNote(ws, "notes/ids.md", []byte("# Ids\n\nrun id "+id+" failed\n"))
+	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws)}
+
+	out, err := h.searchFiles(context.Background(), id)
+	if err != nil {
+		t.Fatalf("searchFiles: %v", err)
+	}
+	if !strings.Contains(out, "notes/ids.md") {
+		t.Errorf("an exact identifier must still match, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Exact matches") {
+		t.Errorf("exact hits should be labelled and listed first, got:\n%s", out)
+	}
+}
+
+func TestSearchFilesNoMatchesIsNonError(t *testing.T) {
+	v := vault.New(t.TempDir())
+	const ws = "ws1"
+	v.EnsureScaffold(ws)
+	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws)}
+
+	out, err := h.searchFiles(context.Background(), "zzz-nothing-matches-this")
+	if err != nil {
+		t.Fatalf("no matches must not be an error: %v", err)
+	}
+	if !strings.Contains(out, "no matches") {
+		t.Errorf("unexpected output: %q", out)
+	}
+}

@@ -152,9 +152,12 @@ func (h *hostToolSet) tools() []llm.Tool {
 		{Name: "write_file", Description: "Create or overwrite a file in the vault (creates parent folders). Path is relative to the vault root, or absolute within the vault.", Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string","description":"full file contents"}},"required":["path","content"]}`)},
 		{Name: "edit_file", Description: "Replace a unique substring in a vault file. old_string must appear exactly once.", Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"}},"required":["path","old_string","new_string"]}`)},
 		{Name: "list_dir", Description: "List entries in a vault directory. Path is relative to the vault root (default \".\" lists the vault root).", Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string","description":"vault-relative directory; defaults to vault root"}}}`)},
-		{Name: "search_files", Description: "Search the user's whole knowledge base (vault) for literal text and return the matching lines as `path:line: snippet` entries. Case-insensitive. Use this to find a note by its CONTENT instead of read_file-ing your way through folders — " +
-			`e.g. search_files with query "dentist appointment". Returns up to a few dozen matches across all notes/memory/agents files (not the hidden .kb sidecars).`,
-			Parameters: rawSchema(`{"type":"object","properties":{"query":{"type":"string","description":"the literal text to search for across the vault (case-insensitive)"}},"required":["query"]}`)},
+		{Name: "search_files", Description: "Search the user's whole knowledge base (vault) and get back the passages that matter. " +
+			"Returns exact text matches as `path:line: snippet`, followed by the most relevant passages with their note path and section heading — " +
+			`e.g. search_files with query "dentist appointment" finds a note that says "orthodontist visit". ` +
+			"Covers every file type, including converted csv/pdf/docx content, and matches on file names as well as content. " +
+			"Use this INSTEAD of read_file-ing your way through folders.",
+			Parameters: rawSchema(`{"type":"object","properties":{"query":{"type":"string","description":"what to look for; plain words work better than exact phrases"}},"required":["query"]}`)},
 		{Name: "glob", Description: "Find files in the vault by name/pattern and return their vault-relative paths (one per line). Supports * (within one folder), ? (one char), and ** (any depth, crosses folders) — " +
 			`e.g. glob with pattern "notes/*-meeting.md" or "**/*.py". Use this to locate files by NAME instead of listing folders one at a time.`,
 			Parameters: rawSchema(`{"type":"object","properties":{"pattern":{"type":"string","description":"glob pattern matching vault-relative paths (supports *, ?, and **)"}},"required":["pattern"]}`)},
@@ -696,12 +699,20 @@ const maxSearchHits = 50
 // maxGlobMatches caps how many file paths glob returns.
 const maxGlobMatches = 200
 
-// searchFiles exposes the existing vault.Searcher (ripgrep + pure-Go fallback,
-// case-insensitive fixed-string, 5 matches/file) to the model as a TIER-1 read —
-// "find the note where I mentioned the dentist" without read_file-ing everything.
-// It searches the WHOLE vault root (not workDir), matching the web KB search and
-// the user's intent. No matches is a valid empty result (NOT an error:) so it never
-// trips the oscillation guard. The Searcher excludes the hidden .kb sidecars.
+// maxRankedChunks bounds how many ranked passages search_files returns.
+const maxRankedChunks = 10
+
+// searchFiles answers "where in my knowledge base is this?" with two passes,
+// deliberately kept both:
+//
+//   - Exact (ripgrep, fixed-string): unbeatable for a UUID, an error string, or
+//     a code identifier, where ranked retrieval would dilute the one right hit.
+//   - Ranked (BM25 over heading-aware chunks): finds a note about "dentist" that
+//     says "orthodontist", and returns whole passages with their heading trail
+//     so one call yields usable context instead of a read_file walk.
+//
+// Exact hits come first because a caller who typed an exact token wants it.
+// No matches remains a NON-error so it never trips the oscillation guard.
 func (h *hostToolSet) searchFiles(ctx context.Context, query string) (string, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -710,21 +721,46 @@ func (h *hostToolSet) searchFiles(ctx context.Context, query string) (string, er
 	if h.vlt == nil {
 		return "", fmt.Errorf("search_files unavailable: no vault")
 	}
+
 	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	hits, err := h.vlt.NewSearcher().Search(sctx, h.workspaceID, query)
-	if err != nil {
-		return "", err
-	}
-	if len(hits) == 0 {
-		return fmt.Sprintf("(no matches for %q)", query), nil
-	}
-	if len(hits) > maxSearchHits {
-		hits = hits[:maxSearchHits]
-	}
+
 	var sb strings.Builder
-	for _, hit := range hits {
-		fmt.Fprintf(&sb, "%s:%d: %s\n", hit.Path, hit.Line, hit.Snippet)
+	exactPaths := map[string]bool{}
+
+	if hits, err := h.vlt.NewSearcher().Search(sctx, h.workspaceID, query); err == nil && len(hits) > 0 {
+		if len(hits) > maxSearchHits {
+			hits = hits[:maxSearchHits]
+		}
+		sb.WriteString("Exact matches:\n")
+		for _, hit := range hits {
+			fmt.Fprintf(&sb, "%s:%d: %s\n", hit.Path, hit.Line, hit.Snippet)
+			exactPaths[hit.Path] = true
+		}
+	}
+
+	ranked := h.vlt.Indexer().Search(h.workspaceID, query, maxRankedChunks)
+	var wrote int
+	for _, r := range ranked {
+		if strings.TrimSpace(r.Text) == "" {
+			continue
+		}
+		if wrote == 0 {
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString("Related passages:\n")
+		}
+		wrote++
+		location := r.Path
+		if r.Heading != "" {
+			location += " — " + r.Heading
+		}
+		fmt.Fprintf(&sb, "\n[%s]\n%s\n", location, strings.TrimSpace(r.Text))
+	}
+
+	if sb.Len() == 0 {
+		return fmt.Sprintf("(no matches for %q)", query), nil
 	}
 	return truncate(sb.String()), nil
 }
