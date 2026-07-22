@@ -46,6 +46,22 @@ truncated *list of filenames* and no content.
 - Knowledge-base search returns ranked, usable context in one call, over the whole vault
   and every file type, and never regresses on exact-match queries.
 
+## Decisions taken during implementation (2026-07-22)
+
+**Ingest policy: convert every format to markdown.** The alternative considered was
+storing already-textual formats (csv/json/xml) as-is and extracting only the one-way
+formats (pdf/docx/pptx) — the retrieval index extracts and caches text per file-version
+anyway, so it does not need a persisted note. Convert-everything was chosen for a single
+uniform rule, and so that every ingested file appears as readable content in the knowledge
+base. The cost is accepted: a converted table is a *rendering* of the data, not the data —
+which is why the original bytes are always preserved alongside the note, and why the row
+cap is a high safety valve that announces itself rather than a routine truncation.
+
+**Write-back: CSV and markdown only.** Agents read every supported format but generate
+only CSV and markdown, which any spreadsheet or editor opens. Generating binary OOXML or
+PDF is an explicit non-goal: pure-Go *writing* of those formats is substantially harder
+than reading them, and nothing in this design requires it.
+
 ## Non-goals
 
 - **OCR.** Needs `tesseract`; not pure-Go. Images convert to a stub note that records what
