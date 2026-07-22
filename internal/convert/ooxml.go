@@ -6,6 +6,8 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -367,4 +369,262 @@ func attrValue(se xml.StartElement, name string) string {
 		}
 	}
 	return ""
+}
+
+// xlsxToMarkdown renders each worksheet as a markdown table under a heading.
+// Values live in xl/worksheets/sheetN.xml, but text values are stored once in
+// xl/sharedStrings.xml and referenced by index (t="s"), so the shared table
+// must be resolved or every text cell reads as a bare number.
+func xlsxToMarkdown(data []byte, opt Options) (Result, error) {
+	zr, err := openOOXML(data)
+	if err != nil {
+		return Result{}, err
+	}
+	shared := readSharedStrings(zr)
+	names := sheetNames(zr)
+
+	res := Result{Kind: KindXLSX, Extractor: "pure-go", Title: titleFromFilename(opt.Filename)}
+	var sb strings.Builder
+	sheets := 0
+	for i := 1; ; i++ {
+		part, err := readZipPart(zr, fmt.Sprintf("xl/worksheets/sheet%d.xml", i))
+		if err != nil {
+			break
+		}
+		rows, err := parseSheetRows(part, shared)
+		if err != nil {
+			return Result{}, err
+		}
+		if len(rows) == 0 {
+			continue
+		}
+		sheets++
+		name := fmt.Sprintf("Sheet%d", i)
+		if i-1 < len(names) && names[i-1] != "" {
+			name = names[i-1]
+		}
+		fmt.Fprintf(&sb, "## %s\n\n", name)
+		if len(rows) > maxTableRows+1 {
+			rows = rows[:maxTableRows+1]
+			res.Warnings = append(res.Warnings, fmt.Sprintf("sheet %s truncated to %d rows", name, maxTableRows))
+		}
+		writeTable(&sb, rows)
+		sb.WriteString("\n")
+	}
+	if sheets == 0 {
+		return Result{}, fmt.Errorf("convert: xlsx contained no readable sheets")
+	}
+	res.Markdown = normalizeText(collapseBlankLines(sb.String()))
+	return res, nil
+}
+
+// readSharedStrings returns the shared string table, or nil when absent (a
+// workbook of pure numbers legitimately has none).
+func readSharedStrings(zr *zip.Reader) []string {
+	part, err := readZipPart(zr, "xl/sharedStrings.xml")
+	if err != nil {
+		return nil
+	}
+	var sst struct {
+		SI []struct {
+			T string   `xml:"t"`
+			R []string `xml:"r>t"` // rich text splits a value across runs
+		} `xml:"si"`
+	}
+	if err := xml.Unmarshal(part, &sst); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(sst.SI))
+	for _, si := range sst.SI {
+		if si.T != "" {
+			out = append(out, si.T)
+			continue
+		}
+		out = append(out, strings.Join(si.R, ""))
+	}
+	return out
+}
+
+// sheetNames returns worksheet display names in workbook order.
+func sheetNames(zr *zip.Reader) []string {
+	part, err := readZipPart(zr, "xl/workbook.xml")
+	if err != nil {
+		return nil
+	}
+	var wb struct {
+		Sheets []struct {
+			Name string `xml:"name,attr"`
+		} `xml:"sheets>sheet"`
+	}
+	if err := xml.Unmarshal(part, &wb); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(wb.Sheets))
+	for _, s := range wb.Sheets {
+		out = append(out, s.Name)
+	}
+	return out
+}
+
+// parseSheetRows decodes one worksheet into a dense grid. Cells carry an A1
+// reference and sparse rows omit empty cells entirely, so column position comes
+// from the reference — not from the cell's index in the XML.
+func parseSheetRows(part []byte, shared []string) ([][]string, error) {
+	var ws struct {
+		Rows []struct {
+			Cells []struct {
+				Ref    string `xml:"r,attr"`
+				Type   string `xml:"t,attr"`
+				Value  string `xml:"v"`
+				Inline string `xml:"is>t"`
+			} `xml:"c"`
+		} `xml:"sheetData>row"`
+	}
+	if err := xml.Unmarshal(part, &ws); err != nil {
+		return nil, fmt.Errorf("convert: parse worksheet: %w", err)
+	}
+	var grid [][]string
+	for _, r := range ws.Rows {
+		row := []string{}
+		for _, c := range r.Cells {
+			col := columnIndex(c.Ref)
+			for len(row) <= col {
+				row = append(row, "")
+			}
+			row[col] = cellValue(c.Type, c.Value, c.Inline, shared)
+		}
+		grid = append(grid, row)
+	}
+	return grid, nil
+}
+
+func cellValue(typ, value, inline string, shared []string) string {
+	switch typ {
+	case "s":
+		idx := 0
+		fmt.Sscanf(value, "%d", &idx)
+		if idx >= 0 && idx < len(shared) {
+			return shared[idx]
+		}
+		return ""
+	case "inlineStr":
+		return inline
+	default:
+		return value
+	}
+}
+
+// columnIndex converts the letter part of an A1 reference to a 0-based index
+// ("A"→0, "B"→1, "AA"→26). An unparseable reference yields 0.
+func columnIndex(ref string) int {
+	idx := 0
+	for _, ch := range ref {
+		if ch < 'A' || ch > 'Z' {
+			break
+		}
+		idx = idx*26 + int(ch-'A') + 1
+	}
+	if idx == 0 {
+		return 0
+	}
+	return idx - 1
+}
+
+// pptxToMarkdown renders each slide as a heading followed by its text. Slides
+// are numbered in the part name; zip entry order is arbitrary and lexical
+// sorting puts slide10 before slide2, so the actual parts present are found
+// and sorted numerically rather than assumed to be a dense 1,2,3... sequence
+// (a sequential probe that stops at the first gap would, e.g., never reach
+// slide10 in a deck whose slides are numbered 1, 2, 10).
+func pptxToMarkdown(data []byte, opt Options) (Result, error) {
+	zr, err := openOOXML(data)
+	if err != nil {
+		return Result{}, err
+	}
+	res := Result{Kind: KindPPTX, Extractor: "pure-go", Title: titleFromFilename(opt.Filename)}
+	var sb strings.Builder
+	slides := 0
+	for _, n := range slideNumbers(zr) {
+		part, err := readZipPart(zr, fmt.Sprintf("ppt/slides/slide%d.xml", n))
+		if err != nil {
+			continue
+		}
+		texts := extractDrawingText(part)
+		if len(texts) == 0 {
+			continue
+		}
+		slides++
+		fmt.Fprintf(&sb, "## Slide %d\n\n", n)
+		for j, t := range texts {
+			if j == 0 {
+				sb.WriteString("**" + t + "**\n\n")
+				continue
+			}
+			sb.WriteString("- " + t + "\n")
+		}
+		sb.WriteString("\n")
+	}
+	if slides == 0 {
+		return Result{}, fmt.Errorf("convert: pptx contained no readable slide text")
+	}
+	res.Markdown = normalizeText(collapseBlankLines(sb.String()))
+	return res, nil
+}
+
+// slideNumbers returns the slide numbers actually present in the archive
+// (from part names like "ppt/slides/slide12.xml"), sorted numerically —
+// never lexically, and never assumed contiguous from 1.
+func slideNumbers(zr *zip.Reader) []int {
+	const prefix, suffix = "ppt/slides/slide", ".xml"
+	var nums []int
+	for _, f := range zr.File {
+		if !strings.HasPrefix(f.Name, prefix) || !strings.HasSuffix(f.Name, suffix) {
+			continue
+		}
+		mid := strings.TrimSuffix(strings.TrimPrefix(f.Name, prefix), suffix)
+		n, err := strconv.Atoi(mid)
+		if err != nil {
+			continue // defensively skip a slideN.xml-shaped name whose middle isn't actually numeric
+		}
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+	return nums
+}
+
+// extractDrawingText collects <a:t> values, one entry per <a:p> paragraph, so a
+// shape's runs join into a single line instead of fragmenting.
+func extractDrawingText(part []byte) []string {
+	dec := xml.NewDecoder(bytes.NewReader(part))
+	var out []string
+	var cur strings.Builder
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return out
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if t.Name.Local == "t" {
+				var text string
+				if err := dec.DecodeElement(&text, &t); err == nil {
+					cur.WriteString(text)
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "p" {
+				if s := strings.TrimSpace(cur.String()); s != "" {
+					out = append(out, s)
+				}
+				cur.Reset()
+			}
+		}
+	}
+	if s := strings.TrimSpace(cur.String()); s != "" {
+		out = append(out, s)
+	}
+	return out
 }

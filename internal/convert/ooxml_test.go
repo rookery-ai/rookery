@@ -229,3 +229,105 @@ func TestDOCXMultiParagraphCellDoesNotFuse(t *testing.T) {
 		t.Errorf("want \"Line one Line two\" (space-separated) in one cell, got:\n%s", got.Markdown)
 	}
 }
+
+const xlsxWorkbook = `<?xml version="1.0"?>
+<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+ <sheets><sheet name="Q3" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`
+
+// Cells with t="s" reference sharedStrings by index; inline numbers do not.
+const xlsxSheet = `<?xml version="1.0"?>
+<worksheet><sheetData>
+ <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>
+ <row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>120</v></c></row>
+</sheetData></worksheet>`
+
+const xlsxShared = `<?xml version="1.0"?>
+<sst><si><t>Region</t></si><si><t>Sales</t></si><si><t>EMEA</t></si></sst>`
+
+func TestXLSXToMarkdown(t *testing.T) {
+	data := buildZip(t, map[string]string{
+		"xl/workbook.xml":          xlsxWorkbook,
+		"xl/worksheets/sheet1.xml": xlsxSheet,
+		"xl/sharedStrings.xml":     xlsxShared,
+	})
+	got, err := ToMarkdown(data, Options{Filename: "sales.xlsx"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	if got.Kind != KindXLSX {
+		t.Errorf("Kind = %q", got.Kind)
+	}
+	for _, want := range []string{"## Q3", "| Region | Sales |", "| EMEA | 120 |"} {
+		if !strings.Contains(got.Markdown, want) {
+			t.Errorf("missing %q, got:\n%s", want, got.Markdown)
+		}
+	}
+}
+
+func TestXLSXSparseRowsAlign(t *testing.T) {
+	// A row that skips column A must not shift its values left — the cell
+	// reference (r="B2") is what places a value, not its position in the XML.
+	sheet := `<worksheet><sheetData>
+	 <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>
+	 <row r="2"><c r="B2"><v>7</v></c></row>
+	</sheetData></worksheet>`
+	data := buildZip(t, map[string]string{
+		"xl/workbook.xml":          xlsxWorkbook,
+		"xl/worksheets/sheet1.xml": sheet,
+		"xl/sharedStrings.xml":     xlsxShared,
+	})
+	got, err := ToMarkdown(data, Options{Filename: "sparse.xlsx"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	if !strings.Contains(got.Markdown, "|  | 7 |") {
+		t.Errorf("sparse row should keep its column position, got:\n%s", got.Markdown)
+	}
+}
+
+const pptxSlide = `<?xml version="1.0"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+       xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+ <p:cSld><p:spTree>
+  <p:sp><p:txBody><a:p><a:r><a:t>Roadmap</a:t></a:r></a:p></p:txBody></p:sp>
+  <p:sp><p:txBody><a:p><a:r><a:t>Ship phase one</a:t></a:r></a:p></p:txBody></p:sp>
+ </p:spTree></p:cSld>
+</p:sld>`
+
+func TestPPTXToMarkdown(t *testing.T) {
+	data := buildZip(t, map[string]string{
+		"ppt/slides/slide1.xml": pptxSlide,
+		"ppt/slides/slide2.xml": strings.Replace(pptxSlide, "Roadmap", "Risks", 1),
+	})
+	got, err := ToMarkdown(data, Options{Filename: "deck.pptx"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	if got.Kind != KindPPTX {
+		t.Errorf("Kind = %q", got.Kind)
+	}
+	for _, want := range []string{"## Slide 1", "Roadmap", "Ship phase one", "## Slide 2", "Risks"} {
+		if !strings.Contains(got.Markdown, want) {
+			t.Errorf("missing %q, got:\n%s", want, got.Markdown)
+		}
+	}
+}
+
+func TestPPTXSlidesInNumericOrder(t *testing.T) {
+	// Zip entry order is arbitrary and slide10 sorts before slide2 lexically;
+	// slides must come out in presentation order.
+	parts := map[string]string{}
+	for _, n := range []string{"1", "2", "10"} {
+		parts["ppt/slides/slide"+n+".xml"] = strings.Replace(pptxSlide, "Roadmap", "S"+n, 1)
+	}
+	data := buildZip(t, parts)
+	got, err := ToMarkdown(data, Options{Filename: "d.pptx"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	i1, i2, i10 := strings.Index(got.Markdown, "S1"), strings.Index(got.Markdown, "S2"), strings.Index(got.Markdown, "S10")
+	if !(i1 < i2 && i2 < i10) {
+		t.Errorf("slides out of order: S1=%d S2=%d S10=%d\n%s", i1, i2, i10, got.Markdown)
+	}
+}

@@ -58,6 +58,10 @@ func ToMarkdown(data []byte, opt Options) (Result, error) {
 		return tabularToMarkdown(data, kind, opt)
 	case KindDOCX:
 		return docxToMarkdown(data, opt)
+	case KindXLSX:
+		return xlsxToMarkdown(data, opt)
+	case KindPPTX:
+		return pptxToMarkdown(data, opt)
 	case KindUnknown:
 		return Result{}, fmt.Errorf("convert: unrecognized format (%d bytes); no converter applies", len(data))
 	default:

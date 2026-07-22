@@ -34,15 +34,17 @@ func TestToMarkdownNeverEmptyOnSuccess(t *testing.T) {
 // unsupported format must return an error that names the format, never a
 // silent empty result.
 func TestToMarkdownUnsupportedNamesFormat(t *testing.T) {
-	// A zip-magic buffer named .xlsx detects as KindXLSX, which has no
-	// converter yet.
-	data := []byte("PK\x03\x04something")
-	res, err := ToMarkdown(data, Options{Filename: "report.xlsx"})
+	// PDF magic bytes detect as KindPDF, which has no converter yet. (An
+	// earlier version of this test used xlsx as the stand-in "unsupported"
+	// format, but Task 10 gave xlsx a real converter, so it had to move to a
+	// format that is still genuinely unsupported.)
+	data := []byte("%PDF-1.7\nsomething")
+	res, err := ToMarkdown(data, Options{Filename: "report.pdf"})
 	if err == nil {
 		t.Fatalf("ToMarkdown() error = nil, want an error naming the unsupported format")
 	}
-	if !strings.Contains(err.Error(), "xlsx") {
-		t.Errorf("ToMarkdown() error = %q, want it to contain %q", err.Error(), "xlsx")
+	if !strings.Contains(err.Error(), "pdf") {
+		t.Errorf("ToMarkdown() error = %q, want it to contain %q", err.Error(), "pdf")
 	}
 	if res.Markdown != "" {
 		t.Errorf("ToMarkdown() Markdown = %q, want empty on error", res.Markdown)
