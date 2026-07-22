@@ -87,6 +87,32 @@ func mapDiscordDM(authorID, guildID, content, msgID, botUserID string, isBot boo
 	}, true
 }
 
+// downloadDiscordAttachment fetches an attachment's bytes from Discord's CDN.
+// Unlike Slack's url_private, a Discord attachment URL is a pre-signed link
+// (ex/is/hm query params) that needs no Authorization header — a plain GET.
+func downloadDiscordAttachment(url string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := (&http.Client{Timeout: 20 * time.Second}).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("discord attachment unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("discord attachment fetch failed (status %d)", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxAttachmentBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxAttachmentBytes {
+		return nil, fmt.Errorf("attachment exceeds the size limit")
+	}
+	return data, nil
+}
+
 // NewDiscord creates (does not start) a Discord adapter.
 func NewDiscord(token, ownerWorkspaceID string, dispatch DispatchFunc) (*DiscordGateway, error) {
 	sess, err := discordgo.New("Bot " + token)
@@ -122,6 +148,24 @@ func (g *DiscordGateway) onMessageCreate(s *discordgo.Session, m *discordgo.Mess
 		return
 	}
 	msg.WorkspaceID = g.ownerWorkspaceID
+
+	// Discord delivers a file as a URL on the message rather than a file id;
+	// only the first attachment is imported (chat attachments are single-file,
+	// same as Telegram). A download failure is logged and otherwise
+	// swallowed — the message still dispatches on its text alone.
+	if len(m.Attachments) > 0 {
+		att := m.Attachments[0]
+		if data, err := downloadDiscordAttachment(att.URL); err == nil {
+			name := att.Filename
+			if name == "" {
+				name = "attachment"
+			}
+			msg.Attachment = &Attachment{Filename: name, Data: data}
+		} else {
+			fmt.Printf("gateway: discord attachment download failed: %v\n", err)
+		}
+	}
+
 	g.dispatch(context.Background(), msg)
 }
 

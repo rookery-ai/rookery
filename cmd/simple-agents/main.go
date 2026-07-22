@@ -363,7 +363,8 @@ func serveCmd() *cli.Command {
 			// not hold across the web and chat surfaces.
 			router := gateway.NewRouter(database, textHandler, agentRunHandler, designFlow, memStore).
 				WithTimeParserFallback(buildLLMTimeParserFn(coderSvc)).
-				WithSkillFlow(skillFlow)
+				WithSkillFlow(skillFlow).
+				WithVault(vlt)
 			gwManager := gateway.New(database, sysKey, router)
 
 			go func() {

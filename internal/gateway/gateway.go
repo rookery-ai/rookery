@@ -24,6 +24,16 @@ type Message struct {
 	WorkspaceID    string // resolved internal user ID (empty if not yet linked)
 	Text           string
 	MessageID      string // platform message ID (used to delete incoming messages)
+	Attachment     *Attachment
+}
+
+// Attachment is a file a user sent through a chat platform. Adapters download
+// the bytes and hand them to the router; conversion and storage happen once,
+// in the shared vault.ImportFile path, so a file sent in Telegram lands exactly
+// as one uploaded in the web UI does.
+type Attachment struct {
+	Filename string
+	Data     []byte
 }
 
 // ParseCommand splits "/cmd arg1 arg2 ..." into (name, remainder).

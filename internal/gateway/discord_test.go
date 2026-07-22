@@ -39,6 +39,43 @@ func TestDiscordSpecRegistered(t *testing.T) {
 	}
 }
 
+func TestDownloadDiscordAttachment(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("item,cost\nrent,900\n"))
+	}))
+	defer srv.Close()
+
+	data, err := downloadDiscordAttachment(srv.URL)
+	if err != nil {
+		t.Fatalf("downloadDiscordAttachment: %v", err)
+	}
+	if string(data) != "item,cost\nrent,900\n" {
+		t.Errorf("unexpected data: %q", data)
+	}
+}
+
+func TestDownloadDiscordAttachmentTooLarge(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(make([]byte, maxAttachmentBytes+1))
+	}))
+	defer srv.Close()
+
+	if _, err := downloadDiscordAttachment(srv.URL); err == nil {
+		t.Error("an oversized attachment must be refused")
+	}
+}
+
+func TestDownloadDiscordAttachmentNon200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	if _, err := downloadDiscordAttachment(srv.URL); err == nil {
+		t.Error("a non-200 response must be refused")
+	}
+}
+
 func TestMapDiscordDM(t *testing.T) {
 	// A real DM from a human → dispatched.
 	msg, ok := mapDiscordDM("user-1", "", "hello", "msg-9", "bot-1", false)
