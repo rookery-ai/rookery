@@ -114,8 +114,26 @@ func (i *Indexer) Invalidate(workspaceID string) {
 	i.mapMu.Unlock()
 }
 
-// Search returns the top-scoring chunks for a query, best first.
+// Search returns the top-scoring chunks for a query, best first, over the
+// WHOLE vault. This is the path `search_files` (the LLM tool) uses — its
+// behavior must stay whole-vault, so it calls this, never SearchExcluding.
 func (i *Indexer) Search(workspaceID, query string, limit int) []Scored {
+	return i.search(workspaceID, query, limit, nil)
+}
+
+// SearchExcluding is Search scoped away from paths under the given prefixes
+// (vault-relative, e.g. "chats", "agents"). It exists as an explicit,
+// documented capability rather than something callers bolt on by filtering
+// Search's result slice: filtering after the top-N are already chosen would
+// silently return fewer than `limit` results whenever excluded paths would
+// otherwise have placed in the top N. Excluding at the candidate stage, before
+// ranking picks the top N, means the N results returned are the true top N of
+// the searchable (non-excluded) set.
+func (i *Indexer) SearchExcluding(workspaceID, query string, limit int, excludePrefixes []string) []Scored {
+	return i.search(workspaceID, query, limit, excludePrefixes)
+}
+
+func (i *Indexer) search(workspaceID, query string, limit int, excludePrefixes []string) []Scored {
 	terms := tokenize(query)
 	if len(terms) == 0 {
 		return nil
@@ -154,6 +172,9 @@ func (i *Indexer) Search(workspaceID, query string, limit int) []Scored {
 
 	scored := make([]Scored, 0, n)
 	for ci, c := range chunks {
+		if hasPathPrefix(c.Path, excludePrefixes) {
+			continue
+		}
 		score := bm25Score(terms, tf[ci], df, avgLen, n)
 		score += fieldBoost(terms, c)
 		if score > 0 {
@@ -214,6 +235,22 @@ func applyScoreFloor(scored []Scored) []Scored {
 		}
 	}
 	return kept
+}
+
+// hasPathPrefix reports whether a vault-relative path (forward-slash
+// separated, as Chunk.Path always is) falls under one of the given top-level
+// prefixes. A plain strings.HasPrefix would wrongly match "chats-export/x.md"
+// against prefix "chats" — the exact-segment-or-slash check avoids that.
+func hasPathPrefix(path string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if p == "" {
+			continue
+		}
+		if path == p || strings.HasPrefix(path, p+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // refresh revalidates the given workspace's index against the filesystem.
@@ -497,8 +534,16 @@ func sortedKeys(m map[string]*fileEntry) []string {
 // folders exist, how many files each holds, and which kinds. It replaces the
 // old exhaustive path list (vault.NotePaths), which capped at 60 files in walk
 // order and rendered the first 30 — so in a 153-note vault, 123 notes were
-// invisible and the visible 30 were arbitrary. A summary is bounded by folder
-// count rather than file count, so it stays honest as the vault grows.
+// invisible and the visible 30 were arbitrary.
+//
+// What this bounds: FILE COUNT WITHIN a folder collapses to one line (a count
+// per extension), so a 500-file folder is still one line, not 500. What it
+// does NOT bound: TOTAL output size as FOLDER COUNT grows — one line is
+// emitted per distinct folder with no cap on how many folders there are, so a
+// vault with hundreds of folders (many agents each with their own subfolder,
+// per-day journal folders, ...) produces a proportionally unbounded string.
+// Callers that need a byte-bounded result (BuildKBContext) must budget and
+// truncate this output themselves.
 func (v *Vault) FolderSummary(workspaceID string) string {
 	root := v.Root(workspaceID)
 	if root == "" {

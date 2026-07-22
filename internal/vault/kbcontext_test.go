@@ -1,8 +1,10 @@
 package vault
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func seedDesignerVault(t *testing.T) (*Vault, string) {
@@ -65,5 +67,176 @@ func TestBuildKBContextEmptyVault(t *testing.T) {
 	v.EnsureScaffold("empty")
 	if got := BuildKBContext(v, "empty", "anything"); got == "" {
 		t.Error("an empty vault should still describe itself rather than returning nothing")
+	}
+}
+
+// TestBuildKBContextDoesNotContradictItself is Finding 1(a): many single-file
+// folders (the folder summary alone used to run past 5 KiB, itself under the
+// old unsplit cap) plus one genuinely-matching note. The old code wrote the
+// "relevant notes" header unconditionally before the budget check, so the
+// header AND the "no notes matched" sentence both landed in the same output
+// while the real match was quoted nowhere. With the folder summary and the
+// passages each budgeted separately, the note has real room and must be
+// shown — not silently dropped into a false "nothing matched" claim.
+func TestBuildKBContextDoesNotContradictItself(t *testing.T) {
+	v := New(t.TempDir())
+	const ws = "ws1"
+	if err := v.EnsureScaffold(ws); err != nil {
+		t.Fatalf("scaffold: %v", err)
+	}
+	for i := 0; i < 130; i++ {
+		rel := fmt.Sprintf("notes/f%03d/note.md", i)
+		if err := v.WriteNote(ws, rel, []byte("# Filler\n\nnothing relevant here\n")); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	// A genuine match sized deliberately: too big to fit the ~1.5 KiB left
+	// over once a 130-folder summary (~4.5 KB, unsplit) eats most of the 6
+	// KiB cap, but comfortably under the ~4 KiB the passage section gets once
+	// the summary has its own separate, smaller budget. This is what makes
+	// the test actually exercise the budget SPLIT, not just the "don't write
+	// a contradictory header unconditionally" fix on its own. The size lives
+	// in the HEADING (uncapped, see chunk.go) rather than the body, so this
+	// stays a single passage rather than being split into several
+	// independently-fitting pieces by the chunker's hard per-chunk bound.
+	headingText := strings.Repeat("Mortgage refinancing details for this quarter ", 36)
+	if err := v.WriteNote(ws, "notes/finances.md", []byte(
+		"# Household finances\n\n## "+headingText+"\n\nRefinancing the mortgage this quarter; rate quote attached.\n",
+	)); err != nil {
+		t.Fatalf("write finances note: %v", err)
+	}
+
+	got := BuildKBContext(v, ws, "mortgage refinancing")
+
+	hasRelevant := strings.Contains(got, "Existing notes relevant to this request:")
+	hasNoMatch := strings.Contains(got, "No existing notes matched this request")
+	if hasRelevant && hasNoMatch {
+		t.Fatalf("both contradictory statements present at once:\n%s", got)
+	}
+	if hasNoMatch {
+		t.Errorf("a real match exists (notes/finances.md) — must not claim nothing matched:\n%s", got)
+	}
+	if !hasRelevant {
+		t.Errorf("expected the relevant-notes header now that the summary no longer starves the passage budget, got:\n%s", got)
+	}
+	if !strings.Contains(got, "finances.md") || !strings.Contains(got, "Refinancing") {
+		t.Errorf("expected the real match reported with its text, got:\n%s", got)
+	}
+}
+
+// TestBuildKBContextMatchTooLargeReportsNoRoomNotNoMatch covers the other
+// half of Finding 1(a): a single matching passage too large to ever fit the
+// passage budget. This must say plainly that a match existed but didn't fit —
+// never the "no notes matched" sentence, which is a different, false claim.
+//
+// A chunk's BODY text is hard-bounded at targetChunkChars (1500 chars, see
+// chunk.go) — deliberately, so it always fits a byte-capped tool result — but
+// the HEADING TRAIL quoted alongside it is not: deeply nested real headings
+// ("H1 > H2 > H3 …", each with a real title) accumulate with no cap. This
+// note stands that in for a single very long heading, which is enough on its
+// own to push one entry past the whole remaining passage budget.
+func TestBuildKBContextMatchTooLargeReportsNoRoomNotNoMatch(t *testing.T) {
+	v, ws := seedDesignerVault(t)
+	longHeading := strings.Repeat("xylophone92 refrigerator58 filler words padding out this heading title ", 160)
+	note := "# " + longHeading + "\n\nShort body mentioning xylophone92 refrigerator58 once.\n"
+	if err := v.WriteNote(ws, "notes/oddity.md", []byte(note)); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+
+	got := BuildKBContext(v, ws, "xylophone92 refrigerator58")
+
+	if strings.Contains(got, "No existing notes matched this request") {
+		t.Errorf("a match existed — must not claim nothing matched:\n%s", got)
+	}
+	if strings.Contains(got, "Existing notes relevant to this request:") {
+		t.Errorf("the oversized match cannot fit — must not claim it was shown:\n%s", got)
+	}
+	if !strings.Contains(got, "matched this request but did not fit") {
+		t.Errorf("expected an explicit matched-but-no-room notice, got:\n%s", got)
+	}
+	if len(got) > maxKBContextBytes {
+		t.Errorf("context is %d bytes, over the %d cap", len(got), maxKBContextBytes)
+	}
+}
+
+// TestBuildKBContextFolderCountBlowoutStaysBounded is Finding 1(b): hundreds
+// of one-file folders blow the folder summary itself past the whole cap
+// before anything else is appended. The old hard tail-slice then cut mid-line
+// and dropped the passages/no-match sentence entirely. With the summary
+// separately budgeted, the total stays capped and the omission is visible
+// (an "…and N more folders" marker) instead of silent.
+func TestBuildKBContextFolderCountBlowoutStaysBounded(t *testing.T) {
+	v := New(t.TempDir())
+	const ws = "ws1"
+	if err := v.EnsureScaffold(ws); err != nil {
+		t.Fatalf("scaffold: %v", err)
+	}
+	for i := 0; i < 400; i++ {
+		rel := fmt.Sprintf("notes/day%04d/note.md", i)
+		if err := v.WriteNote(ws, rel, []byte("# Journal\n\nnothing special today\n")); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	got := BuildKBContext(v, ws, "quantum chromodynamics lattice simulation")
+
+	if len(got) > maxKBContextBytes {
+		t.Fatalf("context is %d bytes, over the %d cap", len(got), maxKBContextBytes)
+	}
+	if !strings.Contains(got, "more folders") {
+		t.Errorf("expected a visible truncation marker on the folder summary, got:\n%s", got)
+	}
+	if !strings.Contains(got, "No existing notes matched this request") {
+		t.Errorf("the no-match sentence must survive truncation, not be sliced away, got:\n%s", got)
+	}
+}
+
+// TestBuildKBContextExcludesChatsAndAgentState is Finding 2: chat transcripts
+// and agent internal state must never be quoted verbatim into the designer's
+// prompt just because a query happens to match a word in them — that is an
+// always-on auto-injection, a materially different exposure mode than a model
+// deliberately reading the file via a tool. notes/ matches must still work.
+func TestBuildKBContextExcludesChatsAndAgentState(t *testing.T) {
+	v, ws := seedDesignerVault(t)
+	if err := v.WriteNote(ws, "chats/c1.md", []byte(
+		"# Chat\n\nMy bank routing number is 123456789 — remember it privately.\n",
+	)); err != nil {
+		t.Fatalf("write chat: %v", err)
+	}
+	if err := v.WriteNote(ws, "agents/a1/state.md", []byte(
+		"# State\n\n```json\n{\"internal_note\": \"do not surface this externally, routing sensitive\"}\n```\n",
+	)); err != nil {
+		t.Fatalf("write agent state: %v", err)
+	}
+	if err := v.WriteNote(ws, "notes/banking.md", []byte(
+		"# Banking\n\nMy routing number reminder should live here.\n",
+	)); err != nil {
+		t.Fatalf("write banking note: %v", err)
+	}
+
+	got := BuildKBContext(v, ws, "routing number")
+
+	if strings.Contains(got, "123456789") {
+		t.Errorf("chat transcript content must not be quoted into the design block, got:\n%s", got)
+	}
+	if strings.Contains(got, "do not surface this externally") {
+		t.Errorf("agent state content must not be quoted into the design block, got:\n%s", got)
+	}
+	if !strings.Contains(got, "notes/banking.md") {
+		t.Errorf("a real notes/ match should still be reported, got:\n%s", got)
+	}
+}
+
+// TestRuneSafeCutNeverSplitsAMultibyteRune is Finding 3: a hard byte-slice
+// truncation must never land inside a multibyte UTF-8 rune.
+func TestRuneSafeCutNeverSplitsAMultibyteRune(t *testing.T) {
+	// "é" is 2 bytes (0xC3 0xA9); sweeping every cut point exercises landing
+	// on both its first and second byte.
+	s := strings.Repeat("a", 9) + "é" + strings.Repeat("b", 9)
+	for cut := 0; cut <= len(s); cut++ {
+		got := runeSafeCut(s, cut)
+		if !utf8.ValidString(s[:got]) {
+			t.Fatalf("cut at %d (safe=%d) produced invalid utf8: %q", cut, got, s[:got])
+		}
 	}
 }
