@@ -47,7 +47,9 @@ type hostToolSet struct {
 	selfExe          string
 	dataDir          string
 	homesDir         string
-	includeExecTools bool // gates the powerful tools (run_script, bash, web_fetch); off for chat
+	includeExecTools bool // gates the tools that execute code (run_script, bash); off for chat.
+	// web_fetch/web_search are read-only, cannot carry secrets, and (per netguard) cannot
+	// reach private address space — so they are offered regardless of this flag.
 
 	// web_fetch tuning (both optional; zero values use sane defaults). Injected by tests so
 	// the transient-retry path doesn't sleep for real.
@@ -155,25 +157,28 @@ func (h *hostToolSet) tools() []llm.Tool {
 		{Name: "glob", Description: "Find files in the vault by name/pattern and return their vault-relative paths (one per line). Supports * (within one folder), ? (one char), and ** (any depth, crosses folders) — " +
 			`e.g. glob with pattern "notes/*-meeting.md" or "**/*.py". Use this to locate files by NAME instead of listing folders one at a time.`,
 			Parameters: rawSchema(`{"type":"object","properties":{"pattern":{"type":"string","description":"glob pattern matching vault-relative paths (supports *, ?, and **)"}},"required":["pattern"]}`)},
+		// Read-only tools, always offered (chat included): file discovery plus the
+		// two web tools. None of them execute code or carry secrets, so the exec
+		// gate below — which exists for run_script/bash — does not apply to them.
+		{
+			Name: "web_fetch",
+			Description: "Fetch a PUBLIC URL over HTTP(S) and return its content as text (HTML is reduced to readable text; JSON/text is returned as-is), " +
+				`e.g. web_fetch with url "https://api.open-meteo.com/v1/forecast?latitude=42.0&longitude=21.4&current=temperature_2m". ` +
+				"Use this for a simple read of a PUBLIC endpoint — a weather API, an RSS/JSON feed, a web page. " +
+				"It CANNOT send secrets: you do not have secret values (they are environment variables), so any call that needs an API key, token, or auth header must use run_script or bash instead, where secrets are available in the environment. " +
+				"Optional: method (GET or POST; default GET).",
+			Parameters: rawSchema(`{"type":"object","properties":{"url":{"type":"string","description":"the public http/https URL to fetch"},"method":{"type":"string","enum":["GET","POST"],"description":"HTTP method (default GET)"}},"required":["url"]}`),
+		},
+		{
+			Name: "web_search",
+			Description: "Search the public web (DuckDuckGo) and return a few results as numbered `title / url / snippet` entries — " +
+				`e.g. web_search with query "weather Skopje today". Use it to FIND a URL when you don't have one yet; then call web_fetch to READ the page you chose. ` +
+				"It is query-only and CANNOT carry secrets — there is nothing to authenticate, so it needs no key/token.",
+			Parameters: rawSchema(`{"type":"object","properties":{"query":{"type":"string","description":"the web search query"}},"required":["query"]}`),
+		},
 	}
 	if h.includeExecTools {
 		tools = append(tools,
-			llm.Tool{
-				Name: "web_fetch",
-				Description: "Fetch a PUBLIC URL over HTTP(S) and return its content as text (HTML is reduced to readable text; JSON/text is returned as-is), " +
-					`e.g. web_fetch with url "https://api.open-meteo.com/v1/forecast?latitude=42.0&longitude=21.4&current=temperature_2m". ` +
-					"Use this for a simple read of a PUBLIC endpoint — a weather API, an RSS/JSON feed, a web page. " +
-					"It CANNOT send secrets: you do not have secret values (they are environment variables), so any call that needs an API key, token, or auth header must use run_script or bash instead, where secrets are available in the environment. " +
-					"Optional: method (GET or POST; default GET).",
-				Parameters: rawSchema(`{"type":"object","properties":{"url":{"type":"string","description":"the public http/https URL to fetch"},"method":{"type":"string","enum":["GET","POST"],"description":"HTTP method (default GET)"}},"required":["url"]}`),
-			},
-			llm.Tool{
-				Name: "web_search",
-				Description: "Search the public web (DuckDuckGo) and return a few results as numbered `title / url / snippet` entries — " +
-					`e.g. web_search with query "weather Skopje today". Use it to FIND a URL when you don't have one yet; then call web_fetch to READ the page you chose. ` +
-					"It is query-only and CANNOT carry secrets — there is nothing to authenticate, so it needs no key/token.",
-				Parameters: rawSchema(`{"type":"object","properties":{"query":{"type":"string","description":"the web search query"}},"required":["query"]}`),
-			},
 			llm.Tool{
 				Name: "run_script",
 				Description: "Run a Python helper script under your working directory's tools/ folder (e.g. \"tools/foo.py\") and return its stdout. " +
@@ -524,18 +529,12 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		}
 		return h.spillLargeOutput(out, "run_script")
 	case "web_fetch":
-		if !h.includeExecTools {
-			return "error: web_fetch is not available"
-		}
 		out, err := h.webFetch(ctx, args.URL, args.Method, args.Headers, args.Body)
 		if err != nil {
 			return "error: " + err.Error()
 		}
 		return truncate(out)
 	case "web_search":
-		if !h.includeExecTools {
-			return "error: web_search is not available"
-		}
 		out, err := h.webSearch(ctx, args.Query)
 		if err != nil {
 			return "error: " + err.Error()

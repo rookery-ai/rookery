@@ -1955,6 +1955,10 @@ You act through FUNCTION CALLS (tools) that the host executes and feeds back to 
   Use it to locate files by name instead of listing folders one at a time.
 You have no shell and cannot run scripts, delete, or rename files.
 
+You can also look things up on the public web: use web_search to FIND a URL when you do not
+have one, then web_fetch to READ it. Both are read-only and cannot carry secrets or reach
+private addresses — they are for public pages only.
+
 Retrieving knowledge — ON DEMAND:
 - Only call tools when the user's message is about their notes or knowledge base. For a
   normal conversational reply, do not touch the vault at all.
@@ -1990,6 +1994,10 @@ is the user's personal knowledge base, an Obsidian-style vault of markdown notes
 The vault contains folders like notes/, memory/, chats/, agents/, reminders/, and any
 folders/files the user has created themselves. You have these file tools available:
 Read, Glob, Grep, Write, Edit.
+
+You also have WebFetch and WebSearch: use WebSearch to FIND a URL when you do not have
+one, then WebFetch to READ it. Both are read-only and cannot carry secrets or reach
+private addresses — they are for public pages only.
 
 Retrieving knowledge — ON DEMAND:
 - Only use the file tools when the user's message is about their notes or knowledge base.

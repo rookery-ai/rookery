@@ -201,20 +201,19 @@ func TestGateToolCallingHasDiscoveryTools(t *testing.T) {
 }
 
 // TestChatToolCallingHasSearchAndGlob guards chat parity with the CLI chat path: the
-// tool-calling chat prompt must offer search_files + glob (file-read, safe in chat), but
-// NOT web_search (chat is file-only — web_search/run_script/bash are exec-gated).
+// tool-calling chat prompt must offer search_files + glob (file-read, safe in chat) and,
+// as of Task 7, web_search/web_fetch too — both are read-only, cannot carry secrets, and
+// cannot reach private addresses, so they are no longer exec-gated in chat. run_script and
+// bash remain exec-gated (they execute code) and must NOT appear.
 func TestChatToolCallingHasSearchAndGlob(t *testing.T) {
 	p := BuildChatSystemPrompt("/tmp/vault", BackendToolCalling, nil, nil, "")
-	for _, want := range []string{"search_files", "glob"} {
+	for _, want := range []string{"search_files", "glob", "web_search", "web_fetch"} {
 		if !strings.Contains(p, want) {
-			t.Errorf("tool-calling chat prompt must offer %q (parity with CLI chat Grep/Glob)", want)
+			t.Errorf("tool-calling chat prompt must offer %q", want)
 		}
 	}
-	if strings.Contains(p, "web_search") {
-		t.Errorf("tool-calling chat prompt must NOT offer web_search (chat is file-only)")
-	}
 	if strings.Contains(p, "run_script") {
-		t.Errorf("tool-calling chat prompt must NOT offer run_script (chat is file-only)")
+		t.Errorf("tool-calling chat prompt must NOT offer run_script (chat cannot run code)")
 	}
 }
 

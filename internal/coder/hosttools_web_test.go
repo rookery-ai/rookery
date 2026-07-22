@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -160,12 +161,51 @@ func TestWebFetchBinaryReturnsNote(t *testing.T) {
 	}
 }
 
-// TestWebFetchDisabledWhenNotExec: without exec tools the tool refuses (chat parity).
-func TestWebFetchDisabledWhenNotExec(t *testing.T) {
+// Web tools are read-only and cannot carry secrets, so they are offered in chat
+// too. The exec gate exists for tools that run code (run_script, bash) — it
+// never applied to fetch/search for the right reason.
+func TestWebToolsOfferedInChat(t *testing.T) {
 	h := &hostToolSet{includeExecTools: false}
-	res := h.execute(context.Background(), webCall("http://example.com"))
-	if !strings.HasPrefix(res, "error:") {
-		t.Fatalf("web_fetch must be unavailable when exec tools are off; got: %q", res)
+	var names []string
+	for _, tool := range h.tools() {
+		names = append(names, tool.Name)
+	}
+	for _, want := range []string{"web_fetch", "web_search"} {
+		if !slices.Contains(names, want) {
+			t.Errorf("%s must be offered without exec tools, got %v", want, names)
+		}
+	}
+	for _, unwanted := range []string{"run_script", "bash"} {
+		if slices.Contains(names, unwanted) {
+			t.Errorf("%s must stay exec-gated, got %v", unwanted, names)
+		}
+	}
+}
+
+func TestWebFetchExecutesWithoutExecTools(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("chat can read this"))
+	}))
+	defer srv.Close()
+
+	h := &hostToolSet{includeExecTools: false, webRetryBase: time.Millisecond, allowPrivateHosts: true}
+	out := h.execute(context.Background(), llm.ToolCall{Name: "web_fetch",
+		Args: json.RawMessage(`{"url":"` + srv.URL + `"}`)})
+	if strings.HasPrefix(out, "error:") {
+		t.Fatalf("web_fetch should work in chat, got %q", out)
+	}
+	if !strings.Contains(out, "chat can read this") {
+		t.Errorf("unexpected body: %q", out)
+	}
+}
+
+func TestExecToolsStillGated(t *testing.T) {
+	h := &hostToolSet{includeExecTools: false}
+	for _, name := range []string{"run_script", "bash"} {
+		out := h.execute(context.Background(), llm.ToolCall{Name: name, Args: json.RawMessage(`{}`)})
+		if !strings.Contains(out, "not available") {
+			t.Errorf("%s should be refused in chat, got %q", name, out)
+		}
 	}
 }
 
@@ -330,16 +370,6 @@ func TestWebSearchRequiresQuery(t *testing.T) {
 	res := h.execute(context.Background(), webSearchCall(""))
 	if !strings.HasPrefix(res, "error:") || !strings.Contains(res, "query") {
 		t.Fatalf("empty query must be a hard error mentioning 'query'; got %q", res)
-	}
-}
-
-// TestWebSearchDisabledWhenNotExec: web_search is a network/exec tool → excluded
-// from chat (file-only), mirroring web_fetch/bash.
-func TestWebSearchDisabledWhenNotExec(t *testing.T) {
-	h := &hostToolSet{includeExecTools: false, webRetryBase: time.Millisecond}
-	res := h.execute(context.Background(), webSearchCall("x"))
-	if !strings.HasPrefix(res, "error:") || !strings.Contains(res, "web_search") {
-		t.Fatalf("web_search must be unavailable when exec tools are off; got %q", res)
 	}
 }
 

@@ -265,7 +265,7 @@ func serveCmd() *cli.Command {
 				root := vlt.Root(workspaceID)
 				cd := coderFor(workspaceID).WithDir(root)
 				if !cd.IsAPI() {
-					cd = cd.WithAllowedTools("Read,Write,Edit,Glob,Grep")
+					cd = cd.WithAllowedTools("Read,Write,Edit,Glob,Grep,WebFetch,WebSearch")
 				}
 
 				// Connector wiring: the API engine exposes bound connections as native
@@ -310,7 +310,7 @@ func serveCmd() *cli.Command {
 								// CLI coders reach connectors by running `<bin> connector exec …`
 								// as a shell command; grant a narrowly-scoped Bash permission for
 								// only that command (chat stays file-only otherwise).
-								cd = cd.WithAllowedTools("Read,Write,Edit,Glob,Grep,Bash(" + connBin + " connector exec:*)")
+								cd = cd.WithAllowedTools("Read,Write,Edit,Glob,Grep,WebFetch,WebSearch,Bash(" + connBin + " connector exec:*)")
 							}
 						}
 					}
