@@ -3,6 +3,7 @@ package convert
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -283,6 +284,192 @@ func TestXLSXSparseRowsAlign(t *testing.T) {
 	}
 	if !strings.Contains(got.Markdown, "|  | 7 |") {
 		t.Errorf("sparse row should keep its column position, got:\n%s", got.Markdown)
+	}
+}
+
+// xlsxReorderedWorkbook declares Finance before Marketing in <sheets> — the
+// order the user sees as tabs — but its rels deliberately point the OTHER
+// way round from physical file numbering: rId1 (Finance, declared first)
+// resolves to sheet2.xml, and rId2 (Marketing, declared second) resolves to
+// sheet1.xml. This reproduces a workbook whose sheets were reordered/renamed
+// after creation, which Excel does not renumber the underlying parts for.
+const xlsxReorderedWorkbook = `<?xml version="1.0"?>
+<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+ <sheets>
+  <sheet name="Finance" sheetId="1" r:id="rId1"/>
+  <sheet name="Marketing" sheetId="2" r:id="rId2"/>
+ </sheets>
+</workbook>`
+
+const xlsxReorderedRels = `<?xml version="1.0"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+ <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+ <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`
+
+// sheet1.xml physically holds Marketing's data; sheet2.xml physically holds
+// Finance's data — the inverse of what positional pairing would assume.
+const xlsxReorderedSheet1 = `<worksheet><sheetData>
+ <row r="1"><c r="A1" t="inlineStr"><is><t>MarketingNum</t></is></c></row>
+ <row r="2"><c r="A2"><v>100</v></c></row>
+</sheetData></worksheet>`
+
+const xlsxReorderedSheet2 = `<worksheet><sheetData>
+ <row r="1"><c r="A1" t="inlineStr"><is><t>FinanceNum</t></is></c></row>
+ <row r="2"><c r="A2"><v>200</v></c></row>
+</sheetData></worksheet>`
+
+// TestXLSXSheetNamesFollowRelsNotPosition is Finding 1: the heading a sheet's
+// data appears under must come from resolving r:id through
+// xl/_rels/workbook.xml.rels, not from pairing <sheets> position i with
+// sheetN+1.xml. Under the old positional pairing this test fails: "Finance"
+// would head Marketing's data (in sheet1.xml) and vice versa.
+func TestXLSXSheetNamesFollowRelsNotPosition(t *testing.T) {
+	data := buildZip(t, map[string]string{
+		"xl/workbook.xml":            xlsxReorderedWorkbook,
+		"xl/_rels/workbook.xml.rels": xlsxReorderedRels,
+		"xl/worksheets/sheet1.xml":   xlsxReorderedSheet1,
+		"xl/worksheets/sheet2.xml":   xlsxReorderedSheet2,
+	})
+	got, err := ToMarkdown(data, Options{Filename: "mismatch.xlsx"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	if !strings.Contains(got.Markdown, "## Finance\n\n| FinanceNum |") {
+		t.Errorf("Finance heading must be followed by Finance's own data, got:\n%s", got.Markdown)
+	}
+	if !strings.Contains(got.Markdown, "## Marketing\n\n| MarketingNum |") {
+		t.Errorf("Marketing heading must be followed by Marketing's own data, got:\n%s", got.Markdown)
+	}
+	if strings.Contains(got.Markdown, "## Finance\n\n| MarketingNum |") {
+		t.Errorf("Finance heading must not be followed by Marketing's data, got:\n%s", got.Markdown)
+	}
+}
+
+// TestXLSXMalformedSharedStringIndexRendersEmpty is Finding 2: a non-numeric
+// t="s" index must render an empty cell, never shared[0] — a real but
+// unrelated string that would otherwise look like a plausible value.
+func TestXLSXMalformedSharedStringIndexRendersEmpty(t *testing.T) {
+	sheet := `<worksheet><sheetData>
+	 <row r="1"><c r="A1" t="inlineStr"><is><t>Region</t></is></c><c r="B1" t="inlineStr"><is><t>Note</t></is></c></row>
+	 <row r="2"><c r="A2" t="s"><v>not-a-number</v></c><c r="B2" t="inlineStr"><is><t>ok</t></is></c></row>
+	</sheetData></worksheet>`
+	shared := `<sst><si><t>ZEROTH-SHOULD-NOT-APPEAR</t></si></sst>`
+	data := buildZip(t, map[string]string{
+		"xl/workbook.xml":          xlsxWorkbook,
+		"xl/worksheets/sheet1.xml": sheet,
+		"xl/sharedStrings.xml":     shared,
+	})
+	got, err := ToMarkdown(data, Options{Filename: "badidx.xlsx"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	if strings.Contains(got.Markdown, "ZEROTH-SHOULD-NOT-APPEAR") {
+		t.Errorf("a malformed shared-string index must not render shared[0], got:\n%s", got.Markdown)
+	}
+	if !strings.Contains(got.Markdown, "|  | ok |") {
+		t.Errorf("malformed-index cell should render empty, other cell unaffected, got:\n%s", got.Markdown)
+	}
+}
+
+// TestXLSXCellsWithoutRefTrackPosition is Finding 3: cells that omit the r=
+// A1 reference (legal per ECMA-376; some non-Excel writers rely on document
+// order) must advance a running column position, not all collapse onto
+// column A and overwrite one another.
+func TestXLSXCellsWithoutRefTrackPosition(t *testing.T) {
+	sheet := `<worksheet><sheetData>
+	 <row r="1"><c r="A1" t="inlineStr"><is><t>Field</t></is></c><c r="B1" t="inlineStr"><is><t>Value</t></is></c></row>
+	 <row><c t="inlineStr"><is><t>Region</t></is></c><c t="inlineStr"><is><t>EMEA</t></is></c></row>
+	</sheetData></worksheet>`
+	data := buildZip(t, map[string]string{
+		"xl/workbook.xml":          xlsxWorkbook,
+		"xl/worksheets/sheet1.xml": sheet,
+	})
+	got, err := ToMarkdown(data, Options{Filename: "noref.xlsx"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	if !strings.Contains(got.Markdown, "| Region | EMEA |") {
+		t.Errorf("ref-less cells must keep their sequential positions, got:\n%s", got.Markdown)
+	}
+}
+
+// TestXLSXEmptySheetIsWarned is Finding 4: an empty sheet must not vanish
+// without a trace — a Warnings entry names it, even though no data was lost.
+func TestXLSXEmptySheetIsWarned(t *testing.T) {
+	workbook := `<?xml version="1.0"?>
+<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+ <sheets>
+  <sheet name="Empty" sheetId="1" r:id="rId1"/>
+  <sheet name="Data" sheetId="2" r:id="rId2"/>
+ </sheets>
+</workbook>`
+	rels := `<?xml version="1.0"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+ <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+ <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+</Relationships>`
+	emptySheet := `<worksheet><sheetData></sheetData></worksheet>`
+	dataSheet := `<worksheet><sheetData>
+	 <row r="1"><c r="A1" t="inlineStr"><is><t>Col</t></is></c></row>
+	 <row r="2"><c r="A2"><v>1</v></c></row>
+	</sheetData></worksheet>`
+	data := buildZip(t, map[string]string{
+		"xl/workbook.xml":            workbook,
+		"xl/_rels/workbook.xml.rels": rels,
+		"xl/worksheets/sheet1.xml":   emptySheet,
+		"xl/worksheets/sheet2.xml":   dataSheet,
+	})
+	got, err := ToMarkdown(data, Options{Filename: "empty.xlsx"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	found := false
+	for _, w := range got.Warnings {
+		if strings.Contains(w, "Empty") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a warning naming the empty sheet, got: %v", got.Warnings)
+	}
+	if !strings.Contains(got.Markdown, "## Data") {
+		t.Errorf("the populated sheet must still render, got:\n%s", got.Markdown)
+	}
+}
+
+// TestXLSXTruncationWarningIncludesCounts is Finding 5: the row-cap warning
+// must report both the omitted and total row counts, matching tabular.go's
+// wording rather than a bare "truncated to N rows".
+func TestXLSXTruncationWarningIncludesCounts(t *testing.T) {
+	const extra = 10
+	total := maxTableRows + extra
+	var sheet strings.Builder
+	sheet.WriteString("<worksheet><sheetData>")
+	sheet.WriteString(`<row r="1"><c r="A1" t="inlineStr"><is><t>N</t></is></c></row>`)
+	for i := 1; i <= total; i++ {
+		fmt.Fprintf(&sheet, `<row r="%d"><c r="A%d"><v>%d</v></c></row>`, i+1, i+1, i)
+	}
+	sheet.WriteString("</sheetData></worksheet>")
+	data := buildZip(t, map[string]string{
+		"xl/workbook.xml":          xlsxWorkbook,
+		"xl/worksheets/sheet1.xml": sheet.String(),
+	})
+	got, err := ToMarkdown(data, Options{Filename: "big.xlsx"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	want := fmt.Sprintf(
+		"row limit reached: %d of %d rows are not in this note — read the preserved original for the full data",
+		extra, total)
+	found := false
+	for _, w := range got.Warnings {
+		if w == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("want warning %q, got: %v", want, got.Warnings)
 	}
 }
 

@@ -381,32 +381,39 @@ func xlsxToMarkdown(data []byte, opt Options) (Result, error) {
 		return Result{}, err
 	}
 	shared := readSharedStrings(zr)
-	names := sheetNames(zr)
+	plans := planSheets(zr)
 
 	res := Result{Kind: KindXLSX, Extractor: "pure-go", Title: titleFromFilename(opt.Filename)}
 	var sb strings.Builder
 	sheets := 0
-	for i := 1; ; i++ {
-		part, err := readZipPart(zr, fmt.Sprintf("xl/worksheets/sheet%d.xml", i))
+	for _, p := range plans {
+		part, err := readZipPart(zr, p.Part)
 		if err != nil {
-			break
+			continue
 		}
 		rows, err := parseSheetRows(part, shared)
 		if err != nil {
 			return Result{}, err
 		}
 		if len(rows) == 0 {
+			// Finding 4: no data was lost (there was none), but a sheet
+			// disappearing from the note with no trace it ever existed is
+			// still a surprise to whoever expected to find it there.
+			res.Warnings = append(res.Warnings, fmt.Sprintf("sheet %s is empty and was omitted", p.Name))
 			continue
 		}
 		sheets++
-		name := fmt.Sprintf("Sheet%d", i)
-		if i-1 < len(names) && names[i-1] != "" {
-			name = names[i-1]
-		}
-		fmt.Fprintf(&sb, "## %s\n\n", name)
+		fmt.Fprintf(&sb, "## %s\n\n", p.Name)
 		if len(rows) > maxTableRows+1 {
+			// total/omitted count DATA rows (rows[0] is the header), matching
+			// tabular.go's truncation-warning precedent so both converters
+			// report the same shape of number.
+			total := len(rows) - 1
+			omitted := total - maxTableRows
 			rows = rows[:maxTableRows+1]
-			res.Warnings = append(res.Warnings, fmt.Sprintf("sheet %s truncated to %d rows", name, maxTableRows))
+			res.Warnings = append(res.Warnings, fmt.Sprintf(
+				"row limit reached: %d of %d rows are not in this note — read the preserved original for the full data",
+				omitted, total))
 		}
 		writeTable(&sb, rows)
 		sb.WriteString("\n")
@@ -445,8 +452,79 @@ func readSharedStrings(zr *zip.Reader) []string {
 	return out
 }
 
-// sheetNames returns worksheet display names in workbook order.
-func sheetNames(zr *zip.Reader) []string {
+// sheetPlan is one worksheet to render: its display name (in the order the
+// user sees the tabs) and the zip part that actually holds its rows.
+type sheetPlan struct {
+	Name string
+	Part string
+}
+
+// planSheets decides, for each declared worksheet, which xl/worksheets/*.xml
+// part actually holds its data (Finding 1).
+//
+// xlsxToMarkdown used to pair workbook.xml's <sheets> list with
+// xl/worksheets/sheetN.xml by shared position — sheets[i] gets sheetN+1.xml.
+// That only holds for a freshly created workbook: Excel does NOT renumber
+// part files when the user reorders, renames, or deletes sheets in the UI,
+// so <sheets> declaration order and the physical sheetN.xml numbering can
+// diverge freely after any edit. The only reliable link between the two is
+// the relationship graph: each <sheet> carries an r:id, and
+// xl/_rels/workbook.xml.rels maps that id to the real part path.
+func planSheets(zr *zip.Reader) []sheetPlan {
+	refs := workbookSheetRefs(zr)
+	if len(refs) == 0 {
+		// workbook.xml is missing or didn't parse. Fall back to the
+		// historical purely-positional probe so a workbook lacking (or with
+		// a broken) workbook.xml still converts instead of producing
+		// nothing — an imperfect heading beats no document.
+		var out []sheetPlan
+		for i := 1; ; i++ {
+			name := fmt.Sprintf("xl/worksheets/sheet%d.xml", i)
+			if !hasZipPart(zr, name) {
+				break
+			}
+			out = append(out, sheetPlan{Name: fmt.Sprintf("Sheet%d", i), Part: name})
+		}
+		return out
+	}
+
+	rels := workbookRels(zr) // nil when the rels part is missing/unparsable
+	out := make([]sheetPlan, len(refs))
+	for i, ref := range refs {
+		name := ref.Name
+		if name == "" {
+			name = fmt.Sprintf("Sheet%d", i+1)
+		}
+		partName := ""
+		if target, ok := rels[ref.RID]; ok {
+			partName = normalizeWorksheetTarget(target)
+		}
+		if partName == "" {
+			// The rels part is missing, or this sheet's r:id didn't resolve
+			// in it (hand-edited/corrupt rels). Fall back to positional
+			// pairing rather than failing the whole conversion — correct
+			// only for an unreordered workbook, but strictly better than
+			// refusing to convert at all.
+			partName = fmt.Sprintf("xl/worksheets/sheet%d.xml", i+1)
+		}
+		out[i] = sheetPlan{Name: name, Part: partName}
+	}
+	return out
+}
+
+// sheetRef is one <sheet> entry from workbook.xml's <sheets> list, in
+// declaration order (the order the user sees the tabs).
+type sheetRef struct {
+	Name string
+	RID  string
+}
+
+// workbookSheetRefs parses xl/workbook.xml's <sheets> list. The r:id
+// attribute is namespaced in the source XML, but encoding/xml's attribute
+// matching (unlike element matching) ignores namespace when the struct tag
+// doesn't declare one, so a bare `xml:"id,attr"` tag matches r:id by its
+// local name alone.
+func workbookSheetRefs(zr *zip.Reader) []sheetRef {
 	part, err := readZipPart(zr, "xl/workbook.xml")
 	if err != nil {
 		return nil
@@ -454,21 +532,71 @@ func sheetNames(zr *zip.Reader) []string {
 	var wb struct {
 		Sheets []struct {
 			Name string `xml:"name,attr"`
+			RID  string `xml:"id,attr"`
 		} `xml:"sheets>sheet"`
 	}
 	if err := xml.Unmarshal(part, &wb); err != nil {
 		return nil
 	}
-	out := make([]string, 0, len(wb.Sheets))
-	for _, s := range wb.Sheets {
-		out = append(out, s.Name)
+	out := make([]sheetRef, len(wb.Sheets))
+	for i, s := range wb.Sheets {
+		out[i] = sheetRef{Name: s.Name, RID: s.RID}
 	}
 	return out
 }
 
-// parseSheetRows decodes one worksheet into a dense grid. Cells carry an A1
-// reference and sparse rows omit empty cells entirely, so column position comes
-// from the reference — not from the cell's index in the XML.
+// workbookRels reads xl/_rels/workbook.xml.rels, mapping each relationship Id
+// to its Target part path. Returns nil when the part is missing or
+// unparsable — callers treat that as "no rels available" and fall back to
+// positional pairing.
+func workbookRels(zr *zip.Reader) map[string]string {
+	part, err := readZipPart(zr, "xl/_rels/workbook.xml.rels")
+	if err != nil {
+		return nil
+	}
+	var rels struct {
+		Rel []struct {
+			ID     string `xml:"Id,attr"`
+			Target string `xml:"Target,attr"`
+		} `xml:"Relationship"`
+	}
+	if err := xml.Unmarshal(part, &rels); err != nil {
+		return nil
+	}
+	out := make(map[string]string, len(rels.Rel))
+	for _, r := range rels.Rel {
+		out[r.ID] = r.Target
+	}
+	return out
+}
+
+// normalizeWorksheetTarget resolves a rels Target to a zip part path.
+// Targets are relative to xl/ ("worksheets/sheet2.xml") but may also be
+// written as package-absolute ("/xl/worksheets/sheet2.xml"); both forms must
+// land on the same "xl/worksheets/sheet2.xml" key that readZipPart expects.
+func normalizeWorksheetTarget(target string) string {
+	if strings.HasPrefix(target, "/") {
+		return strings.TrimPrefix(target, "/")
+	}
+	return "xl/" + target
+}
+
+// hasZipPart reports whether the archive contains a part with this exact
+// name, without reading its content.
+func hasZipPart(zr *zip.Reader, name string) bool {
+	for _, f := range zr.File {
+		if f.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// parseSheetRows decodes one worksheet into a dense grid. Cells normally
+// carry an A1 reference and sparse rows omit empty cells entirely, so column
+// position comes from the reference — not from the cell's index in the XML —
+// when a reference is present; a cell that omits r= (legal per ECMA-376, used
+// by some non-Excel generators) instead advances from the last known column.
 func parseSheetRows(part []byte, shared []string) ([][]string, error) {
 	var ws struct {
 		Rows []struct {
@@ -486,8 +614,19 @@ func parseSheetRows(part []byte, shared []string) ([][]string, error) {
 	var grid [][]string
 	for _, r := range ws.Rows {
 		row := []string{}
+		// nextCol tracks a running column position for cells that omit r=.
+		// ECMA-376 permits this (a reader may rely on document order instead
+		// of an explicit reference), and some non-Excel generators do it
+		// (Finding 3): columnIndex("") is 0, so without this every such cell
+		// would land on column A and overwrite the previous one instead of
+		// advancing.
+		nextCol := 0
 		for _, c := range r.Cells {
-			col := columnIndex(c.Ref)
+			col := nextCol
+			if c.Ref != "" {
+				col = columnIndex(c.Ref)
+			}
+			nextCol = col + 1
 			for len(row) <= col {
 				row = append(row, "")
 			}
@@ -501,8 +640,14 @@ func parseSheetRows(part []byte, shared []string) ([][]string, error) {
 func cellValue(typ, value, inline string, shared []string) string {
 	switch typ {
 	case "s":
-		idx := 0
-		fmt.Sscanf(value, "%d", &idx)
+		// A malformed index must not silently fall back to shared[0] — that
+		// renders a real but unrelated string as though it were this cell's
+		// actual value (Finding 2). An empty cell is an honest failure mode;
+		// a wrong-but-plausible one is not.
+		idx, err := strconv.Atoi(value)
+		if err != nil {
+			return ""
+		}
 		if idx >= 0 && idx < len(shared) {
 			return shared[idx]
 		}
