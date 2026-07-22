@@ -13,6 +13,9 @@ import (
 
 	"github.com/ilijad1/simple-agents/internal/chat"
 	"github.com/ilijad1/simple-agents/internal/coder"
+	// Aliased because this file has a local variable named `coder` that shadows
+	// the package inside the chat handler.
+	codersvc "github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/prompts"
@@ -63,7 +66,12 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 		// blocks on an interactive permission prompt; it's meaningless for an API
 		// coder (host tools are offered via native function-calling, not gated by
 		// this flag), so skip it there — matches the Telegram chat path.
-		coder = coder.WithAllowedTools("Read,Write,Edit,Glob,Grep")
+		// WebFetch/WebSearch are included because they are read-only, cannot carry
+		// secrets, and cannot reach private address space — the same reasoning that
+		// took them out of the exec gate on the API engine. This list must stay in
+		// step with the Telegram/Discord/Slack chat path in cmd/simple-agents;
+		// divergence would give one surface web access and not the other.
+		coder = coder.WithAllowedTools(codersvc.ChatAllowedTools(""))
 	}
 
 	// Connector wiring: the API engine exposes bound connections as native
@@ -108,7 +116,7 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 					// A CLI coder reaches connectors by running `<bin> connector exec …` as a
 					// shell command, so grant a NARROWLY-SCOPED Bash permission for only that
 					// command — chat stays file-only (no arbitrary shell) otherwise.
-					coder = coder.WithAllowedTools("Read,Write,Edit,Glob,Grep,Bash(" + connBin + " connector exec:*)")
+					coder = coder.WithAllowedTools(codersvc.ChatAllowedTools(connBin))
 				}
 			}
 		}
