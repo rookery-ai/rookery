@@ -35,6 +35,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // InternalDir is the hidden directory holding indexes and JSON sidecars. It is
@@ -48,6 +49,10 @@ var ErrEscapes = errors.New("path escapes vault")
 // Vault provides safe, per-user access to knowledge-base files on disk.
 type Vault struct {
 	dataDir string // the application data dir; vaults live at <dataDir>/vaults
+
+	// indexer is the process-lifetime retrieval index, created on first use.
+	indexOnce sync.Once
+	indexer   *Indexer
 }
 
 // New creates a Vault rooted at dataDir. Vault directories are created lazily.
