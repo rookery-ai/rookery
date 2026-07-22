@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // Production endpoints for the keyed providers.
@@ -59,7 +60,7 @@ func (p *braveProvider) Search(ctx context.Context, hc *http.Client, query strin
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-Subscription-Token", p.key)
-	data, err := doJSON(hc, req)
+	data, err := doJSON(hc, req, p.key)
 	if err != nil {
 		return nil, err
 	}
@@ -90,13 +91,14 @@ type tavilyProvider struct {
 func (p *tavilyProvider) Name() string { return "tavily" }
 
 func (p *tavilyProvider) Search(ctx context.Context, hc *http.Client, query string) ([]Result, error) {
-	body, _ := json.Marshal(map[string]any{"api_key": p.key, "query": query, "max_results": 6})
+	body, _ := json.Marshal(map[string]any{"query": query, "max_results": 6})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.base, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	data, err := doJSON(hc, req)
+	req.Header.Set("Authorization", "Bearer "+p.key)
+	data, err := doJSON(hc, req, p.key)
 	if err != nil {
 		return nil, err
 	}
@@ -119,8 +121,10 @@ func (p *tavilyProvider) Search(ctx context.Context, hc *http.Client, query stri
 
 // doJSON performs the request and applies the same transient/definitive split
 // the scraping providers use, so keyed engines participate in the retry loop
-// identically.
-func doJSON(hc *http.Client, req *http.Request) ([]byte, error) {
+// identically. apiKey is redacted out of any error-body excerpt before it
+// reaches the caller — providers must never be trusted not to echo it back
+// (e.g. a validation error that mirrors the request body/headers).
+func doJSON(hc *http.Client, req *http.Request, apiKey string) ([]byte, error) {
 	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, Transient(fmt.Errorf("request failed: %w", err))
@@ -131,16 +135,23 @@ func doJSON(hc *http.Client, req *http.Request) ([]byte, error) {
 	}
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, errSnippet(data))
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, errSnippet(data, apiKey))
 	}
 	return data, nil
 }
 
-// errSnippet returns a short, safe excerpt of an error body for the message.
-func errSnippet(data []byte) string {
+// errSnippet returns a short excerpt of an error body for the message, with
+// any occurrence of apiKey scrubbed out. It is NOT a general-purpose secret
+// scanner — it only guarantees that this specific credential cannot be
+// reconstructed from the returned string.
+func errSnippet(data []byte, apiKey string) string {
 	const limit = 200
-	if len(data) > limit {
-		return string(data[:limit]) + "…"
+	s := string(data)
+	if apiKey != "" {
+		s = strings.ReplaceAll(s, apiKey, "[REDACTED]")
 	}
-	return string(data)
+	if len(s) > limit {
+		return s[:limit] + "…"
+	}
+	return s
 }
