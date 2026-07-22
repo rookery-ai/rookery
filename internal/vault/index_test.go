@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -130,6 +131,77 @@ func TestIndexEmptyQuery(t *testing.T) {
 	v, ws := seedVault(t)
 	if got := v.Indexer().Search(ws, "   ", 5); len(got) != 0 {
 		t.Errorf("an empty query should return nothing, got %+v", paths(got))
+	}
+}
+
+// TestIndexNonsenseQueryAgainstScaffoldVaultFindsNothing is the Finding-4
+// repro: a scaffold-only vault (nothing but README.md + placeholder memory
+// files created by EnsureScaffold — no user content at all) must return NO
+// matches for a made-up query. The literal review repro was the query
+// "zzz-nothing-here" matching README.md purely because "here" (an ordinary
+// function word, in "Everything you and your agents create lives here")
+// wasn't a stopword — any nonzero term overlap earned a nonzero BM25 score.
+// This test would have passed by luck before the fix too (this exact query
+// happens to dodge the specific missing stopword) — that's exactly Finding
+// 4's point, so the case is reproduced verbatim, not paraphrased.
+func TestIndexNonsenseQueryAgainstScaffoldVaultFindsNothing(t *testing.T) {
+	v := New(t.TempDir())
+	const ws = "ws-scaffold-only"
+	if err := v.EnsureScaffold(ws); err != nil {
+		t.Fatalf("scaffold: %v", err)
+	}
+	if got := v.Indexer().Search(ws, "zzz-nothing-here", 5); len(got) != 0 {
+		t.Errorf("a nonsense query against a scaffold-only vault must find nothing, got %+v", paths(got))
+	}
+	// A genuine query must still find real content — the fix must not have
+	// turned into a blanket "never match anything" regression.
+	if err := v.WriteNote(ws, "notes/health.md", []byte("# Health\n\n## Appointments\n\nBooked an orthodontist visit for Tuesday.\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got := v.Indexer().Search(ws, "dentist appointment", 5)
+	if len(got) == 0 || !strings.Contains(got[0].Path, "health.md") {
+		t.Errorf("a genuine query must still match real content, got %+v", paths(got))
+	}
+}
+
+// TestApplyScoreFloorDropsTrivialOverlap exercises applyScoreFloor directly
+// (deterministic, not dependent on tuning a real corpus to land on a
+// particular BM25 ratio): a result scoring well below scoreFloorFrac of the
+// top result is noise and must be dropped, while one within the floor is
+// kept.
+func TestApplyScoreFloorDropsTrivialOverlap(t *testing.T) {
+	in := []Scored{
+		{Chunk: Chunk{Path: "top.md"}, Score: 10.0},
+		{Chunk: Chunk{Path: "strong.md"}, Score: 4.0}, // 40% of top: kept
+		{Chunk: Chunk{Path: "weak.md"}, Score: 0.5},   // 5% of top: below the 10% floor, dropped
+	}
+	out := applyScoreFloor(in)
+	var gotPaths []string
+	for _, s := range out {
+		gotPaths = append(gotPaths, s.Path)
+	}
+	want := []string{"top.md", "strong.md"}
+	if !reflect.DeepEqual(gotPaths, want) {
+		t.Errorf("applyScoreFloor(%v) = %v, want %v", in, gotPaths, want)
+	}
+}
+
+// TestApplyScoreFloorAlwaysKeepsTopResult: the top result must survive even
+// when it is the ONLY candidate, and even when its own absolute score is
+// tiny — the floor is a fraction OF the top result, so it can never exclude
+// the very result it is computed from.
+func TestApplyScoreFloorAlwaysKeepsTopResult(t *testing.T) {
+	in := []Scored{{Chunk: Chunk{Path: "only.md"}, Score: 0.0001}}
+	out := applyScoreFloor(in)
+	if len(out) != 1 || out[0].Path != "only.md" {
+		t.Errorf("the sole top result must always survive filtering, got %+v", out)
+	}
+}
+
+// TestApplyScoreFloorEmptyInput: filtering an empty slice is a no-op, not a panic.
+func TestApplyScoreFloorEmptyInput(t *testing.T) {
+	if out := applyScoreFloor(nil); len(out) != 0 {
+		t.Errorf("expected no results from an empty input, got %+v", out)
 	}
 }
 

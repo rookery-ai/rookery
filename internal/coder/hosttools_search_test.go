@@ -1,8 +1,11 @@
 package coder
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -315,5 +318,195 @@ func TestSearchFilesNoMatchesIsNonError(t *testing.T) {
 	}
 	if !strings.Contains(out, "no matches") {
 		t.Errorf("unexpected output: %q", out)
+	}
+}
+
+// ── exact-section budget (crowding-out fix) ─────────────────────────────────
+
+// exactCrowdingQuery is deliberately SHORT (two tokens) — used both as the
+// search_files query and, verbatim, as the literal substring embedded into
+// many junk notes for the exact/ripgrep pass. Its second word ("appointment")
+// is the one that also gives health.md (below) a real BM25/heading signal, so
+// this single query drives both signals at once. Kept to two tokens on
+// purpose: search_files tokenizes the SAME query for BM25, and every token
+// present in the query necessarily has to appear verbatim in the junk notes
+// for the literal match to fire — a longer query would hand the junk notes
+// more overlapping BM25 terms and let them out-rank health.md on ranked
+// score too, which would defeat the fixture (see exactCrowdingFiller below
+// for how the exact-match LINE is still made long without adding more query
+// terms).
+const exactCrowdingQuery = "zzqcrowdmarker9182 appointment"
+
+// exactCrowdingFiller is unrelated padding placed AROUND exactCrowdingQuery on
+// each junk note's line, so the ripgrep snippet (the whole matching LINE,
+// trimmed to 200 bytes — see trimSnippet) approaches that cap and the exact
+// section is large, WITHOUT adding any of these words to the query itself
+// (bm25Score only scores query terms present in a document — unrelated filler
+// words in the same line contribute nothing to the score).
+const exactCrowdingFiller = "unrelated padding content repeated here purely to push this " +
+	"single matching line closer to the two hundred byte ripgrep snippet cap " +
+	"without contributing any additional query terms to the BM25 ranking pass"
+
+// writeExactCrowdingFixture seeds a vault with n junk notes that each embed
+// exactCrowdingQuery verbatim inside a long padded line (producing n
+// exact/ripgrep hits, each near the 200-byte snippet cap) plus ONE
+// strong-BM25 note (health.md, matching via its "Appointments" heading —
+// never containing exactCrowdingQuery or "zzqcrowdmarker9182") — the "dentist
+// finds orthodontist" case this whole feature exists for. Reproduces the
+// review finding: a vault with dozens of notes containing a common literal
+// phrase produced enough exact lines to consume the entire byte cap on their
+// own, with zero ranked passages (including strong BM25 matches) reaching the
+// model.
+func writeExactCrowdingFixture(t *testing.T, v *vault.Vault, ws string, n int) {
+	t.Helper()
+	if err := v.EnsureScaffold(ws); err != nil {
+		t.Fatalf("scaffold: %v", err)
+	}
+	for i := 0; i < n; i++ {
+		rel := fmt.Sprintf("notes/junk%03d.md", i)
+		body := fmt.Sprintf("# Ops log %d\n\nEntry %d: %s %s %s\n", i, i, exactCrowdingFiller, exactCrowdingQuery, exactCrowdingFiller)
+		if err := v.WriteNote(ws, rel, []byte(body)); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	if err := v.WriteNote(ws, "notes/health.md",
+		[]byte("# Health\n\n## Appointments\n\nBooked an orthodontist visit for Tuesday.\n")); err != nil {
+		t.Fatalf("write health.md: %v", err)
+	}
+}
+
+// TestSearchFilesExactBudgetLeavesRoomForRanked is the Finding-1 repro: with
+// the crowding fixture (40 junk notes, each an exact hit on a long literal
+// phrase, PLUS one strong ranked-only match), the ranked passage must still
+// reach the model, the exact section must be bounded (not all 40 hits), and
+// the omission must be explicit rather than silent.
+//
+// MUTATION CHECK: reverting the budget split (writing the whole unbounded
+// exact-match section first, then appending ranked passages, then truncating
+// the combined string at maxToolResult) makes this test FAIL — the 40 exact
+// lines alone exceed maxToolResult, so "Related passages"/"orthodontist" never
+// appear in the truncated output. Confirmed by hand during review; restored
+// afterward. If a future refactor makes this test pass again with the split
+// removed, the fixture below is no longer big enough — see the doc comment on
+// exactCrowdingQuery and grow n or the phrase length.
+func TestSearchFilesExactBudgetLeavesRoomForRanked(t *testing.T) {
+	v := vault.New(t.TempDir())
+	const ws = "ws1"
+	writeExactCrowdingFixture(t, v, ws, 40)
+	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws)}
+
+	out, err := h.searchFiles(context.Background(), exactCrowdingQuery)
+	if err != nil {
+		t.Fatalf("searchFiles: %v", err)
+	}
+	if len(out) > maxToolResult {
+		t.Fatalf("result must stay within the tool result cap (%d bytes); got %d", maxToolResult, len(out))
+	}
+
+	// The exact section is present and bounded — not all 40 hits crammed in.
+	if !strings.Contains(out, "Exact matches:") {
+		t.Fatalf("expected an exact-matches section, got:\n%s", out)
+	}
+	gotExactLines := strings.Count(out, "junk")
+	if gotExactLines >= 40 {
+		t.Errorf("exact section should be budget-bounded, not all 40 hits; counted %d occurrences of 'junk' in:\n%s", gotExactLines, out)
+	}
+
+	// The omission is explicit, not silent.
+	if !strings.Contains(out, "more exact match") {
+		t.Errorf("expected a visible omission notice for the exact matches dropped by the budget, got:\n%s", out)
+	}
+
+	// The ranked/BM25 section — the whole reason this tool does two passes —
+	// must still reach the model.
+	if !strings.Contains(out, "Related passages:") {
+		t.Errorf("ranked passages must not be crowded out by the exact section, got:\n%s", out)
+	}
+	if !strings.Contains(out, "orthodontist") {
+		t.Errorf("the strong ranked match (health.md) must survive, got:\n%s", out)
+	}
+	if !strings.Contains(out, "notes/health.md") {
+		t.Errorf("expected notes/health.md in the ranked section, got:\n%s", out)
+	}
+}
+
+// TestSearchFilesEmptySectionGetsFullBudget: when only ONE section has
+// content, it is not artificially capped at its 40% share — it may use the
+// whole budget.
+func TestSearchFilesEmptySectionGetsFullBudget(t *testing.T) {
+	v := vault.New(t.TempDir())
+	const ws = "ws1"
+	// Only exact hits: no BM25-scoring content elsewhere for this query
+	// (the crowding phrase's tokens all live inside the junk notes themselves,
+	// so BM25 will also score them — but with no OTHER note in the vault, the
+	// "ranked" section is effectively the same junk notes; what matters here
+	// is simply that the exact section is not truncated to 40% when the
+	// overall output is still within budget).
+	writeExactCrowdingFixture(t, v, ws, 5) // small n: fits well inside 8 KiB unsplit
+	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws)}
+
+	out, err := h.searchFiles(context.Background(), exactCrowdingQuery)
+	if err != nil {
+		t.Fatalf("searchFiles: %v", err)
+	}
+	if strings.Contains(out, "more exact match") {
+		t.Errorf("small exact section should not be truncated at all, got:\n%s", out)
+	}
+	if got := strings.Count(out, "junk"); got < 5 {
+		t.Errorf("all 5 exact hits should be present, counted %d occurrences of 'junk' in:\n%s", got, out)
+	}
+}
+
+// ── exact-search error degradation (no longer silently swallowed) ──────────
+
+// erroringSearcher always fails, simulating a broken ripgrep/subprocess.
+type erroringSearcher struct{ err error }
+
+func (e erroringSearcher) Search(ctx context.Context, workspaceID, query string) ([]vault.SearchHit, error) {
+	return nil, e.err
+}
+
+// TestSearchFilesExactErrorDegradesToRankedOnly: a failing exact-match search
+// must NOT fail the whole tool call (BM25 can still answer usefully), but the
+// failure must be logged, not silently swallowed.
+func TestSearchFilesExactErrorDegradesToRankedOnly(t *testing.T) {
+	v := vault.New(t.TempDir())
+	const ws = "ws1"
+	if err := v.EnsureScaffold(ws); err != nil {
+		t.Fatalf("scaffold: %v", err)
+	}
+	if err := v.WriteNote(ws, "notes/health.md",
+		[]byte("# Health\n\n## Appointments\n\nBooked an orthodontist visit for Tuesday.\n")); err != nil {
+		t.Fatalf("write health.md: %v", err)
+	}
+
+	var logBuf bytes.Buffer
+	prevLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuf, nil)))
+	defer slog.SetDefault(prevLogger)
+
+	simulated := fmt.Errorf("simulated ripgrep subprocess failure")
+	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws), searcher: erroringSearcher{err: simulated}}
+
+	out, err := h.searchFiles(context.Background(), "dentist appointment")
+	if err != nil {
+		t.Fatalf("a broken exact search must degrade, not fail the tool: %v", err)
+	}
+	if strings.HasPrefix(out, "error:") {
+		t.Fatalf("degraded result must not read as an error:; got %q", out)
+	}
+	if !strings.Contains(out, "Related passages:") || !strings.Contains(out, "orthodontist") {
+		t.Errorf("ranked results must still be returned when the exact search fails, got:\n%s", out)
+	}
+	if strings.Contains(out, "Exact matches:") {
+		t.Errorf("no exact section should be emitted when the exact search errored, got:\n%s", out)
+	}
+
+	logged := logBuf.String()
+	if !strings.Contains(logged, ws) {
+		t.Errorf("the exact-search failure must be logged with the workspace, got log: %q", logged)
+	}
+	if !strings.Contains(logged, "simulated ripgrep subprocess failure") {
+		t.Errorf("the exact-search failure must be logged with the underlying error, got log: %q", logged)
 	}
 }

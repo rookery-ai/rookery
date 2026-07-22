@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -51,6 +52,13 @@ type hostToolSet struct {
 	includeExecTools bool // gates the tools that execute code (run_script, bash); off for chat.
 	// web_fetch/web_search are read-only, cannot carry secrets, and (per netguard) cannot
 	// reach private address space — so they are offered regardless of this flag.
+
+	// searcher overrides the exact-match Searcher used by search_files. Nil in
+	// production, where it always falls back to h.vlt.NewSearcher() — this
+	// field exists purely so a test can inject a Searcher that fails on
+	// demand, to exercise the degrade-and-log path (see searchFiles) without
+	// needing to actually break ripgrep on the host.
+	searcher vault.Searcher
 
 	// web_fetch tuning (both optional; zero values use sane defaults). Injected by tests so
 	// the transient-retry path doesn't sleep for real.
@@ -702,6 +710,26 @@ const maxGlobMatches = 200
 // maxRankedChunks bounds how many ranked passages search_files returns.
 const maxRankedChunks = 10
 
+// exactSectionBudgetNum/Den express, as an integer ratio, the share of
+// maxToolResult the exact-match section may consume WHEN both sections have
+// content to contribute (2/5 = 40%). Without a budget of its own, a query that
+// hits dozens of near-identical notes (a common literal phrase repeated across a
+// vault) can fill the entire maxToolResult cap with exact lines before the
+// ranked section ever gets a byte — silently dropping the BM25 hits this tool
+// exists to surface (a note about "dentist" that says "orthodontist" never
+// reaches the model). 40% is a starting point, not a tuned constant: exact lines
+// are short (ripgrep snippets are capped at 200 chars, see trimSnippet), so 40%
+// still fits dozens of them, while reserving a majority of the cap for ranked
+// passages — the harder-to-replace signal, and the reason search_files does BM25
+// retrieval at all. When one section has nothing to contribute, the other gets
+// the FULL cap rather than wasting the reserved share (see searchFiles below).
+// Expressed as an integer ratio (not a float constant) so it can be used in a
+// constant integer expression without Go's constant-truncation restriction.
+const (
+	exactSectionBudgetNum = 2
+	exactSectionBudgetDen = 5
+)
+
 // searchFiles answers "where in my knowledge base is this?" with two passes,
 // deliberately kept both:
 //
@@ -711,8 +739,12 @@ const maxRankedChunks = 10
 //     says "orthodontist", and returns whole passages with their heading trail
 //     so one call yields usable context instead of a read_file walk.
 //
-// Exact hits come first because a caller who typed an exact token wants it.
-// No matches remains a NON-error so it never trips the oscillation guard.
+// Exact hits come first because a caller who typed an exact token wants it, but
+// each section is now bounded to its OWN byte budget (see exactSectionBudgetNum/Den)
+// so a flood of exact hits cannot crowd the ranked section out entirely. A
+// truncated exact section says so explicitly ("…and N more exact matches") so the
+// omission is visible to the model instead of silent. No matches remains a
+// NON-error so it never trips the oscillation guard.
 func (h *hostToolSet) searchFiles(ctx context.Context, query string) (string, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -725,43 +757,100 @@ func (h *hostToolSet) searchFiles(ctx context.Context, query string) (string, er
 	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	var sb strings.Builder
-	exactPaths := map[string]bool{}
-
-	if hits, err := h.vlt.NewSearcher().Search(sctx, h.workspaceID, query); err == nil && len(hits) > 0 {
-		if len(hits) > maxSearchHits {
-			hits = hits[:maxSearchHits]
-		}
-		sb.WriteString("Exact matches:\n")
-		for _, hit := range hits {
-			fmt.Fprintf(&sb, "%s:%d: %s\n", hit.Path, hit.Line, hit.Snippet)
-			exactPaths[hit.Path] = true
-		}
+	searcher := h.searcher
+	if searcher == nil {
+		searcher = h.vlt.NewSearcher()
+	}
+	hits, err := searcher.Search(sctx, h.workspaceID, query)
+	if err != nil {
+		// Degrade, don't fail: BM25 ranked retrieval below can still answer
+		// usefully even when the exact/ripgrep path is broken (missing binary,
+		// subprocess error) — failing the whole tool call would be strictly
+		// worse than falling back to ranked-only results. But a silent
+		// degrade would hide a real regression from every human who might
+		// otherwise notice ripgrep is broken, so it's logged rather than
+		// swallowed.
+		slog.Warn("search_files: exact match search failed; degrading to ranked-only results",
+			"workspace", h.workspaceID, "error", err)
+		hits = nil
+	}
+	if len(hits) > maxSearchHits {
+		hits = hits[:maxSearchHits]
 	}
 
 	ranked := h.vlt.Indexer().Search(h.workspaceID, query, maxRankedChunks)
-	var wrote int
+	nonEmptyRanked := ranked[:0]
 	for _, r := range ranked {
-		if strings.TrimSpace(r.Text) == "" {
-			continue
+		if strings.TrimSpace(r.Text) != "" {
+			nonEmptyRanked = append(nonEmptyRanked, r)
 		}
-		if wrote == 0 {
-			if sb.Len() > 0 {
-				sb.WriteString("\n")
+	}
+
+	// Split the cap between the two sections only when both have content —
+	// otherwise the one that does gets the full cap rather than wasting the
+	// share reserved for an empty section.
+	exactBudget, rankedBudget := maxToolResult, maxToolResult
+	if len(hits) > 0 && len(nonEmptyRanked) > 0 {
+		exactBudget = maxToolResult * exactSectionBudgetNum / exactSectionBudgetDen
+		rankedBudget = maxToolResult - exactBudget
+	}
+
+	var exactSB strings.Builder
+	if len(hits) > 0 {
+		exactSB.WriteString("Exact matches:\n")
+		header := exactSB.Len()
+		omitted := 0
+		for i, hit := range hits {
+			line := fmt.Sprintf("%s:%d: %s\n", hit.Path, hit.Line, hit.Snippet)
+			// Always include at least the first hit even if it alone exceeds the
+			// budget (mirrors the "top result must survive" rule elsewhere) —
+			// only STOP once at least one hit is in and the next one would overflow.
+			if exactSB.Len() > header && exactSB.Len()+len(line) > exactBudget {
+				omitted = len(hits) - i
+				break
 			}
-			sb.WriteString("Related passages:\n")
+			exactSB.WriteString(line)
 		}
-		wrote++
+		if omitted > 0 {
+			fmt.Fprintf(&exactSB, "…and %d more exact matches (omitted to leave room for ranked passages)\n", omitted)
+		}
+	}
+
+	var rankedSB strings.Builder
+	const rankedHeader = "Related passages:\n"
+	for _, r := range nonEmptyRanked {
 		location := r.Path
 		if r.Heading != "" {
 			location += " — " + r.Heading
 		}
-		fmt.Fprintf(&sb, "\n[%s]\n%s\n", location, strings.TrimSpace(r.Text))
+		passage := fmt.Sprintf("\n[%s]\n%s\n", location, strings.TrimSpace(r.Text))
+		// Stop cleanly once the next whole passage would overflow the ranked
+		// budget — never emit a passage cut mid-body. The first passage is
+		// still always included (same "top result survives" rule as above),
+		// so this check only fires once something has already been written.
+		if rankedSB.Len() > 0 && rankedSB.Len()+len(passage) > rankedBudget {
+			break
+		}
+		if rankedSB.Len() == 0 {
+			rankedSB.WriteString(rankedHeader)
+		}
+		rankedSB.WriteString(passage)
 	}
+
+	var sb strings.Builder
+	sb.WriteString(exactSB.String())
+	if exactSB.Len() > 0 && rankedSB.Len() > 0 {
+		sb.WriteString("\n")
+	}
+	sb.WriteString(rankedSB.String())
 
 	if sb.Len() == 0 {
 		return fmt.Sprintf("(no matches for %q)", query), nil
 	}
+	// Defensive final cap: with 200-byte ripgrep snippets and 1500-byte hard-bounded
+	// BM25 chunks (see targetChunkChars), the budgets above already keep the total
+	// under maxToolResult in every realistic case, but this guarantees the tool
+	// result contract (never over cap) even in a pathological edge case.
 	return truncate(sb.String()), nil
 }
 

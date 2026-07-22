@@ -170,10 +170,49 @@ func (i *Indexer) Search(workspaceID, query string, limit int) []Scored {
 		}
 		return scored[a].Line < scored[b].Line
 	})
+	scored = applyScoreFloor(scored)
 	if len(scored) > limit {
 		scored = scored[:limit]
 	}
 	return scored
+}
+
+// scoreFloorFrac drops a result scoring below this fraction of the TOP result's
+// score. Without it, any nonzero term overlap — even one common word shared by
+// chance — earns a nonzero BM25 score, so a query like "zzz-nothing-here"
+// against a near-empty vault can surface a scaffold README as a "Related
+// passages" hit purely because it happens to contain the word "here" (see the
+// stopwords addition above, which fixes the specific word but not the general
+// shape of the bug: SOME other word will always slip through eventually). A
+// relative floor catches that general case: a chunk whose score is a tiny
+// fraction of the best match is noise, not a genuine candidate, regardless of
+// which word caused the overlap. 10% is a starting point — permissive enough
+// not to prune a second/third genuinely-relevant chunk that merely scores lower
+// than the top one (field boosts and idf already produce a wide legitimate
+// score spread), while still cutting the common case of "the only overlap is
+// one stray function word".
+const scoreFloorFrac = 0.10
+
+// applyScoreFloor drops every result scoring below scoreFloorFrac of the top
+// result's score, EXCEPT the top result itself, which always survives if any
+// result does — the floor is relative to it, so it can never be the one thing
+// it excludes. scored must already be sorted best-first. Builds a fresh slice
+// rather than filtering in place: scored[:0]-style in-place compaction would
+// alias the same backing array this function still needs to read from for
+// later (unfiltered) elements.
+func applyScoreFloor(scored []Scored) []Scored {
+	if len(scored) == 0 {
+		return scored
+	}
+	floor := scored[0].Score * scoreFloorFrac
+	kept := make([]Scored, 0, len(scored))
+	kept = append(kept, scored[0])
+	for _, s := range scored[1:] {
+		if s.Score >= floor {
+			kept = append(kept, s)
+		}
+	}
+	return kept
 }
 
 // refresh revalidates the given workspace's index against the filesystem.
@@ -417,6 +456,23 @@ var stopwords = map[string]bool{
 	"was": true, "are": true, "you": true, "your": true, "from": true, "has": true,
 	"have": true, "not": true, "but": true, "all": true, "can": true, "its": true,
 	"about": true, "into": true, "out": true, "our": true, "their": true,
+
+	// Extended common function words: carry no retrieval signal on their own, so
+	// leaving them out of the list is what lets a query like "zzz-nothing-here"
+	// register a nonzero BM25 score against a scaffold note purely because it
+	// contains "here" (see applyScoreFloor's doc comment — the score floor is
+	// the general-case backstop; these are the specific words already known to
+	// cause it in practice).
+	"here": true, "there": true, "what": true, "when": true, "where": true,
+	"how": true, "who": true, "why": true, "which": true, "some": true,
+	"any": true, "more": true, "most": true, "other": true, "such": true,
+	"only": true, "own": true, "same": true, "than": true, "too": true,
+	"very": true, "just": true, "now": true, "then": true, "also": true,
+	"been": true, "being": true, "does": true, "did": true, "had": true,
+	"were": true, "will": true, "would": true, "could": true,
+	"should": true, "may": true, "might": true, "must": true, "one": true,
+	"two": true, "get": true, "got": true, "make": true, "made": true,
+	"see": true, "saw": true, "use": true, "used": true,
 }
 
 func termFreq(terms []string) map[string]int {
