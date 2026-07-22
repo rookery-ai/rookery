@@ -116,7 +116,14 @@ func (w *mdWriter) walk(n *html.Node) {
 		return
 	case atom.Pre:
 		w.block()
-		w.sb.WriteString("```\n" + strings.TrimSpace(textOf(n)) + "\n```")
+		// A fixed "```" fence breaks the moment <pre> content itself contains a
+		// line of three (or more) backticks — the closing fence would be matched
+		// early, dumping the rest as loose markdown plus a stray fence. codeFence
+		// sizes the fence past any run already present (see convert.go's JSON
+		// branch for the identical flaw this mirrors).
+		body := strings.TrimSpace(textOf(n))
+		fence := codeFence(body)
+		w.sb.WriteString(fence + "\n" + body + "\n" + fence)
 		w.block()
 		return
 	case atom.A:

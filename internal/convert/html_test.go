@@ -126,6 +126,38 @@ func TestHTMLInlineSpacing(t *testing.T) {
 	}
 }
 
+// A <pre> block's text is rendered inside a fixed "```" fence with no
+// escaping; content containing its own standalone-``` line closes that fence
+// early, the same defect fixed in convert.go's JSON branch.
+func TestHTMLPreFenceNotBrokenByContent(t *testing.T) {
+	doc := "<pre>before\n```\nfence-breaking line\n```\nafter</pre>"
+	got, err := ToMarkdown([]byte(doc), Options{MIME: "text/html"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(got.Markdown), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("markdown too short:\n%s", got.Markdown)
+	}
+	openFence := lines[0]
+	closeFence := lines[len(lines)-1]
+	if !strings.HasPrefix(openFence, "```") {
+		t.Fatalf("expected an opening fence, got %q", openFence)
+	}
+	if closeFence != openFence {
+		t.Errorf("closing fence %q does not match opening fence %q — content broke out early, got:\n%s", closeFence, openFence, got.Markdown)
+	}
+	if len(openFence) < 4 {
+		t.Errorf("fence %q is not longer than the embedded ``` run", openFence)
+	}
+	if strings.Count(got.Markdown, openFence) != 2 {
+		t.Errorf("expected exactly 2 fence lines (open+close), got:\n%s", got.Markdown)
+	}
+	if !strings.Contains(got.Markdown, "fence-breaking line") || !strings.Contains(got.Markdown, "after") {
+		t.Errorf("embedded content lost, got:\n%s", got.Markdown)
+	}
+}
+
 func TestHTMLNeverEmpty(t *testing.T) {
 	// A document with no extractable text must still not produce an empty body.
 	got, err := ToMarkdown([]byte("<html><body><script>x=1</script></body></html>"), Options{})

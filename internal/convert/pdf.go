@@ -102,13 +102,67 @@ func runPdftotext(bin string, data []byte) (string, int, error) {
 		return "", 0, err
 	}
 	text := out.String()
-	// pdftotext separates pages with a form feed.
-	pages := strings.Count(text, "\f") + 1
-	return strings.ReplaceAll(text, "\f", "\n\n"), pages, nil
+	return strings.ReplaceAll(text, "\f", "\n\n"), pdftotextPageCount(text), nil
 }
 
-// extractPDFPureGo is the dependency-only fallback.
+// pdftotextPageCount counts pages in pdftotext's output. Poppler appends a
+// form feed after EVERY page, including the last one — verified against
+// pdfinfo on both a 1-page and a multi-page fixture — so the count of form
+// feeds already equals the page count. The previous "+1" assumed the form
+// feed was a page *separator* (n pages -> n-1 feeds), which is wrong for this
+// extractor and overcounted every document by one: a 1-page PDF reported 2
+// pages. That wrong count both misstates the page number the warning gives
+// the reader and, via len(text)/pages, skews the thin-extraction threshold
+// toward false positives on genuine single-page documents.
+func pdftotextPageCount(text string) int {
+	return strings.Count(text, "\f")
+}
+
+// pureGoTimeout bounds extractPDFPureGo. runPdftotext's subprocess is already
+// bounded by a 60s context (the OS can kill it from outside); the pure-Go
+// path runs in-process, so nothing external can stop a pathological input
+// from looping forever inside the library and hanging the caller. This gives
+// it the same ceiling.
+const pureGoTimeout = 60 * time.Second
+
+type pureGoResult struct {
+	text  string
+	pages int
+	err   error
+}
+
+// extractPDFPureGo is the dependency-only fallback, bounded by pureGoTimeout.
+// The extraction runs in its own goroutine specifically so a panic from the
+// library (it does panic on some malformed input) is recovered THERE: a
+// goroutine's panic can never be caught by its caller, so once this moved off
+// the calling goroutine to gain a timeout, an unrecovered library panic would
+// have taken down the whole process instead of just failing this conversion —
+// trading a hypothetical hang for a guaranteed crash. Recovering here keeps
+// both failure modes as plain errors.
 func extractPDFPureGo(data []byte) (string, int, error) {
+	done := make(chan pureGoResult, 1)
+	go func() {
+		var res pureGoResult
+		defer func() {
+			if r := recover(); r != nil {
+				res = pureGoResult{err: fmt.Errorf("pdf library panic: %v", r)}
+			}
+			done <- res
+		}()
+		res.text, res.pages, res.err = extractPDFPureGoUnbounded(data)
+	}()
+
+	select {
+	case res := <-done:
+		return res.text, res.pages, res.err
+	case <-time.After(pureGoTimeout):
+		return "", 0, fmt.Errorf("pdf extraction timed out after %s", pureGoTimeout)
+	}
+}
+
+// extractPDFPureGoUnbounded does the actual pure-Go extraction. Callers must
+// go through extractPDFPureGo for the timeout and panic recovery above.
+func extractPDFPureGoUnbounded(data []byte) (string, int, error) {
 	r, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
 		return "", 0, err

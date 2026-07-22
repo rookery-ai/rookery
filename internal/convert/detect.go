@@ -197,6 +197,33 @@ func normalizeText(s string) string {
 	return strings.TrimRight(s, " \t\n") + "\n"
 }
 
+// codeFence returns a fence of backticks long enough that content cannot
+// close it early. CommonMark treats any run of 3+ backticks as a fence, and a
+// closing fence only needs to be *at least* as long as the opening one — so a
+// content line of exactly ``` (three backticks) breaks a naive fixed "```"
+// wrapper, dumping the remainder of the content as loose markdown plus a
+// stray fence. Using longest-run-in-content + 1 (floored at 3) makes that
+// impossible: no run inside content can ever reach the fence's own length.
+func codeFence(content string) string {
+	longest := 0
+	run := 0
+	for _, r := range content {
+		if r == '`' {
+			run++
+			if run > longest {
+				longest = run
+			}
+		} else {
+			run = 0
+		}
+	}
+	n := longest + 1
+	if n < 3 {
+		n = 3
+	}
+	return strings.Repeat("`", n)
+}
+
 // titleFromFilename derives a human title from a file name: "q3-sales.pdf" →
 // "q3 sales". Returns "" when there is no usable name.
 func titleFromFilename(filename string) string {

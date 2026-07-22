@@ -77,8 +77,18 @@ func ToMarkdown(data []byte, opt Options) (Result, error) {
 			Warnings:  []string{"image content is not searchable: no OCR"},
 		}, nil
 	case KindJSON:
+		// Detect classifies KindJSON from the extension/MIME hint alone, with no
+		// JSON validation — so this content is arbitrary uploaded bytes, not
+		// necessarily well-formed JSON. A fixed "```json" fence breaks the moment
+		// that content contains its own backtick-fence line (or simply lacks a
+		// trailing newline before the literal "```" this code appends), dumping
+		// the remainder as loose markdown plus a stray fence. codeFence sizes the
+		// fence past any run already in the content; normalizeText guarantees the
+		// body ends in "\n" so the closing fence always starts its own line.
+		body := normalizeText(string(data))
+		fence := codeFence(body)
 		return Result{
-			Markdown:  "```json\n" + normalizeText(string(data)) + "```\n",
+			Markdown:  fence + "json\n" + body + fence + "\n",
 			Title:     titleFromFilename(opt.Filename),
 			Kind:      KindJSON,
 			Extractor: "pure-go",
