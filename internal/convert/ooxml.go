@@ -19,7 +19,11 @@ const maxPartBytes = 32 << 20 // 32 MiB
 func openOOXML(data []byte) (*zip.Reader, error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return nil, fmt.Errorf("convert: not a readable archive: %w", err)
+		// A corrupt/truncated/not-actually-a-zip upload is "we can't read
+		// this kind of file" (a property of the INPUT), same bucket as a
+		// wholly unrecognized format — not a server fault — so callers using
+		// errors.Is against ErrUnsupportedFormat catch this too.
+		return nil, fmt.Errorf("%w: not a readable archive: %v", ErrUnsupportedFormat, err)
 	}
 	return zr, nil
 }

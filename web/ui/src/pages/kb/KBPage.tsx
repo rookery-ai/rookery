@@ -23,10 +23,11 @@ async function importFiles(
   files: File[],
   upload: ReturnType<typeof useUploadKBFile>,
   toast: ReturnType<typeof useToast>["toast"],
+  dir?: string,
 ) {
   for (const file of files) {
     try {
-      const res = await upload.mutateAsync({ file });
+      const res = await upload.mutateAsync({ file, dir });
       toast({
         message: res.warnings?.length
           ? `Imported ${file.name} — ${res.warnings.join("; ")}`
@@ -152,7 +153,7 @@ export default function KBPage() {
                 selectedPath={path}
                 onSelect={openPath}
                 onMoved={handleMoved}
-                onImportFiles={(files) => void importFiles(files, upload, toast)}
+                onImportFiles={(files, dir) => void importFiles(files, upload, toast, dir)}
               />
             </SearchBox>
           </div>

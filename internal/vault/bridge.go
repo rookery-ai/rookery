@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ilijad1/simple-agents/internal/convert"
 )
 
 const (
@@ -169,7 +172,17 @@ func (b *Bridge) handleConvert(w http.ResponseWriter, r *http.Request) {
 		DestDir: req.DestDir, Title: req.Title, BuildPhase: sess.buildPhase,
 	})
 	if err != nil {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error()})
+		// Same distinction the web upload handler makes (web/api_kb.go's
+		// uploadErrStatus): a bad format / rejected destination is a request
+		// property the calling coder can act on (pick a different file, a
+		// different dir); a genuine disk fault is a server problem the coder
+		// cannot fix by retrying differently, so it gets its own status and a
+		// message that doesn't claim the file itself was the issue.
+		if errors.Is(err, convert.ErrUnsupportedFormat) || errors.Is(err, ErrSystemDir) || errors.Is(err, ErrEscapes) {
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "could not save this file to the knowledge base"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

@@ -1,12 +1,15 @@
 package vault
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/ilijad1/simple-agents/internal/convert"
 )
 
 func TestImportFileWritesNoteWithFrontmatter(t *testing.T) {
@@ -151,8 +154,12 @@ func TestImportFileUnsupportedIsError(t *testing.T) {
 	const ws = "ws1"
 	v.EnsureScaffold(ws)
 
-	if _, err := v.ImportFile(ws, ImportInput{Data: []byte{0x00, 0x01, 0x02}, Filename: "x.bin"}); err == nil {
-		t.Error("an unconvertible file must error rather than create a blank note")
+	_, err := v.ImportFile(ws, ImportInput{Data: []byte{0x00, 0x01, 0x02}, Filename: "x.bin"})
+	if err == nil {
+		t.Fatal("an unconvertible file must error rather than create a blank note")
+	}
+	if !errors.Is(err, convert.ErrUnsupportedFormat) {
+		t.Errorf("error = %v, want errors.Is(err, convert.ErrUnsupportedFormat)", err)
 	}
 }
 
@@ -282,6 +289,51 @@ func TestImportFileRejectsSystemManagedDestDir(t *testing.T) {
 		}); err == nil {
 			t.Errorf("DestDir %q: expected rejection of a system-managed area", dest)
 		}
+	}
+}
+
+// TestImportFileRejectsDotSegmentBypass is the Finding-1 regression test.
+// topSegment used to read DestDir's raw first slash-segment, UNNORMALIZED,
+// while the note's actual path is built with path.Join(destDir, name+".md"),
+// which DOES collapse ".." segments. That let a caller spell a destination
+// whose first raw segment looked innocuous (e.g. "notes") while the cleaned,
+// actually-written path landed inside "agents/" — the very directory the
+// guard exists to keep out of reach. Every case here must be refused, and
+// refused BEFORE any write (checked via the files/ dir count, mirroring
+// TestImportFileRefusesDuringBuild).
+func TestImportFileRejectsDotSegmentBypass(t *testing.T) {
+	v := New(t.TempDir())
+	const ws = "ws1"
+	if err := v.EnsureScaffold(ws); err != nil {
+		t.Fatalf("scaffold: %v", err)
+	}
+
+	cases := []string{
+		"notes/../agents",    // raw first segment "notes" (guard would pass); cleans to "agents"
+		"./agents",           // raw first segment "." (guard would pass); cleans to "agents"
+		"notes/../../agents", // cleans to "../agents" — escapes the vault-relative root entirely
+		"chats/../.kb",       // cleans to ".kb" — a different system dir than the raw first segment
+	}
+	for _, dest := range cases {
+		if _, err := v.ImportFile(ws, ImportInput{
+			Data:     []byte("a,b\n1,2\n"),
+			Filename: "sneaky.csv",
+			DestDir:  dest,
+		}); err == nil {
+			t.Errorf("DestDir %q: expected rejection (dot-segment bypass of the system-dir guard)", dest)
+		}
+	}
+
+	// None of the rejected attempts should have written anything — not even
+	// the preserved original — matching ImportFile's "checked before anything
+	// is written" contract for the system-dir guard.
+	files, _ := os.ReadDir(filepath.Join(v.Root(ws), FilesDir))
+	if len(files) != 0 {
+		t.Errorf("a rejected DestDir must not preserve an original; found %d entries", len(files))
+	}
+	agentsDir, _ := os.ReadDir(filepath.Join(v.Root(ws), "agents"))
+	if len(agentsDir) != 0 {
+		t.Errorf("a rejected DestDir must never land a note inside agents/; found %d entries", len(agentsDir))
 	}
 }
 

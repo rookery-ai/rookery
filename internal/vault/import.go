@@ -16,6 +16,14 @@ import (
 // FilesDir is the vault folder holding preserved original uploads.
 const FilesDir = "files"
 
+// ErrSystemDir is returned by ImportFile when DestDir (after cleaning)
+// targets a system-managed area (.kb, chats/, agents/). This is a property
+// of the REQUEST — a client picked (or was tricked into picking) a
+// destination outside the scope imports are allowed to touch — not a
+// conversion or format problem, so callers should map it distinctly from
+// convert.ErrUnsupportedFormat and from a genuine server fault.
+var ErrSystemDir = errors.New("import: destination targets a system-managed area")
+
 // ImportInput describes a file entering the knowledge base.
 type ImportInput struct {
 	Data      []byte
@@ -81,6 +89,25 @@ func (v *Vault) ImportFile(workspaceID string, in ImportInput) (ImportResult, er
 	destDir := strings.Trim(strings.TrimSpace(in.DestDir), "/")
 	if destDir == "" {
 		destDir = "notes"
+	} else {
+		// Clean dot-segments BEFORE the system-dir check below, not after: the
+		// note's actual path is built with path.Join(destDir, ...), which DOES
+		// collapse "..". Checking topSegment against the RAW string let
+		// "notes/../agents" read as first-segment "notes" (guard passes) while
+		// the join still landed the note inside "agents/" — the very directory
+		// the guard exists to keep out of reach. Cleaning first means the
+		// segment the guard inspects is the segment the write will actually
+		// use, so the two can no longer disagree.
+		//
+		// A cleaned path that still escapes upward (e.g. a bare "../foo", or
+		// enough ".." segments to run past the vault-relative root) is
+		// rejected outright here rather than silently reinterpreted — Resolve
+		// would catch it too, but only after the preserved original had
+		// already been written, leaving an orphan to clean up for no reason.
+		destDir = path.Clean(destDir)
+		if destDir == ".." || strings.HasPrefix(destDir, "../") {
+			return ImportResult{}, fmt.Errorf("%w: dest dir %q", ErrEscapes, in.DestDir)
+		}
 	}
 	// DestDir is otherwise only slash-trimmed, which would let an import land
 	// inside a system-managed area (.kb, chats/, or another agent's own
@@ -89,7 +116,7 @@ func (v *Vault) ImportFile(workspaceID string, in ImportInput) (ImportResult, er
 	// Checked before anything is written so a rejected DestDir never even
 	// creates the preserved original.
 	if seg := topSegment(destDir); seg == InternalDir || seg == "chats" || seg == "agents" {
-		return ImportResult{}, fmt.Errorf("import: dest dir %q targets a system-managed area", in.DestDir)
+		return ImportResult{}, fmt.Errorf("%w: dest dir %q", ErrSystemDir, in.DestDir)
 	}
 
 	res, err := convert.ToMarkdown(in.Data, convert.Options{

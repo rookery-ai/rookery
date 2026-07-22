@@ -259,6 +259,7 @@ function TreeRow({
   onSelect,
   onMoveInto,
   onReorder,
+  onImportFiles,
 }: {
   node: KBNode;
   depth: number;
@@ -269,6 +270,10 @@ function TreeRow({
   // Reorder within the level this row belongs to. Owned by TreeLevel, which
   // is the only component that knows the full sibling list.
   onReorder: (dragged: DraggedNode, targetName: string, position: "before" | "after") => void;
+  // Fired when OS file(s) are dropped ON THIS ROW specifically — see the
+  // dedicated OS-file-drag branch in handleDragOver/handleDrop below. Omitted
+  // when the tree as a whole is drop-inert (FileTree's onImportFiles absent).
+  onImportFiles?: (files: File[], dir: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [dialog, setDialog] = useState<DialogKind>(null);
@@ -313,20 +318,25 @@ function TreeRow({
     return canMoveInto ? "into" : null;
   }
 
-  // Both handlers stop propagation unconditionally, including when this row
-  // rejects the drop. Rows nest (a folder's children render inside its own
-  // wrapper), so without this an illegal drop on a child — say, onto a file —
-  // would bubble to the enclosing folder row and be re-interpreted as "move
-  // into that folder". A row's verdict on a drop aimed at it is final.
+  // Both handlers stop propagation unconditionally for the tree's OWN
+  // internal reorder/move drag, including when this row rejects the drop.
+  // Rows nest (a folder's children render inside its own wrapper), so
+  // without this an illegal drop on a child — say, onto a file — would
+  // bubble to the enclosing folder row and be re-interpreted as "move into
+  // that folder". A row's verdict on a drop aimed at it is final.
   //
-  // That rule applies only to the tree's OWN internal reorder/move drag
-  // (DragCtx's `dragged`, set on a row's onDragStart). A file dragged in from
-  // the OS sets no such state, so `dragged` is null for the whole gesture —
-  // in that case this row must NOT stopPropagation/preventDefault at all, or
-  // the KB page's file-drop container (an ancestor of this tree) never sees
-  // the event and the browser's default action (typically navigating away to
-  // open the dropped file) fires instead. Falling through untouched lets the
-  // native dragover/drop bubble past every row to that container.
+  // That rule applies only while DragCtx's `dragged` is set (a row's own
+  // onDragStart). A file dragged in from the OS sets no such state, so
+  // `dragged` is null for the whole gesture:
+  //   - dragover: still falls through untouched here, letting it bubble to
+  //     the tree's root wrapper, which is what shows the "drop anywhere"
+  //     ring highlight and calls preventDefault so a drop can land at all
+  //     (the same underlying event; the browser only needs preventDefault
+  //     called SOMEWHERE along its bubble path, not on this exact element).
+  //   - drop: handled explicitly in handleDrop below — unlike dragover, drop
+  //     needs to know WHICH row (i.e. which folder) the cursor was actually
+  //     over, so it can no longer just fall through to the root wrapper the
+  //     way it used to; see that handler's comment.
   function handleDragOver(e: React.DragEvent) {
     if (!dragged) return;
     e.stopPropagation();
@@ -343,7 +353,26 @@ function TreeRow({
   }
 
   function handleDrop(e: React.DragEvent) {
-    if (!dragged) return; // native OS file drop — let it bubble to the KB page's container
+    if (!dragged) {
+      // Native OS file drop landing ON this row (not the blank gap below the
+      // last one) — captured here, rather than left to bubble to the tree's
+      // root wrapper, so the folder actually under the cursor becomes the
+      // import target instead of every drop always landing in notes/. A drop
+      // onto a FOLDER row targets that folder; onto a FILE row, there's
+      // nothing sensible "into a file" could mean, so its PARENT folder is
+      // used instead. Only intercepted when the caller wired onImportFiles
+      // AND the drag actually carries files — anything else (no
+      // onImportFiles, or the tree's own internal reorder/move drag, which
+      // carries no "Files" type and has dragged !== null anyway) falls
+      // through untouched and keeps bubbling, exactly as before.
+      if (!onImportFiles || !e.dataTransfer.types.includes("Files")) return;
+      const files = Array.from(e.dataTransfer.files ?? []);
+      if (files.length === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      onImportFiles(files, node.is_dir ? node.path : parentOf(node.path));
+      return;
+    }
     e.stopPropagation();
     const target = hintFor(e);
     setHint(null);
@@ -468,6 +497,7 @@ function TreeRow({
           selectedPath={selectedPath}
           onSelect={onSelect}
           onMoveInto={onMoveInto}
+          onImportFiles={onImportFiles}
         />
       )}
       {node.is_dir && (
@@ -500,12 +530,14 @@ function TreeLevel({
   selectedPath,
   onSelect,
   onMoveInto,
+  onImportFiles,
 }: {
   path: string;
   depth: number;
   selectedPath: string | null;
   onSelect: (path: string, isDir: boolean) => void;
   onMoveInto: (dragged: DraggedNode, folder: KBNode) => void;
+  onImportFiles?: (files: File[], dir: string) => void;
 }) {
   const { data, isLoading } = useKBTree(path);
   const saveOrder = useSaveKBOrder();
@@ -564,6 +596,7 @@ function TreeLevel({
           onSelect={onSelect}
           onMoveInto={onMoveInto}
           onReorder={handleReorder}
+          onImportFiles={onImportFiles}
         />
       ))}
     </>
@@ -583,11 +616,13 @@ export default function FileTree({
   // `?path=` param still points at the old location and NoteEditor drops into
   // its "deleted elsewhere" state on the single most common drag there is.
   onMoved?: (from: string, to: string) => void;
-  // Fired when the user drops OS file(s) anywhere on the tree — including
-  // directly on a row, not just the blank gap below the last one (see the
-  // root wrapper's handlers below for why that distinction used to matter).
+  // Fired when the user drops OS file(s) on the tree. `dir` is the folder the
+  // drop targeted: the row's own path when dropped on a folder row, that
+  // row's parent when dropped on a file row (see TreeRow's handleDrop), or
+  // omitted when dropped in the blank gap below the last row (this root
+  // wrapper's own onDrop, below — no row was under the cursor to target).
   // Omitted entirely, the tree is drop-inert (upload is opt-in per caller).
-  onImportFiles?: (files: File[]) => void;
+  onImportFiles?: (files: File[], dir?: string) => void;
 }) {
   const [dragged, setDragged] = useState<DraggedNode | null>(null);
   const [fileDragging, setFileDragging] = useState(false);
@@ -619,14 +654,18 @@ export default function FileTree({
           "h-full px-1 py-1",
           fileDragging && "rounded ring-2 ring-inset ring-ring",
         )}
-        // This wrapper is what actually receives an OS file drag — a row's
-        // own dragover/drop handlers deliberately do NOT stopPropagation for
-        // one (see TreeRow's handlers), specifically so it bubbles all the
-        // way up here regardless of which row (or the gap below them all) it
-        // lands on. Gated on `onImportFiles` being provided AND the drag
-        // actually carrying files (`types.includes("Files")`), so the tree's
-        // OWN internal reorder/move drag — which carries no "Files" type —
-        // never trips this.
+        // This wrapper's own onDrop only ever fires for a drop in the BLANK
+        // GAP below the last row: a drop landing ON a row is now captured by
+        // that row's own handleDrop (see TreeRow), which stopPropagation's it
+        // so it never reaches here — that's what lets a folder row target
+        // itself instead of every drop defaulting to notes/. dragover is
+        // unaffected (rows deliberately let it keep bubbling here — see
+        // TreeRow's handleDragOver comment) so the ring highlight and the
+        // preventDefault that allows a drop at all still apply tree-wide,
+        // gated on `onImportFiles` being provided AND the drag actually
+        // carrying files (`types.includes("Files")`), so the tree's OWN
+        // internal reorder/move drag — which carries no "Files" type — never
+        // trips this.
         onDragOver={(e) => {
           if (!onImportFiles || !e.dataTransfer.types.includes("Files")) return;
           e.preventDefault();
@@ -647,7 +686,7 @@ export default function FileTree({
           if (files.length === 0) return; // not a file drop — leave it to the row that's actually handling it
           e.preventDefault();
           setFileDragging(false);
-          onImportFiles(files);
+          onImportFiles(files); // blank-gap drop: no folder was under the cursor, keep today's default (notes/)
         }}
       >
         <TreeLevel
@@ -656,6 +695,7 @@ export default function FileTree({
           selectedPath={selectedPath}
           onSelect={onSelect}
           onMoveInto={handleMoveInto}
+          onImportFiles={onImportFiles}
         />
       </div>
     </DragCtx.Provider>

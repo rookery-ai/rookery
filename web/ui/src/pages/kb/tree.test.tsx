@@ -52,7 +52,7 @@ function mockFetch(intercept?: (url: string, init?: RequestInit) => Response | u
 function renderTree(
   onSelect = vi.fn(),
   onMoved?: (from: string, to: string) => void,
-  onImportFiles?: (files: File[]) => void,
+  onImportFiles?: (files: File[], dir?: string) => void,
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
@@ -506,9 +506,12 @@ test("a system dir is not a reorder target", async () => {
 // row's own onDragStart, driving the tree's internal reorder/move). That
 // meant a file dropped directly ON a row — the vast majority of the tree's
 // surface — never reached the root wrapper's onImportFiles handler; only a
-// drop in the blank gap below the last row worked. Dropping on a row (here,
-// "Notes") must import exactly the same as dropping in the gap.
-test("dropping an OS file directly on a row (not just the blank gap) still imports it", async () => {
+// drop in the blank gap below the last row worked.
+//
+// Dropping on a FOLDER row must import it — and, per the "drop onto a folder
+// files it there" fix, must carry that folder as the destination, not the
+// caller's default. "Notes" is a folder here, so the expected dir is "notes".
+test("dropping an OS file onto a folder row imports it into that folder", async () => {
   mockFetch();
   const onImportFiles = vi.fn();
   renderTree(vi.fn(), undefined, onImportFiles);
@@ -524,6 +527,54 @@ test("dropping an OS file directly on a row (not just the blank gap) still impor
 
   fireEvent.dragOver(row, { dataTransfer: dt });
   fireEvent.drop(row, { dataTransfer: dt });
+
+  expect(onImportFiles).toHaveBeenCalledTimes(1);
+  expect(onImportFiles).toHaveBeenCalledWith([file], "notes");
+});
+
+// A drop onto a FILE row can't mean "into" that file — there's nothing
+// sensible that could mean — so it targets the file's own parent folder
+// instead. README.md is at the vault root, so its parent is "" (root);
+// exercise a nested file so the parent is a non-trivial, non-empty folder.
+test("dropping an OS file onto a file row imports it into that file's parent folder", async () => {
+  mockFetch();
+  const onImportFiles = vi.fn();
+  renderTree(vi.fn(), undefined, onImportFiles);
+
+  await userEvent.click(await screen.findByText("Notes"));
+  const row = await screen.findByText("a.md");
+  const file = new File(["x,y\n1,2\n"], "sample.csv", { type: "text/csv" });
+  const dt = { types: ["Files"], files: [file], dropEffect: "" };
+
+  fireEvent.dragOver(row, { dataTransfer: dt });
+  fireEvent.drop(row, { dataTransfer: dt });
+
+  expect(onImportFiles).toHaveBeenCalledTimes(1);
+  expect(onImportFiles).toHaveBeenCalledWith([file], "notes");
+});
+
+// Dropping in the blank gap below the last row never lands on any row's own
+// handler, so it still bubbles to FileTree's root wrapper — which calls
+// onImportFiles with no dir at all, keeping today's default (notes/).
+test("dropping an OS file on the blank gap (not any row) omits a dir", async () => {
+  mockFetch();
+  const onImportFiles = vi.fn();
+  const { container } = render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <ToastProvider>
+        <FileTree selectedPath={null} onSelect={vi.fn()} onImportFiles={onImportFiles} />
+        <ToastHost />
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+  await screen.findByText("README.md");
+
+  const gap = container.firstElementChild as HTMLElement; // FileTree's own root wrapper div
+  const file = new File(["a,b\n1,2\n"], "sample.csv", { type: "text/csv" });
+  const dt = { types: ["Files"], files: [file], dropEffect: "" };
+
+  fireEvent.dragOver(gap, { dataTransfer: dt });
+  fireEvent.drop(gap, { dataTransfer: dt });
 
   expect(onImportFiles).toHaveBeenCalledTimes(1);
   expect(onImportFiles).toHaveBeenCalledWith([file]);

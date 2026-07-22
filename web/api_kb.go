@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path"
@@ -13,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ilijad1/simple-agents/internal/convert"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/vault"
 	"github.com/labstack/echo/v4"
@@ -547,6 +549,27 @@ func isRequestTooLarge(err error) bool {
 	return errors.As(err, &mbe)
 }
 
+// uploadErrStatus maps an ImportFile error to an API status+code+client-safe
+// message. Unlike vaultErrStatus (which only ever sees vault.ErrEscapes /
+// os.ErrNotExist from a path-safety check), ImportFile can fail for either a
+// property of the REQUEST (unconvertible format; a destination that resolves
+// into a system-managed area or escapes the vault) or a genuine SERVER fault
+// (a disk I/O error while preserving the original or writing the note) — the
+// two must not collapse to the same 422, or a real fault gets reported to
+// the user as "we can't read this kind of file". The 500 branch's message is
+// generic on purpose: the real error (which can contain a raw filesystem
+// path) is for the server log only, via the caller.
+func uploadErrStatus(err error) (status int, code string, clientMsg string) {
+	switch {
+	case errors.Is(err, convert.ErrUnsupportedFormat):
+		return http.StatusUnprocessableEntity, "unsupported_format", err.Error()
+	case errors.Is(err, vault.ErrSystemDir), errors.Is(err, vault.ErrEscapes):
+		return http.StatusUnprocessableEntity, "invalid_destination", err.Error()
+	default:
+		return http.StatusInternalServerError, "internal_error", "something went wrong saving this file"
+	}
+}
+
 // apiUploadKBFile accepts a document, converts it to markdown, and files it in
 // the workspace's knowledge base. It shares vault.ImportFile with the
 // save_to_kb LLM tool and the CLI bridge, so a file lands identically no
@@ -600,10 +623,14 @@ func (s *Server) apiUploadKBFile(c echo.Context) error {
 		BuildPhase: false,
 	})
 	if err != nil {
-		// An unconvertible format (or a rejected system-area destination) is a
-		// property of the request, not a server fault — 422 so the UI can say
-		// "we can't read this kind of file" instead of surfacing a 500.
-		return jsonErr(c, http.StatusUnprocessableEntity, "unsupported_format", err.Error())
+		status, code, msg := uploadErrStatus(err)
+		if status == http.StatusInternalServerError {
+			// The raw error can carry a filesystem path (e.g. "write note:
+			// open /home/.../vaults/...: permission denied") — log it for the
+			// operator but never hand it to the client.
+			slog.Error("kb upload: import failed", "workspace_id", u.ID, "err", err)
+		}
+		return jsonErr(c, status, code, msg)
 	}
 	return c.JSON(http.StatusOK, map[string]any{
 		"note_path":     res.NotePath,

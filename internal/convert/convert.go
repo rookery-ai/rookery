@@ -7,7 +7,19 @@
 // all need it.
 package convert
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+// ErrUnsupportedFormat is returned by ToMarkdown when the input's format
+// isn't recognized at all, or is recognized but has no converter yet. It is
+// a property of the INPUT, never a server fault — callers (the KB upload
+// handler, the CLI/coder bridges) use errors.Is against it to report "we
+// can't read this kind of file" instead of collapsing every ToMarkdown
+// failure (including a genuine disk/parse fault deeper in a specific
+// converter) into the same client-facing bucket.
+var ErrUnsupportedFormat = errors.New("convert: unsupported format")
 
 // Kind is a detected document format.
 type Kind string
@@ -94,9 +106,9 @@ func ToMarkdown(data []byte, opt Options) (Result, error) {
 			Extractor: "pure-go",
 		}, nil
 	case KindUnknown:
-		return Result{}, fmt.Errorf("convert: unrecognized format (%d bytes); no converter applies", len(data))
+		return Result{}, fmt.Errorf("%w: unrecognized format (%d bytes); no converter applies", ErrUnsupportedFormat, len(data))
 	default:
-		return Result{}, fmt.Errorf("convert: %s is not supported yet", kind)
+		return Result{}, fmt.Errorf("%w: %s not yet implemented", ErrUnsupportedFormat, kind)
 	}
 }
 

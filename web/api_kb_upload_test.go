@@ -2,11 +2,16 @@ package web
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/ilijad1/simple-agents/internal/convert"
+	"github.com/ilijad1/simple-agents/internal/vault"
 )
 
 // uploadRequest builds a multipart POST to /api/v1/kb/upload with the given
@@ -118,6 +123,11 @@ func TestAPIKBUploadUnsupportedIsUnprocessable(t *testing.T) {
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("status = %d, want 422: %s", rec.Code, rec.Body.String())
 	}
+	var out apiErrBody
+	decodeJSON(t, rec, &out)
+	if out.Error.Code != "unsupported_format" {
+		t.Errorf("error code = %q, want unsupported_format", out.Error.Code)
+	}
 }
 
 // TestAPIKBUploadRespectsDestDir confirms the optional "dir" field is honored
@@ -162,5 +172,83 @@ func TestAPIKBUploadRefusesSystemDir(t *testing.T) {
 	s.echo.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnprocessableEntity {
 		t.Errorf("status = %d, want 422: %s", rec.Code, rec.Body.String())
+	}
+	// The status code alone doesn't distinguish this from an unsupported
+	// format — both are 422 — so pin the error CODE too: a rejected
+	// destination is "invalid_destination", never "unsupported_format" (the
+	// file itself converts fine; it's the folder that's the problem).
+	var out apiErrBody
+	decodeJSON(t, rec, &out)
+	if out.Error.Code != "invalid_destination" {
+		t.Errorf("error code = %q, want invalid_destination", out.Error.Code)
+	}
+}
+
+// TestUploadErrStatusMapping exercises uploadErrStatus directly rather than
+// through HTTP: simulating a genuine disk fault (permission denied, disk
+// full) through the real upload path is awkward without touching a real
+// filesystem in a way that risks the operator's data, so this is the
+// documented substitute for that HTTP-level case — see task-14-report.md.
+// The three sentinel branches ARE also exercised over real HTTP above
+// (TestAPIKBUploadUnsupportedIsUnprocessable, TestAPIKBUploadRefusesSystemDir);
+// this test adds the one branch that isn't reachable that way (plain,
+// unwrapped errors → 500) and pins the exact status/code/message contract for
+// all four in one place.
+func TestUploadErrStatusMapping(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "unsupported format",
+			err:        fmt.Errorf("wrap: %w", convert.ErrUnsupportedFormat),
+			wantStatus: http.StatusUnprocessableEntity,
+			wantCode:   "unsupported_format",
+		},
+		{
+			name:       "system-managed destination",
+			err:        fmt.Errorf("wrap: %w", vault.ErrSystemDir),
+			wantStatus: http.StatusUnprocessableEntity,
+			wantCode:   "invalid_destination",
+		},
+		{
+			name:       "destination escapes the vault",
+			err:        fmt.Errorf("wrap: %w", vault.ErrEscapes),
+			wantStatus: http.StatusUnprocessableEntity,
+			wantCode:   "invalid_destination",
+		},
+		{
+			// A genuine server fault (disk I/O during preserve-original or
+			// write-note) is a bare error, not one of ImportFile's typed
+			// sentinels — Finding 2's whole point is that this must NOT
+			// collapse into the same 422 the format/destination cases get.
+			name:       "generic/unwrapped error (disk fault stand-in)",
+			err:        errors.New("write note: open /vaults/x/notes/y.md: permission denied"),
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "internal_error",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, code, msg := uploadErrStatus(tc.err)
+			if status != tc.wantStatus {
+				t.Errorf("status = %d, want %d", status, tc.wantStatus)
+			}
+			if code != tc.wantCode {
+				t.Errorf("code = %q, want %q", code, tc.wantCode)
+			}
+			if tc.wantStatus == http.StatusInternalServerError {
+				// The 500 branch's client message must never leak the raw
+				// error (which can carry a filesystem path) — that's the
+				// entire reason this branch exists as distinct from the others.
+				if strings.Contains(msg, "permission denied") || strings.Contains(msg, "/vaults/") {
+					t.Errorf("client message leaks the raw error: %q", msg)
+				}
+			} else if msg == "" {
+				t.Error("client message must not be empty for a request-property error")
+			}
+		})
 	}
 }
