@@ -27,13 +27,13 @@ if __name__ == "__main__":
 `
 
 func TestGuardrails_ValidCode(t *testing.T) {
-	err := agentdesigner.RunFullGuardrails(validCode, "")
+	err := agentdesigner.RunFullGuardrails(validCode, agentdesigner.ProfileAgentTool)
 	require.NoError(t, err)
 }
 
 func TestGuardrails_EthicsFilter(t *testing.T) {
 	code := validCode + "\n# rm -rf /\n"
-	err := agentdesigner.RunFullGuardrails(code, "")
+	err := agentdesigner.RunFullGuardrails(code, agentdesigner.ProfileAgentTool)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ethics filter")
 }
@@ -47,7 +47,7 @@ def fetch_price(symbol):
     r = requests.get(f"https://api.example.com/price/{symbol}")
     return r.json()["price"]
 `
-	err := agentdesigner.RunFullGuardrails(code, "")
+	err := agentdesigner.RunFullGuardrails(code, agentdesigner.ProfileAgentTool)
 	require.NoError(t, err)
 }
 
@@ -56,7 +56,7 @@ func TestGuardrails_ASTBlocksEval(t *testing.T) {
 		t.Skip("python3 not available")
 	}
 	code := validCode + "\nresult = eval('1+1')\n"
-	err := agentdesigner.RunFullGuardrails(code, "")
+	err := agentdesigner.RunFullGuardrails(code, agentdesigner.ProfileAgentTool)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ast check")
 }
@@ -66,7 +66,7 @@ func TestGuardrails_ASTBlocksOsSystem(t *testing.T) {
 		t.Skip("python3 not available")
 	}
 	code := validCode + "\nimport os\nos.system('ls')\n"
-	err := agentdesigner.RunFullGuardrails(code, "")
+	err := agentdesigner.RunFullGuardrails(code, agentdesigner.ProfileAgentTool)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ast check")
 }
@@ -76,7 +76,7 @@ func TestGuardrails_ASTBlocksSubprocess(t *testing.T) {
 		t.Skip("python3 not available")
 	}
 	code := validCode + "\nimport subprocess\nsubprocess.run(['ls'])\n"
-	err := agentdesigner.RunFullGuardrails(code, "")
+	err := agentdesigner.RunFullGuardrails(code, agentdesigner.ProfileAgentTool)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ast check")
 }
@@ -101,7 +101,7 @@ func TestEthics_DocVsCodeScoping(t *testing.T) {
 		"import os\nos.remove('x')\n# rm -rf /tmp/data\n",
 		"cur.execute('drop table users')\n",
 	} {
-		if err := agentdesigner.RunToolGuardrails("tools/x.py", code); err == nil {
+		if err := agentdesigner.RunToolGuardrails("tools/x.py", code, agentdesigner.ProfileAgentTool); err == nil {
 			t.Errorf("RunToolGuardrails must still block destructive code: %q", code)
 		}
 	}
@@ -113,5 +113,148 @@ func TestEthics_DocVsCodeScoping(t *testing.T) {
 		if err := agentdesigner.CheckEthics(doc, ""); err == nil {
 			t.Errorf("CheckEthics must block malicious intent even in a document: %q", doc)
 		}
+	}
+}
+
+func TestGuardrailProfiles(t *testing.T) {
+	if !agentdesigner.PythonAvailable() {
+		t.Skip("python3 not available")
+	}
+	cases := []struct {
+		name    string
+		code    string
+		agentOK bool
+		skillOK bool
+	}{
+		{
+			name:    "subprocess list form",
+			code:    "import subprocess\nsubprocess.run(['pdftotext', 'a.pdf', '-'], check=True)\n",
+			agentOK: false,
+			skillOK: true,
+		},
+		{
+			name:    "subprocess check_output list form",
+			code:    "import subprocess\nout = subprocess.check_output(['jq', '.'])\n",
+			agentOK: false,
+			skillOK: true,
+		},
+		{
+			name:    "subprocess with shell=True",
+			code:    "import subprocess\nsubprocess.run('ls | wc -l', shell=True)\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "subprocess with shell=1 (truthy non-literal-True bypass)",
+			code:    "import subprocess\nsubprocess.run(['ls'], shell=1)\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "subprocess with shell=<variable> (non-Constant bypass)",
+			code:    "import subprocess\nflag = True\nsubprocess.run(['ls'], shell=flag)\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "subprocess list form with shell=False explicit",
+			code:    "import subprocess\nsubprocess.run(['ls'], shell=False)\n",
+			agentOK: false,
+			skillOK: true,
+		},
+		{
+			name:    "os.system",
+			code:    "import os\nos.system('ls')\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "os.popen",
+			code:    "import os\nos.popen('ls').read()\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "eval",
+			code:    "eval('1+1')\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "__import__",
+			code:    "__import__('os')\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "socket",
+			code:    "import socket\ns = socket.socket()\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "plain code",
+			code:    "import json\nprint(json.dumps({'a': 1}))\n",
+			agentOK: true,
+			skillOK: true,
+		},
+		{
+			name:    "subprocess with shell=True via literal-dict spread (kwargs bypass)",
+			code:    "import subprocess\nsubprocess.run(['ls'], **{'shell': True})\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "subprocess with shell=True via variable-dict spread (kwargs bypass)",
+			code:    "import subprocess\nkw = {'shell': True}\nsubprocess.run(['ls'], **kw)\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			// Intentional over-block: the checker no longer attempts to resolve what's
+			// inside a ** spread, so even a benign dict literal is rejected under the
+			// skill profile — the trade-off documented on astCheckBody.
+			name:    "subprocess with benign kwargs spread (intentionally over-blocked)",
+			code:    "import subprocess\nopts = {'capture_output': True}\nsubprocess.run(['ls'], **opts)\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "subprocess with shell=True via subscript-assignment spread (kwargs bypass)",
+			code:    "import subprocess\nkw = {}\nkw['shell'] = True\nsubprocess.run(['ls'], **kw)\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			name:    "subprocess with shell=True via .update() spread (kwargs bypass)",
+			code:    "import subprocess\nkw = {'capture_output': True}\nkw.update({'shell': True})\nsubprocess.run(['ls'], **kw)\n",
+			agentOK: false,
+			skillOK: false,
+		},
+		{
+			// Regression test for the constraint this round fixes: the spread rule is
+			// scoped to subprocess.* only, so an unresolvable ** spread into an os.* call
+			// must NOT be newly blocked under the agent profile.
+			name:    "os.makedirs with unresolvable kwargs spread (must not be broadened)",
+			code:    "import os\ndef ensure_dir(p, **kw):\n    os.makedirs(p, **kw)\n",
+			agentOK: true,
+			skillOK: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			agentErr := agentdesigner.RunFullGuardrails(tc.code, agentdesigner.ProfileAgentTool)
+			if tc.agentOK {
+				require.NoError(t, agentErr, "agent profile should allow")
+			} else {
+				require.Error(t, agentErr, "agent profile should block")
+			}
+			skillErr := agentdesigner.RunFullGuardrails(tc.code, agentdesigner.ProfileSkillScript)
+			if tc.skillOK {
+				require.NoError(t, skillErr, "skill profile should allow")
+			} else {
+				require.Error(t, skillErr, "skill profile should block")
+			}
+		})
 	}
 }

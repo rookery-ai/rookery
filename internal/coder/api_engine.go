@@ -113,7 +113,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 			// isn't applicable (a real run, or no script), or the nudge budget is spent.
 			if nudge := tools.verifyFinishNudge(); nudge != "" {
 				if c.progress != nil {
-					c.progress("🔁 verifying the agent's script actually works…")
+					c.progress("🔁 verifying " + tools.buildSpec().ProgressNoun + " actually works…")
 				}
 				req.Messages = append(req.Messages,
 					llm.Message{Role: "assistant", Content: resp.Content},
@@ -406,6 +406,7 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 		// SA_BUILD_PHASE=generation). A real run must never block on this — an agent that
 		// legitimately has nothing to report must be free to finish silently.
 		verifyBuild: c.extraEnv[buildphase.EnvVar] == buildphase.Generation,
+		spec:        c.buildSpec,
 
 		connReg:    c.connReg,
 		connStore:  c.connStore,

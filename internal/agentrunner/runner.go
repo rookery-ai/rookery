@@ -272,10 +272,10 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 
 	skillRefs := make([]prompts.SkillRef, 0, len(allSkills)+8)
 	for _, s := range skilllibrary.LoadBundled() {
-		skillRefs = append(skillRefs, prompts.SkillRef{Name: s.Name, Description: s.Description})
+		skillRefs = append(skillRefs, prompts.SkillRef{Name: s.Name, Description: s.Description, Category: s.Category})
 	}
 	for _, sk := range allSkills {
-		skillRefs = append(skillRefs, prompts.SkillRef{Name: sk.Name, Description: sk.Description})
+		skillRefs = append(skillRefs, prompts.SkillRef{Name: sk.Name, Description: sk.Description, Category: "User skills"})
 	}
 
 	homeDir := filepath.Join(r.homesDir, input.WorkspaceID)

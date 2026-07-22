@@ -130,6 +130,7 @@ type dbDesignStore interface {
 	DeleteAgentSchedule(agentID string) error
 	GetSetting(workspaceID, key string) (string, error)
 	SecretExists(workspaceID, name string) (bool, error)
+	ListAgentSkillNames(agentID string) ([]string, error)
 
 	UpsertAgentDraft(d *db.AgentDraft) error
 	GetAgentDraft(workspaceID string) (*db.AgentDraft, error)
@@ -487,6 +488,9 @@ func (f *Flow) loadAgentForEdit(workspaceID, agentID string) (agentName, reconci
 	} else {
 		agentMD = scheduleLine + "\n" + agentMD
 	}
+
+	attachedSkills, skillsKnown := f.skillNamesForAgent(agentID)
+	agentMD = reconcileSkillsLine(agentMD, attachedSkills, skillsKnown)
 
 	// Load the existing tool scripts so the edit *conversation* can see the actual
 	// code (not just AGENT.md). Without this the coder has no file access during Q&A
@@ -869,7 +873,7 @@ func (f *Flow) recoverBuiltAgentFromDisk(workspaceID, agentName string) (string,
 		return "", nil, false
 	}
 	for name, code := range tools {
-		if err := RunToolGuardrails(name, code); err != nil {
+		if err := RunToolGuardrails(name, code, ProfileAgentTool); err != nil {
 			return "", nil, false
 		}
 	}
@@ -1142,6 +1146,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		BackendType:        backendType,
 		Connections:        connRefs,
 		ConnectionTools:    connToolNames,
+		Skills:             sess.Skills,
 	}
 
 	// Set up a buffered progress channel for SSE and snapshot the Telegram progress func.
@@ -1646,7 +1651,7 @@ func decideBuildOutcome(workDir, resultText, backendType string, scriptVerified 
 	hasAuthoredScript := false
 	for filename, code := range tools {
 		hasAuthoredScript = true
-		if err := RunToolGuardrails(filename, code); err != nil {
+		if err := RunToolGuardrails(filename, code, ProfileAgentTool); err != nil {
 			return buildDecision{
 				message:   "One of the files the build produced didn't pass an internal check, so I held off saving it. Type **approve** to have it rebuilt, or tell me what to change.",
 				logReason: "generated tool failed guardrails: " + filename + ": " + err.Error(),
@@ -1716,7 +1721,7 @@ func decideBuildOutcome(workDir, resultText, backendType string, scriptVerified 
 // left in agentDir by the coder's real end-to-end test step, so only the agent's own
 // source remains on disk after the build. Called post-save (after user approves) so
 // artifacts persist through StateVerifying as proof for the user, then are cleaned up once
-// the agent is persisted. Uses isTestArtifact (toolstree.go) as the shared classifier.
+// the agent is persisted. Uses IsTestArtifact (toolstree.go) as the shared classifier.
 // Also removes root-level scratch .json files (e.g. acc.json, probe.json) that are direct
 // children of agentDir but are not state.json — the one .json name still deliberately
 // excluded here, purely as a defensive belt-and-suspenders guard against ever deleting a
@@ -1740,7 +1745,7 @@ func cleanupTestArtifacts(agentDir string) {
 			return nil
 		}
 		name := info.Name()
-		if isTestArtifact(path, name, toolsDir) {
+		if IsTestArtifact(path, name, toolsDir) {
 			_ = os.Remove(path)
 			return nil
 		}
@@ -1956,14 +1961,8 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 
 	description := extractDescription(agentMD, agentNameSnap)
 
-	skillsSnap := parseSkillsLine(agentMD, skillRefs)
-	if skillsSnap == nil {
-		// No "# Skills:" line in AGENT.md → the agent declared no skills. Leave
-		// agent_skills empty (the user can assign skills on the agent page).
-		// Previously this fell back to ALL installed skills, which polluted the
-		// attachment list and made the agent page show every skill as assigned.
-		skillsSnap = []string{}
-	}
+	// A brand-new agent has no existing attachments, so no clobber check is needed.
+	skillsSnap := f.resolveAgentSkills(ctx, workspaceID, agentIDSnap, agentMD, skillRefs, nil, false)
 
 	// Promote the readable draft_<name> working dir to the canonical AgentDir(<uuid>)
 	// by renaming it, so EVERYTHING the build produced (tools/, notes/, any root-level
@@ -2041,11 +2040,11 @@ func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string,
 
 	description := extractDescription(agentMD, agentNameSnap)
 
-	skillsSnap := parseSkillsLine(agentMD, skillRefs)
-	if skillsSnap == nil {
-		// No "# Skills:" line in AGENT.md → the agent declared no skills.
-		skillsSnap = []string{}
+	var existingSkills []string
+	if f.db != nil {
+		existingSkills, _ = f.db.ListAgentSkillNames(agentIDSnap)
 	}
+	skillsSnap := f.resolveAgentSkills(ctx, workspaceID, agentIDSnap, agentMD, skillRefs, existingSkills, true)
 
 	if err := f.designer.UpdateAgent(workspaceID, agentIDSnap, agentNameSnap, description, agentMD, tools, skillsSnap); err != nil {
 		return "", false, "", fmt.Errorf("update agent: %w", err)
@@ -2263,14 +2262,14 @@ func (f *Flow) loadSkillNames(workspaceID string) []prompts.SkillRef {
 	// Core skills are always-on for every user — always available to the designer.
 	refs := make([]prompts.SkillRef, 0, 16)
 	for _, s := range skilllibrary.LoadBundled() {
-		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description})
+		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description, Category: s.Category})
 	}
 	if f.db == nil {
 		return refs
 	}
 	skills, _ := f.db.ListSkills(workspaceID)
 	for _, s := range skills {
-		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description})
+		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description, Category: "User skills"})
 	}
 	return refs
 }
@@ -2317,6 +2316,49 @@ func parseSkillsLine(agentMD string, installed []prompts.SkillRef) []string {
 		}
 	}
 	return nil
+}
+
+// resolveAgentSkills decides which skills to attach to an agent at save time.
+//
+// Three contracts, each a place this could go subtly wrong:
+//
+//  1. nil vs empty is load-bearing. parseSkillsLine returns nil ONLY when no header
+//     exists at all; a present "# Skills: none" returns a non-nil empty slice. The
+//     selector fires on nil only — an explicit "none" is a decision, and silently
+//     overriding it would make attachment unpredictable.
+//  2. An edit never clobbers. If the agent already has attachments, they stand: the user
+//     may have curated them on the agent page, and a re-edit must not undo that. Same
+//     rule AutoBindTargets uses for connections.
+//  3. It fails closed. SelectSkills returns empty on any failure, which is today's
+//     behaviour — not a guess.
+//
+// The return is always non-nil.
+func (f *Flow) resolveAgentSkills(ctx context.Context, workspaceID, agentID, agentMD string, pool []prompts.SkillRef, existing []string, isEdit bool) []string {
+	// An explicit header always wins. It is the model's declaration for THIS build, and
+	// on an edit it is how a requested change ("also make it read CSVs") takes effect.
+	// Checking `existing` first instead would mean that once an agent has any skill, every
+	// later edit's header is silently discarded — the user asks for a change, the designer
+	// declares it, and nothing happens. Hand-curation is protected upstream instead:
+	// loadAgentForEdit rewrites the header from agent_skills before the coder ever sees
+	// AGENT.md, exactly as it already does for the schedule line, so an edit starts from
+	// what is actually attached rather than a stale header.
+	if declared := parseSkillsLine(agentMD, pool); declared != nil {
+		return declared
+	}
+
+	// No header. On an edit, keep what is attached rather than re-deriving it — the user
+	// may have curated the set on the agent page, and a re-edit must not undo that. Same
+	// rule AutoBindTargets uses for connections.
+	if isEdit && len(existing) > 0 {
+		return existing
+	}
+
+	// No header and nothing attached — the common case on a weak build model. Ask directly.
+	var coderSvc *coder.Coder
+	if f.coderFor != nil {
+		coderSvc = f.coderFor(workspaceID)
+	}
+	return SelectSkills(ctx, coderSvc, workspaceID, agentMD, pool)
 }
 
 // skillsHeaderInline matches a line that declares skills inline, e.g.
@@ -2468,4 +2510,77 @@ func codePreview(code string, maxLines int) string {
 		return code
 	}
 	return strings.Join(lines[:maxLines], "\n") + "\n# ... (truncated)"
+}
+
+// skillNamesForAgent returns the skills currently attached to an agent, or nil.
+func (f *Flow) skillNamesForAgent(agentID string) ([]string, bool) {
+	if f.db == nil {
+		return nil, false
+	}
+	names, err := f.db.ListAgentSkillNames(agentID)
+	if err != nil {
+		slog.Warn("agentdesigner: could not read attached skills; leaving AGENT.md's header alone",
+			"agent_id", agentID, "err", err)
+		return nil, false
+	}
+	return names, true
+}
+
+// reconcileSkillsLine rewrites AGENT.md's `# Skills:` header to match what is actually
+// attached in agent_skills, mirroring what loadAgentForEdit already does for the
+// `# Suggested schedule:` line.
+//
+// Without this the two drift. agent_skills is the source of truth and the agent page
+// writes to it directly, but hand-curating there never touches AGENT.md — so a skill the
+// user removed in the UI still sits in the file's header. Since an explicit header wins
+// at save time (see resolveAgentSkills), that stale header would resurrect the removed
+// skill on the next edit. Rewriting it here means an edit starts from the truth, and the
+// header-wins rule stays safe.
+//
+// The canonical line replaces the first header parseSkillsLine would recognise, wherever
+// it sits and however the model spelled it. With no such line, it is inserted directly
+// after the schedule line — position matters, because parseSkillsLine returns on the
+// FIRST header it finds, so ours must precede any drifted one further down.
+func reconcileSkillsLine(agentMD string, attached []string, known bool) string {
+	// Could not read what is attached. Leave the file alone: writing "none" here would be
+	// a forged declaration, and since an explicit header wins at save time it would
+	// persist as an empty skill set, wiping real attachments over a transient DB error.
+	// Doing nothing degrades to the pre-reconciliation behaviour, which loses nothing.
+	if !known {
+		return agentMD
+	}
+
+	canonical := "# Skills: none"
+	if len(attached) > 0 {
+		canonical = "# Skills: " + strings.Join(attached, ", ")
+	}
+
+	lines := strings.Split(agentMD, "\n")
+	for i, line := range lines {
+		if _, ok := skillsHeaderInline(line); ok {
+			lines[i] = canonical
+			return strings.Join(lines, "\n")
+		}
+		// parseSkillsLine also accepts a bare "## Skills" heading followed by a bullet
+		// list. Replacing just the heading would strand the bullets as contradictory
+		// prose, so the heading AND the list it introduces are replaced together.
+		if skillsListHeading(line) {
+			j := i + 1
+			for j < len(lines) && bulletItemRe.MatchString(lines[j]) {
+				j++
+			}
+			out := make([]string, 0, len(lines))
+			out = append(out, lines[:i]...)
+			out = append(out, canonical)
+			out = append(out, lines[j:]...)
+			return strings.Join(out, "\n")
+		}
+	}
+
+	// No header present. Insert after the schedule line if there is one, else at the top.
+	if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[0]), "# Suggested schedule:") {
+		out := append([]string{lines[0], canonical}, lines[1:]...)
+		return strings.Join(out, "\n")
+	}
+	return canonical + "\n" + agentMD
 }

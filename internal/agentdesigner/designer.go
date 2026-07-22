@@ -78,7 +78,7 @@ func (d *AgentDesigner) writeAgentContent(workspaceID, agentID, name string, age
 		return fmt.Errorf("guardrails: %w", err)
 	}
 	for filename, code := range tools {
-		if err := RunToolGuardrails(filename, code); err != nil {
+		if err := RunToolGuardrails(filename, code, ProfileAgentTool); err != nil {
 			return fmt.Errorf("guardrails (%s): %w", filename, err)
 		}
 	}

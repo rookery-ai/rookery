@@ -72,6 +72,21 @@ for para in doc.paragraphs:
 doc.save(sys.argv[1])
 ```
 
+## Converting a .docx
+
+`pandoc` handles every direction. Resolve it at `$HOME/.local/bin/pandoc` first (where the
+cli-tool-installer skill puts it — it is NOT on the sandboxed PATH), then fall back to
+`command -v pandoc`:
+
+```bash
+"$HOME/.local/bin/pandoc" notes.docx -t markdown          # .docx to markdown on stdout
+"$HOME/.local/bin/pandoc" notes.docx -o notes.md          # write the file directly
+"$HOME/.local/bin/pandoc" notes.md -o notes.docx          # and back again
+```
+
+If pandoc is missing, report that and point at the cli-tool-installer skill rather than
+attempting a partial conversion.
+
 ## Best practices
 
 - For tracked changes, comments, and fidelity beyond text, pandoc's `--track-changes=all`

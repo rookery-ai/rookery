@@ -78,17 +78,17 @@ func TestWriteToolsTreeRejectsEscapes(t *testing.T) {
 // non-Python file passes (ethics-only) while a dangerous .py still fails.
 func TestRunToolGuardrailsByExtension(t *testing.T) {
 	// requirements.txt is not valid Python — must NOT be AST-parsed.
-	require.NoError(t, agentdesigner.RunToolGuardrails("requirements.txt", "requests==2.31.0\n"))
+	require.NoError(t, agentdesigner.RunToolGuardrails("requirements.txt", "requests==2.31.0\n", agentdesigner.ProfileAgentTool))
 
 	// A .py using subprocess must still be blocked when python3 is available.
 	if agentdesigner.PythonAvailable() {
-		err := agentdesigner.RunToolGuardrails("bad.py", "import subprocess\nsubprocess.run(['ls'])\n")
+		err := agentdesigner.RunToolGuardrails("bad.py", "import subprocess\nsubprocess.run(['ls'])\n", agentdesigner.ProfileAgentTool)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "ast check")
 	}
 
 	// Ethics applies to every file regardless of extension.
-	err := agentdesigner.RunToolGuardrails("notes.txt", "please rm -rf / now")
+	err := agentdesigner.RunToolGuardrails("notes.txt", "please rm -rf / now", agentdesigner.ProfileAgentTool)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ethics filter")
 }

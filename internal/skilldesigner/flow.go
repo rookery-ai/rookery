@@ -168,15 +168,16 @@ func (f *Flow) Start(workspaceID, skillName string) (string, error) {
 	if _, exists := f.sessions[workspaceID]; exists {
 		return "", fmt.Errorf("you already have an active skill session; send /skill cancel to start over")
 	}
-	if err := f.validateSkillName(workspaceID, skillName); err != nil {
+	slug, err := f.validateSkillName(workspaceID, skillName)
+	if err != nil {
 		return "", err
 	}
 
-	f.sessions[workspaceID] = f.newSession(workspaceID, skillName, StateDescribing)
+	f.sessions[workspaceID] = f.newSession(workspaceID, slug, StateDescribing)
 
 	return fmt.Sprintf(
 		"Starting skill \"%s\".\n\nDescribe what this skill should do. Be specific: what task does it handle, and when should it kick in?",
-		skillName,
+		slug,
 	), nil
 }
 
@@ -186,11 +187,12 @@ func (f *Flow) StartDesign(ctx context.Context, workspaceID, skillName, firstMes
 		f.mu.Unlock()
 		return "", fmt.Errorf("a skill design session is already active; cancel it first")
 	}
-	if err := f.validateSkillName(workspaceID, skillName); err != nil {
+	slug, err := f.validateSkillName(workspaceID, skillName)
+	if err != nil {
 		f.mu.Unlock()
 		return "", err
 	}
-	sess := f.newSession(workspaceID, skillName, StateDesigning)
+	sess := f.newSession(workspaceID, slug, StateDesigning)
 	f.sessions[workspaceID] = sess
 	f.mu.Unlock()
 
@@ -472,10 +474,12 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	notify("⚙️ Preparing skill workspace…")
 
 	// Staging dir under the user's vault: <vault>/<workspaceID>/skills/.staging-<name>/.
-	// The live skill folder is only written in finalizeSkill after approval.
+	// The live skill folder is only written in finalizeSkill after approval. No scripts/
+	// dir is pre-created: it did not steer the model (it wrote its own tree anyway) and an
+	// empty dir is indistinguishable from one the model chose to leave empty.
 	stagingDir := skillstore.SkillDir(f.saver.SkillsDir(), workspaceID, ".staging-"+skillNameSnap)
 	_ = os.RemoveAll(stagingDir)
-	if err := os.MkdirAll(filepath.Join(stagingDir, "scripts"), 0o750); err != nil {
+	if err := os.MkdirAll(stagingDir, 0o750); err != nil {
 		closeProgress()
 		return "", false, "", fmt.Errorf("create staging dir: %w", err)
 	}
@@ -487,6 +491,10 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	notify("🤖 Coder is building your skill — this can take a few minutes…")
 
 	generationCoder := coderSvc.WithDir(stagingDir).WithAllowedTools("Bash,Write,Edit,Read").
+		// This build produces SKILL.md, not AGENT.md. Without the spec the API engine's
+		// finish gate demands the agent definition and the build can never end correctly
+		// (SP10 spec §1.1). No-op for the CLI engine.
+		WithBuildSpec(coder.SkillBuildSpec).
 		// Stream the API engine's per-tool-call milestones (🔧 run_script(...), 🔧
 		// write_file(...)) to the build SSE, mirroring agentdesigner.runGeneration +
 		// agent runs. Without this a skill build only emits the fixed "🤖 Coder is
@@ -531,8 +539,16 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 
 	notify("🔍 Validating skill safety checks…")
 
-	// Ground truth: read what the coder actually wrote.
-	skillMDBytes, err := os.ReadFile(filepath.Join(stagingDir, "SKILL.md"))
+	// Ground truth: read what the coder actually wrote. The model may have nested the
+	// skill one level down (see LocateSkillRoot).
+	skillRoot, err := LocateSkillRoot(stagingDir)
+	if err != nil {
+		cleanupStaging()
+		closeProgress()
+		f.markGenerationFailed(workspaceID, "the coder didn't create SKILL.md")
+		return "The coder didn't create SKILL.md. Tell me what to change and I'll try again.", false, "", nil
+	}
+	skillMDBytes, err := os.ReadFile(filepath.Join(skillRoot, "SKILL.md"))
 	if err != nil {
 		cleanupStaging()
 		closeProgress()
@@ -541,11 +557,11 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	}
 	skillMD := strings.TrimSpace(string(skillMDBytes))
 
-	scripts, err := readScriptsFromDisk(filepath.Join(stagingDir, "scripts"))
+	scripts, err := ReadSkillTree(skillRoot)
 	if err != nil {
 		cleanupStaging()
 		closeProgress()
-		return "", false, "", fmt.Errorf("read scripts: %w", err)
+		return "", false, "", fmt.Errorf("read skill files: %w", err)
 	}
 
 	// Guardrails on the actual content the coder wrote. The specific reason (regex/AST
@@ -559,7 +575,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		return "That request tripped a safety check I can't get around. Try describing it differently — for example, avoid destructive or high-risk actions.", false, "", nil
 	}
 	for filename, code := range scripts {
-		if err := agentdesigner.RunToolGuardrails(filename, code); err != nil {
+		if err := guardrailsForGeneratedFile(filename, code); err != nil {
 			cleanupStaging()
 			closeProgress()
 			slog.Warn("skilldesigner: generated script failed guardrails", "workspace_id", workspaceID, "skill_name", skillNameSnap, "file", filename, "err", err)
@@ -569,7 +585,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	}
 
 	notify("🧪 Testing scripts…")
-	testOut := f.runTests(stagingDir, scripts, parseTestOutput(result.Text))
+	testOut := f.runTests(skillRoot, scripts, parseTestOutput(result.Text))
 
 	notify("🔒 Security vetting the skill…")
 	report := f.vetSkill(ctx, workspaceID, coderSvc, skillNameSnap, skillMD, scripts)
@@ -618,32 +634,48 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	), false, "", nil
 }
 
-// runTests smoke-runs each script (py_compile to confirm no syntax errors) and
-// combines the result with the coder's own [TEST_OUTPUT]. For prompt-only skills
-// (no scripts) it synthesizes a frontmatter-validation note so a verifying
-// preview is always present.
-func (f *Flow) runTests(stagingDir string, scripts map[string]string, coderTestOut string) string {
+// runTests smoke-runs each checkable script (py_compile for .py, bash -n for .sh) and
+// combines the result with the coder's own [TEST_OUTPUT]. For prompt-only skills (no
+// checkable scripts) it synthesizes a frontmatter-validation note so a verifying preview
+// is always present. Files it cannot statically check (references/*.md, data fixtures,
+// …) are skipped rather than reported as failures.
+func (f *Flow) runTests(skillRoot string, scripts map[string]string, coderTestOut string) string {
 	var sb strings.Builder
 	if coderTestOut != "" {
 		sb.WriteString("Coder test output:\n")
 		sb.WriteString(coderTestOut)
 		sb.WriteString("\n\n")
 	}
-	if len(scripts) == 0 {
+
+	// Only files we can statically check are reported. A references/*.md must never
+	// appear as a failed test just because it isn't code.
+	var checkable []string
+	for _, name := range sortedScriptNames(scripts) {
+		if strings.HasSuffix(name, ".py") || strings.HasSuffix(name, ".sh") {
+			checkable = append(checkable, name)
+		}
+	}
+	if len(checkable) == 0 {
 		if sb.Len() == 0 {
 			sb.WriteString("Prompt-only skill — no scripts to run. Validated frontmatter parses and the description reads as a trigger.\n")
 		}
 		return strings.TrimSpace(sb.String())
 	}
-	sb.WriteString("Script smoke check (py_compile):\n")
-	for _, name := range sortedScriptNames(scripts) {
-		path := filepath.Join(stagingDir, "scripts", name)
-		cmd := exec.Command("python3", "-m", "py_compile", path)
+
+	sb.WriteString("Script smoke check:\n")
+	for _, name := range checkable {
+		path := filepath.Join(skillRoot, name)
+		var cmd *exec.Cmd
+		if strings.HasSuffix(name, ".sh") {
+			cmd = exec.Command("bash", "-n", path)
+		} else {
+			cmd = exec.Command("python3", "-m", "py_compile", path)
+		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			sb.WriteString(fmt.Sprintf("- ❌ %s: %s\n", name, strings.TrimSpace(string(out))))
 		} else {
-			sb.WriteString(fmt.Sprintf("- ✅ %s: compiles cleanly\n", name))
+			sb.WriteString(fmt.Sprintf("- ✅ %s: parses cleanly\n", name))
 		}
 	}
 	return strings.TrimSpace(sb.String())
@@ -707,8 +739,11 @@ func (f *Flow) finalizeSkill(ctx context.Context, workspaceID string) (string, b
 	}
 
 	meta, _ := skilllibrary.ParseMeta(skillMD)
-	name := meta.Name
-	if name == "" {
+	// The generated frontmatter name is not the validated one: re-slugify it, and fall
+	// back to the session's name if the model produced nothing usable. SaveSkill's
+	// core-skill check remains the backstop.
+	name := SlugifySkillName(meta.Name)
+	if name == "" || skilllibrary.IsCoreSkill(name) {
 		name = skillName
 	}
 	description := meta.Description
@@ -871,29 +906,30 @@ func (f *Flow) newSession(workspaceID, skillName string, state DesignState) *Des
 	}
 }
 
-// validateSkillName rejects reserved core-skill names and empty/invalid names.
-func (f *Flow) validateSkillName(workspaceID, name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return fmt.Errorf("give the skill a name first")
+// validateSkillName normalises the name to its slug form and rejects reserved core-skill
+// names and empty/invalid names. The slug is what every path and the frontmatter use.
+func (f *Flow) validateSkillName(workspaceID, name string) (string, error) {
+	slug := SlugifySkillName(name)
+	if slug == "" {
+		return "", fmt.Errorf("give the skill a name first")
 	}
-	if skilllibrary.IsCoreSkill(name) {
-		return fmt.Errorf("%q is a reserved core-skill name; choose a different name", name)
+	if skilllibrary.IsCoreSkill(slug) {
+		return "", fmt.Errorf("%q is a reserved core-skill name; choose a different name", slug)
 	}
-	return nil
+	return slug, nil
 }
 
 func (f *Flow) loadSkillNames(workspaceID string) []prompts.SkillRef {
 	refs := make([]prompts.SkillRef, 0, 16)
 	for _, s := range skilllibrary.LoadBundled() {
-		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description})
+		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description, Category: s.Category})
 	}
 	if f.db == nil {
 		return refs
 	}
 	skills, _ := f.db.ListSkills(workspaceID)
 	for _, s := range skills {
-		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description})
+		refs = append(refs, prompts.SkillRef{Name: s.Name, Description: s.Description, Category: "User skills"})
 	}
 	return refs
 }
@@ -1022,30 +1058,6 @@ func parseBlockedOutput(text string) string {
 		return strings.TrimSpace(text[start:])
 	}
 	return strings.TrimSpace(text[start : start+end])
-}
-
-// readScriptsFromDisk reads every .py file under scriptsDir (one level) as a
-// relpath→content map. Non-.py files are ignored.
-func readScriptsFromDisk(scriptsDir string) (map[string]string, error) {
-	entries, err := os.ReadDir(scriptsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]string{}, nil
-		}
-		return nil, err
-	}
-	scripts := map[string]string{}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".py") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(scriptsDir, e.Name()))
-		if err != nil {
-			return nil, err
-		}
-		scripts[e.Name()] = string(data)
-	}
-	return scripts, nil
 }
 
 func sortedScriptNames(scripts map[string]string) []string {

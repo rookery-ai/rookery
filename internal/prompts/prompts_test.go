@@ -3,6 +3,8 @@ package prompts
 import (
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // TestAgentPhilosophyPresentInEveryPhase guards the brain-vs-scripts contract: the
@@ -371,4 +373,64 @@ func TestNoStateJSONMentionsAnywhere(t *testing.T) {
 	if !strings.Contains(prompts["runtime_full"], "[STATE]") {
 		t.Errorf("runtime prompt must still document the [STATE] output marker")
 	}
+}
+
+func TestImplementationPromptOffersSkills(t *testing.T) {
+	p := ImplementationParams{
+		BackendType: BackendToolCalling,
+		Skills: []SkillRef{
+			{Name: "pdf", Description: "Read and extract text from PDF files."},
+			{Name: "csv", Description: "Read, filter and aggregate CSV data."},
+		},
+	}
+	out := BuildImplementationPrompt("reader", nil, p)
+
+	require.Contains(t, out, "<available_skills>")
+	require.Contains(t, out, "pdf")
+	require.Contains(t, out, "Read and extract text from PDF files.")
+	require.Contains(t, out, "# Skills:")
+}
+
+func TestEditImplementationPromptOffersSkills(t *testing.T) {
+	p := ImplementationParams{
+		BackendType: BackendToolCalling,
+		Skills:      []SkillRef{{Name: "pdf", Description: "Read PDFs."}},
+	}
+	out := BuildEditImplementationPrompt("reader", nil, p)
+
+	require.Contains(t, out, "<available_skills>")
+	require.Contains(t, out, "# Skills:")
+}
+
+// With no skills in the pool the block must be omitted entirely rather than rendering
+// an empty section that invites the model to invent names.
+func TestImplementationPromptOmitsEmptySkillBlock(t *testing.T) {
+	out := BuildImplementationPrompt("x", nil, ImplementationParams{})
+	require.NotContains(t, out, "<available_skills>")
+}
+
+func TestAvailableSkillsGroupedByCategory(t *testing.T) {
+	p := ImplementationParams{
+		Skills: []SkillRef{
+			{Name: "pdf", Description: "Read PDFs.", Category: "File Processing"},
+			{Name: "kb-curation", Description: "Write notes.", Category: "Agent Behaviour"},
+			{Name: "csv", Description: "Read CSVs.", Category: "File Processing"},
+		},
+	}
+	out := BuildImplementationPrompt("x", nil, p)
+
+	require.Contains(t, out, "Agent Behaviour")
+	require.Contains(t, out, "File Processing")
+
+	// Both File Processing skills sit under one heading, not two.
+	require.Equal(t, 1, strings.Count(out, "File Processing"))
+}
+
+// A skill with no category still appears — it must never be silently dropped.
+func TestAvailableSkillsUncategorised(t *testing.T) {
+	p := ImplementationParams{
+		Skills: []SkillRef{{Name: "loose", Description: "No category set."}},
+	}
+	out := BuildImplementationPrompt("x", nil, p)
+	require.Contains(t, out, "loose")
 }

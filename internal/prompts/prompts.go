@@ -31,6 +31,7 @@ type ChatMessage struct {
 type SkillRef struct {
 	Name        string
 	Description string
+	Category    string // e.g. "File Processing"; empty renders under "Other"
 }
 
 // ChatAppInfo describes a connected chat platform and the commands available in it.
@@ -593,6 +594,72 @@ Write your analysis (3-5 sentences) before proceeding to file creation.
 `
 }
 
+// availableSkillsBlock renders the skill catalog and the header contract. It is the
+// SINGLE source shared by the design prompt and both implementation prompts.
+//
+// The header requirement used to live only in the design system prompt — the text-only
+// conversation that writes nothing to disk — while the prompt that actually authors
+// AGENT.md never mentioned skills at all. parseSkillsLine was therefore looking for
+// something no prompt had asked the file's author to produce, and no agent on the install
+// had a single skill attached.
+//
+// The text below is the design prompt's pre-existing wording, preserved on extraction so
+// BuildDesignSystemPrompt's rendered output did not change — with ONE deliberate edit. The
+// original first bullet said "Mention it naturally in the conversation", which only makes
+// sense in the design chat. Once shared, it also reached the two implementation prompts,
+// where there is no live conversation — the design transcript they carry is history, and
+// the coder's job is to author AGENT.md, not to converse. It is reworded to say the same
+// thing in a way that holds in both contexts.
+//
+// The block is deliberately NOT split into design-only and implementation-only variants.
+// Unlike connections, which have AutoBindTargets as a fallback, the `# Skills:` header is
+// the ONLY path by which skills get attached, so it must reach the prompt that writes the
+// file. Splitting risks pulling it back out and reintroducing the bug above.
+func availableSkillsBlock(skills []SkillRef) string {
+	if len(skills) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("<available_skills>\n")
+	sb.WriteString("The user has these pre-built skills installed. When the task clearly benefits from one, use it:\n")
+	sb.WriteString("- Rely on the skill rather than re-deriving what it already does: name it as the way the step is handled instead of restating its instructions.\n")
+	sb.WriteString("- You MUST include a `# Skills: skill-one, skill-two` header line in the generated AGENT.md (alongside the schedule line) declaring EXACTLY the skills this agent needs.\n")
+	sb.WriteString("- List ONLY the specific skills the agent actually uses at runtime — never list all available skills, and never omit the line. If the agent genuinely needs none, write `# Skills: none`.\n")
+	sb.WriteString("- The names must match the skill names below exactly; they are how the agent's skills are recorded.\n\n")
+
+	// Grouped by category so the model scans a structured list rather than a flat wall.
+	// With 22 core skills the descriptions alone run to ~900 words; they stay at full
+	// length because the trigger phrases ARE the matching signal, and truncating them
+	// would undercut the selector that depends on them.
+	byCat := map[string][]SkillRef{}
+	var order []string
+	for _, sk := range skills {
+		cat := sk.Category
+		if cat == "" {
+			cat = "Other"
+		}
+		if _, seen := byCat[cat]; !seen {
+			order = append(order, cat)
+		}
+		byCat[cat] = append(byCat[cat], sk)
+	}
+	sort.Strings(order)
+	for _, cat := range order {
+		sb.WriteString("\n")
+		sb.WriteString(cat)
+		sb.WriteString(":\n")
+		for _, sk := range byCat[cat] {
+			sb.WriteString("- **")
+			sb.WriteString(sk.Name)
+			sb.WriteString("** — ")
+			sb.WriteString(sk.Description)
+			sb.WriteString("\n")
+		}
+	}
+	sb.WriteString("</available_skills>\n\n")
+	return sb.String()
+}
+
 // BuildDesignSystemPrompt returns the system prompt for the conversational agent
 // design/edit wizard. It guides the coder to act as a design assistant that asks
 // focused questions and proposes an implementation plan before any code is written.
@@ -709,18 +776,7 @@ that makes these agents fail.
 	}
 
 	// ── Skills ────────────────────────────────────────────────────────────────
-	if len(p.Skills) > 0 {
-		sb.WriteString("<available_skills>\n")
-		sb.WriteString("The user has these pre-built skills installed. When the task clearly benefits from one, use it:\n")
-		sb.WriteString("- Mention it naturally in the conversation (e.g. \"I'll use the pdf-reader skill to extract the text\").\n")
-		sb.WriteString("- You MUST include a `# Skills: skill-one, skill-two` header line in the generated AGENT.md (alongside the schedule line) declaring EXACTLY the skills this agent needs.\n")
-		sb.WriteString("- List ONLY the specific skills the agent actually uses at runtime — never list all available skills, and never omit the line. If the agent genuinely needs none, write `# Skills: none`.\n")
-		sb.WriteString("- The names must match the skill names below exactly; they are how the agent's skills are recorded.\n\n")
-		for _, sk := range p.Skills {
-			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", sk.Name, sk.Description))
-		}
-		sb.WriteString("</available_skills>\n\n")
-	}
+	sb.WriteString(availableSkillsBlock(p.Skills))
 
 	// ── Connected service accounts ────────────────────────────────────────────
 	if len(p.Connections) > 0 {
@@ -917,6 +973,9 @@ type ImplementationParams struct {
 	Connections     []ConnectionRef
 	ConnectionTools []string // the exact tool names those connections expose
 	ConnectorBin    string   // absolute simple-agents path for the CLI connector-exec command
+	// Skills is the pool (core + user) offered to the build coder so it can declare the
+	// agent's `# Skills:` header. Without this the header is never emitted.
+	Skills []SkillRef
 }
 
 // capabilitySpec renders the authoritative capability blocks shared with the
@@ -936,6 +995,7 @@ func (p ImplementationParams) capabilitySpec() string {
 	// Tell the BUILD coder about the native connector tools it has for the workspace's
 	// connected accounts — otherwise a weak model ignores them and hunts for API keys.
 	sb.WriteString(connectedToolsBlock(p.Connections, p.ConnectionTools, p.BackendType, p.ConnectorBin))
+	sb.WriteString(availableSkillsBlock(p.Skills))
 	return sb.String()
 }
 
@@ -2124,6 +2184,14 @@ func BuildSkillImplementationPrompt(skillName string, history []ChatMessage, ski
 	}
 	sb.WriteString("</design_conversation>\n\n")
 
+	sb.WriteString("<output_layout>\n")
+	sb.WriteString("Write SKILL.md at the ROOT of your current working directory. Do NOT create a folder named after the skill — the folder already exists and you are inside it.\n")
+	sb.WriteString("- SKILL.md            ← at the root, right here\n")
+	sb.WriteString("- scripts/<name>.py   ← only if the skill needs deterministic code\n")
+	sb.WriteString("- references/<name>.md ← only if the skill needs on-demand reference docs\n")
+	sb.WriteString("A published skill lives at <name>/SKILL.md, but you are ALREADY inside that <name> folder. Creating another one nests the skill and the build cannot be saved.\n")
+	sb.WriteString("</output_layout>\n\n")
+
 	sb.WriteString(fmt.Sprintf(`<task>
 Follow these steps in EXACT order.
 
@@ -2152,8 +2220,9 @@ RULES:
 - Secrets are env vars (os.environ); never hardcode keys.
 - Keep SKILL.md under ~500 lines; move deep reference into references/.
 - Output to the vault / $TMPDIR, never /tmp.
-- Folder name: %s (lowercase, hyphens, 3-64 chars). Write it to the staging directory
-  you were given.
+- The skill's canonical name is %s (lowercase, hyphens, 3-64 chars). Use it as the
+  `+"`name`"+` field in SKILL.md's frontmatter. It is NOT a folder for you to create —
+  see <output_layout> above.
 </task>
 `, skillName))
 	return sb.String()
@@ -2198,6 +2267,34 @@ risk and produce the verdict. Emit ONLY the vetting report in the exact format s
 by the protocol (the "SKILL VETTING REPORT" block). Do not emit anything else.
 </task>
 `)
+	return sb.String()
+}
+
+// BuildSkillSelectionPrompt asks a model to pick, from the catalog, the skills an agent
+// needs — the fallback for when the build coder omitted the `# Skills:` header.
+//
+// It is deliberately narrow: one job, no conversation, output constrained to a single
+// line of names so the tolerant parser has the least possible drift to absorb.
+func BuildSkillSelectionPrompt(agentMD string, skills []SkillRef) string {
+	var sb strings.Builder
+	sb.WriteString("You are selecting which reusable skills an automated agent needs.\n\n")
+	sb.WriteString("Here are the available skills:\n\n")
+	for _, sk := range skills {
+		sb.WriteString("- ")
+		sb.WriteString(sk.Name)
+		sb.WriteString(": ")
+		sb.WriteString(sk.Description)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\nHere are the agent's instructions:\n\n---\n")
+	sb.WriteString(agentMD)
+	sb.WriteString("\n---\n\n")
+	sb.WriteString("Which of the skills above does this agent actually need to do its job?\n\n")
+	sb.WriteString("Rules:\n")
+	sb.WriteString("- Answer with ONLY a comma-separated list of skill names, copied exactly from the list above.\n")
+	sb.WriteString("- Include a skill only if the agent's work genuinely requires it. Most agents need none or one or two.\n")
+	sb.WriteString("- Do not invent names. Do not explain. Do not add any other text.\n")
+	sb.WriteString("- If the agent needs no skills at all, answer exactly: none\n")
 	return sb.String()
 }
 
@@ -2246,4 +2343,80 @@ func SkillEnvBlock(bins []SkillBin, homeDir, vaultRoot string) string {
 </skill_environment>
 `, homeDir, homeDir, homeDir, vaultRoot))
 	return sb.String()
+}
+
+// ─── API build-gate nudges ───────────────────────────────────────────────────
+//
+// The API engine refuses to let a BUILD finish until it has produced its deliverable
+// and proven any helper script it wrote actually runs. These are the messages it feeds
+// back to the model to keep the loop going. deliverable is the file that must exist
+// ("AGENT.md" / "SKILL.md"); last is true on the final nudge, when the model must stop
+// iterating and finish.
+
+// BuildMissingDeliverableNudge is gate 1: the build has not produced its deliverable.
+func BuildMissingDeliverableNudge(deliverable string, last bool) string {
+	if deliverable == "SKILL.md" {
+		if last {
+			return "You still have not written SKILL.md — the skill itself — and you're out of attempts to keep " +
+				"iterating. Write SKILL.md NOW with write_file, at the ROOT of the current directory (not inside a " +
+				"sub-folder). It needs YAML frontmatter with name and description, then the markdown body that " +
+				"teaches an agent how to do the task. Then finish. Stop working on the scripts."
+		}
+		return "Before you finish: you have NOT written SKILL.md yet — the skill itself, which is the actual " +
+			"deliverable. Write it now with write_file, at the ROOT of the current directory (not inside a " +
+			"sub-folder named after the skill — that folder already exists). It needs YAML frontmatter with name " +
+			"and description, then the markdown body that teaches an agent how to do the task. Then finish."
+	}
+	if last {
+		return "You still have not written AGENT.md — the agent's instructions — and you're out of attempts to " +
+			"keep iterating. Write AGENT.md NOW with write_file (the agent's full instructions: what it does step " +
+			"by step, how it calls the helper and uses the result, the [CHAT] message it sends the user, and any " +
+			"schedule), then finish. Do NOT try to run or fix the helper script anymore — at build time it cannot " +
+			"reach the live service (outbound is blocked), so its empty output is expected, not a failure."
+	}
+	return "Before you finish: you wrote a helper script but you have NOT written AGENT.md yet — the agent's full " +
+		"instructions, which are the actual deliverable. Write AGENT.md now with write_file (what the agent does " +
+		"step by step, how it calls the helper and uses the result, the [CHAT] message it sends the user, and any " +
+		"schedule). Then finish. At build time the helper cannot reach the live service (outbound is blocked), so " +
+		"its empty output is EXPECTED — do not keep trying to run or fix it; write AGENT.md and finish."
+}
+
+// BuildUnverifiedScriptNudge is gate 2: an authored script has never returned output.
+// The two variants differ because an agent's helper fetches live data (blocked at build
+// time, so an empty result is expected), while a skill's script is a reusable tool that
+// should be smoke-tested with --help or a fixture.
+func BuildUnverifiedScriptNudge(deliverable string, last bool) string {
+	if deliverable == "SKILL.md" {
+		if last {
+			return "You have tried several times and the script still hasn't produced any output. Stop iterating " +
+				"and finish now. If the script works but simply needs real input you don't have at build time, say " +
+				"so plainly and finish. If it genuinely cannot work, emit a [BLOCKED] block explaining in plain, " +
+				"non-technical language what could not be done and suggest ONE alternative."
+		}
+		return "Before you finish: you wrote a script but it has not produced any output yet. A skill's script is a " +
+			"reusable tool, so smoke-test it the way it will actually be called — run it with `--help`, or against a " +
+			"small fixture file you create in the current directory — and read exactly what it prints. Fix any error " +
+			"and run it again. Do not ship a script you have never seen run. Never print, log, or return a secret value."
+	}
+	if last {
+		return "You have tried several times and the helper script still isn't returning real data. " +
+			"Stop trying to fix it now and finish. Choose the honest option:\n" +
+			"- If this genuinely cannot be done, emit a [BLOCKED] block explaining in PLAIN, NON-TECHNICAL " +
+			"language what could not be done (for example: \"I wasn't able to read your emails\") and suggest " +
+			"ONE alternative — no code, no file names, no technical terms.\n" +
+			"- If the empty result is actually CORRECT right now (there truly is nothing to report), say that " +
+			"plainly and finish normally.\n" +
+			"- Or, if you can accomplish the goal WITHOUT that script (doing the work yourself from data you can " +
+			"already obtain with a minimal fetch), do that now."
+	}
+	return "Before you finish: you wrote a helper script but it has not yet returned any real data. " +
+		"An empty result almost always means it is BROKEN — do not ship it. Run it (run_script), read exactly " +
+		"what it prints, and fix the cause (print the raw API response, check the field names, correct the " +
+		"logic), then run it again — repeat until it returns real data. For a SINGLE small result, keep the " +
+		"script THIN — load its secret from the environment, make the request, print the raw result — and do " +
+		"the parsing, decisions, and formatting YOURSELF from what it printed. But when the task processes MANY " +
+		"items or LARGE data (porting pages, exporting a dataset), do the OPPOSITE: have the script do the whole " +
+		"job — fetch AND write each destination file itself (it already has the paths) — and print only a short " +
+		"summary/manifest (counts + file paths), NEVER the full data. Routing a big payload through your reasoning " +
+		"gets truncated and burns the run. Never print, log, or return a secret value."
 }

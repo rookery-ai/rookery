@@ -55,12 +55,13 @@ func WriteToolsTree(toolsDir string, tools map[string]string) error {
 	return nil
 }
 
-// isTestArtifact reports whether a file under the agent work dir is a build-time test
-// artifact (binary download, run output, scratch probe) rather than shipping agent source.
-// toolsDir is the absolute path to the agent's tools/ directory; it is used to detect
-// _-prefixed scratch probes that sit at the tools/ top level (real modules are plain-named
-// there; dunders like __init__.py and __main__.py are kept).
-func isTestArtifact(absPath, name, toolsDir string) bool {
+// IsTestArtifact reports whether a file under a build work dir is a build-time test
+// artifact (binary download, run output, scratch probe) rather than shipping source.
+// scriptRoot is the absolute path to the build's script directory (an agent's tools/, a
+// skill's scripts/); it is used to detect _-prefixed scratch probes that sit at that
+// directory's top level (real modules are plain-named there; dunders like __init__.py
+// and __main__.py are kept).
+func IsTestArtifact(absPath, name, scriptRoot string) bool {
 	// Binary downloads / saved emails — never shipping source.
 	artifactExts := map[string]bool{
 		".pdf": true, ".eml": true, ".msg": true,
@@ -88,12 +89,12 @@ func isTestArtifact(absPath, name, toolsDir string) bool {
 	if strings.HasSuffix(lower, ".out") || strings.HasSuffix(lower, ".err") || strings.HasSuffix(lower, ".log") {
 		return true
 	}
-	// _-prefixed scratch probes at tools/ top level. Real agent modules are plain-named;
-	// dunders (__init__.py, __main__.py) are legitimate.
+	// _-prefixed scratch probes at the script root's top level. Real modules are
+	// plain-named; dunders (__init__.py, __main__.py) are legitimate.
 	if strings.HasPrefix(name, "_") && !strings.HasPrefix(name, "__") {
-		td, err1 := filepath.Abs(toolsDir)
+		sr, err1 := filepath.Abs(scriptRoot)
 		parent, err2 := filepath.Abs(filepath.Dir(absPath))
-		if err1 == nil && err2 == nil && parent == td {
+		if err1 == nil && err2 == nil && parent == sr {
 			return true
 		}
 	}
@@ -130,7 +131,7 @@ func ReadToolsTree(toolsDir string) (map[string]string, error) {
 			return nil
 		}
 		// Skip test artifacts so they never corrupt the pending-tools map or trip guardrails.
-		if isTestArtifact(path, d.Name(), toolsDir) {
+		if IsTestArtifact(path, d.Name(), toolsDir) {
 			return nil
 		}
 		info, err := d.Info()

@@ -423,6 +423,97 @@ func TestZeroSpecDefaultsToAgent(t *testing.T) {
 Run: `go test ./internal/coder/ -run 'TestVerifyFinishNudge|TestSkillBuildSpec|TestZeroSpec' -count=1`
 Expected: FAIL — `undefined: SkillBuildSpec`, `unknown field spec`.
 
+- [ ] **Step 3a: Move the nudge text into `internal/prompts`**
+
+The nudges are text sent straight to the model, and the Global Constraints put all prompt
+text in `internal/prompts`. They live in `hosttools.go` today, so this fixes a standing
+violation rather than creating one; `internal/coder` already imports `internal/prompts`
+(for `APIEngineKickoffMessage`), so there is no new dependency.
+
+Add to `internal/prompts/prompts.go`:
+
+```go
+// ─── API build-gate nudges ───────────────────────────────────────────────────
+//
+// The API engine refuses to let a BUILD finish until it has produced its deliverable
+// and proven any helper script it wrote actually runs. These are the messages it feeds
+// back to the model to keep the loop going. deliverable is the file that must exist
+// ("AGENT.md" / "SKILL.md"); last is true on the final nudge, when the model must stop
+// iterating and finish.
+
+// BuildMissingDeliverableNudge is gate 1: the build has not produced its deliverable.
+func BuildMissingDeliverableNudge(deliverable string, last bool) string {
+	if deliverable == "SKILL.md" {
+		if last {
+			return "You still have not written SKILL.md — the skill itself — and you're out of attempts to keep " +
+				"iterating. Write SKILL.md NOW with write_file, at the ROOT of the current directory (not inside a " +
+				"sub-folder). It needs YAML frontmatter with name and description, then the markdown body that " +
+				"teaches an agent how to do the task. Then finish. Stop working on the scripts."
+		}
+		return "Before you finish: you have NOT written SKILL.md yet — the skill itself, which is the actual " +
+			"deliverable. Write it now with write_file, at the ROOT of the current directory (not inside a " +
+			"sub-folder named after the skill — that folder already exists). It needs YAML frontmatter with name " +
+			"and description, then the markdown body that teaches an agent how to do the task. Then finish."
+	}
+	if last {
+		return "You still have not written AGENT.md — the agent's instructions — and you're out of attempts to " +
+			"keep iterating. Write AGENT.md NOW with write_file (the agent's full instructions: what it does step " +
+			"by step, how it calls the helper and uses the result, the [CHAT] message it sends the user, and any " +
+			"schedule), then finish. Do NOT try to run or fix the helper script anymore — at build time it cannot " +
+			"reach the live service (outbound is blocked), so its empty output is expected, not a failure."
+	}
+	return "Before you finish: you wrote a helper script but you have NOT written AGENT.md yet — the agent's full " +
+		"instructions, which are the actual deliverable. Write AGENT.md now with write_file (what the agent does " +
+		"step by step, how it calls the helper and uses the result, the [CHAT] message it sends the user, and any " +
+		"schedule). Then finish. At build time the helper cannot reach the live service (outbound is blocked), so " +
+		"its empty output is EXPECTED — do not keep trying to run or fix it; write AGENT.md and finish."
+}
+
+// BuildUnverifiedScriptNudge is gate 2: an authored script has never returned output.
+// The two variants differ because an agent's helper fetches live data (blocked at build
+// time, so an empty result is expected), while a skill's script is a reusable tool that
+// should be smoke-tested with --help or a fixture.
+func BuildUnverifiedScriptNudge(deliverable string, last bool) string {
+	if deliverable == "SKILL.md" {
+		if last {
+			return "You have tried several times and the script still hasn't produced any output. Stop iterating " +
+				"and finish now. If the script works but simply needs real input you don't have at build time, say " +
+				"so plainly and finish. If it genuinely cannot work, emit a [BLOCKED] block explaining in plain, " +
+				"non-technical language what could not be done and suggest ONE alternative."
+		}
+		return "Before you finish: you wrote a script but it has not produced any output yet. A skill's script is a " +
+			"reusable tool, so smoke-test it the way it will actually be called — run it with `--help`, or against a " +
+			"small fixture file you create in the current directory — and read exactly what it prints. Fix any error " +
+			"and run it again. Do not ship a script you have never seen run. Never print, log, or return a secret value."
+	}
+	if last {
+		return "You have tried several times and the helper script still isn't returning real data. " +
+			"Stop trying to fix it now and finish. Choose the honest option:\n" +
+			"- If this genuinely cannot be done, emit a [BLOCKED] block explaining in PLAIN, NON-TECHNICAL " +
+			"language what could not be done (for example: \"I wasn't able to read your emails\") and suggest " +
+			"ONE alternative — no code, no file names, no technical terms.\n" +
+			"- If the empty result is actually CORRECT right now (there truly is nothing to report), say that " +
+			"plainly and finish normally.\n" +
+			"- Or, if you can accomplish the goal WITHOUT that script (doing the work yourself from data you can " +
+			"already obtain with a minimal fetch), do that now."
+	}
+	return "Before you finish: you wrote a helper script but it has not yet returned any real data. " +
+		"An empty result almost always means it is BROKEN — do not ship it. Run it (run_script), read exactly " +
+		"what it prints, and fix the cause (print the raw API response, check the field names, correct the " +
+		"logic), then run it again — repeat until it returns real data. For a SINGLE small result, keep the " +
+		"script THIN — load its secret from the environment, make the request, print the raw result — and do " +
+		"the parsing, decisions, and formatting YOURSELF from what it printed. But when the task processes MANY " +
+		"items or LARGE data (porting pages, exporting a dataset), do the OPPOSITE: have the script do the whole " +
+		"job — fetch AND write each destination file itself (it already has the paths) — and print only a short " +
+		"summary/manifest (counts + file paths), NEVER the full data. Routing a big payload through your reasoning " +
+		"gets truncated and burns the run. Never print, log, or return a secret value."
+}
+```
+
+The agent-variant strings above are copied verbatim from the current `verifyFinishNudge`
+in `hosttools.go`; agent-build behaviour must not change. Delete them from `hosttools.go`
+in Step 4.
+
 - [ ] **Step 3: Create the build spec**
 
 Create `internal/coder/buildspec.go`:
@@ -433,6 +524,8 @@ package coder
 import (
 	"path/filepath"
 	"strings"
+
+	"github.com/ilijad1/simple-agents/internal/prompts"
 )
 
 // BuildSpec describes what the current BUILD must produce, so the API engine's
@@ -467,41 +560,10 @@ var AgentBuildSpec = BuildSpec{
 	IsScript:     isAgentScriptPath,
 	ProgressNoun: "the agent's script",
 	MissingDeliverableNudge: func(last bool) string {
-		if last {
-			return "You still have not written AGENT.md — the agent's instructions — and you're out of attempts to " +
-				"keep iterating. Write AGENT.md NOW with write_file (the agent's full instructions: what it does step " +
-				"by step, how it calls the helper and uses the result, the [CHAT] message it sends the user, and any " +
-				"schedule), then finish. Do NOT try to run or fix the helper script anymore — at build time it cannot " +
-				"reach the live service (outbound is blocked), so its empty output is expected, not a failure."
-		}
-		return "Before you finish: you wrote a helper script but you have NOT written AGENT.md yet — the agent's full " +
-			"instructions, which are the actual deliverable. Write AGENT.md now with write_file (what the agent does " +
-			"step by step, how it calls the helper and uses the result, the [CHAT] message it sends the user, and any " +
-			"schedule). Then finish. At build time the helper cannot reach the live service (outbound is blocked), so " +
-			"its empty output is EXPECTED — do not keep trying to run or fix it; write AGENT.md and finish."
+		return prompts.BuildMissingDeliverableNudge("AGENT.md", last)
 	},
 	UnverifiedScriptNudge: func(last bool) string {
-		if last {
-			return "You have tried several times and the helper script still isn't returning real data. " +
-				"Stop trying to fix it now and finish. Choose the honest option:\n" +
-				"- If this genuinely cannot be done, emit a [BLOCKED] block explaining in PLAIN, NON-TECHNICAL " +
-				"language what could not be done (for example: \"I wasn't able to read your emails\") and suggest " +
-				"ONE alternative — no code, no file names, no technical terms.\n" +
-				"- If the empty result is actually CORRECT right now (there truly is nothing to report), say that " +
-				"plainly and finish normally.\n" +
-				"- Or, if you can accomplish the goal WITHOUT that script (doing the work yourself from data you can " +
-				"already obtain with a minimal fetch), do that now."
-		}
-		return "Before you finish: you wrote a helper script but it has not yet returned any real data. " +
-			"An empty result almost always means it is BROKEN — do not ship it. Run it (run_script), read exactly " +
-			"what it prints, and fix the cause (print the raw API response, check the field names, correct the " +
-			"logic), then run it again — repeat until it returns real data. For a SINGLE small result, keep the " +
-			"script THIN — load its secret from the environment, make the request, print the raw result — and do " +
-			"the parsing, decisions, and formatting YOURSELF from what it printed. But when the task processes MANY " +
-			"items or LARGE data (porting pages, exporting a dataset), do the OPPOSITE: have the script do the whole " +
-			"job — fetch AND write each destination file itself (it already has the paths) — and print only a short " +
-			"summary/manifest (counts + file paths), NEVER the full data. Routing a big payload through your reasoning " +
-			"gets truncated and burns the run. Never print, log, or return a secret value."
+		return prompts.BuildUnverifiedScriptNudge("AGENT.md", last)
 	},
 }
 
@@ -516,28 +578,10 @@ var SkillBuildSpec = BuildSpec{
 	IsScript:     isSkillScriptPath,
 	ProgressNoun: "the skill's script",
 	MissingDeliverableNudge: func(last bool) string {
-		if last {
-			return "You still have not written SKILL.md — the skill itself — and you're out of attempts to keep " +
-				"iterating. Write SKILL.md NOW with write_file, at the ROOT of the current directory (not inside a " +
-				"sub-folder). It needs YAML frontmatter with name and description, then the markdown body that " +
-				"teaches an agent how to do the task. Then finish. Stop working on the scripts."
-		}
-		return "Before you finish: you have NOT written SKILL.md yet — the skill itself, which is the actual " +
-			"deliverable. Write it now with write_file, at the ROOT of the current directory (not inside a " +
-			"sub-folder named after the skill — that folder already exists). It needs YAML frontmatter with name " +
-			"and description, then the markdown body that teaches an agent how to do the task. Then finish."
+		return prompts.BuildMissingDeliverableNudge("SKILL.md", last)
 	},
 	UnverifiedScriptNudge: func(last bool) string {
-		if last {
-			return "You have tried several times and the script still hasn't produced any output. Stop iterating " +
-				"and finish now. If the script works but simply needs real input you don't have at build time, say " +
-				"so plainly and finish. If it genuinely cannot work, emit a [BLOCKED] block explaining in plain, " +
-				"non-technical language what could not be done and suggest ONE alternative."
-		}
-		return "Before you finish: you wrote a script but it has not produced any output yet. A skill's script is a " +
-			"reusable tool, so smoke-test it the way it will actually be called — run it with `--help`, or against a " +
-			"small fixture file you create in the current directory — and read exactly what it prints. Fix any error " +
-			"and run it again. Do not ship a script you have never seen run. Never print, log, or return a secret value."
+		return prompts.BuildUnverifiedScriptNudge("SKILL.md", last)
 	},
 }
 
@@ -2070,6 +2114,12 @@ import (
 
 const skillsRoot = "skills"
 
+// minDescriptionLen is the shortest description that can plausibly state BOTH what a
+// skill does and the phrases that trigger it. Shorter than this and the skill is
+// effectively invisible to the designer and to SelectSkills, which match on exactly
+// this text. Raise a failing skill's description; do not lower this floor.
+const minDescriptionLen = 80
+
 // Every embedded core skill must parse, be self-consistent, and hold to the same bar as
 // a user-generated skill. This is the guard against the drift that shipped pdf/ and docx/
 // with a documented scripts/ directory that did not exist.
@@ -2099,8 +2149,9 @@ func TestCoreCatalogInvariants(t *testing.T) {
 			seen[meta.Name] = true
 
 			// A description is the trigger signal — a one-liner with no trigger phrases
-			// makes the skill invisible to both the designer and the selector.
-			require.GreaterOrEqual(t, len(meta.Description), 80,
+			// makes the skill invisible to both the designer and the selector. The floor
+			// is named rather than inline so the intent survives the next reader.
+			require.GreaterOrEqual(t, len(meta.Description), minDescriptionLen,
 				"description must state what the skill does AND when it triggers")
 
 			// Every scripts/ path the body references must exist.

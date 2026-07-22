@@ -38,33 +38,31 @@ func CheckEthics(code, _ string) error {
 	return checkEthicsDoc(code)
 }
 
-// RunFullGuardrails runs ethics + AST checks on free-form Python tool scripts (CODE), so it
-// applies the FULL keyword set (intent + destructive commands). The template marker check is
-// intentionally omitted — tool scripts in tools/ are plain helpers, not the old main.py
-// template format.
-func RunFullGuardrails(code, _ string) error {
+// RunFullGuardrails runs ethics + AST checks on free-form Python (CODE), so it applies
+// the FULL keyword set (intent + destructive commands). profile selects the AST rules
+// (see GuardrailProfile).
+func RunFullGuardrails(code string, profile GuardrailProfile) error {
 	if err := checkEthicsCode(code); err != nil {
 		return fmt.Errorf("ethics filter: %w", err)
 	}
 	if PythonAvailable() {
-		if err := checkAST(code); err != nil {
+		if err := checkAST(code, profile); err != nil {
 			return fmt.Errorf("ast check: %w", err)
 		}
 	}
 	return nil
 }
 
-// RunToolGuardrails runs guardrails on a single agent project FILE (tools/*.py,
-// requirements.txt, …) — all code/config, so it applies the full code-context ethics check
-// (intent + destructive commands) to EVERY file, and the Python AST check
-// only on .py files (parsing a non-Python file as Python would spuriously fail). This is the
-// guardrail used for multi-file agent projects.
-func RunToolGuardrails(filename, code string) error {
+// RunToolGuardrails runs guardrails on a single generated FILE (an agent's tools/*.py or
+// requirements.txt, a skill's scripts/*). All of it is code/config, so the full code-context
+// ethics check applies to EVERY file; the Python AST check applies only to .py files (parsing
+// a non-Python file as Python would spuriously fail). profile selects the AST rules.
+func RunToolGuardrails(filename, code string, profile GuardrailProfile) error {
 	if err := checkEthicsCode(code); err != nil {
 		return fmt.Errorf("ethics filter: %w", err)
 	}
 	if strings.HasSuffix(filename, ".py") && PythonAvailable() {
-		if err := checkAST(code); err != nil {
+		if err := checkAST(code, profile); err != nil {
 			return fmt.Errorf("ast check: %w", err)
 		}
 	}
@@ -106,8 +104,82 @@ func scanForbiddenKeywords(code string, list []string) error {
 	return nil
 }
 
-// astCheckScript is inlined Python that checks for forbidden AST nodes.
-const astCheckScript = `
+// GuardrailProfile selects which AST rules apply to a piece of generated Python.
+//
+// ProfileAgentTool is the historical behaviour for an agent's tools/*.py: no
+// subprocess at all, because an agent shells out through its coder's Bash tool
+// rather than from inside a helper script.
+//
+// ProfileSkillScript applies to a skill's scripts/. A skill's entire purpose can be
+// to drive an installed CLI tool (pdftotext, pandoc, tesseract), so list-form
+// subprocess is permitted. Shell-string execution stays banned in BOTH profiles:
+// os.system, os.popen and subprocess(..., shell=True) all evaluate a shell string,
+// which is the injection surface the ban exists for. Skills carry two defences an
+// agent tool does not — the skill-vetter LLM audit and the Landlock sandbox — which
+// is what makes the wider profile acceptable at this boundary and not the other.
+type GuardrailProfile int
+
+const (
+	ProfileAgentTool GuardrailProfile = iota
+	ProfileSkillScript
+)
+
+// astCheckBody is the AST checker used by RunFullGuardrails/RunToolGuardrails.
+//
+// What this is: a best-effort, deterministic filter against the obvious shapes an LLM
+// produces when it writes eval/exec/os.system/subprocess-with-a-shell-string code. It is
+// cheap, fast, and catches the overwhelming majority of what a coder actually generates.
+//
+// What this is NOT: a security boundary. It is a static pattern match over one parse of the
+// source, not a data-flow or taint analysis, and it can be defeated by anything that hides
+// the call shape from a simple AST walk.
+//
+// The known, NOT-fixed-here bypass is aliased imports, and it applies to SOME rules and not
+// others — which half matters, so be precise about it:
+//
+//   - Rules keyed on the RECEIVER's literal name are defeated by an alias. `import
+//     subprocess as sp; sp.run(['rm', '-rf', '/'])` escapes the outright subprocess ban and
+//     the `**` spread rule, both of which test `val == 'subprocess'`. Aliased
+//     `socket.socket()` escapes the socket ban the same way.
+//   - Rules keyed on the CALLED name are not. `import os as o; o.system('ls')` is still
+//     caught, because the os rule tests the attribute (`system`) rather than the receiver —
+//     as a side effect it also fires on any unrelated object's `.system()` method. The
+//     builtin bans (eval/exec/compile/__import__) and the `shell=` keyword rule are
+//     likewise receiver-agnostic, so an aliased `sp.run(..., shell=True)` IS caught by the
+//     shell rule even though the subprocess ban misses it.
+//
+// This is pre-existing and out of scope for this change; it is logged for triage. Do not
+// assume this checker stops an aliased subprocess or socket call.
+//
+// ** spread rule: a `**something` keyword (subprocess.run(['ls'], **something)) is an
+// ast.keyword node whose .arg is None — it doesn't name `shell` directly, so a per-call walk
+// can't see into it. Earlier rounds tried to resolve what's being spread (dict literals,
+// then single-assignment variables bound to a dict literal) so a benign spread could still
+// pass. That resolver kept growing to chase the next dataflow shape it missed — subscript
+// assignment (`kw['shell'] = True`), `.update()`, `.setdefault()`, forwarded `**kwargs`, a
+// value built in a different branch — an unbounded list, because arbitrary Python dataflow
+// isn't something a single-parse AST walk can decide in general. The rule here instead: when
+// ALLOW_SUBPROCESS is true (the skill profile — subprocess is otherwise already banned
+// outright under the agent profile, so this rule adds nothing there), ANY `**` spread into a
+// subprocess.* call is a violation, full stop, with no attempt to inspect what's inside it.
+// The checker cannot prove `shell` is absent from an opaque spread, so it doesn't guess.
+// Trade-off, deliberate: a skill that forwards `**kwargs` into subprocess.run (even a
+// perfectly benign one) is blocked and must pass explicit arguments instead — an uncommon
+// pattern in the small helper scripts skills ship, and the workaround is one line. Rejecting
+// a rare benign shape is worth more than a resolver that provably leaks on a common one
+// (subscript assignment / `.update()` both defeated the old resolver outright). This rule
+// is scoped to `subprocess.*` only — `os.*` spreads are untouched, so a benign call like
+// `os.makedirs(path, **kwargs)` is unaffected under either profile.
+//
+// The actual enforcement boundaries are (a) the Landlock sandbox every coder subprocess runs
+// under (internal/sandbox — confines the filesystem regardless of what the script does), and
+// (b) for skills specifically, the skill-vetter LLM audit (internal/skilldesigner) that reads
+// the whole script for intent, not just syntax shapes. Treat this AST check as a cheap first
+// filter that raises the bar for a lazy/naive generation, not as the thing standing between a
+// malicious script and the host.
+//
+// ALLOW_SUBPROCESS is prepended by astCheckScript.
+const astCheckBody = `
 import ast, sys
 
 code = sys.stdin.read()
@@ -127,13 +199,31 @@ class Checker(ast.NodeVisitor):
     def visit_Call(self, node):
         if isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN_NAMES:
             violations.append(f"forbidden call: {node.func.id}()")
+
+        is_subprocess_call = (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == 'subprocess'
+        )
+
+        # shell=<anything but literal False> evaluates a shell string in ANY profile — same
+        # surface as os.system. subprocess treats shell= by truthiness, not identity, so
+        # shell=1, shell=<a variable>, shell=(1==1) etc. are all equally dangerous; only a
+        # provably-False literal (or omitting shell entirely) is safe.
+        for kw in node.keywords:
+            if kw.arg == 'shell':
+                if not (isinstance(kw.value, ast.Constant) and kw.value.value is False):
+                    violations.append("forbidden: shell=<non-False>")
+            elif kw.arg is None and ALLOW_SUBPROCESS and is_subprocess_call:
+                violations.append("forbidden: ** spread into subprocess call (cannot verify shell= is absent)")
+
         if isinstance(node.func, ast.Attribute):
             attr = node.func.attr
             if attr in FORBIDDEN_OS_ATTRS:
                 violations.append(f"forbidden: os.{attr}()")
             if isinstance(node.func.value, ast.Name):
                 val = node.func.value.id
-                if val == 'subprocess':
+                if val == 'subprocess' and not ALLOW_SUBPROCESS:
                     violations.append(f"forbidden: subprocess.{attr}()")
                 if val == 'socket' and attr == 'socket':
                     violations.append(f"forbidden: socket.socket()")
@@ -146,8 +236,16 @@ if violations:
 sys.exit(0)
 `
 
-func checkAST(code string) error {
-	cmd := exec.Command("python3", "-c", astCheckScript)
+func astCheckScript(p GuardrailProfile) string {
+	allow := "False"
+	if p == ProfileSkillScript {
+		allow = "True"
+	}
+	return "ALLOW_SUBPROCESS = " + allow + "\n" + astCheckBody
+}
+
+func checkAST(code string, p GuardrailProfile) error {
+	cmd := exec.Command("python3", "-c", astCheckScript(p))
 	cmd.Stdin = strings.NewReader(code)
 	var out bytes.Buffer
 	cmd.Stdout = &out

@@ -24,7 +24,7 @@ metadata:
 
 Drive a real headless browser with `playwright` to read JavaScript-rendered
 pages, click through flows, fill forms, and capture screenshots. Use this when
-the `web-scraper` skill returns empty/missing content (the page renders client-side).
+the `web-research` skill returns empty/missing content (the page renders client-side).
 
 ## Requirements
 
