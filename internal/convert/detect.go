@@ -47,11 +47,8 @@ func detectMagic(data []byte) Kind {
 		bytes.HasPrefix(data, []byte("BM")):
 		return KindImage
 	}
-	if len(data) > 12 && bytes.HasPrefix(data, []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WEBP")) {
+	if len(data) >= 12 && bytes.HasPrefix(data, []byte("RIFF")) && bytes.Equal(data[8:12], []byte("WEBP")) {
 		return KindImage
-	}
-	if looksHTML(data) {
-		return KindHTML
 	}
 	return KindUnknown
 }

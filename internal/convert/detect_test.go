@@ -24,6 +24,13 @@ func TestDetect(t *testing.T) {
 		{"jpeg by magic", []byte("\xff\xd8\xff\xe0"), "", "", KindImage},
 		{"plain text default", []byte("just some words"), "", "", KindText},
 		{"empty is unknown", nil, "", "", KindUnknown},
+		// looksHTML must stay a low-priority fallback below extension/MIME, not a
+		// magic-byte check: a markdown file whose body happens to start with
+		// "<html" must still detect as markdown.
+		{"extension beats html-looking body", []byte("<html>not really</html>"), "notes.md", "", KindMarkdown},
+		// Pins magic-beats-MIME, not just magic-beats-extension: real magic bytes
+		// must win even against a conflicting non-empty MIME.
+		{"pdf magic beats wrong mime", []byte("%PDF-1.7\n..."), "", "text/plain", KindPDF},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
