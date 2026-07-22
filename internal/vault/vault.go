@@ -30,7 +30,6 @@ package vault
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -233,15 +232,6 @@ func (v *Vault) Rename(workspaceID, fromRel, toRel string) error {
 	return os.Rename(from, to)
 }
 
-// kbManifestExcluded are top-level vault dirs omitted from the note manifest
-// shown to the agent designer: they are system-managed or already represented
-// elsewhere in the design context (memory contents are injected separately,
-// skills are listed as Skills, the rest is reflected from the database).
-var kbManifestExcluded = map[string]bool{
-	InternalDir: true, "agents": true, "chats": true,
-	"memory": true, "skills": true, "reminders": true, "inbox": true,
-}
-
 // topSegment returns the first slash-separated segment of a vault-relative path.
 func topSegment(rel string) string {
 	rel = filepath.ToSlash(rel)
@@ -249,43 +239,6 @@ func topSegment(rel string) string {
 		return rel[:i]
 	}
 	return rel
-}
-
-// NotePaths returns the vault-relative paths of the user's markdown notes —
-// everything under notes/ plus any folders/files the user created — so callers
-// (e.g. the agent designer) can show what knowledge already exists.
-// System-managed and already-injected dirs (.kb, agents, chats, memory, skills,
-// reminders) are skipped. The result is capped and sorted.
-func (v *Vault) NotePaths(workspaceID string) []string {
-	root := v.Root(workspaceID)
-	if root == "" {
-		return nil
-	}
-	var paths []string
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		rel, err := v.Rel(workspaceID, path)
-		if err != nil || rel == "." {
-			return nil
-		}
-		if d.IsDir() {
-			if kbManifestExcluded[topSegment(rel)] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(rel, ".md") {
-			return nil
-		}
-		if len(paths) < 60 {
-			paths = append(paths, rel)
-		}
-		return nil
-	})
-	sort.Strings(paths)
-	return paths
 }
 
 // Node is one entry in the vault file tree.

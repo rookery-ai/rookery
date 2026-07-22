@@ -136,12 +136,12 @@ func (s *Server) apiSaveKBOrder(c echo.Context) error {
 }
 
 // kbSystemDirs are the top-level vault directories that are system-managed
-// (reflected from the DB or otherwise not user-authored knowledge), mirroring
-// internal/vault's kbManifestExcluded set (minus .kb, which vault.List never
-// surfaces at all). The template browser has no explicit "system" flag of its
-// own — it just relies on enrichKBDisplayNames to give these dirs friendlier
-// labels — so this is this endpoint's own derivation: a root-level node whose
-// name is one of these is marked system:true.
+// (reflected from the DB or otherwise not user-authored knowledge), minus
+// .kb, which vault.List never surfaces at all. The template browser has no
+// explicit "system" flag of its own — it just relies on enrichKBDisplayNames
+// to give these dirs friendlier labels — so this is this endpoint's own
+// derivation: a root-level node whose name is one of these is marked
+// system:true.
 var kbSystemDirs = map[string]bool{
 	"agents": true, "chats": true, "memory": true,
 	"skills": true, "reminders": true, "inbox": true,

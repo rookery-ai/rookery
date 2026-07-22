@@ -232,7 +232,7 @@ func serveCmd() *cli.Command {
 					svc := secrets.New(database, workspaceID, masterPw, user.SecretsSalt)
 					return svc.GetAll(ctx)
 				}).
-				WithKBLister(vlt)
+				WithVault(vlt)
 			skillStore := skillstore.New(database, skillsDir)
 
 			runner := agentrunner.New(database, sysKey, agentsDir, homesDir, cfg.Data.Dir, coderSvc, skillsDir).
@@ -269,7 +269,7 @@ func serveCmd() *cli.Command {
 					svc := secrets.New(database, workspaceID, masterPw, user.SecretsSalt)
 					return svc.GetAll(ctx)
 				}).
-				WithKBLister(vlt)
+				WithVault(vlt)
 
 			vaultSearcher := vlt.NewSearcher()
 

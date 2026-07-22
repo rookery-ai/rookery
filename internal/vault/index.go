@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"fmt"
 	"io/fs"
 	"math"
 	"os"
@@ -484,6 +485,94 @@ func termFreq(terms []string) map[string]int {
 }
 
 func sortedKeys(m map[string]*fileEntry) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// FolderSummary describes the shape of a workspace's knowledge base: which
+// folders exist, how many files each holds, and which kinds. It replaces the
+// old exhaustive path list (vault.NotePaths), which capped at 60 files in walk
+// order and rendered the first 30 — so in a 153-note vault, 123 notes were
+// invisible and the visible 30 were arbitrary. A summary is bounded by folder
+// count rather than file count, so it stays honest as the vault grows.
+func (v *Vault) FolderSummary(workspaceID string) string {
+	root := v.Root(workspaceID)
+	if root == "" {
+		return ""
+	}
+	type folderStat struct {
+		count int
+		exts  map[string]int
+	}
+	folders := map[string]*folderStat{}
+
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if d.Name() == InternalDir {
+				return filepath.SkipDir
+			}
+			if path != root && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return nil
+		}
+		rel, relErr := v.Rel(workspaceID, path)
+		if relErr != nil {
+			return nil
+		}
+		dir := filepath.ToSlash(filepath.Dir(rel))
+		if dir == "." {
+			dir = "(root)"
+		}
+		stat, ok := folders[dir]
+		if !ok {
+			stat = &folderStat{exts: map[string]int{}}
+			folders[dir] = stat
+		}
+		stat.count++
+		ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(rel), "."))
+		if ext == "" {
+			ext = "no extension"
+		}
+		stat.exts[ext]++
+		return nil
+	})
+
+	if len(folders) == 0 {
+		return "The knowledge base is empty."
+	}
+	var sb strings.Builder
+	for _, dir := range sortedFolderNames(folders) {
+		f := folders[dir]
+		kinds := make([]string, 0, len(f.exts))
+		for _, ext := range sortedExtNames(f.exts) {
+			kinds = append(kinds, fmt.Sprintf("%s×%d", ext, f.exts[ext]))
+		}
+		fmt.Fprintf(&sb, "- %s/ — %d files (%s)\n", dir, f.count, strings.Join(kinds, ", "))
+	}
+	return sb.String()
+}
+
+func sortedFolderNames[T any](m map[string]T) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func sortedExtNames(m map[string]int) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
