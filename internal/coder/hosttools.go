@@ -710,21 +710,25 @@ const maxGlobMatches = 200
 // maxRankedChunks bounds how many ranked passages search_files returns.
 const maxRankedChunks = 10
 
-// exactSectionBudgetNum/Den express, as an integer ratio, the share of
-// maxToolResult the exact-match section may consume WHEN both sections have
-// content to contribute (2/5 = 40%). Without a budget of its own, a query that
-// hits dozens of near-identical notes (a common literal phrase repeated across a
-// vault) can fill the entire maxToolResult cap with exact lines before the
-// ranked section ever gets a byte — silently dropping the BM25 hits this tool
-// exists to surface (a note about "dentist" that says "orthodontist" never
-// reaches the model). 40% is a starting point, not a tuned constant: exact lines
-// are short (ripgrep snippets are capped at 200 chars, see trimSnippet), so 40%
-// still fits dozens of them, while reserving a majority of the cap for ranked
-// passages — the harder-to-replace signal, and the reason search_files does BM25
-// retrieval at all. When one section has nothing to contribute, the other gets
-// the FULL cap rather than wasting the reserved share (see searchFiles below).
-// Expressed as an integer ratio (not a float constant) so it can be used in a
-// constant integer expression without Go's constant-truncation restriction.
+// exactSectionBudgetNum/Den express, as an integer ratio, the CEILING on the
+// share of maxToolResult the exact-match section may consume WHEN both
+// sections have content to contribute (2/5 = 40%). Without a cap of its own, a
+// query that hits dozens of near-identical notes (a common literal phrase
+// repeated across a vault) can fill the entire maxToolResult cap with exact
+// lines before the ranked section ever gets a byte — silently dropping the
+// BM25 hits this tool exists to surface (a note about "dentist" that says
+// "orthodontist" never reaches the model). 40% is a starting point, not a
+// tuned constant: exact lines are short (ripgrep snippets are capped at 200
+// chars, see trimSnippet), so 40% still fits dozens of them, while reserving a
+// majority of the cap for ranked passages — the harder-to-replace signal, and
+// the reason search_files does BM25 retrieval at all. This is a CEILING, not a
+// fixed split: the ranked section afterward gets whatever the exact section
+// ACTUALLY used (see searchFiles below), not a complementary fixed share — an
+// exact section with only a few short hits must not cap ranked at a fixed 60%
+// and waste the rest of the budget. When one section has nothing to
+// contribute, the other gets the FULL cap. Expressed as an integer ratio (not
+// a float constant) so it can be used in a constant integer expression
+// without Go's constant-truncation restriction.
 const (
 	exactSectionBudgetNum = 2
 	exactSectionBudgetDen = 5
@@ -786,13 +790,12 @@ func (h *hostToolSet) searchFiles(ctx context.Context, query string) (string, er
 		}
 	}
 
-	// Split the cap between the two sections only when both have content —
-	// otherwise the one that does gets the full cap rather than wasting the
-	// share reserved for an empty section.
-	exactBudget, rankedBudget := maxToolResult, maxToolResult
+	// The exact section is capped at its share only when both sections have
+	// content — otherwise it gets the full budget rather than being trimmed
+	// for a ranked section that has nothing to show anyway.
+	exactBudget := maxToolResult
 	if len(hits) > 0 && len(nonEmptyRanked) > 0 {
 		exactBudget = maxToolResult * exactSectionBudgetNum / exactSectionBudgetDen
-		rankedBudget = maxToolResult - exactBudget
 	}
 
 	var exactSB strings.Builder
@@ -814,6 +817,16 @@ func (h *hostToolSet) searchFiles(ctx context.Context, query string) (string, er
 		if omitted > 0 {
 			fmt.Fprintf(&exactSB, "…and %d more exact matches (omitted to leave room for ranked passages)\n", omitted)
 		}
+	}
+
+	// The ranked section gets whatever the exact section ACTUALLY used, not
+	// its reserved share — an exact section with only a few short hits (well
+	// under 40%) must not cap ranked at a fixed 60% and waste the rest of the
+	// cap, and a full exact section must not leave ranked room to write a
+	// passage that the final combined string would then have to cut mid-body.
+	rankedBudget := maxToolResult - exactSB.Len()
+	if exactSB.Len() > 0 {
+		rankedBudget-- // the "\n" separator joining the two sections, added below
 	}
 
 	var rankedSB strings.Builder

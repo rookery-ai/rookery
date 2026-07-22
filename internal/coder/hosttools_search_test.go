@@ -457,6 +457,66 @@ func TestSearchFilesEmptySectionGetsFullBudget(t *testing.T) {
 	}
 }
 
+// TestSearchFilesRankedGetsTrueRemainderNotFixedShare: when the exact section
+// is SMALL (well under its 40% ceiling), the ranked section must get the
+// actual leftover budget, not be capped at a fixed 60% share — otherwise a
+// query with just a couple of short exact hits would still waste a big chunk
+// of the cap even though ranked passages exist to fill it.
+func TestSearchFilesRankedGetsTrueRemainderNotFixedShare(t *testing.T) {
+	v := vault.New(t.TempDir())
+	const ws = "ws1"
+	if err := v.EnsureScaffold(ws); err != nil {
+		t.Fatalf("scaffold: %v", err)
+	}
+	const query = "xqshort7 widgetreport"
+
+	// Two SHORT exact hits: the exact section this produces is tiny (well
+	// under its 40% ceiling of maxToolResult).
+	for i := 0; i < 2; i++ {
+		rel := fmt.Sprintf("notes/short%d.md", i)
+		body := fmt.Sprintf("# Ref %d\n\nRef: %s done.\n", i, query)
+		if err := v.WriteNote(ws, rel, []byte(body)); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	// Six LARGE, distinct ranked-only notes (never contain "xqshort7", so
+	// they're not exact hits) — each padded to near the 1500-byte hard chunk
+	// bound, with "widgetreport" in the heading for a strong BM25 signal.
+	// Combined (~8400 bytes) comfortably exceeds BOTH a fixed 60% share
+	// (~4916 bytes, ~3 passages) and the true remainder after two tiny exact
+	// hits (~8000+ bytes, ~5-6 passages) — so this only distinguishes the two
+	// schemes if the true-remainder one lets noticeably more through.
+	filler := strings.Repeat("padding content unrelated to the query terms themselves and here only to reach the target chunk size for this fixture note. ", 10)
+	for i := 0; i < 6; i++ {
+		rel := fmt.Sprintf("notes/big%d.md", i)
+		body := fmt.Sprintf("# Widgetreport %d\n\n%s widgetreport widgetreport widgetreport\n", i, filler)
+		if err := v.WriteNote(ws, rel, []byte(body)); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws)}
+	out, err := h.searchFiles(context.Background(), query)
+	if err != nil {
+		t.Fatalf("searchFiles: %v", err)
+	}
+	if len(out) > maxToolResult {
+		t.Fatalf("result must stay within the tool result cap (%d bytes); got %d", maxToolResult, len(out))
+	}
+
+	rankedIdx := strings.Index(out, "Related passages:")
+	if rankedIdx < 0 {
+		t.Fatalf("expected a ranked section, got:\n%s", out)
+	}
+	rankedBytes := len(out) - rankedIdx
+	fixedShare := maxToolResult * 3 / 5 // the old (rejected) fixed-60% scheme
+	if rankedBytes <= fixedShare {
+		t.Errorf("ranked section (%d bytes) should exceed the old fixed 60%% share (%d bytes) "+
+			"when the exact section is small — got:\n%s", rankedBytes, fixedShare, out)
+	}
+}
+
 // ── exact-search error degradation (no longer silently swallowed) ──────────
 
 // erroringSearcher always fails, simulating a broken ripgrep/subprocess.
