@@ -367,6 +367,21 @@ func isMostlyText(data []byte) bool {
 	return ctrl*100 <= len(head)
 }
 
+// IsTextual reports whether a body should be handed to a caller as plain text
+// when no converter applies: a declared textual MIME type, or bytes that decode
+// as text. Exported because web_fetch needs exactly this fallback decision.
+func IsTextual(data []byte, mime string) bool {
+	switch kindFromMIME(mime) {
+	case KindText, KindJSON, KindCSV, KindTSV, KindMarkdown, KindHTML:
+		return true
+	}
+	m := strings.ToLower(mime)
+	if strings.Contains(m, "xml") || strings.Contains(m, "javascript") {
+		return true
+	}
+	return isMostlyText(data)
+}
+
 // normalizeText makes line endings uniform and trims trailing whitespace so
 // converted output is byte-stable across sources.
 func normalizeText(s string) string {
@@ -1981,6 +1996,25 @@ func TestWebFetchBlocksPrivateAddressByDefault(t *testing.T) {
 	}
 }
 
+// A JSON API response is web_fetch's most common target and its own tool-
+// description example. It must survive Phase 1, where no JSON converter exists.
+func TestWebFetchJSONPassesThrough(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"current":{"temperature_2m":24.1}}`))
+	}))
+	defer srv.Close()
+
+	h := &hostToolSet{includeExecTools: true, webRetryBase: time.Millisecond, allowPrivateHosts: true}
+	out, err := h.webFetch(context.Background(), srv.URL, "GET", nil, "")
+	if err != nil {
+		t.Fatalf("webFetch: %v", err)
+	}
+	if !strings.Contains(out, `"temperature_2m":24.1`) {
+		t.Errorf("json body must pass through verbatim, got:\n%s", out)
+	}
+}
+
 func TestWebFetchPDFIsConverted(t *testing.T) {
 	// Phase 1 has no PDF converter yet, so a PDF must fail LOUDLY with a clear
 	// message rather than returning the old "[not text]" dead end silently.
@@ -2097,6 +2131,15 @@ func renderWebBody(contentType, sourceURL string, data []byte) string {
 	res, err := convert.ToMarkdown(data, convert.Options{MIME: contentType, SourceURL: sourceURL})
 	if err == nil && strings.TrimSpace(res.Markdown) != "" {
 		return res.Markdown
+	}
+	// convert could not handle this type. If the body is textual, hand it back
+	// AS-IS rather than discarding it: a JSON API response is the single most
+	// common web_fetch target, and returning "no text could be extracted" for
+	// one would be a regression. This branch also keeps Phase 1 shippable on
+	// its own — the JSON/CSV/PDF converters land in Phase 2, and until they do
+	// every textual body still flows through here unchanged.
+	if convert.IsTextual(data, contentType) {
+		return string(data)
 	}
 	kind := convert.Detect(data, "", contentType)
 	return fmt.Sprintf("[web_fetch: %s response (%s), %d bytes — no text could be extracted; if you need to process it, use run_script or bash]",
@@ -3540,11 +3583,16 @@ Expected: FAIL — `undefined: pdftotextPath`.
 - [ ] **Step 4: Add the PDF dependency**
 
 ```bash
-go get github.com/ledongthuc/pdf@v0.0.0-20240201131950-da5b75280b06
+go get github.com/ledongthuc/pdf@latest
 CGO_ENABLED=0 go build ./...
 ```
 
-Expected: module added; build succeeds with CGo disabled.
+Expected: module added; build succeeds with CGo disabled. Let the toolchain
+resolve the version — do not hand-write a pseudo-version. Confirm it is pure Go:
+
+```bash
+go list -deps github.com/ledongthuc/pdf | grep -c "^C$" || echo "no cgo"
+```
 
 - [ ] **Step 5: Write the converter**
 
@@ -5736,12 +5784,19 @@ func (i *Indexer) Search(workspaceID, query string, limit int) []Scored {
 
 	i.mu.Lock()
 	idx := i.refresh(workspaceID)
-	// Copy the slices we score against so scoring happens outside the lock.
-	chunks, df, avgLen, n := idx.chunks, idx.df, idx.avgLen, len(idx.chunks)
+	// Snapshot under the lock. `chunks := idx.chunks` would NOT be safe: a slice
+	// header shares its backing array, and recompute() re-appends into that same
+	// array — so a concurrent refresh (a scheduled run calling search_files while
+	// a design turn retrieves) would tear reads out from under the scorer.
+	// recompute() also allocates a fresh slice for the same reason.
+	n := len(idx.chunks)
+	chunks := make([]Chunk, n)
+	copy(chunks, idx.chunks)
 	tf := make([]map[string]int, 0, n)
 	for _, path := range sortedKeys(idx.files) {
 		tf = append(tf, idx.files[path].terms...)
 	}
+	df, avgLen := idx.df, idx.avgLen
 	i.mu.Unlock()
 
 	if n == 0 || len(tf) != n {
@@ -5876,7 +5931,9 @@ func (i *Indexer) buildEntry(abs, rel string, modTime, size int64) *fileEntry {
 
 // recompute rebuilds corpus-wide statistics from the per-file caches.
 func (idx *wsIndex) recompute() {
-	idx.chunks = idx.chunks[:0]
+	// A FRESH slice, never idx.chunks[:0] — a reader may still be scoring the
+	// old backing array (see the snapshot comment in Search).
+	idx.chunks = make([]Chunk, 0, len(idx.chunks))
 	idx.df = map[string]int{}
 	total := 0
 	for _, path := range sortedKeys(idx.files) {
@@ -5994,7 +6051,36 @@ Add `"sync"` to that file's imports.
 Run: `go test ./internal/vault/ -run TestIndex -v`
 Expected: PASS — all nine tests.
 
-- [ ] **Step 6: Verify the cost claim**
+- [ ] **Step 6: Verify there is no data race**
+
+Add to `internal/vault/index_test.go`:
+
+```go
+// The designer retrieves on every turn while a scheduled run can call
+// search_files concurrently — same workspace, same Vault, same Indexer.
+func TestIndexConcurrentSearchAndWrite(t *testing.T) {
+	v, ws := seedVault(t)
+	idx := v.Indexer()
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); idx.Search(ws, "booked flights", 5) }()
+	}
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			v.WriteNote(ws, fmt.Sprintf("notes/conc%d.md", n), []byte("# C\n\nbooked something\n"))
+		}(i)
+	}
+	wg.Wait()
+}
+```
+
+Run: `go test ./internal/vault/ -run TestIndexConcurrent -race -count=3 -v`
+Expected: PASS with no `DATA RACE` report. Add `"sync"` and `"fmt"` to the test imports.
+
+- [ ] **Step 7: Verify the cost claim**
 
 Add a benchmark to `internal/vault/index_test.go`:
 
@@ -6019,7 +6105,7 @@ func BenchmarkIndexSearchWarm(b *testing.B) {
 Run: `go test ./internal/vault/ -run XXX -bench BenchmarkIndexSearchWarm -benchtime 20x`
 Expected: a warm search over 200 notes completes in single-digit milliseconds. If it is materially slower, the revalidation walk is doing work it should be caching — fix that before wiring the designer, which calls this every turn.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add internal/vault/index.go internal/vault/index_test.go internal/vault/vault.go
