@@ -15,9 +15,11 @@ import (
 )
 
 // newWebToolSet builds a minimal hostToolSet wired for web_fetch tests: exec tools
-// enabled and a tiny retry base so transient-retry tests don't sleep for real.
+// enabled, a tiny retry base so transient-retry tests don't sleep for real, and the
+// private-address guard disabled — every test in this file serves fixtures from an
+// httptest server bound to 127.0.0.1, which the guard would otherwise refuse to dial.
 func newWebToolSet() *hostToolSet {
-	return &hostToolSet{includeExecTools: true, webRetryBase: time.Millisecond}
+	return &hostToolSet{includeExecTools: true, webRetryBase: time.Millisecond, allowPrivateHosts: true}
 }
 
 func webCall(url string) llm.ToolCall {
@@ -44,8 +46,12 @@ func TestWebFetchReturnsBody(t *testing.T) {
 	}
 }
 
-// TestWebFetchStripsHTML: an HTML page returns readable text with <script>/<style>
-// content and tags removed and entities unescaped.
+// TestWebFetchStripsHTML: an HTML page is now rendered as MARKDOWN (via
+// internal/convert), not the old regex-stripped single line of plain text — so
+// this asserts the markdown-specific shape (a "# " heading marker, block
+// separation) rather than a substring the old plain-text output would also
+// satisfy. <script>/<style> content is dropped as page chrome and entities are
+// unescaped by the real HTML parser.
 func TestWebFetchStripsHTML(t *testing.T) {
 	html := `<html><head><style>.x{color:red}</style>` +
 		`<script>var evil="DO_NOT_SHOW";</script></head>` +
@@ -58,7 +64,10 @@ func TestWebFetchStripsHTML(t *testing.T) {
 
 	h := newWebToolSet()
 	res := h.execute(context.Background(), webCall(srv.URL))
-	if !strings.Contains(res, "Weather") || !strings.Contains(res, "Skopje") {
+	if !strings.Contains(res, "# Weather") {
+		t.Fatalf("the <h1> should render as a markdown heading (not just bare text, which the old plain-text output would also satisfy); got: %q", res)
+	}
+	if !strings.Contains(res, "Skopje") {
 		t.Fatalf("stripped HTML should keep visible text; got: %q", res)
 	}
 	if strings.Contains(res, "DO_NOT_SHOW") || strings.Contains(res, "color:red") {
@@ -360,5 +369,96 @@ func TestWebSearchOfferedWhenExec(t *testing.T) {
 	h := &hostToolSet{includeExecTools: true}
 	if _, ok := findTool(h.tools(), "web_search"); !ok {
 		t.Fatal("web_search must be offered when exec tools are on")
+	}
+}
+
+func TestWebFetchRendersHTMLAsMarkdown(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte(`<html><body><nav>Menu</nav><main><h1>Title</h1>
+			<p>Body text with <a href="https://example.com/x">a link</a>.</p></main>
+			<footer>Legal</footer></body></html>`))
+	}))
+	defer srv.Close()
+
+	h := &hostToolSet{includeExecTools: true, webRetryBase: time.Millisecond, allowPrivateHosts: true}
+	out, err := h.webFetch(context.Background(), srv.URL, "GET", nil, "")
+	if err != nil {
+		t.Fatalf("webFetch: %v", err)
+	}
+	if !strings.Contains(out, "# Title") {
+		t.Errorf("expected a markdown heading, got:\n%s", out)
+	}
+	if !strings.Contains(out, "[a link](https://example.com/x)") {
+		t.Errorf("expected the link preserved as markdown, got:\n%s", out)
+	}
+	if strings.Contains(out, "Menu") || strings.Contains(out, "Legal") {
+		t.Errorf("page chrome should be dropped, got:\n%s", out)
+	}
+}
+
+func TestWebFetchMemoizesWithinToolset(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Write([]byte("hello"))
+	}))
+	defer srv.Close()
+
+	h := &hostToolSet{includeExecTools: true, webRetryBase: time.Millisecond, allowPrivateHosts: true}
+	for i := 0; i < 3; i++ {
+		if _, err := h.webFetch(context.Background(), srv.URL, "GET", nil, ""); err != nil {
+			t.Fatalf("webFetch %d: %v", i, err)
+		}
+	}
+	if calls != 1 {
+		t.Errorf("identical GETs in one toolset should hit the network once, saw %d", calls)
+	}
+}
+
+func TestWebFetchBlocksPrivateAddressByDefault(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("bridge secrets"))
+	}))
+	defer srv.Close()
+
+	h := &hostToolSet{includeExecTools: true, webRetryBase: time.Millisecond} // guard ON
+	if _, err := h.webFetch(context.Background(), srv.URL, "GET", nil, ""); err == nil {
+		t.Fatal("web_fetch must not reach a loopback address")
+	}
+}
+
+// A JSON API response is web_fetch's most common target and its own tool-
+// description example. It must survive Phase 1, where no JSON converter exists.
+func TestWebFetchJSONPassesThrough(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"current":{"temperature_2m":24.1}}`))
+	}))
+	defer srv.Close()
+
+	h := &hostToolSet{includeExecTools: true, webRetryBase: time.Millisecond, allowPrivateHosts: true}
+	out, err := h.webFetch(context.Background(), srv.URL, "GET", nil, "")
+	if err != nil {
+		t.Fatalf("webFetch: %v", err)
+	}
+	if !strings.Contains(out, `"temperature_2m":24.1`) {
+		t.Errorf("json body must pass through verbatim, got:\n%s", out)
+	}
+}
+
+func TestWebFetchPDFIsConverted(t *testing.T) {
+	// Phase 1 has no PDF converter yet, so a PDF must fail LOUDLY with a clear
+	// message rather than returning the old "[not text]" dead end silently.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Write([]byte("%PDF-1.7\nnot a real pdf"))
+	}))
+	defer srv.Close()
+
+	h := &hostToolSet{includeExecTools: true, webRetryBase: time.Millisecond, allowPrivateHosts: true}
+	out, err := h.webFetch(context.Background(), srv.URL, "GET", nil, "")
+	if err == nil && !strings.Contains(out, "pdf") {
+		t.Errorf("a pdf response should mention the format either way, got err=%v out=%q", err, out)
 	}
 }

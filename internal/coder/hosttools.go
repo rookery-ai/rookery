@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -19,9 +18,11 @@ import (
 	"time"
 
 	"github.com/ilijad1/simple-agents/internal/connectors"
+	"github.com/ilijad1/simple-agents/internal/convert"
 	"github.com/ilijad1/simple-agents/internal/llm"
 	"github.com/ilijad1/simple-agents/internal/sandbox"
 	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/simple-agents/internal/websearch"
 )
 
 // maxToolResult is the per-result byte cap injected back into the model context.
@@ -53,11 +54,23 @@ type hostToolSet struct {
 	httpClient   *http.Client  // nil → a default 30s client
 	webRetryBase time.Duration // 0 → default base backoff for transient (429/5xx/network) retries
 
-	// web_search: the DuckDuckGo HTML endpoint base. Empty → the production endpoint.
-	// Injected by tests (pointed at an httptest server) so the scraper is exercised without
-	// the network; web_search shares httpClient/webRetryBase with web_fetch for the same
-	// transient-retry semantics.
+	// ddgBaseURL, when set, overrides the search endpoint AND collapses the
+	// provider cascade to that single endpoint. Tests point it at an httptest
+	// server so the scraper is exercised deterministically and offline; in
+	// production it is empty and the full cascade (see websearch.DefaultProviders)
+	// applies.
 	ddgBaseURL string
+
+	// allowPrivateHosts disables web_fetch's private-address guard. It exists
+	// ONLY for tests, which serve fixtures from httptest servers bound to
+	// 127.0.0.1. It is never set in production: the guard is what stops a chat
+	// coder from reaching the loopback connector bridge and its bearer tokens.
+	allowPrivateHosts bool
+
+	// fetchMemo caches web_fetch results within this toolset (one run/loop).
+	// A weak model re-fetches the same URL repeatedly; the memo makes that free
+	// and bounded, with no cross-run invalidation problem to get wrong.
+	fetchMemo map[string]string
 
 	// Build-time script verification. verifyBuild is set ONLY during agent generation
 	// (SA_BUILD_PHASE=generation) on the API/tool-calling backend — the weaker-model path
@@ -957,9 +970,26 @@ func (h *hostToolSet) webFetch(ctx context.Context, rawURL, method string, heade
 	if method == "" {
 		method = http.MethodGet
 	}
+
+	// Memo: an identical GET within one toolset costs one request.
+	memoKey := method + " " + u.String() + " " + body
+	if h.fetchMemo == nil {
+		h.fetchMemo = map[string]string{}
+	}
+	if cached, ok := h.fetchMemo[memoKey]; ok {
+		return cached, nil
+	}
+
 	client := h.httpClient
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		// The guarded client refuses to dial private/loopback/link-local space,
+		// enforced at dial time so it also covers a hostname that resolves into
+		// private space and every redirect hop.
+		if h.allowPrivateHosts {
+			client = &http.Client{Timeout: 30 * time.Second}
+		} else {
+			client = guardedHTTPClient(30 * time.Second)
+		}
 	}
 	base := h.webRetryBase
 	if base <= 0 {
@@ -975,6 +1005,7 @@ func (h *hostToolSet) webFetch(ctx context.Context, rawURL, method string, heade
 		}
 		text, retryable, err := h.webFetchOnce(ctx, client, method, u.String(), headers, body)
 		if err == nil {
+			h.fetchMemo[memoKey] = text
 			return text, nil
 		}
 		lastErr = err
@@ -1016,45 +1047,32 @@ func (h *hostToolSet) webFetchOnce(ctx context.Context, client *http.Client, met
 	}
 	ct := resp.Header.Get("Content-Type")
 	header := fmt.Sprintf("[web_fetch %d %s %s]\n", resp.StatusCode, contentTypeMain(ct), u)
-	return header + renderWebBody(ct, data), false, nil
+	return header + renderWebBody(ct, u, data), false, nil
 }
 
-var (
-	reScript = regexp.MustCompile(`(?is)<script\b[^>]*>.*?</script>`)
-	reStyle  = regexp.MustCompile(`(?is)<style\b[^>]*>.*?</style>`)
-	reTag    = regexp.MustCompile(`(?s)<[^>]*>`)
-	reWS     = regexp.MustCompile(`\s+`)
-)
-
-// renderWebBody reduces text/html to readable text, passes textual bodies (text/*, JSON,
-// XML, CSV, JS, or an unlabeled body) through as-is, and — for a binary type (image, pdf,
-// octet-stream, …) — returns a short note with the type and size instead of dumping raw
-// bytes into the model context (which would be garbage, and could confuse a weak model).
-func renderWebBody(contentType string, data []byte) string {
-	ct := strings.ToLower(contentType)
-	switch {
-	case strings.Contains(ct, "html"):
-		return stripHTML(string(data))
-	case ct == "" || strings.Contains(ct, "text") || strings.Contains(ct, "json") ||
-		strings.Contains(ct, "xml") || strings.Contains(ct, "csv") || strings.Contains(ct, "javascript"):
-		return string(data)
-	default:
-		return fmt.Sprintf("[web_fetch: %s response, %d bytes — this is not text; if you need to process it, use run_script or bash]",
-			contentTypeMain(contentType), len(data))
+// renderWebBody turns a response body into text the model can use. HTML and any
+// convertible document format go through internal/convert — so a fetched page
+// keeps its headings, lists, links and tables instead of collapsing into one
+// whitespace-run, and a PDF/DOCX URL yields readable text instead of a dead end.
+// A format convert cannot handle degrades to a short note naming the type rather
+// than dumping raw bytes into the model context.
+func renderWebBody(contentType, sourceURL string, data []byte) string {
+	res, err := convert.ToMarkdown(data, convert.Options{MIME: contentType, SourceURL: sourceURL})
+	if err == nil && strings.TrimSpace(res.Markdown) != "" {
+		return res.Markdown
 	}
-}
-
-// stripHTML reduces an HTML document to readable text using only the standard library
-// (deliberately dependency-free, matching this codebase): drop <script>/<style> blocks,
-// replace remaining tags with spaces, unescape entities, and collapse whitespace. It is a
-// pragmatic best-effort reduction, not a full HTML parser.
-func stripHTML(s string) string {
-	s = reScript.ReplaceAllString(s, " ")
-	s = reStyle.ReplaceAllString(s, " ")
-	s = reTag.ReplaceAllString(s, " ")
-	s = html.UnescapeString(s)
-	s = reWS.ReplaceAllString(s, " ")
-	return strings.TrimSpace(s)
+	// convert could not handle this type. If the body is textual, hand it back
+	// AS-IS rather than discarding it: a JSON API response is the single most
+	// common web_fetch target, and returning "no text could be extracted" for
+	// one would be a regression. This branch also keeps Phase 1 shippable on
+	// its own — the JSON/CSV/PDF converters land in Phase 2, and until they do
+	// every textual body still flows through here unchanged.
+	if convert.IsTextual(data, contentType) {
+		return string(data)
+	}
+	kind := convert.Detect(data, "", contentType)
+	return fmt.Sprintf("[web_fetch: %s response (%s), %d bytes — no text could be extracted; if you need to process it, use run_script or bash]",
+		contentTypeMain(contentType), kind, len(data))
 }
 
 func contentTypeMain(ct string) string {
@@ -1092,34 +1110,20 @@ func ctxSleep(ctx context.Context, d time.Duration) bool {
 
 // ── web_search ───────────────────────────────────────────────────────────────
 
-// ddgHTMLEndpoint is the DuckDuckGo keyless HTML results endpoint. It needs no API
-// key (consistent with web_fetch's key-less design) and returns a parseable HTML
-// page of result blocks. ddgBaseURL, when set on the toolset, overrides it (tests).
-const ddgHTMLEndpoint = "https://html.duckduckgo.com/html/"
-
 // maxWebSearchResults bounds how many results web_search returns to the model.
 const maxWebSearchResults = 6
 
-// webSearch runs a DuckDuckGo HTML query and returns numbered title/url/snippet
-// entries. It is the discovery complement to web_fetch: use it to FIND a URL, then
-// web_fetch to READ it. Query-only — it cannot carry secrets (same boundary as
-// web_fetch). Reliability mirrors webFetch exactly: transient failures (429, 5xx,
-// network, timeout) are retried INTERNALLY with backoff and NEVER surface as an
-// error: result (so a blip that clears doesn't trip the oscillation guard); a
-// non-retryable outcome (bad URL, 4xx other than 429) returns an error. A 200 page
-// with no parseable result blocks is a valid empty result ("(no search results)"),
-// NOT an error — so the model can fall back to web_fetch without tripping the guard.
+// webSearch runs the provider cascade and renders numbered title/url/snippet
+// entries. Reliability comes from the cascade, not from this function: a single
+// engine returning a JS-challenge page (200 OK, zero parseable results) is
+// indistinguishable from "no results", so websearch treats it as a reason to try
+// the next engine. Exhausting every engine still yields a NON-error empty notice
+// so the model can fall back to web_fetch without tripping the oscillation guard.
 func (h *hostToolSet) webSearch(ctx context.Context, query string) (string, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return "", fmt.Errorf("query is required")
 	}
-	target := h.ddgBaseURL
-	if target == "" {
-		target = ddgHTMLEndpoint
-	}
-	full := target + "?q=" + url.QueryEscape(query)
-
 	client := h.httpClient
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
@@ -1129,52 +1133,16 @@ func (h *hostToolSet) webSearch(ctx context.Context, query string) (string, erro
 		base = 500 * time.Millisecond
 	}
 
-	var lastErr error
-	for attempt := 0; attempt < webFetchMaxAttempts; attempt++ {
-		if attempt > 0 {
-			if !ctxSleep(ctx, base<<(attempt-1)) {
-				return "", ctx.Err()
-			}
-		}
-		body, retryable, err := h.webSearchOnce(ctx, client, full)
-		if err == nil {
-			return body, nil
-		}
-		lastErr = err
-		if !retryable {
-			return "", err
-		}
-	}
-	return "", fmt.Errorf("web_search failed after %d attempts: %w", webFetchMaxAttempts, lastErr)
-}
-
-// webSearchOnce performs a single DDG HTML request. retryable mirrors webFetchOnce
-// (true for 429/5xx/network/timeout; false for 2xx or a definitive 4xx).
-func (h *hostToolSet) webSearchOnce(ctx context.Context, client *http.Client, u string) (string, bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	results, err := (&websearch.Client{
+		HTTP:      client,
+		RetryBase: base,
+		Providers: h.searchProviders(),
+	}).Search(ctx, query)
 	if err != nil {
-		return "", false, fmt.Errorf("build request: %v", err)
+		return "", err
 	}
-	// A browser-like User-Agent avoids DDG's JS-challenge interstitial, which
-	// returns a page with no result blocks (we'd report "no search results").
-	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", true, fmt.Errorf("request failed: %v", err) // network/timeout → transient
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-		return "", true, fmt.Errorf("HTTP %d from %s", resp.StatusCode, u)
-	}
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxWebBody))
-	if resp.StatusCode >= 400 {
-		return "", false, fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, u, snippetBytes(data))
-	}
-	results := parseDDGResults(string(data))
 	if len(results) == 0 {
-		// 200-but-no-results is valid, not a failure — the model can fall back to web_fetch.
-		return "(no search results)", false, nil
+		return "(no search results)", nil
 	}
 	if len(results) > maxWebSearchResults {
 		results = results[:maxWebSearchResults]
@@ -1183,69 +1151,26 @@ func (h *hostToolSet) webSearchOnce(ctx context.Context, client *http.Client, u 
 	for i, r := range results {
 		fmt.Fprintf(&sb, "%d. %s\n   %s\n   %s\n", i+1, r.Title, r.URL, r.Snippet)
 	}
-	return strings.TrimSpace(sb.String()), false, nil
+	return strings.TrimSpace(sb.String()), nil
 }
 
-// ddgResult is one parsed DuckDuckGo result.
-type ddgResult struct {
-	Title   string
-	URL     string
-	Snippet string
-}
-
-// reDDGBlock matches one DDG result block: an anchor with class "result__a" whose
-// href is the redirect, followed (case-insensitively, dot-all) by an anchor with
-// class "result__snippet" holding the snippet text.
-var reDDGBlock = regexp.MustCompile(`(?is)<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?<a[^>]*class="result__snippet"[^>]*>(.*?)</a>`)
-
-// parseDDGResults extracts result blocks from a DDG HTML page. The result__a href
-// is a //duckduckgo.com/l/?uddg=<encoded real URL> redirect; the real URL is
-// recovered by decoding the uddg query param. Titles and snippets have HTML
-// stripped. Tolerant by design: a malformed block is skipped, not fatal.
-func parseDDGResults(htmlDoc string) []ddgResult {
-	var out []ddgResult
-	for _, m := range reDDGBlock.FindAllStringSubmatch(htmlDoc, maxWebSearchResults*2) {
-		rawHref, titleHTML, snippetHTML := m[1], m[2], m[3]
-		realURL := decodeDDGRedirect(rawHref)
-		if realURL == "" {
-			continue // not a real result link (e.g. a "more results" nav anchor)
-		}
-		out = append(out, ddgResult{
-			Title:   stripHTML(titleHTML),
-			URL:     realURL,
-			Snippet: stripHTML(snippetHTML),
-		})
-		if len(out) >= maxWebSearchResults {
-			break
-		}
+// searchProviders builds the provider list for this toolset. A workspace that
+// has stored a search API key (as an ordinary encrypted secret, injected into
+// subprocessEnv alongside the agent's other secrets) gets that provider FIRST
+// and skips scraping entirely; otherwise the keyless cascade applies. When
+// ddgBaseURL is set (tests only) the cascade collapses to that single endpoint.
+func (h *hostToolSet) searchProviders() []websearch.Provider {
+	if h.ddgBaseURL != "" {
+		return websearch.DefaultProviders(map[string]string{"ddg-html": h.ddgBaseURL})[:1]
 	}
-	return out
-}
-
-// decodeDDGRedirect recovers the real result URL from a DuckDuckGo redirect href of
-// the form "//duckduckgo.com/l/?uddg=<urlencoded>&rut=..." (or an absolute
-// https:// variant). Returns "" if the href isn't a uddg redirect we can decode.
-func decodeDDGRedirect(href string) string {
-	href = strings.TrimSpace(href)
-	if href == "" {
-		return ""
+	var out []websearch.Provider
+	if p := websearch.KeyedProvider("brave", h.subprocessEnv["SEARCH_KEY_BRAVE"], ""); p != nil {
+		out = append(out, p)
 	}
-	// Resolve protocol-relative "//duckduckgo.com/..." to a parseable absolute URL.
-	if strings.HasPrefix(href, "//") {
-		href = "https:" + href
+	if p := websearch.KeyedProvider("tavily", h.subprocessEnv["SEARCH_KEY_TAVILY"], ""); p != nil {
+		out = append(out, p)
 	}
-	u, err := url.Parse(href)
-	if err != nil {
-		return ""
-	}
-	uddg := u.Query().Get("uddg")
-	if uddg == "" {
-		return ""
-	}
-	if real, err := url.QueryUnescape(uddg); err == nil {
-		return real
-	}
-	return uddg
+	return append(out, websearch.DefaultProviders(nil)...)
 }
 
 // ── bash ─────────────────────────────────────────────────────────────────────
