@@ -93,6 +93,9 @@ func (c *Client) Search(ctx context.Context, query string) ([]Result, error) {
 		if len(results) > 0 {
 			return dedupe(results), nil
 		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 	}
 	return nil, nil
 }
@@ -129,8 +132,14 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-// dedupe collapses results whose URLs differ only in trailing slash, scheme
-// case, or a leading "www." — the same page surfaced twice is noise.
+// dedupe collapses results whose URLs differ only in trailing slash, a
+// leading "www.", scheme (normalizeURL drops the scheme entirely, not just
+// its case — http vs https is the same page), or fragment (normalizeURL
+// drops it too — "#section-a" vs "#section-b" is the same page for
+// search-result purposes). Both drops are a deliberate trade-off: a
+// same-host, same-path, same-query result is treated as a duplicate even
+// when the scheme or fragment differs, because the same page surfaced twice
+// is noise.
 func dedupe(in []Result) []Result {
 	seen := make(map[string]bool, len(in))
 	out := make([]Result, 0, len(in))

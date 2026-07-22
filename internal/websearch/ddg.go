@@ -59,6 +59,14 @@ func parseDDG(doc string) []Result {
 
 // decodeDDGRedirect recovers the real URL from DuckDuckGo's
 // "//duckduckgo.com/l/?uddg=<urlencoded>" redirect wrapper.
+//
+// A href whose path identifies it as the redirect wrapper (contains "/l/")
+// but whose uddg parameter can't be recovered — dropped by url.ParseQuery on
+// a malformed percent-escape, or failing url.QueryUnescape — must NOT fall
+// back to returning the wrapper URL itself: that wrapper is not the search
+// result's real target, and handing it to an LLM as though it were is worse
+// than reporting no result at all. Only a href that was never a redirect
+// wrapper (a genuine direct link) keeps the direct-link fallback.
 func decodeDDGRedirect(href string) string {
 	href = strings.TrimSpace(html.UnescapeString(href))
 	if href == "" {
@@ -71,8 +79,14 @@ func decodeDDGRedirect(href string) string {
 	if err != nil {
 		return ""
 	}
+	isWrapper := strings.Contains(u.Path, "/l/")
 	uddg := u.Query().Get("uddg")
 	if uddg == "" {
+		if isWrapper {
+			// Redirect wrapper whose uddg couldn't be recovered — do not
+			// hand back the wrapper URL as though it were the real target.
+			return ""
+		}
 		// Some endpoints link directly rather than via the redirect.
 		if u.Scheme == "http" || u.Scheme == "https" {
 			return u.String()
@@ -82,7 +96,7 @@ func decodeDDGRedirect(href string) string {
 	if real, err := url.QueryUnescape(uddg); err == nil {
 		return real
 	}
-	return uddg
+	return ""
 }
 
 // getPage performs one GET and classifies the outcome. 429/5xx/network are
