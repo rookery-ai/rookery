@@ -331,10 +331,38 @@ func (v *Vault) List(workspaceID, relDir string) ([]Node, error) {
 
 // writeFileAtomic writes data to path via a temp file in the same directory
 // followed by a rename, so readers never observe a partial write.
+//
+// The scratch file is created with os.CreateTemp (a random suffix), not a
+// fixed ".tmp" name: two concurrent writers targeting different final paths
+// in the same directory would otherwise both write to the identical scratch
+// path and race — one writer's rename would find its temp file already gone
+// (or truncated by the other), failing with "rename ... no such file or
+// directory". That was a real, pre-existing bug in every vault write; it
+// simply had no concurrent caller before vault imports gained one.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmpName := tmp.Name()
+	// Whatever the outcome, don't leave a stray scratch file behind: on
+	// success the rename has already moved it to path, so Remove here is a
+	// harmless no-op (ENOENT, ignored); on any failure path it cleans up.
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	// os.CreateTemp always creates with mode 0600 regardless of the caller's
+	// intended permission; fix it up before the rename makes it visible under
+	// its final name.
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
