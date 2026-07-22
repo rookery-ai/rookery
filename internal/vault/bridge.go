@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ilijad1/simple-agents/internal/convert"
+	"github.com/ilijad1/simple-agents/internal/iolimit"
 )
 
 const (
@@ -31,6 +31,14 @@ const (
 	// query string — no document payload — so a small cap stops an oversized
 	// body without ever affecting a real caller.
 	maxSearchBody = 64 << 10 // 64 KiB
+
+	// maxSearchResultBytes bounds /search's rendered result, matching
+	// internal/coder's maxToolResult (the API engine's per-tool-result cap) —
+	// the two doors share the SearchKB/RenderSearchResult implementation (see
+	// kbsearch.go), so they share its budget too, for the same reason: a CLI
+	// coder relaying this text should never see a materially different amount
+	// of context than an API-engine one asking the identical question.
+	maxSearchResultBytes = 8 * 1024
 )
 
 // Bridge lets a CLI coder subprocess reach the knowledge base's conversion and
@@ -122,20 +130,6 @@ func (b *Bridge) authorize(r *http.Request) (bridgeSession, bool) {
 	return sess, ok
 }
 
-// readCapped reads at most limit+1 bytes so an over-limit body is detected
-// directly (and reported with a clear message) rather than silently truncated
-// into a request that then fails with an opaque "bad request" JSON error.
-func readCapped(r io.Reader, limit int64) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(r, limit+1))
-	if err != nil {
-		return nil, fmt.Errorf("read request body: %w", err)
-	}
-	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("request body exceeds the %d byte limit", limit)
-	}
-	return data, nil
-}
-
 func (b *Bridge) handleConvert(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, `{"error":"POST only"}`, http.StatusMethodNotAllowed)
@@ -146,7 +140,7 @@ func (b *Bridge) handleConvert(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
-	body, err := readCapped(r.Body, maxConvertBody)
+	body, err := iolimit.ReadCapped(r.Body, maxConvertBody)
 	if err != nil {
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": err.Error()})
 		return
@@ -201,7 +195,7 @@ func (b *Bridge) handleSearch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 		return
 	}
-	body, err := readCapped(r.Body, maxSearchBody)
+	body, err := iolimit.ReadCapped(r.Body, maxSearchBody)
 	if err != nil {
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": err.Error()})
 		return
@@ -215,19 +209,12 @@ func (b *Bridge) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	hits, err := b.v.NewSearcher().Search(ctx, sess.workspaceID, req.Query)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
-		return
-	}
-	var sb strings.Builder
-	for _, h := range hits {
-		fmt.Fprintf(&sb, "%s:%d: %s\n", h.Path, h.Line, h.Snippet)
-	}
-	if sb.Len() == 0 {
-		sb.WriteString(fmt.Sprintf("(no matches for %q)\n", req.Query))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": sb.String()})
+	// SearchKB is the SAME two-pass (exact ripgrep matches, then ranked BM25
+	// passages) implementation search_files (internal/coder/hosttools.go)
+	// uses — see kbsearch.go's doc comment for why this must never again be a
+	// separate, lesser implementation.
+	results := SearchKB(ctx, b.v, nil, sess.workspaceID, req.Query, maxSearchResultBytes)
+	writeJSON(w, http.StatusOK, map[string]any{"results": results})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

@@ -85,6 +85,34 @@ func TestBridgeSearchScopedToWorkspace(t *testing.T) {
 	}
 }
 
+// TestBridgeSearchReturnsRankedPassages pins Fix 3: the bridge's /search must
+// use the same ranked BM25 retrieval search_files exposes to the API engine —
+// not a bare literal-ripgrep dump — so a CLI-coder workspace gets the same
+// "dentist finds orthodontist" retrieval quality an API-engine workspace does.
+func TestBridgeSearchReturnsRankedPassages(t *testing.T) {
+	b, v, token := startTestBridge(t)
+	v.WriteNote("ws1", "notes/health.md", []byte("# Health\n\n## Appointments\n\nBooked an orthodontist visit for Tuesday.\n"))
+
+	resp, out := post(t, b.URL()+"/search", token, map[string]any{"query": "dentist appointment"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d: %v", resp.StatusCode, out)
+	}
+	results, _ := out["results"].(string)
+	// A literal search for "dentist appointment" would find nothing — the note
+	// says "orthodontist", never "dentist". Only ranked BM25 retrieval can
+	// surface it, so finding it here proves the bridge is no longer a bare
+	// literal-search dump.
+	if !bytes.Contains([]byte(results), []byte("notes/health.md")) {
+		t.Errorf("ranked retrieval should find the note via the bridge, got %q", results)
+	}
+	if !bytes.Contains([]byte(results), []byte("Appointments")) {
+		t.Errorf("expected the heading trail in the ranked passage, got %q", results)
+	}
+	if !bytes.Contains([]byte(results), []byte("Related passages:")) {
+		t.Errorf("expected a labelled ranked-passages section, got %q", results)
+	}
+}
+
 func TestBridgeUnregister(t *testing.T) {
 	b, _, token := startTestBridge(t)
 	b.Unregister(token)
