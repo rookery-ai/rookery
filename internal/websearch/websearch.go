@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/ilijad1/simple-agents/internal/nethttp"
 )
 
 // Result is one search hit.
@@ -75,7 +77,12 @@ func (c *Client) Search(ctx context.Context, query string) ([]Result, error) {
 	}
 	hc := c.HTTP
 	if hc == nil {
-		hc = &http.Client{Timeout: 30 * time.Second}
+		// Every real caller (hosttools.go's webSearch) injects HTTP explicitly —
+		// this default only guards a hypothetical future caller that doesn't —
+		// but it should still be the SAME guarded client every other outbound
+		// path in this codebase uses, not a bare client that can reach loopback
+		// and private address space.
+		hc = nethttp.GuardedClient(30 * time.Second)
 	}
 	base := c.RetryBase
 	if base <= 0 {

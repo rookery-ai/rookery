@@ -298,7 +298,7 @@ func TestWebSearchReturnsResults(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := &hostToolSet{includeExecTools: true, webRetryBase: time.Millisecond, ddgBaseURL: srv.URL}
+	h := &hostToolSet{includeExecTools: true, webRetryBase: time.Millisecond, ddgBaseURL: srv.URL, allowPrivateHosts: true}
 	res := h.execute(context.Background(), webSearchCall("weather skopje"))
 	if strings.HasPrefix(res, "error:") {
 		t.Fatalf("web_search should succeed; got %q", res)
@@ -331,7 +331,7 @@ func TestWebSearchRetriesTransient(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := &hostToolSet{includeExecTools: true, webRetryBase: time.Millisecond, ddgBaseURL: srv.URL}
+	h := &hostToolSet{includeExecTools: true, webRetryBase: time.Millisecond, ddgBaseURL: srv.URL, allowPrivateHosts: true}
 	res := h.execute(context.Background(), webSearchCall("anything"))
 	if strings.HasPrefix(res, "error:") {
 		t.Fatalf("a transient 503 that recovers must not surface as error:; got %q", res)
@@ -354,13 +354,37 @@ func TestWebSearchNoResultsNonError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	h := &hostToolSet{includeExecTools: true, webRetryBase: time.Millisecond, ddgBaseURL: srv.URL}
+	h := &hostToolSet{includeExecTools: true, webRetryBase: time.Millisecond, ddgBaseURL: srv.URL, allowPrivateHosts: true}
 	res := h.execute(context.Background(), webSearchCall("zzz"))
 	if strings.HasPrefix(res, "error:") {
 		t.Fatalf("no results must not surface as error:; got %q", res)
 	}
 	if !strings.Contains(res, "no search results") {
 		t.Fatalf("expected a no-search-results notice; got %q", res)
+	}
+}
+
+// TestWebSearchBlocksPrivateAddressByDefault pins Fix 6: web_search must use
+// the SAME guarded client web_fetch/save_to_kb do by default — otherwise it is
+// a second, unguarded way to reach the loopback connector bridge or other
+// private address space that the SSRF guard exists to close off everywhere
+// else. Search()'s provider cascade swallows a single provider's failure into
+// a non-error "no results" (by design — see websearch.go), so the observable
+// property here is that the guarded server is never actually reached, not
+// that web_search surfaces an "error:" result.
+func TestWebSearchBlocksPrivateAddressByDefault(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(ddgHTML([][2]string{{"leak", "https://x.example"}}, []string{"snip"})))
+	}))
+	defer srv.Close()
+
+	h := &hostToolSet{includeExecTools: true, webRetryBase: time.Millisecond, ddgBaseURL: srv.URL} // guard ON (allowPrivateHosts unset)
+	h.execute(context.Background(), webSearchCall("anything"))
+	if atomic.LoadInt32(&hits) != 0 {
+		t.Fatalf("web_search must never reach a loopback address by default, but the server was hit %d time(s)", hits)
 	}
 }
 

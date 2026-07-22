@@ -111,6 +111,35 @@ func TestSaveToKBBlockedDuringBuild(t *testing.T) {
 	}
 }
 
+// TestSaveToKBFromURLOverLimitErrors pins Fix 2: an over-limit source must be
+// refused with a clear error, never silently truncated into a shorter file
+// that a false original_bytes frontmatter value then lies about.
+func TestSaveToKBFromURLOverLimitErrors(t *testing.T) {
+	big := make([]byte, maxWebBody+1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/csv")
+		_, _ = w.Write(big)
+	}))
+	defer srv.Close()
+
+	h, v := newSaveKBToolset(t)
+	h.allowPrivateHosts = true
+	h.webRetryBase = time.Millisecond
+	out := h.execute(context.Background(), llm.ToolCall{
+		Name: "save_to_kb",
+		Args: json.RawMessage(`{"source":"` + srv.URL + `/big.csv"}`),
+	})
+	if !strings.HasPrefix(out, "error:") {
+		t.Fatalf("an over-limit source must be refused, got %q", out)
+	}
+	// Confirm nothing was silently written — a partial import would be worse
+	// than no import at all (a note claiming to be the whole document).
+	entries, _ := os.ReadDir(filepath.Join(v.Root("ws1"), "notes"))
+	if len(entries) != 0 {
+		t.Errorf("no note should exist after a refused over-limit fetch, found %d", len(entries))
+	}
+}
+
 // TestSaveToKBFromURLUsesGuardedClient proves the happy path also goes through the
 // same client selection as web_fetch (allowPrivateHosts opts a TEST ONLY into
 // reaching the httptest server, mirroring newWebToolSet's convention).

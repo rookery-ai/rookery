@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/ilijad1/simple-agents/internal/convert"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/iolimit"
 	"github.com/ilijad1/simple-agents/internal/vault"
 	"github.com/labstack/echo/v4"
 )
@@ -604,16 +604,16 @@ func (s *Server) apiUploadKBFile(c echo.Context) error {
 		return jsonErr(c, http.StatusBadRequest, "invalid_request", "could not read the upload")
 	}
 	defer src.Close()
-	// Belt-and-braces re-check against the actual bytes read: an
-	// io.LimitReader one byte past the cap turns any fh.Size lie into a hard
-	// stop rather than a trusted header value.
-	data, err := io.ReadAll(io.LimitReader(src, maxUploadBytes+1))
+	// Belt-and-braces re-check against the actual bytes read: reading one byte
+	// past the cap turns any fh.Size lie into a hard stop rather than a
+	// trusted header value.
+	data, err := iolimit.ReadCapped(src, maxUploadBytes)
 	if err != nil {
+		if errors.Is(err, iolimit.ErrTooLarge) {
+			return jsonErr(c, http.StatusRequestEntityTooLarge, "too_large",
+				fmt.Sprintf("file exceeds the %d byte limit", maxUploadBytes))
+		}
 		return jsonErr(c, http.StatusBadRequest, "invalid_request", "could not read the upload")
-	}
-	if len(data) > maxUploadBytes {
-		return jsonErr(c, http.StatusRequestEntityTooLarge, "too_large",
-			fmt.Sprintf("file exceeds the %d byte limit", maxUploadBytes))
 	}
 
 	res, err := s.vault.ImportFile(u.ID, vault.ImportInput{

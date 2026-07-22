@@ -14,6 +14,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/ilijad1/simple-agents/internal/gateway/render"
+	"github.com/ilijad1/simple-agents/internal/iolimit"
 	"github.com/ilijad1/simple-agents/internal/nethttp"
 )
 
@@ -136,12 +137,9 @@ func downloadDiscordAttachment(rawURL string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("discord attachment fetch failed (status %d)", resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxAttachmentBytes+1))
+	data, err := iolimit.ReadCapped(resp.Body, maxAttachmentBytes)
 	if err != nil {
 		return nil, err
-	}
-	if len(data) > maxAttachmentBytes {
-		return nil, fmt.Errorf("attachment exceeds the size limit")
 	}
 	return data, nil
 }

@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,9 +18,11 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/convert"
+	"github.com/ilijad1/simple-agents/internal/iolimit"
 	"github.com/ilijad1/simple-agents/internal/llm"
 	"github.com/ilijad1/simple-agents/internal/sandbox"
 	"github.com/ilijad1/simple-agents/internal/vault"
@@ -699,56 +701,15 @@ func (h *hostToolSet) listDir(path string) string {
 
 // ── search_files / glob ───────────────────────────────────────────────────────
 
-// maxSearchHits caps how many search_files matches are returned to the model, so a
-// query that hits dozens of notes doesn't blow the context. The Searcher already
-// caps at 5 matches per file; this bounds the total across all files.
-const maxSearchHits = 50
-
 // maxGlobMatches caps how many file paths glob returns.
 const maxGlobMatches = 200
 
-// maxRankedChunks bounds how many ranked passages search_files returns.
-const maxRankedChunks = 10
-
-// exactSectionBudgetNum/Den express, as an integer ratio, the CEILING on the
-// share of maxToolResult the exact-match section may consume WHEN both
-// sections have content to contribute (2/5 = 40%). Without a cap of its own, a
-// query that hits dozens of near-identical notes (a common literal phrase
-// repeated across a vault) can fill the entire maxToolResult cap with exact
-// lines before the ranked section ever gets a byte — silently dropping the
-// BM25 hits this tool exists to surface (a note about "dentist" that says
-// "orthodontist" never reaches the model). 40% is a starting point, not a
-// tuned constant: exact lines are short (ripgrep snippets are capped at 200
-// chars, see trimSnippet), so 40% still fits dozens of them, while reserving a
-// majority of the cap for ranked passages — the harder-to-replace signal, and
-// the reason search_files does BM25 retrieval at all. This is a CEILING, not a
-// fixed split: the ranked section afterward gets whatever the exact section
-// ACTUALLY used (see searchFiles below), not a complementary fixed share — an
-// exact section with only a few short hits must not cap ranked at a fixed 60%
-// and waste the rest of the budget. When one section has nothing to
-// contribute, the other gets the FULL cap. Expressed as an integer ratio (not
-// a float constant) so it can be used in a constant integer expression
-// without Go's constant-truncation restriction.
-const (
-	exactSectionBudgetNum = 2
-	exactSectionBudgetDen = 5
-)
-
-// searchFiles answers "where in my knowledge base is this?" with two passes,
-// deliberately kept both:
-//
-//   - Exact (ripgrep, fixed-string): unbeatable for a UUID, an error string, or
-//     a code identifier, where ranked retrieval would dilute the one right hit.
-//   - Ranked (BM25 over heading-aware chunks): finds a note about "dentist" that
-//     says "orthodontist", and returns whole passages with their heading trail
-//     so one call yields usable context instead of a read_file walk.
-//
-// Exact hits come first because a caller who typed an exact token wants it, but
-// each section is now bounded to its OWN byte budget (see exactSectionBudgetNum/Den)
-// so a flood of exact hits cannot crowd the ranked section out entirely. A
-// truncated exact section says so explicitly ("…and N more exact matches") so the
-// omission is visible to the model instead of silent. No matches remains a
-// NON-error so it never trips the oscillation guard.
+// searchFiles answers "where in my knowledge base is this?" via vault.SearchKB
+// — the single shared two-pass (exact ripgrep matches, then ranked BM25
+// passages) implementation also used by the CLI-coder bridge's /search, so the
+// two doors into KB search can never again drift apart (see kbsearch.go's doc
+// comment). h.searcher lets a test inject a Searcher double to exercise the
+// degrade-on-exact-failure path deterministically; nil in production.
 func (h *hostToolSet) searchFiles(ctx context.Context, query string) (string, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -757,114 +718,10 @@ func (h *hostToolSet) searchFiles(ctx context.Context, query string) (string, er
 	if h.vlt == nil {
 		return "", fmt.Errorf("search_files unavailable: no vault")
 	}
-
-	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	searcher := h.searcher
-	if searcher == nil {
-		searcher = h.vlt.NewSearcher()
-	}
-	hits, err := searcher.Search(sctx, h.workspaceID, query)
-	if err != nil {
-		// Degrade, don't fail: BM25 ranked retrieval below can still answer
-		// usefully even when the exact/ripgrep path is broken (missing binary,
-		// subprocess error) — failing the whole tool call would be strictly
-		// worse than falling back to ranked-only results. But a silent
-		// degrade would hide a real regression from every human who might
-		// otherwise notice ripgrep is broken, so it's logged rather than
-		// swallowed.
-		slog.Warn("search_files: exact match search failed; degrading to ranked-only results",
-			"workspace", h.workspaceID, "error", err)
-		hits = nil
-	}
-	if len(hits) > maxSearchHits {
-		hits = hits[:maxSearchHits]
-	}
-
-	ranked := h.vlt.Indexer().Search(h.workspaceID, query, maxRankedChunks)
-	nonEmptyRanked := ranked[:0]
-	for _, r := range ranked {
-		if strings.TrimSpace(r.Text) != "" {
-			nonEmptyRanked = append(nonEmptyRanked, r)
-		}
-	}
-
-	// The exact section is capped at its share only when both sections have
-	// content — otherwise it gets the full budget rather than being trimmed
-	// for a ranked section that has nothing to show anyway.
-	exactBudget := maxToolResult
-	if len(hits) > 0 && len(nonEmptyRanked) > 0 {
-		exactBudget = maxToolResult * exactSectionBudgetNum / exactSectionBudgetDen
-	}
-
-	var exactSB strings.Builder
-	if len(hits) > 0 {
-		exactSB.WriteString("Exact matches:\n")
-		header := exactSB.Len()
-		omitted := 0
-		for i, hit := range hits {
-			line := fmt.Sprintf("%s:%d: %s\n", hit.Path, hit.Line, hit.Snippet)
-			// Always include at least the first hit even if it alone exceeds the
-			// budget (mirrors the "top result must survive" rule elsewhere) —
-			// only STOP once at least one hit is in and the next one would overflow.
-			if exactSB.Len() > header && exactSB.Len()+len(line) > exactBudget {
-				omitted = len(hits) - i
-				break
-			}
-			exactSB.WriteString(line)
-		}
-		if omitted > 0 {
-			fmt.Fprintf(&exactSB, "…and %d more exact matches (omitted to leave room for ranked passages)\n", omitted)
-		}
-	}
-
-	// The ranked section gets whatever the exact section ACTUALLY used, not
-	// its reserved share — an exact section with only a few short hits (well
-	// under 40%) must not cap ranked at a fixed 60% and waste the rest of the
-	// cap, and a full exact section must not leave ranked room to write a
-	// passage that the final combined string would then have to cut mid-body.
-	rankedBudget := maxToolResult - exactSB.Len()
-	if exactSB.Len() > 0 {
-		rankedBudget-- // the "\n" separator joining the two sections, added below
-	}
-
-	var rankedSB strings.Builder
-	const rankedHeader = "Related passages:\n"
-	for _, r := range nonEmptyRanked {
-		location := r.Path
-		if r.Heading != "" {
-			location += " — " + r.Heading
-		}
-		passage := fmt.Sprintf("\n[%s]\n%s\n", location, strings.TrimSpace(r.Text))
-		// Stop cleanly once the next whole passage would overflow the ranked
-		// budget — never emit a passage cut mid-body. The first passage is
-		// still always included (same "top result survives" rule as above),
-		// so this check only fires once something has already been written.
-		if rankedSB.Len() > 0 && rankedSB.Len()+len(passage) > rankedBudget {
-			break
-		}
-		if rankedSB.Len() == 0 {
-			rankedSB.WriteString(rankedHeader)
-		}
-		rankedSB.WriteString(passage)
-	}
-
-	var sb strings.Builder
-	sb.WriteString(exactSB.String())
-	if exactSB.Len() > 0 && rankedSB.Len() > 0 {
-		sb.WriteString("\n")
-	}
-	sb.WriteString(rankedSB.String())
-
-	if sb.Len() == 0 {
-		return fmt.Sprintf("(no matches for %q)", query), nil
-	}
-	// Defensive final cap: with 200-byte ripgrep snippets and 1500-byte hard-bounded
-	// BM25 chunks (see targetChunkChars), the budgets above already keep the total
-	// under maxToolResult in every realistic case, but this guarantees the tool
-	// result contract (never over cap) even in a pathological edge case.
-	return truncate(sb.String()), nil
+	// Defensive final cap: SearchKB already keeps its result under maxToolResult
+	// in every realistic case, but truncate() guarantees the tool result
+	// contract (never over cap) even in a pathological edge case.
+	return truncate(vault.SearchKB(ctx, h.vlt, h.searcher, h.workspaceID, query, maxToolResult)), nil
 }
 
 // glob finds files by name/pattern across the whole vault and returns their
@@ -1008,7 +865,17 @@ func (h *hostToolSet) saveToKB(ctx context.Context, source, destDir, title strin
 	return msg, nil
 }
 
-// fetchRaw downloads a URL's bytes (not its rendered text) for conversion.
+// fetchRaw downloads a URL's bytes (not its rendered text) for conversion by
+// save_to_kb. Unlike web_fetch (which silently truncates because it's reading
+// a URL as disposable text for one turn's context), a byte truncated here would
+// be written into the vault as the imported note's SOURCE — with a frontmatter
+// original_bytes count that then lies about what the file actually contains,
+// and no signal to the model that anything was lost. So an over-limit response
+// is a hard error here, not a truncation: the model gets a chance to tell the
+// user the document is too large instead of silently filing a corrupted 40%
+// of it. maxWebBody is deliberately the SAME cap web_fetch uses — save_to_kb
+// is not meant to be a bulk-upload replacement, just document import at the
+// same scale a URL fetch already operates at.
 func (h *hostToolSet) fetchRaw(ctx context.Context, rawURL string) ([]byte, string, error) {
 	client := h.httpClient
 	if client == nil {
@@ -1031,9 +898,13 @@ func (h *hostToolSet) fetchRaw(ctx context.Context, rawURL string) ([]byte, stri
 	if resp.StatusCode >= 400 {
 		return nil, "", fmt.Errorf("fetch %s: HTTP %d", rawURL, resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxWebBody))
+	data, err := iolimit.ReadCapped(resp.Body, maxWebBody)
 	if err != nil {
-		return nil, "", err
+		if errors.Is(err, iolimit.ErrTooLarge) {
+			return nil, "", fmt.Errorf("fetch %s: response is over the %d byte limit for save_to_kb — "+
+				"it cannot be imported whole; tell the user the source is too large", rawURL, maxWebBody)
+		}
+		return nil, "", fmt.Errorf("fetch %s: %v", rawURL, err)
 	}
 	name := path.Base(rawURL)
 	if i := strings.IndexByte(name, '?'); i >= 0 {
@@ -1390,7 +1261,16 @@ func (h *hostToolSet) webSearch(ctx context.Context, query string) (string, erro
 	}
 	client := h.httpClient
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		// Match webFetch/fetchRaw's client selection exactly: the guard is what
+		// stops this tool from becoming a way to reach the loopback connector
+		// bridge or other private address space. allowPrivateHosts is a
+		// TEST-ONLY escape hatch (never set in production) for pointing at an
+		// httptest fixture.
+		if h.allowPrivateHosts {
+			client = &http.Client{Timeout: 30 * time.Second}
+		} else {
+			client = guardedHTTPClient(30 * time.Second)
+		}
 	}
 	base := h.webRetryBase
 	if base <= 0 {
@@ -1521,7 +1401,10 @@ func (h *hostToolSet) spillLargeOutput(out, toolName string) string {
 	rel := filepath.ToSlash(filepath.Join(spillDirName, name))
 	head := out
 	if len(head) > spillHeadBytes {
-		head = head[:spillHeadBytes]
+		// Rune-safe: a raw byte cut can land mid-character on multi-byte UTF-8
+		// (this operator's notes are routinely Cyrillic), corrupting the last
+		// character shown instead of merely cutting the text short.
+		head = head[:runeFloorCut(head, spillHeadBytes)]
 	}
 	return fmt.Sprintf("%s\n…[output is %d bytes — saved in full to %s. Do NOT read it all back into "+
 		"context. Write a small Python script that reads that file and does the work directly (e.g. writes "+
@@ -1553,8 +1436,24 @@ func readFileSlice(content string, offset, limit int) string {
 	}
 	remainderNote := ""
 	if len(window) > winCap {
-		next := offset + winCap
-		window = window[:winCap]
+		// Rune-safe cut: floor to the last full character within winCap, and
+		// crucially advance `next` by the SAME floored length, not the nominal
+		// winCap — otherwise the bytes between the floored cut and winCap are
+		// silently skipped on the next page (never shown, never re-requested),
+		// a quiet data-loss bug distinct from just "the last char looks broken".
+		cut := runeFloorCut(window, winCap)
+		if cut == 0 {
+			// winCap was too small to hold even ONE whole multi-byte character at
+			// this exact alignment. Returning an empty window here would read as
+			// "no bytes at offset" (see below) — i.e. EOF — when real bytes
+			// remain, AND it would make no progress: the next call would land on
+			// the identical offset and hit the identical rune. Always include at
+			// least one full rune, even if that means slightly exceeding winCap.
+			_, size := utf8.DecodeRuneInString(window)
+			cut = size
+		}
+		next := offset + cut
+		window = window[:cut]
 		remainderNote = fmt.Sprintf("\n…[%d more bytes; call read_file again with offset=%d]", len(content)-next, next)
 	}
 	if window == "" {
@@ -1567,23 +1466,70 @@ func truncate(s string) string {
 	if len(s) <= maxToolResult {
 		return s
 	}
+	// Rune-safe cut: a raw byte slice at maxToolResult can land mid-character on
+	// multi-byte UTF-8 (this operator's notes are routinely Cyrillic, and this
+	// path now carries note passages — see search_files), corrupting the last
+	// character shown instead of merely cutting the text short. Report the
+	// ACTUAL shown length, not the nominal cap, so the notice never overstates
+	// how much survived.
+	cut := runeFloorCut(s, maxToolResult)
 	// State the true total and the escape hatch so a weak model doesn't silently reason over
 	// incomplete data: it can page the rest (read_file offset/limit) or process it with a
 	// script instead of pulling it inline. Kept short (< maxToolResult+512, see the web_fetch
 	// truncation test) and marker-free of anything parsed for logic elsewhere.
 	return fmt.Sprintf("%s\n…[truncated: showing first %d of %d bytes. To get the rest, request a byte "+
 		"range (read_file offset/limit) or process the data with a script instead of reading it inline.]",
-		s[:maxToolResult], maxToolResult, len(s))
+		s[:cut], cut, len(s))
 }
 
-// writeFileAtomic mirrors the vault's own unexported atomic-write helper.
-// Needed locally only for the absolute-within-vault edge case in writeFile/
-// editFile, where the path is already resolved to an abs on-disk location and
-// vault.WriteNote (which re-resolves from a vault-relative path) doesn't apply.
+// runeFloorCut returns the largest index <= n that lands on a UTF-8 rune
+// boundary, so a hard byte-slice cut never splits a multi-byte character.
+// Mirrors vault.runeSafeCut's logic exactly but is kept as coder's own copy:
+// vault's helper is unexported to that package, and this package has no
+// other reason to depend on vault for a four-line string utility.
+func runeFloorCut(s string, n int) int {
+	if n >= len(s) {
+		return len(s)
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return n
+}
+
+// writeFileAtomic mirrors the vault's own unexported atomic-write helper
+// (internal/vault/vault.go) — INCLUDING its os.CreateTemp fix: a fixed ".tmp"
+// name lets two concurrent writers targeting different final paths in the same
+// directory collide on the identical scratch path, so one writer's rename
+// fails with "no such file or directory" when it finds its temp file already
+// gone or truncated by the other. Needed locally only for the
+// absolute-within-vault edge case in writeFile/editFile, where the path is
+// already resolved to an abs on-disk location and vault.WriteNote (which
+// re-resolves from a vault-relative path) doesn't apply.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmpName := tmp.Name()
+	// Whatever the outcome, don't leave a stray scratch file behind: on
+	// success the rename has already moved it to path, so Remove here is a
+	// harmless no-op (ENOENT, ignored); on any failure path it cleans up.
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	// os.CreateTemp always creates with mode 0600 regardless of the caller's
+	// intended permission; fix it up before the rename makes it visible under
+	// its final name.
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }

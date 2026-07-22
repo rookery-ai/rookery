@@ -2,12 +2,14 @@ package coder
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/ilijad1/simple-agents/internal/llm"
 )
@@ -63,6 +65,79 @@ func TestTruncateNotice(t *testing.T) {
 	}
 	if len(got) > maxToolResult+512 {
 		t.Fatalf("truncated result must stay under maxToolResult+512 (web_fetch test budget); got %d", len(got))
+	}
+}
+
+// TestTruncateIsRuneSafe pins Fix 6: a raw byte-slice cut at maxToolResult must
+// never land inside a multi-byte UTF-8 character (this operator's notes are
+// routinely Cyrillic). Sweeping every possible boundary position — by growing
+// the ASCII prefix one byte at a time so the multi-byte rune's position
+// relative to the cut point varies — exercises landing on both the first and
+// second byte of the two-byte character, without relying on luck.
+func TestTruncateIsRuneSafe(t *testing.T) {
+	for pad := 0; pad < 4; pad++ {
+		s := strings.Repeat("a", maxToolResult+pad) + "ж" + strings.Repeat("b", 100)
+		got := truncate(s)
+		shown := strings.SplitN(got, "\n…[truncated:", 2)[0]
+		if !utf8.ValidString(shown) {
+			t.Fatalf("pad=%d: truncated output is not valid UTF-8: %q", pad, shown)
+		}
+	}
+}
+
+// TestReadFileSliceWindowIsRuneSafe pins Fix 6's other half: the paging window
+// cut must also never split a multi-byte character, AND the next-offset hint
+// must advance by the ACTUAL (possibly floored) cut length — not the nominal
+// limit — or the bytes between the floored cut and the nominal limit are
+// silently skipped and never shown on any page.
+func TestReadFileSliceWindowIsRuneSafe(t *testing.T) {
+	for pad := 0; pad < 4; pad++ {
+		content := strings.Repeat("a", pad) + "ж" + strings.Repeat("b", 100)
+		limit := pad + 1 // lands the window boundary at/inside the 2-byte rune
+		got := readFileSlice(content, 0, limit)
+		window := strings.SplitN(got, "\n…[", 2)[0]
+		if !utf8.ValidString(window) {
+			t.Fatalf("pad=%d, limit=%d: window is not valid UTF-8: %q", pad, limit, window)
+		}
+		// Reassemble every page using each page's own next-offset hint and
+		// confirm no bytes are skipped or duplicated across the boundary.
+		var rebuilt strings.Builder
+		offset := 0
+		maxPages := len(content) + 5 // each page advances by at least 1 byte, so this always terminates
+		for i := 0; i < maxPages; i++ {
+			page := readFileSlice(content, offset, limit)
+			body := strings.SplitN(page, "\n…[", 2)[0]
+			rebuilt.WriteString(body)
+			next := -1
+			if idx := strings.Index(page, "offset="); idx >= 0 {
+				fmt.Sscanf(page[idx:], "offset=%d]", &next)
+			}
+			if next < 0 {
+				break
+			}
+			offset = next
+		}
+		if rebuilt.String() != content {
+			t.Fatalf("pad=%d, limit=%d: paging through the window lost or duplicated bytes: got %q, want %q",
+				pad, limit, rebuilt.String(), content)
+		}
+	}
+}
+
+// TestSpillLargeOutputHeadIsRuneSafe pins Fix 6's third half: the inline head
+// shown alongside the spill-file pointer must never split a multi-byte
+// character, even though the FULL output (unaffected by this cut) is still
+// persisted to disk byte-for-byte.
+func TestSpillLargeOutputHeadIsRuneSafe(t *testing.T) {
+	dir := t.TempDir()
+	h := &hostToolSet{workspaceID: "wsSpillHead", workDir: dir}
+	for pad := 0; pad < 4; pad++ {
+		out := strings.Repeat("a", spillHeadBytes+pad) + "ж" + strings.Repeat("b", maxToolResult*2)
+		got := h.spillLargeOutput(out, "run_script")
+		head := strings.SplitN(got, "\n…[output is", 2)[0]
+		if !utf8.ValidString(head) {
+			t.Fatalf("pad=%d: spill head is not valid UTF-8: %q", pad, head)
+		}
 	}
 }
 

@@ -3,13 +3,13 @@ package gateway
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ilijad1/simple-agents/internal/gateway/render"
+	"github.com/ilijad1/simple-agents/internal/iolimit"
 	telebot "gopkg.in/telebot.v4"
 )
 
@@ -204,12 +204,9 @@ func (g *TelegramGateway) downloadTelegramFile(f telebot.File, name string) ([]b
 		return nil, "", err
 	}
 	defer rc.Close()
-	data, err := io.ReadAll(io.LimitReader(rc, maxAttachmentBytes+1))
+	data, err := iolimit.ReadCapped(rc, maxAttachmentBytes)
 	if err != nil {
 		return nil, "", err
-	}
-	if len(data) > maxAttachmentBytes {
-		return nil, "", fmt.Errorf("attachment exceeds the size limit")
 	}
 	if strings.TrimSpace(name) == "" {
 		name = "attachment"

@@ -570,3 +570,44 @@ func TestSearchFilesExactErrorDegradesToRankedOnly(t *testing.T) {
 		t.Errorf("the exact-search failure must be logged with the underlying error, got log: %q", logged)
 	}
 }
+
+// TestSearchFilesFindsOversizedFileByName pins the search_files side of Fix 1:
+// a file over the index's size cap (see index.go's maxIndexFileBytes) is
+// indexed name-only (empty body, never read into memory) — search_files must
+// still report it by filename rather than silently omitting it, the same
+// guarantee TestBuildKBContextFindsOversizedFileByName pins for the designer.
+// The filler body deliberately never contains the query words, so the ONLY
+// way this file can surface is via the name-only path (a literal exact-match
+// hit would also be legitimate, but would make the assertion less precise
+// about which mechanism is actually being exercised).
+func TestSearchFilesFindsOversizedFileByName(t *testing.T) {
+	v := vault.New(t.TempDir())
+	const ws = "ws1"
+	if err := v.EnsureScaffold(ws); err != nil {
+		t.Fatalf("scaffold: %v", err)
+	}
+	// 4 MiB mirrors vault's unexported maxIndexFileBytes (internal/vault/index.go)
+	// — not importable from this package, so the threshold is duplicated here as
+	// a literal, same as index_test.go's own oversized-file fixtures do within
+	// the vault package itself.
+	const overIndexCap = 4 << 20
+	body := strings.Repeat("unrelated filler content repeated many times over and over again. ", 90000)
+	if len(body) <= overIndexCap {
+		t.Fatalf("test fixture body (%d bytes) must exceed the index size cap (%d)", len(body), overIndexCap)
+	}
+	if err := v.WriteNote(ws, "notes/annual-budget-summary.md", []byte(body)); err != nil {
+		t.Fatalf("write oversized note: %v", err)
+	}
+	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws)}
+
+	out, err := h.searchFiles(context.Background(), "annual budget summary")
+	if err != nil {
+		t.Fatalf("searchFiles: %v", err)
+	}
+	if !strings.Contains(out, "annual-budget-summary.md") {
+		t.Errorf("oversized file must still be found by name, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Also found by filename") {
+		t.Errorf("expected the name-only-match section, got:\n%s", out)
+	}
+}
