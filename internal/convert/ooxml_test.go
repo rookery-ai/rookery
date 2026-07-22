@@ -98,3 +98,134 @@ func TestZipBombRefused(t *testing.T) {
 		t.Error("an oversized part must be refused")
 	}
 }
+
+// nestedTableBody reproduces Finding 1: a 2x2 outer table whose cell (1,1)
+// also holds a one-cell inner table sandwiched between two paragraphs. With a
+// single (non-stack) table pointer, the inner table clobbers the outer one in
+// progress and its closing </w:tbl> nils the pointer out from under the
+// outer table's still-pending end-tags — silently dropping four of the six
+// outer cells with no error.
+const nestedTableBody = `<?xml version="1.0"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+ <w:body>
+  <w:tbl>
+   <w:tr>
+    <w:tc>
+     <w:p><w:r><w:t>OuterR1C1-before</w:t></w:r></w:p>
+     <w:tbl>
+      <w:tr><w:tc><w:p><w:r><w:t>InnerR1C1</w:t></w:r></w:p></w:tc></w:tr>
+     </w:tbl>
+     <w:p><w:r><w:t>OuterR1C1-after</w:t></w:r></w:p>
+    </w:tc>
+    <w:tc><w:p><w:r><w:t>OuterR1C2</w:t></w:r></w:p></w:tc>
+   </w:tr>
+   <w:tr>
+    <w:tc><w:p><w:r><w:t>OuterR2C1</w:t></w:r></w:p></w:tc>
+    <w:tc><w:p><w:r><w:t>OuterR2C2</w:t></w:r></w:p></w:tc>
+   </w:tr>
+  </w:tbl>
+ </w:body>
+</w:document>`
+
+func TestDOCXNestedTablePreservesOuterTable(t *testing.T) {
+	data := buildZip(t, map[string]string{"word/document.xml": nestedTableBody})
+	got, err := ToMarkdown(data, Options{Filename: "nested.docx"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	// All six outer cells, plus the inner cell's own content, must survive.
+	// The inner table is rendered inline in cell (1,1) rather than as a
+	// second markdown table (see parseDocxParagraphs' doc comment) — so
+	// "InnerR1C1" is expected to appear alongside the before/after text, not
+	// as a standalone "| InnerR1C1 |" row.
+	for _, want := range []string{
+		"OuterR1C1-before",
+		"InnerR1C1",
+		"OuterR1C1-after",
+		"OuterR1C2",
+		"OuterR2C1",
+		"OuterR2C2",
+	} {
+		if !strings.Contains(got.Markdown, want) {
+			t.Errorf("missing %q, got:\n%s", want, got.Markdown)
+		}
+	}
+	// The outer table must still render as one coherent 2x2 markdown table,
+	// not have collapsed to just the inner cell's row.
+	if !strings.Contains(got.Markdown, "| OuterR2C1 | OuterR2C2 |") {
+		t.Errorf("outer table's second row missing, got:\n%s", got.Markdown)
+	}
+}
+
+// docxBrTabBody exercises Finding 2 in both the paragraph and table-cell text
+// paths: a manual line break (<w:br/>) and a tab stop (<w:tab/>) must
+// separate the text runs on either side of them, not fuse them together.
+const docxBrTabBody = `<?xml version="1.0"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+ <w:body>
+  <w:p><w:r><w:t>Line1</w:t></w:r><w:r><w:br/></w:r><w:r><w:t>Line2</w:t></w:r></w:p>
+  <w:p><w:r><w:t>Name:</w:t></w:r><w:r><w:tab/></w:r><w:r><w:t>John</w:t></w:r></w:p>
+  <w:tbl>
+   <w:tr>
+    <w:tc><w:p><w:r><w:t>CellA</w:t></w:r><w:r><w:br/></w:r><w:r><w:t>CellB</w:t></w:r></w:p></w:tc>
+    <w:tc><w:p><w:r><w:t>Tab1</w:t></w:r><w:r><w:tab/></w:r><w:r><w:t>Tab2</w:t></w:r></w:p></w:tc>
+   </w:tr>
+  </w:tbl>
+ </w:body>
+</w:document>`
+
+func TestDOCXBreakAndTabDoNotFuseText(t *testing.T) {
+	data := buildZip(t, map[string]string{"word/document.xml": docxBrTabBody})
+	got, err := ToMarkdown(data, Options{Filename: "breaks.docx"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	if strings.Contains(got.Markdown, "Line1Line2") {
+		t.Errorf("<w:br/> fused paragraph text, got:\n%s", got.Markdown)
+	}
+	if !strings.Contains(got.Markdown, "Line1") || !strings.Contains(got.Markdown, "Line2") {
+		t.Errorf("Line1/Line2 missing, got:\n%s", got.Markdown)
+	}
+	if strings.Contains(got.Markdown, "Name:John") {
+		t.Errorf("<w:tab/> fused paragraph text, got:\n%s", got.Markdown)
+	}
+	if !strings.Contains(got.Markdown, "Name:") || !strings.Contains(got.Markdown, "John") {
+		t.Errorf("Name:/John missing, got:\n%s", got.Markdown)
+	}
+	if strings.Contains(got.Markdown, "CellACellB") {
+		t.Errorf("<w:br/> fused table-cell text, got:\n%s", got.Markdown)
+	}
+	if strings.Contains(got.Markdown, "Tab1Tab2") {
+		t.Errorf("<w:tab/> fused table-cell text, got:\n%s", got.Markdown)
+	}
+}
+
+// docxMultiParaCellBody exercises Finding 3: a single <w:tc> holding more
+// than one <w:p> (common for addresses/notes columns) must not fuse them.
+const docxMultiParaCellBody = `<?xml version="1.0"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+ <w:body>
+  <w:tbl>
+   <w:tr>
+    <w:tc>
+     <w:p><w:r><w:t>Line one</w:t></w:r></w:p>
+     <w:p><w:r><w:t>Line two</w:t></w:r></w:p>
+    </w:tc>
+   </w:tr>
+  </w:tbl>
+ </w:body>
+</w:document>`
+
+func TestDOCXMultiParagraphCellDoesNotFuse(t *testing.T) {
+	data := buildZip(t, map[string]string{"word/document.xml": docxMultiParaCellBody})
+	got, err := ToMarkdown(data, Options{Filename: "multipara.docx"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	if strings.Contains(got.Markdown, "Line oneLine two") {
+		t.Errorf("multi-paragraph cell fused, got:\n%s", got.Markdown)
+	}
+	if !strings.Contains(got.Markdown, "Line one Line two") {
+		t.Errorf("want \"Line one Line two\" (space-separated) in one cell, got:\n%s", got.Markdown)
+	}
+}
