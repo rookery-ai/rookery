@@ -48,18 +48,28 @@ const (
 // reuse their cached chunks, so extracting text from a PDF or spreadsheet
 // happens ONCE PER FILE VERSION, never per query.
 type Indexer struct {
-	v  *Vault
-	mu sync.Mutex
-	ws map[string]*wsIndex
+	v *Vault
+
+	// mapMu guards ONLY the ws map itself — looking up or creating a
+	// workspace's entry. It is never held across a refresh or a search: each
+	// workspace's own wsIndex.mu does that, scoped to that workspace alone,
+	// so a slow PDF conversion for workspace A never blocks an unrelated
+	// search in workspace B.
+	mapMu sync.Mutex
+	ws    map[string]*wsIndex
 }
 
 type wsIndex struct {
+	// mu makes the reserve/refresh/snapshot sequence atomic for THIS
+	// workspace, the same guarantee the old process-wide Indexer.mu gave,
+	// just scoped down to one workspace instead of all of them.
+	mu sync.Mutex
+
 	files map[string]*fileEntry // vault-relative path → cached chunks
 	// Corpus statistics, recomputed when the file set changes.
-	chunks    []Chunk
-	df        map[string]int // term → number of chunks containing it
-	avgLen    float64
-	corpusGen int64
+	chunks []Chunk
+	df     map[string]int // term → number of chunks containing it
+	avgLen float64
 }
 
 type fileEntry struct {
@@ -77,13 +87,30 @@ func (v *Vault) Indexer() *Indexer {
 	return v.indexer
 }
 
+// wsIndexFor returns the wsIndex for a workspace, creating it on first use.
+// Only the map lookup/insert is guarded — the returned pointer is then used
+// (and locked) entirely outside mapMu, which is what lets two workspaces
+// proceed independently.
+func (i *Indexer) wsIndexFor(workspaceID string) *wsIndex {
+	i.mapMu.Lock()
+	defer i.mapMu.Unlock()
+	idx := i.ws[workspaceID]
+	if idx == nil {
+		idx = &wsIndex{files: map[string]*fileEntry{}}
+		i.ws[workspaceID] = idx
+	}
+	return idx
+}
+
 // Invalidate drops a workspace's cached index, forcing a full rebuild on the
 // next search. Callers do not normally need this — revalidation is automatic —
-// but a bulk import can use it to skip a stat walk.
+// but a bulk import can use it to skip a stat walk. An in-flight Search that
+// already holds the old wsIndex is unaffected and completes against it; the
+// NEXT Search call gets a fresh, empty entry.
 func (i *Indexer) Invalidate(workspaceID string) {
-	i.mu.Lock()
+	i.mapMu.Lock()
 	delete(i.ws, workspaceID)
-	i.mu.Unlock()
+	i.mapMu.Unlock()
 }
 
 // Search returns the top-scoring chunks for a query, best first.
@@ -96,8 +123,9 @@ func (i *Indexer) Search(workspaceID, query string, limit int) []Scored {
 		limit = 10
 	}
 
-	i.mu.Lock()
-	idx := i.refresh(workspaceID)
+	idx := i.wsIndexFor(workspaceID)
+	idx.mu.Lock()
+	i.refresh(workspaceID, idx)
 	// Snapshot under the lock. `chunks := idx.chunks` would NOT be safe: a slice
 	// header shares its backing array, and recompute() re-appends into that same
 	// array — so a concurrent refresh (a scheduled run calling search_files while
@@ -110,8 +138,14 @@ func (i *Indexer) Search(workspaceID, query string, limit int) []Scored {
 	for _, path := range sortedKeys(idx.files) {
 		tf = append(tf, idx.files[path].terms...)
 	}
+	// df is captured by reference (not copied) — that is only safe because
+	// recompute() always assigns idx.df a BRAND NEW map (`idx.df = map[string]int{}`)
+	// rather than clearing the existing one in place. If recompute() ever
+	// changed to reuse/clear the old map, this reference would let a
+	// concurrent refresh mutate df out from under the scorer running below,
+	// unlocked. Preserve the fresh-map property in recompute() or copy df here.
 	df, avgLen := idx.df, idx.avgLen
-	i.mu.Unlock()
+	idx.mu.Unlock()
 
 	if n == 0 || len(tf) != n {
 		return nil
@@ -142,18 +176,12 @@ func (i *Indexer) Search(workspaceID, query string, limit int) []Scored {
 	return scored
 }
 
-// refresh revalidates the workspace index against the filesystem. Must be
-// called with the mutex held.
-func (i *Indexer) refresh(workspaceID string) *wsIndex {
-	idx := i.ws[workspaceID]
-	if idx == nil {
-		idx = &wsIndex{files: map[string]*fileEntry{}}
-		i.ws[workspaceID] = idx
-	}
-
+// refresh revalidates the given workspace's index against the filesystem.
+// Must be called with idx.mu held.
+func (i *Indexer) refresh(workspaceID string, idx *wsIndex) {
 	root := i.v.Root(workspaceID)
 	if root == "" {
-		return idx
+		return
 	}
 
 	seen := map[string]bool{}
@@ -164,9 +192,14 @@ func (i *Indexer) refresh(workspaceID string) *wsIndex {
 			return nil
 		}
 		if d.IsDir() {
-			// .kb holds internal sidecars — never user knowledge, and it would
-			// leak DB exports into retrieval results.
-			if d.Name() == InternalDir {
+			// Skip every dot-directory, not just .kb: this vault is
+			// Obsidian-style, so .obsidian/ (app.json, workspace.json) is
+			// routine, and a vault living inside a git working tree would
+			// otherwise surface .git/COMMIT_EDITMSG as "content". None of
+			// that is user knowledge, and .kb specifically would leak DB
+			// exports into retrieval results. path != root guards against a
+			// workspace root itself living under a dot-prefixed path.
+			if path != root && strings.HasPrefix(d.Name(), ".") {
 				return filepath.SkipDir
 			}
 			return nil
@@ -184,6 +217,15 @@ func (i *Indexer) refresh(workspaceID string) *wsIndex {
 		}
 		seen[rel] = true
 
+		// (mtime, size) is not a content hash: a same-size edit landing within
+		// the same mtime tick would be missed and the stale cached chunks
+		// reused. This is a real limitation of the cache key, but not a live
+		// bug for anything written through this package: writeFileAtomic
+		// always writes a fresh temp file and renames it into place, and a
+		// rename always advances mtime on ext4/xfs/btrfs, so every write made
+		// through the vault's own API gets a fresh cache key. It would only
+		// bite a write made by some other process that intentionally
+		// preserved both mtime and size.
 		if prev, ok := idx.files[rel]; ok &&
 			prev.modTime == info.ModTime().UnixNano() && prev.size == info.Size() {
 			return nil // unchanged: reuse cached chunks, no re-read, no re-extract
@@ -209,7 +251,6 @@ func (i *Indexer) refresh(workspaceID string) *wsIndex {
 	if changed || idx.df == nil {
 		idx.recompute()
 	}
-	return idx
 }
 
 // buildEntry reads and chunks one file. Non-markdown files go through convert,
@@ -263,7 +304,6 @@ func (idx *wsIndex) recompute() {
 	if n := len(idx.chunks); n > 0 {
 		idx.avgLen = float64(total) / float64(n)
 	}
-	idx.corpusGen++
 }
 
 // bm25Score is the standard Okapi BM25 score of one chunk for a query.
@@ -332,11 +372,44 @@ func tokenize(s string) []string {
 // its singular form. It is applied identically at index time and query time
 // (both go through tokenize), so its only real requirement is internal
 // consistency — not that the form it produces is linguistically correct.
+//
+// That bare heuristic collides on ordinary English words that end in "s"
+// without being plurals: "news" -> "new" made a note mentioning "today's
+// news" a top hit for someone searching for a "new roof", and "lens" ->
+// "len" is the same shape of bug. foldExceptions is a pragmatic, manually
+// curated patch for this — it is NOT a linguistic rule (there is no way to
+// derive "news is not a plural" from the string alone without a
+// dictionary), and it will never be exhaustive. That is the accepted cost
+// of keeping the fold a cheap, explainable heuristic instead of a real
+// stemmer: pay for recall (folding "appointments" -> "appointment" so the
+// query "appointment" finds a heading written "Appointments", which is the
+// entire reason this fold exists) with a short, growable list of precision
+// exceptions, rather than not folding at all.
 func foldPlural(f string) string {
+	if foldExceptions[f] {
+		return f
+	}
 	if len(f) > 3 && strings.HasSuffix(f, "s") && !strings.HasSuffix(f, "ss") {
 		return f[:len(f)-1]
 	}
 	return f
+}
+
+// foldExceptions are common English words ending in "s" that are not
+// plurals, so folding them to a bare stem would produce a form that never
+// occurs in ordinary text and collides the word with the wrong query (see
+// foldPlural's doc comment). A few of these (e.g. "gas", "bus") are already
+// safe via the length floor or the "ss" exclusion and are listed anyway so
+// the set documents intent rather than relying on an incidental side effect
+// of an unrelated guard.
+var foldExceptions = map[string]bool{
+	"news": true, "lens": true, "analysis": true, "basis": true, "crisis": true,
+	"thesis": true, "status": true, "series": true, "species": true, "campus": true,
+	"bonus": true, "focus": true, "virus": true, "census": true, "canvas": true,
+	"atlas": true, "iris": true, "axis": true, "gas": true, "bus": true, "plus": true,
+	"minus": true, "versus": true, "alias": true, "chaos": true, "ethos": true,
+	"jeans": true, "glasses": true, "physics": true, "mathematics": true,
+	"politics": true, "economics": true, "diabetes": true,
 }
 
 var stopwords = map[string]bool{

@@ -161,6 +161,132 @@ func TestIndexConcurrentSearchAndWrite(t *testing.T) {
 	wg.Wait()
 }
 
+// Two workspaces must never block each other: searching one while the other
+// is being written/refreshed concurrently must not deadlock or race.
+func TestIndexTwoWorkspacesConcurrent(t *testing.T) {
+	root := t.TempDir()
+	v := New(root)
+	const wsA, wsB = "ws-a", "ws-b"
+	for _, ws := range []string{wsA, wsB} {
+		if err := v.EnsureScaffold(ws); err != nil {
+			t.Fatalf("scaffold %s: %v", ws, err)
+		}
+	}
+	if err := v.WriteNote(wsA, "notes/a.md", []byte("# A\n\nfacts about kayaking on the Vardar.\n")); err != nil {
+		t.Fatalf("write a: %v", err)
+	}
+	if err := v.WriteNote(wsB, "notes/b.md", []byte("# B\n\nfacts about sailing on the Adriatic.\n")); err != nil {
+		t.Fatalf("write b: %v", err)
+	}
+
+	idx := v.Indexer()
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			idx.Search(wsA, "kayaking", 5)
+			v.WriteNote(wsA, fmt.Sprintf("notes/a%d.md", n), []byte("# A\n\nmore kayaking notes\n"))
+		}(i)
+	}
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			idx.Search(wsB, "sailing", 5)
+			v.WriteNote(wsB, fmt.Sprintf("notes/b%d.md", n), []byte("# B\n\nmore sailing notes\n"))
+		}(i)
+	}
+	wg.Wait()
+
+	gotA := paths(idx.Search(wsA, "kayaking", 5))
+	if len(gotA) == 0 || !strings.Contains(gotA[0], "a") {
+		t.Errorf("workspace A search corrupted, got %+v", gotA)
+	}
+	gotB := paths(idx.Search(wsB, "sailing", 5))
+	if len(gotB) == 0 || !strings.Contains(gotB[0], "b") {
+		t.Errorf("workspace B search corrupted, got %+v", gotB)
+	}
+	// Cross-contamination check: workspace A's index must never surface
+	// workspace B's files and vice versa.
+	for _, s := range idx.Search(wsA, "sailing", 5) {
+		t.Errorf("workspace A must not see workspace B content, got %q", s.Path)
+	}
+}
+
+// foldPlural must not conflate ordinary English words that end in "s" but
+// aren't plurals, while still folding real plurals ("appointments" onto
+// "appointment") — the entire reason the fold exists.
+func TestFoldPluralDoesNotCollideOnOrdinaryWords(t *testing.T) {
+	v, ws := seedVault(t)
+
+	// "news" must not fold onto "new": a note about "today's news" must not
+	// be a top hit for someone searching for a "new roof".
+	if err := v.WriteNote(ws, "notes/news.md", []byte("# Market\n\nRead today's news about the market.\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := v.WriteNote(ws, "notes/roof.md", []byte("# Home\n\nGetting a new roof installed next month.\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got := v.Indexer().Search(ws, "new", 5)
+	if len(got) == 0 || !strings.Contains(got[0].Path, "roof.md") {
+		t.Errorf("query %q top hit = %+v, want roof.md (not news.md via a bad fold)", "new", paths(got))
+	}
+
+	// "lens" must not fold onto "len".
+	if err := v.WriteNote(ws, "notes/camera.md", []byte("# Camera\n\nBought a new 50mm lens.\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if got := v.Indexer().Search(ws, "len", 5); len(got) != 0 {
+		t.Errorf("query %q must not match lens.md via a bad plural fold, got %+v", "len", paths(got))
+	}
+
+	// The fold must still work for a real plural: this is the whole reason
+	// foldPlural exists (see TestIndexFindsWhatLiteralSearchMisses's sibling
+	// case in seedVault: notes/health.md has "## Appointments").
+	got = v.Indexer().Search(ws, "appointment", 5)
+	if len(got) == 0 || !strings.Contains(got[0].Path, "health.md") {
+		t.Errorf("query %q must still match the Appointments heading via the plural fold, got %+v", "appointment", paths(got))
+	}
+}
+
+// A vault is Obsidian-style and can live inside a git working tree: neither
+// .git/ nor .obsidian/ content should ever be retrievable, only the .kb case
+// that was already covered.
+func TestIndexSkipsAllDotDirectories(t *testing.T) {
+	v, ws := seedVault(t)
+	root := v.Root(ws)
+
+	git := filepath.Join(root, ".git")
+	if err := os.MkdirAll(git, 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(git, "COMMIT_EDITMSG"), []byte("orthodontist secret commit message"), 0o600); err != nil {
+		t.Fatalf("write COMMIT_EDITMSG: %v", err)
+	}
+
+	obsidian := filepath.Join(root, ".obsidian")
+	if err := os.MkdirAll(obsidian, 0o755); err != nil {
+		t.Fatalf("mkdir .obsidian: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(obsidian, "workspace.json"), []byte(`{"orthodontist":"config"}`), 0o600); err != nil {
+		t.Fatalf("write workspace.json: %v", err)
+	}
+
+	for _, s := range v.Indexer().Search(ws, "orthodontist", 10) {
+		if strings.Contains(s.Path, ".git") || strings.Contains(s.Path, ".obsidian") {
+			t.Errorf("dot-directory content must never be retrievable, got %q", s.Path)
+		}
+	}
+
+	// Ordinary content must still be found — the guard must not be so broad
+	// it starts skipping real content.
+	got := v.Indexer().Search(ws, "dentist appointment", 5)
+	if len(got) == 0 || !strings.Contains(got[0].Path, "health.md") {
+		t.Errorf("ordinary content must still be searchable, got %+v", paths(got))
+	}
+}
+
 func BenchmarkIndexSearchWarm(b *testing.B) {
 	v := New(b.TempDir())
 	const ws = "ws1"
