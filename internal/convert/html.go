@@ -3,6 +3,7 @@ package convert
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
@@ -59,8 +60,8 @@ var skipTags = map[atom.Atom]bool{
 
 // mdWriter accumulates markdown while walking the parse tree.
 type mdWriter struct {
-	sb       strings.Builder
-	listItem bool // currently inside an <li>, so text is emitted after a bullet
+	sb           strings.Builder
+	pendingSpace bool // previous fragment ended on whitespace; next emit needs a separator
 }
 
 func (w *mdWriter) walk(n *html.Node) {
@@ -101,9 +102,7 @@ func (w *mdWriter) walk(n *html.Node) {
 	case atom.Li:
 		w.block()
 		w.sb.WriteString("- ")
-		w.listItem = true
 		w.children(n)
-		w.listItem = false
 		w.sb.WriteString("\n")
 		return
 	case atom.Strong, atom.B:
@@ -121,16 +120,20 @@ func (w *mdWriter) walk(n *html.Node) {
 		w.block()
 		return
 	case atom.A:
-		text := squeeze(textOf(n))
-		href := attr(n, "href")
+		raw := textOf(n)
+		leading, trailing := hasEdgeSpace(raw)
+		text := squeeze(raw)
 		if text == "" {
 			return
 		}
+		href := attr(n, "href")
 		if href == "" || strings.HasPrefix(href, "javascript:") {
-			w.sb.WriteString(text)
+			w.emit(text, leading)
+			w.pendingSpace = trailing
 			return
 		}
-		fmt.Fprintf(&w.sb, "[%s](%s)", text, href)
+		w.emit(fmt.Sprintf("[%s](%s)", text, href), leading)
+		w.pendingSpace = trailing
 		return
 	case atom.Table:
 		w.block()
@@ -139,7 +142,7 @@ func (w *mdWriter) walk(n *html.Node) {
 		return
 	case atom.Img:
 		if alt := strings.TrimSpace(attr(n, "alt")); alt != "" {
-			fmt.Fprintf(&w.sb, "![%s](%s)", alt, attr(n, "src"))
+			w.emit(fmt.Sprintf("![%s](%s)", alt, attr(n, "src")), false)
 		}
 		return
 	}
@@ -153,30 +156,58 @@ func (w *mdWriter) children(n *html.Node) {
 }
 
 func (w *mdWriter) inline(marker string, n *html.Node) {
-	text := squeeze(textOf(n))
+	raw := textOf(n)
+	leading, trailing := hasEdgeSpace(raw)
+	text := squeeze(raw)
 	if text == "" {
 		return
 	}
-	w.sb.WriteString(marker + text + marker)
+	w.emit(marker+text+marker, leading)
+	w.pendingSpace = trailing
 }
 
-// text writes a text node, collapsing whitespace. Leading whitespace directly
-// after a block break is dropped so paragraphs do not start with a space.
+// text writes a text node. Whitespace at a fragment's boundaries is the only
+// record HTML keeps that two words are separate, and squeeze() discards it —
+// so capture it first and re-apply it as an explicit separator.
 func (w *mdWriter) text(s string) {
-	s = squeeze(s)
-	if s == "" {
+	leading, trailing := hasEdgeSpace(s)
+	sq := squeeze(s)
+	if sq == "" {
+		// A whitespace-only node still separates the spans on either side of it.
+		if leading || trailing {
+			w.pendingSpace = true
+		}
 		return
 	}
+	w.emit(sq, leading)
+	w.pendingSpace = trailing
+}
+
+// emit appends a fragment, inserting a single separator when the previous
+// fragment ended on whitespace or this one began on it. Every writer — text
+// and inline element alike — goes through here, which is what keeps an inline
+// span from fusing with the prose around it.
+func (w *mdWriter) emit(s string, leadingSpace bool) {
 	cur := w.sb.String()
-	if cur != "" && !strings.HasSuffix(cur, "\n") && !strings.HasSuffix(cur, " ") &&
-		!strings.HasPrefix(s, " ") {
+	if (w.pendingSpace || leadingSpace) && cur != "" &&
+		!strings.HasSuffix(cur, "\n") && !strings.HasSuffix(cur, " ") {
 		w.sb.WriteString(" ")
 	}
+	w.pendingSpace = false
 	w.sb.WriteString(s)
+}
+
+// hasEdgeSpace reports whether s begins and/or ends with whitespace.
+func hasEdgeSpace(s string) (leading, trailing bool) {
+	if s == "" {
+		return false, false
+	}
+	return unicode.IsSpace(rune(s[0])), unicode.IsSpace(rune(s[len(s)-1]))
 }
 
 // block ensures the output is at a blank-line boundary before the next block.
 func (w *mdWriter) block() {
+	w.pendingSpace = false
 	cur := w.sb.String()
 	if cur == "" {
 		return

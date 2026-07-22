@@ -85,6 +85,27 @@ func TestHTMLTable(t *testing.T) {
 	}
 }
 
+func TestHTMLInlineSpacing(t *testing.T) {
+	tests := []struct{ name, html, want string }{
+		{"inline between words", "<p>Revenue grew by <strong>12%</strong> this quarter.</p>", "Revenue grew by **12%** this quarter."},
+		{"adjacent inline spans", "<p><strong>A</strong> <em>B</em></p>", "**A** *B*"},
+		{"no spurious space before punctuation", "<p>See <code>here</code>.</p>", "See `here`."},
+		{"link between words", `<p>Read <a href="https://x.co">the docs</a> now.</p>`, "Read [the docs](https://x.co) now."},
+		{"no space where source had none", "<p><strong>Bold</strong>text</p>", "**Bold**text"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ToMarkdown([]byte(tc.html), Options{MIME: "text/html"})
+			if err != nil {
+				t.Fatalf("ToMarkdown: %v", err)
+			}
+			if strings.TrimSpace(got.Markdown) != tc.want {
+				t.Errorf("got  %q\nwant %q", strings.TrimSpace(got.Markdown), tc.want)
+			}
+		})
+	}
+}
+
 func TestHTMLNeverEmpty(t *testing.T) {
 	// A document with no extractable text must still not produce an empty body.
 	got, err := ToMarkdown([]byte("<html><body><script>x=1</script></body></html>"), Options{})
