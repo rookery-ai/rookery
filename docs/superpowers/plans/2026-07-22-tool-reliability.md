@@ -2475,18 +2475,49 @@ func TestCSVRaggedRows(t *testing.T) {
 	}
 }
 
-func TestCSVLargeIsTruncatedWithNotice(t *testing.T) {
+// A realistically large export must survive INTACT. Silently dropping rows makes
+// them unsearchable and invisible to agents, so the row cap is a safety valve
+// far above real-world sizes, not a routine truncation.
+func TestCSVLargeSurvivesIntact(t *testing.T) {
 	var sb strings.Builder
 	sb.WriteString("id,value\n")
-	for i := 0; i < maxTableRows+50; i++ {
+	const rows = 5000
+	for i := 0; i < rows; i++ {
 		fmt.Fprintf(&sb, "%d,v%d\n", i, i)
 	}
 	got, err := ToMarkdown([]byte(sb.String()), Options{Filename: "big.csv"})
 	if err != nil {
 		t.Fatalf("ToMarkdown: %v", err)
 	}
+	if strings.Contains(got.Markdown, "rows omitted") {
+		t.Errorf("a %d-row csv must not be truncated", rows)
+	}
+	if !strings.Contains(got.Markdown, "| 4999 | v4999 |") {
+		t.Error("the last row must be present and searchable")
+	}
+	if len(got.Warnings) != 0 {
+		t.Errorf("no warning expected for a normal-sized file, got %v", got.Warnings)
+	}
+}
+
+// Beyond the safety valve, truncation must announce itself in BOTH the body and
+// Result.Warnings — the importer writes warnings into the note's frontmatter, so
+// a truncated note declares itself rather than looking complete.
+func TestCSVBeyondCapWarnsInBodyAndWarnings(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString("id,value\n")
+	for i := 0; i < maxTableRows+50; i++ {
+		fmt.Fprintf(&sb, "%d,v%d\n", i, i)
+	}
+	got, err := ToMarkdown([]byte(sb.String()), Options{Filename: "huge.csv"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
 	if !strings.Contains(got.Markdown, "rows omitted") {
-		t.Errorf("truncation must be stated in the output, got tail:\n%s", got.Markdown[len(got.Markdown)-200:])
+		t.Error("truncation must be stated in the body")
+	}
+	if len(got.Warnings) == 0 {
+		t.Error("truncation must also surface as a Result warning, or the note's frontmatter will not declare it")
 	}
 }
 
@@ -2515,11 +2546,15 @@ import (
 	"strings"
 )
 
-// maxTableRows bounds how many data rows are rendered. A spreadsheet export can
-// be tens of thousands of rows; rendering all of them would blow past every
-// downstream byte cap and bury the useful part. The output states what was
-// omitted so the reader is never misled about completeness.
-const maxTableRows = 500
+// maxTableRows is a SAFETY VALVE against a pathological file, not a routine
+// truncation. It is deliberately high: a converted note is stored on disk and
+// read through paging (read_file takes offset/limit) and chunked retrieval, so
+// a long table costs nothing at rest — whereas dropping rows makes them
+// unsearchable and invisible to every agent, which is silent data loss on the
+// file type users are most likely to compute over. Anything actually omitted is
+// recorded as a Result warning, which the importer writes into the note's
+// frontmatter, so a truncated note always declares itself.
+const maxTableRows = 50000
 
 // tabularToMarkdown renders delimited data as a markdown table. The first
 // record becomes the header, which is what a delimited export virtually always
@@ -2564,7 +2599,11 @@ func tabularToMarkdown(data []byte, kind Kind, opt Options) (Result, error) {
 	ragged := false
 	for i, rec := range body {
 		if i >= maxTableRows {
-			fmt.Fprintf(&sb, "\n_%d further rows omitted (%d total)._\n", len(body)-maxTableRows, len(body))
+			omitted := len(body) - maxTableRows
+			fmt.Fprintf(&sb, "\n_%d further rows omitted (%d total)._\n", omitted, len(body))
+			res.Warnings = append(res.Warnings, fmt.Sprintf(
+				"row limit reached: %d of %d rows are not in this note — read the preserved original for the full data",
+				omitted, len(body)))
 			break
 		}
 		if len(rec) != width {
