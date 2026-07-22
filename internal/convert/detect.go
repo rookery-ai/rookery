@@ -17,6 +17,13 @@ func Detect(data []byte, filename, mime string) Kind {
 	if k := detectMagic(data); k != KindUnknown {
 		return k
 	}
+	// A zip could be any OOXML format — they share magic bytes — so inspect the
+	// archive's parts before falling back to the (possibly wrong) extension.
+	if bytes.HasPrefix(data, []byte("PK\x03\x04")) {
+		if k := detectOOXMLKind(data); k != KindUnknown {
+			return k
+		}
+	}
 	if k := kindFromExtension(filename); k != KindUnknown {
 		return k
 	}
