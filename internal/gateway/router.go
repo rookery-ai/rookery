@@ -122,6 +122,21 @@ func (r *Router) Handle(ctx context.Context, msg Message, send func(string), del
 	// carries no meaningful Text to dispatch on (Telegram documents/photos
 	// arrive with an empty or caption-only Text field).
 	if msg.Attachment != nil {
+		// A failed download is reported and the turn ends HERE — it must never
+		// fall through to the text path. msg.Text is empty on a download failure
+		// (there was nothing to caption it with beyond what the platform gave us),
+		// and an empty text turn reaching handleText with a master-password
+		// challenge pending would previously be read as an answer, silently
+		// cancelling a security-sensitive pending flow because of an unrelated
+		// network hiccup fetching a file.
+		if msg.Attachment.Err != nil {
+			name := msg.Attachment.Filename
+			if strings.TrimSpace(name) == "" {
+				name = "your file"
+			}
+			send(fmt.Sprintf("⚠️ I couldn't fetch **%s** — %s. Please try sending it again.", name, msg.Attachment.Err.Error()))
+			return nil
+		}
 		reply, err := r.handleAttachment(msg.WorkspaceID, *msg.Attachment)
 		if err != nil {
 			send("⚠️ " + err.Error())
@@ -593,6 +608,9 @@ func (r *Router) resolveMasterPwChallenge(ctx context.Context, msg Message, ch *
 
 	masterPw := strings.TrimSpace(msg.Text)
 	if masterPw == "" {
+		// Unreachable through handleText today (it only calls in here once it has
+		// already confirmed non-empty text) — kept as a second layer of defense
+		// in depth rather than trusting that invariant to hold forever.
 		send("Master password cannot be empty. Challenge cancelled.")
 		return nil
 	}
@@ -939,13 +957,25 @@ func parseDuration(s string) (time.Duration, error) {
 func (r *Router) handleText(ctx context.Context, msg Message, send func(string), deleteIncoming func(), sendAutoDelete func(string), sendProgress func(string)) error {
 	// Check for a pending master-password challenge. These exchanges are intentionally
 	// NOT persisted to session history to keep sensitive values out of the DB.
+	//
+	// Peek (don't consume yet) — an inbound message with no usable text is NOT a
+	// genuine reply to the challenge, even if one is pending. This is defense in
+	// depth independent of the attachment-error short-circuit in Handle(): should
+	// an empty-text message ever reach here some other way (a sticker, a voice
+	// note, an adapter bug), it must not be read as an answer and silently cancel
+	// a security-sensitive pending flow. Only a real, non-empty text reply
+	// resolves — and consumes — the challenge.
 	r.mu.Lock()
 	challenge, hasPending := r.challenges[msg.WorkspaceID]
-	if hasPending {
-		delete(r.challenges, msg.WorkspaceID)
-	}
 	r.mu.Unlock()
 	if hasPending {
+		if strings.TrimSpace(msg.Text) == "" {
+			send("🔐 Still waiting on your master password — reply with the password itself, or send the /secret command again to cancel.")
+			return nil
+		}
+		r.mu.Lock()
+		delete(r.challenges, msg.WorkspaceID)
+		r.mu.Unlock()
 		return r.resolveMasterPwChallenge(ctx, msg, challenge, send, deleteIncoming, sendAutoDelete)
 	}
 

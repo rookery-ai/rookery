@@ -3,8 +3,34 @@ package gateway
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
+	"time"
 )
+
+// withTestDiscordAttachment points downloadDiscordAttachment's CDN allowlist
+// and HTTP client at a hermetic httptest server for the duration of a test.
+// Both overrides are necessary and independent: the allowlist swap lets a
+// non-cdn.discordapp.com host pass the pinning check, and the unguarded
+// client is required because the real guarded client (nethttp.GuardedClient)
+// refuses to dial loopback outright — httptest servers always bind
+// 127.0.0.1, so the production client could never reach one at all.
+func withTestDiscordAttachment(t *testing.T, srvURL string) {
+	t.Helper()
+	u, err := url.Parse(srvURL)
+	if err != nil {
+		t.Fatalf("parse test server url: %v", err)
+	}
+
+	oldHosts := discordCDNHosts
+	oldClient := discordAttachmentClient
+	discordCDNHosts = map[string]bool{u.Hostname(): true}
+	discordAttachmentClient = &http.Client{Timeout: 5 * time.Second}
+	t.Cleanup(func() {
+		discordCDNHosts = oldHosts
+		discordAttachmentClient = oldClient
+	})
+}
 
 func TestValidateDiscordToken(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +70,7 @@ func TestDownloadDiscordAttachment(t *testing.T) {
 		w.Write([]byte("item,cost\nrent,900\n"))
 	}))
 	defer srv.Close()
+	withTestDiscordAttachment(t, srv.URL)
 
 	data, err := downloadDiscordAttachment(srv.URL)
 	if err != nil {
@@ -59,6 +86,7 @@ func TestDownloadDiscordAttachmentTooLarge(t *testing.T) {
 		w.Write(make([]byte, maxAttachmentBytes+1))
 	}))
 	defer srv.Close()
+	withTestDiscordAttachment(t, srv.URL)
 
 	if _, err := downloadDiscordAttachment(srv.URL); err == nil {
 		t.Error("an oversized attachment must be refused")
@@ -70,9 +98,28 @@ func TestDownloadDiscordAttachmentNon200(t *testing.T) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer srv.Close()
+	withTestDiscordAttachment(t, srv.URL)
 
 	if _, err := downloadDiscordAttachment(srv.URL); err == nil {
 		t.Error("a non-200 response must be refused")
+	}
+}
+
+// TestDownloadDiscordAttachmentRejectsNonCDNHost proves the allowlist itself:
+// even with a reachable, well-formed server, a host outside discordCDNHosts
+// must be refused before any network I/O — this is what stops a
+// malformed/tampered attachment URL from reaching an arbitrary host.
+func TestDownloadDiscordAttachmentRejectsNonCDNHost(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("should never be reached"))
+	}))
+	defer srv.Close()
+	// Deliberately do NOT call withTestDiscordAttachment — the production
+	// allowlist (cdn.discordapp.com / media.discordapp.net) stays in effect,
+	// and srv.URL's host is neither.
+
+	if _, err := downloadDiscordAttachment(srv.URL); err == nil {
+		t.Error("a non-discord-cdn host must be refused")
 	}
 }
 

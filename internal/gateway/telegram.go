@@ -172,19 +172,23 @@ func (g *TelegramGateway) handle(tc telebot.Context) error {
 	// already reduced from the size-array Telegram sends down to the single
 	// largest entry). Either way the bytes come from a two-step getFile →
 	// download, which telebot wraps in File/Download. A download failure is
-	// logged and otherwise swallowed — the message still dispatches on its
-	// text/caption alone rather than being dropped outright.
+	// logged AND surfaced as an explicit Attachment.Err — never silently
+	// swallowed into an empty-text dispatch, which the router could misread as
+	// an answer to an unrelated pending flow (see Router.Handle).
 	if doc := tc.Message().Document; doc != nil {
-		if data, name, err := g.downloadTelegramFile(doc.File, doc.FileName); err == nil {
-			msg.Attachment = &Attachment{Filename: name, Data: data}
+		name := doc.FileName
+		if data, resolvedName, err := g.downloadTelegramFile(doc.File, name); err == nil {
+			msg.Attachment = &Attachment{Filename: resolvedName, Data: data}
 		} else {
 			slog.Warn("telegram: attachment download failed", "err", err)
+			msg.Attachment = &Attachment{Filename: name, Err: err}
 		}
 	} else if photo := tc.Message().Photo; photo != nil {
 		if data, name, err := g.downloadTelegramFile(photo.File, "photo.jpg"); err == nil {
 			msg.Attachment = &Attachment{Filename: name, Data: data}
 		} else {
 			slog.Warn("telegram: attachment download failed", "err", err)
+			msg.Attachment = &Attachment{Filename: "photo.jpg", Err: err}
 		}
 	}
 
