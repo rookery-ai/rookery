@@ -57,10 +57,26 @@ base. The cost is accepted: a converted table is a *rendering* of the data, not 
 which is why the original bytes are always preserved alongside the note, and why the row
 cap is a high safety valve that announces itself rather than a routine truncation.
 
-**Write-back: CSV and markdown only.** Agents read every supported format but generate
-only CSV and markdown, which any spreadsheet or editor opens. Generating binary OOXML or
-PDF is an explicit non-goal: pure-Go *writing* of those formats is substantially harder
-than reading them, and nothing in this design requires it.
+**Write-back: markdown only. Conversion is one-directional.** Everything flows *into*
+markdown; nothing in this design writes any other format. `internal/convert` is therefore
+an import pipeline, not a general format library.
+
+Producing other formats is a **planned future feature of its own**: a user-triggered
+**export action in the knowledge base**, letting someone export a note (or a folder) as
+docx/pdf/xlsx/csv. That is deliberately a *user* action rather than an agent capability —
+agents author markdown, users decide what leaves the vault and in what shape.
+
+Two consequences worth keeping in mind while building this phase:
+
+- Keep `internal/convert`'s surface shaped so a reverse direction can sit beside it later
+  without restructuring. `ToMarkdown(data, Options) (Result, error)` leaves room for a
+  future `FromMarkdown(md string, target Kind) ([]byte, error)` in the same package or an
+  `internal/export` sibling. Do not fold export assumptions into the import path now.
+- Downloading an ingested file's **original** already works and is not export: the importer
+  preserves the source bytes under `files/` and links them from the note, and the KB
+  serves them through the existing raw/binary-download path. Export is about generating a
+  NEW artifact from markdown, which is a different problem (and the hard direction —
+  pure-Go *writing* of OOXML/PDF is substantially harder than reading it).
 
 ## Non-goals
 
