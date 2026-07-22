@@ -54,6 +54,8 @@ func ToMarkdown(data []byte, opt Options) (Result, error) {
 		return htmlToMarkdown(data, opt)
 	case KindMarkdown, KindText:
 		return passthrough(data, kind, opt), nil
+	case KindCSV, KindTSV:
+		return tabularToMarkdown(data, kind, opt)
 	case KindUnknown:
 		return Result{}, fmt.Errorf("convert: unrecognized format (%d bytes); no converter applies", len(data))
 	default:
