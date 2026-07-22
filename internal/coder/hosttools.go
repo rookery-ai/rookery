@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -157,6 +158,11 @@ func (h *hostToolSet) tools() []llm.Tool {
 		{Name: "glob", Description: "Find files in the vault by name/pattern and return their vault-relative paths (one per line). Supports * (within one folder), ? (one char), and ** (any depth, crosses folders) — " +
 			`e.g. glob with pattern "notes/*-meeting.md" or "**/*.py". Use this to locate files by NAME instead of listing folders one at a time.`,
 			Parameters: rawSchema(`{"type":"object","properties":{"pattern":{"type":"string","description":"glob pattern matching vault-relative paths (supports *, ?, and **)"}},"required":["pattern"]}`)},
+		{Name: "save_to_kb", Description: "Convert a document to markdown and file it in the user's knowledge base. " +
+			"source is either a vault path (e.g. \"downloads/report.pdf\") or a public http(s) URL. " +
+			"Handles pdf, docx, pptx, xlsx, csv, html and plain text; the original file is preserved alongside the note. " +
+			"Returns the created note's path. Use this instead of writing your own extraction script.",
+			Parameters: rawSchema(`{"type":"object","properties":{"source":{"type":"string","description":"vault path or public http(s) URL"},"dest_dir":{"type":"string","description":"vault folder for the note (default notes/)"},"title":{"type":"string","description":"override the derived title"}},"required":["source"]}`)},
 		// Read-only tools, always offered (chat included): file discovery plus the
 		// two web tools. None of them execute code or carry secrets, so the exec
 		// gate below — which exists for run_script/bash — does not apply to them.
@@ -485,6 +491,9 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		Pattern   string            `json:"pattern"`
 		Offset    int               `json:"offset"`
 		Limit     int               `json:"limit"`
+		Source    string            `json:"source"`
+		DestDir   string            `json:"dest_dir"`
+		Title     string            `json:"title"`
 	}
 	_ = json.Unmarshal(call.Args, &args) // tolerate missing fields
 
@@ -515,6 +524,12 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		return out
 	case "glob":
 		out, err := h.glob(args.Pattern)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return out
+	case "save_to_kb":
+		out, err := h.saveToKB(ctx, args.Source, args.DestDir, args.Title)
 		if err != nil {
 			return "error: " + err.Error()
 		}
@@ -783,6 +798,108 @@ func (h *hostToolSet) glob(pattern string) (string, error) {
 		matches = matches[:maxGlobMatches]
 	}
 	return truncate(strings.Join(matches, "\n")), nil
+}
+
+// saveToKB converts a document and files it in the knowledge base. The source is
+// either a vault-relative path or a public URL; a URL is fetched through the
+// SAME guarded client web_fetch uses, so importing cannot become a way around
+// the private-address block.
+//
+// Unlike write_file/edit_file (which resolve relative paths against workDir —
+// the agent's OWN draft directory during a build, never the live vault root),
+// ImportFile always writes into the REAL vault (notes/ + files/) for the
+// workspace, regardless of workDir. That makes it a mutating action in the same
+// sense connectors.Execute's buildPhase guard cares about: a build-time test
+// call would otherwise leave a real, uncleaned note in the user's live
+// knowledge base (cleanupTestArtifacts only sweeps the draft agent dir). So it
+// is refused during generation (h.verifyBuild), mirroring the connector
+// build-time mutation guard — the read/convert path is proven, the actual save
+// is trusted to work like a real send, and happens only when the agent runs
+// for real.
+func (h *hostToolSet) saveToKB(ctx context.Context, source, destDir, title string) (string, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return "", fmt.Errorf("source is required")
+	}
+	if h.vlt == nil {
+		return "", fmt.Errorf("save_to_kb unavailable: no vault")
+	}
+	if h.verifyBuild {
+		return "", fmt.Errorf("build-time guard: save_to_kb writes to the knowledge base for real and is blocked during generation — it will run when the agent executes for real")
+	}
+
+	var (
+		data     []byte
+		filename string
+		srcURL   string
+	)
+	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+		raw, name, err := h.fetchRaw(ctx, source)
+		if err != nil {
+			return "", err
+		}
+		data, filename, srcURL = raw, name, source
+	} else {
+		abs, err := h.resolveVault(source)
+		if err != nil {
+			return "", err
+		}
+		raw, err := os.ReadFile(abs)
+		if err != nil {
+			return "", fmt.Errorf("read %s: %v", source, err)
+		}
+		data, filename = raw, filepath.Base(abs)
+	}
+
+	res, err := h.vlt.ImportFile(h.workspaceID, vault.ImportInput{
+		Data: data, Filename: filename, SourceURL: srcURL, DestDir: destDir, Title: title,
+	})
+	if err != nil {
+		return "", err
+	}
+	msg := fmt.Sprintf("ok: saved %s (%s, via %s); original kept at %s",
+		res.NotePath, res.Kind, res.Extractor, res.OriginalPath)
+	if len(res.Warnings) > 0 {
+		msg += "\nwarnings: " + strings.Join(res.Warnings, "; ")
+	}
+	return msg, nil
+}
+
+// fetchRaw downloads a URL's bytes (not its rendered text) for conversion.
+func (h *hostToolSet) fetchRaw(ctx context.Context, rawURL string) ([]byte, string, error) {
+	client := h.httpClient
+	if client == nil {
+		if h.allowPrivateHosts {
+			client = &http.Client{Timeout: 60 * time.Second}
+		} else {
+			client = guardedHTTPClient(60 * time.Second)
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("fetch %s: %v", rawURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, "", fmt.Errorf("fetch %s: HTTP %d", rawURL, resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxWebBody))
+	if err != nil {
+		return nil, "", err
+	}
+	name := path.Base(rawURL)
+	if i := strings.IndexByte(name, '?'); i >= 0 {
+		name = name[:i]
+	}
+	if name == "" || name == "/" || name == "." {
+		name = "download"
+	}
+	return data, name, nil
 }
 
 // compileGlob converts a glob pattern into an anchored regexp. It supports the

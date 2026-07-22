@@ -61,22 +61,14 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 	// CLI coder) or read_file/write_file/edit_file/list_dir tool calls (for an API coder).
 	root := s.vault.Root(u.ID)
 	coder := s.coderForWorkspace(u.ID).WithDir(root)
-	if !coder.IsAPI() {
-		// WithAllowedTools pre-approves the CLI subprocess's tool set so it never
-		// blocks on an interactive permission prompt; it's meaningless for an API
-		// coder (host tools are offered via native function-calling, not gated by
-		// this flag), so skip it there — matches the Telegram chat path.
-		// WebFetch/WebSearch are included because they are read-only, cannot carry
-		// secrets, and cannot reach private address space — the same reasoning that
-		// took them out of the exec gate on the API engine. This list must stay in
-		// step with the Telegram/Discord/Slack chat path in cmd/simple-agents;
-		// divergence would give one surface web access and not the other.
-		coder = coder.WithAllowedTools(codersvc.ChatAllowedTools(""))
-	}
 
-	// Connector wiring: the API engine exposes bound connections as native
-	// in-process tools directly. A CLI coder instead reaches them via the loopback
-	// bridge (`simple-agents connector exec <tool>`), the same mechanism agent runs use.
+	// Connector + KB bridge wiring: the API engine exposes bound connections AND
+	// save_to_kb as native in-process tools directly. A CLI coder instead reaches
+	// them via loopback bridges (`simple-agents connector exec <tool>`,
+	// `simple-agents kb convert|search`), the same mechanism agent runs use. This
+	// list must stay in step with the Telegram/Discord/Slack chat path in
+	// cmd/simple-agents; divergence would give one surface a capability the other
+	// lacks.
 	var connRefs []prompts.ConnectionRef
 	var connTools []string
 	var connBin string
@@ -93,33 +85,53 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 				}
 			}
 		}
-	} else if !coder.IsAPI() && s.connBridge != nil && s.connBridge.Addr() != "" {
-		if rows, err := s.db.ListServiceConnections(c.Request().Context(), u.ID); err == nil {
-			bound := connectors.ActiveBoundConns(rows)
-			if len(bound) > 0 {
-				tok := s.connBridge.Register(u.ID, bound, false)
-				defer s.connBridge.Unregister(tok)
-				coder = coder.WithExtraEnv(map[string]string{
-					"SA_CONNECTOR_URL":   s.connBridge.Addr(),
-					"SA_CONNECTOR_TOKEN": tok,
-				})
-				for _, b := range bound {
-					connRefs = append(connRefs, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
-				}
-				for _, d := range s.connectors.ToolDefs(bound) {
-					connTools = append(connTools, d.Name)
-				}
-				if p, err := os.Executable(); err == nil {
-					connBin = p
-				}
-				if connBin != "" {
-					// A CLI coder reaches connectors by running `<bin> connector exec …` as a
-					// shell command, so grant a NARROWLY-SCOPED Bash permission for only that
-					// command — chat stays file-only (no arbitrary shell) otherwise.
-					coder = coder.WithAllowedTools(codersvc.ChatAllowedTools(connBin))
+	} else if !coder.IsAPI() {
+		// WithAllowedTools pre-approves the CLI subprocess's tool set so it never
+		// blocks on an interactive permission prompt; it's meaningless for an API
+		// coder (host tools are offered via native function-calling, not gated by
+		// this flag), so skip it there — matches the Telegram chat path.
+		// WithExtraEnv REPLACES rather than merges, so both bridges' env vars are
+		// assembled into one map and injected with a single call.
+		extraEnv := map[string]string{}
+		var kbBin string
+		if s.kbBridge != nil && s.kbBridge.URL() != "" {
+			if p, err := os.Executable(); err == nil {
+				kbBin = p
+			}
+			if kbBin != "" {
+				kbTok := s.kbBridge.Register(u.ID)
+				defer s.kbBridge.Unregister(kbTok)
+				extraEnv["SA_KB_URL"] = s.kbBridge.URL()
+				extraEnv["SA_KB_TOKEN"] = kbTok
+			}
+		}
+		if s.connBridge != nil && s.connBridge.Addr() != "" {
+			if rows, err := s.db.ListServiceConnections(c.Request().Context(), u.ID); err == nil {
+				bound := connectors.ActiveBoundConns(rows)
+				if len(bound) > 0 {
+					tok := s.connBridge.Register(u.ID, bound, false)
+					defer s.connBridge.Unregister(tok)
+					extraEnv["SA_CONNECTOR_URL"] = s.connBridge.Addr()
+					extraEnv["SA_CONNECTOR_TOKEN"] = tok
+					for _, b := range bound {
+						connRefs = append(connRefs, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
+					}
+					for _, d := range s.connectors.ToolDefs(bound) {
+						connTools = append(connTools, d.Name)
+					}
+					if p, err := os.Executable(); err == nil {
+						connBin = p
+					}
 				}
 			}
 		}
+		if len(extraEnv) > 0 {
+			coder = coder.WithExtraEnv(extraEnv)
+		}
+		// A CLI coder reaches connectors/kb by running `<bin> connector exec …` /
+		// `<bin> kb …` as shell commands, so grant NARROWLY-SCOPED Bash permissions
+		// for only those commands — chat stays file-only (no arbitrary shell) otherwise.
+		coder = coder.WithAllowedTools(codersvc.ChatAllowedTools(connBin, kbBin))
 	}
 	sysCtx := prompts.BuildChatSystemPrompt(root, coder.BackendType(), connRefs, connTools, connBin) + chat.BuildUserContext(s.db, s.memory, u.ID)
 

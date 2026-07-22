@@ -78,6 +78,12 @@ type Runner struct {
 	connReg    *connectors.Registry
 	connStore  connectors.TokenStore
 	connBridge *connectors.Bridge
+
+	// kbBridge, when set, lets a CLI coder's agent run reach the knowledge base's
+	// conversion + search paths via `simple-agents kb convert|search` (the same
+	// vault.ImportFile / Searcher code the API engine's save_to_kb/search_files
+	// tools call in-process). nil for tests that don't wire one.
+	kbBridge *vault.Bridge
 }
 
 // WithConnectors wires the self-managed-OAuth connector registry + token store + loopback
@@ -133,6 +139,14 @@ func (r *Runner) WithMemory(m memoryStore) *Runner {
 // WithVault wires the knowledge base so runs are mirrored into the user's vault.
 func (r *Runner) WithVault(v *vault.Vault) *Runner {
 	r.reflector = v.Reflector()
+	return r
+}
+
+// WithKBBridge wires the loopback KB bridge so a CLI coder's agent run can reach
+// `simple-agents kb convert|search` (parity with the API engine's built-in
+// save_to_kb/search_files host tools).
+func (r *Runner) WithKBBridge(b *vault.Bridge) *Runner {
+	r.kbBridge = b
 	return r
 }
 
@@ -363,6 +377,16 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 			extraEnv["SA_CONNECTOR_URL"] = r.connBridge.Addr()
 			extraEnv["SA_CONNECTOR_TOKEN"] = token
 		}
+	}
+	// CLI coders: register a run-scoped KB bridge token so `simple-agents kb
+	// convert|search` reaches the same vault.ImportFile / Searcher code the API
+	// engine's save_to_kb/search_files tools call in-process. Unregistered when
+	// the run ends, alongside the connector-token cleanup above.
+	if r.kbBridge != nil && r.kbBridge.URL() != "" {
+		kbToken := r.kbBridge.Register(input.WorkspaceID)
+		defer r.kbBridge.Unregister(kbToken)
+		extraEnv["SA_KB_URL"] = r.kbBridge.URL()
+		extraEnv["SA_KB_TOKEN"] = kbToken
 	}
 	if len(extraEnv) > 0 {
 		coderSvc = coderSvc.WithExtraEnv(extraEnv)

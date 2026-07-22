@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
@@ -52,6 +54,7 @@ func main() {
 			adminCmd(),
 			sandboxExecCmd(),
 			connectorCmd(),
+			kbCmd(),
 		},
 	}
 
@@ -205,6 +208,14 @@ func serveCmd() *cli.Command {
 				return fmt.Errorf("start connector bridge: %w", err)
 			}
 
+			// Loopback KB bridge so CLI coders reach conversion + search in-process
+			// (the same vault.ImportFile / Searcher code the API engine calls directly).
+			kbBridge := vault.NewBridge(vlt)
+			if err := kbBridge.Start(); err != nil {
+				return fmt.Errorf("start kb bridge: %w", err)
+			}
+			defer kbBridge.Close()
+
 			designFlow := agentdesigner.NewFlow(coderFor, designer).
 				WithDB(database).
 				WithMemory(memStore).
@@ -228,6 +239,7 @@ func serveCmd() *cli.Command {
 				WithMemory(memStore).
 				WithVault(vlt).
 				WithConnectors(connReg, connStore, connBridge).
+				WithKBBridge(kbBridge).
 				WithCoderFactory(func(workspaceID string) *coder.Coder {
 					w, err := database.GetWorkspaceByID(workspaceID)
 					if err != nil || w == nil {
@@ -264,13 +276,11 @@ func serveCmd() *cli.Command {
 			textHandler := func(ctx context.Context, workspaceID string, history []db.ChatMessage, text string, send func(string)) error {
 				root := vlt.Root(workspaceID)
 				cd := coderFor(workspaceID).WithDir(root)
-				if !cd.IsAPI() {
-					cd = cd.WithAllowedTools(coder.ChatAllowedTools(""))
-				}
 
-				// Connector wiring: the API engine exposes bound connections as native
-				// in-process tools; a CLI coder instead reaches them via the loopback
-				// bridge (`simple-agents connector exec <tool>`), mirroring agent runs.
+				// Connector + KB bridge wiring: the API engine exposes bound connections
+				// AND save_to_kb as native in-process tools directly. A CLI coder instead
+				// reaches them via loopback bridges (`simple-agents connector exec <tool>`,
+				// `simple-agents kb convert|search`), mirroring agent runs.
 				var connRefs []prompts.ConnectionRef
 				var connTools []string
 				var connBin string
@@ -287,33 +297,49 @@ func serveCmd() *cli.Command {
 							}
 						}
 					}
-				} else if connBridge != nil && connBridge.Addr() != "" {
-					if rows, err := database.ListServiceConnections(ctx, workspaceID); err == nil {
-						bound := connectors.ActiveBoundConns(rows)
-						if len(bound) > 0 {
-							tok := connBridge.Register(workspaceID, bound, false)
-							defer connBridge.Unregister(tok)
-							cd = cd.WithExtraEnv(map[string]string{
-								"SA_CONNECTOR_URL":   connBridge.Addr(),
-								"SA_CONNECTOR_TOKEN": tok,
-							})
-							for _, b := range bound {
-								connRefs = append(connRefs, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
-							}
-							for _, d := range connReg.ToolDefs(bound) {
-								connTools = append(connTools, d.Name)
-							}
-							if p, err := os.Executable(); err == nil {
-								connBin = p
-							}
-							if connBin != "" {
-								// CLI coders reach connectors by running `<bin> connector exec …`
-								// as a shell command; grant a narrowly-scoped Bash permission for
-								// only that command (chat stays file-only otherwise).
-								cd = cd.WithAllowedTools(coder.ChatAllowedTools(connBin))
+				} else {
+					// WithExtraEnv REPLACES rather than merges, so both bridges' env vars
+					// are assembled into one map and injected with a single call.
+					extraEnv := map[string]string{}
+					var kbBin string
+					if kbBridge != nil && kbBridge.URL() != "" {
+						if p, err := os.Executable(); err == nil {
+							kbBin = p
+						}
+						if kbBin != "" {
+							kbTok := kbBridge.Register(workspaceID)
+							defer kbBridge.Unregister(kbTok)
+							extraEnv["SA_KB_URL"] = kbBridge.URL()
+							extraEnv["SA_KB_TOKEN"] = kbTok
+						}
+					}
+					if connBridge != nil && connBridge.Addr() != "" {
+						if rows, err := database.ListServiceConnections(ctx, workspaceID); err == nil {
+							bound := connectors.ActiveBoundConns(rows)
+							if len(bound) > 0 {
+								tok := connBridge.Register(workspaceID, bound, false)
+								defer connBridge.Unregister(tok)
+								extraEnv["SA_CONNECTOR_URL"] = connBridge.Addr()
+								extraEnv["SA_CONNECTOR_TOKEN"] = tok
+								for _, b := range bound {
+									connRefs = append(connRefs, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
+								}
+								for _, d := range connReg.ToolDefs(bound) {
+									connTools = append(connTools, d.Name)
+								}
+								if p, err := os.Executable(); err == nil {
+									connBin = p
+								}
 							}
 						}
 					}
+					if len(extraEnv) > 0 {
+						cd = cd.WithExtraEnv(extraEnv)
+					}
+					// CLI coders reach connectors/kb by running `<bin> connector exec …` /
+					// `<bin> kb …` as shell commands; grant narrowly-scoped Bash permissions
+					// for only those commands (chat stays file-only otherwise).
+					cd = cd.WithAllowedTools(coder.ChatAllowedTools(connBin, kbBin))
 				}
 				sysCtx := prompts.BuildChatSystemPrompt(root, cd.BackendType(), connRefs, connTools, connBin) + chat.BuildUserContext(database, memStore, workspaceID)
 				result, err := cd.Chat(ctx, workspaceID, history, sysCtx, text)
@@ -410,7 +436,7 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
-			srv = srv.WithBridge(connBridge)
+			srv = srv.WithBridge(connBridge).WithKBBridge(kbBridge)
 
 			addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 			slog.Info("listening", "addr", addr)
@@ -484,6 +510,74 @@ func connectorCmd() *cli.Command {
 					out, _ := io.ReadAll(resp.Body)
 					fmt.Print(string(out))
 					return nil
+				},
+			},
+		},
+	}
+}
+
+// kbCmd is how a CLI coder reaches the knowledge base's conversion and search
+// paths: it POSTs to the loopback KB bridge in the host process, which runs the
+// SAME vault.ImportFile / Searcher code the API engine calls in-process. The
+// bridge URL and a run-scoped token come from SA_KB_URL / SA_KB_TOKEN.
+func kbCmd() *cli.Command {
+	post := func(ctx context.Context, endpoint string, payload any) error {
+		base, token := os.Getenv("SA_KB_URL"), os.Getenv("SA_KB_TOKEN")
+		if base == "" || token == "" {
+			return fmt.Errorf("no knowledge-base bridge available in this run")
+		}
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequestWithContext(ctx, "POST", base+endpoint, bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("kb bridge unreachable: %w", err)
+		}
+		defer resp.Body.Close()
+		out, _ := io.ReadAll(resp.Body)
+		fmt.Print(string(out))
+		return nil
+	}
+	return &cli.Command{
+		Name:  "kb",
+		Usage: "Knowledge-base actions (used by CLI coders)",
+		Commands: []*cli.Command{
+			{
+				Name:      "convert",
+				Usage:     "Convert a file to markdown and save it: kb convert <path> [--dest notes/x] [--title T]",
+				ArgsUsage: "<path>",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "dest", Usage: "vault folder for the note"},
+					&cli.StringFlag{Name: "title", Usage: "override the derived title"},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					src := cmd.Args().First()
+					if src == "" {
+						return fmt.Errorf("usage: kb convert <path> [--dest <dir>]")
+					}
+					data, err := os.ReadFile(src)
+					if err != nil {
+						return fmt.Errorf("read %s: %w", src, err)
+					}
+					return post(ctx, "/convert", map[string]any{
+						"filename": filepath.Base(src),
+						"content":  base64.StdEncoding.EncodeToString(data),
+						"dest_dir": cmd.String("dest"),
+						"title":    cmd.String("title"),
+					})
+				},
+			},
+			{
+				Name:      "search",
+				Usage:     "Search the knowledge base: kb search <query>",
+				ArgsUsage: "<query>",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					q := strings.Join(cmd.Args().Slice(), " ")
+					if strings.TrimSpace(q) == "" {
+						return fmt.Errorf("usage: kb search <query>")
+					}
+					return post(ctx, "/search", map[string]any{"query": q})
 				},
 			},
 		},
