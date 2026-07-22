@@ -972,6 +972,11 @@ func (h *hostToolSet) webFetch(ctx context.Context, rawURL, method string, heade
 	}
 
 	// Memo: an identical GET within one toolset costs one request.
+	//
+	// The key deliberately omits headers, which is safe ONLY because the tool's
+	// JSON schema exposes just url+method to the model — headers/body are
+	// plumbing it cannot populate. If a future change lets the model set
+	// headers, they must join this key or two different requests will collide.
 	memoKey := method + " " + u.String() + " " + body
 	if h.fetchMemo == nil {
 		h.fetchMemo = map[string]string{}
