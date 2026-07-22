@@ -15,7 +15,11 @@ func seedDesignerVault(t *testing.T) (*Vault, string) {
 		t.Fatalf("scaffold: %v", err)
 	}
 	v.WriteNote(ws, "notes/health.md", []byte("# Health\n\n## Appointments\n\nOrthodontist visit booked for Tuesday.\n"))
-	v.WriteNote(ws, "files/expenses.csv", []byte("item,cost\nrent,900\n"))
+	// Deliberately NOT under files/ (FilesDir) — that directory is reserved for
+	// ImportFile's preserved originals and is excluded from designer retrieval
+	// (see TestBuildKBContextExcludesFilesDir); this fixture instead proves the
+	// separate, unrelated claim that non-markdown files in general are reachable.
+	v.WriteNote(ws, "documents/expenses.csv", []byte("item,cost\nrent,900\n"))
 	for i := 0; i < 80; i++ {
 		v.WriteNote(ws, "notes/bulk/n"+string(rune('a'+i%26))+string(rune('a'+i/26))+".md", []byte("# Filler\n\nnothing relevant\n"))
 	}
@@ -224,6 +228,63 @@ func TestBuildKBContextExcludesChatsAndAgentState(t *testing.T) {
 	}
 	if !strings.Contains(got, "notes/banking.md") {
 		t.Errorf("a real notes/ match should still be reported, got:\n%s", got)
+	}
+}
+
+// TestBuildKBContextExcludesFilesDir pins Fix 4: files/ (FilesDir) holds the
+// preserved ORIGINAL of every imported document, which the index re-converts
+// and chunks independently of the already-converted notes/ copy — so without
+// this exclusion, one imported document competes with itself for the
+// designer's limited passage budget. The notes/ copy must still be found.
+func TestBuildKBContextExcludesFilesDir(t *testing.T) {
+	v, ws := seedDesignerVault(t)
+	if err := v.WriteNote(ws, "files/report.csv", []byte(
+		"item,cost\nzzqinvoice77,4500\n",
+	)); err != nil {
+		t.Fatalf("write preserved original: %v", err)
+	}
+	if err := v.WriteNote(ws, "notes/report.md", []byte(
+		"# Report\n\nzzqinvoice77 total is 4500 this quarter.\n",
+	)); err != nil {
+		t.Fatalf("write converted note: %v", err)
+	}
+
+	got := BuildKBContext(v, ws, "zzqinvoice77")
+
+	if strings.Contains(got, "files/report.csv") {
+		t.Errorf("files/ (the preserved original) must be excluded from designer retrieval, got:\n%s", got)
+	}
+	if !strings.Contains(got, "notes/report.md") {
+		t.Errorf("the converted notes/ copy must still be found, got:\n%s", got)
+	}
+}
+
+// TestBuildKBContextFindsOversizedFileByName is the actual user-facing
+// surface of Fix 1: a file over maxIndexFileBytes must not just survive in
+// the raw index (see index_test.go) — it must stop BuildKBContext from
+// asserting "no existing notes matched" when the user genuinely has a note by
+// that name. A name-only hit (fieldBoost matched the filename, but there is
+// no body to quote as a passage) is a different fact than "nothing matched"
+// and must be reported as such.
+func TestBuildKBContextFindsOversizedFileByName(t *testing.T) {
+	v, ws := seedDesignerVault(t)
+
+	body := "quarterly-expenses-report unique-marker-zzqx\n" +
+		strings.Repeat("filler filler filler filler filler filler filler filler\n", 90000)
+	if len(body) <= maxIndexFileBytes {
+		t.Fatalf("test fixture body (%d bytes) must exceed maxIndexFileBytes (%d)", len(body), maxIndexFileBytes)
+	}
+	if err := v.WriteNote(ws, "notes/quarterly-expenses-report.md", []byte(body)); err != nil {
+		t.Fatalf("write oversized note: %v", err)
+	}
+
+	got := BuildKBContext(v, ws, "quarterly expenses report")
+
+	if strings.Contains(got, "No existing notes matched this request") {
+		t.Fatalf("a note the user has must never be reported as unmatched, got:\n%s", got)
+	}
+	if !strings.Contains(got, "quarterly-expenses-report.md") {
+		t.Errorf("the oversized file should be named so the designer can reference it, got:\n%s", got)
 	}
 }
 

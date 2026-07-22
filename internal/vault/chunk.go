@@ -36,13 +36,22 @@ type Chunk struct {
 // can't fork off a spurious section or split the fence in half. A heading
 // with no body still yields one chunk (carrying the heading text itself) so a
 // stub section isn't invisible to retrieval.
+//
+// A leading YAML frontmatter block (see frontmatterEnd) is skipped entirely,
+// never emitted as its own chunk: every imported document's frontmatter
+// repeats the title/filename (see renderImportedNote), so left unstripped it
+// becomes a passage that scores deceptively well on exactly the terms a
+// filename-based query would use — competing with, and sometimes beating, the
+// real content for the retrieval budget.
 func ChunkMarkdown(path, content string) []Chunk {
 	lines := strings.Split(normalizeLineEndings(content), "\n")
+	fmEnd := frontmatterEnd(lines)
+	lines = lines[fmEnd:]
 	var (
 		out       []Chunk
 		trail     []string
 		curLines  []string
-		curStart  = 1
+		curStart  = fmEnd + 1
 		curHead   string
 		inFence   bool
 		fenceChar byte
@@ -79,7 +88,7 @@ func ChunkMarkdown(path, content string) []Chunk {
 				flush()
 				trail = updateTrail(trail, level, title)
 				curHead = joinTrail(trail)
-				curStart = i + 1
+				curStart = fmEnd + i + 1
 				continue
 			}
 			curLines = append(curLines, line)
@@ -92,6 +101,28 @@ func ChunkMarkdown(path, content string) []Chunk {
 	}
 	flush()
 	return out
+}
+
+// frontmatterEnd returns the index of the first content line after a leading
+// YAML frontmatter block, or 0 if lines does not start with one. Deliberately
+// narrow, on purpose: only a "---" that is LITERALLY the first line of the
+// file opens frontmatter, and only a later line that is EXACTLY "---" on its
+// own closes it. A "---" used as a markdown horizontal rule mid-document is
+// never mistaken for this, because this function only ever looks at line 0
+// for the opening delimiter — it never scans for one. A leading "---" that
+// never finds a closing "---" is left alone too (returns 0): guessing wrong
+// here would silently eat real content as if it were metadata, which is worse
+// than occasionally leaving a genuine frontmatter block unstripped.
+func frontmatterEnd(lines []string) int {
+	if len(lines) == 0 || strings.TrimRight(lines[0], " \t") != "---" {
+		return 0
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimRight(lines[i], " \t") == "---" {
+			return i + 1
+		}
+	}
+	return 0
 }
 
 // ChunkPlain splits non-markdown text purely by size. Used for converted
@@ -320,15 +351,15 @@ func hardSplitWindow(s string) []string {
 	const window = targetChunkChars / 4
 	var out []string
 	for len(s) > targetChunkChars {
-		cut := runeFloor(s, targetChunkChars)
+		cut := runeSafeCut(s, targetChunkChars)
 		if b := backOffToBoundary(s, cut, window); b > 0 {
 			cut = b
 		}
 		if cut == 0 {
 			// Defensive only: targetChunkChars is a package constant known to
-			// be >0, so runeFloor always finds a boundary at index >=1 for a
+			// be >0, so runeSafeCut always finds a boundary at index >=1 for a
 			// non-empty s. Avoids an infinite loop if that ever changes.
-			cut = runeFloor(s, 1)
+			cut = runeSafeCut(s, 1)
 			if cut == 0 {
 				cut = len(s)
 			}
@@ -340,18 +371,6 @@ func hardSplitWindow(s string) []string {
 		out = append(out, s)
 	}
 	return out
-}
-
-// runeFloor returns the largest index <= n that lands on a UTF-8 rune
-// boundary, so a hard cut never lands mid-character.
-func runeFloor(s string, n int) int {
-	if n >= len(s) {
-		return len(s)
-	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return n
 }
 
 // backOffToBoundary scans backward from cut, within window bytes, for a

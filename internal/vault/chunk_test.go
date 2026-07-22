@@ -250,3 +250,63 @@ func TestChunkMarkdownCRLFNormalized(t *testing.T) {
 		t.Errorf("chunk text still contains a stray \\r: %q", chunks[0].Text)
 	}
 }
+
+// TestChunkMarkdownStripsLeadingFrontmatter pins half of Fix 4: a leading YAML
+// frontmatter block (as renderImportedNote writes for every imported document)
+// must never become its own retrievable chunk — it repeats the title/filename,
+// which otherwise lets it score deceptively well and compete with real content
+// for the retrieval budget.
+func TestChunkMarkdownStripsLeadingFrontmatter(t *testing.T) {
+	doc := "---\n" +
+		"title: \"Quarterly Expenses\"\n" +
+		"source: \"expenses.csv\"\n" +
+		"kind: csv\n" +
+		"---\n\n" +
+		"# Quarterly Expenses\n\n" +
+		"rent,900\ngroceries,240\n"
+	chunks := ChunkMarkdown("notes/expenses.md", doc)
+	for _, c := range chunks {
+		if strings.Contains(c.Text, "source:") || strings.Contains(c.Text, "kind: csv") {
+			t.Errorf("frontmatter leaked into a chunk: %+v", c)
+		}
+	}
+	var found bool
+	for _, c := range chunks {
+		if strings.Contains(c.Text, "rent,900") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("real content must still be chunked, got %+v", chunks)
+	}
+}
+
+// TestChunkMarkdownHorizontalRuleNotMistakenForFrontmatter proves the
+// narrowness of frontmatterEnd: a "---" used as a markdown horizontal rule
+// mid-document (never on line 0) must never cause content to be dropped.
+func TestChunkMarkdownHorizontalRuleNotMistakenForFrontmatter(t *testing.T) {
+	doc := "# Notes\n\nFirst part.\n\n---\n\nSecond part after the rule.\n"
+	chunks := ChunkMarkdown("notes/rule.md", doc)
+	var all strings.Builder
+	for _, c := range chunks {
+		all.WriteString(c.Text)
+	}
+	if !strings.Contains(all.String(), "First part") || !strings.Contains(all.String(), "Second part after the rule") {
+		t.Errorf("content around a mid-document horizontal rule must be preserved, got %+v", chunks)
+	}
+}
+
+// TestChunkMarkdownUnclosedLeadingDelimiterNotStripped proves a document that
+// merely STARTS with "---" but never closes it is left alone rather than
+// guessed at (guessing wrong would silently eat real content as metadata).
+func TestChunkMarkdownUnclosedLeadingDelimiterNotStripped(t *testing.T) {
+	doc := "---\n\nThis document starts with a rule but has no closing delimiter.\n"
+	chunks := ChunkMarkdown("notes/unclosed.md", doc)
+	var all strings.Builder
+	for _, c := range chunks {
+		all.WriteString(c.Text)
+	}
+	if !strings.Contains(all.String(), "starts with a rule") {
+		t.Errorf("content must be preserved when no closing delimiter exists, got %+v", chunks)
+	}
+}
