@@ -288,9 +288,119 @@ func TestToolMilestoneShowsQueryPatternURL(t *testing.T) {
 		{"read_file", `{"path":"notes.md"}`, "🔧 read_file(notes.md)"},
 	}
 	for _, c := range cases {
-		if got := toolMilestone(toolCall(c.name, c.args)); got != c.want {
+		if got := toolMilestone(toolCall(c.name, c.args), "", ""); got != c.want {
 			t.Errorf("toolMilestone(%s) = %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+// TestToolMilestoneShowsBashCommand covers the tool that was WORST served by the
+// old renderer. bash's only argument is `command`, which matched none of the
+// extracted fields, so every shell step an agent took reached the user as a
+// truncated raw-JSON blob: `🔧 bash({"command": "cd /home/rookie/…`.
+func TestToolMilestoneShowsBashCommand(t *testing.T) {
+	got := toolMilestone(toolCall("bash", `{"command":"date -u +%Y-%m-%d"}`), "", "")
+	if want := "🔧 bash(date -u +%Y-%m-%d)"; got != want {
+		t.Errorf("toolMilestone(bash) = %q, want %q", got, want)
+	}
+	// save_to_kb had the same defect for the same reason: its subject arrives as
+	// `source`, which matched none of the extracted fields either.
+	got = toolMilestone(toolCall("save_to_kb", `{"source":"downloads/report.pdf"}`), "", "")
+	if want := "🔧 save_to_kb(downloads/report.pdf)"; got != want {
+		t.Errorf("toolMilestone(save_to_kb) = %q, want %q", got, want)
+	}
+	// The raw-JSON fallback still applies to a call with no recognised subject —
+	// better a truncated blob than a bare tool name with no context at all.
+	got = toolMilestone(toolCall("mystery", `{"unknown":"xyz"}`), "", "")
+	if want := `🔧 mystery({"unknown":"xyz"})`; got != want {
+		t.Errorf("toolMilestone(unknown args) = %q, want %q", got, want)
+	}
+}
+
+// TestToolMilestoneStripsHostPaths pins the second half of the same defect: even
+// with `command` extracted, the command TEXT embeds the absolute vault path, so
+// the progress stream read as a tour of the server's filesystem. The vault root
+// collapses away entirely (it is the user's "here") and the workspace home
+// becomes "~".
+func TestToolMilestoneStripsHostPaths(t *testing.T) {
+	const (
+		vaultRoot = "/home/rookie/.simple-agents-v2/vaults/fd11c47e-646e-48e0-9ef8-fc54a2f184ac"
+		homeDir   = "/home/rookie/.simple-agents-v2/claude-homes/fd11c47e-646e-48e0-9ef8-fc54a2f184ac"
+	)
+	cases := []struct{ name, args, want string }{
+		{"bash", `{"command":"cd ` + vaultRoot + `/notes && ls"}`, "🔧 bash(cd notes && ls)"},
+		// A bare reference to the root is the vault's "here", not an empty string.
+		{"bash", `{"command":"cd ` + vaultRoot + `"}`, "🔧 bash(cd .)"},
+		{"bash", `{"command":"cat ` + homeDir + `/.cache/x"}`, "🔧 bash(cat ~/.cache/x)"},
+		// A model that types an absolute path to a file tool is cleaned too.
+		{"read_file", `{"path":"` + vaultRoot + `/notes/trip.md"}`, "🔧 read_file(notes/trip.md)"},
+		// Paths that are NOT one of the two known roots are meaningful to the
+		// user and must survive untouched, leading slash included.
+		{"bash", `{"command":"/usr/bin/python3 --version"}`, "🔧 bash(/usr/bin/python3 --version)"},
+	}
+	for _, c := range cases {
+		if got := toolMilestone(toolCall(c.name, c.args), vaultRoot, homeDir); got != c.want {
+			t.Errorf("toolMilestone(%s, %s):\n got %q\nwant %q", c.name, c.args, got, c.want)
+		}
+	}
+}
+
+// TestShortenHostPathsLeavesSiblingDirs: a directory that merely STARTS with the
+// vault root's name ("<root>-backup") is a different directory, and collapsing it
+// as though it were the root would misreport which path the agent touched.
+// Asserted on shortenHostPaths directly rather than through toolMilestone, whose
+// 60-rune cap would truncate these long paths before the assertion could see the
+// difference.
+func TestShortenHostPathsLeavesSiblingDirs(t *testing.T) {
+	const vaultRoot = "/data/vault"
+	cases := []struct{ in, want string }{
+		{"ls /data/vault-backup", "ls /data/vault-backup"},
+		{"ls /data/vault/notes", "ls notes"},
+		{"ls /data/vault", "ls ."},
+		// Repeated occurrences in one command line are all rewritten.
+		{"cp /data/vault/a.md /data/vault/b.md", "cp a.md b.md"},
+	}
+	for _, c := range cases {
+		if got := shortenHostPaths(c.in, vaultRoot, ""); got != c.want {
+			t.Errorf("shortenHostPaths(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestShortenHostPathsIgnoresDegenerateRoots: an unset vault/home (empty string)
+// must not become a matching prefix. filepath.Clean("") is ".", and "/" cleans to
+// itself — either would match essentially every path in a command line and
+// shred it.
+func TestShortenHostPathsIgnoresDegenerateRoots(t *testing.T) {
+	const cmd = "cd /home/rookie/notes && ls ."
+	for _, root := range []string{"", ".", "/", "   "} {
+		if got := shortenHostPaths(cmd, root, root); got != cmd {
+			t.Errorf("shortenHostPaths with degenerate root %q rewrote the command: %q", root, got)
+		}
+	}
+}
+
+// TestToolMilestoneTruncatesAfterShortening guards the ordering: truncating
+// before stripping the host path would spend the whole character budget on the
+// absolute prefix and cut away the part that says what the command does.
+func TestToolMilestoneTruncatesAfterShortening(t *testing.T) {
+	const vaultRoot = "/home/rookie/.simple-agents-v2/vaults/fd11c47e-646e-48e0-9ef8-fc54a2f184ac"
+	got := toolMilestone(toolCall("bash", `{"command":"cd `+vaultRoot+`/notes && grep -r todo ."}`), vaultRoot, "")
+	if want := "🔧 bash(cd notes && grep -r todo .)"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestTruncateRunesDoesNotSplitRunes: the details rendered here routinely carry
+// non-ASCII (note titles, search queries, emoji in filenames). Byte slicing can
+// cut a multi-byte rune in half and emit U+FFFD into the user's stream.
+func TestTruncateRunesDoesNotSplitRunes(t *testing.T) {
+	got := truncateRunes(strings.Repeat("é", 80), 60)
+	if want := strings.Repeat("é", 60) + "…"; got != want {
+		t.Errorf("truncateRunes mangled multi-byte runes: got %q", got)
+	}
+	if strings.ContainsRune(got, '�') {
+		t.Error("truncateRunes produced a replacement char")
 	}
 }
 

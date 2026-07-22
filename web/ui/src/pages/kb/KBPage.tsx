@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { Plus, FileText, Upload } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
@@ -11,6 +11,8 @@ import FileTree, { NewEntryDialog } from "./FileTree";
 import NoteEditor from "./NoteEditor";
 import FileViewer from "./FileViewer";
 import SearchBox from "./SearchBox";
+import RecentFiles from "./RecentFiles";
+import { useRecentFiles } from "./useRecentFiles";
 
 // importFiles uploads each dropped/picked file in turn (not concurrently — a
 // user dragging a handful of files in expects predictable one-at-a-time
@@ -119,6 +121,17 @@ function KBEmptyState() {
 // "markdown", everything else is content-sniffed server-side into "code" or
 // "binary" by FileViewer's own fetch.
 
+// fileTitle is the fallback label for a recents entry when the caller had no
+// resolved display name to offer (search results carry only a path). The
+// filename stem is right for a user-authored note, whose filename IS its title;
+// a reflected note clicked from search keeps its UUID here, which is still more
+// informative than the full path in a narrow pane.
+function fileTitle(path: string): string {
+  const name = path.split("/").pop() ?? path;
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+
 export default function KBPage() {
   const [params, setParams] = useSearchParams();
   const path = params.get("path");
@@ -128,18 +141,48 @@ export default function KBPage() {
 
   const upload = useUploadKBFile();
   const { toast } = useToast();
+  const { recent, record, forget, rename } = useRecentFiles();
 
-  function openPath(p: string, isDir: boolean) {
+  // Recording happens HERE, in the one place every open funnels through, rather
+  // than at each call site — so the tree, search and the recents list itself all
+  // stay consistent, and a directory click can never enter the history.
+  function openPath(p: string, isDir: boolean, displayName?: string) {
     setParams(isDir ? { path: p, dir: "1" } : { path: p });
+    if (!isDir) record({ path: p, title: displayName || fileTitle(p) });
   }
+
+  // Landing on /kb with no path opens the most recently viewed file, so the
+  // knowledge base resumes where the user left it instead of showing an empty
+  // pane. `replace` keeps this out of history: without it, Back from the note
+  // would return to the bare /kb route, which would immediately re-open the same
+  // note and trap the user.
+  //
+  // Deliberately NOT recorded via openPath — this is programmatic navigation,
+  // and re-recording would only rewrite the entry that caused it.
+  const topRecent = recent.length > 0 ? recent[0] : null;
+  useEffect(() => {
+    if (path === null && topRecent) {
+      setParams({ path: topRecent.path }, { replace: true });
+    }
+  }, [path, topRecent, setParams]);
 
   // A drag-move in the tree is a rename underneath, so the open document's
   // path is stale the moment it lands. Follow it rather than leaving the
   // editor pointed at a path that no longer exists (which reads as the note
   // having been deleted).
   function handleMoved(from: string, to: string) {
+    rename(from, to, fileTitle(to));
     if (path !== from) return;
     setParams(isDirHint ? { path: to, dir: "1" } : { path: to });
+  }
+
+  // A recents entry whose file has since been deleted or renamed outside this
+  // UI would otherwise sit in the list forever, and — worse — be auto-opened on
+  // every visit. Dropping it when the document reports it missing also unblocks
+  // the auto-open, which falls through to the next entry.
+  function handleMissing(missing: string) {
+    forget(missing);
+    if (path === missing) setParams({}, { replace: true });
   }
 
   return (
@@ -147,21 +190,33 @@ export default function KBPage() {
       <ContextPane>
         <div className="flex h-full flex-col">
           <KBPaneHeader onPickFiles={(files) => void importFiles(files, upload, toast)} />
-          <div className="min-h-0 flex-1">
-            <SearchBox onSelect={(p) => openPath(p, false)}>
-              <FileTree
-                selectedPath={path}
-                onSelect={openPath}
-                onMoved={handleMoved}
-                onImportFiles={(files, dir) => void importFiles(files, upload, toast, dir)}
-              />
-            </SearchBox>
+          {/* Recent is a fixed block above the tree, NOT inside a scroll
+              container of its own: SearchBox is `h-full` and owns the pane's
+              only scroll region (for the tree/results). Wrapping both in a
+              second scroller would give the pane two nested scrollbars and
+              collapse SearchBox's height calculation. */}
+          <div className="flex min-h-0 flex-1 flex-col">
+            <RecentFiles
+              recent={recent}
+              selectedPath={path}
+              onSelect={(p, title) => openPath(p, false, title)}
+            />
+            <div className="min-h-0 flex-1">
+              <SearchBox onSelect={(p) => openPath(p, false)}>
+                <FileTree
+                  selectedPath={path}
+                  onSelect={openPath}
+                  onMoved={handleMoved}
+                  onImportFiles={(files, dir) => void importFiles(files, upload, toast, dir)}
+                />
+              </SearchBox>
+            </div>
           </div>
         </div>
       </ContextPane>
       {isFile ? (
         isMarkdown ? (
-          <NoteEditor path={path} key={path} />
+          <NoteEditor path={path} key={path} onMissing={() => handleMissing(path)} />
         ) : (
           <FileViewer path={path} key={path} />
         )

@@ -212,6 +212,15 @@ export function CommandPalette({
                         <Icon className="size-4" />
                         <div className="flex min-w-0 flex-col">
                           <span className="truncate">{item.title}</span>
+                          {/* Path under the title, for note hits whose title the
+                              server resolved away from the filename (a reflected
+                              chat/inbox/run-log note is UUID-named, so the title
+                              is a heading or agent name and the path is the only
+                              thing telling you WHERE the hit lives). Suppressed
+                              when the path adds nothing over the title. */}
+                          {item.path && item.path !== item.title && (
+                            <span className="truncate text-xs text-muted-2">{item.path}</span>
+                          )}
                           {item.snippet && (
                             <span className="truncate text-xs text-muted-2">{highlight(item.snippet, query)}</span>
                           )}

@@ -219,5 +219,10 @@ func (s *Server) apiDeleteInboxMessage(c echo.Context) error {
 	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
 	_ = s.db.DeleteInboxMessage(id, u.ID)
+	// Inbox notifications are reflected into inbox/<id>.md; drop that too, or a
+	// dismissed notification keeps showing up in the knowledge base.
+	if s.vault != nil {
+		_ = s.vault.Reflector().UnreflectInbox(u.ID, id)
+	}
 	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
 }

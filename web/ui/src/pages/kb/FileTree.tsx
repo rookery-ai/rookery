@@ -264,7 +264,7 @@ function TreeRow({
   node: KBNode;
   depth: number;
   selectedPath: string | null;
-  onSelect: (path: string, isDir: boolean) => void;
+  onSelect: (path: string, isDir: boolean, displayName?: string) => void;
   // Move the dragged node into this (folder) node.
   onMoveInto: (dragged: DraggedNode, folder: KBNode) => void;
   // Reorder within the level this row belongs to. Owned by TreeLevel, which
@@ -284,7 +284,7 @@ function TreeRow({
 
   function handleClick() {
     if (node.is_dir) setExpanded((e) => !e);
-    onSelect(node.path, node.is_dir);
+    onSelect(node.path, node.is_dir, node.display_name);
   }
 
   // Which gesture, if any, a drop at this pointer position would perform.
@@ -535,7 +535,7 @@ function TreeLevel({
   path: string;
   depth: number;
   selectedPath: string | null;
-  onSelect: (path: string, isDir: boolean) => void;
+  onSelect: (path: string, isDir: boolean, displayName?: string) => void;
   onMoveInto: (dragged: DraggedNode, folder: KBNode) => void;
   onImportFiles?: (files: File[], dir: string) => void;
 }) {
@@ -610,7 +610,7 @@ export default function FileTree({
   onImportFiles,
 }: {
   selectedPath: string | null;
-  onSelect: (path: string, isDir: boolean) => void;
+  onSelect: (path: string, isDir: boolean, displayName?: string) => void;
   // Fired after a drag-move succeeds. KBPage uses it to follow the open note
   // to its new home — a move is a rename underneath, so without this the
   // `?path=` param still points at the old location and NoteEditor drops into

@@ -2,7 +2,9 @@ package vault
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -219,6 +221,103 @@ func (r *Reflector) ReflectAgentRun(workspaceID string, n RunNote) error {
 	b.WriteString(strings.TrimRight(n.Output, "\n"))
 	b.WriteString("\n```\n")
 	return r.write(workspaceID, rel, b.String(), "agent_runs", n.RunID, n)
+}
+
+// Unreflect is the inverse of write: it removes a reflected note and its JSON
+// sidecar, for when the underlying database row is deleted.
+//
+// Reflection is a projection of the DB, so deleting a row without unreflecting
+// it leaves the note behind as a ghost — the deleted chat/inbox message keeps
+// appearing in the knowledge base browser and in search results, which is
+// exactly how a "deleted" item appears not to have been deleted.
+//
+// Both removals are best-effort and a missing file is not an error: reflection
+// itself is best-effort (a note may never have been written), and the caller has
+// already committed the DB delete, so failing here would report an error for an
+// operation that did succeed. Errors that are NOT "already gone" are returned so
+// a caller that cares can log them.
+//
+// Passing an empty table or id skips the sidecar, for notes written without one.
+func (r *Reflector) Unreflect(workspaceID, relMarkdown, table, id string) error {
+	if r == nil {
+		return nil
+	}
+	var firstErr error
+	remove := func(rel string) {
+		if err := r.v.Delete(workspaceID, rel); err != nil && !errors.Is(err, os.ErrNotExist) && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if relMarkdown != "" {
+		remove(relMarkdown)
+	}
+	if table != "" && id != "" {
+		remove(filepath.Join(InternalDir, "db-export", table, safeName(id)+".json"))
+	}
+	return firstErr
+}
+
+// UnreflectChat / UnreflectInbox / UnreflectReminder name the note path and table
+// alongside the ReflectX method that wrote them, so the two halves cannot drift:
+// a change to where a note is written is a compile-visible change here too.
+func (r *Reflector) UnreflectChat(workspaceID, chatID string) error {
+	return r.Unreflect(workspaceID, filepath.Join("chats", safeName(chatID)+".md"), "chats", chatID)
+}
+
+func (r *Reflector) UnreflectInbox(workspaceID, messageID string) error {
+	return r.Unreflect(workspaceID, filepath.Join("inbox", safeName(messageID)+".md"), "inbox_messages", messageID)
+}
+
+func (r *Reflector) UnreflectReminder(workspaceID, reminderID string) error {
+	return r.Unreflect(workspaceID, filepath.Join("reminders", safeName(reminderID)+".md"), "reminders", reminderID)
+}
+
+// UnreflectAgentRuns drops the db-export sidecars of every run belonging to one
+// agent. The run NOTES live inside the agent's own directory and are removed
+// wholesale with it, but the sidecars live under .kb/db-export/agent_runs/ keyed
+// by RUN id, so nothing about their path identifies the agent — the only way to
+// find them is to read each one back and check its AgentID.
+//
+// Returns the number removed. A sidecar that cannot be read or parsed is skipped
+// rather than deleted: an unreadable file is not evidence that it belongs to the
+// agent being deleted.
+func (r *Reflector) UnreflectAgentRuns(workspaceID, agentID string) (int, error) {
+	if r == nil || agentID == "" {
+		return 0, nil
+	}
+	dir := filepath.Join(InternalDir, "db-export", "agent_runs")
+	entries, err := r.v.List(workspaceID, dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var removed int
+	var firstErr error
+	for _, e := range entries {
+		if e.IsDir || !strings.HasSuffix(e.Name, ".json") {
+			continue
+		}
+		data, err := r.v.ReadNote(workspaceID, e.Path)
+		if err != nil {
+			continue
+		}
+		var sidecar struct {
+			AgentID string `json:"AgentID"`
+		}
+		if err := json.Unmarshal(data, &sidecar); err != nil || sidecar.AgentID != agentID {
+			continue
+		}
+		if err := r.v.Delete(workspaceID, e.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		removed++
+	}
+	return removed, firstErr
 }
 
 // write persists the markdown note and its JSON sidecar. The sidecar holds the

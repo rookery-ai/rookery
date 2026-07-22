@@ -176,6 +176,11 @@ func (s *Server) apiDeleteChat(c echo.Context) error {
 		return jsonErr(c, http.StatusNotFound, "not_found", "chat not found")
 	}
 	_ = s.db.DeleteChat(ch.ID)
+	// The transcript was reflected into the vault when the chat stopped; without
+	// this the deleted chat lives on in the KB browser and in search.
+	if s.vault != nil {
+		_ = s.vault.Reflector().UnreflectChat(u.ID, ch.ID)
+	}
 	s.audit.Log(u.ID, "delete_chat", "chat:"+ch.ID, ch.Name, c.RealIP())
 	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
 }

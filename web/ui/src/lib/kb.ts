@@ -22,7 +22,11 @@ export type KBNoteKind = "markdown" | "code" | "binary";
 
 export type KBNote = { path: string; content: string; html: string; backlinks: string[]; kind: KBNoteKind };
 
-export type KBSearchHit = { path: string; line: number; snippet: string };
+// `title` is the server-resolved display name for `path` — for a reflected note
+// (a chat transcript, an inbox notification, an agent run log) the filename is a
+// UUID, so the path alone is not a usable label. Optional so a response from an
+// older server still type-checks; callers fall back to the path.
+export type KBSearchHit = { path: string; title?: string; line: number; snippet: string };
 
 export const rawURL = (path: string) => `/api/v1/kb/raw?path=${encodeURIComponent(path)}`;
 

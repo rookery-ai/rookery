@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useEditor, EditorContent } from "@tiptap/react";
-import { AlertTriangle, Loader2, Link2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, Info, Loader2, Link2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useKBNote, useSaveNote, useRenameNote, useDeleteNote } from "@/lib/kb";
 import { Button } from "@/components/ui/button";
 import { buildExtensions, toMarkdown, checkFidelity } from "./editor";
+import { splitFrontmatter, joinFrontmatter, parseFrontmatterFields } from "./frontmatter";
 import { splitAlias } from "./wikilinks";
 import { slashSuggestion } from "./SlashMenu";
 import BubbleToolbar from "./BubbleToolbar";
@@ -77,9 +78,14 @@ function WysiwygEditor({
 export default function NoteEditor({
   path,
   onStateChange,
+  onMissing,
 }: {
   path: string;
   onStateChange?: (state: SaveState) => void;
+  // Fired when this note turns out not to exist. Lets the recently-viewed list
+  // drop a stale entry lazily, at the only moment we actually learn the file is
+  // gone, instead of validating every entry up front on each page load.
+  onMissing?: () => void;
 }) {
   const { data, isLoading, isError, error } = useKBNote(path);
   const saveNote = useSaveNote();
@@ -98,6 +104,13 @@ export default function NoteEditor({
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [rawText, setRawText] = useState("");
+  // The note's YAML frontmatter block (empty for most user-authored notes) and
+  // the body the rich text editor actually edits. Kept apart so the block can
+  // be re-attached byte-for-byte on save without ever passing through the
+  // markdown serializer — see ./frontmatter.ts.
+  const [frontmatter, setFrontmatter] = useState("");
+  const [editorBody, setEditorBody] = useState("");
+  const [metaOpen, setMetaOpen] = useState(false);
   const [notFoundHint, setNotFoundHint] = useState<string | null>(null);
   const [renameError, setRenameError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -118,6 +131,9 @@ export default function NoteEditor({
   const mountedRef = useRef(true);
   const timerRef = useRef<number | undefined>(undefined);
   const rawTextRef = useRef("");
+  // Mirrors `frontmatter` for the save path, which reads it from a callback
+  // that must not be re-created on every state change.
+  const frontmatterRef = useRef("");
   const getContentRef = useRef<() => string>(() => "");
   const modeRef = useRef<"wysiwyg" | "raw" | null>(null);
   // The currently in-flight save's completion, set by `flush()` (the
@@ -151,12 +167,26 @@ export default function NoteEditor({
   }, []);
 
   // Determine WYSIWYG-vs-raw once, the first time the note loads.
+  //
+  // The fidelity check runs on the BODY, with any YAML frontmatter split off
+  // first. That block is the sole reason every platform-written note (reflected
+  // chats, inbox notifications, reminders, agent run logs) used to open in raw
+  // mode — markdown reads it as a horizontal rule plus a setext heading, so it
+  // cannot survive a round trip, while the bodies underneath round-trip fine.
+  // See ./frontmatter.ts for the full rationale and the preservation contract.
   useEffect(() => {
     if (!data || initializedRef.current) return;
     initializedRef.current = true;
-    const lossy = !checkFidelity(data.content);
+    const { frontmatter, body } = splitFrontmatter(data.content);
+    frontmatterRef.current = frontmatter;
+    setFrontmatter(frontmatter);
+    setEditorBody(body);
+    const lossy = !checkFidelity(body);
     setFidelityFailed(lossy);
     setMode(lossy ? "raw" : "wysiwyg");
+    // Raw mode shows the WHOLE file, frontmatter included — it is the escape
+    // hatch for editing the block itself, which the rich text path deliberately
+    // preserves untouched.
     setRawText(data.content);
     rawTextRef.current = data.content;
     getContentRef.current = () => rawTextRef.current;
@@ -190,6 +220,22 @@ export default function NoteEditor({
     dirtyRef.current = false;
     intentionallyInvalidatedRef.current = true;
     setVanished(true);
+    onMissing?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isError, error]);
+
+  // The note 404s on its FIRST load — it never existed, or was removed since the
+  // last visit. Distinct from the effect above, which handles a note that WAS
+  // open and then disappeared: here there is no content to preserve and no
+  // "deleted elsewhere" notice to show, we only need to tell the caller so a
+  // stale recently-viewed entry can be dropped instead of being reopened on
+  // every visit.
+  const notifiedMissingRef = useRef(false);
+  useEffect(() => {
+    if (!isError || initializedRef.current || notifiedMissingRef.current) return;
+    if (!(error instanceof ApiError && error.status === 404)) return;
+    notifiedMissingRef.current = true;
+    onMissing?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isError, error]);
 
@@ -318,8 +364,12 @@ export default function NoteEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
+  // The rich text editor only ever holds the BODY, so everything it produces is
+  // re-joined to the preserved frontmatter block here. This is the single funnel
+  // every save goes through (flush reads getContentRef), so there is no path
+  // that can write the body back without its metadata.
   const registerGetContent = useCallback((fn: () => string) => {
-    getContentRef.current = fn;
+    getContentRef.current = () => joinFrontmatter(frontmatterRef.current, fn());
   }, []);
 
   // Auto-dismiss the "note not found" hint so a stale warning doesn't linger
@@ -366,6 +416,9 @@ export default function NoteEditor({
     markDirty();
   };
 
+  // Raw mode edits the WHOLE file. getContentRef.current() already returns the
+  // rejoined document (frontmatter + body), so the textarea is seeded with the
+  // complete note and saves verbatim.
   const switchToRaw = () => {
     if (modeRef.current === "wysiwyg") {
       const latest = getContentRef.current();
@@ -377,7 +430,15 @@ export default function NoteEditor({
     if (!dirtyRef.current) report("raw");
   };
 
+  // Coming back from raw, the frontmatter must be re-split out of the text the
+  // user was just editing rather than reused from the ref: they may have edited
+  // the block, or removed it entirely, while in raw mode. Reusing the stale ref
+  // would silently reinstate the old metadata on the next save.
   const switchToWysiwyg = () => {
+    const { frontmatter: fm, body } = splitFrontmatter(rawTextRef.current);
+    frontmatterRef.current = fm;
+    setFrontmatter(fm);
+    setEditorBody(body);
     setOverrideAccepted(true);
     setMode("wysiwyg");
     if (!dirtyRef.current) report("saved");
@@ -602,8 +663,13 @@ export default function NoteEditor({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {mode === "wysiwyg" ? (
           <div className="mx-auto max-w-3xl px-6 py-8">
+            <FrontmatterStrip
+              frontmatter={frontmatter}
+              open={metaOpen}
+              onToggle={() => setMetaOpen((o) => !o)}
+            />
             <WysiwygEditor
-              content={rawText}
+              content={editorBody}
               onDirty={markDirty}
               onNavigate={handleNavigate}
               registerGetContent={registerGetContent}
@@ -619,6 +685,61 @@ export default function NoteEditor({
           />
         )}
       </div>
+    </div>
+  );
+}
+
+// FrontmatterStrip shows a note's YAML metadata above the document while the
+// rich text editor edits only the body beneath it.
+//
+// Read-only by design: the block is preserved byte-for-byte through the rich
+// text path (see ./frontmatter.ts), and offering an edit affordance here would
+// promise a round trip this component does not perform. Raw mode is the escape
+// hatch for actually changing it.
+//
+// Collapsed by default — for the notes that have frontmatter at all it is
+// provenance ("this came from an agent run, on this date"), not something the
+// user reads every time they open the note.
+function FrontmatterStrip({
+  frontmatter,
+  open,
+  onToggle,
+}: {
+  frontmatter: string;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  if (!frontmatter) return null;
+  const fields = parseFrontmatterFields(frontmatter);
+  if (fields.length === 0) return null;
+  const summary = fields
+    .slice(0, 3)
+    .map((f) => f.value)
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <div className="mb-6 rounded border border-border bg-chrome/50 text-xs">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-2 hover:text-foreground"
+      >
+        <Info className="size-3.5 shrink-0" />
+        <span className="flex-1 truncate">{open ? "Note metadata" : summary || "Note metadata"}</span>
+        <ChevronDown className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-t border-border px-3 py-2">
+          {fields.map((f) => (
+            <div key={f.key} className="contents">
+              <dt className="text-muted-2">{f.key}</dt>
+              <dd className="truncate font-mono text-foreground">{f.value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
     </div>
   );
 }

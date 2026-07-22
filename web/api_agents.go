@@ -241,6 +241,12 @@ func (s *Server) apiDeleteAgent(c echo.Context) error {
 	if dir := s.agentsDir(); dir != "" {
 		_ = os.RemoveAll(agentdesigner.AgentDir(dir, u.ID, agent.ID))
 	}
+	// The run NOTES lived inside that directory, but their db-export sidecars do
+	// not: they sit under .kb/db-export/agent_runs/ keyed by RUN id, so removing
+	// the agent dir leaves them orphaned with no row and no agent to belong to.
+	if s.vault != nil {
+		_, _ = s.vault.Reflector().UnreflectAgentRuns(u.ID, agent.ID)
+	}
 
 	s.audit.Log(u.ID, "delete_agent", "agent:"+agent.ID, agent.Name, c.RealIP())
 	return c.JSON(http.StatusOK, map[string]any{"ok": true})

@@ -23,25 +23,85 @@ var md = goldmark.New(goldmark.WithExtensions(extension.GFM))
 // enrichKBDisplayNames resolves human-readable names for system-managed vault dirs.
 // It mutates nodes in place; failures are silently ignored (raw name is left as-is).
 // Shared by the JSON API's KB tree endpoint.
+//
+// Directories are resolved here rather than in kbDisplayTitle because a dir has
+// no content to read a heading from — only agents/<id> has a DB row to name it.
+// Files delegate to kbDisplayTitle so the tree and global search cannot drift
+// apart on what a given path is called.
 func (s *Server) enrichKBDisplayNames(workspaceID, parentPath string, nodes []vault.Node) {
 	top := strings.Trim(parentPath, "/")
 	for i := range nodes {
 		n := &nodes[i]
-		switch top {
-		case "agents":
-			if n.IsDir {
+		if n.IsDir {
+			if top == "agents" {
 				if agent, err := s.db.GetAgent(n.Name); err == nil {
 					n.DisplayName = agent.Name
 				}
 			}
-		case "memory", "chats", "reminders", "inbox":
-			if !n.IsDir {
-				if title := kbReadFirstHeading(s.vault, workspaceID, n.Path); title != "" {
-					n.DisplayName = title
-				}
-			}
+			continue
+		}
+		if title := s.kbDisplayTitle(workspaceID, n.Path); title != "" && title != kbPathStem(n.Path) {
+			n.DisplayName = title
 		}
 	}
+}
+
+// kbDisplayTitle resolves a human-readable title for one vault FILE path.
+//
+// It is keyed on the FULL path, unlike enrichKBDisplayNames which switches on the
+// immediate parent directory. That difference is the point: reflected notes are
+// named after a UUID (`chats/<id>.md`, `inbox/<id>.md`,
+// `agents/<id>/logs/run_<ts>.md`), so global search was showing raw UUIDs as
+// result titles. A parent-dir switch cannot reach the agent-log case at all — its
+// parent is `logs`, two levels below the `agents` dir that identifies it.
+//
+// Returns a best-effort title, falling back to the filename stem, so callers can
+// use the result unconditionally.
+func (s *Server) kbDisplayTitle(workspaceID, path string) string {
+	rel := strings.Trim(path, "/")
+	if rel == "" {
+		return ""
+	}
+	parts := strings.Split(rel, "/")
+
+	// agents/<agentID>/... — name the agent from the DB, since nothing in the
+	// file itself identifies it. Run logs additionally carry their timestamp,
+	// which is what distinguishes one run from the next.
+	if parts[0] == "agents" && len(parts) >= 3 {
+		name := parts[1]
+		if agent, err := s.db.GetAgent(parts[1]); err == nil && agent.Name != "" {
+			name = agent.Name
+		}
+		leaf := kbPathStem(rel)
+		if parts[len(parts)-2] == "logs" {
+			if stamp := strings.TrimPrefix(leaf, "run_"); stamp != leaf {
+				return name + " — run " + stamp
+			}
+		}
+		return name + " — " + leaf
+	}
+
+	// Reflected/system notes are UUID-named but carry a real "# " heading.
+	switch parts[0] {
+	case "chats", "inbox", "reminders", "memory":
+		if title := kbReadFirstHeading(s.vault, workspaceID, rel); title != "" {
+			return title
+		}
+	}
+	return kbPathStem(rel)
+}
+
+// kbPathStem returns a path's filename without its extension — the plain-English
+// name of a user-authored note, whose filename IS its title.
+func kbPathStem(path string) string {
+	name := path
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	if i := strings.LastIndex(name, "."); i > 0 {
+		name = name[:i]
+	}
+	return name
 }
 
 // kbReadFirstHeading reads the first markdown heading line from a vault note
