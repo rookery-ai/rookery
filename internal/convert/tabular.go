@@ -1,6 +1,7 @@
 package convert
 
 import (
+	"bytes"
 	"encoding/csv"
 	"fmt"
 	"strings"
@@ -20,9 +21,24 @@ const maxTableRows = 50000
 // record becomes the header, which is what a delimited export virtually always
 // means.
 func tabularToMarkdown(data []byte, kind Kind, opt Options) (Result, error) {
-	r := csv.NewReader(strings.NewReader(string(data)))
+	// Excel on Windows writes CSV/TSV with a leading UTF-8 BOM by default. If
+	// left in, it becomes invisibly fused onto the first header cell (e.g.
+	// header "Region" arrives as the three BOM bytes plus "Region"), and
+	// header names are exactly what an agent keys, matches, or joins on — so
+	// this must be stripped from the raw bytes before the csv.Reader ever
+	// tokenizes them. normalizeText (detect.go)
+	// also strips a leading BOM, but only on the OUTPUT string this function
+	// builds later; by then the BOM (if not handled here) would be buried
+	// inside a rendered cell, not leading the string, so that alone would not
+	// fix this.
+	data = bytes.TrimPrefix(data, []byte(utf8BOM))
+	r := csv.NewReader(bytes.NewReader(data))
 	r.FieldsPerRecord = -1 // tolerate ragged rows rather than aborting
-	r.LazyQuotes = true    // tolerate stray quotes in real-world exports
+	// LazyQuotes tolerates stray quotes in real-world exports. Trade-off: on a
+	// genuinely unterminated quote it silently merges the following physical
+	// row into the previous cell instead of erroring — a row-misalignment
+	// corruption, not just a cosmetic escaping relaxation.
+	r.LazyQuotes = true
 	if kind == KindTSV {
 		r.Comma = '\t'
 	}
@@ -38,13 +54,25 @@ func tabularToMarkdown(data []byte, kind Kind, opt Options) (Result, error) {
 	res := Result{Kind: kind, Extractor: "pure-go", Title: titleFromFilename(opt.Filename)}
 	header := records[0]
 	width := len(header)
-	for _, rec := range records {
+	ragged := false
+	for _, rec := range records[1:] {
+		if len(rec) != len(header) {
+			// A row longer OR shorter than the header is the same underlying
+			// situation from an agent's perspective ("this table isn't
+			// rectangular"), so it earns exactly one warning below. Comparing
+			// against len(header) rather than the running width avoids the
+			// previous double-report, where one wide row grew width and then
+			// every OTHER row — including ones that matched the header
+			// exactly — tripped a second "ragged" check against that new,
+			// larger width.
+			ragged = true
+		}
 		if len(rec) > width {
 			width = len(rec)
 		}
 	}
-	if width > len(header) {
-		res.Warnings = append(res.Warnings, "some rows had more columns than the header row")
+	if ragged {
+		res.Warnings = append(res.Warnings, "some rows had a different column count than the header row")
 	}
 
 	var sb strings.Builder
@@ -56,7 +84,6 @@ func tabularToMarkdown(data []byte, kind Kind, opt Options) (Result, error) {
 	writeRow(&sb, sep)
 
 	body := records[1:]
-	ragged := false
 	for i, rec := range body {
 		if i >= maxTableRows {
 			omitted := len(body) - maxTableRows
@@ -66,13 +93,7 @@ func tabularToMarkdown(data []byte, kind Kind, opt Options) (Result, error) {
 				omitted, len(body)))
 			break
 		}
-		if len(rec) != width {
-			ragged = true
-		}
 		writeRow(&sb, pad(rec, width))
-	}
-	if ragged {
-		res.Warnings = append(res.Warnings, "some rows had a different column count than the header row")
 	}
 	res.Markdown = normalizeText(sb.String())
 	return res, nil
@@ -95,9 +116,17 @@ func escapeCell(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// pad grows cells to width by appending empty strings. It must be grow-only:
+// padding must never remove a value, because a dropped cell is unsearchable
+// and invisible to every agent that reads the converted note back. The single
+// current caller happens to always pass the true maximum width across all
+// records, so len(cells) > width never occurs today — but nothing enforces
+// that precondition on a future caller (e.g. a fixed display width), so the
+// truncating branch this replaced was one careless call away from silent data
+// loss.
 func pad(cells []string, width int) []string {
 	if len(cells) >= width {
-		return cells[:width]
+		return cells
 	}
 	out := make([]string, width)
 	copy(out, cells)

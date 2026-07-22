@@ -85,6 +85,26 @@ func TestHTMLTable(t *testing.T) {
 	}
 }
 
+// A literal pipe in a table cell (a price range like "50 | 100") must be
+// escaped, not left to split the cell into a phantom extra column — the same
+// corruption class escapeCell exists to prevent for the CSV/TSV renderer.
+func TestHTMLTablePipeInCell(t *testing.T) {
+	doc := `<table>
+	  <tr><th>Range</th><th>Label</th></tr>
+	  <tr><td>50 | 100</td><td>mid</td></tr>
+	</table>`
+	got, err := ToMarkdown([]byte(doc), Options{MIME: "text/html"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	if !strings.Contains(got.Markdown, `50 \| 100`) {
+		t.Errorf("pipe in cell must be escaped, got:\n%s", got.Markdown)
+	}
+	if !strings.Contains(got.Markdown, `| 50 \| 100 | mid |`) {
+		t.Errorf("row structure broken by an unescaped pipe, got:\n%s", got.Markdown)
+	}
+}
+
 func TestHTMLInlineSpacing(t *testing.T) {
 	tests := []struct{ name, html, want string }{
 		{"inline between words", "<p>Revenue grew by <strong>12%</strong> this quarter.</p>", "Revenue grew by **12%** this quarter."},

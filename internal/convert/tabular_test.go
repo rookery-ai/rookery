@@ -110,6 +110,24 @@ func TestCSVBeyondCapWarnsInBodyAndWarnings(t *testing.T) {
 	}
 }
 
+// Excel on Windows writes CSV with a UTF-8 BOM by default. Left in place it
+// fuses invisibly onto the first header cell — and a header name is exactly
+// what an agent keys, matches, or joins on, so a corrupted header is a silent
+// lookup failure, not a cosmetic one.
+func TestCSVStripsLeadingBOM(t *testing.T) {
+	bom := "\xEF\xBB\xBF"
+	got, err := ToMarkdown([]byte(bom+"Region,Sales\nEMEA,120\n"), Options{Filename: "sales.csv"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	if strings.Contains(got.Markdown, bom) {
+		t.Errorf("BOM must be stripped, got:\n%q", got.Markdown)
+	}
+	if !strings.Contains(got.Markdown, "| Region | Sales |") {
+		t.Errorf("header cell must be exactly %q with no leading BOM, got:\n%q", "Region", got.Markdown)
+	}
+}
+
 func TestCSVEmptyIsError(t *testing.T) {
 	if _, err := ToMarkdown([]byte("\n"), Options{Filename: "empty.csv"}); err == nil {
 		t.Error("an empty csv must error rather than produce a blank note")

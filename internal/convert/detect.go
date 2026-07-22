@@ -165,9 +165,26 @@ func IsTextual(data []byte, mime string) bool {
 	return isMostlyText(data)
 }
 
-// normalizeText makes line endings uniform and trims trailing whitespace so
-// converted output is byte-stable across sources.
+// utf8BOM is the UTF-8 encoding of U+FEFF, which Excel and other Windows
+// tools prepend to exported text by default. Left in place it becomes part of
+// whatever text follows it — most damagingly the first header cell of a
+// table, which is exactly what an agent keys, matches, or joins on.
+const utf8BOM = "\xEF\xBB\xBF"
+
+// normalizeText makes line endings uniform, strips a leading UTF-8 BOM, and
+// trims trailing whitespace so converted output is byte-stable across
+// sources. This only strips a BOM that is the very first thing in s: markdown
+// and plain-text passthrough hand it raw file bytes, so a BOM there is always
+// at position 0 and this is exactly the fix. The tabular and HTML renderers
+// call this on their own already-rendered output (e.g. "| ... |\n" markdown),
+// where a BOM from the source, if any survived, would be buried inside a
+// cell rather than leading the string — so this alone would not have fixed a
+// BOM'd CSV header (see tabularToMarkdown, which strips it from the raw bytes
+// before parsing for exactly that reason). Stripping only a genuine leading
+// BOM cannot affect any other converter's byte-exactness expectations: no
+// legitimate output is supposed to start with U+FEFF.
 func normalizeText(s string) string {
+	s = strings.TrimPrefix(s, utf8BOM)
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
 	return strings.TrimRight(s, " \t\n") + "\n"

@@ -247,17 +247,19 @@ func (w *mdWriter) table(n *html.Node) {
 	if len(rows) == 0 {
 		return
 	}
-	writeRow := func(cells []string) {
-		w.sb.WriteString("| " + strings.Join(cells, " | ") + " |\n")
-	}
-	writeRow(rows[0])
+	// Use the package-level writeRow (tabular.go), which escapes a literal "|"
+	// and scrubs embedded newlines in each cell. The previous local closure
+	// here did neither, so an HTML cell containing a pipe (e.g. a price range
+	// like "50 | 100") silently split into an extra column and misaligned the
+	// whole rendered table — the same bug class escapeCell exists to prevent.
+	writeRow(&w.sb, rows[0])
 	sep := make([]string, len(rows[0]))
 	for i := range sep {
 		sep[i] = "---"
 	}
-	writeRow(sep)
+	writeRow(&w.sb, sep)
 	for _, r := range rows[1:] {
-		writeRow(r)
+		writeRow(&w.sb, r)
 	}
 }
 
