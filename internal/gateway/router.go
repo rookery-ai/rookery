@@ -152,7 +152,7 @@ func (r *Router) Handle(ctx context.Context, msg Message, send func(string), del
 	case "start":
 		return r.handleStart(ctx, msg, send)
 	case "help":
-		send(helpText())
+		send(helpText(msg.Platform))
 		return nil
 	case "agent":
 		return r.handleAgent(ctx, msg, arg, send)
@@ -1266,7 +1266,17 @@ func (r *Router) handleMemory(ctx context.Context, msg Message, arg string, send
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-func helpText() string {
+// helpText renders /help, conditioning the file-upload line on platform: Slack's
+// Socket Mode integration drops subtyped file_share messages entirely (see
+// SlackGateway — there is no attachment handling wired for it), so telling a
+// Slack user to "send a file" is a false promise the bot silently does nothing
+// about. Telegram and Discord both implement attachment download, so they keep
+// the line.
+func helpText(platform string) string {
+	fileLine := "\nSend a file (document/photo) to save it to your knowledge base.\n"
+	if platform == "slack" {
+		fileLine = ""
+	}
 	return `**Simple Agents — Commands**
 
 /agent list — list your agents
@@ -1292,9 +1302,7 @@ func helpText() string {
 /memory add <text> — save a new memory entry
 /memory delete <n> — delete entry by number
 /help — this message
-
-Send a file (document/photo) to save it to your knowledge base.
-
+` + fileLine + `
 _Add secrets at the web dashboard — no master password needed to add_`
 }
 
