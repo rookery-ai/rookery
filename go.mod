@@ -8,6 +8,7 @@ require (
 	github.com/gorilla/sessions v1.4.0
 	github.com/labstack/echo/v4 v4.15.2
 	github.com/landlock-lsm/go-landlock v0.9.0
+	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/slack-go/slack v0.27.0
 	github.com/stretchr/testify v1.11.1
