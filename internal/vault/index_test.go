@@ -359,6 +359,54 @@ func TestIndexSkipsAllDotDirectories(t *testing.T) {
 	}
 }
 
+// TestIndexOversizedFileStaysFindableByName pins Fix 1: a file over
+// maxIndexFileBytes must never vanish from the index. Its content is never
+// read (that's the whole point of the cap), but it must still be findable by
+// filename — the "no existing notes matched this request" designer message
+// is a false statement whenever this regresses.
+func TestIndexOversizedFileStaysFindableByName(t *testing.T) {
+	v, ws := seedVault(t)
+
+	// A body well over the cap, containing a unique token that would ONLY be
+	// findable via content indexing — it must NOT be what makes this file
+	// findable, since an oversized file's body is never read into the index.
+	body := "expenses-report-quarterly unique-content-token-zzqx\n" +
+		strings.Repeat("filler filler filler filler filler filler filler filler\n", 90000)
+	if len(body) <= maxIndexFileBytes {
+		t.Fatalf("test fixture body (%d bytes) must exceed maxIndexFileBytes (%d)", len(body), maxIndexFileBytes)
+	}
+	if err := v.WriteNote(ws, "notes/expenses-report-quarterly.md", []byte(body)); err != nil {
+		t.Fatalf("write oversized note: %v", err)
+	}
+
+	// Findable BY NAME (path/filename field boost) even though it's oversized.
+	got := v.Indexer().Search(ws, "expenses report quarterly", 5)
+	var found bool
+	for _, s := range got {
+		if strings.Contains(s.Path, "expenses-report-quarterly.md") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("oversized file must still be findable by name, got %+v", paths(got))
+	}
+
+	// NOT findable by a body-only token, proving the content genuinely was never
+	// read (distinguishing this from a lucky path-boost false positive).
+	got = v.Indexer().Search(ws, "unique-content-token-zzqx", 5)
+	for _, s := range got {
+		if strings.Contains(s.Path, "expenses-report-quarterly.md") {
+			t.Errorf("oversized file's body must never be read into the index, but a body-only token matched it: %+v", paths(got))
+		}
+	}
+
+	// A normal, well-under-cap file must still match by content exactly as before.
+	got = v.Indexer().Search(ws, "dentist appointment", 5)
+	if len(got) == 0 || !strings.Contains(got[0].Path, "health.md") {
+		t.Errorf("normal file content matching must be unaffected, got %+v", paths(got))
+	}
+}
+
 func BenchmarkIndexSearchWarm(b *testing.B) {
 	v := New(b.TempDir())
 	const ws = "ws1"

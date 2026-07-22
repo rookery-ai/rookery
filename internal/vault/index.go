@@ -3,6 +3,7 @@ package vault
 import (
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -33,7 +34,12 @@ const (
 	pathMatchBoost    = 2.5
 	headingMatchBoost = 1.5
 
-	// maxIndexFileBytes bounds what is read into the index.
+	// maxIndexFileBytes bounds what is read INTO MEMORY for indexing. A file over
+	// this cap is never read — its content contributes nothing to BM25 — but it is
+	// still represented in the index as a name/path-only entry (see nameOnlyEntry),
+	// so it stays findable via fieldBoost's filename/path match. Dropping the file
+	// entirely here would be silently wrong: a design turn would be told "no
+	// existing notes matched" about a document the user does have.
 	maxIndexFileBytes = 4 << 20
 )
 
@@ -289,7 +295,13 @@ func (i *Indexer) refresh(workspaceID string, idx *wsIndex) {
 			return nil
 		}
 		info, statErr := d.Info()
-		if statErr != nil || info.Size() > maxIndexFileBytes {
+		if statErr != nil {
+			// Distinct from the oversized case below: a stat failure (permission
+			// denied, a symlink that vanished mid-walk, ...) means we don't even
+			// know the file's size, so there's nothing safe to index for it. Log
+			// it rather than swallowing it silently — a systemic permissions
+			// problem should be visible, not just a quietly incomplete index.
+			slog.Warn("vault: index: stat failed, skipping file", "path", rel, "error", statErr)
 			return nil
 		}
 		seen[rel] = true
@@ -308,7 +320,19 @@ func (i *Indexer) refresh(workspaceID string, idx *wsIndex) {
 			return nil // unchanged: reuse cached chunks, no re-read, no re-extract
 		}
 
-		entry := i.buildEntry(path, rel, info.ModTime().UnixNano(), info.Size())
+		var entry *fileEntry
+		if info.Size() > maxIndexFileBytes {
+			// Never read an oversized file's body into memory — that's the whole
+			// point of the cap — but still represent it by name/path so it stays
+			// findable (see maxIndexFileBytes's doc comment). Dropping it here
+			// silently was the actual bug: the file simply vanished from every
+			// search result, including a query naming it by filename.
+			slog.Warn("vault: file exceeds index size cap; indexing name only",
+				"path", rel, "size", info.Size(), "cap", maxIndexFileBytes)
+			entry = nameOnlyEntry(rel, info.ModTime().UnixNano(), info.Size())
+		} else {
+			entry = i.buildEntry(path, rel, info.ModTime().UnixNano(), info.Size())
+		}
 		if entry == nil {
 			delete(idx.files, rel)
 			changed = true
@@ -327,6 +351,21 @@ func (i *Indexer) refresh(workspaceID string, idx *wsIndex) {
 	}
 	if changed || idx.df == nil {
 		idx.recompute()
+	}
+}
+
+// nameOnlyEntry builds a degraded index entry for a file whose body is deliberately
+// never read — too large to safely load into memory (see maxIndexFileBytes). It
+// mirrors the degraded entry buildEntry itself falls back to for an unconvertible
+// format: an empty-text chunk that still carries Path, so fieldBoost's filename/path
+// match keeps the file findable by name even though it contributes zero BM25 term
+// signal from its content.
+func nameOnlyEntry(rel string, modTime, size int64) *fileEntry {
+	return &fileEntry{
+		modTime: modTime,
+		size:    size,
+		chunks:  []Chunk{{Path: rel, Text: "", Line: 1}},
+		terms:   []map[string]int{{}},
 	}
 }
 
