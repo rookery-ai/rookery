@@ -318,7 +318,17 @@ function TreeRow({
   // wrapper), so without this an illegal drop on a child — say, onto a file —
   // would bubble to the enclosing folder row and be re-interpreted as "move
   // into that folder". A row's verdict on a drop aimed at it is final.
+  //
+  // That rule applies only to the tree's OWN internal reorder/move drag
+  // (DragCtx's `dragged`, set on a row's onDragStart). A file dragged in from
+  // the OS sets no such state, so `dragged` is null for the whole gesture —
+  // in that case this row must NOT stopPropagation/preventDefault at all, or
+  // the KB page's file-drop container (an ancestor of this tree) never sees
+  // the event and the browser's default action (typically navigating away to
+  // open the dropped file) fires instead. Falling through untouched lets the
+  // native dragover/drop bubble past every row to that container.
   function handleDragOver(e: React.DragEvent) {
+    if (!dragged) return;
     e.stopPropagation();
     const next = hintFor(e);
     if (!next) {
@@ -333,6 +343,7 @@ function TreeRow({
   }
 
   function handleDrop(e: React.DragEvent) {
+    if (!dragged) return; // native OS file drop — let it bubble to the KB page's container
     e.stopPropagation();
     const target = hintFor(e);
     setHint(null);
@@ -563,6 +574,7 @@ export default function FileTree({
   selectedPath,
   onSelect,
   onMoved,
+  onImportFiles,
 }: {
   selectedPath: string | null;
   onSelect: (path: string, isDir: boolean) => void;
@@ -571,8 +583,14 @@ export default function FileTree({
   // `?path=` param still points at the old location and NoteEditor drops into
   // its "deleted elsewhere" state on the single most common drag there is.
   onMoved?: (from: string, to: string) => void;
+  // Fired when the user drops OS file(s) anywhere on the tree — including
+  // directly on a row, not just the blank gap below the last one (see the
+  // root wrapper's handlers below for why that distinction used to matter).
+  // Omitted entirely, the tree is drop-inert (upload is opt-in per caller).
+  onImportFiles?: (files: File[]) => void;
 }) {
   const [dragged, setDragged] = useState<DraggedNode | null>(null);
+  const [fileDragging, setFileDragging] = useState(false);
   const renameNote = useRenameNote();
   const { toast } = useToast();
   const dragCtx = useMemo(() => ({ dragged, setDragged }), [dragged]);
@@ -596,7 +614,42 @@ export default function FileTree({
 
   return (
     <DragCtx.Provider value={dragCtx}>
-      <div className="px-1 py-1">
+      <div
+        className={cn(
+          "h-full px-1 py-1",
+          fileDragging && "rounded ring-2 ring-inset ring-ring",
+        )}
+        // This wrapper is what actually receives an OS file drag — a row's
+        // own dragover/drop handlers deliberately do NOT stopPropagation for
+        // one (see TreeRow's handlers), specifically so it bubbles all the
+        // way up here regardless of which row (or the gap below them all) it
+        // lands on. Gated on `onImportFiles` being provided AND the drag
+        // actually carrying files (`types.includes("Files")`), so the tree's
+        // OWN internal reorder/move drag — which carries no "Files" type —
+        // never trips this.
+        onDragOver={(e) => {
+          if (!onImportFiles || !e.dataTransfer.types.includes("Files")) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "copy";
+          setFileDragging(true);
+        }}
+        onDragLeave={(e) => {
+          // A dragleave fires when moving from this wrapper onto one of its
+          // own row children too — only clear the highlight once the pointer
+          // has actually left the whole tree, or the ring would flicker on
+          // every row boundary crossed while dragging.
+          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+          setFileDragging(false);
+        }}
+        onDrop={(e) => {
+          if (!onImportFiles) return;
+          const files = Array.from(e.dataTransfer.files ?? []);
+          if (files.length === 0) return; // not a file drop — leave it to the row that's actually handling it
+          e.preventDefault();
+          setFileDragging(false);
+          onImportFiles(files);
+        }}
+      >
         <TreeLevel
           path=""
           depth={0}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path"
@@ -15,6 +17,19 @@ import (
 	"github.com/ilijad1/simple-agents/internal/vault"
 	"github.com/labstack/echo/v4"
 )
+
+// maxUploadBytes caps a KB file upload. Conversion (internal/convert) allocates
+// proportional to input size, and an unbounded upload is a trivial
+// memory-exhaustion vector on a home server.
+const maxUploadBytes = 25 << 20 // 25 MiB
+
+// maxUploadOverhead is slack added on top of maxUploadBytes when capping the
+// raw request body: multipart encoding adds boundary/header bytes beyond the
+// file's own content, so a body-level cap set to exactly maxUploadBytes would
+// reject a file that is itself right at the limit. The overhead cap is a
+// coarse memory-exhaustion backstop; the real, exact limit is enforced
+// against fh.Size and the read file content below.
+const maxUploadOverhead = 1 << 20 // 1 MiB
 
 // kbInlineMax is the size cap (bytes) under which a non-markdown file's
 // content is sniffed and inlined as kind:"code". At or above it, the file is
@@ -43,6 +58,7 @@ func (s *Server) registerKBAPI(g *echo.Group) {
 	g.GET("/kb/resolve", s.apiResolveKBLink)
 	g.GET("/kb/raw", s.rawKBNote)
 	g.PUT("/kb/order", s.apiSaveKBOrder)
+	g.POST("/kb/upload", s.apiUploadKBFile)
 }
 
 // ── Tree ordering ────────────────────────────────────────────────────────────
@@ -520,4 +536,80 @@ func (s *Server) apiSearchKB(c echo.Context) error {
 		out = append(out, apiKBSearchHit{Path: h.Path, Line: h.Line, Snippet: h.Snippet})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"hits": out})
+}
+
+// isRequestTooLarge reports whether err originates from an http.MaxBytesReader
+// tripping (Go 1.19+ wraps this as *http.MaxBytesError). Checked so a body
+// that overflows the cap during multipart parsing itself — not just a big
+// fh.Size after the fact — is still reported as 413, not a generic 400.
+func isRequestTooLarge(err error) bool {
+	var mbe *http.MaxBytesError
+	return errors.As(err, &mbe)
+}
+
+// apiUploadKBFile accepts a document, converts it to markdown, and files it in
+// the workspace's knowledge base. It shares vault.ImportFile with the
+// save_to_kb LLM tool and the CLI bridge, so a file lands identically no
+// matter which door it came through.
+// POST /api/v1/kb/upload multipart {file, dir?} → 200 {note_path, original_path, kind, extractor, warnings}
+func (s *Server) apiUploadKBFile(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	if s.vault == nil {
+		return s.kbUnavailable(c)
+	}
+
+	// Cap the request body at the io.Reader level, BEFORE any multipart
+	// parsing reads it into memory: FormFile/ParseMultipartForm reads the
+	// whole body regardless of what fh.Size later reports, so checking
+	// fh.Size alone would still let an oversized body be read in full first.
+	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, maxUploadBytes+maxUploadOverhead)
+
+	fh, err := c.FormFile("file")
+	if err != nil {
+		if isRequestTooLarge(err) {
+			return jsonErr(c, http.StatusRequestEntityTooLarge, "too_large",
+				fmt.Sprintf("upload exceeds the %d byte limit", maxUploadBytes))
+		}
+		return jsonErr(c, http.StatusBadRequest, "invalid_request", "no file uploaded")
+	}
+	if fh.Size > maxUploadBytes {
+		return jsonErr(c, http.StatusRequestEntityTooLarge, "too_large",
+			fmt.Sprintf("file is %d bytes; the limit is %d", fh.Size, maxUploadBytes))
+	}
+	src, err := fh.Open()
+	if err != nil {
+		return jsonErr(c, http.StatusBadRequest, "invalid_request", "could not read the upload")
+	}
+	defer src.Close()
+	// Belt-and-braces re-check against the actual bytes read: an
+	// io.LimitReader one byte past the cap turns any fh.Size lie into a hard
+	// stop rather than a trusted header value.
+	data, err := io.ReadAll(io.LimitReader(src, maxUploadBytes+1))
+	if err != nil {
+		return jsonErr(c, http.StatusBadRequest, "invalid_request", "could not read the upload")
+	}
+	if len(data) > maxUploadBytes {
+		return jsonErr(c, http.StatusRequestEntityTooLarge, "too_large",
+			fmt.Sprintf("file exceeds the %d byte limit", maxUploadBytes))
+	}
+
+	res, err := s.vault.ImportFile(u.ID, vault.ImportInput{
+		Data:       data,
+		Filename:   fh.Filename,
+		DestDir:    strings.TrimSpace(c.FormValue("dir")),
+		BuildPhase: false,
+	})
+	if err != nil {
+		// An unconvertible format (or a rejected system-area destination) is a
+		// property of the request, not a server fault — 422 so the UI can say
+		// "we can't read this kind of file" instead of surfacing a 500.
+		return jsonErr(c, http.StatusUnprocessableEntity, "unsupported_format", err.Error())
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"note_path":     res.NotePath,
+		"original_path": res.OriginalPath,
+		"kind":          res.Kind,
+		"extractor":     res.Extractor,
+		"warnings":      orEmpty(res.Warnings),
+	})
 }

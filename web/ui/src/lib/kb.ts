@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "./api";
+import { api, ApiError } from "./api";
 
 export type KBNode = {
   name: string;
@@ -117,5 +117,48 @@ export function useKBSearch(q: string) {
     queryKey: ["kb-search", q],
     queryFn: () => api.get<{ hits: KBSearchHit[] }>(`/api/v1/kb/search?q=${encodeURIComponent(q)}`),
     enabled: q.length >= 2,
+  });
+}
+
+// KBUploadResult mirrors web/api_kb.go's apiUploadKBFile response. Warnings is
+// how a lossy conversion (a scanned PDF that yielded no text, a spreadsheet
+// with dropped formulas) declares itself — callers must surface it, not treat
+// a 200 alone as "converted faithfully".
+export type KBUploadResult = {
+  note_path: string;
+  original_path: string;
+  kind: string;
+  extractor: string;
+  warnings: string[];
+};
+
+// useUploadKBFile posts a document to /api/v1/kb/upload as multipart/form-data
+// (the generic `api` helper only ever sends JSON, so this builds the request
+// by hand rather than stretching that helper to cover a second body shape).
+// `dir` is optional — omitted, the backend files the note under notes/.
+export function useUploadKBFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ file, dir }: { file: File; dir?: string }): Promise<KBUploadResult> => {
+      const body = new FormData();
+      body.append("file", file);
+      if (dir) body.append("dir", dir);
+      const res = await fetch("/api/v1/kb/upload", { method: "POST", body, credentials: "same-origin" });
+      const text = await res.text();
+      let data: unknown = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        /* non-JSON error body — fall through to the generic message below */
+      }
+      if (!res.ok) {
+        const e = (data as { error?: { code?: string; message?: string } } | null)?.error;
+        throw new ApiError(res.status, e?.code ?? "unknown", e?.message ?? res.statusText);
+      }
+      return data as KBUploadResult;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["kb-tree"] });
+    },
   });
 }

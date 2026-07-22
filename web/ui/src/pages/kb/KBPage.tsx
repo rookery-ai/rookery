@@ -1,21 +1,71 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useSearchParams } from "react-router";
-import { Plus, FileText } from "lucide-react";
+import { Plus, FileText, Upload } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
 import { ContextPaneHeader } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/shell/Toast";
+import { ApiError } from "@/lib/api";
+import { useUploadKBFile } from "@/lib/kb";
 import FileTree, { NewEntryDialog } from "./FileTree";
 import NoteEditor from "./NoteEditor";
 import FileViewer from "./FileViewer";
 import SearchBox from "./SearchBox";
 
-function KBPaneHeader() {
+// importFiles uploads each dropped/picked file in turn (not concurrently — a
+// user dragging a handful of files in expects predictable one-at-a-time
+// feedback, and the shared vault.ImportFile is globally mutex-serialized
+// server-side anyway) and toasts the outcome of each. A conversion warning
+// (e.g. a scanned PDF with no extractable text) is surfaced in the toast
+// rather than treated as a silent success — see vault.ImportFile's doc
+// comment: conversion is lossy by nature, so Warnings must reach the user.
+async function importFiles(
+  files: File[],
+  upload: ReturnType<typeof useUploadKBFile>,
+  toast: ReturnType<typeof useToast>["toast"],
+) {
+  for (const file of files) {
+    try {
+      const res = await upload.mutateAsync({ file });
+      toast({
+        message: res.warnings?.length
+          ? `Imported ${file.name} — ${res.warnings.join("; ")}`
+          : `Imported ${file.name} as ${res.note_path}`,
+      });
+    } catch (err) {
+      toast({
+        message: err instanceof ApiError ? `Couldn't import ${file.name}: ${err.message}` : `Couldn't import ${file.name}`,
+        variant: "error",
+      });
+    }
+  }
+}
+
+function KBPaneHeader({ onPickFiles }: { onPickFiles: (files: File[]) => void }) {
   const [newOpen, setNewOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   return (
     <ContextPaneHeader
       title="Knowledge Base"
       action={
         <>
+          <Button
+            variant="ghost" size="icon-sm" aria-label="Import file"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload className="size-4" />
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            className="sr-only"
+            aria-label="Import file"
+            onChange={(e) => {
+              onPickFiles(Array.from(e.target.files ?? []));
+              e.target.value = ""; // allow re-picking the same file(s) again
+            }}
+          />
           <Button
             variant="ghost" size="icon-sm" aria-label="New note"
             onClick={() => setNewOpen(true)}
@@ -75,6 +125,9 @@ export default function KBPage() {
   const isFile = !!path && !isDirHint;
   const isMarkdown = !!path && path.toLowerCase().endsWith(".md");
 
+  const upload = useUploadKBFile();
+  const { toast } = useToast();
+
   function openPath(p: string, isDir: boolean) {
     setParams(isDir ? { path: p, dir: "1" } : { path: p });
   }
@@ -92,10 +145,15 @@ export default function KBPage() {
     <>
       <ContextPane>
         <div className="flex h-full flex-col">
-          <KBPaneHeader />
+          <KBPaneHeader onPickFiles={(files) => void importFiles(files, upload, toast)} />
           <div className="min-h-0 flex-1">
             <SearchBox onSelect={(p) => openPath(p, false)}>
-              <FileTree selectedPath={path} onSelect={openPath} onMoved={handleMoved} />
+              <FileTree
+                selectedPath={path}
+                onSelect={openPath}
+                onMoved={handleMoved}
+                onImportFiles={(files) => void importFiles(files, upload, toast)}
+              />
             </SearchBox>
           </div>
         </div>

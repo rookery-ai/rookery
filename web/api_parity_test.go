@@ -48,7 +48,7 @@ func TestAPIParityInventory(t *testing.T) {
 		"GET /api/v1/kb/tree", "GET /api/v1/kb/note", "PUT /api/v1/kb/note",
 		"POST /api/v1/kb/new", "DELETE /api/v1/kb/note", "POST /api/v1/kb/rename",
 		"GET /api/v1/kb/search", "GET /api/v1/kb/resolve", "GET /api/v1/kb/raw",
-		"PUT /api/v1/kb/order",
+		"PUT /api/v1/kb/order", "POST /api/v1/kb/upload",
 		"GET /api/v1/settings", "PUT /api/v1/settings/profile", "PUT /api/v1/settings/workspace",
 		"PUT /api/v1/settings/coder", "POST /api/v1/settings/coder/test",
 		"PUT /api/v1/settings/master-password",

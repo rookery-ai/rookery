@@ -49,12 +49,16 @@ function mockFetch(intercept?: (url: string, init?: RequestInit) => Response | u
 
 // FileTree reports move/reorder failures through the shell's toast system, so
 // it needs a ToastProvider in scope exactly as it has in the real app.
-function renderTree(onSelect = vi.fn(), onMoved?: (from: string, to: string) => void) {
+function renderTree(
+  onSelect = vi.fn(),
+  onMoved?: (from: string, to: string) => void,
+  onImportFiles?: (files: File[]) => void,
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={qc}>
       <ToastProvider>
-        <FileTree selectedPath={null} onSelect={onSelect} onMoved={onMoved} />
+        <FileTree selectedPath={null} onSelect={onSelect} onMoved={onMoved} onImportFiles={onImportFiles} />
         <ToastHost />
       </ToastProvider>
     </QueryClientProvider>,
@@ -494,4 +498,47 @@ test("a system dir is not a reorder target", async () => {
   await dragOnto("README.md", "Chats", 0.05);
   await dragOnto("README.md", "Chats", 0.95);
   expect(calls).toEqual([]);
+});
+
+// Regression: a row's dragover/drop handlers used to stopPropagation
+// unconditionally, for ANY drag — including a native OS file drag, where
+// DragCtx's `dragged` is null for the whole gesture (it's only ever set by a
+// row's own onDragStart, driving the tree's internal reorder/move). That
+// meant a file dropped directly ON a row — the vast majority of the tree's
+// surface — never reached the root wrapper's onImportFiles handler; only a
+// drop in the blank gap below the last row worked. Dropping on a row (here,
+// "Notes") must import exactly the same as dropping in the gap.
+test("dropping an OS file directly on a row (not just the blank gap) still imports it", async () => {
+  mockFetch();
+  const onImportFiles = vi.fn();
+  renderTree(vi.fn(), undefined, onImportFiles);
+
+  const row = await screen.findByText("Notes");
+  const file = new File(["a,b\n1,2\n"], "sample.csv", { type: "text/csv" });
+  // jsdom has no constructible DataTransfer with real file-drag semantics; a
+  // plain object with `types`/`files` is enough to drive both the root
+  // wrapper's `types.includes("Files")` check and the row's own guard
+  // (DragCtx's `dragged`, which stays null here since nothing fired an
+  // internal onDragStart).
+  const dt = { types: ["Files"], files: [file], dropEffect: "" };
+
+  fireEvent.dragOver(row, { dataTransfer: dt });
+  fireEvent.drop(row, { dataTransfer: dt });
+
+  expect(onImportFiles).toHaveBeenCalledTimes(1);
+  expect(onImportFiles).toHaveBeenCalledWith([file]);
+});
+
+// The tree's OWN internal reorder/move drag must still be untouched by the
+// file-import wrapper — it carries no "Files" data-transfer type, so
+// onImportFiles must never fire for it even when provided.
+test("an internal reorder drag never triggers onImportFiles", async () => {
+  mockFetch();
+  const onImportFiles = vi.fn();
+  renderTree(vi.fn(), undefined, onImportFiles);
+
+  await screen.findByText("Chats");
+  await dragOnto("README.md", "Notes", 0.5); // "into" Notes — an internal move
+
+  expect(onImportFiles).not.toHaveBeenCalled();
 });
