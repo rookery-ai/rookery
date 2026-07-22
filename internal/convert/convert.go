@@ -72,9 +72,3 @@ func passthrough(data []byte, kind Kind, opt Options) Result {
 		Extractor: "pure-go",
 	}
 }
-
-// htmlToMarkdown is implemented in html.go (Task 2). This stub keeps the
-// package compiling until then.
-func htmlToMarkdown(data []byte, opt Options) (Result, error) {
-	return Result{Markdown: normalizeText(string(data)), Kind: KindHTML, Extractor: "stub"}, nil
-}
