@@ -383,7 +383,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	// engine's save_to_kb/search_files tools call in-process. Unregistered when
 	// the run ends, alongside the connector-token cleanup above.
 	if r.kbBridge != nil && r.kbBridge.URL() != "" {
-		kbToken := r.kbBridge.Register(input.WorkspaceID)
+		kbToken := r.kbBridge.Register(input.WorkspaceID, false)
 		defer r.kbBridge.Unregister(kbToken)
 		extraEnv["SA_KB_URL"] = r.kbBridge.URL()
 		extraEnv["SA_KB_TOKEN"] = kbToken

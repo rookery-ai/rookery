@@ -851,8 +851,13 @@ func (h *hostToolSet) saveToKB(ctx context.Context, source, destDir, title strin
 		data, filename = raw, filepath.Base(abs)
 	}
 
+	// BuildPhase is also threaded through here even though h.verifyBuild already
+	// returned above: ImportFile itself is the choke point that refuses a
+	// build-time write, so this call stays safe even if the early check above
+	// were ever removed or bypassed by a future refactor.
 	res, err := h.vlt.ImportFile(h.workspaceID, vault.ImportInput{
 		Data: data, Filename: filename, SourceURL: srcURL, DestDir: destDir, Title: title,
+		BuildPhase: h.verifyBuild,
 	})
 	if err != nil {
 		return "", err

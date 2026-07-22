@@ -72,6 +72,33 @@ func TestImportFileKeepsOriginal(t *testing.T) {
 	}
 }
 
+// TestImportFileRefusesDuringBuild proves the build-phase guard sits at
+// ImportFile itself — the one choke point every caller (save_to_kb, the KB
+// bridge) funnels through — rather than in any one caller's local check, and
+// that a refused import leaves nothing behind: neither the note nor the
+// preserved original.
+func TestImportFileRefusesDuringBuild(t *testing.T) {
+	v := New(t.TempDir())
+	const ws = "ws1"
+	v.EnsureScaffold(ws)
+
+	_, err := v.ImportFile(ws, ImportInput{
+		Data: []byte("a,b\n1,2\n"), Filename: "data.csv", BuildPhase: true,
+	})
+	if err == nil {
+		t.Fatal("ImportFile must refuse when BuildPhase is set")
+	}
+
+	entries, _ := os.ReadDir(filepath.Join(v.Root(ws), "notes"))
+	if len(entries) != 0 {
+		t.Errorf("no note should have been written, found %d entries", len(entries))
+	}
+	files, _ := os.ReadDir(filepath.Join(v.Root(ws), FilesDir))
+	if len(files) != 0 {
+		t.Errorf("no original should have been preserved, found %d entries", len(files))
+	}
+}
+
 func TestImportFileSanitizesName(t *testing.T) {
 	v := New(t.TempDir())
 	const ws = "ws1"

@@ -23,6 +23,17 @@ type ImportInput struct {
 	SourceURL string // where it came from, when it came from the web
 	DestDir   string // vault-relative folder for the note; defaults to notes/
 	Title     string // overrides the derived title
+
+	// BuildPhase marks a call made during agent (or skill) generation rather
+	// than a real run. ImportFile always resolves against the LIVE vault root
+	// regardless of caller-supplied workDir (unlike write_file/edit_file, which
+	// stay inside the build's draft dir) — so a build-time test call would
+	// otherwise leave a real, uncleaned note in the user's knowledge base.
+	// ImportFile itself refuses when this is set, so the guard lives at the one
+	// choke point every caller (API engine, CLI bridge) funnels through,
+	// mirroring connectors.Execute's buildPhase parameter — a future caller
+	// cannot forget it the way a caller-local check could be omitted.
+	BuildPhase bool
 }
 
 // ImportResult reports where the import landed.
@@ -60,6 +71,11 @@ var importMu sync.Mutex
 func (v *Vault) ImportFile(workspaceID string, in ImportInput) (ImportResult, error) {
 	if len(in.Data) == 0 {
 		return ImportResult{}, fmt.Errorf("import: no file content")
+	}
+	// Checked before anything else is even computed: a build must not write
+	// into the live knowledge base, full stop. See the BuildPhase doc comment.
+	if in.BuildPhase {
+		return ImportResult{}, fmt.Errorf("import: refused during an agent build — this would write into the live knowledge base; it will run for real once the agent executes")
 	}
 
 	destDir := strings.Trim(strings.TrimSpace(in.DestDir), "/")

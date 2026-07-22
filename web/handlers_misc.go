@@ -99,7 +99,7 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 				kbBin = p
 			}
 			if kbBin != "" {
-				kbTok := s.kbBridge.Register(u.ID)
+				kbTok := s.kbBridge.Register(u.ID, false)
 				defer s.kbBridge.Unregister(kbTok)
 				extraEnv["SA_KB_URL"] = s.kbBridge.URL()
 				extraEnv["SA_KB_TOKEN"] = kbTok

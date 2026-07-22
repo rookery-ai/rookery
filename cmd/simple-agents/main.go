@@ -307,7 +307,7 @@ func serveCmd() *cli.Command {
 							kbBin = p
 						}
 						if kbBin != "" {
-							kbTok := kbBridge.Register(workspaceID)
+							kbTok := kbBridge.Register(workspaceID, false)
 							defer kbBridge.Unregister(kbTok)
 							extraEnv["SA_KB_URL"] = kbBridge.URL()
 							extraEnv["SA_KB_TOKEN"] = kbTok
