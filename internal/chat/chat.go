@@ -198,12 +198,13 @@ func sanitizeTitle(raw string) string {
 // main.go supplies a closure backed by the per-workspace coder.
 type TitleGenerator func(ctx context.Context, workspaceID, firstUserMsg, firstReply string) (string, error)
 
-// MaybeAutoTitle renames a chat exactly once, from its first substantive
+// MaybeAutoTitle renames a chat at most once, from its first substantive
 // exchange. It is a no-op (never an error, never blocking) unless the chat
 // still carries its default "Chat <timestamp>" name AND the user message that
 // produced this turn is a real message rather than an attachment confirmation.
 // The rename runs in the background so it never delays the user's reply; any
-// failure leaves the default name in place.
+// failure leaves the default name in place. Renaming is best-effort; a rapid
+// double-turn on a brand-new chat may briefly race (last-write-wins).
 func MaybeAutoTitle(database *db.DB, gen TitleGenerator, ch *db.Chat, firstUserMsg, firstReply string) {
 	if ch == nil || gen == nil {
 		return
@@ -220,6 +221,11 @@ func MaybeAutoTitle(database *db.DB, gen TitleGenerator, ch *db.Chat, firstUserM
 	chatID := ch.ID
 	workspaceID := ch.WorkspaceID
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("auto-title: panic recovered", "chat", chatID, "recovered", r)
+			}
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		raw, err := gen(ctx, workspaceID, firstUserMsg, firstReply)

@@ -121,3 +121,26 @@ func TestMaybeAutoTitle(t *testing.T) {
 		return "", nil
 	}, ch3, "📎 Attached **invoice.pdf** to my knowledge base as `notes/invoice.md`.", "Got it.")
 }
+
+func TestMaybeAutoTitle_RecoversPanic(t *testing.T) {
+	database := newTestDB(t)
+	ws := seedWorkspace(t, database)
+	ch := &db.Chat{ID: "cpanic", WorkspaceID: ws, Name: "Chat 2026-07-23 15:04", Active: true}
+	if err := database.CreateChat(ch); err != nil {
+		t.Fatal(err)
+	}
+	// A generator that panics must NOT crash the process; the chat keeps its
+	// default name and MaybeAutoTitle returns normally.
+	MaybeAutoTitle(database, func(_ context.Context, _, _, _ string) (string, error) {
+		panic("boom")
+	}, ch, "real question", "real answer")
+	// Give the goroutine time to run and recover.
+	time.Sleep(300 * time.Millisecond)
+	got, err := database.GetChat("cpanic")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "Chat 2026-07-23 15:04" {
+		t.Errorf("name changed after panic: %q", got.Name)
+	}
+}
