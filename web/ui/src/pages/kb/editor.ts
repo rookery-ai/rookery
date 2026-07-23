@@ -42,7 +42,17 @@ export function buildExtensions(extra: AnyExtension[] = []): AnyExtension[] {
     TableRow,
     TableCell,
     TableHeader,
-    Markdown.configure({ html: false, linkify: false, breaks: false }),
+    // html:true lets inline HTML an agent or a document conversion leaves in a
+    // note (a stray <br>, <sub>, <div>, or comment) render as its nearest
+    // markdown/text instead of showing up as escaped "&lt;br&gt;" garbage. It is
+    // safe for the fidelity contract: a note with NO html tags serializes
+    // identically either way (verified — plain prose, wikilinks, and tables are
+    // byte-for-byte unchanged), and a literal "a < b" in prose is still escaped
+    // to "a &lt; b" exactly as before (markdown-it only treats "<" as markup
+    // when it forms a real tag). So no note that opens in rich text today changes
+    // behavior; only html-bearing notes (which already open raw) render better
+    // once viewed as rich text.
+    Markdown.configure({ html: true, linkify: false, breaks: false }),
     Wikilink,
     ...extra,
   ];
