@@ -7,6 +7,9 @@ export type KBNode = {
   path: string;
   is_dir: boolean;
   system: boolean;
+  // Custom emoji icon ("" = default lucide icon). Stored out-of-band server-side
+  // in the kb_icons setting; see web/api_kb.go.
+  icon?: string;
 };
 
 // `order` is the user's drag-chosen sibling order for this directory, by node
@@ -18,9 +21,16 @@ export type KBTree = { path: string; nodes: KBNode[]; order: string[] };
 // <pre>; "binary" -> FileViewer's Download-only panel (content is "").
 // Decided server-side by content sniffing, not by extension — see
 // web/api_kb.go's apiGetKBNote.
-export type KBNoteKind = "markdown" | "code" | "binary";
+export type KBNoteKind = "markdown" | "code" | "binary" | "image";
 
-export type KBNote = { path: string; content: string; html: string; backlinks: string[]; kind: KBNoteKind };
+export type KBNote = {
+  path: string;
+  content: string;
+  html: string;
+  backlinks: string[];
+  kind: KBNoteKind;
+  icon?: string;
+};
 
 // `title` is the server-resolved display name for `path` — for a reflected note
 // (a chat transcript, an inbox notification, an agent run log) the filename is a
@@ -113,6 +123,91 @@ export function useRenameNote() {
       qc.invalidateQueries({ queryKey: ["kb-note", from] });
       qc.invalidateQueries({ queryKey: ["kb-note", to] });
     },
+  });
+}
+
+// Sets (or clears, with icon="") a node's custom emoji. Invalidates the tree
+// and the open note so the new icon shows everywhere it's rendered.
+export function useSetKBIcon() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ path, icon }: { path: string; icon: string }) =>
+      api.put<{ ok: boolean }>("/api/v1/kb/icon", { path, icon }),
+    onSuccess: (_data, { path }) => {
+      qc.invalidateQueries({ queryKey: ["kb-tree"] });
+      qc.invalidateQueries({ queryKey: ["kb-note", path] });
+    },
+  });
+}
+
+// Flat list of every folder path in the vault (root "" included), for the
+// new-note "Location" picker and the bulk-Move picker.
+export function useKBFolders() {
+  return useQuery({
+    queryKey: ["kb-folders"],
+    queryFn: () =>
+      api
+        .get<{ folders: string[] }>("/api/v1/kb/folders")
+        .then((r) => r.folders ?? []),
+  });
+}
+
+// Which export formats the host can currently produce (PDF depends on a
+// headless renderer being installed server-side).
+export type ExportFormats = { html: boolean; docx: boolean; pdf: boolean };
+
+export function useExportFormats() {
+  return useQuery({
+    queryKey: ["kb-export-formats"],
+    queryFn: () => api.get<ExportFormats>("/api/v1/kb/export/formats"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export const exportURL = (path: string, format: "html" | "docx" | "pdf") =>
+  `/api/v1/kb/export?path=${encodeURIComponent(path)}&format=${format}`;
+
+// An embeddable asset (image/file) stored in the vault under assets/.
+export type KBAsset = { path: string; url: string };
+export type KBAssetUploadResult = { path: string; url: string; kind: string; content_type: string };
+
+// Uploads a raw file (image/attachment) to the vault's assets/ folder and
+// returns its portable path + served URL. Distinct from useUploadKBFile, which
+// converts a document into markdown; this preserves the bytes.
+export function useUploadKBAsset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (file: File): Promise<KBAssetUploadResult> => {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch("/api/v1/kb/asset", { method: "POST", body, credentials: "same-origin" });
+      const text = await res.text();
+      let data: unknown = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        /* non-JSON error body */
+      }
+      if (!res.ok) {
+        const e = (data as { error?: { code?: string; message?: string } } | null)?.error;
+        throw new ApiError(res.status, e?.code ?? "unknown", e?.message ?? res.statusText);
+      }
+      return data as KBAssetUploadResult;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["kb-tree"] });
+      qc.invalidateQueries({ queryKey: ["kb-assets"] });
+    },
+  });
+}
+
+// Lists every image already stored in the vault, for the editor's
+// "insert from knowledge base" picker.
+export function useKBAssets(enabled = true) {
+  return useQuery({
+    queryKey: ["kb-assets"],
+    queryFn: () => api.get<{ assets: KBAsset[] }>("/api/v1/kb/assets").then((r) => r.assets ?? []),
+    enabled,
   });
 }
 

@@ -157,25 +157,24 @@ describe("table cell fidelity", () => {
 
     // The dangerous case the old code produced: PARA_ONE present but
     // PARA_TWO silently missing (a corrupted-but-plausible table). That must
-    // never happen -- either both paragraphs survive, or the whole table is
-    // honestly deferred to the non-markdown fallback (neither rendered as an
-    // ordinary cell), which is what actually happens here: this app runs
-    // with `html: false` (editor.ts), so the fallback writes the same
-    // "[table]" placeholder the stock tiptap-markdown html node writes,
-    // keeping the note out of a false WYSIWYG-safe state instead of quietly
-    // discarding PARA_TWO.
+    // never happen. The app now runs with `html: true` (editor.ts), so a cell
+    // the simple pipe grammar can't hold is deferred to the HTML fallback,
+    // which preserves BOTH paragraphs as real <table> HTML rather than writing
+    // the old lossy "[table]" placeholder (which discarded the whole table).
+    // Strictly safer: no content is dropped on the save path.
     const hasParaOne = out.includes("PARA_ONE");
     const hasParaTwo = out.includes("PARA_TWO");
     expect(hasParaOne && !hasParaTwo).toBe(false);
-    expect(out).toContain("[table]");
+    expect(hasParaOne && hasParaTwo).toBe(true);
+    expect(out).toContain("<table");
   });
 
   // Companion to the two-paragraph case above: exercises the OTHER arm of
   // isMarkdownSerializable -- a merged (colspan) cell. Such a table can arrive
   // by pasting from a webpage/Word/Sheets. It must take the same honest
-  // fallback (whole table -> "[table]" placeholder under html:false) rather
-  // than emit a delimiter row sized off the first row's childCount, which
-  // would produce a column-count-mismatched, malformed table.
+  // fallback (whole table -> real HTML <table> under html:true, preserving the
+  // cell content) rather than emit a delimiter row sized off the first row's
+  // childCount, which would produce a column-count-mismatched, malformed table.
   it("a table with a colspan cell falls back instead of emitting a malformed table", () => {
     const editor = new Editor({
       element: document.createElement("div"),
@@ -204,9 +203,11 @@ describe("table cell fidelity", () => {
     const out: string = markdownStorage.serializer.serialize(doc);
     editor.destroy();
 
-    // Fallback fired: the whole table is deferred to the placeholder, not
-    // rendered as an ordinary (and here malformed) markdown table.
-    expect(out).toContain("[table]");
+    // Fallback fired: the whole table is deferred to the HTML fallback (which
+    // preserves the cell content), not rendered as an ordinary (and here
+    // malformed) markdown table.
+    expect(out).toContain("SPAN_CELL");
+    expect(out).toContain("<table");
     expect(out).not.toMatch(/\|\s*---/); // no markdown delimiter row was emitted
   });
 });

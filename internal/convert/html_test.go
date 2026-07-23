@@ -168,3 +168,17 @@ func TestHTMLNeverEmpty(t *testing.T) {
 		t.Error("Markdown must never be empty on a nil error")
 	}
 }
+
+// A <br> must become a CommonMark HARD break (backslash + newline), not a bare
+// "\n" soft break — otherwise the KB editor's round-trip collapses it to a
+// space and the converted note opens in raw mode instead of rich text. See the
+// atom.Br case in html.go.
+func TestHTMLBrEmitsHardBreak(t *testing.T) {
+	res, err := ToMarkdown([]byte("<p>Line one<br>line two</p>"), Options{Filename: "x.html", MIME: "text/html"})
+	if err != nil {
+		t.Fatalf("ToMarkdown: %v", err)
+	}
+	if !strings.Contains(res.Markdown, "Line one\\\nline two") {
+		t.Errorf("br not emitted as a hard break; got %q", res.Markdown)
+	}
+}

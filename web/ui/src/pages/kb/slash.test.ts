@@ -38,8 +38,23 @@ describe("filterSlashItems", () => {
 });
 
 describe("slashItems run() against a headless editor", () => {
-  test("all ten items are declared", () => {
-    expect(slashItems).toHaveLength(10);
+  test("all twelve items are declared", () => {
+    expect(slashItems).toHaveLength(12);
+  });
+
+  test("Image and File attachment items dispatch their window events", () => {
+    const editor = headlessEditor();
+    const events: string[] = [];
+    const onImg = () => events.push("kb:insertImage");
+    const onAtt = () => events.push("kb:insertAttachment");
+    window.addEventListener("kb:insertImage", onImg);
+    window.addEventListener("kb:insertAttachment", onAtt);
+    findItem("Image").run(editor);
+    findItem("File attachment").run(editor);
+    window.removeEventListener("kb:insertImage", onImg);
+    window.removeEventListener("kb:insertAttachment", onAtt);
+    editor.destroy();
+    expect(events).toEqual(["kb:insertImage", "kb:insertAttachment"]);
   });
 
   test("Heading 1 sets an active level-1 heading", () => {

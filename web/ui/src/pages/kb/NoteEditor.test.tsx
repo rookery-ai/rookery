@@ -2,6 +2,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useSearchParams } from "react-router";
+import { ToastProvider } from "@/components/shell/Toast";
 import NoteEditor from "./NoteEditor";
 
 function jsonResponse(body: unknown, status = 200) {
@@ -43,7 +44,9 @@ function renderAtPath(initialPath: string, qc: QueryClient = new QueryClient()) 
   return render(
     <MemoryRouter initialEntries={[`/?path=${encodeURIComponent(initialPath)}`]}>
       <QueryClientProvider client={qc}>
+      <ToastProvider>
         <PathBoundEditor />
+      </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
   );
@@ -126,7 +129,9 @@ test("a failed autosave keeps the edit dirty; Ctrl/Cmd+S retries with a fresh PU
   render(
     <MemoryRouter>
       <QueryClientProvider client={qc}>
+      <ToastProvider>
         <NoteEditor path="memory/USER.md" onStateChange={(s) => states.push(s)} />
+      </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
   );
@@ -181,7 +186,9 @@ test("a successful autosave transitions dirty -> saving -> raw with exactly one 
   render(
     <MemoryRouter>
       <QueryClientProvider client={qc}>
+      <ToastProvider>
         <NoteEditor path="memory/USER.md" onStateChange={(s) => states.push(s)} />
+      </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
   );
@@ -481,7 +488,9 @@ test("a failed delete re-arms dirtyRef for the edit it discarded (chip reports d
   render(
     <MemoryRouter initialEntries={["/?path=notes%2Ftrip%20plan.md"]}>
       <QueryClientProvider client={qc}>
+      <ToastProvider>
         <NoteEditor path="notes/trip plan.md" onStateChange={(s) => states.push(s)} />
+      </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
   );
@@ -778,7 +787,9 @@ test("a 409 agent_running save shows the server message and leaves the edit dirt
   render(
     <MemoryRouter>
       <QueryClientProvider client={qc}>
+      <ToastProvider>
         <NoteEditor path="agents/agent-1/state.md" onStateChange={(s) => states.push(s)} />
+      </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
   );

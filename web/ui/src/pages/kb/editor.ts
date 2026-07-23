@@ -1,7 +1,6 @@
 import { Editor, type AnyExtension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
-import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
@@ -11,6 +10,7 @@ import TableHeader from "@tiptap/extension-table-header";
 import { Markdown, type MarkdownStorage } from "tiptap-markdown";
 import { Wikilink } from "./wikilinks";
 import { PipeSafeTable } from "./pipeSafeTable";
+import { KBImage } from "./kbImage";
 
 // tiptap-markdown ships types for its own extension but doesn't merge them
 // into @tiptap/core's Storage interface, so `editor.storage.markdown` is
@@ -26,8 +26,15 @@ export function buildExtensions(extra: AnyExtension[] = []): AnyExtension[] {
     // TipTap 3's StarterKit bundles Link (and Underline) itself; disable its
     // copy so our own Link.configure() below doesn't collide with it.
     StarterKit.configure({ link: false }),
-    Link.configure({ openOnClick: false }),
-    Image,
+    // openOnClick stays false so a plain click in the editor places the cursor
+    // (edits text) rather than navigating away. External links are opened with
+    // Ctrl/Cmd-click instead, handled in NoteEditor's editorProps.handleClick.
+    // target/rel make an opened link safe; the title hints at the gesture.
+    Link.configure({
+      openOnClick: false,
+      HTMLAttributes: { target: "_blank", rel: "noopener nofollow", title: "Ctrl/Cmd-click to open" },
+    }),
+    KBImage,
     Placeholder.configure({ placeholder: "Type / for blocks…" }),
     TaskList,
     TaskItem.configure({ nested: true }),
@@ -35,7 +42,17 @@ export function buildExtensions(extra: AnyExtension[] = []): AnyExtension[] {
     TableRow,
     TableCell,
     TableHeader,
-    Markdown.configure({ html: false, linkify: false, breaks: false }),
+    // html:true lets inline HTML an agent or a document conversion leaves in a
+    // note (a stray <br>, <sub>, <div>, or comment) render as its nearest
+    // markdown/text instead of showing up as escaped "&lt;br&gt;" garbage. It is
+    // safe for the fidelity contract: a note with NO html tags serializes
+    // identically either way (verified — plain prose, wikilinks, and tables are
+    // byte-for-byte unchanged), and a literal "a < b" in prose is still escaped
+    // to "a &lt; b" exactly as before (markdown-it only treats "<" as markup
+    // when it forms a real tag). So no note that opens in rich text today changes
+    // behavior; only html-bearing notes (which already open raw) render better
+    // once viewed as rich text.
+    Markdown.configure({ html: true, linkify: false, breaks: false }),
     Wikilink,
     ...extra,
   ];

@@ -66,8 +66,10 @@ test("an extensionless path opens the file viewer, not the empty state", async (
 // A path can contain a dot and still be a directory (e.g. a dotted config
 // dir name). The routed `dir=1` hint — not a filename guess — is what must
 // decide this, so a dotted directory name must NOT attempt to open as a
-// file (no note fetch at all).
-test("a directory path (routed via the dir hint) resolves to the empty state and never fetches a note", async () => {
+// file (no note fetch at all). A directory now opens the FolderPage (its
+// children as a page) rather than the bare empty state — but the invariant
+// that matters here is unchanged: it's fetched via /kb/tree, never /kb/note.
+test("a directory path (routed via the dir hint) opens the folder page and never fetches a note", async () => {
   const noteFetches: string[] = [];
   vi.stubGlobal(
     "fetch",
@@ -80,7 +82,9 @@ test("a directory path (routed via the dir hint) resolves to the empty state and
 
   renderAtPath("/?path=agents%2Fsite.config&dir=1");
 
-  await screen.findByText(/select a note or create one/i);
+  // FolderPage renders the folder's name as its title (derived from the path
+  // basename when the parent listing has no display name).
+  expect(await screen.findByRole("heading", { name: "site.config" })).toBeInTheDocument();
   expect(noteFetches).toHaveLength(0);
 });
 
@@ -176,7 +180,8 @@ test("deleting a nested code file (FileViewer) returns to the tree, never re-fet
   await user.click(screen.getByRole("button", { name: "Delete" }));
 
   await waitFor(() => expect(deleteCalls).toHaveLength(1));
-  await screen.findByText(/select a note or create one/i);
+  // Delete navigates to the parent folder, which now opens as the FolderPage.
+  await screen.findByText(/this folder is empty/i);
 
   expect(screen.queryByText(/couldn't load this file/i)).not.toBeInTheDocument();
   const parentFetched = noteFetches.some(
@@ -200,7 +205,8 @@ test("deleting a nested markdown note (NoteEditor) returns to the tree, never re
   await user.click(screen.getByRole("button", { name: "Delete" }));
 
   await waitFor(() => expect(deleteCalls).toHaveLength(1));
-  await screen.findByText(/select a note or create one/i);
+  // Delete navigates to the parent folder, which now opens as the FolderPage.
+  await screen.findByText(/this folder is empty/i);
 
   expect(screen.queryByText(/couldn't load this file/i)).not.toBeInTheDocument();
   const parentFetched = noteFetches.some(

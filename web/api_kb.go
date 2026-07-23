@@ -2,11 +2,15 @@ package web
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"strings"
@@ -15,6 +19,7 @@ import (
 
 	"github.com/ilijad1/simple-agents/internal/convert"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/export"
 	"github.com/ilijad1/simple-agents/internal/iolimit"
 	"github.com/ilijad1/simple-agents/internal/vault"
 	"github.com/labstack/echo/v4"
@@ -61,6 +66,292 @@ func (s *Server) registerKBAPI(g *echo.Group) {
 	g.GET("/kb/raw", s.rawKBNote)
 	g.PUT("/kb/order", s.apiSaveKBOrder)
 	g.POST("/kb/upload", s.apiUploadKBFile)
+	g.PUT("/kb/icon", s.apiSaveKBIcon)
+	g.GET("/kb/folders", s.apiKBFolders)
+	g.GET("/kb/export", s.apiExportKBNote)
+	g.GET("/kb/export/formats", s.apiExportFormats)
+	g.POST("/kb/asset", s.apiUploadKBAsset)
+	g.GET("/kb/assets", s.apiListKBAssets)
+}
+
+// ── Assets (images & attachments) ─────────────────────────────────────────────
+//
+// Unlike /kb/upload (which converts a document INTO markdown), an asset is
+// stored as raw bytes under the vault's assets/ folder and referenced from a
+// note as ![alt](assets/…) or [file](assets/…). This is how images/attachments
+// embedded via the editor's / menu are persisted. Serving happens through
+// /kb/raw, which sniffs the content type so an <img> actually renders.
+
+// imageExts is the set of extensions the KB treats as inline-renderable images
+// (for the FileViewer image branch, the assets picker, and kind:"image").
+var imageExts = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
+	".webp": true, ".svg": true, ".bmp": true, ".ico": true, ".avif": true,
+}
+
+func isImagePath(rel string) bool {
+	return imageExts[strings.ToLower(path.Ext(rel))]
+}
+
+// escapePathParam URL-escapes a vault-relative path for use as the ?path= query
+// value in a served URL.
+func escapePathParam(rel string) string {
+	return url.QueryEscape(rel)
+}
+
+// assetName builds a collision-resistant, still-recognizable filename for a
+// stored asset: the sanitized original stem + a short random suffix + the
+// original extension. Keeping the stem means an asset is identifiable in the KB
+// browser rather than an opaque UUID.
+func assetName(filename string) string {
+	ext := strings.ToLower(path.Ext(filename))
+	stem := strings.TrimSuffix(path.Base(filename), path.Ext(filename))
+	stem = slugifyAsset(stem)
+	if stem == "" {
+		stem = "file"
+	}
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("%s-%s%s", stem, hex.EncodeToString(b[:]), ext)
+}
+
+// slugifyAsset lowercases and replaces any run of non-alphanumeric characters
+// with a single dash, trimming leading/trailing dashes — so a stored asset path
+// is filesystem- and URL-safe.
+func slugifyAsset(s string) string {
+	var out strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			out.WriteRune(r)
+			lastDash = false
+		} else if !lastDash {
+			out.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(out.String(), "-")
+}
+
+type apiKBAsset struct {
+	Path string `json:"path"`
+	URL  string `json:"url"`
+}
+
+// apiUploadKBAsset stores an uploaded image/file as raw bytes under assets/ and
+// returns its vault-relative path + a served URL for embedding. Shares the 25
+// MiB iolimit cap with every other ingest door.
+// POST /api/v1/kb/asset multipart {file} → 200 {path, url, kind, content_type}
+func (s *Server) apiUploadKBAsset(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	if s.vault == nil {
+		return s.kbUnavailable(c)
+	}
+	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, maxUploadBytes+maxUploadOverhead)
+	fh, err := c.FormFile("file")
+	if err != nil {
+		if isRequestTooLarge(err) {
+			return jsonErr(c, http.StatusRequestEntityTooLarge, "too_large",
+				fmt.Sprintf("upload exceeds the %d byte limit", maxUploadBytes))
+		}
+		return jsonErr(c, http.StatusBadRequest, "invalid_request", "no file uploaded")
+	}
+	if fh.Size > maxUploadBytes {
+		return jsonErr(c, http.StatusRequestEntityTooLarge, "too_large",
+			fmt.Sprintf("file is %d bytes; the limit is %d", fh.Size, maxUploadBytes))
+	}
+	src, err := fh.Open()
+	if err != nil {
+		return jsonErr(c, http.StatusBadRequest, "invalid_request", "could not read the upload")
+	}
+	defer src.Close()
+	data, err := iolimit.ReadCapped(src, maxUploadBytes)
+	if err != nil {
+		if errors.Is(err, iolimit.ErrTooLarge) {
+			return jsonErr(c, http.StatusRequestEntityTooLarge, "too_large",
+				fmt.Sprintf("file exceeds the %d byte limit", maxUploadBytes))
+		}
+		return jsonErr(c, http.StatusBadRequest, "invalid_request", "could not read the upload")
+	}
+
+	rel := path.Join("assets", assetName(fh.Filename))
+	if err := s.vault.WriteNote(u.ID, rel, data); err != nil {
+		status, code := vaultErrStatus(err)
+		return jsonErr(c, status, code, "could not store asset: "+err.Error())
+	}
+	kind := "file"
+	if isImagePath(rel) {
+		kind = "image"
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"path":         rel,
+		"url":          "/api/v1/kb/raw?path=" + escapePathParam(rel),
+		"kind":         kind,
+		"content_type": detectContentType(rel, data),
+	})
+}
+
+// apiListKBAssets lists every image file in the vault (for the editor's
+// "insert from knowledge base" image picker).
+// GET /api/v1/kb/assets → 200 {"assets":[{path,url}]}
+func (s *Server) apiListKBAssets(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	if s.vault == nil {
+		return s.kbUnavailable(c)
+	}
+	paths, err := s.vault.ListImageFiles(u.ID)
+	if err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", "could not list assets: "+err.Error())
+	}
+	out := make([]apiKBAsset, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, apiKBAsset{Path: p, URL: "/api/v1/kb/raw?path=" + escapePathParam(p)})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"assets": out})
+}
+
+// detectContentType picks a MIME type from the file extension first (exact for
+// our known asset kinds) and falls back to sniffing the bytes.
+func detectContentType(rel string, data []byte) string {
+	if ct := mime.TypeByExtension(path.Ext(rel)); ct != "" {
+		return ct
+	}
+	return http.DetectContentType(data)
+}
+
+// ── Icons ────────────────────────────────────────────────────────────────────
+//
+// Like tree ordering (kbOrderSettingKey above), custom per-node emoji icons are
+// stored OUT of band — one JSON blob per workspace in workspace_settings — so
+// nothing is written into the vault itself (a stray icon sidecar would show up
+// in the tree and in agents' reads of the KB). Shape: {"<rel path>": "<emoji>"}.
+//
+// Unlike kb_order (which keys by name-WITHIN-a-dir, so a rename just drops the
+// entry out of its list and degrades gracefully), icons key by FULL PATH — so a
+// rename/move/delete that didn't maintain this map would orphan the icon or
+// leave it pointing at a path that no longer exists. apiRenameKBNote and
+// apiDeleteKBNoteAPI below re-key/drop entries accordingly (incl. every
+// descendant when a folder moves or is deleted).
+const kbIconsSettingKey = "kb_icons"
+
+type apiKBIconRequest struct {
+	Path string `json:"path"`
+	Icon string `json:"icon"`
+}
+
+// loadKBIcons reads the whole path→emoji map. A missing/corrupt value is not an
+// error: icons are a preference, and losing them degrades to the default lucide
+// icons rather than breaking the tree.
+func (s *Server) loadKBIcons(workspaceID string) map[string]string {
+	out := map[string]string{}
+	raw, err := s.db.GetSetting(workspaceID, kbIconsSettingKey)
+	if err != nil || raw == "" {
+		return out
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return map[string]string{}
+	}
+	return out
+}
+
+func (s *Server) saveKBIcons(workspaceID string, icons map[string]string) error {
+	blob, err := json.Marshal(icons)
+	if err != nil {
+		return err
+	}
+	return s.db.SetSetting(workspaceID, kbIconsSettingKey, string(blob))
+}
+
+// migrateIconKeys re-keys the icon map when a path moves. It moves the exact
+// entry for `from`→`to` AND, so a folder move carries its whole subtree's
+// icons, every entry keyed under `from/…` → `to/…`. Returns whether anything
+// changed (so the caller can skip a needless DB write). Pure map surgery — the
+// caller decides when to persist.
+func migrateIconKeys(icons map[string]string, from, to string) bool {
+	changed := false
+	fromPrefix := from + "/"
+	toPrefix := to + "/"
+	for k, v := range icons {
+		var nk string
+		switch {
+		case k == from:
+			nk = to
+		case strings.HasPrefix(k, fromPrefix):
+			nk = toPrefix + strings.TrimPrefix(k, fromPrefix)
+		default:
+			continue
+		}
+		delete(icons, k)
+		icons[nk] = v
+		changed = true
+	}
+	return changed
+}
+
+// dropIconKeys removes the entry for `p` and every descendant (`p/…`). Returns
+// whether anything changed.
+func dropIconKeys(icons map[string]string, p string) bool {
+	changed := false
+	prefix := p + "/"
+	for k := range icons {
+		if k == p || strings.HasPrefix(k, prefix) {
+			delete(icons, k)
+			changed = true
+		}
+	}
+	return changed
+}
+
+// apiSaveKBIcon sets (or, with an empty icon, clears) a node's custom emoji.
+// PUT /api/v1/kb/icon {path,icon} → 200 {"ok":true}
+func (s *Server) apiSaveKBIcon(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	if s.vault == nil {
+		return s.kbUnavailable(c)
+	}
+	var req apiKBIconRequest
+	if err := bindAPI(c, &req); err != nil {
+		return err
+	}
+	// Path-safety discipline even though only settings are touched (matches
+	// apiSaveKBOrder): a traversal attempt must not be usable to plant a key.
+	rel := cleanKBParam(req.Path)
+	if rel == "" {
+		return jsonErr(c, http.StatusBadRequest, "invalid_path", "a path is required")
+	}
+	if _, err := s.vault.Resolve(u.ID, rel); err != nil {
+		status, code := vaultErrStatus(err)
+		return jsonErr(c, status, code, "invalid path: "+err.Error())
+	}
+	icons := s.loadKBIcons(u.ID)
+	icon := strings.TrimSpace(req.Icon)
+	if icon == "" {
+		delete(icons, rel)
+	} else {
+		icons[rel] = icon
+	}
+	if err := s.saveKBIcons(u.ID, icons); err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", "could not save icon")
+	}
+	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
+}
+
+// apiKBFolders returns every folder path in the vault (root "" included), for
+// the new-note "Location" picker and the bulk-Move picker. Walks the vault dirs
+// only, skipping the hidden .kb internal dir. Ordered depth-first, parents
+// before children.
+// GET /api/v1/kb/folders → 200 {"folders":["","notes","projects",...]}
+func (s *Server) apiKBFolders(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	if s.vault == nil {
+		return s.kbUnavailable(c)
+	}
+	_ = s.vault.EnsureScaffold(u.ID)
+	folders, err := s.vault.ListFolders(u.ID)
+	if err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", "could not list folders: "+err.Error())
+	}
+	return c.JSON(http.StatusOK, map[string]any{"folders": orEmpty(folders)})
 }
 
 // ── Tree ordering ────────────────────────────────────────────────────────────
@@ -144,7 +435,7 @@ func (s *Server) apiSaveKBOrder(c echo.Context) error {
 // system:true.
 var kbSystemDirs = map[string]bool{
 	"agents": true, "chats": true, "memory": true,
-	"skills": true, "reminders": true, "inbox": true,
+	"skills": true, "reminders": true, "inbox": true, "assets": true,
 }
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
@@ -155,6 +446,9 @@ type apiKBNode struct {
 	Path        string `json:"path"`
 	IsDir       bool   `json:"is_dir"`
 	System      bool   `json:"system"`
+	// Icon is the user's custom emoji for this node ("" = client uses its
+	// default lucide icon). Stored out-of-band in kb_icons; see loadKBIcons.
+	Icon string `json:"icon"`
 }
 
 type apiKBTreeResponse struct {
@@ -180,6 +474,9 @@ type apiKBNoteResponse struct {
 	// kbInlineMax), or "binary" (a Download-only panel; Content is omitted).
 	// Decided by content sniffing, not an extension allowlist — see spec §7.
 	Kind string `json:"kind"`
+	// Icon is the note's custom emoji ("" = default). Same kb_icons source as
+	// the tree nodes.
+	Icon string `json:"icon"`
 }
 
 type apiSaveKBNoteRequest struct {
@@ -246,6 +543,7 @@ func (s *Server) apiKBTree(c echo.Context) error {
 	}
 	s.enrichKBDisplayNames(u.ID, rel, nodes)
 
+	icons := s.loadKBIcons(u.ID)
 	isRoot := rel == ""
 	out := make([]apiKBNode, 0, len(nodes))
 	for _, n := range nodes {
@@ -259,6 +557,7 @@ func (s *Server) apiKBTree(c echo.Context) error {
 			Path:        n.Path,
 			IsDir:       n.IsDir,
 			System:      isRoot && n.IsDir && kbSystemDirs[n.Name],
+			Icon:        icons[n.Path],
 		})
 	}
 	return c.JSON(http.StatusOK, apiKBTreeResponse{
@@ -297,6 +596,7 @@ func (s *Server) apiGetKBNote(c echo.Context) error {
 			Content:   string(data),
 			Backlinks: []string{},
 			Kind:      "markdown",
+			Icon:      s.loadKBIcons(u.ID)[rel],
 		}
 		resp.HTML = string(s.renderMarkdown(u.ID, resp.Content))
 		if back, err := s.vault.Backlinks(u.ID, rel); err == nil {
@@ -318,7 +618,13 @@ func (s *Server) apiGetKBNote(c echo.Context) error {
 		return jsonErr(c, status, code, "could not open note: "+err.Error())
 	}
 
-	resp := apiKBNoteResponse{Path: rel, Backlinks: []string{}}
+	resp := apiKBNoteResponse{Path: rel, Backlinks: []string{}, Icon: s.loadKBIcons(u.ID)[rel]}
+	// An image file renders inline in the FileViewer (via /kb/raw) regardless of
+	// size — its bytes are never inlined into this JSON response.
+	if isImagePath(rel) {
+		resp.Kind = "image"
+		return c.JSON(http.StatusOK, resp)
+	}
 	if fi.Size() > kbInlineMax {
 		resp.Kind = "binary"
 		return c.JSON(http.StatusOK, resp)
@@ -458,6 +764,13 @@ func (s *Server) apiDeleteKBNoteAPI(c echo.Context) error {
 		status, code := vaultErrStatus(err)
 		return jsonErr(c, status, code, "delete failed: "+err.Error())
 	}
+	// Drop any custom icon(s) for the removed path and its descendants so the
+	// map doesn't accumulate orphans. Non-fatal on error (the file is gone).
+	if icons := s.loadKBIcons(u.ID); dropIconKeys(icons, rel) {
+		if err := s.saveKBIcons(u.ID, icons); err != nil {
+			slog.Warn("kb delete: icon cleanup failed", "workspace_id", u.ID, "path", rel, "err", err)
+		}
+	}
 	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
 }
 
@@ -493,6 +806,15 @@ func (s *Server) apiRenameKBNote(c echo.Context) error {
 	if err := s.vault.Rename(u.ID, from, to); err != nil {
 		status, code := vaultErrStatus(err)
 		return jsonErr(c, status, code, "rename failed: "+err.Error())
+	}
+	// Carry any custom icon(s) to the new path — the exact entry and, for a
+	// folder move, every descendant's. A failure here is non-fatal: the file
+	// moved fine, only its icon is now stale, so log-and-continue rather than
+	// reporting the rename as failed.
+	if icons := s.loadKBIcons(u.ID); migrateIconKeys(icons, from, to) {
+		if err := s.saveKBIcons(u.ID, icons); err != nil {
+			slog.Warn("kb rename: icon re-key failed", "workspace_id", u.ID, "from", from, "to", to, "err", err)
+		}
 	}
 	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
 }
@@ -545,6 +867,105 @@ func (s *Server) apiSearchKB(c echo.Context) error {
 		})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"hits": out})
+}
+
+// stripFrontmatter removes a leading YAML frontmatter block (--- … ---) from a
+// note body so an export document doesn't render the raw metadata. Mirrors the
+// frontend's splitFrontmatter for the export path; deliberately minimal (a note
+// either opens with a fenced --- block or it doesn't).
+func stripFrontmatter(md string) string {
+	if !strings.HasPrefix(md, "---\n") && !strings.HasPrefix(md, "---\r\n") {
+		return md
+	}
+	rest := md[strings.IndexByte(md, '\n')+1:]
+	// Find the closing fence line (--- on its own line).
+	for i := 0; i < len(rest); {
+		nl := strings.IndexByte(rest[i:], '\n')
+		var line string
+		if nl < 0 {
+			line = rest[i:]
+		} else {
+			line = rest[i : i+nl]
+		}
+		if strings.TrimRight(line, "\r") == "---" {
+			if nl < 0 {
+				return ""
+			}
+			return strings.TrimLeft(rest[i+nl+1:], "\n")
+		}
+		if nl < 0 {
+			break
+		}
+		i += nl + 1
+	}
+	return md // no closing fence — treat the whole thing as body
+}
+
+// apiExportFormats reports which export formats this host can currently produce
+// (PDF depends on a headless renderer being on PATH). The UI greys out PDF when
+// it's false.
+// GET /api/v1/kb/export/formats → 200 {"html":true,"docx":true,"pdf":false}
+func (s *Server) apiExportFormats(c echo.Context) error {
+	return c.JSON(http.StatusOK, export.AvailableFormats())
+}
+
+// apiExportKBNote renders a markdown note to HTML, DOCX, or PDF and streams it
+// as a download. Export is note-only (a non-.md file is 400) and is the
+// sanctioned reverse of internal/convert.
+// GET /api/v1/kb/export?path=<rel>&format=html|docx|pdf → attachment
+func (s *Server) apiExportKBNote(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	if s.vault == nil {
+		return s.kbUnavailable(c)
+	}
+	rel := cleanKBParam(c.QueryParam("path"))
+	if rel == "" {
+		return jsonErr(c, http.StatusBadRequest, "invalid_path", "a note path is required")
+	}
+	if !strings.EqualFold(path.Ext(rel), ".md") {
+		return jsonErr(c, http.StatusBadRequest, "not_a_note", "only markdown notes can be exported")
+	}
+	format := strings.ToLower(strings.TrimSpace(c.QueryParam("format")))
+
+	data, err := s.vault.ReadNote(u.ID, rel)
+	if err != nil {
+		status, code := vaultErrStatus(err)
+		return jsonErr(c, status, code, "could not open note: "+err.Error())
+	}
+	stem := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
+	body := []byte(stripFrontmatter(string(data)))
+	opts := export.Options{Title: stem}
+
+	var (
+		out         []byte
+		contentType string
+		ext         string
+	)
+	switch format {
+	case "html":
+		out, err = export.ToHTML(body, opts)
+		contentType, ext = "text/html; charset=utf-8", "html"
+	case "docx":
+		out, err = export.ToDOCX(body, opts)
+		contentType, ext = "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"
+	case "pdf":
+		out, err = export.ToPDF(body, opts)
+		contentType, ext = "application/pdf", "pdf"
+		if errors.Is(err, export.ErrNoPDFEngine) {
+			return jsonErr(c, http.StatusUnprocessableEntity, "pdf_unavailable",
+				"PDF export needs a headless renderer on the server (weasyprint, chromium, wkhtmltopdf, libreoffice, or pandoc). Install one, or export HTML/Word instead.")
+		}
+	default:
+		return jsonErr(c, http.StatusBadRequest, "invalid_format", "format must be one of: html, docx, pdf")
+	}
+	if err != nil {
+		slog.Error("kb export failed", "workspace_id", u.ID, "path", rel, "format", format, "err", err)
+		return jsonErr(c, http.StatusInternalServerError, "export_failed", "could not export this note")
+	}
+
+	filename := stem + "." + ext
+	c.Response().Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	return c.Blob(http.StatusOK, contentType, out)
 }
 
 // isRequestTooLarge reports whether err originates from an http.MaxBytesReader

@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { AlertTriangle, Download, FileCode, Link2, MoreHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { rawURL } from "@/lib/kb";
+import { rawURL, exportURL, useExportFormats } from "@/lib/kb";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { FileText } from "lucide-react";
+import EmojiPicker from "./EmojiPicker";
 
 // Redeclared locally (identical literal set to NoteEditor's `SaveState`)
 // rather than imported from NoteEditor — NoteEditor renders NoteHeader, so
@@ -23,6 +25,51 @@ const STATE_LABEL: Record<EditorSaveState, string> = {
   error: "Save failed",
   raw: "Raw mode",
 };
+
+// ExportMenu offers downloading the note as HTML / Word / PDF / Markdown. The
+// formats endpoint says whether the host can produce a PDF (needs a headless
+// renderer installed); when it can't, that item is disabled with an
+// explanation. Downloads go through same-origin anchors — the export endpoint
+// sends Content-Disposition: attachment, so the browser saves rather than
+// navigates; Markdown reuses the existing raw endpoint.
+function ExportMenu({ path }: { path: string }) {
+  const { data: formats } = useExportFormats();
+  const pdfOK = formats?.pdf ?? false;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm">
+          <Download className="size-4" />
+          Export
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem asChild>
+          <a href={exportURL(path, "html")} download>HTML</a>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <a href={exportURL(path, "docx")} download>Word (.docx)</a>
+        </DropdownMenuItem>
+        {pdfOK ? (
+          <DropdownMenuItem asChild>
+            <a href={exportURL(path, "pdf")} download>PDF</a>
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem
+            disabled
+            onSelect={(e) => e.preventDefault()}
+            title="PDF export needs a headless renderer on the server (weasyprint, chromium, wkhtmltopdf, libreoffice, or pandoc)."
+          >
+            PDF (unavailable)
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem asChild>
+          <a href={rawURL(path)} download>Markdown (.md)</a>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 // The title field is a filename, not a path — a typed ".md" (any case) is
 // redundant with the fixed suffix we already append, not a second segment
@@ -41,6 +88,8 @@ export default function NoteHeader({
   onToggleRaw,
   renameError,
   lossyInRichText,
+  icon,
+  onSetIcon,
 }: {
   path: string;
   state: EditorSaveState;
@@ -49,6 +98,10 @@ export default function NoteHeader({
   onDelete: () => void;
   rawMode: boolean;
   onToggleRaw: () => void;
+  // The note's custom emoji + a setter (null clears it). Notion-style icon that
+  // sits before the title.
+  icon?: string;
+  onSetIcon?: (emoji: string | null) => void;
   // True when this note failed the round-trip fidelity check but is being
   // edited in rich text anyway (the user took the override). The one-time
   // banner is gone by then, so the risk needs a permanent home — saving will
@@ -65,6 +118,7 @@ export default function NoteHeader({
 }) {
   const [, setParams] = useSearchParams();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [iconOpen, setIconOpen] = useState(false);
 
   const segments = path.split("/");
   const filename = segments[segments.length - 1];
@@ -129,6 +183,16 @@ export default function NoteHeader({
 
   return (
     <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
+      {onSetIcon && (
+        <button
+          type="button"
+          aria-label="Change note icon"
+          onClick={() => setIconOpen(true)}
+          className="flex size-7 shrink-0 items-center justify-center rounded text-lg hover:bg-chrome"
+        >
+          {icon ? <span aria-hidden>{icon}</span> : <FileText className="size-4 text-muted-2" />}
+        </button>
+      )}
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-center gap-1.5">
           {segments.slice(0, -1).map((seg, i) => {
@@ -195,12 +259,7 @@ export default function NoteHeader({
           <FileCode className="size-4" />
           {rawMode ? "Rich text" : "Raw"}
         </Button>
-        <Button variant="ghost" size="sm" asChild>
-          <a href={rawURL(path)} download>
-            <Download className="size-4" />
-            Download
-          </a>
-        </Button>
+        <ExportMenu path={path} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -218,6 +277,10 @@ export default function NoteHeader({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {onSetIcon && (
+        <EmojiPicker open={iconOpen} onOpenChange={setIconOpen} current={icon} onSelect={onSetIcon} />
+      )}
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="max-w-sm">

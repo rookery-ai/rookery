@@ -165,7 +165,15 @@ export default function FileViewer({ path }: { path: string }) {
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-auto">
-        {data.kind === "binary" ? (
+        {data.kind === "image" ? (
+          <div className="flex h-full items-center justify-center p-8">
+            <img
+              src={rawURL(path)}
+              alt={path.split("/").pop() ?? path}
+              className="max-h-full max-w-full rounded object-contain"
+            />
+          </div>
+        ) : data.kind === "binary" ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-2">
             <FileWarning className="size-8" />
             <p className="text-sm">

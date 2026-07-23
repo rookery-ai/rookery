@@ -3,7 +3,9 @@ import { useSearchParams } from "react-router";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { AlertTriangle, ChevronDown, Info, Loader2, Link2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { useKBNote, useSaveNote, useRenameNote, useDeleteNote } from "@/lib/kb";
+import { useKBNote, useSaveNote, useRenameNote, useDeleteNote, useSetKBIcon, useUploadKBAsset } from "@/lib/kb";
+import { useToast } from "@/components/shell/Toast";
+import ImagePicker from "./ImagePicker";
 import { Button } from "@/components/ui/button";
 import { buildExtensions, toMarkdown, checkFidelity } from "./editor";
 import { splitFrontmatter, joinFrontmatter, parseFrontmatterFields } from "./frontmatter";
@@ -16,6 +18,18 @@ import "./editor.css";
 export type SaveState = "saved" | "saving" | "dirty" | "error" | "raw";
 
 const AUTOSAVE_MS = 1000;
+
+// System-generated transcripts — inbox notifications, reflected chats, and agent
+// run logs — are machine output, not knowledge with a link graph. The "Linked
+// from" strip is hidden on them (mirroring the backend, which also excludes them
+// as backlink SOURCES — see internal/vault/links.go's linkSourceExcluded).
+function isSystemLogNote(path: string): boolean {
+  return (
+    path.startsWith("inbox/") ||
+    path.startsWith("chats/") ||
+    /^agents\/[^/]+\/logs\//.test(path)
+  );
+}
 
 // Notes open in the rich text editor by default. This banner explains the one
 // exception: a note whose markdown doesn't survive a round trip through the
@@ -41,6 +55,10 @@ function WysiwygEditor({
   onNavigate: (target: string) => void;
   registerGetContent: (fn: () => string) => void;
 }) {
+  const [imagePickerOpen, setImagePickerOpen] = useState(false);
+  const uploadAsset = useUploadKBAsset();
+  const { toast } = useToast();
+  const attachInputRef = useRef<HTMLInputElement>(null);
   const editor = useEditor({
     // buildExtensions()'s `extra` param exists precisely so UI-only
     // extensions can be appended here without editor.ts knowing about them
@@ -59,6 +77,22 @@ function WysiwygEditor({
         onNavigate(splitAlias(node.attrs.target as string).target);
         return true;
       },
+      // Ctrl/Cmd-click on an external link opens it in a new tab. Plain clicks
+      // still place the cursor (openOnClick is false) so editing isn't hijacked.
+      // Only http(s)/mailto targets open externally — a vault-relative href
+      // would be an internal reference, left to normal handling.
+      handleClick(_view, _pos, event) {
+        if (!(event.metaKey || event.ctrlKey)) return false;
+        const anchor = (event.target as HTMLElement | null)?.closest?.("a");
+        const href = anchor?.getAttribute("href");
+        // Open external links and KB asset/attachment URLs in a new tab; leave
+        // other targets to normal handling.
+        if (href && /^(https?:|mailto:|\/api\/v1\/kb\/)/i.test(href)) {
+          window.open(href, "_blank", "noopener,noreferrer");
+          return true;
+        }
+        return false;
+      },
     },
   });
 
@@ -67,10 +101,62 @@ function WysiwygEditor({
     registerGetContent(() => toMarkdown(editor));
   }, [editor, registerGetContent]);
 
+  // The Image / File-attachment slash items dispatch window events (a React
+  // dialog / file input can't be opened from a plain editor command). Listen
+  // while this editor is mounted; the picker inserts an image node with the
+  // asset's portable path, and an attachment inserts a link to its served URL.
+  useEffect(() => {
+    if (!editor) return;
+    const onInsertImage = () => setImagePickerOpen(true);
+    const onInsertAttachment = () => attachInputRef.current?.click();
+    window.addEventListener("kb:insertImage", onInsertImage);
+    window.addEventListener("kb:insertAttachment", onInsertAttachment);
+    return () => {
+      window.removeEventListener("kb:insertImage", onInsertImage);
+      window.removeEventListener("kb:insertAttachment", onInsertAttachment);
+    };
+  }, [editor]);
+
+  async function handleAttachment(file: File) {
+    try {
+      const res = await uploadAsset.mutateAsync(file);
+      editor
+        ?.chain()
+        .focus()
+        .insertContent({
+          type: "text",
+          text: file.name,
+          marks: [{ type: "link", attrs: { href: res.url } }],
+        })
+        .run();
+    } catch (err) {
+      toast({
+        message: err instanceof ApiError ? `Couldn't attach: ${err.message}` : "Couldn't attach file",
+        variant: "error",
+      });
+    }
+  }
+
   return (
     <>
       <BubbleToolbar editor={editor} />
       <EditorContent editor={editor} className="note-editor-content" />
+      <ImagePicker
+        open={imagePickerOpen}
+        onOpenChange={setImagePickerOpen}
+        onPick={(path) => editor?.chain().focus().setImage({ src: path }).run()}
+      />
+      <input
+        ref={attachInputRef}
+        type="file"
+        className="sr-only"
+        aria-label="Attach file"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) void handleAttachment(file);
+        }}
+      />
     </>
   );
 }
@@ -91,6 +177,7 @@ export default function NoteEditor({
   const saveNote = useSaveNote();
   const renameNote = useRenameNote();
   const deleteNote = useDeleteNote();
+  const setIcon = useSetKBIcon();
   // KBPage already owns the "path" search param and keys NoteEditor by it
   // (key={path}), so a navigation from inside this component can just write
   // the same param directly — no prop needs threading down from KBPage for
@@ -606,19 +693,23 @@ export default function NoteEditor({
   }
 
   const showBanner = mode === "raw" && fidelityFailed && !overrideAccepted;
+  // Machine-log notes don't show the backlink graph (strip or header count).
+  const backlinks = isSystemLogNote(path) ? [] : data.backlinks;
 
   return (
     <div className="flex h-full flex-col">
       <NoteHeader
         path={path}
         state={saveState}
-        backlinksCount={data.backlinks.length}
+        backlinksCount={backlinks.length}
         onRename={handleRename}
         onDelete={handleDelete}
         rawMode={mode === "raw"}
         onToggleRaw={handleToggleRaw}
         renameError={renameError}
         lossyInRichText={fidelityFailed && mode === "wysiwyg"}
+        icon={data.icon}
+        onSetIcon={(emoji) => setIcon.mutate({ path, icon: emoji ?? "" })}
       />
 
       {/* Suppressed while renameError is shown: flushForHandoff's onError
@@ -658,7 +749,7 @@ export default function NoteEditor({
         </div>
       )}
 
-      <BacklinksStrip backlinks={data.backlinks} onNavigate={navigateToPath} />
+      <BacklinksStrip backlinks={backlinks} onNavigate={navigateToPath} />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {mode === "wysiwyg" ? (

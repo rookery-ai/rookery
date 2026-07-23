@@ -35,13 +35,53 @@ func ParseWikilinks(content string) []Wikilink {
 	return links
 }
 
+// agentLogRE matches an agent's run-log notes (agents/<id>/logs/…). These are
+// machine transcripts, not knowledge, so they don't participate in the backlink
+// graph as SOURCES (see linkSourceExcluded).
+var agentLogRE = regexp.MustCompile(`^agents/[^/]+/logs/`)
+
+// linkSourceExcluded reports whether a note should be ignored when collecting
+// who-links-here. System-generated transcripts — inbox notifications, reflected
+// chats, and agent run logs — mention other notes by name incidentally; letting
+// them register as backlinks buries a user's real, meaningful references under
+// machine spam. Targets are unaffected: a link TO any note still resolves.
+func linkSourceExcluded(rel string) bool {
+	return strings.HasPrefix(rel, "inbox/") ||
+		strings.HasPrefix(rel, "chats/") ||
+		agentLogRE.MatchString(rel)
+}
+
+// namePriority ranks candidate locations for resolving a bare [[Name]] link when
+// several notes share a basename. User-authored knowledge (notes/, memory/, the
+// root) wins over system-generated notes (agents/, chats/, inbox/, reminders/),
+// so a link to "Foo" resolves to the user's notes/Foo.md rather than an agent's
+// own Foo.md that merely sorts earlier in the walk. Higher wins; ties keep the
+// first-seen (the walk is deterministic).
+func namePriority(rel string) int {
+	switch {
+	case strings.HasPrefix(rel, "notes/"), strings.HasPrefix(rel, "memory/"):
+		return 3
+	case !strings.Contains(rel, "/"): // a root-level note
+		return 3
+	case strings.HasPrefix(rel, "agents/"), strings.HasPrefix(rel, "chats/"),
+		strings.HasPrefix(rel, "inbox/"), strings.HasPrefix(rel, "reminders/"):
+		return 1
+	default: // skills/ and any other user-organizable folder
+		return 2
+	}
+}
+
 // LinkIndex maps note targets to vault-relative paths so [[wikilinks]] can be
 // resolved for rendering and backlink discovery. It is rebuildable at any time by
 // walking the vault; it is not authoritative state.
 type LinkIndex struct {
 	// byName maps a lowercased basename (without .md) to its vault-relative path.
-	// On collision the first-seen note wins (deterministic via sorted walk).
+	// On collision the higher-namePriority note wins (user content over system),
+	// ties broken by first-seen in the deterministic sorted walk.
 	byName map[string]string
+	// byNamePrio tracks the namePriority of the path currently held in byName for
+	// each basename, so a later, higher-priority candidate can displace it.
+	byNamePrio map[string]int
 	// byPath holds every note's vault-relative path (lowercased, .md trimmed) so
 	// links written as paths ("notes/x") resolve too.
 	byPath map[string]string
@@ -51,7 +91,7 @@ type LinkIndex struct {
 // .kb directory is skipped.
 func (v *Vault) BuildLinkIndex(workspaceID string) (*LinkIndex, error) {
 	root := v.Root(workspaceID)
-	idx := &LinkIndex{byName: map[string]string{}, byPath: map[string]string{}}
+	idx := &LinkIndex{byName: map[string]string{}, byNamePrio: map[string]int{}, byPath: map[string]string{}}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // tolerate unreadable entries
@@ -70,8 +110,12 @@ func (v *Vault) BuildLinkIndex(workspaceID string) (*LinkIndex, error) {
 			return nil
 		}
 		name := strings.ToLower(strings.TrimSuffix(d.Name(), filepath.Ext(d.Name())))
-		if _, exists := idx.byName[name]; !exists {
+		prio := namePriority(rel)
+		// Keep the highest-priority path for a basename (user content beats
+		// system-generated notes); on a tie, first-seen wins.
+		if _, exists := idx.byName[name]; !exists || prio > idx.byNamePrio[name] {
 			idx.byName[name] = rel
+			idx.byNamePrio[name] = prio
 		}
 		idx.byPath[strings.ToLower(strings.TrimSuffix(rel, ".md"))] = rel
 		return nil
@@ -141,15 +185,22 @@ func (v *Vault) Backlinks(workspaceID, targetRel string) ([]string, error) {
 		if !strings.EqualFold(filepath.Ext(d.Name()), ".md") {
 			return nil
 		}
+		rel, relErr := v.Rel(workspaceID, path)
+		if relErr != nil {
+			return nil
+		}
+		// Machine-generated transcripts (inbox, reflected chats, agent run logs)
+		// don't count as backlink sources — see linkSourceExcluded.
+		if linkSourceExcluded(rel) {
+			return nil
+		}
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil
 		}
 		for _, l := range ParseWikilinks(string(data)) {
 			if idx.Resolve(l.Target) == targetRel {
-				if rel, err := v.Rel(workspaceID, path); err == nil {
-					out = append(out, rel)
-				}
+				out = append(out, rel)
 				break
 			}
 		}

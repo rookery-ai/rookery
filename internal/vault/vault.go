@@ -30,6 +30,7 @@ package vault
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -285,6 +286,84 @@ func (v *Vault) List(workspaceID, relDir string) ([]Node, error) {
 		return strings.ToLower(nodes[i].Name) < strings.ToLower(nodes[j].Name)
 	})
 	return nodes, nil
+}
+
+// ListFolders returns every folder's vault-relative path (root "" first),
+// depth-first with parents before children, skipping the hidden internal .kb
+// dir and dotfiles. Used by the KB "Location" / bulk-Move pickers, which need a
+// flat folder list rather than one level at a time.
+func (v *Vault) ListFolders(workspaceID string) ([]string, error) {
+	root := v.Root(workspaceID)
+	out := []string{""}
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // tolerate unreadable entries
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if p == root {
+			return nil // root already seeded as ""
+		}
+		if strings.HasPrefix(name, ".") {
+			if name == InternalDir || name == "." {
+				return filepath.SkipDir
+			}
+			return filepath.SkipDir // skip any dotdir (matches List hiding dotfiles)
+		}
+		rel, relErr := v.Rel(workspaceID, p)
+		if relErr != nil {
+			return nil
+		}
+		out = append(out, rel)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// imageFileExts are the extensions ListImageFiles surfaces as embeddable image
+// assets (the editor's "insert from knowledge base" picker).
+var imageFileExts = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
+	".webp": true, ".svg": true, ".bmp": true, ".ico": true, ".avif": true,
+}
+
+// ListImageFiles returns the vault-relative paths of every image file in the
+// vault, sorted, skipping the hidden internal .kb dir and dotfiles. Used by the
+// editor's image picker to offer already-stored images.
+func (v *Vault) ListImageFiles(workspaceID string) ([]string, error) {
+	root := v.Root(workspaceID)
+	var out []string
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if d.Name() == InternalDir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return nil
+		}
+		if !imageFileExts[strings.ToLower(filepath.Ext(d.Name()))] {
+			return nil
+		}
+		if rel, relErr := v.Rel(workspaceID, p); relErr == nil {
+			out = append(out, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // writeFileAtomic writes data to path via a temp file in the same directory

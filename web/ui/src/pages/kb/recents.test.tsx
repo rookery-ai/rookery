@@ -131,7 +131,10 @@ test("expanding a directory does not record it", async () => {
 
   await userEvent.click(await screen.findByText("Notes"));
 
-  await waitFor(() => expect(screen.getByText("Notes")).toBeInTheDocument());
+  // Opening the folder now also renders it as a FolderPage (its title repeats
+  // "Notes"), so there are two matches — the point of this test is unchanged:
+  // expanding/opening a directory records nothing in the recents list.
+  await waitFor(() => expect(screen.getAllByText("Notes").length).toBeGreaterThan(0));
   expect(readRecent(WS)).toEqual([]);
 });
 
