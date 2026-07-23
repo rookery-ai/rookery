@@ -18,8 +18,8 @@ const (
 )
 
 // KeySecretNames are the secret names a workspace can set to upgrade search
-// from scraping to a real API. They follow the CODER_KEY_<PROVIDER> convention
-// already used for coder provider keys.
+// from scraping to a real API. They are stored as ordinary encrypted secrets,
+// mirroring how coder provider keys use the CODER_KEY_<PROVIDER> convention.
 func KeySecretNames() []string { return []string{"SEARCH_KEY_BRAVE", "SEARCH_KEY_TAVILY"} }
 
 // SecretLookup resolves a single named secret for a workspace. Both chat

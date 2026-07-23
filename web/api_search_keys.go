@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/secrets"
@@ -93,7 +94,11 @@ func (s *Server) apiPutSearchKey(c echo.Context) error {
 	if !ok {
 		return jsonErr(c, http.StatusBadRequest, "invalid_provider", "provider must be brave or tavily")
 	}
-	if req.Key == "" {
+	// Trim before storing: an untrimmed value (a pasted "key\n" or " key ") would
+	// be sent verbatim in the X-Subscription-Token / Bearer header and rejected by
+	// the provider. Matches apiCreateSecret, which trims too.
+	key := strings.TrimSpace(req.Key)
+	if key == "" {
 		return jsonErr(c, http.StatusBadRequest, "missing_field", "key is required")
 	}
 	if u.SecretsSalt == "" || u.EncryptedMasterPassword == "" {
@@ -109,7 +114,7 @@ func (s *Server) apiPutSearchKey(c echo.Context) error {
 	}
 
 	svc := secrets.New(s.db, u.ID, masterPw, u.SecretsSalt)
-	if err := svc.Set(context.Background(), secretName, req.Key); err != nil {
+	if err := svc.Set(context.Background(), secretName, key); err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", "failed to save key")
 	}
 
