@@ -11,6 +11,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/audit"
+	"github.com/ilijad1/simple-agents/internal/chat"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/config"
 	"github.com/ilijad1/simple-agents/internal/connectors"
@@ -48,6 +49,7 @@ type Server struct {
 	connStore  connectors.TokenStore // token store for connector execution (chat + services UI)
 	connBridge *connectors.Bridge    // loopback bridge so CLI chat coders can reach connectors
 	kbBridge   *vault.Bridge         // loopback bridge so CLI chat coders can reach KB convert/search
+	titleGen   chat.TitleGenerator   // optional; auto-titles a chat from its first exchange
 
 	// runs tracks in-flight manual ("Run Now") agent runs so progress can be
 	// streamed to the browser over SSE while the run executes on a detached
@@ -128,6 +130,12 @@ func (s *Server) WithBridge(b *connectors.Bridge) *Server { s.connBridge = b; re
 // WithKBBridge attaches the loopback KB bridge so CLI chat coders can reach
 // save_to_kb-equivalent conversion + search (`simple-agents kb convert|search`).
 func (s *Server) WithKBBridge(b *vault.Bridge) *Server { s.kbBridge = b; return s }
+
+// WithTitleGenerator enables one-time content-based auto-titling of chats.
+func (s *Server) WithTitleGenerator(g chat.TitleGenerator) *Server {
+	s.titleGen = g
+	return s
+}
 
 // ── Middleware ─────────────────────────────────────────────────────────────
 

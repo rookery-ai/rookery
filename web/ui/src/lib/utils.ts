@@ -21,3 +21,17 @@ export function timeAgo(iso: string): string {
   if (diffDay < 7) return `${diffDay}d ago`
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }
+
+// formatShortDate renders an ISO timestamp as a short local date+time,
+// e.g. "Jul 23, 15:04" — the small "kept timestamp" shown under a chat's
+// content-derived title.
+export function formatShortDate(iso: string): string {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ""
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}

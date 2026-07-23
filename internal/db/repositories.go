@@ -738,6 +738,13 @@ func (d *DB) AddChatMessage(chatID, role, content string) error {
 	return err
 }
 
+// UpdateChatName renames a chat. Used by the auto-title flow to replace the
+// default "Chat <timestamp>" name with a content-derived topic.
+func (d *DB) UpdateChatName(chatID, name string) error {
+	_, err := d.Exec(`UPDATE chats SET name=? WHERE id=?`, name, chatID)
+	return err
+}
+
 func (d *DB) ListChatMessages(chatID string) ([]ChatMessage, error) {
 	rows, err := d.Query(`SELECT id,chat_id,role,content,created_at FROM chat_messages WHERE chat_id=? ORDER BY id ASC`, chatID)
 	if err != nil {

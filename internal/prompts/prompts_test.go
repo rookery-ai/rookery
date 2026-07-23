@@ -433,3 +433,22 @@ func TestAvailableSkillsUncategorised(t *testing.T) {
 	out := BuildImplementationPrompt("x", nil, p)
 	require.Contains(t, out, "loose")
 }
+
+func TestBuildChatTitlePrompt(t *testing.T) {
+	sys := BuildChatTitlePrompt()
+	for _, want := range []string{"title", "3", "6"} { // mentions a short word-count target
+		if !strings.Contains(strings.ToLower(sys), want) {
+			t.Errorf("title system prompt missing %q; got:\n%s", want, sys)
+		}
+	}
+	u := ChatTitleUserPrompt("hello there", "general kenobi")
+	if !strings.Contains(u, "hello there") || !strings.Contains(u, "general kenobi") {
+		t.Errorf("user prompt must include both turns; got:\n%s", u)
+	}
+	// Truncates very long turns.
+	long := strings.Repeat("x", 5000)
+	got := ChatTitleUserPrompt(long, long)
+	if len(got) > 6000 {
+		t.Errorf("user prompt not truncated: %d chars", len(got))
+	}
+}

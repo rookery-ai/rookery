@@ -31,7 +31,15 @@ export function useCreateChat() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (name?: string) => api.post<Chat>("/api/v1/chats", name ? { name } : undefined),
-    onSuccess: () => {
+    onSuccess: (chat) => {
+      // Insert the created chat into the cached list synchronously so the
+      // ChatsPage dead-selection guard sees it immediately and the window
+      // opens on the first click. Without this, the list is briefly stale
+      // (no new chat), the guard clears the selection, and the user has to
+      // click the row after the refetch lands.
+      qc.setQueryData<{ chats: Chat[] }>(["chats"], (old) =>
+        old ? { ...old, chats: [chat, ...old.chats] } : { chats: [chat] },
+      );
       qc.invalidateQueries({ queryKey: ["chats"] });
     },
   });

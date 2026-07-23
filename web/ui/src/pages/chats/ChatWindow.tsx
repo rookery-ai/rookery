@@ -1,7 +1,7 @@
 import { useRef, useState, type DragEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, AlertTriangle, Paperclip } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, formatShortDate } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { useChatDetail, useChatAction, sendChatMessage, type Chat, type ChatMessage } from "@/lib/chats";
 import { useUploadKBFile } from "@/lib/kb";
@@ -296,7 +296,10 @@ export function ChatWindow({ chatId, initialText }: { chatId: string; initialTex
     >
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          <h2 className="truncate text-sm font-bold">{chat.name}</h2>
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-bold">{chat.name}</h2>
+            <span className="text-xs text-muted-2">{formatShortDate(chat.created_at)}</span>
+          </div>
           <StatusChip active={chat.active} />
         </div>
         <div className="flex shrink-0 items-center gap-2">
