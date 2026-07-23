@@ -16,6 +16,19 @@ const notes: Record<string, string> = {
     "---\ntype: inbox\n---\n\n# Agent notification\n\nYour agent finished a run and found 2 new items.\n",
   agentRunLog:
     "---\ntype: run\n---\n\n# Run 2026-07-23\n\n- started\n- fetched data\n- done\n",
+  // A converted document (internal/convert) with headings, an escaped-pipe
+  // table cell, a list with a link, a code fence, and a <br> line break —
+  // emitted as a backslash HARD break so it round-trips (a bare "\n" soft break
+  // used to collapse to a space and open the note in raw mode). Mirrors real
+  // convert.ToMarkdown output; pins the html.go/ooxml.go atom.Br fix from this
+  // side too.
+  convertedDocument:
+    "---\ntype: upload\n---\n\n" +
+    "# Quarterly Report\n\nThis is **bold**, *italic*, and `inline code`.\n\n" +
+    "## Metrics\n\n| Name | Value |\n| --- | --- |\n| Growth & churn | x \\| y |\n\n" +
+    "- First point\n\n- Second with a [link](https://x.com)\n\n" +
+    "```\nif a < b { return }\n```\n\n" +
+    "Line one\\\nline two after a break.\n",
 };
 
 describe("generator output opens in rich text", () => {

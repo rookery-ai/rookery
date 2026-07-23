@@ -92,7 +92,13 @@ func (w *mdWriter) walk(n *html.Node) {
 		w.block()
 		return
 	case atom.Br:
-		w.sb.WriteString("\n")
+		// Emit a CommonMark HARD break (backslash + newline), not a bare "\n".
+		// A bare newline inside a paragraph is a SOFT break that the KB editor's
+		// round-trip collapses to a space — which made converted documents with
+		// <br> line breaks fail the fidelity check and open in raw mode. The
+		// backslash form round-trips faithfully (a trailing-space hard break
+		// would be stripped by the editor's whitespace normalization).
+		w.sb.WriteString("\\\n")
 		return
 	case atom.Hr:
 		w.block()

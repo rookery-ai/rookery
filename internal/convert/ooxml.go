@@ -235,12 +235,15 @@ func parseDocxParagraphs(part []byte) ([]docxParagraph, error) {
 			case "br":
 				// A manual line break (Shift+Enter) is a real separator, not
 				// adjacent text — without this, "Line1<br/>Line2" fuses into
-				// "Line1Line2". html.go's atom.Br handling is the same fix for
-				// the same defect class.
+				// "Line1Line2". Emit a CommonMark HARD break (backslash +
+				// newline) so a converted doc with line breaks round-trips
+				// through the KB editor instead of opening raw (a bare "\n" is a
+				// soft break the editor collapses to a space). html.go's atom.Br
+				// handling is the same fix for the same defect class.
 				if b := target(); b != nil {
-					b.WriteString("\n")
+					b.WriteString("\\\n")
 				} else if cur != nil {
-					cur.Text += "\n"
+					cur.Text += "\\\n"
 				}
 			case "tab":
 				// A tab stop (e.g. "Name:<tab/>John") separates two spans just
