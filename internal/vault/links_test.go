@@ -93,3 +93,46 @@ func mustWrite(t *testing.T, v *Vault, user, rel, content string) {
 		t.Fatalf("WriteNote(%s): %v", rel, err)
 	}
 }
+
+// A bare [[Foo]] must resolve to the USER's note when an agent also wrote a
+// Foo.md — the agent dir sorts before notes/, so first-seen-wins used to lose
+// the user's note. namePriority fixes this.
+func TestResolvePrefersUserContentOnCollision(t *testing.T) {
+	v := New(t.TempDir())
+	const user = "u1"
+	mustWrite(t, v, user, "agents/abc/Report.md", "agent copy")
+	mustWrite(t, v, user, "notes/Report.md", "the real user note")
+
+	idx, err := v.BuildLinkIndex(user)
+	if err != nil {
+		t.Fatalf("BuildLinkIndex: %v", err)
+	}
+	if got := idx.Resolve("Report"); got != "notes/Report.md" {
+		t.Errorf("Resolve(Report) = %q, want notes/Report.md", got)
+	}
+	// An exact-path link still reaches the agent copy.
+	if got := idx.Resolve("agents/abc/Report"); got != "agents/abc/Report.md" {
+		t.Errorf("Resolve(agents/abc/Report) = %q, want the agent copy", got)
+	}
+}
+
+// Backlinks on a user note must appear (the reported bug), and must NOT include
+// machine-generated sources: inbox notifications, reflected chats, agent run
+// logs.
+func TestBacklinksExcludesSystemSourcesAndCoversUserNotes(t *testing.T) {
+	v := New(t.TempDir())
+	const user = "u1"
+	mustWrite(t, v, user, "notes/Target.md", "# Target")
+	mustWrite(t, v, user, "notes/Author.md", "see [[Target]]")             // real user backlink
+	mustWrite(t, v, user, "inbox/msg1.md", "agent mentioned [[Target]]")   // excluded source
+	mustWrite(t, v, user, "agents/abc/logs/run_1.md", "wrote [[Target]]")  // excluded source
+	mustWrite(t, v, user, "chats/c1.md", "chat about [[Target]]")          // excluded source
+
+	back, err := v.Backlinks(user, "notes/Target.md")
+	if err != nil {
+		t.Fatalf("Backlinks: %v", err)
+	}
+	if len(back) != 1 || back[0] != "notes/Author.md" {
+		t.Errorf("Backlinks = %v, want exactly [notes/Author.md]", back)
+	}
+}

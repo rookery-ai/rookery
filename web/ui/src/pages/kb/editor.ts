@@ -26,7 +26,14 @@ export function buildExtensions(extra: AnyExtension[] = []): AnyExtension[] {
     // TipTap 3's StarterKit bundles Link (and Underline) itself; disable its
     // copy so our own Link.configure() below doesn't collide with it.
     StarterKit.configure({ link: false }),
-    Link.configure({ openOnClick: false }),
+    // openOnClick stays false so a plain click in the editor places the cursor
+    // (edits text) rather than navigating away. External links are opened with
+    // Ctrl/Cmd-click instead, handled in NoteEditor's editorProps.handleClick.
+    // target/rel make an opened link safe; the title hints at the gesture.
+    Link.configure({
+      openOnClick: false,
+      HTMLAttributes: { target: "_blank", rel: "noopener nofollow", title: "Ctrl/Cmd-click to open" },
+    }),
     Image,
     Placeholder.configure({ placeholder: "Type / for blocks…" }),
     TaskList,

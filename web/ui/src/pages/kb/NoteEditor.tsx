@@ -17,6 +17,18 @@ export type SaveState = "saved" | "saving" | "dirty" | "error" | "raw";
 
 const AUTOSAVE_MS = 1000;
 
+// System-generated transcripts — inbox notifications, reflected chats, and agent
+// run logs — are machine output, not knowledge with a link graph. The "Linked
+// from" strip is hidden on them (mirroring the backend, which also excludes them
+// as backlink SOURCES — see internal/vault/links.go's linkSourceExcluded).
+function isSystemLogNote(path: string): boolean {
+  return (
+    path.startsWith("inbox/") ||
+    path.startsWith("chats/") ||
+    /^agents\/[^/]+\/logs\//.test(path)
+  );
+}
+
 // Notes open in the rich text editor by default. This banner explains the one
 // exception: a note whose markdown doesn't survive a round trip through the
 // editor (checkFidelity in ./editor.ts). Saving such a note from rich text
@@ -58,6 +70,20 @@ function WysiwygEditor({
         if (node.type.name !== "wikilink") return false;
         onNavigate(splitAlias(node.attrs.target as string).target);
         return true;
+      },
+      // Ctrl/Cmd-click on an external link opens it in a new tab. Plain clicks
+      // still place the cursor (openOnClick is false) so editing isn't hijacked.
+      // Only http(s)/mailto targets open externally — a vault-relative href
+      // would be an internal reference, left to normal handling.
+      handleClick(_view, _pos, event) {
+        if (!(event.metaKey || event.ctrlKey)) return false;
+        const anchor = (event.target as HTMLElement | null)?.closest?.("a");
+        const href = anchor?.getAttribute("href");
+        if (href && /^(https?:|mailto:)/i.test(href)) {
+          window.open(href, "_blank", "noopener,noreferrer");
+          return true;
+        }
+        return false;
       },
     },
   });
@@ -607,13 +633,15 @@ export default function NoteEditor({
   }
 
   const showBanner = mode === "raw" && fidelityFailed && !overrideAccepted;
+  // Machine-log notes don't show the backlink graph (strip or header count).
+  const backlinks = isSystemLogNote(path) ? [] : data.backlinks;
 
   return (
     <div className="flex h-full flex-col">
       <NoteHeader
         path={path}
         state={saveState}
-        backlinksCount={data.backlinks.length}
+        backlinksCount={backlinks.length}
         onRename={handleRename}
         onDelete={handleDelete}
         rawMode={mode === "raw"}
@@ -661,7 +689,7 @@ export default function NoteEditor({
         </div>
       )}
 
-      <BacklinksStrip backlinks={data.backlinks} onNavigate={navigateToPath} />
+      <BacklinksStrip backlinks={backlinks} onNavigate={navigateToPath} />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {mode === "wysiwyg" ? (
