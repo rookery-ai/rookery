@@ -2,6 +2,7 @@ package convert
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -134,5 +135,35 @@ func TestPdftotextPageCount(t *testing.T) {
 				t.Errorf("pdftotextPageCount(%q) = %d, want %d", tc.text, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestPdftotextPathPrefersLocalBin pins the SP24-T4 fix: a pdftotext installed
+// in the operator's ~/.local/bin is resolved even when it is not on PATH, since
+// a service-managed server often has a bare PATH. It shells nothing out — it only
+// checks that the resolver returns the local-bin path when a fake executable is
+// present there.
+func TestPdftotextPathPrefersLocalBin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	binDir := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fake := filepath.Join(binDir, "pdftotext")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := pdftotextPath(); got != fake {
+		t.Errorf("pdftotextPath() = %q, want the ~/.local/bin executable %q", got, fake)
+	}
+
+	// A non-executable file in ~/.local/bin must NOT be picked (would fail to run).
+	// Chmod explicitly — os.WriteFile does not re-apply perms to an existing file.
+	if err := os.Chmod(fake, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := pdftotextPath(); got == fake {
+		t.Errorf("a non-executable ~/.local/bin/pdftotext must be skipped, got %q", got)
 	}
 }
