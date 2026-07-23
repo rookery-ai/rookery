@@ -152,6 +152,21 @@ export function useKBFolders() {
   });
 }
 
+// Which export formats the host can currently produce (PDF depends on a
+// headless renderer being installed server-side).
+export type ExportFormats = { html: boolean; docx: boolean; pdf: boolean };
+
+export function useExportFormats() {
+  return useQuery({
+    queryKey: ["kb-export-formats"],
+    queryFn: () => api.get<ExportFormats>("/api/v1/kb/export/formats"),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export const exportURL = (path: string, format: "html" | "docx" | "pdf") =>
+  `/api/v1/kb/export?path=${encodeURIComponent(path)}&format=${format}`;
+
 export function useKBSearch(q: string) {
   return useQuery({
     queryKey: ["kb-search", q],

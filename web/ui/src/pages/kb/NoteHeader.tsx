@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { AlertTriangle, Download, FileCode, Link2, MoreHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { rawURL } from "@/lib/kb";
+import { rawURL, exportURL, useExportFormats } from "@/lib/kb";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -25,6 +25,51 @@ const STATE_LABEL: Record<EditorSaveState, string> = {
   error: "Save failed",
   raw: "Raw mode",
 };
+
+// ExportMenu offers downloading the note as HTML / Word / PDF / Markdown. The
+// formats endpoint says whether the host can produce a PDF (needs a headless
+// renderer installed); when it can't, that item is disabled with an
+// explanation. Downloads go through same-origin anchors — the export endpoint
+// sends Content-Disposition: attachment, so the browser saves rather than
+// navigates; Markdown reuses the existing raw endpoint.
+function ExportMenu({ path }: { path: string }) {
+  const { data: formats } = useExportFormats();
+  const pdfOK = formats?.pdf ?? false;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="sm">
+          <Download className="size-4" />
+          Export
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem asChild>
+          <a href={exportURL(path, "html")} download>HTML</a>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <a href={exportURL(path, "docx")} download>Word (.docx)</a>
+        </DropdownMenuItem>
+        {pdfOK ? (
+          <DropdownMenuItem asChild>
+            <a href={exportURL(path, "pdf")} download>PDF</a>
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem
+            disabled
+            onSelect={(e) => e.preventDefault()}
+            title="PDF export needs a headless renderer on the server (weasyprint, chromium, wkhtmltopdf, libreoffice, or pandoc)."
+          >
+            PDF (unavailable)
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem asChild>
+          <a href={rawURL(path)} download>Markdown (.md)</a>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 // The title field is a filename, not a path — a typed ".md" (any case) is
 // redundant with the fixed suffix we already append, not a second segment
@@ -214,12 +259,7 @@ export default function NoteHeader({
           <FileCode className="size-4" />
           {rawMode ? "Rich text" : "Raw"}
         </Button>
-        <Button variant="ghost" size="sm" asChild>
-          <a href={rawURL(path)} download>
-            <Download className="size-4" />
-            Download
-          </a>
-        </Button>
+        <ExportMenu path={path} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button

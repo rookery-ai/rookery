@@ -78,3 +78,18 @@ func TestDropIconKeys(t *testing.T) {
 		}
 	})
 }
+
+func TestStripFrontmatter(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"---\ntitle: x\ndate: y\n---\n\n# Body\n", "# Body\n"},
+		{"# No frontmatter\n\ntext", "# No frontmatter\n\ntext"},
+		{"---\nonly: open\nno close\n", "---\nonly: open\nno close\n"}, // unterminated → whole body
+		{"---\n---\nbody", "body"},                                     // empty block
+		{"not---\nfoo", "not---\nfoo"},                                 // not a fence at start
+	}
+	for i, c := range cases {
+		if got := stripFrontmatter(c.in); got != c.want {
+			t.Errorf("case %d: got %q want %q", i, got, c.want)
+		}
+	}
+}

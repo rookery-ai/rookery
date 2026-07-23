@@ -15,6 +15,7 @@ import (
 
 	"github.com/ilijad1/simple-agents/internal/convert"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/export"
 	"github.com/ilijad1/simple-agents/internal/iolimit"
 	"github.com/ilijad1/simple-agents/internal/vault"
 	"github.com/labstack/echo/v4"
@@ -63,6 +64,8 @@ func (s *Server) registerKBAPI(g *echo.Group) {
 	g.POST("/kb/upload", s.apiUploadKBFile)
 	g.PUT("/kb/icon", s.apiSaveKBIcon)
 	g.GET("/kb/folders", s.apiKBFolders)
+	g.GET("/kb/export", s.apiExportKBNote)
+	g.GET("/kb/export/formats", s.apiExportFormats)
 }
 
 // ── Icons ────────────────────────────────────────────────────────────────────
@@ -707,6 +710,105 @@ func (s *Server) apiSearchKB(c echo.Context) error {
 		})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"hits": out})
+}
+
+// stripFrontmatter removes a leading YAML frontmatter block (--- … ---) from a
+// note body so an export document doesn't render the raw metadata. Mirrors the
+// frontend's splitFrontmatter for the export path; deliberately minimal (a note
+// either opens with a fenced --- block or it doesn't).
+func stripFrontmatter(md string) string {
+	if !strings.HasPrefix(md, "---\n") && !strings.HasPrefix(md, "---\r\n") {
+		return md
+	}
+	rest := md[strings.IndexByte(md, '\n')+1:]
+	// Find the closing fence line (--- on its own line).
+	for i := 0; i < len(rest); {
+		nl := strings.IndexByte(rest[i:], '\n')
+		var line string
+		if nl < 0 {
+			line = rest[i:]
+		} else {
+			line = rest[i : i+nl]
+		}
+		if strings.TrimRight(line, "\r") == "---" {
+			if nl < 0 {
+				return ""
+			}
+			return strings.TrimLeft(rest[i+nl+1:], "\n")
+		}
+		if nl < 0 {
+			break
+		}
+		i += nl + 1
+	}
+	return md // no closing fence — treat the whole thing as body
+}
+
+// apiExportFormats reports which export formats this host can currently produce
+// (PDF depends on a headless renderer being on PATH). The UI greys out PDF when
+// it's false.
+// GET /api/v1/kb/export/formats → 200 {"html":true,"docx":true,"pdf":false}
+func (s *Server) apiExportFormats(c echo.Context) error {
+	return c.JSON(http.StatusOK, export.AvailableFormats())
+}
+
+// apiExportKBNote renders a markdown note to HTML, DOCX, or PDF and streams it
+// as a download. Export is note-only (a non-.md file is 400) and is the
+// sanctioned reverse of internal/convert.
+// GET /api/v1/kb/export?path=<rel>&format=html|docx|pdf → attachment
+func (s *Server) apiExportKBNote(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	if s.vault == nil {
+		return s.kbUnavailable(c)
+	}
+	rel := cleanKBParam(c.QueryParam("path"))
+	if rel == "" {
+		return jsonErr(c, http.StatusBadRequest, "invalid_path", "a note path is required")
+	}
+	if !strings.EqualFold(path.Ext(rel), ".md") {
+		return jsonErr(c, http.StatusBadRequest, "not_a_note", "only markdown notes can be exported")
+	}
+	format := strings.ToLower(strings.TrimSpace(c.QueryParam("format")))
+
+	data, err := s.vault.ReadNote(u.ID, rel)
+	if err != nil {
+		status, code := vaultErrStatus(err)
+		return jsonErr(c, status, code, "could not open note: "+err.Error())
+	}
+	stem := strings.TrimSuffix(path.Base(rel), path.Ext(rel))
+	body := []byte(stripFrontmatter(string(data)))
+	opts := export.Options{Title: stem}
+
+	var (
+		out         []byte
+		contentType string
+		ext         string
+	)
+	switch format {
+	case "html":
+		out, err = export.ToHTML(body, opts)
+		contentType, ext = "text/html; charset=utf-8", "html"
+	case "docx":
+		out, err = export.ToDOCX(body, opts)
+		contentType, ext = "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"
+	case "pdf":
+		out, err = export.ToPDF(body, opts)
+		contentType, ext = "application/pdf", "pdf"
+		if errors.Is(err, export.ErrNoPDFEngine) {
+			return jsonErr(c, http.StatusUnprocessableEntity, "pdf_unavailable",
+				"PDF export needs a headless renderer on the server (weasyprint, chromium, wkhtmltopdf, libreoffice, or pandoc). Install one, or export HTML/Word instead.")
+		}
+	default:
+		return jsonErr(c, http.StatusBadRequest, "invalid_format", "format must be one of: html, docx, pdf")
+	}
+	if err != nil {
+		slog.Error("kb export failed", "workspace_id", u.ID, "path", rel, "format", format, "err", err)
+		return jsonErr(c, http.StatusInternalServerError, "export_failed", "could not export this note")
+	}
+
+	filename := stem + "." + ext
+	c.Response().Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	return c.Blob(http.StatusOK, contentType, out)
 }
 
 // isRequestTooLarge reports whether err originates from an http.MaxBytesReader
