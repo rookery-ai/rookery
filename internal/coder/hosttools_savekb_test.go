@@ -3,6 +3,7 @@ package coder
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -115,7 +116,7 @@ func TestSaveToKBBlockedDuringBuild(t *testing.T) {
 // refused with a clear error, never silently truncated into a shorter file
 // that a false original_bytes frontmatter value then lies about.
 func TestSaveToKBFromURLOverLimitErrors(t *testing.T) {
-	big := make([]byte, maxWebBody+1)
+	big := make([]byte, maxImportBody+1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/csv")
 		_, _ = w.Write(big)
@@ -137,6 +138,44 @@ func TestSaveToKBFromURLOverLimitErrors(t *testing.T) {
 	entries, _ := os.ReadDir(filepath.Join(v.Root("ws1"), "notes"))
 	if len(entries) != 0 {
 		t.Errorf("no note should exist after a refused over-limit fetch, found %d", len(entries))
+	}
+}
+
+// TestSaveToKBFromURLAcceptsAboveContextCap pins the asymmetry fix: a document
+// larger than the web_fetch context cap (maxWebBody) but within the import cap
+// must import successfully by URL — the same document that would upload fine
+// through the browser must not be rejected only because it arrived by URL. This
+// is why save_to_kb reads to maxImportBody, not maxWebBody.
+func TestSaveToKBFromURLAcceptsAboveContextCap(t *testing.T) {
+	if maxImportBody <= maxWebBody {
+		t.Fatalf("import cap (%d) must exceed the context cap (%d) for this test to mean anything",
+			maxImportBody, maxWebBody)
+	}
+	// A valid CSV comfortably above maxWebBody (2 MiB) but under maxImportBody (25 MiB).
+	var b strings.Builder
+	b.WriteString("id,value\n")
+	for b.Len() < maxWebBody+(1<<20) { // ~3 MiB
+		b.WriteString("1,some row of data here\n")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/csv")
+		_, _ = io.WriteString(w, b.String())
+	}))
+	defer srv.Close()
+
+	h, v := newSaveKBToolset(t)
+	h.allowPrivateHosts = true
+	h.webRetryBase = time.Millisecond
+	out := h.execute(context.Background(), llm.ToolCall{
+		Name: "save_to_kb",
+		Args: json.RawMessage(`{"source":"` + srv.URL + `/mid.csv"}`),
+	})
+	if strings.HasPrefix(out, "error:") {
+		t.Fatalf("a document above the context cap but within the import cap must import, got %q", out)
+	}
+	entries, _ := os.ReadDir(filepath.Join(v.Root("ws1"), "notes"))
+	if len(entries) == 0 {
+		t.Error("expected a note to be written for an in-limit import")
 	}
 }
 

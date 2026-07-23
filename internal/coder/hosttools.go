@@ -898,11 +898,11 @@ func (h *hostToolSet) fetchRaw(ctx context.Context, rawURL string) ([]byte, stri
 	if resp.StatusCode >= 400 {
 		return nil, "", fmt.Errorf("fetch %s: HTTP %d", rawURL, resp.StatusCode)
 	}
-	data, err := iolimit.ReadCapped(resp.Body, maxWebBody)
+	data, err := iolimit.ReadCapped(resp.Body, maxImportBody)
 	if err != nil {
 		if errors.Is(err, iolimit.ErrTooLarge) {
 			return nil, "", fmt.Errorf("fetch %s: response is over the %d byte limit for save_to_kb — "+
-				"it cannot be imported whole; tell the user the source is too large", rawURL, maxWebBody)
+				"it cannot be imported whole; tell the user the source is too large", rawURL, maxImportBody)
 		}
 		return nil, "", fmt.Errorf("fetch %s: %v", rawURL, err)
 	}
@@ -1072,8 +1072,18 @@ func buildEnvList(extra map[string]string, homeDir, tmpDir string) []string {
 // ── web_fetch ────────────────────────────────────────────────────────────────
 
 // maxWebBody bounds how many bytes web_fetch reads from a response before the result is
-// further truncated to maxToolResult for the model context.
+// further truncated to maxToolResult for the model context. It is small on purpose: a
+// web_fetch body is headed into the model's context window, so 2 MiB is already far more
+// than can be relayed usefully.
 const maxWebBody = 2 << 20 // 2 MiB
+
+// maxImportBody bounds save_to_kb's URL fetch. Unlike web_fetch, this path writes the bytes
+// to disk as a knowledge-base document, not into the context window — so it is capped to the
+// SAME limit as the web upload door (web/api_kb.go's maxUploadBytes), not to the much smaller
+// context cap. Keeping the two import doors' limits in step is why this is its own constant
+// rather than a reuse of maxWebBody: a document that uploads fine through the browser must not
+// be rejected only because it arrived by URL instead.
+const maxImportBody = 25 << 20 // 25 MiB — keep in step with web/api_kb.go maxUploadBytes
 
 // webFetchMaxAttempts bounds the internal transient-retry loop (429/5xx/network/timeout).
 const webFetchMaxAttempts = 4
