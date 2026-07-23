@@ -438,6 +438,33 @@ var kbSystemDirs = map[string]bool{
 	"skills": true, "reminders": true, "inbox": true, "assets": true,
 }
 
+// protectedPathMessage returns a user-facing explanation when rel is a
+// DB-backed, system-managed path the user must not delete or rename from the KB
+// browser (see vault.IsUserMutationProtected), or "" when the mutation is
+// allowed. The message points the user at the item's own page — deleting the
+// record there is the sanctioned path that also cleans up the vault files,
+// whereas deleting the files here would orphan the row.
+func protectedPathMessage(rel string) string {
+	if !vault.IsUserMutationProtected(rel) {
+		return ""
+	}
+	top, _, _ := strings.Cut(strings.TrimPrefix(rel, "/"), "/")
+	switch top {
+	case "agents":
+		return "This is an agent's files — delete the agent from the Agents page instead."
+	case "chats":
+		return "This is a chat transcript — delete the chat from the Chats page instead."
+	case "inbox":
+		return "This is an inbox notification — delete it from the inbox instead."
+	case "skills":
+		return "This is a skill's files — delete the skill from the Skills page instead."
+	case "reminders":
+		return "This is a reminder — delete it from the reminders list instead."
+	default:
+		return "This folder is managed by the system and can't be changed here."
+	}
+}
+
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 type apiKBNode struct {
@@ -760,6 +787,9 @@ func (s *Server) apiDeleteKBNoteAPI(c echo.Context) error {
 		return s.kbUnavailable(c)
 	}
 	rel := cleanKBParam(c.QueryParam("path"))
+	if msg := protectedPathMessage(rel); msg != "" {
+		return jsonErr(c, http.StatusForbidden, "protected_path", msg)
+	}
 	if err := s.vault.Delete(u.ID, rel); err != nil {
 		status, code := vaultErrStatus(err)
 		return jsonErr(c, status, code, "delete failed: "+err.Error())
@@ -789,6 +819,16 @@ func (s *Server) apiRenameKBNote(c echo.Context) error {
 	to := cleanKBParam(req.To)
 	if from == "" || to == "" {
 		return jsonErr(c, http.StatusBadRequest, "invalid_path", "both source and destination are required")
+	}
+	// A rename that touches a system-managed area on EITHER end — moving a
+	// protected item out, or dropping a user note into one — would orphan or
+	// shadow a DB-backed record, so refuse both.
+	if msg := protectedPathMessage(from); msg != "" {
+		return jsonErr(c, http.StatusForbidden, "protected_path", msg)
+	}
+	if msg := protectedPathMessage(to); msg != "" {
+		return jsonErr(c, http.StatusForbidden, "protected_path",
+			"can't move items into a system-managed folder (agents, chats, inbox, skills, reminders).")
 	}
 	// vault.Rename bottoms out in os.Rename, which SILENTLY replaces an
 	// existing destination. That was survivable while renaming was a typed,
