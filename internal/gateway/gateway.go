@@ -301,7 +301,13 @@ func (m *GatewayManager) dispatchFunc() DispatchFunc {
 // implementation) can never escape and re-crash the process.
 func (m *GatewayManager) sendPanicReply(msg Message) {
 	defer func() {
-		_ = recover()
+		if r := recover(); r != nil {
+			// Never re-panic from here — this defer's whole job is to be the
+			// last line of defense. Just log it so a broken reply path isn't
+			// silently invisible.
+			slog.Error("gateway: recovered panic inside panic-recovery reply itself",
+				"platform", msg.Platform, "workspace_id", msg.WorkspaceID, "panic", r)
+		}
 	}()
 	if msg.Platform == "" || msg.WorkspaceID == "" || msg.PlatformUserID == "" {
 		return
@@ -311,6 +317,26 @@ func (m *GatewayManager) sendPanicReply(msg Message) {
 		slog.Error("gateway: failed to send panic-recovery reply",
 			"platform", msg.Platform, "workspace_id", msg.WorkspaceID, "err", err)
 	}
+}
+
+// goSafe runs fn in a new goroutine under its own panic guard. A background
+// goroutine spawned off the message path (auto-delete timers, deferred
+// cleanups, progress fan-out) is NOT covered by dispatchFunc's recover — Go's
+// recover() only unwinds the panicking goroutine's own stack, and by the time
+// a detached goroutine runs, dispatch has already returned and that recover
+// has already unwound. Without its own guard, one panic in such a goroutine
+// takes down the entire process. label identifies the call site in the log so
+// a recovered panic here is still traceable back to what spawned it.
+func (m *GatewayManager) goSafe(label string, fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("gateway: recovered panic in background goroutine",
+					"where", label, "panic", r, "stack", string(debug.Stack()))
+			}
+		}()
+		fn()
+	}()
 }
 
 // dispatch is called by adapters when a message arrives.
@@ -426,7 +452,8 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 			return
 		}
 
-		go func(id string) {
+		id := sentMsgID
+		m.goSafe("auto_delete", func() {
 			time.Sleep(30 * time.Second)
 			m.mu.RLock()
 			gw2, ok2 := m.gateways[key(msg.Platform, msg.WorkspaceID)]
@@ -437,7 +464,7 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 				}
 			}
 			_ = m.Send(msg.Platform, msg.WorkspaceID, msg.PlatformUserID, "🔐 Secret message was automatically deleted.")
-		}(sentMsgID)
+		})
 	}
 
 	if err := m.router.Handle(ctx, msg, send, deleteIncoming, sendAutoDelete, updatePlaceholder); err != nil {
