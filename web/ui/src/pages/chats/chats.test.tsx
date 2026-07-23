@@ -264,6 +264,15 @@ test("Delete confirms, DELETEs the chat, and clears the selection", async () => 
   expect(screen.queryByText("Chat One")).not.toBeInTheDocument();
 });
 
+test("shows the creation timestamp as secondary text", async () => {
+  mockFetch();
+  wrap();
+
+  await screen.findByText("Chat One");
+  const rowOne = screen.getByText("Chat One").closest("button")!;
+  expect(rowOne.textContent).toMatch(/Jul 1/);
+});
+
 test("+ New chat creates a chat and selects it", async () => {
   mockFetch();
   wrap();
