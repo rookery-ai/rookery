@@ -133,3 +133,14 @@ func TestCSVEmptyIsError(t *testing.T) {
 		t.Error("an empty csv must error rather than produce a blank note")
 	}
 }
+
+func TestOmittedRowsNote(t *testing.T) {
+	got := omittedRowsNote(3, 5)
+	want := "\n*3 further rows omitted (5 total).*\n"
+	if got != want {
+		t.Errorf("omittedRowsNote(3,5) = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "_") {
+		t.Errorf("omitted-rows note must not use underscore emphasis: %q", got)
+	}
+}

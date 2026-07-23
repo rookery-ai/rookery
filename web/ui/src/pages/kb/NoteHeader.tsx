@@ -177,8 +177,8 @@ export default function NoteHeader({
               </span>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="max-w-64">
-              This note uses formatting the rich editor can&rsquo;t reproduce exactly. Saving from
-              rich text will rewrite those parts. Switch to Raw to edit it as-is.
+              Opened as raw markdown to preserve its exact formatting. Switch to rich text to edit
+              visually — a few uncommon details would be reformatted if you do.
             </TooltipContent>
           </Tooltip>
         )}

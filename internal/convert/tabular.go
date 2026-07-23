@@ -87,7 +87,7 @@ func tabularToMarkdown(data []byte, kind Kind, opt Options) (Result, error) {
 	for i, rec := range body {
 		if i >= maxTableRows {
 			omitted := len(body) - maxTableRows
-			fmt.Fprintf(&sb, "\n_%d further rows omitted (%d total)._\n", omitted, len(body))
+			sb.WriteString(omittedRowsNote(omitted, len(body)))
 			res.Warnings = append(res.Warnings, fmt.Sprintf(
 				"row limit reached: %d of %d rows are not in this note — read the preserved original for the full data",
 				omitted, len(body)))
@@ -97,6 +97,14 @@ func tabularToMarkdown(data []byte, kind Kind, opt Options) (Result, error) {
 	}
 	res.Markdown = normalizeText(sb.String())
 	return res, nil
+}
+
+// omittedRowsNote renders the truncation notice appended when a table exceeds
+// maxTableRows. It uses ASTERISK emphasis (not underscore) so the note
+// round-trips through the KB rich-text editor unchanged — underscore emphasis
+// re-serializes as asterisk and would force the whole note into raw mode.
+func omittedRowsNote(omitted, total int) string {
+	return fmt.Sprintf("\n*%d further rows omitted (%d total).*\n", omitted, total)
 }
 
 func writeRow(sb *strings.Builder, cells []string) {

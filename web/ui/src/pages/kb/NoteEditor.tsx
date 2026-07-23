@@ -24,8 +24,8 @@ const AUTOSAVE_MS = 1000;
 // the user never touched — hence raw markdown, and hence spelling out WHY
 // rather than just announcing the mode.
 const RAW_BANNER =
-  "This note uses formatting the rich text editor can't reproduce exactly, so it opened as raw " +
-  "markdown. Editing it in rich text would rewrite those parts, including ones you didn't touch.";
+  "Opened as raw markdown to preserve its exact formatting. Switch to rich text to edit it visually — " +
+  "a few uncommon formatting details would be reformatted if you do.";
 
 // Isolated so `useEditor` is only ever called while WYSIWYG mode is active —
 // mounting/unmounting this component is how we avoid running the TipTap
