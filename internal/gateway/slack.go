@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
+	"strings"
 	"sync"
 
 	"github.com/slack-go/slack"
@@ -103,13 +104,54 @@ var slackFileHosts = map[string]bool{
 	"files.slack.com": true,
 }
 
+// looksLikeHTMLSignIn reports whether b begins (after optional leading
+// whitespace/BOM) with an HTML doctype or <html> tag, case-insensitively.
+// This is the shape of Slack's web sign-in page — the page a
+// url_private_download request returns with HTTP 200 (not an error status)
+// when the bot token lacks the files:read scope or has expired. Deliberately
+// a cheap prefix check, not a parser: distinguishing "this is HTML" from
+// "this is the specific file format the caller expected" needs nothing more,
+// and pulling in an HTML parser here would be a dependency this repo doesn't
+// otherwise need for the job.
+func looksLikeHTMLSignIn(b []byte) bool {
+	b = bytes.TrimLeft(b, "\xef\xbb\xbf \t\r\n")
+	// Only the first few bytes matter for a prefix check — capping here
+	// avoids lowercasing (and thus allocating a copy of) the whole file,
+	// including a multi-MB non-HTML upload that could never match anyway.
+	// 16 comfortably covers the longest prefix checked ("<!doctype html").
+	if len(b) > 16 {
+		b = b[:16]
+	}
+	lower := bytes.ToLower(b)
+	return bytes.HasPrefix(lower, []byte("<!doctype html")) || bytes.HasPrefix(lower, []byte("<html"))
+}
+
+// isDeclaredHTML reports whether Slack's own file metadata says the file
+// genuinely is HTML — in which case looksLikeHTMLSignIn matching is expected
+// and must NOT be treated as a failed download.
+func isDeclaredHTML(mimetype string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(mimetype)), "text/html")
+}
+
 // downloadSlackFile fetches a Slack file's bytes via the downloader seam,
 // bounded by an iolimit.CappingWriter. GetFile streams into a plain
 // io.Writer with no size bound of its own — capping the WRITE side (rather
 // than reading a response body, which slack.Client.GetFile does internally
 // and doesn't expose) is what stops an oversized file from being buffered
 // in full before anyone notices it's too big.
-func downloadSlackFile(dl slackFileDownloader, downloadURL string) ([]byte, error) {
+//
+// declaredMimetype is the file's Mimetype as reported in Slack's own event
+// payload (me.Message.Files[0].Mimetype) — the file's ADVERTISED type,
+// independent of whatever bytes actually came back. It exists to catch a
+// mis-scoped or expired bot token: url_private_download responds HTTP 200
+// with an HTML sign-in page rather than an error when the token lacks
+// files:read, and that HTML would otherwise sail straight through GetFile's
+// non-200 check (which only inspects the status code) and get filed as a
+// plausible-looking note that silently REPLACES the user's actual file. A
+// download is only rejected when the bytes look like HTML AND the file
+// wasn't actually declared as HTML — a genuine text/html upload still
+// imports normally.
+func downloadSlackFile(dl slackFileDownloader, downloadURL, declaredMimetype string) ([]byte, error) {
 	parsed, err := url.Parse(downloadURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid file url: %w", err)
@@ -121,6 +163,9 @@ func downloadSlackFile(dl slackFileDownloader, downloadURL string) ([]byte, erro
 	cw := iolimit.NewCappingWriter(&buf, maxAttachmentBytes)
 	if err := dl.GetFile(downloadURL, cw); err != nil {
 		return nil, fmt.Errorf("slack file download: %w", err)
+	}
+	if looksLikeHTMLSignIn(buf.Bytes()) && !isDeclaredHTML(declaredMimetype) {
+		return nil, fmt.Errorf("download returned a sign-in page, not the file — the Slack connection is likely missing the files:read scope; reconnect Slack to grant it")
 	}
 	return buf.Bytes(), nil
 }
@@ -186,6 +231,37 @@ func (g *SlackGateway) Start(ctx context.Context) error {
 
 func (g *SlackGateway) Stop() error { return nil } // RunContext exits on ctx cancel
 
+// slackAttachmentFromEvent builds the KB Attachment for a file_share event, or
+// nil when the event carries no file. Pure and testable — the readLoop just
+// calls it, so the "which field holds the files" decision is covered by a
+// unit test rather than only by the live socketmode transport.
+//
+// A file_share message carries its file(s) on the event itself, not as a URL
+// in the text — only the first file is imported (chat attachments are
+// single-file, same as Telegram/Discord). slackevents.MessageEvent has no
+// Files field of its own; for a non-message_changed event its custom
+// UnmarshalJSON populates Message from the SAME top-level payload, and
+// slack.Msg IS where "files" unmarshals to — hence me.Message.Files, not
+// me.Files. A download failure is logged AND surfaced as an explicit
+// Attachment.Err — never silently swallowed into an empty-text dispatch,
+// which the router could misread as an answer to an unrelated pending flow.
+func slackAttachmentFromEvent(me *slackevents.MessageEvent, dl slackFileDownloader) *Attachment {
+	if me == nil || me.Message == nil || len(me.Message.Files) == 0 {
+		return nil
+	}
+	f := me.Message.Files[0]
+	name := f.Name
+	if name == "" {
+		name = "attachment"
+	}
+	data, err := downloadSlackFile(dl, f.URLPrivateDownload, f.Mimetype)
+	if err != nil {
+		slog.Warn("gateway: slack file download failed", "err", err)
+		return &Attachment{Filename: name, Err: err}
+	}
+	return &Attachment{Filename: name, Data: data}
+}
+
 func (g *SlackGateway) readLoop(ctx context.Context) {
 	for {
 		select {
@@ -212,32 +288,7 @@ func (g *SlackGateway) readLoop(ctx context.Context) {
 				msg, ok := mapSlackDM(me.User, me.ChannelType, me.Text, me.TimeStamp, me.BotID, me.SubType, botID)
 				if ok {
 					msg.WorkspaceID = g.ownerWorkspaceID
-					// A file_share message carries its file(s) on the event
-					// itself, not as a URL in the text — only the first file
-					// is imported (chat attachments are single-file, same as
-					// Telegram/Discord). slackevents.MessageEvent has no Files
-					// field of its own; for a non-message_changed event its
-					// custom UnmarshalJSON populates Message from the SAME
-					// top-level payload, and slack.Msg IS where "files"
-					// unmarshals to. The download needs g.api's bot-token
-					// auth, so it happens here (the handler), not inside the
-					// pure mapSlackDM. A download failure is logged AND
-					// surfaced as an explicit Attachment.Err — never silently
-					// swallowed into an empty-text dispatch, which the router
-					// could misread as an answer to an unrelated pending flow.
-					if me.Message != nil && len(me.Message.Files) > 0 {
-						f := me.Message.Files[0]
-						name := f.Name
-						if name == "" {
-							name = "attachment"
-						}
-						if data, err := downloadSlackFile(g.downloader, f.URLPrivateDownload); err == nil {
-							msg.Attachment = &Attachment{Filename: name, Data: data}
-						} else {
-							slog.Warn("gateway: slack file download failed", "err", err)
-							msg.Attachment = &Attachment{Filename: name, Err: err}
-						}
-					}
+					msg.Attachment = slackAttachmentFromEvent(me, g.downloader)
 					g.dispatch(context.Background(), msg)
 				}
 			}

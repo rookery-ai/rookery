@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 
+	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 )
 
@@ -146,7 +148,7 @@ func (f *fakeSlackDownloader) GetFile(downloadURL string, w io.Writer) error {
 
 func TestDownloadSlackFile(t *testing.T) {
 	dl := &fakeSlackDownloader{data: []byte("hello world")}
-	data, err := downloadSlackFile(dl, "https://files.slack.com/files-pri/T1-F1/foo.txt")
+	data, err := downloadSlackFile(dl, "https://files.slack.com/files-pri/T1-F1/foo.txt", "text/plain")
 	if err != nil {
 		t.Fatalf("downloadSlackFile: %v", err)
 	}
@@ -162,14 +164,14 @@ func TestDownloadSlackFile(t *testing.T) {
 // in: a file whose bytes exceed maxAttachmentBytes must be refused.
 func TestDownloadSlackFileTooLarge(t *testing.T) {
 	dl := &fakeSlackDownloader{data: make([]byte, maxAttachmentBytes+1)}
-	if _, err := downloadSlackFile(dl, "https://files.slack.com/files-pri/T1-F1/big.bin"); err == nil {
+	if _, err := downloadSlackFile(dl, "https://files.slack.com/files-pri/T1-F1/big.bin", "application/octet-stream"); err == nil {
 		t.Fatal("an oversized file must be refused")
 	}
 }
 
 func TestDownloadSlackFileDownloaderError(t *testing.T) {
 	dl := &fakeSlackDownloader{err: errors.New("boom")}
-	if _, err := downloadSlackFile(dl, "https://files.slack.com/files-pri/T1-F1/foo.txt"); err == nil {
+	if _, err := downloadSlackFile(dl, "https://files.slack.com/files-pri/T1-F1/foo.txt", "text/plain"); err == nil {
 		t.Fatal("a downloader error must propagate")
 	}
 }
@@ -181,11 +183,163 @@ func TestDownloadSlackFileDownloaderError(t *testing.T) {
 // address.
 func TestDownloadSlackFileRejectsNonSlackHost(t *testing.T) {
 	dl := &fakeSlackDownloader{data: []byte("should never be reached")}
-	if _, err := downloadSlackFile(dl, "https://evil.example.com/f"); err == nil {
+	if _, err := downloadSlackFile(dl, "https://evil.example.com/f", "text/plain"); err == nil {
 		t.Fatal("a non-files.slack.com host must be rejected")
 	}
 	if dl.called {
 		t.Fatal("downloader must not be invoked when the host is rejected")
+	}
+}
+
+// slackSignInPage is a representative Slack web sign-in page: the HTML that
+// url_private_download actually returns (HTTP 200, not an error status) when
+// the requesting bot token lacks the files:read scope or has expired. Real
+// pages have more markup; the leading doctype/html tag is what the sniff
+// checks, so a trimmed stand-in is sufficient and keeps the fixture readable.
+const slackSignInPage = `<!DOCTYPE html>
+<html>
+<head><title>Sign in | Slack</title></head>
+<body>Sign in to your workspace to continue.</body>
+</html>`
+
+// TestDownloadSlackFileRejectsMisScopedTokenHTML is Finding 1's core case: a
+// mis-scoped/expired bot token makes url_private_download return an HTML
+// sign-in page with HTTP 200 — GetFile's non-200 check alone would let this
+// through, and internal/convert genuinely handles HTML, so without the sniff
+// the sign-in page would silently become the "imported" note in place of the
+// user's actual file. The declared mimetype (from Slack's own file metadata)
+// is NOT text/html, so the mismatch must be caught.
+func TestDownloadSlackFileRejectsMisScopedTokenHTML(t *testing.T) {
+	dl := &fakeSlackDownloader{data: []byte(slackSignInPage)}
+	_, err := downloadSlackFile(dl, "https://files.slack.com/files-pri/T1-F1/report.pdf", "application/pdf")
+	if err == nil {
+		t.Fatal("an HTML sign-in page masquerading as a declared-non-HTML file must be rejected")
+	}
+	if !strings.Contains(err.Error(), "files:read") {
+		t.Fatalf("error should name the likely cause (files:read scope), got: %v", err)
+	}
+}
+
+// TestDownloadSlackFileAllowsGenuineHTML proves the check is targeted: a file
+// Slack itself declares as text/html (e.g. a saved web page) must still
+// import normally even though its bytes also look like HTML.
+func TestDownloadSlackFileAllowsGenuineHTML(t *testing.T) {
+	dl := &fakeSlackDownloader{data: []byte(slackSignInPage)}
+	data, err := downloadSlackFile(dl, "https://files.slack.com/files-pri/T1-F1/page.html", "text/html")
+	if err != nil {
+		t.Fatalf("a genuinely-declared HTML file must import normally: %v", err)
+	}
+	if string(data) != slackSignInPage {
+		t.Fatalf("data mismatch for genuine HTML file")
+	}
+}
+
+// TestDownloadSlackFileNormalFileUnaffected proves the sniff doesn't affect
+// ordinary non-HTML downloads (binary or plain text) regardless of declared
+// mimetype.
+func TestDownloadSlackFileNormalFileUnaffected(t *testing.T) {
+	dl := &fakeSlackDownloader{data: []byte("%PDF-1.4 fake pdf bytes")}
+	data, err := downloadSlackFile(dl, "https://files.slack.com/files-pri/T1-F1/report.pdf", "application/pdf")
+	if err != nil {
+		t.Fatalf("a normal file must be unaffected: %v", err)
+	}
+	if string(data) != "%PDF-1.4 fake pdf bytes" {
+		t.Fatalf("data mismatch")
+	}
+}
+
+// TestSlackAttachmentFromEventNoFiles proves the nil case: an event with no
+// files (or a nil Message, matching a message_changed-shaped event) yields no
+// Attachment at all — the point of extracting this helper out of readLoop is
+// that this "which field / is it present" logic is now unit-testable
+// directly, not only reachable through the live socketmode transport.
+func TestSlackAttachmentFromEventNoFiles(t *testing.T) {
+	dl := &fakeSlackDownloader{data: []byte("should never be reached")}
+	if att := slackAttachmentFromEvent(&slackevents.MessageEvent{Message: &slack.Msg{}}, dl); att != nil {
+		t.Fatalf("no files must yield a nil attachment, got %+v", att)
+	}
+	if att := slackAttachmentFromEvent(&slackevents.MessageEvent{}, dl); att != nil {
+		t.Fatalf("nil Message must yield a nil attachment, got %+v", att)
+	}
+	if dl.called {
+		t.Fatal("downloader must not be invoked when there are no files")
+	}
+}
+
+// TestSlackAttachmentFromEventDownloadsFirstFile proves the happy path: the
+// first file's name/mimetype are read from me.Message.Files (not a top-level
+// me.Files, which slackevents.MessageEvent doesn't have) and downloaded.
+func TestSlackAttachmentFromEventDownloadsFirstFile(t *testing.T) {
+	dl := &fakeSlackDownloader{data: []byte("file bytes")}
+	me := &slackevents.MessageEvent{
+		Message: &slack.Msg{
+			Files: []slack.File{
+				{Name: "report.pdf", Mimetype: "application/pdf", URLPrivateDownload: "https://files.slack.com/files-pri/T1-F1/report.pdf"},
+			},
+		},
+	}
+	att := slackAttachmentFromEvent(me, dl)
+	if att == nil {
+		t.Fatal("expected a non-nil attachment")
+	}
+	if att.Err != nil {
+		t.Fatalf("unexpected error: %v", att.Err)
+	}
+	if att.Filename != "report.pdf" || string(att.Data) != "file bytes" {
+		t.Fatalf("attachment = %+v", att)
+	}
+	if !dl.called {
+		t.Fatal("downloader must have been invoked")
+	}
+}
+
+// TestSlackAttachmentFromEventDefaultsMissingName proves an unnamed file gets
+// a sensible default filename rather than an empty one.
+func TestSlackAttachmentFromEventDefaultsMissingName(t *testing.T) {
+	dl := &fakeSlackDownloader{data: []byte("x")}
+	me := &slackevents.MessageEvent{
+		Message: &slack.Msg{
+			Files: []slack.File{{URLPrivateDownload: "https://files.slack.com/files-pri/T1-F1/f", Mimetype: "text/plain"}},
+		},
+	}
+	att := slackAttachmentFromEvent(me, dl)
+	if att == nil || att.Filename != "attachment" {
+		t.Fatalf("expected default filename 'attachment', got %+v", att)
+	}
+}
+
+// TestSlackAttachmentFromEventDownloadError proves a failed download (e.g.
+// the Finding-1 HTML sign-in case, or a plain transport error) surfaces as an
+// explicit Attachment.Err rather than a nil attachment or dropped message.
+func TestSlackAttachmentFromEventDownloadError(t *testing.T) {
+	dl := &fakeSlackDownloader{err: errors.New("boom")}
+	me := &slackevents.MessageEvent{
+		Message: &slack.Msg{
+			Files: []slack.File{{Name: "f.txt", Mimetype: "text/plain", URLPrivateDownload: "https://files.slack.com/files-pri/T1-F1/f.txt"}},
+		},
+	}
+	att := slackAttachmentFromEvent(me, dl)
+	if att == nil || att.Err == nil {
+		t.Fatalf("expected an attachment carrying an error, got %+v", att)
+	}
+	if att.Filename != "f.txt" {
+		t.Fatalf("filename must survive a download error, got %q", att.Filename)
+	}
+
+	// The Finding-1 case specifically: a mis-scoped token's HTML sign-in page
+	// must flow through here as an Err too, not get dispatched as Data.
+	htmlDL := &fakeSlackDownloader{data: []byte(slackSignInPage)}
+	htmlMe := &slackevents.MessageEvent{
+		Message: &slack.Msg{
+			Files: []slack.File{{Name: "report.pdf", Mimetype: "application/pdf", URLPrivateDownload: "https://files.slack.com/files-pri/T1-F1/report.pdf"}},
+		},
+	}
+	htmlAtt := slackAttachmentFromEvent(htmlMe, htmlDL)
+	if htmlAtt == nil || htmlAtt.Err == nil {
+		t.Fatalf("HTML sign-in page must surface as Attachment.Err, got %+v", htmlAtt)
+	}
+	if htmlAtt.Data != nil {
+		t.Fatalf("HTML sign-in page must not be delivered as Data, got %q", htmlAtt.Data)
 	}
 }
 
