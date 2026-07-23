@@ -1,9 +1,9 @@
-import { useRef, useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, AlertTriangle, Paperclip } from "lucide-react";
 import { cn, formatShortDate } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
-import { useChatDetail, useChatAction, sendChatMessage, type Chat, type ChatMessage } from "@/lib/chats";
+import { useChatDetail, useChatAction, useRenameChat, sendChatMessage, type Chat, type ChatMessage } from "@/lib/chats";
 import { useUploadKBFile } from "@/lib/kb";
 import { useToast } from "@/components/shell/Toast";
 import { ChatScroll } from "@/components/chat/ChatScroll";
@@ -297,7 +297,7 @@ export function ChatWindow({ chatId, initialText }: { chatId: string; initialTex
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-bold">{chat.name}</h2>
+            <ChatTitle chatId={chatId} name={chat.name} />
             <span className="text-xs text-muted-2">{formatShortDate(chat.created_at)}</span>
           </div>
           <StatusChip active={chat.active} />
@@ -360,6 +360,83 @@ export function ChatWindow({ chatId, initialText }: { chatId: string; initialTex
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ChatTitle renders a chat's name as an inline-editable title: click (or Enter
+// when focused) to edit, Enter/blur commits via useRenameChat, Escape reverts.
+// A failed rename rolls the value back and toasts.
+function ChatTitle({ chatId, name }: { chatId: string; name: string }) {
+  const rename = useRenameChat();
+  const { toast } = useToast();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(name);
+
+  // Keep the field in sync when the chat switches or the server updates the name
+  // (e.g. auto-title landing after the first message).
+  useEffect(() => {
+    setValue(name);
+  }, [name]);
+
+  function commit() {
+    setEditing(false);
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === name) {
+      setValue(name);
+      return;
+    }
+    rename.mutate(
+      { id: chatId, name: trimmed },
+      {
+        onError: (err) => {
+          setValue(name);
+          toast({
+            message: err instanceof ApiError ? err.message : "Couldn't rename chat",
+            variant: "error",
+          });
+        },
+      },
+    );
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.blur();
+          } else if (e.key === "Escape") {
+            setValue(name);
+            setEditing(false);
+          }
+        }}
+        className="w-full truncate rounded border border-ring bg-transparent px-1 text-sm font-bold outline-none focus:ring-[3px] focus:ring-ring/50"
+        aria-label="Chat title"
+      />
+    );
+  }
+  // Kept as an h2 (a heading, not a button) so the title stays in the a11y
+  // heading tree — it's clickable to rename, with keyboard support via tabIndex.
+  return (
+    <h2
+      tabIndex={0}
+      title="Click to rename"
+      onClick={() => setEditing(true)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          setEditing(true);
+        }
+      }}
+      className="cursor-text truncate rounded px-1 text-sm font-bold hover:bg-chrome"
+    >
+      {name}
+    </h2>
   );
 }
 
