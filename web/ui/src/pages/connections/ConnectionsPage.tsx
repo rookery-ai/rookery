@@ -17,6 +17,12 @@ import {
   type ConnectorPlatform,
   type ServiceProvider,
 } from "@/lib/connections";
+import {
+  useSearchKeys,
+  useSaveSearchKey,
+  useDeleteSearchKey,
+  type SearchKeyProvider,
+} from "@/lib/searchKeys";
 
 const SEARCH_DEBOUNCE_MS = 150;
 
@@ -156,6 +162,118 @@ function ServiceTile({
   );
 }
 
+// ── Web search ───────────────────────────────────────────────────────────
+// A workspace-wide Brave/Tavily API key upgrades web search (chat, agents,
+// skills) from keyless scraping to a real search API — never required, only
+// a reliability upgrade. See internal/websearch.KeySecretNames.
+
+const SEARCH_KEY_PROVIDERS: { id: SearchKeyProvider; label: string; getKeyUrl: string }[] = [
+  { id: "brave", label: "Brave Search", getKeyUrl: "https://brave.com/search/api/" },
+  { id: "tavily", label: "Tavily", getKeyUrl: "https://tavily.com/" },
+];
+
+function SearchKeyRow({ provider, label, getKeyUrl, configured }: {
+  provider: SearchKeyProvider;
+  label: string;
+  getKeyUrl: string;
+  configured: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [key, setKey] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const saveMutation = useSaveSearchKey();
+  const deleteMutation = useDeleteSearchKey();
+
+  function cancelEdit() {
+    setEditing(false);
+    setKey("");
+    setError(null);
+  }
+
+  async function handleSave() {
+    const trimmed = key.trim();
+    if (!trimmed) return;
+    setError(null);
+    try {
+      await saveMutation.mutateAsync({ provider, key: trimmed });
+      cancelEdit();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  async function handleClear() {
+    setError(null);
+    try {
+      await deleteMutation.mutateAsync(provider);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-border bg-background p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate font-semibold">{label}</div>
+          {configured ? (
+            <div className="flex items-center gap-1 text-xs text-ok">
+              <span className="size-1.5 rounded-full bg-ok" /> Configured
+            </div>
+          ) : (
+            <div className="text-xs text-muted-2">Not configured</div>
+          )}
+          <a
+            href={getKeyUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-muted-2 underline underline-offset-2 hover:text-foreground"
+          >
+            Get a key →
+          </a>
+        </div>
+        {!editing && (
+          <div className="flex shrink-0 gap-2">
+            <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+              {configured ? "Replace" : "Add key"}
+            </Button>
+            {configured && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleClear()}
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending ? "Clearing…" : "Clear"}
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+      {editing && (
+        <div className="flex items-center gap-2">
+          <Input
+            type="password"
+            aria-label={`${label} API key`}
+            placeholder={`${label} API key`}
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            autoComplete="off"
+            className="h-8 text-sm"
+          />
+          <Button size="sm" onClick={() => void handleSave()} disabled={saveMutation.isPending || !key.trim()}>
+            {saveMutation.isPending ? "Saving…" : "Save"}
+          </Button>
+          <Button variant="outline" size="sm" onClick={cancelEdit}>
+            Cancel
+          </Button>
+        </div>
+      )}
+      {error && <div className="text-xs text-danger">{error}</div>}
+    </div>
+  );
+}
+
 export default function ConnectionsPage() {
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
@@ -194,9 +312,13 @@ export default function ConnectionsPage() {
 
   const connectorsQuery = useConnectors();
   const servicesQuery = useServices();
+  const searchKeysQuery = useSearchKeys();
 
   const platforms = connectorsQuery.data?.platforms ?? [];
   const services = servicesQuery.data?.providers ?? [];
+  const configuredSearchKeysCount = SEARCH_KEY_PROVIDERS.filter(
+    (p) => searchKeysQuery.data?.[p.id],
+  ).length;
 
   // Resolved lazily off `services` (re-derived on every render, not stored in
   // state) so the label upgrades from the raw slug to the real provider
@@ -229,6 +351,7 @@ export default function ConnectionsPage() {
 
   const chatAppsRef = useRef<HTMLDivElement>(null);
   const servicesRef = useRef<HTMLDivElement>(null);
+  const webSearchRef = useRef<HTMLDivElement>(null);
 
   function scrollTo(ref: React.RefObject<HTMLDivElement | null>) {
     ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -281,6 +404,16 @@ export default function ConnectionsPage() {
                   {connectedServicesCount} of {services.length}
                 </span>
               </button>
+              <button
+                type="button"
+                onClick={() => scrollTo(webSearchRef)}
+                className="flex items-center justify-between rounded-md px-2.5 py-1.5 text-sm font-medium hover:bg-chrome"
+              >
+                <span>🔎 Web search</span>
+                <span className="text-muted-2">
+                  {configuredSearchKeysCount} of {SEARCH_KEY_PROVIDERS.length}
+                </span>
+              </button>
             </div>
             <div className="rounded-lg bg-muted-surface p-3 text-xs leading-relaxed text-foreground">
               <p>
@@ -289,6 +422,10 @@ export default function ConnectionsPage() {
               <p className="mt-2">
                 <b className="text-foreground">Services</b> are the accounts your agents can act on
                 — Gmail, Notion, GitHub…
+              </p>
+              <p className="mt-2">
+                <b className="text-foreground">Web search</b> lets you add a search API key for more
+                reliable results everywhere search happens.
               </p>
             </div>
           </div>
@@ -343,6 +480,29 @@ export default function ConnectionsPage() {
             <div className={cn("grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4")}>
               {filteredServices.map((p) => (
                 <ServiceTile key={p.name} provider={p} onOpen={openServiceWizard} />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section ref={webSearchRef} className="mt-10 scroll-mt-4">
+          <h2 className="text-lg font-bold">Web search</h2>
+          <p className="mb-4 text-sm text-muted-2">
+            A search API key makes web search more reliable across your whole workspace — chat,
+            agents, and skills. Without one, keyless search still works.
+          </p>
+          {searchKeysQuery.isError && <ErrorBanner message={errorMessage(searchKeysQuery.error)} />}
+          {searchKeysQuery.isLoading && <LoadingNote text="Loading web search settings…" />}
+          {!searchKeysQuery.isLoading && !searchKeysQuery.isError && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {SEARCH_KEY_PROVIDERS.map((p) => (
+                <SearchKeyRow
+                  key={p.id}
+                  provider={p.id}
+                  label={p.label}
+                  getKeyUrl={p.getKeyUrl}
+                  configured={!!searchKeysQuery.data?.[p.id]}
+                />
               ))}
             </div>
           )}

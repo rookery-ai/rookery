@@ -21,6 +21,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/reminder"
 	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/simple-agents/internal/websearch"
 	"github.com/labstack/echo/v4"
 )
 
@@ -69,30 +70,48 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 	// list must stay in step with the Telegram/Discord/Slack chat path in
 	// cmd/simple-agents; divergence would give one surface a capability the other
 	// lacks.
+	// Search-key wiring: resolve any configured SEARCH_KEY_BRAVE/SEARCH_KEY_TAVILY
+	// secrets once, host-side, and inject them into the coder's env so its
+	// web_search tool's searchProviders() picks the keyed provider over the
+	// keyless scraping cascade — the same upgrade agent runs already get. The
+	// key value itself never reaches the model: only the host process reads
+	// subprocessEnv to build the provider before making the request.
+	searchEnv := websearch.ResolveKeyEnv(c.Request().Context(), u.ID, s.secretsLookup)
+
 	var connRefs []prompts.ConnectionRef
 	var connTools []string
 	var connBin string
-	if coder.IsAPI() && s.connStore != nil {
-		if rows, err := s.db.ListServiceConnections(c.Request().Context(), u.ID); err == nil {
-			bound := connectors.ActiveBoundConns(rows)
-			if len(bound) > 0 {
-				coder = coder.WithConnectors(s.connectors, s.connStore, bound)
-				for _, b := range bound {
-					connRefs = append(connRefs, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
-				}
-				for _, d := range s.connectors.ToolDefs(bound) {
-					connTools = append(connTools, d.Name)
+	if coder.IsAPI() {
+		if s.connStore != nil {
+			if rows, err := s.db.ListServiceConnections(c.Request().Context(), u.ID); err == nil {
+				bound := connectors.ActiveBoundConns(rows)
+				if len(bound) > 0 {
+					coder = coder.WithConnectors(s.connectors, s.connStore, bound)
+					for _, b := range bound {
+						connRefs = append(connRefs, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
+					}
+					for _, d := range s.connectors.ToolDefs(bound) {
+						connTools = append(connTools, d.Name)
+					}
 				}
 			}
 		}
-	} else if !coder.IsAPI() {
+		if len(searchEnv) > 0 {
+			coder = coder.WithExtraEnv(searchEnv)
+		}
+	} else {
 		// WithAllowedTools pre-approves the CLI subprocess's tool set so it never
 		// blocks on an interactive permission prompt; it's meaningless for an API
 		// coder (host tools are offered via native function-calling, not gated by
 		// this flag), so skip it there — matches the Telegram chat path.
 		// WithExtraEnv REPLACES rather than merges, so both bridges' env vars are
-		// assembled into one map and injected with a single call.
+		// assembled into one map and injected with a single call. A CLI coder's
+		// own web search is native to the CLI, not this searchProviders() cascade,
+		// but including the search keys here is harmless (they're just unused env).
 		extraEnv := map[string]string{}
+		for k, v := range searchEnv {
+			extraEnv[k] = v
+		}
 		var kbBin string
 		if s.kbBridge != nil && s.kbBridge.URL() != "" {
 			if p, err := os.Executable(); err == nil {

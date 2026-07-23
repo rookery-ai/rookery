@@ -99,6 +99,7 @@ func (s *Server) setupAPIRoutes() {
 	s.registerChatsAPI(dash)
 	s.registerSkillsAPI(dash)
 	s.registerSecretsAPI(dash)
+	s.registerSearchKeysAPI(dash)
 	s.registerConnectorsAPI(dash)
 	s.registerServicesAPI(dash)
 	s.registerHomeAPI(dash)

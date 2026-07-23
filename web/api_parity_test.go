@@ -33,6 +33,7 @@ func TestAPIParityInventory(t *testing.T) {
 		"POST /api/v1/skills/design/resume", "POST /api/v1/skills/design/dismiss",
 		"GET /api/v1/skills/design/progress",
 		"GET /api/v1/secrets", "POST /api/v1/secrets", "DELETE /api/v1/secrets/:name",
+		"GET /api/v1/search-keys", "PUT /api/v1/search-keys", "DELETE /api/v1/search-keys/:provider",
 		"GET /api/v1/connectors", "POST /api/v1/connectors",
 		"DELETE /api/v1/connectors/:platform", "POST /api/v1/connectors/:platform/test",
 		"GET /api/v1/services", "POST /api/v1/services/:provider/creds",
