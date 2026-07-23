@@ -10,6 +10,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -111,12 +113,20 @@ func adapterFactory(platform string) (AdapterFactory, bool) {
 	return f, ok
 }
 
+// messageHandler is the subset of *Router's API that GatewayManager depends
+// on. It exists so tests can inject a stub that panics — exercising the
+// dispatch-time recover() below — without having to coerce a real Router
+// (which needs a live DB, coder, etc.) into panicking.
+type messageHandler interface {
+	Handle(ctx context.Context, msg Message, send func(string), deleteIncoming func(), sendAutoDelete func(string), sendProgress func(string)) error
+}
+
 // GatewayManager manages one Gateway per active platform_connection.
 // It is safe for concurrent use.
 type GatewayManager struct {
 	db        *db.DB
 	systemKey []byte
-	router    *Router
+	router    messageHandler
 
 	mu       sync.RWMutex
 	gateways map[string]Gateway // key: "platform:workspaceID"
@@ -260,9 +270,47 @@ func (m *GatewayManager) stop(workspaceID, platform string) {
 }
 
 // dispatchFunc returns m.dispatch bound as a DispatchFunc, for injection into
-// adapter factories.
+// adapter factories. It is the single funnel every adapter (Telegram, Discord,
+// Slack) calls for every inbound message, so it recovers from any panic that
+// occurs while handling ONE message: the offending message is dropped, the
+// sender gets a best-effort generic error reply, and the adapter's read loop
+// (and every other workspace's bot) keeps running. Without this, an
+// unrecovered panic anywhere in the dispatch/router path takes down the
+// entire process — there is no supervisor restarting it on a home install.
 func (m *GatewayManager) dispatchFunc() DispatchFunc {
-	return func(ctx context.Context, msg Message) { m.dispatch(ctx, msg) }
+	return func(ctx context.Context, msg Message) {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("gateway: recovered panic handling inbound message",
+					"platform", msg.Platform,
+					"workspace_id", msg.WorkspaceID,
+					"platform_user_id", msg.PlatformUserID,
+					"panic", r,
+					"stack", string(debug.Stack()),
+				)
+				m.sendPanicReply(msg)
+			}
+		}()
+		m.dispatch(ctx, msg)
+	}
+}
+
+// sendPanicReply best-effort notifies the sender that something went wrong,
+// after a panic was recovered from dispatch. It guards itself with its own
+// recover so a panic inside the send path (e.g. a misbehaving gateway
+// implementation) can never escape and re-crash the process.
+func (m *GatewayManager) sendPanicReply(msg Message) {
+	defer func() {
+		_ = recover()
+	}()
+	if msg.Platform == "" || msg.WorkspaceID == "" || msg.PlatformUserID == "" {
+		return
+	}
+	if err := m.Send(msg.Platform, msg.WorkspaceID, msg.PlatformUserID,
+		"⚠️ Something went wrong handling that message."); err != nil {
+		slog.Error("gateway: failed to send panic-recovery reply",
+			"platform", msg.Platform, "workspace_id", msg.WorkspaceID, "err", err)
+	}
 }
 
 // dispatch is called by adapters when a message arrives.
