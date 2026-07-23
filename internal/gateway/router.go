@@ -750,69 +750,29 @@ func (r *Router) handleRemind(ctx context.Context, msg Message, arg string, send
 		}
 	}
 
-	// Strip optional leading "me "
-	arg = strings.TrimPrefix(arg, "me ")
-	arg = strings.TrimSpace(arg)
-
 	now := time.Now()
 	loc := profile.LoadLocation(r.db, msg.WorkspaceID)
 
-	// Strategy: try to extract a time from the full arg using LLM (smartest path),
-	// falling back to the " to " split + regex approach for speed when possible.
-	var timeExpr, message string
-	var remindAt time.Time
-
-	// 1. Try " to " split → parse time expression with regex first.
-	if idx := strings.Index(arg, " to "); idx >= 0 {
-		timeExpr = strings.TrimSpace(arg[:idx])
-		message = strings.TrimSpace(arg[idx+4:])
-		if t, err := reminder.ParseNaturalTime(timeExpr, now, loc); err == nil {
-			remindAt = t
-		} else if d, err2 := parseDuration(timeExpr); err2 == nil {
-			remindAt = now.Add(d)
-		}
-	}
-
-	// 2. If the above didn't resolve, send the whole arg to the LLM.
-	if remindAt.IsZero() {
-		if r.timeParserFallback != nil {
-			when, extractedMsg, err := r.timeParserFallback(ctx, msg.WorkspaceID, arg, now, loc)
-			if err == nil && !when.IsZero() {
-				remindAt = when
-				if extractedMsg != "" && extractedMsg != arg {
-					message = extractedMsg
-				}
-			} else if err == nil && when.IsZero() {
-				// LLM says no time in the input — ask the user.
-				if extractedMsg != "" {
-					message = extractedMsg
-				} else {
-					message = arg
-				}
-				r.mu.Lock()
-				r.pendingReminderMsg[msg.WorkspaceID] = message
-				r.mu.Unlock()
-				send(fmt.Sprintf("⏰ When should I remind you about **%s**?\nReply with a time, e.g. 'in 10 minutes', 'tomorrow at 9am', 'next Friday evening'", message))
-				return nil
-			}
-		}
-	}
-
-	// 3. Legacy fallback: first word as duration (backward compat).
-	if remindAt.IsZero() {
-		parts := strings.SplitN(arg, " ", 2)
-		if len(parts) == 2 {
-			if d, err := parseDuration(parts[0]); err == nil {
-				remindAt = now.Add(d)
-				if message == "" {
-					message = strings.TrimSpace(parts[1])
-				}
-			}
-		}
-	}
-
-	if remindAt.IsZero() {
+	// Time + message extraction is the shared, pure resolver used by both the
+	// web and Telegram surfaces (strip filler → " to " split + regex → LLM →
+	// legacy duration). The stateful "understood the message, now reply with a
+	// time" follow-up stays here in the router — ParseReminderText is pure.
+	remindAt, message, err := reminder.ParseReminderText(ctx, arg, now, loc, r.timeParserFallback, msg.WorkspaceID)
+	if err != nil {
 		send("Couldn't understand that time. Try:\n• /remind in 10 minutes to check oven\n• /remind next Tuesday to call doctor\n• /remind next Friday evening write note about bitcoin\n• /remind 30m old format\n• /remind to write a note _(I'll ask when)_")
+		return nil
+	}
+
+	if remindAt.IsZero() {
+		// Understood the message but found no time — ask for one, remembering
+		// the message so a bare time reply resumes it.
+		if message == "" {
+			message = arg
+		}
+		r.mu.Lock()
+		r.pendingReminderMsg[msg.WorkspaceID] = message
+		r.mu.Unlock()
+		send(fmt.Sprintf("⏰ When should I remind you about **%s**?\nReply with a time, e.g. 'in 10 minutes', 'tomorrow at 9am', 'next Friday evening'", message))
 		return nil
 	}
 
