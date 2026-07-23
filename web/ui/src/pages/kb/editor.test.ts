@@ -104,4 +104,69 @@ describe("table cell fidelity", () => {
     const md = "| a | b |\n| --- | --- |\n| **bold** and [[note]] | z |\n";
     expect(checkFidelity(md)).toBe(true);
   });
+
+  // Regression guard: a table cell with two paragraphs (an ordinary edit --
+  // click in a cell, press Enter) is not representable by the simple
+  // "| a | b |" markdown table grammar. tiptap-markdown's stock serializer
+  // detects this via isMarkdownSerializable() and falls back to HTML/a
+  // placeholder instead of rendering the table as simple markdown; an
+  // earlier version of PipeSafeTable dropped that guard entirely and always
+  // rendered `col.firstChild`, which would silently keep the first paragraph
+  // and discard the second one -- a plausible-looking but corrupted table,
+  // with no load-time re-check (checkFidelity only runs at note load, not on
+  // the save path toMarkdown(editor)) to ever catch it.
+  //
+  // Constructing this doc from markdown input is impossible (there's no
+  // markdown syntax for two block-level paragraphs inside one table cell),
+  // so it's built directly via the real ProseMirror schema and run through
+  // the actual tiptap-markdown serializer (with PipeSafeTable registered via
+  // buildExtensions()) -- proving the invariant against the real save path,
+  // not a re-derived one.
+  it("a table cell with two paragraphs never silently drops the second paragraph on save", () => {
+    const editor = new Editor({
+      element: document.createElement("div"),
+      extensions: buildExtensions(),
+      content: "<p></p>",
+    });
+    const { schema } = editor;
+
+    const headerRow = schema.nodes.tableRow.create(null, [
+      schema.nodes.tableHeader.create(null, schema.nodes.paragraph.create(null, schema.text("a"))),
+      schema.nodes.tableHeader.create(null, schema.nodes.paragraph.create(null, schema.text("b"))),
+    ]);
+    const twoParaCell = schema.nodes.tableCell.create(null, [
+      schema.nodes.paragraph.create(null, schema.text("PARA_ONE")),
+      schema.nodes.paragraph.create(null, schema.text("PARA_TWO")),
+    ]);
+    const otherCell = schema.nodes.tableCell.create(
+      null,
+      schema.nodes.paragraph.create(null, schema.text("z")),
+    );
+    const bodyRow = schema.nodes.tableRow.create(null, [twoParaCell, otherCell]);
+    const table = schema.nodes.table.create(null, [headerRow, bodyRow]);
+    const doc = schema.nodes.doc.create(null, table);
+
+    // tiptap-markdown's public MarkdownStorage type only declares
+    // options/getMarkdown(); .serializer exists at runtime (see
+    // MarkdownSerializer.js) but isn't part of the published .d.ts.
+    const markdownStorage = editor.storage.markdown as unknown as {
+      serializer: { serialize(node: typeof doc): string };
+    };
+    const out: string = markdownStorage.serializer.serialize(doc);
+    editor.destroy();
+
+    // The dangerous case the old code produced: PARA_ONE present but
+    // PARA_TWO silently missing (a corrupted-but-plausible table). That must
+    // never happen -- either both paragraphs survive, or the whole table is
+    // honestly deferred to the non-markdown fallback (neither rendered as an
+    // ordinary cell), which is what actually happens here: this app runs
+    // with `html: false` (editor.ts), so the fallback writes the same
+    // "[table]" placeholder the stock tiptap-markdown html node writes,
+    // keeping the note out of a false WYSIWYG-safe state instead of quietly
+    // discarding PARA_TWO.
+    const hasParaOne = out.includes("PARA_ONE");
+    const hasParaTwo = out.includes("PARA_TWO");
+    expect(hasParaOne && !hasParaTwo).toBe(false);
+    expect(out).toContain("[table]");
+  });
 });
