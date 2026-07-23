@@ -368,3 +368,89 @@ func TestImportFileKeepsCJKFilename(t *testing.T) {
 		t.Errorf("NotePath = %q, want the CJK title preserved, not collapsed to a timestamp", res.NotePath)
 	}
 }
+
+// TestImportLockDistinctPerWorkspaceStablePerWorkspace pins the structural
+// property the per-workspace lock map depends on: two different workspaces
+// get two different mutexes (so they don't serialize each other), and the
+// SAME workspace always gets back the SAME mutex (so repeated calls — from
+// different *Vault instances, exactly as production has more than one
+// *vault.Vault over the same on-disk data — still exclude each other).
+func TestImportLockDistinctPerWorkspaceStablePerWorkspace(t *testing.T) {
+	a := importLock("ws-a")
+	b := importLock("ws-b")
+	if a == b {
+		t.Fatal("importLock(\"ws-a\") == importLock(\"ws-b\"): different workspaces must not share a mutex")
+	}
+	if again := importLock("ws-a"); again != a {
+		t.Fatal("importLock(\"ws-a\") returned a different mutex on a second call: the per-workspace lock must be stable")
+	}
+}
+
+// TestImportFileConcurrentDifferentWorkspacesBothSucceed is the Task-2
+// regression test: two DIFFERENT workspaces, each imported through its OWN
+// *Vault instance (mirroring production's separate coder/runner and web
+// *vault.Vault objects over the same on-disk data), import concurrently.
+// Both must succeed and produce correct, independent results — proving the
+// per-workspace lock does not accidentally cross-serialize or cross-link
+// unrelated workspaces. Run with -race.
+func TestImportFileConcurrentDifferentWorkspacesBothSucceed(t *testing.T) {
+	dir := t.TempDir()
+	// Two separate *Vault instances over the same on-disk root, matching how
+	// cmd/simple-agents and web.NewServer each construct their own.
+	va := New(dir)
+	vb := New(dir)
+
+	const wsA = "ws-a-concurrent"
+	const wsB = "ws-b-concurrent"
+	if err := va.EnsureScaffold(wsA); err != nil {
+		t.Fatalf("scaffold ws-a: %v", err)
+	}
+	if err := vb.EnsureScaffold(wsB); err != nil {
+		t.Fatalf("scaffold ws-b: %v", err)
+	}
+
+	var (
+		wg         sync.WaitGroup
+		resA, resB ImportResult
+		errA, errB error
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		resA, errA = va.ImportFile(wsA, ImportInput{
+			Data:     []byte("a,b\n1,2\n"),
+			Filename: "shared-name.csv",
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		resB, errB = vb.ImportFile(wsB, ImportInput{
+			Data:     []byte("c,d\n3,4\n"),
+			Filename: "shared-name.csv",
+		})
+	}()
+	wg.Wait()
+
+	if errA != nil {
+		t.Fatalf("workspace A import: %v", errA)
+	}
+	if errB != nil {
+		t.Fatalf("workspace B import: %v", errB)
+	}
+
+	noteA, err := va.ReadNote(wsA, resA.NotePath)
+	if err != nil {
+		t.Fatalf("read note A: %v", err)
+	}
+	if !strings.Contains(string(noteA), "| 1 | 2 |") {
+		t.Errorf("workspace A note has wrong content: %s", noteA)
+	}
+
+	noteB, err := vb.ReadNote(wsB, resB.NotePath)
+	if err != nil {
+		t.Fatalf("read note B: %v", err)
+	}
+	if !strings.Contains(string(noteB), "| 3 | 4 |") {
+		t.Errorf("workspace B note has wrong content: %s", noteB)
+	}
+}

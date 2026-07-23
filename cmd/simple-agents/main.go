@@ -33,6 +33,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/skilllibrary"
 	"github.com/ilijad1/simple-agents/internal/skillstore"
 	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/simple-agents/internal/websearch"
 	"github.com/ilijad1/simple-agents/web"
 	"github.com/urfave/cli/v3"
 )
@@ -211,10 +212,9 @@ func serveCmd() *cli.Command {
 			// Loopback KB bridge so CLI coders reach conversion + search in-process
 			// (the same vault.ImportFile / Searcher code the API engine calls directly).
 			kbBridge := vault.NewBridge(vlt)
-			if err := kbBridge.Start(); err != nil {
+			if _, err := kbBridge.Start(ctx); err != nil {
 				return fmt.Errorf("start kb bridge: %w", err)
 			}
-			defer kbBridge.Close()
 
 			designFlow := agentdesigner.NewFlow(coderFor, designer).
 				WithDB(database).
@@ -281,6 +281,14 @@ func serveCmd() *cli.Command {
 				// AND save_to_kb as native in-process tools directly. A CLI coder instead
 				// reaches them via loopback bridges (`simple-agents connector exec <tool>`,
 				// `simple-agents kb convert|search`), mirroring agent runs.
+				// Search-key wiring: resolve any configured SEARCH_KEY_BRAVE/SEARCH_KEY_TAVILY
+				// secrets once, host-side, and inject them into the coder's env so its
+				// web_search tool's searchProviders() picks the keyed provider over the
+				// keyless scraping cascade — the same upgrade agent runs already get. The
+				// key value itself never reaches the model: only the host process reads
+				// subprocessEnv to build the provider before making the request.
+				searchEnv := websearch.ResolveKeyEnv(ctx, workspaceID, secretsLookup)
+
 				var connRefs []prompts.ConnectionRef
 				var connTools []string
 				var connBin string
@@ -297,10 +305,19 @@ func serveCmd() *cli.Command {
 							}
 						}
 					}
+					if len(searchEnv) > 0 {
+						cd = cd.WithExtraEnv(searchEnv)
+					}
 				} else {
 					// WithExtraEnv REPLACES rather than merges, so both bridges' env vars
-					// are assembled into one map and injected with a single call.
+					// are assembled into one map and injected with a single call. A CLI
+					// coder's own web search is native to the CLI, not this
+					// searchProviders() cascade, but including the search keys here is
+					// harmless (they're just unused env).
 					extraEnv := map[string]string{}
+					for k, v := range searchEnv {
+						extraEnv[k] = v
+					}
 					var kbBin string
 					if kbBridge != nil && kbBridge.URL() != "" {
 						if p, err := os.Executable(); err == nil {

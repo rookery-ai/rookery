@@ -18,9 +18,36 @@ const (
 )
 
 // KeySecretNames are the secret names a workspace can set to upgrade search
-// from scraping to a real API. They follow the CODER_KEY_<PROVIDER> convention
-// already used for coder provider keys.
+// from scraping to a real API. They are stored as ordinary encrypted secrets,
+// mirroring how coder provider keys use the CODER_KEY_<PROVIDER> convention.
 func KeySecretNames() []string { return []string{"SEARCH_KEY_BRAVE", "SEARCH_KEY_TAVILY"} }
+
+// SecretLookup resolves a single named secret for a workspace. Both chat
+// surfaces (web's s.secretsLookup, the gateway's textHandler secretsLookup)
+// already implement this exact signature for the API coder's provider key —
+// ResolveKeyEnv reuses whichever one the caller has in hand.
+type SecretLookup func(ctx context.Context, workspaceID, name string) (string, error)
+
+// ResolveKeyEnv resolves the workspace's configured search API keys (if any)
+// into an env map suitable for coder.WithExtraEnv, so a chat coder's
+// searchProviders() picks up the same keyed provider agent runs already get.
+// Only keys that are actually set are included — an unset key or a lookup
+// error is treated as "not configured" (never a hard failure): search keys
+// are a reliability upgrade for chat, not a dependency it should block on.
+// This never exposes the key value to the model — the host reads it here to
+// build the provider; the model calling web_search only sees results.
+func ResolveKeyEnv(ctx context.Context, workspaceID string, lookup SecretLookup) map[string]string {
+	env := map[string]string{}
+	if lookup == nil {
+		return env
+	}
+	for _, name := range KeySecretNames() {
+		if v, err := lookup(ctx, workspaceID, name); err == nil && v != "" {
+			env[name] = v
+		}
+	}
+	return env
+}
 
 // KeyedProvider returns a provider for a supported keyed engine, or nil when no
 // key is configured or the engine is unknown. Returning nil (rather than an

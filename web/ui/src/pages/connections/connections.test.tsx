@@ -29,6 +29,8 @@ let platforms: ConnectorPlatform[];
 let providers: ServiceProvider[];
 let connectorsStatus = 200;
 let servicesStatus = 200;
+let searchKeysState: { brave: boolean; tavily: boolean };
+let searchKeysStatus = 200;
 
 function resetFixtures() {
   platforms = [
@@ -85,6 +87,8 @@ function resetFixtures() {
   ];
   connectorsStatus = 200;
   servicesStatus = 200;
+  searchKeysState = { brave: false, tavily: false };
+  searchKeysStatus = 200;
 }
 
 function mockFetch() {
@@ -110,6 +114,31 @@ function mockFetch() {
             jsonResponse({ error: { code: "internal", message: "could not load services" } }, servicesStatus),
           );
         return Promise.resolve(jsonResponse({ providers }));
+      }
+
+      if (url === "/api/v1/search-keys" && method === "GET") {
+        if (searchKeysStatus !== 200)
+          return Promise.resolve(
+            jsonResponse(
+              { error: { code: "internal", message: "could not load web search settings" } },
+              searchKeysStatus,
+            ),
+          );
+        return Promise.resolve(jsonResponse(searchKeysState));
+      }
+
+      if (url === "/api/v1/search-keys" && method === "PUT") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { provider: string; key: string };
+        if (body.provider === "brave") searchKeysState.brave = true;
+        if (body.provider === "tavily") searchKeysState.tavily = true;
+        return Promise.resolve(jsonResponse({ ok: true }));
+      }
+
+      if (url.startsWith("/api/v1/search-keys/") && method === "DELETE") {
+        const provider = url.split("/").pop();
+        if (provider === "brave") searchKeysState.brave = false;
+        if (provider === "tavily") searchKeysState.tavily = false;
+        return Promise.resolve(jsonResponse({ ok: true }));
       }
 
       return Promise.resolve(jsonResponse({}));
@@ -351,4 +380,90 @@ test("?error=<huge msg> caps the displayed length instead of blowing out the ban
   expect(banner).toBeInTheDocument();
   // "Connection failed: " (20 chars) + 200 capped chars + the ellipsis.
   expect(banner.textContent!.length).toBeLessThanOrEqual(20 + 200 + 1);
+});
+
+// ── Web search ─────────────────────────────────────────────────────────────
+
+test("renders both search key providers with Not configured state from the API", async () => {
+  mockFetch();
+  wrap();
+
+  expect(await screen.findByText("Brave Search")).toBeInTheDocument();
+  expect(screen.getByText("Tavily")).toBeInTheDocument();
+  expect(screen.getAllByText("Not configured")).toHaveLength(2);
+  expect(screen.getAllByRole("button", { name: "Add key" })).toHaveLength(2);
+
+  const searchRow = screen.getByText("🔎 Web search").closest("button")!;
+  expect(searchRow.textContent).toContain("0 of 2");
+});
+
+test("shows Configured state and a Clear action when a key is already set", async () => {
+  searchKeysState = { brave: true, tavily: false };
+  mockFetch();
+  wrap();
+
+  await screen.findByText("Brave Search");
+  const braveRow = screen.getByText("Brave Search").closest("div.rounded-lg") as HTMLElement;
+  expect(within(braveRow).getByText("Configured")).toBeInTheDocument();
+  expect(within(braveRow).getByRole("button", { name: "Replace" })).toBeInTheDocument();
+  expect(within(braveRow).getByRole("button", { name: "Clear" })).toBeInTheDocument();
+
+  const tavilyRow = screen.getByText("Tavily").closest("div.rounded-lg") as HTMLElement;
+  expect(within(tavilyRow).getByText("Not configured")).toBeInTheDocument();
+
+  const searchRow = screen.getByText("🔎 Web search").closest("button")!;
+  expect(searchRow.textContent).toContain("1 of 2");
+});
+
+test("saving a key calls PUT /api/v1/search-keys and flips the row to Configured", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap();
+
+  await screen.findByText("Brave Search");
+  const braveRow = screen.getByText("Brave Search").closest("div.rounded-lg") as HTMLElement;
+  await user.click(within(braveRow).getByRole("button", { name: "Add key" }));
+
+  const input = within(braveRow).getByPlaceholderText("Brave Search API key");
+  await user.type(input, "sekrit-brave-value");
+  await user.click(within(braveRow).getByRole("button", { name: "Save" }));
+
+  await waitFor(() => expect(within(braveRow).getByText("Configured")).toBeInTheDocument());
+  expect(searchKeysState.brave).toBe(true);
+  // The pasted value never lingers in the DOM after save.
+  expect(screen.queryByDisplayValue("sekrit-brave-value")).not.toBeInTheDocument();
+});
+
+test("clearing a configured key calls DELETE /api/v1/search-keys/:provider and flips back to Not configured", async () => {
+  searchKeysState = { brave: true, tavily: false };
+  mockFetch();
+  const user = userEvent.setup();
+  wrap();
+
+  await screen.findByText("Brave Search");
+  const braveRow = screen.getByText("Brave Search").closest("div.rounded-lg") as HTMLElement;
+  await user.click(within(braveRow).getByRole("button", { name: "Clear" }));
+
+  await waitFor(() => expect(within(braveRow).getByText("Not configured")).toBeInTheDocument());
+  expect(searchKeysState.brave).toBe(false);
+});
+
+test("web search key input is masked (type=password) so the value is never shown in plain text", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap();
+
+  await screen.findByText("Tavily");
+  const tavilyRow = screen.getByText("Tavily").closest("div.rounded-lg") as HTMLElement;
+  await user.click(within(tavilyRow).getByRole("button", { name: "Add key" }));
+  const input = within(tavilyRow).getByPlaceholderText("Tavily API key") as HTMLInputElement;
+  expect(input.type).toBe("password");
+});
+
+test("shows an error banner when the search-keys list fails to load", async () => {
+  searchKeysStatus = 500;
+  mockFetch();
+  wrap();
+
+  expect(await screen.findByText("could not load web search settings")).toBeInTheDocument();
 });

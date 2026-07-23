@@ -22,7 +22,20 @@ const minTextPerPage = 40
 // pdftotextPath resolves poppler's pdftotext, or "" when it is not installed.
 // It is a package variable so tests can force the pure-Go branch on a host that
 // happens to have poppler.
+//
+// It checks $HOME/.local/bin BEFORE PATH: conversion runs in the HOST server
+// process (ImportFile → convert are in-process, not in an agent sandbox), and a
+// server started under systemd or a minimal service manager often has a bare
+// PATH that omits the operator's ~/.local/bin — so poppler installed there by
+// the operator would otherwise be invisible and every PDF would silently take
+// the weaker pure-Go path.
 var pdftotextPath = func() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		local := filepath.Join(home, ".local", "bin", "pdftotext")
+		if fi, err := os.Stat(local); err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0 {
+			return local
+		}
+	}
 	p, err := exec.LookPath("pdftotext")
 	if err != nil {
 		return ""
@@ -57,8 +70,14 @@ func pdfToMarkdown(data []byte, opt Options) (Result, error) {
 			len(text), pages))
 	}
 	if extractor == "pure-go" {
+		// Actionable, and aimed at who can actually fix it: pdftotext runs in the
+		// host server process, so installing poppler on the HOST (dnf install
+		// poppler-utils / apt install poppler-utils, or into the operator's
+		// ~/.local/bin) is what upgrades this — an agent installing tools into its
+		// own sandbox cannot help an in-process converter.
 		res.Warnings = append(res.Warnings,
-			"extracted without pdftotext; layout and column order may be imperfect")
+			"extracted without pdftotext; layout and column order may be imperfect — "+
+				"install poppler-utils on the host for higher-fidelity PDF text")
 	}
 	res.Markdown = normalizeText(paragraphize(text))
 	return res, nil

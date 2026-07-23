@@ -53,15 +53,39 @@ type ImportResult struct {
 	Warnings     []string
 }
 
-// importMu serializes the reserve-then-write sequence in ImportFile across
-// EVERY *Vault instance, not just one. The production wiring constructs more
-// than one *vault.Vault backed by the same on-disk data (cmd/simple-agents
-// wires one into the coder/runner/designer path, web.NewServer builds its own
-// for the upload endpoint) — so a per-Vault mutex field would not close the
-// gap between, say, the web upload door and the chat-attachment door. A
-// package-level lock does, and imports are rare enough that global
-// serialization costs nothing.
-var importMu sync.Mutex
+// importLocks holds one mutex per workspace id, guarding that workspace's
+// reserve-and-write in ImportFile. It is PACKAGE-LEVEL, not a *Vault field,
+// because the production wiring constructs more than one *vault.Vault backed
+// by the same on-disk data (cmd/simple-agents wires one into the
+// coder/runner/designer path, web.NewServer builds its own for the upload
+// endpoint) — so a per-Vault mutex field would not close the gap between,
+// say, the web upload door and the chat-attachment door for the SAME
+// workspace: they'd hold different mutexes and could import concurrently
+// into the same workspace, colliding. Keying by workspace id instead lets
+// DIFFERENT workspaces import in parallel (a slow conversion in one no
+// longer serializes an unrelated import in another) while still serializing
+// each workspace's own doors across every *Vault instance.
+var (
+	importLocksMu sync.Mutex
+	importLocks   = map[string]*sync.Mutex{}
+)
+
+// importLock returns the shared, package-level mutex for a workspace,
+// creating it on first use. importLocksMu is held only for this lookup —
+// never across the reserve-and-write itself — so it cannot become a
+// cross-workspace bottleneck. The map grows by workspace count, which is
+// small and bounded on a single-owner install; entries are never evicted,
+// which is negligible at that scale.
+func importLock(workspaceID string) *sync.Mutex {
+	importLocksMu.Lock()
+	defer importLocksMu.Unlock()
+	mu := importLocks[workspaceID]
+	if mu == nil {
+		mu = &sync.Mutex{}
+		importLocks[workspaceID] = mu
+	}
+	return mu
+}
 
 // ImportFile converts a file to markdown and files it in the knowledge base.
 // It is the single save path shared by the save_to_kb tool, the CLI bridge, the
@@ -137,10 +161,13 @@ func (v *Vault) ImportFile(workspaceID string, in ImportInput) (ImportResult, er
 	// check-then-act (probe for a free path, write later), so the race is
 	// between one goroutine's probe and another goroutine's write, not
 	// between two probes. Locking only the lookup would still leave that gap
-	// open. Imports are not a hot path, so a single coarse-grained critical
-	// section costs nothing and is easy to reason about.
-	importMu.Lock()
-	defer importMu.Unlock()
+	// open. Imports within a workspace are not a hot path, so a single
+	// coarse-grained per-workspace critical section costs nothing and is easy
+	// to reason about — while a different workspace's import proceeds under
+	// its own mutex, unblocked.
+	mu := importLock(workspaceID)
+	mu.Lock()
+	defer mu.Unlock()
 
 	originalRel, err := uniquePath(v, workspaceID, path.Join(FilesDir, base+originalExt(in.Filename)))
 	if err != nil {

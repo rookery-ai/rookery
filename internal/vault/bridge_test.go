@@ -2,12 +2,14 @@ package vault
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func startTestBridge(t *testing.T) (*Bridge, *Vault, string) {
@@ -17,7 +19,9 @@ func startTestBridge(t *testing.T) (*Bridge, *Vault, string) {
 		t.Fatalf("scaffold: %v", err)
 	}
 	b := NewBridge(v)
-	if err := b.Start(); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if _, err := b.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(b.Close)
@@ -192,7 +196,9 @@ func TestBridgeConvertRefusesDuringBuild(t *testing.T) {
 		t.Fatalf("scaffold: %v", err)
 	}
 	b := NewBridge(v)
-	if err := b.Start(); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if _, err := b.Start(ctx); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(b.Close)
@@ -213,4 +219,42 @@ func TestBridgeConvertRefusesDuringBuild(t *testing.T) {
 	if len(files) != 0 {
 		t.Errorf("no preserved original should exist after a refused build-phase import, found %d", len(files))
 	}
+}
+
+// TestBridgeStopsOnContextCancel pins the SP24-T3 change: cancelling the context
+// passed to Start shuts the listener down, so a caller that forgets an explicit
+// Close() cannot leak it — matching connectors.Bridge's lifecycle.
+func TestBridgeStopsOnContextCancel(t *testing.T) {
+	v := New(t.TempDir())
+	if err := v.EnsureScaffold("ws1"); err != nil {
+		t.Fatalf("scaffold: %v", err)
+	}
+	b := NewBridge(v)
+	ctx, cancel := context.WithCancel(context.Background())
+	url, err := b.Start(ctx)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	token := b.Register("ws1", false)
+
+	// Alive before cancel.
+	resp, out := post(t, url+"/search", token, map[string]any{"query": "x"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 before cancel, got %d: %v", resp.StatusCode, out)
+	}
+
+	cancel()
+	// Give the shutdown goroutine a moment to close the listener.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		req, _ := http.NewRequest("POST", url+"/search", bytes.NewReader([]byte(`{"query":"x"}`)))
+		req.Header.Set("Authorization", "Bearer "+token)
+		if r, err := http.DefaultClient.Do(req); err != nil {
+			return // connection refused — listener is down, which is the point
+		} else {
+			r.Body.Close()
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("listener still accepting connections after context cancel")
 }

@@ -1272,17 +1272,12 @@ func (r *Router) handleMemory(ctx context.Context, msg Message, arg string, send
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// helpText renders /help, conditioning the file-upload line on platform: Slack's
-// Socket Mode integration drops subtyped file_share messages entirely (see
-// SlackGateway — there is no attachment handling wired for it), so telling a
-// Slack user to "send a file" is a false promise the bot silently does nothing
-// about. Telegram and Discord both implement attachment download, so they keep
-// the line.
+// helpText renders /help. All three platforms (Telegram, Discord, Slack) now
+// implement attachment download — Slack's Socket Mode handler imports the
+// first file off a file_share message via SlackGateway — so the file-upload
+// line applies uniformly and is no longer conditioned on platform.
 func helpText(platform string) string {
 	fileLine := "\nSend a file (document/photo) to save it to your knowledge base.\n"
-	if platform == "slack" {
-		fileLine = ""
-	}
 	return `**Simple Agents — Commands**
 
 /agent list — list your agents

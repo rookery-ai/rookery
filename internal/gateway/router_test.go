@@ -386,12 +386,11 @@ func TestAgentCancelDiscardSparesSkillDraft(t *testing.T) {
 	}
 }
 
-// TestHelpTextFileLineIsPlatformConditional pins Fix 5: /help must not tell a
-// Slack user to send a file — Slack's Socket Mode integration drops subtyped
-// file_share messages entirely, so the promise is false there. Telegram (and,
-// by the same logic, any other platform with attachment handling wired) keeps
-// the line.
-func TestHelpTextFileLineIsPlatformConditional(t *testing.T) {
+// TestHelpTextFileLineUniformAcrossPlatforms pins the follow-up to Fix 5:
+// Slack now imports file_share attachments via SlackGateway (like Telegram
+// and Discord), so /help's "send a file" line is no longer suppressed for
+// Slack — it applies uniformly to every platform.
+func TestHelpTextFileLineUniformAcrossPlatforms(t *testing.T) {
 	r, _, _, _ := newTestRouter(t)
 
 	slackMsg := testMsg("/help")
@@ -403,11 +402,11 @@ func TestHelpTextFileLineIsPlatformConditional(t *testing.T) {
 	if len(*got) != 1 {
 		t.Fatalf("expected exactly one reply, got %d", len(*got))
 	}
-	if strings.Contains((*got)[0], "Send a file") {
-		t.Errorf("Slack /help must not promise file uploads (Slack drops them silently), got:\n%s", (*got)[0])
+	if !strings.Contains((*got)[0], "Send a file") {
+		t.Errorf("Slack /help should mention file uploads now that Slack imports them, got:\n%s", (*got)[0])
 	}
 
-	// Telegram keeps the line — attachments genuinely work there.
+	// Telegram keeps the line too — attachments work there as before.
 	send2, got2 := collect()
 	if err := r.Handle(t.Context(), testMsg("/help"), send2, nil, nil, nil); err != nil {
 		t.Fatalf("handle: %v", err)

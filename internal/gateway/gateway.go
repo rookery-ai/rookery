@@ -10,6 +10,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -111,12 +113,20 @@ func adapterFactory(platform string) (AdapterFactory, bool) {
 	return f, ok
 }
 
+// messageHandler is the subset of *Router's API that GatewayManager depends
+// on. It exists so tests can inject a stub that panics — exercising the
+// dispatch-time recover() below — without having to coerce a real Router
+// (which needs a live DB, coder, etc.) into panicking.
+type messageHandler interface {
+	Handle(ctx context.Context, msg Message, send func(string), deleteIncoming func(), sendAutoDelete func(string), sendProgress func(string)) error
+}
+
 // GatewayManager manages one Gateway per active platform_connection.
 // It is safe for concurrent use.
 type GatewayManager struct {
 	db        *db.DB
 	systemKey []byte
-	router    *Router
+	router    messageHandler
 
 	mu       sync.RWMutex
 	gateways map[string]Gateway // key: "platform:workspaceID"
@@ -260,9 +270,73 @@ func (m *GatewayManager) stop(workspaceID, platform string) {
 }
 
 // dispatchFunc returns m.dispatch bound as a DispatchFunc, for injection into
-// adapter factories.
+// adapter factories. It is the single funnel every adapter (Telegram, Discord,
+// Slack) calls for every inbound message, so it recovers from any panic that
+// occurs while handling ONE message: the offending message is dropped, the
+// sender gets a best-effort generic error reply, and the adapter's read loop
+// (and every other workspace's bot) keeps running. Without this, an
+// unrecovered panic anywhere in the dispatch/router path takes down the
+// entire process — there is no supervisor restarting it on a home install.
 func (m *GatewayManager) dispatchFunc() DispatchFunc {
-	return func(ctx context.Context, msg Message) { m.dispatch(ctx, msg) }
+	return func(ctx context.Context, msg Message) {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("gateway: recovered panic handling inbound message",
+					"platform", msg.Platform,
+					"workspace_id", msg.WorkspaceID,
+					"platform_user_id", msg.PlatformUserID,
+					"panic", r,
+					"stack", string(debug.Stack()),
+				)
+				m.sendPanicReply(msg)
+			}
+		}()
+		m.dispatch(ctx, msg)
+	}
+}
+
+// sendPanicReply best-effort notifies the sender that something went wrong,
+// after a panic was recovered from dispatch. It guards itself with its own
+// recover so a panic inside the send path (e.g. a misbehaving gateway
+// implementation) can never escape and re-crash the process.
+func (m *GatewayManager) sendPanicReply(msg Message) {
+	defer func() {
+		if r := recover(); r != nil {
+			// Never re-panic from here — this defer's whole job is to be the
+			// last line of defense. Just log it so a broken reply path isn't
+			// silently invisible.
+			slog.Error("gateway: recovered panic inside panic-recovery reply itself",
+				"platform", msg.Platform, "workspace_id", msg.WorkspaceID, "panic", r)
+		}
+	}()
+	if msg.Platform == "" || msg.WorkspaceID == "" || msg.PlatformUserID == "" {
+		return
+	}
+	if err := m.Send(msg.Platform, msg.WorkspaceID, msg.PlatformUserID,
+		"⚠️ Something went wrong handling that message."); err != nil {
+		slog.Error("gateway: failed to send panic-recovery reply",
+			"platform", msg.Platform, "workspace_id", msg.WorkspaceID, "err", err)
+	}
+}
+
+// goSafe runs fn in a new goroutine under its own panic guard. A background
+// goroutine spawned off the message path (auto-delete timers, deferred
+// cleanups, progress fan-out) is NOT covered by dispatchFunc's recover — Go's
+// recover() only unwinds the panicking goroutine's own stack, and by the time
+// a detached goroutine runs, dispatch has already returned and that recover
+// has already unwound. Without its own guard, one panic in such a goroutine
+// takes down the entire process. label identifies the call site in the log so
+// a recovered panic here is still traceable back to what spawned it.
+func (m *GatewayManager) goSafe(label string, fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("gateway: recovered panic in background goroutine",
+					"where", label, "panic", r, "stack", string(debug.Stack()))
+			}
+		}()
+		fn()
+	}()
 }
 
 // dispatch is called by adapters when a message arrives.
@@ -378,7 +452,8 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 			return
 		}
 
-		go func(id string) {
+		id := sentMsgID
+		m.goSafe("auto_delete", func() {
 			time.Sleep(30 * time.Second)
 			m.mu.RLock()
 			gw2, ok2 := m.gateways[key(msg.Platform, msg.WorkspaceID)]
@@ -389,7 +464,7 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 				}
 			}
 			_ = m.Send(msg.Platform, msg.WorkspaceID, msg.PlatformUserID, "🔐 Secret message was automatically deleted.")
-		}(sentMsgID)
+		})
 	}
 
 	if err := m.router.Handle(ctx, msg, send, deleteIncoming, sendAutoDelete, updatePlaceholder); err != nil {
