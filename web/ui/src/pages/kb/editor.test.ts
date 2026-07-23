@@ -169,4 +169,44 @@ describe("table cell fidelity", () => {
     expect(hasParaOne && !hasParaTwo).toBe(false);
     expect(out).toContain("[table]");
   });
+
+  // Companion to the two-paragraph case above: exercises the OTHER arm of
+  // isMarkdownSerializable -- a merged (colspan) cell. Such a table can arrive
+  // by pasting from a webpage/Word/Sheets. It must take the same honest
+  // fallback (whole table -> "[table]" placeholder under html:false) rather
+  // than emit a delimiter row sized off the first row's childCount, which
+  // would produce a column-count-mismatched, malformed table.
+  it("a table with a colspan cell falls back instead of emitting a malformed table", () => {
+    const editor = new Editor({
+      element: document.createElement("div"),
+      extensions: buildExtensions(),
+      content: "<p></p>",
+    });
+    const { schema } = editor;
+
+    const headerRow = schema.nodes.tableRow.create(null, [
+      schema.nodes.tableHeader.create(null, schema.nodes.paragraph.create(null, schema.text("a"))),
+      schema.nodes.tableHeader.create(null, schema.nodes.paragraph.create(null, schema.text("b"))),
+    ]);
+    // One body cell spanning both columns (colspan: 2) — hasSpan() -> not
+    // markdown-serializable.
+    const spanCell = schema.nodes.tableCell.create(
+      { colspan: 2 },
+      schema.nodes.paragraph.create(null, schema.text("SPAN_CELL")),
+    );
+    const bodyRow = schema.nodes.tableRow.create(null, [spanCell]);
+    const table = schema.nodes.table.create(null, [headerRow, bodyRow]);
+    const doc = schema.nodes.doc.create(null, table);
+
+    const markdownStorage = editor.storage.markdown as unknown as {
+      serializer: { serialize(node: typeof doc): string };
+    };
+    const out: string = markdownStorage.serializer.serialize(doc);
+    editor.destroy();
+
+    // Fallback fired: the whole table is deferred to the placeholder, not
+    // rendered as an ordinary (and here malformed) markdown table.
+    expect(out).toContain("[table]");
+    expect(out).not.toMatch(/\|\s*---/); // no markdown delimiter row was emitted
+  });
 });
