@@ -1,9 +1,13 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
+	"net/url"
 	"sync"
 
 	"github.com/slack-go/slack"
@@ -11,6 +15,7 @@ import (
 	"github.com/slack-go/slack/socketmode"
 
 	"github.com/ilijad1/simple-agents/internal/gateway/render"
+	"github.com/ilijad1/simple-agents/internal/iolimit"
 )
 
 // slackAPINew builds a *slack.Client; indirected for tests.
@@ -40,7 +45,7 @@ func init() {
 		SetupSteps: []string{
 			"Create a Slack app at api.slack.com/apps (From scratch)",
 			"Socket Mode → enable it; generate an App-Level Token with connections:write (xapp-...)",
-			"OAuth & Permissions → add bot scopes chat:write, im:history, im:write; Install to Workspace; copy the Bot Token (xoxb-...)",
+			"OAuth & Permissions → add bot scopes chat:write, im:history, im:write, files:read; Install to Workspace; copy the Bot Token (xoxb-...)",
 			"Event Subscriptions → enable; subscribe to bot event message.im; reinstall if prompted",
 			"App Home → Messages Tab → enable it and check 'Allow users to send Slash commands and messages from the messages tab'",
 			"Paste BOTH tokens here, then DM your bot /start",
@@ -63,13 +68,61 @@ func init() {
 }
 
 // mapSlackDM converts an inbound Slack message event to a Message, returning
-// ok=false for the bot's own messages, bot messages, subtyped messages
-// (edits/joins), and non-DM channels.
+// ok=false for the bot's own messages, bot messages, non-DM channels, and
+// every subtyped message EXCEPT file_share — a file upload arrives as a
+// message with subtype "file_share" (its text is often empty; the file IS
+// the message), so it must pass through to be dispatched with an
+// Attachment. Every other subtype (message_changed, channel_join, message
+// edits, …) is still dropped.
 func mapSlackDM(user, channelType, text, ts, botID, subType, botUserID string) (Message, bool) {
-	if channelType != "im" || botID != "" || subType != "" || user == "" || user == botUserID {
+	if channelType != "im" || botID != "" || user == "" || user == botUserID {
+		return Message{}, false
+	}
+	if subType != "" && subType != "file_share" {
 		return Message{}, false
 	}
 	return Message{Platform: "slack", PlatformUserID: user, Text: text, MessageID: ts}, true
+}
+
+// slackFileDownloader is the seam for downloading a Slack file's bytes,
+// satisfied by *slack.Client.GetFile. Storing it as an interface field on
+// SlackGateway (rather than calling g.api.GetFile directly) lets a test
+// inject a fake without a live Slack workspace or bot token.
+type slackFileDownloader interface {
+	GetFile(downloadURL string, w io.Writer) error
+}
+
+// slackFileHosts allowlists the only host a Slack file download URL should
+// ever point at. Belt-and-braces, mirroring the Discord CDN allowlist: this
+// URL comes from Slack's own event payload rather than attacker-controlled
+// message text, but pinning to Slack's known file host means even a
+// malformed/tampered payload can't be used to make this code path reach an
+// arbitrary internal or external address. Var (not const) so a test can
+// point it at a hermetic fake host.
+var slackFileHosts = map[string]bool{
+	"files.slack.com": true,
+}
+
+// downloadSlackFile fetches a Slack file's bytes via the downloader seam,
+// bounded by an iolimit.CappingWriter. GetFile streams into a plain
+// io.Writer with no size bound of its own — capping the WRITE side (rather
+// than reading a response body, which slack.Client.GetFile does internally
+// and doesn't expose) is what stops an oversized file from being buffered
+// in full before anyone notices it's too big.
+func downloadSlackFile(dl slackFileDownloader, downloadURL string) ([]byte, error) {
+	parsed, err := url.Parse(downloadURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid file url: %w", err)
+	}
+	if !slackFileHosts[parsed.Hostname()] {
+		return nil, fmt.Errorf("file host %q is not a recognised slack file host", parsed.Hostname())
+	}
+	var buf bytes.Buffer
+	cw := iolimit.NewCappingWriter(&buf, maxAttachmentBytes)
+	if err := dl.GetFile(downloadURL, cw); err != nil {
+		return nil, fmt.Errorf("slack file download: %w", err)
+	}
+	return buf.Bytes(), nil
 }
 
 // parseSlackConfig extracts the app-level token from the encrypted_config JSON.
@@ -92,6 +145,7 @@ type SlackGateway struct {
 	sm               *socketmode.Client
 	ownerWorkspaceID string
 	dispatch         DispatchFunc
+	downloader       slackFileDownloader
 
 	mu         sync.Mutex
 	botUserID  string
@@ -106,6 +160,7 @@ func NewSlack(botToken, appToken, ownerWorkspaceID string, dispatch DispatchFunc
 		sm:               socketmode.New(api),
 		ownerWorkspaceID: ownerWorkspaceID,
 		dispatch:         dispatch,
+		downloader:       api, // *slack.Client satisfies slackFileDownloader
 		dmChannels:       map[string]string{},
 	}, nil
 }
@@ -157,6 +212,32 @@ func (g *SlackGateway) readLoop(ctx context.Context) {
 				msg, ok := mapSlackDM(me.User, me.ChannelType, me.Text, me.TimeStamp, me.BotID, me.SubType, botID)
 				if ok {
 					msg.WorkspaceID = g.ownerWorkspaceID
+					// A file_share message carries its file(s) on the event
+					// itself, not as a URL in the text — only the first file
+					// is imported (chat attachments are single-file, same as
+					// Telegram/Discord). slackevents.MessageEvent has no Files
+					// field of its own; for a non-message_changed event its
+					// custom UnmarshalJSON populates Message from the SAME
+					// top-level payload, and slack.Msg IS where "files"
+					// unmarshals to. The download needs g.api's bot-token
+					// auth, so it happens here (the handler), not inside the
+					// pure mapSlackDM. A download failure is logged AND
+					// surfaced as an explicit Attachment.Err — never silently
+					// swallowed into an empty-text dispatch, which the router
+					// could misread as an answer to an unrelated pending flow.
+					if me.Message != nil && len(me.Message.Files) > 0 {
+						f := me.Message.Files[0]
+						name := f.Name
+						if name == "" {
+							name = "attachment"
+						}
+						if data, err := downloadSlackFile(g.downloader, f.URLPrivateDownload); err == nil {
+							msg.Attachment = &Attachment{Filename: name, Data: data}
+						} else {
+							slog.Warn("gateway: slack file download failed", "err", err)
+							msg.Attachment = &Attachment{Filename: name, Err: err}
+						}
+					}
 					g.dispatch(context.Background(), msg)
 				}
 			}
