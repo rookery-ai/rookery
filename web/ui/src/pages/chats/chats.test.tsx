@@ -273,6 +273,57 @@ test("shows the creation timestamp as secondary text", async () => {
   expect(rowOne.textContent).toMatch(/Jul 1/);
 });
 
+test("opens a newly created chat on the first click", async () => {
+  // The GET /api/v1/chats list is deliberately slow to "refetch" (a real
+  // 300ms delay) so the invalidateQueries triggered by chat creation cannot
+  // possibly land before the assertion below runs — reproducing the window
+  // where the ["chats"] cache hasn't caught up with a just-created chat by
+  // the time ChatsPage's dead-selection guard runs. Without an optimistic
+  // cache insert in useCreateChat.onSuccess, the guard sees the newly-set
+  // selection missing from the still-stale cached list and clears it.
+  let localChats: Chat[] = [
+    { id: "c1", name: "Chat One", platform: "web", active: true, created_at: "2026-07-01T00:00:00Z", updated_at: "2026-07-17T07:00:00Z" },
+  ];
+  const created: Chat = {
+    id: "new1", name: "New chat", platform: "web", active: true,
+    created_at: "2026-07-17T07:10:00Z", updated_at: "2026-07-17T07:10:00Z",
+  };
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (url === "/api/v1/auth/session") return Promise.resolve(jsonResponse(SESSION_FIXTURE));
+      if (url === "/api/v1/chats" && method === "GET") {
+        return new Promise((resolve) => setTimeout(() => resolve(jsonResponse({ chats: localChats })), 300));
+      }
+      if (url === "/api/v1/chats" && method === "POST") {
+        localChats = [...localChats, created];
+        return Promise.resolve(jsonResponse(created));
+      }
+      if (url === "/api/v1/chats/new1" && method === "GET") {
+        return Promise.resolve(jsonResponse({ chat: created, messages: [] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  wrap();
+  await screen.findByText("Chat One", {}, { timeout: 2000 });
+
+  await userEvent.click(screen.getByRole("button", { name: /new chat/i }));
+
+  // Give the dead-selection guard's effect a tick to run before asserting —
+  // well under the 300ms list "refetch" delay above, so the cached list can
+  // only already contain the new chat via the optimistic insert.
+  await new Promise((r) => setTimeout(r, 100));
+
+  // The chat window for new1 must be shown — not cleared by the
+  // dead-selection guard — before any list refetch lands.
+  expect(await screen.findByTestId("chat-window")).toBeInTheDocument();
+});
+
 test("+ New chat creates a chat and selects it", async () => {
   mockFetch();
   wrap();
