@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 const MIN_ROWS = 1;
@@ -25,9 +25,15 @@ type ComposerProps = {
   // very first mount and miss that case. Undefined (the default for every
   // existing caller) never touches `value`, so this is purely additive.
   initialText?: string;
+  // Optional content rendered before the textarea, in the same row — used by
+  // ChatWindow's attach-file button so it sits inline with Send rather than
+  // in a second bar (which would double the border and vertical space).
+  // Undefined (every caller but ChatWindow) renders nothing, so this is
+  // purely additive.
+  leftSlot?: ReactNode;
 };
 
-export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, initialText }: ComposerProps) {
+export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, initialText, leftSlot }: ComposerProps) {
   const [value, setValue] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   // Set by send() when the textarea itself was the active element at the
@@ -108,6 +114,7 @@ export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, in
 
   return (
     <div className="flex items-end gap-2 border-t border-border p-3">
+      {leftSlot}
       <textarea
         ref={ref}
         rows={MIN_ROWS}

@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useRef, useState, type DragEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, AlertTriangle } from "lucide-react";
+import { MoreHorizontal, AlertTriangle, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { useChatDetail, useChatAction, sendChatMessage, type Chat, type ChatMessage } from "@/lib/chats";
+import { useUploadKBFile } from "@/lib/kb";
 import { ChatScroll } from "@/components/chat/ChatScroll";
 import { ChatMessageBubble, TypingIndicator } from "@/components/chat/Bubbles";
 import { Composer } from "@/components/chat/Composer";
@@ -12,6 +13,27 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
+// Mirrors web/api_kb.go's maxUploadBytes exactly — a client-side pre-check so
+// an obviously-oversized file gets an immediate, friendly message instead of
+// a round trip, but the SERVER remains the only authoritative guard (this
+// constant can drift and nothing breaks; a stale/looser client value just
+// means the 413 the server returns is the one the user actually sees).
+const MAX_ATTACH_BYTES = 25 * 1024 * 1024;
+
+// attachErrorMessage turns an upload failure into the three distinct,
+// readable outcomes the brief calls for: 413 (too large), 422 (unreadable
+// format), anything else (generic). Kept separate from the general chat-send
+// error handling in handleSend below because those are different failure
+// domains with different causes a user can act on.
+function attachErrorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 413) return "That file is too large (max 25 MB).";
+    if (err.status === 422) return "We can't read this kind of file.";
+    return err.message || "Something went wrong uploading that file.";
+  }
+  return "Something went wrong uploading that file.";
+}
 
 // Count-based reconciliation: consumes one fetched-message match per pending
 // entry instead of an existence check. An existence-based filter
@@ -66,6 +88,10 @@ export function ChatWindow({ chatId, initialText }: { chatId: string; initialTex
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const upload = useUploadKBFile();
+  const [attaching, setAttaching] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function handleSend(text: string) {
     setError(null);
@@ -98,6 +124,73 @@ export function ChatWindow({ chatId, initialText }: { chatId: string; initialTex
     action.mutate({ id: chatId, action: "delete" });
   }
 
+  // attachFiles uploads each file to the shared KB-import endpoint (same
+  // path the KB page's own attach button uses), one at a time — a deliberate
+  // choice, not an oversight: uploads land on ImportFile's per-workspace
+  // mutex anyway (see internal/vault's per-workspace import lock), and each
+  // successful import posts its own confirmation as a REAL chat turn (see
+  // below), so importing serially keeps those turns in file order instead of
+  // racing.
+  //
+  // Design choice — WHY this posts through handleSend (a real coder turn)
+  // instead of a client-only system line: the adapters (Telegram/Discord)
+  // reply with a canned acknowledgement at the ROUTER level, never invoking
+  // the coder. Web chat has no equivalent "router reply" surface — the only
+  // way to persist a message into this chat's history (so it survives a
+  // reload and the assistant can reference the note on a later turn) is the
+  // existing send endpoint, which always runs the coder. Inventing a new
+  // endpoint just to persist a non-coder system line was judged NOT worth it
+  // per the brief's own steer to avoid new backend surface when reuse is
+  // available — reuse here is the sendChatMessage path already wired below.
+  async function attachFiles(files: File[]) {
+    if (files.length === 0) return;
+    setAttaching(true);
+    try {
+      for (const file of files) {
+        if (file.size > MAX_ATTACH_BYTES) {
+          setError("That file is too large (max 25 MB).");
+          continue;
+        }
+        try {
+          const res = await upload.mutateAsync({ file });
+          const warningNote = res.warnings?.length ? `\n\n_Note: ${res.warnings.join("; ")}_` : "";
+          const confirmation = `📎 Attached **${file.name}** to my knowledge base as \`${res.note_path}\`.${warningNote}`;
+          await handleSend(confirmation);
+        } catch (err) {
+          // A failed import must never post a success confirmation — this
+          // catch is scoped to exactly the upload call above, so handleSend
+          // (and its own turn) is only ever reached on a successful import.
+          setError(attachErrorMessage(err));
+        }
+      }
+    } finally {
+      setAttaching(false);
+    }
+  }
+
+  function handleDragOver(e: DragEvent<HTMLDivElement>) {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    setDragOver(true);
+  }
+
+  function handleDragLeave(e: DragEvent<HTMLDivElement>) {
+    // Ignore a dragleave fired when moving from this wrapper onto one of its
+    // own children — only clear the highlight once the pointer truly leaves
+    // the whole drop zone (mirrors the KB tree's own drag-highlight guard).
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setDragOver(false);
+  }
+
+  function handleDrop(e: DragEvent<HTMLDivElement>) {
+    const files = Array.from(e.dataTransfer.files ?? []);
+    if (files.length === 0) return;
+    e.preventDefault();
+    setDragOver(false);
+    void attachFiles(files);
+  }
+
   if (isLoading || !data) {
     return <div className="flex h-full items-center justify-center text-sm text-muted-2">Loading…</div>;
   }
@@ -105,8 +198,46 @@ export function ChatWindow({ chatId, initialText }: { chatId: string; initialTex
   const { chat, messages } = data;
   const allMessages = [...messages, ...pending];
 
+  const attachControl = (
+    <>
+      <button
+        type="button"
+        aria-label="Attach file"
+        disabled={busy || attaching}
+        onClick={() => fileInputRef.current?.click()}
+        className={cn(
+          "shrink-0 rounded-lg p-2 text-muted-2 hover:bg-border hover:text-foreground",
+          "disabled:cursor-not-allowed disabled:opacity-50",
+        )}
+      >
+        <Paperclip className="size-4" />
+      </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="sr-only"
+        aria-label="Attach file"
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          e.target.value = ""; // allow re-picking the same file(s) again
+          void attachFiles(files);
+        }}
+      />
+    </>
+  );
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div
+      className={cn(
+        "flex h-full min-h-0 flex-col",
+        dragOver && "ring-2 ring-inset ring-ring",
+      )}
+      data-testid="chat-window"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <h2 className="truncate text-sm font-bold">{chat.name}</h2>
@@ -144,7 +275,8 @@ export function ChatWindow({ chatId, initialText }: { chatId: string; initialTex
         {allMessages.map((m, i) => (
           <ChatMessageBubble key={i} role={m.role} content={m.content} />
         ))}
-        {busy && <TypingIndicator />}
+        {attaching && <TypingIndicator label="Attaching…" />}
+        {busy && !attaching && <TypingIndicator />}
       </ChatScroll>
 
       {error && (
@@ -154,7 +286,7 @@ export function ChatWindow({ chatId, initialText }: { chatId: string; initialTex
         </div>
       )}
 
-      <Composer onSend={handleSend} busy={busy} initialText={initialText} />
+      <Composer onSend={handleSend} busy={busy || attaching} initialText={initialText} leftSlot={attachControl} />
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="max-w-sm">
