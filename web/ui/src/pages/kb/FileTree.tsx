@@ -1,12 +1,13 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   Folder, FolderOpen, FileText, Brain, Bot, MessageSquare, Sparkles,
-  ChevronRight, MoreHorizontal, type LucideIcon,
+  ChevronRight, MoreHorizontal, FolderInput, Trash2, X, type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import {
-  useKBTree, useNewNote, useDeleteNote, useRenameNote, useSaveKBOrder, type KBNode,
+  useKBTree, useNewNote, useDeleteNote, useRenameNote, useSaveKBOrder,
+  useSetKBIcon, type KBNode,
 } from "@/lib/kb";
 import { useToast } from "@/components/shell/Toast";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import EmojiPicker from "./EmojiPicker";
+import { FolderSelect } from "./FolderSelect";
 
 // The backend (web/api_kb.go's kbSystemDirs) marks the root-level `memory`
 // dir system:true — it groups it with agents/chats/skills/reminders/inbox as
@@ -37,7 +40,7 @@ function isEffectivelySystem(node: KBNode): boolean {
 // lists: anything that appeared since the last drag — a note an agent just
 // wrote — is NOT silently pinned to an arbitrary spot, it falls through to the
 // derived rules below and sorts after the explicitly-ordered block.
-function sortNodes(nodes: KBNode[], order: string[] = []): KBNode[] {
+export function sortNodes(nodes: KBNode[], order: string[] = []): KBNode[] {
   const rank = new Map(order.map((name, i) => [name, i]));
   return [...nodes].sort((a, b) => {
     const ra = rank.get(a.name), rb = rank.get(b.name);
@@ -66,17 +69,57 @@ function sortNodes(nodes: KBNode[], order: string[] = []): KBNode[] {
 // The dragged node has to be readable during `dragover` (to decide whether a
 // target is legal and which indicator to draw), and the HTML5 DataTransfer is
 // deliberately unreadable until `drop` — so it lives in context instead.
-type DraggedNode = { path: string; name: string; parent: string; isDir: boolean };
+type DraggedNode = {
+  path: string;
+  name: string;
+  parent: string;
+  isDir: boolean;
+  // When the dragged row is part of a multi-selection of 2+, this carries the
+  // whole selection so a drop moves all of them. Absent for a single-row drag.
+  selection?: string[];
+};
 
 const DragCtx = createContext<{
   dragged: DraggedNode | null;
   setDragged: (d: DraggedNode | null) => void;
 }>({ dragged: null, setDragged: () => {} });
 
-function parentOf(path: string): string {
+export function parentOf(path: string): string {
   const i = path.lastIndexOf("/");
   return i === -1 ? "" : path.slice(0, i);
 }
+
+export function baseName(path: string): string {
+  return path.split("/").pop() ?? path;
+}
+
+// ── Multi-select ─────────────────────────────────────────────────────────────
+//
+// Ctrl/Cmd-click toggles a path in the selection; Shift-click selects the range
+// between the anchor and the clicked row over the currently-VISIBLE rows. The
+// visible order is read straight from the DOM at click time (every row carries a
+// `data-kb-path`), scoped to the tree container — so range selection follows
+// exactly what the user sees, including expanded children, without maintaining a
+// separate flattened registry across the lazily-loaded nested levels.
+type SelectionCtxValue = {
+  selected: Set<string>;
+  isSelected: (path: string) => boolean;
+  // Handle a row's click with modifier keys. Returns true when it consumed the
+  // click as a selection gesture (caller should NOT then open/expand the row).
+  onRowClick: (path: string, e: React.MouseEvent) => boolean;
+  // Called on a plain (no-modifier) click so the anchor tracks the last simple
+  // click even though the multi-selection is cleared.
+  setAnchor: (path: string) => void;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+};
+
+const SelectionCtx = createContext<SelectionCtxValue>({
+  selected: new Set(),
+  isSelected: () => false,
+  onRowClick: () => false,
+  setAnchor: () => {},
+  containerRef: { current: null },
+});
 
 // A folder can't be dropped inside itself or anything beneath it — that would
 // ask os.Rename to move a directory into its own subtree.
@@ -98,38 +141,68 @@ function iconFor(node: KBNode, expanded: boolean): LucideIcon {
   return SPECIAL_DIR_ICONS[node.name] ?? (expanded ? FolderOpen : Folder);
 }
 
+// NodeIcon renders a node's custom emoji when one is set, otherwise the default
+// lucide icon. Shared by the tree rows and (via the exported helper) the folder
+// page / note header so the same node shows the same icon everywhere.
+export function NodeIcon({
+  node,
+  expanded,
+  className,
+}: {
+  node: KBNode;
+  expanded?: boolean;
+  className?: string;
+}) {
+  if (node.icon) {
+    return (
+      <span className={cn("inline-flex items-center justify-center leading-none", className)} aria-hidden>
+        {node.icon}
+      </span>
+    );
+  }
+  const Icon = iconFor(node, !!expanded);
+  return <Icon className={cn("size-4 shrink-0", className)} />;
+}
+
 type NewKind = "note" | "folder";
 
 // Shared by the per-row "New note…"/"New folder…" actions and the pane
-// header's root-level "New note" button.
+// header's root-level "New note" button. `dirPath` seeds the Location picker's
+// default; when `pickLocation` is true (the pane-header + button, which isn't
+// anchored to a specific folder) the user can retarget it to any folder.
 export function NewEntryDialog({
   dirPath,
   kind,
   open,
   onOpenChange,
+  pickLocation = false,
 }: {
   dirPath: string;
   kind: NewKind;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  pickLocation?: boolean;
 }) {
   const [name, setName] = useState("");
+  const [location, setLocation] = useState(dirPath);
   const [error, setError] = useState("");
   const newNote = useNewNote();
 
   useEffect(() => {
     if (open) {
       setName("");
+      setLocation(dirPath);
       setError("");
     }
-  }, [open]);
+  }, [open, dirPath]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     let n = name.trim();
     if (!n) return;
     if (kind === "note" && !n.endsWith(".md")) n += ".md";
-    const path = dirPath ? `${dirPath}/${n}` : n;
+    const dir = pickLocation ? location : dirPath;
+    const path = dir ? `${dir}/${n}` : n;
     try {
       await newNote.mutateAsync({ path, is_dir: kind === "folder" });
       onOpenChange(false);
@@ -149,6 +222,12 @@ export function NewEntryDialog({
             <Label htmlFor="new-entry-name">Name</Label>
             <Input id="new-entry-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
           </div>
+          {pickLocation && (
+            <div className="space-y-1.5">
+              <Label htmlFor="new-entry-location">Location</Label>
+              <FolderSelect id="new-entry-location" value={location} onChange={setLocation} />
+            </div>
+          )}
           {error && <p className="text-danger text-sm">{error}</p>}
           <Button type="submit" className="w-full">Create</Button>
         </form>
@@ -250,7 +329,7 @@ function DeleteDialog({
   );
 }
 
-type DialogKind = "new-note" | "new-folder" | "rename" | "delete" | null;
+type DialogKind = "new-note" | "new-folder" | "rename" | "delete" | "icon" | null;
 
 function TreeRow({
   node,
@@ -279,11 +358,17 @@ function TreeRow({
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [hint, setHint] = useState<DropHint>(null);
   const { dragged, setDragged } = useContext(DragCtx);
+  const selection = useContext(SelectionCtx);
+  const setIcon = useSetKBIcon();
   const selected = selectedPath === node.path;
-  const Icon = iconFor(node, expanded);
+  const multiSelected = selection.isSelected(node.path);
 
-  function handleClick() {
-    if (node.is_dir) setExpanded((e) => !e);
+  function handleClick(e?: React.MouseEvent) {
+    // Ctrl/Cmd or Shift click is a multi-selection gesture — it must not open
+    // or expand the row.
+    if (e && selection.onRowClick(node.path, e)) return;
+    selection.setAnchor(node.path);
+    if (node.is_dir) setExpanded((x) => !x);
     onSelect(node.path, node.is_dir, node.display_name);
   }
 
@@ -386,6 +471,7 @@ function TreeRow({
   return (
     <div
       draggable
+      data-kb-path={node.path}
       onDragStart={(e) => {
         e.stopPropagation();
         setDragged({
@@ -393,6 +479,10 @@ function TreeRow({
           name: node.name,
           parent: parentOf(node.path),
           isDir: node.is_dir,
+          selection:
+            multiSelected && selection.selected.size > 1
+              ? [...selection.selected]
+              : undefined,
         });
         // Payload is set for completeness/interop; the live drag state that
         // dragover needs comes from DragCtx (DataTransfer is write-only until
@@ -452,7 +542,7 @@ function TreeRow({
           className={cn(
             "flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-1 text-sm",
             dragged ? "cursor-grabbing" : "cursor-pointer",
-            selected ? "bg-border" : "hover:bg-chrome",
+            multiSelected ? "bg-accent/20" : selected ? "bg-border" : "hover:bg-chrome",
             isEffectivelySystem(node) && "text-muted-2",
           )}
         >
@@ -463,7 +553,7 @@ function TreeRow({
           ) : (
             <span className="size-3.5 shrink-0" />
           )}
-          <Icon className="size-4 shrink-0" />
+          <NodeIcon node={node} expanded={expanded} className="size-4 shrink-0 text-[15px]" />
           <span className="flex-1 truncate">{node.display_name}</span>
         </div>
         <DropdownMenu>
@@ -482,6 +572,7 @@ function TreeRow({
                 <DropdownMenuItem onSelect={() => setDialog("new-folder")}>New folder…</DropdownMenuItem>
               </>
             )}
+            <DropdownMenuItem onSelect={() => setDialog("icon")}>Change icon…</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setDialog("rename")}>Rename…</DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onSelect={() => setDialog("delete")}>
               Delete…
@@ -514,6 +605,12 @@ function TreeRow({
       )}
       <RenameDialog node={node} open={dialog === "rename"} onOpenChange={(o) => setDialog(o ? "rename" : null)} />
       <DeleteDialog node={node} open={dialog === "delete"} onOpenChange={(o) => setDialog(o ? "delete" : null)} />
+      <EmojiPicker
+        open={dialog === "icon"}
+        onOpenChange={(o) => setDialog(o ? "icon" : null)}
+        current={node.icon}
+        onSelect={(emoji) => setIcon.mutate({ path: node.path, icon: emoji ?? "" })}
+      />
     </div>
   );
 }
@@ -630,26 +727,103 @@ export default function FileTree({
   const { toast } = useToast();
   const dragCtx = useMemo(() => ({ dragged, setDragged }), [dragged]);
 
+  // ── Multi-selection state ────────────────────────────────────────────────
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const anchorRef = useRef<string | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const clearSelection = useCallback(() => setSelected(new Set()), []);
+
+  // Reads the visible row paths straight from the DOM, in document (pre-order)
+  // order — which is exactly what the user sees, including expanded children.
+  const visiblePaths = useCallback((): string[] => {
+    const el = containerRef.current;
+    if (!el) return [];
+    return Array.from(el.querySelectorAll<HTMLElement>("[data-kb-path]"))
+      .map((n) => n.dataset.kbPath ?? "")
+      .filter(Boolean);
+  }, []);
+
+  const onRowClick = useCallback(
+    (path: string, e: React.MouseEvent): boolean => {
+      if (e.metaKey || e.ctrlKey) {
+        setSelected((prev) => {
+          const next = new Set(prev);
+          if (next.has(path)) next.delete(path);
+          else next.add(path);
+          return next;
+        });
+        anchorRef.current = path;
+        return true;
+      }
+      if (e.shiftKey) {
+        const order = visiblePaths();
+        const anchor = anchorRef.current ?? path;
+        const a = order.indexOf(anchor);
+        const b = order.indexOf(path);
+        if (a === -1 || b === -1) {
+          setSelected(new Set([path]));
+        } else {
+          const [lo, hi] = a <= b ? [a, b] : [b, a];
+          setSelected(new Set(order.slice(lo, hi + 1)));
+        }
+        return true;
+      }
+      return false; // plain click — caller proceeds to open/expand
+    },
+    [visiblePaths],
+  );
+
+  const setAnchor = useCallback((path: string) => {
+    anchorRef.current = path;
+    setSelected(new Set());
+  }, []);
+
+  const selectionCtx = useMemo<SelectionCtxValue>(
+    () => ({
+      selected,
+      isSelected: (p: string) => selected.has(p),
+      onRowClick,
+      setAnchor,
+      containerRef,
+    }),
+    [selected, onRowClick, setAnchor],
+  );
+
   // Moves are owned by the root so a drag can cross levels — the source row
-  // and the destination folder are usually in different TreeLevels.
-  function handleMoveInto(d: DraggedNode, folder: KBNode) {
-    const to = folder.path ? `${folder.path}/${d.name}` : d.name;
+  // and the destination folder are usually in different TreeLevels. When the
+  // drag carries a multi-selection, move every selected path into the folder.
+  function moveOne(from: string, folderPath: string) {
+    const to = folderPath ? `${folderPath}/${baseName(from)}` : baseName(from);
+    if (to === from) return; // already there
     renameNote.mutate(
-      { from: d.path, to },
+      { from, to },
       {
-        onSuccess: () => onMoved?.(d.path, to),
+        onSuccess: () => onMoved?.(from, to),
         onError: (err) =>
           toast({
-            message: err instanceof ApiError ? err.message : `Couldn't move “${d.name}”`,
+            message: err instanceof ApiError ? err.message : `Couldn't move “${baseName(from)}”`,
             variant: "error",
           }),
       },
     );
   }
 
+  function handleMoveInto(d: DraggedNode, folder: KBNode) {
+    const paths = d.selection && d.selection.length > 1 ? d.selection : [d.path];
+    for (const p of paths) {
+      // A folder can't be moved into itself or its own subtree.
+      if (folder.path === p || folder.path.startsWith(p + "/")) continue;
+      moveOne(p, folder.path);
+    }
+    clearSelection();
+  }
+
   return (
     <DragCtx.Provider value={dragCtx}>
+     <SelectionCtx.Provider value={selectionCtx}>
       <div
+        ref={containerRef}
         className={cn(
           "h-full px-1 py-1",
           fileDragging && "rounded ring-2 ring-inset ring-ring",
@@ -698,6 +872,121 @@ export default function FileTree({
           onImportFiles={onImportFiles}
         />
       </div>
+      <SelectionActionBar selected={selected} onClear={clearSelection} onMoved={onMoved} />
+     </SelectionCtx.Provider>
     </DragCtx.Provider>
+  );
+}
+
+// SelectionActionBar floats above the pane when 2+ items are multi-selected,
+// offering bulk Move (into a chosen folder) and Delete. Move renames each item
+// into the target folder; Delete uses a single confirm (matching the tree's
+// existing per-row delete UX) then deletes each. Both clear the selection when
+// done.
+function SelectionActionBar({
+  selected,
+  onClear,
+  onMoved,
+}: {
+  selected: Set<string>;
+  onClear: () => void;
+  onMoved?: (from: string, to: string) => void;
+}) {
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [target, setTarget] = useState("");
+  const [busy, setBusy] = useState(false);
+  const renameNote = useRenameNote();
+  const deleteNote = useDeleteNote();
+  const { toast } = useToast();
+
+  if (selected.size < 2) return null;
+  const paths = [...selected];
+  const count = paths.length;
+
+  async function doMove() {
+    setBusy(true);
+    for (const from of paths) {
+      // Skip a folder being moved into itself/its subtree, and no-op moves.
+      if (target === from || target.startsWith(from + "/")) continue;
+      const to = target ? `${target}/${baseName(from)}` : baseName(from);
+      if (to === from) continue;
+      try {
+        await renameNote.mutateAsync({ from, to });
+        onMoved?.(from, to);
+      } catch (err) {
+        toast({
+          message: err instanceof ApiError ? `Couldn't move “${baseName(from)}”: ${err.message}` : `Couldn't move “${baseName(from)}”`,
+          variant: "error",
+        });
+      }
+    }
+    setBusy(false);
+    setMoveOpen(false);
+    onClear();
+  }
+
+  async function doDelete() {
+    setBusy(true);
+    for (const p of paths) {
+      try {
+        await deleteNote.mutateAsync({ path: p });
+      } catch (err) {
+        toast({
+          message: err instanceof ApiError ? `Couldn't delete “${baseName(p)}”: ${err.message}` : `Couldn't delete “${baseName(p)}”`,
+          variant: "error",
+        });
+      }
+    }
+    setBusy(false);
+    setDeleteOpen(false);
+    onClear();
+  }
+
+  return (
+    <>
+      <div className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-border bg-chrome px-3 py-2 shadow-lg">
+        <span className="text-sm text-muted-2">{count} selected</span>
+        <div className="mx-1 h-4 w-px bg-border" />
+        <Button variant="ghost" size="sm" onClick={() => { setTarget(""); setMoveOpen(true); }}>
+          <FolderInput className="mr-1 size-4" /> Move…
+        </Button>
+        <Button variant="ghost" size="sm" className="text-danger" onClick={() => setDeleteOpen(true)}>
+          <Trash2 className="mr-1 size-4" /> Delete
+        </Button>
+        <Button variant="ghost" size="icon-sm" aria-label="Clear selection" onClick={onClear}>
+          <X className="size-4" />
+        </Button>
+      </div>
+
+      <Dialog open={moveOpen} onOpenChange={setMoveOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Move {count} items</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="bulk-move-target">Destination folder</Label>
+            <FolderSelect id="bulk-move-target" value={target} onChange={setTarget} disabledPaths={paths} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMoveOpen(false)} disabled={busy}>Cancel</Button>
+            <Button onClick={doMove} disabled={busy}>Move</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete {count} items?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-2">This can’t be undone.</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={busy}>Cancel</Button>
+            <Button variant="destructive" onClick={doDelete} disabled={busy}>Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

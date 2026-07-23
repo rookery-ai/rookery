@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { FileText } from "lucide-react";
+import EmojiPicker from "./EmojiPicker";
 
 // Redeclared locally (identical literal set to NoteEditor's `SaveState`)
 // rather than imported from NoteEditor — NoteEditor renders NoteHeader, so
@@ -41,6 +43,8 @@ export default function NoteHeader({
   onToggleRaw,
   renameError,
   lossyInRichText,
+  icon,
+  onSetIcon,
 }: {
   path: string;
   state: EditorSaveState;
@@ -49,6 +53,10 @@ export default function NoteHeader({
   onDelete: () => void;
   rawMode: boolean;
   onToggleRaw: () => void;
+  // The note's custom emoji + a setter (null clears it). Notion-style icon that
+  // sits before the title.
+  icon?: string;
+  onSetIcon?: (emoji: string | null) => void;
   // True when this note failed the round-trip fidelity check but is being
   // edited in rich text anyway (the user took the override). The one-time
   // banner is gone by then, so the risk needs a permanent home — saving will
@@ -65,6 +73,7 @@ export default function NoteHeader({
 }) {
   const [, setParams] = useSearchParams();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [iconOpen, setIconOpen] = useState(false);
 
   const segments = path.split("/");
   const filename = segments[segments.length - 1];
@@ -129,6 +138,16 @@ export default function NoteHeader({
 
   return (
     <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2">
+      {onSetIcon && (
+        <button
+          type="button"
+          aria-label="Change note icon"
+          onClick={() => setIconOpen(true)}
+          className="flex size-7 shrink-0 items-center justify-center rounded text-lg hover:bg-chrome"
+        >
+          {icon ? <span aria-hidden>{icon}</span> : <FileText className="size-4 text-muted-2" />}
+        </button>
+      )}
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-center gap-1.5">
           {segments.slice(0, -1).map((seg, i) => {
@@ -218,6 +237,10 @@ export default function NoteHeader({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {onSetIcon && (
+        <EmojiPicker open={iconOpen} onOpenChange={setIconOpen} current={icon} onSelect={onSetIcon} />
+      )}
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="max-w-sm">

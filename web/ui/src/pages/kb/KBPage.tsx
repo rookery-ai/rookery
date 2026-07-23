@@ -10,6 +10,7 @@ import { useUploadKBFile } from "@/lib/kb";
 import FileTree, { NewEntryDialog } from "./FileTree";
 import NoteEditor from "./NoteEditor";
 import FileViewer from "./FileViewer";
+import FolderPage from "./FolderPage";
 import SearchBox from "./SearchBox";
 import RecentFiles from "./RecentFiles";
 import { useRecentFiles } from "./useRecentFiles";
@@ -44,14 +45,24 @@ async function importFiles(
   }
 }
 
-function KBPaneHeader({ onPickFiles }: { onPickFiles: (files: File[]) => void }) {
+function KBPaneHeader({
+  onPickFiles,
+  currentDir,
+}: {
+  onPickFiles: (files: File[]) => void;
+  // The folder the new-note picker defaults to (the active folder, or the open
+  // file's parent, or root). The picker still lets the user retarget it.
+  currentDir: string;
+}) {
   const [newOpen, setNewOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   return (
     <ContextPaneHeader
       title="Knowledge Base"
       action={
-        <>
+        // Both actions in one flex row with a consistent gap so the import and
+        // new-note buttons align (previously they sat unwrapped and drifted).
+        <div className="flex items-center gap-0.5">
           <Button
             variant="ghost" size="icon-sm" aria-label="Import file"
             onClick={() => fileInputRef.current?.click()}
@@ -75,8 +86,14 @@ function KBPaneHeader({ onPickFiles }: { onPickFiles: (files: File[]) => void })
           >
             <Plus className="size-4" />
           </Button>
-          <NewEntryDialog dirPath="" kind="note" open={newOpen} onOpenChange={setNewOpen} />
-        </>
+          <NewEntryDialog
+            dirPath={currentDir}
+            kind="note"
+            open={newOpen}
+            onOpenChange={setNewOpen}
+            pickLocation
+          />
+        </div>
       }
     />
   );
@@ -137,7 +154,12 @@ export default function KBPage() {
   const path = params.get("path");
   const isDirHint = params.get("dir") === "1";
   const isFile = !!path && !isDirHint;
+  const isDir = !!path && isDirHint;
   const isMarkdown = !!path && path.toLowerCase().endsWith(".md");
+
+  // The folder the pane-header "+" defaults to: the open folder itself, the open
+  // file's parent, or root.
+  const currentDir = !path ? "" : isDir ? path : path.split("/").slice(0, -1).join("/");
 
   const upload = useUploadKBFile();
   const { toast } = useToast();
@@ -189,7 +211,10 @@ export default function KBPage() {
     <>
       <ContextPane>
         <div className="flex h-full flex-col">
-          <KBPaneHeader onPickFiles={(files) => void importFiles(files, upload, toast)} />
+          <KBPaneHeader
+            onPickFiles={(files) => void importFiles(files, upload, toast, currentDir)}
+            currentDir={currentDir}
+          />
           {/* Recent is a fixed block above the tree, NOT inside a scroll
               container of its own: SearchBox is `h-full` and owns the pane's
               only scroll region (for the tree/results). Wrapping both in a
@@ -220,6 +245,8 @@ export default function KBPage() {
         ) : (
           <FileViewer path={path} key={path} />
         )
+      ) : isDir ? (
+        <FolderPage path={path!} key={path} onOpen={openPath} />
       ) : (
         <KBEmptyState />
       )}

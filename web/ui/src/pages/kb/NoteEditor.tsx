@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { AlertTriangle, ChevronDown, Info, Loader2, Link2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { useKBNote, useSaveNote, useRenameNote, useDeleteNote } from "@/lib/kb";
+import { useKBNote, useSaveNote, useRenameNote, useDeleteNote, useSetKBIcon } from "@/lib/kb";
 import { Button } from "@/components/ui/button";
 import { buildExtensions, toMarkdown, checkFidelity } from "./editor";
 import { splitFrontmatter, joinFrontmatter, parseFrontmatterFields } from "./frontmatter";
@@ -91,6 +91,7 @@ export default function NoteEditor({
   const saveNote = useSaveNote();
   const renameNote = useRenameNote();
   const deleteNote = useDeleteNote();
+  const setIcon = useSetKBIcon();
   // KBPage already owns the "path" search param and keys NoteEditor by it
   // (key={path}), so a navigation from inside this component can just write
   // the same param directly — no prop needs threading down from KBPage for
@@ -619,6 +620,8 @@ export default function NoteEditor({
         onToggleRaw={handleToggleRaw}
         renameError={renameError}
         lossyInRichText={fidelityFailed && mode === "wysiwyg"}
+        icon={data.icon}
+        onSetIcon={(emoji) => setIcon.mutate({ path, icon: emoji ?? "" })}
       />
 
       {/* Suppressed while renameError is shown: flushForHandoff's onError

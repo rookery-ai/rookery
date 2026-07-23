@@ -61,6 +61,143 @@ func (s *Server) registerKBAPI(g *echo.Group) {
 	g.GET("/kb/raw", s.rawKBNote)
 	g.PUT("/kb/order", s.apiSaveKBOrder)
 	g.POST("/kb/upload", s.apiUploadKBFile)
+	g.PUT("/kb/icon", s.apiSaveKBIcon)
+	g.GET("/kb/folders", s.apiKBFolders)
+}
+
+// ── Icons ────────────────────────────────────────────────────────────────────
+//
+// Like tree ordering (kbOrderSettingKey above), custom per-node emoji icons are
+// stored OUT of band — one JSON blob per workspace in workspace_settings — so
+// nothing is written into the vault itself (a stray icon sidecar would show up
+// in the tree and in agents' reads of the KB). Shape: {"<rel path>": "<emoji>"}.
+//
+// Unlike kb_order (which keys by name-WITHIN-a-dir, so a rename just drops the
+// entry out of its list and degrades gracefully), icons key by FULL PATH — so a
+// rename/move/delete that didn't maintain this map would orphan the icon or
+// leave it pointing at a path that no longer exists. apiRenameKBNote and
+// apiDeleteKBNoteAPI below re-key/drop entries accordingly (incl. every
+// descendant when a folder moves or is deleted).
+const kbIconsSettingKey = "kb_icons"
+
+type apiKBIconRequest struct {
+	Path string `json:"path"`
+	Icon string `json:"icon"`
+}
+
+// loadKBIcons reads the whole path→emoji map. A missing/corrupt value is not an
+// error: icons are a preference, and losing them degrades to the default lucide
+// icons rather than breaking the tree.
+func (s *Server) loadKBIcons(workspaceID string) map[string]string {
+	out := map[string]string{}
+	raw, err := s.db.GetSetting(workspaceID, kbIconsSettingKey)
+	if err != nil || raw == "" {
+		return out
+	}
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return map[string]string{}
+	}
+	return out
+}
+
+func (s *Server) saveKBIcons(workspaceID string, icons map[string]string) error {
+	blob, err := json.Marshal(icons)
+	if err != nil {
+		return err
+	}
+	return s.db.SetSetting(workspaceID, kbIconsSettingKey, string(blob))
+}
+
+// migrateIconKeys re-keys the icon map when a path moves. It moves the exact
+// entry for `from`→`to` AND, so a folder move carries its whole subtree's
+// icons, every entry keyed under `from/…` → `to/…`. Returns whether anything
+// changed (so the caller can skip a needless DB write). Pure map surgery — the
+// caller decides when to persist.
+func migrateIconKeys(icons map[string]string, from, to string) bool {
+	changed := false
+	fromPrefix := from + "/"
+	toPrefix := to + "/"
+	for k, v := range icons {
+		var nk string
+		switch {
+		case k == from:
+			nk = to
+		case strings.HasPrefix(k, fromPrefix):
+			nk = toPrefix + strings.TrimPrefix(k, fromPrefix)
+		default:
+			continue
+		}
+		delete(icons, k)
+		icons[nk] = v
+		changed = true
+	}
+	return changed
+}
+
+// dropIconKeys removes the entry for `p` and every descendant (`p/…`). Returns
+// whether anything changed.
+func dropIconKeys(icons map[string]string, p string) bool {
+	changed := false
+	prefix := p + "/"
+	for k := range icons {
+		if k == p || strings.HasPrefix(k, prefix) {
+			delete(icons, k)
+			changed = true
+		}
+	}
+	return changed
+}
+
+// apiSaveKBIcon sets (or, with an empty icon, clears) a node's custom emoji.
+// PUT /api/v1/kb/icon {path,icon} → 200 {"ok":true}
+func (s *Server) apiSaveKBIcon(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	if s.vault == nil {
+		return s.kbUnavailable(c)
+	}
+	var req apiKBIconRequest
+	if err := bindAPI(c, &req); err != nil {
+		return err
+	}
+	// Path-safety discipline even though only settings are touched (matches
+	// apiSaveKBOrder): a traversal attempt must not be usable to plant a key.
+	rel := cleanKBParam(req.Path)
+	if rel == "" {
+		return jsonErr(c, http.StatusBadRequest, "invalid_path", "a path is required")
+	}
+	if _, err := s.vault.Resolve(u.ID, rel); err != nil {
+		status, code := vaultErrStatus(err)
+		return jsonErr(c, status, code, "invalid path: "+err.Error())
+	}
+	icons := s.loadKBIcons(u.ID)
+	icon := strings.TrimSpace(req.Icon)
+	if icon == "" {
+		delete(icons, rel)
+	} else {
+		icons[rel] = icon
+	}
+	if err := s.saveKBIcons(u.ID, icons); err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", "could not save icon")
+	}
+	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
+}
+
+// apiKBFolders returns every folder path in the vault (root "" included), for
+// the new-note "Location" picker and the bulk-Move picker. Walks the vault dirs
+// only, skipping the hidden .kb internal dir. Ordered depth-first, parents
+// before children.
+// GET /api/v1/kb/folders → 200 {"folders":["","notes","projects",...]}
+func (s *Server) apiKBFolders(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	if s.vault == nil {
+		return s.kbUnavailable(c)
+	}
+	_ = s.vault.EnsureScaffold(u.ID)
+	folders, err := s.vault.ListFolders(u.ID)
+	if err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", "could not list folders: "+err.Error())
+	}
+	return c.JSON(http.StatusOK, map[string]any{"folders": orEmpty(folders)})
 }
 
 // ── Tree ordering ────────────────────────────────────────────────────────────
@@ -155,6 +292,9 @@ type apiKBNode struct {
 	Path        string `json:"path"`
 	IsDir       bool   `json:"is_dir"`
 	System      bool   `json:"system"`
+	// Icon is the user's custom emoji for this node ("" = client uses its
+	// default lucide icon). Stored out-of-band in kb_icons; see loadKBIcons.
+	Icon string `json:"icon"`
 }
 
 type apiKBTreeResponse struct {
@@ -180,6 +320,9 @@ type apiKBNoteResponse struct {
 	// kbInlineMax), or "binary" (a Download-only panel; Content is omitted).
 	// Decided by content sniffing, not an extension allowlist — see spec §7.
 	Kind string `json:"kind"`
+	// Icon is the note's custom emoji ("" = default). Same kb_icons source as
+	// the tree nodes.
+	Icon string `json:"icon"`
 }
 
 type apiSaveKBNoteRequest struct {
@@ -246,6 +389,7 @@ func (s *Server) apiKBTree(c echo.Context) error {
 	}
 	s.enrichKBDisplayNames(u.ID, rel, nodes)
 
+	icons := s.loadKBIcons(u.ID)
 	isRoot := rel == ""
 	out := make([]apiKBNode, 0, len(nodes))
 	for _, n := range nodes {
@@ -259,6 +403,7 @@ func (s *Server) apiKBTree(c echo.Context) error {
 			Path:        n.Path,
 			IsDir:       n.IsDir,
 			System:      isRoot && n.IsDir && kbSystemDirs[n.Name],
+			Icon:        icons[n.Path],
 		})
 	}
 	return c.JSON(http.StatusOK, apiKBTreeResponse{
@@ -297,6 +442,7 @@ func (s *Server) apiGetKBNote(c echo.Context) error {
 			Content:   string(data),
 			Backlinks: []string{},
 			Kind:      "markdown",
+			Icon:      s.loadKBIcons(u.ID)[rel],
 		}
 		resp.HTML = string(s.renderMarkdown(u.ID, resp.Content))
 		if back, err := s.vault.Backlinks(u.ID, rel); err == nil {
@@ -318,7 +464,7 @@ func (s *Server) apiGetKBNote(c echo.Context) error {
 		return jsonErr(c, status, code, "could not open note: "+err.Error())
 	}
 
-	resp := apiKBNoteResponse{Path: rel, Backlinks: []string{}}
+	resp := apiKBNoteResponse{Path: rel, Backlinks: []string{}, Icon: s.loadKBIcons(u.ID)[rel]}
 	if fi.Size() > kbInlineMax {
 		resp.Kind = "binary"
 		return c.JSON(http.StatusOK, resp)
@@ -458,6 +604,13 @@ func (s *Server) apiDeleteKBNoteAPI(c echo.Context) error {
 		status, code := vaultErrStatus(err)
 		return jsonErr(c, status, code, "delete failed: "+err.Error())
 	}
+	// Drop any custom icon(s) for the removed path and its descendants so the
+	// map doesn't accumulate orphans. Non-fatal on error (the file is gone).
+	if icons := s.loadKBIcons(u.ID); dropIconKeys(icons, rel) {
+		if err := s.saveKBIcons(u.ID, icons); err != nil {
+			slog.Warn("kb delete: icon cleanup failed", "workspace_id", u.ID, "path", rel, "err", err)
+		}
+	}
 	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
 }
 
@@ -493,6 +646,15 @@ func (s *Server) apiRenameKBNote(c echo.Context) error {
 	if err := s.vault.Rename(u.ID, from, to); err != nil {
 		status, code := vaultErrStatus(err)
 		return jsonErr(c, status, code, "rename failed: "+err.Error())
+	}
+	// Carry any custom icon(s) to the new path — the exact entry and, for a
+	// folder move, every descendant's. A failure here is non-fatal: the file
+	// moved fine, only its icon is now stale, so log-and-continue rather than
+	// reporting the rename as failed.
+	if icons := s.loadKBIcons(u.ID); migrateIconKeys(icons, from, to) {
+		if err := s.saveKBIcons(u.ID, icons); err != nil {
+			slog.Warn("kb rename: icon re-key failed", "workspace_id", u.ID, "from", from, "to", to, "err", err)
+		}
 	}
 	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
 }
