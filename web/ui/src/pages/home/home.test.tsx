@@ -110,12 +110,13 @@ function mockFetch() {
       }
       if (url === "/api/v1/reminders" && method === "POST") {
         const body = JSON.parse(String(init?.body));
-        if (body.when === "banana") {
+        const text: string = body.text ?? "";
+        if (text.includes("banana")) {
           return Promise.resolve(
             jsonResponse({ error: { code: "unparseable_time", message: "couldn't understand that time" } }, 400),
           );
         }
-        const r = { id: "r2", message: body.message, remind_at: "2026-07-17T16:00:00Z", sent: false };
+        const r = { id: "r2", message: "check the oven", remind_at: "2026-07-17T16:00:00Z", sent: false };
         reminders = [...reminders, r];
         return Promise.resolve(jsonResponse(r, 201));
       }
@@ -231,30 +232,32 @@ test("reminders: delete removes a reminder", async () => {
   await waitFor(() => expect(screen.queryByText("Call the dentist")).not.toBeInTheDocument());
 });
 
-test("reminders: adding with an unparseable time shows the error inline and keeps the form", async () => {
+test("reminders: adding an unparseable sentence shows the error inline and keeps the text", async () => {
   mockFetch();
   wrap();
   await screen.findByText("Call the dentist");
 
-  await userEvent.type(screen.getByLabelText(/reminder message/i), "check the oven");
-  await userEvent.type(screen.getByLabelText(/reminder time/i), "banana");
+  await userEvent.type(screen.getByLabelText(/^reminder$/i), "check the oven banana");
   await userEvent.click(screen.getByRole("button", { name: /add reminder/i }));
 
   expect(await screen.findByText(/couldn't understand that time/i)).toBeInTheDocument();
-  // Input values are preserved on failure — no premature reset.
-  expect(screen.getByLabelText(/reminder message/i)).toHaveValue("check the oven");
+  // Text is preserved on failure — no premature reset.
+  expect(screen.getByLabelText(/^reminder$/i)).toHaveValue("check the oven banana");
 });
 
-test("reminders: adding with a valid time clears the form and shows the new reminder", async () => {
+test("reminders: adding a valid sentence clears the field and toasts the resolved time", async () => {
   mockFetch();
   wrap();
   await screen.findByText("Call the dentist");
 
-  await userEvent.type(screen.getByLabelText(/reminder message/i), "check the oven");
-  await userEvent.type(screen.getByLabelText(/reminder time/i), "in 10 minutes");
+  await userEvent.type(screen.getByLabelText(/^reminder$/i), "in 10 minutes to check the oven");
   await userEvent.click(screen.getByRole("button", { name: /add reminder/i }));
 
-  await waitFor(() => expect(screen.getByLabelText(/reminder message/i)).toHaveValue(""));
+  await waitFor(() => expect(screen.getByLabelText(/^reminder$/i)).toHaveValue(""));
+  // The trust surface: the app echoes back the time it figured out. The toast
+  // message renders in both the visible toast and the sr-only aria-live region,
+  // so match all occurrences.
+  expect((await screen.findAllByText(/reminder set for/i)).length).toBeGreaterThan(0);
 });
 
 // ── Keyboard nav wiring (useListNav) ─────────────────────────────────────────

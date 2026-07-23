@@ -1,9 +1,10 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bell, Bot, Trash2, Clock, AlertTriangle, Plus } from "lucide-react";
+import { Bell, Bot, Trash2, Clock, AlertTriangle, Plus, Loader2 } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
 import { ContextPaneHeader, ContextSection } from "@/components/shell/ContextPaneParts";
+import { useToast } from "@/components/shell/Toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn, timeAgo } from "@/lib/utils";
@@ -219,7 +220,7 @@ function InboxSection() {
   let indexOffset = 0;
 
   return (
-    <div className="border-b border-border pb-3">
+    <div className="pt-3">
       <ContextSection
         title="Inbox"
         action={
@@ -290,18 +291,27 @@ function ReminderRow({ r, onDelete }: { r: Reminder; onDelete: () => void }) {
 }
 
 function AddReminderForm() {
-  const [message, setMessage] = useState("");
-  const [when, setWhen] = useState("");
+  const [text, setText] = useState("");
   const [error, setError] = useState("");
   const create = useCreateReminder();
+  const { toast } = useToast();
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
     try {
-      await create.mutateAsync({ message, when });
-      setMessage("");
-      setWhen("");
+      const r = await create.mutateAsync({ text });
+      setText("");
+      // Echo back the time the parser resolved — the trust surface for what
+      // may have been an LLM guess. The user can delete a wrong parse.
+      const at = new Date(r.remind_at);
+      toast({
+        message: `Reminder set for ${at.toLocaleString([], {
+          weekday: "short",
+          hour: "2-digit",
+          minute: "2-digit",
+        })}`,
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong");
     }
@@ -310,17 +320,11 @@ function AddReminderForm() {
   return (
     <form onSubmit={handleSubmit} className="mt-1.5 space-y-1 px-1">
       <Input
-        aria-label="Reminder message"
-        placeholder="Remind me to…"
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        className="h-7 text-xs"
-      />
-      <Input
-        aria-label="Reminder time"
-        placeholder="in 10 minutes, tomorrow at 3pm…"
-        value={when}
-        onChange={(e) => setWhen(e.target.value)}
+        aria-label="Reminder"
+        placeholder="Remind me in 10 minutes to call the doctor…"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        disabled={create.isPending}
         className="h-7 text-xs"
       />
       {error && <p className="text-[11px] text-danger">{error}</p>}
@@ -328,10 +332,18 @@ function AddReminderForm() {
         type="submit"
         size="xs"
         variant="outline"
-        disabled={!message.trim() || !when.trim() || create.isPending}
+        disabled={!text.trim() || create.isPending}
         className="w-full"
       >
-        <Plus /> Add reminder
+        {create.isPending ? (
+          <>
+            <Loader2 className="animate-spin" /> Setting…
+          </>
+        ) : (
+          <>
+            <Plus /> Add reminder
+          </>
+        )}
       </Button>
     </form>
   );
@@ -348,7 +360,7 @@ function RemindersSection() {
   });
   const reminders = (data?.reminders ?? []).filter((r) => !pending.has(r.id));
   return (
-    <div className="pt-3">
+    <div className="border-b border-border pb-3">
       <ContextSection title="Reminders">
         {reminders.length === 0 ? (
           <p className="px-1 text-xs text-muted-2">No reminders yet.</p>
@@ -466,8 +478,8 @@ export default function HomePage() {
         <div className="flex h-full flex-col">
           <ContextPaneHeader title="Home" />
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
-            <InboxSection />
             <RemindersSection />
+            <InboxSection />
           </div>
         </div>
       </ContextPane>

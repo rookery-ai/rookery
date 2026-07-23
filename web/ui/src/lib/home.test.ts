@@ -76,18 +76,18 @@ test("useReminders fetches the reminders list and normalizes nil", async () => {
   expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/v1/reminders");
 });
 
-test("useCreateReminder posts message+when and invalidates reminders", async () => {
+test("useCreateReminder posts a single text field and invalidates reminders", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue(jsonResponse({ id: "r1", message: "hi", remind_at: "t1", sent: false }, 201)),
   );
   const { result } = renderHook(() => useCreateReminder(), { wrapper: wrapper() });
   await act(async () => {
-    await result.current.mutateAsync({ message: "hi", when: "in 10 minutes" });
+    await result.current.mutateAsync({ text: "in 10 minutes to say hi" });
   });
   const call = vi.mocked(fetch).mock.calls[0];
   expect(call[0]).toBe("/api/v1/reminders");
-  expect(JSON.parse(String((call[1] as RequestInit).body))).toEqual({ message: "hi", when: "in 10 minutes" });
+  expect(JSON.parse(String((call[1] as RequestInit).body))).toEqual({ text: "in 10 minutes to say hi" });
 });
 
 test("useCreateReminder rejects with ApiError(400,'unparseable_time',...) on bad input", async () => {
@@ -101,7 +101,7 @@ test("useCreateReminder rejects with ApiError(400,'unparseable_time',...) on bad
   let caught: unknown;
   await act(async () => {
     try {
-      await result.current.mutateAsync({ message: "hi", when: "banana" });
+      await result.current.mutateAsync({ text: "say hi banana" });
     } catch (e) {
       caught = e;
     }

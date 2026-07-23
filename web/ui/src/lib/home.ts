@@ -75,8 +75,8 @@ export function useReminders() {
 export function useCreateReminder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ message, when }: { message: string; when: string }) =>
-      api.post<Reminder>("/api/v1/reminders", { message, when }),
+    mutationFn: ({ text }: { text: string }) =>
+      api.post<Reminder>("/api/v1/reminders", { text }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["reminders"] }),
   });
 }
