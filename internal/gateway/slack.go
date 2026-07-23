@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
+	"runtime/debug"
 	"strings"
 	"sync"
 
@@ -268,32 +269,55 @@ func (g *SlackGateway) readLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case evt := <-g.sm.Events:
-			if evt.Type != socketmode.EventTypeEventsAPI {
-				continue
-			}
-			eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
-			if !ok {
-				continue
-			}
-			if evt.Request != nil {
-				g.sm.Ack(*evt.Request)
-			}
-			if eventsAPIEvent.Type != slackevents.CallbackEvent {
-				continue
-			}
-			if me, ok := eventsAPIEvent.InnerEvent.Data.(*slackevents.MessageEvent); ok {
-				g.mu.Lock()
-				botID := g.botUserID
-				g.mu.Unlock()
-				msg, ok := mapSlackDM(me.User, me.ChannelType, me.Text, me.TimeStamp, me.BotID, me.SubType, botID)
-				if ok {
-					msg.WorkspaceID = g.ownerWorkspaceID
-					msg.Attachment = slackAttachmentFromEvent(me, g.downloader)
-					g.dispatch(context.Background(), msg)
-				}
-			}
+			// handleEvent recovers its own panics (see below): readLoop is a
+			// long-lived background goroutine with no supervisor, and it now runs
+			// panic-capable code per event (the SDK file download), so a single
+			// malformed event must drop that event, not take down the loop and the
+			// whole server process. This is the same guarantee dispatchFunc gives
+			// the synchronous path — extended to the one goroutine that does work
+			// before reaching it.
+			g.handleEvent(evt)
 		}
 	}
+}
+
+// handleEvent processes one Socket Mode event under a panic guard so a bad event
+// cannot crash the read loop or the process.
+func (g *SlackGateway) handleEvent(evt socketmode.Event) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("gateway: recovered panic handling slack event",
+				"workspace_id", g.ownerWorkspaceID, "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+
+	if evt.Type != socketmode.EventTypeEventsAPI {
+		return
+	}
+	eventsAPIEvent, ok := evt.Data.(slackevents.EventsAPIEvent)
+	if !ok {
+		return
+	}
+	if evt.Request != nil {
+		g.sm.Ack(*evt.Request)
+	}
+	if eventsAPIEvent.Type != slackevents.CallbackEvent {
+		return
+	}
+	me, ok := eventsAPIEvent.InnerEvent.Data.(*slackevents.MessageEvent)
+	if !ok {
+		return
+	}
+	g.mu.Lock()
+	botID := g.botUserID
+	g.mu.Unlock()
+	msg, ok := mapSlackDM(me.User, me.ChannelType, me.Text, me.TimeStamp, me.BotID, me.SubType, botID)
+	if !ok {
+		return
+	}
+	msg.WorkspaceID = g.ownerWorkspaceID
+	msg.Attachment = slackAttachmentFromEvent(me, g.downloader)
+	g.dispatch(context.Background(), msg)
 }
 
 func (g *SlackGateway) resolveDM(userID string) (string, error) {

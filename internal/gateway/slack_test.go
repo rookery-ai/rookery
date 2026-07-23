@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
+	"github.com/slack-go/slack/socketmode"
 )
 
 func TestSlackSpecRegistered(t *testing.T) {
@@ -351,4 +353,32 @@ func TestParseSlackConfig(t *testing.T) {
 	if _, err := parseSlackConfig(`{}`); err == nil {
 		t.Fatal("missing app_token must error")
 	}
+}
+
+// TestSlackHandleEventRecoversFromPanic pins the whole-branch-review fix: the
+// read loop runs panic-capable per-event code (the file download) in a
+// long-lived background goroutine with no supervisor, so one malformed event
+// must be dropped, not crash the loop and the whole server. A dispatch that
+// panics must not escape handleEvent.
+func TestSlackHandleEventRecoversFromPanic(t *testing.T) {
+	g := &SlackGateway{
+		ownerWorkspaceID: "ws1",
+		dispatch: func(context.Context, Message) {
+			panic("boom in dispatch")
+		},
+		dmChannels: map[string]string{},
+	}
+	// A minimal plain-DM callback event that reaches the dispatch call.
+	inner := slackevents.EventsAPIInnerEvent{Type: "message"}
+	inner.Data = &slackevents.MessageEvent{
+		User: "U1", ChannelType: "im", Text: "hi", TimeStamp: "1.2",
+	}
+	evt := socketmode.Event{
+		Type: socketmode.EventTypeEventsAPI,
+		Data: slackevents.EventsAPIEvent{Type: slackevents.CallbackEvent, InnerEvent: inner},
+	}
+	// Must not panic out of handleEvent.
+	g.handleEvent(evt)
+	// Still usable afterwards — a second event is handled without issue.
+	g.handleEvent(evt)
 }
