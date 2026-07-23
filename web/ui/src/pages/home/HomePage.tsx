@@ -305,9 +305,13 @@ function AddReminderForm() {
       // Echo back the time the parser resolved — the trust surface for what
       // may have been an LLM guess. The user can delete a wrong parse.
       const at = new Date(r.remind_at);
+      // Include the date, not just weekday+time: a reminder set for "next week"
+      // renders as an unambiguous "Mon, Jul 27, 09:00" rather than "which Monday?"
       toast({
         message: `Reminder set for ${at.toLocaleString([], {
           weekday: "short",
+          month: "short",
+          day: "numeric",
           hour: "2-digit",
           minute: "2-digit",
         })}`,

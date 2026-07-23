@@ -18,6 +18,8 @@ func TestParseReminderText_Deterministic(t *testing.T) {
 	}{
 		{"remind-me-to-split", "remind me in 10 minutes to call the doctor", "call the doctor", false,
 			func(at time.Time) bool { return at.Equal(now.Add(10 * time.Minute)) }},
+		{"next-week-to-split", "remind me next week to send copy of the contract", "send copy of the contract", false,
+			func(at time.Time) bool { return at.After(now) }},
 		{"filler-reminder-no-splittable-time", "reminder to buy milk in 2 hours", "", true, nil},
 		{"bare-to-split", "in 1 hour to submit invoice", "submit invoice", false,
 			func(at time.Time) bool { return at.Equal(now.Add(time.Hour)) }},
