@@ -21,6 +21,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/skilllibrary"
+	"github.com/ilijad1/simple-agents/internal/vault"
 	"github.com/robfig/cron/v3"
 )
 
@@ -194,33 +195,43 @@ type memoryStore interface {
 	ContextString(workspaceID string) (string, error)
 }
 
-// kbLister enumerates the user's knowledge-base note paths (vault-relative) so
-// the designer can be shown what notes already exist. Satisfied by *vault.Vault.
-type kbLister interface {
-	NotePaths(workspaceID string) []string
+// loadKBManifest returns the knowledge-base block for a design turn: the
+// vault's folder structure plus the passages relevant to the conversation so
+// far. It is recomputed every turn because the relevant passages depend on
+// what the user has said, not just on what exists. currentMessage is the
+// turn's own user input — the strongest retrieval signal available, since it
+// hasn't been appended to sess.History yet at the point this is called.
+func (f *Flow) loadKBManifest(workspaceID, currentMessage string) string {
+	if f.vlt == nil {
+		return ""
+	}
+	return vault.BuildKBContext(f.vlt, workspaceID, f.retrievalQuery(workspaceID, currentMessage))
 }
 
-// loadKBManifest returns a rendered bullet list of the user's existing note paths
-// (capped), or "" if no lister is attached or the knowledge base is empty.
-func (f *Flow) loadKBManifest(workspaceID string) string {
-	if f.kb == nil {
-		return ""
-	}
-	paths := f.kb.NotePaths(workspaceID)
-	if len(paths) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	for i, p := range paths {
-		if i >= 30 {
-			fmt.Fprintf(&sb, "- …and %d more\n", len(paths)-30)
-			break
+// retrievalQuery is what the designer's KB retrieval scores against: the
+// user's own words from this session, which is a far better query than any
+// summary we could synthesize.
+func (f *Flow) retrievalQuery(workspaceID, currentMessage string) string {
+	f.mu.Lock()
+	sess := f.sessions[workspaceID]
+	var parts []string
+	if sess != nil {
+		for _, m := range sess.History {
+			if m.Role == "user" {
+				parts = append(parts, m.Content)
+			}
 		}
-		sb.WriteString("- ")
-		sb.WriteString(p)
-		sb.WriteByte('\n')
+		// Recent turns describe the current need most precisely.
+		if len(parts) > 3 {
+			parts = parts[len(parts)-3:]
+		}
 	}
-	return sb.String()
+	f.mu.Unlock()
+
+	if currentMessage != "" {
+		parts = append(parts, currentMessage)
+	}
+	return strings.Join(parts, " ")
 }
 
 // Flow manages per-user design sessions and drives the FSM.
@@ -232,8 +243,8 @@ type Flow struct {
 	coderFor      func(workspaceID string) *coder.Coder
 	designer      *AgentDesigner
 	db            dbDesignStore
-	memStore      memoryStore // optional; nil = no memory injected
-	kb            kbLister    // optional; nil = no KB manifest injected
+	memStore      memoryStore  // optional; nil = no memory injected
+	vlt           *vault.Vault // optional; nil = no KB context injected
 	secretsLoader func(ctx context.Context, workspaceID string) (map[string]string, error)
 
 	// Self-managed OAuth connectors: when set, a build exposes the workspace's service
@@ -291,11 +302,11 @@ func (f *Flow) WithMemory(m memoryStore) *Flow {
 	return f
 }
 
-// WithKBLister attaches a knowledge-base enumerator so the designer is told what
-// notes the user already has (a manifest of note paths is injected into each
-// design turn). nil = no manifest.
-func (f *Flow) WithKBLister(k kbLister) *Flow {
-	f.kb = k
+// WithVault attaches the vault so the designer's knowledge-base block (folder
+// structure + retrieved passages relevant to the conversation) is injected
+// into each design turn. nil = no KB context.
+func (f *Flow) WithVault(v *vault.Vault) *Flow {
+	f.vlt = v
 	return f
 }
 
@@ -1065,7 +1076,7 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		Connections:        f.loadConnectionRefs(ctx, workspaceID),
 		UserProfile:        sess.UserProfile,
 		UserMemory:         sess.UserMemory,
-		KBManifest:         f.loadKBManifest(workspaceID),
+		KBManifest:         f.loadKBManifest(workspaceID, userMessage),
 	})
 
 	// Use WithNoTools so the design conversation outputs plain text and never

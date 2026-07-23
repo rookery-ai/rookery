@@ -30,11 +30,11 @@ package vault
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // InternalDir is the hidden directory holding indexes and JSON sidecars. It is
@@ -48,6 +48,10 @@ var ErrEscapes = errors.New("path escapes vault")
 // Vault provides safe, per-user access to knowledge-base files on disk.
 type Vault struct {
 	dataDir string // the application data dir; vaults live at <dataDir>/vaults
+
+	// indexer is the process-lifetime retrieval index, created on first use.
+	indexOnce sync.Once
+	indexer   *Indexer
 }
 
 // New creates a Vault rooted at dataDir. Vault directories are created lazily.
@@ -228,15 +232,6 @@ func (v *Vault) Rename(workspaceID, fromRel, toRel string) error {
 	return os.Rename(from, to)
 }
 
-// kbManifestExcluded are top-level vault dirs omitted from the note manifest
-// shown to the agent designer: they are system-managed or already represented
-// elsewhere in the design context (memory contents are injected separately,
-// skills are listed as Skills, the rest is reflected from the database).
-var kbManifestExcluded = map[string]bool{
-	InternalDir: true, "agents": true, "chats": true,
-	"memory": true, "skills": true, "reminders": true, "inbox": true,
-}
-
 // topSegment returns the first slash-separated segment of a vault-relative path.
 func topSegment(rel string) string {
 	rel = filepath.ToSlash(rel)
@@ -244,43 +239,6 @@ func topSegment(rel string) string {
 		return rel[:i]
 	}
 	return rel
-}
-
-// NotePaths returns the vault-relative paths of the user's markdown notes —
-// everything under notes/ plus any folders/files the user created — so callers
-// (e.g. the agent designer) can show what knowledge already exists.
-// System-managed and already-injected dirs (.kb, agents, chats, memory, skills,
-// reminders) are skipped. The result is capped and sorted.
-func (v *Vault) NotePaths(workspaceID string) []string {
-	root := v.Root(workspaceID)
-	if root == "" {
-		return nil
-	}
-	var paths []string
-	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		rel, err := v.Rel(workspaceID, path)
-		if err != nil || rel == "." {
-			return nil
-		}
-		if d.IsDir() {
-			if kbManifestExcluded[topSegment(rel)] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(rel, ".md") {
-			return nil
-		}
-		if len(paths) < 60 {
-			paths = append(paths, rel)
-		}
-		return nil
-	})
-	sort.Strings(paths)
-	return paths
 }
 
 // Node is one entry in the vault file tree.
@@ -331,10 +289,38 @@ func (v *Vault) List(workspaceID, relDir string) ([]Node, error) {
 
 // writeFileAtomic writes data to path via a temp file in the same directory
 // followed by a rename, so readers never observe a partial write.
+//
+// The scratch file is created with os.CreateTemp (a random suffix), not a
+// fixed ".tmp" name: two concurrent writers targeting different final paths
+// in the same directory would otherwise both write to the identical scratch
+// path and race — one writer's rename would find its temp file already gone
+// (or truncated by the other), failing with "rename ... no such file or
+// directory". That was a real, pre-existing bug in every vault write; it
+// simply had no concurrent caller before vault imports gained one.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmpName := tmp.Name()
+	// Whatever the outcome, don't leave a stray scratch file behind: on
+	// success the rename has already moved it to path, so Remove here is a
+	// harmless no-op (ENOENT, ignored); on any failure path it cleans up.
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	// os.CreateTemp always creates with mode 0600 regardless of the caller's
+	// intended permission; fix it up before the rename makes it visible under
+	// its final name.
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/skilllibrary"
 	"github.com/ilijad1/simple-agents/internal/skillstore"
+	"github.com/ilijad1/simple-agents/internal/vault"
 )
 
 // DesignState is the current step in the conversational skill-creator wizard.
@@ -74,7 +75,6 @@ type DesignSession struct {
 	ConnectedPlatforms []string
 	UserProfile        string
 	UserMemory         string
-	KBManifest         string
 	CreatedAt          time.Time
 
 	// Set after generation; cleared on finalize or when the user requests changes.
@@ -117,10 +117,6 @@ type memoryStore interface {
 	ContextString(workspaceID string) (string, error)
 }
 
-type kbLister interface {
-	NotePaths(workspaceID string) []string
-}
-
 // Flow manages per-user skill-design sessions and drives the FSM. Safe for
 // concurrent use.
 type Flow struct {
@@ -131,7 +127,7 @@ type Flow struct {
 	saver         *SkillSaver
 	db            dbStore
 	memStore      memoryStore
-	kb            kbLister
+	vlt           *vault.Vault // optional; nil = no KB context injected
 	secretsLoader func(ctx context.Context, workspaceID string) (map[string]string, error)
 }
 
@@ -146,7 +142,7 @@ func NewSkillFlow(coderResolver func(workspaceID string) *coder.Coder, saver *Sk
 
 func (f *Flow) WithDB(database dbStore) *Flow  { f.db = database; return f }
 func (f *Flow) WithMemory(m memoryStore) *Flow { f.memStore = m; return f }
-func (f *Flow) WithKBLister(k kbLister) *Flow  { f.kb = k; return f }
+func (f *Flow) WithVault(v *vault.Vault) *Flow { f.vlt = v; return f }
 func (f *Flow) WithSecretsLoader(fn func(ctx context.Context, workspaceID string) (map[string]string, error)) *Flow {
 	f.secretsLoader = fn
 	return f
@@ -372,7 +368,7 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		AvailableSkills:    sess.Skills,
 		UserProfile:        sess.UserProfile,
 		UserMemory:         sess.UserMemory,
-		KBManifest:         sess.KBManifest,
+		KBManifest:         f.loadKBManifest(workspaceID, userMessage),
 		ConnectedPlatforms: sess.ConnectedPlatforms,
 		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
 	})
@@ -901,7 +897,6 @@ func (f *Flow) newSession(workspaceID, skillName string, state DesignState) *Des
 		ConnectedPlatforms: f.loadConnectedPlatforms(workspaceID),
 		UserProfile:        f.loadUserProfile(workspaceID),
 		UserMemory:         f.loadUserMemory(workspaceID),
-		KBManifest:         f.loadKBManifest(workspaceID),
 		CreatedAt:          time.Now(),
 	}
 }
@@ -968,25 +963,41 @@ func (f *Flow) loadUserMemory(workspaceID string) string {
 	return mem
 }
 
-func (f *Flow) loadKBManifest(workspaceID string) string {
-	if f.kb == nil {
+// loadKBManifest returns the knowledge-base block for a design turn: the
+// vault's folder structure plus the passages relevant to the conversation so
+// far. It is recomputed every turn (mirrors agentdesigner.Flow.loadKBManifest)
+// because the relevant passages depend on what the user has said, not just on
+// what exists. currentMessage is the turn's own user input.
+func (f *Flow) loadKBManifest(workspaceID, currentMessage string) string {
+	if f.vlt == nil {
 		return ""
 	}
-	paths := f.kb.NotePaths(workspaceID)
-	if len(paths) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	for i, p := range paths {
-		if i >= 30 {
-			fmt.Fprintf(&sb, "- …and %d more\n", len(paths)-30)
-			break
+	return vault.BuildKBContext(f.vlt, workspaceID, f.retrievalQuery(workspaceID, currentMessage))
+}
+
+// retrievalQuery is what the skill designer's KB retrieval scores against: the
+// user's own words from this session, which is a far better query than any
+// summary we could synthesize. Mirrors agentdesigner.Flow.retrievalQuery.
+func (f *Flow) retrievalQuery(workspaceID, currentMessage string) string {
+	f.mu.Lock()
+	sess := f.sessions[workspaceID]
+	var parts []string
+	if sess != nil {
+		for _, m := range sess.History {
+			if m.Role == "user" {
+				parts = append(parts, m.Content)
+			}
 		}
-		sb.WriteString("- ")
-		sb.WriteString(p)
-		sb.WriteByte('\n')
+		if len(parts) > 3 {
+			parts = parts[len(parts)-3:]
+		}
 	}
-	return sb.String()
+	f.mu.Unlock()
+
+	if currentMessage != "" {
+		parts = append(parts, currentMessage)
+	}
+	return strings.Join(parts, " ")
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

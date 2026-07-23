@@ -4,24 +4,29 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"html"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ilijad1/simple-agents/internal/connectors"
+	"github.com/ilijad1/simple-agents/internal/convert"
+	"github.com/ilijad1/simple-agents/internal/iolimit"
 	"github.com/ilijad1/simple-agents/internal/llm"
 	"github.com/ilijad1/simple-agents/internal/sandbox"
 	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/simple-agents/internal/websearch"
 )
 
 // maxToolResult is the per-result byte cap injected back into the model context.
@@ -46,18 +51,39 @@ type hostToolSet struct {
 	selfExe          string
 	dataDir          string
 	homesDir         string
-	includeExecTools bool // gates the powerful tools (run_script, bash, web_fetch); off for chat
+	includeExecTools bool // gates the tools that execute code (run_script, bash); off for chat.
+	// web_fetch/web_search are read-only, cannot carry secrets, and (per netguard) cannot
+	// reach private address space — so they are offered regardless of this flag.
+
+	// searcher overrides the exact-match Searcher used by search_files. Nil in
+	// production, where it always falls back to h.vlt.NewSearcher() — this
+	// field exists purely so a test can inject a Searcher that fails on
+	// demand, to exercise the degrade-and-log path (see searchFiles) without
+	// needing to actually break ripgrep on the host.
+	searcher vault.Searcher
 
 	// web_fetch tuning (both optional; zero values use sane defaults). Injected by tests so
 	// the transient-retry path doesn't sleep for real.
 	httpClient   *http.Client  // nil → a default 30s client
 	webRetryBase time.Duration // 0 → default base backoff for transient (429/5xx/network) retries
 
-	// web_search: the DuckDuckGo HTML endpoint base. Empty → the production endpoint.
-	// Injected by tests (pointed at an httptest server) so the scraper is exercised without
-	// the network; web_search shares httpClient/webRetryBase with web_fetch for the same
-	// transient-retry semantics.
+	// ddgBaseURL, when set, overrides the search endpoint AND collapses the
+	// provider cascade to that single endpoint. Tests point it at an httptest
+	// server so the scraper is exercised deterministically and offline; in
+	// production it is empty and the full cascade (see websearch.DefaultProviders)
+	// applies.
 	ddgBaseURL string
+
+	// allowPrivateHosts disables web_fetch's private-address guard. It exists
+	// ONLY for tests, which serve fixtures from httptest servers bound to
+	// 127.0.0.1. It is never set in production: the guard is what stops a chat
+	// coder from reaching the loopback connector bridge and its bearer tokens.
+	allowPrivateHosts bool
+
+	// fetchMemo caches web_fetch results within this toolset (one run/loop).
+	// A weak model re-fetches the same URL repeatedly; the memo makes that free
+	// and bounded, with no cross-run invalidation problem to get wrong.
+	fetchMemo map[string]string
 
 	// Build-time script verification. verifyBuild is set ONLY during agent generation
 	// (SA_BUILD_PHASE=generation) on the API/tool-calling backend — the weaker-model path
@@ -136,31 +162,42 @@ func (h *hostToolSet) tools() []llm.Tool {
 		{Name: "write_file", Description: "Create or overwrite a file in the vault (creates parent folders). Path is relative to the vault root, or absolute within the vault.", Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string","description":"full file contents"}},"required":["path","content"]}`)},
 		{Name: "edit_file", Description: "Replace a unique substring in a vault file. old_string must appear exactly once.", Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string"},"old_string":{"type":"string"},"new_string":{"type":"string"}},"required":["path","old_string","new_string"]}`)},
 		{Name: "list_dir", Description: "List entries in a vault directory. Path is relative to the vault root (default \".\" lists the vault root).", Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string","description":"vault-relative directory; defaults to vault root"}}}`)},
-		{Name: "search_files", Description: "Search the user's whole knowledge base (vault) for literal text and return the matching lines as `path:line: snippet` entries. Case-insensitive. Use this to find a note by its CONTENT instead of read_file-ing your way through folders — " +
-			`e.g. search_files with query "dentist appointment". Returns up to a few dozen matches across all notes/memory/agents files (not the hidden .kb sidecars).`,
-			Parameters: rawSchema(`{"type":"object","properties":{"query":{"type":"string","description":"the literal text to search for across the vault (case-insensitive)"}},"required":["query"]}`)},
+		{Name: "search_files", Description: "Search the user's whole knowledge base (vault) and get back the passages that matter. " +
+			"Returns exact text matches as `path:line: snippet`, followed by the most relevant passages with their note path and section heading — " +
+			`e.g. search_files with query "dentist appointment" finds a note that says "orthodontist visit". ` +
+			"Covers every file type, including converted csv/pdf/docx content, and matches on file names as well as content. " +
+			"Use this INSTEAD of read_file-ing your way through folders.",
+			Parameters: rawSchema(`{"type":"object","properties":{"query":{"type":"string","description":"what to look for; plain words work better than exact phrases"}},"required":["query"]}`)},
 		{Name: "glob", Description: "Find files in the vault by name/pattern and return their vault-relative paths (one per line). Supports * (within one folder), ? (one char), and ** (any depth, crosses folders) — " +
 			`e.g. glob with pattern "notes/*-meeting.md" or "**/*.py". Use this to locate files by NAME instead of listing folders one at a time.`,
 			Parameters: rawSchema(`{"type":"object","properties":{"pattern":{"type":"string","description":"glob pattern matching vault-relative paths (supports *, ?, and **)"}},"required":["pattern"]}`)},
+		{Name: "save_to_kb", Description: "Convert a document to markdown and file it in the user's knowledge base. " +
+			"source is either a vault path (e.g. \"downloads/report.pdf\") or a public http(s) URL. " +
+			"Handles pdf, docx, pptx, xlsx, csv, html and plain text; the original file is preserved alongside the note. " +
+			"Returns the created note's path. Use this instead of writing your own extraction script.",
+			Parameters: rawSchema(`{"type":"object","properties":{"source":{"type":"string","description":"vault path or public http(s) URL"},"dest_dir":{"type":"string","description":"vault folder for the note (default notes/)"},"title":{"type":"string","description":"override the derived title"}},"required":["source"]}`)},
+		// Read-only tools, always offered (chat included): file discovery plus the
+		// two web tools. None of them execute code or carry secrets, so the exec
+		// gate below — which exists for run_script/bash — does not apply to them.
+		{
+			Name: "web_fetch",
+			Description: "Fetch a PUBLIC URL over HTTP(S) and return its content as text (HTML is reduced to readable text; JSON/text is returned as-is), " +
+				`e.g. web_fetch with url "https://api.open-meteo.com/v1/forecast?latitude=42.0&longitude=21.4&current=temperature_2m". ` +
+				"Use this for a simple read of a PUBLIC endpoint — a weather API, an RSS/JSON feed, a web page. " +
+				"It CANNOT send secrets: you do not have secret values (they are environment variables), so any call that needs an API key, token, or auth header must use run_script or bash instead, where secrets are available in the environment. " +
+				"Optional: method (GET or POST; default GET).",
+			Parameters: rawSchema(`{"type":"object","properties":{"url":{"type":"string","description":"the public http/https URL to fetch"},"method":{"type":"string","enum":["GET","POST"],"description":"HTTP method (default GET)"}},"required":["url"]}`),
+		},
+		{
+			Name: "web_search",
+			Description: "Search the public web (DuckDuckGo) and return a few results as numbered `title / url / snippet` entries — " +
+				`e.g. web_search with query "weather Skopje today". Use it to FIND a URL when you don't have one yet; then call web_fetch to READ the page you chose. ` +
+				"It is query-only and CANNOT carry secrets — there is nothing to authenticate, so it needs no key/token.",
+			Parameters: rawSchema(`{"type":"object","properties":{"query":{"type":"string","description":"the web search query"}},"required":["query"]}`),
+		},
 	}
 	if h.includeExecTools {
 		tools = append(tools,
-			llm.Tool{
-				Name: "web_fetch",
-				Description: "Fetch a PUBLIC URL over HTTP(S) and return its content as text (HTML is reduced to readable text; JSON/text is returned as-is), " +
-					`e.g. web_fetch with url "https://api.open-meteo.com/v1/forecast?latitude=42.0&longitude=21.4&current=temperature_2m". ` +
-					"Use this for a simple read of a PUBLIC endpoint — a weather API, an RSS/JSON feed, a web page. " +
-					"It CANNOT send secrets: you do not have secret values (they are environment variables), so any call that needs an API key, token, or auth header must use run_script or bash instead, where secrets are available in the environment. " +
-					"Optional: method (GET or POST; default GET).",
-				Parameters: rawSchema(`{"type":"object","properties":{"url":{"type":"string","description":"the public http/https URL to fetch"},"method":{"type":"string","enum":["GET","POST"],"description":"HTTP method (default GET)"}},"required":["url"]}`),
-			},
-			llm.Tool{
-				Name: "web_search",
-				Description: "Search the public web (DuckDuckGo) and return a few results as numbered `title / url / snippet` entries — " +
-					`e.g. web_search with query "weather Skopje today". Use it to FIND a URL when you don't have one yet; then call web_fetch to READ the page you chose. ` +
-					"It is query-only and CANNOT carry secrets — there is nothing to authenticate, so it needs no key/token.",
-				Parameters: rawSchema(`{"type":"object","properties":{"query":{"type":"string","description":"the web search query"}},"required":["query"]}`),
-			},
 			llm.Tool{
 				Name: "run_script",
 				Description: "Run a Python helper script under your working directory's tools/ folder (e.g. \"tools/foo.py\") and return its stdout. " +
@@ -467,6 +504,9 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		Pattern   string            `json:"pattern"`
 		Offset    int               `json:"offset"`
 		Limit     int               `json:"limit"`
+		Source    string            `json:"source"`
+		DestDir   string            `json:"dest_dir"`
+		Title     string            `json:"title"`
 	}
 	_ = json.Unmarshal(call.Args, &args) // tolerate missing fields
 
@@ -501,6 +541,12 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 			return "error: " + err.Error()
 		}
 		return out
+	case "save_to_kb":
+		out, err := h.saveToKB(ctx, args.Source, args.DestDir, args.Title)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return out
 	case "run_script":
 		if !h.includeExecTools {
 			return "error: run_script is not available"
@@ -511,18 +557,12 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		}
 		return h.spillLargeOutput(out, "run_script")
 	case "web_fetch":
-		if !h.includeExecTools {
-			return "error: web_fetch is not available"
-		}
 		out, err := h.webFetch(ctx, args.URL, args.Method, args.Headers, args.Body)
 		if err != nil {
 			return "error: " + err.Error()
 		}
 		return truncate(out)
 	case "web_search":
-		if !h.includeExecTools {
-			return "error: web_search is not available"
-		}
 		out, err := h.webSearch(ctx, args.Query)
 		if err != nil {
 			return "error: " + err.Error()
@@ -661,20 +701,15 @@ func (h *hostToolSet) listDir(path string) string {
 
 // ── search_files / glob ───────────────────────────────────────────────────────
 
-// maxSearchHits caps how many search_files matches are returned to the model, so a
-// query that hits dozens of notes doesn't blow the context. The Searcher already
-// caps at 5 matches per file; this bounds the total across all files.
-const maxSearchHits = 50
-
 // maxGlobMatches caps how many file paths glob returns.
 const maxGlobMatches = 200
 
-// searchFiles exposes the existing vault.Searcher (ripgrep + pure-Go fallback,
-// case-insensitive fixed-string, 5 matches/file) to the model as a TIER-1 read —
-// "find the note where I mentioned the dentist" without read_file-ing everything.
-// It searches the WHOLE vault root (not workDir), matching the web KB search and
-// the user's intent. No matches is a valid empty result (NOT an error:) so it never
-// trips the oscillation guard. The Searcher excludes the hidden .kb sidecars.
+// searchFiles answers "where in my knowledge base is this?" via vault.SearchKB
+// — the single shared two-pass (exact ripgrep matches, then ranked BM25
+// passages) implementation also used by the CLI-coder bridge's /search, so the
+// two doors into KB search can never again drift apart (see kbsearch.go's doc
+// comment). h.searcher lets a test inject a Searcher double to exercise the
+// degrade-on-exact-failure path deterministically; nil in production.
 func (h *hostToolSet) searchFiles(ctx context.Context, query string) (string, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -683,23 +718,10 @@ func (h *hostToolSet) searchFiles(ctx context.Context, query string) (string, er
 	if h.vlt == nil {
 		return "", fmt.Errorf("search_files unavailable: no vault")
 	}
-	sctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	hits, err := h.vlt.NewSearcher().Search(sctx, h.workspaceID, query)
-	if err != nil {
-		return "", err
-	}
-	if len(hits) == 0 {
-		return fmt.Sprintf("(no matches for %q)", query), nil
-	}
-	if len(hits) > maxSearchHits {
-		hits = hits[:maxSearchHits]
-	}
-	var sb strings.Builder
-	for _, hit := range hits {
-		fmt.Fprintf(&sb, "%s:%d: %s\n", hit.Path, hit.Line, hit.Snippet)
-	}
-	return truncate(sb.String()), nil
+	// Defensive final cap: SearchKB already keeps its result under maxToolResult
+	// in every realistic case, but truncate() guarantees the tool result
+	// contract (never over cap) even in a pathological edge case.
+	return truncate(vault.SearchKB(ctx, h.vlt, h.searcher, h.workspaceID, query, maxToolResult)), nil
 }
 
 // glob finds files by name/pattern across the whole vault and returns their
@@ -771,6 +793,127 @@ func (h *hostToolSet) glob(pattern string) (string, error) {
 		matches = matches[:maxGlobMatches]
 	}
 	return truncate(strings.Join(matches, "\n")), nil
+}
+
+// saveToKB converts a document and files it in the knowledge base. The source is
+// either a vault-relative path or a public URL; a URL is fetched through the
+// SAME guarded client web_fetch uses, so importing cannot become a way around
+// the private-address block.
+//
+// Unlike write_file/edit_file (which resolve relative paths against workDir —
+// the agent's OWN draft directory during a build, never the live vault root),
+// ImportFile always writes into the REAL vault (notes/ + files/) for the
+// workspace, regardless of workDir. That makes it a mutating action in the same
+// sense connectors.Execute's buildPhase guard cares about: a build-time test
+// call would otherwise leave a real, uncleaned note in the user's live
+// knowledge base (cleanupTestArtifacts only sweeps the draft agent dir). So it
+// is refused during generation (h.verifyBuild), mirroring the connector
+// build-time mutation guard — the read/convert path is proven, the actual save
+// is trusted to work like a real send, and happens only when the agent runs
+// for real.
+func (h *hostToolSet) saveToKB(ctx context.Context, source, destDir, title string) (string, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		return "", fmt.Errorf("source is required")
+	}
+	if h.vlt == nil {
+		return "", fmt.Errorf("save_to_kb unavailable: no vault")
+	}
+	if h.verifyBuild {
+		return "", fmt.Errorf("build-time guard: save_to_kb writes to the knowledge base for real and is blocked during generation — it will run when the agent executes for real")
+	}
+
+	var (
+		data     []byte
+		filename string
+		srcURL   string
+	)
+	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+		raw, name, err := h.fetchRaw(ctx, source)
+		if err != nil {
+			return "", err
+		}
+		data, filename, srcURL = raw, name, source
+	} else {
+		abs, err := h.resolveVault(source)
+		if err != nil {
+			return "", err
+		}
+		raw, err := os.ReadFile(abs)
+		if err != nil {
+			return "", fmt.Errorf("read %s: %v", source, err)
+		}
+		data, filename = raw, filepath.Base(abs)
+	}
+
+	// BuildPhase is also threaded through here even though h.verifyBuild already
+	// returned above: ImportFile itself is the choke point that refuses a
+	// build-time write, so this call stays safe even if the early check above
+	// were ever removed or bypassed by a future refactor.
+	res, err := h.vlt.ImportFile(h.workspaceID, vault.ImportInput{
+		Data: data, Filename: filename, SourceURL: srcURL, DestDir: destDir, Title: title,
+		BuildPhase: h.verifyBuild,
+	})
+	if err != nil {
+		return "", err
+	}
+	msg := fmt.Sprintf("ok: saved %s (%s, via %s); original kept at %s",
+		res.NotePath, res.Kind, res.Extractor, res.OriginalPath)
+	if len(res.Warnings) > 0 {
+		msg += "\nwarnings: " + strings.Join(res.Warnings, "; ")
+	}
+	return msg, nil
+}
+
+// fetchRaw downloads a URL's bytes (not its rendered text) for conversion by
+// save_to_kb. Unlike web_fetch (which silently truncates because it's reading
+// a URL as disposable text for one turn's context), a byte truncated here would
+// be written into the vault as the imported note's SOURCE — with a frontmatter
+// original_bytes count that then lies about what the file actually contains,
+// and no signal to the model that anything was lost. So an over-limit response
+// is a hard error here, not a truncation: the model gets a chance to tell the
+// user the document is too large instead of silently filing a corrupted 40%
+// of it. maxWebBody is deliberately the SAME cap web_fetch uses — save_to_kb
+// is not meant to be a bulk-upload replacement, just document import at the
+// same scale a URL fetch already operates at.
+func (h *hostToolSet) fetchRaw(ctx context.Context, rawURL string) ([]byte, string, error) {
+	client := h.httpClient
+	if client == nil {
+		if h.allowPrivateHosts {
+			client = &http.Client{Timeout: 60 * time.Second}
+		} else {
+			client = guardedHTTPClient(60 * time.Second)
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("fetch %s: %v", rawURL, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return nil, "", fmt.Errorf("fetch %s: HTTP %d", rawURL, resp.StatusCode)
+	}
+	data, err := iolimit.ReadCapped(resp.Body, maxImportBody)
+	if err != nil {
+		if errors.Is(err, iolimit.ErrTooLarge) {
+			return nil, "", fmt.Errorf("fetch %s: response is over the %d byte limit for save_to_kb — "+
+				"it cannot be imported whole; tell the user the source is too large", rawURL, maxImportBody)
+		}
+		return nil, "", fmt.Errorf("fetch %s: %v", rawURL, err)
+	}
+	name := path.Base(rawURL)
+	if i := strings.IndexByte(name, '?'); i >= 0 {
+		name = name[:i]
+	}
+	if name == "" || name == "/" || name == "." {
+		name = "download"
+	}
+	return data, name, nil
 }
 
 // compileGlob converts a glob pattern into an anchored regexp. It supports the
@@ -929,8 +1072,18 @@ func buildEnvList(extra map[string]string, homeDir, tmpDir string) []string {
 // ── web_fetch ────────────────────────────────────────────────────────────────
 
 // maxWebBody bounds how many bytes web_fetch reads from a response before the result is
-// further truncated to maxToolResult for the model context.
+// further truncated to maxToolResult for the model context. It is small on purpose: a
+// web_fetch body is headed into the model's context window, so 2 MiB is already far more
+// than can be relayed usefully.
 const maxWebBody = 2 << 20 // 2 MiB
+
+// maxImportBody bounds save_to_kb's URL fetch. Unlike web_fetch, this path writes the bytes
+// to disk as a knowledge-base document, not into the context window — so it is capped to the
+// SAME limit as the web upload door (web/api_kb.go's maxUploadBytes), not to the much smaller
+// context cap. Keeping the two import doors' limits in step is why this is its own constant
+// rather than a reuse of maxWebBody: a document that uploads fine through the browser must not
+// be rejected only because it arrived by URL instead.
+const maxImportBody = 25 << 20 // 25 MiB — keep in step with web/api_kb.go maxUploadBytes
 
 // webFetchMaxAttempts bounds the internal transient-retry loop (429/5xx/network/timeout).
 const webFetchMaxAttempts = 4
@@ -957,9 +1110,31 @@ func (h *hostToolSet) webFetch(ctx context.Context, rawURL, method string, heade
 	if method == "" {
 		method = http.MethodGet
 	}
+
+	// Memo: an identical GET within one toolset costs one request.
+	//
+	// The key deliberately omits headers, which is safe ONLY because the tool's
+	// JSON schema exposes just url+method to the model — headers/body are
+	// plumbing it cannot populate. If a future change lets the model set
+	// headers, they must join this key or two different requests will collide.
+	memoKey := method + " " + u.String() + " " + body
+	if h.fetchMemo == nil {
+		h.fetchMemo = map[string]string{}
+	}
+	if cached, ok := h.fetchMemo[memoKey]; ok {
+		return cached, nil
+	}
+
 	client := h.httpClient
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		// The guarded client refuses to dial private/loopback/link-local space,
+		// enforced at dial time so it also covers a hostname that resolves into
+		// private space and every redirect hop.
+		if h.allowPrivateHosts {
+			client = &http.Client{Timeout: 30 * time.Second}
+		} else {
+			client = guardedHTTPClient(30 * time.Second)
+		}
 	}
 	base := h.webRetryBase
 	if base <= 0 {
@@ -975,6 +1150,7 @@ func (h *hostToolSet) webFetch(ctx context.Context, rawURL, method string, heade
 		}
 		text, retryable, err := h.webFetchOnce(ctx, client, method, u.String(), headers, body)
 		if err == nil {
+			h.fetchMemo[memoKey] = text
 			return text, nil
 		}
 		lastErr = err
@@ -1016,45 +1192,32 @@ func (h *hostToolSet) webFetchOnce(ctx context.Context, client *http.Client, met
 	}
 	ct := resp.Header.Get("Content-Type")
 	header := fmt.Sprintf("[web_fetch %d %s %s]\n", resp.StatusCode, contentTypeMain(ct), u)
-	return header + renderWebBody(ct, data), false, nil
+	return header + renderWebBody(ct, u, data), false, nil
 }
 
-var (
-	reScript = regexp.MustCompile(`(?is)<script\b[^>]*>.*?</script>`)
-	reStyle  = regexp.MustCompile(`(?is)<style\b[^>]*>.*?</style>`)
-	reTag    = regexp.MustCompile(`(?s)<[^>]*>`)
-	reWS     = regexp.MustCompile(`\s+`)
-)
-
-// renderWebBody reduces text/html to readable text, passes textual bodies (text/*, JSON,
-// XML, CSV, JS, or an unlabeled body) through as-is, and — for a binary type (image, pdf,
-// octet-stream, …) — returns a short note with the type and size instead of dumping raw
-// bytes into the model context (which would be garbage, and could confuse a weak model).
-func renderWebBody(contentType string, data []byte) string {
-	ct := strings.ToLower(contentType)
-	switch {
-	case strings.Contains(ct, "html"):
-		return stripHTML(string(data))
-	case ct == "" || strings.Contains(ct, "text") || strings.Contains(ct, "json") ||
-		strings.Contains(ct, "xml") || strings.Contains(ct, "csv") || strings.Contains(ct, "javascript"):
-		return string(data)
-	default:
-		return fmt.Sprintf("[web_fetch: %s response, %d bytes — this is not text; if you need to process it, use run_script or bash]",
-			contentTypeMain(contentType), len(data))
+// renderWebBody turns a response body into text the model can use. HTML and any
+// convertible document format go through internal/convert — so a fetched page
+// keeps its headings, lists, links and tables instead of collapsing into one
+// whitespace-run, and a PDF/DOCX URL yields readable text instead of a dead end.
+// A format convert cannot handle degrades to a short note naming the type rather
+// than dumping raw bytes into the model context.
+func renderWebBody(contentType, sourceURL string, data []byte) string {
+	res, err := convert.ToMarkdown(data, convert.Options{MIME: contentType, SourceURL: sourceURL})
+	if err == nil && strings.TrimSpace(res.Markdown) != "" {
+		return res.Markdown
 	}
-}
-
-// stripHTML reduces an HTML document to readable text using only the standard library
-// (deliberately dependency-free, matching this codebase): drop <script>/<style> blocks,
-// replace remaining tags with spaces, unescape entities, and collapse whitespace. It is a
-// pragmatic best-effort reduction, not a full HTML parser.
-func stripHTML(s string) string {
-	s = reScript.ReplaceAllString(s, " ")
-	s = reStyle.ReplaceAllString(s, " ")
-	s = reTag.ReplaceAllString(s, " ")
-	s = html.UnescapeString(s)
-	s = reWS.ReplaceAllString(s, " ")
-	return strings.TrimSpace(s)
+	// convert could not handle this type. If the body is textual, hand it back
+	// AS-IS rather than discarding it: a JSON API response is the single most
+	// common web_fetch target, and returning "no text could be extracted" for
+	// one would be a regression. This branch also keeps Phase 1 shippable on
+	// its own — the JSON/CSV/PDF converters land in Phase 2, and until they do
+	// every textual body still flows through here unchanged.
+	if convert.IsTextual(data, contentType) {
+		return string(data)
+	}
+	kind := convert.Detect(data, "", contentType)
+	return fmt.Sprintf("[web_fetch: %s response (%s), %d bytes — no text could be extracted; if you need to process it, use run_script or bash]",
+		contentTypeMain(contentType), kind, len(data))
 }
 
 func contentTypeMain(ct string) string {
@@ -1092,89 +1255,48 @@ func ctxSleep(ctx context.Context, d time.Duration) bool {
 
 // ── web_search ───────────────────────────────────────────────────────────────
 
-// ddgHTMLEndpoint is the DuckDuckGo keyless HTML results endpoint. It needs no API
-// key (consistent with web_fetch's key-less design) and returns a parseable HTML
-// page of result blocks. ddgBaseURL, when set on the toolset, overrides it (tests).
-const ddgHTMLEndpoint = "https://html.duckduckgo.com/html/"
-
 // maxWebSearchResults bounds how many results web_search returns to the model.
 const maxWebSearchResults = 6
 
-// webSearch runs a DuckDuckGo HTML query and returns numbered title/url/snippet
-// entries. It is the discovery complement to web_fetch: use it to FIND a URL, then
-// web_fetch to READ it. Query-only — it cannot carry secrets (same boundary as
-// web_fetch). Reliability mirrors webFetch exactly: transient failures (429, 5xx,
-// network, timeout) are retried INTERNALLY with backoff and NEVER surface as an
-// error: result (so a blip that clears doesn't trip the oscillation guard); a
-// non-retryable outcome (bad URL, 4xx other than 429) returns an error. A 200 page
-// with no parseable result blocks is a valid empty result ("(no search results)"),
-// NOT an error — so the model can fall back to web_fetch without tripping the guard.
+// webSearch runs the provider cascade and renders numbered title/url/snippet
+// entries. Reliability comes from the cascade, not from this function: a single
+// engine returning a JS-challenge page (200 OK, zero parseable results) is
+// indistinguishable from "no results", so websearch treats it as a reason to try
+// the next engine. Exhausting every engine still yields a NON-error empty notice
+// so the model can fall back to web_fetch without tripping the oscillation guard.
 func (h *hostToolSet) webSearch(ctx context.Context, query string) (string, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return "", fmt.Errorf("query is required")
 	}
-	target := h.ddgBaseURL
-	if target == "" {
-		target = ddgHTMLEndpoint
-	}
-	full := target + "?q=" + url.QueryEscape(query)
-
 	client := h.httpClient
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		// Match webFetch/fetchRaw's client selection exactly: the guard is what
+		// stops this tool from becoming a way to reach the loopback connector
+		// bridge or other private address space. allowPrivateHosts is a
+		// TEST-ONLY escape hatch (never set in production) for pointing at an
+		// httptest fixture.
+		if h.allowPrivateHosts {
+			client = &http.Client{Timeout: 30 * time.Second}
+		} else {
+			client = guardedHTTPClient(30 * time.Second)
+		}
 	}
 	base := h.webRetryBase
 	if base <= 0 {
 		base = 500 * time.Millisecond
 	}
 
-	var lastErr error
-	for attempt := 0; attempt < webFetchMaxAttempts; attempt++ {
-		if attempt > 0 {
-			if !ctxSleep(ctx, base<<(attempt-1)) {
-				return "", ctx.Err()
-			}
-		}
-		body, retryable, err := h.webSearchOnce(ctx, client, full)
-		if err == nil {
-			return body, nil
-		}
-		lastErr = err
-		if !retryable {
-			return "", err
-		}
-	}
-	return "", fmt.Errorf("web_search failed after %d attempts: %w", webFetchMaxAttempts, lastErr)
-}
-
-// webSearchOnce performs a single DDG HTML request. retryable mirrors webFetchOnce
-// (true for 429/5xx/network/timeout; false for 2xx or a definitive 4xx).
-func (h *hostToolSet) webSearchOnce(ctx context.Context, client *http.Client, u string) (string, bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	results, err := (&websearch.Client{
+		HTTP:      client,
+		RetryBase: base,
+		Providers: h.searchProviders(),
+	}).Search(ctx, query)
 	if err != nil {
-		return "", false, fmt.Errorf("build request: %v", err)
+		return "", err
 	}
-	// A browser-like User-Agent avoids DDG's JS-challenge interstitial, which
-	// returns a page with no result blocks (we'd report "no search results").
-	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", true, fmt.Errorf("request failed: %v", err) // network/timeout → transient
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-		return "", true, fmt.Errorf("HTTP %d from %s", resp.StatusCode, u)
-	}
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxWebBody))
-	if resp.StatusCode >= 400 {
-		return "", false, fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, u, snippetBytes(data))
-	}
-	results := parseDDGResults(string(data))
 	if len(results) == 0 {
-		// 200-but-no-results is valid, not a failure — the model can fall back to web_fetch.
-		return "(no search results)", false, nil
+		return "(no search results)", nil
 	}
 	if len(results) > maxWebSearchResults {
 		results = results[:maxWebSearchResults]
@@ -1183,69 +1305,26 @@ func (h *hostToolSet) webSearchOnce(ctx context.Context, client *http.Client, u 
 	for i, r := range results {
 		fmt.Fprintf(&sb, "%d. %s\n   %s\n   %s\n", i+1, r.Title, r.URL, r.Snippet)
 	}
-	return strings.TrimSpace(sb.String()), false, nil
+	return strings.TrimSpace(sb.String()), nil
 }
 
-// ddgResult is one parsed DuckDuckGo result.
-type ddgResult struct {
-	Title   string
-	URL     string
-	Snippet string
-}
-
-// reDDGBlock matches one DDG result block: an anchor with class "result__a" whose
-// href is the redirect, followed (case-insensitively, dot-all) by an anchor with
-// class "result__snippet" holding the snippet text.
-var reDDGBlock = regexp.MustCompile(`(?is)<a[^>]*class="result__a"[^>]*href="([^"]*)"[^>]*>(.*?)</a>.*?<a[^>]*class="result__snippet"[^>]*>(.*?)</a>`)
-
-// parseDDGResults extracts result blocks from a DDG HTML page. The result__a href
-// is a //duckduckgo.com/l/?uddg=<encoded real URL> redirect; the real URL is
-// recovered by decoding the uddg query param. Titles and snippets have HTML
-// stripped. Tolerant by design: a malformed block is skipped, not fatal.
-func parseDDGResults(htmlDoc string) []ddgResult {
-	var out []ddgResult
-	for _, m := range reDDGBlock.FindAllStringSubmatch(htmlDoc, maxWebSearchResults*2) {
-		rawHref, titleHTML, snippetHTML := m[1], m[2], m[3]
-		realURL := decodeDDGRedirect(rawHref)
-		if realURL == "" {
-			continue // not a real result link (e.g. a "more results" nav anchor)
-		}
-		out = append(out, ddgResult{
-			Title:   stripHTML(titleHTML),
-			URL:     realURL,
-			Snippet: stripHTML(snippetHTML),
-		})
-		if len(out) >= maxWebSearchResults {
-			break
-		}
+// searchProviders builds the provider list for this toolset. A workspace that
+// has stored a search API key (as an ordinary encrypted secret, injected into
+// subprocessEnv alongside the agent's other secrets) gets that provider FIRST
+// and skips scraping entirely; otherwise the keyless cascade applies. When
+// ddgBaseURL is set (tests only) the cascade collapses to that single endpoint.
+func (h *hostToolSet) searchProviders() []websearch.Provider {
+	if h.ddgBaseURL != "" {
+		return websearch.DefaultProviders(map[string]string{"ddg-html": h.ddgBaseURL})[:1]
 	}
-	return out
-}
-
-// decodeDDGRedirect recovers the real result URL from a DuckDuckGo redirect href of
-// the form "//duckduckgo.com/l/?uddg=<urlencoded>&rut=..." (or an absolute
-// https:// variant). Returns "" if the href isn't a uddg redirect we can decode.
-func decodeDDGRedirect(href string) string {
-	href = strings.TrimSpace(href)
-	if href == "" {
-		return ""
+	var out []websearch.Provider
+	if p := websearch.KeyedProvider("brave", h.subprocessEnv["SEARCH_KEY_BRAVE"], ""); p != nil {
+		out = append(out, p)
 	}
-	// Resolve protocol-relative "//duckduckgo.com/..." to a parseable absolute URL.
-	if strings.HasPrefix(href, "//") {
-		href = "https:" + href
+	if p := websearch.KeyedProvider("tavily", h.subprocessEnv["SEARCH_KEY_TAVILY"], ""); p != nil {
+		out = append(out, p)
 	}
-	u, err := url.Parse(href)
-	if err != nil {
-		return ""
-	}
-	uddg := u.Query().Get("uddg")
-	if uddg == "" {
-		return ""
-	}
-	if real, err := url.QueryUnescape(uddg); err == nil {
-		return real
-	}
-	return uddg
+	return append(out, websearch.DefaultProviders(nil)...)
 }
 
 // ── bash ─────────────────────────────────────────────────────────────────────
@@ -1332,7 +1411,10 @@ func (h *hostToolSet) spillLargeOutput(out, toolName string) string {
 	rel := filepath.ToSlash(filepath.Join(spillDirName, name))
 	head := out
 	if len(head) > spillHeadBytes {
-		head = head[:spillHeadBytes]
+		// Rune-safe: a raw byte cut can land mid-character on multi-byte UTF-8
+		// (this operator's notes are routinely Cyrillic), corrupting the last
+		// character shown instead of merely cutting the text short.
+		head = head[:runeFloorCut(head, spillHeadBytes)]
 	}
 	return fmt.Sprintf("%s\n…[output is %d bytes — saved in full to %s. Do NOT read it all back into "+
 		"context. Write a small Python script that reads that file and does the work directly (e.g. writes "+
@@ -1364,8 +1446,24 @@ func readFileSlice(content string, offset, limit int) string {
 	}
 	remainderNote := ""
 	if len(window) > winCap {
-		next := offset + winCap
-		window = window[:winCap]
+		// Rune-safe cut: floor to the last full character within winCap, and
+		// crucially advance `next` by the SAME floored length, not the nominal
+		// winCap — otherwise the bytes between the floored cut and winCap are
+		// silently skipped on the next page (never shown, never re-requested),
+		// a quiet data-loss bug distinct from just "the last char looks broken".
+		cut := runeFloorCut(window, winCap)
+		if cut == 0 {
+			// winCap was too small to hold even ONE whole multi-byte character at
+			// this exact alignment. Returning an empty window here would read as
+			// "no bytes at offset" (see below) — i.e. EOF — when real bytes
+			// remain, AND it would make no progress: the next call would land on
+			// the identical offset and hit the identical rune. Always include at
+			// least one full rune, even if that means slightly exceeding winCap.
+			_, size := utf8.DecodeRuneInString(window)
+			cut = size
+		}
+		next := offset + cut
+		window = window[:cut]
 		remainderNote = fmt.Sprintf("\n…[%d more bytes; call read_file again with offset=%d]", len(content)-next, next)
 	}
 	if window == "" {
@@ -1378,23 +1476,70 @@ func truncate(s string) string {
 	if len(s) <= maxToolResult {
 		return s
 	}
+	// Rune-safe cut: a raw byte slice at maxToolResult can land mid-character on
+	// multi-byte UTF-8 (this operator's notes are routinely Cyrillic, and this
+	// path now carries note passages — see search_files), corrupting the last
+	// character shown instead of merely cutting the text short. Report the
+	// ACTUAL shown length, not the nominal cap, so the notice never overstates
+	// how much survived.
+	cut := runeFloorCut(s, maxToolResult)
 	// State the true total and the escape hatch so a weak model doesn't silently reason over
 	// incomplete data: it can page the rest (read_file offset/limit) or process it with a
 	// script instead of pulling it inline. Kept short (< maxToolResult+512, see the web_fetch
 	// truncation test) and marker-free of anything parsed for logic elsewhere.
 	return fmt.Sprintf("%s\n…[truncated: showing first %d of %d bytes. To get the rest, request a byte "+
 		"range (read_file offset/limit) or process the data with a script instead of reading it inline.]",
-		s[:maxToolResult], maxToolResult, len(s))
+		s[:cut], cut, len(s))
 }
 
-// writeFileAtomic mirrors the vault's own unexported atomic-write helper.
-// Needed locally only for the absolute-within-vault edge case in writeFile/
-// editFile, where the path is already resolved to an abs on-disk location and
-// vault.WriteNote (which re-resolves from a vault-relative path) doesn't apply.
+// runeFloorCut returns the largest index <= n that lands on a UTF-8 rune
+// boundary, so a hard byte-slice cut never splits a multi-byte character.
+// Mirrors vault.runeSafeCut's logic exactly but is kept as coder's own copy:
+// vault's helper is unexported to that package, and this package has no
+// other reason to depend on vault for a four-line string utility.
+func runeFloorCut(s string, n int) int {
+	if n >= len(s) {
+		return len(s)
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return n
+}
+
+// writeFileAtomic mirrors the vault's own unexported atomic-write helper
+// (internal/vault/vault.go) — INCLUDING its os.CreateTemp fix: a fixed ".tmp"
+// name lets two concurrent writers targeting different final paths in the same
+// directory collide on the identical scratch path, so one writer's rename
+// fails with "no such file or directory" when it finds its temp file already
+// gone or truncated by the other. Needed locally only for the
+// absolute-within-vault edge case in writeFile/editFile, where the path is
+// already resolved to an abs on-disk location and vault.WriteNote (which
+// re-resolves from a vault-relative path) doesn't apply.
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, perm); err != nil {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmpName := tmp.Name()
+	// Whatever the outcome, don't leave a stray scratch file behind: on
+	// success the rename has already moved it to path, so Remove here is a
+	// harmless no-op (ENOENT, ignored); on any failure path it cleans up.
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	// os.CreateTemp always creates with mode 0600 regardless of the caller's
+	// intended permission; fix it up before the rename makes it visible under
+	// its final name.
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }

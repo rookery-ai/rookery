@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
+	"github.com/ilijad1/simple-agents/internal/convert"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/memory"
 	"github.com/ilijad1/simple-agents/internal/profile"
@@ -18,7 +20,14 @@ import (
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/ilijad1/simple-agents/internal/skilldesigner"
 	"github.com/ilijad1/simple-agents/internal/skilllibrary"
+	"github.com/ilijad1/simple-agents/internal/vault"
 )
+
+// maxAttachmentBytes caps a chat attachment. Chat platforms already cap uploads
+// well below this; the limit exists so a hostile or misbehaving adapter cannot
+// hand the router an unbounded buffer. Matches the web upload endpoint's own
+// cap (web/api_kb.go's maxUploadBytes) so the two doors behave identically.
+const maxAttachmentBytes = 25 << 20
 
 // TextHandler is called for non-command messages (one-off chat or within a chat).
 // history contains prior turns when an active chat is present; empty for stateless chat.
@@ -42,6 +51,7 @@ type Router struct {
 	designFlow *agentdesigner.Flow
 	skillFlow  *skilldesigner.Flow
 	memory     *memory.Store
+	vault      *vault.Vault
 
 	// timeParserFallback is an optional LLM-backed time parser used when the
 	// regex parser in reminder.ParseNaturalTime fails to understand the input.
@@ -86,6 +96,15 @@ func (r *Router) WithSkillFlow(f *skilldesigner.Flow) *Router {
 	return r
 }
 
+// WithVault attaches the knowledge-base vault so chat attachments can be
+// imported. Leaving it nil keeps attachments responding with a clear
+// "unavailable" message rather than panicking — the same contract designFlow
+// and skillFlow already have.
+func (r *Router) WithVault(v *vault.Vault) *Router {
+	r.vault = v
+	return r
+}
+
 // WithTimeParserFallback sets an LLM-backed time parser to use when the built-in
 // regex parser fails. The fallback is also used when a reminder message is provided
 // without an explicit time expression.
@@ -99,13 +118,41 @@ func (r *Router) WithTimeParserFallback(fn reminder.TimeParserFunc) *Router {
 // sendAutoDelete sends a message that is automatically deleted after 30 s (used for secret values).
 // sendProgress edits the current Telegram placeholder WITHOUT consuming it, used for mid-generation milestones.
 func (r *Router) Handle(ctx context.Context, msg Message, send func(string), deleteIncoming func(), sendAutoDelete func(string), sendProgress func(string)) error {
+	// A file attachment is routed independently of command/text parsing — it
+	// carries no meaningful Text to dispatch on (Telegram documents/photos
+	// arrive with an empty or caption-only Text field).
+	if msg.Attachment != nil {
+		// A failed download is reported and the turn ends HERE — it must never
+		// fall through to the text path. msg.Text is empty on a download failure
+		// (there was nothing to caption it with beyond what the platform gave us),
+		// and an empty text turn reaching handleText with a master-password
+		// challenge pending would previously be read as an answer, silently
+		// cancelling a security-sensitive pending flow because of an unrelated
+		// network hiccup fetching a file.
+		if msg.Attachment.Err != nil {
+			name := msg.Attachment.Filename
+			if strings.TrimSpace(name) == "" {
+				name = "your file"
+			}
+			send(fmt.Sprintf("⚠️ I couldn't fetch **%s** — %s. Please try sending it again.", name, msg.Attachment.Err.Error()))
+			return nil
+		}
+		reply, err := r.handleAttachment(msg.WorkspaceID, *msg.Attachment)
+		if err != nil {
+			send("⚠️ " + err.Error())
+			return nil
+		}
+		send(reply)
+		return nil
+	}
+
 	cmd, arg := ParseCommand(msg.Text)
 
 	switch cmd {
 	case "start":
 		return r.handleStart(ctx, msg, send)
 	case "help":
-		send(helpText())
+		send(helpText(msg.Platform))
 		return nil
 	case "agent":
 		return r.handleAgent(ctx, msg, arg, send)
@@ -165,6 +212,51 @@ func (r *Router) handleStart(ctx context.Context, msg Message, send func(string)
 
 	send(fmt.Sprintf("Hi **%s**! Your Telegram account is now linked. Send /help to see what you can do.", w.Name))
 	return nil
+}
+
+// handleAttachment converts a chat attachment and files it in the knowledge
+// base, returning the message to send back. A non-nil error is a REFUSAL
+// (empty/oversized/no vault wired) — the two are distinct because a refusal
+// carries no filesystem detail and is always safe to show verbatim, while a
+// deeper import failure is instead reported inline in the returned string
+// (see below) so the caller doesn't have to re-derive wording per error kind.
+func (r *Router) handleAttachment(workspaceID string, att Attachment) (string, error) {
+	if len(att.Data) == 0 {
+		return "", fmt.Errorf("attachment was empty")
+	}
+	if len(att.Data) > maxAttachmentBytes {
+		return "", fmt.Errorf("attachment is too large (%d bytes; limit %d)", len(att.Data), maxAttachmentBytes)
+	}
+	if r.vault == nil {
+		return "", fmt.Errorf("knowledge base is unavailable")
+	}
+
+	res, err := r.vault.ImportFile(workspaceID, vault.ImportInput{
+		Data:     att.Data,
+		Filename: att.Filename,
+		// BuildPhase is always false here — a chat attachment is always a real
+		// user action, never part of an agent/skill build.
+		BuildPhase: false,
+	})
+	if err != nil {
+		// Mirrors uploadErrStatus (web/api_kb.go) and the CLI bridge's
+		// handleConvert (internal/vault/bridge.go): an unconvertible format or a
+		// rejected destination is a property of the FILE the user sent — safe to
+		// explain plainly. Anything else is a genuine server fault (disk I/O,
+		// etc.) the user can't fix by resending a different file, so the raw
+		// error — which can carry a filesystem path — goes to the log only.
+		if errors.Is(err, convert.ErrUnsupportedFormat) || errors.Is(err, vault.ErrSystemDir) || errors.Is(err, vault.ErrEscapes) {
+			return fmt.Sprintf("I couldn't read **%s** — %s", att.Filename, err.Error()), nil
+		}
+		slog.Warn("gateway: attachment import failed", "workspace", workspaceID, "filename", att.Filename, "err", err)
+		return fmt.Sprintf("I couldn't save **%s** to your knowledge base — something went wrong on my end. Try again in a bit.", att.Filename), nil
+	}
+
+	msg := fmt.Sprintf("Saved **%s** to your knowledge base as `%s`.", att.Filename, res.NotePath)
+	if len(res.Warnings) > 0 {
+		msg += "\n\n_Note: " + strings.Join(res.Warnings, "; ") + "_"
+	}
+	return msg, nil
 }
 
 func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send func(string)) error {
@@ -516,6 +608,9 @@ func (r *Router) resolveMasterPwChallenge(ctx context.Context, msg Message, ch *
 
 	masterPw := strings.TrimSpace(msg.Text)
 	if masterPw == "" {
+		// Unreachable through handleText today (it only calls in here once it has
+		// already confirmed non-empty text) — kept as a second layer of defense
+		// in depth rather than trusting that invariant to hold forever.
 		send("Master password cannot be empty. Challenge cancelled.")
 		return nil
 	}
@@ -862,13 +957,25 @@ func parseDuration(s string) (time.Duration, error) {
 func (r *Router) handleText(ctx context.Context, msg Message, send func(string), deleteIncoming func(), sendAutoDelete func(string), sendProgress func(string)) error {
 	// Check for a pending master-password challenge. These exchanges are intentionally
 	// NOT persisted to session history to keep sensitive values out of the DB.
+	//
+	// Peek (don't consume yet) — an inbound message with no usable text is NOT a
+	// genuine reply to the challenge, even if one is pending. This is defense in
+	// depth independent of the attachment-error short-circuit in Handle(): should
+	// an empty-text message ever reach here some other way (a sticker, a voice
+	// note, an adapter bug), it must not be read as an answer and silently cancel
+	// a security-sensitive pending flow. Only a real, non-empty text reply
+	// resolves — and consumes — the challenge.
 	r.mu.Lock()
 	challenge, hasPending := r.challenges[msg.WorkspaceID]
-	if hasPending {
-		delete(r.challenges, msg.WorkspaceID)
-	}
 	r.mu.Unlock()
 	if hasPending {
+		if strings.TrimSpace(msg.Text) == "" {
+			send("🔐 Still waiting on your master password — reply with the password itself, or send the /secret command again to cancel.")
+			return nil
+		}
+		r.mu.Lock()
+		delete(r.challenges, msg.WorkspaceID)
+		r.mu.Unlock()
 		return r.resolveMasterPwChallenge(ctx, msg, challenge, send, deleteIncoming, sendAutoDelete)
 	}
 
@@ -1159,7 +1266,17 @@ func (r *Router) handleMemory(ctx context.Context, msg Message, arg string, send
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-func helpText() string {
+// helpText renders /help, conditioning the file-upload line on platform: Slack's
+// Socket Mode integration drops subtyped file_share messages entirely (see
+// SlackGateway — there is no attachment handling wired for it), so telling a
+// Slack user to "send a file" is a false promise the bot silently does nothing
+// about. Telegram and Discord both implement attachment download, so they keep
+// the line.
+func helpText(platform string) string {
+	fileLine := "\nSend a file (document/photo) to save it to your knowledge base.\n"
+	if platform == "slack" {
+		fileLine = ""
+	}
 	return `**Simple Agents — Commands**
 
 /agent list — list your agents
@@ -1185,7 +1302,7 @@ func helpText() string {
 /memory add <text> — save a new memory entry
 /memory delete <n> — delete entry by number
 /help — this message
-
+` + fileLine + `
 _Add secrets at the web dashboard — no master password needed to add_`
 }
 

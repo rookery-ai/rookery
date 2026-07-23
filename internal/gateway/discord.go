@@ -5,13 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
 
 	"github.com/ilijad1/simple-agents/internal/gateway/render"
+	"github.com/ilijad1/simple-agents/internal/iolimit"
+	"github.com/ilijad1/simple-agents/internal/nethttp"
 )
 
 // discordAPIBase is the Discord REST base; overridable in tests.
@@ -87,6 +91,59 @@ func mapDiscordDM(authorID, guildID, content, msgID, botUserID string, isBot boo
 	}, true
 }
 
+// discordCDNHosts allowlists the only hosts a Discord attachment URL should
+// ever point at. An allowlist is appropriate specifically because this URL is
+// NOT attacker-controlled message text the way a web_fetch target is — it is
+// a pre-signed link Discord's own gateway payload hands us for an object
+// Discord itself hosts. Pinning to Discord's known CDN hosts means even a
+// malformed/tampered payload (or a bug upstream in discordgo) can't be used
+// to make this code path reach an arbitrary internal or external address —
+// on top of, not instead of, the private-address dial guard below.
+// Var (not const) so a test can point it at a hermetic fake server.
+var discordCDNHosts = map[string]bool{
+	"cdn.discordapp.com":   true,
+	"media.discordapp.net": true,
+}
+
+// discordAttachmentClient is the guarded HTTP client used for attachment
+// downloads (see internal/nethttp) — it refuses to dial private/loopback
+// address space, the same protection internal/coder's web_fetch tool uses.
+// Var so a test can substitute an unguarded client: the real guard rejects
+// loopback outright, so a hermetic httptest server (which always binds
+// 127.0.0.1) could never be reached through the production client.
+var discordAttachmentClient = nethttp.GuardedClient(20 * time.Second)
+
+// downloadDiscordAttachment fetches an attachment's bytes from Discord's CDN.
+// Unlike Slack's url_private, a Discord attachment URL is a pre-signed link
+// (ex/is/hm query params) that needs no Authorization header — a plain GET.
+func downloadDiscordAttachment(rawURL string) ([]byte, error) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid attachment url: %w", err)
+	}
+	if !discordCDNHosts[parsed.Hostname()] {
+		return nil, fmt.Errorf("attachment host %q is not a recognised discord cdn host", parsed.Hostname())
+	}
+
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := discordAttachmentClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("discord attachment unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("discord attachment fetch failed (status %d)", resp.StatusCode)
+	}
+	data, err := iolimit.ReadCapped(resp.Body, maxAttachmentBytes)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 // NewDiscord creates (does not start) a Discord adapter.
 func NewDiscord(token, ownerWorkspaceID string, dispatch DispatchFunc) (*DiscordGateway, error) {
 	sess, err := discordgo.New("Bot " + token)
@@ -122,6 +179,27 @@ func (g *DiscordGateway) onMessageCreate(s *discordgo.Session, m *discordgo.Mess
 		return
 	}
 	msg.WorkspaceID = g.ownerWorkspaceID
+
+	// Discord delivers a file as a URL on the message rather than a file id;
+	// only the first attachment is imported (chat attachments are single-file,
+	// same as Telegram). A download failure is logged AND surfaced as an
+	// explicit Attachment.Err — never silently swallowed into an empty-text
+	// dispatch, which the router could misread as an answer to an unrelated
+	// pending flow (see Router.Handle).
+	if len(m.Attachments) > 0 {
+		att := m.Attachments[0]
+		name := att.Filename
+		if name == "" {
+			name = "attachment"
+		}
+		if data, err := downloadDiscordAttachment(att.URL); err == nil {
+			msg.Attachment = &Attachment{Filename: name, Data: data}
+		} else {
+			slog.Warn("gateway: discord attachment download failed", "err", err)
+			msg.Attachment = &Attachment{Filename: name, Err: err}
+		}
+	}
+
 	g.dispatch(context.Background(), msg)
 }
 

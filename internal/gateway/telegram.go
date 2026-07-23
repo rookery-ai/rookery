@@ -3,10 +3,13 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ilijad1/simple-agents/internal/gateway/render"
+	"github.com/ilijad1/simple-agents/internal/iolimit"
 	telebot "gopkg.in/telebot.v4"
 )
 
@@ -41,6 +44,8 @@ func (g *TelegramGateway) OwnerUserID() string { return g.ownerWorkspaceID }
 // Blocks until ctx is cancelled or the bot stops.
 func (g *TelegramGateway) Start(ctx context.Context) error {
 	g.bot.Handle(telebot.OnText, g.handle)
+	g.bot.Handle(telebot.OnDocument, g.handle)
+	g.bot.Handle(telebot.OnPhoto, g.handle)
 	g.bot.Handle("/start", g.handle)
 	g.bot.Handle("/help", g.handle)
 	g.bot.Handle("/agent", g.handle)
@@ -163,9 +168,50 @@ func (g *TelegramGateway) handle(tc telebot.Context) error {
 		}
 	}
 
+	// Telegram delivers a file as a Document (or a Photo, which telebot has
+	// already reduced from the size-array Telegram sends down to the single
+	// largest entry). Either way the bytes come from a two-step getFile →
+	// download, which telebot wraps in File/Download. A download failure is
+	// logged AND surfaced as an explicit Attachment.Err — never silently
+	// swallowed into an empty-text dispatch, which the router could misread as
+	// an answer to an unrelated pending flow (see Router.Handle).
+	if doc := tc.Message().Document; doc != nil {
+		name := doc.FileName
+		if data, resolvedName, err := g.downloadTelegramFile(doc.File, name); err == nil {
+			msg.Attachment = &Attachment{Filename: resolvedName, Data: data}
+		} else {
+			slog.Warn("telegram: attachment download failed", "err", err)
+			msg.Attachment = &Attachment{Filename: name, Err: err}
+		}
+	} else if photo := tc.Message().Photo; photo != nil {
+		if data, name, err := g.downloadTelegramFile(photo.File, "photo.jpg"); err == nil {
+			msg.Attachment = &Attachment{Filename: name, Data: data}
+		} else {
+			slog.Warn("telegram: attachment download failed", "err", err)
+			msg.Attachment = &Attachment{Filename: "photo.jpg", Err: err}
+		}
+	}
+
 	ctx := context.Background()
 	g.dispatch(ctx, msg)
 	return nil
+}
+
+// downloadTelegramFile fetches an attachment's bytes via the bot API.
+func (g *TelegramGateway) downloadTelegramFile(f telebot.File, name string) ([]byte, string, error) {
+	rc, err := g.bot.File(&f)
+	if err != nil {
+		return nil, "", err
+	}
+	defer rc.Close()
+	data, err := iolimit.ReadCapped(rc, maxAttachmentBytes)
+	if err != nil {
+		return nil, "", err
+	}
+	if strings.TrimSpace(name) == "" {
+		name = "attachment"
+	}
+	return data, name, nil
 }
 
 func init() {
@@ -187,4 +233,3 @@ func init() {
 		return NewTelegram(token, ws, d)
 	})
 }
-

@@ -92,7 +92,7 @@ type DesignSystemParams struct {
 	Connections        []ConnectionRef // connected service accounts (Gmail, etc.) available to bind
 	UserProfile        string
 	UserMemory         string
-	KBManifest         string // rendered bullet list of the user's existing note paths; "" if empty/unknown
+	KBManifest         string // vault.BuildKBContext output: folder summary + relevant passages; "" if no vault attached
 }
 
 // ConnectionRef describes one connected service account (self-managed OAuth) the agent
@@ -926,12 +926,18 @@ always the answer. When describing where results go to the USER, say "your notes
 — do not dump file paths or the word "vault" on them.
 `)
 	if p.KBManifest != "" {
-		sb.WriteString(fmt.Sprintf(`The user's knowledge base currently contains these notes:
-<kb_notes>
-%s</kb_notes>
-The agent can read and edit any of these at runtime; reference them by path when
-relevant. The user may have reorganized since this list was made, so have the agent
-discover the actual layout at runtime rather than assuming these exact paths.
+		sb.WriteString(fmt.Sprintf(`The block below describes the user's knowledge base: its folder structure, and
+any existing notes relevant to this request (with their content). Use these real
+notes when designing — reference the actual paths shown.
+
+If the block says no notes matched, the user's knowledge base has nothing on this
+topic. Do NOT invent a file path. Ask the user where the information lives, or
+design the agent to create the note itself.
+<kb_context>
+%s</kb_context>
+The agent can read and edit any of these at runtime. The user may reorganize
+after this snapshot was taken, so have the agent discover the actual layout at
+runtime rather than assuming these exact paths persist forever.
 `, p.KBManifest))
 	} else {
 		sb.WriteString(`The user's knowledge base is currently empty — an agent can create notes
@@ -1955,6 +1961,10 @@ You act through FUNCTION CALLS (tools) that the host executes and feeds back to 
   Use it to locate files by name instead of listing folders one at a time.
 You have no shell and cannot run scripts, delete, or rename files.
 
+You can also look things up on the public web: use web_search to FIND a URL when you do not
+have one, then web_fetch to READ it. Both are read-only and cannot carry secrets or reach
+private addresses — they are for public pages only.
+
 Retrieving knowledge — ON DEMAND:
 - Only call tools when the user's message is about their notes or knowledge base. For a
   normal conversational reply, do not touch the vault at all.
@@ -1990,6 +2000,10 @@ is the user's personal knowledge base, an Obsidian-style vault of markdown notes
 The vault contains folders like notes/, memory/, chats/, agents/, reminders/, and any
 folders/files the user has created themselves. You have these file tools available:
 Read, Glob, Grep, Write, Edit.
+
+You also have WebFetch and WebSearch: use WebSearch to FIND a URL when you do not have
+one, then WebFetch to READ it. Both are read-only and cannot carry secrets or reach
+private addresses — they are for public pages only.
 
 Retrieving knowledge — ON DEMAND:
 - Only use the file tools when the user's message is about their notes or knowledge base.
@@ -2038,7 +2052,7 @@ type SkillDesignParams struct {
 	AvailableSkills    []SkillRef // core + user skills, for the designer's awareness
 	UserProfile        string
 	UserMemory         string
-	KBManifest         string
+	KBManifest         string // vault.BuildKBContext output: folder summary + relevant passages; "" if no vault attached
 	ConnectedPlatforms []string
 	ChatApps           []ChatAppInfo
 	// BackendType selects the capabilities block in BuildSkillImplementationPrompt
@@ -2129,7 +2143,13 @@ supplies the real absolute path.
 		sb.WriteString("\n\n")
 	}
 	if p.KBManifest != "" {
-		sb.WriteString("<knowledge_base_manifest>\nThe user's existing notes (the skill may reference these at runtime):\n")
+		sb.WriteString("<knowledge_base_manifest>\n")
+		sb.WriteString("The block below describes the user's knowledge base: its folder structure, and ")
+		sb.WriteString("any existing notes relevant to this request (with their content). Use these real ")
+		sb.WriteString("notes when designing — reference the actual paths shown.\n\n")
+		sb.WriteString("If the block says no notes matched, the user's knowledge base has nothing on this ")
+		sb.WriteString("topic. Do NOT invent a file path. Ask the user where the information lives, or ")
+		sb.WriteString("design the skill to create the note itself.\n\n")
 		sb.WriteString(p.KBManifest)
 		sb.WriteString("</knowledge_base_manifest>\n\n")
 	}

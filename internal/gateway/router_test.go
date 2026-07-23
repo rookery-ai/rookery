@@ -385,3 +385,34 @@ func TestAgentCancelDiscardSparesSkillDraft(t *testing.T) {
 		t.Fatal("skill draft was destroyed by an agent cancel")
 	}
 }
+
+// TestHelpTextFileLineIsPlatformConditional pins Fix 5: /help must not tell a
+// Slack user to send a file — Slack's Socket Mode integration drops subtyped
+// file_share messages entirely, so the promise is false there. Telegram (and,
+// by the same logic, any other platform with attachment handling wired) keeps
+// the line.
+func TestHelpTextFileLineIsPlatformConditional(t *testing.T) {
+	r, _, _, _ := newTestRouter(t)
+
+	slackMsg := testMsg("/help")
+	slackMsg.Platform = "slack"
+	send, got := collect()
+	if err := r.Handle(t.Context(), slackMsg, send, nil, nil, nil); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if len(*got) != 1 {
+		t.Fatalf("expected exactly one reply, got %d", len(*got))
+	}
+	if strings.Contains((*got)[0], "Send a file") {
+		t.Errorf("Slack /help must not promise file uploads (Slack drops them silently), got:\n%s", (*got)[0])
+	}
+
+	// Telegram keeps the line — attachments genuinely work there.
+	send2, got2 := collect()
+	if err := r.Handle(t.Context(), testMsg("/help"), send2, nil, nil, nil); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+	if !strings.Contains((*got2)[0], "Send a file") {
+		t.Errorf("Telegram /help should still mention file uploads, got:\n%s", (*got2)[0])
+	}
+}

@@ -24,6 +24,25 @@ type Message struct {
 	WorkspaceID    string // resolved internal user ID (empty if not yet linked)
 	Text           string
 	MessageID      string // platform message ID (used to delete incoming messages)
+	Attachment     *Attachment
+}
+
+// Attachment is a file a user sent through a chat platform. Adapters download
+// the bytes and hand them to the router; conversion and storage happen once,
+// in the shared vault.ImportFile path, so a file sent in Telegram lands exactly
+// as one uploaded in the web UI does.
+//
+// Err represents a failed download as an EXPLICIT outcome rather than as
+// absence. An adapter that hit a download error still knows a file was sent —
+// dropping that down to a nil Attachment would make the message indistinguishable
+// from ordinary empty-text traffic, which downstream handlers (a pending
+// master-password challenge, in particular) can silently misread as an answer.
+// When Err is set, Data is not meaningful and Router.Handle replies with a
+// clear failure message instead of attempting to import anything.
+type Attachment struct {
+	Filename string
+	Data     []byte
+	Err      error
 }
 
 // ParseCommand splits "/cmd arg1 arg2 ..." into (name, remainder).
