@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,7 +33,9 @@ func TestKBCLIRoundTrip(t *testing.T) {
 		t.Fatalf("scaffold: %v", err)
 	}
 	b := NewBridge(v)
-	if err := b.Start(); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if _, err := b.Start(ctx); err != nil {
 		t.Fatalf("bridge start: %v", err)
 	}
 	defer b.Close()

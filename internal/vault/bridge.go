@@ -66,18 +66,27 @@ func NewBridge(v *Vault) *Bridge {
 }
 
 // Start binds a loopback listener on an ephemeral port and serves the bridge.
-func (b *Bridge) Start() error {
+// Start binds the loopback listener and serves it, returning the base URL. The
+// server shuts down when ctx is cancelled — mirroring connectors.Bridge.Start so
+// the two loopback bridges have one lifecycle shape and a future adapter copying
+// by analogy cannot leak the listener by forgetting an explicit Close(). Close()
+// remains for callers that want to tear down before ctx ends.
+func (b *Bridge) Start(ctx context.Context) (string, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return fmt.Errorf("kb bridge listen: %w", err)
+		return "", fmt.Errorf("kb bridge listen: %w", err)
 	}
 	b.ln = ln
 	mux := http.NewServeMux()
 	mux.HandleFunc("/convert", b.handleConvert)
 	mux.HandleFunc("/search", b.handleSearch)
 	b.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		<-ctx.Done()
+		_ = b.srv.Close()
+	}()
 	go func() { _ = b.srv.Serve(ln) }()
-	return nil
+	return b.URL(), nil
 }
 
 func (b *Bridge) Close() {

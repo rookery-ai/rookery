@@ -211,10 +211,9 @@ func serveCmd() *cli.Command {
 			// Loopback KB bridge so CLI coders reach conversion + search in-process
 			// (the same vault.ImportFile / Searcher code the API engine calls directly).
 			kbBridge := vault.NewBridge(vlt)
-			if err := kbBridge.Start(); err != nil {
+			if _, err := kbBridge.Start(ctx); err != nil {
 				return fmt.Errorf("start kb bridge: %w", err)
 			}
-			defer kbBridge.Close()
 
 			designFlow := agentdesigner.NewFlow(coderFor, designer).
 				WithDB(database).
