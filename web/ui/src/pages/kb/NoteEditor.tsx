@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { AlertTriangle, ChevronDown, Info, Loader2, Link2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { useKBNote, useSaveNote, useRenameNote, useDeleteNote, useSetKBIcon, useUploadKBAsset } from "@/lib/kb";
+import { useKBNote, useSaveNote, useRenameNote, useDeleteNote, useSetKBIcon, useUploadKBAsset, rawURL } from "@/lib/kb";
 import { useToast } from "@/components/shell/Toast";
 import ImagePicker from "./ImagePicker";
 import { Button } from "@/components/ui/button";
@@ -31,26 +31,33 @@ function isSystemLogNote(path: string): boolean {
   );
 }
 
-// Notes open in the rich text editor by default. This banner explains the one
-// exception: a note whose markdown doesn't survive a round trip through the
-// editor (checkFidelity in ./editor.ts). Saving such a note from rich text
-// re-serializes the WHOLE document, so it would rewrite formatting in parts
-// the user never touched — hence raw markdown, and hence spelling out WHY
-// rather than just announcing the mode.
-const RAW_BANNER =
-  "Opened as raw markdown to preserve its exact formatting. Switch to rich text to edit it visually — " +
-  "a few uncommon formatting details would be reformatted if you do.";
+// Every note opens in the rich text editor by default. This banner explains the
+// one caveat: a note whose markdown doesn't survive a round trip through the
+// editor (checkFidelity in ./editor.ts) opens as a READ-ONLY rich view, because
+// saving it from rich text would re-serialize the WHOLE document and rewrite
+// formatting in parts the user never touched. Editing it is a deliberate opt-in
+// (this banner's button, or the Raw toggle for exact edits) — hence spelling out
+// WHY, not just announcing the state.
+const READONLY_BANNER =
+  "Opened as a read-only rich view to preserve its exact formatting. Edit as rich text to change " +
+  "it visually — a few uncommon formatting details would be reformatted if you do — or use Raw for exact edits.";
 
-// Isolated so `useEditor` is only ever called while WYSIWYG mode is active —
-// mounting/unmounting this component is how we avoid running the TipTap
-// editor at all over content whose fidelity check failed.
+// Isolated so `useEditor` is only ever called while WYSIWYG mode is active.
+// `editable` is false for a note that failed the fidelity check and hasn't been
+// explicitly opened for editing — it then renders as a pretty READ-ONLY rich
+// view (wikilinks/links still resolve, images render) without the autosave ever
+// re-serializing — and only lossy — content the user never touched. TipTap's
+// click handlers (handleClickOn/handleClick) fire regardless of `editable`, so
+// links stay clickable in the read-only view.
 function WysiwygEditor({
   content,
+  editable,
   onDirty,
   onNavigate,
   registerGetContent,
 }: {
   content: string;
+  editable: boolean;
   onDirty: () => void;
   onNavigate: (target: string) => void;
   registerGetContent: (fn: () => string) => void;
@@ -60,6 +67,7 @@ function WysiwygEditor({
   const { toast } = useToast();
   const attachInputRef = useRef<HTMLInputElement>(null);
   const editor = useEditor({
+    editable,
     // buildExtensions()'s `extra` param exists precisely so UI-only
     // extensions can be appended here without editor.ts knowing about them
     // — checkFidelity's headless round-trip (buildExtensions() with no
@@ -77,24 +85,38 @@ function WysiwygEditor({
         onNavigate(splitAlias(node.attrs.target as string).target);
         return true;
       },
-      // Ctrl/Cmd-click on an external link opens it in a new tab. Plain clicks
-      // still place the cursor (openOnClick is false) so editing isn't hijacked.
-      // Only http(s)/mailto targets open externally — a vault-relative href
-      // would be an internal reference, left to normal handling.
+      // A plain click on a link opens it in a new tab — links are clickable in
+      // the rich text editor, not just on Ctrl/Cmd-click (openOnClick stays
+      // false so TipTap doesn't ALSO try to handle it). Only an actual <a> is
+      // affected; clicking plain text still places the cursor normally.
+      //   - http(s)/mailto and already-served /api/v1/kb/ URLs open as-is.
+      //   - a vault-relative href (a portable attachment path like
+      //     assets/foo.pdf) opens through its served raw URL.
       handleClick(_view, _pos, event) {
-        if (!(event.metaKey || event.ctrlKey)) return false;
         const anchor = (event.target as HTMLElement | null)?.closest?.("a");
         const href = anchor?.getAttribute("href");
-        // Open external links and KB asset/attachment URLs in a new tab; leave
-        // other targets to normal handling.
-        if (href && /^(https?:|mailto:|\/api\/v1\/kb\/)/i.test(href)) {
+        if (!href) return false;
+        if (/^(https?:|mailto:|\/api\/v1\/kb\/)/i.test(href)) {
           window.open(href, "_blank", "noopener,noreferrer");
+          return true;
+        }
+        // Vault-relative reference (no scheme, not an in-page anchor): serve it
+        // through the raw endpoint so a portable attachment path still opens.
+        if (!/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith("#") && !href.startsWith("/")) {
+          window.open(rawURL(href), "_blank", "noopener,noreferrer");
           return true;
         }
         return false;
       },
     },
   });
+
+  // `editable` can flip after mount (the "Edit as rich text anyway" override on
+  // a lossy note) without remounting this component, so push it onto the live
+  // editor instance rather than relying on the initial useEditor option alone.
+  useEffect(() => {
+    editor?.setEditable(editable);
+  }, [editor, editable]);
 
   useEffect(() => {
     if (!editor) return;
@@ -126,7 +148,11 @@ function WysiwygEditor({
         .insertContent({
           type: "text",
           text: file.name,
-          marks: [{ type: "link", attrs: { href: res.url } }],
+          // Store the PORTABLE vault path (res.path, e.g. assets/foo.pdf), not
+          // the served URL — so the on-disk markdown stays portable and the
+          // attachment survives export (mirrors how images are stored in
+          // kbImage.ts). handleClick resolves it to the served raw URL to open.
+          marks: [{ type: "link", attrs: { href: res.path } }],
         })
         .run();
     } catch (err) {
@@ -270,16 +296,20 @@ export default function NoteEditor({
     setEditorBody(body);
     const lossy = !checkFidelity(body);
     setFidelityFailed(lossy);
-    setMode(lossy ? "raw" : "wysiwyg");
+    // Every note opens in the rich text view by default, regardless of the
+    // fidelity check — that's the requested default. A lossy note opens
+    // READ-ONLY (editable computed below) so the visual view is available
+    // without risking a re-serialization of untouched formatting; the "Edit as
+    // rich text anyway" banner (or the Raw toggle) is the consent gate to edit.
+    setMode("wysiwyg");
     // Raw mode shows the WHOLE file, frontmatter included — it is the escape
     // hatch for editing the block itself, which the rich text path deliberately
     // preserves untouched.
     setRawText(data.content);
     rawTextRef.current = data.content;
     getContentRef.current = () => rawTextRef.current;
-    const initial: SaveState = lossy ? "raw" : "saved";
-    setSaveState(initial);
-    onStateChange?.(initial);
+    setSaveState("saved");
+    onStateChange?.("saved");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
@@ -692,7 +722,12 @@ export default function NoteEditor({
     );
   }
 
-  const showBanner = mode === "raw" && fidelityFailed && !overrideAccepted;
+  // A lossy note opens as a read-only rich view; this banner offers to unlock
+  // editing. Shown only while still read-only (mode wysiwyg, not yet accepted).
+  const showBanner = mode === "wysiwyg" && fidelityFailed && !overrideAccepted;
+  // The rich text editor is editable unless it's a lossy note the user hasn't
+  // opened for editing yet — see the READONLY_BANNER rationale.
+  const editable = !fidelityFailed || overrideAccepted;
   // Machine-log notes don't show the backlink graph (strip or header count).
   const backlinks = isSystemLogNote(path) ? [] : data.backlinks;
 
@@ -707,7 +742,7 @@ export default function NoteEditor({
         rawMode={mode === "raw"}
         onToggleRaw={handleToggleRaw}
         renameError={renameError}
-        lossyInRichText={fidelityFailed && mode === "wysiwyg"}
+        lossyInRichText={fidelityFailed && mode === "wysiwyg" && overrideAccepted}
         icon={data.icon}
         onSetIcon={(emoji) => setIcon.mutate({ path, icon: emoji ?? "" })}
       />
@@ -735,8 +770,13 @@ export default function NoteEditor({
       {showBanner && (
         <div className="flex items-center gap-2 border-b border-warn-soft bg-warn-soft px-4 py-2 text-sm text-warn">
           <AlertTriangle className="size-4 shrink-0" />
-          <span className="flex-1">{RAW_BANNER}</span>
-          <Button variant="outline" size="sm" className="shrink-0" onClick={switchToWysiwyg}>
+          <span className="flex-1">{READONLY_BANNER}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={() => setOverrideAccepted(true)}
+          >
             Edit as rich text anyway
           </Button>
         </div>
@@ -761,6 +801,7 @@ export default function NoteEditor({
             />
             <WysiwygEditor
               content={editorBody}
+              editable={editable}
               onDirty={markDirty}
               onNavigate={handleNavigate}
               registerGetContent={registerGetContent}
