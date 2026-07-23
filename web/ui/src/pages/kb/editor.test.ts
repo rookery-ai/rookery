@@ -90,3 +90,18 @@ test("buildExtensions() registers an image node and markdown round-trips a plain
   const out = fidelityRoundTrip(md);
   expect(out).toContain("![alt text](https://example.com/img.png)");
 });
+
+describe("table cell fidelity", () => {
+  it("a cell containing a literal pipe round-trips (no corruption)", () => {
+    const md = "| a | b |\n| --- | --- |\n| x \\| y | z |\n";
+    expect(checkFidelity(md)).toBe(true);
+  });
+  it("a plain table still round-trips", () => {
+    const md = "| name | qty |\n| --- | --- |\n| Widget | 3 |\n";
+    expect(checkFidelity(md)).toBe(true);
+  });
+  it("marks and wikilinks inside cells still round-trip", () => {
+    const md = "| a | b |\n| --- | --- |\n| **bold** and [[note]] | z |\n";
+    expect(checkFidelity(md)).toBe(true);
+  });
+});
