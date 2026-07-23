@@ -57,6 +57,13 @@ export type DesignerSurfaceProps = {
   // seeds an EMPTY composer, so this is purely additive: callers that don't
   // pass it (every existing one) see no behavior change.
   initialText?: string;
+  // When true, `initialText` is SENT automatically as the first message once
+  // the surface mounts on a fresh (non-resumed, empty) session — instead of
+  // only pre-filling the composer. AgentNewPage sets this so clicking
+  // "Continue" with a description actually starts the conversation with it. No
+  // send happens when initialText is blank, a draft/resume is in play, or a
+  // transcript already exists.
+  autoSendInitial?: boolean;
   // Rendered in the transcript before the first message exists, so a fresh
   // session reads as "started, your turn" rather than a blank page with a
   // chatbox. Deliberately a ReactNode rendered OUTSIDE `messages` — it is not
@@ -129,6 +136,7 @@ export function DesignerSurface({
   autoResume,
   cancelTo,
   initialText,
+  autoSendInitial,
   intro,
 }: DesignerSurfaceProps) {
   const [messages, setMessages] = useState<HistEntry[]>([]);
@@ -177,6 +185,17 @@ export function DesignerSurface({
   //     stale/incomplete server snapshot — so "live" NEVER refetches on
   //     done, it only clears the live-build UI state.
   const attachSourceRef = useRef<"recovery" | "live" | null>(null);
+  // Set true when a design POST returns building:true — i.e. the build's real
+  // outcome (the verifying transition + the generated spec) will arrive via the
+  // SSE stream, NOT this POST's return value (a concurrent/detached build the
+  // blocking POST didn't itself carry). When that's the case, the "live" SSE
+  // onDone MUST refetch /state to pick up the result — otherwise the surface
+  // never leaves "Build", the Spec panel stays empty, and a follow-up message
+  // races a session the browser thinks is still mid-build ("name is required").
+  // It stays false for a normal same-tab build, whose blocking POST returns the
+  // verifying state directly — so that path still never refetches (the
+  // zero-extra-/state-calls regression holds).
+  const awaitingBuildResultRef = useRef(false);
 
   function focusComposer() {
     setFocusSignal((n) => n + 1);
@@ -193,7 +212,16 @@ export function DesignerSurface({
         setSse((s) => (s ? { ...s, status: "done" } : s));
         sseHandleRef.current = null;
         setGenerating(false);
-        if (attachSourceRef.current === "recovery" && !doneRef.current && endpoints.state) {
+        // Refetch to pick up the finished build's result when nothing else
+        // will deliver it: a "recovery" attach (a reload found a build already
+        // running), OR a "live" build whose POST returned building:true (the
+        // outcome comes via this stream, not that POST). A normal same-tab
+        // build clears awaitingBuildResultRef, so it still never refetches.
+        const src = attachSourceRef.current;
+        const needsRefetch =
+          src === "recovery" || (src === "live" && awaitingBuildResultRef.current);
+        if (needsRefetch && !doneRef.current && endpoints.state) {
+          awaitingBuildResultRef.current = false;
           void refetchState();
         }
       },
@@ -271,6 +299,29 @@ export function DesignerSurface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Auto-send the initial description as the first message (AgentNewPage's
+  // "Continue" flow). Fires exactly once, only for a genuinely fresh session:
+  // recovery has settled, there's no resume banner or draft to restore, and the
+  // transcript is still empty. When any of those don't hold we leave the text
+  // as a composer pre-fill instead (the classic behavior).
+  const autoSentRef = useRef(false);
+  useEffect(() => {
+    if (
+      autoSendInitial &&
+      initialText &&
+      initialText.trim() &&
+      !autoSentRef.current &&
+      !recovering &&
+      !resumeBanner &&
+      messages.length === 0 &&
+      !busy
+    ) {
+      autoSentRef.current = true;
+      void handleSend(initialText.trim());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSendInitial, initialText, recovering, resumeBanner, busy]);
+
   async function handleResume() {
     setResumeBanner(null);
     setBusy(true);
@@ -320,7 +371,14 @@ export function DesignerSurface({
     // of this POST resolving, so `generating` is cleared unconditionally.
     let stillBuilding = false;
     try {
-      const isFirstMessage = messages.length === 0 && fsmState === null && !resumeBanner;
+      // Attach the start payload (the agent's name) whenever the transcript is
+      // empty and we're not resuming — i.e. there's genuinely no conversation
+      // yet, so this is a first message that must carry the name for the
+      // backend to open a session. Keyed on an EMPTY transcript (not
+      // fsmState===null) so it can never fire mid-conversation and start a
+      // fresh session over an in-progress one — a backstop to the primary fix
+      // (the surface staying in sync via the SSE-done refetch above).
+      const isFirstMessage = messages.length === 0 && !resumeBanner;
       const body: Record<string, unknown> = { message: text };
       if (isFirstMessage && startPayload) Object.assign(body, startPayload);
 
@@ -329,6 +387,7 @@ export function DesignerSurface({
 
       if (res.done) {
         doneRef.current = true;
+        awaitingBuildResultRef.current = false;
         setMessages((m) => [...m, { role: "assistant", content: res.response }]);
         setFsmState("done");
         onDone(res.agent_id ?? res.skill_id);
@@ -339,6 +398,10 @@ export function DesignerSurface({
       if (res.state) setFsmState(res.state as FsmState);
       setGenerationFailed(!!res.generation_failed);
       setCanKeepAsIs(!!res.can_keep_as_is);
+      // building:true means the real outcome arrives via the SSE stream, so the
+      // live onDone must refetch; a terminal state (verifying/designing) was
+      // delivered right here, so it must NOT (see awaitingBuildResultRef).
+      awaitingBuildResultRef.current = !!res.building;
       if (res.building) {
         stillBuilding = true;
         ensureSSE("live"); // no-op if mount-recovery already attached it
@@ -553,7 +616,9 @@ export function DesignerSurface({
         onSend={(v) => void handleSend(v)}
         busy={composerBusy}
         focusSignal={focusSignal}
-        initialText={initialText}
+        // When auto-sending, the text becomes the first message — don't ALSO
+        // seed it into the composer box (it would look like an unsent draft).
+        initialText={autoSendInitial ? undefined : initialText}
       />
     </div>
   );
