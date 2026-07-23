@@ -47,6 +47,10 @@ func toAPIReminder(r *db.Reminder) apiReminder {
 }
 
 type apiCreateReminderRequest struct {
+	// Text is the single natural-language field ("remind me in 10 minutes to
+	// call the doctor"). When present it wins; Message/When are the legacy
+	// two-field form kept for back-compat.
+	Text    string `json:"text"`
 	Message string `json:"message"`
 	When    string `json:"when"`
 }
@@ -109,6 +113,32 @@ func (s *Server) apiCreateReminder(c echo.Context) error {
 	var req apiCreateReminderRequest
 	if err := bindAPI(c, &req); err != nil {
 		return err
+	}
+
+	// Single-field path: one natural-language sentence carries both the time
+	// and the message. reminder.ParseReminderText splits them (regex fast path,
+	// LLM fallback) — the same resolver Telegram's /remind uses.
+	if txt := strings.TrimSpace(req.Text); txt != "" {
+		now := time.Now()
+		loc := profile.LoadLocation(s.db, u.ID)
+		llmFn := buildLLMTimeParser(s.coderForWorkspace(u.ID))
+		remindAt, message, err := reminder.ParseReminderText(c.Request().Context(), txt, now, loc, llmFn, u.ID)
+		if err != nil {
+			return jsonErr(c, http.StatusBadRequest, "unparseable_time", `couldn't understand that; try "remind me in 10 minutes to call the doctor"`)
+		}
+		if remindAt.IsZero() {
+			return jsonErr(c, http.StatusBadRequest, "no_time", `couldn't find a time in that — try adding one, e.g. "in 10 minutes" or "tomorrow at 3pm"`)
+		}
+		message = strings.TrimSpace(message)
+		if message == "" {
+			return jsonErr(c, http.StatusBadRequest, "missing_field", "what should I remind you about?")
+		}
+		r := &db.Reminder{ID: uuid.New().String(), WorkspaceID: u.ID, Message: message, RemindAt: remindAt}
+		if err := s.db.CreateReminder(r); err != nil {
+			return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
+		}
+		s.audit.Log(u.ID, "create_reminder", "reminder:"+r.ID, message, c.RealIP())
+		return c.JSON(http.StatusCreated, toAPIReminder(r))
 	}
 
 	whenStr := strings.TrimSpace(req.When)

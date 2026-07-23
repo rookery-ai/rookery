@@ -99,6 +99,30 @@ func TestAPIRemindersUnparseableTime(t *testing.T) {
 	}
 }
 
+// TestAPIRemindersSingleField covers the one-field natural-language create path
+// (regex-deterministic — no LLM): the sentence carries both time and message.
+func TestAPIRemindersSingleField(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/reminders",
+		map[string]string{"text": "in 10 minutes to call the doctor"}, cookies)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("single-field create: %d %s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Message  string `json:"message"`
+		RemindAt string `json:"remind_at"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if created.Message != "call the doctor" || created.RemindAt == "" {
+		t.Fatalf("unexpected create response: %s", rec.Body.String())
+	}
+}
+
 // ── Inbox ────────────────────────────────────────────────────────────────────
 
 func TestAPIInboxCRUD(t *testing.T) {
