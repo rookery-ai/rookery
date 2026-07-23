@@ -140,6 +140,19 @@ func serveCmd() *cli.Command {
 					WithSecretsLookup(secretsLookup)
 			}
 
+			// titleGen produces a one-time content-derived chat title from the first
+			// real exchange, via a text-only call to the workspace's own coder. Wired
+			// into both the web send handler and the gateway router so auto-titling
+			// behaves identically on every surface (see internal/chat.MaybeAutoTitle).
+			titleGen := func(ctx context.Context, workspaceID, userMsg, reply string) (string, error) {
+				res, err := coderFor(workspaceID).WithNoTools().
+					Chat(ctx, workspaceID, nil, prompts.BuildChatTitlePrompt(), prompts.ChatTitleUserPrompt(userMsg, reply))
+				if err != nil {
+					return "", err
+				}
+				return res.Text, nil
+			}
+
 			agentsDir := vaultsDir
 			skillsDir := vaultsDir
 			designer := agentdesigner.NewDesigner(database, agentsDir)
@@ -381,7 +394,8 @@ func serveCmd() *cli.Command {
 			router := gateway.NewRouter(database, textHandler, agentRunHandler, designFlow, memStore).
 				WithTimeParserFallback(buildLLMTimeParserFn(coderSvc)).
 				WithSkillFlow(skillFlow).
-				WithVault(vlt)
+				WithVault(vlt).
+				WithTitleGenerator(titleGen)
 			gwManager := gateway.New(database, sysKey, router)
 
 			go func() {
@@ -454,7 +468,7 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
-			srv = srv.WithBridge(connBridge).WithKBBridge(kbBridge)
+			srv = srv.WithBridge(connBridge).WithKBBridge(kbBridge).WithTitleGenerator(titleGen)
 
 			addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 			slog.Info("listening", "addr", addr)

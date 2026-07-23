@@ -169,6 +169,9 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 	_ = s.db.AddChatMessage(id, "user", text)
 	_ = s.db.AddChatMessage(id, "assistant", result.Text)
 	_ = s.db.TouchChat(id)
+	if ch, err := s.db.GetChat(id); err == nil {
+		chat.MaybeAutoTitle(s.db, s.titleGen, ch, text, result.Text)
+	}
 	return c.JSON(http.StatusOK, map[string]string{"response": result.Text})
 }
 

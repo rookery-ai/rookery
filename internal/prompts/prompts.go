@@ -2440,3 +2440,24 @@ func BuildUnverifiedScriptNudge(deliverable string, last bool) string {
 		"summary/manifest (counts + file paths), NEVER the full data. Routing a big payload through your reasoning " +
 		"gets truncated and burns the run. Never print, log, or return a secret value."
 }
+
+// BuildChatTitlePrompt is the system prompt for the one-shot chat auto-title
+// call. It asks for a bare topic label — no preamble, no quotes.
+func BuildChatTitlePrompt() string {
+	return "You name chat conversations. Given the first message and reply, respond with a " +
+		"concise 3 to 6 word topic in Title Case that captures what the conversation is about. " +
+		"Respond with ONLY the title — no quotes, no trailing punctuation, no preamble, no explanation."
+}
+
+// ChatTitleUserPrompt builds the user turn for the auto-title call, bounding
+// each side so a long exchange can't blow the token budget.
+func ChatTitleUserPrompt(userMsg, reply string) string {
+	const cap = 2000
+	trunc := func(s string) string {
+		if len(s) > cap {
+			return s[:cap]
+		}
+		return s
+	}
+	return "First message:\n" + trunc(userMsg) + "\n\nReply:\n" + trunc(reply)
+}

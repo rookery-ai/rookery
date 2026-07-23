@@ -4,7 +4,7 @@ import { MessageSquare } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
 import { ContextPaneHeader } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
-import { cn, timeAgo } from "@/lib/utils";
+import { cn, formatShortDate, timeAgo } from "@/lib/utils";
 import { useChats, useCreateChat } from "@/lib/chats";
 import { ChatWindow } from "./ChatWindow";
 
@@ -73,7 +73,9 @@ export default function ChatsPage() {
                     {c.active ? "Active" : "Stopped"}
                   </span>
                 </div>
-                <span className="text-xs text-muted-2">{timeAgo(c.updated_at)}</span>
+                <span className="text-xs text-muted-2">
+                  {formatShortDate(c.created_at)} · {timeAgo(c.updated_at)}
+                </span>
               </button>
             ))}
           </div>

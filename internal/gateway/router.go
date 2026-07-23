@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
+	"github.com/ilijad1/simple-agents/internal/chat"
 	"github.com/ilijad1/simple-agents/internal/convert"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/memory"
@@ -52,6 +53,7 @@ type Router struct {
 	skillFlow  *skilldesigner.Flow
 	memory     *memory.Store
 	vault      *vault.Vault
+	titleGen   chat.TitleGenerator // optional; auto-titles a chat from its first exchange
 
 	// timeParserFallback is an optional LLM-backed time parser used when the
 	// regex parser in reminder.ParseNaturalTime fails to understand the input.
@@ -102,6 +104,12 @@ func (r *Router) WithSkillFlow(f *skilldesigner.Flow) *Router {
 // and skillFlow already have.
 func (r *Router) WithVault(v *vault.Vault) *Router {
 	r.vault = v
+	return r
+}
+
+// WithTitleGenerator enables one-time content-based auto-titling of chats.
+func (r *Router) WithTitleGenerator(g chat.TitleGenerator) *Router {
+	r.titleGen = g
 	return r
 }
 
@@ -1067,6 +1075,7 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 		_ = r.db.AddChatMessage(activeChat.ID, "user", msg.Text)
 		_ = r.db.AddChatMessage(activeChat.ID, "assistant", assistantReply)
 		_ = r.db.TouchChat(activeChat.ID)
+		chat.MaybeAutoTitle(r.db, r.titleGen, activeChat, msg.Text, assistantReply)
 	}
 	return nil
 }

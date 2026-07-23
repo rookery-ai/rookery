@@ -77,17 +77,7 @@ func ToMarkdown(data []byte, opt Options) (Result, error) {
 	case KindPDF:
 		return pdfToMarkdown(data, opt)
 	case KindImage:
-		// OCR needs tesseract, which is not a pure-Go dependency and is out of
-		// scope. Produce an honest stub rather than an error: the file is still
-		// worth recording in the knowledge base, and the note says plainly that
-		// no text was read from it.
-		return Result{
-			Markdown:  fmt.Sprintf("(image file, %d bytes — no text was extracted; OCR is not available)\n", len(data)),
-			Title:     titleFromFilename(opt.Filename),
-			Kind:      KindImage,
-			Extractor: "none",
-			Warnings:  []string{"image content is not searchable: no OCR"},
-		}, nil
+		return imageToMarkdown(data, opt)
 	case KindJSON:
 		// Detect classifies KindJSON from the extension/MIME hint alone, with no
 		// JSON validation — so this content is arbitrary uploaded bytes, not
