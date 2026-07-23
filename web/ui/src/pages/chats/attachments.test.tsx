@@ -26,14 +26,27 @@ const SESSION_FIXTURE = {
   workspaces: [],
 };
 
+// The toast host renders a toast's message in two places (a visually-hidden
+// aria-live announcer and the visible toast body) — scope to the visible
+// <span> to disambiguate, matching the established helper in
+// components/shell/toast.test.tsx and pages/kb/tree.test.tsx.
+function toastBody(text: string | RegExp) {
+  return screen.getByText(text, { selector: "span" });
+}
+
 let chats: Chat[];
 let messages: Record<string, ChatMessage[]>;
+// When true, the NEXT /messages POST fails with a 500 and the flag resets —
+// lets a test force exactly one confirmation-turn failure while everything
+// else (including the upload itself) succeeds normally.
+let failNextSend = false;
 
 function resetFixtures() {
   chats = [
     { id: "c1", name: "Chat One", platform: "web", active: true, created_at: "2026-07-01T00:00:00Z", updated_at: "2026-07-17T07:00:00Z" },
   ];
   messages = { c1: [{ role: "user", content: "hi" }, { role: "assistant", content: "hello there" }] };
+  failNextSend = false;
 }
 
 // uploadFor maps a file's NAME to the canned /api/v1/kb/upload outcome each
@@ -90,6 +103,12 @@ function mockFetch() {
 
       const send = url.match(/^\/api\/v1\/chats\/([^/]+)\/messages$/);
       if (send && method === "POST") {
+        if (failNextSend) {
+          failNextSend = false;
+          return Promise.resolve(
+            jsonResponse({ error: { code: "internal", message: "coder crashed" } }, 500),
+          );
+        }
         const id = send[1];
         const body = JSON.parse(String(init?.body)) as { message: string };
         const response = `noted (${body.message.length} chars)`;
@@ -167,7 +186,7 @@ test("choosing a file uploads it and posts a confirmation message naming the not
   expect(await screen.findByText(/noted \(/)).toBeInTheDocument();
 });
 
-test("a 413 response renders a clear size error and posts no confirmation message", async () => {
+test("a 413 response toasts a clear size error and posts no confirmation message", async () => {
   mockFetch();
   wrap();
   await screen.findByText("hi");
@@ -176,12 +195,12 @@ test("a 413 response renders a clear size error and posts no confirmation messag
   const file = new File(["x".repeat(10)], "big.bin");
   await userEvent.upload(input, file);
 
-  expect(await screen.findByText(/too large/i)).toBeInTheDocument();
+  await waitFor(() => expect(toastBody(/too large/i)).toBeInTheDocument());
   expect(screen.queryByText(/Attached/)).not.toBeInTheDocument();
   expect(screen.queryByText(/noted \(/)).not.toBeInTheDocument();
 });
 
-test("a 422 response renders a clear format error and posts no confirmation message", async () => {
+test("a 422 response toasts a clear format error and posts no confirmation message", async () => {
   mockFetch();
   wrap();
   await screen.findByText("hi");
@@ -190,9 +209,65 @@ test("a 422 response renders a clear format error and posts no confirmation mess
   const file = new File(["x"], "bad.xyz");
   await userEvent.upload(input, file);
 
-  expect(await screen.findByText(/can't read this kind of file/i)).toBeInTheDocument();
+  await waitFor(() => expect(toastBody(/can't read this kind of file/i)).toBeInTheDocument());
   expect(screen.queryByText(/Attached/)).not.toBeInTheDocument();
   expect(screen.queryByText(/noted \(/)).not.toBeInTheDocument();
+});
+
+test("a multi-file batch reports every outcome: an earlier rejection isn't erased by a later success", async () => {
+  mockFetch();
+  wrap();
+  await screen.findByText("hi");
+
+  const input = screen.getByLabelText("Attach file", { selector: "input" }) as HTMLInputElement;
+  const big = new File(["x".repeat(10)], "big.bin");
+  const doc = new File(["hello"], "doc.txt", { type: "text/plain" });
+  await userEvent.upload(input, [big, doc]);
+
+  // doc.txt's success is still visible as an in-chat confirmation…
+  expect(await screen.findByText("doc.txt")).toBeInTheDocument();
+  expect(await screen.findByText(/noted \(/)).toBeInTheDocument();
+  // …AND big.bin's rejection survived doc.txt's later success clearing
+  // anything — it's its own toast, not the shared error banner.
+  expect(toastBody(/too large/i)).toBeInTheDocument();
+});
+
+test("upload succeeds but the confirmation turn fails: the message says the file WAS imported, not that the import failed", async () => {
+  mockFetch();
+  failNextSend = true;
+  wrap();
+  await screen.findByText("hi");
+
+  const input = screen.getByLabelText("Attach file", { selector: "input" }) as HTMLInputElement;
+  const file = new File(["hello world"], "doc.txt", { type: "text/plain" });
+  await userEvent.upload(input, file);
+
+  const toastEl = await screen.findByText(/was imported/i, { selector: "span" });
+  expect(toastEl.textContent).toContain("doc.txt");
+  expect(toastEl.textContent).toContain("notes/doc.txt.md");
+  // Must not read as a total/generic failure — the file really is in the KB.
+  expect(toastEl.textContent).not.toMatch(/something went wrong/i);
+
+  // The optimistic "📎 Attached…" bubble is still visible for this live
+  // session even though nothing was persisted server-side (the toast above
+  // is the durable record that survives a reload, where the bubble won't).
+  expect(screen.getByText(/Attached/)).toBeInTheDocument();
+});
+
+test("a batch larger than the per-drop cap is rejected outright, with no partial uploads", async () => {
+  mockFetch();
+  wrap();
+  await screen.findByText("hi");
+
+  const dropZone = screen.getByTestId("chat-window");
+  const files = Array.from({ length: 11 }, (_, i) => new File(["x"], `f${i}.txt`));
+  const dataTransfer = { files, types: ["Files"] };
+
+  fireEvent.dragOver(dropZone, { dataTransfer });
+  fireEvent.drop(dropZone, { dataTransfer });
+
+  await waitFor(() => expect(toastBody(/up to 10 files/i)).toBeInTheDocument());
+  expect(screen.queryByText(/Attached/)).not.toBeInTheDocument();
 });
 
 test("a returned warnings array is surfaced in the confirmation message", async () => {

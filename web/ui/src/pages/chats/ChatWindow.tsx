@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { useChatDetail, useChatAction, sendChatMessage, type Chat, type ChatMessage } from "@/lib/chats";
 import { useUploadKBFile } from "@/lib/kb";
+import { useToast } from "@/components/shell/Toast";
 import { ChatScroll } from "@/components/chat/ChatScroll";
 import { ChatMessageBubble, TypingIndicator } from "@/components/chat/Bubbles";
 import { Composer } from "@/components/chat/Composer";
@@ -20,6 +21,12 @@ import {
 // constant can drift and nothing breaks; a stale/looser client value just
 // means the 413 the server returns is the one the user actually sees).
 const MAX_ATTACH_BYTES = 25 * 1024 * 1024;
+
+// A single drag/pick gesture fires one real coder turn per file, serially —
+// unbounded that's a footgun (a 40-file drop = 40 back-to-back turns off one
+// gesture). Reject the whole batch up front with a clear message rather than
+// silently truncating or firing them all.
+const MAX_ATTACH_FILES = 10;
 
 // attachErrorMessage turns an upload failure into the three distinct,
 // readable outcomes the brief calls for: 413 (too large), 422 (unreadable
@@ -89,12 +96,18 @@ export function ChatWindow({ chatId, initialText }: { chatId: string; initialTex
   const [error, setError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const upload = useUploadKBFile();
+  const { toast } = useToast();
   const [attaching, setAttaching] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  async function handleSend(text: string) {
-    setError(null);
+  // sendTurn is the shared low-level "post one message, wait for the
+  // assistant's reply" primitive. It never throws — every caller gets a
+  // typed result back and decides for itself how to surface a failure.
+  // (handleSend below shows it in the shared banner; attachFiles shows a
+  // per-file toast instead, precisely because a shared banner is the wrong
+  // vehicle when a batch import can have several independent outcomes.)
+  async function sendTurn(text: string): Promise<{ ok: true } | { ok: false; message: string }> {
     setPending((p) => [...p, { role: "user", content: text }]);
     setBusy(true);
     try {
@@ -110,13 +123,20 @@ export function ChatWindow({ chatId, initialText }: { chatId: string; initialTex
       // hadn't actually landed in the cache yet.
       const fresh = qc.getQueryData<{ chat: Chat; messages: ChatMessage[] }>(["chat", chatId]);
       setPending((p) => reconcilePending(p, fresh?.messages ?? []));
+      return { ok: true };
     } catch (err) {
       // The user bubble already pushed above stays visible — the failure
       // is on the assistant's turn, not the user's message.
-      setError(err instanceof ApiError ? err.message : "Something went wrong");
+      return { ok: false, message: err instanceof ApiError ? err.message : "Something went wrong" };
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleSend(text: string) {
+    setError(null);
+    const result = await sendTurn(text);
+    if (!result.ok) setError(result.message);
   }
 
   function handleDelete() {
@@ -142,25 +162,56 @@ export function ChatWindow({ chatId, initialText }: { chatId: string; initialTex
   // endpoint just to persist a non-coder system line was judged NOT worth it
   // per the brief's own steer to avoid new backend surface when reuse is
   // available — reuse here is the sendChatMessage path already wired below.
+  // Each file's outcome is reported through its own toast rather than the
+  // shared `error` banner: `error` is a single slot, so a batch like
+  // [big.bin → 413, doc.txt → ok] would have doc.txt's success clear
+  // big.bin's rejection before the user ever saw it (handleSend clears
+  // `error` as its first statement on every send). Per-file toasts stack
+  // independently and a later success can never erase an earlier failure.
   async function attachFiles(files: File[]) {
     if (files.length === 0) return;
+    if (files.length > MAX_ATTACH_FILES) {
+      toast({
+        message: `Attach up to ${MAX_ATTACH_FILES} files at a time (you selected ${files.length}).`,
+        variant: "error",
+      });
+      return;
+    }
     setAttaching(true);
     try {
       for (const file of files) {
         if (file.size > MAX_ATTACH_BYTES) {
-          setError("That file is too large (max 25 MB).");
+          toast({ message: `Couldn't attach ${file.name}: that file is too large (max 25 MB).`, variant: "error" });
           continue;
         }
+        let res;
         try {
-          const res = await upload.mutateAsync({ file });
-          const warningNote = res.warnings?.length ? `\n\n_Note: ${res.warnings.join("; ")}_` : "";
-          const confirmation = `📎 Attached **${file.name}** to my knowledge base as \`${res.note_path}\`.${warningNote}`;
-          await handleSend(confirmation);
+          res = await upload.mutateAsync({ file });
         } catch (err) {
           // A failed import must never post a success confirmation — this
-          // catch is scoped to exactly the upload call above, so handleSend
-          // (and its own turn) is only ever reached on a successful import.
-          setError(attachErrorMessage(err));
+          // catch is scoped to exactly the upload call above, so the
+          // confirmation turn below is only ever reached on a successful
+          // import.
+          toast({ message: `Couldn't attach ${file.name}: ${attachErrorMessage(err)}`, variant: "error" });
+          continue;
+        }
+        const warningNote = res.warnings?.length ? `\n\n_Note: ${res.warnings.join("; ")}_` : "";
+        const confirmation = `📎 Attached **${file.name}** to my knowledge base as \`${res.note_path}\`.${warningNote}`;
+        const sent = await sendTurn(confirmation);
+        if (!sent.ok) {
+          // The file IS in the KB at this point — the upload above already
+          // succeeded. Only the confirmation TURN failed, so the message
+          // must say so: never tell the user an import failed when it
+          // didn't. This toast is the durable record of that import — the
+          // optimistic "📎 Attached…" bubble above is session-only and
+          // vanishes on reload since nothing was persisted to chat_messages.
+          toast({
+            message:
+              `${file.name} was imported to your knowledge base as ${res.note_path}, ` +
+              `but I couldn't notify the assistant (${sent.message}). The file is safely saved.`,
+            variant: "error",
+            durationMs: 10000,
+          });
         }
       }
     } finally {
@@ -188,6 +239,10 @@ export function ChatWindow({ chatId, initialText }: { chatId: string; initialTex
     if (files.length === 0) return;
     e.preventDefault();
     setDragOver(false);
+    // An attach is already in flight — dropping again mid-batch would race a
+    // second attachFiles against the first and break the sequential file
+    // ordering the comment on attachFiles promises.
+    if (attaching) return;
     void attachFiles(files);
   }
 
@@ -216,6 +271,7 @@ export function ChatWindow({ chatId, initialText }: { chatId: string; initialTex
         ref={fileInputRef}
         type="file"
         multiple
+        disabled={busy || attaching}
         className="sr-only"
         aria-label="Attach file"
         onChange={(e) => {
