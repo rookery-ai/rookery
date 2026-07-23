@@ -1,7 +1,6 @@
 import { Editor, type AnyExtension } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
-import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
@@ -11,6 +10,7 @@ import TableHeader from "@tiptap/extension-table-header";
 import { Markdown, type MarkdownStorage } from "tiptap-markdown";
 import { Wikilink } from "./wikilinks";
 import { PipeSafeTable } from "./pipeSafeTable";
+import { KBImage } from "./kbImage";
 
 // tiptap-markdown ships types for its own extension but doesn't merge them
 // into @tiptap/core's Storage interface, so `editor.storage.markdown` is
@@ -34,7 +34,7 @@ export function buildExtensions(extra: AnyExtension[] = []): AnyExtension[] {
       openOnClick: false,
       HTMLAttributes: { target: "_blank", rel: "noopener nofollow", title: "Ctrl/Cmd-click to open" },
     }),
-    Image,
+    KBImage,
     Placeholder.configure({ placeholder: "Type / for blocks…" }),
     TaskList,
     TaskItem.configure({ nested: true }),

@@ -136,3 +136,20 @@ func TestBacklinksExcludesSystemSourcesAndCoversUserNotes(t *testing.T) {
 		t.Errorf("Backlinks = %v, want exactly [notes/Author.md]", back)
 	}
 }
+
+func TestListImageFiles(t *testing.T) {
+	v := New(t.TempDir())
+	const user = "u1"
+	mustWrite(t, v, user, "assets/a.png", "x")
+	mustWrite(t, v, user, "assets/b.JPG", "x")
+	mustWrite(t, v, user, "notes/doc.md", "not an image")
+	mustWrite(t, v, user, "assets/readme.txt", "not an image")
+
+	imgs, err := v.ListImageFiles(user)
+	if err != nil {
+		t.Fatalf("ListImageFiles: %v", err)
+	}
+	if len(imgs) != 2 {
+		t.Fatalf("ListImageFiles = %v, want 2 images", imgs)
+	}
+}

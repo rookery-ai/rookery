@@ -2,6 +2,7 @@ package web
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -91,5 +92,25 @@ func TestStripFrontmatter(t *testing.T) {
 		if got := stripFrontmatter(c.in); got != c.want {
 			t.Errorf("case %d: got %q want %q", i, got, c.want)
 		}
+	}
+}
+
+func TestSlugifyAssetAndImageDetection(t *testing.T) {
+	if got := slugifyAsset("My Photo (2).PNG"); got != "my-photo-2-png" {
+		t.Errorf("slugifyAsset = %q", got)
+	}
+	if got := slugifyAsset("   !!!   "); got != "" {
+		t.Errorf("slugifyAsset(punct) = %q, want empty", got)
+	}
+	if !isImagePath("assets/x.png") || !isImagePath("A.JPEG") {
+		t.Error("isImagePath should accept png/jpeg")
+	}
+	if isImagePath("notes/x.md") || isImagePath("a.txt") {
+		t.Error("isImagePath should reject non-images")
+	}
+	// assetName preserves the stem + ext with a random middle.
+	n := assetName("Holiday Snap.JPG")
+	if !strings.HasPrefix(n, "holiday-snap-") || !strings.HasSuffix(n, ".jpg") {
+		t.Errorf("assetName = %q", n)
 	}
 }

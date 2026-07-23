@@ -21,7 +21,7 @@ export type KBTree = { path: string; nodes: KBNode[]; order: string[] };
 // <pre>; "binary" -> FileViewer's Download-only panel (content is "").
 // Decided server-side by content sniffing, not by extension — see
 // web/api_kb.go's apiGetKBNote.
-export type KBNoteKind = "markdown" | "code" | "binary";
+export type KBNoteKind = "markdown" | "code" | "binary" | "image";
 
 export type KBNote = {
   path: string;
@@ -166,6 +166,50 @@ export function useExportFormats() {
 
 export const exportURL = (path: string, format: "html" | "docx" | "pdf") =>
   `/api/v1/kb/export?path=${encodeURIComponent(path)}&format=${format}`;
+
+// An embeddable asset (image/file) stored in the vault under assets/.
+export type KBAsset = { path: string; url: string };
+export type KBAssetUploadResult = { path: string; url: string; kind: string; content_type: string };
+
+// Uploads a raw file (image/attachment) to the vault's assets/ folder and
+// returns its portable path + served URL. Distinct from useUploadKBFile, which
+// converts a document into markdown; this preserves the bytes.
+export function useUploadKBAsset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (file: File): Promise<KBAssetUploadResult> => {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch("/api/v1/kb/asset", { method: "POST", body, credentials: "same-origin" });
+      const text = await res.text();
+      let data: unknown = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        /* non-JSON error body */
+      }
+      if (!res.ok) {
+        const e = (data as { error?: { code?: string; message?: string } } | null)?.error;
+        throw new ApiError(res.status, e?.code ?? "unknown", e?.message ?? res.statusText);
+      }
+      return data as KBAssetUploadResult;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["kb-tree"] });
+      qc.invalidateQueries({ queryKey: ["kb-assets"] });
+    },
+  });
+}
+
+// Lists every image already stored in the vault, for the editor's
+// "insert from knowledge base" picker.
+export function useKBAssets(enabled = true) {
+  return useQuery({
+    queryKey: ["kb-assets"],
+    queryFn: () => api.get<{ assets: KBAsset[] }>("/api/v1/kb/assets").then((r) => r.assets ?? []),
+    enabled,
+  });
+}
 
 export function useKBSearch(q: string) {
   return useQuery({

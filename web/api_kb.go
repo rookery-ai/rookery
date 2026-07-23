@@ -2,11 +2,15 @@ package web
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"strings"
@@ -66,6 +70,153 @@ func (s *Server) registerKBAPI(g *echo.Group) {
 	g.GET("/kb/folders", s.apiKBFolders)
 	g.GET("/kb/export", s.apiExportKBNote)
 	g.GET("/kb/export/formats", s.apiExportFormats)
+	g.POST("/kb/asset", s.apiUploadKBAsset)
+	g.GET("/kb/assets", s.apiListKBAssets)
+}
+
+// ── Assets (images & attachments) ─────────────────────────────────────────────
+//
+// Unlike /kb/upload (which converts a document INTO markdown), an asset is
+// stored as raw bytes under the vault's assets/ folder and referenced from a
+// note as ![alt](assets/…) or [file](assets/…). This is how images/attachments
+// embedded via the editor's / menu are persisted. Serving happens through
+// /kb/raw, which sniffs the content type so an <img> actually renders.
+
+// imageExts is the set of extensions the KB treats as inline-renderable images
+// (for the FileViewer image branch, the assets picker, and kind:"image").
+var imageExts = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
+	".webp": true, ".svg": true, ".bmp": true, ".ico": true, ".avif": true,
+}
+
+func isImagePath(rel string) bool {
+	return imageExts[strings.ToLower(path.Ext(rel))]
+}
+
+// escapePathParam URL-escapes a vault-relative path for use as the ?path= query
+// value in a served URL.
+func escapePathParam(rel string) string {
+	return url.QueryEscape(rel)
+}
+
+// assetName builds a collision-resistant, still-recognizable filename for a
+// stored asset: the sanitized original stem + a short random suffix + the
+// original extension. Keeping the stem means an asset is identifiable in the KB
+// browser rather than an opaque UUID.
+func assetName(filename string) string {
+	ext := strings.ToLower(path.Ext(filename))
+	stem := strings.TrimSuffix(path.Base(filename), path.Ext(filename))
+	stem = slugifyAsset(stem)
+	if stem == "" {
+		stem = "file"
+	}
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("%s-%s%s", stem, hex.EncodeToString(b[:]), ext)
+}
+
+// slugifyAsset lowercases and replaces any run of non-alphanumeric characters
+// with a single dash, trimming leading/trailing dashes — so a stored asset path
+// is filesystem- and URL-safe.
+func slugifyAsset(s string) string {
+	var out strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			out.WriteRune(r)
+			lastDash = false
+		} else if !lastDash {
+			out.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(out.String(), "-")
+}
+
+type apiKBAsset struct {
+	Path string `json:"path"`
+	URL  string `json:"url"`
+}
+
+// apiUploadKBAsset stores an uploaded image/file as raw bytes under assets/ and
+// returns its vault-relative path + a served URL for embedding. Shares the 25
+// MiB iolimit cap with every other ingest door.
+// POST /api/v1/kb/asset multipart {file} → 200 {path, url, kind, content_type}
+func (s *Server) apiUploadKBAsset(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	if s.vault == nil {
+		return s.kbUnavailable(c)
+	}
+	c.Request().Body = http.MaxBytesReader(c.Response(), c.Request().Body, maxUploadBytes+maxUploadOverhead)
+	fh, err := c.FormFile("file")
+	if err != nil {
+		if isRequestTooLarge(err) {
+			return jsonErr(c, http.StatusRequestEntityTooLarge, "too_large",
+				fmt.Sprintf("upload exceeds the %d byte limit", maxUploadBytes))
+		}
+		return jsonErr(c, http.StatusBadRequest, "invalid_request", "no file uploaded")
+	}
+	if fh.Size > maxUploadBytes {
+		return jsonErr(c, http.StatusRequestEntityTooLarge, "too_large",
+			fmt.Sprintf("file is %d bytes; the limit is %d", fh.Size, maxUploadBytes))
+	}
+	src, err := fh.Open()
+	if err != nil {
+		return jsonErr(c, http.StatusBadRequest, "invalid_request", "could not read the upload")
+	}
+	defer src.Close()
+	data, err := iolimit.ReadCapped(src, maxUploadBytes)
+	if err != nil {
+		if errors.Is(err, iolimit.ErrTooLarge) {
+			return jsonErr(c, http.StatusRequestEntityTooLarge, "too_large",
+				fmt.Sprintf("file exceeds the %d byte limit", maxUploadBytes))
+		}
+		return jsonErr(c, http.StatusBadRequest, "invalid_request", "could not read the upload")
+	}
+
+	rel := path.Join("assets", assetName(fh.Filename))
+	if err := s.vault.WriteNote(u.ID, rel, data); err != nil {
+		status, code := vaultErrStatus(err)
+		return jsonErr(c, status, code, "could not store asset: "+err.Error())
+	}
+	kind := "file"
+	if isImagePath(rel) {
+		kind = "image"
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"path":         rel,
+		"url":          "/api/v1/kb/raw?path=" + escapePathParam(rel),
+		"kind":         kind,
+		"content_type": detectContentType(rel, data),
+	})
+}
+
+// apiListKBAssets lists every image file in the vault (for the editor's
+// "insert from knowledge base" image picker).
+// GET /api/v1/kb/assets → 200 {"assets":[{path,url}]}
+func (s *Server) apiListKBAssets(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	if s.vault == nil {
+		return s.kbUnavailable(c)
+	}
+	paths, err := s.vault.ListImageFiles(u.ID)
+	if err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", "could not list assets: "+err.Error())
+	}
+	out := make([]apiKBAsset, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, apiKBAsset{Path: p, URL: "/api/v1/kb/raw?path=" + escapePathParam(p)})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"assets": out})
+}
+
+// detectContentType picks a MIME type from the file extension first (exact for
+// our known asset kinds) and falls back to sniffing the bytes.
+func detectContentType(rel string, data []byte) string {
+	if ct := mime.TypeByExtension(path.Ext(rel)); ct != "" {
+		return ct
+	}
+	return http.DetectContentType(data)
 }
 
 // ── Icons ────────────────────────────────────────────────────────────────────
@@ -284,7 +435,7 @@ func (s *Server) apiSaveKBOrder(c echo.Context) error {
 // system:true.
 var kbSystemDirs = map[string]bool{
 	"agents": true, "chats": true, "memory": true,
-	"skills": true, "reminders": true, "inbox": true,
+	"skills": true, "reminders": true, "inbox": true, "assets": true,
 }
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
@@ -468,6 +619,12 @@ func (s *Server) apiGetKBNote(c echo.Context) error {
 	}
 
 	resp := apiKBNoteResponse{Path: rel, Backlinks: []string{}, Icon: s.loadKBIcons(u.ID)[rel]}
+	// An image file renders inline in the FileViewer (via /kb/raw) regardless of
+	// size — its bytes are never inlined into this JSON response.
+	if isImagePath(rel) {
+		resp.Kind = "image"
+		return c.JSON(http.StatusOK, resp)
+	}
 	if fi.Size() > kbInlineMax {
 		resp.Kind = "binary"
 		return c.JSON(http.StatusOK, resp)

@@ -3,7 +3,9 @@ import { useSearchParams } from "react-router";
 import { useEditor, EditorContent } from "@tiptap/react";
 import { AlertTriangle, ChevronDown, Info, Loader2, Link2 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { useKBNote, useSaveNote, useRenameNote, useDeleteNote, useSetKBIcon } from "@/lib/kb";
+import { useKBNote, useSaveNote, useRenameNote, useDeleteNote, useSetKBIcon, useUploadKBAsset } from "@/lib/kb";
+import { useToast } from "@/components/shell/Toast";
+import ImagePicker from "./ImagePicker";
 import { Button } from "@/components/ui/button";
 import { buildExtensions, toMarkdown, checkFidelity } from "./editor";
 import { splitFrontmatter, joinFrontmatter, parseFrontmatterFields } from "./frontmatter";
@@ -53,6 +55,10 @@ function WysiwygEditor({
   onNavigate: (target: string) => void;
   registerGetContent: (fn: () => string) => void;
 }) {
+  const [imagePickerOpen, setImagePickerOpen] = useState(false);
+  const uploadAsset = useUploadKBAsset();
+  const { toast } = useToast();
+  const attachInputRef = useRef<HTMLInputElement>(null);
   const editor = useEditor({
     // buildExtensions()'s `extra` param exists precisely so UI-only
     // extensions can be appended here without editor.ts knowing about them
@@ -79,7 +85,9 @@ function WysiwygEditor({
         if (!(event.metaKey || event.ctrlKey)) return false;
         const anchor = (event.target as HTMLElement | null)?.closest?.("a");
         const href = anchor?.getAttribute("href");
-        if (href && /^(https?:|mailto:)/i.test(href)) {
+        // Open external links and KB asset/attachment URLs in a new tab; leave
+        // other targets to normal handling.
+        if (href && /^(https?:|mailto:|\/api\/v1\/kb\/)/i.test(href)) {
           window.open(href, "_blank", "noopener,noreferrer");
           return true;
         }
@@ -93,10 +101,62 @@ function WysiwygEditor({
     registerGetContent(() => toMarkdown(editor));
   }, [editor, registerGetContent]);
 
+  // The Image / File-attachment slash items dispatch window events (a React
+  // dialog / file input can't be opened from a plain editor command). Listen
+  // while this editor is mounted; the picker inserts an image node with the
+  // asset's portable path, and an attachment inserts a link to its served URL.
+  useEffect(() => {
+    if (!editor) return;
+    const onInsertImage = () => setImagePickerOpen(true);
+    const onInsertAttachment = () => attachInputRef.current?.click();
+    window.addEventListener("kb:insertImage", onInsertImage);
+    window.addEventListener("kb:insertAttachment", onInsertAttachment);
+    return () => {
+      window.removeEventListener("kb:insertImage", onInsertImage);
+      window.removeEventListener("kb:insertAttachment", onInsertAttachment);
+    };
+  }, [editor]);
+
+  async function handleAttachment(file: File) {
+    try {
+      const res = await uploadAsset.mutateAsync(file);
+      editor
+        ?.chain()
+        .focus()
+        .insertContent({
+          type: "text",
+          text: file.name,
+          marks: [{ type: "link", attrs: { href: res.url } }],
+        })
+        .run();
+    } catch (err) {
+      toast({
+        message: err instanceof ApiError ? `Couldn't attach: ${err.message}` : "Couldn't attach file",
+        variant: "error",
+      });
+    }
+  }
+
   return (
     <>
       <BubbleToolbar editor={editor} />
       <EditorContent editor={editor} className="note-editor-content" />
+      <ImagePicker
+        open={imagePickerOpen}
+        onOpenChange={setImagePickerOpen}
+        onPick={(path) => editor?.chain().focus().setImage({ src: path }).run()}
+      />
+      <input
+        ref={attachInputRef}
+        type="file"
+        className="sr-only"
+        aria-label="Attach file"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) void handleAttachment(file);
+        }}
+      />
     </>
   );
 }

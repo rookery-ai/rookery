@@ -17,6 +17,8 @@ import {
   Code,
   Minus,
   Table as TableIcon,
+  Image as ImageIcon,
+  Paperclip,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -33,6 +35,8 @@ const ICONS: Record<string, LucideIcon> = {
   "Code block": Code,
   Divider: Minus,
   Table: TableIcon,
+  Image: ImageIcon,
+  "File attachment": Paperclip,
 };
 
 // Deletes the "/query" range then runs the chosen item — the command every

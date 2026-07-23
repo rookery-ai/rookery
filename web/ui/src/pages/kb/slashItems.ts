@@ -61,6 +61,19 @@ export const slashItems: SlashItem[] = [
     run: (editor) =>
       editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
   },
+  {
+    title: "Image",
+    keywords: "image picture photo img upload embed media",
+    // Opening the image picker is a React concern, so signal NoteEditor via a
+    // window event rather than manipulating the editor here (the "/img" range
+    // is already deleted and the cursor is at the insertion point).
+    run: () => window.dispatchEvent(new CustomEvent("kb:insertImage")),
+  },
+  {
+    title: "File attachment",
+    keywords: "file attachment upload document link paperclip",
+    run: () => window.dispatchEvent(new CustomEvent("kb:insertAttachment")),
+  },
 ];
 
 export function filterSlashItems(query: string): SlashItem[] {

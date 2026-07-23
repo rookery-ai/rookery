@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useSearchParams } from "react-router";
+import { ToastProvider } from "@/components/shell/Toast";
 import NoteEditor from "./NoteEditor";
 
 function jsonResponse(body: unknown) {
@@ -30,7 +31,9 @@ function renderAt(path: string) {
   render(
     <MemoryRouter initialEntries={[`/?path=${encodeURIComponent(path)}`]}>
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <PathBoundEditor />
+        <ToastProvider>
+          <PathBoundEditor />
+        </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
   );

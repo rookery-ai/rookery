@@ -325,6 +325,47 @@ func (v *Vault) ListFolders(workspaceID string) ([]string, error) {
 	return out, nil
 }
 
+// imageFileExts are the extensions ListImageFiles surfaces as embeddable image
+// assets (the editor's "insert from knowledge base" picker).
+var imageFileExts = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
+	".webp": true, ".svg": true, ".bmp": true, ".ico": true, ".avif": true,
+}
+
+// ListImageFiles returns the vault-relative paths of every image file in the
+// vault, sorted, skipping the hidden internal .kb dir and dotfiles. Used by the
+// editor's image picker to offer already-stored images.
+func (v *Vault) ListImageFiles(workspaceID string) ([]string, error) {
+	root := v.Root(workspaceID)
+	var out []string
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if d.Name() == InternalDir {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			return nil
+		}
+		if !imageFileExts[strings.ToLower(filepath.Ext(d.Name()))] {
+			return nil
+		}
+		if rel, relErr := v.Rel(workspaceID, p); relErr == nil {
+			out = append(out, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // writeFileAtomic writes data to path via a temp file in the same directory
 // followed by a rename, so readers never observe a partial write.
 //

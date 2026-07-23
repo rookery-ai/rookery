@@ -134,7 +134,18 @@ func (s *Server) rawKBNote(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "note not found")
 	}
-	return c.Blob(http.StatusOK, "text/plain; charset=utf-8", data)
+	// Serve a sniffed content type so an embedded <img src="/kb/raw?path=…">
+	// actually renders (an image asset), rather than the flat text/plain this
+	// used to always send. Falls back to text/plain for a textual/unknown file
+	// so existing raw-.md downloads are unchanged.
+	ct := detectContentType(rel, data)
+	if ct == "" {
+		ct = "text/plain; charset=utf-8"
+	}
+	if isImagePath(rel) {
+		c.Response().Header().Set("Cache-Control", "private, max-age=3600")
+	}
+	return c.Blob(http.StatusOK, ct, data)
 }
 
 // renderMarkdown rewrites [[wikilinks]] to KB viewer links, then converts the
