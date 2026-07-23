@@ -104,7 +104,13 @@ function SearchResults({
             onClick={() => onSelect(hit.path)}
             className="block w-full rounded px-2 py-1.5 text-left hover:bg-chrome"
           >
-            <div className="truncate text-xs font-medium text-foreground">{hit.path}</div>
+            <div className="truncate text-xs font-medium text-foreground">{hit.title || hit.path}</div>
+            {/* Path under the resolved title: for a reflected note the title is
+                a heading or an agent name, so the path is the only thing saying
+                where the hit actually lives. Hidden when it adds nothing. */}
+            {hit.title && hit.title !== hit.path && (
+              <div className="truncate text-xs text-muted-2">{hit.path}</div>
+            )}
             <div className="truncate text-xs text-muted-2">{highlight(hit.snippet, query)}</div>
           </button>
         </li>

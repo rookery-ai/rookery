@@ -1186,6 +1186,12 @@ func (r *Router) handleChat(ctx context.Context, msg Message, arg string, send f
 		if err := r.db.DeleteChat(c.ID); err != nil {
 			return fmt.Errorf("delete chat: %w", err)
 		}
+		// Mirrors the web handler's cleanup: deleting over chat must remove the
+		// reflected transcript from the knowledge base too, or the same chat
+		// counts as deleted on one surface and present on the other.
+		if r.vault != nil {
+			_ = r.vault.Reflector().UnreflectChat(msg.WorkspaceID, c.ID)
+		}
 		send(fmt.Sprintf("🗑 Chat **%s** deleted.", label))
 
 	default:

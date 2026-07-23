@@ -49,10 +49,20 @@ func (s *Server) apiGlobalSearch(c echo.Context) error {
 	}
 
 	// Notes: full-text via the vault searcher (ripgrep or Go fallback).
+	//
+	// Title is RESOLVED, not the raw path: the searcher returns every matching
+	// vault file, including reflected notes whose filename is a UUID
+	// (chats/<id>.md, inbox/<id>.md, agents/<id>/logs/run_<ts>.md). Showing the
+	// path alone left those results reading as bare UUIDs. The full path still
+	// travels in Path for the client to render underneath.
 	if hits, err := s.vault.NewSearcher().Search(c.Request().Context(), u.ID, q); err == nil {
 		var items []searchItem
 		for _, h := range hits {
-			items = append(items, searchItem{Title: h.Path, Path: h.Path, Line: h.Line,
+			title := s.kbDisplayTitle(u.ID, h.Path)
+			if title == "" {
+				title = h.Path
+			}
+			items = append(items, searchItem{Title: title, Path: h.Path, Line: h.Line,
 				Snippet: h.Snippet, URL: "/kb?path=" + h.Path})
 		}
 		add("notes", items)

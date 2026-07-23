@@ -139,7 +139,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 		})
 		for _, tc := range resp.ToolCalls {
 			if c.progress != nil {
-				c.progress(toolMilestone(tc))
+				c.progress(toolMilestone(tc, tools.vaultRootPath(), tools.homeDirPath()))
 			}
 			result := tools.executeOrNudge(ctx, tc)
 			req.Messages = append(req.Messages, llm.Message{
@@ -462,34 +462,138 @@ func stripKey(env map[string]string, key string) map[string]string {
 // toolMilestone renders a short, human-readable line for one tool call, shown on
 // the live progress stream so the user can see the API coder act on files as it
 // works. Shows the most useful identifier for the call: the path argument for
-// file tools, the query for search_files/web_search, the pattern for glob, or the
-// url for web_fetch — falling back to a trimmed raw-arg blob when none apply.
-func toolMilestone(tc llm.ToolCall) string {
+// file tools, the query for search_files/web_search, the pattern for glob, the
+// url for web_fetch, or the command line for bash — falling back to a trimmed
+// raw-arg blob when none apply.
+//
+// `command` is not optional politeness: without it a bash call matched no field
+// and fell through to the raw-JSON fallback, so every shell step the agent took
+// was shown to the user as a truncated `{"command": "cd /home/…` blob. bash is
+// the tool an agent reaches for most, which made it the most visible line on the
+// stream and the least readable.
+//
+// vaultRoot/homeDir drive shortenHostPaths, which strips host filesystem layout
+// out of whichever detail is chosen — see its comment for why that has to apply
+// to the detail string rather than just to the path-shaped arguments.
+func toolMilestone(tc llm.ToolCall, vaultRoot, homeDir string) string {
 	var args struct {
 		Path    string `json:"path"`
 		Query   string `json:"query"`
 		Pattern string `json:"pattern"`
 		URL     string `json:"url"`
+		Command string `json:"command"`
+		Source  string `json:"source"`
 	}
 	_ = json.Unmarshal(tc.Args, &args)
-	detail := args.Path
-	if detail == "" {
-		detail = args.Query
-	}
-	if detail == "" {
-		detail = args.Pattern
-	}
-	if detail == "" {
-		detail = args.URL
-	}
+	// Order is by specificity, not by tool: each tool sets exactly one of these,
+	// so the first non-empty field IS that tool's subject. `source` (save_to_kb)
+	// and `command` (bash) are last only because they are the newest additions —
+	// both previously matched nothing and fell through to the raw-JSON blob.
+	detail := firstNonEmpty(args.Path, args.Query, args.Pattern, args.URL, args.Command, args.Source)
 	if detail == "" {
 		detail = strings.TrimSpace(string(tc.Args))
 	}
-	if len(detail) > 60 {
-		detail = detail[:60] + "…"
-	}
+	detail = shortenHostPaths(detail, vaultRoot, homeDir)
+	// Truncate AFTER shortening: a bash command that opens with a long absolute
+	// vault path would otherwise spend the whole 60-char budget on the prefix
+	// and truncate away the part that says what the command actually does.
+	detail = truncateRunes(detail, 60)
 	if detail == "" {
 		return "🔧 " + tc.Name
 	}
 	return "🔧 " + tc.Name + "(" + detail + ")"
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// truncateRunes caps s at n RUNES, not bytes. The details rendered here routinely
+// carry non-ASCII (a note title, a search query, an emoji in a filename), and
+// slicing those by byte can cut a multi-byte rune in half and emit U+FFFD into
+// the user's progress stream.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
+// shortenHostPaths rewrites absolute host paths in a progress detail into the
+// vault-relative form the user actually recognises, so the live stream stops
+// reading as a tour of the server's filesystem:
+//
+//	cd /home/rookie/.simple-agents-v2/vaults/fd11c47e-…/notes  →  cd notes
+//
+// This operates on the whole detail string by substring replacement rather than
+// on path-shaped arguments only, because the worst offender is a bash command
+// line: the path is embedded mid-string, often more than once, and never arrives
+// as a standalone argument we could clean structurally.
+//
+// The vault root is replaced before the home directory: a vault normally lives
+// under the workspace home, so matching home first would leave a half-rewritten
+// `~/vaults/<uuid>/notes` that still exposes the workspace UUID.
+//
+// Only these two known roots are rewritten. Absolute paths that are genuinely
+// meaningful to the user — `/usr/bin/python3`, a skill's tool path — are left
+// exactly as they are; there is deliberately no general "strip leading slash"
+// step, which would corrupt them.
+func shortenHostPaths(s, vaultRoot, homeDir string) string {
+	// Vault root first, and with the separator included, so "<root>/notes"
+	// becomes "notes" rather than a leading-slash "/notes" that would read as an
+	// absolute path it no longer is.
+	if root := cleanRoot(vaultRoot); root != "" {
+		s = strings.ReplaceAll(s, root+string(filepath.Separator), "")
+		// A bare reference to the root itself is the vault's "here".
+		s = replaceWholePath(s, root, ".")
+	}
+	if root := cleanRoot(homeDir); root != "" {
+		s = strings.ReplaceAll(s, root+string(filepath.Separator), "~"+string(filepath.Separator))
+		s = replaceWholePath(s, root, "~")
+	}
+	return s
+}
+
+// cleanRoot normalises a root for prefix matching, rejecting the values that
+// would match far too much. filepath.Clean("") returns ".", which as a substring
+// would hit every relative path in the string, and "/" would hit every absolute
+// one — neither is a usable prefix.
+func cleanRoot(root string) string {
+	if strings.TrimSpace(root) == "" {
+		return ""
+	}
+	c := strings.TrimSuffix(filepath.Clean(root), string(filepath.Separator))
+	if c == "" || c == "." || c == string(filepath.Separator) {
+		return ""
+	}
+	return c
+}
+
+// replaceWholePath substitutes `root` only where it is not followed by a path
+// character, so a root of "/data/vault" rewrites a bare "/data/vault" but leaves
+// a sibling directory like "/data/vault-backup" alone. Occurrences followed by a
+// separator are already handled by the caller's prefix replacement.
+func replaceWholePath(s, root, repl string) string {
+	var b strings.Builder
+	for {
+		i := strings.Index(s, root)
+		if i < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		rest := s[i+len(root):]
+		b.WriteString(s[:i])
+		if rest == "" || rest[0] == ' ' || rest[0] == '"' || rest[0] == '\'' || rest[0] == ':' || rest[0] == '\n' {
+			b.WriteString(repl)
+		} else {
+			b.WriteString(root) // part of a longer name — leave it intact
+		}
+		s = rest
+	}
 }

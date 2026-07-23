@@ -1005,6 +1005,25 @@ func (h *hostToolSet) userHomeDir() string {
 	return filepath.Join(h.homesDir, safeID(h.workspaceID))
 }
 
+// vaultRootPath / homeDirPath expose the two host roots that toolMilestone
+// strips out of progress lines. Both return "" when the underlying value is
+// unset rather than a partial path: userHomeDir would otherwise join an empty
+// homesDir into a bare workspace id, which as a substring-replacement prefix
+// would match unrelated text in a command line.
+func (h *hostToolSet) vaultRootPath() string {
+	if h == nil || h.vlt == nil {
+		return ""
+	}
+	return h.vlt.Root(h.workspaceID)
+}
+
+func (h *hostToolSet) homeDirPath() string {
+	if h == nil || h.homesDir == "" || h.workspaceID == "" {
+		return ""
+	}
+	return h.userHomeDir()
+}
+
 // buildScriptCommand mirrors Coder.buildCommand's sandbox wrapping but for an
 // arbitrary command vector (the python interpreter + script). The CLI path is left
 // untouched; this is used only by the API engine's run_script tool.

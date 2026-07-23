@@ -125,7 +125,7 @@ test("renders root nodes with muted system rows, lazy-loads a directory, and sel
   );
 
   await userEvent.click(screen.getByText("a.md"));
-  expect(onSelect).toHaveBeenCalledWith("notes/a.md", false);
+  expect(onSelect).toHaveBeenCalledWith("notes/a.md", false, "a.md");
 });
 
 // Spec §6: "user notes and memory/ first". The backend marks memory/
@@ -193,7 +193,7 @@ test("row dropdown opens a dialog (rename) and the tree stays interactive after 
 
   // The row is still clickable — body isn't stuck with pointer-events:none.
   await userEvent.click(screen.getByText("README.md"));
-  expect(onSelect).toHaveBeenCalledWith("README.md", false);
+  expect(onSelect).toHaveBeenCalledWith("README.md", false, "README.md");
 });
 
 test("New note… on a directory opens the dialog and creates the entry", async () => {
@@ -251,7 +251,7 @@ test("Space activates a row the same as Enter (a11y)", async () => {
   (row as HTMLElement).focus();
   fireEvent.keyDown(row, { key: " " });
 
-  expect(onSelect).toHaveBeenCalledWith("README.md", false);
+  expect(onSelect).toHaveBeenCalledWith("README.md", false, "README.md");
 });
 
 test("the dropdown trigger is NOT nested inside the row's role=button element", async () => {

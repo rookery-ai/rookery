@@ -198,7 +198,12 @@ type apiRenameKBNoteRequest struct {
 }
 
 type apiKBSearchHit struct {
-	Path    string `json:"path"`
+	Path string `json:"path"`
+	// Title is the resolved display name for Path — the same one the KB tree
+	// shows. Sent alongside Path (rather than instead of it) because a
+	// reflected note's filename is a UUID, so the path alone identifies nothing
+	// to a human, while the title alone says nothing about where the file lives.
+	Title   string `json:"title"`
 	Line    int    `json:"line"`
 	Snippet string `json:"snippet"`
 }
@@ -517,7 +522,7 @@ func (s *Server) apiResolveKBLink(c echo.Context) error {
 }
 
 // apiSearchKB ports searchKB.
-// GET /api/v1/kb/search?q= → 200 {"hits":[{path,line,snippet}]}
+// GET /api/v1/kb/search?q= → 200 {"hits":[{path,title,line,snippet}]}
 func (s *Server) apiSearchKB(c echo.Context) error {
 	u := c.Get("workspace").(*db.Workspace)
 	if s.vault == nil {
@@ -535,7 +540,9 @@ func (s *Server) apiSearchKB(c echo.Context) error {
 	}
 	out := make([]apiKBSearchHit, 0, len(hits))
 	for _, h := range hits {
-		out = append(out, apiKBSearchHit{Path: h.Path, Line: h.Line, Snippet: h.Snippet})
+		out = append(out, apiKBSearchHit{
+			Path: h.Path, Title: s.kbDisplayTitle(u.ID, h.Path), Line: h.Line, Snippet: h.Snippet,
+		})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"hits": out})
 }
