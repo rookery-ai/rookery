@@ -8,6 +8,7 @@ import (
 
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/gateway"
+	"github.com/ilijad1/simple-agents/internal/websearch"
 )
 
 // logoAssetDir is where scripts/vendor-brand-logos.sh writes the committed
@@ -45,6 +46,13 @@ func TestBrandLogoCoverage(t *testing.T) {
 	// Coder API providers — the settings/setup provider picker.
 	for _, p := range coder.APIProviders() {
 		slugs = append(slugs, p.Name)
+	}
+
+	// Web-search key providers — the third gallery on the connections page.
+	// Derived from the secret names so adding a provider there is caught here
+	// rather than shipping one more letter tile.
+	for _, name := range websearch.KeySecretNames() {
+		slugs = append(slugs, strings.ToLower(strings.TrimPrefix(name, "SEARCH_KEY_")))
 	}
 
 	if len(slugs) < 40 {

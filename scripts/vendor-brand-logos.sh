@@ -53,6 +53,8 @@ gemini:gemini-color
 google:google-color
 perplexity:perplexity-color
 moonshot:kimi-color
+brave:brave-color
+tavily:tavily-color
 notion:notion
 github:github
 "

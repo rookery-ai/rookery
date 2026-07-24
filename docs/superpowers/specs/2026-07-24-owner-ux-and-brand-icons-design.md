@@ -11,6 +11,7 @@ can land in any order; the logo work is the only one with an external dependency
 | # | Item | Workstream |
 |---|---|---|
 | 1 | Delete dead workspace-permissions UI + backend | A. Dead settings |
+| 1c | Audit log has no filtering | A. Dead settings |
 | 9 | Owner "Claude binary" system settings — verify used, fix or remove | A. Dead settings |
 | 2 | Real logos for every LLM/coder provider | B. Brand icons |
 | 3 | Real logos for connections + chat apps (no placeholder tiles) | B. Brand icons |
@@ -63,11 +64,21 @@ as coloured-initial placeholders today — the thing the user is reacting to.
 A per-directory user drag order is already persisted server-side and takes precedence
 over the derived rule.
 
-**"Browser" has no referent in the UI.** Grepping found no browser entity with placeholder
-icons: the KB file tree already uses Lucide icons plus user-chosen emoji. The nearest
-candidates are the removed `web-browser` rbac permission and the `playwright-browser`
-core skill. Rather than guess, the acceptance criterion is stated in terms of outcome
-(below) so every surface is covered regardless of which one the user meant.
+**"Browser" most likely means Brave Search.** There is no browser entity in the UI — the
+KB file tree already uses Lucide icons plus user-chosen emoji. But the connections page has
+a *third* gallery next to Chat apps and Services: **Web search**, whose two providers are
+Brave and Tavily. Brave is a browser brand, and those rows had no logo at all. That reading
+makes the user's list ("connections, chatapps and browser") map exactly onto the page's three
+galleries, so both search providers get logos and the coverage test includes them. The
+outcome-based acceptance criterion below covers every surface regardless.
+
+**Audit-log filtering** (item 1c) is added in the same workstream because it touches the same
+page. Filters are applied in SQL rather than to the returned page: narrowing an
+already-truncated list of the most recent 100 events would report "no matches" for something
+that merely happened 101 events ago — an answer that looks authoritative and is wrong. The
+endpoint gains `action`, `workspace_id`, `q` (target/detail/IP substring, LIKE wildcards
+escaped) and `since_days`, and returns the distinct action set so the picker can offer every
+action even while a selection has narrowed the rows.
 
 ## Workstream A — remove dead settings
 
@@ -129,20 +140,34 @@ The coloured-initials fallback is **kept** as a safety net for slugs added later
 no slug shipping today may reach it.
 
 **Acceptance criterion (this is what "done" means for items 2–4).** Enumerate the full
-slug set the app can render — 28 connector providers from `internal/connectors/providers/*.yaml`,
-the 3 chat platforms from the gateway CredSpecs, and the ~16 coder providers from
-`coder.APIProviders()` — and assert in a test that every one resolves to a vendored
-asset and none falls through to the initials fallback. A slug set this size drifts
-silently otherwise; the test is the only way "substituted everywhere" stays true.
+slug set the app can render — the 28 connector providers from `availableServiceProviders`,
+the chat platforms with a registered adapter, the 16 coder providers from
+`coder.APIProviders()`, and the web-search providers from `websearch.KeySecretNames()` —
+and assert in a test that every one resolves to a vendored asset and none falls through to
+the initials fallback. A slug set this size drifts silently otherwise; the test is the only
+way "substituted everywhere" stays true.
+
+Chat platforms are read from the **adapter registry**, not `gateway.CredSpecs()`: that
+registry is global and mutable, and other tests in package `web` register throwaway specs
+into it, which made the coverage test demand a logo for a fixture named `cs-multi`. A new
+`gateway.RegisteredAdapterPlatforms()` exposes the platforms that ship a real adapter.
+
+Vendored SVGs have their `<title>` stripped. ProviderLogo inlines them and the tile already
+carries `role="img"` + `aria-label`, so a nested title contributes a second accessible name —
+which made `getByText("Notion")` ambiguous on the connections page.
 
 ## Workstream C — form inputs
 
 **Curated selects.** One shared `<CuratedSelect>` component used by *both* the Profile
-section of Settings and the setup wizard, satisfying the standing platform-parity rule.
+section of Settings and the setup wizard, satisfying the standing platform-parity rule. The
+setup wizard collected only timezone and language; it gains location and tone, which the
+`/api/v1/setup` handler already accepted.
 Sources:
 
 - **Timezone** — `Intl.supportedValuesOf('timeZone')` at runtime. No vendored data, and
-  it stays current with the platform's tzdb.
+  it stays current with the platform's tzdb. It returns 418 region zones but no plain
+  `UTC`, which `time.LoadLocation` accepts and a server-minded user may well want, so UTC
+  is prepended.
 - **Location** — a curated country list. "Location" as free text is ambiguous; country
   is the reading that makes a fixed list sensible, and it is what `profile.LoadLocation`
   needs for timezone-aware reminder parsing.
@@ -208,7 +233,9 @@ comment block explaining that choice is updated rather than left contradicting t
 Per-workstream, matching the existing suites:
 
 - **A** — parity test updated to the reduced route inventory; `OwnerSections.test.tsx`
-  loses its permissions cases and asserts the settings panel is status-only.
+  loses its permissions cases and asserts the settings panel is status-only, plus tests
+  that each filter reaches the query string and that the search box is debounced. Go tests
+  cover the SQL filter, including that a literal `%` does not match everything.
 - **B** — the slug-coverage test described above, plus `ProviderLogo.test.tsx` rewritten
   for the asset-rendering contract (renders an `img` for a known slug, initials for an
   unknown one).
