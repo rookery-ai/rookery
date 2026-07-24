@@ -1,11 +1,9 @@
 import { NavLink, useLocation } from "react-router";
 import {
-  House, Library, Bot, Sparkles, Plug, MessageSquare, KeyRound,
+  House, Library, Bot, Sparkles, Plug, MessageSquare, KeyRound, Settings,
 } from "lucide-react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { useSession } from "@/lib/session";
 import { useInboxPoll } from "@/lib/home";
 import WorkspaceMenu from "./WorkspaceMenu";
 
@@ -59,6 +57,7 @@ export default function IconRail() {
   const { data: poll } = useInboxPoll();
   const unread = poll?.unread ?? 0;
   const { pathname } = useLocation();
+  const settingsActive = isRailActive("/settings", pathname);
 
   return (
     <nav
@@ -118,19 +117,31 @@ export default function IconRail() {
       <div className="md:mt-auto">
         <Tooltip>
           <TooltipTrigger asChild>
+            {/* A gear, not the owner's initial in a circle: this item navigates
+                to settings, and a round monogram read as a decorative avatar
+                rather than as the control it is. It now carries exactly the
+                same treatment as every other rail item — same size, same
+                stroke, same active bar — so the rail is one consistent set of
+                controls instead of six icons and an odd one out. */}
             <NavLink
               to="/settings"
               aria-label="Profile & Settings"
               className={cn(
-                "flex size-11 items-center justify-center rounded-lg transition-colors active:scale-95",
-                isRailActive("/settings", pathname) ? "bg-accent-soft" : "hover:bg-muted-surface",
+                "relative flex size-11 items-center justify-center rounded-lg transition-colors active:scale-95",
+                settingsActive
+                  ? "bg-accent-soft text-accent"
+                  : "text-muted hover:bg-muted-surface hover:text-foreground",
               )}
             >
-              <Avatar className="size-9">
-                <AvatarFallback className="bg-accent-soft text-accent text-sm font-semibold">
-                  <ProfileInitial />
-                </AvatarFallback>
-              </Avatar>
+              {settingsActive && (
+                <span
+                  data-testid="rail-active-bar"
+                  aria-hidden="true"
+                  className="absolute inset-x-2 top-0 h-[3px] rounded-full bg-accent
+                             md:inset-x-auto md:top-auto md:left-0 md:h-6 md:w-[3px]"
+                />
+              )}
+              <Settings className="size-5 stroke-[2.25]" />
             </NavLink>
           </TooltipTrigger>
           <TooltipContent side="right">Profile &amp; Settings</TooltipContent>
@@ -138,9 +149,4 @@ export default function IconRail() {
       </div>
     </nav>
   );
-}
-
-function ProfileInitial() {
-  const { data } = useSession();
-  return <>{data?.owner?.username?.[0]?.toUpperCase() ?? "?"}</>;
 }

@@ -144,3 +144,14 @@ test("rail items render real class names, not a stringified className function",
   expect(home.className).not.toMatch(/isActive/);
   expect(home.className).toMatch(/^[\w\s:/[\]().,%#-]+$/);
 });
+
+test("the settings rail item is a gear, not an avatar monogram", async () => {
+  wrap();
+  const settings = await screen.findByLabelText(/profile & settings/i);
+
+  // lucide stamps its component name into the class list, which is the only
+  // stable handle on WHICH glyph rendered.
+  expect(settings.querySelector("svg.lucide-settings")).not.toBeNull();
+  // The old avatar rendered the owner's initial as text inside a circle.
+  expect(settings.textContent).toBe("");
+});
