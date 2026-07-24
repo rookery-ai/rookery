@@ -104,6 +104,13 @@ func TestBrandLogoAssetsAreWellFormed(t *testing.T) {
 		if !strings.Contains(s, "viewBox") {
 			t.Errorf("%s: no viewBox, so it cannot scale to the tile", e.Name())
 		}
+		// The tile that inlines this already carries role="img" + aria-label.
+		// A <title> inside the mark adds a SECOND accessible name, so the brand
+		// shows up twice in the accessibility tree — which broke the
+		// connections-page tests by making getByText("Notion") ambiguous.
+		if strings.Contains(strings.ToLower(s), "<title") {
+			t.Errorf("%s: contains a <title> — it duplicates the tile's aria-label", e.Name())
+		}
 	}
 	if count == 0 {
 		t.Fatal("no logo assets found — did the vendoring script run?")

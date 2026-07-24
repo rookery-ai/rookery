@@ -39,7 +39,6 @@ type Workspace struct {
 	UpdatedAt  time.Time
 }
 
-
 type PlatformConnection struct {
 	ID              string
 	WorkspaceID     string

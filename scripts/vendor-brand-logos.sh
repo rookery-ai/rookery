@@ -93,9 +93,14 @@ opencode_zen:siOpencode
 opencode_go:siOpencode
 "
 
-# strip_svg removes the XML prolog, DOCTYPE, comments, and any <script>/<style>
-# block, then collapses whitespace. These files are inlined into the DOM by
-# ProviderLogo, so anything executable must not survive vendoring.
+# strip_svg removes the XML prolog, DOCTYPE, comments, any <script>/<style>
+# block, and the mark's own <title>, then collapses whitespace.
+#
+# Two reasons this matters, both because ProviderLogo INLINES these files:
+#   - anything executable must not survive vendoring;
+#   - a nested <title> becomes a second accessible name inside the tile, which
+#     already carries role="img" + aria-label. Leaving it in makes the brand
+#     name match twice in the accessibility tree.
 strip_svg() {
   perl -0777 -pe '
     s/<\?xml.*?\?>//gs;
@@ -103,6 +108,7 @@ strip_svg() {
     s/<!--.*?-->//gs;
     s/<script\b.*?<\/script>//gsi;
     s/<style\b.*?<\/style>//gsi;
+    s/<title\b.*?<\/title>//gsi;
     s/\s+/ /g;
     s/^ //; s/ $//;
   ' "$1"
@@ -133,12 +139,12 @@ done
 echo "→ simple-icons"
 for pair in $SIMPLE; do
   ours="${pair%%:*}"; theirs="${pair##*:}"
-  # run from web/ui so node resolves simple-icons out of the SPA's node_modules
+  # run from web/ui so node resolves simple-icons out of the SPA's node_modules.
+  # No <title> and no role: the tile that inlines this already supplies both.
   ( cd web/ui && node --input-type=module -e "
       import { $theirs as i } from 'simple-icons';
       process.stdout.write(
-        '<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\" role=\"img\">' +
-        '<title>' + i.title + '</title>' +
+        '<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">' +
         '<path fill=\"#' + i.hex + '\" d=\"' + i.path + '\"/></svg>'
       );
     " ) > "$OUT/$ours.svg"

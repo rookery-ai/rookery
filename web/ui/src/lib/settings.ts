@@ -160,10 +160,33 @@ export type AuditLogEntry = {
   created_at: string;
 };
 
-export function useAuditLog(limit = 100) {
+// Filters are sent to the server, not applied to the returned page: narrowing
+// an already-truncated list of the most recent N events would report "no
+// matches" for something that merely happened N+1 events ago.
+export type AuditLogFilters = {
+  workspace_id?: string;
+  action?: string;
+  q?: string;
+  since_days?: number;
+  limit?: number;
+};
+
+export function useAuditLog(filters: AuditLogFilters = {}) {
+  const params = new URLSearchParams();
+  params.set("limit", String(filters.limit ?? 100));
+  if (filters.workspace_id) params.set("workspace_id", filters.workspace_id);
+  if (filters.action) params.set("action", filters.action);
+  if (filters.q) params.set("q", filters.q);
+  if (filters.since_days) params.set("since_days", String(filters.since_days));
+  const qs = params.toString();
+
   return useQuery({
-    queryKey: ["audit-log", limit],
-    queryFn: () => api.get<{ logs: AuditLogEntry[] }>(`/api/v1/admin/audit?limit=${limit}`),
+    queryKey: ["audit-log", qs],
+    // `actions` is the distinct set across the WHOLE log, not just this page,
+    // so the action picker keeps offering a value even while it is selected
+    // and has narrowed the results to a handful of rows.
+    queryFn: () => api.get<{ logs: AuditLogEntry[]; actions: string[] }>(`/api/v1/admin/audit?${qs}`),
+    placeholderData: (prev) => prev,
   });
 }
 

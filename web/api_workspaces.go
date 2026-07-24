@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ilijad1/simple-agents/internal/auth"
@@ -158,14 +159,41 @@ func (s *Server) apiAdminOverview(c echo.Context) error {
 	})
 }
 
+// apiAdminAudit serves the audit log, optionally filtered.
+//
+// Filters are applied in SQL, not over the returned page: narrowing an
+// already-truncated list of the most recent 100 events would report "no
+// matches" for something that merely happened 101 events ago — an answer that
+// looks authoritative and is wrong.
+//
+// The response also carries the distinct action values so the UI can offer a
+// picker rather than expecting the operator to recall exact action strings.
 func (s *Server) apiAdminAudit(c echo.Context) error {
-	limit := 100
+	f := db.AuditLogFilter{
+		WorkspaceID: c.QueryParam("workspace_id"),
+		Action:      c.QueryParam("action"),
+		Query:       strings.TrimSpace(c.QueryParam("q")),
+		Limit:       100,
+	}
 	if v := c.QueryParam("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = n
+			f.Limit = n
 		}
 	}
-	logs, err := s.db.ListAuditLogs(limit)
+	// "since" is a window in days, which is how the filter is actually used
+	// ("last 7 days"); an absolute timestamp would push timezone handling into
+	// the client for no gain.
+	if v := c.QueryParam("since_days"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			f.Since = time.Now().AddDate(0, 0, -n)
+		}
+	}
+
+	logs, err := s.db.ListAuditLogsFiltered(f)
+	if err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
+	}
+	actions, err := s.db.DistinctAuditActions()
 	if err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
 	}
@@ -173,7 +201,10 @@ func (s *Server) apiAdminAudit(c echo.Context) error {
 	for _, l := range logs {
 		out = append(out, toAPIAuditLog(l))
 	}
-	return c.JSON(http.StatusOK, map[string]any{"logs": out})
+	return c.JSON(http.StatusOK, map[string]any{
+		"logs":    out,
+		"actions": orEmpty(actions),
+	})
 }
 
 // apiAdminSettings is read-only status, not configuration.

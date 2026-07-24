@@ -6,7 +6,6 @@ import (
 	"github.com/ilijad1/simple-agents/internal/secrets"
 )
 
-
 // verifyWorkspaceMasterPassword decrypts the stored (system-key encrypted) master
 // password and compares it to the supplied one. The stored form must remain (the
 // scheduler decrypts it for headless cron runs), so this is an access gate, not the
