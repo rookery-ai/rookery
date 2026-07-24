@@ -2154,17 +2154,16 @@ The SKILL.md frontmatter (only name + description are strictly required):
   license: MIT-0
   category: File Processing
   metadata:
-    openclaw:
-      requires:
-        bins: [pandoc]            # tools that MUST be present (or anyBins: at-least-one)
-        env: [SOME_API_KEY]       # required env vars
-      install:
-        - kind: binary            # static binary download
-          bin: pandoc
-          url: https://...
-          strip: 1
-        - kind: pip              # python package
-          package: pdfplumber
+    requires:
+      bins: [pandoc]            # tools that MUST be present (or anyBins: at-least-one)
+      env: [SOME_API_KEY]       # required env vars
+    install:                    # sibling of requires, NOT nested inside it
+      - kind: binary            # static binary download
+        bin: pandoc
+        url: https://...
+        strip: 1
+      - kind: pip               # python package
+        package: pdfplumber
   ---
 
 The ` + "`description`" + ` is the most important field: it must say what the skill does AND the
@@ -2266,8 +2265,9 @@ Follow these steps in EXACT order.
 
 1. ANALYZE — Decide the simplest design that fulfills the agreed plan: is this
    reasoning-only (just SKILL.md with inline snippets) or does it need scripts/?
-   Which tools/packages does it require (declare them in metadata.openclaw.requires
-   and .install)? Which env vars / secrets?
+   Which tools/packages does it require (declare them under metadata.requires,
+   with metadata.install as a SIBLING of requires — there is no vendor
+   namespace segment between metadata and these keys)? Which env vars / secrets?
 
 2. CREATE — Write SKILL.md with valid YAML frontmatter. The `+"`description`"+` field is
    the trigger: say what the skill does AND the specific phrases/contexts that

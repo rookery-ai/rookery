@@ -4,9 +4,10 @@
 // no admin gate. Users create/import their own skills separately (see skillstore);
 // core skills simply supplement the available-skills pool for every user.
 //
-//   - ParseMeta: parse a SKILL.md's Anthropic+ClawHub frontmatter (name,
-//     description, version, license, category, metadata.openclaw.requires,
-//     metadata.openclaw.install) using a real YAML parser.
+//   - ParseMeta: parse a SKILL.md's frontmatter (name, description, version,
+//     license, category, metadata.requires, metadata.install) using a real YAML
+//     parser. The legacy ClawHub nesting (metadata.openclaw.*) is still
+//     accepted so imported skills keep working; the flat form wins per field.
 //   - LoadBundled: enumerate the embedded core skills (metadata only).
 //   - CoreSkillContent: the full SKILL.md body of a core skill (for agent
 //     injection when an agent declares it).
@@ -33,9 +34,9 @@ import (
 //go:embed all:skills
 var skillsFS embed.FS
 
-// InstallSpec is one entry of metadata.openclaw.install — how to provision a
-// required tool. ClawHub kinds brew/node/go/uv are recognized; we add `binary`
-// (static download) and `pip` for the simple-agents sandbox.
+// InstallSpec is one entry of metadata.install — how to provision a required
+// tool. ClawHub kinds brew/node/go/uv are recognized; we add `binary` (static
+// download) and `pip` for the simple-agents sandbox.
 type InstallSpec struct {
 	Kind    string   `yaml:"kind" json:"kind"`
 	Bin     string   `yaml:"bin" json:"bin,omitempty"`
@@ -53,10 +54,18 @@ type SkillMeta struct {
 	Version      string
 	License      string
 	Topics       []string
-	RequiresBins []string // metadata.openclaw.requires.bins (all must be present)
-	AnyBins      []string // metadata.openclaw.requires.anyBins (at least one)
-	RequiresEnv  []string // metadata.openclaw.requires.env
+	RequiresBins []string // metadata.requires.bins (all must be present)
+	AnyBins      []string // metadata.requires.anyBins (at least one)
+	RequiresEnv  []string // metadata.requires.env
 	Install      []InstallSpec
+}
+
+// requiresBlock is the shape of a `requires:` mapping, shared by the flat
+// (metadata.requires) and legacy (metadata.openclaw.requires) forms.
+type requiresBlock struct {
+	Bins    []string `yaml:"bins"`
+	AnyBins []string `yaml:"anyBins"`
+	Env     []string `yaml:"env"`
 }
 
 type frontmatter struct {
@@ -67,15 +76,31 @@ type frontmatter struct {
 	Category    string   `yaml:"category"`
 	Topics      []string `yaml:"topics"`
 	Metadata    struct {
+		// The canonical form this platform emits and ships: requirements sit
+		// DIRECTLY under metadata, with `install` a sibling of `requires` —
+		// no vendor namespace.
+		Requires requiresBlock `yaml:"requires"`
+		Install  []InstallSpec `yaml:"install"`
+		// Legacy ClawHub nesting, still parsed so an imported skill keeps
+		// working. Never emitted. See ParseMeta for the per-field precedence.
 		Openclaw struct {
-			Requires struct {
-				Bins    []string `yaml:"bins"`
-				AnyBins []string `yaml:"anyBins"`
-				Env     []string `yaml:"env"`
-			} `yaml:"requires"`
-			Install []InstallSpec `yaml:"install"`
+			Requires requiresBlock `yaml:"requires"`
+			Install  []InstallSpec `yaml:"install"`
 		} `yaml:"openclaw"`
 	} `yaml:"metadata"`
+}
+
+// pick returns the flat value when it carries anything, else the legacy one.
+// Precedence is resolved PER FIELD rather than all-or-nothing so a
+// half-converted file still yields everything it declares — an all-or-nothing
+// switch would silently drop, say, a legacy `install` list the moment a flat
+// `requires` appeared, and a skill whose tools never resolve fails at run time
+// with a misleading "tool not installed" rather than at parse time.
+func pick[T any](flat, legacy []T) []T {
+	if len(flat) > 0 {
+		return flat
+	}
+	return legacy
 }
 
 // ParseMeta splits a SKILL.md into frontmatter (parsed) and body. If there is no
@@ -107,10 +132,10 @@ func ParseMeta(content string) (SkillMeta, string) {
 	meta.Version = fm.Version
 	meta.License = fm.License
 	meta.Topics = fm.Topics
-	meta.RequiresBins = fm.Metadata.Openclaw.Requires.Bins
-	meta.AnyBins = fm.Metadata.Openclaw.Requires.AnyBins
-	meta.RequiresEnv = fm.Metadata.Openclaw.Requires.Env
-	meta.Install = fm.Metadata.Openclaw.Install
+	meta.RequiresBins = pick(fm.Metadata.Requires.Bins, fm.Metadata.Openclaw.Requires.Bins)
+	meta.AnyBins = pick(fm.Metadata.Requires.AnyBins, fm.Metadata.Openclaw.Requires.AnyBins)
+	meta.RequiresEnv = pick(fm.Metadata.Requires.Env, fm.Metadata.Openclaw.Requires.Env)
+	meta.Install = pick(fm.Metadata.Install, fm.Metadata.Openclaw.Install)
 	return meta, body
 }
 

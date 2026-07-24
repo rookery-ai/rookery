@@ -5,18 +5,17 @@ version: 1.0.0
 license: MIT-0
 category: File Processing
 metadata:
-  openclaw:
-    requires:
-      anyBins: [pdftotext, pandoc]
-    install:
-      - kind: binary
-        bin: pandoc
-        url: https://github.com/jgm/pandoc/releases/download/3.6.4/pandoc-3.6.4-linux-amd64.tar.gz
-        strip: 1
-      - kind: pip
-        package: pdfplumber
-      - kind: pip
-        package: pypdf
+  requires:
+    anyBins: [pdftotext, pandoc]
+  install:
+    - kind: binary
+      bin: pandoc
+      url: https://github.com/jgm/pandoc/releases/download/3.6.4/pandoc-3.6.4-linux-amd64.tar.gz
+      strip: 1
+    - kind: pip
+      package: pdfplumber
+    - kind: pip
+      package: pypdf
 ---
 
 # PDF

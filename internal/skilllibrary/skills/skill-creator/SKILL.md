@@ -24,20 +24,19 @@ version: 1.0.0
 license: MIT-0
 category: File Processing
 metadata:
-  openclaw:
-    requires:
-      bins: [pandoc]       # tools that MUST all be installed
-      anyBins: [pdftotext, pandoc]  # at least one
-      env: [SOME_API_KEY]           # required env vars
-    install:
-      - kind: binary        # static binary download
-        bin: pandoc
-        url: https://github.com/jgm/pandoc/releases/download/3.6.4/pandoc-3.6.4-linux-amd64.tar.gz
-        strip: 1
-      - kind: pip           # python package
-        package: pdfplumber
-      - kind: node          # npm package
-        package: pptxgenjs
+  requires:
+    bins: [pandoc]       # tools that MUST all be installed
+    anyBins: [pdftotext, pandoc]  # at least one
+    env: [SOME_API_KEY]           # required env vars
+  install:
+    - kind: binary        # static binary download
+      bin: pandoc
+      url: https://github.com/jgm/pandoc/releases/download/3.6.4/pandoc-3.6.4-linux-amd64.tar.gz
+      strip: 1
+    - kind: pip           # python package
+      package: pdfplumber
+    - kind: node          # npm package
+      package: pptxgenjs
 ---
 
 # My Skill
