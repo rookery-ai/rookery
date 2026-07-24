@@ -11,7 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAgents } from "@/lib/agents";
 import { cn } from "@/lib/utils";
-import { AGENT_TEMPLATES, type AgentTemplate } from "./templates";
+import { AGENT_TEMPLATES, featuredTemplates, type AgentTemplate } from "./templates";
+import TemplateGallery from "./TemplateGallery";
 
 const ENDPOINTS: DesignerEndpoints = {
   design: "/api/v1/agents/design",
@@ -29,12 +30,22 @@ const LABELS: DesignerLabels = {
   entityName: "agent",
 };
 
-// Reused verbatim from the template briefs so the examples shown here and the
-// text a template drops into the composer are the same non-technical register
+// Derived from the template briefs so the examples shown here stay in the same
+// non-technical register as the text a template drops into the field
 // (templates.ts enforces that with a banned-jargon test).
+//
+// Only the OPENING SENTENCE, though: the briefs are now several sentences long
+// (they pre-answer what/when/notify/which-service for the designer), and
+// quoting three of them in full would bury the intro card. The examples exist
+// to model how to phrase a request, not to be a complete brief.
+function openingSentence(text: string): string {
+  return text.split(/(?<=[.!?])\s/)[0] ?? text;
+}
+
 const INTRO_EXAMPLES = ["daily-digest", "watch-for-changes", "inbox-triage"]
   .map((id) => AGENT_TEMPLATES.find((t) => t.id === id)?.description ?? "")
-  .filter(Boolean);
+  .filter(Boolean)
+  .map(openingSentence);
 
 // Conversational agent creation. A new agent needs a name before the design
 // POST can start a session — that's collected here (once, up front) rather
@@ -57,6 +68,13 @@ export default function AgentNewPage() {
   // by hand-editing OR by picking a different template — since at that point
   // it's the user's own brief again, not the template's.
   const [activeTemplateId, setActiveTemplateId] = useState<string | null>(null);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+
+  // The start screen shows only the promoted templates; the rest are reachable
+  // through the gallery. The button is gated on there actually being more than
+  // is already on screen, so it can never open an empty modal.
+  const featured = featuredTemplates();
+  const hasMoreTemplates = AGENT_TEMPLATES.length > featured.length;
 
   // An existing draft (create OR edit-in-progress under this workspace)
   // means there's already a session to resume/discard — DesignerSurface's
@@ -135,14 +153,25 @@ export default function AgentNewPage() {
           </div>
 
           <div className="space-y-2">
-            <p className="text-sm font-medium">
-              Start from a template{" "}
-              <span className="font-normal text-muted-2">
-                (optional — fills the description below, which you can edit)
-              </span>
-            </p>
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="text-sm font-medium">
+                Start from a template{" "}
+                <span className="font-normal text-muted-2">
+                  (optional — fills the description below, which you can edit)
+                </span>
+              </p>
+              {hasMoreTemplates && (
+                <button
+                  type="button"
+                  onClick={() => setGalleryOpen(true)}
+                  className="shrink-0 text-xs font-medium text-accent underline-offset-2 hover:underline"
+                >
+                  View all templates
+                </button>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {AGENT_TEMPLATES.map((t) => {
+              {featured.map((t) => {
                 const active = activeTemplateId === t.id;
                 return (
                   <button
@@ -181,6 +210,14 @@ export default function AgentNewPage() {
             Continue
           </Button>
         </div>
+
+        {/* Selecting from the gallery routes through the SAME selectTemplate()
+            as the cards above, so the unsaved-custom-text guard applies. */}
+        <TemplateGallery
+          open={galleryOpen}
+          onOpenChange={setGalleryOpen}
+          onSelect={selectTemplate}
+        />
       </div>
     );
   }

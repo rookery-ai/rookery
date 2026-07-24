@@ -3,7 +3,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router";
 import { AppShell } from "@/components/shell/AppShell";
 import AgentNewPage from "./AgentNewPage";
-import { AGENT_TEMPLATES } from "./templates";
+import { AGENT_TEMPLATES, featuredTemplates, SCRATCH_TEMPLATE_ID } from "./templates";
+
+// Template labels contain regex-significant characters ("Page-change watch" is
+// fine, but a future "Q&A (daily)" would not be) — escape before building a
+// name matcher from one.
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -54,7 +61,7 @@ test("picking a template fills the description", async () => {
   wrap();
   await screen.findByLabelText(/what should it do/i);
 
-  fireEvent.click(screen.getByRole("button", { name: /daily digest/i }));
+  fireEvent.click(screen.getByRole("button", { name: /morning email digest/i }));
 
   // toHaveValue doesn't support asymmetric matchers (it compares literal
   // values) — read the live value and match against it directly instead.
@@ -66,7 +73,7 @@ test("the filled description stays editable", async () => {
   wrap();
   await screen.findByLabelText(/what should it do/i);
 
-  fireEvent.click(screen.getByRole("button", { name: /daily digest/i }));
+  fireEvent.click(screen.getByRole("button", { name: /morning email digest/i }));
   const field = screen.getByLabelText(/what should it do/i);
   fireEvent.change(field, { target: { value: "Watch my calendar instead" } });
 
@@ -89,23 +96,56 @@ test("no template text mentions implementation", () => {
   }
 });
 
-test("all six templates render as selectable cards with a label and blurb", async () => {
+test("the featured templates render as selectable cards with a label and blurb", async () => {
   wrap();
   await screen.findByLabelText(/what should it do/i);
 
-  expect(AGENT_TEMPLATES).toHaveLength(6);
-  for (const t of AGENT_TEMPLATES) {
-    const card = screen.getByRole("button", { name: new RegExp(t.label, "i") });
+  // The start screen shows only the promoted ones — 6 real templates plus the
+  // "start from scratch" escape hatch. The rest live behind "View all
+  // templates", asserted in TemplateGallery.test.tsx.
+  const featured = featuredTemplates();
+  expect(featured.filter((t) => t.id !== SCRATCH_TEMPLATE_ID)).toHaveLength(6);
+  for (const t of featured) {
+    const card = screen.getByRole("button", { name: new RegExp(escapeRe(t.label), "i") });
     expect(card).toHaveTextContent(t.blurb);
   }
+});
+
+// The whole point of a template is to save the user the designer's THREE
+// questions, which it can only do if the brief already answers them. The
+// designer treats itself as ready once it knows what the agent does, when it
+// runs, and whether it notifies (internal/prompts' <conversation_discipline>),
+// so every shipped brief must actually say those things.
+test("every template is a full brief: schedule, notification behaviour, and substance", () => {
+  // Broad on purpose: a schedule can be stated as a cadence ("every weekday"),
+  // a frequency ("twice a day"), or a clock time ("at 9:00am") — all of them
+  // answer "when does it run", which is what the designer needs.
+  const scheduleCue =
+    /(\b(every|each|daily|weekly|monthly|hourly|weekday|morning|evening|twice|once|times a day|on the \d)\b|\d{1,2}:\d{2})/i;
+  const notifyCue = /\b(message me|tell me|remind me|send me|alert|stay quiet|don't message|note)\b/i;
+
+  for (const t of AGENT_TEMPLATES) {
+    if (t.id === SCRATCH_TEMPLATE_ID) continue;
+    expect(t.category, `${t.id} needs a category`).toBeTruthy();
+    expect(t.keywords.length, `${t.id} needs keywords`).toBeGreaterThan(0);
+    // Long enough to be a real brief rather than the old one-line gesture.
+    expect(t.description.length, `${t.id} description is too thin`).toBeGreaterThan(200);
+    expect(t.description, `${t.id} must say WHEN it runs`).toMatch(scheduleCue);
+    expect(t.description, `${t.id} must say whether it notifies`).toMatch(notifyCue);
+  }
+});
+
+test("template ids are unique", () => {
+  const ids = AGENT_TEMPLATES.map((t) => t.id);
+  expect(new Set(ids).size).toBe(ids.length);
 });
 
 test("selecting a template marks it visibly active, and switching moves the mark", async () => {
   wrap();
   await screen.findByLabelText(/what should it do/i);
 
-  const digest = screen.getByRole("button", { name: /daily digest/i });
-  const watch = screen.getByRole("button", { name: /watch for changes/i });
+  const digest = screen.getByRole("button", { name: /morning email digest/i });
+  const watch = screen.getByRole("button", { name: /page-change watch/i });
 
   fireEvent.click(digest);
   expect(digest).toHaveAttribute("aria-pressed", "true");
@@ -120,7 +160,7 @@ test("editing the filled-in text by hand deactivates the template mark", async (
   wrap();
   await screen.findByLabelText(/what should it do/i);
 
-  const digest = screen.getByRole("button", { name: /daily digest/i });
+  const digest = screen.getByRole("button", { name: /morning email digest/i });
   fireEvent.click(digest);
   expect(digest).toHaveAttribute("aria-pressed", "true");
 
@@ -139,13 +179,13 @@ test("switching templates after hand-typed text asks for confirmation before rep
   const field = screen.getByLabelText(/what should it do/i);
   fireEvent.change(field, { target: { value: "my own hand-typed brief" } });
 
-  fireEvent.click(screen.getByRole("button", { name: /watch for changes/i }));
+  fireEvent.click(screen.getByRole("button", { name: /page-change watch/i }));
   expect(confirmSpy).toHaveBeenCalled();
   // Declined — the hand-typed text survives.
   expect(field).toHaveValue("my own hand-typed brief");
 
   confirmSpy.mockReturnValue(true);
-  fireEvent.click(screen.getByRole("button", { name: /watch for changes/i }));
+  fireEvent.click(screen.getByRole("button", { name: /page-change watch/i }));
   expect(field).toHaveValue(
     AGENT_TEMPLATES.find((t) => t.id === "watch-for-changes")!.description,
   );
@@ -158,7 +198,7 @@ test("continuing with a filled-in template SENDS it to the designer as the openi
   await screen.findByLabelText(/what should it do/i);
 
   fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "Test Agent" } });
-  fireEvent.click(screen.getByRole("button", { name: /daily digest/i }));
+  fireEvent.click(screen.getByRole("button", { name: /morning email digest/i }));
   fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 
   // The description is SENT as the first design message (auto-send on Continue),
