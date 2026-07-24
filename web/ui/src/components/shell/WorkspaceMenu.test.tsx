@@ -7,11 +7,11 @@ import WorkspaceMenu from "./WorkspaceMenu";
 const session = {
   authenticated: true,
   owner: { id: "o1", username: "admin", must_change_password: false },
-  workspace: { id: "w1", name: "personal", about: "", needs_setup: false, created_at: "2026-01-01T00:00:00Z" },
+  workspace: { id: "w1", name: "personal", icon: "", about: "", needs_setup: false, created_at: "2026-01-01T00:00:00Z" },
   workspaces: [
-    { id: "w1", name: "personal", about: "", needs_setup: false, created_at: "2026-01-01T00:00:00Z" },
-    { id: "w2", name: "new-biz", about: "", needs_setup: true, created_at: "2026-01-02T00:00:00Z" },
-    { id: "w3", name: "other", about: "", needs_setup: false, created_at: "2026-01-03T00:00:00Z" },
+    { id: "w1", name: "personal", icon: "", about: "", needs_setup: false, created_at: "2026-01-01T00:00:00Z" },
+    { id: "w2", name: "new-biz", icon: "", about: "", needs_setup: true, created_at: "2026-01-02T00:00:00Z" },
+    { id: "w3", name: "other", icon: "", about: "", needs_setup: false, created_at: "2026-01-03T00:00:00Z" },
   ],
 };
 
