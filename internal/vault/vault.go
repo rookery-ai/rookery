@@ -184,10 +184,17 @@ func (v *Vault) EnsureScaffold(workspaceID string) error {
 		}
 	}
 	readme := filepath.Join(root, "README.md")
-	if _, err := os.Stat(readme); errors.Is(err, os.ErrNotExist) {
-		// Written only when absent, and deliberately never refreshed: this file
-		// is the user's to edit, and rewriting it on a later boot would discard
-		// whatever they turned their home note into.
+	switch existing, err := os.ReadFile(readme); {
+	case errors.Is(err, os.ErrNotExist):
+		if err := writeFileAtomic(readme, []byte(readmeTemplate), 0o640); err != nil {
+			return err
+		}
+	case err == nil && isPristineREADME(existing):
+		// An untouched home note from an older version: upgrade it, or a vault
+		// that already exists would keep the old four-line folder list forever
+		// and never see the improvement. Safe because isPristineREADME demands
+		// byte-equality with a template we shipped — anything the user edited
+		// cannot match, and is left exactly as it is.
 		if err := writeFileAtomic(readme, []byte(readmeTemplate), 0o640); err != nil {
 			return err
 		}

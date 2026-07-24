@@ -57,8 +57,60 @@ func TestScaffoldREADMEDescribesTheVault(t *testing.T) {
 	}
 }
 
-// TestScaffoldREADMEIsNotRewritten pins the write-once rule: the home note is
-// the user's to edit, so a later boot must not clobber it.
+// TestScaffoldREADMEUpgradesAnUntouchedLegacyNote is the reason legacyREADMEs
+// exists: without it the richer home note would only ever reach vaults created
+// from now on, and every existing install — the ones that actually asked for
+// this — would keep the old four-line folder list.
+func TestScaffoldREADMEUpgradesAnUntouchedLegacyNote(t *testing.T) {
+	for i, legacy := range legacyREADMEs {
+		v := New(t.TempDir())
+		ws := "ws-legacy"
+		if err := v.EnsureScaffold(ws); err != nil {
+			t.Fatalf("scaffold: %v", err)
+		}
+		readme := filepath.Join(v.Root(ws), "README.md")
+		if err := os.WriteFile(readme, []byte(legacy), 0o640); err != nil {
+			t.Fatalf("seed legacy: %v", err)
+		}
+		if err := v.EnsureScaffold(ws); err != nil {
+			t.Fatalf("re-scaffold: %v", err)
+		}
+		b, err := os.ReadFile(readme)
+		if err != nil {
+			t.Fatalf("read back: %v", err)
+		}
+		if string(b) != readmeTemplate {
+			t.Errorf("legacy template %d was not upgraded; still:\n%s", i, b)
+		}
+	}
+}
+
+// A note saved through the KB editor comes back without its trailing newline.
+// Every README in the operator's live install was in that state, so a strictly
+// byte-exact check would have skipped exactly the vaults this upgrade is for.
+func TestScaffoldREADMEUpgradeToleratesAStrippedTrailingNewline(t *testing.T) {
+	v := New(t.TempDir())
+	const ws = "ws-no-trailing-newline"
+	if err := v.EnsureScaffold(ws); err != nil {
+		t.Fatalf("scaffold: %v", err)
+	}
+	readme := filepath.Join(v.Root(ws), "README.md")
+	stripped := strings.TrimRight(legacyREADMEs[0], "\n")
+	if err := os.WriteFile(readme, []byte(stripped), 0o640); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := v.EnsureScaffold(ws); err != nil {
+		t.Fatalf("re-scaffold: %v", err)
+	}
+	b, _ := os.ReadFile(readme)
+	if string(b) != readmeTemplate {
+		t.Errorf("a legacy README missing its trailing newline was not upgraded:\n%s", b)
+	}
+}
+
+// TestScaffoldREADMEIsNotRewritten pins the safety half of that upgrade: a home
+// note the user has touched at all is theirs, and a later boot must not clobber
+// it — including a legacy note with a single line appended.
 func TestScaffoldREADMEIsNotRewritten(t *testing.T) {
 	v := New(t.TempDir())
 	const ws = "ws-readme-keep"
@@ -79,5 +131,17 @@ func TestScaffoldREADMEIsNotRewritten(t *testing.T) {
 	}
 	if string(b) != mine {
 		t.Errorf("EnsureScaffold overwrote a user-edited README:\n%s", b)
+	}
+
+	// A legacy note with ONE extra line is an edited note, not a pristine one.
+	edited := legacyREADMEs[0] + "\nMy own notes below.\n"
+	if err := os.WriteFile(readme, []byte(edited), 0o640); err != nil {
+		t.Fatalf("write edited legacy: %v", err)
+	}
+	if err := v.EnsureScaffold(ws); err != nil {
+		t.Fatalf("re-scaffold: %v", err)
+	}
+	if b, _ := os.ReadFile(readme); string(b) != edited {
+		t.Errorf("an edited legacy README must be left alone, got:\n%s", b)
 	}
 }
