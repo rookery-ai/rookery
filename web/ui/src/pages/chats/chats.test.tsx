@@ -356,3 +356,34 @@ test("+ New chat creates a chat and selects it", async () => {
     ),
   ).toBe(true);
 });
+
+// ── Composer focus ─────────────────────────────────────────────────────────
+
+test("+ New chat puts the caret in the composer", async () => {
+  mockFetch();
+  wrap();
+  await screen.findByText("Chat One");
+
+  await userEvent.click(screen.getByRole("button", { name: "+ New chat" }));
+  await screen.findByRole("heading", { name: "New chat" });
+
+  // Starting a chat is a "let me type now" gesture — having to click into the
+  // box first is a wasted step.
+  const composer = await screen.findByPlaceholderText("Message…");
+  await waitFor(() => expect(document.activeElement).toBe(composer));
+});
+
+test("selecting an EXISTING chat does not steal focus into the composer", async () => {
+  mockFetch();
+  wrap();
+  const row = await screen.findByText("Chat Two");
+
+  await userEvent.click(row);
+  await screen.findByRole("heading", { name: "Chat Two" });
+
+  // Browsing history is not a "type now" gesture: auto-focusing here would
+  // also pop the on-screen keyboard on a touch device for someone who just
+  // wanted to read an old conversation.
+  const composer = await screen.findByPlaceholderText("Message…");
+  expect(document.activeElement).not.toBe(composer);
+});

@@ -86,7 +86,15 @@ export function GlobalChatPanel({
           // key: remounting on a chat switch resets the composer and the
           // scroll position. Without it, the new conversation would inherit
           // the previous one's half-typed draft.
-          <ChatWindow key={shownId} chatId={shownId} initialText={initialText} />
+          // autoFocus only for a chat this panel deliberately created (the
+          // New chat button, or forceNew) — resuming the last conversation on
+          // a plain panel open is not a "type now" gesture.
+          <ChatWindow
+            key={shownId}
+            chatId={shownId}
+            initialText={initialText}
+            autoFocus={shownId === pinnedId}
+          />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-muted-2">Loading…</div>
         )}
