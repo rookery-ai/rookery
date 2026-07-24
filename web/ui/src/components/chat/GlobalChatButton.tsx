@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router";
-import { MessageSquarePlus } from "lucide-react";
+import { MessageSquarePlus, Plus } from "lucide-react";
 import { useSlideOver } from "@/components/shell/AppShell";
+import { Button } from "@/components/ui/button";
 import { useChats, useCreateChat } from "@/lib/chats";
 import { ChatWindow } from "@/pages/chats/ChatWindow";
 
@@ -22,11 +23,25 @@ let createChatInFlight = false;
 // creates within the same mount; the module-level flag above covers the
 // close/reopen case across mounts) and waits for it to land in the
 // (now-invalidated) chats list.
-export function GlobalChatPanel({ initialText }: { initialText?: string } = {}) {
+//
+// `forceNew` overrides that resume-most-recent default: the caller wants a
+// FRESH conversation, not whatever was last open. That is what "Chat about
+// this file" needs — dropping a question about a note into an unrelated
+// ongoing thread is worse than having no button at all.
+export function GlobalChatPanel({
+  initialText,
+  forceNew,
+}: { initialText?: string; forceNew?: boolean } = {}) {
   const { close } = useSlideOver();
   const { data } = useChats();
   const createChat = useCreateChat();
   const attemptedCreate = useRef(false);
+  // A chat this panel deliberately created (the New chat button, or forceNew).
+  // Pinned rather than re-derived from "most recently updated": the list query
+  // may not have refetched yet, and a brand-new chat has no messages, so
+  // "most recent" can still resolve to the OLD one for a beat — the panel
+  // would visibly snap back to the previous conversation.
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
 
   const chats = data?.chats ?? [];
   const active = chats.filter((c) => c.active);
@@ -35,31 +50,66 @@ export function GlobalChatPanel({ initialText }: { initialText?: string } = {}) 
     : undefined;
 
   useEffect(() => {
-    if (!data || mostRecent || attemptedCreate.current || createChatInFlight) return;
+    // forceNew creates unconditionally (there may well be an active chat — we
+    // just don't want it); the default path only creates when there is none.
+    if (!data || pinnedId || attemptedCreate.current) return;
+    if (!forceNew && (mostRecent || createChatInFlight)) return;
     attemptedCreate.current = true;
     createChatInFlight = true;
-    createChat.mutate(undefined, { onSettled: () => { createChatInFlight = false; } });
+    createChat.mutate(undefined, {
+      onSuccess: (chat) => setPinnedId(chat.id),
+      onSettled: () => { createChatInFlight = false; },
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, mostRecent]);
+  }, [data, mostRecent, forceNew, pinnedId]);
 
-  if (!mostRecent) {
-    return <div className="flex h-full items-center justify-center text-sm text-muted-2">Loading…</div>;
+  // The explicit New chat button. Not guarded by createChatInFlight (that flag
+  // exists to stop the AUTOMATIC create from firing twice across a
+  // close/reopen); this is a user gesture, and the mutation's own isPending
+  // already disables the control while one is in flight.
+  function startNewChat() {
+    if (createChat.isPending) return;
+    createChat.mutate(undefined, { onSuccess: (chat) => setPinnedId(chat.id) });
   }
+
+  const shownId = pinnedId ?? mostRecent?.id ?? null;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 items-center justify-end border-b border-border px-4 py-1.5">
+        <Button variant="ghost" size="xs" onClick={startNewChat} disabled={createChat.isPending}>
+          <Plus /> New chat
+        </Button>
+      </div>
       <div className="min-h-0 flex-1">
-        <ChatWindow chatId={mostRecent.id} initialText={initialText} />
+        {shownId ? (
+          // key: remounting on a chat switch resets the composer and the
+          // scroll position. Without it, the new conversation would inherit
+          // the previous one's half-typed draft.
+          // autoFocus only for a chat this panel deliberately created (the
+          // New chat button, or forceNew) — resuming the last conversation on
+          // a plain panel open is not a "type now" gesture.
+          <ChatWindow
+            key={shownId}
+            chatId={shownId}
+            initialText={initialText}
+            autoFocus={shownId === pinnedId}
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-muted-2">Loading…</div>
+        )}
       </div>
-      <div className="shrink-0 border-t border-border px-4 py-2 text-center">
-        <Link
-          to={`${CHATS_PATH}?chat=${mostRecent.id}`}
-          onClick={close}
-          className="text-xs font-medium text-accent hover:underline"
-        >
-          Open full page ↗
-        </Link>
-      </div>
+      {shownId && (
+        <div className="shrink-0 border-t border-border px-4 py-2 text-center">
+          <Link
+            to={`${CHATS_PATH}?chat=${shownId}`}
+            onClick={close}
+            className="text-xs font-medium text-accent hover:underline"
+          >
+            Open full page ↗
+          </Link>
+        </div>
+      )}
     </div>
   );
 }

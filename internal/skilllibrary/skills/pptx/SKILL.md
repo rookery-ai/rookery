@@ -5,13 +5,12 @@ version: 1.0.0
 license: MIT-0
 category: File Processing
 metadata:
-  openclaw:
-    install:
-      - kind: pip
-        package: markitdown
-      - kind: node
-        package: pptxgenjs
-        bins: [pptxgenjs]
+  install:
+    - kind: pip
+      package: markitdown
+    - kind: node
+      package: pptxgenjs
+      bins: [pptxgenjs]
 ---
 
 # PPTX

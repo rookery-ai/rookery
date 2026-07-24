@@ -1,7 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Routes, Route } from "react-router";
+import { AppShell } from "@/components/shell/AppShell";
 import { ToastProvider, ToastHost } from "@/components/shell/Toast";
 import KBPage from "./KBPage";
 
@@ -213,4 +214,55 @@ test("deleting a nested markdown note (NoteEditor) returns to the tree, never re
     (u) => new URL(u, "http://localhost").searchParams.get("path") === parentPath,
   );
   expect(parentFetched).toBe(false);
+});
+
+// ── ?new=note (the ⌘K palette's "New note" action lands here) ───────────────
+
+// Rendered inside AppShell, unlike the tests above: the new-note dialog lives
+// in the CONTEXT PANE header, and <ContextPane> renders null on its own — it
+// hands its children to AppShell, which is what actually mounts them.
+function renderInShell(initialEntry: string) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <QueryClientProvider client={qc}>
+        <ToastProvider>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/kb" element={<KBPage />} />
+            </Route>
+          </Routes>
+          <ToastHost />
+        </ToastProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+}
+
+test("landing on /kb?new=note opens the new-note dialog", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/auth/session") {
+        return Promise.resolve(
+          jsonResponse({
+            authenticated: true,
+            owner: { id: "o1", username: "admin", must_change_password: false },
+            workspace: { id: "w1", name: "ws1", about: "", needs_setup: false, created_at: "2026-01-01T00:00:00Z" },
+            workspaces: [],
+          }),
+        );
+      }
+      if (url.startsWith("/api/v1/kb/tree")) return Promise.resolve(jsonResponse({ tree: [] }));
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  renderInShell("/kb?new=note");
+
+  // The dialog is the KB's only real create affordance; the palette action
+  // used to navigate to bare /kb, which opens the page and creates nothing.
+  expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  expect(await screen.findByText("New note")).toBeInTheDocument();
 });

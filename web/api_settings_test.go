@@ -559,3 +559,70 @@ func TestAPISetupMasterPasswordDifferentPasswordResubmitReEncrypts(t *testing.T)
 		t.Fatalf("expected secret to be decryptable under the NEW password: val=%q err=%v", val, err)
 	}
 }
+
+// TestAPIWorkspaceIconRoundTripsAndValidates covers the whole contract of the
+// workspace-image endpoint in one pass: a known slug persists and shows up in
+// the session payload the SPA renders from, an UNKNOWN slug is rejected rather
+// than stored, and "" is accepted as the legitimate "no image" state.
+//
+// The rejection is the load-bearing half. The stored value is echoed into every
+// session response and rendered by the SPA, so it is untrusted input, not a
+// preference — and storing an unknown slug would "save" a setting that then
+// silently falls back to the monogram forever, which is harder to diagnose than
+// an error at the point of the mistake.
+func TestAPIWorkspaceIconRoundTripsAndValidates(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodPut, "/api/v1/settings/workspace/icon",
+		map[string]string{"icon": "aurora"}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("set icon: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/auth/session", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("session: %d %s", rec.Code, rec.Body.String())
+	}
+	var sess struct {
+		Workspace struct {
+			Icon string `json:"icon"`
+		} `json:"workspace"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &sess); err != nil {
+		t.Fatalf("decode session: %v", err)
+	}
+	if sess.Workspace.Icon != "aurora" {
+		t.Fatalf("session icon = %q, want %q", sess.Workspace.Icon, "aurora")
+	}
+
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/settings/workspace/icon",
+		map[string]string{"icon": "../../etc/passwd"}, cookies)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("unknown icon: got %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+
+	// The rejected value must not have overwritten the good one.
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/auth/session", nil, cookies)
+	if err := json.Unmarshal(rec.Body.Bytes(), &sess); err != nil {
+		t.Fatalf("decode session: %v", err)
+	}
+	if sess.Workspace.Icon != "aurora" {
+		t.Fatalf("icon changed after a rejected write: %q", sess.Workspace.Icon)
+	}
+
+	// "" clears it — the same state a workspace is created in.
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/settings/workspace/icon",
+		map[string]string{"icon": ""}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("clear icon: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/auth/session", nil, cookies)
+	if err := json.Unmarshal(rec.Body.Bytes(), &sess); err != nil {
+		t.Fatalf("decode session: %v", err)
+	}
+	if sess.Workspace.Icon != "" {
+		t.Fatalf("icon = %q after clearing, want empty", sess.Workspace.Icon)
+	}
+}

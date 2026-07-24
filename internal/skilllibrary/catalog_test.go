@@ -164,3 +164,111 @@ func TestCoreSkillsShipNoScripts(t *testing.T) {
 		}
 	}
 }
+
+// ── metadata shape ──────────────────────────────────────────────────────────
+
+// The canonical frontmatter puts a skill's requirements DIRECTLY under
+// metadata — `metadata.requires` and, as its SIBLING, `metadata.install`.
+// There is no vendor segment between them.
+func TestParseMetaFlatForm(t *testing.T) {
+	meta, body := skilllibrary.ParseMeta(`---
+name: flat
+description: a skill declaring its requirements under metadata directly
+metadata:
+  requires:
+    bins: [pdfinfo, pdftotext]
+    anyBins: [pdftotext, pandoc]
+    env: [SOME_API_KEY]
+  install:
+    - kind: binary
+      bin: pdfinfo
+      url: https://example.test/poppler.tar.gz
+      strip: 1
+    - kind: pip
+      package: pdfplumber
+---
+
+Body text.`)
+
+	require.Equal(t, "flat", meta.Name)
+	require.Equal(t, []string{"pdfinfo", "pdftotext"}, meta.RequiresBins)
+	require.Equal(t, []string{"pdftotext", "pandoc"}, meta.AnyBins)
+	require.Equal(t, []string{"SOME_API_KEY"}, meta.RequiresEnv)
+	require.Len(t, meta.Install, 2)
+	require.Equal(t, "binary", meta.Install[0].Kind)
+	require.Equal(t, "pdfinfo", meta.Install[0].Bin)
+	require.Equal(t, 1, meta.Install[0].Strip)
+	require.Equal(t, "pdfplumber", meta.Install[1].Package)
+	require.Equal(t, "Body text.", body)
+}
+
+// A skill imported from ClawHub carries the legacy metadata.openclaw.* nesting.
+// Dropping support would not fail loudly — the skill would parse with EMPTY
+// requirements, and the runner would then tell the agent an installed tool is
+// missing. So the legacy form stays readable.
+func TestParseMetaLegacyOpenclawFormStillParses(t *testing.T) {
+	meta, _ := skilllibrary.ParseMeta(`---
+name: legacy
+description: an imported skill still using the vendor-namespaced nesting
+metadata:
+  openclaw:
+    requires:
+      bins: [pandoc]
+      env: [OLD_KEY]
+    install:
+      - kind: pip
+        package: pypdf
+---
+
+Body.`)
+
+	require.Equal(t, []string{"pandoc"}, meta.RequiresBins)
+	require.Equal(t, []string{"OLD_KEY"}, meta.RequiresEnv)
+	require.Len(t, meta.Install, 1)
+	require.Equal(t, "pypdf", meta.Install[0].Package)
+}
+
+// Precedence is per FIELD, not all-or-nothing: a half-converted file (flat
+// `requires`, legacy `install`) must still yield both. An all-or-nothing rule
+// would silently drop the install list here.
+func TestParseMetaFlatWinsPerField(t *testing.T) {
+	meta, _ := skilllibrary.ParseMeta(`---
+name: mixed
+description: flat requires alongside a legacy install block
+metadata:
+  requires:
+    bins: [flatbin]
+  openclaw:
+    requires:
+      bins: [legacybin]
+    install:
+      - kind: pip
+        package: leftover
+---
+
+Body.`)
+
+	require.Equal(t, []string{"flatbin"}, meta.RequiresBins, "flat requires must win")
+	require.Len(t, meta.Install, 1, "legacy install must survive when there is no flat one")
+	require.Equal(t, "leftover", meta.Install[0].Package)
+}
+
+// Nothing this platform SHIPS may use the legacy nesting — core skills are the
+// worked examples the skill designer's generated output is compared against,
+// and the skill-creator/skill-vetter bodies are literally read by the model as
+// the format to follow. One straggler teaches the wrong shape.
+func TestCoreSkillsUseFlatMetadata(t *testing.T) {
+	entries, err := os.ReadDir(skillsRoot)
+	require.NoError(t, err)
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		raw, readErr := os.ReadFile(filepath.Join(skillsRoot, e.Name(), "SKILL.md"))
+		require.NoError(t, readErr)
+		require.NotContains(t, string(raw), "openclaw",
+			"core skill %q still references the legacy metadata.openclaw nesting; "+
+				"requirements belong directly under metadata (requires + sibling install)", e.Name())
+	}
+}

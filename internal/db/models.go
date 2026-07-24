@@ -20,6 +20,7 @@ type Workspace struct {
 	ID                      string
 	Name                    string
 	About                   string // "what is this workspace about" — injected into LLM context
+	Icon                    string // slug of a preset workspace image; "" = fall back to the name's initial
 	EncryptedMasterPassword string
 	SecretsSalt             string
 

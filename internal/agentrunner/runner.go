@@ -1008,7 +1008,7 @@ func (r *Runner) loadDeclaredSkillContent(workspaceID string, skillNames []strin
 }
 
 // resolveSkillBins resolves the absolute path of every CLI tool a declared skill
-// requires (metadata.openclaw.requires.bins / anyBins), so the runtime env block
+// requires (metadata.requires.bins / anyBins), so the runtime env block
 // can tell the agent where to invoke each tool. A tool is "resolved" if it exists
 // at $HOME/.local/bin/<bin> or on PATH; otherwise Path is empty (the env block
 // instructs the agent to install it via the cli-tool-installer skill).

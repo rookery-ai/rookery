@@ -1,12 +1,15 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bell, Bot, Trash2, Clock, AlertTriangle, Plus, Loader2 } from "lucide-react";
+import { Bell, Bot, Trash2, Clock, AlertTriangle, Plus, Loader2, Check } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
 import { ContextPaneHeader, ContextSection } from "@/components/shell/ContextPaneParts";
 import { useToast } from "@/components/shell/Toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { cn, timeAgo } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { useServices } from "@/lib/connections";
@@ -18,6 +21,7 @@ import {
   useReminders,
   useCreateReminder,
   useDeleteReminder,
+  splitReminders,
   useInbox,
   useMarkInboxRead,
   useMarkAllInboxRead,
@@ -271,12 +275,20 @@ function InboxSection() {
 
 // ── Context pane: Reminders ──────────────────────────────────────────────────
 
+// A fired reminder is struck through and dimmed, with a check replacing the
+// bell — done, but still deletable. It is NOT hidden: seeing what already went
+// off is how you tell "it fired and I missed it" from "it never fired".
 function ReminderRow({ r, onDelete }: { r: Reminder; onDelete: () => void }) {
+  const Icon = r.sent ? Check : Bell;
   return (
     <div className="mb-1.5 flex items-start justify-between gap-2 rounded-lg border border-border bg-background px-2.5 py-2 text-xs">
-      <div className="min-w-0">
-        <p className="truncate font-medium">{r.message}</p>
-        <p className="text-[10px] text-muted-2">{new Date(r.remind_at).toLocaleString()}</p>
+      <Icon className={cn("mt-0.5 size-3.5 shrink-0", r.sent ? "text-ok" : "text-muted-2")} />
+      <div className="min-w-0 flex-1">
+        <p className={cn("truncate font-medium", r.sent && "text-muted-2 line-through")}>{r.message}</p>
+        <p className="text-[10px] text-muted-2">
+          {r.sent && "Done · "}
+          {new Date(r.remind_at).toLocaleString()}
+        </p>
       </div>
       <button
         type="button"
@@ -287,6 +299,39 @@ function ReminderRow({ r, onDelete }: { r: Reminder; onDelete: () => void }) {
         <Trash2 className="size-3.5" />
       </button>
     </div>
+  );
+}
+
+// The full list, behind "View all reminders". A modal rather than a route:
+// there is no /reminders route today (global search maps a reminder hit to
+// "/"), and adding one would mean a rail entry and an API-parity row for what
+// is typically a list of under a dozen items.
+function RemindersDialog({
+  open,
+  onOpenChange,
+  reminders,
+  onDelete,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  reminders: Reminder[];
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[80vh] max-w-md flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="border-b border-border px-4 py-3">
+          <DialogTitle>All reminders</DialogTitle>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          {reminders.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-2">No reminders yet.</p>
+          ) : (
+            reminders.map((r) => <ReminderRow key={r.id} r={r} onDelete={() => onDelete(r.id)} />)
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -353,7 +398,18 @@ function AddReminderForm() {
   );
 }
 
-function RemindersSection() {
+// How many reminders the context pane shows before collapsing behind
+// "View all". The pane also holds the inbox; an unbounded reminder list pushes
+// it off the screen entirely.
+const PANE_REMINDER_LIMIT = 3;
+
+// useRemindersView is called ONCE, by HomePage, and its result handed to both
+// the context-pane section and the main-screen card. Two independent
+// useDeferredDelete instances would each keep their own `pending` set, so a
+// delete in the pane would hide the row there while the card kept rendering
+// it for the full 5s undo window — the same reminder both gone and present on
+// one screen.
+function useRemindersView() {
   const { data } = useReminders();
   const del = useDeleteReminder();
   const qc = useQueryClient();
@@ -363,18 +419,44 @@ function RemindersSection() {
     onRestore: () => qc.invalidateQueries({ queryKey: ["reminders"] }),
   });
   const reminders = (data?.reminders ?? []).filter((r) => !pending.has(r.id));
+  // Upcoming first (soonest at the top), completed after — so the pane's three
+  // visible rows are the three that still matter, never three stale ones.
+  const { pending: upcoming, done } = splitReminders(reminders);
+  return {
+    upcoming,
+    ordered: [...upcoming, ...done],
+    onDelete: (id: string) => schedule(id, "Reminder deleted"),
+  };
+}
+
+export type RemindersView = ReturnType<typeof useRemindersView>;
+
+function RemindersSection({ view }: { view: RemindersView }) {
+  const { ordered, onDelete } = view;
+  const [allOpen, setAllOpen] = useState(false);
+  const shown = ordered.slice(0, PANE_REMINDER_LIMIT);
+
   return (
     <div className="border-b border-border pb-3">
       <ContextSection title="Reminders">
-        {reminders.length === 0 ? (
+        {ordered.length === 0 ? (
           <p className="px-1 text-xs text-muted-2">No reminders yet.</p>
         ) : (
-          reminders.map((r) => (
-            <ReminderRow key={r.id} r={r} onDelete={() => schedule(r.id, "Reminder deleted")} />
-          ))
+          shown.map((r) => <ReminderRow key={r.id} r={r} onDelete={() => onDelete(r.id)} />)
+        )}
+        {ordered.length > PANE_REMINDER_LIMIT && (
+          <Button variant="ghost" size="xs" className="w-full" onClick={() => setAllOpen(true)}>
+            View all reminders ({ordered.length})
+          </Button>
         )}
         <AddReminderForm />
       </ContextSection>
+      <RemindersDialog
+        open={allOpen}
+        onOpenChange={setAllOpen}
+        reminders={ordered}
+        onDelete={onDelete}
+      />
     </div>
   );
 }
@@ -458,10 +540,58 @@ function NeedsAttentionCard({ runs }: { runs: DashboardRun[] }) {
   );
 }
 
+// ── Content: Reminders ───────────────────────────────────────────────────────
+
+// How many upcoming reminders the main-screen card lists. It sits beside Next
+// up / Needs attention in a fixed-height row, so it shows the near horizon and
+// defers the rest to the pane's "View all".
+const CARD_REMINDER_LIMIT = 4;
+
+// The main-screen counterpart to the context pane's list — same shape as
+// NextUpCard / NeedsAttentionCard so the three read as one row of "what's
+// coming". Deliberately shows ONLY upcoming reminders: completed ones are
+// managed in the pane, and struck-through rows on the dashboard would be
+// noise, not status.
+function RemindersCard({ view }: { view: RemindersView }) {
+  const { upcoming } = view;
+  const shown = upcoming.slice(0, CARD_REMINDER_LIMIT);
+  return (
+    // A named region: "Reminders" is also the context pane's section heading,
+    // so the dashboard card needs an addressable identity of its own — for a
+    // screen reader landing on it out of context as much as for a test.
+    <section aria-label="Upcoming reminders" className="rounded-lg border border-border p-3">
+      <h3 className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-2">Reminders</h3>
+      {shown.length === 0 ? (
+        <p className="text-sm text-muted-2">No reminders set.</p>
+      ) : (
+        <ul className="space-y-1.5 text-sm">
+          {shown.map((r) => (
+            <li key={r.id} className="flex items-start gap-2 text-muted-2">
+              <Bell className="mt-0.5 size-3.5 shrink-0" />
+              <span className="min-w-0">
+                <span className="font-medium text-foreground">{r.message}</span>
+                {" — "}
+                {new Date(r.remind_at).toLocaleString()}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {upcoming.length > shown.length && (
+        <p className="mt-2 text-[11px] text-muted-2">
+          +{upcoming.length - shown.length} more in the sidebar
+        </p>
+      )}
+    </section>
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function HomePage() {
   const { data: dash } = useDashboard();
+  // One reminders view, shared by the pane and the card — see useRemindersView.
+  const remindersView = useRemindersView();
   const { data: servicesData } = useServices();
 
   // Tile 3 = connected services (per the validated mockup: "5 connected
@@ -482,7 +612,7 @@ export default function HomePage() {
         <div className="flex h-full flex-col">
           <ContextPaneHeader title="Home" />
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
-            <RemindersSection />
+            <RemindersSection view={remindersView} />
             <InboxSection />
           </div>
         </div>
@@ -508,6 +638,7 @@ export default function HomePage() {
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <NextUpCard upcoming={dash?.upcoming ?? []} />
           <NeedsAttentionCard runs={runs} />
+          <RemindersCard view={remindersView} />
         </div>
       </div>
     </>

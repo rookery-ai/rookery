@@ -5,19 +5,18 @@ version: 1.0.0
 license: MIT-0
 category: Web & Research
 metadata:
-  openclaw:
-    requires:
-      bins: [playwright]
-    install:
-      - kind: pip
-        package: playwright
-      - kind: binary
-        bin: playwright
-        # The `playwright` console script lands at $HOME/.local/bin/playwright
-        # after `pip install --user playwright`. Then run
-        # `playwright install chromium` to fetch the browser binary into the
-        # user's persistent cache. The env block gives you the absolute path.
-        url: https://pypi.org/simple/playwright
+  requires:
+    bins: [playwright]
+  install:
+    - kind: pip
+      package: playwright
+    - kind: binary
+      bin: playwright
+      # The `playwright` console script lands at $HOME/.local/bin/playwright
+      # after `pip install --user playwright`. Then run
+      # `playwright install chromium` to fetch the browser binary into the
+      # user's persistent cache. The env block gives you the absolute path.
+      url: https://pypi.org/simple/playwright
 ---
 
 # Playwright Browser

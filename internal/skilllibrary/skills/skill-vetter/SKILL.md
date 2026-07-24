@@ -53,7 +53,7 @@ Flag any of these red flags:
 
 #### Install URLs
 
-- Any install URL (`metadata.openclaw.install[].url`, or a download URL
+- Any install URL (`metadata.install[].url`, or a download URL
   named in the body/scripts) pointing at a host, org, or release you cannot
   verify is real. A URL that merely has the *shape* of an official release
   (`github.com/<org>/<project>/releases/download/...`) is not evidence it

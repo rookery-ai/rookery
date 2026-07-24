@@ -11,15 +11,21 @@ import (
 )
 
 type apiWorkspace struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Icon is a preset image slug the SPA resolves to a bundled graphic.
+	// Empty means the UI falls back to the workspace name's initial.
+	Icon       string    `json:"icon"`
 	About      string    `json:"about"`
 	NeedsSetup bool      `json:"needs_setup"`
 	CreatedAt  time.Time `json:"created_at"`
 }
 
 func toAPIWorkspace(w *db.Workspace) apiWorkspace {
-	return apiWorkspace{ID: w.ID, Name: w.Name, About: w.About, NeedsSetup: w.NeedsSetup, CreatedAt: w.CreatedAt}
+	return apiWorkspace{
+		ID: w.ID, Name: w.Name, Icon: w.Icon, About: w.About,
+		NeedsSetup: w.NeedsSetup, CreatedAt: w.CreatedAt,
+	}
 }
 
 func (s *Server) registerAuthAPI(g *echo.Group) {

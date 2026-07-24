@@ -83,7 +83,16 @@ function StatusChip({ active }: { active: boolean }) {
 // mounts this directly, KBPage-style embedding would double up chrome.
 // initialText: optional prefill forwarded to the Composer — the ⌘K palette's
 // "Ask assistant" action passes the search query through GlobalChatPanel.
-export function ChatWindow({ chatId, initialText }: { chatId: string; initialText?: string }) {
+// autoFocus: put the caret in the composer as soon as it mounts. Opt-in, not
+// always-on — callers pass it for the gesture that means "I want to type NOW"
+// (starting a new chat), and withhold it when merely SELECTING an existing
+// chat from a list, where grabbing focus would also pop the on-screen
+// keyboard on a touch device just because the user browsed their history.
+export function ChatWindow({
+  chatId,
+  initialText,
+  autoFocus,
+}: { chatId: string; initialText?: string; autoFocus?: boolean }) {
   const { data, isLoading } = useChatDetail(chatId);
   const qc = useQueryClient();
   const action = useChatAction();
@@ -345,7 +354,13 @@ export function ChatWindow({ chatId, initialText }: { chatId: string; initialTex
         </div>
       )}
 
-      <Composer onSend={handleSend} busy={busy || attaching} initialText={initialText} leftSlot={attachControl} />
+      <Composer
+        onSend={handleSend}
+        busy={busy || attaching}
+        initialText={initialText}
+        autoFocus={autoFocus}
+        leftSlot={attachControl}
+      />
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="max-w-sm">

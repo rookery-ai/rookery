@@ -102,7 +102,12 @@ const SlashList = forwardRef<ListHandle, SuggestionProps<SlashItem>>(function Sl
             type="button"
             className={cn(
               "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm",
-              index === selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
+              // Soft tint + normal foreground, matching CommandItem: the icon
+              // inside each row is text-muted-2 and never flipped with the
+              // fill, so a full bg-accent left it barely visible.
+              index === selected
+                ? "bg-accent-soft text-foreground ring-1 ring-accent/40"
+                : "hover:bg-accent-soft",
             )}
             onMouseEnter={() => setSelected(index)}
             onClick={() => select(index)}

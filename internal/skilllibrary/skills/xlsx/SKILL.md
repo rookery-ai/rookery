@@ -5,12 +5,11 @@ version: 1.0.0
 license: MIT-0
 category: File Processing
 metadata:
-  openclaw:
-    install:
-      - kind: pip
-        package: openpyxl
-      - kind: pip
-        package: pandas
+  install:
+    - kind: pip
+      package: openpyxl
+    - kind: pip
+      package: pandas
 ---
 
 # XLSX

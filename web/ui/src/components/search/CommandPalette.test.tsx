@@ -74,7 +74,12 @@ function HomePage() {
 
 function KBPlaceholder() {
   const [params] = useSearchParams();
-  return <div>KB route: {params.get("path")}</div>;
+  return (
+    <div>
+      KB route: {params.get("path")}
+      {params.get("new") === "note" && <span>new-note requested</span>}
+    </div>
+  );
 }
 
 function AgentsNewPlaceholder() {
@@ -302,4 +307,18 @@ test("the search button opens the palette, and ⌘K still works alongside it", a
   );
   fireEvent.keyDown(window, { key: "k", ctrlKey: true });
   expect(await screen.findByPlaceholderText(/search or run a command/i)).toBeInTheDocument();
+});
+
+test("'New note' asks the knowledge base to open its new-note dialog", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap();
+  await openPalette();
+
+  // Bare /kb only OPENS the knowledge base and creates nothing — the action
+  // read as broken. It now carries ?new=note, which KBPage consumes to open
+  // the dialog that actually creates a note.
+  await user.click(screen.getByText("New note"));
+
+  expect(await screen.findByText("new-note requested")).toBeInTheDocument();
 });
