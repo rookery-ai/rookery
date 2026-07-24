@@ -122,38 +122,26 @@ test("renders workspace cards from the session", async () => {
   expect(names.some((t) => t?.includes("Side Project"))).toBe(true);
 });
 
-test("System settings form prefills from GET and renders sandbox/landlock indicators", async () => {
+test("System status renders the sandbox/landlock indicators", async () => {
   mockFetch();
   wrap();
-  const bin = (await screen.findByLabelText(/claude binary path/i)) as HTMLInputElement;
-  await waitFor(() => expect(bin.value).toBe("/usr/bin/claude"));
-  expect(screen.getByText("on")).toBeInTheDocument();
+  expect(await screen.findByText("on")).toBeInTheDocument();
   expect(screen.getByText("ready")).toBeInTheDocument();
 });
 
-test("System settings save PUTs claude_bin/coder_timeout/agent_timeout/memory_mb", async () => {
-  const calls = mockFetch();
+test("System status offers no editable settings", async () => {
+  // Regression guard for the removal: claude_bin / coder_timeout /
+  // agent_timeout / memory_mb were written to system_settings and never read
+  // back by anything, so the form was removed rather than wired up. If an
+  // input reappears here it is once again configuring nothing.
+  mockFetch();
   wrap();
-
-  const bin = (await screen.findByLabelText(/claude binary path/i)) as HTMLInputElement;
-  await waitFor(() => expect(bin.value).toBe("/usr/bin/claude"));
-
-  const user = userEvent.setup();
-  await user.clear(bin);
-  await user.type(bin, "/opt/claude/bin/claude");
-  await user.click(screen.getByRole("button", { name: /^save$/i }));
-
-  await waitFor(() => {
-    const put = calls.find((c) => c.url === "/api/v1/admin/settings" && c.method === "PUT");
-    expect(put).toBeDefined();
-  });
-  const put = calls.find((c) => c.url === "/api/v1/admin/settings" && c.method === "PUT")!;
-  expect(put.body).toEqual({
-    claude_bin: "/opt/claude/bin/claude",
-    coder_timeout: "120",
-    agent_timeout: "300",
-    memory_mb: "512",
-  });
+  await screen.findByText("on");
+  expect(screen.queryByLabelText(/claude binary path/i)).toBeNull();
+  expect(screen.queryByLabelText(/coder timeout/i)).toBeNull();
+  expect(screen.queryByLabelText(/agent timeout/i)).toBeNull();
+  expect(screen.queryByLabelText(/memory limit/i)).toBeNull();
+  expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
 });
 
 test("Audit log renders rows from the last-100 GET", async () => {
@@ -190,32 +178,14 @@ test("Audit log Workspace column resolves a known workspace_id to its name via t
   expect(within(table).getByText("—")).toBeInTheDocument();
 });
 
-test("Workspace permissions: expanding loads checkboxes and Save PUTs grant/revoke", async () => {
-  const calls = mockFetch();
+test("Workspace cards offer no permissions editor", async () => {
+  // Regression guard: workspace_permissions had exactly one reader
+  // (rbac.CanPerform) and that function had no callers at all, so the
+  // checkboxes gated nothing. The whole surface was removed.
+  mockFetch();
   wrap();
-
   await screen.findAllByText("Home Server");
-  const user = userEvent.setup();
-  const permButtons = screen.getAllByRole("button", { name: /permissions/i });
-  await user.click(permButtons[0]);
-
-  await screen.findByText("web-browser");
-  const bashBox = screen.getByRole("checkbox", { name: "bash" }) as HTMLInputElement;
-  expect(bashBox.checked).toBe(true);
-  const webBox = screen.getByRole("checkbox", { name: "web-browser" }) as HTMLInputElement;
-  await user.click(webBox);
-  await user.click(bashBox);
-
-  await user.click(screen.getByRole("button", { name: /save permissions/i }));
-
-  await waitFor(() => {
-    const put = calls.find((c) => c.url === "/api/v1/workspaces/w1/permissions" && c.method === "PUT");
-    expect(put).toBeDefined();
-  });
-  const put = calls.find((c) => c.url === "/api/v1/workspaces/w1/permissions" && c.method === "PUT")!;
-  const body = put.body as { grant: string[]; revoke: string[] };
-  expect(body.grant.sort()).toEqual(["web-browser"]);
-  expect(body.revoke.sort()).toEqual(["bash", "mcp-servers", "system-tools"]);
+  expect(screen.queryByRole("button", { name: /permissions/i })).toBeNull();
 });
 
 test("Delete workspace: confirm flow warns extra for the ACTIVE workspace and calls DELETE", async () => {

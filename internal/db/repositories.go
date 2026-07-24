@@ -986,45 +986,6 @@ func scanInboxMessage(s scanner) (*InboxMessage, error) {
 	return &m, nil
 }
 
-// ── User permissions ───────────────────────────────────────────────────────
-
-func (d *DB) GrantPermission(p *WorkspacePermission) error {
-	_, err := d.Exec(`INSERT OR IGNORE INTO workspace_permissions(id,workspace_id,permission,granted_by,granted_at)
-		VALUES(?,?,?,?,datetime('now'))`,
-		p.ID, p.WorkspaceID, p.Permission, p.GrantedBy)
-	return err
-}
-
-func (d *DB) RevokePermission(workspaceID, permission string) error {
-	_, err := d.Exec(`DELETE FROM workspace_permissions WHERE workspace_id=? AND permission=?`, workspaceID, permission)
-	return err
-}
-
-func (d *DB) HasPermission(workspaceID, permission string) (bool, error) {
-	var count int
-	err := d.QueryRow(`SELECT COUNT(*) FROM workspace_permissions WHERE workspace_id=? AND permission=?`, workspaceID, permission).Scan(&count)
-	return count > 0, err
-}
-
-func (d *DB) ListPermissions(workspaceID string) ([]string, error) {
-	rows, err := d.Query(`SELECT permission FROM workspace_permissions WHERE workspace_id=?`, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var perms []string
-	for rows.Next() {
-		var p string
-		if err := rows.Scan(&p); err != nil {
-			return nil, err
-		}
-		perms = append(perms, p)
-	}
-	return perms, rows.Err()
-}
-
-// ── Audit log ──────────────────────────────────────────────────────────────
-
 func (d *DB) WriteAuditLog(a *AuditLog) error {
 	_, err := d.Exec(`INSERT INTO audit_logs(id,workspace_id,action,target,detail,ip_address,created_at)
 		VALUES(?,?,?,?,?,?,datetime('now'))`,

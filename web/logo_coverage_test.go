@@ -36,10 +36,11 @@ func TestBrandLogoCoverage(t *testing.T) {
 	// Service connectors — the exact list the connections page renders.
 	slugs = append(slugs, availableServiceProviders...)
 
-	// Chat platforms — whatever adapters have registered a CredSpec.
-	for _, spec := range gateway.CredSpecs() {
-		slugs = append(slugs, spec.Platform)
-	}
+	// Chat platforms — the platforms with a real adapter. Deliberately NOT
+	// gateway.CredSpecs(): that registry is global and mutable, and other
+	// tests in this package register throwaway specs into it, which would
+	// make this test demand a logo for a fixture like "cs-multi".
+	slugs = append(slugs, gateway.RegisteredAdapterPlatforms()...)
 
 	// Coder API providers — the settings/setup provider picker.
 	for _, p := range coder.APIProviders() {

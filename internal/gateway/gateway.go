@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -111,6 +112,22 @@ func adapterFactory(platform string) (AdapterFactory, bool) {
 	defer adapterMu.RUnlock()
 	f, ok := adapterRegistry[platform]
 	return f, ok
+}
+
+// RegisteredAdapterPlatforms returns the platforms that have a real adapter,
+// sorted. Distinct from CredSpecs(): a CredSpec is just connect-form metadata
+// and tests register throwaway ones into that global registry, whereas an
+// adapter factory is only ever registered by an actual adapter's init(). Use
+// this when you need the set of platforms the product genuinely ships.
+func RegisteredAdapterPlatforms() []string {
+	adapterMu.RLock()
+	defer adapterMu.RUnlock()
+	out := make([]string, 0, len(adapterRegistry))
+	for p := range adapterRegistry {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // messageHandler is the subset of *Router's API that GatewayManager depends

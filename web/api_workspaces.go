@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/labstack/echo/v4"
@@ -20,13 +19,10 @@ func (s *Server) registerWorkspacesAPI(g *echo.Group) {
 	g.POST("/workspaces/leave", s.apiLeaveWorkspace)
 	g.POST("/workspaces/:id/enter", s.apiEnterWorkspace)
 	g.DELETE("/workspaces/:id", s.apiDeleteWorkspace)
-	g.GET("/workspaces/:id/permissions", s.apiGetWorkspacePermissions)
-	g.PUT("/workspaces/:id/permissions", s.apiPutWorkspacePermissions)
 
 	g.GET("/admin/overview", s.apiAdminOverview)
 	g.GET("/admin/audit", s.apiAdminAudit)
 	g.GET("/admin/settings", s.apiAdminGetSettings)
-	g.PUT("/admin/settings", s.apiAdminPutSettings)
 }
 
 // ── Workspace lifecycle ──────────────────────────────────────────────────────
@@ -121,87 +117,6 @@ func (s *Server) apiDeleteWorkspace(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"ok": true})
 }
 
-// ── Workspace permissions ────────────────────────────────────────────────────
-
-type apiPermEntry struct {
-	Name    string `json:"name"`
-	Granted bool   `json:"granted"`
-}
-
-func (s *Server) apiGetWorkspacePermissions(c echo.Context) error {
-	id := c.Param("id")
-	if _, err := s.db.GetWorkspaceByID(id); err != nil {
-		return jsonErr(c, http.StatusNotFound, "not_found", "workspace not found")
-	}
-	perms, err := s.db.ListPermissions(id)
-	if err != nil {
-		return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
-	}
-	granted := make(map[string]bool, len(perms))
-	for _, p := range perms {
-		granted[p] = true
-	}
-	out := make([]apiPermEntry, len(allPermissions))
-	for i, name := range allPermissions {
-		out[i] = apiPermEntry{Name: name, Granted: granted[name]}
-	}
-	return c.JSON(http.StatusOK, map[string]any{"permissions": out})
-}
-
-func (s *Server) apiPutWorkspacePermissions(c echo.Context) error {
-	workspaceID := c.Param("id")
-	if _, err := s.db.GetWorkspaceByID(workspaceID); err != nil {
-		return jsonErr(c, http.StatusNotFound, "not_found", "workspace not found")
-	}
-	var req struct {
-		Grant  []string `json:"grant"`
-		Revoke []string `json:"revoke"`
-	}
-	if err := bindAPI(c, &req); err != nil {
-		return err
-	}
-
-	isValid := func(p string) bool {
-		for _, v := range validPermissions {
-			if v == p {
-				return true
-			}
-		}
-		return false
-	}
-	for _, p := range req.Grant {
-		if !isValid(p) {
-			return jsonErr(c, http.StatusBadRequest, "invalid_permission", "invalid permission: "+p)
-		}
-	}
-	for _, p := range req.Revoke {
-		if !isValid(p) {
-			return jsonErr(c, http.StatusBadRequest, "invalid_permission", "invalid permission: "+p)
-		}
-	}
-
-	o := c.Get("owner").(*db.Owner)
-	for _, p := range req.Grant {
-		if err := s.db.GrantPermission(&db.WorkspacePermission{
-			ID:          uuid.New().String(),
-			WorkspaceID: workspaceID,
-			Permission:  p,
-			GrantedBy:   o.ID,
-		}); err != nil {
-			return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
-		}
-		s.audit.Log(workspaceID, "grant_permission", "workspace:"+workspaceID, p, c.RealIP())
-	}
-	for _, p := range req.Revoke {
-		if err := s.db.RevokePermission(workspaceID, p); err != nil {
-			return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
-		}
-		s.audit.Log(workspaceID, "revoke_permission", "workspace:"+workspaceID, p, c.RealIP())
-	}
-
-	return c.JSON(http.StatusOK, map[string]any{"ok": true})
-}
-
 // ── Owner/admin ───────────────────────────────────────────────────────────────
 
 type apiAuditLog struct {
@@ -261,56 +176,28 @@ func (s *Server) apiAdminAudit(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"logs": out})
 }
 
+// apiAdminSettings is read-only status, not configuration.
+//
+// This payload used to also carry claude_bin / coder_timeout / agent_timeout /
+// memory_mb, persisted into system_settings by a PUT. Nothing ever read them
+// back: the coder binary and timeout come from config.yaml (cfg.Coder), the
+// per-workspace timeout from workspaces.coder_timeout_s, and the sandbox
+// memory cap from cfg.Sandbox.DefaultMemoryMB. They were a form that appeared
+// to configure the system but did not, so they were removed rather than wired
+// up — inventing runtime meaning for them was never asked for.
 type apiAdminSettings struct {
-	ClaudeBin     string `json:"claude_bin"`
-	CoderTimeout  string `json:"coder_timeout"`
-	AgentTimeout  string `json:"agent_timeout"`
-	MemoryMB      string `json:"memory_mb"`
-	SandboxOn     bool   `json:"sandbox_on"`
-	LandlockReady bool   `json:"landlock_ready"`
+	SandboxOn     bool `json:"sandbox_on"`
+	LandlockReady bool `json:"landlock_ready"`
 }
 
 func (s *Server) apiLoadAdminSettings() apiAdminSettings {
 	d := s.loadAdminSettings()
 	return apiAdminSettings{
-		ClaudeBin:     d.ClaudeBin,
-		CoderTimeout:  d.CoderTimeout,
-		AgentTimeout:  d.AgentTimeout,
-		MemoryMB:      d.MemoryMB,
 		SandboxOn:     d.SandboxOn,
 		LandlockReady: d.LandlockReady,
 	}
 }
 
 func (s *Server) apiAdminGetSettings(c echo.Context) error {
-	return c.JSON(http.StatusOK, s.apiLoadAdminSettings())
-}
-
-func (s *Server) apiAdminPutSettings(c echo.Context) error {
-	var req struct {
-		ClaudeBin    string `json:"claude_bin"`
-		CoderTimeout string `json:"coder_timeout"`
-		AgentTimeout string `json:"agent_timeout"`
-		MemoryMB     string `json:"memory_mb"`
-	}
-	if err := bindAPI(c, &req); err != nil {
-		return err
-	}
-
-	fields := map[string]string{
-		"claude_bin":    req.ClaudeBin,
-		"coder_timeout": req.CoderTimeout,
-		"agent_timeout": req.AgentTimeout,
-		"memory_mb":     req.MemoryMB,
-	}
-	for key, val := range fields {
-		if val != "" {
-			if err := s.db.SetSystemSetting(key, val); err != nil {
-				return jsonErr(c, http.StatusInternalServerError, "internal", "failed to save: "+err.Error())
-			}
-		}
-	}
-
-	s.audit.Log("", "update_system_settings", "system", "", c.RealIP())
 	return c.JSON(http.StatusOK, s.apiLoadAdminSettings())
 }

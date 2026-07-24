@@ -10,12 +10,8 @@ import { useSession } from "@/lib/session";
 import { CreateWorkspaceDialog } from "@/pages/Workspaces";
 import {
   useAdminSettings,
-  useSaveAdminSettings,
   useAuditLog,
-  useWorkspacePermissions,
-  useSaveWorkspacePermissions,
   useDeleteWorkspaceAdmin,
-  type AdminSettings,
 } from "@/lib/settings";
 import type { Workspace } from "@/lib/session";
 
@@ -34,68 +30,7 @@ function ErrorNote({ message }: { message: string }) {
 
 // ── Workspaces ───────────────────────────────────────────────────────────
 
-function PermissionsEditor({ workspaceID }: { workspaceID: string }) {
-  const { data, isLoading, isError, error } = useWorkspacePermissions(workspaceID);
-  const save = useSaveWorkspacePermissions();
-  const [granted, setGranted] = useState<Record<string, boolean>>({});
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    if (!data) return;
-    const m: Record<string, boolean> = {};
-    for (const p of data.permissions) m[p.name] = p.granted;
-    setGranted(m);
-  }, [data]);
-
-  async function handleSave() {
-    setSaved(false);
-    const grant = Object.entries(granted).filter(([, v]) => v).map(([n]) => n);
-    const revoke = Object.entries(granted).filter(([, v]) => !v).map(([n]) => n);
-    try {
-      await save.mutateAsync({ id: workspaceID, grant, revoke });
-      setSaved(true);
-    } catch {
-      // surfaced via save.error
-    }
-  }
-
-  if (isLoading) return <p className="text-xs text-muted-2">Loading permissions…</p>;
-  if (isError) return <ErrorNote message={errMsg(error)} />;
-
-  return (
-    <div className="mt-2 space-y-2 rounded-md border border-border p-3">
-      <div className="flex flex-wrap gap-3">
-        {(data?.permissions ?? []).map((p) => (
-          <label key={p.name} className="flex items-center gap-1.5 text-xs">
-            <input
-              type="checkbox"
-              checked={granted[p.name] ?? false}
-              onChange={(e) => {
-                setGranted((g) => ({ ...g, [p.name]: e.target.checked }));
-                setSaved(false);
-              }}
-            />
-            {p.name}
-          </label>
-        ))}
-      </div>
-      <div className="flex items-center gap-2">
-        <Button type="button" size="sm" variant="outline" onClick={() => void handleSave()} disabled={save.isPending}>
-          {save.isPending ? "Saving…" : "Save permissions"}
-        </Button>
-        {saved && (
-          <span className="flex items-center gap-1 text-xs text-ok">
-            <Check className="size-3" /> Saved
-          </span>
-        )}
-      </div>
-      {save.isError && <ErrorNote message={errMsg(save.error)} />}
-    </div>
-  );
-}
-
 function WorkspaceCard({ ws, activeID }: { ws: Workspace; activeID: string | undefined }) {
-  const [expandedPerms, setExpandedPerms] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const del = useDeleteWorkspaceAdmin();
   const isActive = ws.id === activeID;
@@ -119,12 +54,7 @@ function WorkspaceCard({ ws, activeID }: { ws: Workspace; activeID: string | und
           </div>
           {ws.about && <div className="truncate text-xs text-muted-2">{ws.about}</div>}
         </div>
-        <Button size="sm" variant="outline" onClick={() => setExpandedPerms((v) => !v)}>
-          Permissions
-        </Button>
       </div>
-
-      {expandedPerms && <PermissionsEditor workspaceID={ws.id} />}
 
       <div className="mt-3">
         {!confirming ? (
@@ -173,95 +103,44 @@ function WorkspacesSection() {
   );
 }
 
-// ── System settings ──────────────────────────────────────────────────────
+// ── System status ────────────────────────────────────────────────────────
 
-const EMPTY_ADMIN: AdminSettings = {
-  claude_bin: "",
-  coder_timeout: "",
-  agent_timeout: "",
-  memory_mb: "",
-  sandbox_on: false,
-  landlock_ready: false,
-};
-
-function SystemSettingsSection() {
+// Runtime status only. This section used to be a form over claude_bin /
+// coder_timeout / agent_timeout / memory_mb, all persisted to system_settings
+// and none of them ever read back — the coder binary and timeout come from
+// config.yaml, the per-workspace timeout from the workspace row, and the
+// sandbox memory cap from the sandbox config. The inputs were removed rather
+// than wired up, leaving the two indicators that report something real.
+function SystemStatusSection() {
   const { data, isLoading, isError, error } = useAdminSettings();
-  const save = useSaveAdminSettings();
-  const [form, setForm] = useState<AdminSettings>(EMPTY_ADMIN);
-  const [saved, setSaved] = useState(false);
 
-  useEffect(() => {
-    if (data) setForm(data);
-  }, [data]);
-
-  function set<K extends keyof AdminSettings>(key: K, value: AdminSettings[K]) {
-    setForm((f) => ({ ...f, [key]: value }));
-    setSaved(false);
-  }
-
-  async function handleSave(e: FormEvent) {
-    e.preventDefault();
-    setSaved(false);
-    try {
-      await save.mutateAsync({
-        claude_bin: form.claude_bin,
-        coder_timeout: form.coder_timeout,
-        agent_timeout: form.agent_timeout,
-        memory_mb: form.memory_mb,
-      });
-      setSaved(true);
-    } catch {
-      // surfaced via save.error
-    }
-  }
+  const sandboxOn = data?.sandbox_on ?? false;
+  const landlockReady = data?.landlock_ready ?? false;
 
   return (
     <div>
-      <h3 className="text-sm font-bold text-muted-2">System settings</h3>
+      <h3 className="text-sm font-bold text-muted-2">System status</h3>
+      <p className="mt-1 text-xs text-muted-2">
+        Coder and sandbox settings come from <code>config.yaml</code> and each workspace's own
+        coder configuration.
+      </p>
       {isLoading && <p className="mt-2 text-xs text-muted-2">Loading…</p>}
       {isError && <div className="mt-2"><ErrorNote message={errMsg(error)} /></div>}
       {!isLoading && !isError && (
-        <>
-          <div className="mt-2 flex flex-wrap gap-4 text-xs text-muted-2">
-            <span>
-              Sandbox: <span className={form.sandbox_on ? "text-ok" : "text-muted-2"}>{form.sandbox_on ? "on" : "off"}</span>
-            </span>
-            <span>
-              Landlock: <span className={form.landlock_ready ? "text-ok" : "text-muted-2"}>{form.landlock_ready ? "ready" : "unavailable"}</span>
-            </span>
+        <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-xs">
+          <div>
+            <dt className="text-muted-2">Sandbox</dt>
+            <dd className={sandboxOn ? "font-medium text-ok" : "font-medium text-muted-2"}>
+              {sandboxOn ? "on" : "off"}
+            </dd>
           </div>
-          {save.isError && <div className="mt-3"><ErrorNote message={errMsg(save.error)} /></div>}
-          <form onSubmit={(e) => void handleSave(e)} className="mt-3 max-w-lg space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="claude_bin">Claude binary path</Label>
-              <Input id="claude_bin" value={form.claude_bin} onChange={(e) => set("claude_bin", e.target.value)} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="coder_timeout">Coder timeout (s)</Label>
-                <Input id="coder_timeout" value={form.coder_timeout} onChange={(e) => set("coder_timeout", e.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="agent_timeout">Agent timeout (s)</Label>
-                <Input id="agent_timeout" value={form.agent_timeout} onChange={(e) => set("agent_timeout", e.target.value)} />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="memory_mb">Memory limit (MB)</Label>
-              <Input id="memory_mb" value={form.memory_mb} onChange={(e) => set("memory_mb", e.target.value)} />
-            </div>
-            <div className="flex items-center gap-3">
-              <Button type="submit" size="sm" disabled={save.isPending}>
-                {save.isPending ? "Saving…" : "Save"}
-              </Button>
-              {saved && (
-                <span className="flex items-center gap-1 text-xs text-ok">
-                  <Check className="size-3" /> Saved
-                </span>
-              )}
-            </div>
-          </form>
-        </>
+          <div>
+            <dt className="text-muted-2">Landlock</dt>
+            <dd className={landlockReady ? "font-medium text-ok" : "font-medium text-muted-2"}>
+              {landlockReady ? "ready" : "unavailable"}
+            </dd>
+          </div>
+        </dl>
       )}
     </div>
   );
@@ -329,11 +208,11 @@ export function OwnerSections() {
   return (
     <section>
       <h2 className="text-lg font-bold">Owner</h2>
-      <p className="mt-1 text-sm text-muted-2">Workspaces, audit log, and system settings.</p>
+      <p className="mt-1 text-sm text-muted-2">Workspaces, system status, and the audit log.</p>
 
       <div className="mt-6 space-y-8">
         <WorkspacesSection />
-        <SystemSettingsSection />
+        <SystemStatusSection />
         <AuditLogSection />
       </div>
     </section>
