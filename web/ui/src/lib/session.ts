@@ -16,6 +16,9 @@ export type Session = {
   owner?: { id: string; username: string; must_change_password: boolean };
   workspace?: Workspace | null;
   workspaces?: Workspace[];
+  // Server-side screen lock. The workspace stays entered while locked; every
+  // guarded API route answers 423 until the master password is re-entered.
+  locked?: boolean;
 };
 
 export function useSession() {

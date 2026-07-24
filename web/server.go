@@ -207,6 +207,29 @@ func (s *Server) activeWorkspace(c echo.Context) (*db.Workspace, bool) {
 	return w, true
 }
 
+// isLocked reports whether the owner has locked the UI. Absent means unlocked,
+// so an older session cookie is never read as locked.
+func (s *Server) isLocked(c echo.Context) bool {
+	sess, err := s.store.Get(c.Request(), sessionName)
+	if err != nil {
+		return false
+	}
+	locked, _ := sess.Values["locked"].(bool)
+	return locked
+}
+
+// setLocked sets or clears the screen lock. It deliberately leaves owner_id and
+// active_workspace_id alone: locking must not cost the entered workspace.
+func (s *Server) setLocked(c echo.Context, locked bool) error {
+	sess, _ := s.store.Get(c.Request(), sessionName)
+	if locked {
+		sess.Values["locked"] = true
+	} else {
+		delete(sess.Values, "locked")
+	}
+	return sess.Save(c.Request(), c.Response())
+}
+
 // setOwnerSession marks the owner as logged in.
 func (s *Server) setOwnerSession(c echo.Context, ownerID string) error {
 	sess, _ := s.store.Get(c.Request(), sessionName)

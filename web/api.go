@@ -81,6 +81,25 @@ func (s *Server) requireSetupCompleteAPI(next echo.HandlerFunc) echo.HandlerFunc
 	}
 }
 
+// apiLockGate refuses every guarded API route while the UI is locked.
+//
+// This is what makes the lock real rather than cosmetic: a client-side overlay
+// is cleared by a reload and leaves the whole API reachable, so the master
+// password would be guarding nothing. 423 Locked is the honest status — the
+// resource exists and the credentials are valid, the session is just locked.
+//
+// It is applied to the owner and workspace groups only. /auth/session,
+// /auth/unlock and /auth/logout live on the ungated group and stay reachable
+// by design, or the SPA could neither discover the lock nor escape it.
+func (s *Server) apiLockGate(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		if s.isLocked(c) {
+			return jsonErr(c, http.StatusLocked, "locked", "unlock with your master password")
+		}
+		return next(c)
+	}
+}
+
 // setupAPIRoutes registers the /api/v1 groups. Endpoint registrations are added
 // group-by-group in api_*.go files' registration funcs, called from here.
 func (s *Server) setupAPIRoutes() {
@@ -90,11 +109,11 @@ func (s *Server) setupAPIRoutes() {
 	s.registerAuthAPI(api)
 
 	// Owner-gated (no workspace needed): workspaces, admin, audit.
-	owner := api.Group("", s.requireOwnerAPI)
+	owner := api.Group("", s.requireOwnerAPI, s.apiLockGate)
 	s.registerWorkspacesAPI(owner)
 
 	// Workspace-gated: everything tenant-scoped.
-	dash := api.Group("", s.requireOwnerAPI, s.requireActiveWorkspaceAPI, s.requireSetupCompleteAPI)
+	dash := api.Group("", s.requireOwnerAPI, s.apiLockGate, s.requireActiveWorkspaceAPI, s.requireSetupCompleteAPI)
 	s.registerAgentsAPI(dash)
 	s.registerChatsAPI(dash)
 	s.registerSkillsAPI(dash)

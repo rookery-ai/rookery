@@ -1,10 +1,11 @@
 import { NavLink, useLocation } from "react-router";
 import {
-  House, Library, Bot, Sparkles, Plug, MessageSquare, KeyRound, Settings,
+  House, Library, Bot, Sparkles, Plug, MessageSquare, KeyRound, Settings, Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useInboxPoll } from "@/lib/home";
+import { useLockUI } from "@/lib/lock";
 import WorkspaceMenu from "./WorkspaceMenu";
 
 export const railItems = [
@@ -56,6 +57,7 @@ export function isRailActive(to: string, pathname: string): boolean {
 export default function IconRail() {
   const { data: poll } = useInboxPoll();
   const unread = poll?.unread ?? 0;
+  const { lock, locking } = useLockUI();
   const { pathname } = useLocation();
   const settingsActive = isRailActive("/settings", pathname);
 
@@ -114,7 +116,28 @@ export default function IconRail() {
           </Tooltip>
         );
       })}
+      {/* Lock sits directly above Settings, at the bottom of the rail with the
+          other account-level controls rather than among the navigation items —
+          it performs an action, it does not navigate anywhere. */}
       <div className="md:mt-auto">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => void lock()}
+              disabled={locking}
+              aria-label="Lock"
+              className="relative flex size-11 items-center justify-center rounded-lg text-muted
+                         transition-colors hover:bg-muted-surface hover:text-foreground
+                         active:scale-95 disabled:opacity-50"
+            >
+              <Lock className="size-5 stroke-[2.25]" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right">Lock</TooltipContent>
+        </Tooltip>
+      </div>
+      <div>
         <Tooltip>
           <TooltipTrigger asChild>
             {/* A gear, not the owner's initial in a circle: this item navigates

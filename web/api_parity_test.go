@@ -13,6 +13,7 @@ func TestAPIParityInventory(t *testing.T) {
 	want := []string{
 		"GET /api/v1/auth/session", "POST /api/v1/auth/login", "POST /api/v1/auth/logout",
 		"POST /api/v1/auth/change-password",
+		"POST /api/v1/auth/lock", "POST /api/v1/auth/unlock",
 		"GET /api/v1/workspaces", "POST /api/v1/workspaces", "POST /api/v1/workspaces/:id/enter",
 		"POST /api/v1/workspaces/leave", "DELETE /api/v1/workspaces/:id",
 		"GET /api/v1/admin/overview", "GET /api/v1/admin/audit",
