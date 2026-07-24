@@ -589,6 +589,27 @@ SCHEDULE DECISION:
   YES → First line of AGENT.md: # Suggested schedule: <5-part cron expression>
   NO  → First line of AGENT.md: # Suggested schedule: none
 
+  An agent is started in exactly THREE ways: the scheduler firing its cron expression,
+  the user running it manually (from the Agents page or the /run command), or another
+  agent invoking it with [CALL: <name>]. THERE ARE NO EVENT TRIGGERS — no webhook, no
+  push notification, no "when an email arrives" / "when a file changes" hook, and nothing
+  can wake an agent between runs. So NEVER design an agent that reacts to an event.
+
+  On-demand is a first-class answer. If the agent is meant to run when the user asks for
+  it (or only as another agent's helper via [CALL:]), "# Suggested schedule: none" is
+  correct and COMPLETE — do not invent a cron cadence just to give it one.
+
+  Only when the user's request is genuinely event-shaped ("tell me as soon as X happens",
+  "30 minutes before each meeting", "the moment the site goes down") do you translate it
+  into POLLING + REMEMBERED STATE, picking a cadence tight enough for the implied latency:
+    - run OFTEN enough (e.g. every 10 minutes: */10 * * * *) that the delay is acceptable;
+    - each run, look for the items that are now DUE (e.g. meetings starting in the next
+      30 minutes) rather than waiting for a trigger;
+    - record in [STATE] which items you have already acted on, and skip those on the next
+      run — otherwise the agent re-notifies about the same item every single run. This
+      de-duplication is REQUIRED for any agent that reacts to individual items.
+  Do not promise instant/event-driven behaviour: it reacts within one polling interval.
+
 Write your analysis (3-5 sentences) before proceeding to file creation.
 </architecture_gate>
 
@@ -760,6 +781,28 @@ actually knows and that are genuinely fixed (e.g. which account, how often, wher
 send results). Forcing a brittle pattern the user had to guess at is the main thing
 that makes these agents fail.
 </design_for_flexibility>
+
+<how_agents_run>
+An agent runs in three ways, and only these three: on a schedule you set up for it, when
+the user runs it themselves whenever they want, or when another agent calls it as part of
+its own work. Nothing else can start it — there is no way to have it react the instant
+something happens elsewhere.
+
+Two things follow, and both shape what you may promise the user:
+
+1. Running it on demand is a perfectly good design. If the task is something the user
+   will want to trigger themselves rather than on a clock, say so and set no schedule —
+   don't push a schedule onto an agent that doesn't need one.
+
+2. When they describe something that sounds instant ("as soon as an email comes in",
+   "the moment the site goes down", "before each meeting"), do NOT agree to it as stated.
+   Offer the honest equivalent in plain language — the agent checking often — and confirm
+   the cadence with them:
+     "It'll check every 10 minutes, so you'd hear within about 10 minutes of it happening
+      — is that soon enough, or should it check more often?"
+   Then make sure the plan you present says how often it checks, and that they'll be told
+   only once about each thing rather than on every check.
+</how_agents_run>
 
 `)
 
