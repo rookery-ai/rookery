@@ -1,8 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import { AlertTriangle, Check } from "lucide-react";
+import { CuratedSelect } from "@/components/profile/CuratedSelect";
+import {
+  timezoneOptions, countryOptions, LANGUAGE_OPTIONS, TONE_OPTIONS,
+} from "@/components/profile/options";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -113,12 +117,12 @@ function BasicsStep({
     <form onSubmit={(e) => void submit(e)} className="space-y-4">
       <h2 className="text-lg font-bold">Workspace basics</h2>
       <p className="text-sm text-muted-2">
-        Give this workspace a name and describe what it's about — your agents see this so they
-        understand the workspace's purpose.
+        Your agents read this to understand what the workspace is for, so it's worth a
+        sentence or two.
       </p>
       <div className="space-y-1.5">
         <Label htmlFor="setup_name">Workspace name</Label>
-        <Input id="setup_name" value={name} onChange={(e) => setName(e.target.value)} autoFocus required />
+        <Input id="setup_name" value={name} onChange={(e) => setName(e.target.value)} required />
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="setup_about">What is this workspace about?</Label>
@@ -126,6 +130,9 @@ function BasicsStep({
           id="setup_about"
           value={about}
           onChange={(e) => setAbout(e.target.value)}
+          // The name arrives pre-filled from workspace creation, so the
+          // description is the field actually being asked for here.
+          autoFocus
           rows={3}
           placeholder="Its purpose, domain, goals…"
           className="min-h-20 w-full resize-y rounded-md border border-border bg-background p-3 text-sm outline-none focus:border-ring focus:ring-[3px] focus:ring-ring/50"
@@ -285,6 +292,10 @@ function ProfileStep({
   const [displayName, setDisplayName] = useState("");
   const [timezone, setTimezone] = useState("");
   const [language, setLanguage] = useState("");
+  const [location, setLocation] = useState("");
+  const [tone, setTone] = useState("");
+  const timezones = useMemo(() => timezoneOptions(), []);
+  const countries = useMemo(() => countryOptions(), []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -298,6 +309,8 @@ function ProfileStep({
         display_name: displayName,
         timezone,
         language,
+        location,
+        tone,
       });
       onNext(res.next_step);
     } catch (err) {
@@ -326,21 +339,39 @@ function ProfileStep({
         />
       </div>
       <div className="space-y-1.5">
+        <Label htmlFor="setup_location">Location</Label>
+        <CuratedSelect
+          id="setup_location"
+          value={location}
+          onChange={setLocation}
+          options={countries}
+        />
+      </div>
+      <div className="space-y-1.5">
         <Label htmlFor="setup_timezone">Timezone</Label>
-        <Input
+        <CuratedSelect
           id="setup_timezone"
           value={timezone}
-          onChange={(e) => setTimezone(e.target.value)}
-          placeholder="e.g. Europe/Skopje"
+          onChange={setTimezone}
+          options={timezones}
         />
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="setup_language">Preferred language</Label>
-        <Input
+        <CuratedSelect
           id="setup_language"
           value={language}
-          onChange={(e) => setLanguage(e.target.value)}
-          placeholder="e.g. English"
+          onChange={setLanguage}
+          options={LANGUAGE_OPTIONS}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="setup_tone">Tone</Label>
+        <CuratedSelect
+          id="setup_tone"
+          value={tone}
+          onChange={setTone}
+          options={TONE_OPTIONS}
         />
       </div>
       {error && <ErrorNote>{error}</ErrorNote>}

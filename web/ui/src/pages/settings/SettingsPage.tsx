@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { AlertTriangle, Check } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
@@ -6,6 +6,10 @@ import { ContextPaneHeader } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CuratedSelect } from "@/components/profile/CuratedSelect";
+import {
+  timezoneOptions, countryOptions, LANGUAGE_OPTIONS, TONE_OPTIONS,
+} from "@/components/profile/options";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { useTheme } from "@/theme";
@@ -77,6 +81,11 @@ const EMPTY_PROFILE: Profile = {
 
 function ProfileSection({ profile }: { profile: Profile | undefined }) {
   const [form, setForm] = useState<Profile>(EMPTY_PROFILE);
+  // Built once: timezoneOptions walks the platform tzdb (~400 entries) and
+  // countryOptions runs Intl.DisplayNames over every code, neither of which
+  // should re-run on each keystroke elsewhere in the form.
+  const timezones = useMemo(() => timezoneOptions(), []);
+  const countries = useMemo(() => countryOptions(), []);
   const [saved, setSaved] = useState(false);
   const save = useSaveProfile();
 
@@ -127,24 +136,39 @@ function ProfileSection({ profile }: { profile: Profile | undefined }) {
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="location">Location</Label>
-          <Input id="location" value={form.location} onChange={(e) => set("location", e.target.value)} />
+          <CuratedSelect
+            id="location"
+            value={form.location}
+            onChange={(v) => set("location", v)}
+            options={countries}
+          />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="timezone">Timezone</Label>
-          <Input
+          <CuratedSelect
             id="timezone"
-            placeholder="e.g. Europe/Skopje"
             value={form.timezone}
-            onChange={(e) => set("timezone", e.target.value)}
+            onChange={(v) => set("timezone", v)}
+            options={timezones}
           />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="tone">Tone</Label>
-          <Input id="tone" value={form.tone} onChange={(e) => set("tone", e.target.value)} />
+          <CuratedSelect
+            id="tone"
+            value={form.tone}
+            onChange={(v) => set("tone", v)}
+            options={TONE_OPTIONS}
+          />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="language">Language</Label>
-          <Input id="language" value={form.language} onChange={(e) => set("language", e.target.value)} />
+          <CuratedSelect
+            id="language"
+            value={form.language}
+            onChange={(v) => set("language", v)}
+            options={LANGUAGE_OPTIONS}
+          />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="notes">Notes</Label>
