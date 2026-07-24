@@ -4,6 +4,8 @@ import { api } from "./api";
 export type Workspace = {
   id: string;
   name: string;
+  // Slug of a preset image (see lib/workspaceIcons). "" = show the initial.
+  icon: string;
   about: string;
   needs_setup: boolean;
   created_at: string;

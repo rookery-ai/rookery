@@ -23,6 +23,7 @@ func (s *Server) registerSettingsAPI(g *echo.Group) {
 	g.GET("/settings", s.apiGetSettings)
 	g.PUT("/settings/profile", s.apiPutSettingsProfile)
 	g.PUT("/settings/workspace", s.apiPutSettingsWorkspace)
+	g.PUT("/settings/workspace/icon", s.apiPutSettingsWorkspaceIcon)
 	g.PUT("/settings/coder", s.apiPutSettingsCoder)
 	g.POST("/settings/coder/test", s.handleSmokeCoder) // unchanged, just re-registered
 	g.PUT("/settings/master-password", s.apiPutSettingsMasterPassword)
@@ -195,6 +196,48 @@ func (s *Server) apiPutSettingsWorkspace(c echo.Context) error {
 		return jsonErr(c, http.StatusInternalServerError, "internal", "failed to save: "+err.Error())
 	}
 	s.audit.Log(w.ID, "update_workspace_meta", "workspace:"+w.ID, "", c.RealIP())
+	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
+}
+
+// ── PUT /api/v1/settings/workspace/icon ──────────────────────────────────────
+
+// workspaceIcons is the catalog of preset workspace images. The DB stores only
+// a SLUG; the artwork itself lives in the SPA, so a picture never has to be
+// uploaded, stored, served, or size-checked, and the set stays identical for
+// every workspace.
+//
+// Validated server-side rather than trusted from the client: the value is
+// echoed back into every session response and rendered by the SPA, so an
+// arbitrary string is untrusted input, not a preference. An unknown slug is
+// rejected outright instead of being stored and silently falling back at
+// render time — a setting that appears to save but never shows is worse than
+// an error. Keep in sync with web/ui/src/lib/workspaceIcons.tsx.
+var workspaceIcons = map[string]bool{
+	"aurora": true, "orbit": true, "prism": true, "meadow": true,
+	"ember": true, "tide": true, "dusk": true, "grove": true,
+	"signal": true, "quartz": true, "bloom": true, "slate": true,
+}
+
+type apiWorkspaceIconRequest struct {
+	Icon string `json:"icon"`
+}
+
+func (s *Server) apiPutSettingsWorkspaceIcon(c echo.Context) error {
+	w := c.Get("workspace").(*db.Workspace)
+	var req apiWorkspaceIconRequest
+	if err := bindAPI(c, &req); err != nil {
+		return err
+	}
+	icon := strings.TrimSpace(req.Icon)
+	// "" is legitimate — it clears the image and restores the initial-letter
+	// monogram, which is also what a workspace starts life with.
+	if icon != "" && !workspaceIcons[icon] {
+		return jsonErr(c, http.StatusBadRequest, "invalid_icon", "unknown workspace icon")
+	}
+	if err := s.db.UpdateWorkspaceIcon(w.ID, icon); err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", "failed to save: "+err.Error())
+	}
+	s.audit.Log(w.ID, "update_workspace_icon", "workspace:"+w.ID, icon, c.RealIP())
 	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
 }
 

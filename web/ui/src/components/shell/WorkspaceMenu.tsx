@@ -10,11 +10,14 @@ import {
 import {
   EnterWorkspaceDialog, CreateWorkspaceDialog, resetWorkspaceScopedCache,
 } from "@/pages/Workspaces";
+import { WorkspaceAvatar } from "@/lib/workspaceIcons";
+import WorkspaceIconPicker from "./WorkspaceIconPicker";
 
 export default function WorkspaceMenu() {
   const { data: session } = useSession();
   const [entering, setEntering] = useState<Workspace | null>(null);
   const [creating, setCreating] = useState(false);
+  const [pickingIcon, setPickingIcon] = useState(false);
   const [switchError, setSwitchError] = useState("");
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -50,9 +53,16 @@ export default function WorkspaceMenu() {
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label="Workspace"
-          className="size-9 rounded-lg bg-foreground text-background flex items-center justify-center font-bold"
+          // size-11 matches the rail items below it (they were size-9 too, and
+          // the whole column grew) and text-lg/font-extrabold makes the
+          // fallback monogram carry at that size instead of floating in it.
+          className="flex size-11 items-center justify-center rounded-lg text-lg font-extrabold transition-opacity hover:opacity-90 active:scale-95"
         >
-          {current?.name?.[0]?.toUpperCase() ?? "?"}
+          <WorkspaceAvatar
+            name={current?.name}
+            icon={current?.icon}
+            className="size-11 text-lg"
+          />
         </DropdownMenuTrigger>
         <DropdownMenuContent side="right" align="start" className="w-56">
           <DropdownMenuLabel className="truncate">{current?.name}</DropdownMenuLabel>
@@ -61,9 +71,13 @@ export default function WorkspaceMenu() {
             .filter((w) => w.id !== current?.id)
             .map((w) => (
               <DropdownMenuItem key={w.id} onSelect={() => switchTo(w)}>
+                {/* Each row shows its OWN image, so the switcher is scannable
+                    by picture rather than by reading every name. */}
+                <WorkspaceAvatar name={w.name} icon={w.icon} className="size-5 text-[10px]" />
                 Switch to {w.name}
               </DropdownMenuItem>
             ))}
+          <DropdownMenuItem onSelect={() => setPickingIcon(true)}>Change image…</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setCreating(true)}>+ Create workspace</DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={leave}>Leave workspace</DropdownMenuItem>
@@ -74,6 +88,12 @@ export default function WorkspaceMenu() {
           {switchError}
         </p>
       )}
+      <WorkspaceIconPicker
+        open={pickingIcon}
+        onOpenChange={setPickingIcon}
+        name={current?.name}
+        current={current?.icon}
+      />
       <EnterWorkspaceDialog ws={entering} onClose={() => setEntering(null)} />
       <CreateWorkspaceDialog open={creating} onClose={() => setCreating(false)} />
     </div>

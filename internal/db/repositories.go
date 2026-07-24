@@ -79,7 +79,7 @@ func scanOwner(s scanner) (*Owner, error) {
 
 // ── Workspaces ───────────────────────────────────────────────────────────────
 
-const workspaceCols = `id,name,about,encrypted_master_password,secrets_salt,
+const workspaceCols = `id,name,about,icon,encrypted_master_password,secrets_salt,
 	coder_kind,coder_bin,coder_timeout_s,coder_backend_type,
 	coder_provider,coder_model,coder_api_key_secret,coder_base_url,
 	needs_setup,created_at,updated_at`
@@ -137,6 +137,13 @@ func (d *DB) UpdateWorkspaceMeta(id, name, about string) error {
 	return err
 }
 
+// UpdateWorkspaceIcon sets the workspace's icon slug. An empty slug is valid
+// and means "no icon" — the UI falls back to the name's initial.
+func (d *DB) UpdateWorkspaceIcon(id, icon string) error {
+	_, err := d.Exec(`UPDATE workspaces SET icon=?, updated_at=datetime('now') WHERE id=?`, icon, id)
+	return err
+}
+
 // UpdateWorkspaceCoder updates the inlined coder config for a workspace.
 func (d *DB) UpdateWorkspaceCoder(id, kind, bin string, timeoutS int, backendType, provider, model, apiKeySecret, baseURL string) error {
 	_, err := d.Exec(`UPDATE workspaces SET
@@ -168,7 +175,7 @@ func scanWorkspace(s scanner) (*Workspace, error) {
 	var w Workspace
 	var createdAt, updatedAt string
 	var needsSetup int
-	err := s.Scan(&w.ID, &w.Name, &w.About, &w.EncryptedMasterPassword, &w.SecretsSalt,
+	err := s.Scan(&w.ID, &w.Name, &w.About, &w.Icon, &w.EncryptedMasterPassword, &w.SecretsSalt,
 		&w.CoderKind, &w.CoderBin, &w.CoderTimeoutS, &w.CoderBackendType,
 		&w.CoderProvider, &w.CoderModel, &w.CoderAPIKeySecret, &w.CoderBaseURL,
 		&needsSetup, &createdAt, &updatedAt)
