@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useSearchParams } from "react-router";
 import { ToastProvider } from "@/components/shell/Toast";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import NoteEditor from "./NoteEditor";
 
 function jsonResponse(body: unknown, status = 200) {
@@ -45,11 +46,24 @@ function renderAtPath(initialPath: string, qc: QueryClient = new QueryClient()) 
     <MemoryRouter initialEntries={[`/?path=${encodeURIComponent(initialPath)}`]}>
       <QueryClientProvider client={qc}>
       <ToastProvider>
+      <TooltipProvider>
         <PathBoundEditor />
+      </TooltipProvider>
       </ToastProvider>
       </QueryClientProvider>
     </MemoryRouter>,
   );
+}
+
+// Lossy fixtures (content with an HTML comment) now open as a READ-ONLY rich
+// view by default — the rich-text-for-every-note change. These machinery tests
+// drive the raw <textarea> (whose edits are ungated by fidelity), so switch to
+// Raw mode first via the header toggle, then return the textarea.
+async function enterRawTextarea(
+  user: ReturnType<typeof userEvent.setup>,
+): Promise<HTMLTextAreaElement> {
+  await user.click(await screen.findByRole("button", { name: "Raw" }));
+  return (await screen.findByRole("textbox", { name: "Raw markdown" })) as HTMLTextAreaElement;
 }
 
 const TRIP_NOTE_FIXTURE = {
@@ -90,6 +104,36 @@ test("a note response with backlinks:null (pre-fix API shape) renders without th
   renderAtPath("notes/lonely.md");
 
   expect(await screen.findByDisplayValue("lonely")).toBeInTheDocument();
+});
+
+// The rich-text-for-every-note change: a lossy note (HTML-comment content,
+// which fails the fidelity round trip) still opens in the rich text view — but
+// READ-ONLY, so autosave can't silently re-serialize untouched formatting —
+// with a banner offering to unlock editing. It must NOT drop straight to the
+// raw textarea the way it used to.
+test("a lossy note opens as a read-only rich view; 'Edit as rich text anyway' unlocks editing", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/v1/kb/note")) {
+        return Promise.resolve(jsonResponse(TRIP_NOTE_FIXTURE));
+      }
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  const user = userEvent.setup();
+  renderAtPath("notes/trip plan.md");
+
+  // The read-only banner is shown, and there is NO raw textarea by default —
+  // the note is in the rich text view.
+  await screen.findByText(/read-only rich view/i);
+  expect(screen.queryByRole("textbox", { name: "Raw markdown" })).toBeNull();
+
+  // Accepting the override removes the banner (the editor becomes editable).
+  await user.click(screen.getByRole("button", { name: /edit as rich text anyway/i }));
+  await waitFor(() => expect(screen.queryByText(/read-only rich view/i)).toBeNull());
 });
 
 // Regression test for a review-caught bug: flush() used to clear dirtyRef
@@ -139,7 +183,7 @@ test("a failed autosave keeps the edit dirty; Ctrl/Cmd+S retries with a fresh PU
   // HTML-comment content is lossy -> raw mode, giving a plain textarea to
   // drive without needing a real TipTap DOM round-trip.
   await waitFor(() => expect(screen.getByText(/preserve its exact formatting/)).toBeInTheDocument());
-  const textarea = screen.getByRole("textbox", { name: "Raw markdown" }) as HTMLTextAreaElement;
+  const textarea = await enterRawTextarea(user);
   await user.click(textarea);
   await user.type(textarea, "extra");
 
@@ -194,7 +238,7 @@ test("a successful autosave transitions dirty -> saving -> raw with exactly one 
   );
 
   await waitFor(() => expect(screen.getByText(/preserve its exact formatting/)).toBeInTheDocument());
-  const textarea = screen.getByRole("textbox", { name: "Raw markdown" }) as HTMLTextAreaElement;
+  const textarea = await enterRawTextarea(user);
   await user.click(textarea);
   await user.type(textarea, "extra");
 
@@ -227,7 +271,7 @@ test("dirty edit + rename: exactly one PUT to the old path before the rename POS
   const user = userEvent.setup({ delay: null });
   renderAtPath("notes/trip plan.md");
 
-  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  const textarea = await enterRawTextarea(user);
   await user.click(textarea);
   await user.type(textarea, "extra");
 
@@ -274,7 +318,7 @@ test("dirty edit + delete: zero PUTs, exactly one DELETE (edit discarded, not re
   const user = userEvent.setup({ delay: null });
   renderAtPath("notes/trip plan.md");
 
-  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  const textarea = await enterRawTextarea(user);
   await user.click(textarea);
   await user.type(textarea, "extra");
 
@@ -305,7 +349,7 @@ test("a failed delete surfaces 'Delete failed: <message>' and the note stays (no
   const user = userEvent.setup();
   renderAtPath("notes/trip plan.md");
 
-  await screen.findByRole("textbox", { name: "Raw markdown" });
+  await enterRawTextarea(user);
   await user.click(screen.getByLabelText("Note actions"));
   await user.click(await screen.findByText("Delete…"));
   await user.click(screen.getByRole("button", { name: "Delete" }));
@@ -342,7 +386,7 @@ test("dirty edit + rename: a failed pre-flush ABORTS the rename; retry after a s
   const user = userEvent.setup({ delay: null });
   renderAtPath("notes/trip plan.md");
 
-  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  const textarea = await enterRawTextarea(user);
   await user.click(textarea);
   await user.type(textarea, "extra");
 
@@ -394,7 +438,7 @@ test("a failed pre-flush rename shows exactly one red banner (the rename-abort m
   const user = userEvent.setup({ delay: null });
   renderAtPath("notes/trip plan.md");
 
-  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  const textarea = await enterRawTextarea(user);
   await user.click(textarea);
   await user.type(textarea, "extra");
 
@@ -438,7 +482,7 @@ test("rename-abort: typing again clears the stale renameError, so a later distin
   const user = userEvent.setup({ delay: null });
   renderAtPath("notes/trip plan.md");
 
-  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  const textarea = await enterRawTextarea(user);
   await user.click(textarea);
   await user.type(textarea, "extra");
 
@@ -495,7 +539,7 @@ test("a failed delete re-arms dirtyRef for the edit it discarded (chip reports d
     </MemoryRouter>,
   );
 
-  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  const textarea = await enterRawTextarea(user);
   await user.click(textarea);
   await user.type(textarea, "extra");
 
@@ -538,7 +582,7 @@ test("the open note vanishing elsewhere (tree-delete) disarms dirty/suppression 
   const user = userEvent.setup();
   renderAtPath("notes/trip plan.md", qc);
 
-  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  const textarea = await enterRawTextarea(user);
   await user.click(textarea);
   // Simulate a stuck-dirty edit (e.g. from an earlier failed autosave) —
   // it's still dirty, but no debounce/Ctrl+S has fired yet.
@@ -590,8 +634,8 @@ test("a transient (non-404) refetch error does NOT disarm the editor — the dir
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   renderAtPath("notes/trip plan.md", qc);
 
-  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
   const user = userEvent.setup();
+  const textarea = await enterRawTextarea(user);
   await user.click(textarea);
   await user.type(textarea, "extra");
 
@@ -642,7 +686,7 @@ test("flushForHandoff awaits an in-flight save first — no second concurrent PU
   const user = userEvent.setup({ delay: null });
   renderAtPath("notes/trip plan.md");
 
-  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  const textarea = await enterRawTextarea(user);
   await user.click(textarea);
   await user.type(textarea, "extra");
 
@@ -702,7 +746,7 @@ test("flushForHandoff issues exactly one more PUT when content changed while the
   const user = userEvent.setup({ delay: null });
   renderAtPath("notes/trip plan.md");
 
-  const textarea = await screen.findByRole("textbox", { name: "Raw markdown" });
+  const textarea = await enterRawTextarea(user);
   await user.click(textarea);
   await user.type(textarea, "first");
 
@@ -795,7 +839,7 @@ test("a 409 agent_running save shows the server message and leaves the edit dirt
   );
 
   await waitFor(() => expect(screen.getByText(/preserve its exact formatting/)).toBeInTheDocument());
-  const textarea = screen.getByRole("textbox", { name: "Raw markdown" }) as HTMLTextAreaElement;
+  const textarea = await enterRawTextarea(user);
   await user.click(textarea);
   await user.type(textarea, "extra");
 

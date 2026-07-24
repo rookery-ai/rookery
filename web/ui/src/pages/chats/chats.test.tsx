@@ -66,6 +66,11 @@ function mockFetch(onSend?: (id: string, message: string) => { response?: string
         delete messages[detail[1]];
         return Promise.resolve(jsonResponse({ ok: true }));
       }
+      if (detail && method === "PATCH") {
+        const body = JSON.parse(String(init?.body)) as { name: string };
+        chats = chats.map((c) => (c.id === detail[1] ? { ...c, name: body.name } : c));
+        return Promise.resolve(jsonResponse(chats.find((c) => c.id === detail[1])!));
+      }
 
       const send = url.match(/^\/api\/v1\/chats\/([^/]+)\/messages$/);
       if (send && method === "POST") {
@@ -156,6 +161,19 @@ test("clicking a session row selects it and shows its history", async () => {
 
   await userEvent.click(screen.getByText("Chat Two"));
   expect(await screen.findByRole("heading", { name: "Chat Two" })).toBeInTheDocument();
+});
+
+test("editing the chat title renames the chat", async () => {
+  mockFetch();
+  wrap("/?chat=c1");
+
+  const title = await screen.findByRole("heading", { name: "Chat One" });
+  fireEvent.click(title); // enter edit mode
+  const input = (await screen.findByLabelText("Chat title")) as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "Renamed Chat" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+
+  expect(await screen.findByRole("heading", { name: "Renamed Chat" })).toBeInTheDocument();
 });
 
 test("send round-trip: optimistic user bubble appears immediately, assistant bubble after resolution", async () => {

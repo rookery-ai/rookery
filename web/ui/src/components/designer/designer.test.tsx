@@ -223,6 +223,55 @@ test("SSE completing AFTER the build POST already resolved does not refetch or c
   expect(designCalls[1]!.body).toEqual({ message: "build it" });
 });
 
+// When a design POST returns building:true, the build's real outcome (the
+// verifying transition + the generated spec) arrives via the SSE stream, not
+// that POST — so the "live" SSE onDone MUST refetch /state to pick it up.
+// Without this, the surface never leaves Build and the Spec stays empty (the
+// "name is required" / empty-Spec bugs). A normal same-tab build (POST returns
+// verifying directly) still must NOT refetch — pinned by the round-2 test above.
+test("a building:true build refetches /state on SSE done and surfaces the verifying result", async () => {
+  let stateCalls = 0;
+  mockFetch({
+    "/x/design": () =>
+      jsonResponse({
+        response: "⏳ Still building your agent…",
+        done: false,
+        building: true,
+      }),
+    "/x/state": () => {
+      stateCalls += 1;
+      if (stateCalls === 1) return jsonResponse({ active: false }); // mount recovery
+      return jsonResponse({
+        active: true,
+        generating: false,
+        state: "verifying",
+        history: [
+          { role: "user", content: "build it" },
+          { role: "assistant", content: "Built it — does this look right?" },
+        ],
+        pending_agent_md: "# Daily digest\n\nSummarises your mail.",
+        pending_tools: {},
+      });
+    },
+  });
+  wrap(
+    <DesignerSurface endpoints={{ ...ENDPOINTS, state: "/x/state" }} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />,
+  );
+
+  await screen.findByRole("textbox"); // mount recovery settled (state call 1)
+  await sendViaComposer("build it"); // POST returns building:true
+
+  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+  const es = FakeEventSource.instances[0]!;
+  es.dispatchNamedEvent("done"); // SSE completes → live onDone must refetch
+
+  // The refetched verifying result reaches the transcript...
+  expect(await screen.findByText(/does this look right/i)).toBeInTheDocument();
+  // ...and the Save action (verifying state) is now available.
+  expect(await screen.findByRole("button", { name: LABELS.saveButton })).toBeInTheDocument();
+  expect(stateCalls).toBeGreaterThanOrEqual(2);
+});
+
 test("a plain message answered with building:true attaches the SSE, renders ActivityCard lines, and advances the stepper to Build", async () => {
   mockFetch({
     "/x/design": () =>
@@ -374,7 +423,7 @@ test("Spec tab empty-states and does not crash when the state endpoint has no ac
   await screen.findByRole("textbox"); // mount recovery settled (1st GET)
   fireEvent.click(screen.getByRole("button", { name: "Spec" }));
 
-  expect(await screen.findByText(/nothing built yet/i)).toBeInTheDocument();
+  expect(await screen.findByText(/appears here once you.*built the agent/i)).toBeInTheDocument();
   expect(calls).toBeGreaterThanOrEqual(2); // the click fired its own GET
 });
 
@@ -473,7 +522,7 @@ test("a build finishing while the Spec tab is already open refreshes it automati
   fireEvent.click(buildBtn); // generating -> true; build POST hangs
 
   fireEvent.click(screen.getByRole("button", { name: "Spec" })); // state call 2 (still inactive)
-  expect(await screen.findByText(/nothing built yet/i)).toBeInTheDocument();
+  expect(await screen.findByText(/appears here once you.*built the agent/i)).toBeInTheDocument();
   expect(screen.getByText(/build is in progress/i)).toBeInTheDocument();
 
   // The build POST resolves -> generating flips false -> the effect

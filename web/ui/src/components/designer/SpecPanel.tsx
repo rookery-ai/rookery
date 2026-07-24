@@ -131,8 +131,9 @@ export function SpecPanel({ agentMD, tools }: SpecPanelProps) {
   if (!hasContent) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
-        <p className="text-sm text-muted-2">
-          Nothing built yet — the spec appears here once the designer finishes.
+        <p className="max-w-sm text-sm text-muted-2">
+          The spec is what the designer builds — the agent&apos;s brief plus its schedule, skills,
+          connections, and any helper scripts. It appears here once you&apos;ve built the agent.
         </p>
       </div>
     );

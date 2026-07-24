@@ -4,7 +4,7 @@ import { SpecPanel, parseSchedule, parseSkills, parseConnections } from "./SpecP
 describe("SpecPanel", () => {
   test("empty-states before a build", () => {
     render(<SpecPanel agentMD="" tools={{}} />);
-    expect(screen.getByText(/nothing built yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/appears here once you.*built the agent/i)).toBeInTheDocument();
   });
 
   test("renders the brief as markdown, not raw text", () => {

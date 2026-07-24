@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -438,6 +440,33 @@ var kbSystemDirs = map[string]bool{
 	"skills": true, "reminders": true, "inbox": true, "assets": true,
 }
 
+// protectedPathMessage returns a user-facing explanation when rel is a
+// DB-backed, system-managed path the user must not delete or rename from the KB
+// browser (see vault.IsUserMutationProtected), or "" when the mutation is
+// allowed. The message points the user at the item's own page — deleting the
+// record there is the sanctioned path that also cleans up the vault files,
+// whereas deleting the files here would orphan the row.
+func protectedPathMessage(rel string) string {
+	if !vault.IsUserMutationProtected(rel) {
+		return ""
+	}
+	top, _, _ := strings.Cut(strings.TrimPrefix(rel, "/"), "/")
+	switch top {
+	case "agents":
+		return "This is an agent's files — delete the agent from the Agents page instead."
+	case "chats":
+		return "This is a chat transcript — delete the chat from the Chats page instead."
+	case "inbox":
+		return "This is an inbox notification — delete it from the inbox instead."
+	case "skills":
+		return "This is a skill's files — delete the skill from the Skills page instead."
+	case "reminders":
+		return "This is a reminder — delete it from the reminders list instead."
+	default:
+		return "This folder is managed by the system and can't be changed here."
+	}
+}
+
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
 type apiKBNode struct {
@@ -760,6 +789,9 @@ func (s *Server) apiDeleteKBNoteAPI(c echo.Context) error {
 		return s.kbUnavailable(c)
 	}
 	rel := cleanKBParam(c.QueryParam("path"))
+	if msg := protectedPathMessage(rel); msg != "" {
+		return jsonErr(c, http.StatusForbidden, "protected_path", msg)
+	}
 	if err := s.vault.Delete(u.ID, rel); err != nil {
 		status, code := vaultErrStatus(err)
 		return jsonErr(c, status, code, "delete failed: "+err.Error())
@@ -789,6 +821,16 @@ func (s *Server) apiRenameKBNote(c echo.Context) error {
 	to := cleanKBParam(req.To)
 	if from == "" || to == "" {
 		return jsonErr(c, http.StatusBadRequest, "invalid_path", "both source and destination are required")
+	}
+	// A rename that touches a system-managed area on EITHER end — moving a
+	// protected item out, or dropping a user note into one — would orphan or
+	// shadow a DB-backed record, so refuse both.
+	if msg := protectedPathMessage(from); msg != "" {
+		return jsonErr(c, http.StatusForbidden, "protected_path", msg)
+	}
+	if msg := protectedPathMessage(to); msg != "" {
+		return jsonErr(c, http.StatusForbidden, "protected_path",
+			"can't move items into a system-managed folder (agents, chats, inbox, skills, reminders).")
 	}
 	// vault.Rename bottoms out in os.Rename, which SILENTLY replaces an
 	// existing destination. That was survivable while renaming was a typed,
@@ -909,6 +951,63 @@ func (s *Server) apiExportFormats(c echo.Context) error {
 	return c.JSON(http.StatusOK, export.AvailableFormats())
 }
 
+// mdImageRefRE matches a markdown IMAGE (leading "!") whose destination has no
+// URL scheme and no title/space — a candidate vault-relative image reference
+// like ![alt](assets/pic.png). Group 1 is the alt text, group 2 the destination.
+// Only images are inlined: goldmark permits a data: URI in an <img src> but
+// deliberately blanks one in an <a href> (a security property this export path
+// keeps), so a non-image file attachment stays a portable relative link instead.
+var mdImageRefRE = regexp.MustCompile(`!\[([^\]]*)\]\(([^)\s]+)\)`)
+
+// maxInlineAssetBytes caps how large a single asset may be to inline into an
+// export. base64 inflates by ~33%, so this keeps a self-contained HTML/PDF from
+// ballooning without bound; a larger asset is left as its original reference.
+const maxInlineAssetBytes = 10 << 20 // 10 MiB
+
+// inlineVaultAssets rewrites vault-relative IMAGE references in a note's
+// markdown (e.g. ![](assets/pic.png)) into self-contained data: URIs, reading
+// the bytes from the workspace's vault, so an exported HTML/PDF carries its
+// embedded images instead of dangling relative references that resolve to
+// nothing once downloaded. A destination that carries a URL scheme, is
+// absolute, is a fragment, isn't an image, can't be read from the vault, or is
+// too large is left untouched. (File-attachment LINKS keep their portable
+// relative path — goldmark blanks a data: href, so a link can't be inlined
+// without weakening this path's HTML sanitization.)
+func (s *Server) inlineVaultAssets(workspaceID string, md []byte) []byte {
+	if s.vault == nil {
+		return md
+	}
+	return mdImageRefRE.ReplaceAllFunc(md, func(m []byte) []byte {
+		sub := mdImageRefRE.FindSubmatch(m)
+		if sub == nil {
+			return m
+		}
+		alt, dest := string(sub[1]), string(sub[2])
+		// Skip anything that isn't a plain vault-relative path: schemes
+		// (http:, https:, data:), protocol-relative, absolute paths, fragments.
+		if strings.Contains(dest, "://") || strings.HasPrefix(dest, "//") ||
+			strings.HasPrefix(dest, "/") || strings.HasPrefix(dest, "#") ||
+			strings.HasPrefix(dest, "data:") {
+			return m
+		}
+		raw, err := s.vault.ReadNote(workspaceID, dest)
+		if err != nil || len(raw) == 0 || len(raw) > maxInlineAssetBytes {
+			return m
+		}
+		ct := mime.TypeByExtension(path.Ext(dest))
+		if ct == "" {
+			ct = http.DetectContentType(raw)
+		}
+		// Only inline genuine images (goldmark renders these safely; a
+		// non-image data: URI in an <img> would just be a broken image).
+		if !strings.HasPrefix(ct, "image/") {
+			return m
+		}
+		encoded := base64.StdEncoding.EncodeToString(raw)
+		return []byte(fmt.Sprintf("![%s](data:%s;base64,%s)", alt, ct, encoded))
+	})
+}
+
 // apiExportKBNote renders a markdown note to HTML, DOCX, or PDF and streams it
 // as a download. Export is note-only (a non-.md file is 400) and is the
 // sanctioned reverse of internal/convert.
@@ -943,13 +1042,16 @@ func (s *Server) apiExportKBNote(c echo.Context) error {
 	)
 	switch format {
 	case "html":
-		out, err = export.ToHTML(body, opts)
+		out, err = export.ToHTML(s.inlineVaultAssets(u.ID, body), opts)
 		contentType, ext = "text/html; charset=utf-8", "html"
 	case "docx":
+		// DOCX degrades images to alt-text by design (internal/export/docx.go),
+		// so inlining data URIs would only bloat it (or worse, turn a link into
+		// a giant data: hyperlink target) — export the note as-is.
 		out, err = export.ToDOCX(body, opts)
 		contentType, ext = "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"
 	case "pdf":
-		out, err = export.ToPDF(body, opts)
+		out, err = export.ToPDF(s.inlineVaultAssets(u.ID, body), opts)
 		contentType, ext = "application/pdf", "pdf"
 		if errors.Is(err, export.ErrNoPDFEngine) {
 			return jsonErr(c, http.StatusUnprocessableEntity, "pdf_unavailable",

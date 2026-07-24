@@ -3,6 +3,7 @@ package web
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,6 +22,7 @@ func (s *Server) registerChatsAPI(g *echo.Group) {
 	g.GET("/chats", s.apiListChats)
 	g.POST("/chats", s.apiCreateChat)
 	g.GET("/chats/:id", s.apiGetChat)
+	g.PATCH("/chats/:id", s.apiRenameChat)
 	g.POST("/chats/:id/messages", s.handleChatMessage)
 	g.POST("/chats/:id/resume", s.apiResumeChat)
 	g.POST("/chats/:id/stop", s.apiStopChat)
@@ -63,6 +65,10 @@ func toAPIChatMessage(m db.ChatMessage) apiChatMessage {
 }
 
 type apiCreateChatRequest struct {
+	Name string `json:"name"`
+}
+
+type apiRenameChatRequest struct {
 	Name string `json:"name"`
 }
 
@@ -139,6 +145,30 @@ func (s *Server) apiGetChat(c echo.Context) error {
 		out = append(out, toAPIChatMessage(m))
 	}
 	return c.JSON(http.StatusOK, map[string]any{"chat": toAPIChat(ch), "messages": out})
+}
+
+// apiRenameChat sets a chat's user-facing title.
+// PATCH /api/v1/chats/:id {name} → 200 chat DTO
+func (s *Server) apiRenameChat(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	ch, err := s.getOwnedChat(u.ID, c.Param("id"))
+	if err != nil {
+		return jsonErr(c, http.StatusNotFound, "not_found", "chat not found")
+	}
+	var req apiRenameChatRequest
+	if err := bindAPI(c, &req); err != nil {
+		return err
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return jsonErr(c, http.StatusBadRequest, "invalid_name", "a name is required")
+	}
+	if err := s.db.UpdateChatName(ch.ID, name); err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
+	}
+	ch.Name = name
+	s.audit.Log(u.ID, "rename_chat", "chat:"+ch.ID, name, c.RealIP())
+	return c.JSON(http.StatusOK, toAPIChat(ch))
 }
 
 // apiResumeChat ports handleResumeChat.

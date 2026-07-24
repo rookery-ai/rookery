@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { AlertTriangle, Download, FileCode, Link2, MoreHorizontal } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { rawURL, exportURL, useExportFormats } from "@/lib/kb";
+import { rawURL, exportURL, useExportFormats, isProtectedPath } from "@/lib/kb";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -119,6 +119,11 @@ export default function NoteHeader({
   const [, setParams] = useSearchParams();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [iconOpen, setIconOpen] = useState(false);
+  // A DB-backed, system-managed note (a chat transcript, an agent file, an
+  // inbox notification, …) — the title is read-only and Delete is withheld,
+  // because renaming/deleting it here would orphan the backing record. The
+  // backend refuses these mutations too; this just hides the affordances.
+  const protectedNote = isProtectedPath(path);
 
   const segments = path.split("/");
   const filename = segments[segments.length - 1];
@@ -216,14 +221,20 @@ export default function NoteHeader({
           })}
           <input
             value={value}
+            readOnly={protectedNote}
             onChange={(e) => {
               committedRef.current = false;
               setTitleError(null);
               setValue(e.target.value);
             }}
-            onKeyDown={handleKeyDown}
-            onBlur={() => commit()}
-            className="min-w-0 flex-1 truncate rounded border border-transparent bg-transparent px-1 text-sm font-semibold outline-none hover:border-border focus:border-ring focus:ring-[3px] focus:ring-ring/50"
+            onKeyDown={protectedNote ? undefined : handleKeyDown}
+            onBlur={protectedNote ? undefined : () => commit()}
+            className={cn(
+              "min-w-0 flex-1 truncate rounded border border-transparent bg-transparent px-1 text-sm font-semibold outline-none",
+              protectedNote
+                ? "cursor-default"
+                : "hover:border-border focus:border-ring focus:ring-[3px] focus:ring-ring/50",
+            )}
             aria-label="Note title"
           />
           <span className="shrink-0 text-xs text-muted-2">.md</span>
@@ -260,22 +271,24 @@ export default function NoteHeader({
           {rawMode ? "Rich text" : "Raw"}
         </Button>
         <ExportMenu path={path} />
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="Note actions"
-              className="shrink-0 rounded p-1 hover:bg-border"
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
-              Delete…
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {!protectedNote && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label="Note actions"
+                className="shrink-0 rounded p-1 hover:bg-border"
+              >
+                <MoreHorizontal className="size-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
+                Delete…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
       {onSetIcon && (

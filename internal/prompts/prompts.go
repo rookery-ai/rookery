@@ -313,9 +313,10 @@ func platformContextBlock(chatApps []ChatAppInfo, vaultRoot string) string {
 	sb.WriteString("    memory/USER.md / SOUL.md — the user's core profile/context; update in place,\n")
 	sb.WriteString("                           do not move.\n")
 	sb.WriteString("    agents/<id>/         — an agent's own workspace; each agent stays in its own dir.\n")
-	sb.WriteString("  When an agent writes a NEW note for the user: default to notes/ unless AGENT.md or\n")
-	sb.WriteString("  the user specified a path. Never write into chats/, .kb/, or another agent's\n")
-	sb.WriteString("  agents/<id>/ dir.\n\n")
+	sb.WriteString("  When an agent writes a NEW note for the user: put it in the user's knowledge base\n")
+	sb.WriteString("  notes/ folder (at the vault root) unless AGENT.md or the user specified a path —\n")
+	sb.WriteString("  written ONCE, not also copied into the agent's own agents/<id>/ dir. Never write\n")
+	sb.WriteString("  into chats/, .kb/, or another agent's agents/<id>/ dir.\n\n")
 
 	sb.WriteString("### Working with the knowledge base\n")
 	sb.WriteString("  The KB is meant to ACCUMULATE knowledge across runs — agents should read existing\n")
@@ -1799,11 +1800,16 @@ those are system-managed or belong to other agents.
 
 The user's knowledge base root is:
   %s
-Read it for context (notes/, memory/, chats/, other agents' logs) before acting, and write
-durable knowledge back to notes/ or memory/ so it persists across runs. The user's personal
-context is in memory/ (USER.md, SOUL.md, GENERAL.md — also injected above as <user_memory>);
-check it before acting on assumptions about the user. Use your available file capabilities
-(see <coder_capabilities>) — do not name a specific tool that may not exist on this backend.
+Read it for context (notes/, memory/, chats/, other agents' logs) before acting. To persist
+durable knowledge for the user, write it into the user's knowledge base — its notes/ and
+memory/ folders live UNDER the vault-root path above, so target that path (e.g. write to
+"<vault-root>/notes/<file>.md"). A bare relative "notes/" resolves inside YOUR OWN directory,
+not the user's knowledge base — do not use it for a user note. Write each user note ONCE, in
+the knowledge base; your own directory is only for YOUR files (AGENT.md, tools/, state.md,
+logs/) — never keep a second copy of a user-facing note there. The user's personal context is
+in memory/ (USER.md, SOUL.md, GENERAL.md — also injected above as <user_memory>); check it
+before acting on assumptions about the user. Use your available file capabilities (see
+<coder_capabilities>) — do not name a specific tool that may not exist on this backend.
 </agent_workspace>
 
 `, p.AgentDir, p.VaultRoot))
@@ -1846,7 +1852,7 @@ any other prose you leave behind may be delivered to the user as the message.
 - [CHAT] is the ONLY notification channel. Emit it when AGENT.md instructs you to notify the user. If AGENT.md says the agent is silent (notes-only, state-only): do NOT emit [CHAT] — emit [SILENT] as your last line instead. Silent runs are valid and correct. Do not call Telegram APIs, webhooks, or any messaging service directly.
 - When you do emit [CHAT]: it MUST contain the actual content — never an empty label (e.g. "[CHAT] Quote:" with nothing after it sends a blank notification). If content generation fails, emit [CHAT] explaining what went wrong, not a blank message. Note: if you write a user-facing message as plain prose WITHOUT the [CHAT] marker, the system will deliver that prose as the message anyway (fallback) — but always prefer the explicit [CHAT] marker so formatting is clean.
 - Secrets are injected as environment variables. Access them via your language's env API (e.g. os.environ.get('KEY') in Python, process.env.KEY in Node). Never hardcode credential values. Never print or echo a secret's value (in [CHAT], state, or logs).
-- Use [STATE] blocks for your structured state (state.md's json fence is machine-merged — do not hand-edit that fence yourself). You MAY write durable markdown notes inside your own directory AND in the user's knowledge base; do not write under .kb/, chats/, or another agent's directory.
+- Use [STATE] blocks for your structured state (state.md's json fence is machine-merged — do not hand-edit that fence yourself). Write durable USER notes into the user's knowledge base (its notes/ or memory/ under the vault root) exactly ONCE — your own directory is for YOUR files (tools/, logs/, state.md, scratch), so never keep a duplicate copy of a user note there. Do not write under .kb/, chats/, or another agent's directory.
 - When writing a note or file: use your available file capability (see <coder_capabilities>) directly — do NOT invoke a helper script just to write a file. Read the target note first so you merge/append rather than blindly overwriting the user's existing content.
 - Do not set up or modify cron jobs or external schedulers — this subprocess is invoked by the built-in scheduler.
 - Run your helper scripts under tools/ via the shell to do the repetitive fetching/processing, then YOU make the judgment calls on the results (see <agent_philosophy>) — do not reimplement deterministic logic inline, and do not blindly trust a hardcoded rule where reasoning is needed.

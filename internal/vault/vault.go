@@ -32,6 +32,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -45,6 +46,41 @@ const InternalDir = ".kb"
 
 // ErrEscapes is returned by Resolve when a relative path would escape the vault.
 var ErrEscapes = errors.New("path escapes vault")
+
+// protectedTopDirs are the system-managed, DB-backed top-level vault
+// directories whose contents mirror database rows — agents, reflected chat
+// transcripts, inbox notifications, skills, and reflected reminders — plus the
+// hidden internal dir. Deleting or renaming any of these (or anything inside
+// them) from the KB browser would orphan the backing record and leave the
+// agent/chat/skill/inbox item broken, so those user-initiated mutations are
+// refused at the KB API layer and hidden in the file tree — the item must be
+// deleted from its own page instead. This is the single source of truth for
+// *user-initiated KB-browser* mutation protection; it deliberately does NOT
+// gate the vault primitives (Delete/Rename), which legitimate deletion from an
+// item's own page also calls.
+var protectedTopDirs = map[string]bool{
+	InternalDir: true, // .kb
+	"agents":    true,
+	"chats":     true,
+	"inbox":     true,
+	"skills":    true,
+	"reminders": true,
+}
+
+// IsUserMutationProtected reports whether rel lives inside a system-managed,
+// DB-backed directory that the user must not delete or rename through the KB
+// browser. rel is a vault-relative slash path (the file-tree form). The path is
+// cleaned first, so a traversal like "notes/../chats/x.md" is judged by its
+// real top segment ("chats") and cannot slip past the check.
+func IsUserMutationProtected(rel string) bool {
+	clean := path.Clean("/" + strings.TrimPrefix(filepath.ToSlash(rel), "/"))
+	clean = strings.TrimPrefix(clean, "/")
+	if clean == "" || clean == "." {
+		return false
+	}
+	top, _, _ := strings.Cut(clean, "/")
+	return protectedTopDirs[top]
+}
 
 // Vault provides safe, per-user access to knowledge-base files on disk.
 type Vault struct {

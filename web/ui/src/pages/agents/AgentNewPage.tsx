@@ -136,7 +136,10 @@ export default function AgentNewPage() {
 
           <div className="space-y-2">
             <p className="text-sm font-medium">
-              Start from a template <span className="font-normal text-muted-2">(optional)</span>
+              Start from a template{" "}
+              <span className="font-normal text-muted-2">
+                (optional — fills the description below, which you can edit)
+              </span>
             </p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {AGENT_TEMPLATES.map((t) => {
@@ -188,10 +191,13 @@ export default function AgentNewPage() {
         endpoints={ENDPOINTS}
         labels={LABELS}
         startPayload={{ name: name.trim() }}
-        // A picked/typed template brief pre-fills the first chat message —
-        // still just a starting point the user can edit or clear before
-        // sending, never auto-sent on their behalf.
+        // The description the user wrote (or a template they picked) is SENT as
+        // the first message when they click Continue — the conversation starts
+        // with their brief instead of dropping it into an unsent composer. When
+        // the description is blank (e.g. "Start from scratch"), autoSendInitial
+        // no-ops and the composer opens empty for them to type.
         initialText={description.trim() ? description : undefined}
+        autoSendInitial
         intro={
           <DesignerIntro
             title="Tell me what you want this agent to do"

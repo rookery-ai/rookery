@@ -8,6 +8,33 @@ import (
 	"testing"
 )
 
+func TestIsUserMutationProtected(t *testing.T) {
+	cases := []struct {
+		rel  string
+		want bool
+	}{
+		{"agents/abc/AGENT.md", true},
+		{"agents", true},
+		{"/chats/x.md", true},
+		{"inbox/n.md", true},
+		{"skills/s/SKILL.md", true},
+		{"reminders/r.md", true},
+		{".kb/db-export/x.json", true},
+		{"notes/../chats/x.md", true}, // resolves into chats/
+		{"notes/mine.md", false},
+		{"memory/USER.md", false},
+		{"assets/pic.png", false},
+		{"README.md", false},
+		{"", false},
+		{"agentsomething/x.md", false}, // not the agents dir
+	}
+	for _, c := range cases {
+		if got := IsUserMutationProtected(c.rel); got != c.want {
+			t.Errorf("IsUserMutationProtected(%q) = %v, want %v", c.rel, got, c.want)
+		}
+	}
+}
+
 func TestResolveRejectsEscapes(t *testing.T) {
 	v := New(t.TempDir())
 	const user = "u1"

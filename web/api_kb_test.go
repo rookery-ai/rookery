@@ -139,6 +139,60 @@ func TestAPIKBDeleteAndRename(t *testing.T) {
 	}
 }
 
+// A user must not be able to delete or rename a DB-backed, system-managed vault
+// path (agents/chats/inbox/skills/reminders) from the KB browser — doing so
+// would orphan the backing record. The guard fires before touching the vault,
+// so it holds even for a path that doesn't exist on disk.
+func TestAPIKBProtectedPathsRefused(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	protected := []string{
+		"agents/some-agent-id/AGENT.md",
+		"chats/some-chat.md",
+		"inbox/some-note.md",
+		"skills/some-skill/SKILL.md",
+		"reminders/some-reminder.md",
+	}
+	for _, p := range protected {
+		rec := doJSON(t, s, http.MethodDelete, "/api/v1/kb/note?path="+p, nil, cookies)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("delete %q: want 403, got %d %s", p, rec.Code, rec.Body.String())
+		}
+		rec = doJSON(t, s, http.MethodPost, "/api/v1/kb/rename",
+			map[string]string{"from": p, "to": "notes/escaped.md"}, cookies)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("rename from %q: want 403, got %d %s", p, rec.Code, rec.Body.String())
+		}
+	}
+
+	// Moving a user note INTO a protected area is refused on the destination.
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/kb/new",
+		map[string]any{"path": "notes/keep.md", "is_dir": false}, cookies)
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Fatalf("new: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/kb/rename",
+		map[string]string{"from": "notes/keep.md", "to": "chats/stolen.md"}, cookies)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("rename into chats/: want 403, got %d %s", rec.Code, rec.Body.String())
+	}
+
+	// A traversal that resolves into a protected dir is caught by its real top
+	// segment, not the literal leading segment.
+	rec = doJSON(t, s, http.MethodDelete, "/api/v1/kb/note?path=notes/../chats/x.md", nil, cookies)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("delete traversal into chats: want 403, got %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Control: a genuine user note under notes/ is still deletable.
+	rec = doJSON(t, s, http.MethodDelete, "/api/v1/kb/note?path=notes/keep.md", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete notes/keep.md: want 200, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 // decodeJSON unmarshals a recorder body, failing the test on a parse error.
 func decodeJSON(t *testing.T, rec *httptest.ResponseRecorder, out any) {
 	t.Helper()

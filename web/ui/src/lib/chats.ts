@@ -62,6 +62,23 @@ export async function sendChatMessage(id: string, message: string): Promise<stri
   return body.response ?? "";
 }
 
+// Renames a chat (edits its title). Optimistically updates the cached list and
+// detail so the new title shows immediately; the invalidate reconciles.
+export function useRenameChat() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      api.patch<Chat>(`/api/v1/chats/${id}`, { name }),
+    onSuccess: (chat) => {
+      qc.setQueryData<{ chats: Chat[] }>(["chats"], (old) =>
+        old ? { ...old, chats: old.chats.map((c) => (c.id === chat.id ? { ...c, name: chat.name } : c)) } : old,
+      );
+      qc.invalidateQueries({ queryKey: ["chats"] });
+      qc.invalidateQueries({ queryKey: ["chat", chat.id] });
+    },
+  });
+}
+
 export function useChatAction() {
   const qc = useQueryClient();
   return useMutation({

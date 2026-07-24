@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import {
   useKBTree, useNewNote, useDeleteNote, useRenameNote, useSaveKBOrder,
-  useSetKBIcon, type KBNode,
+  useSetKBIcon, isProtectedPath, type KBNode,
 } from "@/lib/kb";
 import { useToast } from "@/components/shell/Toast";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ import { FolderSelect } from "./FolderSelect";
 function isEffectivelySystem(node: KBNode): boolean {
   return node.system && node.name !== "memory";
 }
+
 
 // Root-content-first ordering (spec §6): user content sorts before system
 // dirs, dirs before files within a group, then alphabetically.
@@ -362,11 +363,15 @@ function TreeRow({
   const setIcon = useSetKBIcon();
   const selected = selectedPath === node.path;
   const multiSelected = selection.isSelected(node.path);
+  // Protected nodes can't be dragged, renamed, deleted, or multi-selected — a
+  // bulk delete/move must never be able to include a DB-backed system node.
+  const protectedNode = isProtectedPath(node.path);
 
   function handleClick(e?: React.MouseEvent) {
     // Ctrl/Cmd or Shift click is a multi-selection gesture — it must not open
-    // or expand the row.
-    if (e && selection.onRowClick(node.path, e)) return;
+    // or expand the row. Protected nodes are never multi-selectable, so the
+    // gesture opens the row normally instead of adding it to a bulk selection.
+    if (e && !protectedNode && selection.onRowClick(node.path, e)) return;
     selection.setAnchor(node.path);
     if (node.is_dir) setExpanded((x) => !x);
     onSelect(node.path, node.is_dir, node.display_name);
@@ -470,7 +475,7 @@ function TreeRow({
 
   return (
     <div
-      draggable
+      draggable={!protectedNode}
       data-kb-path={node.path}
       onDragStart={(e) => {
         e.stopPropagation();
@@ -573,10 +578,17 @@ function TreeRow({
               </>
             )}
             <DropdownMenuItem onSelect={() => setDialog("icon")}>Change icon…</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => setDialog("rename")}>Rename…</DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onSelect={() => setDialog("delete")}>
-              Delete…
-            </DropdownMenuItem>
+            {/* Rename/Delete are withheld for system-managed, DB-backed nodes
+                (agents/chats/inbox/skills/reminders): removing them here would
+                orphan the backing record — delete from the item's own page. */}
+            {!isProtectedPath(node.path) && (
+              <>
+                <DropdownMenuItem onSelect={() => setDialog("rename")}>Rename…</DropdownMenuItem>
+                <DropdownMenuItem variant="destructive" onSelect={() => setDialog("delete")}>
+                  Delete…
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
         </div>

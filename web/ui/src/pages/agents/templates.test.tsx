@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router";
 import { AppShell } from "@/components/shell/AppShell";
@@ -153,7 +153,7 @@ test("switching templates after hand-typed text asks for confirmation before rep
   confirmSpy.mockRestore();
 });
 
-test("continuing with a filled-in template hands it to the designer as the opening message", async () => {
+test("continuing with a filled-in template SENDS it to the designer as the opening message", async () => {
   wrap();
   await screen.findByLabelText(/what should it do/i);
 
@@ -161,6 +161,19 @@ test("continuing with a filled-in template hands it to the designer as the openi
   fireEvent.click(screen.getByRole("button", { name: /daily digest/i }));
   fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 
-  const composer = (await screen.findByPlaceholderText(/message/i)) as HTMLTextAreaElement;
-  expect(composer.value).toMatch(/summary/i);
+  // The description is SENT as the first design message (auto-send on Continue),
+  // not merely pre-filled into the composer — with the agent name attached so
+  // the backend opens a session.
+  await waitFor(() => {
+    const designPost = vi
+      .mocked(fetch)
+      .mock.calls.find(
+        ([url, init]) =>
+          String(url) === "/api/v1/agents/design" && (init?.method ?? "GET") === "POST",
+      );
+    expect(designPost).toBeTruthy();
+    const body = JSON.parse(String((designPost![1] as RequestInit).body));
+    expect(body.message).toMatch(/summary/i);
+    expect(body.name).toBe("Test Agent");
+  });
 });
