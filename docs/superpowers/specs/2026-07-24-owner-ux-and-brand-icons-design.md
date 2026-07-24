@@ -106,7 +106,7 @@ stays, narrowed to the two status booleans.
 
 ## Workstream B — real brand logos
 
-**Sourcing.** Two sources, both vendored into the repo as static SVG files under
+**Sourcing.** Three sources, all vendored into the repo as static SVG files under
 `web/ui/src/assets/logos/`. Nothing is fetched at runtime and no CDN is referenced,
 per the user's explicit instruction.
 
@@ -124,8 +124,15 @@ The package is used as a build-time source and the chosen SVGs are committed; it
 **not** added as a runtime dependency.
 
 **Component contract.** `ProviderLogo` changes from "draw a path" to "render a vendored
-asset". Assets are collected with Vite's `import.meta.glob('../assets/logos/*.svg', { eager: true, query: '?url' })`
-into a slug→URL map, and rendered as an `<img>` inside the existing tile. This keeps
+asset". Assets are collected with Vite's `import.meta.glob('../../assets/logos/*.svg', { eager: true, query: '?raw' })`
+into a slug→markup map and **inlined** into the tile.
+
+Inlined rather than loaded as an `<img>` because several marks (OpenAI, Anthropic, GitHub,
+Notion, Ollama) are published as monochrome `fill="currentColor"` paths, and `currentColor`
+cannot cross an `<img>` boundary — inside an image it resolves against that image's own
+document and always comes out black. Inlining is what lets those marks take a colour from
+the tile. Mono-vs-colour is detected by looking for `currentColor` in the markup, so
+full-colour logos keep their own fills. This keeps
 one lookup point, so item 4's "substitute everywhere" is satisfied by every existing
 `ProviderLogo` call site automatically — the four known ones are ConnectionsPage,
 ProviderCards, SetupWizard, and the component's own test.
