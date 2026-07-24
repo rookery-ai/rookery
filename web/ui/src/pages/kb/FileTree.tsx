@@ -22,36 +22,70 @@ import { FolderSelect } from "./FolderSelect";
 
 // The backend (web/api_kb.go's kbSystemDirs) marks the root-level `memory`
 // dir system:true — it groups it with agents/chats/skills/reminders/inbox as
-// "not user-authored knowledge". But spec §6 explicitly calls out memory/ as
-// user-facing knowledge ("user notes and memory/ first") that should sort
-// and style WITH user content, not muted alongside the others. Rather than
-// special-casing memory/ in the backend's kbSystemDirs (which DOES want the
-// system treatment for the rest of that set), override the flag here by
-// name — memory/ stays fully editable and keeps its Brain icon either way.
+// "not user-authored knowledge". But memory/ is content the user writes and
+// edits directly, so it should not be muted or drag-locked alongside the
+// rest of that set. Rather than special-casing memory/ in the backend's
+// kbSystemDirs (which DOES want the system treatment for the others),
+// override the flag here by name.
+//
+// This now affects STYLING and drag rules only — root ordering is decided by
+// ROOT_FOLDER_RANK below, which names its folders explicitly.
 function isEffectivelySystem(node: KBNode): boolean {
   return node.system && node.name !== "memory";
 }
 
 
-// Root-content-first ordering (spec §6): user content sorts before system
-// dirs, dirs before files within a group, then alphabetically.
+// The vault's own default folders lead, in a fixed order that runs from "who
+// you are" outwards to "what the system produced": memory, agents, chats,
+// skills. `notes` deliberately sorts LAST among folders — it is the open-ended
+// folder that grows without bound, so anchoring it at the bottom keeps the
+// fixed set in a stable, learnable position instead of having it shift as
+// notes/ fills up.
+//
+// This replaces an earlier "user content before system dirs" rule: putting
+// notes/ first pushed the four folders a user actually navigates to by muscle
+// memory down the list.
+const ROOT_FOLDER_RANK = new Map([
+  ["memory", 0],
+  ["agents", 1],
+  ["chats", 2],
+  ["skills", 3],
+  // anything else lands between these two — see rootFolderRank
+  ["notes", 5],
+]);
+const OTHER_ROOT_FOLDER_RANK = 4;
+
+function rootFolderRank(node: KBNode): number {
+  return ROOT_FOLDER_RANK.get(node.name) ?? OTHER_ROOT_FOLDER_RANK;
+}
+
+// sortNodes orders one directory's children.
 //
 // `order` is the user's own drag-chosen sequence for this folder (by name,
 // persisted server-side). It takes precedence, but only for names it actually
 // lists: anything that appeared since the last drag — a note an agent just
 // wrote — is NOT silently pinned to an arbitrary spot, it falls through to the
 // derived rules below and sorts after the explicitly-ordered block.
-export function sortNodes(nodes: KBNode[], order: string[] = []): KBNode[] {
+//
+// `isRoot` selects the fixed default-folder ordering above. It applies only to
+// the vault root, because those names are only meaningful there — a folder
+// someone happens to call "chats" inside notes/ is just a folder.
+export function sortNodes(nodes: KBNode[], order: string[] = [], isRoot = false): KBNode[] {
   const rank = new Map(order.map((name, i) => [name, i]));
   return [...nodes].sort((a, b) => {
     const ra = rank.get(a.name), rb = rank.get(b.name);
     if (ra !== undefined && rb !== undefined) return ra - rb;
     if (ra !== undefined) return -1;
     if (rb !== undefined) return 1;
-    const sysA = isEffectivelySystem(a) ? 1 : 0, sysB = isEffectivelySystem(b) ? 1 : 0;
-    if (sysA !== sysB) return sysA - sysB;
+
+    // Directories always precede files, at every level.
     const dirA = a.is_dir ? 0 : 1, dirB = b.is_dir ? 0 : 1;
     if (dirA !== dirB) return dirA - dirB;
+
+    if (isRoot && a.is_dir && b.is_dir) {
+      const fa = rootFolderRank(a), fb = rootFolderRank(b);
+      if (fa !== fb) return fa - fb;
+    }
     return a.name.localeCompare(b.name);
   });
 }
@@ -652,8 +686,9 @@ function TreeLevel({
   const saveOrder = useSaveKBOrder();
   const { toast } = useToast();
   const nodes = useMemo(
-    () => sortNodes(data?.nodes ?? [], data?.order ?? []),
-    [data?.nodes, data?.order],
+    // path === "" is the vault root, where the default-folder ordering applies.
+    () => sortNodes(data?.nodes ?? [], data?.order ?? [], path === ""),
+    [data?.nodes, data?.order, path],
   );
 
   function handleReorder(dragged: DraggedNode, targetName: string, position: "before" | "after") {

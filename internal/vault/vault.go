@@ -185,14 +185,10 @@ func (v *Vault) EnsureScaffold(workspaceID string) error {
 	}
 	readme := filepath.Join(root, "README.md")
 	if _, err := os.Stat(readme); errors.Is(err, os.ErrNotExist) {
-		content := "# Knowledge Base\n\n" +
-			"This is your personal knowledge base. Everything you and your agents " +
-			"create lives here as interlinked markdown notes.\n\n" +
-			"- [[notes]] — your notes, journals, plans and todos\n" +
-			"- [[memory]] — your profile and context (USER.md, SOUL.md, and more)\n" +
-			"- [[agents]] — your agents and their run logs\n" +
-			"- [[chats]] — chat transcripts\n"
-		if err := writeFileAtomic(readme, []byte(content), 0o640); err != nil {
+		// Written only when absent, and deliberately never refreshed: this file
+		// is the user's to edit, and rewriting it on a later boot would discard
+		// whatever they turned their home note into.
+		if err := writeFileAtomic(readme, []byte(readmeTemplate), 0o640); err != nil {
 			return err
 		}
 	}
