@@ -181,9 +181,14 @@ export default function AgentNewPage() {
                     onClick={() => selectTemplate(t)}
                     className={cn(
                       "rounded-md border p-2.5 text-left text-xs transition-colors",
+                      // Selected/hover are soft accent TINTS. A full `bg-accent`
+                      // (or a 40% wash of it) left this card's own
+                      // text-foreground title and text-muted-2 blurb unchanged
+                      // on top of it — unreadable in light AND dark. The ring
+                      // carries "selected"; the tint only warms the surface.
                       active
-                        ? "border-ring bg-accent ring-1 ring-ring"
-                        : "border-border hover:bg-accent/40",
+                        ? "border-ring bg-accent-soft ring-1 ring-ring"
+                        : "border-border hover:border-accent/40 hover:bg-accent-soft",
                     )}
                   >
                     <div className="font-medium text-foreground">{t.label}</div>

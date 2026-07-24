@@ -164,7 +164,9 @@ export function CommandPalette({
   const trimmed = input.trim();
   const actions: Action[] = [
     { id: "new-agent", label: "New agent", icon: Plus, onSelect: () => go("/agents/new") },
-    { id: "new-note", label: "New note", icon: Plus, onSelect: () => go("/kb") },
+    // ?new=note — bare /kb only OPENS the knowledge base; KBPage consumes this
+    // param to open its new-note dialog, which is the actual create affordance.
+    { id: "new-note", label: "New note", icon: Plus, onSelect: () => go("/kb?new=note") },
     { id: "open-settings", label: "Open settings", icon: Settings, onSelect: () => go("/settings") },
     ...(trimmed
       ? [{
@@ -218,11 +220,14 @@ export function CommandPalette({
                               is a heading or agent name and the path is the only
                               thing telling you WHERE the hit lives). Suppressed
                               when the path adds nothing over the title. */}
+                          {/* text-muted, not text-muted-2: these sit on the
+                              selected row's tinted surface, where the dimmer
+                              muted-2 falls under 4.5:1 in dark mode. */}
                           {item.path && item.path !== item.title && (
-                            <span className="truncate text-xs text-muted-2">{item.path}</span>
+                            <span className="truncate text-xs text-muted">{item.path}</span>
                           )}
                           {item.snippet && (
-                            <span className="truncate text-xs text-muted-2">{highlight(item.snippet, query)}</span>
+                            <span className="truncate text-xs text-muted">{highlight(item.snippet, query)}</span>
                           )}
                         </div>
                       </CommandItem>

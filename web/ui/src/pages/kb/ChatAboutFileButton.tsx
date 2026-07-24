@@ -1,0 +1,39 @@
+import { MessageSquareText } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useSlideOver } from "@/components/shell/AppShell";
+import { GlobalChatPanel } from "@/components/chat/GlobalChatButton";
+
+// chatPrompt is the message the composer opens prefilled with. It NAMES the
+// file rather than inlining its content.
+//
+// That is deliberate and matches the platform's own retrieval model: the chat
+// coder already runs rooted at the vault with file tools (Read/Grep/Glob on a
+// CLI coder, read_file/search_files/glob on the API engine) and its system
+// prompt names the vault root, so a path is all it needs to open the file
+// itself. Inlining would fight that design in both directions — it would blow
+// the context on a large note, and it would hand the model a stale snapshot
+// that silently diverges from the file the moment either of them edits it.
+//
+// Exported for direct unit testing: the exact wording is the contract between
+// this button and the coder's ability to resolve the path.
+export function chatPrompt(path: string): string {
+  return `About my knowledge base file \`${path}\` — `;
+}
+
+// A "Chat about this file" affordance for the knowledge base. Opens the SAME
+// slide-over the global chat button uses, but always on a FRESH chat
+// (forceNew) so a question about a note never lands mid-thread in an unrelated
+// conversation.
+export default function ChatAboutFileButton({ path }: { path: string }) {
+  const { open } = useSlideOver();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => open(<GlobalChatPanel forceNew initialText={chatPrompt(path)} />, { title: "Chat" })}
+    >
+      <MessageSquareText className="size-4" />
+      Chat about this
+    </Button>
+  );
+}

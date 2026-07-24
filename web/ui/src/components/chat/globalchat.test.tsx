@@ -301,3 +301,39 @@ test("navigating to /chats by other means (browser back/forward/address bar) sti
   expect(await screen.findByText("Chats route")).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Chat One" })).not.toBeInTheDocument();
 });
+
+// ── New chat from the panel ────────────────────────────────────────────────
+
+test("panel: New chat creates a fresh chat and switches the panel to it", async () => {
+  mockFetch();
+  wrap();
+
+  await userEvent.click(await screen.findByLabelText("Open chat"));
+  // Opens on the most recently updated ACTIVE chat, as before.
+  expect(await screen.findByText("Chat One")).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: /new chat/i }));
+
+  // The created chat is PINNED rather than re-derived from "most recently
+  // updated" — a brand-new chat has no messages, so a most-recent lookup can
+  // still resolve to the old one for a beat and snap the panel back.
+  // byRole heading, not byText: the panel's own "New chat" BUTTON carries the
+  // same string, and the created chat is titled "New chat" too.
+  expect(await screen.findByRole("heading", { name: "New chat" })).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByText("Chat One")).not.toBeInTheDocument());
+});
+
+test("panel: the full-page link follows the chat currently shown", async () => {
+  mockFetch();
+  wrap();
+
+  await userEvent.click(await screen.findByLabelText("Open chat"));
+  await screen.findByText("Chat One");
+  expect(screen.getByRole("link", { name: /open full page/i })).toHaveAttribute("href", "/chats?chat=c1");
+
+  await userEvent.click(screen.getByRole("button", { name: /new chat/i }));
+  await screen.findByRole("heading", { name: "New chat" });
+  await waitFor(() =>
+    expect(screen.getByRole("link", { name: /open full page/i })).toHaveAttribute("href", "/chats?chat=c3"),
+  );
+});

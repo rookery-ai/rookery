@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router";
 import { AlertTriangle, Download, FileWarning, Loader2, MoreHorizontal } from "lucide-react";
+import ChatAboutFileButton from "./ChatAboutFileButton";
 import { ApiError } from "@/lib/api";
 import { rawURL, useKBNote, useDeleteNote } from "@/lib/kb";
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,7 @@ function FileViewerHeader({ path, onDelete }: { path: string; onDelete: () => vo
 
       <div className="flex shrink-0 items-center gap-3">
         <span className="text-xs text-muted-2">Read-only</span>
+        <ChatAboutFileButton path={path} />
         <Button variant="ghost" size="sm" asChild>
           <a href={rawURL(path)} download>
             <Download className="size-4" />

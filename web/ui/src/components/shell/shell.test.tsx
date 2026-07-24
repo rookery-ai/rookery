@@ -104,3 +104,43 @@ test("Home rail icon caps the visible badge label at '9+' but states the real co
   const link = await screen.findByLabelText("Home (42 unread)");
   expect(link).toHaveTextContent("9+");
 });
+
+// ── Rail: active vs. inactive affordance ───────────────────────────────────
+
+test("the active rail item is visually distinguished from an inactive one", async () => {
+  wrap();
+
+  // Home is the active route in this harness.
+  const active = await screen.findByLabelText(/^home$/i);
+  const inactive = screen.getByLabelText(/agents/i);
+
+  // The old active style was `bg-border` against a `bg-chrome` rail — a
+  // near-invisible difference. Active now carries a soft accent surface AND
+  // accent text, so the two states differ on more than one channel.
+  expect(active.className).toMatch(/bg-accent-soft/);
+  expect(active.className).toMatch(/text-accent/);
+  expect(inactive.className).not.toMatch(/bg-accent-soft/);
+
+  // An inactive item must still SAY it responds to the pointer — the rail
+  // previously had no perceptible hover at all.
+  expect(inactive.className).toMatch(/hover:bg-muted-surface/);
+
+  // Colour alone is not the active signal: a 3px bar on the rail's inner edge
+  // gives it a shape a colour-blind or low-contrast viewer can still read.
+  expect(active.querySelector("[data-testid='rail-active-bar']")).not.toBeNull();
+  expect(inactive.querySelector("[data-testid='rail-active-bar']")).toBeNull();
+});
+
+// The regression this test really guards: every rail item is a Radix
+// TooltipTrigger `asChild`, and Slot merges the child's className into a
+// STRING before NavLink can resolve a function form. A function className
+// therefore reached the DOM as its own stringified source, and none of the
+// rail's styling applied — which is exactly why the rail read as having no
+// hover and no current-page indication. A plain string survives the merge.
+test("rail items render real class names, not a stringified className function", async () => {
+  wrap();
+  const home = await screen.findByLabelText(/^home$/i);
+  expect(home.className).not.toMatch(/=>/);
+  expect(home.className).not.toMatch(/isActive/);
+  expect(home.className).toMatch(/^[\w\s:/[\]().,%#-]+$/);
+});

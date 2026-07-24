@@ -12,6 +12,8 @@ import {
   useDeleteInboxMessage,
   useInboxPoll,
   greeting,
+  splitReminders,
+  type Reminder,
 } from "./home";
 import { ApiError } from "./api";
 
@@ -169,4 +171,31 @@ test("useInboxPoll fetches the poll endpoint and normalizes nil recent", async (
   await waitFor(() => expect(result.current.data?.unread).toBe(3));
   expect(result.current.data?.recent).toEqual([]);
   expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/v1/inbox/poll");
+});
+
+// ── splitReminders ─────────────────────────────────────────────────────────
+
+function reminder(id: string, remind_at: string, sent: boolean): Reminder {
+  return { id, message: id, remind_at, sent };
+}
+
+test("splitReminders puts the soonest upcoming first and the newest done first", () => {
+  const { pending, done } = splitReminders([
+    reminder("done-old", "2026-07-10T08:00:00Z", true),
+    reminder("soon", "2026-07-18T08:00:00Z", false),
+    reminder("later", "2026-07-25T08:00:00Z", false),
+    reminder("done-recent", "2026-07-16T08:00:00Z", true),
+  ]);
+
+  // Upcoming ascending: the next one to fire is the one that matters.
+  expect(pending.map((r) => r.id)).toEqual(["soon", "later"]);
+  // Completed descending: an old completed reminder is the least useful row.
+  expect(done.map((r) => r.id)).toEqual(["done-recent", "done-old"]);
+});
+
+test("splitReminders handles an empty list and an all-done list", () => {
+  expect(splitReminders([])).toEqual({ pending: [], done: [] });
+  const allDone = [reminder("a", "2026-07-10T08:00:00Z", true)];
+  expect(splitReminders(allDone).pending).toEqual([]);
+  expect(splitReminders(allDone).done.map((r) => r.id)).toEqual(["a"]);
 });

@@ -63,6 +63,23 @@ export type Reminder = {
   sent: boolean;
 };
 
+// splitReminders partitions the list into what is still coming and what has
+// already fired. Pending sorts by remind_at ASCENDING (the next one to fire is
+// the one you care about); done sorts DESCENDING (most recently completed
+// first), because an old completed reminder is the least interesting row on
+// the page.
+//
+// Pure and exported so the ordering — the part that is easy to get subtly
+// wrong and invisible in a rendered snapshot — is unit-testable on its own.
+// The API already returns fired reminders (db.ListReminders has no `sent`
+// filter and the DTO carries the flag); the UI simply ignored it until now.
+export function splitReminders(list: Reminder[]): { pending: Reminder[]; done: Reminder[] } {
+  const at = (r: Reminder) => new Date(r.remind_at).getTime();
+  const pending = list.filter((r) => !r.sent).sort((a, b) => at(a) - at(b));
+  const done = list.filter((r) => r.sent).sort((a, b) => at(b) - at(a));
+  return { pending, done };
+}
+
 export function useReminders() {
   return useQuery({
     queryKey: ["reminders"],

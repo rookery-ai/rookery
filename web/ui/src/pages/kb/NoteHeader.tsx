@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { FileText } from "lucide-react";
 import EmojiPicker from "./EmojiPicker";
+import ChatAboutFileButton from "./ChatAboutFileButton";
 
 // Redeclared locally (identical literal set to NoteEditor's `SaveState`)
 // rather than imported from NoteEditor — NoteEditor renders NoteHeader, so
@@ -266,6 +267,7 @@ export default function NoteHeader({
             {backlinksCount} {backlinksCount === 1 ? "backlink" : "backlinks"}
           </span>
         )}
+        <ChatAboutFileButton path={path} />
         <Button variant="ghost" size="sm" onClick={onToggleRaw}>
           <FileCode className="size-4" />
           {rawMode ? "Rich text" : "Raw"}

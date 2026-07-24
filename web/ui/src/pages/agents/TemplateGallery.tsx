@@ -93,7 +93,12 @@ export default function TemplateGallery({
                       key={t.id}
                       type="button"
                       onClick={() => choose(t)}
-                      className="w-full rounded-md border border-border p-3 text-left transition-colors hover:bg-accent/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                      // Hover is a soft accent TINT, not `bg-accent/40`. A 40%
+                      // wash of the accent (a dark blue in light mode, a light
+                      // blue in dark) sat under this card's unchanged
+                      // text-foreground title and text-muted-2 blurb, so the
+                      // row went unreadable on hover in both themes.
+                      className="w-full rounded-md border border-border p-3 text-left transition-colors hover:border-accent/40 hover:bg-accent-soft focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
                     >
                       <div className="text-sm font-medium text-foreground">{t.label}</div>
                       <div className="mt-0.5 text-xs text-muted-2">{t.blurb}</div>

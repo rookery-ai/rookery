@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router";
@@ -398,4 +398,78 @@ test("inbox: j/Enter do nothing to the list while the shortcuts overlay is open 
   fireEvent.keyDown(document.body, { key: "j" });
   fireEvent.keyDown(document.body, { key: "Enter" });
   expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+});
+
+// ── Reminders: completed state, cap-at-3, main-screen card ─────────────────
+
+// Five reminders: two upcoming, three already fired. Enough to exercise the
+// pane's 3-row cap AND the pending/done split in one fixture.
+function manyReminders() {
+  reminders = [
+    { id: "r1", message: "Call the dentist", remind_at: "2026-07-17T15:00:00Z", sent: false },
+    { id: "r2", message: "Book the flight", remind_at: "2026-07-18T09:00:00Z", sent: false },
+    { id: "r3", message: "Water the plants", remind_at: "2026-07-16T08:00:00Z", sent: true },
+    { id: "r4", message: "Renew the domain", remind_at: "2026-07-15T08:00:00Z", sent: true },
+    { id: "r5", message: "Pay the invoice", remind_at: "2026-07-14T08:00:00Z", sent: true },
+  ];
+}
+
+test("reminders: a fired reminder is struck through, a pending one is not", async () => {
+  mockFetch();
+  manyReminders();
+  wrap();
+
+  // Upcoming sort first, so both pending rows are within the pane's 3-row cap
+  // alongside exactly one completed row.
+  const done = await screen.findByText("Water the plants");
+  expect(done.className).toMatch(/line-through/);
+  // getAllBy: an upcoming reminder shows in BOTH the pane row and the
+  // main-screen card. The pane's row is the <p>; assert on that one.
+  const pending = screen.getAllByText("Call the dentist").find((el) => el.tagName === "P");
+  expect(pending?.className).not.toMatch(/line-through/);
+});
+
+test("reminders: the pane caps at 3 and the rest open in the View all modal", async () => {
+  mockFetch();
+  manyReminders();
+  wrap();
+
+  await screen.findByText("Call the dentist");
+  // Row 4 and 5 (both completed) are collapsed behind the button.
+  expect(screen.queryByText("Renew the domain")).not.toBeInTheDocument();
+
+  const viewAll = screen.getByRole("button", { name: /view all reminders \(5\)/i });
+  await userEvent.click(viewAll);
+
+  expect(await screen.findByText("All reminders")).toBeInTheDocument();
+  expect(screen.getByText("Renew the domain")).toBeInTheDocument();
+  expect(screen.getByText("Pay the invoice")).toBeInTheDocument();
+});
+
+test("reminders: upcoming ones also appear in the main-screen card", async () => {
+  mockFetch();
+  manyReminders();
+  wrap();
+
+  const card = await screen.findByRole("region", { name: "Upcoming reminders" });
+  // findBy inside the card, not getBy: the region renders (as its empty state)
+  // before the reminders query resolves, so a synchronous read races the fetch.
+  // The card lists upcoming reminders only — a completed one belongs to the
+  // pane, where it can be cleared.
+  expect(await within(card).findByText("Call the dentist")).toBeInTheDocument();
+  expect(within(card).getByText("Book the flight")).toBeInTheDocument();
+  expect(within(card).queryByText("Water the plants")).not.toBeInTheDocument();
+});
+
+test("reminders: deleting from the pane also clears the main-screen card", async () => {
+  mockFetch();
+  manyReminders();
+  wrap();
+
+  await screen.findByText("Call the dentist");
+  // Two views, one deferred-delete buffer: the row must vanish from BOTH at
+  // once, not linger on the dashboard for the 5s undo window.
+  const [firstDelete] = screen.getAllByRole("button", { name: /delete reminder/i });
+  await userEvent.click(firstDelete);
+  await waitFor(() => expect(screen.queryByText("Call the dentist")).not.toBeInTheDocument());
 });

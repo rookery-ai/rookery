@@ -48,13 +48,18 @@ async function importFiles(
 function KBPaneHeader({
   onPickFiles,
   currentDir,
+  newOpen,
+  setNewOpen,
 }: {
   onPickFiles: (files: File[]) => void;
   // The folder the new-note picker defaults to (the active folder, or the open
   // file's parent, or root). The picker still lets the user retarget it.
   currentDir: string;
+  // The new-note dialog is CONTROLLED by KBPage rather than owned here, so the
+  // ⌘K palette's "New note" action can open it by navigating to /kb?new=note.
+  newOpen: boolean;
+  setNewOpen: (open: boolean) => void;
 }) {
-  const [newOpen, setNewOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   return (
     <ContextPaneHeader
@@ -152,6 +157,7 @@ function fileTitle(path: string): string {
 export default function KBPage() {
   const [params, setParams] = useSearchParams();
   const path = params.get("path");
+  const [newNoteOpen, setNewNoteOpen] = useState(false);
   const isDirHint = params.get("dir") === "1";
   const isFile = !!path && !isDirHint;
   const isDir = !!path && isDirHint;
@@ -164,6 +170,30 @@ export default function KBPage() {
   const upload = useUploadKBFile();
   const { toast } = useToast();
   const { recent, record, forget, rename } = useRecentFiles();
+
+  // The ⌘K palette's "New note" action navigates to /kb?new=note. It used to
+  // point at bare /kb, which opens the knowledge base and creates nothing —
+  // the action looked broken because the only real new-note affordance is the
+  // dialog below, owned by this page's local state.
+  //
+  // The intent is captured into state and the param stripped in the SAME
+  // effect: the resume-last-note effect further down rewrites the query
+  // wholesale (setParams({path}), no merge) and would drop `new` regardless,
+  // so consuming it up front makes the ordering between the two irrelevant.
+  // Stripping also stops a reload or a Back from reopening the dialog.
+  const wantsNewNote = params.get("new") === "note";
+  useEffect(() => {
+    if (!wantsNewNote) return;
+    setNewNoteOpen(true);
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("new");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [wantsNewNote, setParams]);
 
   // Recording happens HERE, in the one place every open funnels through, rather
   // than at each call site — so the tree, search and the recents list itself all
@@ -214,6 +244,8 @@ export default function KBPage() {
           <KBPaneHeader
             onPickFiles={(files) => void importFiles(files, upload, toast, currentDir)}
             currentDir={currentDir}
+            newOpen={newNoteOpen}
+            setNewOpen={setNewNoteOpen}
           />
           {/* Recent is a fixed block above the tree, NOT inside a scroll
               container of its own: SearchBox is `h-full` and owns the pane's
