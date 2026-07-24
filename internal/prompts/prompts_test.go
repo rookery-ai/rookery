@@ -452,3 +452,48 @@ func TestBuildChatTitlePrompt(t *testing.T) {
 		t.Errorf("user prompt not truncated: %d chars", len(got))
 	}
 }
+
+// TestNoEventTriggersGuidance pins the platform's actual execution model in the
+// prompts. Agents are started in exactly three ways — the scheduler firing, the
+// user running one manually, or another agent's [CALL:] — and there is no
+// webhook/event hook of any kind. Without this stated, a designer happily
+// produced event-shaped agents ("30 minutes before each meeting") describing a
+// trigger that cannot exist, and would never fire.
+//
+// Both halves matter and are asserted separately:
+//   - the IMPLEMENTATION gate must say there are no event triggers, must keep
+//     on-demand ("none") a valid answer so it doesn't invent a cadence for an
+//     agent that shouldn't have one, and must require de-duplication for a
+//     polling agent that reacts to individual items;
+//   - the DESIGN conversation must carry the same model in NON-TECHNICAL terms,
+//     since it is spoken to the user and the jargon blocklist applies there.
+func TestNoEventTriggersGuidance(t *testing.T) {
+	history := []ChatMessage{{Role: "user", Content: "tell me as soon as an email arrives"}}
+	for name, out := range map[string]string{
+		"create": BuildImplementationPrompt("x", history, ImplementationParams{}),
+		"edit":   BuildEditImplementationPrompt("x", history, ImplementationParams{}),
+	} {
+		require.Contains(t, out, "THERE ARE NO EVENT TRIGGERS",
+			"[%s] implementation prompt must state the platform has no event triggers", name)
+		require.Contains(t, out, "[CALL: <name>]",
+			"[%s] must list being called by another agent as a way an agent starts", name)
+		require.Contains(t, out, "On-demand is a first-class answer",
+			"[%s] must keep a manual-only agent (schedule: none) valid", name)
+		require.Contains(t, out, "de-duplication is REQUIRED",
+			"[%s] a polling agent reacting to items must be told to remember what it handled", name)
+	}
+
+	design := BuildDesignSystemPrompt(DesignSystemParams{AgentName: "x"})
+	require.Contains(t, design, "<how_agents_run>",
+		"design conversation must explain how agents actually run")
+	require.Contains(t, design, "on demand",
+		"design conversation must offer running on demand as a real option")
+	// The design prompt is spoken to the user, so it must express all of this
+	// without the terms the jargon blocklist forbids.
+	block := design[strings.Index(design, "<how_agents_run>"):]
+	block = block[:strings.Index(block, "</how_agents_run>")]
+	for _, banned := range []string{"cron", "webhook", "endpoint", "AGENT.md", "JSON", "Bash"} {
+		require.NotContains(t, strings.ToLower(block), strings.ToLower(banned),
+			"design-facing block must not use the forbidden term %q", banned)
+	}
+}
