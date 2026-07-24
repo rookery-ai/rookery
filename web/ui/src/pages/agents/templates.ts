@@ -14,6 +14,22 @@
 // exactly why the earlier version of this file was decorative rather than
 // useful.
 //
+// THE PLATFORM HAS NO EVENT TRIGGERS. Agents are run by a cron scheduler
+// (internal/scheduler polls agent_schedules and fires the runner); there is no
+// webhook, push, or "when X happens" hook, and the chat adapters are
+// deliberately outbound-only with zero inbound port. So a brief must NEVER be
+// phrased as event-driven — "as soon as an email arrives", "the moment it goes
+// down", "30 minutes before each meeting" all describe a trigger that cannot
+// exist. Express the same intent as POLLING plus REMEMBERED STATE:
+//
+//   bad:  "30 minutes before each meeting, message me a briefing"
+//   good: "every 10 minutes, look for meetings starting in the next 30 minutes
+//          that you haven't briefed me on yet, and message me about those"
+//
+// The "haven't ... yet" half matters as much as the cadence: a polling agent
+// re-sees the same item on every run, so without remembered state it would
+// notify repeatedly. templates.test.tsx enforces both halves.
+//
 // Conventions, all load-bearing:
 //   - [Square brackets] mark ONLY values that cannot have a sensible default —
 //     an address, a URL, an account, a threshold. Everything else ships as a
@@ -118,16 +134,17 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
   {
     id: "uptime-check",
     label: "Uptime check",
-    blurb: "Alerts the moment a site goes down, and when it's back",
+    blurb: "Checks a site every few minutes and flags an outage",
     category: "Monitoring",
     keywords: ["uptime", "downtime", "health", "monitor", "outage", "status", "url"],
     featured: false,
     description:
-      "Check that [https://example.com] is responding properly every 10 minutes. The first time it looks " +
-      "down or returns an error, message me straight away with what you saw and the time. Don't keep " +
-      "messaging me about the same outage — tell me once when it starts, then once more when it comes back " +
-      "up, including how long it was down for. Treat one failed check as possibly a blip: confirm it's " +
-      "really down with a second check before alerting me. Stay quiet the whole time it's healthy.",
+      "Check that [https://example.com] is responding properly every 10 minutes. On the first check that " +
+      "finds it down or returning an error, message me with what you saw and the time. Don't keep " +
+      "messaging me about the same outage — remember that you've already reported it, tell me once when it " +
+      "starts, then once more on the check where it comes back up, including how long it was down for. " +
+      "Treat a single failed check as possibly a blip: confirm it's really down on the following check " +
+      "before messaging me. Stay quiet the whole time it's healthy.",
   },
   {
     id: "price-watch",
@@ -193,17 +210,20 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
   {
     id: "meeting-prep",
     label: "Meeting-prep briefing",
-    blurb: "Briefs you just before each meeting, with context",
+    blurb: "Checks your calendar and briefs you ahead of meetings",
     category: "Reminders",
     keywords: ["calendar", "meeting", "prep", "briefing", "agenda", "before", "context"],
     featured: true,
     description:
-      "Look at my calendar and, 30 minutes before each meeting that has other people in it, message me a " +
-      "short briefing: who's attending, the title and any agenda or description on the invite, plus " +
-      "anything I already have on those people or that topic in my notes or recent email — what we last " +
-      "discussed and anything I said I'd follow up on. Keep it to a few lines I can read on the way in. " +
-      "Skip events I'm the only attendee of, all-day entries, and anything marked as blocked-out or " +
-      "personal time. If there are no meetings, stay quiet.",
+      "Every 10 minutes between 8:00am and 6:00pm on weekdays, check my calendar for meetings that start " +
+      "within the next 30 minutes, have other people in them, and that you haven't already briefed me on. " +
+      "For each of those, message me a short briefing: who's attending, the title and any agenda or " +
+      "description on the invite, plus anything I already have on those people or that topic in my notes " +
+      "or recent email — what we last discussed and anything I said I'd follow up on. Keep it to a few " +
+      "lines I can read on the way in. Remember which meetings you've already briefed me on so I get " +
+      "exactly one briefing per meeting, never a repeat on the next check. Skip events I'm the only " +
+      "attendee of, all-day entries, and anything marked as blocked-out or personal time. Stay quiet when " +
+      "nothing is starting soon.",
   },
   {
     id: "reminder-with-context",

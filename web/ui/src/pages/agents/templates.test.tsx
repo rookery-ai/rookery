@@ -117,11 +117,14 @@ test("the featured templates render as selectable cards with a label and blurb",
 // runs, and whether it notifies (internal/prompts' <conversation_discipline>),
 // so every shipped brief must actually say those things.
 test("every template is a full brief: schedule, notification behaviour, and substance", () => {
-  // Broad on purpose: a schedule can be stated as a cadence ("every weekday"),
-  // a frequency ("twice a day"), or a clock time ("at 9:00am") — all of them
-  // answer "when does it run", which is what the designer needs.
+  // A schedule can be stated as a cadence ("every weekday"), a frequency
+  // ("twice a day"), or a clock time ("at 9:00am") — all answer "when does it
+  // run". Deliberately NOT loose: an earlier version accepted the bare word
+  // "each", so "30 minutes before each meeting" passed as though it were a
+  // cadence, letting an event-driven template ship on a platform that has no
+  // event triggers. "each" now only counts when followed by a time unit.
   const scheduleCue =
-    /(\b(every|each|daily|weekly|monthly|hourly|weekday|morning|evening|twice|once|times a day|on the \d)\b|\d{1,2}:\d{2})/i;
+    /(\bevery\b|\beach (day|week|month|morning|evening|weekday|hour)\b|\bonce (a|an)\b|\btwice\b|\btimes a day\b|\bon the \d|\d{1,2}:\d{2})/i;
   const notifyCue = /\b(message me|tell me|remind me|send me|alert|stay quiet|don't message|note)\b/i;
 
   for (const t of AGENT_TEMPLATES) {
@@ -132,6 +135,36 @@ test("every template is a full brief: schedule, notification behaviour, and subs
     expect(t.description.length, `${t.id} description is too thin`).toBeGreaterThan(200);
     expect(t.description, `${t.id} must say WHEN it runs`).toMatch(scheduleCue);
     expect(t.description, `${t.id} must say whether it notifies`).toMatch(notifyCue);
+  }
+});
+
+// The platform runs agents on a CRON SCHEDULER and has no webhook/event hook
+// of any kind (internal/scheduler polls agent_schedules; the chat adapters are
+// outbound-only). A template phrased as event-driven therefore promises a
+// trigger that cannot exist, and the agent built from it would either not fire
+// or quietly degrade to polling with no de-duplication. Both the user-facing
+// blurb and the brief itself have to stay honest about that.
+test("no template promises an event trigger the scheduler cannot provide", () => {
+  const eventPhrasing =
+    /\b(as soon as|the moment|immediately (when|after)|right when|before each|whenever (a|an|my|the)\b[^.]*\b(arrives|comes in|is sent|is created|happens))\b/i;
+
+  for (const t of AGENT_TEMPLATES) {
+    expect(t.description, `${t.id} description implies an event trigger`).not.toMatch(eventPhrasing);
+    expect(t.blurb, `${t.id} blurb implies an event trigger`).not.toMatch(eventPhrasing);
+  }
+});
+
+// A polling agent re-sees the same item on every run, so any template that
+// reacts to individual items (rather than reporting a whole period) must tell
+// the agent to remember what it already handled — otherwise it notifies about
+// the same meeting/outage/price on every single check.
+test("templates that react to individual items ask the agent to remember what it handled", () => {
+  const reactive = ["meeting-prep", "uptime-check", "price-watch", "watch-for-changes", "follow-up-chaser"];
+  const remembers = /\b(remember|already (briefed|told|reported|flagged|sent)|don't repeat|haven't already|keep a running note)\b/i;
+
+  for (const id of reactive) {
+    const t = AGENT_TEMPLATES.find((x) => x.id === id)!;
+    expect(t.description, `${id} must tell the agent to remember what it already handled`).toMatch(remembers);
   }
 });
 
