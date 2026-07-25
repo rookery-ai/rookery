@@ -10,12 +10,8 @@ import { useSession } from "@/lib/session";
 import { CreateWorkspaceDialog } from "@/pages/Workspaces";
 import {
   useAdminSettings,
-  useSaveAdminSettings,
   useAuditLog,
-  useWorkspacePermissions,
-  useSaveWorkspacePermissions,
   useDeleteWorkspaceAdmin,
-  type AdminSettings,
 } from "@/lib/settings";
 import type { Workspace } from "@/lib/session";
 
@@ -34,68 +30,7 @@ function ErrorNote({ message }: { message: string }) {
 
 // ── Workspaces ───────────────────────────────────────────────────────────
 
-function PermissionsEditor({ workspaceID }: { workspaceID: string }) {
-  const { data, isLoading, isError, error } = useWorkspacePermissions(workspaceID);
-  const save = useSaveWorkspacePermissions();
-  const [granted, setGranted] = useState<Record<string, boolean>>({});
-  const [saved, setSaved] = useState(false);
-
-  useEffect(() => {
-    if (!data) return;
-    const m: Record<string, boolean> = {};
-    for (const p of data.permissions) m[p.name] = p.granted;
-    setGranted(m);
-  }, [data]);
-
-  async function handleSave() {
-    setSaved(false);
-    const grant = Object.entries(granted).filter(([, v]) => v).map(([n]) => n);
-    const revoke = Object.entries(granted).filter(([, v]) => !v).map(([n]) => n);
-    try {
-      await save.mutateAsync({ id: workspaceID, grant, revoke });
-      setSaved(true);
-    } catch {
-      // surfaced via save.error
-    }
-  }
-
-  if (isLoading) return <p className="text-xs text-muted-2">Loading permissions…</p>;
-  if (isError) return <ErrorNote message={errMsg(error)} />;
-
-  return (
-    <div className="mt-2 space-y-2 rounded-md border border-border p-3">
-      <div className="flex flex-wrap gap-3">
-        {(data?.permissions ?? []).map((p) => (
-          <label key={p.name} className="flex items-center gap-1.5 text-xs">
-            <input
-              type="checkbox"
-              checked={granted[p.name] ?? false}
-              onChange={(e) => {
-                setGranted((g) => ({ ...g, [p.name]: e.target.checked }));
-                setSaved(false);
-              }}
-            />
-            {p.name}
-          </label>
-        ))}
-      </div>
-      <div className="flex items-center gap-2">
-        <Button type="button" size="sm" variant="outline" onClick={() => void handleSave()} disabled={save.isPending}>
-          {save.isPending ? "Saving…" : "Save permissions"}
-        </Button>
-        {saved && (
-          <span className="flex items-center gap-1 text-xs text-ok">
-            <Check className="size-3" /> Saved
-          </span>
-        )}
-      </div>
-      {save.isError && <ErrorNote message={errMsg(save.error)} />}
-    </div>
-  );
-}
-
 function WorkspaceCard({ ws, activeID }: { ws: Workspace; activeID: string | undefined }) {
-  const [expandedPerms, setExpandedPerms] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const del = useDeleteWorkspaceAdmin();
   const isActive = ws.id === activeID;
@@ -119,12 +54,7 @@ function WorkspaceCard({ ws, activeID }: { ws: Workspace; activeID: string | und
           </div>
           {ws.about && <div className="truncate text-xs text-muted-2">{ws.about}</div>}
         </div>
-        <Button size="sm" variant="outline" onClick={() => setExpandedPerms((v) => !v)}>
-          Permissions
-        </Button>
       </div>
-
-      {expandedPerms && <PermissionsEditor workspaceID={ws.id} />}
 
       <div className="mt-3">
         {!confirming ? (
@@ -173,95 +103,44 @@ function WorkspacesSection() {
   );
 }
 
-// ── System settings ──────────────────────────────────────────────────────
+// ── System status ────────────────────────────────────────────────────────
 
-const EMPTY_ADMIN: AdminSettings = {
-  claude_bin: "",
-  coder_timeout: "",
-  agent_timeout: "",
-  memory_mb: "",
-  sandbox_on: false,
-  landlock_ready: false,
-};
-
-function SystemSettingsSection() {
+// Runtime status only. This section used to be a form over claude_bin /
+// coder_timeout / agent_timeout / memory_mb, all persisted to system_settings
+// and none of them ever read back — the coder binary and timeout come from
+// config.yaml, the per-workspace timeout from the workspace row, and the
+// sandbox memory cap from the sandbox config. The inputs were removed rather
+// than wired up, leaving the two indicators that report something real.
+function SystemStatusSection() {
   const { data, isLoading, isError, error } = useAdminSettings();
-  const save = useSaveAdminSettings();
-  const [form, setForm] = useState<AdminSettings>(EMPTY_ADMIN);
-  const [saved, setSaved] = useState(false);
 
-  useEffect(() => {
-    if (data) setForm(data);
-  }, [data]);
-
-  function set<K extends keyof AdminSettings>(key: K, value: AdminSettings[K]) {
-    setForm((f) => ({ ...f, [key]: value }));
-    setSaved(false);
-  }
-
-  async function handleSave(e: FormEvent) {
-    e.preventDefault();
-    setSaved(false);
-    try {
-      await save.mutateAsync({
-        claude_bin: form.claude_bin,
-        coder_timeout: form.coder_timeout,
-        agent_timeout: form.agent_timeout,
-        memory_mb: form.memory_mb,
-      });
-      setSaved(true);
-    } catch {
-      // surfaced via save.error
-    }
-  }
+  const sandboxOn = data?.sandbox_on ?? false;
+  const landlockReady = data?.landlock_ready ?? false;
 
   return (
     <div>
-      <h3 className="text-sm font-bold text-muted-2">System settings</h3>
+      <h3 className="text-sm font-bold text-muted-2">System status</h3>
+      <p className="mt-1 text-xs text-muted-2">
+        Coder and sandbox settings come from <code>config.yaml</code> and each workspace's own
+        coder configuration.
+      </p>
       {isLoading && <p className="mt-2 text-xs text-muted-2">Loading…</p>}
       {isError && <div className="mt-2"><ErrorNote message={errMsg(error)} /></div>}
       {!isLoading && !isError && (
-        <>
-          <div className="mt-2 flex flex-wrap gap-4 text-xs text-muted-2">
-            <span>
-              Sandbox: <span className={form.sandbox_on ? "text-ok" : "text-muted-2"}>{form.sandbox_on ? "on" : "off"}</span>
-            </span>
-            <span>
-              Landlock: <span className={form.landlock_ready ? "text-ok" : "text-muted-2"}>{form.landlock_ready ? "ready" : "unavailable"}</span>
-            </span>
+        <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-xs">
+          <div>
+            <dt className="text-muted-2">Sandbox</dt>
+            <dd className={sandboxOn ? "font-medium text-ok" : "font-medium text-muted-2"}>
+              {sandboxOn ? "on" : "off"}
+            </dd>
           </div>
-          {save.isError && <div className="mt-3"><ErrorNote message={errMsg(save.error)} /></div>}
-          <form onSubmit={(e) => void handleSave(e)} className="mt-3 max-w-lg space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="claude_bin">Claude binary path</Label>
-              <Input id="claude_bin" value={form.claude_bin} onChange={(e) => set("claude_bin", e.target.value)} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="coder_timeout">Coder timeout (s)</Label>
-                <Input id="coder_timeout" value={form.coder_timeout} onChange={(e) => set("coder_timeout", e.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="agent_timeout">Agent timeout (s)</Label>
-                <Input id="agent_timeout" value={form.agent_timeout} onChange={(e) => set("agent_timeout", e.target.value)} />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="memory_mb">Memory limit (MB)</Label>
-              <Input id="memory_mb" value={form.memory_mb} onChange={(e) => set("memory_mb", e.target.value)} />
-            </div>
-            <div className="flex items-center gap-3">
-              <Button type="submit" size="sm" disabled={save.isPending}>
-                {save.isPending ? "Saving…" : "Save"}
-              </Button>
-              {saved && (
-                <span className="flex items-center gap-1 text-xs text-ok">
-                  <Check className="size-3" /> Saved
-                </span>
-              )}
-            </div>
-          </form>
-        </>
+          <div>
+            <dt className="text-muted-2">Landlock</dt>
+            <dd className={landlockReady ? "font-medium text-ok" : "font-medium text-muted-2"}>
+              {landlockReady ? "ready" : "unavailable"}
+            </dd>
+          </div>
+        </dl>
       )}
     </div>
   );
@@ -270,12 +149,31 @@ function SystemSettingsSection() {
 // ── Audit log ────────────────────────────────────────────────────────────
 
 function AuditLogSection() {
-  const { data, isLoading, isError, error } = useAuditLog(100);
   const { data: session } = useSession();
+  const [action, setAction] = useState("");
+  const [workspaceID, setWorkspaceID] = useState("");
+  const [sinceDays, setSinceDays] = useState("");
+  const [search, setSearch] = useState("");
+  // The text box is debounced so typing doesn't fire a request per keystroke;
+  // the dropdowns apply immediately because a single click is already the
+  // user's final intent.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data, isLoading, isError, error } = useAuditLog({
+    action: action || undefined,
+    workspace_id: workspaceID || undefined,
+    q: debouncedSearch || undefined,
+    since_days: sinceDays ? Number(sinceDays) : undefined,
+  });
+
   const logs = data?.logs ?? [];
-  const workspaceNameById = new Map(
-    (session?.workspaces ?? []).map((w) => [w.id, w.name] as const),
-  );
+  const workspaces = session?.workspaces ?? [];
+  const workspaceNameById = new Map(workspaces.map((w) => [w.id, w.name] as const));
+  const filtered = Boolean(action || workspaceID || sinceDays || debouncedSearch);
 
   function workspaceLabel(id: string) {
     if (!id) return "—";
@@ -284,14 +182,77 @@ function AuditLogSection() {
     return workspaceNameById.get(id) ?? id.slice(0, 8);
   }
 
+  function clearFilters() {
+    setAction("");
+    setWorkspaceID("");
+    setSinceDays("");
+    setSearch("");
+  }
+
+  const selectClass =
+    "h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
   return (
     <div>
       <h3 className="text-sm font-bold text-muted-2">Audit log</h3>
-      <p className="mt-1 text-xs text-muted-2">Last 100 events, most recent first.</p>
+      <p className="mt-1 text-xs text-muted-2">
+        Most recent first, up to 100 matching events.
+      </p>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Input
+          aria-label="Search audit log"
+          placeholder="Search target, detail or IP…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-8 w-56 text-xs"
+        />
+        <select
+          aria-label="Filter by action"
+          className={selectClass}
+          value={action}
+          onChange={(e) => setAction(e.target.value)}
+        >
+          <option value="">All actions</option>
+          {(data?.actions ?? []).map((a) => (
+            <option key={a} value={a}>{a}</option>
+          ))}
+        </select>
+        <select
+          aria-label="Filter by workspace"
+          className={selectClass}
+          value={workspaceID}
+          onChange={(e) => setWorkspaceID(e.target.value)}
+        >
+          <option value="">All workspaces</option>
+          {workspaces.map((w) => (
+            <option key={w.id} value={w.id}>{w.name}</option>
+          ))}
+        </select>
+        <select
+          aria-label="Filter by time"
+          className={selectClass}
+          value={sinceDays}
+          onChange={(e) => setSinceDays(e.target.value)}
+        >
+          <option value="">Any time</option>
+          <option value="1">Last 24 hours</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+        </select>
+        {filtered && (
+          <Button type="button" size="sm" variant="outline" onClick={clearFilters}>
+            Clear
+          </Button>
+        )}
+      </div>
+
       {isLoading && <p className="mt-2 text-xs text-muted-2">Loading…</p>}
       {isError && <div className="mt-2"><ErrorNote message={errMsg(error)} /></div>}
       {!isLoading && !isError && logs.length === 0 && (
-        <p className="mt-2 text-xs text-muted-2">No audit events yet.</p>
+        <p className="mt-2 text-xs text-muted-2">
+          {filtered ? "No events match these filters." : "No audit events yet."}
+        </p>
       )}
       {!isLoading && !isError && logs.length > 0 && (
         <div className="mt-2 overflow-x-auto rounded-md border border-border">
@@ -329,11 +290,11 @@ export function OwnerSections() {
   return (
     <section>
       <h2 className="text-lg font-bold">Owner</h2>
-      <p className="mt-1 text-sm text-muted-2">Workspaces, audit log, and system settings.</p>
+      <p className="mt-1 text-sm text-muted-2">Workspaces, system status, and the audit log.</p>
 
       <div className="mt-6 space-y-8">
         <WorkspacesSection />
-        <SystemSettingsSection />
+        <SystemStatusSection />
         <AuditLogSection />
       </div>
     </section>

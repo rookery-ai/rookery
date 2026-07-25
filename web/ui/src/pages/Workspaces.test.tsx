@@ -83,3 +83,45 @@ test("needs_setup workspace enters directly without a master-password prompt", a
   expect(screen.queryByLabelText(/master password/i)).not.toBeInTheDocument();
   expect(screen.queryByText(/finish setup/i)).not.toBeInTheDocument();
 });
+
+test("creating a workspace asks for a name only, and posts no about", async () => {
+  // "What is this workspace about?" belongs to the setup wizard the new
+  // workspace lands in. It used to be asked here too, so a user answered the
+  // same question twice in a row.
+  const calls: Array<{ url: string; body: unknown }> = [];
+  const fetchMock = vi.fn().mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(url);
+    if (u.endsWith("/auth/session")) {
+      return Promise.resolve(
+        new Response(JSON.stringify(session), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+    calls.push({ url: u, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    return Promise.resolve(
+      new Response(JSON.stringify({ id: "w2", name: "Work", about: "", needs_setup: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  wrap();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /create workspace/i }));
+
+  const nameInput = await screen.findByLabelText(/^name$/i);
+  expect(screen.queryByLabelText(/about/i)).toBeNull();
+
+  await user.type(nameInput, "Work");
+  await user.click(screen.getByRole("button", { name: /^create$/i }));
+
+  await waitFor(() => {
+    expect(calls.find((c) => c.url.endsWith("/api/v1/workspaces"))).toBeDefined();
+  });
+  const post = calls.find((c) => c.url.endsWith("/api/v1/workspaces"))!;
+  expect(post.body).toEqual({ name: "Work" });
+});

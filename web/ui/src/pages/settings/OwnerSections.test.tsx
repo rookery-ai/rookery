@@ -28,6 +28,7 @@ const ADMIN_SETTINGS = {
 };
 
 const AUDIT_LOGS = {
+  actions: ["configure_coder", "delete_workspace"],
   logs: [
     {
       workspace_id: "w1",
@@ -48,15 +49,6 @@ const AUDIT_LOGS = {
   ],
 };
 
-const PERMISSIONS = {
-  permissions: [
-    { name: "bash", granted: true },
-    { name: "web-browser", granted: false },
-    { name: "system-tools", granted: false },
-    { name: "mcp-servers", granted: false },
-  ],
-};
-
 type Overrides = Record<string, (body: unknown) => Response | Promise<Response>>;
 
 function mockFetch(overrides: Overrides = {}) {
@@ -74,13 +66,7 @@ function mockFetch(overrides: Overrides = {}) {
 
       if (url === "/api/v1/auth/session") return Promise.resolve(jsonResponse(SESSION_FIXTURE));
       if (url === "/api/v1/admin/settings" && method === "GET") return Promise.resolve(jsonResponse(ADMIN_SETTINGS));
-      if (url === "/api/v1/admin/audit?limit=100" && method === "GET") return Promise.resolve(jsonResponse(AUDIT_LOGS));
-      if (/^\/api\/v1\/workspaces\/.+\/permissions$/.test(url) && method === "GET") {
-        return Promise.resolve(jsonResponse(PERMISSIONS));
-      }
-      if (/^\/api\/v1\/workspaces\/.+\/permissions$/.test(url) && method === "PUT") {
-        return Promise.resolve(jsonResponse({ ok: true }));
-      }
+      if (url.startsWith("/api/v1/admin/audit") && method === "GET") return Promise.resolve(jsonResponse(AUDIT_LOGS));
       if (/^\/api\/v1\/workspaces\/.+$/.test(url) && method === "DELETE") {
         return Promise.resolve(jsonResponse({ ok: true }));
       }
@@ -109,6 +95,13 @@ afterEach(() => {
 // Scoped to the workspace-card name element specifically (not text-only
 // getByText) — the audit log's Workspace column now also resolves w1 to
 // "Home Server", so a plain getByText would match twice.
+// An action name now appears both as an <option> in the filter picker and as
+// a cell in the table, so audit-row assertions have to be scoped to the table.
+async function findAuditRow(text: string) {
+  const table = await screen.findByRole("table");
+  return within(table).findByText(text);
+}
+
 function workspaceCardNames() {
   return Array.from(document.querySelectorAll(".truncate.font-semibold")).map((el) => el.textContent);
 }
@@ -122,46 +115,35 @@ test("renders workspace cards from the session", async () => {
   expect(names.some((t) => t?.includes("Side Project"))).toBe(true);
 });
 
-test("System settings form prefills from GET and renders sandbox/landlock indicators", async () => {
+test("System status renders the sandbox/landlock indicators", async () => {
   mockFetch();
   wrap();
-  const bin = (await screen.findByLabelText(/claude binary path/i)) as HTMLInputElement;
-  await waitFor(() => expect(bin.value).toBe("/usr/bin/claude"));
-  expect(screen.getByText("on")).toBeInTheDocument();
+  expect(await screen.findByText("on")).toBeInTheDocument();
   expect(screen.getByText("ready")).toBeInTheDocument();
 });
 
-test("System settings save PUTs claude_bin/coder_timeout/agent_timeout/memory_mb", async () => {
-  const calls = mockFetch();
+test("System status offers no editable settings", async () => {
+  // Regression guard for the removal: claude_bin / coder_timeout /
+  // agent_timeout / memory_mb were written to system_settings and never read
+  // back by anything, so the form was removed rather than wired up. If an
+  // input reappears here it is once again configuring nothing.
+  mockFetch();
   wrap();
-
-  const bin = (await screen.findByLabelText(/claude binary path/i)) as HTMLInputElement;
-  await waitFor(() => expect(bin.value).toBe("/usr/bin/claude"));
-
-  const user = userEvent.setup();
-  await user.clear(bin);
-  await user.type(bin, "/opt/claude/bin/claude");
-  await user.click(screen.getByRole("button", { name: /^save$/i }));
-
-  await waitFor(() => {
-    const put = calls.find((c) => c.url === "/api/v1/admin/settings" && c.method === "PUT");
-    expect(put).toBeDefined();
-  });
-  const put = calls.find((c) => c.url === "/api/v1/admin/settings" && c.method === "PUT")!;
-  expect(put.body).toEqual({
-    claude_bin: "/opt/claude/bin/claude",
-    coder_timeout: "120",
-    agent_timeout: "300",
-    memory_mb: "512",
-  });
+  await screen.findByText("on");
+  expect(screen.queryByLabelText(/claude binary path/i)).toBeNull();
+  expect(screen.queryByLabelText(/coder timeout/i)).toBeNull();
+  expect(screen.queryByLabelText(/agent timeout/i)).toBeNull();
+  expect(screen.queryByLabelText(/memory limit/i)).toBeNull();
+  expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
 });
 
 test("Audit log renders rows from the last-100 GET", async () => {
   mockFetch();
   wrap();
-  expect(await screen.findByText("configure_coder")).toBeInTheDocument();
-  expect(screen.getByText("delete_workspace")).toBeInTheDocument();
-  expect(screen.getByText("workspace:w1")).toBeInTheDocument();
+  expect(await findAuditRow("configure_coder")).toBeInTheDocument();
+  const table = screen.getByRole("table");
+  expect(within(table).getByText("delete_workspace")).toBeInTheDocument();
+  expect(within(table).getByText("workspace:w1")).toBeInTheDocument();
 });
 
 test("Audit log Workspace column resolves a known workspace_id to its name via the session, and falls back to a short uuid for a deleted workspace", async () => {
@@ -177,7 +159,7 @@ test("Audit log Workspace column resolves a known workspace_id to its name via t
   });
   wrap();
 
-  await screen.findByText("configure_coder");
+  await findAuditRow("configure_coder");
   const table = screen.getByRole("table");
 
   // Known workspace_id (present in session.workspaces) resolves to its name
@@ -190,32 +172,14 @@ test("Audit log Workspace column resolves a known workspace_id to its name via t
   expect(within(table).getByText("—")).toBeInTheDocument();
 });
 
-test("Workspace permissions: expanding loads checkboxes and Save PUTs grant/revoke", async () => {
-  const calls = mockFetch();
+test("Workspace cards offer no permissions editor", async () => {
+  // Regression guard: workspace_permissions had exactly one reader
+  // (rbac.CanPerform) and that function had no callers at all, so the
+  // checkboxes gated nothing. The whole surface was removed.
+  mockFetch();
   wrap();
-
   await screen.findAllByText("Home Server");
-  const user = userEvent.setup();
-  const permButtons = screen.getAllByRole("button", { name: /permissions/i });
-  await user.click(permButtons[0]);
-
-  await screen.findByText("web-browser");
-  const bashBox = screen.getByRole("checkbox", { name: "bash" }) as HTMLInputElement;
-  expect(bashBox.checked).toBe(true);
-  const webBox = screen.getByRole("checkbox", { name: "web-browser" }) as HTMLInputElement;
-  await user.click(webBox);
-  await user.click(bashBox);
-
-  await user.click(screen.getByRole("button", { name: /save permissions/i }));
-
-  await waitFor(() => {
-    const put = calls.find((c) => c.url === "/api/v1/workspaces/w1/permissions" && c.method === "PUT");
-    expect(put).toBeDefined();
-  });
-  const put = calls.find((c) => c.url === "/api/v1/workspaces/w1/permissions" && c.method === "PUT")!;
-  const body = put.body as { grant: string[]; revoke: string[] };
-  expect(body.grant.sort()).toEqual(["web-browser"]);
-  expect(body.revoke.sort()).toEqual(["bash", "mcp-servers", "system-tools"]);
+  expect(screen.queryByRole("button", { name: /permissions/i })).toBeNull();
 });
 
 test("Delete workspace: confirm flow warns extra for the ACTIVE workspace and calls DELETE", async () => {
@@ -241,11 +205,54 @@ test("Delete workspace: non-active workspace has no extra warning", async () => 
   mockFetch();
   wrap();
 
-  await screen.findByText("Side Project");
+  // "Side Project" now also appears as an <option> in the audit log's
+  // workspace filter, so scope the wait to the workspace cards.
+  await waitFor(() => expect(workspaceCardNames()).toContain("Side Project"));
   const user = userEvent.setup();
   const deleteButtons = screen.getAllByRole("button", { name: /^delete$/i });
   await user.click(deleteButtons[1]);
 
   expect(screen.getByText(/delete “side project”\?/i)).toBeInTheDocument();
   expect(screen.queryByText(/active workspace/i)).not.toBeInTheDocument();
+});
+
+test("Audit log filters are sent to the server, not applied to the returned page", async () => {
+  // Narrowing an already-truncated page of the most recent 100 events would
+  // report "no matches" for something that merely happened 101 events ago, so
+  // every filter has to reach the query.
+  const calls = mockFetch();
+  wrap();
+  await findAuditRow("configure_coder");
+
+  const user = userEvent.setup();
+  await user.selectOptions(screen.getByLabelText(/filter by action/i), "configure_coder");
+  await waitFor(() => {
+    expect(calls.some((c) => c.url.includes("action=configure_coder"))).toBe(true);
+  });
+
+  await user.selectOptions(screen.getByLabelText(/filter by time/i), "7");
+  await waitFor(() => {
+    expect(calls.some((c) => c.url.includes("since_days=7"))).toBe(true);
+  });
+
+  await user.selectOptions(screen.getByLabelText(/filter by workspace/i), "w1");
+  await waitFor(() => {
+    expect(calls.some((c) => c.url.includes("workspace_id=w1"))).toBe(true);
+  });
+});
+
+test("Audit log search is debounced into a single server query", async () => {
+  const calls = mockFetch();
+  wrap();
+  await findAuditRow("configure_coder");
+
+  const user = userEvent.setup();
+  await user.type(screen.getByLabelText(/search audit log/i), "invoice");
+
+  await waitFor(() => {
+    expect(calls.some((c) => c.url.includes("q=invoice"))).toBe(true);
+  });
+  // Seven keystrokes must not mean seven requests.
+  const searchCalls = calls.filter((c) => c.url.includes("q="));
+  expect(searchCalls.length).toBeLessThan(4);
 });

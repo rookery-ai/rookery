@@ -160,48 +160,6 @@ func TestAPIWorkspaceDelete(t *testing.T) {
 	}
 }
 
-func TestAPIWorkspacePermissions(t *testing.T) {
-	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
-	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
-
-	// Initial permissions: all ungranted.
-	rec := doJSON(t, s, http.MethodGet, "/api/v1/workspaces/"+wsID+"/permissions", nil, cookies)
-	if rec.Code != http.StatusOK || !contains(rec.Body.String(), `"name":"bash"`) {
-		t.Fatalf("permissions get: %d %s", rec.Code, rec.Body.String())
-	}
-
-	// Grant bash.
-	rec = doJSON(t, s, http.MethodPut, "/api/v1/workspaces/"+wsID+"/permissions",
-		map[string]any{"grant": []string{"bash"}}, cookies)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("permissions grant: %d %s", rec.Code, rec.Body.String())
-	}
-
-	rec = doJSON(t, s, http.MethodGet, "/api/v1/workspaces/"+wsID+"/permissions", nil, cookies)
-	if !contains(rec.Body.String(), `"name":"bash","granted":true`) {
-		t.Fatalf("permissions not granted: %s", rec.Body.String())
-	}
-
-	// Invalid permission name → 400.
-	rec = doJSON(t, s, http.MethodPut, "/api/v1/workspaces/"+wsID+"/permissions",
-		map[string]any{"grant": []string{"not-a-real-permission"}}, cookies)
-	if rec.Code != http.StatusBadRequest || !contains(rec.Body.String(), "invalid_permission") {
-		t.Fatalf("permissions invalid: %d %s", rec.Code, rec.Body.String())
-	}
-
-	// Revoke bash.
-	rec = doJSON(t, s, http.MethodPut, "/api/v1/workspaces/"+wsID+"/permissions",
-		map[string]any{"revoke": []string{"bash"}}, cookies)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("permissions revoke: %d %s", rec.Code, rec.Body.String())
-	}
-	rec = doJSON(t, s, http.MethodGet, "/api/v1/workspaces/"+wsID+"/permissions", nil, cookies)
-	if !contains(rec.Body.String(), `"name":"bash","granted":false`) {
-		t.Fatalf("permission not revoked: %s", rec.Body.String())
-	}
-}
-
 func TestAPIAdminOverviewAuditSettings(t *testing.T) {
 	s, _ := newAPITestServer(t)
 	cookies := bootstrapAndLogin(t, s)
@@ -223,14 +181,22 @@ func TestAPIAdminOverviewAuditSettings(t *testing.T) {
 		t.Fatalf("audit limit: %d %s", rec.Code, rec.Body.String())
 	}
 
+	// Admin settings are read-only runtime status now. The writable
+	// claude_bin / coder_timeout / agent_timeout / memory_mb fields were
+	// removed along with the PUT: they persisted into system_settings and
+	// nothing ever read them back.
 	rec = doJSON(t, s, http.MethodGet, "/api/v1/admin/settings", nil, cookies)
-	if rec.Code != http.StatusOK || !contains(rec.Body.String(), `"claude_bin"`) {
+	if rec.Code != http.StatusOK || !contains(rec.Body.String(), `"landlock_ready"`) {
 		t.Fatalf("settings get: %d %s", rec.Code, rec.Body.String())
 	}
+	if contains(rec.Body.String(), `"claude_bin"`) {
+		t.Fatalf("settings get still exposes claude_bin: %s", rec.Body.String())
+	}
 
+	// The PUT is gone entirely — Echo answers an unregistered method with 405.
 	rec = doJSON(t, s, http.MethodPut, "/api/v1/admin/settings",
-		map[string]string{"claude_bin": "/usr/bin/claude", "coder_timeout": "150"}, cookies)
-	if rec.Code != http.StatusOK || !contains(rec.Body.String(), `"claude_bin":"/usr/bin/claude"`) {
-		t.Fatalf("settings put: %d %s", rec.Code, rec.Body.String())
+		map[string]string{"claude_bin": "/usr/bin/claude"}, cookies)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("settings put should no longer be routed, got 200: %s", rec.Body.String())
 	}
 }

@@ -209,10 +209,10 @@ test("category rows show correct counts: chat apps total, services connected-of-
   wrap();
 
   await screen.findByText("Telegram");
-  const chatAppsRow = screen.getByText("💬 Chat apps").closest("button")!;
+  const chatAppsRow = screen.getByRole("button", { name: /chat apps/i });
   expect(chatAppsRow.textContent).toContain("2");
 
-  const servicesRow = screen.getByText("🧩 Services").closest("button")!;
+  const servicesRow = screen.getByRole("button", { name: /^services/i });
   // gmail + jira both have >=1 connection → 2 of 3
   expect(servicesRow.textContent).toContain("2 of 3");
 });
@@ -225,10 +225,10 @@ test("clicking a category row scrolls to its section", async () => {
   wrap();
 
   await screen.findByText("Telegram");
-  await user.click(screen.getByText("💬 Chat apps").closest("button")!);
+  await user.click(screen.getByRole("button", { name: /chat apps/i }));
   expect(scrollSpy).toHaveBeenCalledTimes(1);
 
-  await user.click(screen.getByText("🧩 Services").closest("button")!);
+  await user.click(screen.getByRole("button", { name: /^services/i }));
   expect(scrollSpy).toHaveBeenCalledTimes(2);
 });
 
@@ -393,7 +393,7 @@ test("renders both search key providers with Not configured state from the API",
   expect(screen.getAllByText("Not configured")).toHaveLength(2);
   expect(screen.getAllByRole("button", { name: "Add key" })).toHaveLength(2);
 
-  const searchRow = screen.getByText("🔎 Web search").closest("button")!;
+  const searchRow = screen.getByRole("button", { name: /web search/i });
   expect(searchRow.textContent).toContain("0 of 2");
 });
 
@@ -411,7 +411,7 @@ test("shows Configured state and a Clear action when a key is already set", asyn
   const tavilyRow = screen.getByText("Tavily").closest("div.rounded-lg") as HTMLElement;
   expect(within(tavilyRow).getByText("Not configured")).toBeInTheDocument();
 
-  const searchRow = screen.getByText("🔎 Web search").closest("button")!;
+  const searchRow = screen.getByRole("button", { name: /web search/i });
   expect(searchRow.textContent).toContain("1 of 2");
 });
 

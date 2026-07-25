@@ -1,5 +1,6 @@
 import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
 import { createBrowserRouter, Navigate, Outlet } from "react-router";
+import LockScreen from "@/pages/LockScreen";
 import { useSession } from "@/lib/session";
 import { AppShell } from "@/components/shell/AppShell";
 import HomePage from "@/pages/home/HomePage";
@@ -37,6 +38,11 @@ function RequireAuth() {
   if (isLoading) return <RouteFallback />;
   if (!session?.authenticated) return <Navigate to="/login" replace />;
   if (session.owner?.must_change_password) return <Navigate to="/change-password" replace />;
+  // Checked before the workspace redirect: locking keeps the workspace, so a
+  // locked session must land on the lock screen rather than being bounced to
+  // the workspace picker. Rendered in place rather than as a route so the
+  // current URL survives — unlocking returns you where you were.
+  if (session.locked) return <LockScreen />;
   if (!session.workspace) return <Navigate to="/workspaces" replace />;
   if (session.workspace?.needs_setup) return <Navigate to="/setup" replace />;
   return <Outlet />;

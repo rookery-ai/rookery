@@ -1,24 +1,24 @@
 import { render, screen } from "@testing-library/react";
 import { ProviderLogo } from "./ProviderLogo";
-import { PROVIDER_LOGOS } from "./logos";
+import { PROVIDER_LOGOS, isMonochrome, lookupLogo } from "./logos";
 
-test("known slug renders an svg with the expected brand path", () => {
-  render(<ProviderLogo name="telegram" />);
-  const svg = document.querySelector("svg");
+test("known slug renders the vendored svg inline", () => {
+  const { container } = render(<ProviderLogo name="telegram" />);
+  const svg = container.querySelector("svg");
   expect(svg).not.toBeNull();
-  const path = svg?.querySelector("path");
-  expect(path?.getAttribute("d")).toBe(PROVIDER_LOGOS.telegram.path);
+  // Inline, not an <img> — currentColor in a monochrome mark cannot resolve
+  // against the app's theme across an <img> boundary.
+  expect(container.querySelector("img")).toBeNull();
 });
 
 test("known slug is case-insensitive", () => {
-  render(<ProviderLogo name="Telegram" />);
-  const svg = document.querySelector("svg");
-  expect(svg?.querySelector("path")?.getAttribute("d")).toBe(PROVIDER_LOGOS.telegram.path);
+  const { container } = render(<ProviderLogo name="Telegram" />);
+  expect(container.querySelector("svg")).not.toBeNull();
 });
 
 test("unknown slug renders the capitalized initial", () => {
-  render(<ProviderLogo name="mattermost" />);
-  expect(document.querySelector("svg")).toBeNull();
+  const { container } = render(<ProviderLogo name="mattermost" />);
+  expect(container.querySelector("svg")).toBeNull();
   expect(screen.getByText("M")).toBeTruthy();
 });
 
@@ -52,36 +52,40 @@ test("default size is 32", () => {
   expect(tile.style.width).toBe("32px");
 });
 
-test("title attribute is always set", () => {
+test("title and aria-label are always set, for known and unknown slugs alike", () => {
   render(<ProviderLogo name="github" />);
-  expect(screen.getByTitle("GitHub")).toBeTruthy();
-});
-
-test("title attribute falls back to the raw name for unknown slugs", () => {
+  expect(screen.getByTitle("github")).toBeTruthy();
   render(<ProviderLogo name="mattermost" />);
   expect(screen.getByTitle("mattermost")).toBeTruthy();
 });
 
-function hexToRgb(hex: string): string {
-  const n = parseInt(hex, 16);
-  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
-}
-
-test("a very light brand color (mailchimp) renders brand-on-white, not white-on-brand", () => {
-  // mailchimp's hex (#FFE01B) is light enough to fail contrast as a
-  // white-glyph-on-brand tile — the component should flip to a white tile
-  // with the brand color carried by the glyph instead.
-  const { container } = render(<ProviderLogo name="mailchimp" />);
+test("a monochrome mark gets an explicit color so currentColor resolves", () => {
+  // GitHub ships as a fill="currentColor" path. Without a color on the tile it
+  // would inherit whatever the surrounding text colour happens to be, which in
+  // dark mode is near-white on a white tile — i.e. invisible.
+  expect(isMonochrome(lookupLogo("github")!)).toBe(true);
+  const { container } = render(<ProviderLogo name="github" />);
   const tile = container.firstElementChild as HTMLElement;
-  expect(tile.style.backgroundColor).toBe("rgb(255, 255, 255)");
-  const svg = tile.querySelector("svg");
-  expect(svg?.getAttribute("fill")).toBe(`#${PROVIDER_LOGOS.mailchimp.hex}`);
+  expect(tile.style.color).toBe("rgb(24, 24, 27)");
 });
 
-test("a dark/saturated brand color (telegram) renders white-on-brand", () => {
-  const { container } = render(<ProviderLogo name="telegram" />);
+test("a full-colour mark is left to its own fills", () => {
+  // Slack is a multi-colour logo; forcing a colour on the tile would do
+  // nothing here but would be a bug if the mark ever mixed currentColor in.
+  expect(isMonochrome(lookupLogo("slack")!)).toBe(false);
+  const { container } = render(<ProviderLogo name="slack" />);
   const tile = container.firstElementChild as HTMLElement;
-  expect(tile.style.backgroundColor).toBe(hexToRgb(PROVIDER_LOGOS.telegram.hex));
-  const svg = tile.querySelector("svg");
-  expect(svg?.getAttribute("fill")).toBe("#ffffff");
+  expect(tile.style.color).toBe("");
+});
+
+test("every vendored asset is a well-formed svg with a viewBox", () => {
+  // A logo without a viewBox cannot scale to the tile and would render at its
+  // published pixel size, blowing out the layout.
+  const entries = Object.entries(PROVIDER_LOGOS);
+  expect(entries.length).toBeGreaterThan(40);
+  for (const [slug, svg] of entries) {
+    expect(svg.startsWith("<svg"), `${slug} should start with <svg`).toBe(true);
+    expect(svg.includes("viewBox"), `${slug} should carry a viewBox`).toBe(true);
+    expect(/<script/i.test(svg), `${slug} must not contain <script>`).toBe(false);
+  }
 });

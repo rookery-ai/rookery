@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router";
@@ -154,4 +154,28 @@ test("the settings rail item is a gear, not an avatar monogram", async () => {
   expect(settings.querySelector("svg.lucide-settings")).not.toBeNull();
   // The old avatar rendered the owner's initial as text inside a circle.
   expect(settings.textContent).toBe("");
+});
+
+test("the rail offers a Lock control, positioned above Settings", async () => {
+  // Lock is an action, not a destination, so it sits with the account-level
+  // controls at the bottom of the rail rather than among the nav items.
+  wrap();
+  const lock = await screen.findByLabelText("Lock");
+  const settings = screen.getByLabelText("Profile & Settings");
+  expect(lock.tagName).toBe("BUTTON");
+  // DOCUMENT_POSITION_FOLLOWING === 4: settings comes after lock in the DOM.
+  expect(lock.compareDocumentPosition(settings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test("clicking Lock posts to the lock endpoint", async () => {
+  wrap();
+  const lock = await screen.findByLabelText("Lock");
+  await userEvent.click(lock);
+
+  await waitFor(() => {
+    const posted = vi.mocked(fetch).mock.calls.some(
+      ([url]) => String(url) === "/api/v1/auth/lock",
+    );
+    expect(posted).toBe(true);
+  });
 });

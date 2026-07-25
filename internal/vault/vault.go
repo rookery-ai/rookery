@@ -184,15 +184,18 @@ func (v *Vault) EnsureScaffold(workspaceID string) error {
 		}
 	}
 	readme := filepath.Join(root, "README.md")
-	if _, err := os.Stat(readme); errors.Is(err, os.ErrNotExist) {
-		content := "# Knowledge Base\n\n" +
-			"This is your personal knowledge base. Everything you and your agents " +
-			"create lives here as interlinked markdown notes.\n\n" +
-			"- [[notes]] — your notes, journals, plans and todos\n" +
-			"- [[memory]] — your profile and context (USER.md, SOUL.md, and more)\n" +
-			"- [[agents]] — your agents and their run logs\n" +
-			"- [[chats]] — chat transcripts\n"
-		if err := writeFileAtomic(readme, []byte(content), 0o640); err != nil {
+	switch existing, err := os.ReadFile(readme); {
+	case errors.Is(err, os.ErrNotExist):
+		if err := writeFileAtomic(readme, []byte(readmeTemplate), 0o640); err != nil {
+			return err
+		}
+	case err == nil && isPristineREADME(existing):
+		// An untouched home note from an older version: upgrade it, or a vault
+		// that already exists would keep the old four-line folder list forever
+		// and never see the improvement. Safe because isPristineREADME demands
+		// byte-equality with a template we shipped — anything the user edited
+		// cannot match, and is left exactly as it is.
+		if err := writeFileAtomic(readme, []byte(readmeTemplate), 0o640); err != nil {
 			return err
 		}
 	}

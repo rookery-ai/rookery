@@ -93,7 +93,6 @@ export function CreateWorkspaceDialog({
   open, onClose,
 }: { open: boolean; onClose: () => void }) {
   const [name, setName] = useState("");
-  const [about, setAbout] = useState("");
   const [error, setError] = useState("");
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -101,7 +100,10 @@ export function CreateWorkspaceDialog({
   async function create(e: React.FormEvent) {
     e.preventDefault();
     try {
-      await api.post<Workspace>("/api/v1/workspaces", { name, about });
+      // Name only. "What is this workspace about?" is asked once, by the
+      // setup wizard the new workspace lands in — it was previously collected
+      // here as well, so the same question appeared twice in a row.
+      await api.post<Workspace>("/api/v1/workspaces", { name });
       // A freshly created workspace is auto-activated — same tenant switch as
       // entering one, so the previous workspace's cached rows must go too.
       await resetWorkspaceScopedCache(qc);
@@ -124,10 +126,6 @@ export function CreateWorkspaceDialog({
           <div className="space-y-1.5">
             <Label htmlFor="ws-name">Name</Label>
             <Input id="ws-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="ws-about">About (optional)</Label>
-            <Input id="ws-about" value={about} onChange={(e) => setAbout(e.target.value)} />
           </div>
           {error && <p className="text-danger text-sm">{error}</p>}
           <Button type="submit" className="w-full">Create</Button>

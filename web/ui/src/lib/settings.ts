@@ -130,16 +130,15 @@ export function useChangeMasterPassword() {
   });
 }
 
-// ── Owner sections (workspaces / permissions / system settings / audit) ────
+// ── Owner sections (workspaces / system status / audit) ────────────────────
 // Mirrors web/api_workspaces.go's DTOs. These endpoints are owner-gated
 // (requireOwnerAPI, not requireActiveWorkspaceAPI) — no workspace-master-
 // password re-entry is needed to read/write them.
 
+// Read-only runtime status. The former claude_bin / coder_timeout /
+// agent_timeout / memory_mb fields were removed: nothing on the server ever
+// read them back, so the form only looked like it configured the system.
 export type AdminSettings = {
-  claude_bin: string;
-  coder_timeout: string;
-  agent_timeout: string;
-  memory_mb: string;
   sandbox_on: boolean;
   landlock_ready: boolean;
 };
@@ -148,22 +147,6 @@ export function useAdminSettings() {
   return useQuery({
     queryKey: ["admin-settings"],
     queryFn: () => api.get<AdminSettings>("/api/v1/admin/settings"),
-  });
-}
-
-export type SaveAdminSettingsInput = {
-  claude_bin: string;
-  coder_timeout: string;
-  agent_timeout: string;
-  memory_mb: string;
-};
-
-export function useSaveAdminSettings() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: SaveAdminSettingsInput) =>
-      api.put<AdminSettings>("/api/v1/admin/settings", input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-settings"] }),
   });
 }
 
@@ -177,34 +160,33 @@ export type AuditLogEntry = {
   created_at: string;
 };
 
-export function useAuditLog(limit = 100) {
+// Filters are sent to the server, not applied to the returned page: narrowing
+// an already-truncated list of the most recent N events would report "no
+// matches" for something that merely happened N+1 events ago.
+export type AuditLogFilters = {
+  workspace_id?: string;
+  action?: string;
+  q?: string;
+  since_days?: number;
+  limit?: number;
+};
+
+export function useAuditLog(filters: AuditLogFilters = {}) {
+  const params = new URLSearchParams();
+  params.set("limit", String(filters.limit ?? 100));
+  if (filters.workspace_id) params.set("workspace_id", filters.workspace_id);
+  if (filters.action) params.set("action", filters.action);
+  if (filters.q) params.set("q", filters.q);
+  if (filters.since_days) params.set("since_days", String(filters.since_days));
+  const qs = params.toString();
+
   return useQuery({
-    queryKey: ["audit-log", limit],
-    queryFn: () => api.get<{ logs: AuditLogEntry[] }>(`/api/v1/admin/audit?limit=${limit}`),
-  });
-}
-
-// Mirrors apiPermEntry.
-export type PermissionEntry = { name: string; granted: boolean };
-
-export function useWorkspacePermissions(workspaceID: string | null) {
-  return useQuery({
-    queryKey: ["workspace-permissions", workspaceID],
-    queryFn: () =>
-      api.get<{ permissions: PermissionEntry[] }>(
-        `/api/v1/workspaces/${workspaceID}/permissions`,
-      ),
-    enabled: !!workspaceID,
-  });
-}
-
-export function useSaveWorkspacePermissions() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, grant, revoke }: { id: string; grant: string[]; revoke: string[] }) =>
-      api.put<{ ok: boolean }>(`/api/v1/workspaces/${id}/permissions`, { grant, revoke }),
-    onSuccess: (_data, vars) =>
-      qc.invalidateQueries({ queryKey: ["workspace-permissions", vars.id] }),
+    queryKey: ["audit-log", qs],
+    // `actions` is the distinct set across the WHOLE log, not just this page,
+    // so the action picker keeps offering a value even while it is selected
+    // and has narrowed the results to a handful of rows.
+    queryFn: () => api.get<{ logs: AuditLogEntry[]; actions: string[] }>(`/api/v1/admin/audit?${qs}`),
+    placeholderData: (prev) => prev,
   });
 }
 

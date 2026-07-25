@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Search } from "lucide-react";
+import { Search, MessageSquare, Puzzle } from "lucide-react";
 import { ContextPane, useSlideOver } from "@/components/shell/AppShell";
 import { ContextPaneHeader } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
@@ -46,13 +46,17 @@ const MAX_ERROR_PARAM_LEN = 200;
 
 function formatConnectionError(raw: string): string {
   const trimmed =
-    raw.length > MAX_ERROR_PARAM_LEN ? raw.slice(0, MAX_ERROR_PARAM_LEN) + "…" : raw;
+    raw.length > MAX_ERROR_PARAM_LEN
+      ? raw.slice(0, MAX_ERROR_PARAM_LEN) + "…"
+      : raw;
   return `Connection failed: ${trimmed}`;
 }
 
 function ErrorBanner({ message }: { message: string }) {
   return (
-    <div className="mb-3 rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">{message}</div>
+    <div className="mb-3 rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">
+      {message}
+    </div>
   );
 }
 
@@ -67,9 +71,15 @@ function LandingBanner({
   message: string;
   onDismiss: () => void;
 }) {
-  const tone = kind === "success" ? "bg-ok-soft text-ok" : "bg-danger-soft text-danger";
+  const tone =
+    kind === "success" ? "bg-ok-soft text-ok" : "bg-danger-soft text-danger";
   return (
-    <div className={cn("mb-4 flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm", tone)}>
+    <div
+      className={cn(
+        "mb-4 flex items-center justify-between gap-2 rounded-md px-3 py-2 text-sm",
+        tone,
+      )}
+    >
       <span>{message}</span>
       <button
         type="button"
@@ -148,7 +158,9 @@ function ServiceTile({
       className="flex flex-col items-center gap-1.5 rounded-lg border border-border bg-background p-3 text-center transition-colors hover:border-primary/40 hover:shadow-sm"
     >
       <ProviderLogo name={provider.name} size={30} />
-      <div className="w-full truncate text-xs font-semibold">{provider.label}</div>
+      <div className="w-full truncate text-xs font-semibold">
+        {provider.label}
+      </div>
       {count === 0 ? (
         <div className="text-[11px] text-muted-2">Connect</div>
       ) : needsReauth ? (
@@ -167,12 +179,25 @@ function ServiceTile({
 // skills) from keyless scraping to a real search API — never required, only
 // a reliability upgrade. See internal/websearch.KeySecretNames.
 
-const SEARCH_KEY_PROVIDERS: { id: SearchKeyProvider; label: string; getKeyUrl: string }[] = [
-  { id: "brave", label: "Brave Search", getKeyUrl: "https://brave.com/search/api/" },
+const SEARCH_KEY_PROVIDERS: {
+  id: SearchKeyProvider;
+  label: string;
+  getKeyUrl: string;
+}[] = [
+  {
+    id: "brave",
+    label: "Brave Search",
+    getKeyUrl: "https://brave.com/search/api/",
+  },
   { id: "tavily", label: "Tavily", getKeyUrl: "https://tavily.com/" },
 ];
 
-function SearchKeyRow({ provider, label, getKeyUrl, configured }: {
+function SearchKeyRow({
+  provider,
+  label,
+  getKeyUrl,
+  configured,
+}: {
   provider: SearchKeyProvider;
   label: string;
   getKeyUrl: string;
@@ -214,27 +239,34 @@ function SearchKeyRow({ provider, label, getKeyUrl, configured }: {
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-border bg-background p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate font-semibold">{label}</div>
-          {configured ? (
-            <div className="flex items-center gap-1 text-xs text-ok">
-              <span className="size-1.5 rounded-full bg-ok" /> Configured
-            </div>
-          ) : (
-            <div className="text-xs text-muted-2">Not configured</div>
-          )}
-          <a
-            href={getKeyUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="text-xs text-muted-2 underline underline-offset-2 hover:text-foreground"
-          >
-            Get a key →
-          </a>
+        <div className="flex min-w-0 items-center gap-3">
+          <ProviderLogo name={provider} size={30} />
+          <div className="min-w-0">
+            <div className="truncate font-semibold">{label}</div>
+            {configured ? (
+              <div className="flex items-center gap-1 text-xs text-ok">
+                <span className="size-1.5 rounded-full bg-ok" /> Configured
+              </div>
+            ) : (
+              <div className="text-xs text-muted-2">Not configured</div>
+            )}
+            <a
+              href={getKeyUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-muted-2 underline underline-offset-2 hover:text-foreground"
+            >
+              Get a key →
+            </a>
+          </div>
         </div>
         {!editing && (
           <div className="flex shrink-0 gap-2">
-            <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setEditing(true)}
+            >
               {configured ? "Replace" : "Add key"}
             </Button>
             {configured && (
@@ -261,7 +293,11 @@ function SearchKeyRow({ provider, label, getKeyUrl, configured }: {
             autoComplete="off"
             className="h-8 text-sm"
           />
-          <Button size="sm" onClick={() => void handleSave()} disabled={saveMutation.isPending || !key.trim()}>
+          <Button
+            size="sm"
+            onClick={() => void handleSave()}
+            disabled={saveMutation.isPending || !key.trim()}
+          >
             {saveMutation.isPending ? "Saving…" : "Save"}
           </Button>
           <Button variant="outline" size="sm" onClick={cancelEdit}>
@@ -327,7 +363,10 @@ export default function ConnectionsPage() {
   const landingBanner = bannerDismissed
     ? null
     : initialErrorParam.current
-      ? { kind: "error" as const, message: formatConnectionError(initialErrorParam.current) }
+      ? {
+          kind: "error" as const,
+          message: formatConnectionError(initialErrorParam.current),
+        }
       : initialConnected.current
         ? {
             kind: "success" as const,
@@ -391,7 +430,13 @@ export default function ConnectionsPage() {
                 onClick={() => scrollTo(chatAppsRef)}
                 className="flex items-center justify-between rounded-md px-2.5 py-1.5 text-sm font-medium hover:bg-chrome"
               >
-                <span>💬 Chat apps</span>
+                <span className="flex items-center gap-2">
+                  <MessageSquare
+                    className="size-4 text-muted-2"
+                    aria-hidden="true"
+                  />
+                  Chat apps
+                </span>
                 <span className="text-muted-2">{platforms.length}</span>
               </button>
               <button
@@ -399,7 +444,10 @@ export default function ConnectionsPage() {
                 onClick={() => scrollTo(servicesRef)}
                 className="flex items-center justify-between rounded-md px-2.5 py-1.5 text-sm font-medium hover:bg-chrome"
               >
-                <span>🧩 Services</span>
+                <span className="flex items-center gap-2">
+                  <Puzzle className="size-4 text-muted-2" aria-hidden="true" />
+                  Services
+                </span>
                 <span className="text-muted-2">
                   {connectedServicesCount} of {services.length}
                 </span>
@@ -409,7 +457,10 @@ export default function ConnectionsPage() {
                 onClick={() => scrollTo(webSearchRef)}
                 className="flex items-center justify-between rounded-md px-2.5 py-1.5 text-sm font-medium hover:bg-chrome"
               >
-                <span>🔎 Web search</span>
+                <span className="flex items-center gap-2">
+                  <Search className="size-4 text-muted-2" aria-hidden="true" />
+                  Web search
+                </span>
                 <span className="text-muted-2">
                   {configuredSearchKeysCount} of {SEARCH_KEY_PROVIDERS.length}
                 </span>
@@ -417,15 +468,17 @@ export default function ConnectionsPage() {
             </div>
             <div className="rounded-lg bg-muted-surface p-3 text-xs leading-relaxed text-foreground">
               <p>
-                <b className="text-foreground">Chat apps</b> are where you talk to your assistant.
+                <b className="text-foreground">Chat apps</b> are where you talk
+                to your assistant.
               </p>
               <p className="mt-2">
-                <b className="text-foreground">Services</b> are the accounts your agents can act on
-                — Gmail, Notion, GitHub…
+                <b className="text-foreground">Services</b> are the accounts
+                your agents can act on — Gmail, Notion, GitHub…
               </p>
               <p className="mt-2">
-                <b className="text-foreground">Web search</b> lets you add a search API key for more
-                reliable results everywhere search happens.
+                <b className="text-foreground">Web search</b> lets you add a
+                search API key for more reliable results everywhere search
+                happens.
               </p>
             </div>
           </div>
@@ -446,22 +499,36 @@ export default function ConnectionsPage() {
           <p className="mb-4 text-sm text-muted-2">
             Talk to your workspace from the messenger you already use.
           </p>
-          {connectorsQuery.isError && <ErrorBanner message={errorMessage(connectorsQuery.error)} />}
-          {connectorsQuery.isLoading && <LoadingNote text="Loading chat apps…" />}
+          {connectorsQuery.isError && (
+            <ErrorBanner message={errorMessage(connectorsQuery.error)} />
+          )}
+          {connectorsQuery.isLoading && (
+            <LoadingNote text="Loading chat apps…" />
+          )}
           {!connectorsQuery.isLoading &&
             !connectorsQuery.isError &&
             filteredPlatforms.length === 0 && (
               <EmptyNote
-                text={q ? `No chat apps match “${query.trim()}”.` : "No chat apps available."}
+                text={
+                  q
+                    ? `No chat apps match “${query.trim()}”.`
+                    : "No chat apps available."
+                }
               />
             )}
-          {!connectorsQuery.isLoading && !connectorsQuery.isError && filteredPlatforms.length > 0 && (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {filteredPlatforms.map((p) => (
-                <ChatAppCard key={p.platform} platform={p} onOpen={openChatWizard} />
-              ))}
-            </div>
-          )}
+          {!connectorsQuery.isLoading &&
+            !connectorsQuery.isError &&
+            filteredPlatforms.length > 0 && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {filteredPlatforms.map((p) => (
+                  <ChatAppCard
+                    key={p.platform}
+                    platform={p}
+                    onOpen={openChatWizard}
+                  />
+                ))}
+              </div>
+            )}
         </section>
 
         <section ref={servicesRef} className="scroll-mt-4">
@@ -469,30 +536,53 @@ export default function ConnectionsPage() {
           <p className="mb-4 text-sm text-muted-2">
             Give your agents superpowers — connect the tools they'll work with.
           </p>
-          {servicesQuery.isError && <ErrorBanner message={errorMessage(servicesQuery.error)} />}
+          {servicesQuery.isError && (
+            <ErrorBanner message={errorMessage(servicesQuery.error)} />
+          )}
           {servicesQuery.isLoading && <LoadingNote text="Loading services…" />}
-          {!servicesQuery.isLoading && !servicesQuery.isError && filteredServices.length === 0 && (
-            <EmptyNote
-              text={q ? `No services match “${query.trim()}”.` : "No services available."}
-            />
-          )}
-          {!servicesQuery.isLoading && !servicesQuery.isError && filteredServices.length > 0 && (
-            <div className={cn("grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4")}>
-              {filteredServices.map((p) => (
-                <ServiceTile key={p.name} provider={p} onOpen={openServiceWizard} />
-              ))}
-            </div>
-          )}
+          {!servicesQuery.isLoading &&
+            !servicesQuery.isError &&
+            filteredServices.length === 0 && (
+              <EmptyNote
+                text={
+                  q
+                    ? `No services match “${query.trim()}”.`
+                    : "No services available."
+                }
+              />
+            )}
+          {!servicesQuery.isLoading &&
+            !servicesQuery.isError &&
+            filteredServices.length > 0 && (
+              <div
+                className={cn(
+                  "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4",
+                )}
+              >
+                {filteredServices.map((p) => (
+                  <ServiceTile
+                    key={p.name}
+                    provider={p}
+                    onOpen={openServiceWizard}
+                  />
+                ))}
+              </div>
+            )}
         </section>
 
         <section ref={webSearchRef} className="mt-10 scroll-mt-4">
           <h2 className="text-lg font-bold">Web search</h2>
           <p className="mb-4 text-sm text-muted-2">
-            A search API key makes web search more reliable across your whole workspace — chat,
-            agents, and skills. Without one, keyless search still works.
+            A search API key makes web search more reliable across your whole
+            workspace — chat, agents, and skills. Without one, keyless search
+            still works.
           </p>
-          {searchKeysQuery.isError && <ErrorBanner message={errorMessage(searchKeysQuery.error)} />}
-          {searchKeysQuery.isLoading && <LoadingNote text="Loading web search settings…" />}
+          {searchKeysQuery.isError && (
+            <ErrorBanner message={errorMessage(searchKeysQuery.error)} />
+          )}
+          {searchKeysQuery.isLoading && (
+            <LoadingNote text="Loading web search settings…" />
+          )}
           {!searchKeysQuery.isLoading && !searchKeysQuery.isError && (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {SEARCH_KEY_PROVIDERS.map((p) => (

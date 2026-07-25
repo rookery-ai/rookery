@@ -34,7 +34,7 @@ export default function FolderPage({
     is_dir: true,
     system: false,
   };
-  const children = sortNodes(tree?.nodes ?? [], tree?.order ?? []);
+  const children = sortNodes(tree?.nodes ?? [], tree?.order ?? [], path === "");
 
   return (
     <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-6 py-8">

@@ -39,14 +39,6 @@ type Workspace struct {
 	UpdatedAt  time.Time
 }
 
-type WorkspacePermission struct {
-	ID          string
-	WorkspaceID string
-	Permission  string
-	GrantedBy   string
-	GrantedAt   time.Time
-}
-
 type PlatformConnection struct {
 	ID              string
 	WorkspaceID     string

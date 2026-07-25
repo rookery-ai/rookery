@@ -33,6 +33,8 @@ func (s *Server) registerAuthAPI(g *echo.Group) {
 	g.POST("/auth/login", s.apiLogin)
 	g.POST("/auth/logout", s.apiLogout)
 	g.POST("/auth/change-password", s.apiChangePassword, s.requireOwnerAPI)
+	g.POST("/auth/lock", s.apiLock, s.requireOwnerAPI)
+	g.POST("/auth/unlock", s.apiUnlock, s.requireOwnerAPI)
 }
 
 func (s *Server) apiAuthSession(c echo.Context) error {
@@ -56,7 +58,67 @@ func (s *Server) apiAuthSession(c echo.Context) error {
 	if w, ok := s.activeWorkspace(c); ok {
 		out["workspace"] = toAPIWorkspace(w)
 	}
+	// Reported so a reload lands back on the lock screen. The lock is a server
+	// flag, not a client overlay, so this is the SPA's only way to know.
+	out["locked"] = s.isLocked(c)
 	return c.JSON(http.StatusOK, out)
+}
+
+// ── Screen lock ─────────────────────────────────────────────────────────────
+//
+// Locking leaves the session's owner_id AND active_workspace_id in place — the
+// point is to blank the screen without giving up the entered workspace, which
+// would otherwise cost a master-password re-entry anyway.
+//
+// The flag lives on the session rather than in the browser because a lock a
+// reload clears is theatre: the API would still answer every request, and
+// "unlock requires the master password" would not be true of anything. While
+// locked, apiLockGate 423s the owner- and workspace-scoped routes; session,
+// unlock and logout stay reachable so the SPA can render the lock screen and
+// the user can always escape it.
+//
+// The threat model is someone walking up to an unattended screen, not someone
+// who already holds the session cookie.
+
+func (s *Server) apiLock(c echo.Context) error {
+	o := c.Get("owner").(*db.Owner)
+	if err := s.setLocked(c, true); err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
+	}
+	s.audit.Log("", "lock_ui", "owner:"+o.ID, "", c.RealIP())
+	return c.JSON(http.StatusOK, map[string]any{"ok": true, "locked": true})
+}
+
+func (s *Server) apiUnlock(c echo.Context) error {
+	o := c.Get("owner").(*db.Owner)
+	var req struct {
+		MasterPassword string `json:"master_password"`
+	}
+	if err := bindAPI(c, &req); err != nil {
+		return err
+	}
+	w, ok := s.activeWorkspace(c)
+	if !ok {
+		// Locked with no workspace entered: nothing tenant-scoped to protect,
+		// so clearing the flag returns the owner to the workspace picker
+		// rather than stranding them at a prompt no password can satisfy.
+		if err := s.setLocked(c, false); err != nil {
+			return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
+		}
+		return c.JSON(http.StatusOK, map[string]any{"ok": true, "locked": false})
+	}
+	// Same check as entering the workspace: compare against the system-key
+	// encrypted copy. Nothing about secret handling changes — the master
+	// password is not held in the session before or after this.
+	if !s.verifyWorkspaceMasterPassword(w, req.MasterPassword) {
+		s.audit.Log(w.ID, "unlock_failed", "owner:"+o.ID, "", c.RealIP())
+		return jsonErr(c, http.StatusUnauthorized, "invalid_master_password", "wrong master password")
+	}
+	if err := s.setLocked(c, false); err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
+	}
+	s.audit.Log(w.ID, "unlock_ui", "owner:"+o.ID, "", c.RealIP())
+	return c.JSON(http.StatusOK, map[string]any{"ok": true, "locked": false})
 }
 
 func (s *Server) apiLogin(c echo.Context) error {

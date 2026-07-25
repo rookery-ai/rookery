@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -986,45 +987,6 @@ func scanInboxMessage(s scanner) (*InboxMessage, error) {
 	return &m, nil
 }
 
-// ── User permissions ───────────────────────────────────────────────────────
-
-func (d *DB) GrantPermission(p *WorkspacePermission) error {
-	_, err := d.Exec(`INSERT OR IGNORE INTO workspace_permissions(id,workspace_id,permission,granted_by,granted_at)
-		VALUES(?,?,?,?,datetime('now'))`,
-		p.ID, p.WorkspaceID, p.Permission, p.GrantedBy)
-	return err
-}
-
-func (d *DB) RevokePermission(workspaceID, permission string) error {
-	_, err := d.Exec(`DELETE FROM workspace_permissions WHERE workspace_id=? AND permission=?`, workspaceID, permission)
-	return err
-}
-
-func (d *DB) HasPermission(workspaceID, permission string) (bool, error) {
-	var count int
-	err := d.QueryRow(`SELECT COUNT(*) FROM workspace_permissions WHERE workspace_id=? AND permission=?`, workspaceID, permission).Scan(&count)
-	return count > 0, err
-}
-
-func (d *DB) ListPermissions(workspaceID string) ([]string, error) {
-	rows, err := d.Query(`SELECT permission FROM workspace_permissions WHERE workspace_id=?`, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var perms []string
-	for rows.Next() {
-		var p string
-		if err := rows.Scan(&p); err != nil {
-			return nil, err
-		}
-		perms = append(perms, p)
-	}
-	return perms, rows.Err()
-}
-
-// ── Audit log ──────────────────────────────────────────────────────────────
-
 func (d *DB) WriteAuditLog(a *AuditLog) error {
 	_, err := d.Exec(`INSERT INTO audit_logs(id,workspace_id,action,target,detail,ip_address,created_at)
 		VALUES(?,?,?,?,?,?,datetime('now'))`,
@@ -1032,12 +994,92 @@ func (d *DB) WriteAuditLog(a *AuditLog) error {
 	return err
 }
 
-func (d *DB) ListAuditLogs(limit int) ([]*AuditLog, error) {
-	rows, err := d.Query(`SELECT id,workspace_id,action,target,detail,ip_address,created_at
-		FROM audit_logs ORDER BY created_at DESC LIMIT ?`, limit)
+// AuditLogFilter narrows a ListAuditLogs query. A zero value means "no
+// filtering" and behaves exactly like the old unfiltered call.
+//
+// Filtering is done in SQL rather than over an already-truncated page: a
+// filter applied to the last 100 rows client-side would report "no matches"
+// for an action that simply happened 101 events ago, which is worse than no
+// filter at all because it looks like an answer.
+type AuditLogFilter struct {
+	WorkspaceID string    // exact match; "" means any
+	Action      string    // exact match; "" means any
+	Query       string    // substring over target/detail/ip; "" means any
+	Since       time.Time // only entries at or after this instant; zero means any
+	Limit       int       // <= 0 falls back to 100
+}
+
+// DistinctAuditActions returns every action value present in the log, sorted,
+// so the UI can offer a picker instead of asking the operator to recall exact
+// action strings.
+func (d *DB) DistinctAuditActions() ([]string, error) {
+	rows, err := d.Query(`SELECT DISTINCT action FROM audit_logs ORDER BY action`)
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// ListAuditLogsFiltered is ListAuditLogs with an optional filter.
+func (d *DB) ListAuditLogsFiltered(f AuditLogFilter) ([]*AuditLog, error) {
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	q := `SELECT id,workspace_id,action,target,detail,ip_address,created_at
+		FROM audit_logs WHERE 1=1`
+	args := []any{}
+	if f.WorkspaceID != "" {
+		q += ` AND workspace_id = ?`
+		args = append(args, f.WorkspaceID)
+	}
+	if f.Action != "" {
+		q += ` AND action = ?`
+		args = append(args, f.Action)
+	}
+	if f.Query != "" {
+		// LIKE with escaped wildcards — a user searching for a literal "%"
+		// should not silently match everything.
+		like := "%" + escapeLike(f.Query) + "%"
+		q += ` AND (target LIKE ? ESCAPE '\' OR detail LIKE ? ESCAPE '\' OR ip_address LIKE ? ESCAPE '\')`
+		args = append(args, like, like, like)
+	}
+	if !f.Since.IsZero() {
+		// created_at is stored by SQLite's datetime('now'), which is UTC.
+		q += ` AND created_at >= ?`
+		args = append(args, f.Since.UTC().Format("2006-01-02 15:04:05"))
+	}
+	q += ` ORDER BY created_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := d.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	return scanAuditLogs(rows)
+}
+
+func escapeLike(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
+func (d *DB) ListAuditLogs(limit int) ([]*AuditLog, error) {
+	return d.ListAuditLogsFiltered(AuditLogFilter{Limit: limit})
+}
+
+// scanAuditLogs consumes and closes rows shaped like the audit_logs SELECT
+// above. Shared so the filtered and unfiltered paths cannot decode differently.
+func scanAuditLogs(rows *sql.Rows) ([]*AuditLog, error) {
 	defer rows.Close()
 	var logs []*AuditLog
 	for rows.Next() {

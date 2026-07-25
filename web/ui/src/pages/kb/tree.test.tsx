@@ -161,14 +161,14 @@ test("memory/ sorts before muted system dirs and is NOT styled muted, despite th
   // chats/ is untouched — still muted, as a real system dir should be.
   expect(chatsRow?.className).toMatch(/text-muted-2/);
 
-  // Sort order: user content (notes, memory) before system (chats), dirs
-  // alphabetical within each group -> memory, notes, chats.
+  // Root order is the fixed default-folder ranking: memory, agents, chats,
+  // skills, then anything else, with notes/ deliberately last.
   const rows = screen.getAllByRole("button").map((el) => el.textContent);
   const memoryIndex = rows.findIndex((t) => t?.includes("Memory"));
   const notesIndex = rows.findIndex((t) => t?.includes("Notes"));
   const chatsIndex = rows.findIndex((t) => t?.includes("Chats"));
   expect(memoryIndex).toBeLessThan(chatsIndex);
-  expect(notesIndex).toBeLessThan(chatsIndex);
+  expect(chatsIndex).toBeLessThan(notesIndex);
 });
 
 test("row dropdown opens a dialog (rename) and the tree stays interactive after closing it", async () => {
@@ -453,7 +453,7 @@ test("reordering persists only the user's own rows, not system dirs", async () =
   expect(order?.body).toEqual({ dir: "", names: ["README.md", "notes"] });
 });
 
-test("a newly created note still sorts above system dirs after a reorder", async () => {
+test("a note created after a reorder is not pinned into the saved order", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL) => {
@@ -479,8 +479,11 @@ test("a newly created note still sorts above system dirs after a reorder", async
   renderTree();
   await screen.findByText("Chats");
 
+  // README.md and notes/ are pinned by the saved drag order. brand-new.md was
+  // created after that drag, so it is NOT given a slot inside the pinned block
+  // — it falls through to the derived rules, where dirs precede files.
   const labels = screen.getAllByRole("button").map((el) => el.textContent?.trim()).filter(Boolean);
-  expect(labels).toEqual(["README.md", "Notes", "brand-new.md", "Chats"]);
+  expect(labels).toEqual(["README.md", "Notes", "Chats", "brand-new.md"]);
 });
 
 // System dirs are excluded from the saved order, so a reorder aimed at one
