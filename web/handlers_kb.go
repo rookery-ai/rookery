@@ -40,6 +40,19 @@ func (s *Server) enrichKBDisplayNames(workspaceID, parentPath string, nodes []va
 			}
 			continue
 		}
+		// Files inside an agent's own directory keep their REAL filename in the tree.
+		// kbDisplayTitle qualifies them as "<Agent> — <stem>", which is right for a
+		// search hit (it arrives with no folder context to say which agent it belongs
+		// to) and wrong here: the tree already shows the agent name on the parent
+		// folder, so the prefix is pure noise. Worse, the stem strips the extension —
+		// AGENT.md rendered as "Digest — AGENT", state.md as "Digest — state", and
+		// tools/fetch.py as "Digest — fetch". For a user's own note the filename IS
+		// the title so dropping ".md" reads naturally, but these are real files whose
+		// extension is part of their identity, and the browser was showing a name that
+		// matched nothing on disk.
+		if strings.HasPrefix(strings.Trim(n.Path, "/"), "agents/") {
+			continue // empty DisplayName → the API falls back to n.Name
+		}
 		if title := s.kbDisplayTitle(workspaceID, n.Path); title != "" && title != kbPathStem(n.Path) {
 			n.DisplayName = title
 		}

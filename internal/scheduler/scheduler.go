@@ -94,15 +94,13 @@ func (s *Scheduler) fire(ctx context.Context, sched *db.AgentSchedule, firedAt t
 		slog.Error("scheduler: update schedule times", "schedule_id", sched.ID, "err", err)
 	}
 
-	// Skip the coder run entirely if the user has no platform connected.
-	// The agent cannot deliver output and running it wastes API quota.
-	// next_run_at is already advanced above, so the schedule stays live.
-	if !s.db.HasPlatformIdentity(sched.WorkspaceID) {
-		slog.Warn("scheduler: skipping agent run — user has no platform connected",
-			"agent_id", sched.AgentID, "user_id", sched.WorkspaceID, "next_run", next)
-		return
-	}
-
+	// A missing chat platform is NOT a reason to skip the run. This used to return early
+	// on the rationale that "the agent cannot deliver output and running it wastes API
+	// quota" — true when written, false since the inbox landed: the runner records every
+	// delivered notification to the inbox (recordInbox), which has its own UI, unread
+	// badge, and vault reflection. Skipping meant a workspace with no chat app connected
+	// had NO scheduled agents run at all, which reads as the scheduler being broken.
+	// The chat send remains best-effort inside the runner; the inbox always gets it.
 	slog.Info("scheduler: firing agent", "agent_id", sched.AgentID, "user_id", sched.WorkspaceID, "next_run", next)
 
 	// Decrypt the user's stored master password so secrets are injected at run time.

@@ -497,3 +497,57 @@ func TestNoEventTriggersGuidance(t *testing.T) {
 			"design-facing block must not use the forbidden term %q", banned)
 	}
 }
+
+// TestForceTier1Block guards the one-attempt override that follows a build whose authored
+// helper script was never confirmed to run. The retry previously carried only an advisory
+// History note offering two options — including "run the script and prove it works", the
+// approach that had just failed — so a weak model regenerated the same unverifiable script
+// and the user had to type "Dont build python script" by hand.
+//
+// Regression guard on prompt content: it proves the constraint is stated and absolute, not
+// that a given model obeys it.
+func TestForceTier1Block(t *testing.T) {
+	history := []ChatMessage{{Role: "user", Content: "scrape discounts"}}
+
+	for name, out := range map[string]string{
+		"create": BuildImplementationPrompt("x", history, ImplementationParams{
+			BackendType: BackendToolCalling, ForceTier1: true}),
+		// The edit prompt shares ImplementationParams, so an edit that trips the same gate
+		// must be constrained identically — otherwise the override silently applies to
+		// creates only.
+		"edit": BuildEditImplementationPrompt("x", history, ImplementationParams{
+			BackendType: BackendToolCalling, ForceTier1: true}),
+	} {
+		if !strings.Contains(out, "<mandatory_override>") {
+			t.Errorf("[%s] ForceTier1 prompt missing the override block", name)
+		}
+		if !strings.Contains(out, "create ZERO code files") {
+			t.Errorf("[%s] ForceTier1 prompt must forbid code files outright", name)
+		}
+		if !strings.Contains(out, "web_fetch") {
+			t.Errorf("[%s] ForceTier1 prompt must name the direct tools to use instead of a script", name)
+		}
+		// The override contradicts the tier reasoning above it on purpose. Saying so is what
+		// stops a weak model from resolving the conflict in favor of the earlier text.
+		if !strings.Contains(out, "overrides") {
+			t.Errorf("[%s] ForceTier1 block must declare that it overrides the tier reasoning above", name)
+		}
+	}
+}
+
+// TestForceTier1AbsentByDefault: the override must never appear on an ordinary build. It
+// forbids scripts entirely, so leaking it into a normal attempt would break every agent
+// that legitimately needs one.
+func TestForceTier1AbsentByDefault(t *testing.T) {
+	history := []ChatMessage{{Role: "user", Content: "scrape discounts"}}
+	for name, out := range map[string]string{
+		"create":      BuildImplementationPrompt("x", history, ImplementationParams{BackendType: BackendToolCalling}),
+		"edit":        BuildEditImplementationPrompt("x", history, ImplementationParams{BackendType: BackendToolCalling}),
+		"full coder":  BuildImplementationPrompt("x", history, ImplementationParams{BackendType: BackendFullCoder}),
+		"zero params": BuildImplementationPrompt("x", history, ImplementationParams{}),
+	} {
+		if strings.Contains(out, "<mandatory_override>") {
+			t.Errorf("[%s] prompt must NOT carry the ForceTier1 override when the flag is unset", name)
+		}
+	}
+}
