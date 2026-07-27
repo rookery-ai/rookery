@@ -1,0 +1,19 @@
+name: pinterest
+label: Pinterest
+category: Publishing & Media
+authorize_url: https://www.pinterest.com/oauth/
+token_url: https://api.pinterest.com/v5/oauth/token
+userinfo_url: https://api.pinterest.com/v5/user_account
+identity_path: username
+token_auth: basic
+default_scopes:
+  - boards:read
+  - pins:read
+  - pins:write
+setup_url: https://developers.pinterest.com/apps
+setup_steps:
+  - "IMPORTANT: a TRIAL-access app creates SANDBOX pins visible only to you, capped at 1000 requests/day. Standard access requires a demo video and 1-4 weeks of review."
+  - "Go to Pinterest Developers → My apps → create an app (a business account is required)."
+  - "Add the redirect URI shown above exactly."
+  - "Copy the App ID and App secret key and paste them below."
+  - "Trial access is usually granted within a business day or two; request Standard when you need real, publicly visible pins."

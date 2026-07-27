@@ -38,7 +38,7 @@ type TokenSet struct {
 // auth_parent can request ITS OWN scopes against the PARENT's authorize endpoint.
 func (p Provider) ConsentURL(clientID, redirectURI, state string, scopes []string) string {
 	q := url.Values{}
-	q.Set("client_id", clientID)
+	q.Set(p.ClientIDParam(), clientID)
 	q.Set("redirect_uri", redirectURI)
 	q.Set("response_type", "code")
 	if len(scopes) > 0 { // Notion sends no scope param
@@ -61,7 +61,7 @@ func (c OAuthClient) tokenRequest(ctx context.Context, p Provider, form url.Valu
 	// token_auth: "basic" sends client creds as HTTP Basic (Notion); default sends them in
 	// the form body (Google, GitHub, MS, Atlassian). For basic, strip them from the body.
 	if p.TokenAuth == "basic" {
-		form.Del("client_id")
+		form.Del(p.ClientIDParam())
 		form.Del("client_secret")
 	}
 	var bodyReader io.Reader
@@ -133,7 +133,7 @@ func (c OAuthClient) ExchangeCode(ctx context.Context, p Provider, clientID, cli
 	f := url.Values{}
 	f.Set("grant_type", "authorization_code")
 	f.Set("code", code)
-	f.Set("client_id", clientID)
+	f.Set(p.ClientIDParam(), clientID)
 	f.Set("client_secret", clientSecret)
 	f.Set("redirect_uri", redirectURI)
 	return c.tokenRequest(ctx, p, f, clientID, clientSecret)
@@ -152,7 +152,7 @@ func (c OAuthClient) Refresh(ctx context.Context, p Provider, clientID, clientSe
 	f := url.Values{}
 	f.Set("grant_type", "refresh_token")
 	f.Set("refresh_token", refreshToken)
-	f.Set("client_id", clientID)
+	f.Set(p.ClientIDParam(), clientID)
 	f.Set("client_secret", clientSecret)
 	ts, err := c.tokenRequest(ctx, p, f, clientID, clientSecret)
 	if err != nil {
@@ -174,9 +174,10 @@ func (c OAuthClient) Refresh(ctx context.Context, p Provider, clientID, clientSe
 // access token. Without it, the second renewal would have nothing to send.
 func (c OAuthClient) ExchangeLongLived(ctx context.Context, p Provider, clientID, clientSecret, currentToken string) (TokenSet, error) {
 	f := url.Values{}
-	f.Set("grant_type", "fb_exchange_token")
-	f.Set("fb_exchange_token", currentToken)
-	f.Set("client_id", clientID)
+	grant := p.ExchangeGrant()
+	f.Set("grant_type", grant)
+	f.Set(grant, currentToken)
+	f.Set(p.ClientIDParam(), clientID)
 	f.Set("client_secret", clientSecret)
 	ts, err := c.tokenRequest(ctx, p, f, clientID, clientSecret)
 	if err != nil {

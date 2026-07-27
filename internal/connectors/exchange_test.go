@@ -39,9 +39,17 @@ func TestOnlyMetaFamilyUsesExchange(t *testing.T) {
 		if !p.UsesTokenExchange() {
 			continue
 		}
-		if !contains(p.TokenURL, "graph.facebook.com") {
-			t.Errorf("provider %q uses the fb_exchange_token grant but its token endpoint "+
-				"is %q — that grant only exists on Meta", name, p.TokenURL)
+		// The token-exchange grant is a Meta-family mechanism (Facebook/Instagram use
+		// fb_exchange_token, Threads th_exchange_token). Asserting the HOST rather than
+		// a name list means a new Meta provider needs no edit here, while a non-Meta
+		// provider adopting the mode by mistake still fails.
+		metaHost := contains(p.TokenURL, "graph.facebook.com") || contains(p.TokenURL, "graph.threads.net")
+		if !metaHost {
+			t.Errorf("provider %q uses the token-exchange grant but its token endpoint "+
+				"is %q — that grant only exists on Meta-operated hosts", name, p.TokenURL)
+		}
+		if g := p.ExchangeGrant(); !contains(g, "_exchange_token") {
+			t.Errorf("provider %q has exchange grant %q, which is not an exchange grant", name, g)
 		}
 	}
 }
@@ -314,5 +322,96 @@ func TestXReadActionsRequireALimit(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("x_list_posts must require max — reads are billed per post; required=%v", schema.Required)
+	}
+}
+
+// ── Phase 4 remainder ────────────────────────────────────────────────────────
+
+// Threads uses th_exchange_token, not Meta's fb_exchange_token. Sending the wrong
+// grant name fails with an opaque error that never mentions the grant.
+func TestThreadsUsesItsOwnExchangeGrant(t *testing.T) {
+	reg, _ := LoadBundled()
+	p, ok := reg.ProviderByName("threads")
+	if !ok {
+		t.Fatal("threads provider not loaded")
+	}
+	if !p.UsesTokenExchange() {
+		t.Error("threads must use the exchange token mode")
+	}
+	if got := p.ExchangeGrant(); got != "th_exchange_token" {
+		t.Errorf("ExchangeGrant() = %q, want th_exchange_token", got)
+	}
+	// It is NOT a Meta alias: its own OAuth and API hosts.
+	if p.AuthParent != "" {
+		t.Errorf("threads must not alias another provider, got auth_parent=%q", p.AuthParent)
+	}
+	if !contains(p.TokenURL, "graph.threads.net") {
+		t.Errorf("token endpoint = %q, want graph.threads.net", p.TokenURL)
+	}
+}
+
+// The default must remain Meta's grant so the existing providers are unaffected.
+func TestExchangeGrantDefaultsToMeta(t *testing.T) {
+	reg, _ := LoadBundled()
+	p, _ := reg.ProviderByName("facebook")
+	if got := p.ExchangeGrant(); got != "fb_exchange_token" {
+		t.Errorf("facebook ExchangeGrant() = %q, want fb_exchange_token", got)
+	}
+}
+
+// TikTok calls the client id "client_key" in both the consent URL and the token
+// request; the default must stay client_id for everyone else.
+func TestTikTokUsesClientKey(t *testing.T) {
+	reg, _ := LoadBundled()
+	p, ok := reg.ProviderByName("tiktok")
+	if !ok {
+		t.Fatal("tiktok provider not loaded")
+	}
+	if got := p.ClientIDParam(); got != "client_key" {
+		t.Errorf("ClientIDParam() = %q, want client_key", got)
+	}
+	u := p.ConsentURL("CK123", "https://example.com/cb", "st", p.DefaultScopes)
+	if !contains(u, "client_key=CK123") {
+		t.Errorf("consent URL must carry client_key: %s", u)
+	}
+	if contains(u, "client_id=") {
+		t.Errorf("consent URL must not also send client_id: %s", u)
+	}
+
+	other, _ := reg.ProviderByName("github")
+	if got := other.ClientIDParam(); got != "client_id" {
+		t.Errorf("github ClientIDParam() = %q, want the client_id default", got)
+	}
+}
+
+// TikTok's draft upload is the audit-free path: it lands in the creator's inbox for
+// them to publish by hand. It is mutating but NOT public_write — nothing goes public,
+// and gating it would add an approval step in front of an action that is already
+// human-reviewed by construction.
+func TestTikTokDraftUploadIsNotPublicWrite(t *testing.T) {
+	reg, _ := LoadBundled()
+	a, ok := reg.Action("tiktok", "tiktok_upload_draft")
+	if !ok {
+		t.Fatal("tiktok_upload_draft not found")
+	}
+	if a.PublicWrite {
+		t.Error("an inbox draft is not public — gating it would double up on a review " +
+			"the creator already performs in the TikTok app")
+	}
+	if !a.Mutating {
+		t.Error("uploading is still a write")
+	}
+}
+
+// Pinterest's trial tier makes sandbox-only pins, but on Standard access the same call
+// is a real public post — so it must be gated.
+func TestPinterestCreatePinIsGated(t *testing.T) {
+	reg, _ := LoadBundled()
+	a, ok := reg.Action("pinterest", "pinterest_create_pin")
+	if !ok {
+		t.Fatal("pinterest_create_pin not found")
+	}
+	if !a.PublicWrite || !a.Mutating {
+		t.Error("creating a pin is public on Standard access and must be gated")
 	}
 }

@@ -1,0 +1,62 @@
+provider: threads
+actions:
+  - name: threads_me
+    description: "Your own Threads account: username and id. Read-only. Call this FIRST — publishing needs the user id it returns."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://graph.threads.net/v1.0/me"
+      query:
+        fields: "id,username,threads_profile_picture_url"
+    response_extract: "$"
+  - name: threads_list_posts
+    description: "Your recent Threads posts, newest first. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        user_id: {type: string, description: "user id from threads_me"}
+        limit:   {type: integer, description: "max rows — REQUIRED. Use 10."}
+      required: [user_id, limit]
+    request:
+      method: GET
+      url: "https://graph.threads.net/v1.0/{{user_id}}/threads"
+      query:
+        fields: "id,text,permalink,timestamp"
+        limit:  "{{limit}}"
+    response_extract: "$.data"
+  - name: threads_create_post
+    description: "STEP 1 of 2 — stage a Threads post. Nothing is public yet. Returns a creation id you pass to threads_publish_post."
+    mutating: false
+    params:
+      type: object
+      properties:
+        user_id: {type: string, description: "user id from threads_me"}
+        text:    {type: string, description: "the post body, as it will appear"}
+      required: [user_id, text]
+    request:
+      method: POST
+      url: "https://graph.threads.net/v1.0/{{user_id}}/threads"
+      form:
+        media_type: "TEXT"
+        text:       "{{text}}"
+    response_extract: "$"
+  - name: threads_publish_post
+    description: "STEP 2 of 2 — publish a staged post. This is a REAL, PUBLIC, irreversible post. Pass the id returned by threads_create_post."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        user_id:     {type: string, description: "user id from threads_me"}
+        creation_id: {type: string, description: "the id returned by threads_create_post"}
+      required: [user_id, creation_id]
+    request:
+      method: POST
+      url: "https://graph.threads.net/v1.0/{{user_id}}/threads_publish"
+      form:
+        creation_id: "{{creation_id}}"
+    response_extract: "$"

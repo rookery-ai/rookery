@@ -101,6 +101,9 @@ facebook:siFacebook
 instagram:siInstagram
 x:siX
 reddit:siReddit
+threads:siThreads
+tiktok:siTiktok
+pinterest:siPinterest
 opencode_zen:siOpencode
 opencode_go:siOpencode
 "

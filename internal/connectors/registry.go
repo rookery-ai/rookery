@@ -55,6 +55,12 @@ type Provider struct {
 	//              the CURRENT access token again before it expires. OAuthClient.Refresh
 	//              routes here so callers need no provider-specific branch.
 	TokenExpiry string `yaml:"token_expiry"`
+	// TokenExchangeGrant overrides the grant_type used when TokenExpiry=="exchange".
+	// Meta uses fb_exchange_token (the default); Threads uses th_exchange_token.
+	TokenExchangeGrant string `yaml:"token_exchange_grant"`
+	// ClientParam is the parameter name carrying the OAuth client id in BOTH the consent
+	// URL and the token request. Defaults to "client_id"; TikTok calls it "client_key".
+	ClientParam string `yaml:"client_param"`
 	// TokenExtra names fields to capture from the token endpoint's JSON response into
 	// TokenSet.Extra / service_connections.extra (e.g. Salesforce's instance_url).
 	TokenExtra []string `yaml:"token_extra"`
@@ -120,6 +126,24 @@ func (p Provider) NonExpiring() bool { return p.TokenExpiry == "never" }
 // rather than a standard refresh_token grant. Such providers issue no refresh token at
 // all; the current access token is what gets exchanged.
 func (p Provider) UsesTokenExchange() bool { return p.TokenExpiry == "exchange" }
+
+// ExchangeGrant is the grant_type for the token-exchange renewal path.
+func (p Provider) ExchangeGrant() string {
+	if p.TokenExchangeGrant != "" {
+		return p.TokenExchangeGrant
+	}
+	return "fb_exchange_token"
+}
+
+// ClientIDParam is the parameter name carrying the client id. Providers overwhelmingly
+// use "client_id"; TikTok is the exception, and getting it wrong yields an opaque
+// "invalid request" rather than anything naming the parameter.
+func (p Provider) ClientIDParam() string {
+	if p.ClientParam != "" {
+		return p.ClientParam
+	}
+	return "client_id"
+}
 
 // RequestTemplate describes how to turn typed args into a real provider HTTP request.
 type RequestTemplate struct {

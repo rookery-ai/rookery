@@ -1,0 +1,21 @@
+name: tiktok
+label: TikTok
+category: Publishing & Media
+authorize_url: https://www.tiktok.com/v2/auth/authorize/
+token_url: https://open.tiktokapis.com/v2/oauth/token/
+userinfo_url: https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name
+identity_path: data.user.display_name
+# TikTok names the client id "client_key" in BOTH the consent URL and the token request.
+client_param: client_key
+default_scopes:
+  - user.info.basic
+  - video.list
+  - video.upload
+setup_url: https://developers.tiktok.com/apps
+setup_steps:
+  - "IMPORTANT: an UNAUDITED app can only post privately (SELF_ONLY). This connector therefore uploads to your TikTok INBOX as a draft, which needs no audit — you finish and publish the post in the TikTok app."
+  - "Go to TikTok for Developers → Manage apps → create an app."
+  - "Add the 'Login Kit' and 'Content Posting API' products, and enable the 'Direct Post' toggle ONLY if you have passed the audit."
+  - "Add the redirect URI shown above exactly."
+  - "Copy the Client key and Client secret and paste them below."
+  - "Video must be at a PUBLICLY reachable URL, and the domain must be verified in the developer portal under 'URL properties'."

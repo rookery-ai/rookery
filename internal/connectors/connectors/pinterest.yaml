@@ -1,0 +1,51 @@
+provider: pinterest
+actions:
+  - name: pinterest_me
+    description: "Your own Pinterest account: username, follower and pin counts. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.pinterest.com/v5/user_account"
+    response_extract: "$"
+  - name: pinterest_list_boards
+    description: "Your boards. Read-only. Call this FIRST — creating a pin requires a board id."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max rows — REQUIRED. Use 25."}
+      required: [limit]
+    request:
+      method: GET
+      url: "https://api.pinterest.com/v5/boards"
+      query:
+        page_size: "{{limit}}"
+    response_extract: "$.items"
+  - name: pinterest_create_pin
+    description: "Create a pin on one of your boards. On TRIAL access the pin is a sandbox entity visible only to you; on Standard access this is a REAL, PUBLIC post. image_url must be a publicly reachable URL."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        board_id:  {type: string, description: "board id from pinterest_list_boards"}
+        image_url: {type: string, description: "publicly reachable https URL of the image"}
+        title:     {type: string, description: "pin title"}
+        description: {type: string, description: "pin description"}
+        link:      {type: string, description: "optional destination URL the pin links to"}
+      required: [board_id, image_url]
+    request:
+      method: POST
+      url: "https://api.pinterest.com/v5/pins"
+      body:
+        board_id: "{{board_id}}"
+        title: "{{title}}"
+        description: "{{description}}"
+        link: "{{link}}"
+        media_source:
+          source_type: "image_url"
+          url: "{{image_url}}"
+    response_extract: "$"

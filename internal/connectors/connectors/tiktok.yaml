@@ -1,0 +1,46 @@
+provider: tiktok
+actions:
+  - name: tiktok_me
+    description: "Your own TikTok account: display name, follower count, open id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://open.tiktokapis.com/v2/user/info/"
+      query:
+        fields: "open_id,display_name,follower_count,likes_count,video_count"
+    response_extract: "$.data.user"
+  - name: tiktok_list_videos
+    description: "Your recent videos with view and like counts, newest first. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        max: {type: integer, description: "max rows — REQUIRED. Use 10."}
+      required: [max]
+    request:
+      method: POST
+      url: "https://open.tiktokapis.com/v2/video/list/"
+      query:
+        fields: "id,title,view_count,like_count,comment_count,create_time"
+      body:
+        max_count: "{{max}}"
+    response_extract: "$.data.videos"
+  - name: tiktok_upload_draft
+    description: "Upload a video to your TikTok INBOX as a draft. NOT public — you review and publish it yourself in the TikTok app. Needs no audit, unlike direct posting. video_url must be a publicly reachable URL on a domain verified in the developer portal."
+    mutating: true
+    params:
+      type: object
+      properties:
+        video_url: {type: string, description: "publicly reachable https URL of the video file"}
+      required: [video_url]
+    request:
+      method: POST
+      url: "https://open.tiktokapis.com/v2/post/publish/inbox/video/init/"
+      body:
+        source_info:
+          source: "PULL_FROM_URL"
+          video_url: "{{video_url}}"
+    response_extract: "$.data"
