@@ -468,6 +468,28 @@ Home's inbox (`pages/home/HomePage.tsx`) groups notifications under calendar-day
 status badge, marks unread rows with a left accent bar, and deep-links each card to its source agent;
 deleting a message or a reminder goes through the deferred-delete/undo flow above.
 
+**Chat message chrome.** Every `ChatMessageBubble` (`components/chat/Bubbles.tsx`) renders a
+`MessageMeta` footer — a `Day HH:MM` timestamp plus a copy-to-clipboard button. The footer is
+**always mounted** and revealed purely by opacity (`opacity-0 group-hover:opacity-100
+focus-within:opacity-100`); mounting it on hover would insert a node under the cursor and cancel an
+in-progress drag-select, so `select-none` is scoped to the footer row and never applied to the
+message body. `createdAt` is optional because `DesignerSurface` renders design-conversation turns
+through the same component with no timestamps (it gets the copy button only). The **timezone**
+reaches the footer as CONTEXT (`lib/timezone.tsx`: `TimeZoneProvider` at the app root,
+`useTimeZone()` at the leaf) rather than a `useSession()` call inside the bubble — the bubble is
+mounted in places with no `QueryClientProvider` above it, where `useQuery` would throw; an undefined
+context degrades to browser-local. `formatMessageTime` (`lib/utils.ts`) wraps `Intl` in a try/catch
+because `profile.Timezone` is free text (`""`/`"CEST"`/`"UTC+2"` all throw `RangeError`), and a throw
+during render would blank the whole conversation. Opening a chat from `ChatsPage` **auto-resumes it
+once per open** if it is stopped (the chip is presentational — `handleChatMessage` never checks
+`chat.active`) and focuses the composer; the decision is latched in a ref on the FIRST detail load of
+the mount, before the active check, so a later manual Stop sticks.
+
+**Session `timezone`.** `GET /api/v1/auth/session` carries the active workspace's profile timezone
+(`""` when unset or no workspace entered). It lives here rather than on `/api/v1/settings` because
+the SPA already loads and caches the session once, while the settings endpoint re-probes the host
+filesystem for installed coders on every call.
+
 ```
 /                        # embedded React SPA (index.html); every unmatched deep path falls through
 /*                       #   to the SPA catch-all (client-side routing). 503 if built without `make ui`.
