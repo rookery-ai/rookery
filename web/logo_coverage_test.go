@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ilijad1/simple-agents/internal/coder"
+	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/gateway"
 	"github.com/ilijad1/simple-agents/internal/websearch"
 )
@@ -34,8 +35,14 @@ func TestBrandLogoCoverage(t *testing.T) {
 
 	var slugs []string
 
-	// Service connectors — the exact list the connections page renders.
-	slugs = append(slugs, availableServiceProviders...)
+	// Service connectors — the exact list the connections page renders. Loaded
+	// from the registry directly rather than through a Server: this test needs
+	// no other server state, and the handler derives its list from the same call.
+	reg, err := connectors.LoadBundled()
+	if err != nil {
+		t.Fatalf("LoadBundled: %v", err)
+	}
+	slugs = append(slugs, reg.ProviderNames()...)
 
 	// Chat platforms — the platforms with a real adapter. Deliberately NOT
 	// gateway.CredSpecs(): that registry is global and mutable, and other

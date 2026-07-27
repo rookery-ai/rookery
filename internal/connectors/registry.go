@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -214,6 +215,17 @@ func (r *Registry) OAuthProvider(name string) (Provider, bool) {
 		return Provider{}, false
 	}
 	return p, true
+}
+
+// ProviderNames returns every loaded provider slug, sorted. The connections page renders
+// this set, so it must be deterministic — map iteration order is not.
+func (r *Registry) ProviderNames() []string {
+	out := make([]string, 0, len(r.providers))
+	for name := range r.providers {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Actions returns all actions declared for a provider.

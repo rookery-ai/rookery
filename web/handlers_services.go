@@ -64,9 +64,13 @@ func verifyState(secret []byte, tok string, now time.Time) (string, bool) {
 
 // ── Service connections (OAuth + API-key) ────────────────────────────────────
 
-// availableServiceProviders is the set of providers exposed in the UI (grows as
-// provider data files are added). Shared with the JSON services API (api_services.go).
-var availableServiceProviders = []string{"google", "github", "notion", "outlook", "jira", "slack", "openai", "google_drive", "google_sheets", "google_docs", "teams", "hubspot", "calendly", "asana", "airtable", "sendgrid", "intercom", "clickup", "monday", "dropbox", "zoom", "shopify", "salesforce", "mailchimp", "zendesk", "stripe", "twilio", "trello"}
+// serviceProviders is the set of providers exposed in the UI: every provider the registry
+// loaded. Derived rather than hardcoded so adding a service really is "two YAML files, no
+// Go changes" — the maintained slice this replaced silently omitted them. Shared with the
+// JSON services API (api_services.go).
+func (s *Server) serviceProviders() []string {
+	return s.connectors.ProviderNames()
+}
 
 // redirectWithError performs a PRG redirect carrying a user-facing error message in
 // the query string. Used by the OAuth callback (handleOAuthCallback) to land the

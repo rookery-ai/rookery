@@ -85,8 +85,9 @@ func (s *Server) apiListServices(c echo.Context) error {
 	ctx := c.Request().Context()
 	all, _ := s.db.ListServiceConnections(ctx, w.ID)
 
-	out := make([]apiServiceProvider, 0, len(availableServiceProviders))
-	for _, provider := range availableServiceProviders {
+	providers := s.serviceProviders()
+	out := make([]apiServiceProvider, 0, len(providers))
+	for _, provider := range providers {
 		conns := make([]apiServiceConnection, 0)
 		for _, cn := range all {
 			if cn.Provider != provider {
