@@ -19,6 +19,10 @@ export type Session = {
   // Server-side screen lock. The workspace stays entered while locked; every
   // guarded API route answers 423 until the master password is re-entered.
   locked?: boolean;
+  // The active workspace's profile timezone (an IANA name, or "" when unset).
+  // Free text server-side, so consumers must tolerate a bogus value — see
+  // formatMessageTime.
+  timezone?: string;
 };
 
 export function useSession() {
@@ -27,4 +31,11 @@ export function useSession() {
     queryFn: () => api.get<Session>("/api/v1/auth/session"),
     staleTime: 30_000,
   });
+}
+
+// The zone chat timestamps render in. Undefined (no workspace, no configured
+// timezone, or the session not loaded yet) means "use the browser's own zone",
+// which is what formatMessageTime does with an absent/empty value.
+export function useDisplayTimeZone(): string | undefined {
+  return useSession().data?.timezone || undefined;
 }

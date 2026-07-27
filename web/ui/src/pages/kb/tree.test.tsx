@@ -2,7 +2,7 @@ import { render, screen, waitFor, fireEvent, createEvent } from "@testing-librar
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider, ToastHost } from "@/components/shell/Toast";
-import FileTree from "./FileTree";
+import FileTree, { NewEntryDialog } from "./FileTree";
 
 function jsonResponse(body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -595,4 +595,27 @@ test("an internal reorder drag never triggers onImportFiles", async () => {
   await dragOnto("README.md", "Notes", 0.5); // "into" Notes — an internal move
 
   expect(onImportFiles).not.toHaveBeenCalled();
+});
+
+// The reset effect used to be keyed on [open, dirPath], and dirPath is derived
+// from the open note's path — which changes underneath an already-open dialog.
+// The user's typed name was cleared mid-typing and Create then silently no-oped
+// on `if (!n) return`.
+test("NewEntryDialog keeps the typed name when dirPath changes while it is open", async () => {
+  mockFetch();
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const { rerender } = render(
+    <QueryClientProvider client={qc}>
+      <NewEntryDialog dirPath="" kind="note" open onOpenChange={() => {}} pickLocation />
+    </QueryClientProvider>,
+  );
+  await userEvent.type(await screen.findByLabelText("Name"), "ideas");
+
+  rerender(
+    <QueryClientProvider client={qc}>
+      <NewEntryDialog dirPath="notes" kind="note" open onOpenChange={() => {}} pickLocation />
+    </QueryClientProvider>,
+  );
+
+  expect(screen.getByLabelText("Name")).toHaveValue("ideas");
 });

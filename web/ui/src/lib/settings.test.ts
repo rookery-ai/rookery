@@ -242,7 +242,7 @@ test("useAuditLog fetches /api/v1/admin/audit with a limit param", async () => {
       }),
     ),
   );
-  const { result } = renderHook(() => useAuditLog(100), { wrapper: wrapper() });
+  const { result } = renderHook(() => useAuditLog({ limit: 100 }), { wrapper: wrapper() });
   await waitFor(() => expect(result.current.isSuccess).toBe(true));
   expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/v1/admin/audit?limit=100");
   expect(result.current.data?.logs[0].action).toBe("configure_coder");

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useSearchParams } from "react-router";
 import { MessageSquare } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
@@ -20,12 +20,6 @@ function ChatsEmptyState() {
 export default function ChatsPage() {
   const [params, setParams] = useSearchParams();
   const selected = params.get("chat");
-  // The chat THIS page just created. Starting a new chat is a "let me type"
-  // gesture, so its composer takes focus; clicking an existing chat in the
-  // list is browsing, and must not. Holding the id (rather than a bare
-  // boolean) keeps the two apart even after the create resolves and the list
-  // re-renders.
-  const [createdId, setCreatedId] = useState<string | null>(null);
   const { data } = useChats();
   const createChat = useCreateChat();
   const chats = data?.chats ?? [];
@@ -42,7 +36,6 @@ export default function ChatsPage() {
 
   async function handleNew() {
     const chat = await createChat.mutateAsync(undefined);
-    setCreatedId(chat.id);
     setParams({ chat: chat.id });
   }
 
@@ -89,9 +82,15 @@ export default function ChatsPage() {
         </div>
       </ContextPane>
       {selected ? (
-        // key={selected}: ChatWindow remounts per chat, which is what lets a
-        // mount-time autoFocus fire for the newly created one.
-        <ChatWindow chatId={selected} key={selected} autoFocus={selected === createdId} />
+        // key={selected}: ChatWindow remounts per chat, which is what lets the
+        // mount-time autoFocus fire — and what scopes ChatWindow's
+        // once-per-open auto-resume to a single chat.
+        //
+        // autoFocus is unconditional here: on this page every way of arriving
+        // at a chat (clicking the list, a ⌘K search hit, a deep link) means the
+        // user came to type. An earlier version withheld it while merely
+        // browsing history; that distinction was dropped deliberately.
+        <ChatWindow chatId={selected} key={selected} autoFocus />
       ) : (
         <ChatsEmptyState />
       )}

@@ -211,24 +211,38 @@ export function NewEntryDialog({
   open,
   onOpenChange,
   pickLocation = false,
+  onCreated,
 }: {
   dirPath: string;
   kind: NewKind;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   pickLocation?: boolean;
+  // Called with the path that was actually created, so the caller can navigate
+  // to it — creating a note and being left on the previous screen was the whole
+  // complaint. Optional, so a call site that only wants the file to exist stays
+  // unchanged.
+  onCreated?: (path: string, isDir: boolean) => void;
 }) {
   const [name, setName] = useState("");
   const [location, setLocation] = useState(dirPath);
   const [error, setError] = useState("");
   const newNote = useNewNote();
 
+  // Reset on the OPEN TRANSITION only. Keying this on `dirPath` as well (as it
+  // was) meant any change to the caller's current directory while the dialog
+  // was open wiped the half-typed name — and KBPage's `currentDir` does change
+  // underneath an open dialog, because it is derived from the open note's path.
+  // The user then pressed Create on an empty field and submit() silently
+  // returned on `if (!n) return`.
+  const wasOpenRef = useRef(false);
   useEffect(() => {
-    if (open) {
+    if (open && !wasOpenRef.current) {
       setName("");
       setLocation(dirPath);
       setError("");
     }
+    wasOpenRef.current = open;
   }, [open, dirPath]);
 
   async function submit(e: React.FormEvent) {
@@ -240,6 +254,13 @@ export function NewEntryDialog({
     const path = dir ? `${dir}/${n}` : n;
     try {
       await newNote.mutateAsync({ path, is_dir: kind === "folder" });
+      // `path` IS the created path, so no round trip is needed to discover it:
+      // the client appends ".md" when the name lacks it, and the server
+      // (apiNewKBNote) only appends when the basename has no dot at all — so
+      // for a plain name both produce the same result, and for a dotted name
+      // the client already supplied the extension and the server writes it
+      // verbatim.
+      onCreated?.(path, kind === "folder");
       onOpenChange(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong");
@@ -639,13 +660,18 @@ function TreeRow({
       )}
       {node.is_dir && (
         <>
+          {/* Creating from a folder's menu opens the result, exactly as
+              clicking it in the tree would — same onSelect, so the two paths
+              can't drift. */}
           <NewEntryDialog
             dirPath={node.path} kind="note"
             open={dialog === "new-note"} onOpenChange={(o) => setDialog(o ? "new-note" : null)}
+            onCreated={(p, isDir) => onSelect(p, isDir)}
           />
           <NewEntryDialog
             dirPath={node.path} kind="folder"
             open={dialog === "new-folder"} onOpenChange={(o) => setDialog(o ? "new-folder" : null)}
+            onCreated={(p, isDir) => onSelect(p, isDir)}
           />
         </>
       )}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/labstack/echo/v4"
 )
 
@@ -55,8 +56,14 @@ func (s *Server) apiAuthSession(c echo.Context) error {
 		list = append(list, toAPIWorkspace(w))
 	}
 	out["workspaces"] = list
+	// Timezone travels with the session (not /api/v1/settings) because the SPA
+	// already loads and caches this payload once, and the settings endpoint
+	// re-probes the host filesystem for installed coders on every call. Always
+	// present as a key — the SPA treats "" as "use the browser's own zone".
+	out["timezone"] = ""
 	if w, ok := s.activeWorkspace(c); ok {
 		out["workspace"] = toAPIWorkspace(w)
+		out["timezone"] = profile.Load(s.db, w.ID).Timezone
 	}
 	// Reported so a reload lands back on the lock screen. The lock is a server
 	// flag, not a client overlay, so this is the SPA's only way to know.
