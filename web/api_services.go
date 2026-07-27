@@ -119,9 +119,14 @@ func (s *Server) apiListServices(c echo.Context) error {
 			if setupSteps == nil {
 				setupSteps = []string{}
 			}
-			if p.IsAPIKey() {
+			// session_exchange (Bluesky) is an OAuth-less paste-a-credential flow like
+			// api_key, so it renders the same connect form. They differ only in what
+			// happens to the stored value at request time, which the UI does not care about.
+			if p.PastesCredential() {
 				kind = "api_key"
-				setupURL = p.Auth.SetupURL
+				if p.Auth.SetupURL != "" {
+					setupURL = p.Auth.SetupURL
+				}
 			}
 			for _, ci := range p.ConnectInputs {
 				connectInputs = append(connectInputs, apiServiceConnectInput{
@@ -238,8 +243,10 @@ func (s *Server) apiConnectAPIKey(c echo.Context) error {
 	w := c.Get("workspace").(*db.Workspace)
 	provider := c.Param("provider")
 
+	// session_exchange providers connect through this same paste-a-credential endpoint;
+	// gating on IsAPIKey alone would make Bluesky unconnectable despite its form rendering.
 	prov, ok := s.connectors.ProviderByName(provider)
-	if !ok || !prov.IsAPIKey() {
+	if !ok || !prov.PastesCredential() {
 		return jsonErr(c, http.StatusNotFound, "not_found", "unknown or non-API-key provider: "+provider)
 	}
 

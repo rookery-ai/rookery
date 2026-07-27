@@ -30,6 +30,13 @@ type AuthConfig struct {
 	KeyHint     string `yaml:"key_hint"`     // UI placeholder: "sk-..."
 	SetupURL    string `yaml:"setup_url"`    // UI: where to get the key
 
+	// SessionURL, for kind=="session_exchange", is the endpoint that swaps stored
+	// credentials for a short-lived bearer token (Bluesky's createSession).
+	SessionURL string `yaml:"session_url"`
+	// SessionIdentityKey names the connect_input holding the account identifier sent
+	// alongside the credential (Bluesky's handle).
+	SessionIdentityKey string `yaml:"session_identity_key"`
+
 	// BasicUserTemplate, for placement=="basic", is a {{conn.<key>}} template resolved
 	// against the connection's Extra to produce the HTTP Basic username (the credential
 	// is always the password). Empty means the legacy behavior: credential as username,
@@ -118,6 +125,18 @@ type ConnectInput struct {
 
 // IsAPIKey reports whether this provider authenticates with a static API key.
 func (p Provider) IsAPIKey() bool { return p.Auth.Kind == "api_key" }
+
+// UsesSessionExchange reports whether the stored credential is swapped for a
+// short-lived bearer token on use (Bluesky: handle + app password → accessJwt).
+//
+// It is a third auth model: the credential never expires like an API key, but the
+// value actually sent on a request does — so it is neither IsAPIKey (send the stored
+// value verbatim) nor OAuth (no authorization-code flow, no refresh token).
+func (p Provider) UsesSessionExchange() bool { return p.Auth.Kind == "session_exchange" }
+
+// PastesCredential reports whether the connect UI should show the paste-a-credential
+// form rather than an OAuth app setup. Both api_key and session_exchange do.
+func (p Provider) PastesCredential() bool { return p.IsAPIKey() || p.UsesSessionExchange() }
 
 // NonExpiring reports whether this provider's access tokens never expire.
 func (p Provider) NonExpiring() bool { return p.TokenExpiry == "never" }

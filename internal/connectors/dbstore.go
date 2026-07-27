@@ -1,8 +1,13 @@
 package connectors
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"sync"
 	"time"
 
 	"github.com/ilijad1/simple-agents/internal/db"
@@ -23,6 +28,11 @@ type DBTokenStore struct {
 	Reg       *Registry
 	OAuth     OAuthClient
 	Now       func() time.Time // injectable for tests; nil → time.Now
+	HTTP      *http.Client     // injectable for tests; nil → a 30s client
+
+	// sessions caches session_exchange bearer tokens (Bluesky) per connection id.
+	sessMu   sync.Mutex
+	sessions map[string]sessionCacheEntry
 }
 
 func (s *DBTokenStore) now() time.Time {
@@ -41,8 +51,14 @@ func (s *DBTokenStore) AccessToken(ctx context.Context, conn ConnRef) (string, e
 	if row.Status != "ACTIVE" {
 		return "", &ConnectorError{KindNeedsReauth, fmt.Sprintf("connection %s is %s — reconnect it in Settings → Connectors", row.AccountLabel, row.Status)}
 	}
-	// API-key connections hold a static credential in encrypted_access_token — never refresh.
 	prov, _ := s.Reg.ProviderByName(row.Provider)
+	// session_exchange: the STORED credential (an app password) never expires, but the
+	// value sent on a request does. Swap on demand and cache, rather than persisting a
+	// short-lived JWT that would be stale for most of its life in the DB.
+	if prov.UsesSessionExchange() {
+		return s.sessionToken(ctx, prov, row)
+	}
+	// API-key connections hold a static credential in encrypted_access_token — never refresh.
 	if prov.IsAPIKey() {
 		tok, err := secrets.DecryptWithSystemKey(row.EncryptedAccessToken, s.SystemKey)
 		if err != nil {
@@ -114,4 +130,76 @@ func (s *DBTokenStore) refresh(ctx context.Context, row *db.ServiceConnection) (
 		return "", &ConnectorError{KindOther, err.Error()}
 	}
 	return ts.AccessToken, nil
+}
+
+// sessionCacheEntry holds a swapped bearer token until shortly before it expires.
+type sessionCacheEntry struct {
+	token   string
+	expires time.Time
+}
+
+// sessionToken exchanges a connection's stored credential for a short-lived bearer
+// token, caching it in memory.
+//
+// The cache is per-process and deliberately not persisted: a Bluesky accessJwt lives
+// about two hours, so storing it would mean a DB row that is stale far more often than
+// it is fresh, and a restart simply re-exchanges — the app password is the durable
+// credential.
+func (s *DBTokenStore) sessionToken(ctx context.Context, prov Provider, row *db.ServiceConnection) (string, error) {
+	s.sessMu.Lock()
+	if e, ok := s.sessions[row.ID]; ok && s.now().Add(expirySkew).Before(e.expires) {
+		s.sessMu.Unlock()
+		return e.token, nil
+	}
+	s.sessMu.Unlock()
+
+	cred, err := secrets.DecryptWithSystemKey(row.EncryptedAccessToken, s.SystemKey)
+	if err != nil {
+		return "", &ConnectorError{KindOther, "decrypt credential: " + err.Error()}
+	}
+	identity := ParseExtra(row.Extra)[prov.Auth.SessionIdentityKey]
+	if identity == "" {
+		identity = row.AccountIdentity
+	}
+
+	body, _ := json.Marshal(map[string]string{"identifier": identity, "password": cred})
+	req, _ := http.NewRequestWithContext(ctx, "POST", prov.Auth.SessionURL, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	client := s.HTTP
+	if client == nil {
+		client = &http.Client{Timeout: 30 * time.Second}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", &ConnectorError{KindNetwork, err.Error()}
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 400 {
+		// An app password that was revoked shows up here, so this must read as
+		// needs-reauth rather than a generic failure.
+		return "", &ConnectorError{KindNeedsReauth,
+			fmt.Sprintf("could not start a %s session (%d) — the app password may have been revoked: %s",
+				prov.Label, resp.StatusCode, string(raw))}
+	}
+	var out struct {
+		AccessJwt string `json:"accessJwt"`
+		Did       string `json:"did"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return "", &ConnectorError{KindOther, err.Error()}
+	}
+	if out.AccessJwt == "" {
+		return "", &ConnectorError{KindNeedsReauth, "session response carried no access token"}
+	}
+
+	s.sessMu.Lock()
+	if s.sessions == nil {
+		s.sessions = map[string]sessionCacheEntry{}
+	}
+	// One hour, well inside Bluesky's ~2h lifetime: the cost of re-exchanging is one
+	// request, while serving an expired token fails the agent's actual call.
+	s.sessions[row.ID] = sessionCacheEntry{token: out.AccessJwt, expires: s.now().Add(time.Hour)}
+	s.sessMu.Unlock()
+	return out.AccessJwt, nil
 }

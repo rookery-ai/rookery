@@ -105,6 +105,7 @@ threads:siThreads
 tiktok:siTiktok
 pinterest:siPinterest
 google_ads:siGoogleads
+bluesky:siBluesky
 opencode_zen:siOpencode
 opencode_go:siOpencode
 "
