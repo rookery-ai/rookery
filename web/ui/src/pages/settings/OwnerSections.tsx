@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react";
-import type { FormEvent } from "react";
-import { AlertTriangle, Check } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { timeAgo } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";

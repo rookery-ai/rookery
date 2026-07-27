@@ -596,7 +596,11 @@ export function DesignerSurface({
 
       {generationFailed && (
         <div className="flex items-center justify-between gap-2 border-t border-warn/30 bg-warn/10 px-4 py-2 text-xs text-warn">
-          <span>The build hit a problem — describe a change or say &quot;try again&quot;.</span>
+          {/* Copy states what happens next, not what the user must type. The old wording
+              ("describe a change or say 'try again'") named the exact action that did NOT
+              work: a described change was routed to a chat turn instead of a rebuild. The
+              flow now rebuilds on any non-question message, so this just says so. */}
+          <span>The last build didn&apos;t finish. Tell me what to change and I&apos;ll rebuild it.</span>
           {canKeepAsIs && (
             <Button size="xs" variant="outline" onClick={() => void handleSend(KEEP_AS_IS_PHRASE)}>
               Keep it as-is
