@@ -247,7 +247,7 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
 
 - **Data files, not code.** Adding a service = a `providers/<p>.yaml` (auth config) + a
   `connectors/<p>.yaml` (curated action manifest), both `go:embed`ed. `LoadBundled()` parses them.
-  **33 providers (~232 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
+  **35 providers (~239 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
   Search Console**), **YouTube**, GitHub, Slack, OpenAI, Notion, Outlook, Teams, Jira, HubSpot,
   Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce,
   Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello.
@@ -290,7 +290,19 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
   the provider's `auth` block) + provider `static_headers` (resolved via `OAuthProvider` so aliased
   children inherit the parent's) → call (1 transient retry) → normalize into a `ConnectorError`
   taxonomy (auth/ratelimit/server/needs-reauth/bad-args/build-blocked).
-- **OAuth** (`oauth.go`): `ConsentURL`/`ExchangeCode`/`Refresh`/`FetchIdentity`. Per-provider config
+- **OAuth** (`oauth.go`): `ConsentURL`/`ExchangeCode`/`Refresh`/`ExchangeLongLived`/`FetchIdentity`.
+  `token_expiry` has a third mode beyond `expiring`/`never`: **`exchange`** (Meta) means there is
+  NO refresh token — a short-lived token is swapped for a ~60-day one via the `fb_exchange_token`
+  grant and renewed by exchanging the CURRENT access token again. `Refresh` routes there so
+  `DBTokenStore`/`RunRefreshLoop` need no Meta branch, and `ExchangeLongLived` returns the new
+  access token as the RefreshToken too — the store hands RefreshToken back on the next renewal,
+  and for this provider that IS what you exchange, so omitting it would break the *second*
+  renewal ~60 days in. `post_connect` may now also **replace the connection's access token**
+  (`PostConnectResult.AccessToken`): the `meta_page_token` hook swaps the user token for the first
+  managed Page's own token, because publishing to a Page requires the PAGE token. That keeps the
+  credential in `encrypted_access_token` instead of plaintext `extra` — which is why the design's
+  "encrypt `extra`" change was dropped as unnecessary. A connection therefore means "this Page";
+  several Pages means connecting several times. Per-provider config
   covers the real quirks: `token_expiry: never` (GitHub/Notion — empty `expires_at`, never refreshed),
   `token_auth: basic` + `token_content_type: json` (Notion), `static_headers` (Notion-Version, GitHub
   Accept), `authorize_extra` (Atlassian audience/prompt, Google access_type/prompt, Notion owner),
