@@ -150,11 +150,21 @@ not fine for a Facebook **Page access token**, which is a credential and is exac
 Meta `post_connect` hook resolves. Storing it plaintext would be a downgrade from how every
 other token in the system is handled.
 
-`extra` moves to `secrets.EncryptWithSystemKey`, matching the other secret columns on that
-table. The migration adds `extra_encrypted` alongside the existing column, a startup pass
-encrypts every non-empty plaintext `extra` into it, and the plaintext column is dropped in
-the following migration. Read paths prefer `extra_encrypted` and fall back to `extra` while
-both exist, so a half-migrated database never loses a Jira cloud id.
+**Superseded during Phase 3 implementation — this change is NOT being made.** The premise was
+that a Page access token must live in `extra`. It does not: the cleaner model stores the page
+token as the connection's OWN access token — `encrypted_access_token`, already encrypted — so a
+connection means "this Page" the same way an existing connection means "this account". `extra`
+then holds only non-secret identifiers (page id, IG user id, ad account id), which is exactly
+what it already holds for Jira's cloud id, and needs no encryption.
+
+The cost of that model is that one connection maps to one Page, resolved by the `post_connect`
+hook at connect time. For a single-owner install that is the normal case; managing several Pages
+means connecting several times. The alternative — one connection holding a user token plus a map
+of page tokens — is what would have forced the encryption change, and it buys multi-Page support
+this install does not need yet.
+
+This does mean `post_connect` gains one new capability: replacing the connection's access token,
+not just writing to `extra`.
 
 ### 4. Meta long-lived token exchange (Phase 3)
 
