@@ -1,0 +1,22 @@
+name: facebook
+label: Facebook Page
+category: Publishing & Media
+authorize_url: https://www.facebook.com/v21.0/dialog/oauth
+token_url: https://graph.facebook.com/v21.0/oauth/access_token
+userinfo_url: https://graph.facebook.com/v21.0/me
+identity_path: name
+token_expiry: exchange
+# Swaps the user token for the first managed Page's own token at connect time: publishing
+# to a Page requires the PAGE token, not the user token. One connection = one Page.
+post_connect: meta_page_token
+default_scopes:
+  - pages_show_list
+  - pages_read_engagement
+  - pages_manage_posts
+setup_url: https://developers.facebook.com/apps
+setup_steps:
+  - "Go to Meta for Developers → My Apps → Create App → type 'Business'."
+  - "Add 'Facebook Login for Business', and under its Settings add the redirect URI shown above exactly."
+  - "In App settings → Basic, copy the App ID and App Secret and paste them below."
+  - "Keep the app in DEVELOPMENT mode: it then has full access to Pages YOU administer, with no App Review."
+  - "You must be an admin of the Page. Connecting links the FIRST Page you manage — to use a different one, connect again after changing your Page roles."

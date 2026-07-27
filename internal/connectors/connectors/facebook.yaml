@@ -1,0 +1,46 @@
+provider: facebook
+actions:
+  - name: facebook_page_info
+    description: "Your connected Page: name, category, follower count. Read-only. Use it to confirm which Page is connected."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{conn.page_id}}"
+      query:
+        fields: "id,name,category,followers_count,fan_count"
+    response_extract: "$"
+  - name: facebook_list_posts
+    description: "Recent posts on your Page with engagement counts, newest first. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max rows — REQUIRED. Use 10."}
+      required: [limit]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{conn.page_id}}/posts"
+      query:
+        fields: "id,message,created_time,permalink_url"
+        limit:  "{{limit}}"
+    response_extract: "$.data"
+  - name: facebook_create_post
+    description: "Publish a text post to your Facebook Page. This is a REAL, PUBLIC, irreversible post visible to everyone who follows the Page — write the final wording, not a draft."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        message: {type: string, description: "the post body, as it will appear"}
+        link:    {type: string, description: "optional URL to attach to the post"}
+      required: [message]
+    request:
+      method: POST
+      url: "https://graph.facebook.com/v21.0/{{conn.page_id}}/feed"
+      form:
+        message: "{{message}}"
+        link:    "{{link}}"
+    response_extract: "$"

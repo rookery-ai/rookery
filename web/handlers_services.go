@@ -228,12 +228,18 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 	// instance_url) → merged into extra, exposed to request templates as {{conn.<key>}}.
 	extraMap := map[string]string{}
 	if prov.PostConnect != "" {
-		if vals, perr := connectors.RunPostConnect(ctx, prov.PostConnect, nil, ts.AccessToken); perr != nil {
+		res, perr := connectors.RunPostConnect(ctx, prov.PostConnect, nil, ts.AccessToken)
+		if perr != nil {
 			return s.redirectWithError(c, "/connections", "Connected, but setup failed: "+perr.Error())
-		} else {
-			for k, v := range vals {
-				extraMap[k] = v
-			}
+		}
+		for k, v := range res.Extra {
+			extraMap[k] = v
+		}
+		// A hook may REPLACE the stored token: Facebook publishing needs the Page's own
+		// token, not the user token OAuth returned. Storing it here keeps the credential
+		// in the encrypted column rather than in plaintext `extra`.
+		if res.AccessToken != "" {
+			ts.AccessToken = res.AccessToken
 		}
 	}
 	for k, v := range ts.Extra { // token_extra fields (e.g. Salesforce instance_url)
