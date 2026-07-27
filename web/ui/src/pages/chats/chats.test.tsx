@@ -463,3 +463,18 @@ test("with no chat open (no composer) the FAB stack sits in its normal corner", 
   expect(fabStack().className).toContain("md:bottom-6");
   expect(fabStack().className).not.toContain("md:bottom-24");
 });
+
+// The messages must share the composer's 10% column. Asserted on the RENDERED
+// class, because the failure mode here is silent: ChatScroll's base padding was
+// the `p-4` shorthand, which tailwind-merge does NOT treat as conflicting with
+// `px-[10%]` — both survived and the winner was left to stylesheet ordering, so
+// the composer could end up inset while the bubbles were not.
+test("the message scroll region carries the same 10% gutter as the composer", async () => {
+  mockFetch();
+  const { container } = wrap("/?chat=c1");
+  await screen.findByText("hello there");
+
+  const scroll = container.querySelector('[data-testid="chat-window"] .overflow-y-auto')!;
+  expect(scroll.className).toContain("px-[10%]");
+  expect(scroll.className).not.toContain("px-4");
+});
