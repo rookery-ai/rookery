@@ -320,3 +320,49 @@ test("landing on /kb?new=note does not auto-open the last recent note", async ()
 
   localStorage.clear();
 });
+
+test("creating a note from the palette flow opens it in the rich text editor", async () => {
+  const created: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/auth/session") {
+        return Promise.resolve(
+          jsonResponse({
+            authenticated: true,
+            owner: { id: "o1", username: "admin", must_change_password: false },
+            workspace: { id: "w1", name: "ws1", about: "", needs_setup: false, created_at: "2026-01-01T00:00:00Z" },
+            workspaces: [],
+          }),
+        );
+      }
+      if (url === "/api/v1/kb/new" && init?.method === "POST") {
+        created.push((JSON.parse(String(init.body)) as { path: string }).path);
+        return Promise.resolve(jsonResponse({ ok: true }, 201));
+      }
+      if (url.startsWith("/api/v1/kb/note")) {
+        const p = new URL(url, "http://localhost").searchParams.get("path")!;
+        return Promise.resolve(
+          jsonResponse({ path: p, content: "# ideas\n\n", html: "", backlinks: [], kind: "markdown" }),
+        );
+      }
+      if (url.startsWith("/api/v1/kb/tree")) return Promise.resolve(jsonResponse({ path: "", nodes: [], order: [] }));
+      if (url.startsWith("/api/v1/kb/folders")) return Promise.resolve(jsonResponse({ folders: [""] }));
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  const user = userEvent.setup();
+  renderInShell("/kb?new=note");
+
+  await screen.findByRole("dialog");
+  await user.type(await screen.findByLabelText("Name"), "ideas");
+  await user.click(screen.getByRole("button", { name: "Create" }));
+
+  // The client appends .md; the server would too, so the computed path is the
+  // created path and needs no extra round trip to discover.
+  await waitFor(() => expect(created).toEqual(["ideas.md"]));
+  // NoteEditor's title input carries the filename minus ".md".
+  expect(await screen.findByDisplayValue("ideas")).toBeInTheDocument();
+});

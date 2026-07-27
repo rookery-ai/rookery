@@ -50,6 +50,7 @@ function KBPaneHeader({
   currentDir,
   newOpen,
   setNewOpen,
+  onCreated,
 }: {
   onPickFiles: (files: File[]) => void;
   // The folder the new-note picker defaults to (the active folder, or the open
@@ -59,6 +60,9 @@ function KBPaneHeader({
   // ⌘K palette's "New note" action can open it by navigating to /kb?new=note.
   newOpen: boolean;
   setNewOpen: (open: boolean) => void;
+  // Navigate to whatever the dialog just created — creating a note and being
+  // left on the previous screen was the whole complaint.
+  onCreated: (path: string, isDir: boolean) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   return (
@@ -97,6 +101,7 @@ function KBPaneHeader({
             open={newOpen}
             onOpenChange={setNewOpen}
             pickLocation
+            onCreated={onCreated}
           />
         </div>
       }
@@ -223,7 +228,14 @@ export default function KBPage() {
   // and re-recording would only rewrite the entry that caused it.
   const topRecent = recent.length > 0 ? recent[0] : null;
   useEffect(() => {
-    if (suppressResumeRef.current) return;
+    if (suppressResumeRef.current) {
+      // Released once the user is actually looking at something — creating the
+      // note navigates to it, and from then on this visit behaves normally, so
+      // a later landing on a bare /kb still resumes. The race this guards can't
+      // recur: it only exists while `path` is null with the dialog just opened.
+      if (path !== null) suppressResumeRef.current = false;
+      return;
+    }
     if (path === null && topRecent) {
       setParams({ path: topRecent.path }, { replace: true });
     }
@@ -257,6 +269,7 @@ export default function KBPage() {
             currentDir={currentDir}
             newOpen={newNoteOpen}
             setNewOpen={setNewNoteOpen}
+            onCreated={openPath}
           />
           {/* Recent is a fixed block above the tree, NOT inside a scroll
               container of its own: SearchBox is `h-full` and owns the pane's
