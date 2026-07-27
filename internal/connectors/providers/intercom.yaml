@@ -1,5 +1,6 @@
 name: intercom
 label: Intercom
+category: Support
 auth:
   kind: api_key
   placement: header

@@ -129,7 +129,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/iolimit` | `ReadCapped` + `ErrTooLarge` — the shared capped read every ingest door uses (KB upload, web-chat attachment, Telegram/Discord/Slack attachment, KB bridge, `save_to_kb` URL fetch), all enforcing one 25 MiB cap. Reads `cap+1` and REJECTS rather than truncating: a silently truncated import writes a note whose frontmatter states a byte count that is not the source's. `CappingWriter` is the write-side analogue — bounds a stream written into an `io.Writer` (Slack's `slack.Client.GetFile` insists on an `io.Writer` and has no size bound; there is no stdlib `io.LimitWriter`), rejecting at the same `cap+1` boundary. |
 | `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface: one struct per coder — Claude/OpenCode/Codex/Gemini/Cursor, plus a generic fallback). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host tools (`read_file`/`write_file`/`edit_file`/`list_dir` + read-only discovery `search_files`/`glob` + exec tools `run_script`/`bash`/`web_fetch`/`web_search`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
-| `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **28 providers** (Google-family, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
+| `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **32 providers** (Google-family incl. AdSense/GA4/Search Console, YouTube, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing, `ProviderNames()` backing the connections page), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
 | `internal/buildphase` | Tiny package holding `SA_BUILD_PHASE`/`generation` marker (set during agent/skill builds; the connector `Execute` build-guard refuses mutating actions when present). Its own package so it outlives any one integration. |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal); `statefile.go` (`StateFilePath`/`ReadState`/`WriteState`/`RenderStateTemplate`) owns an agent's `state.md` format (see "Agent state" below); `migrate_files.go` (`MigrateAgentFilesToMarkdown`) is the idempotent startup migration off the old `state.json`/`agent.json` pair; `ParseRequiredSecrets` (`flow.go`) parses AGENT.md's `# Required secrets:` header — the only source of an agent's declared secrets now that `agent.json` is gone |
 | `internal/skilldesigner` | Conversational skill-creator wizard mirroring `agentdesigner.Flow` (FSM Idle→AwaitingResume→Describing→Designing→Verifying→Done, SSE progress, 7-day drafts, approval triggers); `SkillSaver` writes SKILL.md+scripts/ to vault + DB upsert; generation runs with the `skill-creator` core skill, vetting runs the `skill-vetter` core skill as a text-only audit; `vettingBlocksSave()` parses the verdict line. Wired to BOTH surfaces: the SPA (`/api/v1/skills/design`) and chat platforms (`/skill`). `Start` is the chat entry point (opens in `StateDescribing`, asks for a description, no coder call); `StartDesign` is the web one (its form collects the description up front). |
@@ -251,11 +251,27 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
 
 - **Data files, not code.** Adding a service = a `providers/<p>.yaml` (auth config) + a
   `connectors/<p>.yaml` (curated action manifest), both `go:embed`ed. `LoadBundled()` parses them.
-  **28 providers (~214 actions):** the Google family (Gmail/Drive/Sheets/Docs), GitHub, Slack,
-  OpenAI, Notion, Outlook, Teams, Jira, HubSpot, Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable,
-  Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello.
+  **32 providers (~229 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
+  Search Console**), **YouTube**, GitHub, Slack, OpenAI, Notion, Outlook, Teams, Jira, HubSpot,
+  Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce,
+  Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello.
   (AWS SigV4 + PostgreSQL were scoped but dropped.) Each action = name + JSON-schema params +
   `mutating` flag + a request template (method/URL/query + one body kind) + `response_extract`.
+  Every provider declares a `category:` grouping it on the connections page (one of Google,
+  Publishing & Media, Advertising, Productivity, Communication, Commerce, Developer, Support,
+  Other; empty renders under Other). The UI list is **derived from the registry**
+  (`Registry.ProviderNames()`, sorted) — the old hardcoded `availableServiceProviders` slice is
+  gone, so adding a service really is two YAML files and no Go change.
+- **The publisher-side Google providers discover their own identifiers.** AdSense, GA4, Search
+  Console, and YouTube are read-only and alias the `google` OAuth app, and each ships a list
+  action (`adsense_list_accounts`, `ga4_list_properties`, `gsc_list_sites`,
+  `youtube_my_channel`) that uses the SAME scope as its reporting action. That is why none of
+  them needs `connect_inputs`: the agent enumerates accounts/properties/sites and picks one,
+  rather than the identifier being pinned at connect time. Two renderer features exist for
+  them: `{{arg|escape}}` opt-in path escaping (a Search Console site URL sits inside a path
+  segment, while AdSense's `accounts/pub-…` and GA4's `properties/…` carry REAL separators that
+  a blanket escape would corrupt), and the `ga4_report`/`ga4_realtime` body builders (GA4 wants
+  `metrics` as `[{"name":"…"}]`; `renderBody` can substitute an array but not restructure one).
 - **Auth is declarative + reusable.** A provider is OAuth2 (default) or `auth.kind: api_key`
   (`placement: header`/`query`/`basic`, `value_prefix`, `basic_user_template` for a two-part Basic
   username like Twilio's SID). Cross-provider reuse via `auth_parent`: a child (e.g. `google_sheets`)
@@ -295,7 +311,13 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
     bound connections; the coder runs `simple-agents connector exec <tool> --args '<json>'` (a thin
     client subcommand) which POSTs to it. Tokens never leave the host; Landlock restricts filesystem,
     not loopback TCP, so a sandboxed coder can reach it (the `simple-agents` binary dir is granted
-    RO+exec in the sandbox spec so the child can exec it).
+    RO+exec in the sandbox spec so the child can exec it). The bridge response is **byte-capped**
+    at `maxBridgeResult` (8 KiB, mirroring `coder.maxToolResult`) via `capBridgeData` — the API
+    engine always truncated and the bridge did not, and an analytics or ad-insights report is
+    exactly the payload that exploited the gap. Under the cap the envelope is unchanged
+    (`{"data": …}`); over it, `data` becomes a truncated STRING plus `truncated: true` and a note
+    telling the model to narrow its query, because a JSON value cut in place still parses and
+    reads as complete data.
 - **Agent binding** (`agent_connections` table, keyed by connection id) is the source of truth for
   run-time tool exposure — NOT the AGENT.md `# Connections:` header. THREE ways to bind: the designer
   parses a `# Connections:` header (`agentdesigner.parseConnectionsLine`, tolerant of inline OR

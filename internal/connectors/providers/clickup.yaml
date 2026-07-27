@@ -1,5 +1,6 @@
 name: clickup
 label: ClickUp
+category: Productivity
 auth:
   kind: api_key
   placement: header

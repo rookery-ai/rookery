@@ -1,0 +1,11 @@
+name: google_analytics
+label: Google Analytics (GA4)
+category: Google
+auth_parent: google
+default_scopes:
+  - https://www.googleapis.com/auth/analytics.readonly
+setup_url: https://console.cloud.google.com/apis/credentials
+setup_steps:
+  - "Google Analytics reuses your Google (Gmail) OAuth app. Set up Google first on its card above."
+  - "In Google Cloud Console, enable BOTH the Google Analytics Data API and the Google Analytics Admin API."
+  - "Then click Connect here to authorize Analytics access on the same Google account."

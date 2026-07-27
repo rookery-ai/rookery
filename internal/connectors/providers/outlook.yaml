@@ -1,5 +1,6 @@
 name: outlook
 label: Outlook (Microsoft 365)
+category: Productivity
 setup_url: https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade
 setup_steps:
   - "Go to the Microsoft Entra admin center → App registrations → New registration."

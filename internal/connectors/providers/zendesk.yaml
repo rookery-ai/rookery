@@ -1,5 +1,6 @@
 name: zendesk
 label: Zendesk
+category: Support
 auth:
   kind: api_key
   placement: basic

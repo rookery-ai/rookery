@@ -1,5 +1,6 @@
 name: trello
 label: Trello
+category: Productivity
 auth:
   kind: api_key
   placement: query

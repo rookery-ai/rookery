@@ -1,5 +1,6 @@
 name: shopify
 label: Shopify
+category: Commerce
 auth:
   kind: api_key
   placement: header

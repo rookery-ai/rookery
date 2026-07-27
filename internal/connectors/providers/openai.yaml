@@ -1,5 +1,6 @@
 name: openai
 label: OpenAI
+category: Developer
 auth:
   kind: api_key
   placement: header

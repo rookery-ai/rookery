@@ -1,0 +1,12 @@
+name: youtube
+label: YouTube
+category: Publishing & Media
+auth_parent: google
+default_scopes:
+  - https://www.googleapis.com/auth/youtube.readonly
+  - https://www.googleapis.com/auth/yt-analytics.readonly
+setup_url: https://console.cloud.google.com/apis/credentials
+setup_steps:
+  - "YouTube reuses your Google (Gmail) OAuth app. Set up Google first on its card above."
+  - "In Google Cloud Console, enable BOTH the YouTube Data API v3 and the YouTube Analytics API."
+  - "Then click Connect here to authorize YouTube access on the same Google account."

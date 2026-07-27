@@ -44,6 +44,7 @@ type apiServiceConnectInput struct {
 type apiServiceProvider struct {
 	Name          string                   `json:"name"`
 	Label         string                   `json:"label"`
+	Category      string                   `json:"category"`
 	Kind          string                   `json:"kind"`
 	SetupURL      string                   `json:"setup_url"`
 	SetupSteps    []string                 `json:"setup_steps"`
@@ -85,8 +86,9 @@ func (s *Server) apiListServices(c echo.Context) error {
 	ctx := c.Request().Context()
 	all, _ := s.db.ListServiceConnections(ctx, w.ID)
 
-	out := make([]apiServiceProvider, 0, len(availableServiceProviders))
-	for _, provider := range availableServiceProviders {
+	providers := s.serviceProviders()
+	out := make([]apiServiceProvider, 0, len(providers))
+	for _, provider := range providers {
 		conns := make([]apiServiceConnection, 0)
 		for _, cn := range all {
 			if cn.Provider != provider {
@@ -98,10 +100,16 @@ func (s *Server) apiListServices(c echo.Context) error {
 		}
 
 		label, setupURL, setupSteps, kind := provider, "", []string{}, "oauth"
+		// A provider with no declared category groups under "Other" rather than
+		// dropping out of the page entirely.
+		category := "Other"
 		connectInputs := make([]apiServiceConnectInput, 0)
 		if p, ok := s.connectors.ProviderByName(provider); ok {
 			if p.Label != "" {
 				label = p.Label
+			}
+			if p.Category != "" {
+				category = p.Category
 			}
 			setupURL, setupSteps = p.SetupURL, p.SetupSteps
 			if setupSteps == nil {
@@ -127,6 +135,7 @@ func (s *Server) apiListServices(c echo.Context) error {
 		out = append(out, apiServiceProvider{
 			Name:          provider,
 			Label:         label,
+			Category:      category,
 			Kind:          kind,
 			SetupURL:      setupURL,
 			SetupSteps:    setupSteps,

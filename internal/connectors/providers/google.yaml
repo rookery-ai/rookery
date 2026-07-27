@@ -1,5 +1,6 @@
 name: google
 label: Google (Gmail)
+category: Google
 setup_url: https://console.cloud.google.com/apis/credentials
 setup_steps:
   - "Open the Google Cloud Console and create a project (or pick an existing one)."

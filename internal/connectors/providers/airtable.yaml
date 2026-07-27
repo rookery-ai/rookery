@@ -1,5 +1,6 @@
 name: airtable
 label: Airtable
+category: Productivity
 auth:
   kind: api_key
   placement: header

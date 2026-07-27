@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -73,6 +74,10 @@ type Provider struct {
 	AuthParent string `yaml:"auth_parent"`
 
 	// UI guidance for obtaining OAuth app credentials (shown on the Services page).
+	// Category groups this provider on the connections page. One of: Google,
+	// Publishing & Media, Advertising, Productivity, Communication, Commerce,
+	// Developer, Support, Other. Empty renders under Other rather than vanishing.
+	Category   string   `yaml:"category"`
 	Label      string   `yaml:"label"`       // human-friendly name, e.g. "Google (Gmail)"
 	SetupURL   string   `yaml:"setup_url"`   // link to the provider's developer console
 	SetupSteps []string `yaml:"setup_steps"` // numbered instructions to create the OAuth client
@@ -214,6 +219,17 @@ func (r *Registry) OAuthProvider(name string) (Provider, bool) {
 		return Provider{}, false
 	}
 	return p, true
+}
+
+// ProviderNames returns every loaded provider slug, sorted. The connections page renders
+// this set, so it must be deterministic — map iteration order is not.
+func (r *Registry) ProviderNames() []string {
+	out := make([]string, 0, len(r.providers))
+	for name := range r.providers {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Actions returns all actions declared for a provider.

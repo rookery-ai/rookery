@@ -1,0 +1,11 @@
+name: google_searchconsole
+label: Google Search Console
+category: Google
+auth_parent: google
+default_scopes:
+  - https://www.googleapis.com/auth/webmasters.readonly
+setup_url: https://console.cloud.google.com/apis/credentials
+setup_steps:
+  - "Search Console reuses your Google (Gmail) OAuth app. Set up Google first on its card above."
+  - "In Google Cloud Console, also enable the Google Search Console API."
+  - "Then click Connect here to authorize Search Console access on the same Google account."

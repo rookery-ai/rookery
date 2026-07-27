@@ -1,0 +1,47 @@
+provider: google_adsense
+actions:
+  - name: adsense_list_accounts
+    description: "List your AdSense accounts. Read-only. Call this FIRST — every other AdSense action needs the account resource name it returns, which looks like accounts/pub-1234567890123456."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://adsense.googleapis.com/v2/accounts"
+    response_extract: "$.accounts"
+  - name: adsense_list_adclients
+    description: "List the ad clients (sites/apps) under one AdSense account. Read-only. Use it to find which properties earn."
+    mutating: false
+    params:
+      type: object
+      properties:
+        account: {type: string, description: "account resource name from adsense_list_accounts, e.g. accounts/pub-1234567890123456"}
+      required: [account]
+    request:
+      method: GET
+      url: "https://adsense.googleapis.com/v2/{{account}}/adclients"
+    response_extract: "$.adClients"
+  - name: adsense_report
+    description: "Earnings report for an AdSense account over a preset date range. Read-only. Use for 'how much did I earn last week', 'which page earned most'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        account:    {type: string, description: "account resource name, e.g. accounts/pub-1234567890123456"}
+        date_range: {type: string, description: "one of TODAY, YESTERDAY, MONTH_TO_DATE, YEAR_TO_DATE, LAST_7_DAYS, LAST_30_DAYS"}
+        metrics:    {type: string, description: "comma-separated, e.g. ESTIMATED_EARNINGS,CLICKS,IMPRESSIONS,PAGE_VIEWS"}
+        dimensions: {type: string, description: "comma-separated, e.g. DATE or PAGE_URL or COUNTRY_CODE. Optional."}
+        limit:      {type: integer, description: "max rows — REQUIRED. Use 50 unless you truly need more; AdSense returns up to 100000 rows when unset."}
+      required: [account, date_range, metrics, limit]
+    request:
+      method: GET
+      url: "https://adsense.googleapis.com/v2/{{account}}/reports:generate"
+      query:
+        dateRange:  "{{date_range}}"
+        metrics:    "{{metrics}}"
+        dimensions: "{{dimensions}}"
+        limit:      "{{limit}}"
+    # Whole envelope on purpose: the report rows are meaningless without the
+    # sibling "headers" block that names each column.
+    response_extract: "$"

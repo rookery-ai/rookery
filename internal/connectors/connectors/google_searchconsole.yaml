@@ -1,0 +1,45 @@
+provider: google_searchconsole
+actions:
+  - name: gsc_list_sites
+    description: "List the Search Console properties you can access. Read-only. Call this FIRST — other actions need the site URL it returns, e.g. https://example.com/ or sc-domain:example.com."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://www.googleapis.com/webmasters/v3/sites"
+    response_extract: "$.siteEntry"
+  - name: gsc_search_analytics
+    description: "Search performance for a site: clicks, impressions, CTR, average position. Read-only. Use for 'which queries bring traffic', 'how did search traffic change'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        site_url:   {type: string, description: "site URL from gsc_list_sites, e.g. https://example.com/"}
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+        dimensions: {type: array, items: {type: string}, description: "any of query, page, country, device, date. Optional."}
+        row_limit:  {type: integer, description: "max rows — REQUIRED. Use 50 unless you truly need more; Search Console returns up to 1000 rows when unset."}
+      required: [site_url, start_date, end_date, row_limit]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/webmasters/v3/sites/{{site_url|escape}}/searchAnalytics/query"
+      body:
+        startDate:  "{{start_date}}"
+        endDate:    "{{end_date}}"
+        dimensions: "{{dimensions}}"
+        rowLimit:   "{{row_limit}}"
+    response_extract: "$.rows"
+  - name: gsc_list_sitemaps
+    description: "List submitted sitemaps for a site and their processing status. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        site_url: {type: string, description: "site URL from gsc_list_sites"}
+      required: [site_url]
+    request:
+      method: GET
+      url: "https://www.googleapis.com/webmasters/v3/sites/{{site_url|escape}}/sitemaps"
+    response_extract: "$.sitemap"

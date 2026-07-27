@@ -1,5 +1,6 @@
 name: dropbox
 label: Dropbox
+category: Productivity
 authorize_url: https://www.dropbox.com/oauth2/authorize
 token_url: https://api.dropboxapi.com/oauth2/token
 default_scopes:

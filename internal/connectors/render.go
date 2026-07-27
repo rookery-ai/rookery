@@ -9,7 +9,9 @@ import (
 	"strings"
 )
 
-var placeholderRE = regexp.MustCompile(`\{\{([\w.]+)\}\}`)
+// placeholderRE matches {{name}} and the opt-in {{name|escape}} form. The suffix
+// URL-escapes the substituted value for a path segment; see subst.
+var placeholderRE = regexp.MustCompile(`\{\{([\w.]+)(\|escape)?\}\}`)
 
 // lonePlaceholderRE matches a string that is EXACTLY one {{name}} placeholder, so its
 // substituted value keeps the arg's real type (array/int/bool) instead of stringifying.
@@ -35,11 +37,29 @@ func asString(v any) string {
 // subst replaces {{name}} from args and {{conn.key}} from connVars. connVars may be nil.
 func subst(tmpl string, args map[string]any, connVars map[string]string) string {
 	return placeholderRE.ReplaceAllStringFunc(tmpl, func(m string) string {
-		name := placeholderRE.FindStringSubmatch(m)[1]
+		g := placeholderRE.FindStringSubmatch(m)
+		name, escape := g[1], g[2] == "|escape"
+		var val string
 		if strings.HasPrefix(name, "conn.") {
-			return connVars[strings.TrimPrefix(name, "conn.")]
+			val = connVars[strings.TrimPrefix(name, "conn.")]
+		} else {
+			val = asString(args[name])
 		}
-		return asString(args[name])
+		// Escaping is OPT-IN, never blanket. An identifier like AdSense's
+		// "accounts/pub-123" or GA4's "properties/123" carries a REAL path
+		// separator, so escaping every substitution would corrupt it. Only a
+		// value that is itself a URL sitting in a path segment — a Search
+		// Console site URL — asks for this.
+		//
+		// PathEscape deliberately leaves ':' alone (RFC 3986 permits it in a
+		// path segment), but Google's Search Console API documents the siteUrl
+		// as fully encoded — "https%3A%2F%2Fwww.example.com%2F", and
+		// "sc-domain%3Aexample.com" for a domain property. Both of this app's
+		// escaped values are exactly that shape, so the colon is escaped too.
+		if escape {
+			val = strings.ReplaceAll(url.PathEscape(val), ":", "%3A")
+		}
+		return val
 	})
 }
 
@@ -96,6 +116,55 @@ var bodyBuilders = map[string]bodyBuilder{
 	"jira_issue":       jiraIssue,
 	"jira_comment":     jiraComment,
 	"drive_folder":     driveFolder,
+	"ga4_report":       ga4Report,
+	"ga4_realtime":     ga4Realtime,
+}
+
+// ga4Names turns a comma-separated metric/dimension list into GA4's [{"name": "..."}]
+// form. GA4 rejects a bare string array, and renderBody cannot map one shape onto the
+// other — a template can substitute an array but not restructure it — which is why this
+// is a builder. Taking CSV rather than an array also keeps the tool schema simple for
+// weaker models, which reliably produce "a,b" and unreliably produce [{"name":"a"}].
+func ga4Names(csv string) []map[string]string {
+	out := []map[string]string{}
+	for _, part := range strings.Split(csv, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, map[string]string{"name": p})
+		}
+	}
+	return out
+}
+
+// ga4Report builds a runReport body. Args: start_date, end_date, metrics, dimensions
+// (optional), limit (optional). GA4 types limit as an int64-in-a-string, which is what
+// asString produces.
+func ga4Report(args map[string]any) ([]byte, string, error) {
+	m := map[string]any{
+		"dateRanges": []any{map[string]string{
+			"startDate": asString(args["start_date"]),
+			"endDate":   asString(args["end_date"]),
+		}},
+		"metrics": ga4Names(asString(args["metrics"])),
+	}
+	if d := ga4Names(asString(args["dimensions"])); len(d) > 0 {
+		m["dimensions"] = d
+	}
+	if l := asString(args["limit"]); l != "" {
+		m["limit"] = l
+	}
+	b, err := json.Marshal(m)
+	return b, "application/json", err
+}
+
+// ga4Realtime builds a runRealtimeReport body. No date range: the API's window is fixed
+// at the last 30 minutes. Args: metrics, dimensions (optional).
+func ga4Realtime(args map[string]any) ([]byte, string, error) {
+	m := map[string]any{"metrics": ga4Names(asString(args["metrics"]))}
+	if d := ga4Names(asString(args["dimensions"])); len(d) > 0 {
+		m["dimensions"] = d
+	}
+	b, err := json.Marshal(m)
+	return b, "application/json", err
 }
 
 // driveFolder builds a Drive create-folder body, including parents (as a single-element

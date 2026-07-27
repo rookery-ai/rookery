@@ -11,7 +11,86 @@ import {
   useConnectService,
   useConnectAPIKey,
   useDeleteServiceConnection,
+  groupByCategory,
+  CATEGORY_ORDER,
+  type ServiceProvider,
 } from "./connections";
+
+function providerFixture(
+  name: string,
+  category: string,
+): ServiceProvider {
+  return {
+    name,
+    label: name,
+    category,
+    kind: "oauth",
+    setup_url: "",
+    setup_steps: [],
+    has_creds: false,
+    connect_inputs: [],
+    connections: [],
+  };
+}
+
+describe("groupByCategory", () => {
+  it("orders groups by CATEGORY_ORDER, not by input or alphabet", () => {
+    const grouped = groupByCategory([
+      providerFixture("stripe", "Commerce"),
+      providerFixture("gmail", "Google"),
+      providerFixture("asana", "Productivity"),
+    ]);
+    expect(grouped.map(([c]) => c)).toEqual([
+      "Google",
+      "Productivity",
+      "Commerce",
+    ]);
+  });
+
+  it("preserves incoming order within a group", () => {
+    const grouped = groupByCategory([
+      providerFixture("google_sheets", "Google"),
+      providerFixture("gmail", "Google"),
+    ]);
+    expect(grouped[0][1].map((p) => p.name)).toEqual([
+      "google_sheets",
+      "gmail",
+    ]);
+  });
+
+  // A provider must never vanish from a page whose whole purpose is showing
+  // every available integration — an unknown or missing category falls to Other.
+  it("routes unknown and empty categories to Other", () => {
+    const grouped = groupByCategory([
+      providerFixture("mystery", "Nonsense"),
+      providerFixture("blank", ""),
+    ]);
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0][0]).toBe("Other");
+    expect(grouped[0][1].map((p) => p.name)).toEqual(["mystery", "blank"]);
+  });
+
+  it("drops empty categories so no blank heading renders", () => {
+    const grouped = groupByCategory([providerFixture("gmail", "Google")]);
+    expect(grouped.map(([c]) => c)).toEqual(["Google"]);
+    expect(grouped.length).toBeLessThan(CATEGORY_ORDER.length);
+  });
+
+  it("loses no providers", () => {
+    const input = [
+      providerFixture("a", "Google"),
+      providerFixture("b", "Commerce"),
+      providerFixture("c", "Nonsense"),
+      providerFixture("d", ""),
+    ];
+    const total = groupByCategory(input).reduce((n, [, ps]) => n + ps.length, 0);
+    expect(total).toBe(input.length);
+  });
+
+  it("returns nothing for an empty list", () => {
+    expect(groupByCategory([])).toEqual([]);
+  });
+});
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {

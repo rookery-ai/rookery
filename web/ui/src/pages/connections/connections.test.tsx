@@ -57,6 +57,7 @@ function resetFixtures() {
     {
       name: "gmail",
       label: "Gmail",
+      category: "Google",
       kind: "oauth",
       setup_url: "",
       setup_steps: [],
@@ -67,6 +68,7 @@ function resetFixtures() {
     {
       name: "notion",
       label: "Notion",
+      category: "Productivity",
       kind: "oauth",
       setup_url: "",
       setup_steps: [],
@@ -77,6 +79,7 @@ function resetFixtures() {
     {
       name: "jira",
       label: "Jira",
+      category: "Productivity",
       kind: "oauth",
       setup_url: "",
       setup_steps: [],

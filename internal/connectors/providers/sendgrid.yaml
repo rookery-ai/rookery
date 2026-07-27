@@ -1,5 +1,6 @@
 name: sendgrid
 label: SendGrid
+category: Communication
 auth:
   kind: api_key
   placement: header
