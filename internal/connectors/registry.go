@@ -114,6 +114,25 @@ type Provider struct {
 	KeyExtra map[string]string `yaml:"key_extra"`
 }
 
+// WithConnVars returns a copy of the provider with its OAuth endpoint URLs resolved
+// against per-connection values.
+//
+// Mastodon is why this exists: every instance is its own OAuth server, so
+// authorize_url/token_url/userinfo_url are templates over {{conn.instance}} rather than
+// constants. The values come from connect_inputs, which are collected BEFORE consent
+// and ride the signed state — so both the consent URL and the callback's token exchange
+// can resolve them. Providers with literal URLs are unaffected: subst leaves a string
+// with no placeholders untouched.
+func (p Provider) WithConnVars(vars map[string]string) Provider {
+	if len(vars) == 0 {
+		return p
+	}
+	p.AuthorizeURL = subst(p.AuthorizeURL, nil, vars)
+	p.TokenURL = subst(p.TokenURL, nil, vars)
+	p.UserinfoURL = subst(p.UserinfoURL, nil, vars)
+	return p
+}
+
 // ConnectInput is a per-connection value collected on the api-key connect form and stored in
 // service_connections.extra (exposed to request templates + auth as {{conn.<key>}}).
 type ConnectInput struct {

@@ -124,6 +124,14 @@ func (s *Server) buildConsentURL(c echo.Context, w *db.Workspace, provider, labe
 	if err != nil {
 		return "", &consentURLError{"unreadable_creds", "Stored credentials are unreadable; re-enter them."}
 	}
+	// Mastodon-style providers template their OAuth endpoints over a connect_input
+	// (the instance host), so resolve before building the consent URL.
+	oauth = oauth.WithConnVars(inputs)
+	if strings.Contains(oauth.AuthorizeURL, "{{") || oauth.AuthorizeURL == "" {
+		return "", &consentURLError{"missing_creds",
+			"This provider needs its connection details filled in before connecting."}
+	}
+
 	nonce := uuid.New().String()
 	// connect_inputs ride the signed state rather than server-side pending storage: the
 	// state is already HMAC-signed and TTL'd, so it cannot be tampered with, and there is
@@ -228,6 +236,9 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 	if !ok {
 		return s.redirectWithError(c, "/connections", "Unknown provider.")
 	}
+	// Same resolution as the consent URL: a per-instance provider's token and userinfo
+	// endpoints are templates, and the values came back to us inside the signed state.
+	authProv = authProv.WithConnVars(connectInputs)
 	cfg, _ := s.db.GetServiceProviderConfig(ctx, w.ID, authProv.Name)
 	if cfg == nil {
 		return s.redirectWithError(c, "/connections", "Missing OAuth app credentials.")

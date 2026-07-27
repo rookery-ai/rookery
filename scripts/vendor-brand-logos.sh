@@ -106,6 +106,7 @@ tiktok:siTiktok
 pinterest:siPinterest
 google_ads:siGoogleads
 bluesky:siBluesky
+mastodon:siMastodon
 opencode_zen:siOpencode
 opencode_go:siOpencode
 "

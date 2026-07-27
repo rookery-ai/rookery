@@ -1,0 +1,59 @@
+provider: mastodon
+actions:
+  - name: mastodon_me
+    description: "Your own Mastodon account: handle, display name, follower and post counts. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "{{conn.instance}}/api/v1/accounts/verify_credentials"
+    response_extract: "$"
+  - name: mastodon_timeline
+    description: "Recent posts from your home timeline, newest first. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max rows — REQUIRED. Use 10."}
+      required: [limit]
+    request:
+      method: GET
+      url: "{{conn.instance}}/api/v1/timelines/home"
+      query:
+        limit: "{{limit}}"
+    response_extract: "$"
+  - name: mastodon_search
+    description: "Search Mastodon for posts, accounts, or hashtags. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "search terms"}
+        limit: {type: integer, description: "max rows — REQUIRED. Use 10."}
+      required: [query, limit]
+    request:
+      method: GET
+      url: "{{conn.instance}}/api/v2/search"
+      query:
+        q:     "{{query}}"
+        limit: "{{limit}}"
+    response_extract: "$"
+  - name: mastodon_create_post
+    description: "Publish a post (a 'toot') to your Mastodon account. This is a REAL, PUBLIC, irreversible post. Most instances allow 500 characters."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        status:     {type: string, description: "the post body, as it will appear"}
+        visibility: {type: string, description: "public, unlisted, private, or direct (default public)"}
+      required: [status]
+    request:
+      method: POST
+      url: "{{conn.instance}}/api/v1/statuses"
+      form:
+        status:     "{{status}}"
+        visibility: "{{visibility}}"
+    response_extract: "$"

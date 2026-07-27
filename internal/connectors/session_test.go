@@ -180,3 +180,89 @@ func fakeRow(t *testing.T, handle string) *db.ServiceConnection {
 func asConnectorError(err error, target **ConnectorError) bool {
 	return errors.As(err, target)
 }
+
+// ── Mastodon: per-instance OAuth endpoints ───────────────────────────────────
+
+// Every Mastodon instance is its own OAuth server, so the endpoints are TEMPLATES.
+// Unresolved, the consent URL would point at a literal "{{conn.instance}}" host.
+func TestMastodonResolvesPerInstanceEndpoints(t *testing.T) {
+	reg, err := LoadBundled()
+	if err != nil {
+		t.Fatalf("LoadBundled: %v", err)
+	}
+	p, ok := reg.ProviderByName("mastodon")
+	if !ok {
+		t.Fatal("mastodon provider not loaded")
+	}
+	if !contains(p.AuthorizeURL, "{{conn.instance}}") {
+		t.Fatalf("authorize_url should be a template, got %q", p.AuthorizeURL)
+	}
+
+	resolved := p.WithConnVars(map[string]string{"instance": "https://mastodon.social"})
+	if resolved.AuthorizeURL != "https://mastodon.social/oauth/authorize" {
+		t.Errorf("authorize_url = %q", resolved.AuthorizeURL)
+	}
+	if resolved.TokenURL != "https://mastodon.social/oauth/token" {
+		t.Errorf("token_url = %q", resolved.TokenURL)
+	}
+	if resolved.UserinfoURL != "https://mastodon.social/api/v1/accounts/verify_credentials" {
+		t.Errorf("userinfo_url = %q", resolved.UserinfoURL)
+	}
+
+	u := resolved.ConsentURL("cid", "https://example.com/cb", "st", resolved.DefaultScopes)
+	if !contains(u, "https://mastodon.social/oauth/authorize?") {
+		t.Errorf("consent URL did not resolve: %s", u)
+	}
+	// Mastodon tokens do not expire, so nothing should try to refresh them.
+	if !p.NonExpiring() {
+		t.Error("mastodon tokens do not expire — token_expiry should be never")
+	}
+}
+
+// WithConnVars must be a no-op for every provider with literal URLs, or resolving it
+// on the shared code path would corrupt them.
+func TestWithConnVarsLeavesLiteralURLsAlone(t *testing.T) {
+	reg, _ := LoadBundled()
+	for _, name := range []string{"github", "google", "linkedin", "x"} {
+		p, ok := reg.ProviderByName(name)
+		if !ok {
+			continue
+		}
+		got := p.WithConnVars(map[string]string{"instance": "https://evil.example"})
+		if got.AuthorizeURL != p.AuthorizeURL || got.TokenURL != p.TokenURL {
+			t.Errorf("%s: literal endpoints were altered: %q / %q", name, got.AuthorizeURL, got.TokenURL)
+		}
+	}
+	// Empty vars must also be a no-op.
+	p, _ := reg.ProviderByName("mastodon")
+	if p.WithConnVars(nil).AuthorizeURL != p.AuthorizeURL {
+		t.Error("nil vars should leave the provider untouched")
+	}
+}
+
+// Every action addresses the user's own instance from conn.extra, so the model cannot
+// direct a post at an arbitrary server.
+func TestMastodonActionsUseInstanceFromExtra(t *testing.T) {
+	reg, _ := LoadBundled()
+	for _, name := range []string{"mastodon_me", "mastodon_timeline", "mastodon_search", "mastodon_create_post"} {
+		a, ok := reg.Action("mastodon", name)
+		if !ok {
+			t.Fatalf("%s not found", name)
+		}
+		if !contains(a.Request.URL, "{{conn.instance}}") {
+			t.Errorf("%s must address the connected instance, got %s", name, a.Request.URL)
+		}
+	}
+	a, _ := reg.Action("mastodon", "mastodon_create_post")
+	if !a.PublicWrite || !a.Mutating {
+		t.Error("posting to Mastodon must be public_write and mutating")
+	}
+	_, u, _, _, err := renderRequest(a, map[string]any{"status": "hi"},
+		map[string]string{"instance": "https://mastodon.social"})
+	if err != nil {
+		t.Fatalf("renderRequest: %v", err)
+	}
+	if u != "https://mastodon.social/api/v1/statuses" {
+		t.Errorf("unexpected URL: %s", u)
+	}
+}

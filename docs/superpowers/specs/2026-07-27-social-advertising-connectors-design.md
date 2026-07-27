@@ -74,9 +74,10 @@ non-public mode. That maps onto the approval gate below rather than fighting it.
 
 ### Deferred
 
-**Mastodon** needs per-connection `authorize_url` / `token_url`; `Provider` resolves those
-statically from the embedded YAML. Supporting it means per-connection OAuth endpoints,
-which is a framework change no other provider needs. Not worth it yet.
+~~**Mastodon** needs per-connection `authorize_url` / `token_url`~~ — **BUILT.** It became
+cheap once OAuth-path `connect_inputs` existed: the instance is collected before consent and
+rides the signed state, so `Provider.WithConnVars` can resolve the endpoints at both the
+consent URL and the callback's token exchange. Providers with literal URLs are unaffected.
 
 ## Framework extensions
 
@@ -290,9 +291,9 @@ Recorded after implementation so the spec does not read as a description of what
 Everything below was verified by the test suite; **nothing was verified against a live
 provider API**, which needs real apps on each platform and would publish real content.
 
-**Built:** 44 providers / ~268 actions (up from 28). Google publisher side (AdSense, GA4,
+**Built:** 45 providers / ~272 actions (up from 28). Google publisher side (AdSense, GA4,
 Search Console, YouTube), the approval gate, LinkedIn, Meta Ads, Facebook Pages, Instagram,
-Threads, X, Reddit, TikTok, Pinterest, Google Ads, LinkedIn Ads, Bluesky.
+Threads, X, Reddit, TikTok, Pinterest, Google Ads, LinkedIn Ads, Bluesky, Mastodon.
 
 **Framework changes built:** the approval gate (1), OAuth-path `connect_inputs` (2), Meta
 token exchange (4), the bridge byte cap (5) — plus three not anticipated by this spec:
@@ -312,4 +313,10 @@ header required.
 - **YouTube upload** — `videos.insert` needs a multipart/resumable binary body and the
   framework has no body kind for it. `youtube_post_comment` shipped instead, which exercises
   the approval gate on the same provider.
-- **Mastodon** — unchanged from the Deferred section: per-connection OAuth endpoints.
+- **Mastodon** — now BUILT; see the Deferred section.
+
+**Everything in this spec is therefore built except YouTube upload**, which needs a
+streaming/multipart body kind. That is a framework capability with real design weight —
+buffering a multi-hundred-MB video in memory, and fetching an arbitrary URL from inside the
+connector layer (an SSRF surface `internal/nethttp` exists to guard) — not something to
+smuggle in as a body builder.
