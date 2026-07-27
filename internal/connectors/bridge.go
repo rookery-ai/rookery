@@ -8,10 +8,35 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
+
+// maxBridgeResult mirrors coder.maxToolResult: the API engine truncates a connector result
+// before it reaches the model, and a CLI coder reading this bridge must not be handed an
+// unbounded one. Analytics and ad-insights responses are the payloads that make the
+// difference — a 30-day report runs to megabytes and would otherwise land whole in a
+// coder's context.
+const maxBridgeResult = 8 * 1024
+
+// capBridgeData bounds a connector result for the wire. Under the cap the response is
+// unchanged: {"data": <original json>}. Over it, data becomes a truncated STRING plus an
+// explicit truncated/note pair — cutting a JSON value in place would produce something
+// that still parses as data and reads as complete, which is the worst of both.
+func capBridgeData(data json.RawMessage) map[string]any {
+	if len(data) <= maxBridgeResult {
+		return map[string]any{"data": data}
+	}
+	return map[string]any{
+		"data":      string(data[:maxBridgeResult]) + "…",
+		"truncated": true,
+		"note": "response exceeded " + strconv.Itoa(maxBridgeResult) +
+			" bytes and was cut. Re-run with a narrower query — a shorter date range, " +
+			"a smaller limit, or fewer dimensions.",
+	}
+}
 
 // Bridge lets a CLI coder subprocess reach the SAME connectors.Execute path the API
 // engine calls in-process. It runs a loopback-only HTTP listener in the host process
@@ -119,7 +144,7 @@ func (b *Bridge) handler() http.Handler {
 			writeJSON(w, http.StatusOK, map[string]string{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]json.RawMessage{"data": res.Data})
+		writeJSON(w, http.StatusOK, capBridgeData(res.Data))
 	})
 	return mux
 }
