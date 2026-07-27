@@ -212,3 +212,33 @@ type failingStore struct{}
 func (failingStore) AccessToken(context.Context, ConnRef) (string, error) {
 	return "", &ConnectorError{KindNeedsReauth, "no token"}
 }
+
+// A Parker that returns an empty ticket means "this binding is on auto" — the call
+// must be SENT, not treated as a failed park. One agent run holds several
+// connections with different modes, so this is the normal mixed case, not an edge.
+func TestEmptyTicketFallsThroughToSending(t *testing.T) {
+	reg := parkTestRegistry(t)
+	declining := &decliningParker{}
+
+	_, err := Execute(context.Background(), reg, failingStore{}, &http.Client{},
+		ConnRef{ID: "c1", Provider: "fake"}, "fake_post",
+		map[string]any{"text": "hi"}, Policy{Parker: declining})
+
+	if declining.calls != 1 {
+		t.Fatalf("Park should still be consulted, called %d times", declining.calls)
+	}
+	// Falling through means it reached the token fetch, which our store denies.
+	if err == nil {
+		t.Fatal("expected the ungated fall-through to reach the token fetch")
+	}
+	if strings.Contains(err.Error(), "queue for approval") {
+		t.Errorf("an empty ticket must not be reported as a queueing failure: %v", err)
+	}
+}
+
+type decliningParker struct{ calls int }
+
+func (d *decliningParker) Park(context.Context, ConnRef, string, map[string]any) (string, error) {
+	d.calls++
+	return "", nil // not gated
+}

@@ -237,6 +237,19 @@ func (d *DB) SetAgentConnections(ctx context.Context, agentID string, connIDs []
 	return tx.Commit()
 }
 
+// AgentHasGatedConnection reports whether the agent has ANY binding on 'approve'.
+//
+// It exists so the common case costs one query per run instead of one per
+// public_write call: when it returns false the runner installs no Parker at all and
+// Execute skips the gate branch entirely.
+func (d *DB) AgentHasGatedConnection(ctx context.Context, agentID string) (bool, error) {
+	var n int
+	err := d.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM agent_connections WHERE agent_id=? AND approval_mode=?`,
+		agentID, ApprovalModeApprove).Scan(&n)
+	return n > 0, err
+}
+
 // SetAgentConnectionApprovalMode sets one binding's gate. mode must be ApprovalModeAuto
 // or ApprovalModeApprove; anything else is rejected rather than stored, so an unknown
 // value can never sit in the column and be read as "not approve" at execution time.

@@ -77,6 +77,12 @@ type Policy struct {
 
 // Parker parks a public_write call for the owner to approve later, returning the
 // ticket id. Implemented by the approval service; nil in every non-gated path.
+//
+// Returning ("", nil) means "this call is NOT gated — send it normally". That is how
+// the per-binding approval_mode is honoured: one agent run can hold several
+// connections with different modes, so the decision cannot be made once up front when
+// the Policy is built. The Parker owns the lookup because it has the agent context;
+// this package knows nothing about agents.
 type Parker interface {
 	Park(ctx context.Context, conn ConnRef, action string, args map[string]any) (ticketID string, err error)
 }
@@ -122,18 +128,22 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 		if err != nil {
 			return Result{}, &ConnectorError{KindOther, "could not queue for approval: " + err.Error()}
 		}
-		payload, err := json.Marshal(ParkedResult{
-			Status: "queued_for_approval",
-			ID:     id,
-			Action: actionName,
-			Note: "NOT yet published — this is awaiting the owner's approval and may never " +
-				"be sent. Do NOT record it as posted, and do not retry it. The owner will " +
-				"be notified of the outcome separately.",
-		})
-		if err != nil {
-			return Result{}, &ConnectorError{KindOther, err.Error()}
+		// An empty id means this binding is on 'auto' — not gated. Fall through and
+		// send now, rather than treating "no ticket" as a failure.
+		if id != "" {
+			payload, err := json.Marshal(ParkedResult{
+				Status: "queued_for_approval",
+				ID:     id,
+				Action: actionName,
+				Note: "NOT yet published — this is awaiting the owner's approval and may never " +
+					"be sent. Do NOT record it as posted, and do not retry it. The owner will " +
+					"be notified of the outcome separately.",
+			})
+			if err != nil {
+				return Result{}, &ConnectorError{KindOther, err.Error()}
+			}
+			return Result{Data: payload}, nil
 		}
-		return Result{Data: payload}, nil
 	}
 	token, err := store.AccessToken(ctx, conn)
 	if err != nil {
