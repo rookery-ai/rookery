@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const MIN_ROWS = 1;
@@ -132,16 +133,20 @@ export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, in
           "focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
         )}
       />
+      {/* Icon-only, but the accessible name stays exactly "Send" — every
+          surface's tests (and any screen reader) still find it by that name. */}
       <button
         type="button"
         onClick={send}
+        aria-label="Send"
+        title="Send"
         disabled={busy || !value.trim()}
         className={cn(
-          "rounded-lg bg-foreground px-3 py-2 text-sm font-medium text-background",
+          "flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground text-background",
           "disabled:cursor-not-allowed disabled:opacity-40",
         )}
       >
-        Send
+        <Send className="size-4" />
       </button>
     </div>
   );

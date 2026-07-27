@@ -155,3 +155,12 @@ test("Composer: clicking Send does not pull focus into the textarea", async () =
   rerender(<Composer onSend={onSend} />);
   expect(box).not.toHaveFocus();
 });
+
+test("Composer: the send control is an icon button still named 'Send'", () => {
+  render(<Composer onSend={vi.fn()} />);
+  const btn = screen.getByRole("button", { name: "Send" });
+  // An icon, not the word — but the accessible name is unchanged so every
+  // existing getByRole("button", { name: "Send" }) keeps matching.
+  expect(btn.textContent).toBe("");
+  expect(btn.querySelector("svg")).toBeInTheDocument();
+});
