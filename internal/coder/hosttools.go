@@ -132,6 +132,7 @@ type hostToolSet struct {
 	// connections (agent_connections), each connection's curated actions are offered
 	// as native typed tools (connectorTools) and dispatched through connectors.Execute.
 	// Empty for chat / unbound agents. See connectortools.go.
+	connParker connectors.Parker
 	connReg    *connectors.Registry
 	connStore  connectors.TokenStore
 	boundConns []connectors.BoundConn

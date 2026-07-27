@@ -16,6 +16,7 @@ import (
 
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
+	"github.com/ilijad1/simple-agents/internal/approval"
 	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/chat"
 	"github.com/ilijad1/simple-agents/internal/coder"
@@ -224,6 +225,11 @@ func serveCmd() *cli.Command {
 
 			// Loopback KB bridge so CLI coders reach conversion + search in-process
 			// (the same vault.ImportFile / Searcher code the API engine calls directly).
+			// Approval gate for irreversible public writes (posts, uploads). Off unless
+			// a workspace sets a binding's approval_mode to 'approve', so this costs
+			// nothing on an install that never enables it.
+			approvalSvc := approval.New(database, connReg, connStore, nil)
+
 			kbBridge := vault.NewBridge(vlt)
 			if _, err := kbBridge.Start(ctx); err != nil {
 				return fmt.Errorf("start kb bridge: %w", err)
@@ -252,6 +258,7 @@ func serveCmd() *cli.Command {
 				WithMemory(memStore).
 				WithVault(vlt).
 				WithConnectors(connReg, connStore, connBridge).
+				WithApprovalGate(approvalSvc.ParkerFor).
 				WithKBBridge(kbBridge).
 				WithCoderFactory(func(workspaceID string) *coder.Coder {
 					w, err := database.GetWorkspaceByID(workspaceID)
@@ -395,8 +402,14 @@ func serveCmd() *cli.Command {
 				WithTimeParserFallback(buildLLMTimeParserFn(coderSvc)).
 				WithSkillFlow(skillFlow).
 				WithVault(vlt).
-				WithTitleGenerator(titleGen)
+				WithTitleGenerator(titleGen).
+				WithApproval(approvalSvc)
 			gwManager := gateway.New(database, sysKey, router)
+
+			// Chat delivery for park/outcome notices. Set after the manager exists
+			// because the notifier IS the manager — the approval service is built
+			// earlier so the runner can reference it.
+			approvalSvc.WithNotifier(gwManager)
 
 			go func() {
 				if err := gwManager.StartAll(ctx); err != nil {
@@ -432,6 +445,11 @@ func serveCmd() *cli.Command {
 					case <-ctx.Done():
 						return
 					case <-ticker.C:
+						// Stale approvals: a post approved a week after it was drafted is
+						// almost never what the owner meant, and an unbounded queue turns
+						// into a list nobody reads.
+						approvalSvc.ExpireStale(ctx, 7*24*time.Hour)
+
 						expired, err := database.ListExpiredAgentDrafts()
 						if err != nil {
 							slog.Warn("draft gc: list expired", "err", err)

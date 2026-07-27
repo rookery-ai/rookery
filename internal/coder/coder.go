@@ -105,6 +105,8 @@ type Coder struct {
 	connReg    *connectors.Registry
 	connStore  connectors.TokenStore
 	boundConns []connectors.BoundConn
+	// connParker gates public_write connector actions; nil means no gate.
+	connParker connectors.Parker
 }
 
 // WithConnectors returns a shallow copy of the Coder that offers the given bound
@@ -113,6 +115,15 @@ type Coder struct {
 func (c *Coder) WithConnectors(reg *connectors.Registry, store connectors.TokenStore, bound []connectors.BoundConn) *Coder {
 	c2 := *c
 	c2.connReg, c2.connStore, c2.boundConns = reg, store, bound
+	return &c2
+}
+
+// WithParker attaches the approval gate for public_write connector actions. Nil (the
+// default) means no gate, which is what chat, builds, and any agent with no gated
+// binding all want — see approval.Service.ParkerFor.
+func (c *Coder) WithParker(p connectors.Parker) *Coder {
+	c2 := *c
+	c2.connParker = p
 	return &c2
 }
 

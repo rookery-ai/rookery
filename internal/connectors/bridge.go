@@ -58,6 +58,10 @@ type bridgeSession struct {
 	workspaceID string
 	bound       []BoundConn
 	buildPhase  bool
+	// parker gates public_write actions for this run; nil means no gate. A CLI coder
+	// must be gated identically to the API engine, or switching coder kind would
+	// silently disable the user's approval setting.
+	parker Parker
 }
 
 // NewBridge creates a bridge over the given registry + token store. client may be nil.
@@ -88,9 +92,14 @@ func (b *Bridge) Addr() string { return b.addr }
 // Register scopes a new per-run token to the run's bound connections and returns it.
 // Call Unregister when the run finishes.
 func (b *Bridge) Register(workspaceID string, bound []BoundConn, buildPhase bool) string {
+	return b.RegisterGated(workspaceID, bound, buildPhase, nil)
+}
+
+// RegisterGated is Register plus an approval gate for this run's public_write calls.
+func (b *Bridge) RegisterGated(workspaceID string, bound []BoundConn, buildPhase bool, parker Parker) string {
 	tok := randomToken()
 	b.mu.Lock()
-	b.sessions[tok] = &bridgeSession{workspaceID: workspaceID, bound: bound, buildPhase: buildPhase}
+	b.sessions[tok] = &bridgeSession{workspaceID: workspaceID, bound: bound, buildPhase: buildPhase, parker: parker}
 	b.mu.Unlock()
 	return tok
 }
@@ -139,7 +148,7 @@ func (b *Bridge) handler() http.Handler {
 		}
 		res, err := Execute(r.Context(), b.reg, b.store, b.client,
 			ConnRef{ID: conn.ID, Provider: conn.Provider, AccountIdentity: conn.AccountIdentity, Extra: conn.Extra},
-			action, req.Args, Policy{BuildPhase: sess.buildPhase})
+			action, req.Args, Policy{BuildPhase: sess.buildPhase, Parker: sess.parker})
 		if err != nil {
 			writeJSON(w, http.StatusOK, map[string]string{"error": err.Error()})
 			return
