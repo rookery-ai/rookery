@@ -64,7 +64,7 @@ func TestTokenAuthBasicAndStaticHeaders(t *testing.T) {
 	reg := &Registry{providers: map[string]Provider{"notion": p}, actions: map[string][]Action{
 		"notion": {{Name: "notion_ping", Request: RequestTemplate{Method: "GET", URL: srv.URL + "/v1/x"}}},
 	}}
-	_, err = Execute(context.Background(), reg, fakeStore{tok: "AT"}, srv.Client(), ConnRef{Provider: "notion"}, "notion_ping", map[string]any{}, false)
+	_, err = Execute(context.Background(), reg, fakeStore{tok: "AT"}, srv.Client(), ConnRef{Provider: "notion"}, "notion_ping", map[string]any{}, Policy{})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestConnVarTemplating(t *testing.T) {
 		"jira": {{Name: "jira_myself", Request: RequestTemplate{Method: "GET", URL: srv.URL + "/ex/jira/{{conn.cloudid}}/rest/api/3/myself"}}},
 	}}
 	_, err := Execute(context.Background(), reg, fakeStore{tok: "AT"}, srv.Client(),
-		ConnRef{Provider: "jira", Extra: map[string]string{"cloudid": "CLOUD123"}}, "jira_myself", map[string]any{}, false)
+		ConnRef{Provider: "jira", Extra: map[string]string{"cloudid": "CLOUD123"}}, "jira_myself", map[string]any{}, Policy{})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

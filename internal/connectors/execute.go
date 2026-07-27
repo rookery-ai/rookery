@@ -54,11 +54,23 @@ type Result struct {
 	Data json.RawMessage
 }
 
+// Policy carries the per-call execution rules Execute enforces before touching the
+// network. It replaced a bare `buildPhase bool` parameter so new rules (the approval
+// gate) could be added without changing the signature at every call site again.
+//
+// The zero value is the permissive default — no build guard, no approval gate — which
+// is what a run, a chat turn, and the livecheck harness all want.
+type Policy struct {
+	// BuildPhase blocks mutating actions during agent/skill generation: a build must
+	// exercise real read paths without sending anything on the user's behalf.
+	BuildPhase bool
+}
+
 // Execute is the typed choke point every connector call goes through: validate args,
-// enforce the build-time mutation guard, fetch a fresh token, render + send the
-// provider request (one transient retry), and normalize the response/errors.
+// enforce the policy guards, fetch a fresh token, render + send the provider request
+// (one transient retry), and normalize the response/errors.
 func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.Client,
-	conn ConnRef, actionName string, args map[string]any, buildPhase bool) (Result, error) {
+	conn ConnRef, actionName string, args map[string]any, pol Policy) (Result, error) {
 
 	a, ok := reg.Action(conn.Provider, actionName)
 	if !ok {
@@ -67,7 +79,7 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 	if err := validateArgs(a.Params, args); err != nil {
 		return Result{}, &ConnectorError{KindBadArgs, err.Error()}
 	}
-	if a.Mutating && buildPhase {
+	if a.Mutating && pol.BuildPhase {
 		return Result{}, &ConnectorError{KindBuildBlocked,
 			fmt.Sprintf("build-time guard: %q sends/modifies for real and is blocked during generation — it will run when the agent executes for real", actionName)}
 	}

@@ -170,7 +170,7 @@ func TestExecuteChildProviderSendsBearer(t *testing.T) {
 	a.Request.URL = srv.URL + "/files"
 	reg.actions["google_drive"] = []Action{a}
 	res, err := Execute(context.Background(), reg, fakeStore{tok: "AT"}, srv.Client(),
-		ConnRef{ID: "c1", Provider: "google_drive"}, "drive_list_files", map[string]any{}, false)
+		ConnRef{ID: "c1", Provider: "google_drive"}, "drive_list_files", map[string]any{}, Policy{})
 	if err != nil {
 		t.Fatalf("execute child: %v", err)
 	}

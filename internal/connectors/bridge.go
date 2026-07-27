@@ -139,7 +139,7 @@ func (b *Bridge) handler() http.Handler {
 		}
 		res, err := Execute(r.Context(), b.reg, b.store, b.client,
 			ConnRef{ID: conn.ID, Provider: conn.Provider, AccountIdentity: conn.AccountIdentity, Extra: conn.Extra},
-			action, req.Args, sess.buildPhase)
+			action, req.Args, Policy{BuildPhase: sess.buildPhase})
 		if err != nil {
 			writeJSON(w, http.StatusOK, map[string]string{"error": err.Error()})
 			return
