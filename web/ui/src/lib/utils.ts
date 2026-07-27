@@ -35,3 +35,32 @@ export function formatShortDate(iso: string): string {
     minute: "2-digit",
   })
 }
+
+// formatMessageTime renders a chat message's timestamp as "Sun, 21:00" — a
+// short weekday plus a 24-hour clock, no seconds and no date, which is what a
+// per-message footer needs (the day is enough context inside one conversation).
+//
+// `timeZone` is the workspace profile's timezone, a FREE-TEXT settings field:
+// it can legitimately hold "", "CEST" or "UTC+2", none of which Intl accepts —
+// it throws RangeError. This runs during render for every bubble, so a throw
+// would blank the whole conversation. Hence the try/catch fallback to the
+// browser's own zone, mirroring Go's profile.LoadLocation, which likewise
+// degrades (to UTC) rather than failing on an unparseable zone.
+export function formatMessageTime(iso: string, timeZone?: string): string {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ""
+  const opts: Intl.DateTimeFormatOptions = {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }
+  if (timeZone) {
+    try {
+      return d.toLocaleString(undefined, { ...opts, timeZone })
+    } catch {
+      // Not a valid IANA zone — fall through to browser-local below.
+    }
+  }
+  return d.toLocaleString(undefined, opts)
+}
