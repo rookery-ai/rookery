@@ -2,6 +2,7 @@ import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-qu
 import { RouterProvider } from "react-router";
 import { router } from "./router";
 import { ApiError } from "@/lib/api";
+import { TimeZoneProvider } from "@/lib/timezone";
 
 const AUTH_ERROR_CODES = ["not_authenticated", "no_workspace", "needs_setup", "must_change_password"];
 
@@ -20,7 +21,9 @@ const qc: QueryClient = new QueryClient({
 export default function App() {
   return (
     <QueryClientProvider client={qc}>
-      <RouterProvider router={router} />
+      <TimeZoneProvider>
+        <RouterProvider router={router} />
+      </TimeZoneProvider>
     </QueryClientProvider>
   );
 }
