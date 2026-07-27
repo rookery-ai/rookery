@@ -247,7 +247,7 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
 
 - **Data files, not code.** Adding a service = a `providers/<p>.yaml` (auth config) + a
   `connectors/<p>.yaml` (curated action manifest), both `go:embed`ed. `LoadBundled()` parses them.
-  **38 providers (~250 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
+  **43 providers (~264 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
   Search Console**), **YouTube**, GitHub, Slack, OpenAI, Notion, Outlook, Teams, Jira, HubSpot,
   Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce,
   Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello.
@@ -326,6 +326,17 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
     (`{"data": …}`); over it, `data` becomes a truncated STRING plus `truncated: true` and a note
     telling the model to narrow its query, because a JSON value cut in place still parses and
     reads as complete data.
+- **`connect_inputs` work on the OAuth path too**, not just the paste-key form. A value that
+  cannot be discovered from any API (a Google Ads developer token) is collected BEFORE consent
+  and rides the **signed OAuth state** — already HMAC-signed and TTL'd, so no server-side pending
+  row exists to garbage-collect when a user abandons the consent screen. Base64 keeps the JSON
+  clear of the `~` field separator; the callback accepts both the 4- and 5-field state shapes,
+  because a state issued before the change can still be in flight across a deploy. Required
+  inputs are validated at CONNECT, not at callback — otherwise a user completes consent and is
+  then told a field was missing. Two further one-field provider generalisations live alongside:
+  `token_exchange_grant` (Threads uses `th_exchange_token`, not Meta's `fb_exchange_token`) and
+  `client_param` (TikTok names the client id `client_key` in both the consent URL and the token
+  request). Both default to today's behaviour.
 - **Approval gate for public writes** (`internal/approval`, opt-in, default OFF). Three layers:
   an action-level `public_write: true` in the connector YAML marks irreversible PUBLIC
   publishing (`mutating` is too blunt — pausing an ad campaign is mutating but private and
