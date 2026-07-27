@@ -53,7 +53,7 @@ is irrelevant for a single-owner install.
 | Instagram | Requires a Professional (Business/Creator) account. Two-step publish: create media container, then `media_publish`. 25 posts / 24h. |
 | Threads | Rides the same Meta app. 250 posts / 24h; media must be at a publicly reachable URL. |
 | Meta Ads | `ads_read` / `ads_management` against own ad accounts needs no App Review. |
-| Bluesky | App password → `createSession` → short-lived JWT + refresh JWT. No OAuth app at all. **NOT BUILT — see Delivery status.** |
+| Bluesky | App password → `createSession` → short-lived JWT. No OAuth app at all. **BUILT** (`session_exchange`). |
 | X / Twitter | Pay-per-use since Feb 2026: ~$0.015 per post created, ~$0.005 per post read, no monthly minimum. Basic/Pro closed to new signups. |
 
 ### Tier C — real approval gate
@@ -290,9 +290,9 @@ Recorded after implementation so the spec does not read as a description of what
 Everything below was verified by the test suite; **nothing was verified against a live
 provider API**, which needs real apps on each platform and would publish real content.
 
-**Built:** 43 providers / ~264 actions (up from 28). Google publisher side (AdSense, GA4,
+**Built:** 44 providers / ~268 actions (up from 28). Google publisher side (AdSense, GA4,
 Search Console, YouTube), the approval gate, LinkedIn, Meta Ads, Facebook Pages, Instagram,
-Threads, X, Reddit, TikTok, Pinterest, Google Ads, LinkedIn Ads.
+Threads, X, Reddit, TikTok, Pinterest, Google Ads, LinkedIn Ads, Bluesky.
 
 **Framework changes built:** the approval gate (1), OAuth-path `connect_inputs` (2), Meta
 token exchange (4), the bridge byte cap (5) — plus three not anticipated by this spec:
@@ -305,9 +305,10 @@ header required.
 
 - **Encrypting `extra` (change 3)** — superseded; see that section. The Page token became the
   connection's own already-encrypted token, so no secret lands in `extra`.
-- **Bluesky's `session_exchange` auth kind (change 6)** — a third auth kind for a single
-  provider. The cost is a new credential form, a session-exchange path, and a refresh model
-  that matches neither existing kind. Deferred on value-per-unit-of-machinery, not difficulty.
+- ~~**Bluesky's `session_exchange` auth kind (change 6)**~~ — **BUILT.** The app password is
+  the durable credential and is swapped for a short-lived accessJwt on use, cached in memory
+  for an hour rather than persisted (a stored JWT would be stale more often than fresh, and a
+  restart simply re-exchanges).
 - **YouTube upload** — `videos.insert` needs a multipart/resumable binary body and the
   framework has no body kind for it. `youtube_post_comment` shipped instead, which exercises
   the approval gate on the same provider.
