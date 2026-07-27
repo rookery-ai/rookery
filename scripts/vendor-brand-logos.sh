@@ -85,6 +85,7 @@ trello:trello
 twilio:twilio-2
 zendesk:zendesk-1
 zoom:zoom-communications-logo
+linkedin:linkedin-icon-2
 "
 
 # our-slug:simple-icons-export
