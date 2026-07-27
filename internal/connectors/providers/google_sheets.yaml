@@ -1,5 +1,6 @@
 name: google_sheets
 label: Google Sheets
+category: Google
 auth_parent: google
 default_scopes:
   - https://www.googleapis.com/auth/spreadsheets

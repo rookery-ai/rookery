@@ -1,5 +1,6 @@
 name: notion
 label: Notion
+category: Productivity
 setup_url: https://www.notion.so/my-integrations
 setup_steps:
   - "Go to Notion → My integrations → New integration → choose \"Public\" (OAuth)."

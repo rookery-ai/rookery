@@ -1,5 +1,6 @@
 name: twilio
 label: Twilio
+category: Communication
 auth:
   kind: api_key
   placement: basic

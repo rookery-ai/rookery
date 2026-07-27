@@ -1,5 +1,6 @@
 name: salesforce
 label: Salesforce
+category: Commerce
 authorize_url: https://login.salesforce.com/services/oauth2/authorize
 token_url: https://login.salesforce.com/services/oauth2/token
 token_extra: [instance_url]

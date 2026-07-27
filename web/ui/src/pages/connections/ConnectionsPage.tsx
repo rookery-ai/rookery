@@ -15,6 +15,7 @@ import {
   useConnectors,
   useServices,
   type ConnectorPlatform,
+  groupByCategory,
   type ServiceProvider,
 } from "@/lib/connections";
 import {
@@ -383,6 +384,14 @@ export default function ConnectionsPage() {
     [services, q],
   );
 
+  // Grouped for display. Derived from the FILTERED list so searching narrows the
+  // sections too, and a category whose every provider was filtered out drops its
+  // heading rather than leaving an empty one behind.
+  const groupedServices = useMemo(
+    () => groupByCategory(filteredServices),
+    [filteredServices],
+  );
+
   const connectedServicesCount = useMemo(
     () => services.filter((p) => p.connections.length > 0).length,
     [services],
@@ -554,17 +563,26 @@ export default function ConnectionsPage() {
           {!servicesQuery.isLoading &&
             !servicesQuery.isError &&
             filteredServices.length > 0 && (
-              <div
-                className={cn(
-                  "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4",
-                )}
-              >
-                {filteredServices.map((p) => (
-                  <ServiceTile
-                    key={p.name}
-                    provider={p}
-                    onOpen={openServiceWizard}
-                  />
+              <div className="space-y-6">
+                {groupedServices.map(([category, providers]) => (
+                  <div key={category}>
+                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-2">
+                      {category}
+                    </h3>
+                    <div
+                      className={cn(
+                        "grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4",
+                      )}
+                    >
+                      {providers.map((p) => (
+                        <ServiceTile
+                          key={p.name}
+                          provider={p}
+                          onOpen={openServiceWizard}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 ))}
               </div>
             )}

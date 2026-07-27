@@ -44,6 +44,7 @@ type apiServiceConnectInput struct {
 type apiServiceProvider struct {
 	Name          string                   `json:"name"`
 	Label         string                   `json:"label"`
+	Category      string                   `json:"category"`
 	Kind          string                   `json:"kind"`
 	SetupURL      string                   `json:"setup_url"`
 	SetupSteps    []string                 `json:"setup_steps"`
@@ -99,10 +100,16 @@ func (s *Server) apiListServices(c echo.Context) error {
 		}
 
 		label, setupURL, setupSteps, kind := provider, "", []string{}, "oauth"
+		// A provider with no declared category groups under "Other" rather than
+		// dropping out of the page entirely.
+		category := "Other"
 		connectInputs := make([]apiServiceConnectInput, 0)
 		if p, ok := s.connectors.ProviderByName(provider); ok {
 			if p.Label != "" {
 				label = p.Label
+			}
+			if p.Category != "" {
+				category = p.Category
 			}
 			setupURL, setupSteps = p.SetupURL, p.SetupSteps
 			if setupSteps == nil {
@@ -128,6 +135,7 @@ func (s *Server) apiListServices(c echo.Context) error {
 		out = append(out, apiServiceProvider{
 			Name:          provider,
 			Label:         label,
+			Category:      category,
 			Kind:          kind,
 			SetupURL:      setupURL,
 			SetupSteps:    setupSteps,

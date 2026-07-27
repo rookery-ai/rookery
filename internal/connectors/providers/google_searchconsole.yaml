@@ -1,5 +1,6 @@
 name: google_searchconsole
 label: Google Search Console
+category: Google
 auth_parent: google
 default_scopes:
   - https://www.googleapis.com/auth/webmasters.readonly

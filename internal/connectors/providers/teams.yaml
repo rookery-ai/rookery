@@ -1,5 +1,6 @@
 name: teams
 label: Microsoft Teams
+category: Productivity
 auth_parent: outlook
 default_scopes:
   - Team.ReadBasic.All

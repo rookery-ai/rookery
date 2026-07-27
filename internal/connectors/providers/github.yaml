@@ -1,5 +1,6 @@
 name: github
 label: GitHub
+category: Developer
 setup_url: https://github.com/settings/developers
 setup_steps:
   - "Go to GitHub → Settings → Developer settings → OAuth Apps → New OAuth App."

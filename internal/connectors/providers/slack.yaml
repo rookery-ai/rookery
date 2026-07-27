@@ -1,5 +1,6 @@
 name: slack
 label: Slack
+category: Communication
 authorize_url: https://slack.com/oauth/v2/authorize
 token_url: https://slack.com/api/oauth.v2.access
 token_expiry: never

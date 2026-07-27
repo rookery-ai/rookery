@@ -1,5 +1,6 @@
 name: google_analytics
 label: Google Analytics (GA4)
+category: Google
 auth_parent: google
 default_scopes:
   - https://www.googleapis.com/auth/analytics.readonly

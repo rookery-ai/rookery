@@ -1,5 +1,6 @@
 name: hubspot
 label: HubSpot
+category: Commerce
 auth:
   kind: api_key
   placement: header

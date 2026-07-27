@@ -69,6 +69,7 @@ export type ServiceConnectInput = { key: string; label: string; hint: string; re
 export type ServiceProvider = {
   name: string;
   label: string;
+  category: string;
   kind: string;
   setup_url: string;
   setup_steps: string[];
@@ -76,6 +77,47 @@ export type ServiceProvider = {
   connect_inputs: ServiceConnectInput[];
   connections: ServiceConnection[];
 };
+
+// CATEGORY_ORDER fixes the section order on the connections page. A fixed array
+// rather than sorting alphabetically: the groups have a natural priority, and
+// alphabetical order would reshuffle the page as providers are added.
+export const CATEGORY_ORDER = [
+  "Google",
+  "Publishing & Media",
+  "Advertising",
+  "Productivity",
+  "Communication",
+  "Commerce",
+  "Developer",
+  "Support",
+  "Other",
+] as const;
+
+/**
+ * Groups providers into ordered [category, providers] pairs, preserving the
+ * incoming order within each group. A provider whose category is empty or not
+ * in CATEGORY_ORDER falls into "Other" — it must never disappear from a page
+ * whose whole purpose is showing every available integration. Empty categories
+ * are dropped so "Advertising" leaves no blank heading before those providers
+ * exist.
+ */
+export function groupByCategory(
+  providers: ServiceProvider[],
+): Array<[string, ServiceProvider[]]> {
+  const known = new Set<string>(CATEGORY_ORDER);
+  const buckets = new Map<string, ServiceProvider[]>();
+
+  for (const p of providers) {
+    const key = known.has(p.category) ? p.category : "Other";
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(p);
+    else buckets.set(key, [p]);
+  }
+
+  return CATEGORY_ORDER.filter((c) => (buckets.get(c)?.length ?? 0) > 0).map(
+    (c) => [c, buckets.get(c)!] as [string, ServiceProvider[]],
+  );
+}
 
 export function useServices() {
   return useQuery({

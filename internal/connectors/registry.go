@@ -74,6 +74,10 @@ type Provider struct {
 	AuthParent string `yaml:"auth_parent"`
 
 	// UI guidance for obtaining OAuth app credentials (shown on the Services page).
+	// Category groups this provider on the connections page. One of: Google,
+	// Publishing & Media, Advertising, Productivity, Communication, Commerce,
+	// Developer, Support, Other. Empty renders under Other rather than vanishing.
+	Category   string   `yaml:"category"`
 	Label      string   `yaml:"label"`       // human-friendly name, e.g. "Google (Gmail)"
 	SetupURL   string   `yaml:"setup_url"`   // link to the provider's developer console
 	SetupSteps []string `yaml:"setup_steps"` // numbered instructions to create the OAuth client

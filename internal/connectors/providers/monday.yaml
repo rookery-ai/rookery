@@ -1,5 +1,6 @@
 name: monday
 label: Monday.com
+category: Productivity
 auth:
   kind: api_key
   placement: header

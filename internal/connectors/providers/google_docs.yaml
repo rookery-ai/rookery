@@ -1,5 +1,6 @@
 name: google_docs
 label: Google Docs
+category: Google
 auth_parent: google
 default_scopes:
   - https://www.googleapis.com/auth/documents

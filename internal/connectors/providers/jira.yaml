@@ -1,5 +1,6 @@
 name: jira
 label: Jira (Atlassian)
+category: Productivity
 setup_url: https://developer.atlassian.com/console/myapps/
 setup_steps:
   - "Go to the Atlassian Developer Console → Create → OAuth 2.0 integration."

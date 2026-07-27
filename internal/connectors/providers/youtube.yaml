@@ -1,5 +1,6 @@
 name: youtube
 label: YouTube
+category: Publishing & Media
 auth_parent: google
 default_scopes:
   - https://www.googleapis.com/auth/youtube.readonly

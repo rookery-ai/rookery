@@ -1,5 +1,6 @@
 name: google_adsense
 label: Google AdSense
+category: Google
 auth_parent: google
 default_scopes:
   - https://www.googleapis.com/auth/adsense.readonly
