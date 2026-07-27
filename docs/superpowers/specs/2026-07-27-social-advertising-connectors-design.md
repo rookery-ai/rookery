@@ -42,7 +42,7 @@ is irrelevant for a single-owner install.
 | `google_adsense` | `adsense.readonly` |
 | `google_analytics` (GA4) | `analytics.readonly` |
 | `google_searchconsole` | `webmasters.readonly` |
-| `youtube` | `youtube.readonly`, `yt-analytics.readonly` (+ `youtube.upload` in Phase 2) |
+| `youtube` | `youtube.readonly`, `yt-analytics.readonly`, `youtube.force-ssl` (see Delivery status: upload NOT built; commenting shipped instead) |
 
 ### Tier B — self-serve, works against own accounts
 
@@ -53,7 +53,7 @@ is irrelevant for a single-owner install.
 | Instagram | Requires a Professional (Business/Creator) account. Two-step publish: create media container, then `media_publish`. 25 posts / 24h. |
 | Threads | Rides the same Meta app. 250 posts / 24h; media must be at a publicly reachable URL. |
 | Meta Ads | `ads_read` / `ads_management` against own ad accounts needs no App Review. |
-| Bluesky | App password → `createSession` → short-lived JWT + refresh JWT. No OAuth app at all. |
+| Bluesky | App password → `createSession` → short-lived JWT + refresh JWT. No OAuth app at all. **NOT BUILT — see Delivery status.** |
 | X / Twitter | Pay-per-use since Feb 2026: ~$0.015 per post created, ~$0.005 per post read, no monthly minimum. Basic/Pro closed to new signups. |
 
 ### Tier C — real approval gate
@@ -181,7 +181,7 @@ handles it without a Meta-specific branch.
 payload that exploits the asymmetry, dumping unbounded JSON into a coder's context. The
 bridge gets the same cap and the same truncation notice.
 
-### 6. Bluesky's auth kind (Phase 4)
+### 6. Bluesky's auth kind (Phase 4) — NOT BUILT
 
 Bluesky is neither `oauth2` nor `api_key`: handle plus app password are exchanged at
 `com.atproto.server.createSession` for an access JWT (minutes) and a refresh JWT. This is a
@@ -282,3 +282,33 @@ pretending otherwise.
   sufficiently weak model may still record a queued post as published. The follow-up-run
   design that would fix this properly was considered and deferred; `pending_actions` carries
   the agent id from day one so it can be added later without a migration.
+
+
+## Delivery status
+
+Recorded after implementation so the spec does not read as a description of what exists.
+Everything below was verified by the test suite; **nothing was verified against a live
+provider API**, which needs real apps on each platform and would publish real content.
+
+**Built:** 43 providers / ~264 actions (up from 28). Google publisher side (AdSense, GA4,
+Search Console, YouTube), the approval gate, LinkedIn, Meta Ads, Facebook Pages, Instagram,
+Threads, X, Reddit, TikTok, Pinterest, Google Ads, LinkedIn Ads.
+
+**Framework changes built:** the approval gate (1), OAuth-path `connect_inputs` (2), Meta
+token exchange (4), the bridge byte cap (5) — plus three not anticipated by this spec:
+`post_connect` may replace the connection's access token, `token_exchange_grant` (Threads
+uses `th_exchange_token`), and `client_param` (TikTok uses `client_key`). Static header
+values are now templated and merge parent-then-child, which Google Ads' developer-token
+header required.
+
+**Not built, with reasons:**
+
+- **Encrypting `extra` (change 3)** — superseded; see that section. The Page token became the
+  connection's own already-encrypted token, so no secret lands in `extra`.
+- **Bluesky's `session_exchange` auth kind (change 6)** — a third auth kind for a single
+  provider. The cost is a new credential form, a session-exchange path, and a refresh model
+  that matches neither existing kind. Deferred on value-per-unit-of-machinery, not difficulty.
+- **YouTube upload** — `videos.insert` needs a multipart/resumable binary body and the
+  framework has no body kind for it. `youtube_post_comment` shipped instead, which exercises
+  the approval gate on the same provider.
+- **Mastodon** — unchanged from the Deferred section: per-connection OAuth endpoints.

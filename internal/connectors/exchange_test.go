@@ -1,7 +1,10 @@
 package connectors
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -524,5 +527,89 @@ func TestGatedAdProvidersWarnUpFront(t *testing.T) {
 			t.Errorf("%s's first setup step must lead with its access constraint, got %q",
 				name, p.SetupSteps[0])
 		}
+	}
+}
+
+// Static header values are TEMPLATED. Asserting the YAML contains the template passes
+// whether or not Execute resolves it — the discriminating check is what reaches the
+// wire. A literal "{{conn.developer_token}}" header 401s every Google Ads call.
+func TestStaticHeadersAreTemplatedAndEmptyOnesDropped(t *testing.T) {
+	reg, err := LoadBundled()
+	if err != nil {
+		t.Fatalf("LoadBundled: %v", err)
+	}
+
+	var gotHeaders http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	defer srv.Close()
+
+	// Point the action at the test server while keeping the provider's real headers.
+	a, ok := reg.Action("google_ads", "google_ads_search")
+	if !ok {
+		t.Fatal("google_ads_search not found")
+	}
+	a.Request.URL = srv.URL + "/search"
+	reg.actions["google_ads"] = []Action{a}
+
+	_, err = Execute(context.Background(), reg, stubStore{}, srv.Client(),
+		ConnRef{ID: "c1", Provider: "google_ads", Extra: map[string]string{
+			"developer_token": "DT-1234",
+			"customer_id":     "9999999999",
+			// login_customer_id deliberately absent: most accounts have no manager.
+		}},
+		"google_ads_search",
+		map[string]any{"query": "SELECT campaign.name FROM campaign", "page_size": 25},
+		Policy{})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	if got := gotHeaders.Get("developer-token"); got != "DT-1234" {
+		t.Errorf("developer-token header = %q, want the resolved value DT-1234", got)
+	}
+	// An optional header with no value must be ABSENT, not empty: Google Ads rejects a
+	// blank login-customer-id.
+	if _, present := gotHeaders["Login-Customer-Id"]; present {
+		t.Errorf("unset optional header was sent anyway: %q", gotHeaders.Get("login-customer-id"))
+	}
+}
+
+// An aliased child inherits the parent's static headers AND may add its own. Reading
+// only the parent's would drop google_ads's developer-token entirely, since its parent
+// declares none.
+func TestAliasedChildInheritsAndExtendsStaticHeaders(t *testing.T) {
+	reg, _ := LoadBundled()
+
+	var gotHeaders http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeaders = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"elements":[]}`))
+	}))
+	defer srv.Close()
+
+	a, ok := reg.Action("linkedin_ads", "linkedin_ads_list_accounts")
+	if !ok {
+		t.Fatal("linkedin_ads_list_accounts not found")
+	}
+	a.Request.URL = srv.URL + "/adAccounts"
+	reg.actions["linkedin_ads"] = []Action{a}
+
+	if _, err := Execute(context.Background(), reg, stubStore{}, srv.Client(),
+		ConnRef{ID: "c1", Provider: "linkedin_ads"},
+		"linkedin_ads_list_accounts", map[string]any{}, Policy{}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	// Inherited from the linkedin parent — LinkedIn rejects unversioned calls.
+	if gotHeaders.Get("LinkedIn-Version") == "" {
+		t.Error("aliased child did not inherit the parent's LinkedIn-Version header")
+	}
+	if got := gotHeaders.Get("X-Restli-Protocol-Version"); got != "2.0.0" {
+		t.Errorf("X-Restli-Protocol-Version = %q, want 2.0.0", got)
 	}
 }

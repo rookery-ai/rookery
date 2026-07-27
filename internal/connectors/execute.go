@@ -153,7 +153,19 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 	if err != nil {
 		return Result{}, &ConnectorError{KindOther, err.Error()}
 	}
-	prov, _ := reg.OAuthProvider(conn.Provider) // static headers + auth config; resolves auth_parent for aliased providers
+	prov, _ := reg.OAuthProvider(conn.Provider) // auth config; resolves auth_parent for aliased providers
+	// Static headers merge parent-then-child: an aliased child inherits the parent's
+	// (Notion-Version, GitHub Accept) AND may add its own. Reading only the parent's
+	// would silently drop google_ads's developer-token header, since its parent
+	// `google` declares none — and the call would 401 with nothing naming the cause.
+	child, _ := reg.ProviderByName(conn.Provider)
+	staticHeaders := map[string]string{}
+	for k, v := range prov.StaticHeaders {
+		staticHeaders[k] = v
+	}
+	for k, v := range child.StaticHeaders {
+		staticHeaders[k] = v
+	}
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -169,8 +181,19 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 		if contentType != "" {
 			req.Header.Set("Content-Type", contentType)
 		}
-		for hk, hv := range prov.StaticHeaders {
-			req.Header.Set(hk, hv)
+		for hk, hv := range staticHeaders {
+			// Header values are TEMPLATED, not literal: Google Ads carries its
+			// developer token and manager id as headers sourced from the connection.
+			// Copying verbatim would send the literal "{{conn.developer_token}}" and
+			// 401 on every call.
+			v := subst(hv, nil, conn.Extra)
+			// Drop empties, mirroring the query renderer: an optional header sent as
+			// "" is not the same as absent — Google Ads rejects a blank
+			// login-customer-id, which most accounts do not have.
+			if v == "" {
+				continue
+			}
+			req.Header.Set(hk, v)
 		}
 		resp, e := client.Do(req)
 		if e != nil {
