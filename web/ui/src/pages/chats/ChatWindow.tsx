@@ -121,8 +121,11 @@ export function ChatWindow({
   // Stopped by the user has already spent its decision, so Stop sticks instead
   // of being instantly undone. ChatWindow is keyed by chatId at every call
   // site, so the decision resets only when a DIFFERENT chat is opened.
-  // GlobalChatPanel is unaffected — it only ever mounts this for a chat it
-  // already filtered as active, or one it just created.
+  // GlobalChatPanel is unaffected on both of its paths: it mounts this either
+  // for a chat it filtered as active, or for one it just created (also active).
+  // Its `pinnedId` chat could later be stopped elsewhere — the 30-minute idle
+  // auto-stop in internal/chat — while the panel stays mounted, but the latch
+  // is per-mount and already spent by then, so no resume POST fires from there.
   const autoResumeDecidedRef = useRef(false);
   useEffect(() => {
     if (autoResumeDecidedRef.current || !data) return;
