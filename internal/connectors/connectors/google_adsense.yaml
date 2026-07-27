@@ -32,8 +32,8 @@ actions:
         date_range: {type: string, description: "one of TODAY, YESTERDAY, MONTH_TO_DATE, YEAR_TO_DATE, LAST_7_DAYS, LAST_30_DAYS"}
         metrics:    {type: string, description: "comma-separated, e.g. ESTIMATED_EARNINGS,CLICKS,IMPRESSIONS,PAGE_VIEWS"}
         dimensions: {type: string, description: "comma-separated, e.g. DATE or PAGE_URL or COUNTRY_CODE. Optional."}
-        limit:      {type: integer, description: "max rows (default 50 — keep this small, reports are large)"}
-      required: [account, date_range, metrics]
+        limit:      {type: integer, description: "max rows — REQUIRED. Use 50 unless you truly need more; AdSense returns up to 100000 rows when unset."}
+      required: [account, date_range, metrics, limit]
     request:
       method: GET
       url: "https://adsense.googleapis.com/v2/{{account}}/reports:generate"
@@ -42,4 +42,6 @@ actions:
         metrics:    "{{metrics}}"
         dimensions: "{{dimensions}}"
         limit:      "{{limit}}"
+    # Whole envelope on purpose: the report rows are meaningless without the
+    # sibling "headers" block that names each column.
     response_extract: "$"

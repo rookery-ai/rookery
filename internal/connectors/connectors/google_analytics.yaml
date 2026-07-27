@@ -21,8 +21,8 @@ actions:
         end_date:   {type: string, description: "YYYY-MM-DD, or today / yesterday"}
         metrics:    {type: string, description: "comma-separated GA4 metric names, e.g. activeUsers,screenPageViews"}
         dimensions: {type: string, description: "comma-separated GA4 dimension names, e.g. date or pagePath. Optional."}
-        limit:      {type: integer, description: "max rows (default 50 — keep this small)"}
-      required: [property, start_date, end_date, metrics]
+        limit:      {type: integer, description: "max rows — REQUIRED. Use 50 unless you truly need more; GA4 returns up to 10000 rows when unset."}
+      required: [property, start_date, end_date, metrics, limit]
     request:
       method: POST
       url: "https://analyticsdata.googleapis.com/v1beta/{{property}}:runReport"

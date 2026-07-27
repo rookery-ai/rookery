@@ -50,8 +50,14 @@ func subst(tmpl string, args map[string]any, connVars map[string]string) string 
 		// separator, so escaping every substitution would corrupt it. Only a
 		// value that is itself a URL sitting in a path segment — a Search
 		// Console site URL — asks for this.
+		//
+		// PathEscape deliberately leaves ':' alone (RFC 3986 permits it in a
+		// path segment), but Google's Search Console API documents the siteUrl
+		// as fully encoded — "https%3A%2F%2Fwww.example.com%2F", and
+		// "sc-domain%3Aexample.com" for a domain property. Both of this app's
+		// escaped values are exactly that shape, so the colon is escaped too.
 		if escape {
-			val = url.PathEscape(val)
+			val = strings.ReplaceAll(url.PathEscape(val), ":", "%3A")
 		}
 		return val
 	})

@@ -865,8 +865,13 @@ func subst(tmpl string, args map[string]any, connVars map[string]string) string 
 		// Opt-in only: an identifier like "accounts/pub-123" carries a REAL path
 		// separator, so escaping every substitution would corrupt it. Only a value
 		// that is itself a URL sitting in a path segment asks for this.
+		//
+		// PathEscape leaves ':' alone (RFC 3986 permits it in a path segment), but
+		// Google documents siteUrl fully encoded — "https%3A%2F%2Fwww.example.com%2F"
+		// and "sc-domain%3Aexample.com". Without the ReplaceAll the unit test passes
+		// with "https:%2F%2F…" and the live request goes out wrong.
 		if escape {
-			val = url.PathEscape(val)
+			val = strings.ReplaceAll(url.PathEscape(val), ":", "%3A")
 		}
 		return val
 	})

@@ -83,4 +83,6 @@ actions:
         endDate:    "{{end_date}}"
         metrics:    "{{metrics}}"
         dimensions: "{{dimensions}}"
+    # Whole envelope on purpose: YouTube Analytics returns bare "rows" whose
+    # columns are named only by the sibling "columnHeaders" block.
     response_extract: "$"

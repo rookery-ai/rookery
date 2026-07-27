@@ -20,8 +20,8 @@ actions:
         start_date: {type: string, description: "YYYY-MM-DD"}
         end_date:   {type: string, description: "YYYY-MM-DD"}
         dimensions: {type: array, items: {type: string}, description: "any of query, page, country, device, date. Optional."}
-        row_limit:  {type: integer, description: "max rows (default 50 — keep this small)"}
-      required: [site_url, start_date, end_date]
+        row_limit:  {type: integer, description: "max rows — REQUIRED. Use 50 unless you truly need more; Search Console returns up to 1000 rows when unset."}
+      required: [site_url, start_date, end_date, row_limit]
     request:
       method: POST
       url: "https://www.googleapis.com/webmasters/v3/sites/{{site_url|escape}}/searchAnalytics/query"

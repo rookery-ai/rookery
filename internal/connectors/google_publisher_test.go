@@ -157,15 +157,46 @@ func TestGA4PropertyDiscoveryUsesAdminHost(t *testing.T) {
 // A Search Console site URL is itself a URL sitting in a path segment. Interpolated
 // raw, "https://example.com/" becomes extra path separators and the request 404s
 // against a nonsense path.
+//
+// The expected encodings come from Google's own searchanalytics.query reference,
+// which documents the siteUrl as fully encoded — colon included. url.PathEscape
+// alone leaves ':' untouched (RFC 3986 permits it in a path segment), so a test
+// asserting "https:%2F%2F…" would pass while the live request went out wrong.
 func TestGSCSiteURLIsEscapedInPath(t *testing.T) {
-	_, u, _ := renderFor(t, "google_searchconsole", "gsc_search_analytics", map[string]any{
-		"site_url":   "https://example.com/",
-		"start_date": "2026-07-01",
-		"end_date":   "2026-07-27",
+	cases := map[string]string{
+		"https://example.com/":    "https%3A%2F%2Fexample.com%2F",
+		"sc-domain:example.com":   "sc-domain%3Aexample.com",
+		"https://a.example.com/b": "https%3A%2F%2Fa.example.com%2Fb",
+	}
+	for site, encoded := range cases {
+		_, u, _ := renderFor(t, "google_searchconsole", "gsc_search_analytics", map[string]any{
+			"site_url":   site,
+			"start_date": "2026-07-01",
+			"end_date":   "2026-07-27",
+			"row_limit":  50,
+		})
+		want := "https://www.googleapis.com/webmasters/v3/sites/" + encoded + "/searchAnalytics/query"
+		if u != want {
+			t.Errorf("site %q not escaped correctly.\n got: %s\nwant: %s", site, u, want)
+		}
+	}
+}
+
+// The escape is opt-in, so identifiers whose slashes are REAL path separators
+// must survive untouched. This is the regression the escape could most easily
+// cause, and it would only surface as a live 404.
+func TestUnescapedIdentifiersKeepTheirSlashes(t *testing.T) {
+	_, u, _ := renderFor(t, "google_adsense", "adsense_list_adclients", map[string]any{
+		"account": "accounts/pub-1234567890123456",
 	})
-	const want = "https://www.googleapis.com/webmasters/v3/sites/https:%2F%2Fexample.com%2F/searchAnalytics/query"
-	if u != want {
-		t.Errorf("site URL not escaped into the path.\n got: %s\nwant: %s", u, want)
+	if !strings.Contains(u, "/accounts/pub-1234567890123456/adclients") {
+		t.Errorf("AdSense account separator was escaped: %s", u)
+	}
+	_, u2, _ := renderFor(t, "google_analytics", "ga4_metadata", map[string]any{
+		"property": "properties/123456789",
+	})
+	if !strings.Contains(u2, "/properties/123456789/metadata") {
+		t.Errorf("GA4 property separator was escaped: %s", u2)
 	}
 }
 
@@ -270,6 +301,43 @@ func TestPublisherProvidersAreReadOnlyAndWellNamed(t *testing.T) {
 			if err := json.Unmarshal(a.Params, &schema); err != nil {
 				t.Errorf("%s: action %q has an unparseable schema: %v", p, a.Name, err)
 			}
+		}
+	}
+}
+
+// Every report action must REQUIRE its row limit. An omitted optional param is
+// dropped, not defaulted — so a description saying "default 50" enforces nothing
+// and the provider's own default applies instead: 100000 rows for AdSense, 10000
+// for GA4, 1000 for Search Console. The 8 KiB bridge cap would then truncate a
+// report the agent believed it received whole.
+func TestReportActionsRequireARowLimit(t *testing.T) {
+	reg, err := LoadBundled()
+	if err != nil {
+		t.Fatalf("LoadBundled: %v", err)
+	}
+	for _, tc := range []struct{ provider, action, param string }{
+		{"google_adsense", "adsense_report", "limit"},
+		{"google_analytics", "ga4_run_report", "limit"},
+		{"google_searchconsole", "gsc_search_analytics", "row_limit"},
+	} {
+		a, ok := reg.Action(tc.provider, tc.action)
+		if !ok {
+			t.Fatalf("action %q not found", tc.action)
+		}
+		var schema struct {
+			Required []string `json:"required"`
+		}
+		if err := json.Unmarshal(a.Params, &schema); err != nil {
+			t.Fatalf("%s schema: %v", tc.action, err)
+		}
+		found := false
+		for _, r := range schema.Required {
+			if r == tc.param {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s must require %q, got required=%v", tc.action, tc.param, schema.Required)
 		}
 	}
 }
