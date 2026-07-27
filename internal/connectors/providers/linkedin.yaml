@@ -11,7 +11,10 @@ default_scopes:
   - email
   - w_member_social
 static_headers:
-  LinkedIn-Version: "202401"
+  # LinkedIn versions monthly and SUNSETS each version after ~12 months; an
+  # unversioned or sunset value is rejected outright, so this is not cosmetic.
+  # Bump it when the release you pin drops off the supported list.
+  LinkedIn-Version: "202606"
   X-Restli-Protocol-Version: "2.0.0"
 setup_url: https://www.linkedin.com/developers/apps
 setup_steps:

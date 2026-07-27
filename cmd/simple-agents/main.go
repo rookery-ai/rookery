@@ -486,7 +486,7 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
-			srv = srv.WithBridge(connBridge).WithKBBridge(kbBridge).WithTitleGenerator(titleGen)
+			srv = srv.WithBridge(connBridge).WithKBBridge(kbBridge).WithTitleGenerator(titleGen).WithApproval(approvalSvc)
 
 			addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 			slog.Info("listening", "addr", addr)

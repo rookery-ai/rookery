@@ -430,8 +430,16 @@ func TestLinkedInDeclaresVersionHeaders(t *testing.T) {
 	if !ok {
 		t.Fatal("linkedin provider not loaded")
 	}
-	if p.StaticHeaders["LinkedIn-Version"] == "" {
-		t.Error("LinkedIn-Version header is required by the Posts API")
+	// LinkedIn sunsets each monthly version after ~12 months and rejects a sunset
+	// value outright, so "non-empty" is not enough — a stale pin fails 100% of calls
+	// with an error that does not obviously point at the header.
+	v := p.StaticHeaders["LinkedIn-Version"]
+	if !regexp.MustCompile(`^\d{6}$`).MatchString(v) {
+		t.Fatalf("LinkedIn-Version = %q, want a YYYYMM value", v)
+	}
+	if v < "202509" {
+		t.Errorf("LinkedIn-Version %q is at or past sunset (LinkedIn supports roughly the "+
+			"last 12 monthly releases) — bump it to a currently supported version", v)
 	}
 	if p.StaticHeaders["X-Restli-Protocol-Version"] != "2.0.0" {
 		t.Errorf("X-Restli-Protocol-Version = %q, want 2.0.0", p.StaticHeaders["X-Restli-Protocol-Version"])
