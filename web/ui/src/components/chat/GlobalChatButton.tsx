@@ -94,6 +94,7 @@ export function GlobalChatPanel({
             chatId={shownId}
             initialText={initialText}
             autoFocus={shownId === pinnedId}
+            compact
           />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-muted-2">Loading…</div>

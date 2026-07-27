@@ -89,11 +89,19 @@ function StatusChip({ active }: { active: boolean }) {
 // withholds it when the slide-over merely re-opens on the last conversation,
 // which is not a typing gesture and would pop the on-screen keyboard on a touch
 // device.
+// compact: the ~448px slide-over panel. It suppresses the 10% side gutters the
+// full-page chat uses — at that width they'd eat a fifth of the reading column
+// for no gain.
 export function ChatWindow({
   chatId,
   initialText,
   autoFocus,
-}: { chatId: string; initialText?: string; autoFocus?: boolean }) {
+  compact,
+}: { chatId: string; initialText?: string; autoFocus?: boolean; compact?: boolean }) {
+  // 10% each side on the full-page surface: messages and composer share one
+  // inset column, which is what gives the conversation its compact feel (and
+  // moves the Send button clear of the floating action buttons in the corner).
+  const gutter = !compact;
   const { data, isLoading } = useChatDetail(chatId);
   const qc = useQueryClient();
   const action = useChatAction();
@@ -299,8 +307,11 @@ export function ChatWindow({
         aria-label="Attach file"
         disabled={busy || attaching}
         onClick={() => fileInputRef.current?.click()}
+        // size-9 mirrors the Send button so both controls are the same height
+        // as the (single-row) textarea instead of the attach icon sitting short.
         className={cn(
-          "shrink-0 rounded-lg p-2 text-muted-2 hover:bg-border hover:text-foreground",
+          "flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-2",
+          "hover:bg-border hover:text-foreground",
           "disabled:cursor-not-allowed disabled:opacity-50",
         )}
       >
@@ -369,7 +380,7 @@ export function ChatWindow({
         </div>
       </div>
 
-      <ChatScroll>
+      <ChatScroll className={cn(gutter && "px-[10%]")}>
         {allMessages.map((m, i) => (
           <ChatMessageBubble key={i} role={m.role} content={m.content} createdAt={m.created_at} />
         ))}
@@ -390,6 +401,7 @@ export function ChatWindow({
         initialText={initialText}
         autoFocus={autoFocus}
         leftSlot={attachControl}
+        gutter={gutter}
       />
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>

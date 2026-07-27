@@ -27,7 +27,13 @@ export function ChatScroll({ children, className }: { children: ReactNode; class
     <div
       ref={ref}
       onScroll={handleScroll}
-      className={cn("flex flex-1 flex-col gap-3 overflow-y-auto p-4", className)}
+      // px-4/py-4 rather than the shorthand p-4: a caller passing a gutter
+      // (px-[10%]) must be able to override the horizontal padding
+      // deterministically. tailwind-merge treats `p` and `px` as separate
+      // groups, so `cn("p-4", "px-[10%]")` keeps BOTH and leaves the winner to
+      // the generated stylesheet's ordering. Two `px-*` classes are one group,
+      // where the last one provably wins.
+      className={cn("flex flex-1 flex-col gap-3 overflow-y-auto px-4 py-4", className)}
     >
       {children}
     </div>

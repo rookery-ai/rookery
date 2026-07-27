@@ -545,7 +545,7 @@ export function DesignerSurface({
           </div>
         </div>
       ) : (
-        <ChatScroll>
+        <ChatScroll className="px-[10%]">
           {/* Only while the transcript is genuinely empty AND nothing is in
               flight — mount recovery may still be about to populate it, and
               flashing a "start here" card in front of a session that's about
@@ -619,6 +619,7 @@ export function DesignerSurface({
         // When auto-sending, the text becomes the first message — don't ALSO
         // seed it into the composer box (it would look like an unsent draft).
         initialText={autoSendInitial ? undefined : initialText}
+        gutter
       />
     </div>
   );
