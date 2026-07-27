@@ -99,6 +99,8 @@ youtube:siYoutube
 meta_ads:siMeta
 facebook:siFacebook
 instagram:siInstagram
+x:siX
+reddit:siReddit
 opencode_zen:siOpencode
 opencode_go:siOpencode
 "

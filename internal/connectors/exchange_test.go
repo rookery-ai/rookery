@@ -1,6 +1,9 @@
 package connectors
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 // Meta issues no refresh token: renewal re-exchanges the CURRENT access token. The
 // mode has to be discoverable from the provider, or DBTokenStore would try a
@@ -232,5 +235,84 @@ func TestInstagramPublishRenders(t *testing.T) {
 	}
 	if !contains(string(body), "creation_id=C1") {
 		t.Errorf("form body did not render: %s", body)
+	}
+}
+
+// ── Phase 4 social providers ─────────────────────────────────────────────────
+
+// Every publishing action across every provider must be public_write, or the approval
+// gate silently does not apply to it. This is the invariant most likely to be broken
+// by a future data file, and the failure is invisible until something posts unreviewed.
+func TestAllPublishingActionsAreGated(t *testing.T) {
+	reg, err := LoadBundled()
+	if err != nil {
+		t.Fatalf("LoadBundled: %v", err)
+	}
+	// Actions whose names say they publish. Named explicitly rather than pattern-
+	// matched so adding a publisher forces a deliberate edit here.
+	publishers := []struct{ provider, action string }{
+		{"linkedin", "linkedin_create_post"},
+		{"youtube", "youtube_post_comment"},
+		{"facebook", "facebook_create_post"},
+		{"instagram", "instagram_publish_media"},
+		{"x", "x_create_post"},
+		{"reddit", "reddit_submit_post"},
+	}
+	for _, p := range publishers {
+		a, ok := reg.Action(p.provider, p.action)
+		if !ok {
+			t.Errorf("%s: action %q not found", p.provider, p.action)
+			continue
+		}
+		if !a.PublicWrite {
+			t.Errorf("%s.%s is not public_write — the approval gate does not apply to it",
+				p.provider, p.action)
+		}
+		if !a.Mutating {
+			t.Errorf("%s.%s is not mutating — a BUILD could publish with it",
+				p.provider, p.action)
+		}
+	}
+}
+
+// Reddit rate-limits or blocks a generic User-Agent outright, and the token endpoint
+// needs HTTP Basic client auth. Both are easy to omit and produce failures that do not
+// name the cause.
+func TestRedditDeclaresUserAgentAndBasicAuth(t *testing.T) {
+	reg, _ := LoadBundled()
+	p, ok := reg.ProviderByName("reddit")
+	if !ok {
+		t.Fatal("reddit provider not loaded")
+	}
+	if p.StaticHeaders["User-Agent"] == "" {
+		t.Error("Reddit blocks or throttles a generic User-Agent — one must be declared")
+	}
+	if p.TokenAuth != "basic" {
+		t.Errorf("token_auth = %q, want basic", p.TokenAuth)
+	}
+}
+
+// X charges per call, so every read action must force a bounded result set rather than
+// letting a model page through a bill.
+func TestXReadActionsRequireALimit(t *testing.T) {
+	reg, _ := LoadBundled()
+	a, ok := reg.Action("x", "x_list_posts")
+	if !ok {
+		t.Fatal("x_list_posts not found")
+	}
+	var schema struct {
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(a.Params, &schema); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, r := range schema.Required {
+		if r == "max" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("x_list_posts must require max — reads are billed per post; required=%v", schema.Required)
 	}
 }
