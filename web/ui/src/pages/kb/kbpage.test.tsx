@@ -266,3 +266,57 @@ test("landing on /kb?new=note opens the new-note dialog", async () => {
   expect(await screen.findByRole("dialog")).toBeInTheDocument();
   expect(await screen.findByText("New note")).toBeInTheDocument();
 });
+
+// The real timing: useRecentFiles waits for the session query's workspace id,
+// so the recents list arrives a tick AFTER first render — which is why the
+// auto-open used to win the race against the ?new=note intent and open an
+// unrelated note behind the dialog. When that recents entry was stale the
+// editor rendered "Couldn't load this note.", the reported symptom.
+test("landing on /kb?new=note does not auto-open the last recent note", async () => {
+  localStorage.setItem(
+    "sa.kb.recent.w1",
+    JSON.stringify([{ path: "notes/stale.md", title: "stale" }]),
+  );
+  const noteFetches: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/v1/auth/session") {
+        return Promise.resolve(
+          jsonResponse({
+            authenticated: true,
+            owner: { id: "o1", username: "admin", must_change_password: false },
+            workspace: { id: "w1", name: "ws1", about: "", needs_setup: false, created_at: "2026-01-01T00:00:00Z" },
+            workspaces: [],
+          }),
+        );
+      }
+      if (url.startsWith("/api/v1/kb/note")) {
+        noteFetches.push(url);
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: { code: "not_found", message: "gone" } }), { status: 404 }),
+        );
+      }
+      if (url.startsWith("/api/v1/kb/tree")) return Promise.resolve(jsonResponse({ path: "", nodes: [], order: [] }));
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  renderInShell("/kb?new=note");
+
+  expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  // Wait for the recents strip to render the entry rather than a fixed delay:
+  // that is the observable proof the list has loaded, which is the exact moment
+  // the auto-open effect would have fired. A timeout instead would let this
+  // test pass vacuously by finishing before the race even happens.
+  expect(await screen.findByTitle("notes/stale.md")).toBeInTheDocument();
+  // …then let the navigation the auto-open would have triggered settle. The
+  // findByTitle above is the gate that the race has actually been reached; this
+  // window is what lets its CONSEQUENCE (a note fetch) show up if it happens.
+  await new Promise((r) => setTimeout(r, 200));
+  expect(noteFetches).toHaveLength(0);
+  expect(screen.queryByText(/couldn't load this note/i)).not.toBeInTheDocument();
+
+  localStorage.clear();
+});

@@ -181,9 +181,19 @@ export default function KBPage() {
   // wholesale (setParams({path}), no merge) and would drop `new` regardless,
   // so consuming it up front makes the ordering between the two irrelevant.
   // Stripping also stops a reload or a Back from reopening the dialog.
+  // Latched in a ref, not read from the URL: the effect below strips `new` from
+  // the query string on the very next tick, but the recents list the auto-open
+  // depends on only arrives AFTER that (useRecentFiles waits for the session
+  // query's workspace id) — so a `params.get("new")` check would stop
+  // suppressing exactly one render too early and the auto-open would still win
+  // the race. Creating a note is not resuming one, so once the create intent is
+  // seen, this visit never auto-opens.
+  const suppressResumeRef = useRef(false);
+
   const wantsNewNote = params.get("new") === "note";
   useEffect(() => {
     if (!wantsNewNote) return;
+    suppressResumeRef.current = true;
     setNewNoteOpen(true);
     setParams(
       (prev) => {
@@ -213,6 +223,7 @@ export default function KBPage() {
   // and re-recording would only rewrite the entry that caused it.
   const topRecent = recent.length > 0 ? recent[0] : null;
   useEffect(() => {
+    if (suppressResumeRef.current) return;
     if (path === null && topRecent) {
       setParams({ path: topRecent.path }, { replace: true });
     }
