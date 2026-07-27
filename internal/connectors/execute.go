@@ -64,6 +64,36 @@ type Policy struct {
 	// BuildPhase blocks mutating actions during agent/skill generation: a build must
 	// exercise real read paths without sending anything on the user's behalf.
 	BuildPhase bool
+
+	// Parker, when non-nil, gates public_write actions: instead of calling the
+	// provider, Execute hands the call to Parker and returns its queue ticket as a
+	// SUCCESSFUL result. Nil (the default) means no gate — today's behaviour.
+	//
+	// The caller decides whether this call is gated; Execute only asks the action
+	// whether it is eligible. That split keeps the per-binding approval_mode lookup
+	// (a DB read) out of this package, which knows nothing about agents.
+	Parker Parker
+}
+
+// Parker parks a public_write call for the owner to approve later, returning the
+// ticket id. Implemented by the approval service; nil in every non-gated path.
+type Parker interface {
+	Park(ctx context.Context, conn ConnRef, action string, args map[string]any) (ticketID string, err error)
+}
+
+// ParkedResult is the payload Execute returns for a gated call. It is a SUCCESS, not
+// an error: the coder's tool loop treats any `error:` string as a failing call worth
+// retrying or blocking on, and a parked post is neither — it is the system working as
+// configured.
+//
+// Note is written for the model, not the user. An agent that records a queued post as
+// published would never retry it and would report a lie to its owner, so the wording
+// has to be impossible to read as success.
+type ParkedResult struct {
+	Status string `json:"status"`
+	ID     string `json:"pending_action_id"`
+	Action string `json:"action"`
+	Note   string `json:"note"`
 }
 
 // Execute is the typed choke point every connector call goes through: validate args,
@@ -82,6 +112,28 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 	if a.Mutating && pol.BuildPhase {
 		return Result{}, &ConnectorError{KindBuildBlocked,
 			fmt.Sprintf("build-time guard: %q sends/modifies for real and is blocked during generation — it will run when the agent executes for real", actionName)}
+	}
+	// The approval gate sits AFTER arg validation (so a malformed call is rejected
+	// rather than parked for a human to discover is broken) and BEFORE the token
+	// fetch (parking must not depend on a live token — approval can arrive hours
+	// later, and the token is refreshed when the call is actually sent).
+	if a.PublicWrite && pol.Parker != nil {
+		id, err := pol.Parker.Park(ctx, conn, actionName, args)
+		if err != nil {
+			return Result{}, &ConnectorError{KindOther, "could not queue for approval: " + err.Error()}
+		}
+		payload, err := json.Marshal(ParkedResult{
+			Status: "queued_for_approval",
+			ID:     id,
+			Action: actionName,
+			Note: "NOT yet published — this is awaiting the owner's approval and may never " +
+				"be sent. Do NOT record it as posted, and do not retry it. The owner will " +
+				"be notified of the outcome separately.",
+		})
+		if err != nil {
+			return Result{}, &ConnectorError{KindOther, err.Error()}
+		}
+		return Result{Data: payload}, nil
 	}
 	token, err := store.AccessToken(ctx, conn)
 	if err != nil {
