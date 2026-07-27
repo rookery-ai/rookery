@@ -1,0 +1,66 @@
+provider: meta_ads
+actions:
+  - name: meta_ads_list_accounts
+    description: "List the ad accounts you can access. Read-only. Call this FIRST — every other action needs the account id it returns, which looks like act_1234567890."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/me/adaccounts"
+      query:
+        fields: "id,name,account_status,currency"
+    response_extract: "$.data"
+  - name: meta_ads_insights
+    description: "Spend, impressions, clicks, and other performance metrics for an ad account over a preset date range. Read-only. Use for 'what did I spend last week', 'how are my campaigns doing'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        account_id:  {type: string, description: "ad account id from meta_ads_list_accounts, e.g. act_1234567890"}
+        date_preset: {type: string, description: "one of today, yesterday, this_week_mon_today, last_7d, last_14d, last_30d, this_month, last_month"}
+        level:       {type: string, description: "one of account, campaign, adset, ad (default account)"}
+        fields:      {type: string, description: "comma-separated, e.g. spend,impressions,clicks,ctr,cpc"}
+        limit:       {type: integer, description: "max rows — REQUIRED. Use 25 unless you truly need more; insights responses are large."}
+      required: [account_id, date_preset, fields, limit]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{account_id}}/insights"
+      query:
+        date_preset: "{{date_preset}}"
+        level:       "{{level}}"
+        fields:      "{{fields}}"
+        limit:       "{{limit}}"
+    response_extract: "$.data"
+  - name: meta_ads_list_campaigns
+    description: "List campaigns in an ad account with their status and budgets. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        account_id: {type: string, description: "ad account id, e.g. act_1234567890"}
+        limit:      {type: integer, description: "max rows — REQUIRED. Use 25."}
+      required: [account_id, limit]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{account_id}}/campaigns"
+      query:
+        fields: "id,name,status,objective,daily_budget,lifetime_budget"
+        limit:  "{{limit}}"
+    response_extract: "$.data"
+  - name: meta_ads_set_campaign_status
+    description: "Pause or resume a campaign. Mutating but PRIVATE and reversible — it changes delivery, it does not publish anything."
+    mutating: true
+    params:
+      type: object
+      properties:
+        campaign_id: {type: string, description: "campaign id from meta_ads_list_campaigns"}
+        status:      {type: string, description: "ACTIVE or PAUSED"}
+      required: [campaign_id, status]
+    request:
+      method: POST
+      url: "https://graph.facebook.com/v21.0/{{campaign_id}}"
+      form:
+        status: "{{status}}"
+    response_extract: "$"

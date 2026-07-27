@@ -141,7 +141,14 @@ func (c OAuthClient) ExchangeCode(ctx context.Context, p Provider, clientID, cli
 
 // Refresh renews an access token. Google omits a new refresh token on refresh, so the
 // existing one is preserved.
+//
+// Providers with token_expiry: exchange (Meta) have no refresh token at all — they
+// re-exchange the CURRENT access token for a fresh long-lived one. Refresh routes to
+// that path so callers (DBTokenStore, RunRefreshLoop) need no provider-specific branch.
 func (c OAuthClient) Refresh(ctx context.Context, p Provider, clientID, clientSecret, refreshToken string) (TokenSet, error) {
+	if p.UsesTokenExchange() {
+		return c.ExchangeLongLived(ctx, p, clientID, clientSecret, refreshToken)
+	}
 	f := url.Values{}
 	f.Set("grant_type", "refresh_token")
 	f.Set("refresh_token", refreshToken)
@@ -153,6 +160,30 @@ func (c OAuthClient) Refresh(ctx context.Context, p Provider, clientID, clientSe
 	}
 	if ts.RefreshToken == "" {
 		ts.RefreshToken = refreshToken
+	}
+	return ts, nil
+}
+
+// ExchangeLongLived swaps a token for a longer-lived one via Meta's fb_exchange_token
+// grant. It is NOT a refresh grant: there is no refresh token in the Meta model, so the
+// value passed in is the current ACCESS token and the result replaces it.
+//
+// The returned TokenSet carries the new access token as its refresh token as well. That
+// looks odd but is deliberate: the store persists RefreshToken and hands it back on the
+// next renewal, and for this provider the thing you exchange next time IS the current
+// access token. Without it, the second renewal would have nothing to send.
+func (c OAuthClient) ExchangeLongLived(ctx context.Context, p Provider, clientID, clientSecret, currentToken string) (TokenSet, error) {
+	f := url.Values{}
+	f.Set("grant_type", "fb_exchange_token")
+	f.Set("fb_exchange_token", currentToken)
+	f.Set("client_id", clientID)
+	f.Set("client_secret", clientSecret)
+	ts, err := c.tokenRequest(ctx, p, f, clientID, clientSecret)
+	if err != nil {
+		return ts, err
+	}
+	if ts.RefreshToken == "" {
+		ts.RefreshToken = ts.AccessToken
 	}
 	return ts, nil
 }

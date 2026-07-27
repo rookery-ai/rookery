@@ -96,6 +96,7 @@ google_adsense:siGoogleadsense
 google_analytics:siGoogleanalytics
 google_searchconsole:siGooglesearchconsole
 youtube:siYoutube
+meta_ads:siMeta
 opencode_zen:siOpencode
 opencode_go:siOpencode
 "

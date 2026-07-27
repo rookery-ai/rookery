@@ -46,9 +46,14 @@ type Provider struct {
 	IdentityPath  string   `yaml:"identity_path"`
 	DefaultScopes []string `yaml:"default_scopes"`
 
-	// TokenExpiry is "expiring" (default) or "never". "never" (GitHub, Notion) means the
-	// access token does not expire and must never be refreshed — connect/refresh store an
-	// empty expires_at and AccessToken treats empty as valid.
+	// TokenExpiry is "expiring" (default), "never", or "exchange".
+	//   never    — GitHub, Notion: the access token does not expire and must never be
+	//              refreshed; connect/refresh store an empty expires_at and AccessToken
+	//              treats empty as valid.
+	//   exchange — Meta: there is NO refresh token. A short-lived token is swapped for a
+	//              ~60-day one via the fb_exchange_token grant, and renewed by exchanging
+	//              the CURRENT access token again before it expires. OAuthClient.Refresh
+	//              routes here so callers need no provider-specific branch.
 	TokenExpiry string `yaml:"token_expiry"`
 	// TokenExtra names fields to capture from the token endpoint's JSON response into
 	// TokenSet.Extra / service_connections.extra (e.g. Salesforce's instance_url).
@@ -110,6 +115,11 @@ func (p Provider) IsAPIKey() bool { return p.Auth.Kind == "api_key" }
 
 // NonExpiring reports whether this provider's access tokens never expire.
 func (p Provider) NonExpiring() bool { return p.TokenExpiry == "never" }
+
+// UsesTokenExchange reports whether renewal goes through Meta's fb_exchange_token grant
+// rather than a standard refresh_token grant. Such providers issue no refresh token at
+// all; the current access token is what gets exchanged.
+func (p Provider) UsesTokenExchange() bool { return p.TokenExpiry == "exchange" }
 
 // RequestTemplate describes how to turn typed args into a real provider HTTP request.
 type RequestTemplate struct {
