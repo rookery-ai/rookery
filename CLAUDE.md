@@ -247,7 +247,7 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
 
 - **Data files, not code.** Adding a service = a `providers/<p>.yaml` (auth config) + a
   `connectors/<p>.yaml` (curated action manifest), both `go:embed`ed. `LoadBundled()` parses them.
-  **32 providers (~229 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
+  **33 providers (~232 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
   Search Console**), **YouTube**, GitHub, Slack, OpenAI, Notion, Outlook, Teams, Jira, HubSpot,
   Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce,
   Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello.
@@ -314,6 +314,27 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
     (`{"data": …}`); over it, `data` becomes a truncated STRING plus `truncated: true` and a note
     telling the model to narrow its query, because a JSON value cut in place still parses and
     reads as complete data.
+- **Approval gate for public writes** (`internal/approval`, opt-in, default OFF). Three layers:
+  an action-level `public_write: true` in the connector YAML marks irreversible PUBLIC
+  publishing (`mutating` is too blunt — pausing an ad campaign is mutating but private and
+  reversible); a binding-level `agent_connections.approval_mode` (`auto` default | `approve`)
+  chooses per agent+account, so one agent can post autonomously to a personal account while
+  requiring approval on a company one; and `Execute`'s `Policy{BuildPhase, Parker}` (which
+  replaced the bare `buildPhase bool`) enforces it. Semantics are **park, plain**: a gated call
+  is written to `pending_actions` and the coder gets a queue ticket as a SUCCESS (never an
+  `error:` string — the tool loop would retry it), the run finishes, and the owner resolves it
+  via `/pending` `/approve <id>` `/reject <id>` in chat or the web inbox. Park sits AFTER arg
+  validation (never ask a human to approve a broken call) and BEFORE the token fetch (approval
+  arrives hours later, so ARGS are stored and re-rendered against a fresh token at send time).
+  `Parker.Park` returning `("", nil)` means "not gated — send now", which is how a mixed set of
+  bindings is honoured. `ClaimPendingAction` is a conditional UPDATE making `status` the lock,
+  so chat and the web inbox racing cannot double-publish. `ParkerFor` returns nil when an agent
+  has no gated binding (ungated installs pay nothing) and fails OPEN on a DB error — failing
+  closed would silently halt an autonomous agent the user never gated. Both coder kinds get the
+  same parker (`Coder.WithParker`, `Bridge.RegisterGated`) so changing coder kind cannot disable
+  the setting. Accepted costs of park, recorded: no chaining, no error reaction, and state drift
+  if the owner rejects — mitigated only by the parked result's wording. Stale rows expire after
+  7 days in the nightly GC.
 - **Agent binding** (`agent_connections` table, keyed by connection id) is the source of truth for
   run-time tool exposure — NOT the AGENT.md `# Connections:` header. THREE ways to bind: the designer
   parses a `# Connections:` header (`agentdesigner.parseConnectionsLine`, tolerant of inline OR
