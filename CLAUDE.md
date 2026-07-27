@@ -334,7 +334,14 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
   same parker (`Coder.WithParker`, `Bridge.RegisterGated`) so changing coder kind cannot disable
   the setting. Accepted costs of park, recorded: no chaining, no error reaction, and state drift
   if the owner rejects — mitigated only by the parked result's wording. Stale rows expire after
-  7 days in the nightly GC.
+  7 days in the nightly GC. **Control surface:**
+  `PUT /api/v1/agents/:id/connections/:connID/approval` toggles a binding;
+  `GET /api/v1/approvals` + `POST /api/v1/approvals/:id/{approve,reject}` resolve from the web,
+  so a workspace with no chat platform connected is not stuck until the expiry.
+  **One-off chat is deliberately NOT gated** — `ParkerFor` returns nil when `agentID == ""` and
+  the chat bridge registration passes no parker. Chat is a human typing a request in real time,
+  so gating would hold the user against themselves; the residual gap is that they have not
+  reviewed the wording the model produced. Revisit if a workspace-level default is added.
 - **Agent binding** (`agent_connections` table, keyed by connection id) is the source of truth for
   run-time tool exposure — NOT the AGENT.md `# Connections:` header. THREE ways to bind: the designer
   parses a `# Connections:` header (`agentdesigner.parseConnectionsLine`, tolerant of inline OR
