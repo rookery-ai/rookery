@@ -68,6 +68,22 @@ AST guardrail tests shell out to `python3`. If Python is not available, those te
 > `curl -sS http://127.0.0.1:8080/` (200 HTML) and
 > `curl -sS http://127.0.0.1:8080/api/v1/auth/session` (200 JSON).
 
+## Git workflow
+
+- **Always branch, never commit directly to `main`.** All work happens on a
+  feature branch off `main`. When the work is finished, open a **pull request**
+  back into `main` — `main` only ever advances through merged PRs.
+- **Conventional Commits.** Structure every commit message as
+  `type(scope): summary` (e.g. `feat(gateway): …`, `fix(web/chat): …`,
+  `refactor(vault): …`, `docs: …`). Types: `feat`, `fix`, `refactor`, `docs`,
+  `test`, `chore`, `perf`, `build`, `ci`. Scope is optional but preferred.
+- **Deploy from `main` for production** — only after the work is finished and
+  merged. `make deploy` on `main` is the production path.
+- **Local branch deploys are fine for testing.** When a development phase or a
+  group of tasks is complete and needs to be exercised on the running server,
+  it's OK to `make deploy` from the feature branch locally before the PR merges —
+  that's for testing, not production.
+
 ## Architecture
 
 ### Entry point & wiring
