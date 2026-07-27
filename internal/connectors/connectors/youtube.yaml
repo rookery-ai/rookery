@@ -1,0 +1,86 @@
+provider: youtube
+actions:
+  - name: youtube_my_channel
+    description: "Your own channel: title, description, subscriber/view/video counts. Read-only. Call this FIRST — it returns the uploads playlist id other actions need, at contentDetails.relatedPlaylists.uploads."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://youtube.googleapis.com/youtube/v3/channels"
+      query:
+        part: "snippet,statistics,contentDetails"
+        mine: "true"
+    response_extract: "$.items"
+  - name: youtube_list_videos
+    description: "List videos in a playlist, newest first — pass the uploads playlist id from youtube_my_channel to list your own uploads. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        playlist_id: {type: string, description: "playlist id; the uploads playlist is at contentDetails.relatedPlaylists.uploads in youtube_my_channel"}
+        max:         {type: integer, description: "max results, 1-50 (default 25)"}
+      required: [playlist_id]
+    request:
+      method: GET
+      url: "https://youtube.googleapis.com/youtube/v3/playlistItems"
+      query:
+        part:       "snippet,contentDetails"
+        playlistId: "{{playlist_id}}"
+        maxResults: "{{max}}"
+    response_extract: "$.items"
+  - name: youtube_video_stats
+    description: "View, like, and comment counts for one or more videos. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        video_ids: {type: string, description: "comma-separated video ids, e.g. abc123,def456"}
+      required: [video_ids]
+    request:
+      method: GET
+      url: "https://youtube.googleapis.com/youtube/v3/videos"
+      query:
+        part: "snippet,statistics"
+        id:   "{{video_ids}}"
+    response_extract: "$.items"
+  - name: youtube_list_comments
+    description: "Top-level comments on a video, newest first. Read-only. Use for 'what are people saying about my latest video'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        video_id: {type: string, description: "video id"}
+        max:      {type: integer, description: "max results, 1-100 (default 25)"}
+      required: [video_id]
+    request:
+      method: GET
+      url: "https://youtube.googleapis.com/youtube/v3/commentThreads"
+      query:
+        part:       "snippet"
+        videoId:    "{{video_id}}"
+        order:      "time"
+        maxResults: "{{max}}"
+    response_extract: "$.items"
+  - name: youtube_analytics_report
+    description: "Channel analytics over a date range: views, watch time, subscribers gained. Read-only. Use for 'how did the channel do last month'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+        metrics:    {type: string, description: "comma-separated, e.g. views,estimatedMinutesWatched,subscribersGained"}
+        dimensions: {type: string, description: "comma-separated, e.g. day or country. Optional."}
+      required: [start_date, end_date, metrics]
+    request:
+      method: GET
+      url: "https://youtubeanalytics.googleapis.com/v2/reports"
+      query:
+        ids:        "channel==MINE"
+        startDate:  "{{start_date}}"
+        endDate:    "{{end_date}}"
+        metrics:    "{{metrics}}"
+        dimensions: "{{dimensions}}"
+    response_extract: "$"

@@ -1,0 +1,57 @@
+provider: google_analytics
+actions:
+  - name: ga4_list_properties
+    description: "List the GA4 properties you can access, with their display names. Read-only. Call this FIRST — reporting actions need the property resource name it returns, e.g. properties/123456789."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://analyticsadmin.googleapis.com/v1beta/accountSummaries"
+    response_extract: "$.accountSummaries"
+  - name: ga4_run_report
+    description: "Run a GA4 report over a date range. Read-only. Use for 'how many users last week', 'top pages this month', 'traffic by country'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        property:   {type: string, description: "property resource name from ga4_list_properties, e.g. properties/123456789"}
+        start_date: {type: string, description: "YYYY-MM-DD, or a relative form like 28daysAgo / yesterday"}
+        end_date:   {type: string, description: "YYYY-MM-DD, or today / yesterday"}
+        metrics:    {type: string, description: "comma-separated GA4 metric names, e.g. activeUsers,screenPageViews"}
+        dimensions: {type: string, description: "comma-separated GA4 dimension names, e.g. date or pagePath. Optional."}
+        limit:      {type: integer, description: "max rows (default 50 — keep this small)"}
+      required: [property, start_date, end_date, metrics]
+    request:
+      method: POST
+      url: "https://analyticsdata.googleapis.com/v1beta/{{property}}:runReport"
+      body_builder: ga4_report
+    response_extract: "$.rows"
+  - name: ga4_run_realtime_report
+    description: "Active users and events in the last 30 minutes. Read-only. Use for 'who is on the site right now'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        property:   {type: string, description: "property resource name, e.g. properties/123456789"}
+        metrics:    {type: string, description: "comma-separated, e.g. activeUsers"}
+        dimensions: {type: string, description: "comma-separated, e.g. country. Optional."}
+      required: [property, metrics]
+    request:
+      method: POST
+      url: "https://analyticsdata.googleapis.com/v1beta/{{property}}:runRealtimeReport"
+      body_builder: ga4_realtime
+    response_extract: "$.rows"
+  - name: ga4_metadata
+    description: "List the metric and dimension names available for a property. Read-only. Call this when a report fails with an unknown metric or dimension."
+    mutating: false
+    params:
+      type: object
+      properties:
+        property: {type: string, description: "property resource name, e.g. properties/123456789"}
+      required: [property]
+    request:
+      method: GET
+      url: "https://analyticsdata.googleapis.com/v1beta/{{property}}/metadata"
+    response_extract: "$"

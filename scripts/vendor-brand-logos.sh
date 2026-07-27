@@ -91,6 +91,10 @@ zoom:zoom-communications-logo
 SIMPLE="
 google_docs:siGoogledocs
 google_sheets:siGooglesheets
+google_adsense:siGoogleadsense
+google_analytics:siGoogleanalytics
+google_searchconsole:siGooglesearchconsole
+youtube:siYoutube
 opencode_zen:siOpencode
 opencode_go:siOpencode
 "

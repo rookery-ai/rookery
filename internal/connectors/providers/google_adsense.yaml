@@ -1,0 +1,10 @@
+name: google_adsense
+label: Google AdSense
+auth_parent: google
+default_scopes:
+  - https://www.googleapis.com/auth/adsense.readonly
+setup_url: https://console.cloud.google.com/apis/credentials
+setup_steps:
+  - "AdSense reuses your Google (Gmail) OAuth app. Set up Google first on its card above."
+  - "In Google Cloud Console, also enable the AdSense Management API."
+  - "Then click Connect here to authorize AdSense access on the same Google account."
