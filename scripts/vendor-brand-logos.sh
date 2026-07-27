@@ -104,6 +104,7 @@ reddit:siReddit
 threads:siThreads
 tiktok:siTiktok
 pinterest:siPinterest
+google_ads:siGoogleads
 opencode_zen:siOpencode
 opencode_go:siOpencode
 "
@@ -165,6 +166,12 @@ for pair in $SIMPLE; do
     " ) > "$OUT/$ours.svg"
   printf '  %-14s ← %s\n' "$ours" "$theirs"
 done
+
+# linkedin_ads has no separate brand mark — it is the LinkedIn Marketing Developer
+# Platform, not a distinct product — so it reuses LinkedIn's. Copied rather than
+# symlinked because the SVGs are inlined by import.meta.glob at build time.
+cp "$OUT/linkedin.svg" "$OUT/linkedin_ads.svg"
+printf '  %-22s ← linkedin.svg (no distinct mark)\n' "linkedin_ads"
 
 echo
 echo "vendored $(ls -1 "$OUT"/*.svg | wc -l) logos into $OUT"

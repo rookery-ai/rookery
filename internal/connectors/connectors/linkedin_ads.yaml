@@ -1,0 +1,38 @@
+provider: linkedin_ads
+actions:
+  - name: linkedin_ads_list_accounts
+    description: "List the LinkedIn ad accounts you can access. Read-only. Call this FIRST — reporting needs the account id it returns. Returns 403 until Marketing Developer Platform access is granted."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.linkedin.com/rest/adAccounts"
+      query:
+        q: "search"
+    response_extract: "$.elements"
+  - name: linkedin_ads_report
+    description: "Campaign performance for an ad account over a date range: impressions, clicks, spend. Read-only. Returns 403 until Marketing Developer Platform access is granted."
+    mutating: false
+    params:
+      type: object
+      properties:
+        account_id:  {type: string, description: "numeric ad account id from linkedin_ads_list_accounts"}
+        start_day:   {type: integer, description: "start day of month, 1-31"}
+        start_month: {type: integer, description: "start month, 1-12"}
+        start_year:  {type: integer, description: "start year, e.g. 2026"}
+      required: [account_id, start_day, start_month, start_year]
+    request:
+      method: GET
+      url: "https://api.linkedin.com/rest/adAnalytics"
+      query:
+        q: "analytics"
+        pivot: "CAMPAIGN"
+        timeGranularity: "ALL"
+        accounts: "urn:li:sponsoredAccount:{{account_id}}"
+        dateRange.start.day: "{{start_day}}"
+        dateRange.start.month: "{{start_month}}"
+        dateRange.start.year: "{{start_year}}"
+        fields: "impressions,clicks,costInLocalCurrency,externalWebsiteConversions"
+    response_extract: "$.elements"

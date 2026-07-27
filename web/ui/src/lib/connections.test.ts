@@ -277,7 +277,7 @@ test("useConnectService POSTs label and resolves redirect_url without navigating
   const [url, init] = vi.mocked(fetch).mock.calls[0];
   expect(url).toBe("/api/v1/services/github/connect");
   expect((init as RequestInit).method).toBe("POST");
-  expect(JSON.parse(String((init as RequestInit).body))).toEqual({ label: "work" });
+  expect(JSON.parse(String((init as RequestInit).body))).toEqual({ label: "work", inputs: {} });
   expect(response?.redirect_url).toBe("https://github.com/login/oauth/authorize?x=1");
   // The hook must not navigate itself — only return the URL for the caller.
   expect(window.location.href).toBe(originalLocation);

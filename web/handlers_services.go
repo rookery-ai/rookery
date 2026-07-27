@@ -107,7 +107,7 @@ func (e *consentURLError) Error() string { return e.Msg }
 // constructs the signed-state consent URL the user visits to authorize this
 // workspace. Shared by handleConnectService (redirect) and apiConnectService
 // (JSON) — the only two callers.
-func (s *Server) buildConsentURL(c echo.Context, w *db.Workspace, provider, label string) (string, error) {
+func (s *Server) buildConsentURL(c echo.Context, w *db.Workspace, provider, label string, inputs map[string]string) (string, error) {
 	child, ok := s.connectors.ProviderByName(provider)
 	if !ok {
 		return "", &consentURLError{"unknown_provider", "Unknown provider."}
@@ -125,7 +125,17 @@ func (s *Server) buildConsentURL(c echo.Context, w *db.Workspace, provider, labe
 		return "", &consentURLError{"unreadable_creds", "Stored credentials are unreadable; re-enter them."}
 	}
 	nonce := uuid.New().String()
-	payload := strings.Join([]string{w.ID, provider, label, nonce}, "~")
+	// connect_inputs ride the signed state rather than server-side pending storage: the
+	// state is already HMAC-signed and TTL'd, so it cannot be tampered with, and there is
+	// no row to garbage-collect when a user abandons the consent screen. Base64 keeps the
+	// JSON clear of the "~" field separator.
+	encoded := ""
+	if len(inputs) > 0 {
+		if b, err := json.Marshal(inputs); err == nil {
+			encoded = base64.RawURLEncoding.EncodeToString(b)
+		}
+	}
+	payload := strings.Join([]string{w.ID, provider, label, nonce, encoded}, "~")
 	state := signState(s.systemKey, payload, time.Now())
 	return oauth.ConsentURL(clientID, s.callbackURL(c, provider), state, child.DefaultScopes), nil
 }
@@ -194,10 +204,18 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 		return s.redirectWithError(c, "/connections", "Invalid or expired authorization request; try again.")
 	}
 	parts := strings.Split(payload, "~")
-	if len(parts) != 4 || parts[0] != w.ID || parts[1] != provider {
+	// 4 fields is a state issued before connect_inputs existed; the 10-minute TTL means
+	// such a state can still be in flight across a deploy, so both shapes are accepted.
+	if len(parts) < 4 || len(parts) > 5 || parts[0] != w.ID || parts[1] != provider {
 		return s.redirectWithError(c, "/connections", "Authorization did not match this workspace; try again.")
 	}
 	label := parts[2]
+	connectInputs := map[string]string{}
+	if len(parts) == 5 && parts[4] != "" {
+		if raw, derr := base64.RawURLEncoding.DecodeString(parts[4]); derr == nil {
+			_ = json.Unmarshal(raw, &connectInputs)
+		}
+	}
 
 	prov, ok := s.connectors.ProviderByName(provider)
 	if !ok {
@@ -244,6 +262,13 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 	}
 	for k, v := range ts.Extra { // token_extra fields (e.g. Salesforce instance_url)
 		extraMap[k] = v
+	}
+	// connect_inputs collected before consent (e.g. Google Ads developer token). Applied
+	// last so a user-supplied value wins over a hook-derived one of the same name.
+	for k, v := range connectInputs {
+		if strings.TrimSpace(v) != "" {
+			extraMap[k] = v
+		}
 	}
 	extraJSON := ""
 	if len(extraMap) > 0 {

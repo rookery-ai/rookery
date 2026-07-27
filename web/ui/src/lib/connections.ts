@@ -152,9 +152,20 @@ export function useSaveProviderCreds() {
 export function useConnectService() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ provider, label }: { provider: string; label?: string }) =>
+    mutationFn: ({
+      provider,
+      label,
+      inputs,
+    }: {
+      provider: string;
+      label?: string;
+      // connect_inputs collected before consent (e.g. a Google Ads developer token)
+      // — they cannot be discovered from any API, so they ride the signed state.
+      inputs?: Record<string, string>;
+    }) =>
       api.post<{ redirect_url: string }>(`/api/v1/services/${provider}/connect`, {
         label: label ?? "",
+        inputs: inputs ?? {},
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["services"] }),
   });

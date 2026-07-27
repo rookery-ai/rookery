@@ -64,6 +64,10 @@ type apiSaveProviderCredsRequest struct {
 
 type apiConnectServiceRequest struct {
 	Label string `json:"label"`
+	// Inputs carries the provider's connect_inputs on the OAuth path. They ride the
+	// signed state through the provider and are stored in extra at callback — Google
+	// Ads needs a developer token that cannot be discovered from any API.
+	Inputs map[string]string `json:"inputs"`
 }
 
 type apiConnectServiceResponse struct {
@@ -199,7 +203,17 @@ func (s *Server) apiConnectService(c echo.Context) error {
 		label = "account"
 	}
 
-	redirectURL, err := s.buildConsentURL(c, w, provider, label)
+	// Required connect_inputs are validated here rather than at callback: a user who
+	// completes consent only to be told a field was missing has to redo the whole flow.
+	if prov, ok := s.connectors.ProviderByName(provider); ok {
+		for _, ci := range prov.ConnectInputs {
+			if ci.Required && strings.TrimSpace(req.Inputs[ci.Key]) == "" {
+				return jsonErr(c, http.StatusBadRequest, "missing_field", ci.Label+" is required.")
+			}
+		}
+	}
+
+	redirectURL, err := s.buildConsentURL(c, w, provider, label, req.Inputs)
 	if err != nil {
 		var cerr *consentURLError
 		if errors.As(err, &cerr) {

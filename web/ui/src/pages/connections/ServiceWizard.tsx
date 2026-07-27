@@ -162,7 +162,7 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
   async function handleConnect() {
     setConnectError(null);
     try {
-      const res = await connectServiceMutation.mutateAsync({ provider: provider.name, label });
+      const res = await connectServiceMutation.mutateAsync({ provider: provider.name, label, inputs });
       window.location.assign(res.redirect_url);
     } catch (err) {
       setConnectError(errMsg(err));
@@ -261,6 +261,24 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
             </div>
           ) : (
             <div className="space-y-3">
+              {/* connect_inputs on the OAuth path: values that cannot be discovered
+                  from any API (a Google Ads developer token) and so must be collected
+                  BEFORE consent — they ride the signed state through the provider. */}
+              {provider.connect_inputs.map((ci) => (
+                <div key={ci.key} className="space-y-1">
+                  <Label htmlFor={`svc-oauth-input-${ci.key}`}>
+                    {ci.label}
+                    {ci.required && <span className="text-danger"> *</span>}
+                  </Label>
+                  <Input
+                    id={`svc-oauth-input-${ci.key}`}
+                    value={inputs[ci.key] ?? ""}
+                    onChange={(e) => setInputs((v) => ({ ...v, [ci.key]: e.target.value }))}
+                    autoComplete="off"
+                  />
+                  {ci.hint && <p className="text-xs text-muted-2">{ci.hint}</p>}
+                </div>
+              ))}
               <div className="space-y-1">
                 <Label htmlFor="svc-label">Label (optional)</Label>
                 <Input

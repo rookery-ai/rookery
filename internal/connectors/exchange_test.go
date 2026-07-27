@@ -415,3 +415,114 @@ func TestPinterestCreatePinIsGated(t *testing.T) {
 		t.Error("creating a pin is public on Standard access and must be gated")
 	}
 }
+
+// ── Phase 5: advertising ─────────────────────────────────────────────────────
+
+// A Google Ads developer token cannot be discovered from any API — it is issued out
+// of band — which is the entire reason connect_inputs had to work on the OAuth path.
+// Everything else (customer id, campaigns) is reachable once you have it.
+func TestGoogleAdsCollectsUndiscoverableInputs(t *testing.T) {
+	reg, _ := LoadBundled()
+	p, ok := reg.ProviderByName("google_ads")
+	if !ok {
+		t.Fatal("google_ads provider not loaded")
+	}
+	if p.AuthParent != "google" {
+		t.Errorf("auth_parent = %q, want google", p.AuthParent)
+	}
+	want := map[string]bool{"developer_token": true, "customer_id": true}
+	got := map[string]bool{}
+	for _, ci := range p.ConnectInputs {
+		got[ci.Key] = ci.Required
+	}
+	for k := range want {
+		req, present := got[k]
+		if !present {
+			t.Errorf("missing connect_input %q", k)
+			continue
+		}
+		if !req {
+			t.Errorf("connect_input %q must be required — the API returns an opaque error without it", k)
+		}
+	}
+	// The manager id is genuinely optional; marking it required would block every
+	// non-manager account from connecting at all.
+	if got["login_customer_id"] {
+		t.Error("login_customer_id must be optional — most accounts have no manager account")
+	}
+	// The developer token travels as a header on every call, sourced from the connection.
+	if p.StaticHeaders["developer-token"] != "{{conn.developer_token}}" {
+		t.Errorf("developer-token header = %q, want the conn template",
+			p.StaticHeaders["developer-token"])
+	}
+}
+
+// GAQL reporting is one action, so the row cap must be required there or a report can
+// return unbounded rows into the coder's context.
+func TestGoogleAdsSearchRequiresPageSize(t *testing.T) {
+	reg, _ := LoadBundled()
+	a, ok := reg.Action("google_ads", "google_ads_search")
+	if !ok {
+		t.Fatal("google_ads_search not found")
+	}
+	var schema struct {
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(a.Params, &schema); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, r := range schema.Required {
+		if r == "page_size" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("google_ads_search must require page_size, got required=%v", schema.Required)
+	}
+	// The customer id comes from the connection, not an argument.
+	if !contains(a.Request.URL, "{{conn.customer_id}}") {
+		t.Errorf("query must target the configured customer: %s", a.Request.URL)
+	}
+}
+
+// LinkedIn Ads aliases the LinkedIn app but needs its own partner-gated scopes.
+func TestLinkedInAdsAliasesLinkedIn(t *testing.T) {
+	reg, _ := LoadBundled()
+	p, ok := reg.ProviderByName("linkedin_ads")
+	if !ok {
+		t.Fatal("linkedin_ads provider not loaded")
+	}
+	if p.AuthParent != "linkedin" {
+		t.Errorf("auth_parent = %q, want linkedin", p.AuthParent)
+	}
+	oauth, ok := reg.OAuthProvider("linkedin_ads")
+	if !ok || oauth.Name != "linkedin" {
+		t.Fatalf("OAuthProvider did not resolve to linkedin: %+v", oauth)
+	}
+	// The aliased parent supplies the version headers the whole LinkedIn API needs.
+	if oauth.StaticHeaders["LinkedIn-Version"] == "" {
+		t.Error("resolved parent must supply LinkedIn-Version")
+	}
+}
+
+// Both advertising providers are gated behind an application the user may not have.
+// Their setup steps must say so FIRST, or a user connects and then sees only 403s
+// with no idea why.
+func TestGatedAdProvidersWarnUpFront(t *testing.T) {
+	reg, _ := LoadBundled()
+	for _, name := range []string{"google_ads", "linkedin_ads", "reddit", "pinterest", "tiktok"} {
+		p, ok := reg.ProviderByName(name)
+		if !ok {
+			t.Fatalf("provider %q not loaded", name)
+		}
+		if len(p.SetupSteps) == 0 {
+			t.Errorf("%s has no setup steps", name)
+			continue
+		}
+		if !contains(p.SetupSteps[0], "IMPORTANT") {
+			t.Errorf("%s's first setup step must lead with its access constraint, got %q",
+				name, p.SetupSteps[0])
+		}
+	}
+}

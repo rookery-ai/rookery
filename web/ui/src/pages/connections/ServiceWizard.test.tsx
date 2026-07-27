@@ -237,7 +237,7 @@ test("oauth provider with saved creds: connect posts {label} and navigates to re
   await user.type(await screen.findByLabelText(/label/i), "work");
   await user.click(screen.getByRole("button", { name: /connect github/i }));
 
-  expect(captured).toEqual({ label: "work" });
+  expect(captured).toEqual({ label: "work", inputs: {} });
   expect(assignSpy).toHaveBeenCalledWith("https://github.com/login/oauth/authorize?client_id=x");
 });
 
