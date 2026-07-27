@@ -164,3 +164,23 @@ test("Composer: the send control is an icon button still named 'Send'", () => {
   expect(btn.textContent).toBe("");
   expect(btn.querySelector("svg")).toBeInTheDocument();
 });
+
+// ── Layout contract ─────────────────────────────────────────────────────────
+
+test("Composer: gutter insets the row by 10% on each side", () => {
+  const { container } = render(<Composer onSend={vi.fn()} gutter />);
+  const row = container.firstElementChild!;
+  expect(row.className).toContain("px-[10%]");
+});
+
+test("Composer: without gutter the row is full-bleed (the narrow slide-over)", () => {
+  const { container } = render(<Composer onSend={vi.fn()} />);
+  expect(container.firstElementChild!.className).not.toContain("px-[10%]");
+});
+
+// "I don't want lines to mark the start chat or anything" — the composer must
+// not draw a full-width rule above itself.
+test("Composer: no top border rule above the input row", () => {
+  const { container } = render(<Composer onSend={vi.fn()} />);
+  expect(container.firstElementChild!.className).not.toContain("border-t");
+});

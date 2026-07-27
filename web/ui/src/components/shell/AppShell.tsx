@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { Outlet } from "react-router";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { GlobalChatButton } from "@/components/chat/GlobalChatButton";
 import { CommandPalette, GlobalSearchButton } from "@/components/search/CommandPalette";
 import { useRailShortcuts } from "@/lib/useKeyboardNav";
@@ -9,6 +10,7 @@ import IconRail from "./IconRail";
 import { PaneResizeHandle, usePaneWidth } from "./usePaneWidth";
 import { ShortcutsOverlay } from "./ShortcutsOverlay";
 import { ToastProvider, ToastHost } from "./Toast";
+import { DockedComposerCtx } from "./dockedComposer";
 
 type SlideOverState = { node: React.ReactNode; title?: string } | null;
 
@@ -43,6 +45,7 @@ export function ContextPane({ children }: { children: React.ReactNode }) {
 
 export function AppShell() {
   const [panel, setPanel] = useState<SlideOverState>(null);
+  const [dockedComposers, setDockedComposers] = useState(0);
   const [contextPane, setContextPane] = useState<React.ReactNode | null>(null);
   // Held here rather than inside CommandPalette so the search FAB — which
   // lives in this subtree, stacked with the chat button — can open it. The
@@ -56,13 +59,20 @@ export function AppShell() {
     [],
   );
   const closePanel = useCallback(() => setPanel(null), []);
+  const registerDockedComposer = useCallback(() => {
+    setDockedComposers((n) => n + 1);
+    return () => setDockedComposers((n) => Math.max(0, n - 1));
+  }, []);
+
   const value = useMemo(
     () => ({ openPanel, closePanel, setContextPane }),
     [openPanel, closePanel, setContextPane],
   );
+  const dockedValue = useMemo(() => ({ register: registerDockedComposer }), [registerDockedComposer]);
 
   return (
     <ShellCtx.Provider value={value}>
+      <DockedComposerCtx.Provider value={dockedValue}>
       <ToastProvider>
         <TooltipProvider>
           <div className="h-screen flex flex-col md:flex-row bg-background">
@@ -83,7 +93,12 @@ export function AppShell() {
                 stays anchored at the bottom, with search sitting above it.
                 GlobalChatButton renders null on /chats, and the stack simply
                 closes up rather than leaving a hole. */}
-            <div className="fixed bottom-20 md:bottom-6 right-4 md:right-6 z-30 flex flex-col-reverse gap-3">
+            <div
+              className={cn(
+                "fixed right-4 md:right-6 z-30 flex flex-col-reverse gap-3",
+                dockedComposers > 0 ? "bottom-32 md:bottom-24" : "bottom-20 md:bottom-6",
+              )}
+            >
               <GlobalChatButton />
               <GlobalSearchButton onClick={() => setSearchOpen(true)} />
             </div>
@@ -105,6 +120,7 @@ export function AppShell() {
           </div>
         </TooltipProvider>
       </ToastProvider>
+      </DockedComposerCtx.Provider>
     </ShellCtx.Provider>
   );
 }

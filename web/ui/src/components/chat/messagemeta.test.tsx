@@ -60,3 +60,31 @@ test("with no createdAt the copy button remains and no time is shown", () => {
   expect(screen.getByRole("button", { name: /copy message/i })).toBeInTheDocument();
   expect(screen.queryByTestId("message-time")).not.toBeInTheDocument();
 });
+
+// The server is reached over plain HTTP on the LAN (http://<host>:8080), which
+// is NOT a secure context — so `navigator.clipboard` is undefined and the
+// Clipboard API path throws before it can copy anything. This is the real
+// reported failure: the button did nothing at all, silently.
+test("copy falls back to execCommand when the Clipboard API is unavailable", async () => {
+  vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
+  const execCommand = vi.fn().mockReturnValue(true);
+  document.execCommand = execCommand;
+
+  renderBubble(<ChatMessageBubble role="assistant" content="fallback me" createdAt={ISO} />);
+  await userEvent.click(screen.getByRole("button", { name: /copy message/i }));
+
+  expect(execCommand).toHaveBeenCalledWith("copy");
+  await waitFor(() => expect(screen.getByRole("button", { name: /copied/i })).toBeInTheDocument());
+});
+
+// A silent no-op is what let the original bug hide. When BOTH paths fail the
+// control has to say so.
+test("copy reports a failure when both the Clipboard API and execCommand fail", async () => {
+  vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
+  document.execCommand = vi.fn().mockReturnValue(false);
+
+  renderBubble(<ChatMessageBubble role="assistant" content="nope" createdAt={ISO} />);
+  await userEvent.click(screen.getByRole("button", { name: /copy message/i }));
+
+  await waitFor(() => expect(screen.getByRole("button", { name: /copy failed/i })).toBeInTheDocument());
+});

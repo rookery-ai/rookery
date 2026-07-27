@@ -436,3 +436,30 @@ test("stopping a chat after an auto-resume does not re-resume it", async () => {
   await new Promise((r) => setTimeout(r, 50));
   expect(actionCalls).toEqual(["c2/resume", "c2/stop"]);
 });
+
+// ── FAB clearance ───────────────────────────────────────────────────────────
+
+// The reported bug: the floating action buttons sit in the bottom-right corner
+// directly on top of the composer's Send button. The 10% gutter clears them on
+// a wide window but not below ~1100px, so a page-level composer also pushes the
+// FAB stack up. Asserted through the real AppShell, not a stubbed context.
+function fabStack() {
+  return screen.getByLabelText("Search everything").parentElement!;
+}
+
+test("an open chat lifts the FAB stack clear of the composer", async () => {
+  mockFetch();
+  wrap("/?chat=c1");
+  await screen.findByPlaceholderText("Message…");
+
+  await waitFor(() => expect(fabStack().className).toContain("md:bottom-24"));
+});
+
+test("with no chat open (no composer) the FAB stack sits in its normal corner", async () => {
+  mockFetch();
+  wrap();
+  await screen.findByText(/select a chat or start a new one/i);
+
+  expect(fabStack().className).toContain("md:bottom-6");
+  expect(fabStack().className).not.toContain("md:bottom-24");
+});

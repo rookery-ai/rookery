@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Send } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useDockedComposer } from "@/components/shell/dockedComposer";
 
 const MIN_ROWS = 1;
 const MAX_ROWS = 6;
@@ -32,9 +33,17 @@ type ComposerProps = {
   // Undefined (every caller but ChatWindow) renders nothing, so this is
   // purely additive.
   leftSlot?: ReactNode;
+  // Inset the row by 10% of the container width on each side, so the composer
+  // lines up with the message column on the full-page chat surfaces. Off by
+  // default: the ~448px slide-over panel has no width to spare.
+  gutter?: boolean;
 };
 
-export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, initialText, leftSlot }: ComposerProps) {
+export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, initialText, leftSlot, gutter }: ComposerProps) {
+  // `gutter` marks the page-level docked composer (the slide-over passes it
+  // false), which is exactly the case where the floating action buttons would
+  // otherwise sit on top of the Send button. No-op outside the shell.
+  useDockedComposer(!!gutter);
   const [value, setValue] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   // Set by send() when the textarea itself was the active element at the
@@ -114,7 +123,10 @@ export function Composer({ onSend, busy, placeholder, autoFocus, focusSignal, in
   }
 
   return (
-    <div className="flex items-end gap-2 border-t border-border p-3">
+    // No top border: the brief is "no lines marking the start of the chat" —
+    // the textarea's own border is enough separation, and a full-width rule
+    // above a 10%-inset composer reads as a frame the design doesn't want.
+    <div className={cn("flex items-end gap-2 p-3", gutter && "px-[10%]")}>
       {leftSlot}
       <textarea
         ref={ref}

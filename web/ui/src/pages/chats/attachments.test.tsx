@@ -299,3 +299,14 @@ test("dragging a file onto the chat window uploads it and posts the same confirm
   expect(screen.getByText("dragged.txt")).toBeInTheDocument();
   await waitFor(() => expect(screen.getByText(/noted \(/)).toBeInTheDocument());
 });
+
+// The attach control used to be a p-2 icon button — visibly shorter than the
+// textarea and the Send button next to it.
+test("the attach button matches the send button's height", async () => {
+  mockFetch();
+  wrap();
+  const attach = await screen.findByRole("button", { name: "Attach file" });
+  const send = screen.getByRole("button", { name: "Send" });
+  expect(attach.className).toContain("size-9");
+  expect(send.className).toContain("size-9");
+});
