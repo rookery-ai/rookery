@@ -83,11 +83,12 @@ function StatusChip({ active }: { active: boolean }) {
 // mounts this directly, KBPage-style embedding would double up chrome.
 // initialText: optional prefill forwarded to the Composer — the ⌘K palette's
 // "Ask assistant" action passes the search query through GlobalChatPanel.
-// autoFocus: put the caret in the composer as soon as it mounts. Opt-in, not
-// always-on — callers pass it for the gesture that means "I want to type NOW"
-// (starting a new chat), and withhold it when merely SELECTING an existing
-// chat from a list, where grabbing focus would also pop the on-screen
-// keyboard on a touch device just because the user browsed their history.
+// autoFocus: put the caret in the composer as soon as it mounts. Opt-in rather
+// than automatic because the two surfaces differ: ChatsPage passes it for every
+// selection (opening a chat there IS "I want to type"), while GlobalChatPanel
+// withholds it when the slide-over merely re-opens on the last conversation,
+// which is not a typing gesture and would pop the on-screen keyboard on a touch
+// device.
 export function ChatWindow({
   chatId,
   initialText,
@@ -110,6 +111,29 @@ export function ChatWindow({
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Opening a stopped chat resumes it — the "Stopped" chip is presentational
+  // (handleChatMessage never checks chat.active before running a turn), so
+  // making the user find and press Resume before typing was pure friction.
+  //
+  // The ref latches on the FIRST load of this mount — before the active check,
+  // not after it. That ordering is what makes this once-per-OPEN rather than a
+  // standing policy that the chat must be active: a chat opened active and then
+  // Stopped by the user has already spent its decision, so Stop sticks instead
+  // of being instantly undone. ChatWindow is keyed by chatId at every call
+  // site, so the decision resets only when a DIFFERENT chat is opened.
+  // GlobalChatPanel is unaffected — it only ever mounts this for a chat it
+  // already filtered as active, or one it just created.
+  const autoResumeDecidedRef = useRef(false);
+  useEffect(() => {
+    if (autoResumeDecidedRef.current || !data) return;
+    autoResumeDecidedRef.current = true;
+    if (data.chat.active) return;
+    action.mutate({ id: chatId, action: "resume" });
+    // `action` is a stable mutation object and the ref above is the real guard;
+    // depending on its identity would only add a chance of a second fire.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, chatId]);
+
   // sendTurn is the shared low-level "post one message, wait for the
   // assistant's reply" primitive. It never throws — every caller gets a
   // typed result back and decides for itself how to surface a failure.
@@ -117,11 +141,14 @@ export function ChatWindow({
   // per-file toast instead, precisely because a shared banner is the wrong
   // vehicle when a batch import can have several independent outcomes.)
   async function sendTurn(text: string): Promise<{ ok: true } | { ok: false; message: string }> {
-    setPending((p) => [...p, { role: "user", content: text }]);
+    // Stamped client-side so a just-sent bubble shows its time immediately
+    // instead of blank until the refetch lands. reconcilePending keys on
+    // role::content only, so this never disturbs the dedupe.
+    setPending((p) => [...p, { role: "user", content: text, created_at: new Date().toISOString() }]);
     setBusy(true);
     try {
       const response = await sendChatMessage(chatId, text);
-      setPending((p) => [...p, { role: "assistant", content: response }]);
+      setPending((p) => [...p, { role: "assistant", content: response, created_at: new Date().toISOString() }]);
       await qc.invalidateQueries({ queryKey: ["chat", chatId] });
       // Also refresh the session list so its updated_at/ordering doesn't go
       // stale after a send (list is a separate query keyed by ["chats"]).
@@ -341,7 +368,7 @@ export function ChatWindow({
 
       <ChatScroll>
         {allMessages.map((m, i) => (
-          <ChatMessageBubble key={i} role={m.role} content={m.content} />
+          <ChatMessageBubble key={i} role={m.role} content={m.content} createdAt={m.created_at} />
         ))}
         {attaching && <TypingIndicator label="Attaching…" />}
         {busy && !attaching && <TypingIndicator />}

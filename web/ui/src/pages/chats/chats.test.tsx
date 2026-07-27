@@ -19,8 +19,12 @@ const SESSION_FIXTURE = {
 
 let chats: Chat[];
 let messages: Record<string, ChatMessage[]>;
+// Every stop/resume POST, in order, as "<chatId>/<action>" — the auto-resume
+// tests below assert on the exact sequence, not just that a call happened.
+let actionCalls: string[];
 
 function resetFixtures() {
+  actionCalls = [];
   chats = [
     { id: "c1", name: "Chat One", platform: "web", active: true, created_at: "2026-07-01T00:00:00Z", updated_at: "2026-07-17T07:00:00Z" },
     { id: "c2", name: "Chat Two", platform: "web", active: false, created_at: "2026-07-01T00:00:00Z", updated_at: "2026-07-10T00:00:00Z" },
@@ -90,6 +94,7 @@ function mockFetch(onSend?: (id: string, message: string) => { response?: string
       const action = url.match(/^\/api\/v1\/chats\/([^/]+)\/(stop|resume)$/);
       if (action && method === "POST") {
         const [, id, kind] = action;
+        actionCalls.push(`${id}/${kind}`);
         chats = chats.map((c) => (c.id === id ? { ...c, active: kind === "resume" } : c));
         return Promise.resolve(jsonResponse({ ok: true }));
       }
@@ -244,13 +249,16 @@ test("Stop posts to the stop endpoint and flips the chip/button to Resume", asyn
   expect(await screen.findByRole("button", { name: "Resume" })).toBeInTheDocument();
 });
 
+// Reaching the manual Resume button now takes a Stop first: opening a chat
+// that is ALREADY stopped auto-resumes it (see the auto-resume tests below), so
+// the only way the control is on screen is after the user stopped it here.
 test("Resume posts to the resume endpoint", async () => {
-  chats = chats.map((c) => (c.id === "c1" ? { ...c, active: false } : c));
   mockFetch();
   wrap("/?chat=c1");
   await screen.findByText("hi");
 
-  await userEvent.click(screen.getByRole("button", { name: "Resume" }));
+  await userEvent.click(screen.getByRole("button", { name: "Stop" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Resume" }));
 
   await waitFor(() =>
     expect(
@@ -373,17 +381,58 @@ test("+ New chat puts the caret in the composer", async () => {
   await waitFor(() => expect(document.activeElement).toBe(composer));
 });
 
-test("selecting an EXISTING chat does not steal focus into the composer", async () => {
+// Reversal of an earlier deliberate choice (this test used to assert the
+// opposite): on the chats page, every way of arriving at a chat is now treated
+// as "I came here to type", so the caret goes into the composer on selection —
+// not only for a chat this page just created.
+test("selecting an EXISTING chat focuses the composer", async () => {
   mockFetch();
   wrap();
-  const row = await screen.findByText("Chat Two");
+  const row = await screen.findByText("Chat One");
 
   await userEvent.click(row);
-  await screen.findByRole("heading", { name: "Chat Two" });
+  await screen.findByRole("heading", { name: "Chat One" });
 
-  // Browsing history is not a "type now" gesture: auto-focusing here would
-  // also pop the on-screen keyboard on a touch device for someone who just
-  // wanted to read an old conversation.
   const composer = await screen.findByPlaceholderText("Message…");
-  expect(document.activeElement).not.toBe(composer);
+  await waitFor(() => expect(document.activeElement).toBe(composer));
+});
+
+// ── Opening a chat: auto-resume + composer focus ─────────────────────────────
+
+test("opening a stopped chat resumes it once and focuses the composer", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap();
+
+  await user.click(await screen.findByText("Chat Two")); // c2, active: false
+
+  await waitFor(() => expect(actionCalls).toEqual(["c2/resume"]));
+  await waitFor(() => expect(screen.getByPlaceholderText("Message…")).toHaveFocus());
+});
+
+test("opening an already-active chat resumes nothing", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap();
+
+  await user.click(await screen.findByText("Chat One")); // c1, active: true
+  await screen.findByText("hello there");
+
+  expect(actionCalls).toEqual([]);
+});
+
+// The auto-resume is a per-open gesture, not a policy that a chat must be
+// active: pressing Stop afterwards has to stick.
+test("stopping a chat after an auto-resume does not re-resume it", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap();
+
+  await user.click(await screen.findByText("Chat Two"));
+  await waitFor(() => expect(actionCalls).toEqual(["c2/resume"]));
+
+  await user.click(await screen.findByRole("button", { name: "Stop" }));
+  await waitFor(() => expect(actionCalls).toEqual(["c2/resume", "c2/stop"]));
+  await new Promise((r) => setTimeout(r, 50));
+  expect(actionCalls).toEqual(["c2/resume", "c2/stop"]);
 });
