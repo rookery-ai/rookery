@@ -68,6 +68,22 @@ AST guardrail tests shell out to `python3`. If Python is not available, those te
 > `curl -sS http://127.0.0.1:8080/` (200 HTML) and
 > `curl -sS http://127.0.0.1:8080/api/v1/auth/session` (200 JSON).
 
+## Git workflow
+
+- **Always branch, never commit directly to `main`.** All work happens on a
+  feature branch off `main`. When the work is finished, open a **pull request**
+  back into `main` — `main` only ever advances through merged PRs.
+- **Conventional Commits.** Structure every commit message as
+  `type(scope): summary` (e.g. `feat(gateway): …`, `fix(web/chat): …`,
+  `refactor(vault): …`, `docs: …`). Types: `feat`, `fix`, `refactor`, `docs`,
+  `test`, `chore`, `perf`, `build`, `ci`. Scope is optional but preferred.
+- **Deploy from `main` for production** — only after the work is finished and
+  merged. `make deploy` on `main` is the production path.
+- **Local branch deploys are fine for testing.** When a development phase or a
+  group of tasks is complete and needs to be exercised on the running server,
+  it's OK to `make deploy` from the feature branch locally before the PR merges —
+  that's for testing, not production.
+
 ## Architecture
 
 ### Entry point & wiring
@@ -484,6 +500,31 @@ during render would blank the whole conversation. Opening a chat from `ChatsPage
 once per open** if it is stopped (the chip is presentational — `handleChatMessage` never checks
 `chat.active`) and focuses the composer; the decision is latched in a ref on the FIRST detail load of
 the mount, before the active check, so a later manual Stop sticks.
+
+**Copying a message works without a secure context.** `navigator.clipboard` exists ONLY in a secure
+context (https, or localhost) — and the normal way to reach a self-hosted install is plain HTTP on
+the LAN (`http://<host>:8080`), where it is `undefined` and reading `.writeText` off it throws. So
+`MessageMeta.copy()` guards with `navigator.clipboard?.writeText` and falls back to
+`document.execCommand("copy")` via an off-screen (NOT `display:none` — a hidden node is unselectable
+and copies nothing) textarea, restoring the user's own selection afterwards. When both paths fail the
+button shows a "Copy failed" state: the earlier silent no-op is precisely why the broken button went
+unnoticed.
+
+**Chat gutters (the 10% column).** On the full-page chat surfaces — `ChatsPage` and both designers via
+`DesignerSurface` — the messages and the composer share one column inset 10% on each side
+(`ChatScroll className="px-[10%]"` + `<Composer gutter>`). The ~448px slide-over panel opts out
+(`ChatWindow compact`). No rule is drawn above the composer: the design is deliberately unframed.
+Two traps live here:
+- `ChatScroll`'s base padding is `px-4 py-4`, **not** the `p-4` shorthand. tailwind-merge treats `p`
+  and `px` as different groups, so `cn("p-4", "px-[10%]")` keeps BOTH classes and leaves the winner to
+  the generated stylesheet's ordering — the composer would inset while the bubbles did not. Two `px-*`
+  classes are one group, where the last provably wins.
+- A page-level composer registers as the docked bottom bar (`components/shell/dockedComposer.tsx`)
+  so `AppShell` lifts the floating action buttons above it; otherwise they sit on top of the Send
+  button. The 10% gutter alone only clears them above ~1100px viewport width. That context lives in
+  its own module purely to break an import cycle (`Composer → AppShell → GlobalChatButton →
+  ChatWindow → Composer`). The registration is COUNTED, not a boolean: on a route change the incoming
+  composer mounts before the outgoing one unmounts.
 
 **Session `timezone`.** `GET /api/v1/auth/session` carries the active workspace's profile timezone
 (`""` when unset or no workspace entered). It lives here rather than on `/api/v1/settings` because
