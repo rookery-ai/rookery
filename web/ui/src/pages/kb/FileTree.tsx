@@ -223,12 +223,20 @@ export function NewEntryDialog({
   const [error, setError] = useState("");
   const newNote = useNewNote();
 
+  // Reset on the OPEN TRANSITION only. Keying this on `dirPath` as well (as it
+  // was) meant any change to the caller's current directory while the dialog
+  // was open wiped the half-typed name — and KBPage's `currentDir` does change
+  // underneath an open dialog, because it is derived from the open note's path.
+  // The user then pressed Create on an empty field and submit() silently
+  // returned on `if (!n) return`.
+  const wasOpenRef = useRef(false);
   useEffect(() => {
-    if (open) {
+    if (open && !wasOpenRef.current) {
       setName("");
       setLocation(dirPath);
       setError("");
     }
+    wasOpenRef.current = open;
   }, [open, dirPath]);
 
   async function submit(e: React.FormEvent) {
