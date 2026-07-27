@@ -47,6 +47,8 @@ func RunPostConnect(ctx context.Context, name string, client *http.Client, acces
 		return PostConnectResult{Extra: extra}, err
 	case "meta_page_token":
 		return resolveMetaPageToken(ctx, client, accessToken)
+	case "meta_ig_user":
+		return resolveMetaIGUser(ctx, client, accessToken)
 	default:
 		return PostConnectResult{}, fmt.Errorf("unknown post_connect hook %q", name)
 	}
@@ -130,4 +132,53 @@ func resolveAtlassianCloudID(ctx context.Context, client *http.Client, accessTok
 		return nil, &ConnectorError{KindOther, "no accessible Atlassian sites for this account"}
 	}
 	return map[string]string{"cloudid": sites[0].ID}, nil
+}
+
+// resolveMetaIGUser resolves the Instagram Business account behind the first managed
+// Page, and swaps in that Page's token.
+//
+// Instagram publishing is addressed by the IG user id but AUTHORISED by the Page token,
+// which is why this reuses the page-token swap rather than being a separate auth model.
+// A personal Instagram account cannot be used at all — it must be a Professional
+// (Business or Creator) account linked to a Page — so a missing link is reported at
+// connect time rather than as a confusing 400 on the first publish.
+func resolveMetaIGUser(ctx context.Context, client *http.Client, userToken string) (PostConnectResult, error) {
+	page, err := resolveMetaPageToken(ctx, client, userToken)
+	if err != nil {
+		return PostConnectResult{}, err
+	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+	pageID := page.Extra["page_id"]
+	req, _ := http.NewRequestWithContext(ctx, "GET",
+		"https://graph.facebook.com/v21.0/"+pageID+"?fields=instagram_business_account{id,username}", nil)
+	req.Header.Set("Authorization", "Bearer "+page.AccessToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return PostConnectResult{}, &ConnectorError{KindNetwork, err.Error()}
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 400 {
+		return PostConnectResult{}, &ConnectorError{KindAuth,
+			fmt.Sprintf("page lookup %d: %s", resp.StatusCode, string(b))}
+	}
+	var out struct {
+		IG struct {
+			ID       string `json:"id"`
+			Username string `json:"username"`
+		} `json:"instagram_business_account"`
+	}
+	if err := json.Unmarshal(b, &out); err != nil {
+		return PostConnectResult{}, err
+	}
+	if out.IG.ID == "" {
+		return PostConnectResult{}, &ConnectorError{KindOther,
+			"the Page \"" + page.Extra["page_name"] + "\" has no linked Instagram Business account — " +
+				"convert the Instagram account to Professional and link it to this Page first"}
+	}
+	page.Extra["ig_user_id"] = out.IG.ID
+	page.Extra["ig_username"] = out.IG.Username
+	return page, nil
 }

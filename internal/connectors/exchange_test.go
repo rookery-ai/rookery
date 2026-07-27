@@ -27,12 +27,18 @@ func TestMetaUsesTokenExchange(t *testing.T) {
 // The mode is opt-in per data file: only the Meta-family providers use it, and every
 // other provider must keep the standard refresh_token path.
 func TestOnlyMetaFamilyUsesExchange(t *testing.T) {
-	metaFamily := map[string]bool{"meta_ads": true, "facebook": true}
+	// Derived from the token host rather than a hardcoded name list: fb_exchange_token
+	// is a Meta grant, so any provider using it must be talking to Meta — and a list
+	// would need editing every time a Meta provider is added, which is how it drifts.
 	reg, _ := LoadBundled()
 	for _, name := range reg.ProviderNames() {
 		p, _ := reg.ProviderByName(name)
-		if p.UsesTokenExchange() && !metaFamily[name] {
-			t.Errorf("provider %q unexpectedly uses token exchange", name)
+		if !p.UsesTokenExchange() {
+			continue
+		}
+		if !contains(p.TokenURL, "graph.facebook.com") {
+			t.Errorf("provider %q uses the fb_exchange_token grant but its token endpoint "+
+				"is %q — that grant only exists on Meta", name, p.TokenURL)
 		}
 	}
 }
@@ -143,5 +149,88 @@ func TestFacebookPostIsGatedAndRendersFromConnExtra(t *testing.T) {
 	// link was not supplied and must be dropped rather than posted empty.
 	if contains(string(body), "link=") {
 		t.Errorf("unsupplied optional field should be dropped: %s", body)
+	}
+}
+
+// ── Instagram ────────────────────────────────────────────────────────────────
+
+// Instagram publishes in two steps. Modelling them as two ACTIONS (rather than one
+// action needing a two-call framework feature) has a useful property: only the second
+// is public_write, so staging an image never waits on approval and only the publish
+// does.
+func TestInstagramTwoStepPublishGatingSplit(t *testing.T) {
+	reg, _ := LoadBundled()
+
+	create, ok := reg.Action("instagram", "instagram_create_media")
+	if !ok {
+		t.Fatal("instagram_create_media not found")
+	}
+	if create.PublicWrite {
+		t.Error("staging a media container publishes nothing and must not be gated")
+	}
+	if create.Mutating {
+		t.Error("staging is not a public mutation; gating/build rules should leave it alone")
+	}
+
+	pub, ok := reg.Action("instagram", "instagram_publish_media")
+	if !ok {
+		t.Fatal("instagram_publish_media not found")
+	}
+	if !pub.PublicWrite || !pub.Mutating {
+		t.Error("the publish step must be public_write and mutating")
+	}
+}
+
+// Every Instagram action is addressed by the ig_user_id the post_connect hook stored,
+// never by an argument — the model must not be able to publish to another account.
+func TestInstagramAddressedByConnExtra(t *testing.T) {
+	reg, _ := LoadBundled()
+	for _, name := range []string{"instagram_account_info", "instagram_list_media",
+		"instagram_create_media", "instagram_publish_media"} {
+		a, ok := reg.Action("instagram", name)
+		if !ok {
+			t.Fatalf("%s not found", name)
+		}
+		if !contains(a.Request.URL, "{{conn.ig_user_id}}") {
+			t.Errorf("%s must address the account via conn.ig_user_id, got %s", name, a.Request.URL)
+		}
+	}
+}
+
+func TestInstagramDeclaresIGHookAndScopes(t *testing.T) {
+	reg, _ := LoadBundled()
+	p, ok := reg.ProviderByName("instagram")
+	if !ok {
+		t.Fatal("instagram provider not loaded")
+	}
+	if p.PostConnect != "meta_ig_user" {
+		t.Errorf("post_connect = %q, want meta_ig_user", p.PostConnect)
+	}
+	for _, want := range []string{"instagram_basic", "instagram_content_publish"} {
+		var found bool
+		for _, s := range p.DefaultScopes {
+			if s == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("missing scope %q", want)
+		}
+	}
+}
+
+func TestInstagramPublishRenders(t *testing.T) {
+	reg, _ := LoadBundled()
+	a, _ := reg.Action("instagram", "instagram_publish_media")
+	method, u, body, _, err := renderRequest(a, map[string]any{"creation_id": "C1"},
+		map[string]string{"ig_user_id": "IG9"})
+	if err != nil {
+		t.Fatalf("renderRequest: %v", err)
+	}
+	if method != "POST" || u != "https://graph.facebook.com/v21.0/IG9/media_publish" {
+		t.Errorf("unexpected request: %s %s", method, u)
+	}
+	if !contains(string(body), "creation_id=C1") {
+		t.Errorf("form body did not render: %s", body)
 	}
 }

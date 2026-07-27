@@ -1,0 +1,60 @@
+provider: instagram
+actions:
+  - name: instagram_account_info
+    description: "Your connected Instagram Business account: username, follower and media counts. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{conn.ig_user_id}}"
+      query:
+        fields: "id,username,followers_count,media_count"
+    response_extract: "$"
+  - name: instagram_list_media
+    description: "Recent posts on your Instagram account with engagement counts, newest first. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max rows — REQUIRED. Use 10."}
+      required: [limit]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{conn.ig_user_id}}/media"
+      query:
+        fields: "id,caption,media_type,permalink,timestamp,like_count,comments_count"
+        limit:  "{{limit}}"
+    response_extract: "$.data"
+  - name: instagram_create_media
+    description: "STEP 1 of 2 — stage an image for publishing. Nothing is public yet. Returns a creation id you pass to instagram_publish_media. image_url must be a PUBLICLY reachable URL; the API cannot upload a local file."
+    mutating: false
+    params:
+      type: object
+      properties:
+        image_url: {type: string, description: "publicly reachable https URL of the image"}
+        caption:   {type: string, description: "the caption, as it will appear"}
+      required: [image_url]
+    request:
+      method: POST
+      url: "https://graph.facebook.com/v21.0/{{conn.ig_user_id}}/media"
+      form:
+        image_url: "{{image_url}}"
+        caption:   "{{caption}}"
+    response_extract: "$"
+  - name: instagram_publish_media
+    description: "STEP 2 of 2 — publish a staged image. This is a REAL, PUBLIC, irreversible post. Pass the id returned by instagram_create_media."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        creation_id: {type: string, description: "the id returned by instagram_create_media"}
+      required: [creation_id]
+    request:
+      method: POST
+      url: "https://graph.facebook.com/v21.0/{{conn.ig_user_id}}/media_publish"
+      form:
+        creation_id: "{{creation_id}}"
+    response_extract: "$"

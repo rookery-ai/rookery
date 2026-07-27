@@ -98,6 +98,7 @@ google_searchconsole:siGooglesearchconsole
 youtube:siYoutube
 meta_ads:siMeta
 facebook:siFacebook
+instagram:siInstagram
 opencode_zen:siOpencode
 opencode_go:siOpencode
 "
