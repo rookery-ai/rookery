@@ -29,6 +29,7 @@ const SESSION_FIXTURE = {
 const OAUTH_NO_CREDS: ServiceProvider = {
   name: "notion",
   label: "Notion",
+  category: "Productivity",
   kind: "oauth",
   setup_url: "https://www.notion.so/my-integrations",
   setup_steps: [
@@ -43,6 +44,7 @@ const OAUTH_NO_CREDS: ServiceProvider = {
 const OAUTH_WITH_CREDS: ServiceProvider = {
   name: "github",
   label: "GitHub",
+  category: "Productivity",
   kind: "oauth",
   setup_url: "",
   setup_steps: [],
@@ -54,6 +56,7 @@ const OAUTH_WITH_CREDS: ServiceProvider = {
 const OAUTH_NEEDS_REAUTH: ServiceProvider = {
   name: "jira",
   label: "Jira",
+  category: "Productivity",
   kind: "oauth",
   setup_url: "",
   setup_steps: [],
@@ -65,6 +68,7 @@ const OAUTH_NEEDS_REAUTH: ServiceProvider = {
 const OAUTH_ACTIVE_CONN: ServiceProvider = {
   name: "gmail",
   label: "Gmail",
+  category: "Productivity",
   kind: "oauth",
   setup_url: "",
   setup_steps: [],
@@ -76,6 +80,7 @@ const OAUTH_ACTIVE_CONN: ServiceProvider = {
 const API_KEY_PROVIDER: ServiceProvider = {
   name: "openai",
   label: "OpenAI",
+  category: "Productivity",
   kind: "api_key",
   setup_url: "",
   setup_steps: [],
