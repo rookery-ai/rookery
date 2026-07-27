@@ -132,9 +132,19 @@ type RequestTemplate struct {
 
 // Action is one curated, typed operation on a provider.
 type Action struct {
-	Name            string          `yaml:"name"`
-	Description     string          `yaml:"description"`
-	Mutating        bool            `yaml:"mutating"`
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	Mutating    bool   `yaml:"mutating"`
+	// PublicWrite marks an action that publishes irreversibly to a public audience —
+	// a post, a comment, an upload. `Mutating` is too blunt to gate on: pausing an ad
+	// campaign is mutating but private and reversible, while a LinkedIn post is
+	// neither. Only PublicWrite actions are ever eligible for the approval gate, so
+	// enabling the gate never makes an agent wait on a routine write.
+	//
+	// A PublicWrite action is always Mutating too; RunGuardrails-style consistency is
+	// enforced by TestPublicWriteImpliesMutating rather than by the loader, so a data
+	// file with the pair wrong fails the build rather than silently skipping a guard.
+	PublicWrite     bool            `yaml:"public_write"`
 	ParamsRaw       map[string]any  `yaml:"params"`
 	Request         RequestTemplate `yaml:"request"`
 	ResponseExtract string          `yaml:"response_extract"`
