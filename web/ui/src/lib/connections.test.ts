@@ -1,6 +1,6 @@
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createElement } from "react";
+import { createElement, type ReactNode } from "react";
 import {
   useConnectors,
   useSaveConnector,
@@ -11,6 +11,7 @@ import {
   useConnectService,
   useConnectAPIKey,
   useDeleteServiceConnection,
+  useProviderActions,
   groupByCategory,
   CATEGORY_ORDER,
   type ServiceProvider,
@@ -28,6 +29,7 @@ function providerFixture(
     setup_url: "",
     setup_steps: [],
     has_creds: false,
+    action_count: 0,
     connect_inputs: [],
     connections: [],
   };
@@ -349,4 +351,45 @@ test("useSaveProviderCreds invalidates the services list query", async () => {
   await waitFor(() => expect(list.result.current.isFetching).toBe(false));
   const listCalls = vi.mocked(fetch).mock.calls.filter((c) => String(c[0]) === "/api/v1/services");
   expect(listCalls.length).toBeGreaterThan(1);
+});
+
+describe("useProviderActions", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("fetches the provider's actions endpoint and returns the list", async () => {
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            actions: [
+              {
+                name: "github_search_issues",
+                description: "Search issues",
+                mutating: false,
+                public_write: false,
+                params: { properties: { query: { type: "string" } }, required: ["query"] },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: qc }, children);
+
+    const { result } = renderHook(() => useProviderActions("github"), { wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/services/github/actions",
+      expect.anything(),
+    );
+    expect(result.current.data?.actions[0].name).toBe("github_search_issues");
+  });
 });

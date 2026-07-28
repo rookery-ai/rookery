@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -19,6 +20,7 @@ import (
 // browser-redirect route and is untouched here.
 func (s *Server) registerServicesAPI(g *echo.Group) {
 	g.GET("/services", s.apiListServices)
+	g.GET("/services/:provider/actions", s.apiListProviderActions)
 	g.POST("/services/:provider/creds", s.apiSaveProviderCreds)
 	g.POST("/services/:provider/connect", s.apiConnectService)
 	g.POST("/services/:provider/apikey", s.apiConnectAPIKey)
@@ -51,10 +53,31 @@ type apiServiceProvider struct {
 	HasCreds      bool                     `json:"has_creds"`
 	ConnectInputs []apiServiceConnectInput `json:"connect_inputs"`
 	Connections   []apiServiceConnection   `json:"connections"`
+	// ActionCount lets the UI show a count and hide the actions entry point at
+	// zero without a second fetch. The actions themselves stay OFF this payload:
+	// it loads on every visit to the connections page, and 272 actions across
+	// 45 providers with their JSON schemas is a real regression on that critical path.
+	ActionCount int `json:"action_count"`
 }
 
 type apiServicesListResponse struct {
 	Providers []apiServiceProvider `json:"providers"`
+}
+
+// apiConnectorAction is one curated action a provider exposes. Deliberately a
+// SUBSET of connectors.Action: Request (method/URL/query/body templates) and
+// ResponseExtract are internal plumbing — noise to a reader and a needless
+// widening of what the API discloses about how requests are built.
+type apiConnectorAction struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Mutating    bool            `json:"mutating"`
+	PublicWrite bool            `json:"public_write"`
+	Params      json.RawMessage `json:"params"`
+}
+
+type apiProviderActionsResponse struct {
+	Actions []apiConnectorAction `json:"actions"`
 }
 
 type apiSaveProviderCredsRequest struct {
@@ -151,10 +174,42 @@ func (s *Server) apiListServices(c echo.Context) error {
 			HasCreds:      cfgForCreds != nil,
 			ConnectInputs: connectInputs,
 			Connections:   conns,
+			ActionCount:   len(s.connectors.Actions(provider)),
 		})
 	}
 
 	return c.JSON(http.StatusOK, apiServicesListResponse{Providers: out})
+}
+
+// apiListProviderActions lists the curated actions a provider exposes. GET
+// /api/v1/services/:provider/actions → {"actions":[...]}; unknown provider → 404.
+// Read-only over embedded manifest data: no DB access and nothing
+// workspace-scoped, so an unconnected provider lists its actions too — "what can
+// this do for me" is the strongest reason to connect in the first place.
+func (s *Server) apiListProviderActions(c echo.Context) error {
+	provider := c.Param("provider")
+	if _, ok := s.connectors.ProviderByName(provider); !ok {
+		return jsonErr(c, http.StatusNotFound, "not_found", "unknown provider: "+provider)
+	}
+
+	acts := s.connectors.Actions(provider)
+	out := make([]apiConnectorAction, 0, len(acts))
+	for _, a := range acts {
+		// A manifest with no params: block compiles to the literal bytes `null`,
+		// not to empty — normalize so the client can always read .properties.
+		params := a.Params
+		if len(params) == 0 || string(params) == "null" {
+			params = json.RawMessage(`{}`)
+		}
+		out = append(out, apiConnectorAction{
+			Name:        a.Name,
+			Description: a.Description,
+			Mutating:    a.Mutating,
+			PublicWrite: a.PublicWrite,
+			Params:      params,
+		})
+	}
+	return c.JSON(http.StatusOK, apiProviderActionsResponse{Actions: out})
 }
 
 // apiSaveProviderCreds ports handleSaveProviderCreds. POST

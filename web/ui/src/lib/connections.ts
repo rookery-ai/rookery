@@ -74,6 +74,7 @@ export type ServiceProvider = {
   setup_url: string;
   setup_steps: string[];
   has_creds: boolean;
+  action_count: number;
   connect_inputs: ServiceConnectInput[];
   connections: ServiceConnection[];
 };
@@ -123,6 +124,47 @@ export function useServices() {
   return useQuery({
     queryKey: ["services"],
     queryFn: () => api.get<{ providers: ServiceProvider[] }>("/api/v1/services"),
+  });
+}
+
+// Mirrors apiConnectorAction. `params` is the action's JSON Schema. Real
+// manifests can nest schemas deeper than this (e.g. an array param's `items`
+// — see internal/connectors/schema.go's propSchema), but that's intentionally
+// not modeled here: the actions panel only ever renders a param's top-level
+// `type`, so an array param just shows as "array" and the nested shape is
+// never read.
+export type ConnectorActionParams = {
+  properties?: Record<string, { type?: string; description?: string }>;
+  required?: string[];
+};
+
+export type ConnectorAction = {
+  name: string;
+  description: string;
+  mutating: boolean;
+  public_write: boolean;
+  params: ConnectorActionParams;
+};
+
+/**
+ * Fetches one provider's curated action list.
+ *
+ * The key root is "service-actions", NOT "services": React Query invalidates by
+ * key prefix, so every connect/disconnect mutation's
+ * invalidateQueries({queryKey:["services"]}) would evict these lists too.
+ *
+ * staleTime: Infinity because the manifests are compiled into the binary via
+ * go:embed and cannot change while the server runs. Fetched lazily — only the
+ * actions view mounts this hook, so opening the wizard costs nothing.
+ */
+export function useProviderActions(provider: string) {
+  return useQuery({
+    queryKey: ["service-actions", provider],
+    queryFn: () =>
+      api.get<{ actions: ConnectorAction[] }>(
+        `/api/v1/services/${provider}/actions`,
+      ),
+    staleTime: Infinity,
   });
 }
 
