@@ -1,0 +1,21 @@
+name: threads
+label: Threads
+category: Publishing & Media
+# Threads has its OWN OAuth host and API host — it is not an alias of the Meta app.
+authorize_url: https://threads.net/oauth/authorize
+token_url: https://graph.threads.net/oauth/access_token
+userinfo_url: https://graph.threads.net/v1.0/me?fields=id,username
+identity_path: username
+token_expiry: exchange
+# Threads names the grant th_exchange_token, not Meta's fb_exchange_token.
+token_exchange_grant: th_exchange_token
+default_scopes:
+  - threads_basic
+  - threads_content_publish
+setup_url: https://developers.facebook.com/apps
+setup_steps:
+  - "Go to Meta for Developers → My Apps → Create App, then add the 'Threads API' product (it is separate from Facebook Login)."
+  - "Under Threads API → Settings, add the redirect URI shown above exactly."
+  - "Copy the Threads App ID and Threads App Secret — these are DIFFERENT from the Facebook app id/secret — and paste them below."
+  - "Production use of threads_content_publish requires App Review; a Development-mode app works against accounts with a role on it."
+  - "Note: 250 posts per 24 hours, and any image must be at a PUBLICLY reachable URL."

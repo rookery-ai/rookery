@@ -30,6 +30,10 @@ const sessionName = "sa_session"
 
 // Server is the HTTP server for the Simple Agents web UI.
 type Server struct {
+	// approval resolves parked public_write actions from the web UI. Nil when the
+	// install has no approval service wired, in which case the endpoints say so
+	// rather than 500ing.
+	approval   ApprovalResolver
 	echo       *echo.Echo
 	cfg        *config.Config
 	db         *db.DB
@@ -322,4 +326,18 @@ func (s *Server) secretsLookup(ctx context.Context, workspaceID, name string) (s
 	}
 	svc := secrets.New(s.db, workspaceID, masterPw, w.SecretsSalt)
 	return svc.Get(ctx, name)
+}
+
+// ApprovalResolver is the subset of *approval.Service the web layer needs. An
+// interface so web does not import internal/approval (which imports the whole
+// connector layer) purely to resolve two endpoints.
+type ApprovalResolver interface {
+	Approve(ctx context.Context, workspaceID, id string) (*db.PendingAction, error)
+	Reject(ctx context.Context, workspaceID, id string) (*db.PendingAction, error)
+}
+
+// WithApproval wires the approval resolver used by the /api/v1/approvals endpoints.
+func (s *Server) WithApproval(a ApprovalResolver) *Server {
+	s.approval = a
+	return s
 }

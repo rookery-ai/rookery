@@ -86,3 +86,25 @@ actions:
     # Whole envelope on purpose: YouTube Analytics returns bare "rows" whose
     # columns are named only by the sibling "columnHeaders" block.
     response_extract: "$"
+  - name: youtube_post_comment
+    description: "Post a top-level comment on a video as your channel. This is a REAL, PUBLIC, irreversible comment — write the final wording."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        video_id: {type: string, description: "video id to comment on"}
+        text:     {type: string, description: "the comment body, as it will appear"}
+      required: [video_id, text]
+    request:
+      method: POST
+      url: "https://youtube.googleapis.com/youtube/v3/commentThreads"
+      query:
+        part: "snippet"
+      body:
+        snippet:
+          videoId: "{{video_id}}"
+          topLevelComment:
+            snippet:
+              textOriginal: "{{text}}"
+    response_extract: "$"

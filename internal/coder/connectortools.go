@@ -39,7 +39,7 @@ func (h *hostToolSet) executeConnectorTool(ctx context.Context, name string, arg
 	}
 	res, err := connectors.Execute(ctx, h.connReg, h.connStore, h.httpClient,
 		connectors.ConnRef{ID: b.ID, Provider: b.Provider, AccountIdentity: b.AccountIdentity, Extra: b.Extra},
-		action, args, h.verifyBuild)
+		action, args, connectors.Policy{BuildPhase: h.verifyBuild, Parker: h.connParker})
 	if err != nil {
 		return "error: " + err.Error() // ConnectorError messages are already actionable
 	}

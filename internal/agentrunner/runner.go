@@ -78,6 +78,7 @@ type Runner struct {
 	connReg    *connectors.Registry
 	connStore  connectors.TokenStore
 	connBridge *connectors.Bridge
+	parkerFor  ParkerFactory
 
 	// kbBridge, when set, lets a CLI coder's agent run reach the knowledge base's
 	// conversion + search paths via `simple-agents kb convert|search` (the same
@@ -94,6 +95,19 @@ func (r *Runner) WithConnectors(reg *connectors.Registry, store connectors.Token
 	r.connReg = reg
 	r.connStore = store
 	r.connBridge = bridge
+	return r
+}
+
+// ParkerFactory builds the approval gate for one run, or returns nil when this agent
+// has no gated binding. A function rather than the service itself so agentrunner does
+// not import internal/approval, which imports connectors + db and would make this
+// package's tests drag the whole stack in.
+type ParkerFactory func(ctx context.Context, workspaceID, agentID, agentName string) connectors.Parker
+
+// WithApprovalGate wires the public_write approval gate. Without it, runs are ungated —
+// today's behaviour, and the behaviour of any install that never turns approval on.
+func (r *Runner) WithApprovalGate(f ParkerFactory) *Runner {
+	r.parkerFor = f
 	return r
 }
 
@@ -367,12 +381,20 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 
 	// Expose the agent's bound service connections to BOTH coder types.
 	if len(boundConns) > 0 {
+		// The approval gate for public_write actions. Resolved once per run: nil when
+		// the agent has no binding set to 'approve', which keeps the ungated path free
+		// of any per-call work. BOTH coder kinds get the same parker, so switching
+		// coder kind cannot silently disable the user's approval setting.
+		var parker connectors.Parker
+		if r.parkerFor != nil {
+			parker = r.parkerFor(ctx, input.WorkspaceID, agent.ID, agent.Name)
+		}
 		// API engine: native in-process typed tools.
-		coderSvc = coderSvc.WithConnectors(r.connReg, r.connStore, boundConns)
+		coderSvc = coderSvc.WithConnectors(r.connReg, r.connStore, boundConns).WithParker(parker)
 		// CLI coders: register a run-scoped bridge token + inject the loopback URL so
 		// `simple-agents connector exec <tool>` reaches the same connectors.Execute.
 		if r.connBridge != nil && r.connBridge.Addr() != "" {
-			token := r.connBridge.Register(input.WorkspaceID, boundConns, false)
+			token := r.connBridge.RegisterGated(input.WorkspaceID, boundConns, false, parker)
 			defer r.connBridge.Unregister(token)
 			extraEnv["SA_CONNECTOR_URL"] = r.connBridge.Addr()
 			extraEnv["SA_CONNECTOR_TOKEN"] = token

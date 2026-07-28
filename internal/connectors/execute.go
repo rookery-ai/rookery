@@ -54,11 +54,59 @@ type Result struct {
 	Data json.RawMessage
 }
 
+// Policy carries the per-call execution rules Execute enforces before touching the
+// network. It replaced a bare `buildPhase bool` parameter so new rules (the approval
+// gate) could be added without changing the signature at every call site again.
+//
+// The zero value is the permissive default — no build guard, no approval gate — which
+// is what a run, a chat turn, and the livecheck harness all want.
+type Policy struct {
+	// BuildPhase blocks mutating actions during agent/skill generation: a build must
+	// exercise real read paths without sending anything on the user's behalf.
+	BuildPhase bool
+
+	// Parker, when non-nil, gates public_write actions: instead of calling the
+	// provider, Execute hands the call to Parker and returns its queue ticket as a
+	// SUCCESSFUL result. Nil (the default) means no gate — today's behaviour.
+	//
+	// The caller decides whether this call is gated; Execute only asks the action
+	// whether it is eligible. That split keeps the per-binding approval_mode lookup
+	// (a DB read) out of this package, which knows nothing about agents.
+	Parker Parker
+}
+
+// Parker parks a public_write call for the owner to approve later, returning the
+// ticket id. Implemented by the approval service; nil in every non-gated path.
+//
+// Returning ("", nil) means "this call is NOT gated — send it normally". That is how
+// the per-binding approval_mode is honoured: one agent run can hold several
+// connections with different modes, so the decision cannot be made once up front when
+// the Policy is built. The Parker owns the lookup because it has the agent context;
+// this package knows nothing about agents.
+type Parker interface {
+	Park(ctx context.Context, conn ConnRef, action string, args map[string]any) (ticketID string, err error)
+}
+
+// ParkedResult is the payload Execute returns for a gated call. It is a SUCCESS, not
+// an error: the coder's tool loop treats any `error:` string as a failing call worth
+// retrying or blocking on, and a parked post is neither — it is the system working as
+// configured.
+//
+// Note is written for the model, not the user. An agent that records a queued post as
+// published would never retry it and would report a lie to its owner, so the wording
+// has to be impossible to read as success.
+type ParkedResult struct {
+	Status string `json:"status"`
+	ID     string `json:"pending_action_id"`
+	Action string `json:"action"`
+	Note   string `json:"note"`
+}
+
 // Execute is the typed choke point every connector call goes through: validate args,
-// enforce the build-time mutation guard, fetch a fresh token, render + send the
-// provider request (one transient retry), and normalize the response/errors.
+// enforce the policy guards, fetch a fresh token, render + send the provider request
+// (one transient retry), and normalize the response/errors.
 func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.Client,
-	conn ConnRef, actionName string, args map[string]any, buildPhase bool) (Result, error) {
+	conn ConnRef, actionName string, args map[string]any, pol Policy) (Result, error) {
 
 	a, ok := reg.Action(conn.Provider, actionName)
 	if !ok {
@@ -67,9 +115,35 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 	if err := validateArgs(a.Params, args); err != nil {
 		return Result{}, &ConnectorError{KindBadArgs, err.Error()}
 	}
-	if a.Mutating && buildPhase {
+	if a.Mutating && pol.BuildPhase {
 		return Result{}, &ConnectorError{KindBuildBlocked,
 			fmt.Sprintf("build-time guard: %q sends/modifies for real and is blocked during generation — it will run when the agent executes for real", actionName)}
+	}
+	// The approval gate sits AFTER arg validation (so a malformed call is rejected
+	// rather than parked for a human to discover is broken) and BEFORE the token
+	// fetch (parking must not depend on a live token — approval can arrive hours
+	// later, and the token is refreshed when the call is actually sent).
+	if a.PublicWrite && pol.Parker != nil {
+		id, err := pol.Parker.Park(ctx, conn, actionName, args)
+		if err != nil {
+			return Result{}, &ConnectorError{KindOther, "could not queue for approval: " + err.Error()}
+		}
+		// An empty id means this binding is on 'auto' — not gated. Fall through and
+		// send now, rather than treating "no ticket" as a failure.
+		if id != "" {
+			payload, err := json.Marshal(ParkedResult{
+				Status: "queued_for_approval",
+				ID:     id,
+				Action: actionName,
+				Note: "NOT yet published — this is awaiting the owner's approval and may never " +
+					"be sent. Do NOT record it as posted, and do not retry it. The owner will " +
+					"be notified of the outcome separately.",
+			})
+			if err != nil {
+				return Result{}, &ConnectorError{KindOther, err.Error()}
+			}
+			return Result{Data: payload}, nil
+		}
 	}
 	token, err := store.AccessToken(ctx, conn)
 	if err != nil {
@@ -79,7 +153,19 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 	if err != nil {
 		return Result{}, &ConnectorError{KindOther, err.Error()}
 	}
-	prov, _ := reg.OAuthProvider(conn.Provider) // static headers + auth config; resolves auth_parent for aliased providers
+	prov, _ := reg.OAuthProvider(conn.Provider) // auth config; resolves auth_parent for aliased providers
+	// Static headers merge parent-then-child: an aliased child inherits the parent's
+	// (Notion-Version, GitHub Accept) AND may add its own. Reading only the parent's
+	// would silently drop google_ads's developer-token header, since its parent
+	// `google` declares none — and the call would 401 with nothing naming the cause.
+	child, _ := reg.ProviderByName(conn.Provider)
+	staticHeaders := map[string]string{}
+	for k, v := range prov.StaticHeaders {
+		staticHeaders[k] = v
+	}
+	for k, v := range child.StaticHeaders {
+		staticHeaders[k] = v
+	}
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -95,8 +181,19 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 		if contentType != "" {
 			req.Header.Set("Content-Type", contentType)
 		}
-		for hk, hv := range prov.StaticHeaders {
-			req.Header.Set(hk, hv)
+		for hk, hv := range staticHeaders {
+			// Header values are TEMPLATED, not literal: Google Ads carries its
+			// developer token and manager id as headers sourced from the connection.
+			// Copying verbatim would send the literal "{{conn.developer_token}}" and
+			// 401 on every call.
+			v := subst(hv, nil, conn.Extra)
+			// Drop empties, mirroring the query renderer: an optional header sent as
+			// "" is not the same as absent — Google Ads rejects a blank
+			// login-customer-id, which most accounts do not have.
+			if v == "" {
+				continue
+			}
+			req.Header.Set(hk, v)
 		}
 		resp, e := client.Do(req)
 		if e != nil {

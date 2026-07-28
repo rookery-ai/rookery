@@ -1,0 +1,22 @@
+name: bluesky
+label: Bluesky
+category: Publishing & Media
+auth:
+  kind: session_exchange
+  # The stored credential is an APP PASSWORD, which does not expire. It is swapped for
+  # a short-lived accessJwt on use, so nothing long-lived is ever sent on a request.
+  session_url: https://bsky.social/xrpc/com.atproto.server.createSession
+  session_identity_key: handle
+  key_label: "App password"
+  key_hint: "xxxx-xxxx-xxxx-xxxx — create one in Settings → Privacy and security → App passwords. NOT your main password."
+  setup_url: https://bsky.app/settings/app-passwords
+connect_inputs:
+  - key: handle
+    label: "Handle"
+    hint: "e.g. yourname.bsky.social (no leading @)"
+    required: true
+setup_steps:
+  - "Bluesky needs no OAuth app and no approval — it is the cheapest connector here to set up."
+  - "In the Bluesky app go to Settings → Privacy and security → App passwords → Add App Password."
+  - "Copy the generated app password (format xxxx-xxxx-xxxx-xxxx) and paste it below with your handle."
+  - "Use an APP PASSWORD, never your account password: an app password can be revoked on its own."

@@ -1,0 +1,65 @@
+provider: reddit
+actions:
+  - name: reddit_me
+    description: "Your own Reddit account: username, karma, account age. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://oauth.reddit.com/api/v1/me"
+    response_extract: "$"
+  - name: reddit_list_subreddit
+    description: "Recent posts in a subreddit, newest first. Read-only. Use for 'what's new in r/golang'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        subreddit: {type: string, description: "subreddit name WITHOUT the r/ prefix, e.g. golang"}
+        limit:     {type: integer, description: "max rows — REQUIRED. Use 10."}
+      required: [subreddit, limit]
+    request:
+      method: GET
+      url: "https://oauth.reddit.com/r/{{subreddit}}/new"
+      query:
+        limit: "{{limit}}"
+    response_extract: "$.data.children"
+  - name: reddit_search
+    description: "Search Reddit posts across subreddits. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "search terms"}
+        limit: {type: integer, description: "max rows — REQUIRED. Use 10."}
+      required: [query, limit]
+    request:
+      method: GET
+      url: "https://oauth.reddit.com/search"
+      query:
+        q:     "{{query}}"
+        limit: "{{limit}}"
+        sort:  "new"
+    response_extract: "$.data.children"
+  - name: reddit_submit_post
+    description: "Submit a text post to a subreddit. This is a REAL, PUBLIC, irreversible post subject to that subreddit's rules and moderation. Write the final wording."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        subreddit: {type: string, description: "subreddit name WITHOUT the r/ prefix"}
+        title:     {type: string, description: "post title, as it will appear"}
+        text:      {type: string, description: "post body (markdown)"}
+      required: [subreddit, title]
+    request:
+      method: POST
+      url: "https://oauth.reddit.com/api/submit"
+      form:
+        sr:    "{{subreddit}}"
+        title: "{{title}}"
+        text:  "{{text}}"
+        kind:  "self"
+        api_type: "json"
+    response_extract: "$"

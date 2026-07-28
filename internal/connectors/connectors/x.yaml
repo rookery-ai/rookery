@@ -1,0 +1,45 @@
+provider: x
+actions:
+  - name: x_me
+    description: "Your own X account: username, name, id. Read-only. Call this FIRST — other actions need the user id it returns."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.twitter.com/2/users/me"
+      query:
+        user.fields: "id,name,username,public_metrics"
+    response_extract: "$.data"
+  - name: x_list_posts
+    description: "Recent posts from an account, newest first. Read-only. Costs roughly $0.005 per post read."
+    mutating: false
+    params:
+      type: object
+      properties:
+        user_id: {type: string, description: "user id from x_me"}
+        max:     {type: integer, description: "max results, 5-100 — REQUIRED. Use 10; every post read is billed."}
+      required: [user_id, max]
+    request:
+      method: GET
+      url: "https://api.twitter.com/2/users/{{user_id}}/tweets"
+      query:
+        max_results:  "{{max}}"
+        tweet.fields: "created_at,public_metrics"
+    response_extract: "$.data"
+  - name: x_create_post
+    description: "Publish a post to X. This is a REAL, PUBLIC, irreversible post and it COSTS money (~$0.015, or ~$0.20 if it contains a link). Write the final wording."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        text: {type: string, description: "the post body, max 280 characters for a standard account"}
+      required: [text]
+    request:
+      method: POST
+      url: "https://api.twitter.com/2/tweets"
+      body:
+        text: "{{text}}"
+    response_extract: "$.data"

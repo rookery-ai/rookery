@@ -1,0 +1,14 @@
+name: linkedin_ads
+label: LinkedIn Ads
+category: Advertising
+# Reuses the LinkedIn OAuth app, but needs its own (partner-gated) scopes.
+auth_parent: linkedin
+default_scopes:
+  - r_ads
+  - r_ads_reporting
+setup_url: https://www.linkedin.com/developers/apps
+setup_steps:
+  - "IMPORTANT: this needs the LinkedIn Marketing Developer Platform, which is a PARTNER APPLICATION — reported at 1-4 weeks and sometimes months. Until it is granted these calls return 403."
+  - "LinkedIn Ads reuses your LinkedIn OAuth app. Set up LinkedIn first on its card above."
+  - "On that app's Products tab, request 'Advertising API' and complete the access form."
+  - "Once approved, click Connect here to authorize the advertising scopes on the same account."

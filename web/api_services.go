@@ -64,6 +64,10 @@ type apiSaveProviderCredsRequest struct {
 
 type apiConnectServiceRequest struct {
 	Label string `json:"label"`
+	// Inputs carries the provider's connect_inputs on the OAuth path. They ride the
+	// signed state through the provider and are stored in extra at callback — Google
+	// Ads needs a developer token that cannot be discovered from any API.
+	Inputs map[string]string `json:"inputs"`
 }
 
 type apiConnectServiceResponse struct {
@@ -115,9 +119,14 @@ func (s *Server) apiListServices(c echo.Context) error {
 			if setupSteps == nil {
 				setupSteps = []string{}
 			}
-			if p.IsAPIKey() {
+			// session_exchange (Bluesky) is an OAuth-less paste-a-credential flow like
+			// api_key, so it renders the same connect form. They differ only in what
+			// happens to the stored value at request time, which the UI does not care about.
+			if p.PastesCredential() {
 				kind = "api_key"
-				setupURL = p.Auth.SetupURL
+				if p.Auth.SetupURL != "" {
+					setupURL = p.Auth.SetupURL
+				}
 			}
 			for _, ci := range p.ConnectInputs {
 				connectInputs = append(connectInputs, apiServiceConnectInput{
@@ -199,7 +208,17 @@ func (s *Server) apiConnectService(c echo.Context) error {
 		label = "account"
 	}
 
-	redirectURL, err := s.buildConsentURL(c, w, provider, label)
+	// Required connect_inputs are validated here rather than at callback: a user who
+	// completes consent only to be told a field was missing has to redo the whole flow.
+	if prov, ok := s.connectors.ProviderByName(provider); ok {
+		for _, ci := range prov.ConnectInputs {
+			if ci.Required && strings.TrimSpace(req.Inputs[ci.Key]) == "" {
+				return jsonErr(c, http.StatusBadRequest, "missing_field", ci.Label+" is required.")
+			}
+		}
+	}
+
+	redirectURL, err := s.buildConsentURL(c, w, provider, label, req.Inputs)
 	if err != nil {
 		var cerr *consentURLError
 		if errors.As(err, &cerr) {
@@ -224,8 +243,10 @@ func (s *Server) apiConnectAPIKey(c echo.Context) error {
 	w := c.Get("workspace").(*db.Workspace)
 	provider := c.Param("provider")
 
+	// session_exchange providers connect through this same paste-a-credential endpoint;
+	// gating on IsAPIKey alone would make Bluesky unconnectable despite its form rendering.
 	prov, ok := s.connectors.ProviderByName(provider)
-	if !ok || !prov.IsAPIKey() {
+	if !ok || !prov.PastesCredential() {
 		return jsonErr(c, http.StatusNotFound, "not_found", "unknown or non-API-key provider: "+provider)
 	}
 

@@ -77,7 +77,7 @@ func main() {
 }
 
 func run(ctx context.Context, reg *connectors.Registry, store connectors.TokenStore, client *http.Client, ref connectors.ConnRef, action string, args map[string]any) (connectors.Result, bool) {
-	res, err := connectors.Execute(ctx, reg, store, client, ref, action, args, false)
+	res, err := connectors.Execute(ctx, reg, store, client, ref, action, args, connectors.Policy{})
 	if err != nil {
 		fmt.Printf("  [FAIL] %-24s %v\n", action, err)
 		return res, false

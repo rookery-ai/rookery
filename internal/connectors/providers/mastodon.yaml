@@ -1,0 +1,25 @@
+name: mastodon
+label: Mastodon
+category: Publishing & Media
+# Every Mastodon instance is its own OAuth server, so these are TEMPLATES over the
+# instance collected at connect — not constants like every other provider.
+authorize_url: "{{conn.instance}}/oauth/authorize"
+token_url: "{{conn.instance}}/oauth/token"
+userinfo_url: "{{conn.instance}}/api/v1/accounts/verify_credentials"
+identity_path: acct
+token_expiry: never
+connect_inputs:
+  - key: instance
+    label: "Instance URL"
+    hint: "e.g. https://mastodon.social — include https://, no trailing slash"
+    required: true
+default_scopes:
+  - read
+  - write:statuses
+setup_url: https://docs.joinmastodon.org/client/token/
+setup_steps:
+  - "Mastodon is federated: you register an application on YOUR OWN instance, not with a central provider."
+  - "On your instance go to Preferences → Development → New application."
+  - "Set the redirect URI to the URI shown above exactly, and tick the read and write:statuses scopes."
+  - "Copy the Client key and Client secret into the fields below, then enter your instance URL when connecting."
+  - "Mastodon access tokens do not expire, so there is nothing to refresh."

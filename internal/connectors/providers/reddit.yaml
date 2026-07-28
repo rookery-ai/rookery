@@ -1,0 +1,25 @@
+name: reddit
+label: Reddit
+category: Publishing & Media
+authorize_url: https://www.reddit.com/api/v1/authorize
+token_url: https://www.reddit.com/api/v1/access_token
+userinfo_url: https://oauth.reddit.com/api/v1/me
+identity_path: name
+# Reddit requires HTTP Basic client auth on the token endpoint, and a descriptive
+# User-Agent on every API call — a generic one is rate-limited hard or blocked outright.
+token_auth: basic
+static_headers:
+  User-Agent: "simple-agents/1.0 (self-hosted agent platform)"
+authorize_extra:
+  duration: permanent
+default_scopes:
+  - identity
+  - read
+  - submit
+setup_url: https://www.reddit.com/prefs/apps
+setup_steps:
+  - "IMPORTANT: Reddit closed self-service API registration. A new OAuth client needs manual approval, reported at 2-4 weeks, and the free tier is NON-COMMERCIAL only. Apply before expecting this to work."
+  - "Go to Reddit → Preferences → Apps → 'create another app', and choose type 'web app'."
+  - "Set the redirect uri to the URI shown above exactly."
+  - "Copy the client id (under the app name) and the secret, and paste them below."
+  - "Request access via the Reddit Data API contact form, selecting the 'developer' category and describing your use case."

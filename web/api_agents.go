@@ -31,6 +31,7 @@ func (s *Server) registerAgentsAPI(g *echo.Group) {
 	g.PUT("/agents/:id/agent-md", s.apiSaveAgentMD)
 	g.PUT("/agents/:id/skills", s.apiSaveAgentSkills)
 	g.PUT("/agents/:id/connections", s.apiSaveAgentConnections)
+	s.registerApprovalRoutes(g)
 
 	// Design/SSE family: unchanged legacy handlers, unchanged legacy error shapes.
 	g.POST("/agents/design", s.handleDesignChat)
@@ -176,6 +177,7 @@ func (s *Server) toAPIAgentDetail(d *agentDetailData) map[string]any {
 		"all_skills":              allSkills,
 		"workspace_connections":   wsConns,
 		"attached_connection_ids": attachedConnIDs,
+		"connection_approval":     s.connectionApprovalModes(d.Agent.ID, attachedConnIDs),
 		"missing_secrets":         orEmpty(d.MissingSecrets),
 		"running":                 d.Running,
 		"live_run":                d.LiveRun,

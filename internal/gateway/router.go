@@ -59,6 +59,10 @@ type Router struct {
 	// regex parser in reminder.ParseNaturalTime fails to understand the input.
 	timeParserFallback reminder.TimeParserFunc
 
+	// approval handles /pending, /approve, /reject. Nil when the install has no
+	// approval service wired, in which case those commands say so.
+	approval ApprovalService
+
 	mu                 sync.Mutex
 	challenges         map[string]*secretChallenge // workspaceID → pending master-password challenge
 	pendingCancel      map[string]cancelKind       // workspaceID → which flow is waiting for a save/discard reply
@@ -176,6 +180,12 @@ func (r *Router) Handle(ctx context.Context, msg Message, send func(string), del
 		return r.handleChat(ctx, msg, arg, send)
 	case "memory":
 		return r.handleMemory(ctx, msg, arg, send)
+	case "pending":
+		return r.handlePending(ctx, msg, send)
+	case "approve":
+		return r.handleApprove(ctx, msg, arg, send)
+	case "reject":
+		return r.handleReject(ctx, msg, arg, send)
 	case "":
 		return r.handleText(ctx, msg, send, deleteIncoming, sendAutoDelete, sendProgress)
 	default:
@@ -1271,6 +1281,9 @@ func helpText(platform string) string {
 /memory list — list saved memory entries
 /memory add <text> — save a new memory entry
 /memory delete <n> — delete entry by number
+/pending — list posts waiting for your approval
+/approve <id> — publish a waiting post
+/reject <id> — decline a waiting post
 /help — this message
 ` + fileLine + `
 _Add secrets at the web dashboard — no master password needed to add_`

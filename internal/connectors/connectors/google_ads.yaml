@@ -1,0 +1,28 @@
+provider: google_ads
+actions:
+  - name: google_ads_list_accounts
+    description: "List the Google Ads customer accounts your login can reach. Read-only. Use it to confirm the customer id you configured is correct."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://googleads.googleapis.com/v21/customers:listAccessibleCustomers"
+    response_extract: "$"
+  - name: google_ads_search
+    description: "Run a GAQL query against your Google Ads account — the single entry point for all reporting (spend, clicks, conversions, campaign lists). Read-only. Example: SELECT campaign.name, metrics.cost_micros, metrics.clicks FROM campaign WHERE segments.date DURING LAST_7_DAYS"
+    mutating: false
+    params:
+      type: object
+      properties:
+        query:     {type: string, description: "a GAQL query. Costs are in micros — divide cost_micros by 1000000 for the currency amount."}
+        page_size: {type: integer, description: "max rows — REQUIRED. Use 25; report responses are large."}
+      required: [query, page_size]
+    request:
+      method: POST
+      url: "https://googleads.googleapis.com/v21/customers/{{conn.customer_id}}/googleAds:search"
+      body:
+        query:    "{{query}}"
+        pageSize: "{{page_size}}"
+    response_extract: "$.results"

@@ -137,7 +137,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/agentrunner` | Load agent → decrypt secrets into env via `WithExtraEnv` → coder subprocess → capture `[CHAT]` lines → send via GatewayManager; timestamped run logs; `RunInput.OnProgress` per-turn hook for live SSE streaming. Skills pool = core skills (embedded) + user skills; the agent's DECLARED skills come from the `agent_skills` DB table (`db.ListAgentSkillNames`, the source of truth), never from AGENT.md; `resolveSkillBins` resolves declared tools' paths for the runtime `<skill_environment>` block; `loadDeclaredSkillContent` reads core skills from the embed. **Reliable delivery**: `parseCoderOutput` (blank lines don't end `[CHAT]`; empty `[CHAT]` dropped; a stray `[/CHAT]` close tag weak models sometimes emit is stripped and never delivered; `[SILENT]` detected; `[STATE]` merged and saved via `agentdesigner.WriteState` into `state.md`'s json fence) + `extractProseMessage` fallback when no `[CHAT]` emitted and not silent → visible warning when nothing deliverable. Covered by `runner_test.go`. |
 | `internal/sandbox` | Self-contained Landlock filesystem confinement for coder subprocesses (Linux). `Spec`, `Supported()`, `Wrap()` (re-exec via the hidden `__sandbox-exec` helper), `Exec()` (applies Landlock + rlimits, then `execve`). No external dependency. |
 | `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users |
-| `internal/reminder` | Creates/lists/fires reminders; background polling goroutine. Reminders live only in the DB and the reminders UI tab — they are NOT reflected to the vault. **The inbox is an unconditional delivery channel**: `tick()` always calls `recordInbox` + `MarkReminderSent`, and the chat send is best-effort on top (attempted only when a platform identity exists, logged-not-fatal on failure). Both early exits it used to have — skip on no platform identity, `continue` on send error — bypassed *both* of those calls, so a reminder was invisible without a chat app AND stayed due, re-firing every 60s tick forever. The same assumption is gone from `scheduler.go`: a workspace with no chat app connected previously had **no scheduled agents run at all**; runs now fire and reach the inbox via the runner's `recordInbox`. |
+| `internal/reminder` | Creates/lists/fires reminders; background polling goroutine. Reminders live only in the DB and the reminders UI tab — they are NOT reflected to the vault. |
 | `internal/chat` | `Chat` create/list/stop/resume/delete; 30-min idle auto-stop; `BuildUserContext` (shared **identity-only** context builder for one-off chat — profile/memory/agents/MCP; the broader KB is retrieved on demand via tools, not injected here) |
 | `internal/prompts` | Central home for all LLM prompt construction: `BuildDesignSystemPrompt` (+ `<knowledge_base>` block + `KBManifest`), `BuildImplementationPrompt`, `BuildEditImplementationPrompt` (diagnose-before-fix), `BuildCoderPrompt` (+ `<skill_instructions>` + `<skill_environment>` blocks), `BuildChatSystemPrompt` (chat read+write KB instruction), `BuildChildAgentFollowUpPrompt`, `BuildSkillMetaPrompt`, `BuildReminderParsePrompt`, skill-creator prompts (`BuildSkillDesignSystemPrompt`, `BuildSkillImplementationPrompt`, `BuildSkillVettingPrompt`, `SkillEnvBlock`). `SkillRef`/`SkillBin` types. No inline prompt text exists outside this package. Shared single-source blocks: `agentPhilosophyBlock` (three-tier), `platformContextBlock`, `coderCapabilitiesBlock` (backend-aware), `agentArchitectureGateBlock`, `testingRulesBlock` (one bounded smoke test + dry run; real secrets at build time, no outbound sends), `shellSafetyBlock`, `scriptRobustnessBlock`, `connectedToolsBlock` (backend-aware native-tools vs `connector exec` guidance). `ChatAppsForPlatforms` + `MapCoderBackend` bridge callers to prompt params. |
 | `internal/memory` | Per-user structured context store. Memory lives as named `.md` files in `memory/` (`USER.md`, `SOUL.md`, `GENERAL.md`, etc.) — editable via the KB browser. `ContextString()` reads all files, skips placeholder-only ones, and returns sectioned markdown for LLM injection. `Append/List/Delete` target GENERAL.md bullet lines (used by Telegram `/memory` command). `MigrateToStructuredFiles()` consolidates legacy UUID-keyed entries at startup. |
@@ -212,10 +212,6 @@ Agent creation uses a single `agentdesigner.Flow` FSM shared between Telegram an
 
 **Change requests no longer discard the build.** When the user replies in `StateVerifying` with something that isn't approval, the session returns to `StateDesigning` but **keeps** `PendingAgentMD`/`PendingTools` in memory — a misfire (e.g. `"yes"`, `"save"`, `"ok"`) no longer silently drops the generated agent. The next approve re-generates with the change context and overwrites.
 
-**After a FAILED build, a change request rebuilds — it does not open a chat turn.** In `StateDesigning` with `GenerationFailed` set, `stepDesigning` routes anything that isn't a question to `runGeneration` (after `appendUserHistory`, so the instruction steers the rebuild). Only `isDesignQuestion` escapes to the design chat, and it fails **toward** rebuilding: the message must end in `?`, open with an interrogative lead, AND carry no imperative cue (`don't`, `use`, `instead`, `change`, `add`, …) — so `"can you use web_fetch instead?"` rebuilds while `"why did that fail?"` gets an answer. This deliberately reverses `isRetryApproval`'s `"change"` exclusion **for the post-failure state only**: that exclusion is right during normal design (a change request should refine the plan) and wrong after a failure, where the build is what's being iterated on — routing the change to a Q&A-shaped design prompt made the designer re-ask for details the conversation had already settled, forcing a manual "Build it" click. `GenerationFailed` (which drives the SPA's failure banner) is now cleared on the chat path and on finalize, not only inside `runGeneration` — previously any chat turn left the banner stuck on screen forever. `skilldesigner.Flow` mirrors the banner-clearing half.
-
-**Weak-backend unverified script → the retry is FORCED to TIER 1.** When `decideBuildOutcome`'s weak-backend gate holds back a build (`BackendToolCalling` + an authored script + no confirmed run), `reconcileBlockedOutcome` now sets `forceTier1` on the `reconciledOutcome` in **both** weak-backend branches (not-presentable, and presentable-with-`[BLOCKED]`). It lands on `DesignSession.ForceTier1`, is consumed once by `runGeneration` into `prompts.ImplementationParams.ForceTier1`, and renders `prompts.forceTier1Block()` — a `<mandatory_override>` appended LAST in `capabilitySpec()` (later text outweighs earlier text for a weak model) that forbids code files outright and names the direct tools (`web_fetch`/`web_search`/`search_files`/`glob`/`read_file`/`list_dir`) to use instead. The accompanying `recordFailNote` also lost its second option: it previously offered "actually run the script and show its real output" — the approach that had just failed — and a weak model re-picked it every time, regenerating the same unverifiable script until the user manually typed "don't build a python script". The flag is in-memory (deliberately not persisted to the draft): it only needs to survive one build → its immediate retry, and a restart in that window degrades to the History note's soft steering rather than silently forbidding scripts on an unrelated later build.
-
 **On approval:** `runGeneration()` calls the coder with the same tool set as an agent run (`WithDir(agentDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").WithProgress(notify)`) — so the coder runs REAL end-to-end tests against live services during the build, not mock-only. `WithProgress(notify)` streams the API engine's per-tool-call milestones (`🔧 run_script(...)` / `🔧 write_file(...)` / `🔧 web_search(...)`) to the build SSE + Telegram — the same live visibility a run has (agentrunner wires `WithProgress(OnProgress)`), so a weak-model build no longer looks frozen at the static `🤖 Coder is building your agent…` string. No-op for the CLI engine (it never calls the progress sink). Secrets are injected via `WithSecretsLoader`/`WithExtraEnv` so the real API calls the agent will make at run time are actually exercised here. The one hard exception: never send real OUTBOUND messages on the user's behalf at build time (enforced by the testing-rules prompt, not by withholding credentials). Coder writes `AGENT.md` + `tools/*.py` to disk, runs scripts via Bash, fixes errors, outputs `[TEST_OUTPUT]...[/TEST_OUTPUT]`. Flow reads AGENT.md, runs guardrails, stores in `PendingAgentMD`/`PendingTools`, moves to `StateVerifying`. A missing `[TEST_OUTPUT]` no longer automatically keeps the user in `StateDesigning`: on the API backend, if the engine CONFIRMED the authored script ran (`Result.ScriptVerified`) the build advances to `StateVerifying` with the captured real output shown (see "Script-verification bridge"); it only stays in `StateDesigning` when there's no confirmed run and no clean marker.
 
 **Create-mode draft working dir (`draft_<slug>`).** A create build runs in a readable `agentdesigner.DraftAgentDir(vaultsBase, workspaceID, agentName)` = `agents/draft_<slugifyAgentName(name)>` — named from the agent's NAME, not the opaque UUID, so a work-in-progress agent is recognizable in the KB browser. The dir is KEPT across blocked/designing/verifying builds (a failed build never removes it) so a resumed draft's next generation iterates in the same place and `recoverBuiltAgentFromDisk` can recover an interrupted build. `finalizeAgent` (on save) promotes it to the canonical `AgentDir(<uuid>)` and removes the draft dir; the nightly GC sweeps `DraftAgentDir` on draft expiry (create only — edit drafts point `AgentID` at the LIVE agent and are never swept). `DesignSession.HasSaveableBuild` drives whether "keep it as-is" (`isKeepAsIs`) is offered.
@@ -251,7 +247,7 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
 
 - **Data files, not code.** Adding a service = a `providers/<p>.yaml` (auth config) + a
   `connectors/<p>.yaml` (curated action manifest), both `go:embed`ed. `LoadBundled()` parses them.
-  **32 providers (~229 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
+  **45 providers (~272 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
   Search Console**), **YouTube**, GitHub, Slack, OpenAI, Notion, Outlook, Teams, Jira, HubSpot,
   Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce,
   Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello.
@@ -294,7 +290,19 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
   the provider's `auth` block) + provider `static_headers` (resolved via `OAuthProvider` so aliased
   children inherit the parent's) → call (1 transient retry) → normalize into a `ConnectorError`
   taxonomy (auth/ratelimit/server/needs-reauth/bad-args/build-blocked).
-- **OAuth** (`oauth.go`): `ConsentURL`/`ExchangeCode`/`Refresh`/`FetchIdentity`. Per-provider config
+- **OAuth** (`oauth.go`): `ConsentURL`/`ExchangeCode`/`Refresh`/`ExchangeLongLived`/`FetchIdentity`.
+  `token_expiry` has a third mode beyond `expiring`/`never`: **`exchange`** (Meta) means there is
+  NO refresh token — a short-lived token is swapped for a ~60-day one via the `fb_exchange_token`
+  grant and renewed by exchanging the CURRENT access token again. `Refresh` routes there so
+  `DBTokenStore`/`RunRefreshLoop` need no Meta branch, and `ExchangeLongLived` returns the new
+  access token as the RefreshToken too — the store hands RefreshToken back on the next renewal,
+  and for this provider that IS what you exchange, so omitting it would break the *second*
+  renewal ~60 days in. `post_connect` may now also **replace the connection's access token**
+  (`PostConnectResult.AccessToken`): the `meta_page_token` hook swaps the user token for the first
+  managed Page's own token, because publishing to a Page requires the PAGE token. That keeps the
+  credential in `encrypted_access_token` instead of plaintext `extra` — which is why the design's
+  "encrypt `extra`" change was dropped as unnecessary. A connection therefore means "this Page";
+  several Pages means connecting several times. Per-provider config
   covers the real quirks: `token_expiry: never` (GitHub/Notion — empty `expires_at`, never refreshed),
   `token_auth: basic` + `token_content_type: json` (Notion), `static_headers` (Notion-Version, GitHub
   Accept), `authorize_extra` (Atlassian audience/prompt, Google access_type/prompt, Notion owner),
@@ -318,6 +326,45 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
     (`{"data": …}`); over it, `data` becomes a truncated STRING plus `truncated: true` and a note
     telling the model to narrow its query, because a JSON value cut in place still parses and
     reads as complete data.
+- **`connect_inputs` work on the OAuth path too**, not just the paste-key form. A value that
+  cannot be discovered from any API (a Google Ads developer token) is collected BEFORE consent
+  and rides the **signed OAuth state** — already HMAC-signed and TTL'd, so no server-side pending
+  row exists to garbage-collect when a user abandons the consent screen. Base64 keeps the JSON
+  clear of the `~` field separator; the callback accepts both the 4- and 5-field state shapes,
+  because a state issued before the change can still be in flight across a deploy. Required
+  inputs are validated at CONNECT, not at callback — otherwise a user completes consent and is
+  then told a field was missing. Two further one-field provider generalisations live alongside:
+  `token_exchange_grant` (Threads uses `th_exchange_token`, not Meta's `fb_exchange_token`) and
+  `client_param` (TikTok names the client id `client_key` in both the consent URL and the token
+  request). Both default to today's behaviour.
+- **Approval gate for public writes** (`internal/approval`, opt-in, default OFF). Three layers:
+  an action-level `public_write: true` in the connector YAML marks irreversible PUBLIC
+  publishing (`mutating` is too blunt — pausing an ad campaign is mutating but private and
+  reversible); a binding-level `agent_connections.approval_mode` (`auto` default | `approve`)
+  chooses per agent+account, so one agent can post autonomously to a personal account while
+  requiring approval on a company one; and `Execute`'s `Policy{BuildPhase, Parker}` (which
+  replaced the bare `buildPhase bool`) enforces it. Semantics are **park, plain**: a gated call
+  is written to `pending_actions` and the coder gets a queue ticket as a SUCCESS (never an
+  `error:` string — the tool loop would retry it), the run finishes, and the owner resolves it
+  via `/pending` `/approve <id>` `/reject <id>` in chat or the web inbox. Park sits AFTER arg
+  validation (never ask a human to approve a broken call) and BEFORE the token fetch (approval
+  arrives hours later, so ARGS are stored and re-rendered against a fresh token at send time).
+  `Parker.Park` returning `("", nil)` means "not gated — send now", which is how a mixed set of
+  bindings is honoured. `ClaimPendingAction` is a conditional UPDATE making `status` the lock,
+  so chat and the web inbox racing cannot double-publish. `ParkerFor` returns nil when an agent
+  has no gated binding (ungated installs pay nothing) and fails OPEN on a DB error — failing
+  closed would silently halt an autonomous agent the user never gated. Both coder kinds get the
+  same parker (`Coder.WithParker`, `Bridge.RegisterGated`) so changing coder kind cannot disable
+  the setting. Accepted costs of park, recorded: no chaining, no error reaction, and state drift
+  if the owner rejects — mitigated only by the parked result's wording. Stale rows expire after
+  7 days in the nightly GC. **Control surface:**
+  `PUT /api/v1/agents/:id/connections/:connID/approval` toggles a binding;
+  `GET /api/v1/approvals` + `POST /api/v1/approvals/:id/{approve,reject}` resolve from the web,
+  so a workspace with no chat platform connected is not stuck until the expiry.
+  **One-off chat is deliberately NOT gated** — `ParkerFor` returns nil when `agentID == ""` and
+  the chat bridge registration passes no parker. Chat is a human typing a request in real time,
+  so gating would hold the user against themselves; the residual gap is that they have not
+  reviewed the wording the model produced. Revisit if a workspace-level default is added.
 - **Agent binding** (`agent_connections` table, keyed by connection id) is the source of truth for
   run-time tool exposure — NOT the AGENT.md `# Connections:` header. THREE ways to bind: the designer
   parses a `# Connections:` header (`agentdesigner.parseConnectionsLine`, tolerant of inline OR

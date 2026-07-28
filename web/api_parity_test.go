@@ -59,6 +59,11 @@ func TestAPIParityInventory(t *testing.T) {
 		"PUT /api/v1/settings/coder", "POST /api/v1/settings/coder/test",
 		"PUT /api/v1/settings/master-password",
 		"GET /api/v1/setup", "POST /api/v1/setup",
+		// Approval gate for public_write connector actions.
+		"PUT /api/v1/agents/:id/connections/:connID/approval",
+		"GET /api/v1/approvals",
+		"POST /api/v1/approvals/:id/approve",
+		"POST /api/v1/approvals/:id/reject",
 		"GET /api/v1/search",
 		"GET /api/v1/dashboard",
 	}

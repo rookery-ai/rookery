@@ -30,6 +30,13 @@ type AuthConfig struct {
 	KeyHint     string `yaml:"key_hint"`     // UI placeholder: "sk-..."
 	SetupURL    string `yaml:"setup_url"`    // UI: where to get the key
 
+	// SessionURL, for kind=="session_exchange", is the endpoint that swaps stored
+	// credentials for a short-lived bearer token (Bluesky's createSession).
+	SessionURL string `yaml:"session_url"`
+	// SessionIdentityKey names the connect_input holding the account identifier sent
+	// alongside the credential (Bluesky's handle).
+	SessionIdentityKey string `yaml:"session_identity_key"`
+
 	// BasicUserTemplate, for placement=="basic", is a {{conn.<key>}} template resolved
 	// against the connection's Extra to produce the HTTP Basic username (the credential
 	// is always the password). Empty means the legacy behavior: credential as username,
@@ -46,10 +53,21 @@ type Provider struct {
 	IdentityPath  string   `yaml:"identity_path"`
 	DefaultScopes []string `yaml:"default_scopes"`
 
-	// TokenExpiry is "expiring" (default) or "never". "never" (GitHub, Notion) means the
-	// access token does not expire and must never be refreshed — connect/refresh store an
-	// empty expires_at and AccessToken treats empty as valid.
+	// TokenExpiry is "expiring" (default), "never", or "exchange".
+	//   never    — GitHub, Notion: the access token does not expire and must never be
+	//              refreshed; connect/refresh store an empty expires_at and AccessToken
+	//              treats empty as valid.
+	//   exchange — Meta: there is NO refresh token. A short-lived token is swapped for a
+	//              ~60-day one via the fb_exchange_token grant, and renewed by exchanging
+	//              the CURRENT access token again before it expires. OAuthClient.Refresh
+	//              routes here so callers need no provider-specific branch.
 	TokenExpiry string `yaml:"token_expiry"`
+	// TokenExchangeGrant overrides the grant_type used when TokenExpiry=="exchange".
+	// Meta uses fb_exchange_token (the default); Threads uses th_exchange_token.
+	TokenExchangeGrant string `yaml:"token_exchange_grant"`
+	// ClientParam is the parameter name carrying the OAuth client id in BOTH the consent
+	// URL and the token request. Defaults to "client_id"; TikTok calls it "client_key".
+	ClientParam string `yaml:"client_param"`
 	// TokenExtra names fields to capture from the token endpoint's JSON response into
 	// TokenSet.Extra / service_connections.extra (e.g. Salesforce's instance_url).
 	TokenExtra []string `yaml:"token_extra"`
@@ -96,6 +114,25 @@ type Provider struct {
 	KeyExtra map[string]string `yaml:"key_extra"`
 }
 
+// WithConnVars returns a copy of the provider with its OAuth endpoint URLs resolved
+// against per-connection values.
+//
+// Mastodon is why this exists: every instance is its own OAuth server, so
+// authorize_url/token_url/userinfo_url are templates over {{conn.instance}} rather than
+// constants. The values come from connect_inputs, which are collected BEFORE consent
+// and ride the signed state — so both the consent URL and the callback's token exchange
+// can resolve them. Providers with literal URLs are unaffected: subst leaves a string
+// with no placeholders untouched.
+func (p Provider) WithConnVars(vars map[string]string) Provider {
+	if len(vars) == 0 {
+		return p
+	}
+	p.AuthorizeURL = subst(p.AuthorizeURL, nil, vars)
+	p.TokenURL = subst(p.TokenURL, nil, vars)
+	p.UserinfoURL = subst(p.UserinfoURL, nil, vars)
+	return p
+}
+
 // ConnectInput is a per-connection value collected on the api-key connect form and stored in
 // service_connections.extra (exposed to request templates + auth as {{conn.<key>}}).
 type ConnectInput struct {
@@ -108,8 +145,43 @@ type ConnectInput struct {
 // IsAPIKey reports whether this provider authenticates with a static API key.
 func (p Provider) IsAPIKey() bool { return p.Auth.Kind == "api_key" }
 
+// UsesSessionExchange reports whether the stored credential is swapped for a
+// short-lived bearer token on use (Bluesky: handle + app password → accessJwt).
+//
+// It is a third auth model: the credential never expires like an API key, but the
+// value actually sent on a request does — so it is neither IsAPIKey (send the stored
+// value verbatim) nor OAuth (no authorization-code flow, no refresh token).
+func (p Provider) UsesSessionExchange() bool { return p.Auth.Kind == "session_exchange" }
+
+// PastesCredential reports whether the connect UI should show the paste-a-credential
+// form rather than an OAuth app setup. Both api_key and session_exchange do.
+func (p Provider) PastesCredential() bool { return p.IsAPIKey() || p.UsesSessionExchange() }
+
 // NonExpiring reports whether this provider's access tokens never expire.
 func (p Provider) NonExpiring() bool { return p.TokenExpiry == "never" }
+
+// UsesTokenExchange reports whether renewal goes through Meta's fb_exchange_token grant
+// rather than a standard refresh_token grant. Such providers issue no refresh token at
+// all; the current access token is what gets exchanged.
+func (p Provider) UsesTokenExchange() bool { return p.TokenExpiry == "exchange" }
+
+// ExchangeGrant is the grant_type for the token-exchange renewal path.
+func (p Provider) ExchangeGrant() string {
+	if p.TokenExchangeGrant != "" {
+		return p.TokenExchangeGrant
+	}
+	return "fb_exchange_token"
+}
+
+// ClientIDParam is the parameter name carrying the client id. Providers overwhelmingly
+// use "client_id"; TikTok is the exception, and getting it wrong yields an opaque
+// "invalid request" rather than anything naming the parameter.
+func (p Provider) ClientIDParam() string {
+	if p.ClientParam != "" {
+		return p.ClientParam
+	}
+	return "client_id"
+}
 
 // RequestTemplate describes how to turn typed args into a real provider HTTP request.
 type RequestTemplate struct {
@@ -132,9 +204,19 @@ type RequestTemplate struct {
 
 // Action is one curated, typed operation on a provider.
 type Action struct {
-	Name            string          `yaml:"name"`
-	Description     string          `yaml:"description"`
-	Mutating        bool            `yaml:"mutating"`
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	Mutating    bool   `yaml:"mutating"`
+	// PublicWrite marks an action that publishes irreversibly to a public audience —
+	// a post, a comment, an upload. `Mutating` is too blunt to gate on: pausing an ad
+	// campaign is mutating but private and reversible, while a LinkedIn post is
+	// neither. Only PublicWrite actions are ever eligible for the approval gate, so
+	// enabling the gate never makes an agent wait on a routine write.
+	//
+	// A PublicWrite action is always Mutating too; RunGuardrails-style consistency is
+	// enforced by TestPublicWriteImpliesMutating rather than by the loader, so a data
+	// file with the pair wrong fails the build rather than silently skipping a guard.
+	PublicWrite     bool            `yaml:"public_write"`
 	ParamsRaw       map[string]any  `yaml:"params"`
 	Request         RequestTemplate `yaml:"request"`
 	ResponseExtract string          `yaml:"response_extract"`

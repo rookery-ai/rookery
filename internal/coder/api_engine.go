@@ -411,6 +411,7 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 		connReg:    c.connReg,
 		connStore:  c.connStore,
 		boundConns: c.boundConns,
+		connParker: c.connParker,
 
 		usedConnIDs: map[string]bool{},
 	}

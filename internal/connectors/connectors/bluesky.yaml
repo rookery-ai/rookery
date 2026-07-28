@@ -1,0 +1,68 @@
+provider: bluesky
+actions:
+  - name: bluesky_me
+    description: "Your own Bluesky profile: handle, display name, follower and post counts. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://bsky.social/xrpc/app.bsky.actor.getProfile"
+      query:
+        actor: "{{conn.handle}}"
+    response_extract: "$"
+  - name: bluesky_list_posts
+    description: "Recent posts from an account, newest first. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        actor: {type: string, description: "handle or DID, e.g. someone.bsky.social"}
+        limit: {type: integer, description: "max rows — REQUIRED. Use 10."}
+      required: [actor, limit]
+    request:
+      method: GET
+      url: "https://bsky.social/xrpc/app.bsky.feed.getAuthorFeed"
+      query:
+        actor: "{{actor}}"
+        limit: "{{limit}}"
+    response_extract: "$.feed"
+  - name: bluesky_search_posts
+    description: "Search Bluesky posts by keyword. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "search terms"}
+        limit: {type: integer, description: "max rows — REQUIRED. Use 10."}
+      required: [query, limit]
+    request:
+      method: GET
+      url: "https://bsky.social/xrpc/app.bsky.feed.searchPosts"
+      query:
+        q:     "{{query}}"
+        limit: "{{limit}}"
+    response_extract: "$.posts"
+  - name: bluesky_create_post
+    description: "Publish a post to Bluesky. This is a REAL, PUBLIC, irreversible post. Max 300 characters. created_at must be an ISO-8601 UTC timestamp for the post to appear at the right time."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        text:       {type: string, description: "the post body, max 300 characters"}
+        created_at: {type: string, description: "ISO-8601 UTC timestamp, e.g. 2026-07-27T12:00:00Z"}
+      required: [text, created_at]
+    request:
+      method: POST
+      url: "https://bsky.social/xrpc/com.atproto.repo.createRecord"
+      body:
+        # repo takes an at-identifier — a handle works, so no DID capture at connect.
+        repo: "{{conn.handle}}"
+        collection: "app.bsky.feed.post"
+        record:
+          $type: "app.bsky.feed.post"
+          text: "{{text}}"
+          createdAt: "{{created_at}}"
+    response_extract: "$"

@@ -288,8 +288,12 @@ func TestPublisherProvidersAreReadOnlyAndWellNamed(t *testing.T) {
 			t.Errorf("provider %q has no actions", p)
 		}
 		for _, a := range actions {
-			if a.Mutating {
-				t.Errorf("%s: action %q is mutating — Phase 1 is read-only", p, a.Name)
+			// The reporting/discovery actions must stay read-only. The only writes
+			// these providers may carry are explicitly-marked public_write publishing
+			// actions, which the approval gate can hold — an unmarked mutating action
+			// would slip past the gate entirely.
+			if a.Mutating && !a.PublicWrite {
+				t.Errorf("%s: action %q is mutating but not public_write — it would bypass the approval gate", p, a.Name)
 			}
 			if !valid.MatchString(a.Name) {
 				t.Errorf("%s: action name %q fails the tool-name regex", p, a.Name)
@@ -358,5 +362,131 @@ func TestPublisherProvidersDeclareNoOwnEndpoints(t *testing.T) {
 		if len(p.DefaultScopes) == 0 {
 			t.Errorf("%s declares no scopes, so consent would request none", name)
 		}
+	}
+}
+
+// ── Publishing actions (Phase 2) ─────────────────────────────────────────────
+
+// The whole gate keys off public_write, so the publishing actions must carry it —
+// and must be mutating too, or the build guard would let a generation run post.
+func TestPublishingActionsAreMarkedPublicWrite(t *testing.T) {
+	reg, err := LoadBundled()
+	if err != nil {
+		t.Fatalf("LoadBundled: %v", err)
+	}
+	for _, tc := range []struct{ provider, action string }{
+		{"linkedin", "linkedin_create_post"},
+		{"youtube", "youtube_post_comment"},
+	} {
+		a, ok := reg.Action(tc.provider, tc.action)
+		if !ok {
+			t.Fatalf("action %q not found", tc.action)
+		}
+		if !a.PublicWrite {
+			t.Errorf("%s must be public_write — the approval gate keys off it", tc.action)
+		}
+		if !a.Mutating {
+			t.Errorf("%s must be mutating — otherwise a build could publish", tc.action)
+		}
+		// The description is what the model reads before deciding to call it.
+		if !strings.Contains(strings.ToUpper(a.Description), "REAL") {
+			t.Errorf("%s description should warn it publishes for real: %q", tc.action, a.Description)
+		}
+	}
+}
+
+func TestLinkedInPostBodyShape(t *testing.T) {
+	_, u, body := renderFor(t, "linkedin", "linkedin_create_post", map[string]any{
+		"person_id": "ABC123",
+		"text":      "Shipping today",
+	})
+	if u != "https://api.linkedin.com/rest/posts" {
+		t.Fatalf("unexpected URL: %s", u)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("body is not valid JSON: %v — %s", err, body)
+	}
+	if got["author"] != "urn:li:person:ABC123" {
+		t.Errorf("author URN did not render: %v", got["author"])
+	}
+	if got["commentary"] != "Shipping today" {
+		t.Errorf("commentary = %v", got["commentary"])
+	}
+	if got["lifecycleState"] != "PUBLISHED" {
+		t.Errorf("lifecycleState = %v, want PUBLISHED", got["lifecycleState"])
+	}
+	dist, ok := got["distribution"].(map[string]any)
+	if !ok || dist["feedDistribution"] != "MAIN_FEED" {
+		t.Errorf("distribution did not render: %v", got["distribution"])
+	}
+}
+
+// LinkedIn rejects requests without its versioning headers, and they come from the
+// provider's static_headers rather than the action.
+func TestLinkedInDeclaresVersionHeaders(t *testing.T) {
+	reg, _ := LoadBundled()
+	p, ok := reg.ProviderByName("linkedin")
+	if !ok {
+		t.Fatal("linkedin provider not loaded")
+	}
+	// LinkedIn sunsets each monthly version after ~12 months and rejects a sunset
+	// value outright, so "non-empty" is not enough — a stale pin fails 100% of calls
+	// with an error that does not obviously point at the header.
+	v := p.StaticHeaders["LinkedIn-Version"]
+	if !regexp.MustCompile(`^\d{6}$`).MatchString(v) {
+		t.Fatalf("LinkedIn-Version = %q, want a YYYYMM value", v)
+	}
+	if v < "202509" {
+		t.Errorf("LinkedIn-Version %q is at or past sunset (LinkedIn supports roughly the "+
+			"last 12 monthly releases) — bump it to a currently supported version", v)
+	}
+	if p.StaticHeaders["X-Restli-Protocol-Version"] != "2.0.0" {
+		t.Errorf("X-Restli-Protocol-Version = %q, want 2.0.0", p.StaticHeaders["X-Restli-Protocol-Version"])
+	}
+}
+
+func TestYouTubeCommentBodyShape(t *testing.T) {
+	_, u, body := renderFor(t, "youtube", "youtube_post_comment", map[string]any{
+		"video_id": "vid123",
+		"text":     "nice one",
+	})
+	if !strings.Contains(u, "part=snippet") {
+		t.Errorf("part=snippet is required: %s", u)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("body is not valid JSON: %v — %s", err, body)
+	}
+	snip, ok := got["snippet"].(map[string]any)
+	if !ok {
+		t.Fatalf("snippet missing: %v", got)
+	}
+	if snip["videoId"] != "vid123" {
+		t.Errorf("videoId = %v", snip["videoId"])
+	}
+	top, ok := snip["topLevelComment"].(map[string]any)
+	if !ok {
+		t.Fatalf("topLevelComment missing: %v", snip)
+	}
+	inner, ok := top["snippet"].(map[string]any)
+	if !ok || inner["textOriginal"] != "nice one" {
+		t.Errorf("comment text did not render into the nested snippet: %v", top)
+	}
+}
+
+// Commenting needs force-ssl; youtube.readonly alone cannot write. Requesting it up
+// front avoids a re-consent the first time an agent tries to comment.
+func TestYouTubeRequestsCommentScope(t *testing.T) {
+	reg, _ := LoadBundled()
+	p, _ := reg.ProviderByName("youtube")
+	var found bool
+	for _, s := range p.DefaultScopes {
+		if strings.Contains(s, "youtube.force-ssl") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("youtube must request force-ssl, or youtube_post_comment 403s")
 	}
 }

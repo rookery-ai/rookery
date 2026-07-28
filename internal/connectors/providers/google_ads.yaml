@@ -1,0 +1,31 @@
+name: google_ads
+label: Google Ads
+category: Advertising
+auth_parent: google
+default_scopes:
+  - https://www.googleapis.com/auth/adwords
+# A developer token is issued out of band and cannot be discovered from any API, which
+# is the whole reason connect_inputs had to work on the OAuth path.
+connect_inputs:
+  - key: developer_token
+    label: "Developer token"
+    hint: "From Google Ads → Tools → API Center. Starts at Test-Account access until approved."
+    required: true
+  - key: customer_id
+    label: "Customer ID (digits only)"
+    hint: "Your Google Ads account id without dashes, e.g. 1234567890"
+    required: true
+  - key: login_customer_id
+    label: "Manager (MCC) ID — optional"
+    hint: "Digits only. Set this only if you access the account through a manager account."
+    required: false
+static_headers:
+  developer-token: "{{conn.developer_token}}"
+  login-customer-id: "{{conn.login_customer_id}}"
+setup_url: https://console.cloud.google.com/apis/credentials
+setup_steps:
+  - "IMPORTANT: a new developer token starts at TEST-ACCOUNT access and returns nothing for real accounts. Basic Access is an application; a brand-verification pilot can reduce the wait to hours."
+  - "Google Ads reuses your Google (Gmail) OAuth app. Set up Google first on its card above."
+  - "In Google Cloud Console, also enable the Google Ads API."
+  - "In Google Ads → Tools & Settings → API Center, copy your developer token."
+  - "Apply for Basic Access from the same API Center page before expecting production data."

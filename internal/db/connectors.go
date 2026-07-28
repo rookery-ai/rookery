@@ -3,6 +3,8 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -177,13 +179,46 @@ WHERE status='ACTIVE' AND expires_at <> '' AND expires_at <= ? AND encrypted_ref
 	return out, rows.Err()
 }
 
+// ApprovalModeAuto executes an action immediately; ApprovalModeApprove parks a
+// public_write action for the owner to approve. These are the only two values the
+// approval_mode column may hold.
+const (
+	ApprovalModeAuto    = "auto"
+	ApprovalModeApprove = "approve"
+)
+
 // SetAgentConnections replaces an agent's bound connections with connIDs (replace-all).
+//
+// It PRESERVES each surviving binding's approval_mode across the replace. The designer's
+// auto-bind and the agent page's checkbox card both call this on every save, so a naive
+// delete-then-insert would silently reset a user's "require approval before posting to
+// the company LinkedIn" back to auto — turning a deliberate safety setting off as a side
+// effect of an unrelated edit.
 func (d *DB) SetAgentConnections(ctx context.Context, agentID string, connIDs []string) error {
 	tx, err := d.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+
+	modes := map[string]string{}
+	rows, err := tx.QueryContext(ctx, `SELECT connection_id, approval_mode FROM agent_connections WHERE agent_id=?`, agentID)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id, mode string
+		if err := rows.Scan(&id, &mode); err != nil {
+			rows.Close()
+			return err
+		}
+		modes[id] = mode
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
 	if _, err := tx.ExecContext(ctx, `DELETE FROM agent_connections WHERE agent_id=?`, agentID); err != nil {
 		return err
 	}
@@ -191,11 +226,60 @@ func (d *DB) SetAgentConnections(ctx context.Context, agentID string, connIDs []
 		if strings.TrimSpace(id) == "" {
 			continue
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO agent_connections (agent_id, connection_id) VALUES (?, ?)`, agentID, id); err != nil {
+		mode := modes[id]
+		if mode == "" {
+			mode = ApprovalModeAuto
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO agent_connections (agent_id, connection_id, approval_mode) VALUES (?, ?, ?)`, agentID, id, mode); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
+}
+
+// AgentHasGatedConnection reports whether the agent has ANY binding on 'approve'.
+//
+// It exists so the common case costs one query per run instead of one per
+// public_write call: when it returns false the runner installs no Parker at all and
+// Execute skips the gate branch entirely.
+func (d *DB) AgentHasGatedConnection(ctx context.Context, agentID string) (bool, error) {
+	var n int
+	err := d.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM agent_connections WHERE agent_id=? AND approval_mode=?`,
+		agentID, ApprovalModeApprove).Scan(&n)
+	return n > 0, err
+}
+
+// SetAgentConnectionApprovalMode sets one binding's gate. mode must be ApprovalModeAuto
+// or ApprovalModeApprove; anything else is rejected rather than stored, so an unknown
+// value can never sit in the column and be read as "not approve" at execution time.
+func (d *DB) SetAgentConnectionApprovalMode(ctx context.Context, agentID, connID, mode string) error {
+	if mode != ApprovalModeAuto && mode != ApprovalModeApprove {
+		return fmt.Errorf("invalid approval mode %q", mode)
+	}
+	_, err := d.ExecContext(ctx,
+		`UPDATE agent_connections SET approval_mode=? WHERE agent_id=? AND connection_id=?`,
+		mode, agentID, connID)
+	return err
+}
+
+// AgentConnectionApprovalMode returns the gate for one binding, defaulting to
+// ApprovalModeAuto when the agent is not bound to that connection at all.
+func (d *DB) AgentConnectionApprovalMode(ctx context.Context, agentID, connID string) (string, error) {
+	var mode string
+	err := d.QueryRowContext(ctx,
+		`SELECT approval_mode FROM agent_connections WHERE agent_id=? AND connection_id=?`,
+		agentID, connID).Scan(&mode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ApprovalModeAuto, nil
+	}
+	if err != nil {
+		return ApprovalModeAuto, err
+	}
+	if mode != ApprovalModeApprove {
+		return ApprovalModeAuto, nil
+	}
+	return mode, nil
 }
 
 // ListAgentConnections returns the service connections an agent is bound to.

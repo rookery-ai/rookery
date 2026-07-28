@@ -1,0 +1,25 @@
+name: x
+label: X (Twitter)
+category: Publishing & Media
+authorize_url: https://twitter.com/i/oauth2/authorize
+token_url: https://api.twitter.com/2/oauth2/token
+userinfo_url: https://api.twitter.com/2/users/me
+identity_path: data.username
+token_auth: basic
+authorize_extra:
+  # X requires PKCE. "challenge" is the plain-method challenge; the framework does not
+  # generate a verifier, so the plain method is used deliberately rather than S256.
+  code_challenge: challenge
+  code_challenge_method: plain
+default_scopes:
+  - tweet.read
+  - tweet.write
+  - users.read
+  - offline.access
+setup_url: https://developer.x.com/en/portal/dashboard
+setup_steps:
+  - "X's API is PAY-PER-USE since Feb 2026 — roughly $0.015 per post created and $0.005 per post read, with no monthly minimum. Posting from an agent costs pennies, but it is not free."
+  - "Go to the X Developer Portal → Projects & Apps → create an app inside a project."
+  - "Under User authentication settings, enable OAuth 2.0, set App type to 'Web App', and add the redirect URI shown above exactly."
+  - "Copy the OAuth 2.0 Client ID and Client Secret and paste them below."
+  - "Request the tweet.write scope — reading alone will not let an agent post."

@@ -1,0 +1,25 @@
+name: instagram
+label: Instagram
+category: Publishing & Media
+authorize_url: https://www.facebook.com/v21.0/dialog/oauth
+token_url: https://graph.facebook.com/v21.0/oauth/access_token
+userinfo_url: https://graph.facebook.com/v21.0/me
+identity_path: name
+token_expiry: exchange
+# Resolves the Instagram Business account behind the first managed Page and swaps in
+# that Page's token: IG publishing is ADDRESSED by the IG user id but AUTHORISED by the
+# Page token.
+post_connect: meta_ig_user
+default_scopes:
+  - pages_show_list
+  - pages_read_engagement
+  - instagram_basic
+  - instagram_content_publish
+setup_url: https://developers.facebook.com/apps
+setup_steps:
+  - "Your Instagram account must be a PROFESSIONAL account (Business or Creator) and linked to a Facebook Page you administer. A personal account cannot use this API at all."
+  - "Go to Meta for Developers → My Apps → Create App → type 'Business'."
+  - "Add 'Facebook Login for Business', and under its Settings add the redirect URI shown above exactly."
+  - "In App settings → Basic, copy the App ID and App Secret and paste them below."
+  - "Keep the app in DEVELOPMENT mode: full access to accounts YOU administer, no App Review."
+  - "Note: Instagram allows 25 published posts per 24 hours, and images must be at a PUBLICLY reachable URL — the API cannot upload a local file."

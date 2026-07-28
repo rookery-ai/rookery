@@ -5,6 +5,9 @@ auth_parent: google
 default_scopes:
   - https://www.googleapis.com/auth/youtube.readonly
   - https://www.googleapis.com/auth/yt-analytics.readonly
+  # youtube.force-ssl is what commentThreads.insert needs; youtube.readonly alone
+  # cannot comment. Requested up front so posting does not require a re-consent.
+  - https://www.googleapis.com/auth/youtube.force-ssl
 setup_url: https://console.cloud.google.com/apis/credentials
 setup_steps:
   - "YouTube reuses your Google (Gmail) OAuth app. Set up Google first on its card above."
