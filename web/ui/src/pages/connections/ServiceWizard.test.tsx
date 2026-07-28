@@ -37,6 +37,7 @@ const OAUTH_NO_CREDS: ServiceProvider = {
     "Copy the client id and secret below",
   ],
   has_creds: false,
+  action_count: 0,
   connect_inputs: [],
   connections: [],
 };
@@ -49,6 +50,7 @@ const OAUTH_WITH_CREDS: ServiceProvider = {
   setup_url: "",
   setup_steps: [],
   has_creds: true,
+  action_count: 3,
   connect_inputs: [],
   connections: [],
 };
@@ -61,6 +63,7 @@ const OAUTH_NEEDS_REAUTH: ServiceProvider = {
   setup_url: "",
   setup_steps: [],
   has_creds: true,
+  action_count: 0,
   connect_inputs: [],
   connections: [{ id: "c2", label: "team", identity: "me@co.com", status: "NEEDS_REAUTH" }],
 };
@@ -73,6 +76,7 @@ const OAUTH_ACTIVE_CONN: ServiceProvider = {
   setup_url: "",
   setup_steps: [],
   has_creds: true,
+  action_count: 0,
   connect_inputs: [],
   connections: [{ id: "c1", label: "work", identity: "me@gmail.com", status: "ACTIVE" }],
 };
@@ -85,6 +89,7 @@ const API_KEY_PROVIDER: ServiceProvider = {
   setup_url: "",
   setup_steps: [],
   has_creds: false,
+  action_count: 0,
   connect_inputs: [
     { key: "org_id", label: "Organization ID", hint: "Found in your OpenAI settings", required: true },
   ],
