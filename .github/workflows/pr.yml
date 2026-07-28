@@ -169,3 +169,74 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  container:
+    name: Container smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+
+      # Single-arch and loaded locally: this job proves the image RUNS, which a
+      # multi-arch build cannot do (you cannot start an arm64 container here
+      # without emulation). The multi-arch build happens at release.
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: simple-agents:pr
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Image mode complements the filesystem scan in the security job: that one
+      # sees source manifests, this one sees the Debian base layer and the
+      # apt-installed runtime (python3, ripgrep, poppler, tesseract), which no
+      # source scan can reach.
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: image
+          image-ref: simple-agents:pr
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+      # The project's only end-to-end coverage: a real binary, in a real image,
+      # actually serving. Also fails if the image ever loses SA_CODER_MODE=slim,
+      # which would advertise CLI coders it does not contain.
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          docker run -d --name sa-smoke -p 18080:8080 simple-agents:pr
+
+          for i in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:18080/healthz >/dev/null 2>&1; then break; fi
+            if [ "$i" = "45" ]; then
+              echo "::error::server never became healthy"
+              docker logs sa-smoke
+              exit 1
+            fi
+            sleep 1
+          done
+
+          body="$(curl -fsS http://127.0.0.1:18080/healthz)"
+          echo "healthz: $body"
+
+          echo "$body" | grep -q '"status":"ok"' \
+            || { echo "::error::status not ok"; exit 1; }
+          echo "$body" | grep -q '"coder_mode":"slim"' \
+            || { echo "::error::image is missing SA_CODER_MODE=slim"; exit 1; }
+          # The image installs all four; a missing one means a broken base layer.
+          echo "$body" | grep -q '"python3":true' \
+            || { echo "::error::python3 absent — the AST guardrail would be inactive"; exit 1; }
+
+          code="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/)"
+          [ "$code" = "200" ] || { echo "::error::SPA root returned $code, want 200"; exit 1; }
+
+          sess="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/v1/auth/session)"
+          [ "$sess" = "200" ] || { echo "::error::session endpoint returned $sess, want 200"; exit 1; }
+
+          docker exec sa-smoke /usr/bin/simple-agents healthcheck
+          docker rm -f sa-smoke

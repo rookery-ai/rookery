@@ -13,3 +13,6 @@ bin/
 web/ui/node_modules/
 web/ui/dist/*
 !web/ui/dist/.gitkeep
+
+# goreleaser output
+dist/

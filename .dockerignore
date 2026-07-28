@@ -1,0 +1,16 @@
+.git
+.github
+.claude
+.superpowers
+bin/
+dist/
+logs/
+web/ui/node_modules
+# Always build the SPA from source; never embed a developer's stale local build.
+web/ui/dist
+docs/
+plans/
+*.md
+!README.md
+simple-agents
+.server.pid

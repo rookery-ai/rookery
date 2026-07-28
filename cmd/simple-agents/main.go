@@ -60,6 +60,7 @@ func main() {
 			connectorCmd(),
 			kbCmd(),
 			versionCmd(),
+			healthcheckCmd(),
 		},
 	}
 
@@ -764,6 +765,34 @@ func versionCmd() *cli.Command {
 		Usage: "Print the build version and exit",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			fmt.Println(buildinfo.String())
+			return nil
+		},
+	}
+}
+
+// healthcheckCmd probes the local server's /healthz and exits non-zero if it is
+// not serving. It exists so the container HEALTHCHECK can shell the binary
+// itself: the runtime image ships no curl, and adding one purely for a health
+// probe is dead weight in every layer and every scan.
+func healthcheckCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "healthcheck",
+		Usage: "Probe the local server's /healthz and exit non-zero if unhealthy",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			cfg, err := config.Load(cmd.Root().String("config"))
+			if err != nil {
+				return err
+			}
+			url := fmt.Sprintf("http://127.0.0.1:%d/healthz", cfg.Server.Port)
+			client := &http.Client{Timeout: 4 * time.Second}
+			resp, err := client.Get(url)
+			if err != nil {
+				return fmt.Errorf("healthcheck: %w", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("healthcheck: status %d", resp.StatusCode)
+			}
 			return nil
 		},
 	}

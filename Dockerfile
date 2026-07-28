@@ -1,0 +1,95 @@
+# syntax=docker/dockerfile:1
+
+# ── SPA ──────────────────────────────────────────────────────────────────────
+FROM node:24-alpine AS ui
+WORKDIR /src/web/ui
+COPY web/ui/package.json web/ui/package-lock.json ./
+RUN npm ci
+COPY web/ui/ ./
+RUN npm run build
+
+# ── Go ───────────────────────────────────────────────────────────────────────
+# Pinned to BUILDPLATFORM and cross-compiled to TARGETARCH. Because the project
+# is CGo-free this needs no QEMU: a multi-arch build stays as fast as a native
+# one instead of emulating a foreign architecture.
+FROM --platform=$BUILDPLATFORM golang:1.26 AS build
+ARG TARGETARCH
+ARG VERSION=0.0.0-dev
+ARG COMMIT=none
+ARG BUILD_DATE=unknown
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+COPY . .
+COPY --from=ui /src/web/ui/dist ./web/ui/dist
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go build -trimpath \
+      -ldflags "-s -w \
+        -X github.com/ilijad1/simple-agents/internal/buildinfo.Version=${VERSION} \
+        -X github.com/ilijad1/simple-agents/internal/buildinfo.Commit=${COMMIT} \
+        -X github.com/ilijad1/simple-agents/internal/buildinfo.Date=${BUILD_DATE}" \
+      -o /out/simple-agents ./cmd/simple-agents
+
+# ── Runtime ──────────────────────────────────────────────────────────────────
+# Debian rather than Alpine: tesseract's language data packaging is saner here,
+# and glibc stays available for whatever a future :full target installs.
+FROM debian:trixie-slim AS runtime
+
+# python3 is not optional: without it the agent-tool AST guardrail self-skips,
+# which /healthz reports as a warning. The rest prevent silent degradation of
+# KB search, PDF extraction and OCR.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      python3 \
+      ripgrep \
+      poppler-utils \
+      tesseract-ocr \
+      tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+
+# A fixed uid/gid keeps volume ownership predictable across rootless Podman and
+# Docker, which map users differently.
+RUN groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid app --create-home --home-dir /home/app app
+
+COPY --from=build /out/simple-agents /usr/bin/simple-agents
+# Beside the binary on purpose: resolveDir() looks EXE-relative first and only
+# then falls back to a CWD-relative path, so this is found no matter what
+# working directory the container is started with.
+COPY migrations /usr/bin/migrations
+
+# HOME must sit inside the volume: the per-workspace claude-homes trees live
+# under the data dir and must be writable and persistent.
+ENV SA_DATA_DIR=/data \
+    SA_HOST=0.0.0.0 \
+    SA_PORT=8080 \
+    SA_CODER_MODE=slim \
+    HOME=/data
+
+RUN mkdir -p /data && chown -R app:app /data
+VOLUME ["/data"]
+WORKDIR /data
+USER app
+EXPOSE 8080
+
+# Shells the binary's own subcommand rather than curl, which this image does not
+# ship and which would be dead weight added purely for a health probe.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["/usr/bin/simple-agents", "healthcheck"]
+
+ENTRYPOINT ["/usr/bin/simple-agents"]
+CMD ["serve"]
+
+ARG VERSION=0.0.0-dev
+ARG COMMIT=none
+LABEL org.opencontainers.image.title="simple-agents" \
+      org.opencontainers.image.description="Multi-workspace AI agents control plane" \
+      org.opencontainers.image.source="https://github.com/ilijad1/simple-agents-v2" \
+      org.opencontainers.image.licenses="proprietary" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}"

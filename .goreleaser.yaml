@@ -1,0 +1,108 @@
+version: 2
+
+project_name: simple-agents
+
+before:
+  hooks:
+    # The SPA must exist before the Go build, because it is embedded. A clean
+    # checkout only has dist/.gitkeep, which keeps `go build` working but would
+    # ship a binary with no UI.
+    - npm --prefix web/ui ci
+    - npm --prefix web/ui run build
+
+builds:
+  - id: simple-agents
+    main: ./cmd/simple-agents
+    binary: simple-agents
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/ilijad1/simple-agents/internal/buildinfo.Version={{.Version}}
+      - -X github.com/ilijad1/simple-agents/internal/buildinfo.Commit={{.ShortCommit}}
+      - -X github.com/ilijad1/simple-agents/internal/buildinfo.Date={{.Date}}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - packaging/README.md
+      - packaging/systemd/simple-agents.service
+
+nfpms:
+  - id: packages
+    package_name: simple-agents
+    vendor: Ilija Dimitrovski
+    homepage: https://github.com/ilijad1/simple-agents-v2
+    maintainer: Ilija Dimitrovski <ilija.dimitrovski@kroute.ai>
+    description: |
+      Multi-workspace AI agents control plane with a built-in knowledge base,
+      connector layer and scheduler.
+    license: proprietary
+    formats: [deb, rpm]
+    bindir: /usr/bin
+    contents:
+      # Shipped to /usr/share rather than installed into ~/.config: a package
+      # must not write into a user's home directory, and the unit is per-user.
+      - src: packaging/systemd/simple-agents.service
+        dst: /usr/share/simple-agents/simple-agents.service
+      - src: packaging/README.md
+        dst: /usr/share/doc/simple-agents/README.md
+    # These make the difference between a working install and a mystifying one.
+    # python3 in particular: without it the agent-tool AST guardrail self-skips.
+    recommends:
+      - python3
+      - ripgrep
+      - poppler-utils
+      - tesseract-ocr
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+signs:
+  # Keyless: the certificate is issued against the workflow's OIDC identity, so
+  # there is no private key to store or rotate.
+  - cmd: cosign
+    signature: "${artifact}.sig"
+    certificate: "${artifact}.pem"
+    args:
+      - sign-blob
+      - "--output-signature=${signature}"
+      - "--output-certificate=${certificate}"
+      - "${artifact}"
+      - "--yes"
+    artifacts: checksum
+    output: true
+
+changelog:
+  # release-please owns the changelog; goreleaser must not write a second one.
+  disable: true
+
+release:
+  draft: false
+  prerelease: auto
+  footer: |
+    ## Verifying this release
+
+    ```bash
+    cosign verify-blob checksums.txt \
+      --signature checksums.txt.sig \
+      --certificate checksums.txt.pem \
+      --certificate-identity-regexp 'https://github\.com/ilijad1/simple-agents-v2/.*' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+    ```
+
+    ## Installing
+
+    See `packaging/README.md` in the archive, or install the `.deb`/`.rpm` and
+    follow `/usr/share/doc/simple-agents/README.md`.
