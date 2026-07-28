@@ -5,7 +5,7 @@
 
 ## Problem
 
-A workspace owner can connect 46 services but has no way to learn what any of
+A workspace owner can connect 45 services but has no way to learn what any of
 them lets an agent *do*. The action manifests exist — 272 curated actions across
 45 providers, each with a description written for an LLM — but they are visible
 only to the model. The connections page shows a logo, a connection count, and a
@@ -33,10 +33,13 @@ nothing rather than to the connect form. Making stacking work means converting t
 shell's slide-over into a stack — work every other page inherits, for a feature
 that does not need it.
 
-`ServiceWizard` already carries a `view` state (`"creds" | "connect"`). This adds
-`"actions"`. The user gets a separate screen that does not crowd the connect form,
-which is the requirement; the shell is untouched. If a genuinely nested panel is
-needed elsewhere later, the stack refactor can happen then.
+`ServiceWizard` already carries a `view` state (`"creds" | "connect"`). A new
+`showActions` boolean overlays it rather than widening the union; `view` keeps
+meaning "which connect step am I on", so Back returns to the connect form without
+a separate variable remembering it. The user gets a separate screen that does not
+crowd the connect form, which is the requirement; the shell is untouched. If a
+genuinely nested panel is needed elsewhere later, the stack refactor can happen
+then.
 
 ## Backend
 
