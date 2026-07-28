@@ -157,7 +157,7 @@ jobs:
       # unfixed findings: failing on a CVE with no available patch blocks work
       # nobody can unblock.
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -195,7 +195,7 @@ jobs:
       # apt-installed runtime (python3, ripgrep, poppler, tesseract), which no
       # source scan can reach.
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
           image-ref: simple-agents:pr

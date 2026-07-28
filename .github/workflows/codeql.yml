@@ -20,6 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
+      # A job-level permissions block REPLACES the workflow-level one rather
+      # than merging with it, so contents: read must be restated here. Without
+      # it, actions/checkout cannot clone this private repo and the job dies
+      # with "fatal: repository not found" before CodeQL ever starts.
+      contents: read
       security-events: write
       actions: read
     strategy:
