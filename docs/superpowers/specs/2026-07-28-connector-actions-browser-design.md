@@ -97,7 +97,10 @@ fetch.
 ### Data hook
 
 `useProviderActions(name)` in `web/ui/src/lib/connections.ts`, keyed
-`["services", name, "actions"]` with `staleTime: Infinity`. The manifests are
+`["service-actions", name]` with `staleTime: Infinity`. The key root is
+deliberately **not** `["services", …]`: React Query invalidates by key prefix, so
+every connect/disconnect mutation's `invalidateQueries({queryKey:["services"]})`
+would evict the action lists too, defeating the point of caching them. The manifests are
 compiled into the binary via `go:embed` and cannot change while the server runs,
 so a fetched list never needs revalidating. It is fetched lazily — the hook is
 only mounted by the actions view, so opening the wizard costs nothing.
@@ -133,15 +136,17 @@ conventions.
 
 **`ServiceWizard.tsx`** changes:
 
-- `view` widens to `"creds" | "connect" | "actions"`.
+- A new `showActions` boolean overlays the existing `view` state rather than
+  widening its union. `view` keeps meaning "which connect step am I on", so Back
+  lands where the user left with no separate variable remembering it — the
+  previous view was never overwritten.
 - A button above the connected-accounts block: `What can it do? · N actions`,
   rendered only when `provider.action_count > 0`.
-- `view === "actions"` renders `<ProviderActions>` **instead of** the creds/connect
-  body, passing an `onBack` that restores the previously active view.
-- The previous view is remembered so Back lands where the user left. Because the
-  actions view replaces only the rendered body and `ServiceWizard` itself stays
-  mounted, all form state (`clientId`, `clientSecret`, `apiKey`, `label`, `inputs`)
-  survives the round trip untouched.
+- When `showActions` is true, `<ProviderActions>` renders **instead of** the
+  creds/connect body, with an `onBack` that clears the flag.
+- Because the actions view replaces only the rendered body and `ServiceWizard`
+  itself stays mounted, all form state (`clientId`, `clientSecret`, `apiKey`,
+  `label`, `inputs`) survives the round trip untouched.
 
 ### Availability
 
