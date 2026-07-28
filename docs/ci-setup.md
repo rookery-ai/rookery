@@ -42,7 +42,22 @@ Also enable:
   validates and what release-please reads to compute the version; allowing merge
   commits would let unlinted commit messages reach `main`.
 
-## 3. GHCR package visibility
+## 3. CodeQL is dormant until the repo is public
+
+`codeql.yml` is committed and correct, but its job is gated on
+`github.event.repository.private == false`, so it **skips** today. Code scanning
+on a *private* repository requires GitHub Advanced Security (a paid
+per-committer add-on); on a *public* repository CodeQL is free.
+
+Nothing to do now — it activates by itself when the repo goes public. At that
+point, restore the weekly `schedule:` trigger that was removed (a schedule event
+does not reliably populate the repository payload, so the visibility guard
+cannot be trusted there).
+
+If you *do* want CodeQL while private, buy GHAS and enable
+**Settings → Code security → Code scanning**, then delete the `if:` line.
+
+## 4. GHCR package visibility
 
 The package `ghcr.io/ilijad1/simple-agents-v2` is **private**. A host pulling it
 needs a one-time login:
@@ -56,7 +71,7 @@ Making it public at launch is a visibility toggle in the package settings — no
 pipeline change is required. Cosign signatures, SBOMs and provenance
 attestations are produced either way.
 
-## 4. Expected timings
+## 5. Expected timings
 
 Measured locally on a 4-thread i5-6200U; GitHub runners are typically faster.
 
