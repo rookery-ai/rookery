@@ -591,3 +591,255 @@ test("intro is suppressed while the resume banner is showing", async () => {
   expect(await screen.findByText(/unfinished draft/i)).toBeInTheDocument();
   expect(screen.queryByText("Tell me what you want")).not.toBeInTheDocument();
 });
+
+test("design turns render a timestamp footer like every other chat", async () => {
+  mockFetch({
+    "/x/design": () => jsonResponse({ response: "What should it do?", done: false, state: "designing" }),
+  });
+  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />);
+
+  await sendViaComposer("Build me a thing");
+  await screen.findByText("What should it do?");
+
+  // Both the optimistic user turn and the assistant reply are stamped locally —
+  // the design POST returns prose, never a time.
+  await waitFor(() => expect(screen.getAllByTestId("message-time")).toHaveLength(2));
+});
+
+test("resumed history keeps the server's timestamps and stamps the resume message", async () => {
+  mockFetch({
+    "/x/state": () => jsonResponse({ active: false }),
+    "/x/resume": () =>
+      jsonResponse({
+        response: "Where were we — you wanted a daily digest.",
+        state: "designing",
+        history: [
+          { role: "user", content: "a daily digest", created_at: "2026-07-28T09:30:00Z" },
+          { role: "assistant", content: "how often?", created_at: "2026-07-28T09:30:05Z" },
+        ],
+      }),
+  });
+  wrap(
+    <DesignerSurface
+      endpoints={{ ...ENDPOINTS, state: "/x/state" }}
+      labels={LABELS}
+      cancelTo="/agents"
+      draft={{ name: "Digest" }}
+      autoResume
+      onDone={vi.fn()}
+    />,
+  );
+
+  await screen.findByText("Where were we — you wanted a daily digest.");
+  // Two restored turns + the freshly generated resume message, which is NOT part
+  // of `history` and so has to be stamped client-side.
+  await waitFor(() => expect(screen.getAllByTestId("message-time")).toHaveLength(3));
+});
+
+test("startEndpoint takes the first message; later messages go to the design endpoint", async () => {
+  const calls = mockFetch({
+    "/x/start": () => jsonResponse({ response: "Here's what I found.", done: false, state: "designing" }),
+    "/x/design": () => jsonResponse({ response: "Updated.", done: false, state: "designing" }),
+  });
+  wrap(
+    <DesignerSurface
+      endpoints={ENDPOINTS}
+      labels={LABELS}
+      cancelTo="/agents"
+      startEndpoint="/x/start"
+      onDone={vi.fn()}
+    />,
+  );
+
+  await sendViaComposer("make it hourly");
+  await screen.findByText("Here's what I found.");
+  await sendViaComposer("actually daily");
+  await screen.findByText("Updated.");
+
+  const posts = calls.filter((c) => c.method === "POST").map((c) => c.url);
+  expect(posts).toEqual(["/x/start", "/x/design"]);
+});
+
+test("startPayload is never merged into a startEndpoint POST", async () => {
+  const calls = mockFetch({
+    "/x/start": () => jsonResponse({ response: "ok", done: false, state: "designing" }),
+  });
+  wrap(
+    <DesignerSurface
+      endpoints={ENDPOINTS}
+      labels={LABELS}
+      cancelTo="/agents"
+      startEndpoint="/x/start"
+      startPayload={{ name: "MyAgent" }}
+      onDone={vi.fn()}
+    />,
+  );
+
+  await sendViaComposer("first");
+  await screen.findByText("ok");
+
+  const start = calls.find((c) => c.url === "/x/start");
+  expect(start?.body).toEqual({ message: "first" });
+});
+
+test("a recovered session the caller rejects is not adopted and its build is not streamed", async () => {
+  mockFetch({
+    "/x/state": () =>
+      jsonResponse({
+        active: true,
+        generating: true,
+        state: "designing",
+        is_edit: false,
+        agent_id: "someone-else",
+        history: [{ role: "user", content: "an unrelated conversation" }],
+      }),
+  });
+  wrap(
+    <DesignerSurface
+      endpoints={{ ...ENDPOINTS, state: "/x/state" }}
+      labels={LABELS}
+      cancelTo="/agents"
+      acceptRecoveredSession={(s) => s.isEdit && s.agentId === "a1"}
+      onDone={vi.fn()}
+    />,
+  );
+
+  await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled());
+  expect(screen.queryByText("an unrelated conversation")).not.toBeInTheDocument();
+  expect(FakeEventSource.instances).toHaveLength(0);
+});
+
+test("a recovered session the caller accepts is still adopted", async () => {
+  mockFetch({
+    "/x/state": () =>
+      jsonResponse({
+        active: true,
+        state: "designing",
+        is_edit: true,
+        agent_id: "a1",
+        history: [{ role: "user", content: "make it daily" }],
+      }),
+  });
+  wrap(
+    <DesignerSurface
+      endpoints={{ ...ENDPOINTS, state: "/x/state" }}
+      labels={LABELS}
+      cancelTo="/agents"
+      acceptRecoveredSession={(s) => s.isEdit && s.agentId === "a1"}
+      onDone={vi.fn()}
+    />,
+  );
+
+  expect(await screen.findByText("make it daily")).toBeInTheDocument();
+});
+
+test("cancelling an untouched surface navigates without cancelling anyone's session", async () => {
+  const calls = mockFetch({ "/x/state": () => jsonResponse({ active: false }) });
+  wrap(
+    <DesignerSurface
+      endpoints={{ ...ENDPOINTS, state: "/x/state" }}
+      labels={LABELS}
+      cancelTo="/agents"
+      onDone={vi.fn()}
+    />,
+  );
+
+  await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled());
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+  expect(calls.some((c) => c.url === "/x/cancel")).toBe(false);
+});
+
+test("cancelling after a message still cancels the session", async () => {
+  const calls = mockFetch({
+    "/x/state": () => jsonResponse({ active: false }),
+    "/x/design": () => jsonResponse({ response: "ok", done: false, state: "designing" }),
+  });
+  wrap(
+    <DesignerSurface
+      endpoints={{ ...ENDPOINTS, state: "/x/state" }}
+      labels={LABELS}
+      cancelTo="/agents"
+      onDone={vi.fn()}
+    />,
+  );
+
+  await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled());
+  await sendViaComposer("hello");
+  await screen.findByText("ok");
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+  await waitFor(() => expect(calls.some((c) => c.url === "/x/cancel")).toBe(true));
+});
+
+// A failed OPENING post used to strand the surface: the optimistic bubble made
+// messages.length non-zero, so the retry was treated as an ordinary turn, sent
+// to endpoints.design with no session to step, and dead-ended. "Design session
+// already active; cancel it first" is an expected outcome of the agent editor's
+// start endpoint, so this path is reachable in normal use, not exotic.
+test("a failed opening POST is retried against the start endpoint, not the design one", async () => {
+  let attempt = 0;
+  const calls = mockFetch({
+    "/x/start": () => {
+      attempt += 1;
+      if (attempt === 1) {
+        return jsonResponse({ error: "design session already active; cancel it first" }, 500);
+      }
+      return jsonResponse({ response: "Here's what I found.", done: false, state: "designing" });
+    },
+    "/x/design": () => jsonResponse({ response: "WRONG ENDPOINT", done: false, state: "designing" }),
+  });
+  wrap(
+    <DesignerSurface
+      endpoints={ENDPOINTS}
+      labels={LABELS}
+      cancelTo="/agents"
+      startEndpoint="/x/start"
+      onDone={vi.fn()}
+    />,
+  );
+
+  await sendViaComposer("run it once a day");
+  expect(await screen.findByText("design session already active; cancel it first")).toBeInTheDocument();
+  // The failed turn's bubble is rolled back — nothing was created, and leaving it
+  // would duplicate the message once the retry succeeds.
+  await waitFor(() => expect(screen.queryByText("run it once a day")).not.toBeInTheDocument());
+
+  await sendViaComposer("run it once a day");
+  expect(await screen.findByText("Here's what I found.")).toBeInTheDocument();
+  expect(screen.queryByText("WRONG ENDPOINT")).not.toBeInTheDocument();
+
+  const posts = calls.filter((c) => c.method === "POST").map((c) => c.url);
+  expect(posts).toEqual(["/x/start", "/x/start"]);
+});
+
+// Same latent bug on the create path: a failed first POST used to strand the
+// name, so the retry opened no session either.
+test("a failed first design POST still carries startPayload on the retry", async () => {
+  let attempt = 0;
+  const calls = mockFetch({
+    "/x/design": () => {
+      attempt += 1;
+      if (attempt === 1) return jsonResponse({ error: "something broke" }, 500);
+      return jsonResponse({ response: "ok", done: false, state: "designing" });
+    },
+  });
+  wrap(
+    <DesignerSurface
+      endpoints={ENDPOINTS}
+      labels={LABELS}
+      cancelTo="/agents"
+      startPayload={{ name: "MyAgent" }}
+      onDone={vi.fn()}
+    />,
+  );
+
+  await sendViaComposer("first");
+  await screen.findByText("something broke");
+  await sendViaComposer("first");
+  await screen.findByText("ok");
+
+  const posts = calls.filter((c) => c.method === "POST");
+  expect(posts).toHaveLength(2);
+  expect(posts[1]!.body).toEqual({ message: "first", name: "MyAgent" });
+});

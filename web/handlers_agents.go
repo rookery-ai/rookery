@@ -38,6 +38,48 @@ type agentDetailData struct {
 	LiveRun        bool // a manual run is in flight on THIS server — gates the SSE stream
 }
 
+// designHistEntry is the wire shape of one design-conversation turn. CreatedAt is
+// a preformatted STRING, not a time.Time: `omitempty` does nothing for a struct,
+// so a time.Time field would emit "0001-01-01T00:00:00Z" for drafts written
+// before turns were timestamped, and the browser would render a bubble stamped
+// year 1. RFC3339Nano matches what /api/v1/chats/:id/messages emits for
+// created_at, so both chat surfaces feed formatMessageTime identical input.
+type designHistEntry struct {
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	CreatedAt string `json:"created_at,omitempty"`
+}
+
+// designHistoryDTO maps session history to the wire shape. Shared by the agent
+// resume/state handlers and the skill resume handler so the three cannot drift.
+func designHistoryDTO(hist []db.ChatMessage) []designHistEntry {
+	out := make([]designHistEntry, 0, len(hist))
+	for _, m := range hist {
+		e := designHistEntry{Role: m.Role, Content: m.Content}
+		if !m.CreatedAt.IsZero() {
+			e.CreatedAt = m.CreatedAt.Format(time.RFC3339Nano)
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// designTurnResponse is the body every non-terminal design turn returns. The
+// create chat and the first turn of an EDIT share it so they cannot drift: the
+// edit page mounts DesignerSurface directly (no pre-screen remount), so this
+// response is the only thing that tells the browser which FSM state it is in —
+// without `state` the stepper never leaves "Describe" and the Build button never
+// appears until the user sends a throwaway second message.
+func designTurnResponse(response string, snap agentdesigner.DesignSnapshot) map[string]interface{} {
+	return map[string]interface{}{
+		"response":          response,
+		"done":              false,
+		"state":             snap.State,
+		"generation_failed": snap.GenerationFailed,
+		"can_keep_as_is":    snap.CanKeepAsIs,
+	}
+}
+
 // handleResumeDraft reconstructs the user's saved design draft as an active
 // session and returns the conversation history + resumption message so the
 // browser can replay the chat and continue. The coder is never re-run here —
@@ -52,15 +94,8 @@ func (s *Server) handleResumeDraft(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
-	type histEntry struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}
 	snap := s.designFlow.Snapshot(u.ID)
-	hist := make([]histEntry, 0, len(snap.History))
-	for _, m := range snap.History {
-		hist = append(hist, histEntry{Role: m.Role, Content: m.Content})
-	}
+	hist := designHistoryDTO(snap.History)
 	out := map[string]interface{}{
 		"response":          resp,
 		"state":             snap.State,
@@ -134,14 +169,7 @@ func (s *Server) handleDesignChat(c echo.Context) error {
 			slog.Error("agentdesigner: start design failed", "workspace_id", u.ID, "name", req.Name, "err", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		}
-		snap := s.designFlow.Snapshot(u.ID)
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"response":          response,
-			"done":              false,
-			"state":             snap.State,
-			"generation_failed": snap.GenerationFailed,
-			"can_keep_as_is":    snap.CanKeepAsIs,
-		})
+		return c.JSON(http.StatusOK, designTurnResponse(response, s.designFlow.Snapshot(u.ID)))
 	}
 
 	// Existing session: step the FSM. Capture whether this is an edit session (and
@@ -173,14 +201,7 @@ func (s *Server) handleDesignChat(c echo.Context) error {
 		})
 	}
 
-	snap := s.designFlow.Snapshot(u.ID)
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"response":          response,
-		"done":              false,
-		"state":             snap.State,
-		"generation_failed": snap.GenerationFailed,
-		"can_keep_as_is":    snap.CanKeepAsIs,
-	})
+	return c.JSON(http.StatusOK, designTurnResponse(response, s.designFlow.Snapshot(u.ID)))
 }
 
 // handleDesignState returns the live in-memory design session (if any) so a
@@ -198,14 +219,7 @@ func (s *Server) handleDesignState(c echo.Context) error {
 	if !snap.Active {
 		return c.JSON(http.StatusOK, map[string]interface{}{"active": false})
 	}
-	type histEntry struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}
-	hist := make([]histEntry, 0, len(snap.History))
-	for _, m := range snap.History {
-		hist = append(hist, histEntry{Role: m.Role, Content: m.Content})
-	}
+	hist := designHistoryDTO(snap.History)
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"active":            true,
 		"generating":        snap.Generating,
@@ -323,10 +337,10 @@ func (s *Server) handleStartEditDesign(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"response": response,
-		"done":     false,
-	})
+	// The full design-turn body, not just {response,done}: the edit page mounts
+	// DesignerSurface directly now, so nothing remounts into GET /design/state to
+	// pick the FSM state up afterwards — see designTurnResponse.
+	return c.JSON(http.StatusOK, designTurnResponse(response, s.designFlow.Snapshot(u.ID)))
 }
 
 // agentsDir returns the vaults base directory from config (or empty string in

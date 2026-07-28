@@ -289,3 +289,69 @@ func TestAPIDesignStateExposesPopulatedPendingBuild(t *testing.T) {
 		t.Fatalf("pending_tools content did not reach the wire: %s", body)
 	}
 }
+
+// TestAPIDesignStateHistoryCarriesTimestamps pins that design-conversation turns
+// reach the browser with a time, so DesignerSurface's bubbles can render the same
+// `Day HH:MM` footer the chats page shows. A turn with no CreatedAt (a draft
+// written before turns were timestamped) must OMIT the field rather than emit a
+// zero time, which would render a bubble stamped year 1 — `omitempty` does
+// nothing for a struct, which is why the DTO field is a preformatted string.
+func TestAPIDesignStateHistoryCarriesTimestamps(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	s.designFlow = agentdesigner.NewFlow(nil, nil).WithDB(s.db)
+	if _, err := s.designFlow.Start(wsID, "TestAgent"); err != nil {
+		t.Fatalf("start design session: %v", err)
+	}
+	sess := s.designFlow.GetSession(wsID)
+	if sess == nil {
+		t.Fatal("no design session after Start")
+	}
+	stamped := time.Date(2026, 7, 28, 9, 30, 0, 0, time.UTC)
+	sess.History = []db.ChatMessage{
+		{Role: "user", Content: "stamped turn", CreatedAt: stamped},
+		{Role: "assistant", Content: "legacy turn"}, // zero CreatedAt
+	}
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/agents/design/state", nil, cookies)
+	if rec.Code != 200 {
+		t.Fatalf("design state: %d %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !contains(body, `"created_at":"2026-07-28T09:30:00Z"`) {
+		t.Fatalf("stamped history turn lost its created_at: %s", body)
+	}
+	if contains(body, "0001-01-01") {
+		t.Fatalf("zero CreatedAt must be omitted, not serialized: %s", body)
+	}
+}
+
+// TestDesignTurnResponseCarriesState pins the shape every non-terminal design
+// turn returns. handleStartEditDesign shares it with handleDesignChat: with the
+// edit pre-screen gone, DesignerSurface no longer remounts after the first edit
+// message, so this response is the ONLY thing that can move the stepper into
+// "designing" and reveal the Build button.
+func TestDesignTurnResponseCarriesState(t *testing.T) {
+	snap := agentdesigner.DesignSnapshot{
+		Active:           true,
+		State:            "designing",
+		GenerationFailed: true,
+		CanKeepAsIs:      true,
+	}
+	out := designTurnResponse("here's my read on it", snap)
+
+	if out["response"] != "here's my read on it" {
+		t.Fatalf("response = %v", out["response"])
+	}
+	if out["done"] != false {
+		t.Fatalf("done = %v, want false", out["done"])
+	}
+	if out["state"] != "designing" {
+		t.Fatalf("state = %v, want designing", out["state"])
+	}
+	if out["generation_failed"] != true || out["can_keep_as_is"] != true {
+		t.Fatalf("failure flags dropped: %#v", out)
+	}
+}

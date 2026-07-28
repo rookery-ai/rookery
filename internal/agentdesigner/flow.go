@@ -1149,8 +1149,8 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 
 	f.mu.Lock()
 	sess.History = append(sess.History,
-		db.ChatMessage{Role: "user", Content: userMessage},
-		db.ChatMessage{Role: "assistant", Content: result.Text},
+		db.ChatMessage{Role: "user", Content: userMessage, CreatedAt: time.Now().UTC()},
+		db.ChatMessage{Role: "assistant", Content: result.Text, CreatedAt: time.Now().UTC()},
 	)
 	// Persist the draft so a reload/restart can resume from this turn. Covers
 	// every conversation turn including StartDesign's first message.
@@ -1508,7 +1508,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		// resumed after a server restart) replays it. Previously this message only
 		// ever lived in the POST return value, so anyone who navigated away mid-build
 		// never saw the "here's your agent, approve?" prompt on return.
-		sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: outcome.message})
+		sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: outcome.message, CreatedAt: time.Now().UTC()})
 		// Persist the generated content so a reload before final approval can resume
 		// without re-running the (quota-consuming) coder generation.
 		f.saveDraft(sess)
@@ -1648,7 +1648,7 @@ func (f *Flow) recordGenerationFailure(workspaceID, detail string, forceTier1 bo
 	// loop. The per-case detail above already says what to fix, so the suffix only needs to
 	// point at finishing the agent.
 	note += " On the next attempt I will address this and finish building the agent."
-	sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: note})
+	sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: note, CreatedAt: time.Now().UTC()})
 	f.saveDraft(sess)
 }
 
@@ -1662,7 +1662,7 @@ func (f *Flow) appendUserHistory(workspaceID, input string) {
 	if sess == nil {
 		return
 	}
-	sess.History = append(sess.History, db.ChatMessage{Role: "user", Content: input})
+	sess.History = append(sess.History, db.ChatMessage{Role: "user", Content: input, CreatedAt: time.Now().UTC()})
 	f.saveDraft(sess)
 }
 
