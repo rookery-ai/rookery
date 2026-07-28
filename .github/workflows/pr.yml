@@ -1,0 +1,171 @@
+name: PR
+
+on:
+  pull_request:
+    branches: [main]
+
+# A force-push should not leave the previous run burning minutes.
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  commit-lint:
+    name: Conventional commit title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      # The PR TITLE is linted rather than individual commits because merges are
+      # squashes: the title becomes the commit that lands on main and the input
+      # release-please reads to compute the next version.
+      - uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            refactor
+            docs
+            test
+            chore
+            perf
+            build
+            ci
+          requireScope: false
+
+  go:
+    name: Go build and test
+    runs-on: ubuntu-latest
+    # Measured at ~8 min wall with -race (the web package alone is ~6 min).
+    # The cap exists so a hung test fails in minutes instead of burning hours.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # python3 is present on ubuntu-latest, which matters: the AST guardrail
+      # tests self-skip without it, and a silently skipped security test is
+      # worse than a failing one.
+      - name: Verify python3 is available
+        run: python3 --version
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l . | grep -v '^\.claude/' || true)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt found unformatted files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      # -race is the point of this job: the scheduler, gateway manager and
+      # connector bridge all run concurrent goroutines against shared state.
+      # 900s per test binary, not 600s — the web package measures ~343s locally
+      # under -race and a slower runner needs the headroom.
+      - name: go test -race
+        run: go test ./... -race -count=1 -timeout 900s
+
+  cross-compile:
+    name: Cross-compile ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # This matrix is the regression guard for the build-tagged setProcGroup
+      # helper. GOOS=windows was broken for the project's entire history because
+      # nothing ever compiled it.
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -o /dev/null ./cmd/simple-agents
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web/ui
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/ui/package-lock.json
+
+      - run: npm ci
+      - name: Typecheck
+        run: npx tsc -b
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npx vitest run
+      - name: Build
+        run: npm run build
+
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # govulncheck is call-graph aware: it reports only vulnerabilities in code
+      # paths the binary actually reaches, so it is far less noisy than a
+      # manifest-level scanner and worth failing the build on. Verified clean
+      # against this tree before the workflow was added.
+      - name: govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      # Trivy in filesystem mode covers the npm tree and Go modules. Ignore
+      # unfixed findings: failing on a CVE with no available patch blocks work
+      # nobody can unblock.
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

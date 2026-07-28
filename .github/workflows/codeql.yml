@@ -1,0 +1,45 @@
+name: CodeQL
+
+# CodeQL lives in its own workflow because it needs security-events: write,
+# which should not be granted to the whole PR workflow.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Weekly, so a newly published query still finds old code.
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        if: matrix.language == 'go'
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - uses: github/codeql-action/autobuild@v4
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

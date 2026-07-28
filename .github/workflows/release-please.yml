@@ -1,0 +1,30 @@
+name: release-please
+
+# Maintains a release pull request on main, accumulating Conventional Commits
+# and computing the next semantic version. Merging that PR creates the tag,
+# which fires release.yml.
+#
+# Chosen over semantic-release specifically because it releases THROUGH a merged
+# PR; semantic-release pushes tags directly from CI, which would violate the
+# project rule that main only ever advances through merged PRs.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # RELEASE_PLEASE_TOKEN rather than GITHUB_TOKEN: a pull request opened
+      # with GITHUB_TOKEN does not trigger other workflows, so merging the
+      # release PR would create a tag that release.yml never sees and no
+      # artifacts would be produced. See docs/ci-setup.md.
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
