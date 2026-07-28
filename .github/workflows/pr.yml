@@ -146,6 +146,11 @@ jobs:
       pull-requests: read
     steps:
       - uses: actions/checkout@v5
+        with:
+          # gitleaks diffs from the PR's first commit's PARENT to its head, so a
+          # shallow clone makes those revisions unknown and the scan aborts with
+          # "ambiguous argument". Full history is the documented requirement.
+          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
