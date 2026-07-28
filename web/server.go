@@ -309,8 +309,24 @@ func (s *Server) requireSetupComplete(next echo.HandlerFunc) echo.HandlerFunc {
 func (s *Server) coderForWorkspace(workspaceID string) *coder.Coder {
 	w, _ := s.db.GetWorkspaceByID(workspaceID)
 	return coder.ForWorkspace(w, s.homesDir, s.cfg.Data.Dir, s.vault,
-		s.cfg.Coder.ClaudeBin, s.cfg.Coder.Timeout, s.cfg.Sandbox.Enabled).
+		s.cfg.Coder.ClaudeBin, s.cfg.Coder.Timeout, s.cfg.Sandbox.Enabled,
+		s.coderMode() == config.ModeFull).
 		WithSecretsLookup(s.secretsLookup)
+}
+
+// coderMode returns the build's coder policy, defaulting to full. Nil-safe
+// because tests construct a bare &Server{}; the config is the single source, so
+// no parallel field is stored on Server.
+func (s *Server) coderMode() string {
+	if s.cfg == nil || s.cfg.Coder.Mode == "" {
+		return config.ModeFull
+	}
+	return s.cfg.Coder.Mode
+}
+
+// sandboxEnabled reports whether Landlock confinement is switched on.
+func (s *Server) sandboxEnabled() bool {
+	return s.cfg != nil && s.cfg.Sandbox.Enabled
 }
 
 // secretsLookup resolves a single named secret for a workspace at run time. The

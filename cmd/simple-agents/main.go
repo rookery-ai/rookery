@@ -139,7 +139,8 @@ func serveCmd() *cli.Command {
 					return coderSvc
 				}
 				return coder.ForWorkspace(w, homesDir, cfg.Data.Dir, vlt,
-					cfg.Coder.ClaudeBin, cfg.Coder.Timeout, cfg.Sandbox.Enabled).
+					cfg.Coder.ClaudeBin, cfg.Coder.Timeout, cfg.Sandbox.Enabled,
+					cfg.Coder.Mode == config.ModeFull).
 					WithSecretsLookup(secretsLookup)
 			}
 
@@ -268,7 +269,8 @@ func serveCmd() *cli.Command {
 						return nil
 					}
 					return coder.ForWorkspace(w, homesDir, cfg.Data.Dir, vlt,
-						cfg.Coder.ClaudeBin, cfg.Coder.Timeout, cfg.Sandbox.Enabled).
+						cfg.Coder.ClaudeBin, cfg.Coder.Timeout, cfg.Sandbox.Enabled,
+						cfg.Coder.Mode == config.ModeFull).
 						WithSecretsLookup(secretsLookup)
 				})
 

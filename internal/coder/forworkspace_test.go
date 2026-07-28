@@ -1,6 +1,8 @@
 package coder
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -15,7 +17,7 @@ func TestForWorkspaceUsesInlinedConfig(t *testing.T) {
 		CoderTimeoutS:    90,
 		CoderBackendType: "generic",
 	}
-	c := ForWorkspace(w, "/homes", "/data", nil, "claude", 20*time.Minute, false)
+	c := ForWorkspace(w, "/homes", "/data", nil, "claude", 20*time.Minute, false, true)
 	if c.bin != "opencode" {
 		t.Fatalf("bin = %q, want opencode", c.bin)
 	}
@@ -29,7 +31,7 @@ func TestForWorkspaceUsesInlinedConfig(t *testing.T) {
 
 func TestForWorkspaceFallsBackToDefaults(t *testing.T) {
 	w := &db.Workspace{ID: "ws2", CoderKind: "local"} // no coder fields set
-	c := ForWorkspace(w, "/homes", "/data", nil, "claude", 15*time.Minute, false)
+	c := ForWorkspace(w, "/homes", "/data", nil, "claude", 15*time.Minute, false, true)
 	if c.bin != "claude" {
 		t.Fatalf("bin = %q, want claude (default)", c.bin)
 	}
@@ -50,7 +52,7 @@ func TestForWorkspaceAPIKindBuildsAPIEngine(t *testing.T) {
 		CoderBaseURL:      "https://api.openai.com/v1",
 		CoderTimeoutS:     120,
 	}
-	c := ForWorkspace(w, "/homes", "/data", nil, "claude", time.Minute, false)
+	c := ForWorkspace(w, "/homes", "/data", nil, "claude", time.Minute, false, true)
 	if !c.IsAPI() {
 		t.Fatal("IsAPI() = false, want true for api-kind workspace")
 	}
@@ -68,5 +70,31 @@ func TestDetectInstalledReturnsResolvedPaths(t *testing.T) {
 		if in.Bin == "" || in.Name == "" {
 			t.Fatalf("detected coder with empty field: %+v", in)
 		}
+	}
+}
+
+func TestForWorkspaceRejectsLocalWhenNotAllowed(t *testing.T) {
+	w := &db.Workspace{ID: "w1", CoderKind: "local", CoderBin: "claude"}
+	c := ForWorkspace(w, "/homes", "/data", nil, "claude", time.Minute, false, false)
+
+	if _, err := c.Ping(context.Background(), "w1"); !errors.Is(err, ErrLocalCoderDisabled) {
+		t.Fatalf("Ping error = %v, want ErrLocalCoderDisabled", err)
+	}
+	if _, err := c.Generate(context.Background(), "w1", "hi"); !errors.Is(err, ErrLocalCoderDisabled) {
+		t.Fatalf("Generate error = %v, want ErrLocalCoderDisabled", err)
+	}
+}
+
+// An API-kind workspace must keep working in a slim build — that is the whole
+// point of slim.
+func TestForWorkspaceAllowsAPIWhenLocalDisabled(t *testing.T) {
+	w := &db.Workspace{ID: "w1", CoderKind: "api", CoderProvider: "openai", CoderModel: "gpt-4o"}
+	c := ForWorkspace(w, "/homes", "/data", nil, "claude", time.Minute, false, false)
+
+	if !c.IsAPI() {
+		t.Fatal("api workspace did not produce an API coder")
+	}
+	if _, err := c.Ping(context.Background(), "w1"); errors.Is(err, ErrLocalCoderDisabled) {
+		t.Fatal("API coder was wrongly disabled in slim mode")
 	}
 }

@@ -106,6 +106,19 @@ type Coder struct {
 	boundConns []connectors.BoundConn
 	// connParker gates public_write connector actions; nil means no gate.
 	connParker connectors.Parker
+
+	// disabled, when non-nil, is returned by every entry point instead of
+	// running anything. Set when the build cannot honour the workspace's coder
+	// kind — see ForWorkspace and ErrLocalCoderDisabled.
+	disabled error
+}
+
+// withDisabled returns a shallow copy whose entry points all fail with err.
+// Unexported: only ForWorkspace decides a coder is unusable.
+func (c *Coder) withDisabled(err error) *Coder {
+	c2 := *c
+	c2.disabled = err
+	return &c2
 }
 
 // WithConnectors returns a shallow copy of the Coder that offers the given bound
@@ -240,6 +253,9 @@ func New(bin string, timeout time.Duration, homesDir, dataDir string) *Coder {
 
 // Generate sends prompt to the coder binary and returns the text response.
 func (c *Coder) Generate(ctx context.Context, workspaceID, prompt string) (*Result, error) {
+	if c.disabled != nil {
+		return nil, c.disabled
+	}
 	// API coder: run the in-process tool-calling loop instead of spawning a CLI.
 	if c.api != nil {
 		return c.runAPI(ctx, workspaceID, prompt)
@@ -314,6 +330,9 @@ var ErrRateLimited = errors.New("coder rate-limited by provider")
 // used by the text-only design conversations (agent designer, skill designer,
 // skill vetter) — never the agentic tool loop, which uses Generate.
 func (c *Coder) Chat(ctx context.Context, workspaceID string, history []db.ChatMessage, systemContext, userMessage string) (*Result, error) {
+	if c.disabled != nil {
+		return nil, c.disabled
+	}
 	// API coders need real alternating user/assistant message turns. Flattening
 	// the history into the system prompt (as the CLI path below does) makes the
 	// model treat each turn as a fresh single-turn request and re-ask the
@@ -362,6 +381,9 @@ func (c *Coder) Chat(ctx context.Context, workspaceID string, history []db.ChatM
 // For an API coder, workspaceID is required — it's used to resolve the
 // provider API key via the secrets lookup, exactly as Generate does.
 func (c *Coder) Ping(ctx context.Context, workspaceID string) (string, error) {
+	if c.disabled != nil {
+		return "", c.disabled
+	}
 	if c.api != nil {
 		return c.pingAPI(ctx, workspaceID)
 	}
@@ -382,6 +404,9 @@ func (c *Coder) Ping(ctx context.Context, workspaceID string) (string, error) {
 // auth returns a descriptive error instead of silently feeding garbage into a
 // run. For API coders it delegates to Ping (which resolves the provider key).
 func (c *Coder) Smoke(ctx context.Context, workspaceID string) (string, error) {
+	if c.disabled != nil {
+		return "", c.disabled
+	}
 	if c.api != nil {
 		return c.Ping(ctx, workspaceID)
 	}

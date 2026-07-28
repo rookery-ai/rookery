@@ -1,6 +1,7 @@
 package coder
 
 import (
+	"errors"
 	"time"
 
 	"github.com/ilijad1/simple-agents/internal/db"
@@ -21,7 +22,15 @@ import (
 //
 // vlt is the per-user vault used by the API coder's host tools for path-safe file
 // access. It is unused by the local coder path.
-func ForWorkspace(w *db.Workspace, homesDir, dataDir string, vlt *vault.Vault, defaultBin string, defaultTimeout time.Duration, enableSandbox bool) *Coder {
+// ErrLocalCoderDisabled is returned by every entry point of a coder built for a
+// "local" workspace in a build that ships no CLI coder (SA_CODER_MODE=slim).
+// It is returned at USE time rather than construction time because ForWorkspace
+// has no error return and is called from hot paths; failing loudly here beats
+// spawning a binary that does not exist and surfacing "executable file not found".
+var ErrLocalCoderDisabled = errors.New(
+	"this build has no CLI coder (SA_CODER_MODE=slim) — switch this workspace to the API engine in Settings → Coder")
+
+func ForWorkspace(w *db.Workspace, homesDir, dataDir string, vlt *vault.Vault, defaultBin string, defaultTimeout time.Duration, enableSandbox, allowLocal bool) *Coder {
 	if w != nil && w.CoderKind == "api" {
 		c := New(defaultBin, defaultTimeout, homesDir, dataDir).
 			WithBackendType("api").
@@ -32,6 +41,13 @@ func ForWorkspace(w *db.Workspace, homesDir, dataDir string, vlt *vault.Vault, d
 			c.timeout = time.Duration(w.CoderTimeoutS) * time.Second
 		}
 		return c
+	}
+
+	// Everything below builds a CLI-coder subprocess. A slim build has no such
+	// binary, so hand back a coder that fails with a message naming the fix
+	// instead of one that will fail with "executable file not found".
+	if !allowLocal {
+		return New(defaultBin, defaultTimeout, homesDir, dataDir).withDisabled(ErrLocalCoderDisabled)
 	}
 
 	bin := defaultBin
