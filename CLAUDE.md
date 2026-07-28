@@ -410,6 +410,8 @@ Nightly GC (in `serve`) sweeps expired skill drafts and their orphaned `.staging
 
 Editing reuses the same `Flow` FSM via `DesignSession.IsEdit`. `loadAgentForEdit` reads live `AGENT.md` and reconciles its `# Suggested schedule:` line against the real `agent_schedules` row before the coder sees it.
 
+**One chat surface.** `AgentEditPage` mounts the SAME `DesignerSurface` as creation from the first paint — there is no pre-screen. It used to render its own full-width chrome until the first reply landed and then swap in the surface, which jumped the layout to the designer's 10% gutter and showed no bubble (and no typing indicator) for the whole first coder round-trip. The only thing that pre-screen did is now a prop: **`startEndpoint`** routes the VERY FIRST message of a fresh session to `/api/v1/agents/:id/edit/start` (body `{message}` only — `startPayload` is the alternative way to open a session and is never merged in); every later message goes to `endpoints.design`, since a created edit session is indistinguishable from a create session. Two things make that work: `handleStartEditDesign` returns the FULL design-turn body (`web.designTurnResponse`, shared with `handleDesignChat`) — without `state` the stepper never leaves "Describe" and the Build button never appears, because nothing remounts into `GET /design/state` any more — and **`acceptRecoveredSession`** vetoes a recovered session that isn't this agent's edit (the design session is a per-workspace SINGLETON, so mount recovery would otherwise adopt an unrelated create conversation and offer to save the wrong agent). A vetoed session is treated as absent, SSE attach included, so another entity's build log can't stream into this page. `handleCancel` is likewise gated on a `sessionTouchedRef` — an untouched surface navigates without POSTing cancel, which would otherwise kill a stranger's in-flight build.
+
 **Diagnose-before-fix flow** (`BuildEditImplementationPrompt` + the edit variant of `BuildDesignSystemPrompt`): the designer must DIAGNOSE the root cause in plain English to the user → CONFIRM the proposed fix → AWAIT APPROVAL, then the editor states the root cause + fix in code, applies only the targeted change, and fully re-tests, proving the original bug no longer occurs. Prevents superficial edits that don't fix the actual problem.
 
 **Edit generation** runs in a sibling staging dir (`<agentID>-edit-staging`) — the live agent dir is never touched before approval. On approval, `updateAndFinish()` calls `AgentDesigner.UpdateAgent` → `db.UpdateAgentDescription` (UPDATE, not INSERT). `reconcileScheduleOnSave()` reuses the existing schedule row's ID to avoid duplicate rows and double-firing.
@@ -562,8 +564,14 @@ deleting a message or a reminder goes through the deferred-delete/undo flow abov
 **always mounted** and revealed purely by opacity (`opacity-0 group-hover:opacity-100
 focus-within:opacity-100`); mounting it on hover would insert a node under the cursor and cancel an
 in-progress drag-select, so `select-none` is scoped to the footer row and never applied to the
-message body. `createdAt` is optional because `DesignerSurface` renders design-conversation turns
-through the same component with no timestamps (it gets the copy button only). The **timezone**
+message body. **Designer turns are timestamped too**, so the two chat surfaces read identically: both
+`Flow`s stamp `db.ChatMessage.CreatedAt` on every history append, and `web.designHistoryDTO` (the one
+mapper behind the agent resume/state and skill resume handlers) emits it as a `created_at`
+RFC3339Nano **string** — a `time.Time` DTO field would defeat `omitempty` (a no-op on structs) and
+stamp pre-timestamp drafts year 1. Turns appended client-side (the optimistic user bubble, each
+assistant reply, the resume message) are stamped in the browser via `nowStamp()`, because the design
+endpoints return prose, not a transcript row. `createdAt` stays optional: an old draft's turn simply
+omits the field and the footer degrades to the copy button alone. The **timezone**
 reaches the footer as CONTEXT (`lib/timezone.tsx`: `TimeZoneProvider` at the app root,
 `useTimeZone()` at the leaf) rather than a `useSession()` call inside the bubble — the bubble is
 mounted in places with no `QueryClientProvider` above it, where `useQuery` would throw; an undefined
