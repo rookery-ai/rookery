@@ -17,7 +17,7 @@ jobs:
       contents: write # create the GitHub Release
       id-token: write # cosign keyless signing via OIDC
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # goreleaser needs full history for the changelog range
 
@@ -51,7 +51,7 @@ jobs:
       packages: write # push to GHCR
       id-token: write # cosign keyless
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v3
       - uses: sigstore/cosign-installer@v4.1.2
 
