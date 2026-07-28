@@ -105,6 +105,7 @@ type Handlers = {
   ) => Response;
   del?: (id: string) => Response;
   providersOverride?: () => ServiceProvider[];
+  actions?: (provider: string) => Response;
 };
 
 function mockFetch(handlers: Handlers = {}) {
@@ -148,6 +149,25 @@ function mockFetch(handlers: Handlers = {}) {
           : { key: "", label: "", inputs: {} };
         return Promise.resolve(
           handlers.apikey ? handlers.apikey(apikeyMatch[1], body) : jsonResponse({ ok: true }),
+        );
+      }
+
+      const actionsMatch = url.match(/^\/api\/v1\/services\/([^/]+)\/actions$/);
+      if (actionsMatch && method === "GET") {
+        return Promise.resolve(
+          handlers.actions
+            ? handlers.actions(actionsMatch[1])
+            : jsonResponse({
+                actions: [
+                  {
+                    name: "github_search_issues",
+                    description: "Search issues across your repos",
+                    mutating: false,
+                    public_write: false,
+                    params: { properties: { query: { type: "string" } }, required: ["query"] },
+                  },
+                ],
+              }),
         );
       }
 
@@ -301,4 +321,60 @@ test("disconnect asks for confirmation, then DELETEs the connection", async () =
   await user.click(screen.getByRole("button", { name: /yes, disconnect/i }));
 
   expect(deletedID).toBe("c1");
+});
+
+test("shows an actions entry button carrying the provider's action count", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap(OAUTH_WITH_CREDS);
+  await user.click(screen.getByText("open wizard"));
+
+  expect(await screen.findByRole("button", { name: /What can it do/ })).toBeInTheDocument();
+  expect(screen.getByText(/3 actions/)).toBeInTheDocument();
+});
+
+test("a provider with no actions shows no entry button", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap(OAUTH_NO_CREDS); // action_count: 0
+  await user.click(screen.getByText("open wizard"));
+
+  await screen.findByLabelText("Client ID");
+  expect(screen.queryByRole("button", { name: /What can it do/ })).not.toBeInTheDocument();
+});
+
+test("opening the actions view replaces the connect body, and Back restores it", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap(OAUTH_WITH_CREDS); // has_creds: true → opens on the connect view
+  await user.click(screen.getByText("open wizard"));
+
+  await screen.findByLabelText("Label (optional)");
+  await user.click(await screen.findByRole("button", { name: /What can it do/ }));
+
+  expect(await screen.findByText("Search issues across your repos")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Label (optional)")).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: /Back/ }));
+  expect(await screen.findByLabelText("Label (optional)")).toBeInTheDocument();
+});
+
+// The regression that ruled out opening a second slide-over panel: the shell's
+// slide-over is a single slot, so a real second panel would unmount the wizard
+// and silently discard whatever the user had typed.
+test("half-typed OAuth credentials survive a trip through the actions view", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap(OAUTH_WITH_CREDS);
+  await user.click(screen.getByText("open wizard"));
+
+  // Jump to the creds view, where the sensitive fields live.
+  await user.click(await screen.findByText("edit app credentials"));
+  await user.type(await screen.findByLabelText("Client ID"), "typed-client-id");
+
+  await user.click(screen.getByRole("button", { name: /What can it do/ }));
+  await screen.findByText("Search issues across your repos");
+  await user.click(screen.getByRole("button", { name: /Back/ }));
+
+  expect(await screen.findByLabelText("Client ID")).toHaveValue("typed-client-id");
 });

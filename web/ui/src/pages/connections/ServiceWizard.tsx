@@ -17,6 +17,7 @@ import {
   type ServiceProvider,
   type ServiceConnection,
 } from "@/lib/connections";
+import { ProviderActions } from "./ProviderActions";
 
 type ServiceWizardProps = { provider: ServiceProvider };
 
@@ -131,6 +132,12 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
     servicesQuery.data?.providers.find((p) => p.name === initialProvider.name) ?? initialProvider;
 
   const [view, setView] = useState<"creds" | "connect">(provider.has_creds ? "connect" : "creds");
+  // Overlays `view` rather than widening its union: `view` keeps meaning "which
+  // connect step am I on", so Back lands where the user left without a separate
+  // variable remembering it. ServiceWizard stays mounted throughout, so every
+  // form field below survives the round trip — which a second slide-over panel
+  // could not have done (the shell's slide-over is a single slot).
+  const [showActions, setShowActions] = useState(false);
   const [label, setLabel] = useState("");
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
@@ -186,8 +193,29 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
 
   const hasConnections = provider.connections.length > 0;
 
+  if (showActions) {
+    return (
+      <PanelBody>
+        <ProviderActions provider={provider} onBack={() => setShowActions(false)} />
+      </PanelBody>
+    );
+  }
+
   return (
     <PanelBody>
+      {provider.action_count > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowActions(true)}
+          className="flex w-full items-center justify-between gap-2 rounded-lg border border-border px-3 py-2 text-sm transition-colors hover:border-primary/40"
+        >
+          <span className="font-medium">What can it do?</span>
+          <span className="shrink-0 text-xs text-muted-2">
+            {provider.action_count} action{provider.action_count === 1 ? "" : "s"} →
+          </span>
+        </button>
+      )}
+
       {hasConnections && (
         <div className="space-y-2">
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-2">
