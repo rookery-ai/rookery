@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ── SPA ──────────────────────────────────────────────────────────────────────
-FROM node:24-alpine AS ui
+FROM node:26-alpine AS ui
 WORKDIR /src/web/ui
 COPY web/ui/package.json web/ui/package-lock.json ./
 RUN npm ci
