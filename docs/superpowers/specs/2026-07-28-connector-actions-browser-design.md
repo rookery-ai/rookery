@@ -6,8 +6,8 @@
 ## Problem
 
 A workspace owner can connect 46 services but has no way to learn what any of
-them lets an agent *do*. The action manifests exist — ~214 curated actions across
-the providers, each with a description written for an LLM — but they are visible
+them lets an agent *do*. The action manifests exist — 272 curated actions across
+45 providers, each with a description written for an LLM — but they are visible
 only to the model. The connections page shows a logo, a connection count, and a
 connect form. Nothing answers "if I connect Gmail, what can my agents actually
 do with it?", which is the question that decides whether connecting is worth the
@@ -77,7 +77,7 @@ caching layer is warranted.
 
 ### Why not inline it into `GET /api/v1/services`
 
-That endpoint is fetched on every visit to the connections page. Adding ~214
+That endpoint is fetched on every visit to the connections page. Adding 272
 actions with their compiled JSON schemas to that payload is a real size
 regression on the page's critical path, paid by every user on every visit to
 serve a panel most visits never open.
@@ -161,7 +161,7 @@ so there is nothing to gate on.
   A browser-triggered execute path would mean mutating third-party calls
   originating from the UI — a materially larger security surface than a read-only
   reference pane, and a separate design if ever wanted.
-- **No cross-provider action catalog.** A global searchable index of all ~214
+- **No cross-provider action catalog.** A global searchable index of all 272
   actions is a different feature with a different entry point.
 - **No slide-over stacking refactor** (see Placement decision).
 - **No changes to how agents discover or bind actions.** `connectors.ToolDefs` and

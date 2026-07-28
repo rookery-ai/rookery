@@ -55,9 +55,9 @@ type apiServiceProvider struct {
 	Connections   []apiServiceConnection   `json:"connections"`
 	// ActionCount lets the UI show a count and hide the actions entry point at
 	// zero without a second fetch. The actions themselves stay OFF this payload:
-	// it loads on every visit to the connections page, and ~214 actions with
-	// their JSON schemas is a real regression on that critical path.
-	ActionCount   int                      `json:"action_count"`
+	// it loads on every visit to the connections page, and 272 actions across
+	// 45 providers with their JSON schemas is a real regression on that critical path.
+	ActionCount int `json:"action_count"`
 }
 
 type apiServicesListResponse struct {

@@ -268,6 +268,48 @@ func TestAPIServices_ACTIONS_ListsGithubActions(t *testing.T) {
 	if contains(body, `"actions":null`) {
 		t.Fatalf("actions must serialize as [] not null: %s", body)
 	}
+
+	// Decode and verify the params contract itself, not just that the substring
+	// "params" appears somewhere in the body (which would pass even if it only
+	// showed up inside a description string). The whole Go-to-TypeScript seam
+	// (ConnectorActionParams in web/ui/src/lib/connections.ts) assumes every
+	// action's params is a JSON Schema object with properties+required — this
+	// is the one place that assumption is checked against the real payload.
+	var decoded apiProviderActionsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &decoded); err != nil {
+		t.Fatalf("decoding actions response: %v: %s", err, body)
+	}
+	var searchIssues *apiConnectorAction
+	for i := range decoded.Actions {
+		if decoded.Actions[i].Name == "github_search_issues" {
+			searchIssues = &decoded.Actions[i]
+			break
+		}
+	}
+	if searchIssues == nil {
+		t.Fatalf("github_search_issues not found among decoded actions: %s", body)
+	}
+	var params struct {
+		Type       string          `json:"type"`
+		Properties json.RawMessage `json:"properties"`
+		Required   []string        `json:"required"`
+	}
+	if err := json.Unmarshal(searchIssues.Params, &params); err != nil {
+		t.Fatalf("decoding github_search_issues params: %v: %s", err, string(searchIssues.Params))
+	}
+	if params.Type != "object" {
+		t.Fatalf("expected params.type == object, got %q", params.Type)
+	}
+	var props map[string]json.RawMessage
+	if err := json.Unmarshal(params.Properties, &props); err != nil {
+		t.Fatalf("params.properties did not decode as an object: %v: %s", err, string(searchIssues.Params))
+	}
+	if _, ok := props["query"]; !ok {
+		t.Fatalf("expected params.properties.query, got: %s", string(searchIssues.Params))
+	}
+	if len(params.Required) == 0 {
+		t.Fatalf("expected a non-empty params.required, got: %s", string(searchIssues.Params))
+	}
 }
 
 // The action manifests are the only place request templates live. Leaking them
