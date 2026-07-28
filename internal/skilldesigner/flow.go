@@ -280,7 +280,7 @@ func (f *Flow) markGenerationFailed(workspaceID, detail string) {
 		note += " Reason: " + strings.TrimSpace(detail) + "."
 	}
 	note += " On the next attempt I will address this and finish building the skill."
-	sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: note})
+	sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: note, CreatedAt: time.Now().UTC()})
 	f.saveDraft(sess)
 }
 
@@ -405,7 +405,7 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		reply = fmt.Sprintf("⚠️ %s hit its usage limit. The skill design session is still active — try again in a while.", coderSvc.Name())
 	default:
 		f.mu.Lock()
-		sess.History = append(sess.History, db.ChatMessage{Role: "user", Content: userMessage})
+		sess.History = append(sess.History, db.ChatMessage{Role: "user", Content: userMessage, CreatedAt: time.Now().UTC()})
 		f.saveDraft(sess)
 		f.mu.Unlock()
 		return "", fmt.Errorf("coder: %w", err)
@@ -413,8 +413,8 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 
 	f.mu.Lock()
 	sess.History = append(sess.History,
-		db.ChatMessage{Role: "user", Content: userMessage},
-		db.ChatMessage{Role: "assistant", Content: reply},
+		db.ChatMessage{Role: "user", Content: userMessage, CreatedAt: time.Now().UTC()},
+		db.ChatMessage{Role: "assistant", Content: reply, CreatedAt: time.Now().UTC()},
 	)
 	f.saveDraft(sess)
 	f.mu.Unlock()
@@ -625,7 +625,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		// security-relevant failure of the bunch — isn't context-blind about
 		// WHY the vetter blocked it; without this a retry could regenerate the
 		// exact same flagged behavior.
-		sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: msg})
+		sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: msg, CreatedAt: time.Now().UTC()})
 		f.saveDraft(sess)
 		f.mu.Unlock()
 		cleanupStaging()

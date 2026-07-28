@@ -110,27 +110,19 @@ func (s *Server) handleResumeSkillDraft(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
-	type histEntry struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
-	}
 	sess := s.skillFlow.GetSession(u.ID)
 	out := map[string]interface{}{
 		"response":          resp,
 		"state":             "",
-		"history":           []histEntry{},
+		"history":           []designHistEntry{},
 		"skill_id":          "",
 		"skill_name":        "",
 		"generation_failed": false,
 	}
 	if sess != nil {
 		out["generation_failed"] = sess.GenerationFailed
-		hist := make([]histEntry, 0, len(sess.History))
-		for _, m := range sess.History {
-			hist = append(hist, histEntry{Role: m.Role, Content: m.Content})
-		}
 		out["state"] = sess.State.String()
-		out["history"] = hist
+		out["history"] = designHistoryDTO(sess.History)
 		out["skill_name"] = sess.SkillName
 	}
 	return c.JSON(http.StatusOK, out)
