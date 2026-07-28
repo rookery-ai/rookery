@@ -127,8 +127,12 @@ export function useServices() {
   });
 }
 
-// Mirrors apiConnectorAction. `params` is the action's JSON Schema. The manifests
-// only ever use flat object schemas, so nothing deeper is modeled here.
+// Mirrors apiConnectorAction. `params` is the action's JSON Schema. Real
+// manifests can nest schemas deeper than this (e.g. an array param's `items`
+// — see internal/connectors/schema.go's propSchema), but that's intentionally
+// not modeled here: the actions panel only ever renders a param's top-level
+// `type`, so an array param just shows as "array" and the nested shape is
+// never read.
 export type ConnectorActionParams = {
   properties?: Record<string, { type?: string; description?: string }>;
   required?: string[];
