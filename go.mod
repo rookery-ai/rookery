@@ -12,7 +12,7 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/slack-go/slack v0.27.0
 	github.com/stretchr/testify v1.11.1
-	github.com/urfave/cli/v3 v3.9.0
+	github.com/urfave/cli/v3 v3.10.1
 	github.com/yuin/goldmark v1.8.2
 	golang.org/x/crypto v0.53.0
 	golang.org/x/net v0.55.0
