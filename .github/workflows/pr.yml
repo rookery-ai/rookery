@@ -137,6 +137,13 @@ jobs:
     name: Security scan
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      # gitleaks lists the PR's commits to scan only what the PR adds, which
+      # needs pull-requests: read — without it the API returns 403 "Resource not
+      # accessible by integration". contents: read must be restated because a
+      # job-level block REPLACES the workflow-level one instead of merging.
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
