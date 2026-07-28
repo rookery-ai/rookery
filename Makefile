@@ -78,9 +78,9 @@ logs:
 status:
 	@pgrep -af '[b]in/simple-agents serve' || echo "not running"
 
-## test: run the unit tests
+## test: run the unit tests (no -race; see ci-test for the gate's version)
 test:
-	go test ./... -count=1 -timeout 120s
+	go test ./... -count=1 -timeout $(GOTEST_TIMEOUT)
 
 ## clean: remove the built binary
 clean:
