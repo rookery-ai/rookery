@@ -18,6 +18,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/approval"
 	"github.com/ilijad1/simple-agents/internal/auth"
+	"github.com/ilijad1/simple-agents/internal/buildinfo"
 	"github.com/ilijad1/simple-agents/internal/chat"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/config"
@@ -57,6 +58,7 @@ func main() {
 			sandboxExecCmd(),
 			connectorCmd(),
 			kbCmd(),
+			versionCmd(),
 		},
 	}
 
@@ -734,4 +736,17 @@ func resolveDir(sub string) string {
 		}
 	}
 	return sub
+}
+
+// versionCmd prints the build identity stamped in at link time. An installed
+// binary that cannot say what it is cannot be supported.
+func versionCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "version",
+		Usage: "Print the build version and exit",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			fmt.Println(buildinfo.String())
+			return nil
+		},
+	}
 }

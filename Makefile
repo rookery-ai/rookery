@@ -15,6 +15,15 @@ LOG := logs/server.log
 PID := logs/server.pid
 SHELL := /bin/bash
 
+# Build identity stamped into the binary via -ldflags. Overridable from the
+# environment so a release build can pass an exact tag.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -X github.com/ilijad1/simple-agents/internal/buildinfo.Version=$(VERSION) \
+           -X github.com/ilijad1/simple-agents/internal/buildinfo.Commit=$(COMMIT) \
+           -X github.com/ilijad1/simple-agents/internal/buildinfo.Date=$(DATE)
+
 .PHONY: ui build-go build stop start deploy restart logs status clean test
 
 ## ui: build the SPA (web/ui/dist) — requires node; run before `build`
@@ -23,7 +32,7 @@ ui:
 
 ## build-go: compile the binary only (embeds whatever dist/ currently holds)
 build-go:
-	go build -o $(BIN) $(PKG)
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BIN) $(PKG)
 
 ## build: full artifact — SPA + binary (spec §2)
 build: ui build-go
