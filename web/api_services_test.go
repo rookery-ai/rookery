@@ -224,3 +224,122 @@ func TestAPIServices_APIKEY_ReconnectSameLabelPreservesID(t *testing.T) {
 		}
 	}
 }
+
+func TestAPIServices_ACTIONS_Unauthenticated(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/services/github/actions", nil, nil)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAPIServices_ACTIONS_UnknownProvider(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/services/not-a-real-provider/actions", nil, cookies)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !contains(rec.Body.String(), "not_found") {
+		t.Fatalf("expected not_found code, got: %s", rec.Body.String())
+	}
+}
+
+func TestAPIServices_ACTIONS_ListsGithubActions(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/services/github/actions", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !contains(body, `"github_search_issues"`) {
+		t.Fatalf("expected github_search_issues in response, got: %s", body)
+	}
+	for _, key := range []string{`"description"`, `"mutating"`, `"public_write"`, `"params"`} {
+		if !contains(body, key) {
+			t.Fatalf("expected response to contain field %s, got: %s", key, body)
+		}
+	}
+	if contains(body, `"actions":null`) {
+		t.Fatalf("actions must serialize as [] not null: %s", body)
+	}
+}
+
+// The action manifests are the only place request templates live. Leaking them
+// through this endpoint would disclose how every request is built, for no reader
+// benefit — so sweep EVERY provider rather than trusting one spot check.
+func TestAPIServices_ACTIONS_NeverLeaksRequestPlumbing(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	listRec := doJSON(t, s, http.MethodGet, "/api/v1/services", nil, cookies)
+	var list struct {
+		Providers []struct {
+			Name        string `json:"name"`
+			ActionCount int    `json:"action_count"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decoding services list: %v", err)
+	}
+	if len(list.Providers) == 0 {
+		t.Fatal("expected at least one provider")
+	}
+
+	for _, p := range list.Providers {
+		rec := doJSON(t, s, http.MethodGet, "/api/v1/services/"+p.Name+"/actions", nil, cookies)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d: %s", p.Name, rec.Code, rec.Body.String())
+		}
+		body := rec.Body.String()
+		for _, banned := range []string{`"request":`, `"response_extract":`, `"body_builder":`} {
+			if contains(body, banned) {
+				t.Fatalf("%s: response leaked request plumbing %s: %s", p.Name, banned, body)
+			}
+		}
+		if contains(body, `"params":null`) {
+			t.Fatalf("%s: params must normalize to {} not null: %s", p.Name, body)
+		}
+	}
+}
+
+// action_count exists so the UI can render a count and hide the entry button at
+// zero without a second fetch. If it drifts from the real list the button lies.
+func TestAPIServices_ActionCountMatchesActionsEndpoint(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	listRec := doJSON(t, s, http.MethodGet, "/api/v1/services", nil, cookies)
+	var list struct {
+		Providers []struct {
+			Name        string `json:"name"`
+			ActionCount int    `json:"action_count"`
+		} `json:"providers"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decoding services list: %v", err)
+	}
+
+	for _, p := range list.Providers {
+		rec := doJSON(t, s, http.MethodGet, "/api/v1/services/"+p.Name+"/actions", nil, cookies)
+		var got struct {
+			Actions []struct {
+				Name string `json:"name"`
+			} `json:"actions"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("%s: decoding actions: %v", p.Name, err)
+		}
+		if p.ActionCount != len(got.Actions) {
+			t.Fatalf("%s: action_count=%d but endpoint returned %d actions",
+				p.Name, p.ActionCount, len(got.Actions))
+		}
+	}
+}
