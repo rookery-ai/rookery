@@ -25,6 +25,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/gateway"
+	"github.com/ilijad1/simple-agents/internal/health"
 	"github.com/ilijad1/simple-agents/internal/memory"
 	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/reminder"
@@ -80,6 +81,21 @@ func serveCmd() *cli.Command {
 
 			if err := os.MkdirAll(cfg.Data.Dir, 0o750); err != nil {
 				return fmt.Errorf("create data dir: %w", err)
+			}
+
+			// Report the build identity and every host capability that degrades
+			// SILENTLY when missing. The python3 warning is the load-bearing one:
+			// without it the agent-tool AST guardrail self-skips, so a security
+			// control switches itself off with no other signal.
+			rep := health.Detect(cfg.Sandbox.Enabled, cfg.Coder.Mode)
+			slog.Info("simple-agents starting",
+				"version", rep.Version, "commit", rep.Commit,
+				"sandbox_supported", rep.Sandbox.Supported,
+				"sandbox_enabled", rep.Sandbox.Enabled,
+				"sandbox_abi", rep.Sandbox.ABI,
+				"coder_mode", rep.CoderMode)
+			for _, warn := range rep.Warnings() {
+				slog.Warn("capability degraded", "detail", warn)
 			}
 
 			migrationsDir := resolveDir("migrations")

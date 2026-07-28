@@ -171,6 +171,10 @@ func (s *Server) setupRoutes() {
 	s.echo.GET("/dashboard/connectors/services/callback/:provider", s.handleOAuthCallback,
 		s.requireOwner, s.requireActiveWorkspace, s.requireSetupComplete)
 
+	// Unauthenticated infrastructure endpoint — see apiHealthz. Registered
+	// before the SPA catch-all so /healthz is never swallowed by it.
+	s.echo.GET("/healthz", s.apiHealthz)
+
 	s.setupAPIRoutes()
 	s.setupSPARoutes()
 }

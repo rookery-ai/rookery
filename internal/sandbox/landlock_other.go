@@ -8,6 +8,9 @@ import "errors"
 // Strong per-user filesystem confinement on Windows/macOS is a future phase.
 func Supported() bool { return false }
 
+// ABI returns 0 off Linux: Landlock is a Linux-only LSM.
+func ABI() int { return 0 }
+
 // SystemReadOnlyPaths returns nil off Linux (no confinement is applied).
 func SystemReadOnlyPaths() []string { return nil }
 
