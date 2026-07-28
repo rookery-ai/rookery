@@ -46,6 +46,8 @@ make stop      # stop the running server
 make logs      # tail -f logs/server.log
 make status    # show running server process
 make test      # run the unit tests
+make ci        # run the full PR gate locally (fmt, vet, -race, cross-compile, UI)
+make docker-build / docker-run   # slim container image (podman or docker)
 
 # Frontend (web/ui): build the SPA into the binary
 make ui        # npm ci + vite build → web/ui/dist (embedded on next go build)
@@ -83,6 +85,125 @@ AST guardrail tests shell out to `python3`. If Python is not available, those te
   group of tasks is complete and needs to be exercised on the running server,
   it's OK to `make deploy` from the feature branch locally before the PR merges —
   that's for testing, not production.
+
+## CI/CD and release process
+
+**Every change ships through this path. There are no manual tags and no manual
+image pushes.**
+
+1. **Branch** off `main`. Never commit to `main` directly.
+2. **Commit** using Conventional Commits (`type(scope): summary`).
+3. **Open a PR.** Its **title** must itself be a valid Conventional Commit —
+   merges are squashes, so the title becomes the commit that lands on `main` and
+   is what release-please reads to compute the next version.
+4. **PR checks must pass** (`.github/workflows/pr.yml`, six jobs):
+   - `Conventional commit title`
+   - `Go build and test` — gofmt, `go vet`, `go test -race` (**900s timeout**,
+     not 600s: the `web` package alone measures ~343s under `-race`, 13× its
+     non-race time)
+   - `Cross-compile` — all six GOOS/GOARCH pairs. **This is the guard that keeps
+     `GOOS=windows` compiling**; it was broken for the repo's entire history
+     precisely because nothing ever built it.
+   - `Frontend` — `npm ci`, `tsc -b`, `oxlint`, `vitest`, `vite build`
+   - `Security scan` — govulncheck, Trivy (fs), gitleaks. CodeQL runs in its own
+     workflow because it needs `security-events: write`.
+   - `Container smoke test` — builds the image, Trivy-scans it, runs it, and
+     asserts `/healthz`, the SPA root and the session endpoint all answer. **This
+     is the project's only end-to-end coverage.**
+5. **Run the same checks locally first** with `make ci` — it mirrors the gate
+   exactly, including the cross-compile matrix. `make ci-fmt` / `ci-vet` /
+   `ci-test` / `ci-cross` / `ci-ui` run the pieces individually.
+6. **Squash-merge.** release-please then maintains a release PR on `main`.
+7. **Merging the release PR** tags the repo, which fires
+   `.github/workflows/release.yml`: goreleaser publishes binaries, `.deb`/`.rpm`,
+   checksums, cosign signatures and SBOMs, and buildx pushes the multi-arch
+   image to GHCR.
+
+Versioning starts at **v0.1.0** with `bump-minor-pre-major`, so a breaking
+change bumps the minor while the project is pre-1.0. Reaching 1.0.0 is a
+deliberate act at public release.
+
+**Secrets:** the pipeline needs exactly one, `RELEASE_PLEASE_TOKEN` — see
+`docs/ci-setup.md` for that plus the required branch-protection settings. GHCR
+authenticates with the built-in `GITHUB_TOKEN`, cosign signs keylessly via OIDC,
+and the scanners need no credentials. **Do not add secrets that have no
+consumer.**
+
+## Distribution
+
+**Native binaries are the primary artifact**; the container image is secondary.
+
+| Target | Sandbox | Service | Tier |
+|---|---|---|---|
+| linux amd64/arm64 | Landlock | systemd **user** unit + `enable-linger` | 1 |
+| container (linux) | Landlock (verified ABI 8 under rootless Podman) | runtime-managed | 1 |
+| darwin amd64/arm64 | **none** | launchd (not yet shipped) | 2 |
+| windows amd64/arm64 | **none** | SCM (not yet shipped) | 2 |
+
+**Off Linux there is no filesystem sandbox at all** — `sandbox.Supported()`
+returns false and callers do not wrap, so coder subprocesses run unconfined.
+`/healthz` and the startup log both report this.
+
+One-command installers (`install.sh`/`install.ps1`), a Homebrew tap and Windows
+service registration are **deferred until the repository is public**: release
+assets on a private repo require an authenticated request, so `curl | sh` cannot
+work yet. Everything those installers will need is already built.
+
+Release artifacts (`.goreleaser.yaml`): six binary archives, `.deb`/`.rpm`
+carrying the systemd user unit, `checksums.txt` + cosign keyless signature, and
+an SBOM per archive.
+
+### Container
+
+```bash
+make docker-build           # honours podman or docker, whichever is installed
+make docker-run             # port 8080, data in the simple-agents-data volume
+
+podman run -d --name simple-agents -p 8080:8080 \
+  -v simple-agents-data:/data ghcr.io/ilijad1/simple-agents-v2:latest
+```
+
+The image is **slim**: it contains no CLI coder binary and sets
+`SA_CODER_MODE=slim`, so workspaces must use the `api` coder kind. It does ship
+python3, ripgrep, poppler-utils and tesseract, so `/healthz` reports no
+capability warnings inside it. ~270 MB.
+
+Two container notes worth knowing: **Podman ignores `HEALTHCHECK`** unless built
+with `--format docker` (Docker/buildx honours it), and `migrations/` is copied
+*beside* the binary because `resolveDir()` looks exe-relative before
+CWD-relative.
+
+### Environment variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `SA_HOST` | `0.0.0.0` | bind address; `127.0.0.1` for loopback-only |
+| `SA_PORT` | `8080` | listen port |
+| `SA_DATA_DIR` | `~/.simple-agents-v2` | data root; also relocates the DB |
+| `SA_SESSION_KEY` | generated | hex 32-byte session key |
+| `SA_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks |
+| `SA_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |
+| `SA_CODER_MODE` | `full` | `slim` removes the local CLI coder kind entirely |
+
+`SA_CODER_MODE` is **policy** ("this build has no CLI coder"), deliberately
+distinct from **detection** (`coder.DetectInstalled` — "none is on PATH right
+now"). Slim is enforced at four layers: config parsing (an unknown value is a
+startup error), the settings API (skips the host probe), the SPA (hides the
+local engine), and both write paths + `coder.ForWorkspace`, which returns
+`ErrLocalCoderDisabled` naming the fix rather than spawning a missing binary.
+
+### Health
+
+`GET /healthz` is unauthenticated (outside `/api/v1`) and reports version,
+commit, sandbox status including Landlock ABI, coder mode, and host-tool
+presence — booleans only, never paths. It backs the container `HEALTHCHECK`
+(via the `simple-agents healthcheck` subcommand), the CI smoke test, and
+operator triage.
+
+**A `python3` warning is not cosmetic**: without it the agent-tool AST guardrail
+in `internal/agentdesigner/guardrails.go` self-skips, so generated tool scripts
+run unchecked. `rg`, `pdftotext` and `tesseract` degrade KB search, PDF
+extraction and OCR respectively.
 
 ## Architecture
 
@@ -691,7 +812,7 @@ provider/model/base-url/api-key-secret through `db.UpdateWorkspaceCoder`.
 
 ## Known gaps
 
-- No integration or e2e test coverage — unit tests cover logic boundaries; coder subprocess round-trips (real edit → test → approve) are exercised manually.
+- **Thin e2e coverage.** The CI container smoke test (`pr.yml` → `Container smoke test`) is the only end-to-end check: it starts the real image and asserts `/healthz`, the SPA root and the session endpoint answer. Everything above that — coder subprocess round-trips (real edit → test → approve), agent runs, connector calls — is still exercised manually. Unit tests cover logic boundaries.
 - **Local-coder Model field not in the settings UI** — the coder settings/setup form collects a model only for the `api` coder kind; the `#coder_local` section has just the binary picker. So `workspaces.CoderModel` cannot be set for a **local** CLI coder through the UI, even though the runner already passes it as `-m`/`--model` (opencode/cursor). This blocks OpenCode out of the box (see "OpenCode requires an explicit model" above — with no model it 401s on its OpenRouter default). Until a Model input is added to `#coder_local` (+ read in `handleSaveWorkspaceCoder`/`handleSetupCoder`), `CoderModel` for a local coder must be set another way (e.g. directly in the DB). Two clean fixes, not yet built: (1) add the local Model field; (2) have `opencodeBackend` fall back to a host-configured default model when `CoderModel` is empty. Codex/Gemini also don't yet receive `cliModel` (noted in `selectBackend`).
 - **Discord adapter** — implemented (DM-only); live WS round-trip is operator-verified. **Slack adapter** — implemented (DM-only, Socket Mode); live loop operator-verified. Note: Slack's Socket Mode inbound loop does not auto-restart after a *fatal* reconnect failure (reconnect exhaustion) — outbound still works, but inbound DMs stop until the connector is re-saved or the server restarts; a per-adapter supervisor is a future framework enhancement. Mattermost/Matrix adapters — not yet implemented (framework ready: adapter registry + `CredSpec` + render subsystem all support a new platform via `init()` registration alone; Mattermost should be a hand-rolled thin REST+WS client, NOT the heavy official SDK; Matrix E2EE needs `-tags goolm` to stay CGo-free). The connectors UI (SPA `/connections` → Chat apps tab, backed by `/api/v1/connectors`) is `CredSpec`-driven — a new platform's connect card is data, not hand-written markup. **Design stance:** all adapters use an **outbound** connection (bot dials out; zero inbound port) — a deliberate security property for self-hosted/home installs (works behind NAT, home firewall can drop-by-default, no forgeable public endpoint). **Webhook-based platforms** (WhatsApp/Viber/LINE/Teams/Messenger/Google Chat) are deferred OUT of the home-install core; if built, they must be tunnel/relay-first (outbound), never a raw open port. Future outbound-only candidates: Zulip (event-queue long-poll), XMPP. See `docs/superpowers/specs/2026-07-15-multi-platform-chat-adapters-design.md`.
 - **Skill editing + import via chat** — `/skill` covers list/create/cancel, but there is no `/skill edit` (the skill designer has no edit mode at all, unlike `agentdesigner.StartEdit`) and no skill import (ZIP / pasted SKILL.md) over chat, which needs per-adapter file-upload handling. The remaining half of the skill parity gap.
