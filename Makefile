@@ -15,7 +15,24 @@ LOG := logs/server.log
 PID := logs/server.pid
 SHELL := /bin/bash
 
-.PHONY: ui build-go build stop start deploy restart logs status clean test
+# Build identity stamped into the binary via -ldflags. Overridable from the
+# environment so a release build can pass an exact tag.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -X github.com/ilijad1/simple-agents/internal/buildinfo.Version=$(VERSION) \
+           -X github.com/ilijad1/simple-agents/internal/buildinfo.Commit=$(COMMIT) \
+           -X github.com/ilijad1/simple-agents/internal/buildinfo.Date=$(DATE)
+
+# Prefer podman, fall back to docker. Overridable: CONTAINER_ENGINE=docker make …
+CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null || echo podman)
+
+# Keep in sync with .github/workflows/pr.yml. The web package measures ~343s
+# under -race, so 600s leaves no headroom on a slower machine.
+GOTEST_TIMEOUT ?= 900s
+
+.PHONY: ui build-go build stop start deploy restart logs status clean test \
+        ci ci-fmt ci-vet ci-test ci-cross ci-ui docker-build docker-run
 
 ## ui: build the SPA (web/ui/dist) — requires node; run before `build`
 ui:
@@ -23,7 +40,7 @@ ui:
 
 ## build-go: compile the binary only (embeds whatever dist/ currently holds)
 build-go:
-	go build -o $(BIN) $(PKG)
+	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o $(BIN) $(PKG)
 
 ## build: full artifact — SPA + binary (spec §2)
 build: ui build-go
@@ -61,10 +78,48 @@ logs:
 status:
 	@pgrep -af '[b]in/simple-agents serve' || echo "not running"
 
-## test: run the unit tests
+## test: run the unit tests (no -race; see ci-test for the gate's version)
 test:
-	go test ./... -count=1 -timeout 120s
+	go test ./... -count=1 -timeout $(GOTEST_TIMEOUT)
 
 ## clean: remove the built binary
 clean:
 	rm -f $(BIN)
+
+## ci: run the same checks pr.yml runs, locally — catch it before you push
+ci: ci-fmt ci-vet ci-test ci-cross ci-ui
+	@echo "all PR checks passed"
+
+ci-fmt:
+	@unformatted="$$(gofmt -l . | grep -v '^\.claude/' || true)"; \
+	if [ -n "$$unformatted" ]; then \
+		echo "gofmt needed:"; echo "$$unformatted"; exit 1; \
+	fi
+	@echo "gofmt: clean"
+
+ci-vet:
+	go vet ./...
+
+ci-test:
+	go test ./... -race -count=1 -timeout $(GOTEST_TIMEOUT)
+
+## ci-cross: the GOOS=windows regression guard — the reason this target exists
+ci-cross:
+	@for t in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do \
+		printf "%-16s" "$$t"; \
+		CGO_ENABLED=0 GOOS=$${t%/*} GOARCH=$${t#*/} go build -o /dev/null $(PKG) \
+			&& echo OK || { echo FAIL; exit 1; }; \
+	done
+
+ci-ui:
+	cd web/ui && npm ci && npx tsc -b && npm run lint && npx vitest run
+
+## docker-build: build the slim container image locally (podman or docker)
+docker-build:
+	$(CONTAINER_ENGINE) build -t simple-agents:local \
+		--build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) .
+
+## docker-run: run the locally built image with a persistent data volume
+docker-run:
+	$(CONTAINER_ENGINE) run --rm -it -p 8080:8080 \
+		-v simple-agents-data:/data simple-agents:local

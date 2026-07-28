@@ -12,7 +12,7 @@ func TestOpenAIChatBody(t *testing.T) {
 		t.Fatal("openai_chat_completion missing")
 	}
 	_, _, body, _, err := renderRequest(a, map[string]any{
-		"model": "gpt-4o-mini",
+		"model":    "gpt-4o-mini",
 		"messages": []any{map[string]any{"role": "user", "content": "hi"}},
 	}, nil)
 	if err != nil {

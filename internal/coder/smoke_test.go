@@ -49,7 +49,7 @@ func TestOpencodeLiveGenerate(t *testing.T) {
 		model = "ollama-cloud/gpt-oss:20b"
 	}
 	w := &db.Workspace{ID: "wsLive", CoderKind: "local", CoderBin: bin, CoderBackendType: "opencode", CoderModel: model}
-	c := ForWorkspace(w, t.TempDir(), t.TempDir(), nil, bin, 90*time.Second, false)
+	c := ForWorkspace(w, t.TempDir(), t.TempDir(), nil, bin, 90*time.Second, false, true)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	res, err := c.Generate(ctx, "wsLive", "Reply with exactly the word PONG and nothing else.")

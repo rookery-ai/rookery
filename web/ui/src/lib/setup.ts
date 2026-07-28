@@ -17,6 +17,8 @@ export type SetupResponse = {
   detected_coders?: DetectedCoder[];
   api_providers?: APIProvider[];
   coder_catalog?: CoderCatalogEntry[];
+  // "slim" builds ship no CLI coder binary; the wizard hides the local engine.
+  coder_mode?: "full" | "slim";
   platforms?: ConnectorPlatform[];
   bot_username?: string;
 };

@@ -1,0 +1,59 @@
+# Installing from a package
+
+## Debian / Ubuntu
+
+```bash
+sudo dpkg -i simple-agents_<version>_linux_amd64.deb
+```
+
+## Fedora / RHEL
+
+```bash
+sudo rpm -i simple-agents-<version>.x86_64.rpm
+```
+
+## Running it so it survives a reboot
+
+The packaged unit is a **systemd user unit**, so it needs no root and keeps all
+data under your own home directory:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp /usr/share/simple-agents/simple-agents.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now simple-agents
+
+# Without lingering, a user unit stops when your last session ends and does not
+# start at boot. This is the step people miss.
+sudo loginctl enable-linger "$USER"
+```
+
+Check it:
+
+```bash
+systemctl --user status simple-agents
+curl -sS http://127.0.0.1:8080/healthz
+```
+
+## Reading `/healthz`
+
+`/healthz` reports the build, the sandbox status and which optional host tools
+are present. Two warnings are worth acting on:
+
+- **`python3` missing** — the agent-tool AST guardrail is *inactive*. Generated
+  tool scripts run without being statically checked first. Install python3.
+- **`sandbox.supported: false`** — Landlock is unavailable, so coder
+  subprocesses run unconfined. Expected on macOS and Windows; on Linux it means
+  the kernel lacks Landlock support.
+
+`rg`, `pdftotext` and `tesseract` are optional; without them knowledge-base
+search, PDF extraction and image OCR degrade but keep working (OCR is simply
+unavailable).
+
+## Bootstrapping
+
+```bash
+simple-agents owner bootstrap -u <username> -p <password>
+```
+
+Then open `http://<host>:8080/`.

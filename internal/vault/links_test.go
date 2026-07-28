@@ -123,10 +123,10 @@ func TestBacklinksExcludesSystemSourcesAndCoversUserNotes(t *testing.T) {
 	v := New(t.TempDir())
 	const user = "u1"
 	mustWrite(t, v, user, "notes/Target.md", "# Target")
-	mustWrite(t, v, user, "notes/Author.md", "see [[Target]]")             // real user backlink
-	mustWrite(t, v, user, "inbox/msg1.md", "agent mentioned [[Target]]")   // excluded source
-	mustWrite(t, v, user, "agents/abc/logs/run_1.md", "wrote [[Target]]")  // excluded source
-	mustWrite(t, v, user, "chats/c1.md", "chat about [[Target]]")          // excluded source
+	mustWrite(t, v, user, "notes/Author.md", "see [[Target]]")            // real user backlink
+	mustWrite(t, v, user, "inbox/msg1.md", "agent mentioned [[Target]]")  // excluded source
+	mustWrite(t, v, user, "agents/abc/logs/run_1.md", "wrote [[Target]]") // excluded source
+	mustWrite(t, v, user, "chats/c1.md", "chat about [[Target]]")         // excluded source
 
 	back, err := v.Backlinks(user, "notes/Target.md")
 	if err != nil {

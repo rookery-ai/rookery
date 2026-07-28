@@ -16,7 +16,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -1058,13 +1057,7 @@ func (h *hostToolSet) buildScriptCommand(ctx context.Context, command []string, 
 	}
 	cmd.Dir = runDir
 	cmd.Env = env
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
+	setProcGroup(cmd)
 	cmd.WaitDelay = 5 * time.Second
 	return cmd
 }

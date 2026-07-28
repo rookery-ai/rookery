@@ -57,6 +57,8 @@ export type Settings = {
   api_providers: APIProvider[];
   coder_catalog: CoderCatalogEntry[];
   secret_names: string[];
+  // "slim" builds ship no CLI coder binary; the local engine is hidden.
+  coder_mode?: "full" | "slim";
 };
 
 export function useSettings() {

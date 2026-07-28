@@ -1,0 +1,59 @@
+name: CodeQL
+
+# CodeQL lives in its own workflow because it needs security-events: write,
+# which should not be granted to the whole PR workflow.
+#
+# DORMANT WHILE THE REPO IS PRIVATE. Code scanning on a private repository
+# requires GitHub Advanced Security, which this repo does not have; on a public
+# repository CodeQL is free. The job below is therefore gated on visibility so
+# it SKIPS (rather than fails and blocks merges) until launch, then activates by
+# itself with no workflow edit.
+#
+# The weekly `schedule:` trigger is deliberately omitted for now: on a schedule
+# event the repository payload is not reliably populated, so the visibility
+# guard cannot be trusted and the run would fail every Monday for no reason.
+# Restore it alongside the first public release.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      # A job-level permissions block REPLACES the workflow-level one rather
+      # than merging with it, so contents: read must be restated here. Without
+      # it, actions/checkout cannot clone this private repo and the job dies
+      # with "fatal: repository not found" before CodeQL ever starts.
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        if: matrix.language == 'go'
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-and-quality
+
+      - uses: github/codeql-action/autobuild@v4
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

@@ -16,16 +16,24 @@ import (
 // landlockCreateRulesetVersion is LANDLOCK_CREATE_RULESET_VERSION (flag bit 0).
 const landlockCreateRulesetVersion = 1
 
-// Supported reports whether the running kernel supports Landlock. It performs a
-// read-only ABI probe (landlock_create_ruleset with the VERSION flag) and does
-// NOT restrict the calling process, so it is safe to call from the parent.
-func Supported() bool {
+// ABI reports the Landlock ABI version the running kernel supports, or 0 when
+// Landlock is unavailable. Calling landlock_create_ruleset with a nil attr and
+// the VERSION flag is the documented way to query it WITHOUT creating a ruleset,
+// so this does not restrict the calling process and is safe from the parent.
+//
+// Informational only — Exec uses BestEffort, which negotiates the version
+// itself. It is surfaced on /healthz so an operator can see at a glance whether
+// confinement is really active.
+func ABI() int {
 	ret, _, errno := unix.Syscall(unix.SYS_LANDLOCK_CREATE_RULESET, 0, 0, landlockCreateRulesetVersion)
 	if errno != 0 {
-		return false
+		return 0
 	}
-	return int(ret) > 0
+	return int(ret)
 }
+
+// Supported reports whether the running kernel supports Landlock.
+func Supported() bool { return ABI() > 0 }
 
 // defaultReadOnlySystemPaths is the broad-but-safe set of system locations the
 // coder CLI (node) and the bash/python it spawns need to read and execute. Each

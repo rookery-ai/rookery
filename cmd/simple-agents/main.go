@@ -18,12 +18,14 @@ import (
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/approval"
 	"github.com/ilijad1/simple-agents/internal/auth"
+	"github.com/ilijad1/simple-agents/internal/buildinfo"
 	"github.com/ilijad1/simple-agents/internal/chat"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/config"
 	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/gateway"
+	"github.com/ilijad1/simple-agents/internal/health"
 	"github.com/ilijad1/simple-agents/internal/memory"
 	"github.com/ilijad1/simple-agents/internal/prompts"
 	"github.com/ilijad1/simple-agents/internal/reminder"
@@ -57,6 +59,8 @@ func main() {
 			sandboxExecCmd(),
 			connectorCmd(),
 			kbCmd(),
+			versionCmd(),
+			healthcheckCmd(),
 		},
 	}
 
@@ -78,6 +82,21 @@ func serveCmd() *cli.Command {
 
 			if err := os.MkdirAll(cfg.Data.Dir, 0o750); err != nil {
 				return fmt.Errorf("create data dir: %w", err)
+			}
+
+			// Report the build identity and every host capability that degrades
+			// SILENTLY when missing. The python3 warning is the load-bearing one:
+			// without it the agent-tool AST guardrail self-skips, so a security
+			// control switches itself off with no other signal.
+			rep := health.Detect(cfg.Sandbox.Enabled, cfg.Coder.Mode)
+			slog.Info("simple-agents starting",
+				"version", rep.Version, "commit", rep.Commit,
+				"sandbox_supported", rep.Sandbox.Supported,
+				"sandbox_enabled", rep.Sandbox.Enabled,
+				"sandbox_abi", rep.Sandbox.ABI,
+				"coder_mode", rep.CoderMode)
+			for _, warn := range rep.Warnings() {
+				slog.Warn("capability degraded", "detail", warn)
 			}
 
 			migrationsDir := resolveDir("migrations")
@@ -137,7 +156,8 @@ func serveCmd() *cli.Command {
 					return coderSvc
 				}
 				return coder.ForWorkspace(w, homesDir, cfg.Data.Dir, vlt,
-					cfg.Coder.ClaudeBin, cfg.Coder.Timeout, cfg.Sandbox.Enabled).
+					cfg.Coder.ClaudeBin, cfg.Coder.Timeout, cfg.Sandbox.Enabled,
+					cfg.Coder.Mode == config.ModeFull).
 					WithSecretsLookup(secretsLookup)
 			}
 
@@ -266,7 +286,8 @@ func serveCmd() *cli.Command {
 						return nil
 					}
 					return coder.ForWorkspace(w, homesDir, cfg.Data.Dir, vlt,
-						cfg.Coder.ClaudeBin, cfg.Coder.Timeout, cfg.Sandbox.Enabled).
+						cfg.Coder.ClaudeBin, cfg.Coder.Timeout, cfg.Sandbox.Enabled,
+						cfg.Coder.Mode == config.ModeFull).
 						WithSecretsLookup(secretsLookup)
 				})
 
@@ -734,4 +755,45 @@ func resolveDir(sub string) string {
 		}
 	}
 	return sub
+}
+
+// versionCmd prints the build identity stamped in at link time. An installed
+// binary that cannot say what it is cannot be supported.
+func versionCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "version",
+		Usage: "Print the build version and exit",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			fmt.Println(buildinfo.String())
+			return nil
+		},
+	}
+}
+
+// healthcheckCmd probes the local server's /healthz and exits non-zero if it is
+// not serving. It exists so the container HEALTHCHECK can shell the binary
+// itself: the runtime image ships no curl, and adding one purely for a health
+// probe is dead weight in every layer and every scan.
+func healthcheckCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "healthcheck",
+		Usage: "Probe the local server's /healthz and exit non-zero if unhealthy",
+		Action: func(ctx context.Context, cmd *cli.Command) error {
+			cfg, err := config.Load(cmd.Root().String("config"))
+			if err != nil {
+				return err
+			}
+			url := fmt.Sprintf("http://127.0.0.1:%d/healthz", cfg.Server.Port)
+			client := &http.Client{Timeout: 4 * time.Second}
+			resp, err := client.Get(url)
+			if err != nil {
+				return fmt.Errorf("healthcheck: %w", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return fmt.Errorf("healthcheck: status %d", resp.StatusCode)
+			}
+			return nil
+		},
+	}
 }

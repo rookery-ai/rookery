@@ -228,6 +228,7 @@ type CoderStepData = {
   detected: DetectedCoder[];
   providers: APIProvider[];
   catalog: CoderCatalogEntry[];
+  coderMode: "full" | "slim";
 };
 
 function CoderStep({
@@ -269,6 +270,7 @@ function CoderStep({
           coder={undefined}
           detectedCoders={data.detected}
           catalog={data.catalog}
+          coderMode={data.coderMode}
           saveOverride={mutation}
           hideTest
           showApiKeyInput
@@ -560,6 +562,7 @@ export default function SetupWizard() {
         detected: d.detected_coders ?? [],
         providers: d.api_providers ?? [],
         catalog: d.coder_catalog ?? [],
+        coderMode: d.coder_mode ?? "full",
       });
     }
     if (d.step === 5 && !connectorData) {

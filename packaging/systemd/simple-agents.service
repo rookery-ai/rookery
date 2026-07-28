@@ -1,0 +1,28 @@
+[Unit]
+Description=Simple Agents control plane
+Documentation=https://github.com/ilijad1/simple-agents-v2
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/simple-agents serve
+Restart=on-failure
+RestartSec=5s
+
+# The data directory holds the SQLite database, every workspace vault, and the
+# claude-homes credential trees. Keep it out of the binary's install prefix so a
+# package upgrade cannot touch user data.
+Environment=SA_DATA_DIR=%h/.simple-agents-v2
+
+# Hardening. NOT a substitute for the Landlock confinement the app applies to
+# coder subprocesses itself — this protects the host from the server process,
+# Landlock protects one workspace from another.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.simple-agents-v2
+
+[Install]
+WantedBy=default.target
