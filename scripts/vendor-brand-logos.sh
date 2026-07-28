@@ -86,29 +86,32 @@ twilio:twilio-2
 zendesk:zendesk-1
 zoom:zoom-communications-logo
 linkedin:linkedin-icon-2
+youtube:youtube-2
+facebook:facebook-4
+instagram:instagram-2016-5
+meta_ads:meta-3
+google_analytics:google-analytics-4
+google_adsense:google-adsense
+google_searchconsole:google-search-console
+google_ads:google-ads-2
+tiktok:tiktok-icon-2
+reddit:reddit-4
+mastodon:mastodon-2
 "
 
 # our-slug:simple-icons-export
 SIMPLE="
 google_docs:siGoogledocs
 google_sheets:siGooglesheets
-google_adsense:siGoogleadsense
-google_analytics:siGoogleanalytics
-google_searchconsole:siGooglesearchconsole
-youtube:siYoutube
-meta_ads:siMeta
-facebook:siFacebook
-instagram:siInstagram
-x:siX
-reddit:siReddit
-threads:siThreads
-tiktok:siTiktok
-pinterest:siPinterest
-google_ads:siGoogleads
-bluesky:siBluesky
-mastodon:siMastodon
 opencode_zen:siOpencode
 opencode_go:siOpencode
+# These four brands are MONOCHROME by design — X and Threads are black, Pinterest
+# red, Bluesky blue — so a single-path simple-icons mark is the accurate rendering,
+# not a degraded one. Everything else moved to worldvectorlogo for full colour.
+x:siX
+threads:siThreads
+pinterest:siPinterest
+bluesky:siBluesky
 "
 
 # strip_svg removes the XML prolog, DOCTYPE, comments, any <script>/<style>
