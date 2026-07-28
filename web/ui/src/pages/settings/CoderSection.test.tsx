@@ -54,11 +54,16 @@ function mockFetch(handlers: Handlers = {}) {
   return calls;
 }
 
-function wrap(coder: CoderConfig | undefined, detected: DetectedCoder[] = DETECTED, catalog: CoderCatalogEntry[] = CATALOG) {
+function wrap(
+  coder: CoderConfig | undefined,
+  detected: DetectedCoder[] = DETECTED,
+  catalog: CoderCatalogEntry[] = CATALOG,
+  coderMode: "full" | "slim" = "full",
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <CoderSection coder={coder} detectedCoders={detected} catalog={catalog} />
+      <CoderSection coder={coder} detectedCoders={detected} catalog={catalog} coderMode={coderMode} />
     </QueryClientProvider>,
   );
 }
@@ -274,4 +279,20 @@ test("saveOverride: Save posts through the override mutation instead of /api/v1/
     base_url: "",
     api_key: "",
   });
+});
+
+// A slim build ships no CLI coder binary, so the engine toggle must not offer
+// it. The server rejects it too (rejectLocalInSlim) — this is the convenience
+// half of that guard.
+test("slim build hides the Local CLI engine option", () => {
+  mockFetch();
+  wrap(LOCAL_CODER, [], CATALOG, "slim");
+  expect(screen.queryByText("Local CLI")).not.toBeInTheDocument();
+  expect(screen.getByText("API")).toBeInTheDocument();
+});
+
+test("full build still offers the Local CLI engine option", () => {
+  mockFetch();
+  wrap(LOCAL_CODER, DETECTED, CATALOG, "full");
+  expect(screen.getByText("Local CLI")).toBeInTheDocument();
 });

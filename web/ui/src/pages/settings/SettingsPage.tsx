@@ -454,6 +454,7 @@ export default function SettingsPage() {
                 coder={settings?.coder}
                 detectedCoders={settings?.detected_coders ?? []}
                 catalog={settings?.coder_catalog ?? []}
+                coderMode={settings?.coder_mode}
               />
             )}
             {section === "master-password" && <MasterPasswordSection />}

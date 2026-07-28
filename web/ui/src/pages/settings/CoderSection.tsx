@@ -37,6 +37,7 @@ export function CoderSection({
   saveOverride,
   hideTest = false,
   showApiKeyInput = false,
+  coderMode = "full",
 }: {
   coder: CoderConfig | undefined;
   detectedCoders: DetectedCoder[];
@@ -58,8 +59,13 @@ export function CoderSection({
   saveOverride?: UseMutationResult<any, any, SaveCoderInput>;
   hideTest?: boolean;
   showApiKeyInput?: boolean;
+  // Build policy from /api/v1/settings: a "slim" build ships no CLI coder
+  // binary at all, so the local engine is not an option the user can pick.
+  // Distinct from detectedCoders being empty, which only means none is
+  // installed right now on a build that does support them.
+  coderMode?: "full" | "slim";
 }) {
-  const [engine, setEngine] = useState<Engine>("local");
+  const [engine, setEngine] = useState<Engine>(coderMode === "slim" ? "api" : "local");
   const [bin, setBin] = useState("");
   const [timeoutS, setTimeoutS] = useState(120);
   const [provider, setProvider] = useState("");
@@ -76,13 +82,18 @@ export function CoderSection({
 
   useEffect(() => {
     if (!coder) return;
-    setEngine(coder.kind === "api" ? "api" : "local");
+    setEngine(coder.kind === "api" || coderMode === "slim" ? "api" : "local");
     setBin(coder.bin);
     setTimeoutS(coder.timeout_s || 120);
     setProvider(coder.provider);
     setModel(coder.model);
     setBaseURL(coder.base_url);
-  }, [coder]);
+  }, [coder, coderMode]);
+
+  // A slim build ships no CLI coder binary, so "local" is not offered. This
+  // mirrors the server-side guard in rejectLocalInSlim — the UI is the
+  // convenience, the API is the enforcement.
+  const engines: Engine[] = coderMode === "slim" ? ["api"] : ["local", "api"];
 
   const selectedEntry = catalog.find((c) => c.name === provider);
   const isCustom = selectedEntry?.custom ?? false;
@@ -135,7 +146,7 @@ export function CoderSection({
 
       <form onSubmit={(e) => void handleSave(e)} className="mt-4 max-w-lg space-y-4">
         <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Engine">
-          {(["local", "api"] as const).map((eng) => (
+          {engines.map((eng) => (
             <label
               key={eng}
               className={cn(

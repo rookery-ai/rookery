@@ -8,12 +8,41 @@ import (
 
 	"github.com/ilijad1/simple-agents/internal/auth"
 	"github.com/ilijad1/simple-agents/internal/coder"
+	"github.com/ilijad1/simple-agents/internal/config"
 	"github.com/ilijad1/simple-agents/internal/db"
 	"github.com/ilijad1/simple-agents/internal/llm"
 	"github.com/ilijad1/simple-agents/internal/profile"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
 )
+
+// detectedCoders returns the installed CLI coders, or an empty slice in slim
+// mode. Short-circuiting matters twice over: the probe hits the host filesystem
+// on every settings load, and in slim mode a coder that happens to be installed
+// still cannot be used, so listing it would be a lie.
+//
+// Always returns a non-nil slice so the JSON field marshals as [] not null.
+func (s *Server) detectedCoders() []apiDetectedCoderDTO {
+	out := []apiDetectedCoderDTO{}
+	if s.coderMode() == config.ModeSlim {
+		return out
+	}
+	for _, d := range coder.DetectInstalled() {
+		out = append(out, apiDetectedCoderDTO{Name: d.Name, Bin: d.Bin, BackendType: d.BackendType})
+	}
+	return out
+}
+
+// rejectLocalInSlim guards the write path. The SPA hides the local option in
+// slim mode, but a stale tab or a plain curl would otherwise still persist
+// coder_kind=local and produce a workspace that can never run.
+func (s *Server) rejectLocalInSlim(kind string) error {
+	if s.coderMode() == config.ModeSlim && kind == "local" {
+		return echo.NewHTTPError(http.StatusBadRequest,
+			"this build has no CLI coder (SA_CODER_MODE=slim) — choose the API engine")
+	}
+	return nil
+}
 
 // registerSettingsAPI registers the settings + setup + coder JSON endpoints on
 // the given group (already guarded by requireOwnerAPI + requireActiveWorkspaceAPI
@@ -124,11 +153,7 @@ func (s *Server) apiGetSettings(c echo.Context) error {
 		secretNames = []string{}
 	}
 
-	detected := coder.DetectInstalled()
-	detOut := make([]apiDetectedCoderDTO, 0, len(detected))
-	for _, d := range detected {
-		detOut = append(detOut, apiDetectedCoderDTO{Name: d.Name, Bin: d.Bin, BackendType: d.BackendType})
-	}
+	detOut := s.detectedCoders()
 
 	providers := coder.APIProviders()
 	provOut := make([]apiAPIProviderDTO, 0, len(providers))
@@ -154,6 +179,9 @@ func (s *Server) apiGetSettings(c echo.Context) error {
 		"api_providers":   provOut,
 		"coder_catalog":   s.coderCatalogSlice(secretNames),
 		"secret_names":    secretNames,
+		// Build policy, not host state: slim means this build has no CLI coder
+		// at all, so the SPA must not offer the local engine.
+		"coder_mode": s.coderMode(),
 	})
 }
 
@@ -257,6 +285,11 @@ func (s *Server) apiPutSettingsCoder(c echo.Context) error {
 	w := c.Get("workspace").(*db.Workspace)
 	var req apiCoderRequest
 	if err := bindAPI(c, &req); err != nil {
+		return err
+	}
+	// The SPA hides the local engine in slim mode, but a stale tab or a plain
+	// curl would otherwise still persist a coder kind this build cannot run.
+	if err := s.rejectLocalInSlim(req.Kind); err != nil {
 		return err
 	}
 	f := coderForm{
@@ -375,11 +408,7 @@ func (s *Server) apiGetSetup(c echo.Context) error {
 	switch step {
 	case 3:
 		secretNames, _ := s.db.ListSecretNames(w.ID)
-		detected := coder.DetectInstalled()
-		detOut := make([]apiDetectedCoderDTO, 0, len(detected))
-		for _, d := range detected {
-			detOut = append(detOut, apiDetectedCoderDTO{Name: d.Name, Bin: d.Bin, BackendType: d.BackendType})
-		}
+		detOut := s.detectedCoders()
 		providers := coder.APIProviders()
 		provOut := make([]apiAPIProviderDTO, 0, len(providers))
 		for _, p := range providers {
@@ -391,6 +420,7 @@ func (s *Server) apiGetSetup(c echo.Context) error {
 		resp["detected_coders"] = detOut
 		resp["api_providers"] = provOut
 		resp["coder_catalog"] = s.coderCatalogSlice(secretNames)
+		resp["coder_mode"] = s.coderMode()
 	case 5:
 		resp["platforms"] = s.connectorPlatformList(w)
 	case 7:
@@ -528,6 +558,11 @@ func (s *Server) apiSetupMasterPassword(c echo.Context, w *db.Workspace, req api
 // which differ from the settings page on purpose.
 func (s *Server) apiSetupCoder(c echo.Context, w *db.Workspace, req apiSetupRequest) error {
 	kind := req.CoderKind
+	// Same guard as apiPutSettingsCoder: the wizard is a separate write path
+	// into the same field, so it needs its own check.
+	if err := s.rejectLocalInSlim(kind); err != nil {
+		return err
+	}
 	timeoutS := 0
 	if req.CoderTimeoutS > 0 {
 		timeoutS = req.CoderTimeoutS
