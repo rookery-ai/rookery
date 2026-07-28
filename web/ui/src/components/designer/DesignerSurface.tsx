@@ -235,6 +235,17 @@ export function DesignerSurface({
   // running and hitting Cancel would kill that build. An untouched surface has
   // nothing of its own to cancel anyway.
   const sessionTouchedRef = useRef(false);
+  // True once a session PROVABLY exists server-side: recovery adopted one, a
+  // resume succeeded, or an opening POST returned without throwing. This — not
+  // `messages.length === 0` — decides whether the next send is an OPENING one
+  // (startEndpoint / startPayload) or an ordinary turn. The transcript is the
+  // wrong signal because the optimistic user bubble is appended BEFORE the POST:
+  // if that POST fails (the editor's "design session already active; cancel it
+  // first" is an expected outcome, not an exotic one), a transcript-keyed test
+  // would treat the retry as an ordinary turn, send it to endpoints.design with
+  // no session to step, and dead-end on "name is required to start a new
+  // session" until the user reloaded.
+  const sessionOpenedRef = useRef(false);
 
   function focusComposer() {
     setFocusSignal((n) => n + 1);
@@ -303,6 +314,7 @@ export function DesignerSurface({
           acceptRecoveredSession({ isEdit: !!snap.is_edit, agentId: snap.agent_id ?? "" }));
       if (accepted) {
         sessionTouchedRef.current = true;
+        sessionOpenedRef.current = true;
         setResumeBanner(null);
         setMessages(snap.history ?? []);
         setFsmState((snap.state as FsmState) ?? null);
@@ -376,6 +388,7 @@ export function DesignerSurface({
     try {
       const res = await api.post<ResumeResponse>(endpoints.resume);
       sessionTouchedRef.current = true;
+      sessionOpenedRef.current = true;
       const hist = res.history ?? [];
       setMessages([...hist, { role: "assistant", content: res.response, created_at: nowStamp() }]);
       setFsmState((res.state as FsmState) ?? null);
@@ -432,7 +445,7 @@ export function DesignerSurface({
       // fsmState===null) so it can never fire mid-conversation and start a
       // fresh session over an in-progress one — a backstop to the primary fix
       // (the surface staying in sync via the SSE-done refetch above).
-      const isFirstMessage = messages.length === 0 && !resumeBanner;
+      const isFirstMessage = !sessionOpenedRef.current && !resumeBanner;
       const body: Record<string, unknown> = { message: text };
       // startEndpoint and startPayload are alternative ways to OPEN a session
       // (the editor's edit/start creates it from the agent id in the URL; the
@@ -442,6 +455,7 @@ export function DesignerSurface({
       if (isFirstMessage && startPayload && !startEndpoint) Object.assign(body, startPayload);
 
       const res = await api.post<DesignResponse>(url, body);
+      sessionOpenedRef.current = true;
       if (unmountedRef.current) return;
 
       if (res.done) {
@@ -467,7 +481,14 @@ export function DesignerSurface({
         setGenerating(true); // stepper still shows "Build" while it runs
       }
     } catch (err) {
-      if (!unmountedRef.current) setError(errMessage(err));
+      if (!unmountedRef.current) {
+        setError(errMessage(err));
+        // An opening POST that failed created nothing, so its bubble would sit
+        // in front of an empty session and be duplicated by the retry. Drop it
+        // and leave the user where they started — what the agent editor's old
+        // pre-screen did by simply not having a transcript yet.
+        if (!sessionOpenedRef.current) setMessages((m) => m.slice(0, -1));
+      }
     } finally {
       if (!unmountedRef.current) {
         setBusy(false);

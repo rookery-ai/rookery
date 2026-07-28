@@ -771,3 +771,75 @@ test("cancelling after a message still cancels the session", async () => {
 
   await waitFor(() => expect(calls.some((c) => c.url === "/x/cancel")).toBe(true));
 });
+
+// A failed OPENING post used to strand the surface: the optimistic bubble made
+// messages.length non-zero, so the retry was treated as an ordinary turn, sent
+// to endpoints.design with no session to step, and dead-ended. "Design session
+// already active; cancel it first" is an expected outcome of the agent editor's
+// start endpoint, so this path is reachable in normal use, not exotic.
+test("a failed opening POST is retried against the start endpoint, not the design one", async () => {
+  let attempt = 0;
+  const calls = mockFetch({
+    "/x/start": () => {
+      attempt += 1;
+      if (attempt === 1) {
+        return jsonResponse({ error: "design session already active; cancel it first" }, 500);
+      }
+      return jsonResponse({ response: "Here's what I found.", done: false, state: "designing" });
+    },
+    "/x/design": () => jsonResponse({ response: "WRONG ENDPOINT", done: false, state: "designing" }),
+  });
+  wrap(
+    <DesignerSurface
+      endpoints={ENDPOINTS}
+      labels={LABELS}
+      cancelTo="/agents"
+      startEndpoint="/x/start"
+      onDone={vi.fn()}
+    />,
+  );
+
+  await sendViaComposer("run it once a day");
+  expect(await screen.findByText("design session already active; cancel it first")).toBeInTheDocument();
+  // The failed turn's bubble is rolled back — nothing was created, and leaving it
+  // would duplicate the message once the retry succeeds.
+  await waitFor(() => expect(screen.queryByText("run it once a day")).not.toBeInTheDocument());
+
+  await sendViaComposer("run it once a day");
+  expect(await screen.findByText("Here's what I found.")).toBeInTheDocument();
+  expect(screen.queryByText("WRONG ENDPOINT")).not.toBeInTheDocument();
+
+  const posts = calls.filter((c) => c.method === "POST").map((c) => c.url);
+  expect(posts).toEqual(["/x/start", "/x/start"]);
+});
+
+// Same latent bug on the create path: a failed first POST used to strand the
+// name, so the retry opened no session either.
+test("a failed first design POST still carries startPayload on the retry", async () => {
+  let attempt = 0;
+  const calls = mockFetch({
+    "/x/design": () => {
+      attempt += 1;
+      if (attempt === 1) return jsonResponse({ error: "something broke" }, 500);
+      return jsonResponse({ response: "ok", done: false, state: "designing" });
+    },
+  });
+  wrap(
+    <DesignerSurface
+      endpoints={ENDPOINTS}
+      labels={LABELS}
+      cancelTo="/agents"
+      startPayload={{ name: "MyAgent" }}
+      onDone={vi.fn()}
+    />,
+  );
+
+  await sendViaComposer("first");
+  await screen.findByText("something broke");
+  await sendViaComposer("first");
+  await screen.findByText("ok");
+
+  const posts = calls.filter((c) => c.method === "POST");
+  expect(posts).toHaveLength(2);
+  expect(posts[1]!.body).toEqual({ message: "first", name: "MyAgent" });
+});
