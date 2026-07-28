@@ -76,19 +76,29 @@ func (s *Service) tick() {
 	}
 
 	for _, r := range reminders {
-		// Skip users with no platform connected — they have no way to receive
-		// the reminder. Keep it pending so it fires once they link a platform.
-		if !s.db.HasPlatformIdentity(r.WorkspaceID) {
-			slog.Warn("reminder: skipping — user has no platform connected",
+		msg := s.buildReminderMessage(ctx, r, now)
+
+		// The inbox is a real delivery channel with its own UI, badge, and vault
+		// reflection — a chat platform is no longer the only way output reaches the user.
+		// So the chat send is best-effort ON TOP of the inbox, never a precondition for it.
+		//
+		// This path previously had two early exits — skip when no platform identity, and
+		// `continue` on a send error — and BOTH bypassed recordInbox *and*
+		// MarkReminderSent. The visible symptom was a reminder that never showed up
+		// anywhere without a chat app; the quieter one was that such a reminder stayed
+		// due and re-fired on every single tick, forever.
+		if s.db.HasPlatformIdentity(r.WorkspaceID) {
+			if err := s.sender.SendToUser(r.WorkspaceID, msg); err != nil {
+				// Logged, not fatal: the inbox delivery below still stands, so the user
+				// gets the reminder and it is not retried indefinitely.
+				slog.Error("reminder: chat send failed — delivering to inbox only",
+					"reminder_id", r.ID, "user_id", r.WorkspaceID, "err", err)
+			}
+		} else {
+			slog.Info("reminder: no chat platform connected — delivering to inbox only",
 				"reminder_id", r.ID, "user_id", r.WorkspaceID)
-			continue
 		}
 
-		msg := s.buildReminderMessage(ctx, r, now)
-		if err := s.sender.SendToUser(r.WorkspaceID, msg); err != nil {
-			slog.Error("reminder: send failed", "reminder_id", r.ID, "user_id", r.WorkspaceID, "err", err)
-			continue
-		}
 		s.recordInbox(r.WorkspaceID, r.ID, msg)
 		if err := s.db.MarkReminderSent(r.ID); err != nil {
 			slog.Error("reminder: mark sent failed", "reminder_id", r.ID, "err", err)

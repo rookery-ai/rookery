@@ -3,6 +3,8 @@ package web
 import (
 	"net/http"
 	"testing"
+
+	"github.com/ilijad1/simple-agents/internal/vault"
 )
 
 // TestKBDisplayTitleResolvesReflectedNotes pins the fix for UUID-named results in
@@ -98,5 +100,69 @@ func TestAPISearchShowsResolvedTitleAndPath(t *testing.T) {
 	}
 	if contains(body, `"title":"`+rel+`"`) {
 		t.Errorf("raw UUID path still used as title: %s", body)
+	}
+}
+
+// TestKBTreeShowsRealFilenamesInsideAgentDirs pins the split between the two consumers
+// of kbDisplayTitle. In the TREE, a file inside agents/<id>/ must show its real
+// filename: the agent name is already on the parent folder, and the qualified title
+// additionally strips the extension — so AGENT.md rendered as "Digest — AGENT",
+// state.md as "Digest — state", and tools/fetch.py as "Digest — fetch", none of which
+// match anything on disk.
+//
+// SEARCH keeps the qualified form (asserted separately above), because a hit there
+// arrives with no folder context to say which agent produced it.
+func TestKBTreeShowsRealFilenamesInsideAgentDirs(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	_, wsID := createAndEnterWorkspace(t, s, cookies)
+	agent := seedAgent(t, s, wsID) // name "Digest"
+
+	for rel, body := range map[string]string{
+		"agents/" + agent.ID + "/AGENT.md":       "# Digest agent\n",
+		"agents/" + agent.ID + "/state.md":       "# State — Digest\n",
+		"agents/" + agent.ID + "/tools/fetch.py": "print('hi')\n",
+	} {
+		if err := s.vault.WriteNote(wsID, rel, []byte(body)); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	// Top level of the agent's dir.
+	nodes := []vault.Node{
+		{Name: "AGENT.md", Path: "agents/" + agent.ID + "/AGENT.md"},
+		{Name: "state.md", Path: "agents/" + agent.ID + "/state.md"},
+	}
+	s.enrichKBDisplayNames(wsID, "agents/"+agent.ID, nodes)
+	for _, n := range nodes {
+		if n.DisplayName != "" {
+			t.Errorf("tree label for %s = %q, want the raw filename (empty DisplayName)", n.Path, n.DisplayName)
+		}
+	}
+
+	// A nested tools/ file — the qualifier reached this depth too.
+	nested := []vault.Node{{Name: "fetch.py", Path: "agents/" + agent.ID + "/tools/fetch.py"}}
+	s.enrichKBDisplayNames(wsID, "agents/"+agent.ID+"/tools", nested)
+	if nested[0].DisplayName != "" {
+		t.Errorf("tree label for a tools/ file = %q, want the raw filename", nested[0].DisplayName)
+	}
+
+	// The agent DIRECTORY itself still resolves to the agent's name — that is the
+	// context which makes dropping the per-file prefix safe.
+	dirs := []vault.Node{{Name: agent.ID, Path: "agents/" + agent.ID, IsDir: true}}
+	s.enrichKBDisplayNames(wsID, "agents", dirs)
+	if dirs[0].DisplayName != "Digest" {
+		t.Errorf("agent dir label = %q, want %q", dirs[0].DisplayName, "Digest")
+	}
+
+	// Reflected notes elsewhere still get their heading resolved — this change must
+	// not disable the UUID-name fix it sits next to.
+	if err := s.vault.WriteNote(wsID, "chats/uuid-1.md", []byte("# Chat about Ohrid\n")); err != nil {
+		t.Fatalf("write chat: %v", err)
+	}
+	chats := []vault.Node{{Name: "uuid-1.md", Path: "chats/uuid-1.md"}}
+	s.enrichKBDisplayNames(wsID, "chats", chats)
+	if chats[0].DisplayName != "Chat about Ohrid" {
+		t.Errorf("chat label = %q, want the heading", chats[0].DisplayName)
 	}
 }

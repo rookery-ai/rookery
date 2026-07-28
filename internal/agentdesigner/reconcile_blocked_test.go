@@ -25,12 +25,17 @@ func TestReconcileBlockedOutcome(t *testing.T) {
 		}
 	})
 
-	t.Run("weak backend + not-presentable gate + no blocker → STEERING retry note (not the safety note)", func(t *testing.T) {
+	t.Run("weak backend + not-presentable gate + no blocker → DROP-THE-SCRIPT note + forceTier1", func(t *testing.T) {
 		// This is the common case: the weak model finished with no [BLOCKED] marker, and
 		// decideBuildOutcome's gate set presentable=false + hasAuthoredScript=true. The retry
-		// note must steer the coder to run-or-drop the script — NOT the generic
-		// "safety/quality check" note, which is false here (ethics + guardrails passed) and
-		// would make the retry rewrite clean code, reopening the approve/rebuild loop.
+		// note must NOT be the generic "safety/quality check" note, which is false here
+		// (ethics + guardrails passed) and would make the retry rewrite clean code.
+		//
+		// The note offers exactly ONE option: drop the script. It previously also offered
+		// "actually run the script and show its real output" — the approach that had just
+		// failed — and a weak model re-picked it every time, regenerating the same
+		// unverifiable script. forceTier1 makes the remaining option binding, since the note
+		// itself is advisory prose the model may ignore.
 		d := buildDecision{presentable: false, hasAuthoredScript: true, message: "…keep going…"}
 		got := reconcileBlockedOutcome(d, "", prompts.BackendToolCalling)
 		if got.advance {
@@ -39,11 +44,51 @@ func TestReconcileBlockedOutcome(t *testing.T) {
 		if got.message != d.message {
 			t.Errorf("must keep decideBuildOutcome's user message; got %q", got.message)
 		}
-		if !strings.Contains(got.recordFailNote, "run the script") {
-			t.Errorf("retry note must steer toward running the script; got %q", got.recordFailNote)
+		if !strings.Contains(got.recordFailNote, "drop the script") {
+			t.Errorf("retry note must steer toward dropping the script; got %q", got.recordFailNote)
+		}
+		if strings.Contains(got.recordFailNote, "run the script and show") {
+			t.Errorf("retry note must NOT re-offer the approach that just failed; got %q", got.recordFailNote)
+		}
+		if !got.forceTier1 {
+			t.Error("weak-gate build must force TIER 1 on the retry — the advisory note alone is what let the loop persist")
 		}
 		if strings.Contains(strings.ToLower(got.recordFailNote), "safety/quality") {
 			t.Errorf("must NOT record the misleading generic safety/quality note; got %q", got.recordFailNote)
+		}
+	})
+
+	t.Run("weak backend + presentable + blocker → holds back AND forces TIER 1", func(t *testing.T) {
+		// The other weak-backend branch: the build IS presentable on disk but the coder
+		// emitted [BLOCKED] and never confirmed its script. Same remedy as above — the retry
+		// must not re-attempt the script — so this branch must set forceTier1 too. It was the
+		// easier one to miss, since the build looks complete.
+		d := buildDecision{presentable: true, hasAuthoredScript: true, message: "review it"}
+		got := reconcileBlockedOutcome(d, "ran out of turns", prompts.BackendToolCalling)
+		if got.advance {
+			t.Fatal("weak-gate build with an unverified script must not advance")
+		}
+		if !got.forceTier1 {
+			t.Error("presentable+blocked weak-backend build must also force TIER 1 on the retry")
+		}
+	})
+
+	t.Run("forceTier1 stays off when the script WAS verified, and for capable backends", func(t *testing.T) {
+		// The override is a response to an unverified script specifically. A confirmed run,
+		// or a backend that self-verifies reliably, must not be constrained — forcing TIER 1
+		// there would forbid scripts on builds that legitimately need one.
+		verified := buildDecision{presentable: false, hasAuthoredScript: true, scriptVerified: true,
+			message: "x", recordFailNote: "n"}
+		if got := reconcileBlockedOutcome(verified, "", prompts.BackendToolCalling); got.forceTier1 {
+			t.Error("a verified script must not force TIER 1")
+		}
+		capable := buildDecision{presentable: false, hasAuthoredScript: true, message: "x", recordFailNote: "n"}
+		if got := reconcileBlockedOutcome(capable, "", prompts.BackendFullCoder); got.forceTier1 {
+			t.Error("a capable CLI backend must not force TIER 1")
+		}
+		noScript := buildDecision{presentable: false, message: "x", recordFailNote: "n"}
+		if got := reconcileBlockedOutcome(noScript, "", prompts.BackendToolCalling); got.forceTier1 {
+			t.Error("a build with no authored script has nothing to forbid — must not force TIER 1")
 		}
 	})
 

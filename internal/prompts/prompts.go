@@ -1026,6 +1026,12 @@ type ImplementationParams struct {
 	// Skills is the pool (core + user) offered to the build coder so it can declare the
 	// agent's `# Skills:` header. Without this the header is never emitted.
 	Skills []SkillRef
+	// ForceTier1 hard-forbids authored code files for THIS attempt. Set by the agent
+	// designer for the retry that follows a weak-backend build whose helper script was
+	// never confirmed to run (see reconcileBlockedOutcome). Without it the retry is
+	// steered only by an advisory History note, and a weak model regenerates the same
+	// unverifiable script — the loop this flag exists to break.
+	ForceTier1 bool
 }
 
 // capabilitySpec renders the authoritative capability blocks shared with the
@@ -1046,7 +1052,36 @@ func (p ImplementationParams) capabilitySpec() string {
 	// connected accounts — otherwise a weak model ignores them and hunts for API keys.
 	sb.WriteString(connectedToolsBlock(p.Connections, p.ConnectionTools, p.BackendType, p.ConnectorBin))
 	sb.WriteString(availableSkillsBlock(p.Skills))
+	// LAST, so it is the most recent instruction the model reads — this is an override of
+	// the tier machinery above, and a weak model weights later text more heavily.
+	if p.ForceTier1 {
+		sb.WriteString(forceTier1Block())
+	}
 	return sb.String()
+}
+
+// forceTier1Block is the one-attempt override that follows a build whose authored helper
+// script could not be confirmed to run. The previous attempt already failed at "write a
+// script and prove it works", so this removes that option entirely rather than repeating
+// the advice: no code files at all, do the work with the direct tools.
+//
+// It is deliberately absolute. A softer "prefer not to write a script" reads, to a weak
+// model, as permission to write one — which is exactly what produced the loop.
+func forceTier1Block() string {
+	return "<mandatory_override>\n" +
+		"THIS ATTEMPT: create ZERO code files. This overrides any tier reasoning above.\n" +
+		"The previous attempt wrote a helper script that could not be confirmed to work.\n" +
+		"Do not write another one — writing a script is not an option on this attempt.\n" +
+		"- Do the ENTIRE task with your direct tools and your own reasoning: web_fetch to\n" +
+		"  load a page, web_search to find one, search_files/glob/list_dir to find files,\n" +
+		"  read_file to read them. Read what comes back and decide, judge, extract, and\n" +
+		"  format it yourself — that is the agent's whole implementation.\n" +
+		"- Write AGENT.md describing those steps in plain language, and nothing else.\n" +
+		"- If the agent already has code files from the previous attempt, DELETE them.\n" +
+		"- If some step genuinely cannot be done without code, do NOT write the code: say\n" +
+		"  so in plain language and explain what is missing. A clear explanation is a\n" +
+		"  useful answer here; another unverifiable script is not.\n" +
+		"</mandatory_override>\n\n"
 }
 
 // selfVerificationBlock is the single source of the "prove your script works, and keep

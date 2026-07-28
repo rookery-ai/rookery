@@ -328,7 +328,25 @@ func (f *Flow) stepDesigning(ctx context.Context, workspaceID, input string) (st
 	if isApproval(input) {
 		return f.runGeneration(ctx, workspaceID)
 	}
+	// The user is talking rather than rebuilding, so the failed state is over. Clear the
+	// flag that drives the UI's failure banner — it was previously cleared only inside
+	// runGeneration, so the banner outlived the failure and kept telling the user to
+	// "describe a change or say try again" long after they had moved on.
+	f.clearGenerationFailed(workspaceID)
 	return ret4(f.callCoder(ctx, workspaceID, input))
+}
+
+// clearGenerationFailed drops the soft-failure flag when the session leaves the failed
+// state without rebuilding. Mirrors agentdesigner.Flow.clearGenerationFailed.
+func (f *Flow) clearGenerationFailed(workspaceID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sess := f.sessions[workspaceID]
+	if sess == nil || !sess.GenerationFailed {
+		return
+	}
+	sess.GenerationFailed = false
+	f.saveDraft(sess)
 }
 
 func (f *Flow) stepVerifying(ctx context.Context, workspaceID, input string) (string, bool, string, error) {

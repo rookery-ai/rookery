@@ -97,8 +97,22 @@ type DesignSession struct {
 	// session stayed in StateDesigning. While set, a forgiving retry phrase ("try again",
 	// "fix it", "yes", "ok") re-runs generation — otherwise the strict isApproval would
 	// route those to the design chat and the coder would just re-present the plan
-	// (the "approve-loop"). Cleared at the start of every runGeneration attempt.
+	// (the "approve-loop"). Cleared at the start of every runGeneration attempt, and when
+	// a post-failure turn routes to the design chat instead (the failed state is over —
+	// leaving it set is what made the UI's failure banner stick forever).
 	GenerationFailed bool
+
+	// ForceTier1 makes the NEXT generation attempt create zero code files
+	// (prompts.ImplementationParams.ForceTier1). Set when a weak tool-calling backend
+	// authored a helper script that was never confirmed to run: the retry must not
+	// re-attempt the approach that just failed. Consumed (read, then cleared) by
+	// runGeneration, so it constrains exactly one attempt.
+	//
+	// In-memory only: it is deliberately NOT persisted to the draft. It needs to survive
+	// from one build to the retry immediately after, and a server restart in that window
+	// degrades to the History note's soft steering rather than silently forcing TIER 1
+	// onto an unrelated later attempt.
+	ForceTier1 bool
 
 	// HasSaveableBuild is true when the last generation left a valid AGENT.md + guardrail-
 	// passing tools on disk — i.e. "keep it as-is" can actually save something. Distinct
@@ -1008,7 +1022,9 @@ func (f *Flow) stepDesigning(ctx context.Context, workspaceID, input string) (st
 			f.mu.Unlock()
 			return f.finalizeAgent(ctx, workspaceID)
 		}
-		// Nothing usable on disk — fall through to a normal design turn.
+		// Nothing usable on disk to keep, so there is nothing to accept. Fall through: the
+		// change-request branch below rebuilds, which is what the user wants anyway when
+		// the build they tried to keep turned out not to exist.
 	}
 	if genFailed && isRetryApproval(input) {
 		// Capture the retry message in History before re-running, so any instruction it
@@ -1017,12 +1033,54 @@ func (f *Flow) stepDesigning(ctx context.Context, workspaceID, input string) (st
 		f.appendUserHistory(workspaceID, input)
 		return f.runGeneration(ctx, workspaceID)
 	}
+	if genFailed && !isDesignQuestion(input) {
+		// A CHANGE REQUEST after a failed build rebuilds with that change applied.
+		//
+		// This deliberately reverses isRetryApproval's "change" exclusion (see its doc
+		// comment) for the post-failure state only. That exclusion is right during normal
+		// design — a change request should refine the plan, not blindly re-run. It is wrong
+		// here: the build IS what's being iterated on, and routing the change to a design
+		// chat turn drops the user into a Q&A-shaped prompt that re-asks for details the
+		// conversation already settled ("paste the URL"), forcing them to click Build again
+		// to apply a change they had already described. Rebuilding directly is what the
+		// message meant.
+		//
+		// Only a question escapes to the chat path, and isDesignQuestion fails TOWARD
+		// rebuilding: an unnecessary build costs minutes, but a misrouted change request
+		// re-creates the exact trap this branch removes.
+		f.appendUserHistory(workspaceID, input)
+		return f.runGeneration(ctx, workspaceID)
+	}
+
+	// Ordinary design turn. If a build had failed, that state is over — the user asked
+	// something rather than steering a rebuild. Clear the flag so the UI's failure banner
+	// (driven by GenerationFailed) doesn't outlive the failure it describes; it previously
+	// cleared only inside runGeneration, so any chat turn left it stuck on screen.
+	if genFailed {
+		f.clearGenerationFailed(workspaceID)
+	}
 
 	response, err := f.callCoder(ctx, workspaceID, input)
 	if err != nil {
 		return "", false, "", err
 	}
 	return response, false, "", nil
+}
+
+// clearGenerationFailed drops the soft-failure flag (and the one-attempt TIER-1 override
+// that rides with it) when the session leaves the failed state without rebuilding.
+func (f *Flow) clearGenerationFailed(workspaceID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sess := f.sessions[workspaceID]
+	if sess == nil {
+		return
+	}
+	sess.GenerationFailed = false
+	// The override exists to constrain the retry of the failed build. No retry is coming,
+	// so carrying it forward would silently forbid scripts on some unrelated later build.
+	sess.ForceTier1 = false
+	f.saveDraft(sess)
 }
 
 // stepVerifying: test output was shown; wait for approval or change request.
@@ -1124,6 +1182,11 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// recordGenerationFailure). Snapshot History AFTER any prior failure was appended.
 	sess.GenerationFailed = false
 	sess.HasSaveableBuild = false // re-derived from decideBuildOutcome below
+	// Consume-once: this attempt is the one the flag was set for. Clearing it here (rather
+	// than on success) means a second consecutive unverified-script build re-sets it via
+	// recordGenerationFailure, while a build that got past the gate leaves it off.
+	forceTier1 := sess.ForceTier1
+	sess.ForceTier1 = false
 	coderSvc := f.coderFor(workspaceID)
 	agentIDSnap := sess.AgentID
 	agentNameSnap := sess.AgentName
@@ -1158,6 +1221,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		Connections:        connRefs,
 		ConnectionTools:    connToolNames,
 		Skills:             sess.Skills,
+		ForceTier1:         forceTier1,
 	}
 
 	// Set up a buffered progress channel for SSE and snapshot the Telegram progress func.
@@ -1418,7 +1482,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		// went wrong, instead of the user being trapped in an approve-loop (C1/C2). This
 		// also appends a note to History + saves the draft, so a page that reconnected to
 		// the live build sees the outcome after the SSE closes below.
-		f.recordGenerationFailure(workspaceID, outcome.recordFailNote)
+		f.recordGenerationFailure(workspaceID, outcome.recordFailNote, outcome.forceTier1)
 		// Close the SSE channel only AFTER History/draft are committed (see the success
 		// path) so the reconnect re-fetch of /design/state finds the updated state.
 		closeProgress()
@@ -1464,6 +1528,10 @@ type reconciledOutcome struct {
 	message        string // user-facing message
 	advance        bool   // true → advance to StateVerifying (keep the build)
 	recordFailNote string // when !advance, the detail to record for a context-aware retry
+	// forceTier1 hard-forbids authored code files on the NEXT attempt. Set only for the
+	// weak-backend unverified-script cases, where the recordFailNote alone has proven too
+	// weak: it is advisory prose, so the model re-picks the approach it just failed at.
+	forceTier1 bool
 }
 
 // reconcileBlockedOutcome decides the final outcome from a build's on-disk decision plus any
@@ -1491,11 +1559,18 @@ func reconcileBlockedOutcome(d buildDecision, blocked, backendType string) recon
 		// script and show real output, or drop it and reason directly — so "keep going"
 		// converges instead of regenerating the same unverified script. Takes priority
 		// over the blocked/safety branches, and keeps decideBuildOutcome's user message.
+		//
+		// The note offers exactly ONE option, not two. It previously also offered "actually
+		// run the script and show its real output" — the approach the model had just failed
+		// at — and a weak model re-picked it every time, regenerating the same unverifiable
+		// script. forceTier1 then makes the remaining option binding rather than advisory
+		// (prompts.forceTier1Block), because the note is History prose the model may ignore.
 		if backendType == prompts.BackendToolCalling && d.hasAuthoredScript && !d.scriptVerified {
 			return reconciledOutcome{
 				message:        d.message,
 				advance:        false,
-				recordFailNote: "the helper script it wrote was never confirmed to run. Next attempt: actually run the script and show its real output, or drop the script and do the task by reasoning directly.",
+				recordFailNote: "the helper script it wrote was never confirmed to run. Next attempt: drop the script entirely and do the task directly with the available tools (fetch pages, search, read files) and reasoning — do not write another script.",
+				forceTier1:     true,
 			}
 		}
 		if blocked != "" {
@@ -1532,7 +1607,8 @@ func reconcileBlockedOutcome(d buildDecision, blocked, backendType string) recon
 					"wrote actually runs — so I won't save it as working yet. Say **keep going** and " +
 					"I'll take another pass (I'll try a simpler approach), or tell me to keep it as-is.",
 				advance:        false,
-				recordFailNote: "build blocked on weak backend with an unverified authored script: " + blocked,
+				recordFailNote: "build blocked on weak backend with an unverified authored script — drop the script entirely on the next attempt and do the task directly with the available tools and reasoning: " + blocked,
+				forceTier1:     true,
 			}
 		}
 		return reconciledOutcome{
@@ -1548,7 +1624,10 @@ func reconcileBlockedOutcome(d buildDecision, blocked, backendType string) recon
 // aware the previous one failed and why — without this the re-run repeats the same build
 // context-blind. detail may carry technical specifics; History is the coder's channel, not
 // the user's, so precision there helps the coder fix the actual problem.
-func (f *Flow) recordGenerationFailure(workspaceID, detail string) {
+// forceTier1 additionally binds the next attempt to zero code files (see
+// DesignSession.ForceTier1) — the note below is advisory, and for the unverified-script
+// case advisory has already been shown not to work.
+func (f *Flow) recordGenerationFailure(workspaceID, detail string, forceTier1 bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	sess := f.sessions[workspaceID]
@@ -1556,6 +1635,9 @@ func (f *Flow) recordGenerationFailure(workspaceID, detail string) {
 		return
 	}
 	sess.GenerationFailed = true
+	if forceTier1 {
+		sess.ForceTier1 = true
+	}
 	note := "I attempted to build the agent but it did not succeed."
 	if strings.TrimSpace(detail) != "" {
 		note += " Reason: " + strings.TrimSpace(detail) + "."
@@ -1942,6 +2024,12 @@ func (f *Flow) finalizeAgent(ctx context.Context, workspaceID string) (string, b
 	tools := sess.PendingTools
 	isEdit := sess.IsEdit
 	usedConns := sess.PendingUsedConnections
+	// The build is being saved, so any earlier soft-failure is resolved. Clear the flag
+	// (and its one-attempt TIER-1 override) here as well as on the chat path: saving via
+	// "keep it as-is" reaches finalize straight from the failed state, and leaving the flag
+	// set would show the failure banner over a successful save.
+	sess.GenerationFailed = false
+	sess.ForceTier1 = false
 	f.mu.Unlock()
 
 	var resp string
@@ -2246,6 +2334,49 @@ func isRetryApproval(input string) bool {
 	}
 	for _, phrase := range []string{"try again", "try it again", "fix it", "retry", "another try", "give it another", "have another go", "keep going", "keep trying", "keep at it", "another pass", "take another"} {
 		if strings.Contains(s, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// questionLeads are the openers that make a message interrogative rather than directive.
+var questionLeads = []string{
+	"why", "what", "what's", "whats", "how", "how come", "which", "who", "when", "where",
+	"did", "does", "do you", "is ", "is-", "was", "are ", "can you explain", "could you explain",
+	"explain", "tell me why", "tell me what", "any idea", "wondering",
+}
+
+// questionChangeCues are imperative markers that mean the user is steering the build, even
+// if the sentence happens to end in a question mark ("can you use web_fetch instead?").
+// Their presence disqualifies a message from being treated as a pure question.
+var questionChangeCues = []string{
+	"don't", "dont", "do not", "instead", "change", "without", "rather than", "skip",
+	"make it", "add ", "remove", "use ", "try ", "should be", "needs to", "must ",
+}
+
+// isDesignQuestion reports whether a post-failure message is the user ASKING something
+// rather than steering the rebuild. It gates the "change request rebuilds" branch in
+// stepDesigning, so a "why did that fail?" gets an answer instead of kicking off a
+// multi-minute build.
+//
+// It fails TOWARD rebuilding by design — the asymmetry matters. Misreading a question as a
+// change request wastes a build; misreading a change request as a question re-creates the
+// bug this exists to fix (the user describes a change, gets interrogated instead, and has to
+// press Build to be heard). So all three conditions must hold, and anything ambiguous
+// rebuilds: the message ends in "?", opens interrogatively, and carries no imperative cue.
+func isDesignQuestion(input string) bool {
+	s := strings.ToLower(strings.TrimSpace(input))
+	if !strings.HasSuffix(s, "?") {
+		return false
+	}
+	for _, cue := range questionChangeCues {
+		if strings.Contains(s, cue) {
+			return false
+		}
+	}
+	for _, lead := range questionLeads {
+		if strings.HasPrefix(s, lead) {
 			return true
 		}
 	}
