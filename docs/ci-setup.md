@@ -19,9 +19,23 @@ built-in `GITHUB_TOKEN`; cosign signs keylessly through GitHub's OIDC provider;
 govulncheck, Trivy, gitleaks and CodeQL need no credentials. Do not add secrets
 that have no consumer.
 
-## 2. Branch protection on `main`
+## 2. Branch protection on `main` — NOT AVAILABLE ON THIS PLAN
 
-Require these status checks to pass before merging:
+**Verified 2026-07-28:** the API returns
+`403 — Upgrade to GitHub Pro or make this repository public`. Branch protection
+requires GitHub Pro (or an org plan) for a **private** repository; it is free on
+public ones. Nothing to configure today.
+
+The checks still **run** on every PR — they are simply not **enforced**, so a
+red PR *can* be merged. Until one of the following is true, the gate is a
+discipline, not a guarantee:
+
+- go public at launch (protection becomes free, and CodeQL starts working too —
+  see §3), or
+- subscribe to GitHub Pro, or
+- accept the gap and just don't merge red PRs.
+
+When protection does become available, require these checks:
 
 - `Conventional commit title`
 - `Go build and test`
@@ -41,6 +55,11 @@ Also enable:
 - **Squash merging only.** The PR title is what the conventional-commit lint
   validates and what release-please reads to compute the version; allowing merge
   commits would let unlinted commit messages reach `main`.
+
+**Squash-merge can be set today** — it is a plain repository setting, not branch
+protection: *Settings → General → Pull Requests* → allow only "Squash merging".
+Worth doing now, because it is what keeps `main`'s history readable by
+release-please regardless of whether protection exists.
 
 ## 3. CodeQL is dormant until the repo is public
 
@@ -85,3 +104,15 @@ Measured locally on a 4-thread i5-6200U; GitHub runners are typically faster.
 `go test -timeout` is set to **900s**, not 600s: the `web` package measures
 ~343s under `-race` locally and a slower runner needs the headroom. Keep this in
 sync with the `ci-test` target in the `Makefile`.
+
+### A note on Actions minutes
+
+A full PR run is ~12 jobs, dominated by the ~8-minute `-race` job and the
+container build. On a **private** repo those minutes are metered against the free
+monthly allowance.
+
+This bit immediately after the first merge: Dependabot opened **ten** PRs at
+once, queueing ~110 jobs. `dependabot.yml` now groups minor/patch updates per
+ecosystem and caps open PRs at 3 each, which turns that into roughly one PR per
+ecosystem per week. If minutes still run short, the next levers are
+`interval: monthly` and dropping the container job to `push` on `main` only.
