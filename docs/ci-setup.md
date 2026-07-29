@@ -117,10 +117,18 @@ ecosystem and caps open PRs at 3 each, which turns that into roughly one PR per
 ecosystem per week. If minutes still run short, the next levers are
 `interval: monthly` and dropping the container job to `push` on `main` only.
 
-## Why `bootstrap-sha` is pinned
+## Why `last-release-sha` is pinned
 
-`release-please-config.json` sets `bootstrap-sha` to `b12768c` — the commit
+`release-please-config.json` sets `last-release-sha` to `b12768c` — the commit
 immediately before PR #55.
+
+**`bootstrap-sha` was tried first and does not work here.** The schema defines it
+as "for the *initial release* of a library, only consider as far back as this
+commit SHA" — but `.release-please-manifest.json` declares `"." : "0.0.0"`, so
+release-please does not treat this as an initial release and the option never
+fires. Merging it changed nothing: the regenerated changelog was still 482 lines
+/ 456 entries. `last-release-sha` is the equivalent option scoped to "any
+release", which does apply.
 
 Without it, release-please has no anchor telling it where the previous release
 was (this repository had **529 commits and no tags** at the time of the first
@@ -134,7 +142,13 @@ the GitHub GraphQL API. That had two consequences, both observed:
 - When it did succeed, it generated a **482-line changelog** covering every
   pre-release commit, rather than the release-worthy work.
 
-`bootstrap-sha` affects the **first release only**. Once `v0.1.0` is tagged,
-release-please anchors on the previous tag and each subsequent release contains
-only the commits since it — no further configuration needed, and the value can
-be left in place.
+`last-release-sha` is a **floor**, not an override: it says "never look further
+back than this". Once `v0.1.0` is tagged at a commit newer than the pin,
+release-please anchors on that tag and the floor becomes inert, so each
+subsequent release contains only the commits since the previous tag.
+
+**Verify this once**, on the first release PR raised after `v0.1.0` ships: it
+should list only the work merged after the tag. If it instead repeats the
+`v0.1.0` entries, the floor is being applied as an anchor rather than a bound —
+delete the `last-release-sha` line, since after `v0.1.0` exists the tag alone
+does the job.
