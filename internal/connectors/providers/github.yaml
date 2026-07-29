@@ -20,3 +20,9 @@ static_headers:
 default_scopes:
   - repo
   - read:user
+
+# Verified 2026-07-29 against
+# https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps
+# — loopback redirect URIs over plain http are explicitly supported.
+redirect_policy:
+  verified: true

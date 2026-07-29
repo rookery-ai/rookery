@@ -11,6 +11,7 @@ import (
 	"path"
 	"sort"
 
+	"github.com/ilijad1/simple-agents/internal/publicurl"
 	"gopkg.in/yaml.v3"
 )
 
@@ -112,6 +113,12 @@ type Provider struct {
 	// is supported. Derived values are merged into service_connections.extra alongside
 	// ConnectInputs and exposed to request templates as {{conn.<key>}}.
 	KeyExtra map[string]string `yaml:"key_extra"`
+
+	// RedirectPolicy declares what this provider accepts as a redirect URI, so
+	// the connect UI can tell the user their instance URL will not work BEFORE
+	// they create an OAuth app and click through consent. An absent block is the
+	// zero Policy: fully permissive and unverified, which can only ever warn.
+	RedirectPolicy publicurl.Policy `yaml:"redirect_policy"`
 }
 
 // WithConnVars returns a copy of the provider with its OAuth endpoint URLs resolved
@@ -331,4 +338,20 @@ func (r *Registry) Action(provider, name string) (Action, bool) {
 type BoundConn struct {
 	ID, Provider, AccountLabel, AccountIdentity string
 	Extra                                       map[string]string // resolved per-connection values (e.g. cloudid)
+}
+
+// RedirectPolicy returns the redirect-URI policy governing a provider.
+//
+// It resolves through OAuthProvider, so an aliased child (google_drive → google)
+// inherits its parent's policy. That is required for correctness rather than
+// convenience: the redirect URI is registered against the PARENT's OAuth app, so
+// the parent's rules are the ones the provider will enforce.
+func (r *Registry) RedirectPolicy(provider string) publicurl.Policy {
+	if p, ok := r.OAuthProvider(provider); ok {
+		return p.RedirectPolicy
+	}
+	if p, ok := r.ProviderByName(provider); ok {
+		return p.RedirectPolicy
+	}
+	return publicurl.Policy{}
 }

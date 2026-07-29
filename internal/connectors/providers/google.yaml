@@ -24,3 +24,14 @@ default_scopes:
   - https://www.googleapis.com/auth/gmail.send
   - https://www.googleapis.com/auth/gmail.modify
   - https://www.googleapis.com/auth/userinfo.email
+
+# Verified 2026-07-29 against
+# https://developers.google.com/identity/protocols/oauth2/web-server and
+# https://support.google.com/cloud/answer/15549257 — "Redirect URIs must use the
+# HTTPS scheme… Localhost URIs are exempt", "Hosts cannot be raw IP addresses",
+# and the domain must be a valid top private domain.
+redirect_policy:
+  scheme: https_or_loopback
+  allow_raw_ip: loopback_only
+  require_public_host: true
+  verified: true
