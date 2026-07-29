@@ -45,7 +45,7 @@ nfpms:
     description: |
       Multi-workspace AI agents control plane with a built-in knowledge base,
       connector layer and scheduler.
-    license: proprietary
+    license: Apache-2.0
     formats: [deb, rpm]
     bindir: /usr/bin
     contents:
