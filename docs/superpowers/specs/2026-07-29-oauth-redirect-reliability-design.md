@@ -151,20 +151,30 @@ YAML files and no Go change" ethos:
 redirect_policy:
   scheme: https_or_loopback    # https | https_or_loopback | any     (default: any)
   allow_raw_ip: loopback_only  # yes | no | loopback_only            (default: yes)
-  allow_reserved_host: false   # .lan / .local / dotless             (default: true)
+  require_public_host: true    # reject .lan / .local / dotless      (default: false)
   verified: true               # confirmed against live provider docs (default: false)
 ```
+
+Every field's zero value is the permissive case. That is why the host rule is
+phrased as `require_public_host` rather than `allow_reserved_host`: a Go bool
+defaults to `false`, so an "allow" field would have defaulted to *deny* for every
+provider without a policy block — inverting the safety property the design rests on.
 
 **An absent block means unverified, which means soft warnings only.** The feature therefore
 ships incrementally: the four providers verified against live documentation get policies now;
 the other fourteen stay soft until someone verifies them.
 
-| Provider | scheme | allow_raw_ip | allow_reserved_host | Source |
+| Provider | scheme | allow_raw_ip | require_public_host | Source |
 |---|---|---|---|---|
-| `google` | `https_or_loopback` | `loopback_only` | `false` | [Google OAuth 2.0 for Web Server Applications](https://developers.google.com/identity/protocols/oauth2/web-server), [Manage OAuth Clients](https://support.google.com/cloud/answer/15549257) |
-| `github` | `any` | `yes` | `true` | [Authorizing OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps) |
-| `notion` | `https_or_loopback` | `yes` | `true` | [Notion authorization](https://developers.notion.com/guides/get-started/authorization) |
-| `slack` | `https` | `no` | `true` | [Installing with OAuth](https://docs.slack.dev/authentication/installing-with-oauth/) |
+| `google` | `https_or_loopback` | `loopback_only` | `true` | [Google OAuth 2.0 for Web Server Applications](https://developers.google.com/identity/protocols/oauth2/web-server), [Manage OAuth Clients](https://support.google.com/cloud/answer/15549257) |
+| `github` | *(default: any)* | *(default: yes)* | `false` | [Authorizing OAuth apps](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps) |
+| `notion` | `https_or_loopback` | *(default: yes)* | `false` | [Notion authorization](https://developers.notion.com/guides/get-started/authorization) |
+| `slack` | `https` | `no` | `false` | [Installing with OAuth](https://docs.slack.dev/authentication/installing-with-oauth/) |
+
+Only `google` requires a public host — it is the one provider of the four whose
+documentation states the domain must be a valid top private domain. GitHub, Notion
+and Slack are annotated `verified: true` so their *scheme* rules can hard-block,
+while leaving the hostname rule permissive.
 
 Google's policy inherits to its seven `auth_parent: google` children (Drive, Sheets, Docs,
 AdSense, GA4, Search Console, YouTube) through the existing `OAuthProvider()` resolution —
