@@ -9,9 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/connectors"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/publicurl"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
 )
@@ -84,12 +85,36 @@ func (s *Server) callbackURL(c echo.Context, provider string) string {
 	return s.publicBaseURL(c) + "/dashboard/connectors/services/callback/" + provider
 }
 
+// publicBaseURL is the instance's externally-reachable base URL: the configured
+// setting, else SA_PUBLIC_URL, else what this request suggests.
+//
+// Detection is only the fallback. It is why the redirect URI used to change with
+// however the operator happened to reach the page, which is the defect the
+// configured setting exists to remove.
 func (s *Server) publicBaseURL(c echo.Context) string {
-	if b := os.Getenv("SA_PUBLIC_URL"); b != "" {
-		return strings.TrimRight(b, "/")
+	base, _ := s.resolvePublicURL(c)
+	return base
+}
+
+// resolvePublicURL also reports where the value came from, for the settings UI.
+func (s *Server) resolvePublicURL(c echo.Context) (string, publicurl.Source) {
+	return publicurl.Resolve(s.db.GetSystemSetting, detectBaseURL(c))
+}
+
+// detectBaseURL infers a base URL from the current request. Note this reads the
+// Host header directly and does NOT consult X-Forwarded-Host, so any reverse
+// proxy that rewrites Host must have the instance URL configured explicitly.
+func detectBaseURL(c echo.Context) string {
+	return c.Scheme() + "://" + c.Request().Host
+}
+
+// redirectURIFromState reads the pinned redirect URI out of a split state
+// payload, tolerating the 4- and 5-field shapes issued before it was pinned.
+func redirectURIFromState(parts []string) string {
+	if len(parts) < 6 {
+		return ""
 	}
-	scheme := c.Scheme()
-	return scheme + "://" + c.Request().Host
+	return parts[5]
 }
 
 // consentURLError classifies a failure building an OAuth consent URL so both
@@ -143,9 +168,14 @@ func (s *Server) buildConsentURL(c echo.Context, w *db.Workspace, provider, labe
 			encoded = base64.RawURLEncoding.EncodeToString(b)
 		}
 	}
-	payload := strings.Join([]string{w.ID, provider, label, nonce, encoded}, "~")
+	redirectURI := s.callbackURL(c, provider)
+	// The URI is pinned into the signed state so the token exchange uses the
+	// SAME string the consent request did. Recomputing it at callback time was a
+	// real failure mode: any difference produces redirect_uri_mismatch AFTER the
+	// user has already granted consent, which reads as a provider fault.
+	payload := strings.Join([]string{w.ID, provider, label, nonce, encoded, redirectURI}, "~")
 	state := signState(s.systemKey, payload, time.Now())
-	return oauth.ConsentURL(clientID, s.callbackURL(c, provider), state, child.DefaultScopes), nil
+	return oauth.ConsentURL(clientID, redirectURI, state, child.DefaultScopes), nil
 }
 
 // connectAPIKeyCore validates the connect-input fields, derives any
@@ -214,7 +244,7 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 	parts := strings.Split(payload, "~")
 	// 4 fields is a state issued before connect_inputs existed; the 10-minute TTL means
 	// such a state can still be in flight across a deploy, so both shapes are accepted.
-	if len(parts) < 4 || len(parts) > 5 || parts[0] != w.ID || parts[1] != provider {
+	if len(parts) < 4 || len(parts) > 6 || parts[0] != w.ID || parts[1] != provider {
 		return s.redirectWithError(c, "/connections", "Authorization did not match this workspace; try again.")
 	}
 	label := parts[2]
@@ -246,10 +276,33 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 	clientID, _ := secrets.DecryptWithSystemKey(cfg.EncryptedClientID, s.systemKey)
 	clientSecret, _ := secrets.DecryptWithSystemKey(cfg.EncryptedClientSecret, s.systemKey)
 
+	// Use the URI pinned at consent time, unconditionally. It is by definition
+	// the correct string: it is the one the provider itself saw and validated
+	// when it issued this code, so the exchange must present the same one.
+	//
+	// Do NOT reject the callback when it diverges from what we would compute now.
+	// The user has already granted consent at that point, and if the cause is
+	// systematic — the operator changed the instance URL mid-flow, or a transient
+	// GetSystemSetting error made Resolve fall through to detection — then
+	// "start again" reproduces the divergence. That is a loop, not a recovery.
+	// Log it and proceed.
+	redirectURI := redirectURIFromState(parts)
+	if redirectURI == "" {
+		// A pre-pinning state, still inside the 10-minute TTL.
+		redirectURI = s.callbackURL(c, provider)
+	} else if current := s.callbackURL(c, provider); current != redirectURI {
+		slog.Warn("oauth callback: instance URL changed mid-flow; using the pinned URI",
+			"provider", provider, "pinned", redirectURI, "current", current)
+	}
+
 	oauth := connectors.OAuthClient{}
-	ts, err := oauth.ExchangeCode(ctx, authProv, clientID, clientSecret, code, s.callbackURL(c, provider))
+	ts, err := oauth.ExchangeCode(ctx, authProv, clientID, clientSecret, code, redirectURI)
 	if err != nil {
-		return s.redirectWithError(c, "/connections", "Token exchange failed: "+err.Error())
+		label := authProv.Label
+		if label == "" {
+			label = provider
+		}
+		return s.redirectWithError(c, "/connections", explainOAuthError(label, redirectURI, err))
 	}
 	identity, _ := oauth.FetchIdentity(ctx, authProv, ts.AccessToken)
 
