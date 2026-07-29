@@ -18,6 +18,8 @@ func TestAPIParityInventory(t *testing.T) {
 		"POST /api/v1/workspaces/leave", "DELETE /api/v1/workspaces/:id",
 		"GET /api/v1/admin/overview", "GET /api/v1/admin/audit",
 		"GET /api/v1/admin/settings",
+		"GET /api/v1/admin/public-url", "PUT /api/v1/admin/public-url",
+		"POST /api/v1/admin/public-url/test",
 		"GET /api/v1/agents", "GET /api/v1/agents/:id", "DELETE /api/v1/agents/:id",
 		"POST /api/v1/agents/:id/run", "GET /api/v1/agents/:id/run/progress",
 		"PUT /api/v1/agents/:id/schedule", "DELETE /api/v1/agents/:id/schedule",

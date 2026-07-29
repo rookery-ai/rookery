@@ -1,0 +1,193 @@
+package web
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+)
+
+type preflightDTO struct {
+	Severity string `json:"severity"`
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	Fix      string `json:"fix"`
+}
+
+type providerDTO struct {
+	Name        string         `json:"name"`
+	Kind        string         `json:"kind"`
+	RedirectURI string         `json:"redirect_uri"`
+	Preflight   []preflightDTO `json:"preflight"`
+}
+
+type servicesDTO struct {
+	Providers []providerDTO `json:"providers"`
+	Summary   struct {
+		BaseURL        string `json:"base_url"`
+		OAuthProviders int    `json:"oauth_providers"`
+		CleanProviders int    `json:"clean_providers"`
+	} `json:"summary"`
+}
+
+func listServices(t *testing.T) (*Server, servicesDTO) {
+	t.Helper()
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+	// The operator's own SA_PUBLIC_URL must not leak into the test's expectations.
+	t.Setenv("SA_PUBLIC_URL", "")
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/services", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var body servicesDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return s, body
+}
+
+func findProvider(t *testing.T, body servicesDTO, name string) providerDTO {
+	t.Helper()
+	for _, p := range body.Providers {
+		if p.Name == name {
+			return p
+		}
+	}
+	t.Fatalf("provider %q not in list", name)
+	return providerDTO{}
+}
+
+// Every OAuth provider must carry the exact redirect URI the user has to
+// register. Its absence is what made OAuth unusable through the UI.
+func TestListServicesCarriesRedirectURI(t *testing.T) {
+	_, body := listServices(t)
+
+	google := findProvider(t, body, "google")
+	want := "/dashboard/connectors/services/callback/google"
+	if !strings.HasSuffix(google.RedirectURI, want) {
+		t.Fatalf("google redirect_uri = %q, want it to end with %q", google.RedirectURI, want)
+	}
+
+	// An api_key provider has no redirect URI at all — emitting one would tell
+	// the user to register something that is never used.
+	stripe := findProvider(t, body, "stripe")
+	if stripe.RedirectURI != "" {
+		t.Fatalf("api_key provider must not carry a redirect_uri, got %q", stripe.RedirectURI)
+	}
+
+	// httptest requests arrive as http://example.com, a public domain over plain
+	// http, which google's verified policy hard-blocks.
+	if len(google.Preflight) == 0 {
+		t.Fatalf("expected a preflight problem for google over plain http")
+	}
+	if google.Preflight[0].Severity != "hard" || google.Preflight[0].Fix == "" {
+		t.Fatalf("got preflight %+v", google.Preflight[0])
+	}
+}
+
+// An aliased child registers its OWN callback path against the parent's OAuth
+// app, so its redirect URI must name the child.
+func TestListServicesChildHasOwnRedirectPath(t *testing.T) {
+	_, body := listServices(t)
+	child := findProvider(t, body, "google_drive")
+	if !strings.HasSuffix(child.RedirectURI, "/callback/google_drive") {
+		t.Fatalf("google_drive redirect_uri = %q", child.RedirectURI)
+	}
+}
+
+func TestListServicesSummaryCountsCleanProviders(t *testing.T) {
+	_, body := listServices(t)
+	if body.Summary.OAuthProviders < 10 {
+		t.Fatalf("expected the bundled OAuth providers to be counted, got %d", body.Summary.OAuthProviders)
+	}
+	if body.Summary.CleanProviders > body.Summary.OAuthProviders {
+		t.Fatalf("clean (%d) cannot exceed total (%d)",
+			body.Summary.CleanProviders, body.Summary.OAuthProviders)
+	}
+	if body.Summary.BaseURL == "" {
+		t.Fatalf("summary must carry the base URL it judged")
+	}
+}
+
+// The echo endpoint is unauthenticated, so single-use and expiry ARE its access
+// control and must be pinned by tests.
+func TestEchoNonceIsSingleUseAndScoped(t *testing.T) {
+	s, _ := newAPITestServer(t)
+
+	rec := doJSON(t, s, http.MethodGet, "/healthz/echo?token=bogus", nil, nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unissued token: status %d, want 404", rec.Code)
+	}
+
+	s.echoMu.Lock()
+	if s.echoNonces == nil {
+		s.echoNonces = map[string]echoNonce{}
+	}
+	s.echoNonces["tok1"] = echoNonce{expires: time.Now().Add(30 * time.Second)}
+	s.echoMu.Unlock()
+
+	if rec := doJSON(t, s, http.MethodGet, "/healthz/echo?token=tok1", nil, nil); rec.Code != http.StatusOK {
+		t.Fatalf("issued token: status %d, want 200", rec.Code)
+	}
+	if rec := doJSON(t, s, http.MethodGet, "/healthz/echo?token=tok1", nil, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("replayed token: status %d, want 404 — nonces must be single-use", rec.Code)
+	}
+}
+
+func TestEchoNonceExpires(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	s.echoMu.Lock()
+	if s.echoNonces == nil {
+		s.echoNonces = map[string]echoNonce{}
+	}
+	s.echoNonces["stale"] = echoNonce{expires: time.Now().Add(-time.Second)}
+	s.echoMu.Unlock()
+
+	if rec := doJSON(t, s, http.MethodGet, "/healthz/echo?token=stale", nil, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("expired token: status %d, want 404", rec.Code)
+	}
+}
+
+// Saving an instance URL must change what the redirect URI reports, and a
+// malformed value must be rejected rather than silently stored.
+func TestSavePublicURLDrivesTheRedirectURI(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+	t.Setenv("SA_PUBLIC_URL", "")
+
+	rec := doJSON(t, s, http.MethodPut, "/api/v1/admin/public-url",
+		map[string]string{"url": "not-a-url"}, cookies)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("malformed url: status %d, want 400", rec.Code)
+	}
+
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/admin/public-url",
+		map[string]string{"url": "https://agents.example.com/"}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
+	}
+	if !contains(rec.Body.String(), `"public_url_source":"configured"`) {
+		t.Fatalf("source should be configured: %s", rec.Body.String())
+	}
+
+	listRec := doJSON(t, s, http.MethodGet, "/api/v1/services", nil, cookies)
+	var body servicesDTO
+	if err := json.Unmarshal(listRec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	google := findProvider(t, body, "google")
+	want := "https://agents.example.com/dashboard/connectors/services/callback/google"
+	if google.RedirectURI != want {
+		t.Fatalf("redirect_uri = %q, want %q", google.RedirectURI, want)
+	}
+	// A configured public https domain satisfies google's policy, so the hard
+	// block from the detected http://example.com must be gone.
+	if len(google.Preflight) != 0 {
+		t.Fatalf("expected a clean preflight, got %+v", google.Preflight)
+	}
+}

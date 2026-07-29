@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/simple-agents/internal/publicurl"
 	"github.com/ilijad1/simple-agents/internal/secrets"
 	"github.com/labstack/echo/v4"
 )
@@ -36,6 +37,25 @@ type apiServiceConnection struct {
 	Status   string `json:"status"`
 }
 
+// apiPreflightProblem is a publicurl.Problem flattened for JSON. Severity is a
+// string ("hard"/"soft") rather than the Go int so the SPA never depends on our
+// enum ordering.
+type apiPreflightProblem struct {
+	Severity string `json:"severity"`
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	Fix      string `json:"fix"`
+}
+
+// apiPublicURLSummary answers "what does my current instance URL cost me?" in
+// one line. Per-provider preflight cannot answer that — a user comparing URLs
+// would otherwise have to open all 18 OAuth cards and tally them by hand.
+type apiPublicURLSummary struct {
+	BaseURL        string `json:"base_url"`
+	OAuthProviders int    `json:"oauth_providers"`
+	CleanProviders int    `json:"clean_providers"`
+}
+
 type apiServiceConnectInput struct {
 	Key      string `json:"key"`
 	Label    string `json:"label"`
@@ -52,6 +72,8 @@ type apiServiceProvider struct {
 	SetupSteps    []string                 `json:"setup_steps"`
 	HasCreds      bool                     `json:"has_creds"`
 	ConnectInputs []apiServiceConnectInput `json:"connect_inputs"`
+	RedirectURI   string                   `json:"redirect_uri"`
+	Preflight     []apiPreflightProblem    `json:"preflight"`
 	Connections   []apiServiceConnection   `json:"connections"`
 	// ActionCount lets the UI show a count and hide the actions entry point at
 	// zero without a second fetch. The actions themselves stay OFF this payload:
@@ -62,6 +84,7 @@ type apiServiceProvider struct {
 
 type apiServicesListResponse struct {
 	Providers []apiServiceProvider `json:"providers"`
+	Summary   apiPublicURLSummary  `json:"summary"`
 }
 
 // apiConnectorAction is one curated action a provider exposes. Deliberately a
@@ -114,6 +137,11 @@ func (s *Server) apiListServices(c echo.Context) error {
 	all, _ := s.db.ListServiceConnections(ctx, w.ID)
 
 	providers := s.serviceProviders()
+	// Resolved ONCE: there are 45 providers and callbackURL resolves again
+	// internally, so resolving per-iteration would mean ~90 GetSystemSetting
+	// reads on every page load.
+	base, _ := s.resolvePublicURL(c)
+	oauthProviders, cleanProviders := 0, 0
 	out := make([]apiServiceProvider, 0, len(providers))
 	for _, provider := range providers {
 		conns := make([]apiServiceConnection, 0)
@@ -164,13 +192,32 @@ func (s *Server) apiListServices(c echo.Context) error {
 		}
 		cfgForCreds, _ := s.db.GetServiceProviderConfig(ctx, w.ID, credsProvider)
 
+		// Only OAuth providers have a redirect URI; an api_key provider never
+		// leaves the browser, so emitting one would be a false instruction.
+		redirectURI, preflight := "", []apiPreflightProblem{}
+		if kind == "oauth" {
+			redirectURI = base + "/dashboard/connectors/services/callback/" + provider
+			preflight = toAPIPreflight(publicurl.Check(base, s.connectors.RedirectPolicy(provider)))
+			if len(preflight) == 0 {
+				cleanProviders++
+			}
+			oauthProviders++
+		}
+
 		out = append(out, apiServiceProvider{
-			Name:          provider,
-			Label:         label,
-			Category:      category,
-			Kind:          kind,
-			SetupURL:      setupURL,
+			Name:     provider,
+			Label:    label,
+			Category: category,
+			Kind:     kind,
+			SetupURL: setupURL,
+			// SetupSteps ship with {{redirect_uri}} UNSUBSTITUTED on purpose. The
+			// wizard splits on the token and renders the URI as copyable code;
+			// substituting here would embed a bare URL that Linkify turns into a
+			// link, and clicking our own callback route without a state parameter
+			// only ever produces "Invalid or expired authorization request".
 			SetupSteps:    setupSteps,
+			RedirectURI:   redirectURI,
+			Preflight:     preflight,
 			HasCreds:      cfgForCreds != nil,
 			ConnectInputs: connectInputs,
 			Connections:   conns,
@@ -178,7 +225,14 @@ func (s *Server) apiListServices(c echo.Context) error {
 		})
 	}
 
-	return c.JSON(http.StatusOK, apiServicesListResponse{Providers: out})
+	return c.JSON(http.StatusOK, apiServicesListResponse{
+		Providers: out,
+		Summary: apiPublicURLSummary{
+			BaseURL:        base,
+			OAuthProviders: oauthProviders,
+			CleanProviders: cleanProviders,
+		},
+	})
 }
 
 // apiListProviderActions lists the curated actions a provider exposes. GET
@@ -345,4 +399,16 @@ func (s *Server) apiDeleteServiceConnection(c echo.Context) error {
 	}
 	s.audit.Log(w.ID, "disconnect_service", "conn:"+id, "", c.RealIP())
 	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
+}
+
+func toAPIPreflight(ps []publicurl.Problem) []apiPreflightProblem {
+	out := make([]apiPreflightProblem, 0, len(ps))
+	for _, p := range ps {
+		sev := "soft"
+		if p.Severity == publicurl.SeverityHard {
+			sev = "hard"
+		}
+		out = append(out, apiPreflightProblem{sev, p.Code, p.Message, p.Fix})
+	}
+	return out
 }
