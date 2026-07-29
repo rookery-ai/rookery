@@ -5,7 +5,7 @@
       "release-type": "go",
       "package-name": "simple-agents",
       "initial-version": "0.1.0",
-      "bootstrap-sha": "b12768c6e12ff742c6539856687bb8060d69270b",
+      "last-release-sha": "b12768c6e12ff742c6539856687bb8060d69270b",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
       "include-v-in-tag": true,
