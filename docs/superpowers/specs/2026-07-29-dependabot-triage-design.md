@@ -84,21 +84,38 @@ benefit is nil: this is the build stage only, and no Node reaches the runtime
 image. Bumping `.nvmrc` alongside it would fix the desync but move the whole
 project onto a non-LTS runtime, which is a separate decision nobody asked for.
 
-## The audit fix
+## The audit fix — and a correction to this document
 
-Not from any Dependabot PR, and the most valuable single change here.
+Not from any Dependabot PR.
 
 `npm audit` reported four advisories on `main` — two of them HIGH
 (`brace-expansion`, `fast-uri`), both transitive under the `shadcn` CLI
-devDependency, and both **with a fix available**. The PR gate's Trivy
-filesystem scan covers the npm tree at `severity: CRITICAL,HIGH` with
-`ignore-unfixed: true` and `exit-code: 1` — so "fix available" means Trivy
-would *not* have ignored them.
+devDependency, and all four with fixes available within existing semver ranges.
+`npm audit fix` resolves them lockfile-only. Audit is now clean.
 
-Dependabot's grouped version-update PRs do not reach transitive dependencies;
-only security updates would, and those were not producing PRs. `npm audit fix`
-resolves all four within existing semver ranges, lockfile-only. Audit is now
-clean.
+**The first draft of this document claimed those advisories were failing the PR
+gate's Trivy scan. That was wrong, and CI disproved it within the hour.** The
+Security scan job passes on the Go-deps PR, which carries the *unfixed*
+lockfile, and its Trivy step reports `web/ui/package-lock.json → npm → 0`.
+
+The reason is a Trivy default worth remembering: `--include-dev-deps`
+(`pkg.include-dev-deps`) defaults to **false**, so Trivy skips npm dev
+dependencies entirely. All four advisories are dev-only, so `ignore-unfixed`
+and the `CRITICAL,HIGH` threshold never even came into play — the findings were
+excluded before severity was considered.
+
+Two things follow. First, the audit fix is **defensive hygiene, not a gate
+fix**: zero behaviour risk, lockfile-only, and it removes findings that surface
+the moment anyone runs `npm audit` or that Trivy scope widens — but it was not
+urgent, and claiming otherwise oversold it. Second, and more useful long-term:
+**the gate has a real blind spot.** Trivy is the only npm vulnerability scanner
+in the pipeline, and it cannot see dev dependencies. The build toolchain — vite,
+vitest, the shadcn CLI, everything that executes on a developer's machine and in
+CI with repository credentials in scope — is unscanned. Adding
+`--include-dev-deps` would close it, at the cost of failing on findings in
+packages that never ship in the binary. That is a deliberate trade-off worth
+making consciously, and is left as a follow-up rather than smuggled into a
+dependency-bump PR.
 
 ## Verification
 
