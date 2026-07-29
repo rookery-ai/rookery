@@ -220,6 +220,8 @@ Ensure the import block of `service.go` contains `"path/filepath"` and `"strings
 
 Leave `SystemKeyFromEnv` in place — it is the documented legacy behaviour and the test above uses it to prove the migration is faithful.
 
+**On `system.key` and the archive:** the key file sits at `<data_dir>/system.key` while `collectVaultFiles` (Task 4) walks `<data_dir>/vaults`, so the file is never swept into a snapshot as a side effect. That is correct and intentional — the key reaches a snapshot only through `Manifest.SystemKey`, deliberately, inside the encrypted envelope. Do not "fix" the apparent omission by adding the file to the archive: it would then also sit in the tar unencrypted relative to the manifest's own copy, for no gain.
+
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `go test ./internal/secrets/... -count=1`
@@ -579,6 +581,15 @@ func Decrypt(dst io.Writer, src io.Reader, passphrase string) error {
 			final = true
 		}
 		if err != nil {
+			// A first frame that reads fully but fails to authenticate is
+			// ambiguous: a wrong passphrase and a corrupted frame 0 are
+			// indistinguishable, because the key derives from the passphrase and
+			// nothing else is available to check it against. Wrong passphrase is
+			// overwhelmingly the common case, so it is reported — at the cost
+			// that a snapshot damaged in its first frame sends the owner hunting
+			// for a credential problem that does not exist. Every other form of
+			// damage (bad magic, short header, short frame, implausible length)
+			// is reported as ErrCorrupt before reaching here.
 			if index == 0 {
 				return ErrBadPassphrase
 			}
@@ -1913,6 +1924,14 @@ func buildEncrypted(path string, files []archiveFile, m Manifest, passphrase str
 	}()
 
 	encErr := Encrypt(out, pr, passphrase)
+
+	// Unblock the writer before receiving. If Encrypt returned early — a full
+	// disk on the staged file is the realistic case — nothing is draining the
+	// pipe, and writeArchive's next Write would block forever, so the receive
+	// below would hang the whole snapshot path. Closing the read side makes
+	// that Write fail instead.
+	pr.CloseWithError(encErr)
+
 	// Drain the writer goroutine before reporting, so an archive error is not
 	// masked by the encrypt side simply seeing a closed pipe.
 	if err := <-archiveErr; err != nil {
