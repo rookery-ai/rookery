@@ -10,7 +10,7 @@ secrets, agents, connector, and inlined coder config — and replaces the old pe
 Workspaces have no login of their own: the owner **enters** a workspace by typing that workspace's
 **master password** (re-entered on every switch). The web session is two-level: `owner_id`
 (logged in) + `active_workspace_id` (entered). All tenant-scoped tables key off `workspace_id`.
-Bootstrap the owner with `simple-agents owner bootstrap -u <name> -p <pw>`.
+Bootstrap the owner with `rookery owner bootstrap -u <name> -p <pw>`.
 
 Terminology map (fully renamed throughout): user → **workspace**, admin → **owner**,
 `user_id` → `workspace_id`, `db.User` → `db.Workspace` (+ new `db.Owner`).
@@ -19,7 +19,7 @@ Terminology map (fully renamed throughout): user → **workspace**, admin → **
 
 ```bash
 # Build
-go build -o bin/simple-agents ./cmd/simple-agents
+go build -o bin/rookery ./cmd/rookery
 
 # Run all tests
 go test ./... -count=1 -timeout 120s
@@ -28,16 +28,16 @@ go test ./... -count=1 -timeout 120s
 go test -v ./internal/agentdesigner/... -run TestFlow
 
 # Run the server (after build)
-./bin/simple-agents serve
+./bin/rookery serve
 
 # Bootstrap the owner account (first run only)
-./bin/simple-agents owner bootstrap -u <username> -p <password>
+./bin/rookery owner bootstrap -u <username> -p <password>
 
 # Reset the owner password (single-owner model, no login required)
-./bin/simple-agents owner reset-password -p <new-password>
+./bin/rookery owner reset-password -p <new-password>
 
 # Database migration
-./bin/simple-agents db migrate
+./bin/rookery db migrate
 
 # Deploy / restart the server (build + run in background, logs to logs/server.log)
 make deploy    # stop existing server, rebuild, start in background
@@ -62,7 +62,7 @@ AST guardrail tests shell out to `python3`. If Python is not available, those te
 > starts it in the background with logs captured to `logs/server.log`. The
 > server listens on `0.0.0.0:8080` by default (override host with `ROOKERY_HOST=…`, port
 > with `ROOKERY_PORT=…`). Set `ROOKERY_PUBLIC_URL` to the externally-reachable base URL so OAuth
-> callbacks are correct. `simple-agents connector exec <tool> --args '<json>'` is the
+> callbacks are correct. `rookery connector exec <tool> --args '<json>'` is the
 > subcommand CLI coders use to reach the connector bridge (not for manual use).
 > The UI is the embedded React SPA served at `http://host:8080/` (build it into the
 > binary with `make ui` before `go build`; `/app` + `/app/*` 301-redirect to `/`).
@@ -131,6 +131,12 @@ consumer.**
 
 ## Distribution
 
+The project is **Rookery** (`github.com/ilijad1/rookery`); the binary, module and
+package are all lowercase `rookery`, and every environment variable is prefixed
+`ROOKERY_`. The project domain is **rookery.sh** — it is the documented
+`ROOKERY_PUBLIC_URL` example because OAuth providers reject redirect URIs on
+non-public hostnames, so a `.lan` address fails Google's validation outright.
+
 **Native binaries are the primary artifact**; the container image is secondary.
 
 | Target | Sandbox | Service | Tier |
@@ -157,10 +163,10 @@ an SBOM per archive.
 
 ```bash
 make docker-build           # honours podman or docker, whichever is installed
-make docker-run             # port 8080, data in the simple-agents-data volume
+make docker-run             # port 8080, data in the rookery-data volume
 
-podman run -d --name simple-agents -p 8080:8080 \
-  -v simple-agents-data:/data ghcr.io/ilijad1/simple-agents-v2:latest
+podman run -d --name rookery -p 8080:8080 \
+  -v rookery-data:/data ghcr.io/ilijad1/rookery:latest
 ```
 
 The image is **slim**: it contains no CLI coder binary and sets
@@ -197,7 +203,7 @@ local engine), and both write paths + `coder.ForWorkspace`, which returns
 `GET /healthz` is unauthenticated (outside `/api/v1`) and reports version,
 commit, sandbox status including Landlock ABI, coder mode, and host-tool
 presence — booleans only, never paths. It backs the container `HEALTHCHECK`
-(via the `simple-agents healthcheck` subcommand), the CI smoke test, and
+(via the `rookery healthcheck` subcommand), the CI smoke test, and
 operator triage.
 
 **A `python3` warning is not cosmetic**: without it the agent-tool AST guardrail
@@ -209,7 +215,7 @@ extraction and OCR respectively.
 
 ### Entry point & wiring
 
-`cmd/simple-agents/main.go` loads `config.yaml` via `internal/config`, wires all services, and
+`cmd/rookery/main.go` loads `config.yaml` via `internal/config`, wires all services, and
 delegates subcommands via `github.com/urfave/cli/v3`. The `serve` subcommand:
 1. Opens/migrates SQLite DB
 2. Creates secrets service, coder, agent designer, agent runner, skill designer (`skilldesigner.Flow`)
@@ -318,7 +324,7 @@ Key types in `internal/vault`:
 
 **Chat knowledge-base access (on-demand retrieval + editing).** The one-off chat coder runs with `WithDir(vaultRoot).WithAllowedTools("Read,Write,Edit,Glob,Grep")` and a system instruction (`prompts.BuildChatSystemPrompt`) naming the vault root. The LLM retrieves and edits the user's notes **on demand** — only on turns that touch the KB — instead of having the vault injected every prompt. `chat.BuildUserContext` now returns identity-only context (profile/memory/agents/MCP); the old always-on `[Related knowledge base]` keyword-snippet block was removed. The tool set is file-only (no `Bash`/`WebFetch`): the chat can create/edit/read notes but cannot delete, rename, or run shell commands. The same applies to agents (RW over the vault via the sandbox). The detective `Guard` is no longer wired into agent runs — it would revert the KB edits that are now intentional — so agent/chat KB edits persist.
 
-**Chat connector access.** One-off chat (both web `handleChatMessage` and Telegram) also exposes the workspace's **ACTIVE** service connections to the chat coder (`connectors.ActiveBoundConns` — all of them; chat isn't an agent so there's no per-agent binding), wired identically to how the API/CLI split works elsewhere: the **API engine** gets them as native function tools (`coder.WithConnectors`), a **CLI coder** reaches them via the loopback bridge (`bridge.Register` → `ROOKERY_CONNECTOR_URL`/`ROOKERY_CONNECTOR_TOKEN` env → `simple-agents connector exec`, plus a scoped `Bash(<bin> connector exec:*)` grant since chat is otherwise file-only). Both paths hit the same `connectors.Execute` (mutating allowed — chat is like a run, `buildPhase=false`). `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` appends `connectedToolsBlock` so the model knows the tools exist; with no active connections / no bridge, chat behaves exactly as the file-only default.
+**Chat connector access.** One-off chat (both web `handleChatMessage` and Telegram) also exposes the workspace's **ACTIVE** service connections to the chat coder (`connectors.ActiveBoundConns` — all of them; chat isn't an agent so there's no per-agent binding), wired identically to how the API/CLI split works elsewhere: the **API engine** gets them as native function tools (`coder.WithConnectors`), a **CLI coder** reaches them via the loopback bridge (`bridge.Register` → `ROOKERY_CONNECTOR_URL`/`ROOKERY_CONNECTOR_TOKEN` env → `rookery connector exec`, plus a scoped `Bash(<bin> connector exec:*)` grant since chat is otherwise file-only). Both paths hit the same `connectors.Execute` (mutating allowed — chat is like a run, `buildPhase=false`). `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` appends `connectedToolsBlock` so the model knows the tools exist; with no active connections / no bridge, chat behaves exactly as the file-only default.
 
 **Agent designer KB awareness.** The designer is text-only (`WithNoTools`) but its system prompt (`BuildDesignSystemPrompt`, `<knowledge_base>` block) now knows the app has a built-in vault that agents read/write, and is told to prefer it over Notion/external note apps for the user's own knowledge. Each design turn injects a fresh retrieval-backed block via `Flow.WithVault(v)` → `vault.BuildKBContext(v, workspaceID, query)` → `DesignSystemParams.KBManifest` — a folder-shape summary (`Vault.FolderSummary`, one line per folder regardless of how many files it holds — note this bounds bytes PER FOLDER, not in total as folder COUNT grows, which is why `BuildKBContext` gives the summary its own 2 KiB budget with a `…and N more folders` marker; unlike the old exhaustive path list that capped at 60 files/rendered 30) plus the passages most relevant to the conversation so far (via `Indexer().Search`, scored against the session's own recent user turns + the current message — the designer has no search tool of its own, so this is done for it on every turn). When nothing matches, the block says so explicitly and the prompt tells the designer to ask the user rather than invent a path. `skilldesigner.Flow` mirrors this identically (`WithVault`, its own `loadKBManifest`/`retrievalQuery`) — `BuildKBContext` lives in `internal/vault`, not `agentdesigner`, precisely so both designers can reach it without an awkward cross-designer import. `vault.NotePaths`/`Flow.WithKBLister`/the `kbLister` interface are gone — `BuildKBContext` was their only consumer.
 
@@ -354,7 +360,7 @@ Agent creation uses a single `agentdesigner.Flow` FSM shared between Telegram an
 
 All prompts live in `internal/prompts` (single source). The designer produces **coder-agnostic** AGENT.md — it says WHAT to do, never runtime-specific tool names (so it works on a full coder like claude-code/codex OR a basic model call like OpenRouter GLM). HOW the coder acts on files is injected separately based on `BackendType`:
 
-- **`platformContextBlock(chatApps, vaultRoot)`** — full Simple Agents primer (flexible ever-growing KB with USER-REORGANIZABLE vs SYSTEM-WRITTEN fixed locations, secrets store, chats, reminders, connected chat apps + commands, output protocol, schedule). Injected into design, implementation, and runtime prompts.
+- **`platformContextBlock(chatApps, vaultRoot)`** — full Rookery primer (flexible ever-growing KB with USER-REORGANIZABLE vs SYSTEM-WRITTEN fixed locations, secrets store, chats, reminders, connected chat apps + commands, output protocol, schedule). Injected into design, implementation, and runtime prompts.
 - **`coderCapabilitiesBlock(backendType)`** — three-way: `BackendFullCoder` (CLI) → direct tool access; `BackendToolCalling` (the `api` engine) → native function calls (`read_file`/`write_file`/`edit_file`/`list_dir`/`search_files`/`glob`/`web_search`/`web_fetch`/`run_script`) the host executes, final answer as protocol markers; `BackendBasicModel` → `[READ_FILE]`/`[WRITE_FILE]`/`[RUN_SCRIPT]` output markers. `MapCoderBackend()` maps the coder's backend type (`"api"` → tool-calling) to these. `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` is likewise backend-aware (tool-calling chat offers the file tools incl. `search_files`/`glob` but NOT the exec/network tools) and appends `connectedToolsBlock` when the workspace has active connections.
 - **`agentPhilosophyBlock()`** — three-tier taxonomy (TIER 1 reasoning-only / TIER 2 one script / TIER 3 multi-file) with NOT-TO-DO lists; forces the coder to pick the simplest tier that solves the task (prevents writing a script for trivial reasoning work).
 - **`agentArchitectureGateBlock()`** — mandatory TASK ANALYSIS → TIER DECISION → NOTIFICATION DECISION → SCHEDULE DECISION before any file is created. Supports no-notification (`[SILENT]`) and no-schedule (`none`) agents.
@@ -438,9 +444,9 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
   - **API engine** exposes them as native function tools in `hostToolSet` (`coder/connectortools.go`).
   - **CLI coders** reach the SAME `Execute` via a **loopback bridge** (`bridge.go`): a `127.0.0.1`
     HTTP listener started in `serve`; the runner registers a per-run bearer token scoped to the run's
-    bound connections; the coder runs `simple-agents connector exec <tool> --args '<json>'` (a thin
+    bound connections; the coder runs `rookery connector exec <tool> --args '<json>'` (a thin
     client subcommand) which POSTs to it. Tokens never leave the host; Landlock restricts filesystem,
-    not loopback TCP, so a sandboxed coder can reach it (the `simple-agents` binary dir is granted
+    not loopback TCP, so a sandboxed coder can reach it (the `rookery` binary dir is granted
     RO+exec in the sandbox spec so the child can exec it). The bridge response is **byte-capped**
     at `maxBridgeResult` (8 KiB, mirroring `coder.maxToolResult`) via `capBridgeData` — the API
     engine always truncated and the bridge did not, and an analytics or ad-insights report is
@@ -645,9 +651,9 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
 
 `internal/sandbox` adds preventive filesystem confinement via Linux Landlock LSM. No external deps, no setuid, no namespaces.
 
-**Mechanism:** `coder.buildCommand()` wraps the real command as `simple-agents __sandbox-exec <base64-spec>`. The helper applies `landlock.V5.BestEffort().RestrictPaths(...)` then `syscall.Exec`s the real command. Inherited by all children (`claude`→`bash`→`python`).
+**Mechanism:** `coder.buildCommand()` wraps the real command as `rookery __sandbox-exec <base64-spec>`. The helper applies `landlock.V5.BestEffort().RestrictPaths(...)` then `syscall.Exec`s the real command. Inherited by all children (`claude`→`bash`→`python`).
 
-**Allowed:** RW: per-workspace HOME + agent workdir. RO: system paths, coder binary dir, the `simple-agents` binary dir (so a confined CLI coder can exec `simple-agents connector exec`), the workspace's vault root. Denied: SQLite DB, config.yaml, other workspaces' vaults.
+**Allowed:** RW: per-workspace HOME + agent workdir. RO: system paths, coder binary dir, the `rookery` binary dir (so a confined CLI coder can exec `rookery connector exec`), the workspace's vault root. Denied: SQLite DB, config.yaml, other workspaces' vaults.
 
 `config.SandboxConfig.Enabled` (default true; `ROOKERY_SANDBOX=0` disables). With Landlock unavailable, the sandbox is not applied and nothing physically prevents writes outside the vault — agents/chat run trusted within the user's own vault.
 
@@ -676,8 +682,9 @@ fields `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`), 
 **The server-rendered template UI has been deleted (big-bang cutover).** There are now exactly
 **two** HTTP surfaces: the embedded **React SPA** at `/` and the **`/api/v1` JSON API**. All the old
 `/dashboard/*` and `/admin/*` HTML routes, the `TemplateRenderer`/`setupTemplates`/`parseTemplates`
-machinery, the `web/templates/` + `web/static/` directories, and the `templates_dir`/`static_dir` +
-`ROOKERY_TEMPLATES_DIR`/`ROOKERY_STATIC_DIR` config are gone. The SPA talks to the JSON API for everything.
+machinery, the `web/templates/` + `web/static/` directories, and their `templates_dir`/`static_dir`
+config plus the two environment overrides that fed them are gone. The SPA talks to the JSON API for
+everything.
 
 **Shell primitives** (`web/ui/src/components/shell/`): every page renders inside `AppShell` —
 an icon rail + list panel + a `ContextPane` slot. The context pane is user-resizable —
@@ -868,7 +875,7 @@ migrated — then holds an exclusive `flock` on `<data_dir>/rookery.pid` for
 its whole lifetime. The offline CLI takes the same lock and refuses when the
 server holds it. The settings button does not swap anything itself: it stages,
 writes a `.restore-pending` marker, and shuts the server down, so the swap
-happens on the next boot through the identical code path. `simple-agents backup
+happens on the next boot through the identical code path. `rookery backup
 cancel-restore` abandons a staged restore that would otherwise fire weeks later.
 
 **Snapshot contents.** `db/rookery.db` (via `VACUUM INTO` — copying the
@@ -915,6 +922,6 @@ cannot be pruned.
 - **Skill editing + import via chat** — `/skill` covers list/create/cancel, but there is no `/skill edit` (the skill designer has no edit mode at all, unlike `agentdesigner.StartEdit`) and no skill import (ZIP / pasted SKILL.md) over chat, which needs per-adapter file-upload handling. The remaining half of the skill parity gap.
 - **MCP servers** — `mcp_servers` table exists; MCP tool execution not implemented.
 - **Connector provider configs (non-Google) unverified against live APIs** — google/github/notion verified end-to-end against real accounts; outlook/jira were hand-authored (rendering unit-tested only). Verify each against live docs before relying on it. A dev harness for this lives at `cmd/livecheck` (uncommitted; runs `connectors.Execute` against real stored tokens).
-- **Connector native tools for CLI coders** — CLI coders reach connector actions via the `simple-agents connector exec` command (loopback bridge), not as native function tools in their own loop; true native parity for MCP-capable coders (claude-code) would be an MCP transport over the same `connectors.Execute` (not built).
+- **Connector native tools for CLI coders** — CLI coders reach connector actions via the `rookery connector exec` command (loopback bridge), not as native function tools in their own loop; true native parity for MCP-capable coders (claude-code) would be an MCP transport over the same `connectors.Execute` (not built).
 - **Build-time connector testing exposes ALL workspace connections** (the agent hasn't declared bindings yet); a real run exposes only the agent's bound connections (`agent_connections`).
 - **CLI-chat connector permission is a scoped Bash grant** — a CLI chat coder is otherwise file-only; when connectors are wired it gets `Bash(<bin> connector exec:*)` (only that command). Relies on the coder CLI honoring command-scoped Bash permissions (claude-code does); a coder that doesn't would need a wider grant.
