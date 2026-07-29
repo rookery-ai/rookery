@@ -179,7 +179,7 @@ CWD-relative.
 |---|---|---|
 | `ROOKERY_HOST` | `0.0.0.0` | bind address; `127.0.0.1` for loopback-only |
 | `ROOKERY_PORT` | `8080` | listen port |
-| `ROOKERY_DATA_DIR` | `~/.simple-agents-v2` | data root; also relocates the DB |
+| `ROOKERY_DATA_DIR` | `~/.rookery` | data root; also relocates the DB |
 | `ROOKERY_SESSION_KEY` | generated | hex 32-byte session key |
 | `ROOKERY_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks; validated at use (`internal/publicurl.Normalize`) and overridden by the instance URL in owner settings |
 | `ROOKERY_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |
@@ -264,7 +264,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/memory` | Per-user structured context store. Memory lives as named `.md` files in `memory/` (`USER.md`, `SOUL.md`, `GENERAL.md`, etc.) — editable via the KB browser. `ContextString()` reads all files, skips placeholder-only ones, and returns sectioned markdown for LLM injection. `Append/List/Delete` target GENERAL.md bullet lines (used by Telegram `/memory` command). `MigrateToStructuredFiles()` consolidates legacy UUID-keyed entries at startup. |
 | `internal/vault` | Per-user Obsidian-style knowledge base: `Vault` (paths + `Resolve` safety + file IO), `Reflector` (chats→markdown+sidecar), `LinkIndex` ([[wikilinks]]), `Searcher` (ripgrep), `Guard` (post-run write-scope enforcement), `MigrateLegacyLayout`, `MigrateSessionsToChats`. |
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
-| `internal/backup` | Owner-level snapshot/restore of the WHOLE install (database + every workspace vault) into one passphrase-encrypted `.sab` file. `Snapshot` (`VACUUM INTO` → tar+gzip → chunked AES-256-GCM, staged to a temp file then uploaded), `StageRestore`/`ApplyPendingRestore`/`CancelRestore`/`Verify`, `Destination` interface + `LocalDestination`/`S3Destination` (hand-rolled `signV4`, no AWS SDK), `Config` in `system_settings` (`backup.config`; passphrase + S3 secret encrypted under the system key), `Scheduler` (own ticker; daily/weekly, missed runs collapse), `Prune` (keep-last-N), `AcquireLock` (flock). See "Backup and restore" below. |
+| `internal/backup` | Owner-level snapshot/restore of the WHOLE install (database + every workspace vault) into one passphrase-encrypted `.rkb` file. `Snapshot` (`VACUUM INTO` → tar+gzip → chunked AES-256-GCM, staged to a temp file then uploaded), `StageRestore`/`ApplyPendingRestore`/`CancelRestore`/`Verify`, `Destination` interface + `LocalDestination`/`S3Destination` (hand-rolled `signV4`, no AWS SDK), `Config` in `system_settings` (`backup.config`; passphrase + S3 secret encrypted under the system key), `Scheduler` (own ticker; daily/weekly, missed runs collapse), `Prune` (keep-last-N), `AcquireLock` (flock). See "Backup and restore" below. |
 | `internal/profile` | Per-user personalization (name, email, location, timezone, tone, language, notes); stored in the generic `settings` table; `Load()`/`Save()`/`ContextString()` for LLM injection; `LoadLocation()` for timezone-aware reminder parsing |
 | `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per workspace. `SkillDir(base, workspaceID, name)` is the path helper shared with the skill designer (staging dirs use the `.staging-<name>` convention). |
 | `web/` | Echo v4 web server: the `/api/v1` JSON API + the embedded React SPA (`web/ui`, served at `/`). The old server-rendered template UI was deleted — the SPA is the only front end. Handler files now hold API handlers + shared cores (e.g. `saveConnector`, `loadAgentDetail`, `saveWorkspaceCoderCore`, `handleOAuthCallback`) reused by the JSON layer. |
@@ -835,7 +835,7 @@ provider/model/base-url/api-key-secret through `db.UpdateWorkspaceCoder`.
 ## Backup and restore
 
 One **owner-level** snapshot covers the entire install — the database plus every
-workspace's vault — in a single passphrase-encrypted `.sab` file. Configured in
+workspace's vault — in a single passphrase-encrypted `.rkb` file. Configured in
 owner settings (`BackupSection`), scheduled daily/weekly, restorable via CLI or
 from the UI.
 
@@ -864,14 +864,14 @@ consequences, all load-bearing:
 
 **Restore only ever runs against a dead install.** `serve` calls
 `ApplyPendingRestore` at the very top — *before* the database is opened or
-migrated — then holds an exclusive `flock` on `<data_dir>/simple-agents.pid` for
+migrated — then holds an exclusive `flock` on `<data_dir>/rookery.pid` for
 its whole lifetime. The offline CLI takes the same lock and refuses when the
 server holds it. The settings button does not swap anything itself: it stages,
 writes a `.restore-pending` marker, and shuts the server down, so the swap
 happens on the next boot through the identical code path. `simple-agents backup
 cancel-restore` abandons a staged restore that would otherwise fire weeks later.
 
-**Snapshot contents.** `db/simple-agents.db` (via `VACUUM INTO` — copying the
+**Snapshot contents.** `db/rookery.db` (via `VACUUM INTO` — copying the
 live file is torn, the WAL is multi-megabyte) plus `vaults/**`. Excluded:
 `claude-homes/` (regenerable; `.credentials.json` is re-copied per invocation),
 `config.yaml`, staging/work dirs. The vault walker is a **raw `filepath.WalkDir`,

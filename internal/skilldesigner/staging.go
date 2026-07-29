@@ -63,7 +63,7 @@ func ReadSkillTree(skillRoot string) (map[string]string, error) {
 			return err
 		}
 		if d.IsDir() {
-			// Skip dotfile dirs (e.g. the API engine's .sa_out spill dir).
+			// Skip dotfile dirs (e.g. the API engine's .rookery_out spill dir).
 			if path != skillRoot && strings.HasPrefix(d.Name(), ".") {
 				return filepath.SkipDir
 			}

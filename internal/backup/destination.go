@@ -32,12 +32,12 @@ type Entry struct {
 // snapshotNameRe matches exactly the names this package creates. Retention and
 // listing both filter on it so that a destination shared with other data never
 // has a foreign file listed, downloaded, or deleted.
-var snapshotNameRe = regexp.MustCompile(`^simple-agents-\d{8}-\d{6}\.sab$`)
+var snapshotNameRe = regexp.MustCompile(`^rookery-\d{8}-\d{6}\.rkb$`)
 
 // SnapshotName renders the canonical name for a snapshot taken at t. The layout
 // sorts lexically by time, which is what retention relies on.
 func SnapshotName(t time.Time) string {
-	return "simple-agents-" + t.UTC().Format("20060102-150405") + ".sab"
+	return "rookery-" + t.UTC().Format("20060102-150405") + ".rkb"
 }
 
 // IsSnapshotName reports whether name is one of ours.

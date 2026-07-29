@@ -16,7 +16,7 @@ func TestManifestJSONRoundTrip(t *testing.T) {
 		SystemKey:      "00112233",
 		WorkspaceCount: 7,
 		TotalBytes:     123,
-		Files:          []FileEntry{{Path: "db/simple-agents.db", Size: 123, SHA256: "deadbeef"}},
+		Files:          []FileEntry{{Path: "db/rookery.db", Size: 123, SHA256: "deadbeef"}},
 	}
 	raw, err := json.Marshal(m)
 	if err != nil {

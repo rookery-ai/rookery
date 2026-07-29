@@ -304,7 +304,7 @@ func (s *Server) openSnapshotForRead(c echo.Context, name string) (io.ReadCloser
 		}
 		defer src.Close()
 
-		tmp, err := os.CreateTemp("", "sa-restore-*.sab")
+		tmp, err := os.CreateTemp("", "rookery-restore-*.rkb")
 		if err != nil {
 			return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}

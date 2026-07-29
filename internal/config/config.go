@@ -87,14 +87,14 @@ func Load(path string) (*Config, error) {
 
 func defaults() *Config {
 	home, _ := os.UserHomeDir()
-	dataDir := filepath.Join(home, ".simple-agents-v2")
+	dataDir := filepath.Join(home, ".rookery")
 	return &Config{
 		Server: ServerConfig{
 			Host: "0.0.0.0",
 			Port: 8080,
 		},
 		Database: DatabaseConfig{
-			Path: filepath.Join(dataDir, "simple-agents.db"),
+			Path: filepath.Join(dataDir, "rookery.db"),
 		},
 		Data: DataConfig{
 			Dir: dataDir,
@@ -125,7 +125,7 @@ func applyEnv(cfg *Config) error {
 	}
 	if v := os.Getenv("ROOKERY_DATA_DIR"); v != "" {
 		cfg.Data.Dir = v
-		cfg.Database.Path = filepath.Join(v, "simple-agents.db")
+		cfg.Database.Path = filepath.Join(v, "rookery.db")
 	}
 	if v := os.Getenv("ROOKERY_SESSION_KEY"); v != "" {
 		cfg.Server.SessionKey = v

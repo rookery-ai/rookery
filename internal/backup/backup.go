@@ -79,7 +79,7 @@ func Snapshot(ctx context.Context, opts Options) (string, error) {
 	// VACUUM INTO is a single statement producing a consistent, checkpointed
 	// copy. Copying the .db file directly would be torn: a live install carries
 	// a multi-megabyte WAL that a plain copy does not fold in.
-	dbCopy := filepath.Join(work, "simple-agents.db")
+	dbCopy := filepath.Join(work, "rookery.db")
 	if _, err := opts.DB.ExecContext(ctx, `VACUUM INTO ?`, dbCopy); err != nil {
 		return "", fmt.Errorf("backup: vacuum database: %w", err)
 	}
@@ -97,7 +97,7 @@ func Snapshot(ctx context.Context, opts Options) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	files := append([]archiveFile{{Name: "db/simple-agents.db", Path: dbCopy}}, vaultFiles...)
+	files := append([]archiveFile{{Name: "db/rookery.db", Path: dbCopy}}, vaultFiles...)
 
 	m := Manifest{
 		CreatedAt:      now.UTC(),
@@ -108,7 +108,7 @@ func Snapshot(ctx context.Context, opts Options) (string, error) {
 		WorkspaceCount: wsCount,
 	}
 
-	staged := filepath.Join(work, "snapshot.sab")
+	staged := filepath.Join(work, "snapshot.rkb")
 	if err := buildEncrypted(staged, files, m, opts.Passphrase); err != nil {
 		return "", err
 	}

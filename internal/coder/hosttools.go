@@ -1387,7 +1387,7 @@ const spillHeadBytes = 2 * 1024
 // Dot-prefixed on purpose: ReadToolsTree only walks tools/ and skips dot-dirs, cleanupTestArtifacts
 // removes any dot-dir post-save, and vault.List hides dotfiles — so a spill never ships with a
 // built agent nor shows in the KB browser.
-const spillDirName = ".sa_out"
+const spillDirName = ".rookery_out"
 
 // spillLargeOutput persists an over-cap exec-tool output (run_script / bash stdout) to a file under
 // the agent workDir and returns a compact, STEERING notice: a head of the data plus the file path

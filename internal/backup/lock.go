@@ -26,7 +26,7 @@ type Lock struct {
 
 // LockPath is the lock file for an install.
 func LockPath(dataDir string) string {
-	return filepath.Join(dataDir, "simple-agents.pid")
+	return filepath.Join(dataDir, "rookery.pid")
 }
 
 // AcquireLock takes the exclusive install lock without blocking.

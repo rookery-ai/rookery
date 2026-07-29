@@ -14,7 +14,7 @@ import (
 func TestSnapshotNameSortsLexically(t *testing.T) {
 	earlier := SnapshotName(time.Date(2026, 7, 29, 3, 0, 0, 0, time.UTC))
 	later := SnapshotName(time.Date(2026, 7, 30, 3, 0, 0, 0, time.UTC))
-	if earlier != "simple-agents-20260729-030000.sab" {
+	if earlier != "rookery-20260729-030000.rkb" {
 		t.Fatalf("got %q", earlier)
 	}
 	if !(earlier < later) {
@@ -23,12 +23,12 @@ func TestSnapshotNameSortsLexically(t *testing.T) {
 }
 
 func TestIsSnapshotName(t *testing.T) {
-	if !IsSnapshotName("simple-agents-20260729-030000.sab") {
+	if !IsSnapshotName("rookery-20260729-030000.rkb") {
 		t.Fatal("must accept a well-formed name")
 	}
 	for _, bad := range []string{
-		"notes.txt", "simple-agents-2026-07-29.sab", "simple-agents-20260729-030000.sab.tmp",
-		"other-20260729-030000.sab",
+		"notes.txt", "rookery-2026-07-29.rkb", "rookery-20260729-030000.rkb.tmp",
+		"other-20260729-030000.rkb",
 	} {
 		if IsSnapshotName(bad) {
 			t.Fatalf("must reject %q — retention deletes only what it matches", bad)
@@ -76,7 +76,7 @@ func TestLocalPutGetListDelete(t *testing.T) {
 func TestLocalListIgnoresForeignFiles(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "important-tax-return.pdf"), []byte("x"), 0o644)
-	os.WriteFile(filepath.Join(dir, "simple-agents-20260729-030000.sab.tmp"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "rookery-20260729-030000.rkb.tmp"), []byte("x"), 0o644)
 
 	entries, err := NewLocalDestination(dir).List(context.Background())
 	if err != nil {
@@ -102,7 +102,7 @@ func TestLocalPutIsAtomic(t *testing.T) {
 }
 
 func TestLocalGetMissingIsNotFound(t *testing.T) {
-	_, err := NewLocalDestination(t.TempDir()).Get(context.Background(), "simple-agents-20260729-030000.sab")
+	_, err := NewLocalDestination(t.TempDir()).Get(context.Background(), "rookery-20260729-030000.rkb")
 	if err == nil {
 		t.Fatal("expected an error for a missing snapshot")
 	}

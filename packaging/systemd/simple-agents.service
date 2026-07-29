@@ -13,7 +13,7 @@ RestartSec=5s
 # The data directory holds the SQLite database, every workspace vault, and the
 # claude-homes credential trees. Keep it out of the binary's install prefix so a
 # package upgrade cannot touch user data.
-Environment=ROOKERY_DATA_DIR=%h/.simple-agents-v2
+Environment=ROOKERY_DATA_DIR=%h/.rookery
 # Set this when the app sits behind a reverse proxy or is reached by a name
 # other than the one the browser used, otherwise OAuth redirect URIs are wrong.
 #Environment=ROOKERY_PUBLIC_URL=https://agents.example.com
@@ -25,7 +25,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/.simple-agents-v2
+ReadWritePaths=%h/.rookery
 
 [Install]
 WantedBy=default.target

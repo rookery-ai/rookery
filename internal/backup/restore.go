@@ -193,7 +193,7 @@ func ApplyPendingRestore(dataDir string) error {
 	// Move the current install aside. Staging lives inside dataDir so every
 	// rename is within one filesystem: atomic, and never half-complete.
 	for _, name := range []string{
-		"simple-agents.db", "simple-agents.db-wal", "simple-agents.db-shm",
+		"rookery.db", "rookery.db-wal", "rookery.db-shm",
 		"vaults", "system.key",
 	} {
 		src := filepath.Join(dataDir, name)
@@ -205,8 +205,8 @@ func ApplyPendingRestore(dataDir string) error {
 		}
 	}
 
-	if err := os.Rename(filepath.Join(staging, "db", "simple-agents.db"),
-		filepath.Join(dataDir, "simple-agents.db")); err != nil {
+	if err := os.Rename(filepath.Join(staging, "db", "rookery.db"),
+		filepath.Join(dataDir, "rookery.db")); err != nil {
 		return fmt.Errorf("backup: install restored database: %w", err)
 	}
 	stagedVaults := filepath.Join(staging, "vaults")

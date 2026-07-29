@@ -5,7 +5,7 @@
 # captured to logs/server.log. The Makefile owns process tracking via
 # logs/server.pid (the app has no pidfile/lock of its own).
 #
-# Defaults used by `serve`: listen 0.0.0.0:8080, data dir ~/.simple-agents-v2
+# Defaults used by `serve`: listen 0.0.0.0:8080, data dir ~/.rookery
 # (DB auto-migrates on open). Override the port with ROOKERY_PORT, e.g.
 #   ROOKERY_PORT=8081 make deploy
 

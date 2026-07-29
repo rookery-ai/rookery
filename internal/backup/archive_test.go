@@ -24,7 +24,7 @@ func TestArchiveRoundTrip(t *testing.T) {
 	writeFile(t, filepath.Join(src, "notes", "a.md"), "hello")
 
 	files := []archiveFile{
-		{Name: "db/simple-agents.db", Path: filepath.Join(src, "db.sqlite")},
+		{Name: "db/rookery.db", Path: filepath.Join(src, "db.sqlite")},
 		{Name: "vaults/ws1/notes/a.md", Path: filepath.Join(src, "notes", "a.md")},
 	}
 

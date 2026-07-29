@@ -142,7 +142,7 @@ func TestSpillLargeOutputHeadIsRuneSafe(t *testing.T) {
 }
 
 // TestRunScriptSpillsLargeOutput: a script whose stdout exceeds the per-result cap has its FULL
-// output persisted to .sa_out/ under the agent workDir, and the model-facing result is a compact
+// output persisted to .rookery_out/ under the agent workDir, and the model-facing result is a compact
 // head + a steering pointer (not the whole payload). This is the primary fix — the large output
 // reaches the filesystem without transiting the model context.
 func TestRunScriptSpillsLargeOutput(t *testing.T) {
@@ -176,7 +176,7 @@ func TestRunScriptSpillsLargeOutput(t *testing.T) {
 	if !strings.Contains(res, spillDirName) || !strings.Contains(strings.ToLower(res), "saved in full") {
 		t.Fatalf("result must point at the spill file and steer the model; got %q", res)
 	}
-	// The full output must exist on disk under .sa_out/.
+	// The full output must exist on disk under .rookery_out/.
 	spillDir := filepath.Join(dir, spillDirName)
 	entries, err := os.ReadDir(spillDir)
 	if err != nil || len(entries) == 0 {
@@ -285,7 +285,7 @@ func TestAPIEngine_RunScriptSpillDoesNotAccumulateInHistory(t *testing.T) {
 	}
 }
 
-// TestClearSpillDir removes stale spill files at run start so .sa_out can't grow unbounded.
+// TestClearSpillDir removes stale spill files at run start so .rookery_out can't grow unbounded.
 func TestClearSpillDir(t *testing.T) {
 	dir := t.TempDir()
 	spillDir := filepath.Join(dir, spillDirName)

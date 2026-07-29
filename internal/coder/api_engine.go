@@ -50,7 +50,7 @@ func (c *Coder) runAPI(ctx context.Context, workspaceID, prompt string) (*Result
 	}
 
 	tools := c.buildHostTools(workspaceID)
-	// Clear any spill files left by a previous run of this agent so .sa_out can't grow
+	// Clear any spill files left by a previous run of this agent so .rookery_out can't grow
 	// unbounded across runs (the live agent dir, unlike a build dir, is never cleaned up).
 	tools.clearSpillDir()
 	var offeredTools []llm.Tool
@@ -530,7 +530,7 @@ func truncateRunes(s string, n int) string {
 // vault-relative form the user actually recognises, so the live stream stops
 // reading as a tour of the server's filesystem:
 //
-//	cd /home/rookie/.simple-agents-v2/vaults/fd11c47e-…/notes  →  cd notes
+//	cd /home/rookie/.rookery/vaults/fd11c47e-…/notes  →  cd notes
 //
 // This operates on the whole detail string by substring replacement rather than
 // on path-shaped arguments only, because the worst offender is a bash command

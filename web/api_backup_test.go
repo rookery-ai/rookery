@@ -136,7 +136,7 @@ func TestBackupRestoreRequiresConfirmation(t *testing.T) {
 	cookies := bootstrapAndLogin(t, s)
 
 	payload := map[string]string{
-		"name": "simple-agents-20260729-030000.sab", "passphrase": "pw", "confirm": "nope",
+		"name": "rookery-20260729-030000.rkb", "passphrase": "pw", "confirm": "nope",
 	}
 	rec := doJSON(t, s, http.MethodPost, "/api/v1/backup/restore", payload, cookies)
 	if rec.Code != http.StatusBadRequest {
