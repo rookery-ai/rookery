@@ -97,7 +97,7 @@ function wrap(initialEntry = "/settings") {
 
 beforeEach(() => {
   resetFixtures();
-  localStorage.removeItem("sa-theme");
+  localStorage.removeItem("rookery-theme");
   document.documentElement.classList.remove("dark");
 });
 

@@ -19,11 +19,11 @@ test("clamps to range", () => {
 });
 
 test("corrupt stored value falls back to default", () => {
-  localStorage.setItem("sa.paneWidth", "not-a-number");
+  localStorage.setItem("rookery.paneWidth", "not-a-number");
   expect(readStoredWidth()).toBe(PANE_DEFAULT);
-  localStorage.setItem("sa.paneWidth", "99999");
+  localStorage.setItem("rookery.paneWidth", "99999");
   expect(readStoredWidth()).toBe(PANE_DEFAULT);
-  localStorage.removeItem("sa.paneWidth");
+  localStorage.removeItem("rookery.paneWidth");
   expect(readStoredWidth()).toBe(PANE_DEFAULT);
 });
 
@@ -70,7 +70,7 @@ function wrap() {
 }
 
 beforeEach(() => {
-  localStorage.removeItem("sa.paneWidth");
+  localStorage.removeItem("rookery.paneWidth");
 });
 
 test("arrow keys resize and Home/End jump", async () => {

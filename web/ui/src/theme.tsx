@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 
 type Theme = "light" | "dark" | "system";
-const KEY = "sa-theme";
+const KEY = "rookery-theme";
 
 const Ctx = createContext<{ theme: Theme; setTheme: (t: Theme) => void }>({
   theme: "system",

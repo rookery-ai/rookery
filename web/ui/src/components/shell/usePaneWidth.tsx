@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 export const PANE_MIN = 200;
 export const PANE_MAX = 560;
 export const PANE_DEFAULT = 256;
-export const STORAGE_KEY = "sa.paneWidth";
+export const STORAGE_KEY = "rookery.paneWidth";
 
 const STEP = 16;
 

@@ -185,7 +185,7 @@ export function BackupSection() {
       {data.pending_restore && (
         <div className="mt-3 rounded-md bg-warning-soft px-3 py-2 text-xs text-warning">
           A restore is staged and will be applied the next time the server starts. Run{" "}
-          <code>simple-agents backup cancel-restore</code> to abandon it.
+          <code>rookery backup cancel-restore</code> to abandon it.
         </div>
       )}
 
@@ -332,7 +332,7 @@ export function BackupSection() {
               <span className="block text-muted-2">Prefix</span>
               <Input
                 className="mt-1"
-                placeholder="simple-agents/"
+                placeholder="rookery/"
                 value={form.s3Prefix}
                 onChange={(e) => set("s3Prefix", e.target.value)}
               />
