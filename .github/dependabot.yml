@@ -40,9 +40,22 @@ updates:
       prefix: "ci(deps)"
     groups:
       # MAJOR action bumps land in their own PR: they are the ones that actually
-      # break a workflow (gitleaks v2→v3 changes its licensing model, and this
-      # pipeline was already bitten by a nonexistent action tag), so they should
-      # not ride along with routine patches.
+      # break a workflow (this pipeline was already bitten by a nonexistent
+      # action tag), so they should not ride along with routine patches.
+      #
+      # A correction, because the earlier note here was wrong and steered us
+      # away from a fix we needed: gitleaks v2→v3 does NOT change its licensing
+      # model. v3 is a Node 20→24 runtime bump with explicitly no change to
+      # inputs, outputs or behaviour — and v2 stops working entirely once
+      # GitHub removes Node 20 from hosted runners on 2026-09-16.
+      #
+      # That deadline is why `open-pull-requests-limit` deserves an eye: it is
+      # a CAP, not a queue. The five major bumps already open filled it, so
+      # Dependabot never proposed the node24 majors for build-push-action,
+      # metadata-action, goreleaser-action or release-please-action — all four
+      # were still on the dead runtime and had to be found by auditing every
+      # action's `runs.using` by hand. A silent cap is not the same as
+      # "nothing to update".
       actions-minor-patch:
         update-types: ["minor", "patch"]
 
