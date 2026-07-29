@@ -715,15 +715,19 @@ redirect_policy:
 
 > `allow_raw_ip: "no"` is quoted deliberately: unquoted `no` is a YAML 1.1 boolean and would fail to unmarshal into a string field.
 
-- [ ] **Step 5: Fix the misleading setup-step wording**
+- [ ] **Step 5: Record the setup-step wording baseline**
 
-Task 6 makes the redirect URI visible in the wizard, above these steps. Until then the wording promised something that did not exist. Verify each of these still reads correctly once the URI is displayed; no change is required if the step already says "shown above". Run:
+The "shown above" prose is rewritten in **Task 7b**, once the wizard can render a
+substituted URI. Capture the baseline count now so that task can verify it reached
+every one:
 
 ```bash
 grep -rn "shown above" internal/connectors/providers/*.yaml | wc -l
 ```
 
-Expected: a non-zero count. These become accurate as of Task 6 — no edit needed now.
+Expected: `19`. Do not edit the wording in this task — Task 7b replaces it with the
+`{{redirect_uri}}` placeholder, and a half-migrated set would fail that task's
+guardrail test in a confusing way.
 
 - [ ] **Step 6: Run the tests to verify they pass**
 
@@ -1763,6 +1767,251 @@ Expected: all clean.
 ```bash
 git add web/ui/
 git commit -m "feat(web/ui): show the redirect URI, preflight verdict and instance-URL setting"
+```
+
+---
+
+### Task 7b: Substitute the real callback URL into every provider's setup steps
+
+Task 7 puts the redirect URI in a box above the steps, which makes "the redirect
+URI shown above" *true*. This task makes it unnecessary: each step names the
+actual URL inline, so a user following the guide never has to correlate two
+places on the page. Because the URI is built from the resolved instance URL, a
+server deployment with a configured domain gets that domain in its guide
+automatically.
+
+**Files:**
+- Modify: all 19 OAuth `internal/connectors/providers/*.yaml` listed below
+- Modify: `web/api_services.go` (leave the placeholder intact; document why)
+- Modify: `web/ui/src/pages/connections/ServiceWizard.tsx`
+- Test: `internal/connectors/setup_steps_test.go`, `web/ui/src/pages/connections/ServiceWizard.test.tsx`
+
+**Interfaces:**
+- Consumes: `apiServiceProvider.RedirectURI` from Task 6, `CopyButton` from Task 7.
+- Produces: the literal token `{{redirect_uri}}` as a contract between the provider YAML and the wizard.
+
+**Why the placeholder is substituted in the browser, not the server.** The obvious
+implementation — `strings.ReplaceAll` in `apiListServices` — produces a step string
+containing a URL, which `Linkify` (`web/ui/src/lib/linkify.tsx:29`) then turns into a
+clickable link. Clicking it hits our own callback route with no `state`, which the
+handler correctly rejects as "Invalid or expired authorization request" — so the guide
+would ship a prominent button whose only function is to show an error. Sending the
+placeholder intact lets the wizard render that span as copyable code instead, which is
+what the user actually needs to do with it.
+
+- [ ] **Step 1: Write the failing guardrail test**
+
+Create `internal/connectors/setup_steps_test.go`:
+
+```go
+package connectors
+
+import (
+	"strings"
+	"testing"
+)
+
+// A setup step that tells the user to register a redirect URI must name it via
+// the {{redirect_uri}} placeholder. Prose like "the redirect URI shown above"
+// is what made this feature unusable: it referred to something the page never
+// rendered. This test stops that wording from creeping back.
+func TestSetupStepsUsePlaceholderNotProse(t *testing.T) {
+	r, err := LoadBundled()
+	if err != nil {
+		t.Fatalf("LoadBundled: %v", err)
+	}
+	banned := []string{"shown above", "URI shown", "URL shown"}
+	for _, name := range r.ProviderNames() {
+		p, ok := r.ProviderByName(name)
+		if !ok {
+			continue
+		}
+		for i, step := range p.SetupSteps {
+			low := strings.ToLower(step)
+			for _, b := range banned {
+				if strings.Contains(low, strings.ToLower(b)) {
+					t.Errorf("%s step %d refers to %q instead of using {{redirect_uri}}: %s",
+						name, i+1, b, step)
+				}
+			}
+		}
+	}
+}
+
+// Every OAuth provider that ships setup steps must name the redirect URI in at
+// least one of them — otherwise the guide is incomplete for the one field the
+// user cannot guess.
+func TestOAuthSetupStepsNameTheRedirectURI(t *testing.T) {
+	r, err := LoadBundled()
+	if err != nil {
+		t.Fatalf("LoadBundled: %v", err)
+	}
+	for _, name := range r.ProviderNames() {
+		p, ok := r.ProviderByName(name)
+		if !ok || p.Auth.Kind == "api_key" || len(p.SetupSteps) == 0 {
+			continue
+		}
+		// Aliased children inherit their parent's guidance and ship none of their own.
+		if p.AuthParent != "" {
+			continue
+		}
+		found := false
+		for _, step := range p.SetupSteps {
+			if strings.Contains(step, "{{redirect_uri}}") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s: no setup step names {{redirect_uri}}", name)
+		}
+	}
+}
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `go test ./internal/connectors/ -run "TestSetupSteps|TestOAuthSetupSteps" -v`
+Expected: FAIL — 19 providers still use the "shown above" prose.
+
+- [ ] **Step 3: Rewrite the 19 steps**
+
+Replace each step exactly as follows. The surrounding steps in each file are unchanged.
+
+| File | Replacement step text |
+|---|---|
+| `github.yaml:9` | `"Authorization callback URL: paste {{redirect_uri}} exactly."` |
+| `google.yaml:11` | `"Under Authorized redirect URIs, add {{redirect_uri}} exactly, then click Create."` |
+| `notion.yaml:7` | `"Fill in the basic info; under OAuth Domain & URIs add {{redirect_uri}} exactly."` |
+| `slack.yaml:21` | `"Add {{redirect_uri}} under Redirect URLs, then Save."` |
+| `jira.yaml:8` | `"Authorization → OAuth 2.0 (3LO) → set the Callback URL to {{redirect_uri}} exactly."` |
+| `outlook.yaml:8` | `"Redirect URI: platform \"Web\", value = {{redirect_uri}} exactly."` |
+| `dropbox.yaml:17` | `"On Settings, add {{redirect_uri}} under OAuth 2 Redirect URIs."` |
+| `salesforce.yaml:11` | `"Add {{redirect_uri}} as the Callback URL; select scopes: Manage user data via APIs (api) + refresh_token."` |
+| `zoom.yaml:15` | `"Add {{redirect_uri}} under OAuth."` |
+| `mastodon.yaml:23` | `"Set the redirect URI to {{redirect_uri}} exactly, and tick the read and write:statuses scopes."` |
+| `reddit.yaml:23` | `"Set the redirect uri to {{redirect_uri}} exactly."` |
+| `pinterest.yaml:17` | `"Add {{redirect_uri}} exactly."` |
+| `tiktok.yaml:19` | `"Add {{redirect_uri}} exactly."` |
+| `linkedin.yaml:23` | `"On the Auth tab, add {{redirect_uri}} exactly."` |
+| `x.yaml:23` | `"Under User authentication settings, enable OAuth 2.0, set App type to 'Web App', and add {{redirect_uri}} exactly."` |
+| `facebook.yaml:19` | `"Add 'Facebook Login for Business', and under its Settings add {{redirect_uri}} exactly."` |
+| `instagram.yaml:22` | `"Add 'Facebook Login for Business', and under its Settings add {{redirect_uri}} exactly."` |
+| `meta_ads.yaml:17` | `"Add the 'Facebook Login for Business' product, and under its Settings add {{redirect_uri}} exactly."` |
+| `threads.yaml:18` | `"Under Threads API → Settings, add {{redirect_uri}} exactly."` |
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `go test ./internal/connectors/ -run "TestSetupSteps|TestOAuthSetupSteps" -v`
+Expected: PASS.
+
+- [ ] **Step 5: Document the deliberate non-substitution server-side**
+
+In `web/api_services.go`, add above the line that assigns `SetupSteps` in the
+struct literal:
+
+```go
+			// SetupSteps ship with {{redirect_uri}} UNSUBSTITUTED on purpose. The
+			// wizard splits on the token and renders the URI as copyable code;
+			// substituting here would embed a bare URL that Linkify turns into a
+			// link, and clicking our own callback route without a state parameter
+			// only ever produces "Invalid or expired authorization request".
+```
+
+An aliased child (`google_drive`, `youtube`, …) inherits its parent's steps but has
+its **own** callback path, and the substitution below happens per provider card, so
+each child correctly shows `…/callback/google_drive` rather than the parent's.
+
+- [ ] **Step 6: Write the failing SPA test**
+
+Add to `web/ui/src/pages/connections/ServiceWizard.test.tsx`:
+
+```tsx
+it("substitutes the real callback URL into the setup steps, as copyable text not a link", async () => {
+  const uri = "https://agents.example.com/dashboard/connectors/services/callback/google";
+  renderWizard({
+    ...oauthProvider,
+    redirect_uri: uri,
+    setup_steps: ["Under Authorized redirect URIs, add {{redirect_uri}} exactly, then click Create."],
+  });
+
+  // The placeholder must never reach the user.
+  expect(screen.queryByText(/\{\{redirect_uri\}\}/)).not.toBeInTheDocument();
+
+  // The URI appears inside the step, and is NOT an anchor: clicking our own
+  // callback without a state parameter only produces an error page.
+  const occurrences = await screen.findAllByText(uri);
+  expect(occurrences.length).toBeGreaterThan(0);
+  for (const node of occurrences) {
+    expect(node.closest("a")).toBeNull();
+  }
+  expect(screen.getByText(/then click Create/)).toBeInTheDocument();
+});
+```
+
+- [ ] **Step 7: Run the test to verify it fails**
+
+Run: `cd web/ui && npx vitest run src/pages/connections/ServiceWizard.test.tsx`
+Expected: FAIL — the literal `{{redirect_uri}}` is rendered.
+
+- [ ] **Step 8: Render the substituted step**
+
+In `ServiceWizard.tsx`, add this helper above the component:
+
+```tsx
+const REDIRECT_TOKEN = "{{redirect_uri}}";
+
+// Renders a setup step, replacing {{redirect_uri}} with the real URI as copyable
+// code. The surrounding prose still goes through Linkify so console links keep
+// working; the URI itself deliberately does not, because it is a value to paste
+// into another site, not a destination to visit.
+function SetupStep({ text, redirectURI }: { text: string; redirectURI: string }) {
+  if (!redirectURI || !text.includes(REDIRECT_TOKEN)) {
+    return <Linkify text={text} />;
+  }
+  const parts = text.split(REDIRECT_TOKEN);
+  return (
+    <>
+      {parts.map((part, i) => (
+        <span key={i}>
+          <Linkify text={part} />
+          {i < parts.length - 1 && (
+            <span className="inline-flex items-baseline gap-1 align-baseline">
+              <code className="break-all rounded bg-muted-surface px-1 py-0.5 text-xs">
+                {redirectURI}
+              </code>
+              <CopyButton value={redirectURI} />
+            </span>
+          )}
+        </span>
+      ))}
+    </>
+  );
+}
+```
+
+Then replace the step body in the `setup_steps` list — currently
+`<Linkify text={s} />` at `ServiceWizard.tsx:255` — with:
+
+```tsx
+<SetupStep text={s} redirectURI={provider.redirect_uri} />
+```
+
+- [ ] **Step 9: Run the tests to verify they pass**
+
+Run: `cd web/ui && npx vitest run src/pages/connections/ServiceWizard.test.tsx`
+Expected: PASS, including the Task 7 tests.
+
+- [ ] **Step 10: Typecheck, lint and build**
+
+Run: `cd web/ui && npx tsc -b && npx oxlint && npx vitest run && npm run build`
+Expected: all clean.
+
+- [ ] **Step 11: Commit**
+
+```bash
+git add internal/connectors/ web/api_services.go web/ui/
+git commit -m "feat(connectors): name the real callback URL in every provider's setup steps"
 ```
 
 ---

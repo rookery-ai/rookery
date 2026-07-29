@@ -221,6 +221,21 @@ Rendered as a structured banner on the connections page, not a query-string blob
 
 1. **The redirect URI, with a copy button.** This single field unblocks all eighteen
    providers and is the highest-value change in the spec.
+1. **The real URL inline in every setup step.** The nineteen steps that today say
+   "the redirect URI shown above" carry a `{{redirect_uri}}` placeholder instead, which
+   the wizard replaces with the actual URI. A user following the guide never has to
+   correlate two places on the page, and because the URI is built from the resolved
+   instance URL, **a server deployment with a configured domain gets that domain in its
+   guide automatically** — including aliased children, which inherit the parent's prose
+   but substitute their own callback path (`…/callback/google_drive`, not `…/google`).
+
+   The substitution happens **in the browser, not the server**. Replacing the token
+   server-side yields a step string containing a bare URL, which `Linkify`
+   (`web/ui/src/lib/linkify.tsx:29`) turns into a clickable link — and clicking our own
+   callback route with no `state` produces "Invalid or expired authorization request".
+   The guide would ship a prominent button whose only function is to show an error.
+   Sending the token intact lets the wizard render it as copyable code, which is what
+   the user needs to do with it. A guardrail test bans the old prose from returning.
 2. **The preflight verdict** from `Check`:
    - ✅ clean → Connect enabled.
    - ⚠️ soft → Connect enabled, warning shown.
@@ -312,7 +327,7 @@ The reliability claim rests on pure-function tests, not on manual OAuth runs:
 |---|---|
 | `internal/publicurl/` (new) | `Resolve`, `Detect`, `Normalize`, `Check`, `Policy`, `Problem` + tests |
 | `internal/connectors/registry.go` | `RedirectPolicy` field on `Provider`; resolve via OAuth parent |
-| `internal/connectors/providers/*.yaml` | Policy blocks for google/github/notion/slack; fix the "shown above" wording |
+| `internal/connectors/providers/*.yaml` | Policy blocks for google/github/notion/slack; replace the "shown above" prose in 19 providers with a `{{redirect_uri}}` placeholder |
 | `web/handlers_services.go` | `publicBaseURL` → `publicurl.Resolve`; pin URI into state; use pinned URI at exchange; error mapper |
 | `web/api_services.go` | Provider DTO gains `redirect_uri` + `preflight` |
 | `web/api_workspaces.go` | Instance URL in admin settings GET/PUT; the self-test trigger |
