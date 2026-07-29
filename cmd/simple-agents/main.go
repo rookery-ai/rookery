@@ -479,6 +479,7 @@ func serveCmd() *cli.Command {
 			// to a workspace that backup does not have.
 			backupSched := backup.NewScheduler(database, database.DB, cfg.Data.Dir, sysKey)
 			go backupSched.Run(ctx)
+			slog.Info("backup scheduler started")
 
 			// Self-managed OAuth connector token-refresh loop: proactively renews
 			// service_connections access tokens before they expire so scheduled runs
@@ -538,7 +539,7 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
-			srv = srv.WithBridge(connBridge).WithKBBridge(kbBridge).WithTitleGenerator(titleGen).WithApproval(approvalSvc)
+			srv = srv.WithBridge(connBridge).WithKBBridge(kbBridge).WithTitleGenerator(titleGen).WithApproval(approvalSvc).WithBackupScheduler(backupSched)
 
 			addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 			slog.Info("listening", "addr", addr)
