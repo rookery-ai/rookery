@@ -181,6 +181,13 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Point at the config explicitly rather than relying on gitleaks
+          # auto-discovering .gitleaks.toml from the working directory: the
+          # action's scan root is not contractually the repo root, and a config
+          # that is silently NOT loaded fails open — the scan still passes, so
+          # nothing would reveal that the allowlist (and with it the default
+          # ruleset it extends) was ignored.
+          GITLEAKS_CONFIG: ${{ github.workspace }}/.gitleaks.toml
 
   container:
     name: Container smoke test
