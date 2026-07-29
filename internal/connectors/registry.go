@@ -11,7 +11,7 @@ import (
 	"path"
 	"sort"
 
-	"github.com/ilijad1/simple-agents/internal/publicurl"
+	"github.com/ilijad1/rookery/internal/publicurl"
 	"gopkg.in/yaml.v3"
 )
 

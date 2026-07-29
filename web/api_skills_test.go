@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/simple-agents/internal/config"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/skillstore"
+	"github.com/ilijad1/rookery/internal/config"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/skillstore"
 	"github.com/labstack/echo/v4"
 )
 

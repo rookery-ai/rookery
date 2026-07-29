@@ -3,7 +3,7 @@ package connectors
 import (
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/rookery/internal/db"
 )
 
 func TestActiveBoundConns(t *testing.T) {

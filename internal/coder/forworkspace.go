@@ -4,8 +4,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/vault"
 )
 
 // ForWorkspace builds a Coder from a workspace's inlined coder config, falling

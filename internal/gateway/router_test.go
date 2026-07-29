@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/agentdesigner"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/gateway"
-	"github.com/ilijad1/simple-agents/internal/skilldesigner"
+	"github.com/ilijad1/rookery/internal/agentdesigner"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/gateway"
+	"github.com/ilijad1/rookery/internal/skilldesigner"
 )
 
 const testWorkspaceID = "ws-router-test"

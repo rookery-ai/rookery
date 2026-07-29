@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/backup"
-	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/rookery/internal/backup"
+	"github.com/ilijad1/rookery/internal/db"
 )
 
 func TestBackupConfigRequiresOwner(t *testing.T) {

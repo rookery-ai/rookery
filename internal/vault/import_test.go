@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/convert"
+	"github.com/ilijad1/rookery/internal/convert"
 )
 
 func TestImportFileWritesNoteWithFrontmatter(t *testing.T) {

@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/buildphase"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/llm"
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/buildphase"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/ilijad1/rookery/internal/vault"
 )
 
 // fakeProvider is an in-process llm.Provider used to drive the API engine in

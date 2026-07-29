@@ -30,10 +30,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -trimpath \
       -ldflags "-s -w \
-        -X github.com/ilijad1/simple-agents/internal/buildinfo.Version=${VERSION} \
-        -X github.com/ilijad1/simple-agents/internal/buildinfo.Commit=${COMMIT} \
-        -X github.com/ilijad1/simple-agents/internal/buildinfo.Date=${BUILD_DATE}" \
-      -o /out/simple-agents ./cmd/simple-agents
+        -X github.com/ilijad1/rookery/internal/buildinfo.Version=${VERSION} \
+        -X github.com/ilijad1/rookery/internal/buildinfo.Commit=${COMMIT} \
+        -X github.com/ilijad1/rookery/internal/buildinfo.Date=${BUILD_DATE}" \
+      -o /out/rookery ./cmd/rookery
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 # Debian rather than Alpine: tesseract's language data packaging is saner here,
@@ -57,7 +57,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --create-home --home-dir /home/app app
 
-COPY --from=build /out/simple-agents /usr/bin/simple-agents
+COPY --from=build /out/rookery /usr/bin/rookery
 # Beside the binary on purpose: resolveDir() looks EXE-relative first and only
 # then falls back to a CWD-relative path, so this is found no matter what
 # working directory the container is started with.
@@ -86,9 +86,9 @@ EXPOSE 8080
 # Shells the binary's own subcommand rather than curl, which this image does not
 # ship and which would be dead weight added purely for a health probe.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD ["/usr/bin/simple-agents", "healthcheck"]
+  CMD ["/usr/bin/rookery", "healthcheck"]
 
-ENTRYPOINT ["/usr/bin/simple-agents"]
+ENTRYPOINT ["/usr/bin/rookery"]
 CMD ["serve"]
 
 ARG VERSION=0.0.0-dev

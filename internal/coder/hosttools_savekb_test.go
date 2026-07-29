@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/llm"
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/ilijad1/rookery/internal/vault"
 )
 
 func newSaveKBToolset(t *testing.T) (*hostToolSet, *vault.Vault) {

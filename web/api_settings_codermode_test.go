@@ -3,7 +3,7 @@ package web
 import (
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/config"
+	"github.com/ilijad1/rookery/internal/config"
 )
 
 func slimServer() *Server {

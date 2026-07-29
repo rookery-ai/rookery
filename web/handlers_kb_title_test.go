@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/vault"
 )
 
 // TestKBDisplayTitleResolvesReflectedNotes pins the fix for UUID-named results in

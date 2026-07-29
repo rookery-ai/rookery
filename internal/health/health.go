@@ -11,8 +11,8 @@ import (
 	"os/exec"
 	"runtime"
 
-	"github.com/ilijad1/simple-agents/internal/buildinfo"
-	"github.com/ilijad1/simple-agents/internal/sandbox"
+	"github.com/ilijad1/rookery/internal/buildinfo"
+	"github.com/ilijad1/rookery/internal/sandbox"
 )
 
 // Tools reports presence only — never paths, never versions. /healthz is

@@ -1,9 +1,9 @@
 package web
 
 import (
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/sandbox"
-	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/sandbox"
+	"github.com/ilijad1/rookery/internal/secrets"
 )
 
 // verifyWorkspaceMasterPassword decrypts the stored (system-key encrypted) master

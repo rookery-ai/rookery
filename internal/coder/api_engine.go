@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/buildphase"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/llm"
-	"github.com/ilijad1/simple-agents/internal/prompts"
+	"github.com/ilijad1/rookery/internal/buildphase"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/ilijad1/rookery/internal/prompts"
 )
 
 // maxAPITurns bounds the tool-calling loop so a misbehaving model can't loop

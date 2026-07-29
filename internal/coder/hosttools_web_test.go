@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/llm"
+	"github.com/ilijad1/rookery/internal/llm"
 )
 
 // newWebToolSet builds a minimal hostToolSet wired for web_fetch tests: exec tools

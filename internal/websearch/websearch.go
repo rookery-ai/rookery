@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/nethttp"
+	"github.com/ilijad1/rookery/internal/nethttp"
 )
 
 // Result is one search hit.

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/agentdesigner"
+	"github.com/ilijad1/rookery/internal/agentdesigner"
 )
 
 // TestAgentStatePersistsAcrossRunsAsMarkdown proves the runner's state-loading

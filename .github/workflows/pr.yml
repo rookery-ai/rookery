@@ -106,7 +106,7 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: go build -o /dev/null ./cmd/simple-agents
+        run: go build -o /dev/null ./cmd/rookery
 
   frontend:
     name: Frontend

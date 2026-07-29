@@ -11,17 +11,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/chat"
-	"github.com/ilijad1/simple-agents/internal/coder"
+	"github.com/ilijad1/rookery/internal/chat"
+	"github.com/ilijad1/rookery/internal/coder"
 	// Aliased because this file has a local variable named `coder` that shadows
 	// the package inside the chat handler.
-	codersvc "github.com/ilijad1/simple-agents/internal/coder"
-	"github.com/ilijad1/simple-agents/internal/connectors"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/prompts"
-	"github.com/ilijad1/simple-agents/internal/reminder"
-	"github.com/ilijad1/simple-agents/internal/secrets"
-	"github.com/ilijad1/simple-agents/internal/websearch"
+	codersvc "github.com/ilijad1/rookery/internal/coder"
+	"github.com/ilijad1/rookery/internal/connectors"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/prompts"
+	"github.com/ilijad1/rookery/internal/reminder"
+	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/ilijad1/rookery/internal/websearch"
 	"github.com/labstack/echo/v4"
 )
 

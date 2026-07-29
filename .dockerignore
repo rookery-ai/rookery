@@ -12,5 +12,5 @@ docs/
 plans/
 *.md
 !README.md
-simple-agents
+rookery
 .server.pid

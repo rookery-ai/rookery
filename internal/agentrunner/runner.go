@@ -16,15 +16,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/simple-agents/internal/agentdesigner"
-	"github.com/ilijad1/simple-agents/internal/coder"
-	"github.com/ilijad1/simple-agents/internal/connectors"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/prompts"
-	"github.com/ilijad1/simple-agents/internal/secrets"
-	"github.com/ilijad1/simple-agents/internal/skilllibrary"
-	"github.com/ilijad1/simple-agents/internal/skillstore"
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/agentdesigner"
+	"github.com/ilijad1/rookery/internal/coder"
+	"github.com/ilijad1/rookery/internal/connectors"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/prompts"
+	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/ilijad1/rookery/internal/skilllibrary"
+	"github.com/ilijad1/rookery/internal/skillstore"
+	"github.com/ilijad1/rookery/internal/vault"
 )
 
 const (

@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/rookery/internal/db"
 )
 
 // connHeaderRE matches the "# Connections:" heading and captures the (possibly empty)

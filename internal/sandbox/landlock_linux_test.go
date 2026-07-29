@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/sandbox"
+	"github.com/ilijad1/rookery/internal/sandbox"
 )
 
 // TestLandlockBoundary verifies the core security property: a confined process

@@ -8,9 +8,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/agentrunner"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/rookery/internal/agentrunner"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/secrets"
 	"github.com/robfig/cron/v3"
 )
 

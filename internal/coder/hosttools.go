@@ -19,13 +19,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/ilijad1/simple-agents/internal/connectors"
-	"github.com/ilijad1/simple-agents/internal/convert"
-	"github.com/ilijad1/simple-agents/internal/iolimit"
-	"github.com/ilijad1/simple-agents/internal/llm"
-	"github.com/ilijad1/simple-agents/internal/sandbox"
-	"github.com/ilijad1/simple-agents/internal/vault"
-	"github.com/ilijad1/simple-agents/internal/websearch"
+	"github.com/ilijad1/rookery/internal/connectors"
+	"github.com/ilijad1/rookery/internal/convert"
+	"github.com/ilijad1/rookery/internal/iolimit"
+	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/ilijad1/rookery/internal/sandbox"
+	"github.com/ilijad1/rookery/internal/vault"
+	"github.com/ilijad1/rookery/internal/websearch"
 )
 
 // maxToolResult is the per-result byte cap injected back into the model context.

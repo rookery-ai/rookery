@@ -3,7 +3,7 @@ package skilldesigner
 import (
 	"strings"
 
-	"github.com/ilijad1/simple-agents/internal/agentdesigner"
+	"github.com/ilijad1/rookery/internal/agentdesigner"
 )
 
 // guardrailsForGeneratedFile decides which ethics check a single generated skill

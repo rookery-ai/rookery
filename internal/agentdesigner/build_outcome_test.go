@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/prompts"
+	"github.com/ilijad1/rookery/internal/prompts"
 )
 
 // writeBuild lays out a fake finished generation on disk: AGENT.md plus optional

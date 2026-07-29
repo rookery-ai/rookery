@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/convert"
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/convert"
+	"github.com/ilijad1/rookery/internal/vault"
 )
 
 // uploadRequest builds a multipart POST to /api/v1/kb/upload with the given

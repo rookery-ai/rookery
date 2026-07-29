@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/prompts"
+	"github.com/ilijad1/rookery/internal/prompts"
 )
 
 // installed pool used across all cases: two core skills (lowercase) + one

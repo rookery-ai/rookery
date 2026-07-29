@@ -8,10 +8,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/simple-agents/internal/agentdesigner"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/secrets"
-	"github.com/ilijad1/simple-agents/internal/skilllibrary"
+	"github.com/ilijad1/rookery/internal/agentdesigner"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/ilijad1/rookery/internal/skilllibrary"
 	"github.com/labstack/echo/v4"
 	"github.com/robfig/cron/v3"
 )

@@ -3,8 +3,8 @@ package coder
 import (
 	"context"
 
-	"github.com/ilijad1/simple-agents/internal/connectors"
-	"github.com/ilijad1/simple-agents/internal/llm"
+	"github.com/ilijad1/rookery/internal/connectors"
+	"github.com/ilijad1/rookery/internal/llm"
 )
 
 // connectorTools returns the native typed tools for every bound connection's actions.

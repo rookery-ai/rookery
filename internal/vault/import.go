@@ -10,7 +10,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/ilijad1/simple-agents/internal/convert"
+	"github.com/ilijad1/rookery/internal/convert"
 )
 
 // FilesDir is the vault folder holding preserved original uploads.

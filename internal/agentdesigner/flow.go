@@ -14,14 +14,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/simple-agents/internal/buildphase"
-	"github.com/ilijad1/simple-agents/internal/coder"
-	"github.com/ilijad1/simple-agents/internal/connectors"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/profile"
-	"github.com/ilijad1/simple-agents/internal/prompts"
-	"github.com/ilijad1/simple-agents/internal/skilllibrary"
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/buildphase"
+	"github.com/ilijad1/rookery/internal/coder"
+	"github.com/ilijad1/rookery/internal/connectors"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/profile"
+	"github.com/ilijad1/rookery/internal/prompts"
+	"github.com/ilijad1/rookery/internal/skilllibrary"
+	"github.com/ilijad1/rookery/internal/vault"
 	"github.com/robfig/cron/v3"
 )
 

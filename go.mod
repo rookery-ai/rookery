@@ -1,4 +1,4 @@
-module github.com/ilijad1/simple-agents
+module github.com/ilijad1/rookery
 
 go 1.26.5
 

@@ -19,11 +19,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/ilijad1/simple-agents/internal/convert"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/export"
-	"github.com/ilijad1/simple-agents/internal/iolimit"
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/convert"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/export"
+	"github.com/ilijad1/rookery/internal/iolimit"
+	"github.com/ilijad1/rookery/internal/vault"
 	"github.com/labstack/echo/v4"
 )
 

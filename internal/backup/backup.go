@@ -19,7 +19,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/buildinfo"
+	"github.com/ilijad1/rookery/internal/buildinfo"
 )
 
 // Options configures one Snapshot run.

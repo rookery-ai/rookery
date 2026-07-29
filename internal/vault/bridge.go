@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/convert"
-	"github.com/ilijad1/simple-agents/internal/iolimit"
+	"github.com/ilijad1/rookery/internal/convert"
+	"github.com/ilijad1/rookery/internal/iolimit"
 )
 
 const (

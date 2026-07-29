@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ilijad1/simple-agents/internal/agentdesigner"
+	"github.com/ilijad1/rookery/internal/agentdesigner"
 )
 
 // ErrNoSkillMD means the build produced no SKILL.md the flow can identify — either none

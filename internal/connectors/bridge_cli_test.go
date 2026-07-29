@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/sandbox"
+	"github.com/ilijad1/rookery/internal/sandbox"
 )
 
 // TestConnectorExecSubcommandEndToEnd exercises the REAL `simple-agents connector exec`

@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/rookery/internal/db"
 )
 
 // inboxTestDB opens a fresh migrated DB with one workspace + one agent (FK

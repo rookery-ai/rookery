@@ -14,9 +14,9 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/ilijad1/simple-agents/internal/backup"
-	"github.com/ilijad1/simple-agents/internal/config"
-	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/rookery/internal/backup"
+	"github.com/ilijad1/rookery/internal/config"
+	"github.com/ilijad1/rookery/internal/secrets"
 )
 
 // readPassphrase reads the envelope passphrase from the terminal, or from

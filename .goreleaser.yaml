@@ -12,7 +12,7 @@ before:
 
 builds:
   - id: simple-agents
-    main: ./cmd/simple-agents
+    main: ./cmd/rookery
     binary: simple-agents
     env:
       - CGO_ENABLED=0
@@ -22,9 +22,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/ilijad1/simple-agents/internal/buildinfo.Version={{.Version}}
-      - -X github.com/ilijad1/simple-agents/internal/buildinfo.Commit={{.ShortCommit}}
-      - -X github.com/ilijad1/simple-agents/internal/buildinfo.Date={{.Date}}
+      - -X github.com/ilijad1/rookery/internal/buildinfo.Version={{.Version}}
+      - -X github.com/ilijad1/rookery/internal/buildinfo.Commit={{.ShortCommit}}
+      - -X github.com/ilijad1/rookery/internal/buildinfo.Date={{.Date}}
 
 archives:
   - id: default

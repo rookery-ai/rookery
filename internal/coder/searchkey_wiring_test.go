@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/secrets"
-	"github.com/ilijad1/simple-agents/internal/vault"
-	"github.com/ilijad1/simple-agents/internal/websearch"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/ilijad1/rookery/internal/vault"
+	"github.com/ilijad1/rookery/internal/websearch"
 )
 
 // newWiringTestDB + findWiringMigrations mirror internal/secrets's own test
