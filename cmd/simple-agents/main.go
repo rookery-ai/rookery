@@ -474,6 +474,12 @@ func serveCmd() *cli.Command {
 			sessionSvc := chat.New(database).WithReflector(vlt.Reflector())
 			go sessionSvc.Run(ctx)
 
+			// Owner-level backup runs on its own ticker rather than through
+			// internal/scheduler, whose agent_schedules rows are foreign-keyed
+			// to a workspace that backup does not have.
+			backupSched := backup.NewScheduler(database, database.DB, cfg.Data.Dir, sysKey)
+			go backupSched.Run(ctx)
+
 			// Self-managed OAuth connector token-refresh loop: proactively renews
 			// service_connections access tokens before they expire so scheduled runs
 			// never hit an expired token. Uses the system key (headless, no master pw).
