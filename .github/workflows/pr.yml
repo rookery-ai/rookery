@@ -177,6 +177,12 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
 
+      # Config comes from .gitleaks.toml at the repo root, which gitleaks
+      # auto-discovers from --source. There is deliberately no GITLEAKS_CONFIG
+      # here: this action builds its own argv (`detect --redact -v
+      # --exit-code=2 …`) and passes no --config, and it never reads that
+      # variable — setting it looks like it configures something and does not.
+      # See src/gitleaks.js in gitleaks/gitleaks-action.
       - name: gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
