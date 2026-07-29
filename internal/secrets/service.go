@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -247,6 +248,64 @@ func SystemKeyFromEnv() ([]byte, error) {
 	// Fallback: derive from hostname — only acceptable in development.
 	host, _ := os.Hostname()
 	key := argon2.IDKey([]byte(host), []byte("simple-agents-dev-key"), 1, 64*1024, 4, 32)
+	return key, nil
+}
+
+// SystemKeyPath is where the pinned 32-byte system key lives.
+func SystemKeyPath(dataDir string) string {
+	return filepath.Join(dataDir, "system.key")
+}
+
+// SystemKey resolves the system key, pinning it to disk so it survives a
+// hostname change. Resolution order:
+//
+//  1. SA_SYSTEM_KEY, if set — still wins, and is never written to disk.
+//  2. <dataDir>/system.key, if present.
+//  3. Derive and persist. When hasWorkspaces is true the install already holds
+//     data encrypted under the legacy hostname-derived key, so that exact key is
+//     reproduced and written out — an upgrade must never change it. A fresh
+//     install instead gets 32 random bytes, which is strictly stronger than a
+//     guessable hostname.
+//
+// Restore writes the recovered key to this same path, which is how connector
+// tokens and stored master passwords survive a move to new hardware.
+func SystemKey(dataDir string, hasWorkspaces bool) ([]byte, error) {
+	if hex64 := os.Getenv("SA_SYSTEM_KEY"); hex64 != "" {
+		key, err := hex.DecodeString(hex64)
+		if err != nil || len(key) != 32 {
+			return nil, fmt.Errorf("SA_SYSTEM_KEY must be 64 hex chars (32 bytes), got %d chars", len(hex64))
+		}
+		return key, nil
+	}
+
+	path := SystemKeyPath(dataDir)
+	if raw, err := os.ReadFile(path); err == nil {
+		key, err := hex.DecodeString(strings.TrimSpace(string(raw)))
+		if err != nil || len(key) != 32 {
+			return nil, fmt.Errorf("%s is corrupt: expected 64 hex chars (32 bytes)", path)
+		}
+		return key, nil
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read system key: %w", err)
+	}
+
+	var key []byte
+	if hasWorkspaces {
+		host, _ := os.Hostname()
+		key = argon2.IDKey([]byte(host), []byte("simple-agents-dev-key"), 1, 64*1024, 4, 32)
+	} else {
+		key = make([]byte, 32)
+		if _, err := rand.Read(key); err != nil {
+			return nil, fmt.Errorf("generate system key: %w", err)
+		}
+	}
+
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create data dir: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(hex.EncodeToString(key)), 0o600); err != nil {
+		return nil, fmt.Errorf("persist system key: %w", err)
+	}
 	return key, nil
 }
 

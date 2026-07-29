@@ -108,7 +108,15 @@ func serveCmd() *cli.Command {
 
 			slog.Info("database ready", "path", cfg.Database.Path)
 
-			sysKey, err := secrets.SystemKeyFromEnv()
+			// The workspace count decides how a first-run key is derived: an
+			// install that already holds encrypted data must keep its legacy
+			// hostname-derived key byte-for-byte, while a fresh one gets random
+			// bytes. Either way the key is pinned to a file from now on.
+			var wsCount int
+			if err := database.QueryRow(`SELECT COUNT(*) FROM workspaces`).Scan(&wsCount); err != nil {
+				return fmt.Errorf("count workspaces: %w", err)
+			}
+			sysKey, err := secrets.SystemKey(cfg.Data.Dir, wsCount > 0)
 			if err != nil {
 				return fmt.Errorf("system key: %w", err)
 			}
