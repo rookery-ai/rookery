@@ -72,13 +72,20 @@ sboms:
 signs:
   # Keyless: the certificate is issued against the workflow's OIDC identity, so
   # there is no private key to store or rotate.
+  #
+  # Emits a single Sigstore BUNDLE rather than separate .sig/.pem files. cosign
+  # v3 (what sigstore/cosign-installer installs) defaults to the new bundle
+  # format, under which --output-signature/--output-certificate are deprecated
+  # AND IGNORED — cosign then tries to write a bundle to the empty path it was
+  # never given, and v0.1.0 died exactly there:
+  #   Error: signing dist/checksums.txt: create bundle file: open : no such file
+  # The bundle carries the signature and the certificate together, so nothing is
+  # lost; the verify command in the release footer below changes to match.
   - cmd: cosign
-    signature: "${artifact}.sig"
-    certificate: "${artifact}.pem"
+    signature: "${artifact}.bundle"
     args:
       - sign-blob
-      - "--output-signature=${signature}"
-      - "--output-certificate=${certificate}"
+      - "--bundle=${signature}"
       - "${artifact}"
       - "--yes"
     artifacts: checksum
@@ -96,8 +103,7 @@ release:
 
     ```bash
     cosign verify-blob checksums.txt \
-      --signature checksums.txt.sig \
-      --certificate checksums.txt.pem \
+      --bundle checksums.txt.bundle \
       --certificate-identity-regexp 'https://github\.com/ilijad1/simple-agents-v2/.*' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
     ```
