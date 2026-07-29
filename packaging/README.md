@@ -57,3 +57,26 @@ simple-agents owner bootstrap -u <username> -p <password>
 ```
 
 Then open `http://<host>:8080/`.
+
+## OAuth and your instance URL
+
+An OAuth provider never connects to this server — it redirects the user's
+browser. So the server does not need to be reachable from the internet. What
+gets validated is the **redirect URI string**, when you register it.
+
+| How you reach the app | Redirect URI | Outcome |
+|---|---|---|
+| `http://localhost:8080` | `http://localhost:8080/…` | Google, GitHub, Notion work. Slack-class providers need HTTPS. |
+| LAN server, plain HTTP on an IP | `http://192.168.1.194:8080/…` | Google rejects raw IP addresses. GitHub works. |
+| LAN server, internal CA, `.lan` name | `https://agents.rookie.lan/…` | HTTPS satisfies Slack-class providers; Google rejects the reserved `.lan` suffix. |
+| **Real domain, DNS-01 certificate, resolved on your LAN** | `https://agents.example.com/…` | **All providers work, with no inbound exposure.** |
+
+The last row is the recommended setup for a self-hosted install: register a real
+domain, obtain a certificate via a DNS-01 challenge (no inbound port needed),
+and point the name at the server's private IP in your own DNS. Then set
+`SA_PUBLIC_URL` — or the instance URL in Settings — to that address.
+
+Settings → Owner → **Instance URL** shows what is currently in use and has a
+**Test this URL** button that verifies the address actually reaches this server.
+Each provider's connect panel shows the exact redirect URI to register, and
+warns before you start if your current URL will not work with that provider.

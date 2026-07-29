@@ -18,6 +18,8 @@ func TestAPIParityInventory(t *testing.T) {
 		"POST /api/v1/workspaces/leave", "DELETE /api/v1/workspaces/:id",
 		"GET /api/v1/admin/overview", "GET /api/v1/admin/audit",
 		"GET /api/v1/admin/settings",
+		"GET /api/v1/admin/public-url", "PUT /api/v1/admin/public-url",
+		"POST /api/v1/admin/public-url/test",
 		// Backup is owner-scoped, not workspace-scoped: one snapshot covers
 		// every workspace, so these sit on the owner group.
 		"GET /api/v1/backup/config", "PUT /api/v1/backup/config",

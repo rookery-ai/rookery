@@ -181,7 +181,7 @@ CWD-relative.
 | `SA_PORT` | `8080` | listen port |
 | `SA_DATA_DIR` | `~/.simple-agents-v2` | data root; also relocates the DB |
 | `SA_SESSION_KEY` | generated | hex 32-byte session key |
-| `SA_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks |
+| `SA_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks; validated at use (`internal/publicurl.Normalize`) and overridden by the instance URL in owner settings |
 | `SA_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |
 | `SA_CODER_MODE` | `full` | `slim` removes the local CLI coder kind entirely |
 
@@ -508,6 +508,27 @@ server-rendered redirect route that survives the SPA cutover: `GET /dashboard/co
 (HMAC-signed, TTL'd `state`; path FROZEN because it's the registered external redirect URI; it finishes
 with an HTTP redirect back to the SPA). `SA_PUBLIC_URL` sets the callback base (Google rejects
 non-public-TLD/`http` redirect URIs — use `https://` or `http://localhost`).
+
+**Redirect-URI reliability.** `internal/publicurl` owns the instance base URL
+(`Resolve`: the `system_settings.public_url` row → `SA_PUBLIC_URL` → detection
+from the request) and judges it against a provider's `redirect_policy` YAML block
+(`Check`, a pure function). Only a policy marked `verified: true` may hard-block
+the Connect button; an absent block is the zero `Policy`, which is fully
+permissive, so rolling policies out provider by provider can never lock a user
+out. Host classification hard-blocks only RFC-reserved suffixes — an ICANN
+public suffix passes, and a PSL *private* entry such as `github.io` degrades to a
+soft warning, because `publicsuffix.PublicSuffix` reports `icann=false` for both
+it and `.lan`. The consent-time redirect URI is pinned into the signed OAuth
+state (a 6th `~` field; 4- and 5-field states are still accepted for the 10-minute
+TTL) so the token exchange cannot use a different string than consent did — and
+a divergence is logged and proceeds, never rejected, because the user has already
+granted consent by then. Provider `setup_steps` carry a `{{redirect_uri}}`
+placeholder that the SPA substitutes (browser-side, rendered as copyable code
+rather than a link — following our own callback with no `state` only errors);
+`connectors.TestSetupStepsUsePlaceholderNotProse` bans the old "shown above"
+wording. The hard block is **UI-only by design**: the policy predicts a third
+party's rules rather than expressing an invariant we own, so a server-side gate
+would turn a stale YAML entry into a lockout with no override.
 
 ### Skill system (core + user skills)
 

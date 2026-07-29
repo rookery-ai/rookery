@@ -30,7 +30,7 @@ function providerFixture(
     setup_steps: [],
     has_creds: false,
     action_count: 0,
-    connect_inputs: [],
+    connect_inputs: [], redirect_uri: "", preflight: [],
     connections: [],
   };
 }
@@ -234,7 +234,7 @@ test("useServices fetches the provider list", async () => {
             setup_url: "",
             setup_steps: [],
             has_creds: true,
-            connect_inputs: [],
+            connect_inputs: [], redirect_uri: "", preflight: [],
             connections: [],
           },
         ],

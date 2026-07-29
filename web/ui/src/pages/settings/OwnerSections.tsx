@@ -10,6 +10,9 @@ import {
   useAdminSettings,
   useAuditLog,
   useDeleteWorkspaceAdmin,
+  usePublicURL,
+  useSavePublicURL,
+  useTestPublicURL,
 } from "@/lib/settings";
 import type { Workspace } from "@/lib/session";
 import { BackupSection } from "./BackupSection";
@@ -140,6 +143,92 @@ function SystemStatusSection() {
             </dd>
           </div>
         </dl>
+      )}
+    </div>
+  );
+}
+
+// ── Instance URL ─────────────────────────────────────────────────────────
+
+// Every OAuth redirect URI is built from this value, so it is the single most
+// consequential setting for connecting a service. Left unset it is detected from
+// the browser's request, which is why the redirect URI used to change depending
+// on how the operator reached the page.
+function InstanceURLSection() {
+  const { data, isLoading } = usePublicURL();
+  const save = useSavePublicURL();
+  const test = useTestPublicURL();
+  const [value, setValue] = useState("");
+  const [touched, setTouched] = useState(false);
+
+  // Seed from the server once, then leave the field alone so typing is not
+  // clobbered by a refetch.
+  useEffect(() => {
+    if (data && !touched) setValue(data.public_url);
+  }, [data, touched]);
+
+  const source = data?.public_url_source;
+  return (
+    <div>
+      <h3 className="text-sm font-bold text-muted-2">Instance URL</h3>
+      <p className="mt-1 text-xs text-muted-2">
+        The address this server is reached at. Every service connection's redirect URI is built
+        from it, so providers must be able to accept it. Leave it empty to detect it from your
+        browser.
+      </p>
+
+      {isLoading && <p className="mt-2 text-xs text-muted-2">Loading…</p>}
+
+      {!isLoading && (
+        <>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Input
+              value={value}
+              placeholder="https://agents.example.com"
+              onChange={(e) => {
+                setTouched(true);
+                setValue(e.target.value);
+              }}
+              className="min-w-64 flex-1"
+              aria-label="Instance URL"
+            />
+            <Button onClick={() => save.mutate(value.trim())} disabled={save.isPending}>
+              {save.isPending ? "Saving…" : "Save"}
+            </Button>
+            <Button
+              variant="secondary"
+              onClick={() => test.mutate((value.trim() || data?.public_url_actual) ?? "")}
+              disabled={test.isPending}
+            >
+              {test.isPending ? "Testing…" : "Test this URL"}
+            </Button>
+          </div>
+
+          <p className="mt-2 text-xs text-muted-2">
+            Currently using <code>{data?.public_url_actual}</code>{" "}
+            {source === "configured"
+              ? "(configured here)"
+              : source === "env"
+                ? "(from SA_PUBLIC_URL)"
+                : "(detected from your browser)"}
+          </p>
+
+          {save.isError && <div className="mt-2"><ErrorNote message={errMsg(save.error)} /></div>}
+          {test.isError && <div className="mt-2"><ErrorNote message={errMsg(test.error)} /></div>}
+          {test.data && (
+            <p
+              className={
+                test.data.ok && !test.data.warning
+                  ? "mt-2 text-xs font-medium text-ok"
+                  : "mt-2 text-xs text-muted-2"
+              }
+            >
+              {test.data.ok && !test.data.warning
+                ? "Reached this server successfully."
+                : test.data.error}
+            </p>
+          )}
+        </>
       )}
     </div>
   );
@@ -295,6 +384,7 @@ export function OwnerSections() {
 
       <div className="mt-6 space-y-8">
         <WorkspacesSection />
+        <InstanceURLSection />
         <SystemStatusSection />
         <BackupSection />
         <AuditLogSection />

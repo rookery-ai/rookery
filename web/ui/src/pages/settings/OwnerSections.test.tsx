@@ -156,8 +156,9 @@ test("System status offers no editable settings", async () => {
   expect(screen.queryByLabelText(/agent timeout/i)).toBeNull();
   expect(screen.queryByLabelText(/memory limit/i)).toBeNull();
   // Scoped to the System status section: this guard was page-wide only because
-  // that section used to be the only one with a Save button. Backup now has a
-  // legitimate one, and a page-wide assertion would forbid it.
+  // that section used to be the only one with a Save button. Backup and the
+  // Instance URL both now have legitimate ones — each backed by a value that is
+  // actually read back — and a page-wide assertion would forbid them.
   const systemStatus = screen.getByText("System status").parentElement!;
   expect(within(systemStatus).queryByRole("button", { name: /^save$/i })).toBeNull();
 });

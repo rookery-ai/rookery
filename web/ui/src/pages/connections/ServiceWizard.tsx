@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError } from "@/lib/api";
 import { Linkify } from "@/lib/linkify";
+import { CopyButton } from "@/components/CopyButton";
 import {
   useServices,
   useSaveProviderCreds,
@@ -20,6 +21,40 @@ import {
 import { ProviderActions } from "./ProviderActions";
 
 type ServiceWizardProps = { provider: ServiceProvider };
+
+const REDIRECT_TOKEN = "{{redirect_uri}}";
+
+// SetupStep renders one provider instruction, replacing {{redirect_uri}} with
+// the real URI as copyable code.
+//
+// The surrounding prose still goes through Linkify so console links keep
+// working; the URI itself deliberately does NOT become a link. It is a value to
+// paste into another site, not a destination to visit — and following it would
+// hit our own callback route with no state parameter, which only ever renders
+// "Invalid or expired authorization request".
+function SetupStep({ text, redirectURI }: { text: string; redirectURI: string }) {
+  if (!redirectURI || !text.includes(REDIRECT_TOKEN)) {
+    return <Linkify text={text} />;
+  }
+  const parts = text.split(REDIRECT_TOKEN);
+  return (
+    <>
+      {parts.map((part, i) => (
+        <span key={i}>
+          <Linkify text={part} />
+          {i < parts.length - 1 && (
+            <span className="inline-flex items-baseline gap-1 align-baseline">
+              <code className="break-all rounded bg-muted-surface px-1 py-0.5 text-xs">
+                {redirectURI}
+              </code>
+              <CopyButton value={redirectURI} />
+            </span>
+          )}
+        </span>
+      ))}
+    </>
+  );
+}
 
 function ErrorNote({ children }: { children: ReactNode }) {
   return (
@@ -132,6 +167,10 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
     servicesQuery.data?.providers.find((p) => p.name === initialProvider.name) ?? initialProvider;
 
   const [view, setView] = useState<"creds" | "connect">(provider.has_creds ? "connect" : "creds");
+  // A hard preflight problem is provably fatal for this provider, so Connect is
+  // disabled rather than letting the user walk into a provider error screen.
+  // Soft problems only warn — see the never-lock-anyone-out rule in publicurl.
+  const hardBlocked = provider.preflight.some((p) => p.severity === "hard");
   // Overlays `view` rather than widening its union: `view` keeps meaning "which
   // connect step am I on", so Back lands where the user left without a separate
   // variable remembering it. ServiceWizard stays mounted throughout, so every
@@ -227,6 +266,36 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
         </div>
       )}
 
+      {/* Shown on BOTH the credentials step and the connect step: the URI is
+          needed while registering the app, and the preflight verdict has to be
+          visible next to the Connect button it disables. */}
+      {provider.kind === "oauth" && provider.redirect_uri && (
+        <div className="space-y-1 rounded-lg border border-border bg-muted-surface p-3">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-2">
+            Redirect URI to register
+          </div>
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 break-all text-xs">{provider.redirect_uri}</code>
+            <CopyButton value={provider.redirect_uri} />
+          </div>
+        </div>
+      )}
+
+      {provider.kind === "oauth" &&
+        provider.preflight.map((p) => (
+          <div
+            key={p.code}
+            className={
+              p.severity === "hard"
+                ? "space-y-1 rounded-lg border border-danger/40 bg-danger-soft p-3 text-sm"
+                : "space-y-1 rounded-lg border border-border bg-muted-surface p-3 text-sm"
+            }
+          >
+            <div className="font-medium">{p.message}</div>
+            <div className="text-muted-2">{p.fix}</div>
+          </div>
+        ))}
+
       <div className={hasConnections ? "space-y-3 border-t border-border pt-4" : "space-y-3"}>
         {provider.kind === "oauth" ? (
           view === "creds" ? (
@@ -252,7 +321,7 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
                         {i + 1}
                       </span>
                       <span className="leading-relaxed">
-                        <Linkify text={s} />
+                        <SetupStep text={s} redirectURI={provider.redirect_uri} />
                       </span>
                     </li>
                   ))}
@@ -325,7 +394,10 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
                 >
                   edit app credentials
                 </button>
-                <Button onClick={() => void handleConnect()} disabled={connectServiceMutation.isPending}>
+                <Button
+                  onClick={() => void handleConnect()}
+                  disabled={connectServiceMutation.isPending || hardBlocked}
+                >
                   {connectServiceMutation.isPending ? "Connecting…" : `Connect ${provider.label} →`}
                 </Button>
               </div>

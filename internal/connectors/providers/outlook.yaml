@@ -5,7 +5,7 @@ setup_url: https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/Applic
 setup_steps:
   - "Go to the Microsoft Entra admin center → App registrations → New registration."
   - "Supported account types: \"Accounts in any organizational directory and personal Microsoft accounts\"."
-  - "Redirect URI: platform \"Web\", value = the redirect URI shown above exactly."
+  - "Redirect URI: platform \"Web\", value = {{redirect_uri}} exactly."
   - "After creating, copy the Application (client) ID."
   - "Certificates & secrets → New client secret → copy its Value (not the Secret ID)."
   - "Paste the client ID and secret Value below."

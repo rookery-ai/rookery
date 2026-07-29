@@ -19,7 +19,7 @@ setup_url: https://developers.facebook.com/apps
 setup_steps:
   - "Your Instagram account must be a PROFESSIONAL account (Business or Creator) and linked to a Facebook Page you administer. A personal account cannot use this API at all."
   - "Go to Meta for Developers → My Apps → Create App → type 'Business'."
-  - "Add 'Facebook Login for Business', and under its Settings add the redirect URI shown above exactly."
+  - "Add 'Facebook Login for Business', and under its Settings add {{redirect_uri}} exactly."
   - "In App settings → Basic, copy the App ID and App Secret and paste them below."
   - "Keep the app in DEVELOPMENT mode: full access to accounts YOU administer, no App Review."
   - "Note: Instagram allows 25 published posts per 24 hours, and images must be at a PUBLICLY reachable URL — the API cannot upload a local file."

@@ -76,7 +76,28 @@ export type ServiceProvider = {
   has_creds: boolean;
   action_count: number;
   connect_inputs: ServiceConnectInput[];
+  // The exact URI to register with the provider. Empty for api_key providers,
+  // which never leave the browser.
+  redirect_uri: string;
+  // Why the current instance URL will not work with this provider. "hard"
+  // disables Connect; "soft" warns only.
+  preflight: PreflightProblem[];
   connections: ServiceConnection[];
+};
+
+// Mirrors apiPreflightProblem.
+export type PreflightProblem = {
+  severity: "hard" | "soft";
+  code: string;
+  message: string;
+  fix: string;
+};
+
+// Mirrors apiPublicURLSummary — "what does my current instance URL cost me?"
+export type PublicURLSummary = {
+  base_url: string;
+  oauth_providers: number;
+  clean_providers: number;
 };
 
 // CATEGORY_ORDER fixes the section order on the connections page. A fixed array
@@ -123,7 +144,8 @@ export function groupByCategory(
 export function useServices() {
   return useQuery({
     queryKey: ["services"],
-    queryFn: () => api.get<{ providers: ServiceProvider[] }>("/api/v1/services"),
+    queryFn: () =>
+      api.get<{ providers: ServiceProvider[]; summary: PublicURLSummary }>("/api/v1/services"),
   });
 }
 

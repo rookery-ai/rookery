@@ -20,6 +20,6 @@ setup_url: https://developer.x.com/en/portal/dashboard
 setup_steps:
   - "X's API is PAY-PER-USE since Feb 2026 — roughly $0.015 per post created and $0.005 per post read, with no monthly minimum. Posting from an agent costs pennies, but it is not free."
   - "Go to the X Developer Portal → Projects & Apps → create an app inside a project."
-  - "Under User authentication settings, enable OAuth 2.0, set App type to 'Web App', and add the redirect URI shown above exactly."
+  - "Under User authentication settings, enable OAuth 2.0, set App type to 'Web App', and add {{redirect_uri}} exactly."
   - "Copy the OAuth 2.0 Client ID and Client Secret and paste them below."
   - "Request the tweet.write scope — reading alone will not let an agent post."

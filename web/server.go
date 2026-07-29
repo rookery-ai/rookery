@@ -39,6 +39,8 @@ type Server struct {
 	cfg        *config.Config
 	db         *db.DB
 	store      *sessions.CookieStore
+	echoMu     sync.Mutex
+	echoNonces map[string]echoNonce
 	audit      *audit.Writer
 	systemKey  []byte                  // 32-byte key for encrypting master passwords at rest
 	gateway    *gateway.GatewayManager // may be nil in tests
@@ -195,6 +197,13 @@ func (s *Server) setupRoutes() {
 	// Unauthenticated infrastructure endpoint — see apiHealthz. Registered
 	// before the SPA catch-all so /healthz is never swallowed by it.
 	s.echo.GET("/healthz", s.apiHealthz)
+	// Unauthenticated by necessity: the "Test this URL" check is a server-to-
+	// server fetch that carries no session cookie, so an authenticated endpoint
+	// would fail identically whether the URL was right or wrong — inverting the
+	// signal the test exists to give. Safe because it is not an oracle: it echoes
+	// only a nonce this process issued, once, within 30 seconds, and 404s
+	// otherwise. It reveals no configuration.
+	s.echo.GET("/healthz/echo", s.handleEchoNonce)
 
 	s.setupAPIRoutes()
 	s.setupSPARoutes()

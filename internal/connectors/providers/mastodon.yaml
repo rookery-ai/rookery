@@ -20,6 +20,6 @@ setup_url: https://docs.joinmastodon.org/client/token/
 setup_steps:
   - "Mastodon is federated: you register an application on YOUR OWN instance, not with a central provider."
   - "On your instance go to Preferences → Development → New application."
-  - "Set the redirect URI to the URI shown above exactly, and tick the read and write:statuses scopes."
+  - "Set the redirect URI to {{redirect_uri}} exactly, and tick the read and write:statuses scopes."
   - "Copy the Client key and Client secret into the fields below, then enter your instance URL when connecting."
   - "Mastodon access tokens do not expire, so there is nothing to refresh."

@@ -18,5 +18,14 @@ setup_url: https://api.slack.com/apps
 setup_steps:
   - "Go to api.slack.com/apps → Create New App → From scratch."
   - "OAuth & Permissions → add the Bot Token Scopes listed for this connector."
-  - "Add the redirect URL shown above under Redirect URLs, then Save."
+  - "Add {{redirect_uri}} under Redirect URLs, then Save."
   - "Install the app to your workspace, then copy the Client ID and Client Secret from Basic Information."
+
+# Verified 2026-07-29 against
+# https://docs.slack.dev/authentication/installing-with-oauth/ — "Redirect URLs
+# and URIs must use HTTPS". There is NO localhost exemption, which is why this
+# provider needs a reverse proxy on a plain-http install.
+redirect_policy:
+  scheme: https
+  allow_raw_ip: "no"
+  verified: true

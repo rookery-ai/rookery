@@ -6,7 +6,7 @@ setup_steps:
   - "Go to GitHub → Settings → Developer settings → OAuth Apps → New OAuth App."
   - "Application name: anything (e.g. Simple Agents)."
   - "Homepage URL: your dashboard URL (e.g. https://agents.rookie.lan)."
-  - "Authorization callback URL: paste the redirect URI shown above exactly."
+  - "Authorization callback URL: paste {{redirect_uri}} exactly."
   - "Click Register application, then Generate a new client secret."
   - "Copy the Client ID and the generated Client secret and paste them below."
 authorize_url: https://github.com/login/oauth/authorize
@@ -20,3 +20,9 @@ static_headers:
 default_scopes:
   - repo
   - read:user
+
+# Verified 2026-07-29 against
+# https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps
+# — loopback redirect URIs over plain http are explicitly supported.
+redirect_policy:
+  verified: true

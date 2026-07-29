@@ -14,6 +14,6 @@ setup_url: https://developers.pinterest.com/apps
 setup_steps:
   - "IMPORTANT: a TRIAL-access app creates SANDBOX pins visible only to you, capped at 1000 requests/day. Standard access requires a demo video and 1-4 weeks of review."
   - "Go to Pinterest Developers → My apps → create an app (a business account is required)."
-  - "Add the redirect URI shown above exactly."
+  - "Add {{redirect_uri}} exactly."
   - "Copy the App ID and App secret key and paste them below."
   - "Trial access is usually granted within a business day or two; request Standard when you need real, publicly visible pins."

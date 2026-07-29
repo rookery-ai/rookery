@@ -24,6 +24,9 @@ func (s *Server) registerWorkspacesAPI(g *echo.Group) {
 	g.GET("/admin/overview", s.apiAdminOverview)
 	g.GET("/admin/audit", s.apiAdminAudit)
 	g.GET("/admin/settings", s.apiAdminGetSettings)
+	g.GET("/admin/public-url", s.apiPublicURLState)
+	g.PUT("/admin/public-url", s.apiSavePublicURL)
+	g.POST("/admin/public-url/test", s.apiTestPublicURL)
 }
 
 // ── Workspace lifecycle ──────────────────────────────────────────────────────
