@@ -468,6 +468,30 @@ testable and each leaving the tree green:
 5. **Web surface** — the eight API routes, parity-test entries, and the settings
    `BackupSection`.
 
+## Changes made during implementation
+
+Recorded here because they diverge from the design as written above, and were
+found by building and testing it rather than by reasoning:
+
+- **`readArchive` drains the gzip stream before returning.** tar stops at its own
+  end-of-archive marker, which sits *before* the gzip trailer, so the CRC32 was
+  never verified and damage to the tail of a snapshot went undetected. Per-file
+  SHA-256 still caught damage to file contents; this covers the rest.
+- **Snapshot names are collision-checked (`freeSnapshotName`).** Names have
+  one-second granularity, so two runs inside the same second — a double-clicked
+  "Back up now", or a manual run racing the scheduler — resolved to one name and
+  the second silently overwrote the first. Observed in a smoke test.
+- **Terminal echo is suppressed with `stty`, not `golang.org/x/term`.** That
+  module is only a graph entry in this repo, so using it would have added a real
+  dependency, against the no-new-deps constraint.
+- **The API derives the binary's schema version from the database**
+  (`LatestSchemaVersion`) rather than re-reading the migrations directory: a
+  running server has already applied every migration it ships, so the newest
+  applied row *is* the binary's version, and no new `Server` field is needed.
+- **`useSnapshots` gates on `passphrase_set`, not `enabled`.** An owner who
+  configured a destination but left automatic runs off can still use "Back up
+  now", and hiding their snapshots would make those backups look lost.
+
 ## Accepted costs
 
 - Restore requires a restart. Automatic under systemd/container, manual for a

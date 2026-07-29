@@ -61,7 +61,10 @@ export function BackupSection() {
   const verify = useVerifySnapshot();
   const restore = useRestoreSnapshot();
 
-  const configured = Boolean(data?.enabled);
+  // Gate on the passphrase, not the enabled toggle: an owner who configured a
+  // destination but left automatic runs off can still use "Back up now", and
+  // hiding their snapshots would make those backups look lost.
+  const configured = Boolean(data?.passphrase_set);
   const snapshots = useSnapshots(configured);
 
   const [form, setForm] = useState<FormState | null>(null);
