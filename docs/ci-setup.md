@@ -117,38 +117,40 @@ ecosystem and caps open PRs at 3 each, which turns that into roughly one PR per
 ecosystem per week. If minutes still run short, the next levers are
 `interval: monthly` and dropping the container job to `push` on `main` only.
 
-## Why `last-release-sha` is pinned
+## The first release was tagged by hand
 
-`release-please-config.json` sets `last-release-sha` to `b12768c` — the commit
-immediately before PR #55.
+`v0.1.0` was created manually rather than by release-please, and this is the
+reason the pipeline is now stable.
 
-**`bootstrap-sha` was tried first and does not work here.** The schema defines it
-as "for the *initial release* of a library, only consider as far back as this
-commit SHA" — but `.release-please-manifest.json` declares `"." : "0.0.0"`, so
-release-please does not treat this as an initial release and the option never
-fires. Merging it changed nothing: the regenerated changelog was still 482 lines
-/ 456 entries. `last-release-sha` is the equivalent option scoped to "any
-release", which does apply.
+With **529 commits and no tags**, release-please had no anchor and walked the
+entire history on every run, backfilling a file list per commit via the GitHub
+GraphQL API. That produced two failures, repeatedly:
 
-Without it, release-please has no anchor telling it where the previous release
-was (this repository had **529 commits and no tags** at the time of the first
-release), so it walks the entire history, backfilling a file list per commit via
-the GitHub GraphQL API. That had two consequences, both observed:
+- The workflow died with `release-please failed: We couldn't respond to your
+  request in time.` — the API timing out mid-walk. Intermittent, and worsening
+  as history grew.
+- When it did succeed, it generated a **482-line changelog / 456 entries**
+  covering every pre-release commit.
 
-- The workflow **failed** on the merges of #55 and #56 with
-  `release-please failed: We couldn't respond to your request in time.` — the
-  API timing out partway through the walk. It succeeded on retry, so the failure
-  is intermittent rather than absolute, but it worsens as history grows.
-- When it did succeed, it generated a **482-line changelog** covering every
-  pre-release commit, rather than the release-worthy work.
+Two config attempts did not fix it. `bootstrap-sha` is scoped by the schema to
+"the initial release of a library", and `.release-please-manifest.json` declared
+`"." : "0.0.0"` — a release, as far as release-please is concerned — so the
+option never fired. `last-release-sha` applies to "any release" and should have
+worked, but the underlying history walk still timed out before it mattered.
 
-`last-release-sha` is a **floor**, not an override: it says "never look further
-back than this". Once `v0.1.0` is tagged at a commit newer than the pin,
-release-please anchors on that tag and the floor becomes inert, so each
-subsequent release contains only the commits since the previous tag.
+Tagging `v0.1.0` by hand removed the cause rather than working around it: with a
+real tag present, release-please anchors on it and scans only the commits since,
+so runs are fast and each changelog contains only that release's work. No
+`bootstrap-sha` or `last-release-sha` pin is needed, and both have been removed.
 
-**Verify this once**, on the first release PR raised after `v0.1.0` ships: it
-should list only the work merged after the tag. If it instead repeats the
-`v0.1.0` entries, the floor is being applied as an anchor rather than a bound —
-delete the `last-release-sha` line, since after `v0.1.0` exists the tag alone
-does the job.
+`.goreleaser.yaml` sets `changelog: disable: true`, so the manual tag published
+artifacts without a duplicate commit dump in the GitHub Release body.
+
+### Releasing from here
+
+Normal release-please flow, no manual steps:
+
+1. Merge a feature PR (Conventional Commit title).
+2. release-please opens/updates a release PR computing the next version.
+3. Merge that PR → it creates the tag → `release.yml` fires goreleaser and the
+   GHCR image push.
