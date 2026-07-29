@@ -134,7 +134,12 @@ export function BackupSection() {
     });
   }
 
-  if (isLoading) {
+  // These three states are deliberately NOT collapsed into one branch. They
+  // were, and the result was that a request answered by the SPA catch-all
+  // (200 index.html → parses to null → no error object) rendered a bare
+  // "Something went wrong" with nothing to act on, while the server log showed
+  // a 200. An error state that cannot say what failed costs more than it saves.
+  if (isLoading || (!data && !isError)) {
     return (
       <div>
         <h3 className="text-sm font-bold text-muted-2">Backup</h3>
@@ -142,13 +147,29 @@ export function BackupSection() {
       </div>
     );
   }
-  if (isError || !data || !form) {
+  if (isError || !data) {
     return (
       <div>
         <h3 className="text-sm font-bold text-muted-2">Backup</h3>
         <div className="mt-2">
-          <ErrorNote message={errMsg(error)} />
+          <ErrorNote
+            message={
+              isError
+                ? errMsg(error)
+                : "The server returned no backup settings. Check that /api/v1/backup/config is reachable."
+            }
+          />
         </div>
+      </div>
+    );
+  }
+  // data has arrived but the form-state effect has not run yet: one render, and
+  // it is a loading state, not a failure.
+  if (!form) {
+    return (
+      <div>
+        <h3 className="text-sm font-bold text-muted-2">Backup</h3>
+        <p className="mt-2 text-xs text-muted-2">Loading…</p>
       </div>
     );
   }

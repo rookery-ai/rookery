@@ -40,12 +40,24 @@ function mockConfig(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// Only /api/v1/* is the JSON API; every other path falls through to the SPA
+// catch-all, which answers 200 with index.html. So an unprefixed request does
+// NOT fail loudly — it resolves with HTML that parses to null. Modelling that
+// here is what makes a wrong path a test failure instead of a silent one.
 function mountWith(config: Record<string, unknown>, snapshots: unknown[] = []) {
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/backup/snapshots")) return Promise.resolve(jsonResponse(snapshots));
+      if (!url.startsWith("/api/v1/")) {
+        return Promise.resolve(
+          new Response("<!doctype html><title>SPA</title>", {
+            status: 200,
+            headers: { "Content-Type": "text/html" },
+          }),
+        );
+      }
+      if (url.startsWith("/api/v1/backup/snapshots")) return Promise.resolve(jsonResponse(snapshots));
       return Promise.resolve(jsonResponse(config));
     }),
   );
@@ -66,6 +78,23 @@ describe("BackupSection", () => {
   it("warns that the passphrase is the only way to recover", async () => {
     mountWith(mockConfig());
     expect(await screen.findByText(/only way to recover/i)).toBeInTheDocument();
+  });
+
+  // Regression guard. api.request() passes the path straight to fetch with no
+  // prefix, so a bare "/backup/config" hit the SPA catch-all, came back as
+  // 200 index.html, parsed to null, and rendered "Something went wrong" — with
+  // a 200 in the server log, which is what made it hard to spot.
+  it("calls the /api/v1-prefixed endpoints", async () => {
+    mountWith(mockConfig({ enabled: true, passphrase_set: true }), []);
+    await screen.findByText(/only way to recover/i);
+
+    const urls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+    expect(urls.length).toBeGreaterThan(0);
+    for (const u of urls) {
+      expect(u).toMatch(/^\/api\/v1\//);
+    }
+    expect(urls).toContain("/api/v1/backup/config");
+    expect(urls).toContain("/api/v1/backup/snapshots");
   });
 
   it("shows the last failure so a silently broken backup is visible", async () => {

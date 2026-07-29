@@ -58,7 +58,7 @@ export type SaveBackupConfig = {
 export function useBackupConfig() {
   return useQuery({
     queryKey: ["backup", "config"],
-    queryFn: () => api.get<BackupConfig>("/backup/config"),
+    queryFn: () => api.get<BackupConfig>("/api/v1/backup/config"),
   });
 }
 
@@ -67,7 +67,7 @@ export function useBackupConfig() {
 export function useSnapshots(enabled: boolean) {
   return useQuery({
     queryKey: ["backup", "snapshots"],
-    queryFn: () => api.get<Snapshot[]>("/backup/snapshots"),
+    queryFn: () => api.get<Snapshot[]>("/api/v1/backup/snapshots"),
     enabled,
     retry: false,
   });
@@ -76,7 +76,7 @@ export function useSnapshots(enabled: boolean) {
 export function useSaveBackupConfig() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: SaveBackupConfig) => api.put<BackupConfig>("/backup/config", body),
+    mutationFn: (body: SaveBackupConfig) => api.put<BackupConfig>("/api/v1/backup/config", body),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["backup"] }),
   });
 }
@@ -84,7 +84,7 @@ export function useSaveBackupConfig() {
 export function useRunBackup() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post<{ name: string }>("/backup/run", {}),
+    mutationFn: () => api.post<{ name: string }>("/api/v1/backup/run", {}),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["backup"] }),
   });
 }
@@ -92,7 +92,7 @@ export function useRunBackup() {
 export function useDeleteSnapshot() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) => api.del<void>(`/backup/snapshots/${encodeURIComponent(name)}`),
+    mutationFn: (name: string) => api.del<void>(`/api/v1/backup/snapshots/${encodeURIComponent(name)}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["backup", "snapshots"] }),
   });
 }
@@ -100,14 +100,14 @@ export function useDeleteSnapshot() {
 export function useVerifySnapshot() {
   return useMutation({
     mutationFn: (body: { name: string; passphrase: string }) =>
-      api.post<{ ok: boolean; files: number; workspaces: number }>("/backup/verify", body),
+      api.post<{ ok: boolean; files: number; workspaces: number }>("/api/v1/backup/verify", body),
   });
 }
 
 export function useRestoreSnapshot() {
   return useMutation({
     mutationFn: (body: { name: string; passphrase: string; confirm: string }) =>
-      api.post<{ status: string; message: string }>("/backup/restore", body),
+      api.post<{ status: string; message: string }>("/api/v1/backup/restore", body),
   });
 }
 
