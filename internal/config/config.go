@@ -27,16 +27,6 @@ type Config struct {
 	Coder    CoderConfig    `yaml:"coder"`
 	Sandbox  SandboxConfig  `yaml:"sandbox"`
 	Chat     ChatConfig     `yaml:"chat"`
-	Backup   BackupConfig   `yaml:"backup"`
-}
-
-// BackupConfig is the hook point for syncing each user's self-contained vault to
-// a remote (GitHub/Drive/S3). The vault is already structured as a clean backup
-// unit; remote push is a future phase, so these fields are presently inert.
-type BackupConfig struct {
-	Enabled bool   `yaml:"enabled"` // when true, a future sync worker pushes vaults
-	Target  string `yaml:"target"`  // "git" | "drive" | "s3" (reserved)
-	Dest    string `yaml:"dest"`    // remote URL/bucket/repo (reserved)
 }
 
 type ServerConfig struct {

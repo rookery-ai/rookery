@@ -2,6 +2,8 @@ package config
 
 import (
 	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -34,5 +36,23 @@ func TestCoderModeRejectsUnknownValue(t *testing.T) {
 	t.Setenv("SA_CODER_MODE", "minimal")
 	if _, err := Load(""); err == nil {
 		t.Fatal("Load accepted SA_CODER_MODE=minimal, want an error")
+	}
+}
+
+func TestBackupConfigIsGone(t *testing.T) {
+	// The inert backup config was replaced by owner-level settings stored in
+	// the database. A second, unread config surface next to the real one is
+	// exactly what this project's no-fake-settings rule forbids.
+	raw := []byte("backup:\n  enabled: true\n  target: git\n")
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("an unknown key must be ignored, not fatal: %v", err)
+	}
+	if reflect.ValueOf(*cfg).FieldByName("Backup").IsValid() {
+		t.Fatal("Config.Backup must no longer exist")
 	}
 }

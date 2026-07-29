@@ -18,6 +18,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/approval"
 	"github.com/ilijad1/simple-agents/internal/auth"
+	"github.com/ilijad1/simple-agents/internal/backup"
 	"github.com/ilijad1/simple-agents/internal/buildinfo"
 	"github.com/ilijad1/simple-agents/internal/chat"
 	"github.com/ilijad1/simple-agents/internal/coder"
@@ -59,6 +60,7 @@ func main() {
 			sandboxExecCmd(),
 			connectorCmd(),
 			kbCmd(),
+			backupCommand(),
 			versionCmd(),
 			healthcheckCmd(),
 		},
@@ -98,6 +100,21 @@ func serveCmd() *cli.Command {
 			for _, warn := range rep.Warnings() {
 				slog.Warn("capability degraded", "detail", warn)
 			}
+
+			// Order here is load-bearing. A staged restore must be swapped in
+			// BEFORE the database is opened or migrated — that is the whole
+			// reason the swap happens at startup rather than in-process. The
+			// lock is then held for the server's entire lifetime so a
+			// concurrent `backup restore` refuses instead of corrupting a live
+			// install.
+			if err := backup.ApplyPendingRestore(cfg.Data.Dir); err != nil {
+				return fmt.Errorf("apply pending restore: %w", err)
+			}
+			installLock, err := backup.AcquireLock(cfg.Data.Dir)
+			if err != nil {
+				return err
+			}
+			defer installLock.Release()
 
 			migrationsDir := resolveDir("migrations")
 			database, err := db.Open(cfg.Database.Path, migrationsDir)
