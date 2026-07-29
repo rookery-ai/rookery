@@ -116,3 +116,25 @@ once, queueing ~110 jobs. `dependabot.yml` now groups minor/patch updates per
 ecosystem and caps open PRs at 3 each, which turns that into roughly one PR per
 ecosystem per week. If minutes still run short, the next levers are
 `interval: monthly` and dropping the container job to `push` on `main` only.
+
+## Why `bootstrap-sha` is pinned
+
+`release-please-config.json` sets `bootstrap-sha` to `b12768c` — the commit
+immediately before PR #55.
+
+Without it, release-please has no anchor telling it where the previous release
+was (this repository had **529 commits and no tags** at the time of the first
+release), so it walks the entire history, backfilling a file list per commit via
+the GitHub GraphQL API. That had two consequences, both observed:
+
+- The workflow **failed** on the merges of #55 and #56 with
+  `release-please failed: We couldn't respond to your request in time.` — the
+  API timing out partway through the walk. It succeeded on retry, so the failure
+  is intermittent rather than absolute, but it worsens as history grows.
+- When it did succeed, it generated a **482-line changelog** covering every
+  pre-release commit, rather than the release-worthy work.
+
+`bootstrap-sha` affects the **first release only**. Once `v0.1.0` is tagged,
+release-please anchors on the previous tag and each subsequent release contains
+only the commits since it — no further configuration needed, and the value can
+be left in place.
