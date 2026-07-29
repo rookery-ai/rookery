@@ -56,7 +56,7 @@ type ImportResult struct {
 // importLocks holds one mutex per workspace id, guarding that workspace's
 // reserve-and-write in ImportFile. It is PACKAGE-LEVEL, not a *Vault field,
 // because the production wiring constructs more than one *vault.Vault backed
-// by the same on-disk data (cmd/simple-agents wires one into the
+// by the same on-disk data (cmd/rookery wires one into the
 // coder/runner/designer path, web.NewServer builds its own for the upload
 // endpoint) — so a per-Vault mutex field would not close the gap between,
 // say, the web upload door and the chat-attachment door for the SAME

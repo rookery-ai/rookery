@@ -247,7 +247,7 @@ func SystemKeyFromEnv() ([]byte, error) {
 	}
 	// Fallback: derive from hostname — only acceptable in development.
 	host, _ := os.Hostname()
-	key := argon2.IDKey([]byte(host), []byte("simple-agents-dev-key"), 1, 64*1024, 4, 32)
+	key := argon2.IDKey([]byte(host), []byte("rookery-dev-key"), 1, 64*1024, 4, 32)
 	return key, nil
 }
 
@@ -292,7 +292,7 @@ func SystemKey(dataDir string, hasWorkspaces bool) ([]byte, error) {
 	var key []byte
 	if hasWorkspaces {
 		host, _ := os.Hostname()
-		key = argon2.IDKey([]byte(host), []byte("simple-agents-dev-key"), 1, 64*1024, 4, 32)
+		key = argon2.IDKey([]byte(host), []byte("rookery-dev-key"), 1, 64*1024, 4, 32)
 	} else {
 		key = make([]byte, 32)
 		if _, err := rand.Read(key); err != nil {

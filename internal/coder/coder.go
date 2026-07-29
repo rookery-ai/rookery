@@ -486,8 +486,8 @@ func (c *Coder) buildCommand(ctx context.Context, workspaceID string, args, env 
 func (c *Coder) sandboxReadOnlyPaths(workspaceID string) []string {
 	ro := sandbox.SystemReadOnlyPaths()
 	ro = append(ro, c.sandboxBinaryDirs()...)
-	// The simple-agents binary's own dir must be RO+execute so a confined CLI coder can run
-	// `simple-agents connector exec …` (the connector bridge client). Without this the child
+	// The rookery binary's own dir must be RO+execute so a confined CLI coder can run
+	// `rookery connector exec …` (the connector bridge client). Without this the child
 	// gets EACCES on exec even though the loopback TCP call itself is allowed.
 	if c.selfExe != "" {
 		ro = append(ro, filepath.Dir(c.selfExe))

@@ -44,7 +44,7 @@ import (
 
 func main() {
 	app := &cli.Command{
-		Name:  "simple-agents",
+		Name:  "rookery",
 		Usage: "Multi-user AI Agents Control Plane",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
@@ -75,7 +75,7 @@ func main() {
 func serveCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "serve",
-		Usage: "Start the Simple Agents server",
+		Usage: "Start the Rookery server",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			cfg, err := config.Load(cmd.Root().String("config"))
 			if err != nil {
@@ -91,7 +91,7 @@ func serveCmd() *cli.Command {
 			// without it the agent-tool AST guardrail self-skips, so a security
 			// control switches itself off with no other signal.
 			rep := health.Detect(cfg.Sandbox.Enabled, cfg.Coder.Mode)
-			slog.Info("simple-agents starting",
+			slog.Info("rookery starting",
 				"version", rep.Version, "commit", rep.Commit,
 				"sandbox_supported", rep.Sandbox.Supported,
 				"sandbox_enabled", rep.Sandbox.Enabled,
@@ -345,8 +345,8 @@ func serveCmd() *cli.Command {
 
 				// Connector + KB bridge wiring: the API engine exposes bound connections
 				// AND save_to_kb as native in-process tools directly. A CLI coder instead
-				// reaches them via loopback bridges (`simple-agents connector exec <tool>`,
-				// `simple-agents kb convert|search`), mirroring agent runs.
+				// reaches them via loopback bridges (`rookery connector exec <tool>`,
+				// `rookery kb convert|search`), mirroring agent runs.
 				// Search-key wiring: resolve any configured SEARCH_KEY_BRAVE/SEARCH_KEY_TAVILY
 				// secrets once, host-side, and inject them into the coder's env so its
 				// web_search tool's searchProviders() picks the keyed provider over the
@@ -574,7 +574,7 @@ func sandboxExecCmd() *cli.Command {
 // connector bridge in the host process, which runs the SAME connectors.Execute path the
 // API engine uses in-process (auth/token-refresh stay host-side). The bridge URL + a
 // run-scoped token come from the ROOKERY_CONNECTOR_URL / ROOKERY_CONNECTOR_TOKEN env vars the runner
-// injects. Usage: simple-agents connector exec <tool> --args '<json>'
+// injects. Usage: rookery connector exec <tool> --args '<json>'
 func connectorCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "connector",

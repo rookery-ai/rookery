@@ -396,7 +396,7 @@ func TestImportLockDistinctPerWorkspaceStablePerWorkspace(t *testing.T) {
 func TestImportFileConcurrentDifferentWorkspacesBothSucceed(t *testing.T) {
 	dir := t.TempDir()
 	// Two separate *Vault instances over the same on-disk root, matching how
-	// cmd/simple-agents and web.NewServer each construct their own.
+	// cmd/rookery and web.NewServer each construct their own.
 	va := New(dir)
 	vb := New(dir)
 

@@ -212,7 +212,7 @@ const CORPUS: CorpusEntry[] = [
   // also running `go test ./internal/agentdesigner/...`.
   {
     name: "agent-state-md-template",
-    md: '# State — Gmail Digest\n\n*Managed by Simple Agents. The block below is this agent\'s memory between runs — edit it if you need to fix something by hand.*\n\n```json\n{\n  "a": 1\n}\n```\n',
+    md: '# State — Gmail Digest\n\n*Managed by Rookery. The block below is this agent\'s memory between runs — edit it if you need to fix something by hand.*\n\n```json\n{\n  "a": 1\n}\n```\n',
     expectLossy: false,
   },
 ];

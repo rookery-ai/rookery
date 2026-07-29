@@ -1,4 +1,4 @@
-// Package backup snapshots an entire Simple Agents install — the database and
+// Package backup snapshots an entire Rookery install — the database and
 // every workspace vault — into one passphrase-encrypted file, and restores it.
 //
 // The 32-byte system key travels INSIDE the encrypted envelope. That is the

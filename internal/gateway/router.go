@@ -1257,7 +1257,7 @@ func (r *Router) handleMemory(ctx context.Context, msg Message, arg string, send
 // line applies uniformly and is no longer conditioned on platform.
 func helpText(platform string) string {
 	fileLine := "\nSend a file (document/photo) to save it to your knowledge base.\n"
-	return `**Simple Agents — Commands**
+	return `**Rookery — Commands**
 
 /agent list — list your agents
 /agent create <name> — build a new agent with AI wizard

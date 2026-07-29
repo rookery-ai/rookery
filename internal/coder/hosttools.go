@@ -1186,7 +1186,7 @@ func (h *hostToolSet) webFetchOnce(ctx context.Context, client *http.Client, met
 	if err != nil {
 		return "", false, fmt.Errorf("build request: %v", err)
 	}
-	req.Header.Set("User-Agent", "simple-agents/1.0 (+web_fetch)")
+	req.Header.Set("User-Agent", "rookery/1.0 (+web_fetch)")
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}

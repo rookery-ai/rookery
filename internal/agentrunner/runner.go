@@ -74,14 +74,14 @@ type Runner struct {
 
 	// Self-managed OAuth connectors: when set, an agent's bound connections
 	// (agent_connections) are exposed to BOTH coder types — API engine via in-process
-	// tools, CLI coders via the loopback bridge (simple-agents connector exec).
+	// tools, CLI coders via the loopback bridge (rookery connector exec).
 	connReg    *connectors.Registry
 	connStore  connectors.TokenStore
 	connBridge *connectors.Bridge
 	parkerFor  ParkerFactory
 
 	// kbBridge, when set, lets a CLI coder's agent run reach the knowledge base's
-	// conversion + search paths via `simple-agents kb convert|search` (the same
+	// conversion + search paths via `rookery kb convert|search` (the same
 	// vault.ImportFile / Searcher code the API engine's save_to_kb/search_files
 	// tools call in-process). nil for tests that don't wire one.
 	kbBridge *vault.Bridge
@@ -90,7 +90,7 @@ type Runner struct {
 // WithConnectors wires the self-managed-OAuth connector registry + token store + loopback
 // bridge so an agent's bound service connections are usable by every coder type: the API
 // engine calls connectors.Execute in-process; a CLI coder shells out to
-// `simple-agents connector exec`, which reaches the same Execute via the bridge.
+// `rookery connector exec`, which reaches the same Execute via the bridge.
 func (r *Runner) WithConnectors(reg *connectors.Registry, store connectors.TokenStore, bridge *connectors.Bridge) *Runner {
 	r.connReg = reg
 	r.connStore = store
@@ -157,7 +157,7 @@ func (r *Runner) WithVault(v *vault.Vault) *Runner {
 }
 
 // WithKBBridge wires the loopback KB bridge so a CLI coder's agent run can reach
-// `simple-agents kb convert|search` (parity with the API engine's built-in
+// `rookery kb convert|search` (parity with the API engine's built-in
 // save_to_kb/search_files host tools).
 func (r *Runner) WithKBBridge(b *vault.Bridge) *Runner {
 	r.kbBridge = b
@@ -332,7 +332,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 			}
 		}
 	}
-	// The exact tool names a CLI coder invokes via `simple-agents connector exec <tool>`.
+	// The exact tool names a CLI coder invokes via `rookery connector exec <tool>`.
 	var connToolNames []string
 	for _, d := range r.connReg.ToolDefs(boundConns) {
 		connToolNames = append(connToolNames, d.Name)
@@ -392,7 +392,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 		// API engine: native in-process typed tools.
 		coderSvc = coderSvc.WithConnectors(r.connReg, r.connStore, boundConns).WithParker(parker)
 		// CLI coders: register a run-scoped bridge token + inject the loopback URL so
-		// `simple-agents connector exec <tool>` reaches the same connectors.Execute.
+		// `rookery connector exec <tool>` reaches the same connectors.Execute.
 		if r.connBridge != nil && r.connBridge.Addr() != "" {
 			token := r.connBridge.RegisterGated(input.WorkspaceID, boundConns, false, parker)
 			defer r.connBridge.Unregister(token)
@@ -400,7 +400,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 			extraEnv["ROOKERY_CONNECTOR_TOKEN"] = token
 		}
 	}
-	// CLI coders: register a run-scoped KB bridge token so `simple-agents kb
+	// CLI coders: register a run-scoped KB bridge token so `rookery kb
 	// convert|search` reaches the same vault.ImportFile / Searcher code the API
 	// engine's save_to_kb/search_files tools call in-process. Unregistered when
 	// the run ends, alongside the connector-token cleanup above.
@@ -1106,7 +1106,7 @@ func addUsage(a, b coder.Usage) coder.Usage {
 	return a
 }
 
-// connectorBinPath is the absolute path to the running simple-agents binary, which a CLI
+// connectorBinPath is the absolute path to the running rookery binary, which a CLI
 // coder invokes as `<bin> connector exec …`. Falls back to "" (bare name via PATH) if
 // os.Executable() fails.
 func connectorBinPath() string {

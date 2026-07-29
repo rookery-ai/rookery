@@ -23,7 +23,7 @@ import (
 )
 
 // HelperCommand is the hidden CLI subcommand that confines itself and then
-// exec()s the real command. cmd/simple-agents registers it and routes it to Exec.
+// exec()s the real command. cmd/rookery registers it and routes it to Exec.
 const HelperCommand = "__sandbox-exec"
 
 // Spec describes one confined execution. It is JSON-serialised, base64-encoded,
@@ -66,7 +66,7 @@ func DecodeSpec(enc string) (Spec, error) {
 //
 //	selfExe HelperCommand <base64-spec>
 //
-// selfExe must be the path to the running simple-agents binary (os.Executable()).
+// selfExe must be the path to the running rookery binary (os.Executable()).
 func Wrap(selfExe string, spec Spec) ([]string, error) {
 	if selfExe == "" {
 		return nil, fmt.Errorf("sandbox: empty self-executable path")

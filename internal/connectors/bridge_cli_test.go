@@ -13,17 +13,17 @@ import (
 	"github.com/ilijad1/rookery/internal/sandbox"
 )
 
-// TestConnectorExecSubcommandEndToEnd exercises the REAL `simple-agents connector exec`
+// TestConnectorExecSubcommandEndToEnd exercises the REAL `rookery connector exec`
 // CLI path a CLI coder uses: build the binary, stand up a bridge against a fake provider,
 // and invoke the subcommand with the run-scoped env the runner injects. Skips if the
 // binary isn't built.
 func TestConnectorExecSubcommandEndToEnd(t *testing.T) {
-	bin, err := filepath.Abs("../../bin/simple-agents")
+	bin, err := filepath.Abs("../../bin/rookery")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(bin); err != nil {
-		t.Skip("binary not built at bin/simple-agents; run `go build -o bin/simple-agents ./cmd/simple-agents`")
+		t.Skip("binary not built at bin/rookery; run `go build -o bin/rookery ./cmd/rookery`")
 	}
 
 	prov := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -62,9 +62,9 @@ func TestConnectorExecUnderSandbox(t *testing.T) {
 	if !sandbox.Supported() {
 		t.Skip("Landlock not supported on this kernel")
 	}
-	bin, _ := filepath.Abs("../../bin/simple-agents")
+	bin, _ := filepath.Abs("../../bin/rookery")
 	if _, err := os.Stat(bin); err != nil {
-		t.Skip("binary not built at bin/simple-agents")
+		t.Skip("binary not built at bin/rookery")
 	}
 
 	prov := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

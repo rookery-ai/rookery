@@ -166,7 +166,7 @@ func ApplyPendingRestore(dataDir string) error {
 
 	staging := stagingDir(dataDir)
 	if _, err := os.Stat(staging); err != nil {
-		return fmt.Errorf("backup: marker present but staging dir is missing; run 'simple-agents backup cancel-restore'")
+		return fmt.Errorf("backup: marker present but staging dir is missing; run 'rookery backup cancel-restore'")
 	}
 
 	slog.Warn("applying pending restore",

@@ -27,7 +27,7 @@ func StateFilePath(vaultsBase, workspaceID, agentID string) string {
 func RenderStateTemplate(agentName, jsonBody string) string {
 	return fmt.Sprintf(`# State — %s
 
-*Managed by Simple Agents. The block below is this agent's memory between runs — edit it if you need to fix something by hand.*
+*Managed by Rookery. The block below is this agent's memory between runs — edit it if you need to fix something by hand.*
 
 `+"```json\n%s\n```"+`
 `, agentName, jsonBody)

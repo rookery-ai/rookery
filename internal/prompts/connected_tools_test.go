@@ -21,8 +21,8 @@ func TestConnectedToolsBlockAPI(t *testing.T) {
 
 func TestConnectedToolsBlockCLI(t *testing.T) {
 	block := connectedToolsBlock([]ConnectionRef{{Provider: "google", Label: "work", Identity: "w@x.com"}},
-		[]string{"gmail_search", "gmail_send_email"}, BackendFullCoder, "/opt/sa/simple-agents")
-	if !strings.Contains(block, "/opt/sa/simple-agents connector exec") {
+		[]string{"gmail_search", "gmail_send_email"}, BackendFullCoder, "/opt/rookery/rookery")
+	if !strings.Contains(block, "/opt/rookery/rookery connector exec") {
 		t.Fatalf("CLI backend should use the absolute binary path in the command: %s", block)
 	}
 	if !strings.Contains(block, "gmail_search") {
@@ -33,7 +33,7 @@ func TestConnectedToolsBlockCLI(t *testing.T) {
 func TestConnectedToolsBlockCLIFallsBackToBareName(t *testing.T) {
 	block := connectedToolsBlock([]ConnectionRef{{Provider: "google", Label: "work"}},
 		[]string{"gmail_search"}, BackendFullCoder, "")
-	if !strings.Contains(block, "simple-agents connector exec") {
+	if !strings.Contains(block, "rookery connector exec") {
 		t.Fatalf("empty bin should fall back to bare name: %s", block)
 	}
 }

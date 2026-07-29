@@ -29,7 +29,7 @@ import (
 
 const sessionName = "sa_session"
 
-// Server is the HTTP server for the Simple Agents web UI.
+// Server is the HTTP server for the Rookery web UI.
 type Server struct {
 	// approval resolves parked public_write actions from the web UI. Nil when the
 	// install has no approval service wired, in which case the endpoints say so
@@ -155,7 +155,7 @@ func (s *Server) WithBackupScheduler(b *backup.Scheduler) *Server { s.backupSche
 func (s *Server) WithBridge(b *connectors.Bridge) *Server { s.connBridge = b; return s }
 
 // WithKBBridge attaches the loopback KB bridge so CLI chat coders can reach
-// save_to_kb-equivalent conversion + search (`simple-agents kb convert|search`).
+// save_to_kb-equivalent conversion + search (`rookery kb convert|search`).
 func (s *Server) WithKBBridge(b *vault.Bridge) *Server { s.kbBridge = b; return s }
 
 // WithTitleGenerator enables one-time content-based auto-titling of chats.

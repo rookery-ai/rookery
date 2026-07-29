@@ -65,10 +65,10 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 
 	// Connector + KB bridge wiring: the API engine exposes bound connections AND
 	// save_to_kb as native in-process tools directly. A CLI coder instead reaches
-	// them via loopback bridges (`simple-agents connector exec <tool>`,
-	// `simple-agents kb convert|search`), the same mechanism agent runs use. This
+	// them via loopback bridges (`rookery connector exec <tool>`,
+	// `rookery kb convert|search`), the same mechanism agent runs use. This
 	// list must stay in step with the Telegram/Discord/Slack chat path in
-	// cmd/simple-agents; divergence would give one surface a capability the other
+	// cmd/rookery; divergence would give one surface a capability the other
 	// lacks.
 	// Search-key wiring: resolve any configured SEARCH_KEY_BRAVE/SEARCH_KEY_TAVILY
 	// secrets once, host-side, and inject them into the coder's env so its
