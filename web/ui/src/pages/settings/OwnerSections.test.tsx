@@ -49,6 +49,25 @@ const AUDIT_LOGS = {
   ],
 };
 
+// OwnerSections mounts BackupSection, so its endpoints must be mocked here too.
+const BACKUP_CONFIG = {
+  enabled: false,
+  destination: "local",
+  schedule: "daily",
+  hour: 3,
+  weekday: 0,
+  retention: 7,
+  passphrase_set: false,
+  local_dir: "",
+  s3: { endpoint: "", region: "", bucket: "", prefix: "", access_key: "", secret_key_set: false, path_style: false },
+  last_run_at: "0001-01-01T00:00:00Z",
+  last_status: "",
+  last_error: "",
+  last_size: 0,
+  next_run_at: "0001-01-01T00:00:00Z",
+  pending_restore: false,
+};
+
 type Overrides = Record<string, (body: unknown) => Response | Promise<Response>>;
 
 function mockFetch(overrides: Overrides = {}) {
@@ -67,6 +86,8 @@ function mockFetch(overrides: Overrides = {}) {
       if (url === "/api/v1/auth/session") return Promise.resolve(jsonResponse(SESSION_FIXTURE));
       if (url === "/api/v1/admin/settings" && method === "GET") return Promise.resolve(jsonResponse(ADMIN_SETTINGS));
       if (url.startsWith("/api/v1/admin/audit") && method === "GET") return Promise.resolve(jsonResponse(AUDIT_LOGS));
+      if (url === "/api/v1/backup/config") return Promise.resolve(jsonResponse(BACKUP_CONFIG));
+      if (url.startsWith("/api/v1/backup/snapshots")) return Promise.resolve(jsonResponse([]));
       if (/^\/api\/v1\/workspaces\/.+$/.test(url) && method === "DELETE") {
         return Promise.resolve(jsonResponse({ ok: true }));
       }
@@ -134,7 +155,11 @@ test("System status offers no editable settings", async () => {
   expect(screen.queryByLabelText(/coder timeout/i)).toBeNull();
   expect(screen.queryByLabelText(/agent timeout/i)).toBeNull();
   expect(screen.queryByLabelText(/memory limit/i)).toBeNull();
-  expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
+  // Scoped to the System status section: this guard was page-wide only because
+  // that section used to be the only one with a Save button. Backup now has a
+  // legitimate one, and a page-wide assertion would forbid it.
+  const systemStatus = screen.getByText("System status").parentElement!;
+  expect(within(systemStatus).queryByRole("button", { name: /^save$/i })).toBeNull();
 });
 
 test("Audit log renders rows from the last-100 GET", async () => {

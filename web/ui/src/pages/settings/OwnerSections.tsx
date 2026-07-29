@@ -12,6 +12,7 @@ import {
   useDeleteWorkspaceAdmin,
 } from "@/lib/settings";
 import type { Workspace } from "@/lib/session";
+import { BackupSection } from "./BackupSection";
 
 function errMsg(err: unknown) {
   return err instanceof ApiError ? err.message : "Something went wrong";
@@ -288,11 +289,14 @@ export function OwnerSections() {
   return (
     <section>
       <h2 className="text-lg font-bold">Owner</h2>
-      <p className="mt-1 text-sm text-muted-2">Workspaces, system status, and the audit log.</p>
+      <p className="mt-1 text-sm text-muted-2">
+        Workspaces, system status, backup, and the audit log.
+      </p>
 
       <div className="mt-6 space-y-8">
         <WorkspacesSection />
         <SystemStatusSection />
+        <BackupSection />
         <AuditLogSection />
       </div>
     </section>

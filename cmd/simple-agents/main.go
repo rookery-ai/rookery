@@ -18,6 +18,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/approval"
 	"github.com/ilijad1/simple-agents/internal/auth"
+	"github.com/ilijad1/simple-agents/internal/backup"
 	"github.com/ilijad1/simple-agents/internal/buildinfo"
 	"github.com/ilijad1/simple-agents/internal/chat"
 	"github.com/ilijad1/simple-agents/internal/coder"
@@ -59,6 +60,7 @@ func main() {
 			sandboxExecCmd(),
 			connectorCmd(),
 			kbCmd(),
+			backupCommand(),
 			versionCmd(),
 			healthcheckCmd(),
 		},
@@ -99,6 +101,21 @@ func serveCmd() *cli.Command {
 				slog.Warn("capability degraded", "detail", warn)
 			}
 
+			// Order here is load-bearing. A staged restore must be swapped in
+			// BEFORE the database is opened or migrated — that is the whole
+			// reason the swap happens at startup rather than in-process. The
+			// lock is then held for the server's entire lifetime so a
+			// concurrent `backup restore` refuses instead of corrupting a live
+			// install.
+			if err := backup.ApplyPendingRestore(cfg.Data.Dir); err != nil {
+				return fmt.Errorf("apply pending restore: %w", err)
+			}
+			installLock, err := backup.AcquireLock(cfg.Data.Dir)
+			if err != nil {
+				return err
+			}
+			defer installLock.Release()
+
 			migrationsDir := resolveDir("migrations")
 			database, err := db.Open(cfg.Database.Path, migrationsDir)
 			if err != nil {
@@ -108,7 +125,15 @@ func serveCmd() *cli.Command {
 
 			slog.Info("database ready", "path", cfg.Database.Path)
 
-			sysKey, err := secrets.SystemKeyFromEnv()
+			// The workspace count decides how a first-run key is derived: an
+			// install that already holds encrypted data must keep its legacy
+			// hostname-derived key byte-for-byte, while a fresh one gets random
+			// bytes. Either way the key is pinned to a file from now on.
+			var wsCount int
+			if err := database.QueryRow(`SELECT COUNT(*) FROM workspaces`).Scan(&wsCount); err != nil {
+				return fmt.Errorf("count workspaces: %w", err)
+			}
+			sysKey, err := secrets.SystemKey(cfg.Data.Dir, wsCount > 0)
 			if err != nil {
 				return fmt.Errorf("system key: %w", err)
 			}
@@ -449,6 +474,13 @@ func serveCmd() *cli.Command {
 			sessionSvc := chat.New(database).WithReflector(vlt.Reflector())
 			go sessionSvc.Run(ctx)
 
+			// Owner-level backup runs on its own ticker rather than through
+			// internal/scheduler, whose agent_schedules rows are foreign-keyed
+			// to a workspace that backup does not have.
+			backupSched := backup.NewScheduler(database, database.DB, cfg.Data.Dir, sysKey)
+			go backupSched.Run(ctx)
+			slog.Info("backup scheduler started")
+
 			// Self-managed OAuth connector token-refresh loop: proactively renews
 			// service_connections access tokens before they expire so scheduled runs
 			// never hit an expired token. Uses the system key (headless, no master pw).
@@ -507,7 +539,7 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
-			srv = srv.WithBridge(connBridge).WithKBBridge(kbBridge).WithTitleGenerator(titleGen).WithApproval(approvalSvc)
+			srv = srv.WithBridge(connBridge).WithKBBridge(kbBridge).WithTitleGenerator(titleGen).WithApproval(approvalSvc).WithBackupScheduler(backupSched)
 
 			addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 			slog.Info("listening", "addr", addr)

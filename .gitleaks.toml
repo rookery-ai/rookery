@@ -1,0 +1,37 @@
+# gitleaks configuration.
+#
+# The default ruleset is kept in full — this file only adds a narrowly-scoped
+# allowlist for confirmed false positives. Never broaden it to a whole path or
+# rule: a secret scanner taught to ignore a directory stops being a secret
+# scanner for that directory.
+#
+# COMPATIBILITY: this uses the SINGULAR [allowlist] table, not the plural
+# [[allowlists]] form. The multi-allowlist syntax only exists in gitleaks
+# 8.25.0+, and gitleaks-action@v2 currently installs 8.24.3, which parses the
+# plural form as an unknown key and silently ignores it — the config loads, the
+# allowlist does nothing, and the scan fails with no hint as to why. Verified
+# against 8.24.3 specifically, not just against a local build.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = """
+The generic-api-key rule fires on Go IDENTIFIERS whose names contain
+"secret"/"key" when they sit to the right of a colon: it reads
+`SecretKeySet: c.S3.EncryptedSecretKey` as key-then-value and scores the
+expression's entropy (3.53) as credential-like.
+
+`EncryptedSecretKey` is a struct FIELD holding an already-encrypted value at
+rest, and `SecretKeySet` is a bool reporting only WHETHER one is configured —
+the backup API deliberately never returns the value itself. Matching the exact
+expressions keeps this to those identifiers: a real credential assigned
+anywhere, including in these same files, is still reported.
+
+regexTarget is omitted deliberately — it defaults to the extracted secret,
+which is exactly what these patterns match.
+"""
+regexes = [
+  '''^c\.S3\.EncryptedSecretKey$''',
+  '''^cfg\.S3\.EncryptedSecretKey$''',
+]

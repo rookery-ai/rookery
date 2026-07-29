@@ -264,6 +264,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/memory` | Per-user structured context store. Memory lives as named `.md` files in `memory/` (`USER.md`, `SOUL.md`, `GENERAL.md`, etc.) — editable via the KB browser. `ContextString()` reads all files, skips placeholder-only ones, and returns sectioned markdown for LLM injection. `Append/List/Delete` target GENERAL.md bullet lines (used by Telegram `/memory` command). `MigrateToStructuredFiles()` consolidates legacy UUID-keyed entries at startup. |
 | `internal/vault` | Per-user Obsidian-style knowledge base: `Vault` (paths + `Resolve` safety + file IO), `Reflector` (chats→markdown+sidecar), `LinkIndex` ([[wikilinks]]), `Searcher` (ripgrep), `Guard` (post-run write-scope enforcement), `MigrateLegacyLayout`, `MigrateSessionsToChats`. |
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
+| `internal/backup` | Owner-level snapshot/restore of the WHOLE install (database + every workspace vault) into one passphrase-encrypted `.sab` file. `Snapshot` (`VACUUM INTO` → tar+gzip → chunked AES-256-GCM, staged to a temp file then uploaded), `StageRestore`/`ApplyPendingRestore`/`CancelRestore`/`Verify`, `Destination` interface + `LocalDestination`/`S3Destination` (hand-rolled `signV4`, no AWS SDK), `Config` in `system_settings` (`backup.config`; passphrase + S3 secret encrypted under the system key), `Scheduler` (own ticker; daily/weekly, missed runs collapse), `Prune` (keep-last-N), `AcquireLock` (flock). See "Backup and restore" below. |
 | `internal/profile` | Per-user personalization (name, email, location, timezone, tone, language, notes); stored in the generic `settings` table; `Load()`/`Save()`/`ContextString()` for LLM injection; `LoadLocation()` for timezone-aware reminder parsing |
 | `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per workspace. `SkillDir(base, workspaceID, name)` is the path helper shared with the skill designer (staging dirs use the `.staging-<name>` convention). |
 | `web/` | Echo v4 web server: the `/api/v1` JSON API + the embedded React SPA (`web/ui`, served at `/`). The old server-rendered template UI was deleted — the SPA is the only front end. Handler files now hold API handlers + shared cores (e.g. `saveConnector`, `loadAgentDetail`, `saveWorkspaceCoderCore`, `handleOAuthCallback`) reused by the JSON layer. |
@@ -809,6 +810,81 @@ provider/model/base-url/api-key-secret through `db.UpdateWorkspaceCoder`.
 `internal/reminder/timeparser.go` — `ParseNaturalTime(text, now, loc)` parses expressions like `"in 10 minutes"`, `"tomorrow at 3pm"`, `"next Tuesday at noon"`. Both web UI and Telegram use `profile.LoadLocation(db, workspaceID)` so reminders fire in the workspace's timezone.
 
 ---
+
+## Backup and restore
+
+One **owner-level** snapshot covers the entire install — the database plus every
+workspace's vault — in a single passphrase-encrypted `.sab` file. Configured in
+owner settings (`BackupSection`), scheduled daily/weekly, restorable via CLI or
+from the UI.
+
+**The system key is why this design looks the way it does.** `secrets.SystemKey`
+encrypts `workspaces.encrypted_master_password`, every `service_connections`
+OAuth token, and every `platform_connections` bot token. It used to be derived
+from the **hostname** whenever `SA_SYSTEM_KEY` was unset, so a naive file-copy
+backup restored on new hardware produced an install that booted, looked healthy,
+and had silently lost every scheduled agent and every connector. Three
+consequences, all load-bearing:
+
+- **The key travels inside the encrypted snapshot** (`Manifest.SystemKey`), which
+  is what makes cross-machine restore one step. It is also why the envelope needs
+  a passphrase — and why the passphrase is the one thing an owner must not lose.
+- **`secrets.SystemKey(dataDir, hasWorkspaces)` pins the key to
+  `<data_dir>/system.key`.** Resolution order is `SA_SYSTEM_KEY` → the file →
+  derive-and-persist (hostname-derived when the install already has workspaces,
+  so an upgrade keeps its exact key; random for a fresh install). `SystemKeyFromEnv`
+  survives only as the legacy path the migration test compares against — **every
+  call site must use `SystemKey`**, or it will diverge from the restored key with
+  no visible symptom.
+- **`ApplyPendingRestore` moves the OLD `system.key` into `.pre-restore-<ts>/`
+  together with the database and vaults**, and writes the new key only after that
+  succeeds. Leaving it behind would make the rollback copy undecryptable the
+  instant a restore landed. Only the newest `.pre-restore-*` is kept.
+
+**Restore only ever runs against a dead install.** `serve` calls
+`ApplyPendingRestore` at the very top — *before* the database is opened or
+migrated — then holds an exclusive `flock` on `<data_dir>/simple-agents.pid` for
+its whole lifetime. The offline CLI takes the same lock and refuses when the
+server holds it. The settings button does not swap anything itself: it stages,
+writes a `.restore-pending` marker, and shuts the server down, so the swap
+happens on the next boot through the identical code path. `simple-agents backup
+cancel-restore` abandons a staged restore that would otherwise fire weeks later.
+
+**Snapshot contents.** `db/simple-agents.db` (via `VACUUM INTO` — copying the
+live file is torn, the WAL is multi-megabyte) plus `vaults/**`. Excluded:
+`claude-homes/` (regenerable; `.credentials.json` is re-copied per invocation),
+`config.yaml`, staging/work dirs. The vault walker is a **raw `filepath.WalkDir`,
+never `vault.List`** — those hide dotfiles, which would silently drop `.kb/`
+(db-export sidecars, `links.json`) from every snapshot.
+
+Details worth knowing before changing this code:
+
+- `readArchive` **drains to the end of the gzip stream** before returning. tar
+  stops at its own end-of-archive marker, which sits before the gzip trailer, so
+  without the drain the CRC32 is never checked and tail damage goes undetected.
+- Snapshot names have one-second granularity, so `freeSnapshotName` probes the
+  destination and advances by whole seconds — two runs in the same second
+  otherwise resolved to one name and the second silently overwrote the first.
+- The envelope is **framed** (1 MiB AES-256-GCM frames, frame index + final flag
+  authenticated as AAD) rather than one-shot: that bounds memory and makes
+  reordering and truncation detectable. A first frame that fails to authenticate
+  is reported as `ErrBadPassphrase` — a wrong passphrase and a corrupted frame 0
+  are genuinely indistinguishable.
+- `Prune` and both destinations filter on `IsSnapshotName`, so a bucket or folder
+  shared with other data never has a foreign file listed, downloaded or deleted.
+- `POST /api/v1/backup/restore` is **exempt from the shared 25 MiB `iolimit`
+  cap** — a real snapshot exceeds it as soon as a workspace has attachments.
+- The eight `/api/v1/backup/*` routes sit on the **owner** group with no
+  `requireActiveWorkspace`: backup covers every workspace, so it must be
+  configurable before one exists.
+- No new dependencies: SigV4 is stdlib HMAC/SHA-256, and the CLI suppresses
+  terminal echo with `stty` rather than pulling in `golang.org/x/term`.
+
+**Not built** (deliberate): per-workspace restore, incremental/deduplicated
+backup, and the Google Drive / Dropbox / GitHub destinations — adding one is a
+new `Destination` implementation plus a settings form. GitHub was considered and
+rejected: a daily encrypted blob committed to git grows history without bound and
+cannot be pruned.
 
 ## Known gaps
 

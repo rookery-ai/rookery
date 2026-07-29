@@ -11,6 +11,7 @@ import (
 	"github.com/ilijad1/simple-agents/internal/agentdesigner"
 	"github.com/ilijad1/simple-agents/internal/agentrunner"
 	"github.com/ilijad1/simple-agents/internal/audit"
+	"github.com/ilijad1/simple-agents/internal/backup"
 	"github.com/ilijad1/simple-agents/internal/chat"
 	"github.com/ilijad1/simple-agents/internal/coder"
 	"github.com/ilijad1/simple-agents/internal/config"
@@ -55,6 +56,12 @@ type Server struct {
 	kbBridge   *vault.Bridge         // loopback bridge so CLI chat coders can reach KB convert/search
 	titleGen   chat.TitleGenerator   // optional; auto-titles a chat from its first exchange
 
+	// backupSched drives owner-level snapshots. Shared with the background
+	// ticker started in serve so the "Back up now" button and the schedule run
+	// the exact same path. Nil in tests, where the endpoint says so rather than
+	// panicking.
+	backupSched *backup.Scheduler
+
 	// runs tracks in-flight manual ("Run Now") agent runs so progress can be
 	// streamed to the browser over SSE while the run executes on a detached
 	// context that outlives the originating HTTP request. Keyed by agentID.
@@ -79,7 +86,17 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 		SameSite: http.SameSiteLaxMode,
 	}
 
-	sysKey, err := secrets.SystemKeyFromEnv()
+	// Must resolve the key the SAME way main.go does. Using the hostname-derived
+	// SystemKeyFromEnv here would diverge from the pinned <data_dir>/system.key
+	// the moment a restore installed a recovered key — the server would then
+	// fail to decrypt connector tokens and stored master passwords with no
+	// visible cause. By the time serve constructs the Server the key file
+	// already exists, so this is a read.
+	var wsCount int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM workspaces`).Scan(&wsCount); err != nil {
+		return nil, fmt.Errorf("count workspaces: %w", err)
+	}
+	sysKey, err := secrets.SystemKey(cfg.Data.Dir, wsCount > 0)
 	if err != nil {
 		return nil, fmt.Errorf("system key: %w", err)
 	}
@@ -127,6 +144,10 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 func (s *Server) Start(addr string) error {
 	return s.echo.Start(addr)
 }
+
+// WithBackupScheduler attaches the owner-level backup scheduler, so the
+// "Back up now" button runs the same path as the nightly ticker.
+func (s *Server) WithBackupScheduler(b *backup.Scheduler) *Server { s.backupSched = b; return s }
 
 // WithBridge attaches the loopback connector bridge so CLI chat coders can reach connectors.
 func (s *Server) WithBridge(b *connectors.Bridge) *Server { s.connBridge = b; return s }
