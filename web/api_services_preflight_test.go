@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -189,5 +190,70 @@ func TestSavePublicURLDrivesTheRedirectURI(t *testing.T) {
 	// block from the detected http://example.com must be gone.
 	if len(google.Preflight) != 0 {
 		t.Fatalf("expected a clean preflight, got %+v", google.Preflight)
+	}
+}
+
+// The untrusted-certificate branch exists specifically so a private-CA install
+// is not told its working setup is "unreachable". It is the one outcome that
+// cannot be reached by unit-testing publicurl, and it depends on errors.As
+// traversing *url.Error → *tls.CertificateVerificationError → the value-typed
+// x509.UnknownAuthorityError. If that chain does not match, this silently
+// degrades into the false negative it was written to prevent.
+func TestSelfTestTreatsUntrustedCertAsWarningNotFailure(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+
+	// httptest's TLS server uses a self-signed cert the default client rejects.
+	tls := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer tls.Close()
+
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/admin/public-url/test",
+		map[string]string{"url": tls.URL}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		OK      bool   `json:"ok"`
+		Warning bool   `json:"warning"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !body.OK || !body.Warning {
+		t.Fatalf("an untrusted certificate must be ok+warning, not a failure: %s", rec.Body.String())
+	}
+	if !strings.Contains(body.Error, "does not trust its certificate") {
+		t.Fatalf("warning text should name the certificate: %q", body.Error)
+	}
+}
+
+// A failed self-test never reaches handleEchoNonce, so nothing would delete its
+// nonce. Minting must sweep, or the map grows without bound.
+func TestSelfTestSweepsExpiredNonces(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+
+	s.echoMu.Lock()
+	s.echoNonces = map[string]echoNonce{
+		"stale-1": {expires: time.Now().Add(-time.Minute)},
+		"stale-2": {expires: time.Now().Add(-time.Hour)},
+	}
+	s.echoMu.Unlock()
+
+	// Nothing is listening on this port, so the probe fails and its own nonce
+	// stays — but the two stale entries must be gone.
+	doJSON(t, s, http.MethodPost, "/api/v1/admin/public-url/test",
+		map[string]string{"url": "http://127.0.0.1:1"}, cookies)
+
+	s.echoMu.Lock()
+	defer s.echoMu.Unlock()
+	if _, ok := s.echoNonces["stale-1"]; ok {
+		t.Fatalf("stale-1 was not swept: %v", s.echoNonces)
+	}
+	if _, ok := s.echoNonces["stale-2"]; ok {
+		t.Fatalf("stale-2 was not swept: %v", s.echoNonces)
 	}
 }

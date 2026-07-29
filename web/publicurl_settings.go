@@ -116,11 +116,20 @@ func (s *Server) apiTestPublicURL(c echo.Context) error {
 		return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
 	}
 	tok := hex.EncodeToString(raw)
+	now := time.Now()
 	s.echoMu.Lock()
 	if s.echoNonces == nil {
 		s.echoNonces = map[string]echoNonce{}
 	}
-	s.echoNonces[tok] = echoNonce{expires: time.Now().Add(30 * time.Second)}
+	// Sweep on mint. Only handleEchoNonce deletes, and it is only reached when
+	// the probe SUCCEEDS — so without this every failed self-test would leave an
+	// entry behind forever, growing the map without bound.
+	for k, v := range s.echoNonces {
+		if now.After(v.expires) {
+			delete(s.echoNonces, k)
+		}
+	}
+	s.echoNonces[tok] = echoNonce{expires: now.Add(30 * time.Second)}
 	s.echoMu.Unlock()
 
 	// DELIBERATE EXCEPTION: internal/nethttp.GuardedClient blocks loopback and
