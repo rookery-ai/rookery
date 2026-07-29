@@ -84,6 +84,51 @@ benefit is nil: this is the build stage only, and no Node reaches the runtime
 image. Bumping `.nvmrc` alongside it would fix the desync but move the whole
 project onto a non-LTS runtime, which is a separate decision nobody asked for.
 
+## Second pass: what was still outstanding after the three PRs
+
+Once the Dependabot queue was empty, the tree was swept directly rather than
+waiting for Dependabot to propose again — `go list -m -u` for direct modules,
+`npm outdated`, and every action compared against its latest release. Four
+things remained. One was taken, three were not.
+
+**Go: nothing.** Zero direct modules have an update available.
+
+**`actions/setup-node` v6 → v7 — take.** The one action left behind its latest
+major. Not a deadline item (v6 is already node24); it simply never got a
+Dependabot PR, because `open-pull-requests-limit` was full. v7 is an ESM
+migration plus cache-key outputs; both inputs this repo passes
+(`node-version-file`, `cache`) are still declared. Gate-validated, since the
+Frontend job runs on it.
+
+**`jsdom` 29 → 30 — reject, and this one was tested rather than reasoned
+about.** jsdom 30.0.0's *only* breaking change is raising the Node floor to
+`^22.22.2 || ^24.15.0 || >=26.0.0`; everything else is additive. CI satisfies
+that (`.nvmrc` is `24`, which resolves to 24.18.0). So it looked takeable, and
+it was installed and run:
+
+- First full run: **733/734**, `router.test.tsx` timing out on a `findByText`
+  after a dynamic import.
+- In isolation: passes.
+- Second full run: **734/734**.
+
+So the failure was a flake, not a regression — but the suite is consistently
+~25% slower under jsdom 30 (environment 171s vs 138s), which is what made a
+timeout-sensitive test flake in the first place. That measurement is
+*confounded*: this machine runs Node 24.13.1, below jsdom 30's own floor, so
+the slowdown may be the unsupported pairing rather than jsdom itself.
+
+Against that: the benefit is zero. jsdom is the test DOM environment, 29.1.1
+has no advisories, and 30.0.0's additions are CSS features these tests do not
+use. A slower suite and an observed flake, in exchange for nothing, on a
+version this machine is not qualified to run — leave it. Revisit when the
+development Node is ≥24.15, which is the same coupling that sank #26.
+
+**`@types/node` 24 → 26 — reject.** It compiles cleanly (`tsc -b` exits 0), so
+this is a principled call, not a breakage: the type package should track the
+runtime, and the runtime is Node 24 (`.nvmrc`, `Dockerfile`). Typing the tree
+as Node 26 would let `tsc` accept APIs that do not exist at runtime — a silent
+hazard for no gain. It moves when Node moves.
+
 ## The audit fix — and a correction to this document
 
 Not from any Dependabot PR.
