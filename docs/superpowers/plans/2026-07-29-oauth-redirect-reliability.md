@@ -814,6 +814,17 @@ func TestRedirectURIFromState(t *testing.T) {
 		}
 	}
 }
+
+// A pinned URI that disagrees with what we would compute now must still be USED,
+// not rejected: the user has already granted consent, and the pinned string is
+// the one the provider validated. Rejecting would bounce them into a loop.
+func TestPinnedURIWinsOverCurrentComputation(t *testing.T) {
+	pinned := "https://old.example.com/dashboard/connectors/services/callback/google"
+	parts := strings.Split("ws~google~default~nonce~~"+pinned, "~")
+	if got := redirectURIFromState(parts); got != pinned {
+		t.Fatalf("pinned URI must be returned verbatim, got %q", got)
+	}
+}
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -891,16 +902,27 @@ In `handleOAuthCallback`, widen the accepted field count and use the pinned valu
 Then, immediately before the `oauth := connectors.OAuthClient{}` line, add:
 
 ```go
-	// Prefer the URI pinned at consent time; fall back to recomputing it only for
-	// pre-pinning states still inside the 10-minute TTL.
+	// Use the URI pinned at consent time, unconditionally. It is by definition
+	// the correct string: it is the one the provider itself saw and validated
+	// when it issued this code, so the exchange must present the same one.
+	//
+	// Do NOT reject the callback when it diverges from what we would compute now.
+	// The user has already granted consent at that point, and if the cause is
+	// systematic — the operator changed the instance URL mid-flow, or a transient
+	// GetSystemSetting error made Resolve fall through to detection — then
+	// "start again" reproduces the divergence. That is a loop, not a recovery.
+	// Log it and proceed.
 	redirectURI := redirectURIFromState(parts)
 	if redirectURI == "" {
+		// A pre-pinning state, still inside the 10-minute TTL.
 		redirectURI = s.callbackURL(c, provider)
 	} else if current := s.callbackURL(c, provider); current != redirectURI {
-		return s.redirectWithError(c, "/connections",
-			"This instance's URL changed after you started connecting. Start the connection again.")
+		slog.Warn("oauth callback: instance URL changed mid-flow; using the pinned URI",
+			"provider", provider, "pinned", redirectURI, "current", current)
 	}
 ```
+
+Add `"log/slog"` to the file's imports.
 
 and change the exchange call to:
 
@@ -1110,6 +1132,8 @@ import (
 // register. Its absence is what made OAuth unusable through the UI.
 func TestListServicesCarriesRedirectURI(t *testing.T) {
 	s, cookies := setupEnteredWorkspace(t)
+	// The operator's own SA_PUBLIC_URL must not leak into the test's expectations.
+	t.Setenv("SA_PUBLIC_URL", "")
 
 	rec := doJSON(t, s, http.MethodGet, "/api/v1/services", nil, cookies)
 	if rec.Code != http.StatusOK {
@@ -1227,10 +1251,22 @@ Inside the provider loop in `apiListServices`, just before the `out = append(out
 		// leaves the browser, so emitting one would be a false instruction.
 		redirectURI, preflight := "", []apiPreflightProblem{}
 		if kind == "oauth" {
-			redirectURI = s.callbackURL(c, provider)
-			base, _ := s.resolvePublicURL(c)
+			redirectURI = base + "/dashboard/connectors/services/callback/" + provider
 			preflight = toAPIPreflight(publicurl.Check(base, s.connectors.RedirectPolicy(provider)))
+			if len(preflight) == 0 {
+				cleanProviders++
+			}
+			oauthProviders++
 		}
+```
+
+Resolve the base URL **once, above the loop** — there are 45 providers and
+`callbackURL` resolves again internally, so resolving per-iteration would mean
+~90 `GetSystemSetting` reads on every page load:
+
+```go
+	base, _ := s.resolvePublicURL(c)
+	oauthProviders, cleanProviders := 0, 0
 ```
 
 and add the two fields to the struct literal:
@@ -1241,6 +1277,71 @@ and add the two fields to the struct literal:
 ```
 
 Add the `publicurl` import.
+
+- [ ] **Step 4b: Emit the remedy tier**
+
+Per-provider problems tell the user what is broken *here*; the remedy tier tells
+them what the current URL costs them *overall*, while they are still choosing it.
+Extend `apiServicesListResponse` in `web/api_services.go`:
+
+```go
+// apiPublicURLSummary answers "what does my current instance URL cost me?" in
+// one line. Per-provider preflight cannot answer that — a user comparing URLs
+// would otherwise have to open all 18 OAuth cards and tally them by hand.
+type apiPublicURLSummary struct {
+	BaseURL        string `json:"base_url"`
+	OAuthProviders int    `json:"oauth_providers"`
+	CleanProviders int    `json:"clean_providers"`
+}
+```
+
+Add the field to the response struct and populate it from the counters:
+
+```go
+	Summary apiPublicURLSummary `json:"summary"`
+```
+
+```go
+	return c.JSON(http.StatusOK, apiServicesListResponse{
+		Providers: out,
+		Summary: apiPublicURLSummary{
+			BaseURL:        base,
+			OAuthProviders: oauthProviders,
+			CleanProviders: cleanProviders,
+		},
+	})
+```
+
+Add to `web/api_services_preflight_test.go`:
+
+```go
+func TestListServicesSummaryCountsCleanProviders(t *testing.T) {
+	s, cookies := setupEnteredWorkspace(t)
+	t.Setenv("SA_PUBLIC_URL", "")
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/services", nil, cookies)
+	var body struct {
+		Summary struct {
+			BaseURL        string `json:"base_url"`
+			OAuthProviders int    `json:"oauth_providers"`
+			CleanProviders int    `json:"clean_providers"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Summary.OAuthProviders < 10 {
+		t.Fatalf("expected the bundled OAuth providers to be counted, got %d", body.Summary.OAuthProviders)
+	}
+	if body.Summary.CleanProviders > body.Summary.OAuthProviders {
+		t.Fatalf("clean (%d) cannot exceed total (%d)",
+			body.Summary.CleanProviders, body.Summary.OAuthProviders)
+	}
+	if body.Summary.BaseURL == "" {
+		t.Fatalf("summary must carry the base URL it judged")
+	}
+}
+```
 
 - [ ] **Step 5: Add the instance URL to admin settings**
 
@@ -1274,7 +1375,13 @@ func (s *Server) apiLoadAdminSettings(c echo.Context) apiAdminSettings {
 }
 ```
 
-Update `apiAdminGetSettings` to pass `c`, and update the existing admin-settings PUT handler to accept and persist a `public_url` field:
+Update `apiAdminGetSettings` to pass `c`. Then locate the admin-settings PUT handler — it is registered in `web/api_workspaces.go` near the `GET /admin/settings` line at `:26` and exercised by `web/api_workspaces_test.go:197`. Find it with:
+
+```bash
+grep -rn '"/admin/settings"' web/*.go
+```
+
+Extend that handler's request struct with `PublicURL string \`json:"public_url"\`` and add:
 
 ```go
 	// An empty value clears the setting and returns the instance to detection.
@@ -1343,6 +1450,9 @@ func (s *Server) apiTestPublicURL(c echo.Context) error {
 			"Enter a full URL including the scheme, for example https://agents.example.com")
 	}
 
+	// crypto/rand, NOT math/rand — this nonce is the endpoint's only access
+	// control. Import it as `crypto/rand`; a math/rand nonce reads as fine and is
+	// a security bug.
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
@@ -1365,8 +1475,25 @@ func (s *Server) apiTestPublicURL(c echo.Context) error {
 	hreq, _ := http.NewRequestWithContext(ctx, http.MethodGet, base+"/healthz/echo?token="+tok, nil)
 	resp, err := client.Do(hreq)
 	if err != nil {
+		// A certificate the SERVER does not trust is a third outcome, not a
+		// failure. Verified empirically: against a Caddy internal-CA host this
+		// succeeds when `caddy trust` has put the root in the system pool and
+		// fails when it has not — so it is install-dependent, while the BROWSER
+		// (the only party in an OAuth redirect that actually loads this URL) may
+		// trust it either way. Reporting "unreachable" for a working setup is
+		// worse than having no button at all.
+		var uaErr x509.UnknownAuthorityError
+		var hostErr x509.HostnameError
+		if errors.As(err, &uaErr) || errors.As(err, &hostErr) {
+			return c.JSON(http.StatusOK, map[string]any{"ok": true, "warning": true,
+				"error": "Reached " + base + ", but this server does not trust its certificate. " +
+					"That is fine for OAuth as long as your browser trusts it — the provider " +
+					"never connects to this server, it only redirects your browser."})
+		}
 		return c.JSON(http.StatusOK, map[string]any{"ok": false,
-			"error": "Could not reach " + base + " from the server: " + err.Error()})
+			"error": "Could not reach " + base + " from the server: " + err.Error() +
+				". If your network has no NAT hairpin, the server may be unable to reach its own " +
+				"public name even though browsers can — check from a browser before changing anything."})
 	}
 	defer resp.Body.Close()
 	var got struct {
@@ -1392,6 +1519,52 @@ Register the route in the owner-guarded group alongside the other admin routes:
 
 ```go
 	g.POST("/admin/public-url/test", s.apiTestPublicURL)
+```
+
+- [ ] **Step 6b: Test the echo endpoint's security properties**
+
+The endpoint is unauthenticated, so single-use and expiry ARE its access control
+and must be pinned by tests. Add to `web/api_services_preflight_test.go`:
+
+```go
+func TestEchoNonceIsSingleUseAndScoped(t *testing.T) {
+	s, _ := setupEnteredWorkspace(t)
+
+	// An unissued token is never echoed.
+	rec := doJSON(t, s, http.MethodGet, "/healthz/echo?token=bogus", nil, nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unissued token: status %d, want 404", rec.Code)
+	}
+
+	// An issued token works exactly once.
+	s.echoMu.Lock()
+	if s.echoNonces == nil {
+		s.echoNonces = map[string]echoNonce{}
+	}
+	s.echoNonces["tok1"] = echoNonce{expires: time.Now().Add(30 * time.Second)}
+	s.echoMu.Unlock()
+
+	if rec := doJSON(t, s, http.MethodGet, "/healthz/echo?token=tok1", nil, nil); rec.Code != http.StatusOK {
+		t.Fatalf("issued token: status %d, want 200", rec.Code)
+	}
+	if rec := doJSON(t, s, http.MethodGet, "/healthz/echo?token=tok1", nil, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("replayed token: status %d, want 404 — nonces must be single-use", rec.Code)
+	}
+}
+
+func TestEchoNonceExpires(t *testing.T) {
+	s, _ := setupEnteredWorkspace(t)
+	s.echoMu.Lock()
+	if s.echoNonces == nil {
+		s.echoNonces = map[string]echoNonce{}
+	}
+	s.echoNonces["stale"] = echoNonce{expires: time.Now().Add(-time.Second)}
+	s.echoMu.Unlock()
+
+	if rec := doJSON(t, s, http.MethodGet, "/healthz/echo?token=stale", nil, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("expired token: status %d, want 404", rec.Code)
+	}
+}
 ```
 
 - [ ] **Step 7: Register the new route in the parity inventory**
@@ -1540,6 +1713,42 @@ and add `disabled={hardBlocked}` to the Connect button (combining with any exist
 Run: `cd web/ui && npx vitest run src/pages/connections/ServiceWizard.test.tsx`
 Expected: PASS.
 
+- [ ] **Step 6b: Render the remedy tier on the connections page**
+
+In `web/ui/src/pages/connections/ConnectionsPage.tsx`, render the summary once
+above the provider grid, so the cost of the current URL is visible while the user
+is choosing it rather than discoverable only card by card:
+
+```tsx
+{summary.oauth_providers > 0 && summary.clean_providers < summary.oauth_providers && (
+  <div className="rounded-lg border border-border bg-muted-surface p-3 text-sm">
+    <span className="font-medium">
+      {summary.base_url} works with {summary.clean_providers} of{" "}
+      {summary.oauth_providers} sign-in services.
+    </span>{" "}
+    <span className="text-muted-2">
+      A public domain name over https unlocks the rest.{" "}
+      <Link to="/settings" className="underline underline-offset-2">
+        Change the instance URL
+      </Link>
+    </span>
+  </div>
+)}
+```
+
+Add the matching type to `web/ui/src/lib/connections.ts`:
+
+```ts
+export type PublicURLSummary = {
+  base_url: string;
+  oauth_providers: number;
+  clean_providers: number;
+};
+```
+
+and add `summary: PublicURLSummary` to the services-list response type. Update
+any existing fixture in `connections.test.ts` that builds that response.
+
 - [ ] **Step 7: Add the instance-URL field to owner settings**
 
 In `web/ui/src/pages/settings/OwnerSections.tsx`, add a section with: a text input bound to `public_url`; helper text showing `public_url_actual` and `public_url_source` ("currently detected from your browser" vs "configured"); a Save button hitting the existing admin-settings PUT; and a "Test this URL" button hitting `POST /api/v1/admin/public-url/test`, rendering `{ok:true}` as a success chip and `{ok:false, error}` as the error text.
@@ -1658,16 +1867,35 @@ Expected: `ci-fmt`, `ci-vet`, `ci-test`, `ci-cross` and `ci-ui` all pass. Fix an
 
 - [ ] **Step 2: Verify the app still boots and serves**
 
-Run:
+Build, then start the server as a **background job** (this harness blocks a
+foreground `sleep`, and a stray listener left on :8099 is exactly the setup for
+killing the wrong process later):
 
 ```bash
-go build -o /tmp/sa-verify ./cmd/simple-agents && SA_DATA_DIR=$(mktemp -d) SA_PORT=8099 /tmp/sa-verify serve &
-sleep 3
-curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8099/healthz
-curl -sS -o /dev/null -w '%{http_code}\n' 'http://127.0.0.1:8099/healthz/echo?token=bogus'
+go build -o "$CLAUDE_JOB_DIR/tmp/sa-verify" ./cmd/simple-agents
 ```
 
-Expected: `200` then `404`. Use a temporary `SA_DATA_DIR` — never the operator's live install. Kill the server by the PID captured from `$!`, never by name pattern.
+Start it with `run_in_background`, writing the PID to a file:
+
+```bash
+SA_DATA_DIR=$(mktemp -d) SA_PORT=8099 "$CLAUDE_JOB_DIR/tmp/sa-verify" serve \
+  & echo $! > "$CLAUDE_JOB_DIR/tmp/sa-verify.pid"
+```
+
+Then probe and shut down **by captured PID only**:
+
+```bash
+curl -sS --retry 5 --retry-delay 1 --retry-connrefused \
+  -o /dev/null -w 'healthz=%{http_code}\n' http://127.0.0.1:8099/healthz
+curl -sS -o /dev/null -w 'echo=%{http_code}\n' 'http://127.0.0.1:8099/healthz/echo?token=bogus'
+kill "$(cat "$CLAUDE_JOB_DIR/tmp/sa-verify.pid")"
+```
+
+Expected: `healthz=200` then `echo=404`.
+
+Two rules here are not negotiable: use a **temporary** `SA_DATA_DIR`, never the
+operator's live install; and kill **by captured PID**, never by name pattern — a
+name-pattern kill has already taken down the live server once in this project.
 
 - [ ] **Step 3: Push and open a draft PR**
 
@@ -1704,3 +1932,5 @@ EOF
 - **Spec coverage:** every spec section maps to a task — components 1/2 → Tasks 1-2, component 3 → Task 3, component 4 → Task 4, component 5 → Task 5, UX flows → Tasks 6-7, deployment guidance → Task 8, testing → distributed across all.
 - **One spec deviation, deliberate:** the spec's YAML key `allow_reserved_host: false` became `require_public_host: true`. A Go bool defaults to `false`, so a field meaning "allow" would have defaulted to *deny* for every provider without a policy block — inverting the safety property the whole design rests on. The inverted name defaults correctly.
 - **Task 6 depends on `authProv.Label`** being populated for the four verified providers; each provider YAML already carries `label:`, and `explainOAuthError` falls back to the raw provider name when it is empty.
+- **The hard block is UI-only by design.** Do not add a server-side gate on the connect endpoint. Our policy data predicts a third party's validation rules rather than expressing an invariant we own, so a server-side gate would turn a stale YAML entry into a lockout with no override. The provider is the authoritative enforcement point.
+- **Task 4 uses the pinned URI unconditionally.** An earlier draft rejected the callback when the pinned and freshly-computed URIs diverged; that bounces a user who has *already* granted consent, and loops if the cause is systematic. It logs and proceeds instead.

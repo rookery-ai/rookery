@@ -227,6 +227,15 @@ Rendered as a structured banner on the connections page, not a query-string blob
    - ❌ hard → **Connect disabled**, with the problem, the fix, and a direct link to the
      instance-URL setting.
 
+**The hard block is deliberately UI-only.** There is no server-side gate on the
+connect endpoint, and one must not be added. The codebase's usual instinct — "the
+frontend can't be trusted to send the well-behaved form", as with the `state.md`
+save guard — is the wrong instinct here. Our policy data is a *prediction* about a
+third party's validation rules, not an invariant we own. A server-side gate would
+turn a stale or mistaken YAML entry into a hard lockout with no override, which is
+precisely the failure the `verified` flag exists to prevent. The provider itself is
+the real enforcement point, and it is authoritative.
+
 The preflight also names the **remedy tier** rather than only the local problem — e.g.
 "`agents.rookie.lan` works for 4 of your 18 providers; a public domain unlocks the rest" —
 so the trade-off is visible while the user is choosing a URL, not discovered provider by
@@ -252,6 +261,17 @@ valid once and for 30 seconds, and the endpoint echoes **only** a nonce it issue
 > an unguarded client, because dialling ourselves is exactly the point. This is the single
 > intentional exception in the codebase and needs a comment saying so, or a later reader will
 > "fix" it back.
+
+The test has **three** outcomes, not two. A certificate the *server* does not trust is
+not a failure: verified against a Caddy internal-CA host, Go's default client succeeds
+when `caddy trust` has installed the root into the system pool and fails when it has
+not — so the result is install-dependent, while the browser (the only party that
+actually loads a redirect URI) may trust it either way. An untrusted certificate
+therefore reports "reached it, but this server doesn't trust the certificate — fine if
+your browser does". Likewise a network with no NAT hairpin will fail to reach its own
+public name from inside even though every browser succeeds, so the failure text says so
+rather than asserting the URL is wrong. A button that calls a working setup broken is
+worse than no button.
 
 ### Deployment guidance
 
