@@ -38,7 +38,7 @@ const OAUTH_NO_CREDS: ServiceProvider = {
   ],
   has_creds: false,
   action_count: 0,
-  connect_inputs: [],
+  connect_inputs: [], redirect_uri: "", preflight: [],
   connections: [],
 };
 
@@ -51,7 +51,7 @@ const OAUTH_WITH_CREDS: ServiceProvider = {
   setup_steps: [],
   has_creds: true,
   action_count: 3,
-  connect_inputs: [],
+  connect_inputs: [], redirect_uri: "", preflight: [],
   connections: [],
 };
 
@@ -64,7 +64,7 @@ const OAUTH_NEEDS_REAUTH: ServiceProvider = {
   setup_steps: [],
   has_creds: true,
   action_count: 0,
-  connect_inputs: [],
+  connect_inputs: [], redirect_uri: "", preflight: [],
   connections: [{ id: "c2", label: "team", identity: "me@co.com", status: "NEEDS_REAUTH" }],
 };
 
@@ -77,7 +77,7 @@ const OAUTH_ACTIVE_CONN: ServiceProvider = {
   setup_steps: [],
   has_creds: true,
   action_count: 0,
-  connect_inputs: [],
+  connect_inputs: [], redirect_uri: "", preflight: [],
   connections: [{ id: "c1", label: "work", identity: "me@gmail.com", status: "ACTIVE" }],
 };
 
@@ -89,7 +89,7 @@ const API_KEY_PROVIDER: ServiceProvider = {
   setup_url: "",
   setup_steps: [],
   has_creds: false,
-  action_count: 0,
+  action_count: 0, redirect_uri: "", preflight: [],
   connect_inputs: [
     { key: "org_id", label: "Organization ID", hint: "Found in your OpenAI settings", required: true },
   ],
@@ -377,4 +377,82 @@ test("half-typed OAuth credentials survive a trip through the actions view", asy
   await user.click(screen.getByRole("button", { name: /Back/ }));
 
   expect(await screen.findByLabelText("Client ID")).toHaveValue("typed-client-id");
+});
+
+// ServiceWizard prefers the provider from the ["services"] query over the prop
+// snapshot, so these fixtures must be served by the mocked fetch — passing them
+// only to wrap() would be silently discarded on the first refetch.
+function wrapLive(provider: ServiceProvider) {
+  mockFetch({ providersOverride: () => [provider] });
+  return wrap(provider);
+}
+
+test("shows the redirect URI so the user can register it", async () => {
+  const user = userEvent.setup();
+  const uri = "https://agents.example.com/dashboard/connectors/services/callback/google";
+  wrapLive({ ...OAUTH_NO_CREDS, redirect_uri: uri });
+
+  await user.click(screen.getByText("open wizard"));
+
+  expect(await screen.findByText("Redirect URI to register")).toBeInTheDocument();
+  expect(screen.getAllByText(uri).length).toBeGreaterThan(0);
+});
+
+test("substitutes the real callback URL into the setup steps, as copyable text not a link", async () => {
+  const user = userEvent.setup();
+  const uri = "https://agents.example.com/dashboard/connectors/services/callback/google";
+  wrapLive({
+    ...OAUTH_NO_CREDS,
+    redirect_uri: uri,
+    setup_steps: ["Under Authorized redirect URIs, add {{redirect_uri}} exactly, then click Create."],
+  });
+
+  await user.click(screen.getByText("open wizard"));
+  expect(await screen.findByText(/then click Create/)).toBeInTheDocument();
+
+  // The placeholder must never reach the user.
+  expect(screen.queryByText(/\{\{redirect_uri\}\}/)).not.toBeInTheDocument();
+
+  // The URI is NOT an anchor: following it would hit our own callback route with
+  // no state parameter, which only ever renders an error.
+  for (const node of screen.getAllByText(uri)) {
+    expect(node.closest("a")).toBeNull();
+  }
+});
+
+test("disables Connect and explains when preflight finds a hard problem", async () => {
+  const user = userEvent.setup();
+  wrapLive({
+    ...OAUTH_WITH_CREDS,
+    redirect_uri: "http://192.168.1.194:8080/dashboard/connectors/services/callback/github",
+    preflight: [
+      {
+        severity: "hard",
+        code: "raw_ip",
+        message: "This provider does not accept an IP address as the redirect host.",
+        fix: "Use a hostname instead.",
+      },
+    ],
+  });
+
+  await user.click(screen.getByText("open wizard"));
+
+  // The reason must be visible next to the button it disables.
+  expect(await screen.findByText(/does not accept an IP address/)).toBeInTheDocument();
+  expect(screen.getByText("Use a hostname instead.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /connect github/i })).toBeDisabled();
+});
+
+test("warns but still allows Connect on a soft problem", async () => {
+  const user = userEvent.setup();
+  wrapLive({
+    ...OAUTH_WITH_CREDS,
+    preflight: [
+      { severity: "soft", code: "unverified_host", message: "Unconfirmed suffix.", fix: "Try it." },
+    ],
+  });
+
+  await user.click(screen.getByText("open wizard"));
+  expect(await screen.findByText("Unconfirmed suffix.")).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: /connect github/i })).toBeEnabled();
 });

@@ -16,6 +16,6 @@ setup_steps:
   - "IMPORTANT: an UNAUDITED app can only post privately (SELF_ONLY). This connector therefore uploads to your TikTok INBOX as a draft, which needs no audit — you finish and publish the post in the TikTok app."
   - "Go to TikTok for Developers → Manage apps → create an app."
   - "Add the 'Login Kit' and 'Content Posting API' products, and enable the 'Direct Post' toggle ONLY if you have passed the audit."
-  - "Add the redirect URI shown above exactly."
+  - "Add {{redirect_uri}} exactly."
   - "Copy the Client key and Client secret and paste them below."
   - "Video must be at a PUBLICLY reachable URL, and the domain must be verified in the developer portal under 'URL properties'."

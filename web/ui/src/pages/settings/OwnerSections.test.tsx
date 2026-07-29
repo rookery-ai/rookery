@@ -134,7 +134,11 @@ test("System status offers no editable settings", async () => {
   expect(screen.queryByLabelText(/coder timeout/i)).toBeNull();
   expect(screen.queryByLabelText(/agent timeout/i)).toBeNull();
   expect(screen.queryByLabelText(/memory limit/i)).toBeNull();
-  expect(screen.queryByRole("button", { name: /^save$/i })).toBeNull();
+  // NOTE: a bare "Save" button is no longer a valid proxy for "nothing here is
+  // editable" — the Instance URL section owns one, and that value IS read back
+  // (publicurl.Resolve consults it on every consent URL and every preflight).
+  // The guard that matters is the absence of the inert fields above.
+  expect(screen.queryByLabelText(/instance url/i)).toBeInTheDocument();
 });
 
 test("Audit log renders rows from the last-100 GET", async () => {

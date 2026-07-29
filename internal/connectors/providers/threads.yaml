@@ -15,7 +15,7 @@ default_scopes:
 setup_url: https://developers.facebook.com/apps
 setup_steps:
   - "Go to Meta for Developers → My Apps → Create App, then add the 'Threads API' product (it is separate from Facebook Login)."
-  - "Under Threads API → Settings, add the redirect URI shown above exactly."
+  - "Under Threads API → Settings, add {{redirect_uri}} exactly."
   - "Copy the Threads App ID and Threads App Secret — these are DIFFERENT from the Facebook app id/secret — and paste them below."
   - "Production use of threads_content_publish requires App Review; a Development-mode app works against accounts with a role on it."
   - "Note: 250 posts per 24 hours, and any image must be at a PUBLICLY reachable URL."

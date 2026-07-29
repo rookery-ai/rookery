@@ -5,7 +5,7 @@ setup_url: https://developer.atlassian.com/console/myapps/
 setup_steps:
   - "Go to the Atlassian Developer Console → Create → OAuth 2.0 integration."
   - "Add the Jira API permission (Permissions → Jira API → Add) with read/write scopes."
-  - "Authorization → OAuth 2.0 (3LO) → set the Callback URL to the redirect URI shown above exactly."
+  - "Authorization → OAuth 2.0 (3LO) → set the Callback URL to {{redirect_uri}} exactly."
   - "Settings → copy the Client ID and generate/copy the Secret."
   - "Paste the Client ID and Secret below."
 authorize_url: https://auth.atlassian.com/authorize

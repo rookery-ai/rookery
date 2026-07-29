@@ -4,7 +4,7 @@ category: Productivity
 setup_url: https://www.notion.so/my-integrations
 setup_steps:
   - "Go to Notion → My integrations → New integration → choose \"Public\" (OAuth)."
-  - "Fill in the basic info; under OAuth Domain & URIs add the Redirect URI shown above exactly."
+  - "Fill in the basic info; under OAuth Domain & URIs add {{redirect_uri}} exactly."
   - "Save, then open the integration's Secrets/OAuth section."
   - "Copy the OAuth client ID and client secret and paste them below."
   - "After connecting, share the specific Notion pages/databases with the integration so it can access them."

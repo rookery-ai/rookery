@@ -12,5 +12,5 @@ default_scopes:
 setup_url: https://marketplace.zoom.us/develop/create
 setup_steps:
   - "Go to marketplace.zoom.us → Develop → Build App → General App (User-managed)."
-  - "Add the redirect URI shown above under OAuth."
+  - "Add {{redirect_uri}} under OAuth."
   - "Add the scopes listed for this connector, then copy the Client ID and Client Secret below."

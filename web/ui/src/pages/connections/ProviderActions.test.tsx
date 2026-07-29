@@ -20,7 +20,7 @@ const PROVIDER: ServiceProvider = {
   setup_steps: [],
   has_creds: true,
   action_count: 3,
-  connect_inputs: [],
+  connect_inputs: [], redirect_uri: "", preflight: [],
   connections: [],
 };
 

@@ -199,3 +199,41 @@ export function useDeleteWorkspaceAdmin() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["session"] }),
   });
 }
+
+// ── Instance public URL ──────────────────────────────────────────────────────
+// The base URL every OAuth redirect URI is built from. Instance-level, not
+// per-workspace: it is a property of the deployment.
+
+export type PublicURLState = {
+  public_url: string; // configured value, "" when unset
+  public_url_actual: string; // what is actually in use right now
+  public_url_source: "configured" | "env" | "detected";
+};
+
+export function usePublicURL() {
+  return useQuery({
+    queryKey: ["admin", "public-url"],
+    queryFn: () => api.get<PublicURLState>("/api/v1/admin/public-url"),
+  });
+}
+
+export function useSavePublicURL() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (url: string) => api.put<PublicURLState>("/api/v1/admin/public-url", { url }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["admin", "public-url"] });
+      // The redirect URI and every provider's preflight are derived from this.
+      void qc.invalidateQueries({ queryKey: ["services"] });
+    },
+  });
+}
+
+export type PublicURLTestResult = { ok: boolean; warning?: boolean; error?: string };
+
+export function useTestPublicURL() {
+  return useMutation({
+    mutationFn: (url: string) =>
+      api.post<PublicURLTestResult>("/api/v1/admin/public-url/test", { url }),
+  });
+}
