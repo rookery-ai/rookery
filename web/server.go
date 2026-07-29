@@ -79,7 +79,17 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 		SameSite: http.SameSiteLaxMode,
 	}
 
-	sysKey, err := secrets.SystemKeyFromEnv()
+	// Must resolve the key the SAME way main.go does. Using the hostname-derived
+	// SystemKeyFromEnv here would diverge from the pinned <data_dir>/system.key
+	// the moment a restore installed a recovered key — the server would then
+	// fail to decrypt connector tokens and stored master passwords with no
+	// visible cause. By the time serve constructs the Server the key file
+	// already exists, so this is a read.
+	var wsCount int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM workspaces`).Scan(&wsCount); err != nil {
+		return nil, fmt.Errorf("count workspaces: %w", err)
+	}
+	sysKey, err := secrets.SystemKey(cfg.Data.Dir, wsCount > 0)
 	if err != nil {
 		return nil, fmt.Errorf("system key: %w", err)
 	}

@@ -213,3 +213,31 @@ func findPreRestoreDir(t *testing.T, dataDir string) string {
 	}
 	return matches[0]
 }
+
+// Each restore leaves a full copy of the database and vaults behind, so only
+// the newest rollback copy is kept.
+func TestApplyPendingRestoreKeepsOnlyNewestPreRestore(t *testing.T) {
+	t.Setenv("SA_SYSTEM_KEY", "")
+	target := t.TempDir()
+	writeFile(t, filepath.Join(target, "simple-agents.db"), "OLD")
+
+	// A stale rollback copy from an earlier restore.
+	stale := filepath.Join(target, ".pre-restore-20200101-000000")
+	writeFile(t, filepath.Join(stale, "simple-agents.db"), "ANCIENT")
+
+	raw, _ := makeSnapshot(t, "pw")
+	if _, err := StageRestore(bytes.NewReader(raw), target, "pw", "011_pending_actions.up.sql"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyPendingRestore(target); err != nil {
+		t.Fatalf("ApplyPendingRestore: %v", err)
+	}
+
+	matches, _ := filepath.Glob(filepath.Join(target, ".pre-restore-*"))
+	if len(matches) != 1 {
+		t.Fatalf("expected exactly one pre-restore copy, got %v", matches)
+	}
+	if matches[0] == stale {
+		t.Fatal("the stale copy must be replaced, not retained")
+	}
+}

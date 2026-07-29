@@ -20,9 +20,14 @@ import (
 
 func main() {
 	ctx := context.Background()
-	key, err := secrets.SystemKeyFromEnv()
+	dataDir := os.ExpandEnv("$HOME/.simple-agents-v2")
+	d, err := db.Open(dataDir+"/simple-agents.db", "")
 	must(err)
-	d, err := db.Open(os.ExpandEnv("$HOME/.simple-agents-v2/simple-agents.db"), "")
+	// Resolve the key exactly as the server does, so this harness keeps working
+	// after a restore has installed a recovered <data_dir>/system.key.
+	var wsCount int
+	must(d.QueryRow(`SELECT COUNT(*) FROM workspaces`).Scan(&wsCount))
+	key, err := secrets.SystemKey(dataDir, wsCount > 0)
 	must(err)
 	reg, err := connectors.LoadBundled()
 	must(err)

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -207,5 +208,35 @@ func TestSnapshotDoesNotArchiveItsOwnWorkDir(t *testing.T) {
 	leftovers, _ := filepath.Glob(filepath.Join(dataDir, ".backup-work-*"))
 	if len(leftovers) != 0 {
 		t.Fatalf("work dirs must be cleaned up: %v", leftovers)
+	}
+}
+
+// Two runs inside the same second must not resolve to the same name: the
+// second would silently overwrite the first.
+func TestSnapshotNamesDoNotCollideWithinASecond(t *testing.T) {
+	dataDir := t.TempDir()
+	database, dbPath := newTestDB(t, dataDir)
+	destDir := t.TempDir()
+	fixed := time.Date(2026, 7, 29, 3, 0, 0, 0, time.UTC)
+
+	seen := map[string]bool{}
+	for i := 0; i < 3; i++ {
+		name, err := Snapshot(context.Background(), Options{
+			DB: database, DBPath: dbPath, DataDir: dataDir,
+			SystemKey: make([]byte, 32), Passphrase: "pw",
+			Destination: NewLocalDestination(destDir), Now: fixed,
+		})
+		if err != nil {
+			t.Fatalf("Snapshot %d: %v", i, err)
+		}
+		if seen[name] {
+			t.Fatalf("name %q reused — the earlier snapshot was overwritten", name)
+		}
+		seen[name] = true
+	}
+
+	entries, _ := NewLocalDestination(destDir).List(context.Background())
+	if len(entries) != 3 {
+		t.Fatalf("got %d stored snapshots, want 3", len(entries))
 	}
 }

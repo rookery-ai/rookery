@@ -174,6 +174,17 @@ func ApplyPendingRestore(dataDir string) error {
 		"snapshot_version", marker.AppVersion,
 		"snapshot_schema", marker.SchemaVersion)
 
+	// Only the most recent rollback copy is retained. Each restore otherwise
+	// leaves a full copy of the database and every vault behind, so a handful
+	// of restores would quietly fill the disk.
+	if old, err := filepath.Glob(filepath.Join(dataDir, ".pre-restore-*")); err == nil {
+		for _, dir := range old {
+			if err := os.RemoveAll(dir); err != nil {
+				slog.Warn("could not remove an old pre-restore copy", "dir", dir, "error", err)
+			}
+		}
+	}
+
 	preDir := filepath.Join(dataDir, ".pre-restore-"+time.Now().UTC().Format("20060102-150405"))
 	if err := os.MkdirAll(preDir, 0o700); err != nil {
 		return fmt.Errorf("backup: create pre-restore dir: %w", err)
