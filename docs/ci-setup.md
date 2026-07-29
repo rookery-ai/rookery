@@ -154,3 +154,26 @@ Normal release-please flow, no manual steps:
 2. release-please opens/updates a release PR computing the next version.
 3. Merge that PR → it creates the tag → `release.yml` fires goreleaser and the
    GHCR image push.
+
+## Tag format: `include-component-in-tag` must stay `false`
+
+`release-please-config.json` sets `include-component-in-tag: false`. This is
+load-bearing, not cosmetic.
+
+The option **defaults to `true`**, which makes release-please tag releases
+`simple-agents-v0.1.0` — the package name, then the version. But
+`.github/workflows/release.yml` triggers on `tags: ["v*"]`, which that string
+does not match. Left at the default, merging a release PR would create a tag
+that **fires no workflow at all**: no binaries, no packages, no image. The
+release would silently produce nothing.
+
+It also breaks changelog scoping in the other direction. Because release-please
+looked for `simple-agents-v0.1.0` and the real tag is `v0.1.0`, it could not find
+any previous release, fell back to walking the entire history, and proposed
+`0.2.0` with a 489-line changelog — after `v0.1.0` had already shipped. This was
+the actual cause of the "482-line changelog" symptom that `bootstrap-sha` (#58)
+and `last-release-sha` (#59) were both aimed at and both failed to fix.
+
+If the tag format is ever changed, `release.yml`'s trigger has to change with it.
+They are two halves of one contract.
+
