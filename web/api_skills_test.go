@@ -21,7 +21,7 @@ import (
 // 503/degraded paths newAPITestServer's harness produces.
 func newAPITestServerWithSkills(t *testing.T) (*Server, *db.DB) {
 	t.Helper()
-	t.Setenv("SA_SYSTEM_KEY", strings.Repeat("ab", 32))
+	t.Setenv("ROOKERY_SYSTEM_KEY", strings.Repeat("ab", 32))
 	dir := t.TempDir()
 	database, err := db.Open(filepath.Join(dir, "test.db"), "../migrations")
 	if err != nil {

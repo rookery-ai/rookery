@@ -39,7 +39,7 @@ func (s *Server) detectedCoders() []apiDetectedCoderDTO {
 func (s *Server) rejectLocalInSlim(kind string) error {
 	if s.coderMode() == config.ModeSlim && kind == "local" {
 		return echo.NewHTTPError(http.StatusBadRequest,
-			"this build has no CLI coder (SA_CODER_MODE=slim) — choose the API engine")
+			"this build has no CLI coder (ROOKERY_CODER_MODE=slim) — choose the API engine")
 	}
 	return nil
 }

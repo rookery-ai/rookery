@@ -86,7 +86,7 @@ func (s *Server) callbackURL(c echo.Context, provider string) string {
 }
 
 // publicBaseURL is the instance's externally-reachable base URL: the configured
-// setting, else SA_PUBLIC_URL, else what this request suggests.
+// setting, else ROOKERY_PUBLIC_URL, else what this request suggests.
 //
 // Detection is only the fallback. It is why the redirect URI used to change with
 // however the operator happened to reach the page, which is the defect the

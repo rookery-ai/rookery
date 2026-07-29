@@ -886,7 +886,7 @@ func TestAPIEngine_GraceNudge_NonBuildUsesPlainWrapUp(t *testing.T) {
 		return &llm.Response{Content: "wrapped up in plain language"}, nil
 	}
 
-	// Run (not a build): Generate without SA_BUILD_PHASE, so tools.verifyBuild is false.
+	// Run (not a build): Generate without ROOKERY_BUILD_PHASE, so tools.verifyBuild is false.
 	// (Agent runs and builds share Generate; only the build sets the build-phase env.)
 	if _, err := c.Generate(context.Background(), ws, "go"); err != nil {
 		t.Fatalf("Generate: %v", err)

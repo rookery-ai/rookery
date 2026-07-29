@@ -65,16 +65,16 @@ COPY migrations /usr/bin/migrations
 
 # HOME must sit inside the volume: the per-workspace claude-homes trees live
 # under the data dir and must be writable and persistent.
-# SA_PUBLIC_URL is REQUIRED behind any reverse proxy that rewrites Host: the app
+# ROOKERY_PUBLIC_URL is REQUIRED behind any reverse proxy that rewrites Host: the app
 # reads the Host header directly and does not consult X-Forwarded-Host, so
 # without it every OAuth redirect URI points at the wrong address. Left unset,
 # the instance URL is inferred from the browser's request (and can be set in
 # Settings → Owner → Instance URL instead).
-#   -e SA_PUBLIC_URL=https://agents.example.com
-ENV SA_DATA_DIR=/data \
-    SA_HOST=0.0.0.0 \
-    SA_PORT=8080 \
-    SA_CODER_MODE=slim \
+#   -e ROOKERY_PUBLIC_URL=https://agents.example.com
+ENV ROOKERY_DATA_DIR=/data \
+    ROOKERY_HOST=0.0.0.0 \
+    ROOKERY_PORT=8080 \
+    ROOKERY_CODER_MODE=slim \
     HOME=/data
 
 RUN mkdir -p /data && chown -R app:app /data

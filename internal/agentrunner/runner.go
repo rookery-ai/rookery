@@ -396,8 +396,8 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 		if r.connBridge != nil && r.connBridge.Addr() != "" {
 			token := r.connBridge.RegisterGated(input.WorkspaceID, boundConns, false, parker)
 			defer r.connBridge.Unregister(token)
-			extraEnv["SA_CONNECTOR_URL"] = r.connBridge.Addr()
-			extraEnv["SA_CONNECTOR_TOKEN"] = token
+			extraEnv["ROOKERY_CONNECTOR_URL"] = r.connBridge.Addr()
+			extraEnv["ROOKERY_CONNECTOR_TOKEN"] = token
 		}
 	}
 	// CLI coders: register a run-scoped KB bridge token so `simple-agents kb
@@ -407,8 +407,8 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	if r.kbBridge != nil && r.kbBridge.URL() != "" {
 		kbToken := r.kbBridge.Register(input.WorkspaceID, false)
 		defer r.kbBridge.Unregister(kbToken)
-		extraEnv["SA_KB_URL"] = r.kbBridge.URL()
-		extraEnv["SA_KB_TOKEN"] = kbToken
+		extraEnv["ROOKERY_KB_URL"] = r.kbBridge.URL()
+		extraEnv["ROOKERY_KB_TOKEN"] = kbToken
 	}
 	if len(extraEnv) > 0 {
 		coderSvc = coderSvc.WithExtraEnv(extraEnv)

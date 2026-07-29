@@ -13,10 +13,10 @@ RestartSec=5s
 # The data directory holds the SQLite database, every workspace vault, and the
 # claude-homes credential trees. Keep it out of the binary's install prefix so a
 # package upgrade cannot touch user data.
-Environment=SA_DATA_DIR=%h/.simple-agents-v2
+Environment=ROOKERY_DATA_DIR=%h/.simple-agents-v2
 # Set this when the app sits behind a reverse proxy or is reached by a name
 # other than the one the browser used, otherwise OAuth redirect URIs are wrong.
-#Environment=SA_PUBLIC_URL=https://agents.example.com
+#Environment=ROOKERY_PUBLIC_URL=https://agents.example.com
 
 # Hardening. NOT a substitute for the Landlock confinement the app applies to
 # coder subprocesses itself — this protects the host from the server process,

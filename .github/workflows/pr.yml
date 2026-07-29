@@ -222,7 +222,7 @@ jobs:
           exit-code: "1"
 
       # The project's only end-to-end coverage: a real binary, in a real image,
-      # actually serving. Also fails if the image ever loses SA_CODER_MODE=slim,
+      # actually serving. Also fails if the image ever loses ROOKERY_CODER_MODE=slim,
       # which would advertise CLI coders it does not contain.
       - name: Smoke test
         run: |
@@ -245,7 +245,7 @@ jobs:
           echo "$body" | grep -q '"status":"ok"' \
             || { echo "::error::status not ok"; exit 1; }
           echo "$body" | grep -q '"coder_mode":"slim"' \
-            || { echo "::error::image is missing SA_CODER_MODE=slim"; exit 1; }
+            || { echo "::error::image is missing ROOKERY_CODER_MODE=slim"; exit 1; }
           # The image installs all four; a missing one means a broken base layer.
           echo "$body" | grep -q '"python3":true' \
             || { echo "::error::python3 absent — the AST guardrail would be inactive"; exit 1; }

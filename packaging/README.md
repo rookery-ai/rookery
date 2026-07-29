@@ -74,7 +74,7 @@ gets validated is the **redirect URI string**, when you register it.
 The last row is the recommended setup for a self-hosted install: register a real
 domain, obtain a certificate via a DNS-01 challenge (no inbound port needed),
 and point the name at the server's private IP in your own DNS. Then set
-`SA_PUBLIC_URL` — or the instance URL in Settings — to that address.
+`ROOKERY_PUBLIC_URL` — or the instance URL in Settings — to that address.
 
 Settings → Owner → **Instance URL** shows what is currently in use and has a
 **Test this URL** button that verifies the address actually reaches this server.

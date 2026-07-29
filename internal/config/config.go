@@ -52,7 +52,7 @@ type CoderConfig struct {
 // SandboxConfig controls the Landlock filesystem confinement applied to every
 // coder subprocess. When Enabled and the kernel supports Landlock, an agent can
 // only read/write its own user's files; otherwise it falls back to the detective
-// vault guard. Set via SA_SANDBOX (0/false/off disables).
+// vault guard. Set via ROOKERY_SANDBOX (0/false/off disables).
 type SandboxConfig struct {
 	Enabled         bool          `yaml:"enabled"`
 	PythonBin       string        `yaml:"python_bin"`
@@ -117,30 +117,30 @@ func defaults() *Config {
 }
 
 func applyEnv(cfg *Config) error {
-	if v := os.Getenv("SA_HOST"); v != "" {
+	if v := os.Getenv("ROOKERY_HOST"); v != "" {
 		cfg.Server.Host = v // e.g. 127.0.0.1 to bind loopback-only (reachable only via localhost/SSH tunnel)
 	}
-	if v := os.Getenv("SA_PORT"); v != "" {
+	if v := os.Getenv("ROOKERY_PORT"); v != "" {
 		fmt.Sscanf(v, "%d", &cfg.Server.Port)
 	}
-	if v := os.Getenv("SA_DATA_DIR"); v != "" {
+	if v := os.Getenv("ROOKERY_DATA_DIR"); v != "" {
 		cfg.Data.Dir = v
 		cfg.Database.Path = filepath.Join(v, "simple-agents.db")
 	}
-	if v := os.Getenv("SA_SESSION_KEY"); v != "" {
+	if v := os.Getenv("ROOKERY_SESSION_KEY"); v != "" {
 		cfg.Server.SessionKey = v
 	}
-	if v := os.Getenv("SA_CLAUDE_BIN"); v != "" {
+	if v := os.Getenv("ROOKERY_CLAUDE_BIN"); v != "" {
 		cfg.Coder.ClaudeBin = v
 	}
-	if v := os.Getenv("SA_SANDBOX"); v != "" {
+	if v := os.Getenv("ROOKERY_SANDBOX"); v != "" {
 		cfg.Sandbox.Enabled = !(v == "0" || strings.EqualFold(v, "false") || strings.EqualFold(v, "off"))
 	}
-	if v := os.Getenv("SA_CODER_MODE"); v != "" {
+	if v := os.Getenv("ROOKERY_CODER_MODE"); v != "" {
 		cfg.Coder.Mode = strings.ToLower(strings.TrimSpace(v))
 	}
 	// Fail loudly on a typo rather than silently defaulting: an image whose
-	// SA_CODER_MODE was misspelled would otherwise advertise a CLI coder kind
+	// ROOKERY_CODER_MODE was misspelled would otherwise advertise a CLI coder kind
 	// it does not contain.
 	switch cfg.Coder.Mode {
 	case ModeFull, ModeSlim:

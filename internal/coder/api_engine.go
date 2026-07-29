@@ -58,7 +58,7 @@ func (c *Coder) runAPI(ctx context.Context, workspaceID, prompt string) (*Result
 		offeredTools = tools.tools()
 	}
 	// During a build, raise the completion-token cap so a large single write_file isn't
-	// truncated (H2). tools.verifyBuild is set only when SA_BUILD_PHASE=generation.
+	// truncated (H2). tools.verifyBuild is set only when ROOKERY_BUILD_PHASE=generation.
 	maxTokens := 0
 	if tools.verifyBuild {
 		maxTokens = buildMaxTokens
@@ -403,7 +403,7 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 		homesDir:         c.homesDir,
 		includeExecTools: includeExecTools,
 		// Enforce script self-verification only during an agent BUILD (the caller sets
-		// SA_BUILD_PHASE=generation). A real run must never block on this — an agent that
+		// ROOKERY_BUILD_PHASE=generation). A real run must never block on this — an agent that
 		// legitimately has nothing to report must be free to finish silently.
 		verifyBuild: c.extraEnv[buildphase.EnvVar] == buildphase.Generation,
 		spec:        c.buildSpec,

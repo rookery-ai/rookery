@@ -39,7 +39,7 @@ func TestKBCLIRoundTrip(t *testing.T) {
 		t.Fatalf("bridge start: %v", err)
 	}
 	defer b.Close()
-	env := append(os.Environ(), "SA_KB_URL="+b.URL(), "SA_KB_TOKEN="+b.Register("ws1", false))
+	env := append(os.Environ(), "ROOKERY_KB_URL="+b.URL(), "ROOKERY_KB_TOKEN="+b.Register("ws1", false))
 
 	doc := filepath.Join(t.TempDir(), "report.csv")
 	const marker = "zq-unicorn-marker-42"

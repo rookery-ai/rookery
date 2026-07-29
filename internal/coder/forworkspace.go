@@ -23,12 +23,12 @@ import (
 // vlt is the per-user vault used by the API coder's host tools for path-safe file
 // access. It is unused by the local coder path.
 // ErrLocalCoderDisabled is returned by every entry point of a coder built for a
-// "local" workspace in a build that ships no CLI coder (SA_CODER_MODE=slim).
+// "local" workspace in a build that ships no CLI coder (ROOKERY_CODER_MODE=slim).
 // It is returned at USE time rather than construction time because ForWorkspace
 // has no error return and is called from hot paths; failing loudly here beats
 // spawning a binary that does not exist and surfacing "executable file not found".
 var ErrLocalCoderDisabled = errors.New(
-	"this build has no CLI coder (SA_CODER_MODE=slim) — switch this workspace to the API engine in Settings → Coder")
+	"this build has no CLI coder (ROOKERY_CODER_MODE=slim) — switch this workspace to the API engine in Settings → Coder")
 
 func ForWorkspace(w *db.Workspace, homesDir, dataDir string, vlt *vault.Vault, defaultBin string, defaultTimeout time.Duration, enableSandbox, allowLocal bool) *Coder {
 	if w != nil && w.CoderKind == "api" {

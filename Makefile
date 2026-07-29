@@ -6,8 +6,8 @@
 # logs/server.pid (the app has no pidfile/lock of its own).
 #
 # Defaults used by `serve`: listen 0.0.0.0:8080, data dir ~/.simple-agents-v2
-# (DB auto-migrates on open). Override the port with SA_PORT, e.g.
-#   SA_PORT=8081 make deploy
+# (DB auto-migrates on open). Override the port with ROOKERY_PORT, e.g.
+#   ROOKERY_PORT=8081 make deploy
 
 BIN := bin/rookery
 PKG := ./cmd/rookery

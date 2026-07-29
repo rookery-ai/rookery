@@ -21,7 +21,7 @@ func contains(haystack, needle string) bool { return strings.Contains(haystack, 
 // newAPITestServer builds a Server with a temp DB and no gateway/runner/flows.
 func newAPITestServer(t *testing.T) (*Server, *db.DB) {
 	t.Helper()
-	t.Setenv("SA_SYSTEM_KEY", strings.Repeat("ab", 32)) // 64 hex chars
+	t.Setenv("ROOKERY_SYSTEM_KEY", strings.Repeat("ab", 32)) // 64 hex chars
 	dir := t.TempDir()
 	database, err := db.Open(filepath.Join(dir, "test.db"), "../migrations")
 	if err != nil {

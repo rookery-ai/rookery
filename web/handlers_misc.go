@@ -120,8 +120,8 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 			if kbBin != "" {
 				kbTok := s.kbBridge.Register(u.ID, false)
 				defer s.kbBridge.Unregister(kbTok)
-				extraEnv["SA_KB_URL"] = s.kbBridge.URL()
-				extraEnv["SA_KB_TOKEN"] = kbTok
+				extraEnv["ROOKERY_KB_URL"] = s.kbBridge.URL()
+				extraEnv["ROOKERY_KB_TOKEN"] = kbTok
 			}
 		}
 		if s.connBridge != nil && s.connBridge.Addr() != "" {
@@ -130,8 +130,8 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 				if len(bound) > 0 {
 					tok := s.connBridge.Register(u.ID, bound, false)
 					defer s.connBridge.Unregister(tok)
-					extraEnv["SA_CONNECTOR_URL"] = s.connBridge.Addr()
-					extraEnv["SA_CONNECTOR_TOKEN"] = tok
+					extraEnv["ROOKERY_CONNECTOR_URL"] = s.connBridge.Addr()
+					extraEnv["ROOKERY_CONNECTOR_TOKEN"] = tok
 					for _, b := range bound {
 						connRefs = append(connRefs, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
 					}

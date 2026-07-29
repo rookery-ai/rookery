@@ -85,7 +85,7 @@ type hostToolSet struct {
 	fetchMemo map[string]string
 
 	// Build-time script verification. verifyBuild is set ONLY during agent generation
-	// (SA_BUILD_PHASE=generation) on the API/tool-calling backend — the weaker-model path
+	// (ROOKERY_BUILD_PHASE=generation) on the API/tool-calling backend — the weaker-model path
 	// that, unlike a full CLI coder, does not reliably run-and-fix its own scripts. The
 	// engine uses these to refuse to "finish" a build while the model has authored a
 	// helper script it never once got real output from (see verifyFinishNudge +
@@ -452,7 +452,7 @@ func (h *hostToolSet) buildSpec() BuildSpec {
 //  1. the build's deliverable must exist. A build with no deliverable is useless
 //     regardless of the helper script, and the common trap on a weak tool-calling backend
 //     is the model burning its whole turn budget trying to verify a helper script that
-//     can't reach the live service at build time (SA_BUILD_PHASE blocks outbound) — and
+//     can't reach the live service at build time (ROOKERY_BUILD_PHASE blocks outbound) — and
 //     never writing the deliverable. So the FIRST thing the nudge demands is: write it,
 //     don't keep fixing the script.
 //

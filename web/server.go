@@ -76,7 +76,7 @@ type Server struct {
 func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, designer *agentdesigner.AgentDesigner, homesDir string, skillStore *skillstore.Store, designFlow *agentdesigner.Flow, skillFlow *skilldesigner.Flow, memStore *memory.Store) (*Server, error) {
 	sessionKey := []byte(cfg.Server.SessionKey)
 	if len(sessionKey) == 0 {
-		// Use a fixed dev key if not configured; production MUST set SA_SESSION_KEY.
+		// Use a fixed dev key if not configured; production MUST set ROOKERY_SESSION_KEY.
 		sessionKey = []byte("change-me-in-production-32bytes!!")
 	}
 

@@ -44,7 +44,7 @@ func TestConnectorExecSubcommandEndToEnd(t *testing.T) {
 	tok := br.Register("ws1", []BoundConn{{ID: "c1", Provider: "google", AccountLabel: "work"}}, false)
 
 	cmd := exec.Command(bin, "connector", "exec", "gmail_search", "--args", `{"query":"hi"}`)
-	cmd.Env = append(os.Environ(), "SA_CONNECTOR_URL="+addr, "SA_CONNECTOR_TOKEN="+tok)
+	cmd.Env = append(os.Environ(), "ROOKERY_CONNECTOR_URL="+addr, "ROOKERY_CONNECTOR_TOKEN="+tok)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("subcommand failed: %v\noutput: %s", err, out)
@@ -87,7 +87,7 @@ func TestConnectorExecUnderSandbox(t *testing.T) {
 	spec := sandbox.Spec{
 		Command:       []string{bin, "connector", "exec", "gmail_search", "--args", `{"query":"hi"}`},
 		Dir:           t.TempDir(),
-		Env:           append(os.Environ(), "SA_CONNECTOR_URL="+addr, "SA_CONNECTOR_TOKEN="+tok),
+		Env:           append(os.Environ(), "ROOKERY_CONNECTOR_URL="+addr, "ROOKERY_CONNECTOR_TOKEN="+tok),
 		ReadOnlyPaths: ro,
 	}
 	wargv, err := sandbox.Wrap(bin, spec)

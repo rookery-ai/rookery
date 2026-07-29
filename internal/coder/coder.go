@@ -42,7 +42,7 @@ type Result struct {
 
 	// ScriptVerified / ScriptOutput carry the API build engine's ground truth: whether an
 	// authored helper script actually RAN with real output this build, and that captured
-	// stdout (secret-redacted). Set only by the API engine during a build (SA_BUILD_PHASE=
+	// stdout (secret-redacted). Set only by the API engine during a build (ROOKERY_BUILD_PHASE=
 	// generation); zero for CLI coders and for runs/chat. The agent designer uses these so a
 	// build the engine confirmed runs isn't falsely flagged "couldn't confirm the helper".
 	ScriptVerified bool

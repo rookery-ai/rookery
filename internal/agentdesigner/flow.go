@@ -1712,7 +1712,7 @@ func decideBuildOutcome(workDir, resultText, backendType string, scriptVerified 
 		// The coder didn't finish the agent's instructions. The most common cause on a
 		// weak tool-calling backend is the build-time verify trap: it authored a helper
 		// script, the verify-finish nudge demanded real output from it, but at build time
-		// (SA_BUILD_PHASE=generation) live service calls are intentionally blocked, so the
+		// (ROOKERY_BUILD_PHASE=generation) live service calls are intentionally blocked, so the
 		// script can never produce real output and the coder spends its budget on that
 		// instead of writing AGENT.md. Steer the next attempt to write AGENT.md FIRST and
 		// not block on script verification — this is the lever that breaks the loop.

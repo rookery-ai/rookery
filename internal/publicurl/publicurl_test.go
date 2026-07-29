@@ -20,7 +20,7 @@ func TestNormalize(t *testing.T) {
 		}
 	}
 
-	// A schemeless value is the exact bug this fixes: SA_PUBLIC_URL=localhost:8080
+	// A schemeless value is the exact bug this fixes: ROOKERY_PUBLIC_URL=localhost:8080
 	// previously produced a silently broken redirect URI.
 	bad := []string{"localhost:8080", "agents.example.com", "",
 		"https://agents.example.com/base", "https://a.com?x=1", "https://a.com#f", "ftp://a.com"}
@@ -37,19 +37,19 @@ func TestResolvePrecedence(t *testing.T) {
 	}
 	none := func(string) (string, error) { return "", nil }
 
-	t.Setenv("SA_PUBLIC_URL", "")
+	t.Setenv("ROOKERY_PUBLIC_URL", "")
 	got, src := Resolve(cfg("https://configured.example.com"), "http://detected:8080")
 	if got != "https://configured.example.com" || src != SourceConfigured {
 		t.Fatalf("configured must win: got %q src %v", got, src)
 	}
 
-	t.Setenv("SA_PUBLIC_URL", "https://env.example.com")
+	t.Setenv("ROOKERY_PUBLIC_URL", "https://env.example.com")
 	got, src = Resolve(none, "http://detected:8080")
 	if got != "https://env.example.com" || src != SourceEnv {
 		t.Fatalf("env must beat detection: got %q src %v", got, src)
 	}
 
-	t.Setenv("SA_PUBLIC_URL", "")
+	t.Setenv("ROOKERY_PUBLIC_URL", "")
 	got, src = Resolve(none, "http://detected:8080")
 	if got != "http://detected:8080" || src != SourceDetected {
 		t.Fatalf("detection is the fallback: got %q src %v", got, src)
@@ -59,7 +59,7 @@ func TestResolvePrecedence(t *testing.T) {
 // A stored or env value that does not normalize must not silently produce a
 // broken redirect URI — fall through to detection instead.
 func TestResolveIgnoresUnnormalizableValues(t *testing.T) {
-	t.Setenv("SA_PUBLIC_URL", "")
+	t.Setenv("ROOKERY_PUBLIC_URL", "")
 	bad := func(string) (string, error) { return "localhost:8080", nil }
 	got, src := Resolve(bad, "http://detected:8080")
 	if got != "http://detected:8080" || src != SourceDetected {

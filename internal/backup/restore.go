@@ -13,11 +13,11 @@ import (
 	"time"
 )
 
-// ErrSystemKeyConflict means SA_SYSTEM_KEY is set to something other than the
+// ErrSystemKeyConflict means ROOKERY_SYSTEM_KEY is set to something other than the
 // snapshot's key. The environment variable outranks the key file, so proceeding
 // would install a key the process then ignores — and the restored data would
 // fail to decrypt with no obvious cause.
-var ErrSystemKeyConflict = errors.New("backup: SA_SYSTEM_KEY conflicts with the snapshot's system key")
+var ErrSystemKeyConflict = errors.New("backup: ROOKERY_SYSTEM_KEY conflicts with the snapshot's system key")
 
 const (
 	stagingDirName = ".restore-staging"
@@ -105,9 +105,9 @@ func StageRestore(src io.Reader, dataDir, passphrase, binarySchema string) (*Man
 		return nil, err
 	}
 
-	if envKey := os.Getenv("SA_SYSTEM_KEY"); envKey != "" && !strings.EqualFold(envKey, m.SystemKey) {
+	if envKey := os.Getenv("ROOKERY_SYSTEM_KEY"); envKey != "" && !strings.EqualFold(envKey, m.SystemKey) {
 		os.RemoveAll(staging)
-		return nil, fmt.Errorf("%w: unset SA_SYSTEM_KEY, or set it to the snapshot's key, then retry",
+		return nil, fmt.Errorf("%w: unset ROOKERY_SYSTEM_KEY, or set it to the snapshot's key, then retry",
 			ErrSystemKeyConflict)
 	}
 	if _, err := hex.DecodeString(m.SystemKey); err != nil || len(m.SystemKey) != 64 {

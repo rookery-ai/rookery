@@ -16,7 +16,7 @@ import (
 // Where Landlock confinement is active (see internal/sandbox), it *preventively*
 // blocks out-of-scope writes before they happen, superseding the Guard for writes
 // — the Guard then simply finds nothing to revert. The Guard remains the boundary
-// on kernels without Landlock (or when SA_SANDBOX=0), where every subprocess runs
+// on kernels without Landlock (or when ROOKERY_SANDBOX=0), where every subprocess runs
 // as the same OS user and nothing physically prevents writing elsewhere.
 //
 // The protected region is the user's *authored* knowledge — notes, journals,

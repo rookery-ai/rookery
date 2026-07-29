@@ -392,8 +392,8 @@ func serveCmd() *cli.Command {
 						if kbBin != "" {
 							kbTok := kbBridge.Register(workspaceID, false)
 							defer kbBridge.Unregister(kbTok)
-							extraEnv["SA_KB_URL"] = kbBridge.URL()
-							extraEnv["SA_KB_TOKEN"] = kbTok
+							extraEnv["ROOKERY_KB_URL"] = kbBridge.URL()
+							extraEnv["ROOKERY_KB_TOKEN"] = kbTok
 						}
 					}
 					if connBridge != nil && connBridge.Addr() != "" {
@@ -402,8 +402,8 @@ func serveCmd() *cli.Command {
 							if len(bound) > 0 {
 								tok := connBridge.Register(workspaceID, bound, false)
 								defer connBridge.Unregister(tok)
-								extraEnv["SA_CONNECTOR_URL"] = connBridge.Addr()
-								extraEnv["SA_CONNECTOR_TOKEN"] = tok
+								extraEnv["ROOKERY_CONNECTOR_URL"] = connBridge.Addr()
+								extraEnv["ROOKERY_CONNECTOR_TOKEN"] = tok
 								for _, b := range bound {
 									connRefs = append(connRefs, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
 								}
@@ -573,7 +573,7 @@ func sandboxExecCmd() *cli.Command {
 // connectorCmd is how a CLI coder acts on a connected service: it POSTs to the loopback
 // connector bridge in the host process, which runs the SAME connectors.Execute path the
 // API engine uses in-process (auth/token-refresh stay host-side). The bridge URL + a
-// run-scoped token come from the SA_CONNECTOR_URL / SA_CONNECTOR_TOKEN env vars the runner
+// run-scoped token come from the ROOKERY_CONNECTOR_URL / ROOKERY_CONNECTOR_TOKEN env vars the runner
 // injects. Usage: simple-agents connector exec <tool> --args '<json>'
 func connectorCmd() *cli.Command {
 	return &cli.Command{
@@ -592,8 +592,8 @@ func connectorCmd() *cli.Command {
 					if tool == "" {
 						return fmt.Errorf("usage: connector exec <tool> --args '<json>'")
 					}
-					base := os.Getenv("SA_CONNECTOR_URL")
-					token := os.Getenv("SA_CONNECTOR_TOKEN")
+					base := os.Getenv("ROOKERY_CONNECTOR_URL")
+					token := os.Getenv("ROOKERY_CONNECTOR_TOKEN")
 					if base == "" || token == "" {
 						return fmt.Errorf("no connected-service bridge available in this run")
 					}
@@ -622,10 +622,10 @@ func connectorCmd() *cli.Command {
 // kbCmd is how a CLI coder reaches the knowledge base's conversion and search
 // paths: it POSTs to the loopback KB bridge in the host process, which runs the
 // SAME vault.ImportFile / Searcher code the API engine calls in-process. The
-// bridge URL and a run-scoped token come from SA_KB_URL / SA_KB_TOKEN.
+// bridge URL and a run-scoped token come from ROOKERY_KB_URL / ROOKERY_KB_TOKEN.
 func kbCmd() *cli.Command {
 	post := func(ctx context.Context, endpoint string, payload any) error {
-		base, token := os.Getenv("SA_KB_URL"), os.Getenv("SA_KB_TOKEN")
+		base, token := os.Getenv("ROOKERY_KB_URL"), os.Getenv("ROOKERY_KB_TOKEN")
 		if base == "" || token == "" {
 			return fmt.Errorf("no knowledge-base bridge available in this run")
 		}

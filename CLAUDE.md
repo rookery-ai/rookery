@@ -60,8 +60,8 @@ AST guardrail tests shell out to `python3`. If Python is not available, those te
 > **Deploy workflow:** When the user says "restart the server", "rebuild", or
 > "deploy", run `make deploy` — it stops the running server, rebuilds, and
 > starts it in the background with logs captured to `logs/server.log`. The
-> server listens on `0.0.0.0:8080` by default (override host with `SA_HOST=…`, port
-> with `SA_PORT=…`). Set `SA_PUBLIC_URL` to the externally-reachable base URL so OAuth
+> server listens on `0.0.0.0:8080` by default (override host with `ROOKERY_HOST=…`, port
+> with `ROOKERY_PORT=…`). Set `ROOKERY_PUBLIC_URL` to the externally-reachable base URL so OAuth
 > callbacks are correct. `simple-agents connector exec <tool> --args '<json>'` is the
 > subcommand CLI coders use to reach the connector bridge (not for manual use).
 > The UI is the embedded React SPA served at `http://host:8080/` (build it into the
@@ -164,7 +164,7 @@ podman run -d --name simple-agents -p 8080:8080 \
 ```
 
 The image is **slim**: it contains no CLI coder binary and sets
-`SA_CODER_MODE=slim`, so workspaces must use the `api` coder kind. It does ship
+`ROOKERY_CODER_MODE=slim`, so workspaces must use the `api` coder kind. It does ship
 python3, ripgrep, poppler-utils and tesseract, so `/healthz` reports no
 capability warnings inside it. ~270 MB.
 
@@ -177,15 +177,15 @@ CWD-relative.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `SA_HOST` | `0.0.0.0` | bind address; `127.0.0.1` for loopback-only |
-| `SA_PORT` | `8080` | listen port |
-| `SA_DATA_DIR` | `~/.simple-agents-v2` | data root; also relocates the DB |
-| `SA_SESSION_KEY` | generated | hex 32-byte session key |
-| `SA_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks; validated at use (`internal/publicurl.Normalize`) and overridden by the instance URL in owner settings |
-| `SA_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |
-| `SA_CODER_MODE` | `full` | `slim` removes the local CLI coder kind entirely |
+| `ROOKERY_HOST` | `0.0.0.0` | bind address; `127.0.0.1` for loopback-only |
+| `ROOKERY_PORT` | `8080` | listen port |
+| `ROOKERY_DATA_DIR` | `~/.simple-agents-v2` | data root; also relocates the DB |
+| `ROOKERY_SESSION_KEY` | generated | hex 32-byte session key |
+| `ROOKERY_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks; validated at use (`internal/publicurl.Normalize`) and overridden by the instance URL in owner settings |
+| `ROOKERY_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |
+| `ROOKERY_CODER_MODE` | `full` | `slim` removes the local CLI coder kind entirely |
 
-`SA_CODER_MODE` is **policy** ("this build has no CLI coder"), deliberately
+`ROOKERY_CODER_MODE` is **policy** ("this build has no CLI coder"), deliberately
 distinct from **detection** (`coder.DetectInstalled` — "none is on PATH right
 now"). Slim is enforced at four layers: config parsing (an unknown value is a
 startup error), the settings API (skips the host probe), the SPA (hides the
@@ -251,7 +251,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface: one struct per coder — Claude/OpenCode/Codex/Gemini/Cursor, plus a generic fallback). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host tools (`read_file`/`write_file`/`edit_file`/`list_dir` + read-only discovery `search_files`/`glob` + exec tools `run_script`/`bash`/`web_fetch`/`web_search`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
 | `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **32 providers** (Google-family incl. AdSense/GA4/Search Console, YouTube, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing, `ProviderNames()` backing the connections page), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
-| `internal/buildphase` | Tiny package holding `SA_BUILD_PHASE`/`generation` marker (set during agent/skill builds; the connector `Execute` build-guard refuses mutating actions when present). Its own package so it outlives any one integration. |
+| `internal/buildphase` | Tiny package holding `ROOKERY_BUILD_PHASE`/`generation` marker (set during agent/skill builds; the connector `Execute` build-guard refuses mutating actions when present). Its own package so it outlives any one integration. |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal); `statefile.go` (`StateFilePath`/`ReadState`/`WriteState`/`RenderStateTemplate`) owns an agent's `state.md` format (see "Agent state" below); `migrate_files.go` (`MigrateAgentFilesToMarkdown`) is the idempotent startup migration off the old `state.json`/`agent.json` pair; `ParseRequiredSecrets` (`flow.go`) parses AGENT.md's `# Required secrets:` header — the only source of an agent's declared secrets now that `agent.json` is gone |
 | `internal/skilldesigner` | Conversational skill-creator wizard mirroring `agentdesigner.Flow` (FSM Idle→AwaitingResume→Describing→Designing→Verifying→Done, SSE progress, 7-day drafts, approval triggers); `SkillSaver` writes SKILL.md+scripts/ to vault + DB upsert; generation runs with the `skill-creator` core skill, vetting runs the `skill-vetter` core skill as a text-only audit; `vettingBlocksSave()` parses the verdict line. Wired to BOTH surfaces: the SPA (`/api/v1/skills/design`) and chat platforms (`/skill`). `Start` is the chat entry point (opens in `StateDescribing`, asks for a description, no coder call); `StartDesign` is the web one (its form collects the description up front). |
 | `internal/skilllibrary` | Embedded core skill catalog (`go:embed skills/*/SKILL.md`) — always-on for every user, no DB rows, no admin gate. `LoadBundled()`, `CoreSkillContent(slug)`, `IsCoreSkill()`, `ParseMeta()` (Anthropic+openclaw YAML frontmatter: requires.bins/anyBins/env, install specs). Supersedes the admin-catalog approach dropped in migration 009. |
@@ -318,7 +318,7 @@ Key types in `internal/vault`:
 
 **Chat knowledge-base access (on-demand retrieval + editing).** The one-off chat coder runs with `WithDir(vaultRoot).WithAllowedTools("Read,Write,Edit,Glob,Grep")` and a system instruction (`prompts.BuildChatSystemPrompt`) naming the vault root. The LLM retrieves and edits the user's notes **on demand** — only on turns that touch the KB — instead of having the vault injected every prompt. `chat.BuildUserContext` now returns identity-only context (profile/memory/agents/MCP); the old always-on `[Related knowledge base]` keyword-snippet block was removed. The tool set is file-only (no `Bash`/`WebFetch`): the chat can create/edit/read notes but cannot delete, rename, or run shell commands. The same applies to agents (RW over the vault via the sandbox). The detective `Guard` is no longer wired into agent runs — it would revert the KB edits that are now intentional — so agent/chat KB edits persist.
 
-**Chat connector access.** One-off chat (both web `handleChatMessage` and Telegram) also exposes the workspace's **ACTIVE** service connections to the chat coder (`connectors.ActiveBoundConns` — all of them; chat isn't an agent so there's no per-agent binding), wired identically to how the API/CLI split works elsewhere: the **API engine** gets them as native function tools (`coder.WithConnectors`), a **CLI coder** reaches them via the loopback bridge (`bridge.Register` → `SA_CONNECTOR_URL`/`SA_CONNECTOR_TOKEN` env → `simple-agents connector exec`, plus a scoped `Bash(<bin> connector exec:*)` grant since chat is otherwise file-only). Both paths hit the same `connectors.Execute` (mutating allowed — chat is like a run, `buildPhase=false`). `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` appends `connectedToolsBlock` so the model knows the tools exist; with no active connections / no bridge, chat behaves exactly as the file-only default.
+**Chat connector access.** One-off chat (both web `handleChatMessage` and Telegram) also exposes the workspace's **ACTIVE** service connections to the chat coder (`connectors.ActiveBoundConns` — all of them; chat isn't an agent so there's no per-agent binding), wired identically to how the API/CLI split works elsewhere: the **API engine** gets them as native function tools (`coder.WithConnectors`), a **CLI coder** reaches them via the loopback bridge (`bridge.Register` → `ROOKERY_CONNECTOR_URL`/`ROOKERY_CONNECTOR_TOKEN` env → `simple-agents connector exec`, plus a scoped `Bash(<bin> connector exec:*)` grant since chat is otherwise file-only). Both paths hit the same `connectors.Execute` (mutating allowed — chat is like a run, `buildPhase=false`). `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` appends `connectedToolsBlock` so the model knows the tools exist; with no active connections / no bridge, chat behaves exactly as the file-only default.
 
 **Agent designer KB awareness.** The designer is text-only (`WithNoTools`) but its system prompt (`BuildDesignSystemPrompt`, `<knowledge_base>` block) now knows the app has a built-in vault that agents read/write, and is told to prefer it over Notion/external note apps for the user's own knowledge. Each design turn injects a fresh retrieval-backed block via `Flow.WithVault(v)` → `vault.BuildKBContext(v, workspaceID, query)` → `DesignSystemParams.KBManifest` — a folder-shape summary (`Vault.FolderSummary`, one line per folder regardless of how many files it holds — note this bounds bytes PER FOLDER, not in total as folder COUNT grows, which is why `BuildKBContext` gives the summary its own 2 KiB budget with a `…and N more folders` marker; unlike the old exhaustive path list that capped at 60 files/rendered 30) plus the passages most relevant to the conversation so far (via `Indexer().Search`, scored against the session's own recent user turns + the current message — the designer has no search tool of its own, so this is done for it on every turn). When nothing matches, the block says so explicitly and the prompt tells the designer to ask the user rather than invent a path. `skilldesigner.Flow` mirrors this identically (`WithVault`, its own `loadKBManifest`/`retrievalQuery`) — `BuildKBContext` lives in `internal/vault`, not `agentdesigner`, precisely so both designers can reach it without an awkward cross-designer import. `vault.NotePaths`/`Flow.WithKBLister`/the `kbLister` interface are gone — `BuildKBContext` was their only consumer.
 
@@ -506,11 +506,11 @@ OAuth-app creds + connect per provider, with per-provider setup guidance
 (`label`/`setup_url`/`setup_steps` in the provider YAML). The OAuth **callback** is the one
 server-rendered redirect route that survives the SPA cutover: `GET /dashboard/connectors/services/callback/:provider`
 (HMAC-signed, TTL'd `state`; path FROZEN because it's the registered external redirect URI; it finishes
-with an HTTP redirect back to the SPA). `SA_PUBLIC_URL` sets the callback base (Google rejects
+with an HTTP redirect back to the SPA). `ROOKERY_PUBLIC_URL` sets the callback base (Google rejects
 non-public-TLD/`http` redirect URIs — use `https://` or `http://localhost`).
 
 **Redirect-URI reliability.** `internal/publicurl` owns the instance base URL
-(`Resolve`: the `system_settings.public_url` row → `SA_PUBLIC_URL` → detection
+(`Resolve`: the `system_settings.public_url` row → `ROOKERY_PUBLIC_URL` → detection
 from the request) and judges it against a provider's `redirect_policy` YAML block
 (`Check`, a pure function). Only a policy marked `verified: true` may hard-block
 the Connect button; an absent block is the zero `Policy`, which is fully
@@ -649,7 +649,7 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
 
 **Allowed:** RW: per-workspace HOME + agent workdir. RO: system paths, coder binary dir, the `simple-agents` binary dir (so a confined CLI coder can exec `simple-agents connector exec`), the workspace's vault root. Denied: SQLite DB, config.yaml, other workspaces' vaults.
 
-`config.SandboxConfig.Enabled` (default true; `SA_SANDBOX=0` disables). With Landlock unavailable, the sandbox is not applied and nothing physically prevents writes outside the vault — agents/chat run trusted within the user's own vault.
+`config.SandboxConfig.Enabled` (default true; `ROOKERY_SANDBOX=0` disables). With Landlock unavailable, the sandbox is not applied and nothing physically prevents writes outside the vault — agents/chat run trusted within the user's own vault.
 
 ### Database
 
@@ -677,7 +677,7 @@ fields `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`), 
 **two** HTTP surfaces: the embedded **React SPA** at `/` and the **`/api/v1` JSON API**. All the old
 `/dashboard/*` and `/admin/*` HTML routes, the `TemplateRenderer`/`setupTemplates`/`parseTemplates`
 machinery, the `web/templates/` + `web/static/` directories, and the `templates_dir`/`static_dir` +
-`SA_TEMPLATES_DIR`/`SA_STATIC_DIR` config are gone. The SPA talks to the JSON API for everything.
+`ROOKERY_TEMPLATES_DIR`/`ROOKERY_STATIC_DIR` config are gone. The SPA talks to the JSON API for everything.
 
 **Shell primitives** (`web/ui/src/components/shell/`): every page renders inside `AppShell` —
 an icon rail + list panel + a `ContextPane` slot. The context pane is user-resizable —
@@ -842,7 +842,7 @@ from the UI.
 **The system key is why this design looks the way it does.** `secrets.SystemKey`
 encrypts `workspaces.encrypted_master_password`, every `service_connections`
 OAuth token, and every `platform_connections` bot token. It used to be derived
-from the **hostname** whenever `SA_SYSTEM_KEY` was unset, so a naive file-copy
+from the **hostname** whenever `ROOKERY_SYSTEM_KEY` was unset, so a naive file-copy
 backup restored on new hardware produced an install that booted, looked healthy,
 and had silently lost every scheduled agent and every connector. Three
 consequences, all load-bearing:
@@ -851,7 +851,7 @@ consequences, all load-bearing:
   is what makes cross-machine restore one step. It is also why the envelope needs
   a passphrase — and why the passphrase is the one thing an owner must not lose.
 - **`secrets.SystemKey(dataDir, hasWorkspaces)` pins the key to
-  `<data_dir>/system.key`.** Resolution order is `SA_SYSTEM_KEY` → the file →
+  `<data_dir>/system.key`.** Resolution order is `ROOKERY_SYSTEM_KEY` → the file →
   derive-and-persist (hostname-derived when the install already has workspaces,
   so an upgrade keeps its exact key; random for a fresh install). `SystemKeyFromEnv`
   survives only as the legacy path the migration test compares against — **every

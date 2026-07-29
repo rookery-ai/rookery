@@ -4,7 +4,7 @@
 // The 32-byte system key travels INSIDE the encrypted envelope. That is the
 // whole reason cross-machine restore works: the key encrypts every workspace's
 // stored master password and every connector and chat-platform token, and it is
-// derived from the hostname on installs that never set SA_SYSTEM_KEY. A restore
+// derived from the hostname on installs that never set ROOKERY_SYSTEM_KEY. A restore
 // without it produces an install that boots, looks healthy, and has silently
 // lost every scheduled agent and every connector.
 package backup

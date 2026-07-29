@@ -81,7 +81,7 @@ func (r Report) Warnings() []string {
 		w = append(w, fmt.Sprintf("filesystem sandbox unavailable on %s — coder "+
 			"subprocesses run unconfined (Landlock is Linux-only)", runtime.GOOS))
 	} else if !r.Sandbox.Enabled {
-		w = append(w, "filesystem sandbox is supported but DISABLED (SA_SANDBOX) — "+
+		w = append(w, "filesystem sandbox is supported but DISABLED (ROOKERY_SANDBOX) — "+
 			"coder subprocesses run unconfined")
 	}
 	if !r.Tools.Ripgrep {
