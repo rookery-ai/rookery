@@ -1,12 +1,12 @@
 [Unit]
-Description=Simple Agents control plane
-Documentation=https://github.com/ilijad1/simple-agents-v2
+Description=Rookery control plane
+Documentation=https://github.com/ilijad1/rookery
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/simple-agents serve
+ExecStart=/usr/bin/rookery serve
 Restart=on-failure
 RestartSec=5s
 

@@ -1,6 +1,6 @@
 version: 2
 
-project_name: simple-agents
+project_name: rookery
 
 before:
   hooks:
@@ -11,9 +11,9 @@ before:
     - npm --prefix web/ui run build
 
 builds:
-  - id: simple-agents
+  - id: rookery
     main: ./cmd/rookery
-    binary: simple-agents
+    binary: rookery
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin, windows]
@@ -34,13 +34,13 @@ archives:
         formats: [zip]
     files:
       - packaging/README.md
-      - packaging/systemd/simple-agents.service
+      - packaging/systemd/rookery.service
 
 nfpms:
   - id: packages
-    package_name: simple-agents
+    package_name: rookery
     vendor: Ilija Dimitrovski
-    homepage: https://github.com/ilijad1/simple-agents-v2
+    homepage: https://github.com/ilijad1/rookery
     maintainer: Ilija Dimitrovski <ilija.dimitrovski@kroute.ai>
     description: |
       Multi-workspace AI agents control plane with a built-in knowledge base,
@@ -51,10 +51,10 @@ nfpms:
     contents:
       # Shipped to /usr/share rather than installed into ~/.config: a package
       # must not write into a user's home directory, and the unit is per-user.
-      - src: packaging/systemd/simple-agents.service
-        dst: /usr/share/simple-agents/simple-agents.service
+      - src: packaging/systemd/rookery.service
+        dst: /usr/share/rookery/rookery.service
       - src: packaging/README.md
-        dst: /usr/share/doc/simple-agents/README.md
+        dst: /usr/share/doc/rookery/README.md
     # These make the difference between a working install and a mystifying one.
     # python3 in particular: without it the agent-tool AST guardrail self-skips.
     recommends:
@@ -104,11 +104,11 @@ release:
     ```bash
     cosign verify-blob checksums.txt \
       --bundle checksums.txt.bundle \
-      --certificate-identity-regexp 'https://github\.com/ilijad1/simple-agents-v2/.*' \
+      --certificate-identity-regexp 'https://github\.com/ilijad1/rookery/.*' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
     ```
 
     ## Installing
 
     See `packaging/README.md` in the archive, or install the `.deb`/`.rpm` and
-    follow `/usr/share/doc/simple-agents/README.md`.
+    follow `/usr/share/doc/rookery/README.md`.

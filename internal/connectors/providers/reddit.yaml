@@ -9,7 +9,7 @@ identity_path: name
 # User-Agent on every API call — a generic one is rate-limited hard or blocked outright.
 token_auth: basic
 static_headers:
-  User-Agent: "simple-agents/1.0 (self-hosted agent platform)"
+  User-Agent: "rookery/1.0 (self-hosted agent platform)"
 authorize_extra:
   duration: permanent
 default_scopes:

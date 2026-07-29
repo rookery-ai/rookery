@@ -93,9 +93,9 @@ CMD ["serve"]
 
 ARG VERSION=0.0.0-dev
 ARG COMMIT=none
-LABEL org.opencontainers.image.title="simple-agents" \
+LABEL org.opencontainers.image.title="rookery" \
       org.opencontainers.image.description="Multi-workspace AI agents control plane" \
-      org.opencontainers.image.source="https://github.com/ilijad1/simple-agents-v2" \
+      org.opencontainers.image.source="https://github.com/ilijad1/rookery" \
       org.opencontainers.image.licenses="proprietary" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${COMMIT}"

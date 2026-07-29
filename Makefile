@@ -1,4 +1,4 @@
-# simple-agents — build & local deploy helpers.
+# rookery — build & local deploy helpers.
 #
 # `make deploy` is the one-command rebuild+restart: it stops any running
 # server, rebuilds the binary, and starts it in the background with stdout/stderr
@@ -116,10 +116,10 @@ ci-ui:
 
 ## docker-build: build the slim container image locally (podman or docker)
 docker-build:
-	$(CONTAINER_ENGINE) build -t simple-agents:local \
+	$(CONTAINER_ENGINE) build -t rookery:local \
 		--build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) .
 
 ## docker-run: run the locally built image with a persistent data volume
 docker-run:
 	$(CONTAINER_ENGINE) run --rm -it -p 8080:8080 \
-		-v simple-agents-data:/data simple-agents:local
+		-v rookery-data:/data rookery:local

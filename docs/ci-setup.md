@@ -10,7 +10,7 @@ with `GITHUB_TOKEN` do not trigger other workflows, so merging the release PR
 would tag the repository without ever running `release.yml` — producing a tag
 with no artifacts attached to it.
 
-1. Create a fine-grained PAT scoped to `ilijad1/simple-agents-v2`.
+1. Create a fine-grained PAT scoped to `ilijad1/rookery`.
 2. Grant it **Contents: read and write** and **Pull requests: read and write**.
 3. Add it as the repository secret `RELEASE_PLEASE_TOKEN`.
 
@@ -78,7 +78,7 @@ If you *do* want CodeQL while private, buy GHAS and enable
 
 ## 4. GHCR package visibility
 
-The package `ghcr.io/ilijad1/simple-agents-v2` is **private**. A host pulling it
+The package `ghcr.io/ilijad1/rookery` is **private**. A host pulling it
 needs a one-time login:
 
 ```bash
@@ -161,14 +161,14 @@ Normal release-please flow, no manual steps:
 load-bearing, not cosmetic.
 
 The option **defaults to `true`**, which makes release-please tag releases
-`simple-agents-v0.1.0` — the package name, then the version. But
+`rookery-v0.1.0` — the package name, then the version. But
 `.github/workflows/release.yml` triggers on `tags: ["v*"]`, which that string
 does not match. Left at the default, merging a release PR would create a tag
 that **fires no workflow at all**: no binaries, no packages, no image. The
 release would silently produce nothing.
 
 It also breaks changelog scoping in the other direction. Because release-please
-looked for `simple-agents-v0.1.0` and the real tag is `v0.1.0`, it could not find
+looked for `rookery-v0.1.0` and the real tag is `v0.1.0`, it could not find
 any previous release, fell back to walking the entire history, and proposed
 `0.2.0` with a 489-line changelog — after `v0.1.0` had already shipped. This was
 the actual cause of the "482-line changelog" symptom that `bootstrap-sha` (#58)

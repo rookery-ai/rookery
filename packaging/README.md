@@ -3,13 +3,13 @@
 ## Debian / Ubuntu
 
 ```bash
-sudo dpkg -i simple-agents_<version>_linux_amd64.deb
+sudo dpkg -i rookery_<version>_linux_amd64.deb
 ```
 
 ## Fedora / RHEL
 
 ```bash
-sudo rpm -i simple-agents-<version>.x86_64.rpm
+sudo rpm -i rookery-<version>.x86_64.rpm
 ```
 
 ## Running it so it survives a reboot
@@ -19,9 +19,9 @@ data under your own home directory:
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp /usr/share/simple-agents/simple-agents.service ~/.config/systemd/user/
+cp /usr/share/rookery/rookery.service ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now simple-agents
+systemctl --user enable --now rookery
 
 # Without lingering, a user unit stops when your last session ends and does not
 # start at boot. This is the step people miss.
@@ -31,7 +31,7 @@ sudo loginctl enable-linger "$USER"
 Check it:
 
 ```bash
-systemctl --user status simple-agents
+systemctl --user status rookery
 curl -sS http://127.0.0.1:8080/healthz
 ```
 
@@ -53,7 +53,7 @@ unavailable).
 ## Bootstrapping
 
 ```bash
-simple-agents owner bootstrap -u <username> -p <password>
+rookery owner bootstrap -u <username> -p <password>
 ```
 
 Then open `http://<host>:8080/`.

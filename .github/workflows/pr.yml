@@ -204,7 +204,7 @@ jobs:
         with:
           context: .
           load: true
-          tags: simple-agents:pr
+          tags: rookery:pr
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -216,7 +216,7 @@ jobs:
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
-          image-ref: simple-agents:pr
+          image-ref: rookery:pr
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: "1"
@@ -227,13 +227,13 @@ jobs:
       - name: Smoke test
         run: |
           set -euo pipefail
-          docker run -d --name sa-smoke -p 18080:8080 simple-agents:pr
+          docker run -d --name rookery-smoke -p 18080:8080 rookery:pr
 
           for i in $(seq 1 45); do
             if curl -fsS http://127.0.0.1:18080/healthz >/dev/null 2>&1; then break; fi
             if [ "$i" = "45" ]; then
               echo "::error::server never became healthy"
-              docker logs sa-smoke
+              docker logs rookery-smoke
               exit 1
             fi
             sleep 1
@@ -256,5 +256,5 @@ jobs:
           sess="$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/v1/auth/session)"
           [ "$sess" = "200" ] || { echo "::error::session endpoint returned $sess, want 200"; exit 1; }
 
-          docker exec sa-smoke /usr/bin/simple-agents healthcheck
-          docker rm -f sa-smoke
+          docker exec rookery-smoke /usr/bin/rookery healthcheck
+          docker rm -f rookery-smoke
