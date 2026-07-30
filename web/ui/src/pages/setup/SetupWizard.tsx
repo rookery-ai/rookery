@@ -56,7 +56,7 @@ function StepChips({ step }: { step: number }) {
           <li key={s} className="flex items-center gap-1.5">
             <span
               className={cn(
-                "flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px]",
+                "flex size-5 shrink-0 items-center justify-center rounded-full border text-xs",
                 isActive && "border-foreground bg-foreground text-background",
                 isDone && "border-ok bg-ok text-white",
                 !isActive && !isDone && "border-border text-muted-2",
@@ -480,7 +480,7 @@ function ChatAppStep({
                   key={i}
                   className="flex gap-3 rounded-lg border border-border bg-background p-3 text-sm"
                 >
-                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted-surface text-[11px] font-semibold">
+                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted-surface text-xs font-semibold">
                     {i + 1}
                   </span>
                   <span className="leading-relaxed">

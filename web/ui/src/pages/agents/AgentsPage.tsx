@@ -45,7 +45,7 @@ function DraftCard({ draft }: { draft: AgentDraft }) {
     <div className="flex flex-col gap-2 rounded-lg border border-dashed border-warn/50 bg-background p-4">
       <div className="flex items-start justify-between gap-2">
         <h3 className="font-semibold leading-tight">{draft.agent_name || "Untitled draft"}</h3>
-        <span className="shrink-0 rounded-full bg-warn-soft px-2 py-0.5 text-[10px] font-medium text-warn">
+        <span className="shrink-0 rounded-full bg-warn-soft px-2 py-0.5 text-xs font-medium text-warn">
           Draft
         </span>
       </div>

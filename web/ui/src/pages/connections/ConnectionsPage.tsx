@@ -163,11 +163,11 @@ function ServiceTile({
         {provider.label}
       </div>
       {count === 0 ? (
-        <div className="text-[11px] text-muted-2">Connect</div>
+        <div className="text-xs text-muted-2">Connect</div>
       ) : needsReauth ? (
-        <div className="text-[11px] text-warn">reconnect needed</div>
+        <div className="text-xs text-warn">reconnect needed</div>
       ) : (
-        <div className="text-[11px] text-ok">
+        <div className="text-xs text-ok">
           ● {count} account{count > 1 ? "s" : ""}
         </div>
       )}

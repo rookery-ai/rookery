@@ -44,7 +44,7 @@ function ActionRow({ action }: { action: ConnectorAction }) {
         <span className="flex shrink-0 items-center gap-2">
           <span
             className={cn(
-              "rounded-full px-2 py-0.5 text-[11px] font-medium",
+              "rounded-full px-2 py-0.5 text-xs font-medium",
               cap.tone,
             )}
           >

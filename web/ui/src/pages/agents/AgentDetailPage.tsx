@@ -26,7 +26,7 @@ import { SkillsCard, ConnectionsCard } from "./AttachmentCards";
 function RunStatusChip({ status }: { status: AgentRun["status"] }) {
   if (status === "running") {
     return (
-      <span className="flex shrink-0 items-center gap-1 rounded-full bg-warn-soft px-2 py-0.5 text-[10px] font-medium text-warn">
+      <span className="flex shrink-0 items-center gap-1 rounded-full bg-warn-soft px-2 py-0.5 text-xs font-medium text-warn">
         <span className="size-1.5 animate-pulse rounded-full bg-warn" />
         Running
       </span>
@@ -35,7 +35,7 @@ function RunStatusChip({ status }: { status: AgentRun["status"] }) {
   return (
     <span
       className={cn(
-        "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium",
+        "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
         status === "success" ? "bg-ok-soft text-ok" : "bg-danger-soft text-danger",
       )}
     >
@@ -80,7 +80,7 @@ function RunRow({ run }: { run: AgentRun }) {
         )}
       </div>
       {expanded && output && (
-        <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-chrome p-2 font-mono text-[11px]">
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-chrome p-2 font-mono text-xs">
           {output}
         </pre>
       )}

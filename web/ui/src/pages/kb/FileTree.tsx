@@ -613,7 +613,7 @@ function TreeRow({
           ) : (
             <span className="size-3.5 shrink-0" />
           )}
-          <NodeIcon node={node} expanded={expanded} className="size-4 shrink-0 text-[15px]" />
+          <NodeIcon node={node} expanded={expanded} className="size-4 shrink-0 text-base" />
           <span className="flex-1 truncate">{node.display_name}</span>
         </div>
         <DropdownMenu>

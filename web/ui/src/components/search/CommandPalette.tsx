@@ -86,7 +86,7 @@ export function GlobalSearchButton({ onClick }: { onClick: () => void }) {
         </button>
       </TooltipTrigger>
       <TooltipContent side="left">
-        Search everything <kbd className="ml-1 font-mono text-[10px]">⌘K</kbd>
+        Search everything <kbd className="ml-1 font-mono text-xs">⌘K</kbd>
       </TooltipContent>
     </Tooltip>
   );

@@ -44,7 +44,7 @@ export function MessageMeta({ content, createdAt }: { content: string; createdAt
     <div
       data-testid="message-meta"
       className={cn(
-        "mt-0.5 flex select-none items-center gap-1.5 px-1 text-[10px] leading-none text-muted-2",
+        "mt-0.5 flex select-none items-center gap-1.5 px-1 text-xs leading-none text-muted-2",
         "opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100",
       )}
     >

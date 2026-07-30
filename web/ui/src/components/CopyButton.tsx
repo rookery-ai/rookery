@@ -27,7 +27,7 @@ export function CopyButton({ value, label = "Copy" }: { value: string; label?: s
     <button
       type="button"
       onClick={onClick}
-      className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted-2 transition-colors hover:border-primary/40 hover:text-foreground"
+      className="shrink-0 rounded border border-border px-1.5 py-0.5 text-xs text-muted-2 transition-colors hover:border-primary/40 hover:text-foreground"
     >
       {status === "copied" ? "Copied" : status === "failed" ? "Copy failed" : label}
     </button>

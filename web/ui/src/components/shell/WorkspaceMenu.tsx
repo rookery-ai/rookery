@@ -73,7 +73,7 @@ export default function WorkspaceMenu() {
               <DropdownMenuItem key={w.id} onSelect={() => switchTo(w)}>
                 {/* Each row shows its OWN image, so the switcher is scannable
                     by picture rather than by reading every name. */}
-                <WorkspaceAvatar name={w.name} icon={w.icon} className="size-5 text-[10px]" />
+                <WorkspaceAvatar name={w.name} icon={w.icon} className="size-5 text-xs" />
                 Switch to {w.name}
               </DropdownMenuItem>
             ))}

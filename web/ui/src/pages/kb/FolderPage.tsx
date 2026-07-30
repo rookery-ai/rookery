@@ -75,7 +75,7 @@ export default function FolderPage({
                 onClick={() => onOpen(child.path, child.is_dir, child.display_name)}
                 className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-chrome"
               >
-                <NodeIcon node={child} className="size-4 shrink-0 text-[15px]" />
+                <NodeIcon node={child} className="size-4 shrink-0 text-base" />
                 <span className="min-w-0 flex-1 truncate">{child.display_name}</span>
               </button>
             </li>

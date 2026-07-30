@@ -90,7 +90,7 @@ export function SkillsCard({ agentId, attachedSkills, coreSkills, allSkills }: S
         <div className="flex flex-col gap-3">
           {coreSkills.length > 0 && (
             <div className="flex flex-col gap-1.5">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-2">Core</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-2">Core</p>
               {coreSkills.map((sk) => (
                 <label key={sk.name} className="flex items-center gap-2 text-sm">
                   <input
@@ -106,7 +106,7 @@ export function SkillsCard({ agentId, attachedSkills, coreSkills, allSkills }: S
           )}
           {allSkills.length > 0 && (
             <div className="flex flex-col gap-1.5">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-2">
                 Your skills
               </p>
               {allSkills.map((sk) => (

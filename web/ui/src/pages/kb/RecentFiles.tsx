@@ -21,7 +21,7 @@ export default function RecentFiles({
     // shrink-0: this is a fixed block above the tree's scroll region, so it must
     // not be compressed when the tree is long.
     <div className="shrink-0 border-b border-border px-2 py-2">
-      <h2 className="px-2 pb-1 text-[11px] font-medium tracking-wide text-muted-2 uppercase">
+      <h2 className="px-2 pb-1 text-xs font-medium tracking-wide text-muted-2 uppercase">
         Recent
       </h2>
       <ul>

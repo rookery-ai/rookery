@@ -79,7 +79,7 @@ export function ActivityCard({ title, lines, status, startedAt, collapsible }: A
             type="button"
             data-testid="activity-toggle"
             onClick={() => setCollapsed((c) => !c)}
-            className="text-[11px] text-muted-2 hover:text-muted"
+            className="text-xs text-muted-2 hover:text-muted"
           >
             {collapsed ? "▸ expand" : "▾ collapse"}
           </button>
