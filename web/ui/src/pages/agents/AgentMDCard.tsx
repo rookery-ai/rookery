@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Pencil, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import { useAgentActions } from "@/lib/agents";
@@ -12,7 +12,11 @@ type AgentMDCardProps = {
   missingSecrets: string[];
 };
 
-export function AgentMDCard({ agentId, content, missingSecrets }: AgentMDCardProps) {
+export function AgentMDCard({
+  agentId,
+  content,
+  missingSecrets,
+}: AgentMDCardProps) {
   const { saveAgentMD } = useAgentActions();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(content);
@@ -58,7 +62,12 @@ export function AgentMDCard({ agentId, content, missingSecrets }: AgentMDCardPro
         <h2 className="text-sm font-semibold">AGENT.md</h2>
         {editing ? (
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={cancelEditing} disabled={saving}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={cancelEditing}
+              disabled={saving}
+            >
               Cancel
             </Button>
             <Button
@@ -67,11 +76,13 @@ export function AgentMDCard({ agentId, content, missingSecrets }: AgentMDCardPro
               onClick={() => void handleSave()}
               disabled={!dirty || saving}
             >
+              <Save />
               Save
             </Button>
           </div>
         ) : (
           <Button size="sm" variant="outline" onClick={startEditing}>
+            <Pencil />
             Edit
           </Button>
         )}
@@ -80,7 +91,8 @@ export function AgentMDCard({ agentId, content, missingSecrets }: AgentMDCardPro
       {missingSecrets.length > 0 && (
         <div className="flex items-center gap-2 rounded-md bg-warn-soft px-3 py-2 text-xs text-warn">
           <AlertTriangle className="size-3.5 shrink-0" />
-          This agent expects secrets: {missingSecrets.join(", ")} — add them in Secrets.
+          This agent expects secrets: {missingSecrets.join(", ")} — add them in
+          Secrets.
         </div>
       )}
 

@@ -2,13 +2,36 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* Inter Variable, self-hosted.
+   Rookery ships as a single binary for offline/LAN installs, so a Google
+   Fonts @import would both fail there and add an external request. The woff2
+   lives at internal/fonts/ — one copy, two consumers (the Go export path
+   inlines the same bytes as a data: URI) — and reaches us via the "@fonts"
+   Vite alias, which fingerprints it and emits it into dist/.
+   Chosen for a tall x-height and open apertures: the properties that make
+   13px actually legible, which is the whole point of the type-scale change
+   below. */
+@font-face {
+  font-family: "InterVariable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("@fonts/InterVariable.woff2") format("woff2-variations");
+}
+
 /* Design tokens — spec §5. Notion-ish: white content, warm gray chrome,
    near-black text, hairline borders, one restrained accent. */
 :root {
   --background: #ffffff;
   --chrome: #f7f6f3;
   --foreground: #37352f;
-  --border: #e9e7e3;
+  /* Darkened from #e9e7e3: raises card-outline contrast against both
+     --background and --chrome. Deliberately still 1px — a 2px hairline across
+     two dozen cards reads as heavy rather than crisp, so "bolder" comes from
+     the darker value and "bigger" from Card's rounded-xl + p-4. */
+  --border: #dcd8d2;
+  /* One step up, for dividers and emphasised outlines. */
+  --border-strong: #c9c4bc;
   --muted: #716f6b;
   --muted-2: #726f6a;
   --muted-surface: #e3dfd7;
@@ -37,7 +60,7 @@
   --muted-foreground: #716f6b;
   --accent-foreground: #ffffff;
   --destructive: #be322c;
-  --input: #e9e7e3;
+  --input: #dcd8d2;
   --ring: #2d5a74;
   --chart-1: #2d5a74;
   --chart-2: #448361;
@@ -50,7 +73,7 @@
   --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: #f7f6f3;
   --sidebar-accent-foreground: #2d5a74;
-  --sidebar-border: #e9e7e3;
+  --sidebar-border: #dcd8d2;
   --sidebar-ring: #2d5a74;
 }
 
@@ -58,7 +81,8 @@
   --background: #191919;
   --chrome: #202020;
   --foreground: #e6e4e0;
-  --border: #333330;
+  --border: #3f3f3b;
+  --border-strong: #4d4d48;
   --muted: #a3a09a;
   --muted-2: #8b8882;
   --muted-surface: #33332f;
@@ -82,7 +106,7 @@
   --muted-foreground: #a3a09a;
   --accent-foreground: #191919;
   --destructive: #e0716c;
-  --input: #333330;
+  --input: #3f3f3b;
   --ring: #6fa2bd;
   --chart-1: #6fa2bd;
   --chart-2: #6fbf8f;
@@ -95,13 +119,42 @@
   --sidebar-primary-foreground: #191919;
   --sidebar-accent: #2d3e4f;
   --sidebar-accent-foreground: #6fa2bd;
-  --sidebar-border: #333330;
+  --sidebar-border: #3f3f3b;
   --sidebar-ring: #6fa2bd;
 }
 
 @variant dark (.dark &);
 
 @theme inline {
+  /* Font stacks as tokens, so Tailwind's font-sans/font-mono utilities and the
+     body rule all resolve to the same place. InterVariable first, then the
+     system stack as the fallback while the woff2 loads (font-display: swap). */
+  --font-sans: "InterVariable", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Type scale. Remapped HERE rather than at ~405 call sites: Tailwind v4
+     resolves every text-* utility from these tokens, so all 212 text-xs and
+     193 text-sm uses grow at once.
+     Raising body font-size alone does NOT do this — text-sm is an absolute rem
+     value, so the token is the fix and the body rule is a separate, smaller
+     one (it only reaches elements with no text-* class at all).
+     Both halves of each pair must be set: Tailwind pairs --text-X with
+     --text-X--line-height, and setting only the size leaves line-height pinned
+     to the old metric, which makes text cramped rather than more readable. */
+  --text-xs: 0.8125rem; /* 12 → 13px */
+  --text-xs--line-height: 1.25rem;
+  --text-sm: 0.9375rem; /* 14 → 15px */
+  --text-sm--line-height: 1.5rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.625rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl: 1.375rem; /* 20 → 22px */
+  --text-xl--line-height: 1.875rem;
+  --text-2xl: 1.75rem; /* 24 → 28px */
+  --text-2xl--line-height: 2.125rem;
+
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -113,6 +166,7 @@
   --color-chrome: var(--chrome);
   --color-foreground: var(--foreground);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-muted: var(--muted);
   --color-muted-2: var(--muted-2);
   --color-muted-surface: var(--muted-surface);
@@ -155,8 +209,10 @@
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 14px;
+  font-family: var(--font-sans);
+  /* Only affects elements carrying no text-* class; the utilities themselves
+     come from the --text-* scale in @theme inline. */
+  font-size: 15px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -164,6 +220,29 @@ body {
 @layer base {
   * {
     @apply border-border outline-ring/50;
+  }
+
+  /* Restore the pointer cursor on interactive controls.
+     Tailwind v4's Preflight deliberately dropped `button { cursor: pointer }`
+     to match the browser default — and the browser default for a <button> is
+     `cursor: default`. The emitted CSS confirmed it: the whole bundle held two
+     cursor:pointer rules, neither for a button.
+     The result was that 54 raw <button> elements across the app hovered as if
+     they were inert text. It showed up most sharply in the KB pane, where
+     FileTree's rows opt into cursor-pointer explicitly while search results did
+     not — so in ONE pane the tree felt clickable and the results did not,
+     which is exactly how "search finds the pages but they are not clickable"
+     was reported. The clicks always worked; the affordance never did.
+     Fixed once here rather than at 54 call sites, so a new button inherits it
+     instead of having to remember. */
+  button:not(:disabled),
+  [role="tab"]:not([aria-disabled="true"]),
+  summary {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
   }
 }
 

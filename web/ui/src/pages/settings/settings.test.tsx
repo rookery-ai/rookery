@@ -290,3 +290,62 @@ test("Settings load error shows an inline banner", async () => {
 
   expect(await screen.findByText(/database unreachable/i)).toBeInTheDocument();
 });
+
+// ── Owner split ────────────────────────────────────────────────────────────
+//
+// The Owner area used to be ONE nav entry that stacked five sub-sections on a
+// single page, which is what read as cluttered and gave no signal about which
+// part you were looking at. Each is now its own page behind the same gate.
+
+const OWNER_SLUGS = [
+  "owner-workspaces",
+  "owner-instance-url",
+  "owner-system",
+  "owner-backup",
+  "owner-audit",
+] as const;
+
+test("the section nav is grouped, with all five owner sections listed", async () => {
+  mockFetch();
+  wrap();
+
+  // Group headings.
+  expect(await screen.findByRole("heading", { name: "Workspace", level: 3 })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Owner", level: 3 })).toBeInTheDocument();
+
+  for (const label of ["Workspaces", "Instance URL", "System status", "Backup", "Audit log"]) {
+    expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+  }
+});
+
+test("a legacy ?section=owner link redirects to the first owner section", async () => {
+  // Old links and bookmarks must land somewhere real rather than silently
+  // falling back to Profile, which is what an unrecognised slug would do.
+  mockFetch();
+  wrap("/settings?section=owner");
+
+  expect(await screen.findByRole("heading", { name: "Workspaces", level: 2 })).toBeInTheDocument();
+});
+
+test.each(OWNER_SLUGS)("%s renders behind the owner re-auth gate", async (slug) => {
+  // A 403 owner_verification_required on the probe endpoint must produce the
+  // password prompt instead of the section body. A missed OwnerGate wrap would
+  // expose an install-level section, so each slug is asserted individually.
+  mockFetch({
+    "GET /api/v1/admin/overview": () =>
+      jsonResponse({ error: { code: "owner_verification_required", message: "owner verification required" } }, 403),
+  });
+  wrap(`/settings?section=${slug}`);
+
+  expect(await screen.findByLabelText(/owner password/i)).toBeInTheDocument();
+});
+
+test("the owner gate names the section being unlocked", async () => {
+  mockFetch({
+    "GET /api/v1/admin/overview": () =>
+      jsonResponse({ error: { code: "owner_verification_required", message: "owner verification required" } }, 403),
+  });
+  wrap("/settings?section=owner-backup");
+
+  expect(await screen.findByRole("heading", { name: "Backup" })).toBeInTheDocument();
+});

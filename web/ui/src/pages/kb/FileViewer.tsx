@@ -1,13 +1,29 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router";
-import { AlertTriangle, Download, FileWarning, Loader2, MoreHorizontal } from "lucide-react";
+import {
+  AlertTriangle,
+  Download,
+  FileWarning,
+  Loader2,
+  MoreHorizontal,
+  Trash2,
+} from "lucide-react";
 import ChatAboutFileButton from "./ChatAboutFileButton";
 import { ApiError } from "@/lib/api";
 import { rawURL, useKBNote, useDeleteNote } from "@/lib/kb";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
 // FileViewer opens any KB file the WYSIWYG/raw NoteEditor can't: a non-.md
@@ -25,7 +41,13 @@ import {
 // mutation assumes that suffix) — reusing it as-is for a "script.py" would
 // mangle the extension. This is the read-only subset of that pattern,
 // without a title/rename control.
-function FileViewerHeader({ path, onDelete }: { path: string; onDelete: () => void }) {
+function FileViewerHeader({
+  path,
+  onDelete,
+}: {
+  path: string;
+  onDelete: () => void;
+}) {
   const [, setParams] = useSearchParams();
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -38,7 +60,10 @@ function FileViewerHeader({ path, onDelete }: { path: string; onDelete: () => vo
         {segments.slice(0, -1).map((seg, i) => {
           const target = segments.slice(0, i + 1).join("/");
           return (
-            <span key={target} className="flex shrink-0 items-center gap-1.5 text-xs text-muted-2">
+            <span
+              key={target}
+              className="flex shrink-0 items-center gap-1.5 text-xs text-muted-2"
+            >
               <button
                 type="button"
                 // Breadcrumb ancestors are always directories by
@@ -54,7 +79,9 @@ function FileViewerHeader({ path, onDelete }: { path: string; onDelete: () => vo
             </span>
           );
         })}
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold">{filename}</span>
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+          {filename}
+        </span>
       </div>
 
       <div className="flex shrink-0 items-center gap-3">
@@ -77,7 +104,10 @@ function FileViewerHeader({ path, onDelete }: { path: string; onDelete: () => vo
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={() => setDeleteOpen(true)}
+            >
               Delete…
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -91,7 +121,9 @@ function FileViewerHeader({ path, onDelete }: { path: string; onDelete: () => vo
           </DialogHeader>
           <p className="text-sm text-muted-2">This can’t be undone.</p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>
+              Cancel
+            </Button>
             <Button
               variant="destructive"
               onClick={() => {
@@ -99,6 +131,7 @@ function FileViewerHeader({ path, onDelete }: { path: string; onDelete: () => vo
                 onDelete();
               }}
             >
+              <Trash2 />
               Delete
             </Button>
           </DialogFooter>
@@ -135,7 +168,11 @@ export default function FileViewer({ path }: { path: string }) {
           setSearchParams(parent ? { path: parent, dir: "1" } : {});
         },
         onError: (err) => {
-          setDeleteError(err instanceof ApiError ? `Delete failed: ${err.message}` : "Delete failed");
+          setDeleteError(
+            err instanceof ApiError
+              ? `Delete failed: ${err.message}`
+              : "Delete failed",
+          );
         },
       },
     );
@@ -179,7 +216,8 @@ export default function FileViewer({ path }: { path: string }) {
           <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-muted-2">
             <FileWarning className="size-8" />
             <p className="text-sm">
-              Binary file — this format can't be previewed here. Use Download above to save it.
+              Binary file — this format can't be previewed here. Use Download
+              above to save it.
             </p>
           </div>
         ) : (

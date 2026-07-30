@@ -1,13 +1,33 @@
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
-import { AlertTriangle, Download, FileCode, Link2, MoreHorizontal } from "lucide-react";
+import {
+  AlertTriangle,
+  Download,
+  FileCode,
+  Link2,
+  MoreHorizontal,
+  Trash2,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { rawURL, exportURL, useExportFormats, isProtectedPath } from "@/lib/kb";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { FileText } from "lucide-react";
 import EmojiPicker from "./EmojiPicker";
@@ -46,14 +66,20 @@ function ExportMenu({ path }: { path: string }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem asChild>
-          <a href={exportURL(path, "html")} download>HTML</a>
+          <a href={exportURL(path, "html")} download>
+            HTML
+          </a>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <a href={exportURL(path, "docx")} download>Word (.docx)</a>
+          <a href={exportURL(path, "docx")} download>
+            Word (.docx)
+          </a>
         </DropdownMenuItem>
         {pdfOK ? (
           <DropdownMenuItem asChild>
-            <a href={exportURL(path, "pdf")} download>PDF</a>
+            <a href={exportURL(path, "pdf")} download>
+              PDF
+            </a>
           </DropdownMenuItem>
         ) : (
           <DropdownMenuItem
@@ -65,7 +91,9 @@ function ExportMenu({ path }: { path: string }) {
           </DropdownMenuItem>
         )}
         <DropdownMenuItem asChild>
-          <a href={rawURL(path)} download>Markdown (.md)</a>
+          <a href={rawURL(path)} download>
+            Markdown (.md)
+          </a>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -196,7 +224,11 @@ export default function NoteHeader({
           onClick={() => setIconOpen(true)}
           className="flex size-7 shrink-0 items-center justify-center rounded text-lg hover:bg-chrome"
         >
-          {icon ? <span aria-hidden>{icon}</span> : <FileText className="size-4 text-muted-2" />}
+          {icon ? (
+            <span aria-hidden>{icon}</span>
+          ) : (
+            <FileText className="size-4 text-muted-2" />
+          )}
         </button>
       )}
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -204,7 +236,10 @@ export default function NoteHeader({
           {segments.slice(0, -1).map((seg, i) => {
             const target = segments.slice(0, i + 1).join("/");
             return (
-              <span key={target} className="flex shrink-0 items-center gap-1.5 text-xs text-muted-2">
+              <span
+                key={target}
+                className="flex shrink-0 items-center gap-1.5 text-xs text-muted-2"
+              >
                 <button
                   type="button"
                   // Breadcrumb ancestors are always directories by
@@ -240,7 +275,9 @@ export default function NoteHeader({
           />
           <span className="shrink-0 text-xs text-muted-2">.md</span>
         </div>
-        {titleError && <span className="pl-1 text-xs text-danger">{titleError}</span>}
+        {titleError && (
+          <span className="pl-1 text-xs text-danger">{titleError}</span>
+        )}
       </div>
 
       <div className="flex shrink-0 items-center gap-3">
@@ -253,12 +290,18 @@ export default function NoteHeader({
               </span>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="max-w-64">
-              Opened as raw markdown to preserve its exact formatting. Switch to rich text to edit
-              visually — a few uncommon details would be reformatted if you do.
+              Opened as raw markdown to preserve its exact formatting. Switch to
+              rich text to edit visually — a few uncommon details would be
+              reformatted if you do.
             </TooltipContent>
           </Tooltip>
         )}
-        <span className={cn("text-xs", state === "error" ? "text-danger" : "text-muted-2")}>
+        <span
+          className={cn(
+            "text-xs",
+            state === "error" ? "text-danger" : "text-muted-2",
+          )}
+        >
           {STATE_LABEL[state]}
         </span>
         {backlinksCount > 0 && (
@@ -285,7 +328,10 @@ export default function NoteHeader({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => setDeleteOpen(true)}
+              >
                 Delete…
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -294,7 +340,12 @@ export default function NoteHeader({
       </div>
 
       {onSetIcon && (
-        <EmojiPicker open={iconOpen} onOpenChange={setIconOpen} current={icon} onSelect={onSetIcon} />
+        <EmojiPicker
+          open={iconOpen}
+          onOpenChange={setIconOpen}
+          current={icon}
+          onSelect={onSetIcon}
+        />
       )}
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
@@ -304,7 +355,9 @@ export default function NoteHeader({
           </DialogHeader>
           <p className="text-sm text-muted-2">This can’t be undone.</p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>
+              Cancel
+            </Button>
             <Button
               variant="destructive"
               onClick={() => {
@@ -312,6 +365,7 @@ export default function NoteHeader({
                 onDelete();
               }}
             >
+              <Trash2 />
               Delete
             </Button>
           </DialogFooter>

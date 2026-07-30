@@ -2,20 +2,41 @@ package export
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"html"
 	"strings"
+
+	"github.com/ilijad1/rookery/internal/fonts"
 )
 
+// fontFaceCSS inlines the UI font as a data: URI.
+//
+// Naming the font instead would not work for two reasons. ToPDF shells out to a
+// headless renderer running on the SERVER, which will not have Inter installed
+// — a named font silently falls back while the export still reports success.
+// And an exported HTML file is meant to be a single portable document, which a
+// font fetched from anywhere is not.
+//
+// Built once at package init: the encoding is deterministic, so doing it per
+// request would re-base64 48 KB for nothing. It adds ~65 KB to each exported
+// file, consistent with the existing precedent that base64's ~33% inflation is
+// an accepted cost for self-contained exports (see the vault-asset inlining in
+// web/api_kb.go).
+var fontFaceCSS = `@font-face{font-family:"InterVariable";font-style:normal;` +
+	`font-weight:100 900;src:url(data:font/woff2;base64,` +
+	base64.StdEncoding.EncodeToString(fonts.InterVariableWOFF2) +
+	`) format("woff2-variations");}`
+
 // htmlCSS is the inlined stylesheet wrapped around the rendered note. It is kept
-// deliberately small and self-contained (no web fonts, no external assets) so the
-// exported file is a single portable document and so it doubles as clean input to
-// a headless PDF engine. It styles the handful of block types a note produces:
-// headings, code, tables, blockquotes, lists.
-const htmlCSS = `
+// deliberately small and self-contained (the font is EMBEDDED, not fetched — see
+// fontFaceCSS) so the exported file is a single portable document and so it
+// doubles as clean input to a headless PDF engine. It styles the handful of
+// block types a note produces: headings, code, tables, blockquotes, lists.
+var htmlCSS = fontFaceCSS + `
 :root { color-scheme: light; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: "InterVariable", ui-sans-serif, system-ui, Helvetica, Arial, sans-serif;
   line-height: 1.6; color: #1a1a1a; background: #fff;
   max-width: 820px; margin: 2rem auto; padding: 0 1.25rem;
 }

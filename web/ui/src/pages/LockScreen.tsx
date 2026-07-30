@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { Lock } from "lucide-react";
+import { Lock, Unlock } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
@@ -29,7 +29,9 @@ export default function LockScreen() {
     setBusy(true);
     setError("");
     try {
-      await api.post<{ ok: boolean }>("/api/v1/auth/unlock", { master_password: password });
+      await api.post<{ ok: boolean }>("/api/v1/auth/unlock", {
+        master_password: password,
+      });
       setPassword("");
       // Refetch the session first so `locked` is false before anything else
       // re-runs; the rest of the app's queries were 423ing until now and must
@@ -57,12 +59,20 @@ export default function LockScreen() {
         </div>
         <h1 className="mt-4 text-lg font-bold">Locked</h1>
         <p className="mt-1 text-sm text-muted-2">
-          {workspace
-            ? <>Enter the master password for <b className="text-foreground">{workspace.name}</b> to continue.</>
-            : "Enter your master password to continue."}
+          {workspace ? (
+            <>
+              Enter the master password for{" "}
+              <b className="text-foreground">{workspace.name}</b> to continue.
+            </>
+          ) : (
+            "Enter your master password to continue."
+          )}
         </p>
 
-        <form onSubmit={(e) => void unlock(e)} className="mt-6 space-y-3 text-left">
+        <form
+          onSubmit={(e) => void unlock(e)}
+          className="mt-6 space-y-3 text-left"
+        >
           <div className="space-y-1.5">
             <Label htmlFor="unlock_password">Master password</Label>
             <Input
@@ -76,6 +86,7 @@ export default function LockScreen() {
           </div>
           {error && <p className="text-sm text-danger">{error}</p>}
           <Button type="submit" className="w-full" disabled={busy}>
+            <Unlock />
             {busy ? "Unlocking…" : "Unlock"}
           </Button>
         </form>

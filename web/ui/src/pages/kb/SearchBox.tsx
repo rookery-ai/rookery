@@ -65,7 +65,7 @@ export default function SearchBox({
             type="button"
             aria-label="Clear search"
             onClick={clear}
-            className="absolute right-4 top-1/2 -translate-y-1/2 text-muted-2 hover:text-foreground"
+            className="absolute right-4 top-1/2 -translate-y-1/2 cursor-pointer text-muted-2 hover:text-foreground"
           >
             <X className="size-3.5" />
           </button>
@@ -102,9 +102,9 @@ function SearchResults({
           <button
             type="button"
             onClick={() => onSelect(hit.path)}
-            className="block w-full rounded px-2 py-1.5 text-left hover:bg-chrome"
+            className="block w-full cursor-pointer rounded-md px-2 py-2 text-left hover:bg-chrome"
           >
-            <div className="truncate text-xs font-medium text-foreground">{hit.title || hit.path}</div>
+            <div className="truncate text-sm font-medium text-foreground">{hit.title || hit.path}</div>
             {/* Path under the resolved title: for a reflected note the title is
                 a heading or an agent name, so the path is the only thing saying
                 where the hit actually lives. Hidden when it adds nothing. */}

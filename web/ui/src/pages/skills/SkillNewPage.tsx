@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ArrowRight } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   DesignerSurface,
@@ -84,7 +85,12 @@ export default function SkillNewPage() {
               }}
             />
           </div>
-          <Button onClick={confirmName} disabled={!name.trim()} className="w-full">
+          <Button
+            onClick={confirmName}
+            disabled={!name.trim()}
+            className="w-full"
+          >
+            <ArrowRight />
             Continue
           </Button>
         </div>

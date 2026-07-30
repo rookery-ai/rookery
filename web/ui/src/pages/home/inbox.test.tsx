@@ -231,3 +231,38 @@ test("a reminder-sourced message offers no View agent link", async () => {
   await waitFor(() => expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument());
   expect(screen.queryByRole("link", { name: /view agent/i })).not.toBeInTheDocument();
 });
+
+// The endpoint (POST /api/v1/inbox/read-all), the hook (useMarkAllInboxRead)
+// and a passing test for it all already existed. The button was invisible: a
+// 24px-tall, 12px grey GHOST TEXT button in a narrow context pane, rendered
+// only while unread > 0. These assert the affordance itself, not the call.
+test("mark all read is present whenever there are messages, and carries an icon", async () => {
+  messages = [msg({ id: "a", read: true })];
+  mockFetch();
+  wrap();
+
+  const btn = await screen.findByRole("button", { name: /mark all read/i });
+  // Present with nothing unread — discoverable before it is needed, rather
+  // than appearing and vanishing.
+  expect(btn).toBeDisabled();
+  expect(btn.querySelector("svg")).toBeTruthy();
+  // Outlined action at the density floor, not a 24px ghost.
+  expect(btn.className).toMatch(/h-9/);
+});
+
+test("mark all read is enabled and hidden appropriately by message state", async () => {
+  messages = [msg({ id: "a", read: false })];
+  mockFetch();
+  wrap();
+
+  expect(await screen.findByRole("button", { name: /mark all read/i })).toBeEnabled();
+});
+
+test("mark all read is absent when the inbox is empty", async () => {
+  messages = [];
+  mockFetch();
+  wrap();
+
+  await screen.findByText(/no notifications yet/i);
+  expect(screen.queryByRole("button", { name: /mark all read/i })).toBeNull();
+});

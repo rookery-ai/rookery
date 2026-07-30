@@ -79,6 +79,19 @@ function mockFetch() {
       if (url === "/api/v1/auth/session") return Promise.resolve(jsonResponse(SESSION_FIXTURE));
       if (url === "/api/v1/dashboard") return Promise.resolve(jsonResponse(dashboard));
       if (url === "/api/v1/services") return Promise.resolve(jsonResponse({ providers: [] }));
+      // AgentsAtAGlanceCard reads useAgents(); without this the card renders
+      // its empty state and the table assertions below have nothing to find.
+      if (url === "/api/v1/agents" && method === "GET") {
+        return Promise.resolve(
+          jsonResponse({
+            agents: [
+              { id: "agent-1", name: "Failing Agent", description: "", active: true, created_at: "2026-01-01T00:00:00Z", running: false },
+              { id: "agent-2", name: "Backup Bot", description: "", active: true, created_at: "2026-01-01T00:00:00Z", running: false },
+            ],
+            draft: null,
+          }),
+        );
+      }
 
       if (url === "/api/v1/inbox" && method === "GET") return Promise.resolve(jsonResponse({ messages, unread }));
       // Generalized to any id (not just "m1") so multi-message fixtures used
@@ -178,9 +191,12 @@ test("Next up lists upcoming schedules with a link to the agent", async () => {
   mockFetch();
   wrap();
   const heading = await screen.findByText("Next up");
-  const link = await screen.findByRole("link", { name: "Backup Bot" });
+  const card = heading.parentElement!;
+  // Scoped to this card: "Agents at a glance" now also links every agent by
+  // name, so an unscoped getByRole("link", { name }) matches twice.
+  const link = await within(card).findByRole("link", { name: "Backup Bot" });
   expect(link.getAttribute("href")).toBe("/agents/agent-2");
-  expect(heading.parentElement!.textContent).toContain("runs");
+  expect(card.textContent).toContain("runs");
 });
 
 test("Needs attention shows failed runs with view-log and ask-the-designer links", async () => {
@@ -472,4 +488,55 @@ test("reminders: deleting from the pane also clears the main-screen card", async
   const [firstDelete] = screen.getAllByRole("button", { name: /delete reminder/i });
   await userEvent.click(firstDelete);
   await waitFor(() => expect(screen.queryByText("Call the dentist")).not.toBeInTheDocument());
+});
+
+// ── The cards that fill what was a half-empty dashboard ─────────────────────
+//
+// Every one is built from data the SPA already fetches — no new endpoint.
+
+test("quick actions link to the four create surfaces", async () => {
+  mockFetch();
+  wrap();
+  for (const [name, href] of [
+    [/new agent/i, "/agents/new"],
+    [/new note/i, "/kb"],
+    [/start chat/i, "/chats"],
+    [/connect a service/i, "/connections"],
+  ] as const) {
+    const link = await screen.findByRole("link", { name });
+    // Links, not buttons: a button with onClick navigate() silently breaks
+    // middle-click and "open in new tab".
+    expect(link.getAttribute("href")).toBe(href);
+  }
+});
+
+test("recent activity shows successful runs, not only failures", async () => {
+  mockFetch();
+  wrap();
+  await screen.findByRole("heading", { name: /Ilija/ }); // dashboard resolved
+  const card = await screen.findByLabelText("Recent activity");
+  // NeedsAttentionCard filters to failures because that IS its job. This card
+  // does not: recent_runs was already fetched and its successes were never
+  // rendered, so a healthy install looked like it had done nothing.
+  expect(within(card).getByRole("link", { name: "Backup Bot" })).toBeInTheDocument();
+  expect(within(card).getByRole("link", { name: "Failing Agent" })).toBeInTheDocument();
+  expect(card.textContent).toContain("cron");
+});
+
+test("agents at a glance scrolls wide content in its own container", async () => {
+  mockFetch();
+  wrap();
+  await screen.findByRole("heading", { name: /Ilija/ });
+  const card = await screen.findByLabelText("Agents at a glance");
+  await within(card).findByRole("link", { name: "Backup Bot" });
+  // The page container is fluid now, so an unbounded table would make the
+  // whole document scroll sideways instead of the card.
+  expect(card.querySelector(".overflow-x-auto")).toBeTruthy();
+});
+
+test("recent notes offers a way into the knowledge base when empty", async () => {
+  mockFetch();
+  wrap();
+  const card = await screen.findByLabelText("Recently edited notes");
+  expect(within(card).getByRole("link", { name: /browse the knowledge base/i })).toBeInTheDocument();
 });

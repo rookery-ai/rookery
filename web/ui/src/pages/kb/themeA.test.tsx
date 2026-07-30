@@ -116,6 +116,10 @@ test("Change icon… sends a PUT to /kb/icon with the chosen emoji", async () =>
   // Open the row's ⋯ menu, choose Change icon…, pick an emoji.
   await userEvent.click(screen.getByLabelText(/actions for a\.md/i));
   await userEvent.click(await screen.findByText("Change icon…"));
+  // The picker now covers the full Unicode set behind category tabs, so 🚀
+  // (Travel & Places) is not in the default group. Searching is the real flow
+  // with 1906 emoji, and a search cuts across every category.
+  await userEvent.type(await screen.findByLabelText("Search emoji"), "rocket");
   await userEvent.click(await screen.findByLabelText("Set icon 🚀"));
 
   await waitFor(() => expect(calls.length).toBe(1));

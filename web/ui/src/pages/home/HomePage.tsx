@@ -1,7 +1,13 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bell, Bot, Trash2, Clock, AlertTriangle, Plus, Loader2, Check } from "lucide-react";
+import { PageContainer } from "@/components/shell/PageContainer";
+import { PageTitle } from "@/components/shell/PageTitle";
+import { cardClass } from "@/components/ui/card";
+import {
+  AgentsAtAGlanceCard, QuickActions, RecentActivityCard, RecentNotesCard,
+} from "./cards";
+import { AlertTriangle, Bell, Bot, Check, CheckCheck, Clock, Loader2, Plus, Trash2 } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
 import { ContextPaneHeader, ContextSection } from "@/components/shell/ContextPaneParts";
 import { useToast } from "@/components/shell/Toast";
@@ -95,7 +101,7 @@ export function groupByDay(messages: InboxMessage[], now: Date): DayGroup[] {
 
 function DayHeader({ label }: { label: string }) {
   return (
-    <div className="sticky top-0 z-10 mb-1 bg-chrome/95 px-1 py-1 text-[11px] font-semibold text-muted-2 backdrop-blur">
+    <div className="sticky top-0 z-10 mb-1 bg-chrome/95 px-1 py-1 text-xs font-semibold text-muted-2 backdrop-blur">
       {label}
     </div>
   );
@@ -137,11 +143,11 @@ function InboxCard({
           <Icon className="size-3.5 shrink-0 text-muted-2" />
           <span className={cn("truncate", !msg.read && "font-medium")}>{name}</span>
           {msg.status === "error" && (
-            <span className="shrink-0 rounded-full bg-danger-soft px-1.5 py-0.5 text-[10px] font-medium text-danger">
+            <span className="shrink-0 rounded-full bg-danger-soft px-1.5 py-0.5 text-xs font-medium text-danger">
               Failed
             </span>
           )}
-          <span className="ml-auto shrink-0 text-[10px] text-muted-2">{timeAgo(msg.created_at)}</span>
+          <span className="ml-auto shrink-0 text-xs text-muted-2">{timeAgo(msg.created_at)}</span>
         </span>
         {/* Body carries the primary foreground token, not muted-2 — spec §9:
             muted-2 is for metadata (timestamps, counts), not content. */}
@@ -149,7 +155,7 @@ function InboxCard({
       </button>
       {expanded && (
         <div className="mt-1.5">
-          {msg.trigger && <p className="mb-1.5 text-[11px] text-muted-2">Trigger: {msg.trigger}</p>}
+          {msg.trigger && <p className="mb-1.5 text-xs text-muted-2">Trigger: {msg.trigger}</p>}
           <div className="flex items-center justify-end gap-1">
             {msg.agent_id && (
               <Button variant="ghost" size="xs" asChild>
@@ -170,7 +176,7 @@ function InboxCountBadge({ count }: { count: number }) {
   return (
     <span
       aria-label={`${count} unread`}
-      className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold leading-none text-accent-foreground"
+      className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-xs font-semibold leading-none text-accent-foreground"
     >
       {count > 9 ? "9+" : count}
     </span>
@@ -228,11 +234,22 @@ function InboxSection() {
       <ContextSection
         title="Inbox"
         action={
-          unread > 0 ? (
+          // The endpoint, hook and tests for this all existed; the button was
+          // a 24px, 12px grey GHOST TEXT button that only rendered while
+          // unread > 0, which is why it read as missing. It is now a real
+          // outlined action with an icon, present whenever there is anything
+          // to mark and merely disabled when there is nothing — discoverable
+          // before it is needed rather than appearing and vanishing.
+          messages.length > 0 ? (
             <div className="flex items-center gap-2">
-              <InboxCountBadge count={unread} />
-              <Button variant="ghost" size="xs" onClick={() => markAll.mutate()}>
-                Mark all read
+              {unread > 0 && <InboxCountBadge count={unread} />}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={unread === 0 || markAll.isPending}
+                onClick={() => markAll.mutate()}
+              >
+                <CheckCheck /> Mark all read
               </Button>
             </div>
           ) : undefined
@@ -285,7 +302,7 @@ function ReminderRow({ r, onDelete }: { r: Reminder; onDelete: () => void }) {
       <Icon className={cn("mt-0.5 size-3.5 shrink-0", r.sent ? "text-ok" : "text-muted-2")} />
       <div className="min-w-0 flex-1">
         <p className={cn("truncate font-medium", r.sent && "text-muted-2 line-through")}>{r.message}</p>
-        <p className="text-[10px] text-muted-2">
+        <p className="text-xs text-muted-2">
           {r.sent && "Done · "}
           {new Date(r.remind_at).toLocaleString()}
         </p>
@@ -376,7 +393,7 @@ function AddReminderForm() {
         disabled={create.isPending}
         className="h-7 text-xs"
       />
-      {error && <p className="text-[11px] text-danger">{error}</p>}
+      {error && <p className="text-xs text-danger">{error}</p>}
       <Button
         type="submit"
         size="xs"
@@ -446,6 +463,7 @@ function RemindersSection({ view }: { view: RemindersView }) {
         )}
         {ordered.length > PANE_REMINDER_LIMIT && (
           <Button variant="ghost" size="xs" className="w-full" onClick={() => setAllOpen(true)}>
+            <Bell />
             View all reminders ({ordered.length})
           </Button>
         )}
@@ -465,12 +483,12 @@ function RemindersSection({ view }: { view: RemindersView }) {
 
 function StatTile({ value, label, badge }: { value: ReactNode; label: string; badge?: string }) {
   return (
-    <div className="flex-1 rounded-lg border border-border p-3">
+    <div className={cn("flex-1", cardClass)}>
       <div className="flex items-baseline gap-1.5">
         <span className="text-xl font-extrabold">{value}</span>
         {badge && <span className="text-xs font-medium text-danger">{badge}</span>}
       </div>
-      <p className="text-[11px] text-muted-2">{label}</p>
+      <p className="text-xs text-muted-2">{label}</p>
     </div>
   );
 }
@@ -479,8 +497,8 @@ function StatTile({ value, label, badge }: { value: ReactNode; label: string; ba
 
 function NextUpCard({ upcoming }: { upcoming: DashboardUpcoming[] }) {
   return (
-    <div className="rounded-lg border border-border p-3">
-      <h3 className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-2">Next up</h3>
+    <div className={cardClass}>
+      <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-2">Next up</h3>
       {upcoming.length === 0 ? (
         <p className="text-sm text-muted-2">Nothing scheduled.</p>
       ) : (
@@ -508,8 +526,8 @@ function NextUpCard({ upcoming }: { upcoming: DashboardUpcoming[] }) {
 function NeedsAttentionCard({ runs }: { runs: DashboardRun[] }) {
   const failed = runs.filter((r) => r.status === "failed");
   return (
-    <div className="rounded-lg border border-border p-3">
-      <h3 className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-2">
+    <div className={cardClass}>
+      <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-2">
         Needs attention
       </h3>
       {failed.length === 0 ? (
@@ -559,8 +577,8 @@ function RemindersCard({ view }: { view: RemindersView }) {
     // A named region: "Reminders" is also the context pane's section heading,
     // so the dashboard card needs an addressable identity of its own — for a
     // screen reader landing on it out of context as much as for a test.
-    <section aria-label="Upcoming reminders" className="rounded-lg border border-border p-3">
-      <h3 className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-2">Reminders</h3>
+    <section aria-label="Upcoming reminders" className={cardClass}>
+      <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-2">Reminders</h3>
       {shown.length === 0 ? (
         <p className="text-sm text-muted-2">No reminders set.</p>
       ) : (
@@ -578,7 +596,7 @@ function RemindersCard({ view }: { view: RemindersView }) {
         </ul>
       )}
       {upcoming.length > shown.length && (
-        <p className="mt-2 text-[11px] text-muted-2">
+        <p className="mt-2 text-xs text-muted-2">
           +{upcoming.length - shown.length} more in the sidebar
         </p>
       )}
@@ -618,11 +636,13 @@ export default function HomePage() {
         </div>
       </ContextPane>
 
-      <div className="p-6">
-        <div className="mb-6 flex items-center justify-between gap-2">
-          <h1 className="text-xl font-bold">
-            {dash ? `${greeting(hour)}, ${dash.display_name}` : "Welcome"}
-          </h1>
+      <PageContainer>
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <PageTitle
+            icon="home"
+            title={dash ? `${greeting(hour)}, ${dash.display_name}` : "Welcome"}
+          />
+          <QuickActions />
         </div>
 
         <div className="mb-6 flex flex-col gap-3 sm:flex-row">
@@ -635,12 +655,21 @@ export default function HomePage() {
           <StatTile value={connectedServices} label="connected services" />
         </div>
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <NextUpCard upcoming={dash?.upcoming ?? []} />
-          <NeedsAttentionCard runs={runs} />
-          <RemindersCard view={remindersView} />
+        {/* Left column carries the dense, scannable content; right column the
+            short status cards. Collapses to one column below lg. */}
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+          <div className="flex flex-col gap-4">
+            <RecentActivityCard runs={runs} />
+            <AgentsAtAGlanceCard upcoming={dash?.upcoming ?? []} />
+          </div>
+          <div className="flex flex-col gap-4">
+            <NextUpCard upcoming={dash?.upcoming ?? []} />
+            <NeedsAttentionCard runs={runs} />
+            <RemindersCard view={remindersView} />
+            <RecentNotesCard />
+          </div>
         </div>
-      </div>
+      </PageContainer>
     </>
   );
 }

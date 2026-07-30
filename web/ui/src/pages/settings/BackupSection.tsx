@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Download, ShieldCheck, Trash2 } from "lucide-react";
+import { AlertTriangle, Download, HardDriveDownload, HardDriveUpload, Save, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { timeAgo } from "@/lib/utils";
@@ -30,7 +30,15 @@ function ErrorNote({ message }: { message: string }) {
   );
 }
 
-const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const WEEKDAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
 
 // Form state is kept separate from the fetched config because the passphrase
 // and S3 secret are write-only — the server never sends them back, so they
@@ -178,14 +186,15 @@ export function BackupSection() {
     <div>
       <h3 className="text-sm font-bold text-muted-2">Backup</h3>
       <p className="mt-1 text-xs text-muted-2">
-        A snapshot covers every workspace — knowledge base, agents, skills, secrets and settings —
-        in one encrypted file. Times are in the server's local timezone.
+        A snapshot covers every workspace — knowledge base, agents, skills,
+        secrets and settings — in one encrypted file. Times are in the server's
+        local timezone.
       </p>
 
       {data.pending_restore && (
         <div className="mt-3 rounded-md bg-warning-soft px-3 py-2 text-xs text-warning">
-          A restore is staged and will be applied the next time the server starts. Run{" "}
-          <code>rookery backup cancel-restore</code> to abandon it.
+          A restore is staged and will be applied the next time the server
+          starts. Run <code>rookery backup cancel-restore</code> to abandon it.
         </div>
       )}
 
@@ -193,7 +202,13 @@ export function BackupSection() {
       <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-xs">
         <div>
           <dt className="text-muted-2">Last run</dt>
-          <dd className={data.last_status === "error" ? "font-medium text-danger" : "font-medium"}>
+          <dd
+            className={
+              data.last_status === "error"
+                ? "font-medium text-danger"
+                : "font-medium"
+            }
+          >
             {data.last_run_at && !data.last_run_at.startsWith("0001")
               ? timeAgo(data.last_run_at)
               : "never"}
@@ -202,7 +217,9 @@ export function BackupSection() {
         <div>
           <dt className="text-muted-2">Next run</dt>
           <dd className="font-medium">
-            {data.enabled && data.next_run_at && !data.next_run_at.startsWith("0001")
+            {data.enabled &&
+            data.next_run_at &&
+            !data.next_run_at.startsWith("0001")
               ? new Date(data.next_run_at).toLocaleString()
               : "not scheduled"}
           </dd>
@@ -236,7 +253,9 @@ export function BackupSection() {
             <select
               className="mt-1 rounded-md border border-line bg-transparent px-2 py-1"
               value={form.destination}
-              onChange={(e) => set("destination", e.target.value as "local" | "s3")}
+              onChange={(e) =>
+                set("destination", e.target.value as "local" | "s3")
+              }
             >
               <option value="local">Local folder</option>
               <option value="s3">S3-compatible</option>
@@ -248,7 +267,9 @@ export function BackupSection() {
             <select
               className="mt-1 rounded-md border border-line bg-transparent px-2 py-1"
               value={form.schedule}
-              onChange={(e) => set("schedule", e.target.value as "daily" | "weekly")}
+              onChange={(e) =>
+                set("schedule", e.target.value as "daily" | "weekly")
+              }
             >
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
@@ -313,14 +334,24 @@ export function BackupSection() {
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-xs">
               <span className="block text-muted-2">Bucket</span>
-              <Input className="mt-1" value={form.s3Bucket} onChange={(e) => set("s3Bucket", e.target.value)} />
+              <Input
+                className="mt-1"
+                value={form.s3Bucket}
+                onChange={(e) => set("s3Bucket", e.target.value)}
+              />
             </label>
             <label className="text-xs">
               <span className="block text-muted-2">Region</span>
-              <Input className="mt-1" value={form.s3Region} onChange={(e) => set("s3Region", e.target.value)} />
+              <Input
+                className="mt-1"
+                value={form.s3Region}
+                onChange={(e) => set("s3Region", e.target.value)}
+              />
             </label>
             <label className="text-xs">
-              <span className="block text-muted-2">Endpoint (blank for AWS)</span>
+              <span className="block text-muted-2">
+                Endpoint (blank for AWS)
+              </span>
               <Input
                 className="mt-1"
                 placeholder="https://s3.us-west-002.backblazeb2.com"
@@ -339,11 +370,18 @@ export function BackupSection() {
             </label>
             <label className="text-xs">
               <span className="block text-muted-2">Access key</span>
-              <Input className="mt-1" value={form.s3AccessKey} onChange={(e) => set("s3AccessKey", e.target.value)} />
+              <Input
+                className="mt-1"
+                value={form.s3AccessKey}
+                onChange={(e) => set("s3AccessKey", e.target.value)}
+              />
             </label>
             <label className="text-xs">
               <span className="block text-muted-2">
-                Secret key {data.s3.secret_key_set && <span className="text-ok">(set)</span>}
+                Secret key{" "}
+                {data.s3.secret_key_set && (
+                  <span className="text-ok">(set)</span>
+                )}
               </span>
               <Input
                 className="mt-1"
@@ -359,7 +397,9 @@ export function BackupSection() {
                 checked={form.s3PathStyle}
                 onChange={(e) => set("s3PathStyle", e.target.checked)}
               />
-              <span>Use path-style URLs (MinIO and some R2 setups need this)</span>
+              <span>
+                Use path-style URLs (MinIO and some R2 setups need this)
+              </span>
             </label>
           </div>
         )}
@@ -390,12 +430,13 @@ export function BackupSection() {
             </label>
           )}
           <p className="mt-1 text-xs text-danger">
-            Write this down. It is the only way to recover your data — nobody can reset it for you.
+            Write this down. It is the only way to recover your data — nobody
+            can reset it for you.
           </p>
           {data.passphrase_set && (
             <p className="mt-1 text-xs text-muted-2">
-              Changing it does not re-encrypt existing snapshots; each stays readable with the
-              passphrase in force when it was written.
+              Changing it does not re-encrypt existing snapshots; each stays
+              readable with the passphrase in force when it was written.
             </p>
           )}
         </div>
@@ -405,13 +446,19 @@ export function BackupSection() {
 
         <div className="flex gap-2">
           <Button onClick={onSave} disabled={save.isPending}>
+            <Save />
             {save.isPending ? "Saving…" : "Save"}
           </Button>
           <Button
             variant="secondary"
-            onClick={() => run.mutate(undefined, { onSuccess: (r) => setNotice(`Wrote ${r.name}.`) })}
+            onClick={() =>
+              run.mutate(undefined, {
+                onSuccess: (r) => setNotice(`Wrote ${r.name}.`),
+              })
+            }
             disabled={run.isPending || !data.passphrase_set}
           >
+            <HardDriveDownload />
             {run.isPending ? "Backing up…" : "Back up now"}
           </Button>
         </div>
@@ -432,7 +479,10 @@ export function BackupSection() {
           )}
           <ul className="mt-2 divide-y divide-line text-xs">
             {snapshots.data?.map((s) => (
-              <li key={s.name} className="flex flex-wrap items-center gap-2 py-2">
+              <li
+                key={s.name}
+                className="flex flex-wrap items-center gap-2 py-2"
+              >
                 <span className="font-mono">{s.name}</span>
                 <span className="text-muted-2">{formatBytes(s.size)}</span>
                 <span className="ml-auto flex items-center gap-2">
@@ -467,10 +517,12 @@ export function BackupSection() {
       {restoreTarget && (
         <div className="mt-4 rounded-md border border-danger p-3">
           <p className="text-xs font-medium text-danger">
-            Restore {restoreTarget}? This replaces the database and every workspace vault.
+            Restore {restoreTarget}? This replaces the database and every
+            workspace vault.
           </p>
           <p className="mt-1 text-xs text-muted-2">
-            The current data is moved aside into a <code>.pre-restore-*</code> folder first.
+            The current data is moved aside into a <code>.pre-restore-*</code>{" "}
+            folder first.
           </p>
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
             <label className="text-xs">
@@ -483,7 +535,9 @@ export function BackupSection() {
               />
             </label>
             <label className="text-xs">
-              <span className="block text-muted-2">Type RESTORE to confirm</span>
+              <span className="block text-muted-2">
+                Type RESTORE to confirm
+              </span>
               <Input
                 className="mt-1"
                 aria-label="Type RESTORE to confirm"
@@ -497,7 +551,9 @@ export function BackupSection() {
               <ErrorNote message={errMsg(restore.error)} />
             </div>
           )}
-          {restore.data && <p className="mt-2 text-xs text-warning">{restore.data.message}</p>}
+          {restore.data && (
+            <p className="mt-2 text-xs text-warning">{restore.data.message}</p>
+          )}
           <div className="mt-2 flex gap-2">
             <Button
               variant="destructive"
@@ -510,6 +566,7 @@ export function BackupSection() {
                 })
               }
             >
+            <HardDriveUpload />
               {restore.isPending ? "Staging…" : "Restore"}
             </Button>
             <Button
@@ -517,11 +574,15 @@ export function BackupSection() {
               onClick={() =>
                 verify.mutate(
                   { name: restoreTarget, passphrase: restorePassphrase },
-                  { onSuccess: (r) => setNotice(`Snapshot is intact: ${r.files} files.`) },
+                  {
+                    onSuccess: (r) =>
+                      setNotice(`Snapshot is intact: ${r.files} files.`),
+                  },
                 )
               }
               disabled={verify.isPending}
             >
+            <ShieldCheck />
               {verify.isPending ? "Verifying…" : "Verify only"}
             </Button>
             <Button

@@ -1,12 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { AlertTriangle } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Hammer,
+  MessageSquare,
+  Pencil,
+  Play,
+  Save,
+  Undo2,
+} from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { openSSE, type SSEHandle } from "@/lib/sse";
 import { ChatScroll } from "@/components/chat/ChatScroll";
 import { ChatMessageBubble, TypingIndicator } from "@/components/chat/Bubbles";
 import { Composer } from "@/components/chat/Composer";
-import { ActivityCard, type ActivityStatus } from "@/components/chat/ActivityCard";
+import {
+  ActivityCard,
+  type ActivityStatus,
+} from "@/components/chat/ActivityCard";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Stepper } from "./Stepper";
@@ -89,7 +101,10 @@ export type DesignerSurfaceProps = {
   // Returning false makes the surface treat the session as inactive. Omitted
   // (every caller but AgentEditPage) accepts everything, which is the
   // pre-existing behavior.
-  acceptRecoveredSession?: (info: { isEdit: boolean; agentId: string }) => boolean;
+  acceptRecoveredSession?: (info: {
+    isEdit: boolean;
+    agentId: string;
+  }) => boolean;
 };
 
 type Role = "user" | "assistant";
@@ -147,7 +162,11 @@ type ResumeResponse = {
   can_keep_as_is?: boolean;
 };
 
-const STATE_INDEX: Record<string, number> = { describing: 0, designing: 1, verifying: 3 };
+const STATE_INDEX: Record<string, number> = {
+  describing: 0,
+  designing: 1,
+  verifying: 3,
+};
 
 const BUILD_PHRASE = "build it";
 const SAVE_PHRASE = "save";
@@ -179,8 +198,13 @@ export function DesignerSurface({
   const [error, setError] = useState<string | null>(null);
   const [generationFailed, setGenerationFailed] = useState(false);
   const [canKeepAsIs, setCanKeepAsIs] = useState(false);
-  const [resumeBanner, setResumeBanner] = useState<{ name?: string } | null>(null);
-  const [sse, setSse] = useState<{ lines: string[]; status: ActivityStatus } | null>(null);
+  const [resumeBanner, setResumeBanner] = useState<{ name?: string } | null>(
+    null,
+  );
+  const [sse, setSse] = useState<{
+    lines: string[];
+    status: ActivityStatus;
+  } | null>(null);
   const [focusSignal, setFocusSignal] = useState(0);
   const [view, setView] = useState<"transcript" | "spec">("transcript");
   const [pendingAgentMD, setPendingAgentMD] = useState("");
@@ -257,7 +281,8 @@ export function DesignerSurface({
     sseStartedAtRef.current = Date.now();
     setSse({ lines: seedLine ? [seedLine] : [], status: "live" });
     const handle = openSSE(endpoints.progress, {
-      onMessage: (line) => setSse((s) => (s ? { ...s, lines: [...s.lines, line] } : s)),
+      onMessage: (line) =>
+        setSse((s) => (s ? { ...s, lines: [...s.lines, line] } : s)),
       onDone: () => {
         setSse((s) => (s ? { ...s, status: "done" } : s));
         sseHandleRef.current = null;
@@ -269,7 +294,8 @@ export function DesignerSurface({
         // build clears awaitingBuildResultRef, so it still never refetches.
         const src = attachSourceRef.current;
         const needsRefetch =
-          src === "recovery" || (src === "live" && awaitingBuildResultRef.current);
+          src === "recovery" ||
+          (src === "live" && awaitingBuildResultRef.current);
         if (needsRefetch && !doneRef.current && endpoints.state) {
           awaitingBuildResultRef.current = false;
           void refetchState();
@@ -311,7 +337,10 @@ export function DesignerSurface({
       const accepted =
         snap.active &&
         (!acceptRecoveredSession ||
-          acceptRecoveredSession({ isEdit: !!snap.is_edit, agentId: snap.agent_id ?? "" }));
+          acceptRecoveredSession({
+            isEdit: !!snap.is_edit,
+            agentId: snap.agent_id ?? "",
+          }));
       if (accepted) {
         sessionTouchedRef.current = true;
         sessionOpenedRef.current = true;
@@ -328,7 +357,8 @@ export function DesignerSurface({
         // already shipped once.
         setPendingAgentMD(snap.pending_agent_md ?? "");
         setPendingTools(snap.pending_tools ?? {});
-        if (snap.generating) ensureSSE("recovery", snap.last_progress || undefined);
+        if (snap.generating)
+          ensureSSE("recovery", snap.last_progress || undefined);
       } else {
         setGenerating(false);
         if (!dismissedRef.current && draft) {
@@ -390,7 +420,10 @@ export function DesignerSurface({
       sessionTouchedRef.current = true;
       sessionOpenedRef.current = true;
       const hist = res.history ?? [];
-      setMessages([...hist, { role: "assistant", content: res.response, created_at: nowStamp() }]);
+      setMessages([
+        ...hist,
+        { role: "assistant", content: res.response, created_at: nowStamp() },
+      ]);
       setFsmState((res.state as FsmState) ?? null);
       setGenerationFailed(!!res.generation_failed);
       setCanKeepAsIs(!!res.can_keep_as_is);
@@ -428,7 +461,10 @@ export function DesignerSurface({
 
   async function handleSend(text: string) {
     setError(null);
-    setMessages((m) => [...m, { role: "user", content: text, created_at: nowStamp() }]);
+    setMessages((m) => [
+      ...m,
+      { role: "user", content: text, created_at: nowStamp() },
+    ]);
     sessionTouchedRef.current = true;
     setBusy(true);
     // Set when this POST reports the generation is STILL running elsewhere
@@ -451,8 +487,10 @@ export function DesignerSurface({
       // (the editor's edit/start creates it from the agent id in the URL; the
       // create pages pass a name). No caller needs both, so the payload is never
       // merged into a start POST.
-      const url = isFirstMessage && startEndpoint ? startEndpoint : endpoints.design;
-      if (isFirstMessage && startPayload && !startEndpoint) Object.assign(body, startPayload);
+      const url =
+        isFirstMessage && startEndpoint ? startEndpoint : endpoints.design;
+      if (isFirstMessage && startPayload && !startEndpoint)
+        Object.assign(body, startPayload);
 
       const res = await api.post<DesignResponse>(url, body);
       sessionOpenedRef.current = true;
@@ -461,13 +499,19 @@ export function DesignerSurface({
       if (res.done) {
         doneRef.current = true;
         awaitingBuildResultRef.current = false;
-        setMessages((m) => [...m, { role: "assistant", content: res.response, created_at: nowStamp() }]);
+        setMessages((m) => [
+          ...m,
+          { role: "assistant", content: res.response, created_at: nowStamp() },
+        ]);
         setFsmState("done");
         onDone(res.agent_id ?? res.skill_id);
         return;
       }
 
-      setMessages((m) => [...m, { role: "assistant", content: res.response, created_at: nowStamp() }]);
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", content: res.response, created_at: nowStamp() },
+      ]);
       if (res.state) setFsmState(res.state as FsmState);
       setGenerationFailed(!!res.generation_failed);
       setCanKeepAsIs(!!res.can_keep_as_is);
@@ -542,11 +586,18 @@ export function DesignerSurface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [generating]);
 
-  const stepIndex = generating ? 2 : fsmState ? (STATE_INDEX[fsmState] ?? 0) : 0;
+  const stepIndex = generating
+    ? 2
+    : fsmState
+      ? (STATE_INDEX[fsmState] ?? 0)
+      : 0;
   const composerBusy = busy || recovering;
-  const lastIsAssistant = messages.length > 0 && messages[messages.length - 1]!.role === "assistant";
-  const showDesigningActions = fsmState === "designing" && !generating && !busy && lastIsAssistant;
-  const showVerifyingActions = fsmState === "verifying" && !generating && !busy && lastIsAssistant;
+  const lastIsAssistant =
+    messages.length > 0 && messages[messages.length - 1]!.role === "assistant";
+  const showDesigningActions =
+    fsmState === "designing" && !generating && !busy && lastIsAssistant;
+  const showVerifyingActions =
+    fsmState === "verifying" && !generating && !busy && lastIsAssistant;
 
   if (resumeBanner) {
     return (
@@ -559,13 +610,16 @@ export function DesignerSurface({
         </div>
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
           <p className="text-sm text-muted-2">
-            You have an unfinished draft{resumeBanner.name ? `: ${resumeBanner.name}` : ""}
+            You have an unfinished draft
+            {resumeBanner.name ? `: ${resumeBanner.name}` : ""}
           </p>
           <div className="flex gap-2">
             <Button onClick={() => void handleResume()} disabled={busy}>
+              <Play />
               Resume
             </Button>
             <Button variant="outline" onClick={() => void handleDiscard()}>
+              <Undo2 />
               Discard
             </Button>
           </div>
@@ -590,7 +644,9 @@ export function DesignerSurface({
                 onClick={() => setView("transcript")}
                 className={cn(
                   "rounded px-2.5 py-1 text-xs",
-                  view === "transcript" ? "bg-chrome font-medium text-foreground" : "text-muted-2",
+                  view === "transcript"
+                    ? "bg-chrome font-medium text-foreground"
+                    : "text-muted-2",
                 )}
               >
                 Transcript
@@ -600,7 +656,9 @@ export function DesignerSurface({
                 onClick={() => void openSpecView()}
                 className={cn(
                   "rounded px-2.5 py-1 text-xs",
-                  view === "spec" ? "bg-chrome font-medium text-foreground" : "text-muted-2",
+                  view === "spec"
+                    ? "bg-chrome font-medium text-foreground"
+                    : "text-muted-2",
                 )}
               >
                 Spec
@@ -617,7 +675,8 @@ export function DesignerSurface({
         <div className="flex min-h-0 flex-1 flex-col">
           {generating && (
             <div className="border-b border-border bg-chrome px-4 py-2 text-xs text-muted-2">
-              A new build is in progress — this will update automatically when it's done.
+              A new build is in progress — this will update automatically when
+              it's done.
             </div>
           )}
           <div className="min-h-0 flex-1">
@@ -630,10 +689,17 @@ export function DesignerSurface({
               flight — mount recovery may still be about to populate it, and
               flashing a "start here" card in front of a session that's about
               to restore would be worse than the blank page it replaces. */}
-          {intro && messages.length === 0 && !busy && !recovering && <>{intro}</>}
+          {intro && messages.length === 0 && !busy && !recovering && (
+            <>{intro}</>
+          )}
 
           {messages.map((m, i) => (
-            <ChatMessageBubble key={i} role={m.role} content={m.content} createdAt={m.created_at} />
+            <ChatMessageBubble
+              key={i}
+              role={m.role}
+              content={m.content}
+              createdAt={m.created_at}
+            />
           ))}
 
           {sse && (
@@ -653,9 +719,11 @@ export function DesignerSurface({
           {showDesigningActions && (
             <div className="flex gap-2 pl-1">
               <Button size="sm" onClick={handleBuildClick}>
+                <Hammer />
                 {labels.buildButton}
               </Button>
               <Button size="sm" variant="outline" onClick={focusComposer}>
+                <Pencil />
                 Make changes
               </Button>
             </div>
@@ -664,9 +732,11 @@ export function DesignerSurface({
           {showVerifyingActions && (
             <div className="flex gap-2 pl-1">
               <Button size="sm" onClick={() => void handleSend(SAVE_PHRASE)}>
+                <Save />
                 {labels.saveButton}
               </Button>
               <Button size="sm" variant="outline" onClick={focusComposer}>
+                <MessageSquare />
                 Request changes
               </Button>
             </div>
@@ -680,9 +750,17 @@ export function DesignerSurface({
               ("describe a change or say 'try again'") named the exact action that did NOT
               work: a described change was routed to a chat turn instead of a rebuild. The
               flow now rebuilds on any non-question message, so this just says so. */}
-          <span>The last build didn&apos;t finish. Tell me what to change and I&apos;ll rebuild it.</span>
+          <span>
+            The last build didn&apos;t finish. Tell me what to change and
+            I&apos;ll rebuild it.
+          </span>
           {canKeepAsIs && (
-            <Button size="xs" variant="outline" onClick={() => void handleSend(KEEP_AS_IS_PHRASE)}>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() => void handleSend(KEEP_AS_IS_PHRASE)}
+            >
+              <Check />
               Keep it as-is
             </Button>
           )}

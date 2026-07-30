@@ -254,6 +254,10 @@ var workspaceIcons = map[string]bool{
 	"aurora": true, "orbit": true, "prism": true, "meadow": true,
 	"ember": true, "tide": true, "dusk": true, "grove": true,
 	"signal": true, "quartz": true, "bloom": true, "slate": true,
+	"cascade": true, "lattice": true, "forum": true, "spring": true,
+	"nova": true, "eclipse": true, "surge": true, "venn": true,
+	"summit": true, "monolith": true, "waning": true, "clinic": true,
+	"strata": true, "beacon": true, "sprout": true, "voyage": true,
 }
 
 type apiWorkspaceIconRequest struct {

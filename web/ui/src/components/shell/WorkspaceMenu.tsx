@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Image, LogOut, Plus } from "lucide-react";
 import { useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
@@ -73,14 +74,20 @@ export default function WorkspaceMenu() {
               <DropdownMenuItem key={w.id} onSelect={() => switchTo(w)}>
                 {/* Each row shows its OWN image, so the switcher is scannable
                     by picture rather than by reading every name. */}
-                <WorkspaceAvatar name={w.name} icon={w.icon} className="size-5 text-[10px]" />
+                <WorkspaceAvatar name={w.name} icon={w.icon} className="size-5 text-xs" />
                 Switch to {w.name}
               </DropdownMenuItem>
             ))}
-          <DropdownMenuItem onSelect={() => setPickingIcon(true)}>Change image…</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setCreating(true)}>+ Create workspace</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setPickingIcon(true)}>
+            <Image /> Change image…
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setCreating(true)}>
+            <Plus /> Create workspace
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={leave}>Leave workspace</DropdownMenuItem>
+          <DropdownMenuItem onSelect={leave}>
+            <LogOut /> Leave workspace
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       {switchError && (

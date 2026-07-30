@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Upload, Loader2 } from "lucide-react";
+import { Loader2, Upload } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/shell/Toast";
@@ -68,6 +68,7 @@ export default function ImagePicker({
                 <Upload className="size-6 text-muted-2" />
                 <p className="text-sm text-muted-2">Drag an image here, or</p>
                 <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+            <Upload />
                   Choose file
                 </Button>
                 <input

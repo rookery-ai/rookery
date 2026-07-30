@@ -320,8 +320,20 @@ func writeRun(b *strings.Builder, s string, rp runProps) {
 		return
 	}
 	b.WriteString("<w:r>")
-	if rp.bold || rp.italic || rp.code || rp.strike || rp.link {
-		b.WriteString("<w:rPr>")
+	// rPr is now unconditional because every run names its font. DOCX can only
+	// NAME a font: embedding one in the OOXML package is out of scope, so Word
+	// substitutes when the reader has not installed Inter. That is a stated
+	// limitation, not an oversight — unlike the HTML/PDF path, which embeds the
+	// woff2 outright (see fontFaceCSS in html.go).
+	//
+	// There is no styles.xml part in this package (see the file header), so a
+	// document-level default is not available; per-run rFonts is the only place
+	// the font can be declared without adding a fifth part.
+	b.WriteString("<w:rPr>")
+	if !rp.code {
+		b.WriteString(`<w:rFonts w:ascii="Inter" w:hAnsi="Inter" w:cs="Inter"/>`)
+	}
+	{
 		if rp.link {
 			b.WriteString(`<w:rStyle w:val="Hyperlink"/>`)
 		}
@@ -340,8 +352,8 @@ func writeRun(b *strings.Builder, s string, rp runProps) {
 		if rp.link {
 			b.WriteString(`<w:color w:val="0563C1"/><w:u w:val="single"/>`)
 		}
-		b.WriteString("</w:rPr>")
 	}
+	b.WriteString("</w:rPr>")
 	b.WriteString(`<w:t xml:space="preserve">`)
 	b.WriteString(escXML(s))
 	b.WriteString("</w:t></w:r>")
