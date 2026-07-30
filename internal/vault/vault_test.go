@@ -154,3 +154,26 @@ func nodeNames(nodes []Node) string {
 	}
 	return b.String()
 }
+
+// EnsureScaffold must not write memory files. memory.SeedIdentity owns
+// ABOUT.md and STYLE.md exclusively; a placeholder written here would be
+// created by a lazy KB visit and then rewritten by the next boot's backfill,
+// giving one file two writers — and the placeholder itself was the original
+// bug, since isEffectivelyEmpty dropped it from every prompt.
+func TestEnsureScaffoldWritesNoMemoryFiles(t *testing.T) {
+	v := New(t.TempDir())
+	if err := v.EnsureScaffold("ws1"); err != nil {
+		t.Fatalf("EnsureScaffold: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(v.Root("ws1"), "memory"))
+	if err != nil {
+		t.Fatalf("memory dir should exist: %v", err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("EnsureScaffold wrote memory files: %v", names)
+	}
+}
