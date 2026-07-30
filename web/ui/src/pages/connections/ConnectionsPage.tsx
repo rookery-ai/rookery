@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Search, MessageSquare, Puzzle } from "lucide-react";
+import { PageContainer } from "@/components/shell/PageContainer";
 import { ContextPane, useSlideOver } from "@/components/shell/AppShell";
 import { ContextPaneHeader } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
@@ -495,7 +496,7 @@ export default function ConnectionsPage() {
         </div>
       </ContextPane>
 
-      <div className="mx-auto max-w-5xl p-6">
+      <PageContainer>
         {landingBanner && (
           <LandingBanner
             kind={landingBanner.kind}
@@ -635,7 +636,7 @@ export default function ConnectionsPage() {
             </div>
           )}
         </section>
-      </div>
+      </PageContainer>
     </>
   );
 }

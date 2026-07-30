@@ -192,7 +192,7 @@ export function CommandPalette({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="top-[20%] max-w-xl translate-y-0 gap-0 overflow-hidden p-0" showCloseButton={false}>
+      <DialogContent className="top-[12%] max-w-3xl translate-y-0 gap-0 overflow-hidden p-0" showCloseButton={false}>
         <DialogHeader className="sr-only">
           <DialogTitle>Search</DialogTitle>
           <DialogDescription>Search notes, agents, chats, skills, connections, secrets, and reminders</DialogDescription>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { AlertTriangle, Check } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
+import { PageContainer } from "@/components/shell/PageContainer";
 import { ContextPaneHeader } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -463,7 +464,7 @@ export default function SettingsPage() {
         </div>
       </ContextPane>
 
-      <div className="mx-auto max-w-3xl p-6">
+      <PageContainer>
         {isError && <ErrorBanner message={errMessage(error)} />}
         {isLoading ? (
           <div className="text-sm text-muted-2">Loading…</div>
@@ -528,7 +529,7 @@ export default function SettingsPage() {
             )}
           </>
         )}
-      </div>
+      </PageContainer>
     </>
   );
 }

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { MoreHorizontal } from "lucide-react";
+import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -127,7 +128,7 @@ export default function AgentDetailPage() {
     <div className="flex h-full flex-col overflow-y-auto p-6">
       <div className="mb-1 flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold">{agent.name}</h1>
+          <PageTitle icon="agents" title={agent.name} />
           <StatusChip agent={agent} />
         </div>
         <div className="flex shrink-0 items-center gap-2">

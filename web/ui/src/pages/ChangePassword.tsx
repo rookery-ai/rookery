@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
+import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -36,7 +37,9 @@ export default function ChangePassword() {
   return (
     <div className="min-h-screen bg-chrome flex items-center justify-center">
       <form onSubmit={submit} className="bg-background border border-border rounded-xl p-8 w-full max-w-sm shadow-sm">
-        <h1 className="text-xl font-bold mb-6">Change password</h1>
+        <div className="mb-6">
+          <PageTitle icon="master-password" title="Change password" />
+        </div>
         <div className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="password">New password</Label>

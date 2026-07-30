@@ -793,7 +793,7 @@ export default function NoteEditor({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {mode === "wysiwyg" ? (
-          <div className="mx-auto max-w-3xl px-6 py-8">
+          <div className="px-[7%] py-8">
             <FrontmatterStrip
               frontmatter={frontmatter}
               open={metaOpen}
@@ -810,7 +810,7 @@ export default function NoteEditor({
         ) : (
           <textarea
             aria-label="Raw markdown"
-            className="h-full w-full resize-none bg-background px-6 py-8 font-mono text-sm text-foreground outline-none"
+            className="h-full w-full resize-none bg-background px-[7%] py-8 font-mono text-sm text-foreground outline-none"
             value={rawText}
             onChange={handleRawChange}
             spellCheck={false}

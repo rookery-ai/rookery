@@ -322,3 +322,15 @@ test("'New note' asks the knowledge base to open its new-note dialog", async () 
 
   expect(await screen.findByText("new-note requested")).toBeInTheDocument();
 });
+
+test("the command palette is wide and sits high", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const nodePath = await import("node:path");
+  const here = nodePath.dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(nodePath.join(here, "CommandPalette.tsx"), "utf8");
+  // 576px at 20% down was cramped for a result list with snippets.
+  expect(src).toContain("max-w-3xl");
+  expect(src).toContain("top-[12%]");
+  expect(src).not.toContain("max-w-xl ");
+});

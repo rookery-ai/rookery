@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Sparkles, Plus, Search, Upload } from "lucide-react";
+import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -229,19 +230,22 @@ export default function SkillsPage() {
   return (
     <div className="flex h-full flex-col overflow-y-auto p-6">
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Skills</h1>
-          {total > 0 && (
-            <p className="mt-0.5 text-sm text-muted-2">
-              {skills.length > 0 && (
-                <>
-                  {skills.length} skill{skills.length > 1 ? "s" : ""} +{" "}
-                </>
-              )}
-              {coreSkills.length} built-in
-            </p>
-          )}
-        </div>
+        <PageTitle
+          icon="skills"
+          title="Skills"
+          subtitle={
+            total > 0 ? (
+              <>
+                {skills.length > 0 && (
+                  <>
+                    {skills.length} skill{skills.length > 1 ? "s" : ""} +{" "}
+                  </>
+                )}
+                {coreSkills.length} built-in
+              </>
+            ) : undefined
+          }
+        />
         <div className="flex items-center gap-2">
           {total > 0 && (
             <div className="relative">

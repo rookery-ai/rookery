@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Bot, Plus, Search } from "lucide-react";
+import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
@@ -113,14 +114,15 @@ export default function AgentsPage() {
   return (
     <div className="flex h-full flex-col p-6">
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Agents</h1>
-          {agents.length > 0 && (
-            <p className="mt-0.5 text-sm text-muted-2">
-              {agents.length} agent{agents.length > 1 ? "s" : ""} configured
-            </p>
-          )}
-        </div>
+        <PageTitle
+          icon="agents"
+          title="Agents"
+          subtitle={
+            agents.length > 0
+              ? `${agents.length} agent${agents.length > 1 ? "s" : ""} configured`
+              : undefined
+          }
+        />
         <div className="flex items-center gap-2">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-2" />

@@ -1,6 +1,12 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { PageContainer } from "@/components/shell/PageContainer";
+import { PageTitle } from "@/components/shell/PageTitle";
+import { cardClass } from "@/components/ui/card";
+import {
+  AgentsAtAGlanceCard, QuickActions, RecentActivityCard, RecentNotesCard,
+} from "./cards";
 import { Bell, Bot, Trash2, Clock, AlertTriangle, Plus, Loader2, Check, CheckCheck } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
 import { ContextPaneHeader, ContextSection } from "@/components/shell/ContextPaneParts";
@@ -476,7 +482,7 @@ function RemindersSection({ view }: { view: RemindersView }) {
 
 function StatTile({ value, label, badge }: { value: ReactNode; label: string; badge?: string }) {
   return (
-    <div className="flex-1 rounded-lg border border-border p-3">
+    <div className={cn("flex-1", cardClass)}>
       <div className="flex items-baseline gap-1.5">
         <span className="text-xl font-extrabold">{value}</span>
         {badge && <span className="text-xs font-medium text-danger">{badge}</span>}
@@ -490,7 +496,7 @@ function StatTile({ value, label, badge }: { value: ReactNode; label: string; ba
 
 function NextUpCard({ upcoming }: { upcoming: DashboardUpcoming[] }) {
   return (
-    <div className="rounded-lg border border-border p-3">
+    <div className={cardClass}>
       <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-2">Next up</h3>
       {upcoming.length === 0 ? (
         <p className="text-sm text-muted-2">Nothing scheduled.</p>
@@ -519,7 +525,7 @@ function NextUpCard({ upcoming }: { upcoming: DashboardUpcoming[] }) {
 function NeedsAttentionCard({ runs }: { runs: DashboardRun[] }) {
   const failed = runs.filter((r) => r.status === "failed");
   return (
-    <div className="rounded-lg border border-border p-3">
+    <div className={cardClass}>
       <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-2">
         Needs attention
       </h3>
@@ -570,7 +576,7 @@ function RemindersCard({ view }: { view: RemindersView }) {
     // A named region: "Reminders" is also the context pane's section heading,
     // so the dashboard card needs an addressable identity of its own — for a
     // screen reader landing on it out of context as much as for a test.
-    <section aria-label="Upcoming reminders" className="rounded-lg border border-border p-3">
+    <section aria-label="Upcoming reminders" className={cardClass}>
       <h3 className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-2">Reminders</h3>
       {shown.length === 0 ? (
         <p className="text-sm text-muted-2">No reminders set.</p>
@@ -629,11 +635,13 @@ export default function HomePage() {
         </div>
       </ContextPane>
 
-      <div className="p-6">
-        <div className="mb-6 flex items-center justify-between gap-2">
-          <h1 className="text-xl font-bold">
-            {dash ? `${greeting(hour)}, ${dash.display_name}` : "Welcome"}
-          </h1>
+      <PageContainer>
+        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <PageTitle
+            icon="home"
+            title={dash ? `${greeting(hour)}, ${dash.display_name}` : "Welcome"}
+          />
+          <QuickActions />
         </div>
 
         <div className="mb-6 flex flex-col gap-3 sm:flex-row">
@@ -646,12 +654,21 @@ export default function HomePage() {
           <StatTile value={connectedServices} label="connected services" />
         </div>
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <NextUpCard upcoming={dash?.upcoming ?? []} />
-          <NeedsAttentionCard runs={runs} />
-          <RemindersCard view={remindersView} />
+        {/* Left column carries the dense, scannable content; right column the
+            short status cards. Collapses to one column below lg. */}
+        <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+          <div className="flex flex-col gap-4">
+            <RecentActivityCard runs={runs} />
+            <AgentsAtAGlanceCard upcoming={dash?.upcoming ?? []} />
+          </div>
+          <div className="flex flex-col gap-4">
+            <NextUpCard upcoming={dash?.upcoming ?? []} />
+            <NeedsAttentionCard runs={runs} />
+            <RemindersCard view={remindersView} />
+            <RecentNotesCard />
+          </div>
         </div>
-      </div>
+      </PageContainer>
     </>
   );
 }

@@ -857,3 +857,26 @@ test("a 409 agent_running save shows the server message and leaves the edit dirt
   fireEvent.keyDown(window, { key: "s", ctrlKey: true });
   await waitFor(() => expect(putCount).toBe(2));
 });
+
+test("both editor modes use the same 7% gutter, with no p-* shorthand", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const nodePath = await import("node:path");
+  // See styles.test.ts: Vite's asset-URL transform turns
+  // new URL(relative, import.meta.url) into an http: URL even under vitest.
+  const here = nodePath.dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(nodePath.join(here, "NoteEditor.tsx"), "utf8");
+
+  // TWO occurrences: the WYSIWYG container and the raw markdown textarea. Miss
+  // the textarea and switching modes jumps the layout horizontally.
+  expect(src.match(/px-\[7%\]/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+
+  // The old treatment centred the note in a 768px column, which read as a
+  // 25-30% gutter per side on a wide display.
+  expect(src).not.toMatch(/mx-auto max-w-3xl/);
+
+  // tailwind-merge group trap: p-* beside px-* keeps BOTH classes and lets
+  // stylesheet order decide (CLAUDE.md records this bug in ChatScroll).
+  expect(src).not.toMatch(/className="[^"]*\bp-\d[^"]*px-\[7%\]/);
+  expect(src).not.toMatch(/className="[^"]*px-\[7%\][^"]*\bp-\d\b/);
+});

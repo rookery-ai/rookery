@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Check, KeyRound, Pencil, Search, Trash2 } from "lucide-react";
+import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -306,14 +307,15 @@ export default function SecretsPage() {
   return (
     <div className="flex h-full flex-col overflow-y-auto p-6">
       <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Secrets</h1>
-          {secrets.length > 0 && (
-            <p className="mt-0.5 text-sm text-muted-2">
-              {secrets.length} secret{secrets.length > 1 ? "s" : ""} stored
-            </p>
-          )}
-        </div>
+        <PageTitle
+          icon="secrets"
+          title="Secrets"
+          subtitle={
+            secrets.length > 0
+              ? `${secrets.length} secret${secrets.length > 1 ? "s" : ""} stored`
+              : undefined
+          }
+        />
         {secrets.length > 0 && (
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-2" />

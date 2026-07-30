@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
 import { useSession, type Workspace } from "@/lib/session";
+import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -162,7 +163,9 @@ export default function Workspaces() {
   return (
     <div className="min-h-screen bg-chrome flex items-center justify-center p-4">
       <div className="bg-background border border-border rounded-xl p-8 w-full max-w-md shadow-sm">
-        <h1 className="text-xl font-bold mb-1">Workspaces</h1>
+        <div className="mb-1">
+          <PageTitle icon="owner-workspaces" title="Workspaces" />
+        </div>
         <p className="text-muted-2 text-sm mb-6">
           Pick a workspace to enter — its master password is required every time.
         </p>

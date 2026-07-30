@@ -37,7 +37,7 @@ export default function FolderPage({
   const children = sortNodes(tree?.nodes ?? [], tree?.order ?? [], path === "");
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-6 py-8">
+    <div className="mx-auto flex h-full w-full max-w-[1600px] flex-col px-8 py-8">
       <div className="mb-6 flex items-center gap-3">
         <button
           type="button"
@@ -47,7 +47,7 @@ export default function FolderPage({
         >
           <NodeIcon node={folderNode} expanded className="size-7 text-2xl" />
         </button>
-        <h1 className="min-w-0 flex-1 truncate text-2xl font-semibold">{displayName}</h1>
+        <h1 className="min-w-0 flex-1 truncate text-xl font-bold">{displayName}</h1>
         <Button variant="outline" size="sm" onClick={() => setNewKind("note")}>
           <FilePlus className="mr-1 size-4" /> New note
         </Button>
