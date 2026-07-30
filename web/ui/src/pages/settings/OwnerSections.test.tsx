@@ -2,7 +2,10 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
-import { OwnerSections } from "./OwnerSections";
+import {
+  AuditLogSection, InstanceURLSection, SystemStatusSection, WorkspacesSection,
+} from "./OwnerSections";
+import { BackupSection } from "./BackupSection";
 import { OwnerGate } from "./OwnerGate";
 
 function jsonResponse(body: unknown, status = 200) {
@@ -104,7 +107,14 @@ function wrap() {
   return render(
     <QueryClientProvider client={qc}>
       <MemoryRouter>
-        <OwnerSections />
+        {/* The OwnerSections wrapper is gone — each section is now its own
+            settings page. This renders all five together so the existing
+            assertions keep exercising the same components. */}
+        <WorkspacesSection />
+        <InstanceURLSection />
+        <SystemStatusSection />
+        <BackupSection />
+        <AuditLogSection />
       </MemoryRouter>
     </QueryClientProvider>,
   );

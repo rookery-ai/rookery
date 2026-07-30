@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   Folder, FolderOpen, FileText, Brain, Bot, MessageSquare, Sparkles,
-  ChevronRight, MoreHorizontal, FolderInput, Trash2, X, type LucideIcon,
+  ChevronRight, MoreHorizontal, FolderInput, Trash2, X, FilePlus, FolderPlus,
+  Pencil, Smile, type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
@@ -600,7 +601,7 @@ function TreeRow({
           }}
           style={{ paddingLeft: 6 + depth * 14 }}
           className={cn(
-            "flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-1 text-sm",
+            "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-sm",
             dragged ? "cursor-grabbing" : "cursor-pointer",
             multiSelected ? "bg-accent/20" : selected ? "bg-border" : "hover:bg-chrome",
             isEffectivelySystem(node) && "text-muted-2",
@@ -608,10 +609,10 @@ function TreeRow({
         >
           {node.is_dir ? (
             <ChevronRight
-              className={cn("size-3.5 shrink-0 text-muted-2 transition-transform", expanded && "rotate-90")}
+              className={cn("size-4 shrink-0 text-muted-2 transition-transform", expanded && "rotate-90")}
             />
           ) : (
-            <span className="size-3.5 shrink-0" />
+            <span className="size-4 shrink-0" />
           )}
           <NodeIcon node={node} expanded={expanded} className="size-4 shrink-0 text-base" />
           <span className="flex-1 truncate">{node.display_name}</span>
@@ -620,27 +621,35 @@ function TreeRow({
           <DropdownMenuTrigger asChild>
             <button
               aria-label={`Actions for ${node.display_name}`}
-              className="shrink-0 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-border focus-visible:opacity-100"
+              className="flex size-7 shrink-0 items-center justify-center rounded-md opacity-0 transition-opacity group-hover:opacity-100 hover:bg-border focus-visible:opacity-100"
             >
-              <MoreHorizontal className="size-3.5" />
+              <MoreHorizontal className="size-4" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
             {node.is_dir && (
               <>
-                <DropdownMenuItem onSelect={() => setDialog("new-note")}>New note…</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setDialog("new-folder")}>New folder…</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setDialog("new-note")}>
+                  <FilePlus /> New note…
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setDialog("new-folder")}>
+                  <FolderPlus /> New folder…
+                </DropdownMenuItem>
               </>
             )}
-            <DropdownMenuItem onSelect={() => setDialog("icon")}>Change icon…</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setDialog("icon")}>
+              <Smile /> Change icon…
+            </DropdownMenuItem>
             {/* Rename/Delete are withheld for system-managed, DB-backed nodes
                 (agents/chats/inbox/skills/reminders): removing them here would
                 orphan the backing record — delete from the item's own page. */}
             {!isProtectedPath(node.path) && (
               <>
-                <DropdownMenuItem onSelect={() => setDialog("rename")}>Rename…</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setDialog("rename")}>
+                  <Pencil /> Rename…
+                </DropdownMenuItem>
                 <DropdownMenuItem variant="destructive" onSelect={() => setDialog("delete")}>
-                  Delete…
+                  <Trash2 /> Delete…
                 </DropdownMenuItem>
               </>
             )}
@@ -750,7 +759,7 @@ function TreeLevel({
 
   if (isLoading) {
     return (
-      <div style={{ paddingLeft: 6 + depth * 14 }} className="py-1 text-xs text-muted-2">
+      <div style={{ paddingLeft: 6 + depth * 14 }} className="py-2 text-xs text-muted-2">
         Loading…
       </div>
     );

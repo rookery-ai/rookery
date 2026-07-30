@@ -1,21 +1,23 @@
 import { NavLink, useLocation } from "react-router";
-import {
-  House, Library, Bot, Sparkles, Plug, MessageSquare, KeyRound, Settings, Lock,
-} from "lucide-react";
+import { Lock } from "lucide-react";
+import { ENTITY_ICONS } from "@/lib/entityIcons";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useInboxPoll } from "@/lib/home";
 import { useLockUI } from "@/lib/lock";
 import WorkspaceMenu from "./WorkspaceMenu";
 
+// Icons come from the shared entity map (lib/entityIcons) rather than being
+// imported here, so the rail and a page's own title cannot disagree about what
+// a destination looks like.
 export const railItems = [
-  { to: "/", label: "Home", icon: House },
-  { to: "/kb", label: "Knowledge Base", icon: Library },
-  { to: "/agents", label: "Agents", icon: Bot },
-  { to: "/skills", label: "Skills", icon: Sparkles },
-  { to: "/connections", label: "Connections", icon: Plug },
-  { to: "/chats", label: "Chats", icon: MessageSquare },
-  { to: "/secrets", label: "Secrets", icon: KeyRound },
+  { to: "/", label: "Home", icon: ENTITY_ICONS.home },
+  { to: "/kb", label: "Knowledge Base", icon: ENTITY_ICONS.kb },
+  { to: "/agents", label: "Agents", icon: ENTITY_ICONS.agents },
+  { to: "/skills", label: "Skills", icon: ENTITY_ICONS.skills },
+  { to: "/connections", label: "Connections", icon: ENTITY_ICONS.connections },
+  { to: "/chats", label: "Chats", icon: ENTITY_ICONS.chats },
+  { to: "/secrets", label: "Secrets", icon: ENTITY_ICONS.secrets },
 ];
 
 // Small accent dot + count shown on the Home rail icon when there's unread
@@ -164,7 +166,7 @@ export default function IconRail() {
                              md:inset-x-auto md:top-auto md:left-0 md:h-6 md:w-[3px]"
                 />
               )}
-              <Settings className="size-5 stroke-[2.25]" />
+              <ENTITY_ICONS.settings className="size-5 stroke-[2.25]" />
             </NavLink>
           </TooltipTrigger>
           <TooltipContent side="right">Profile &amp; Settings</TooltipContent>

@@ -39,7 +39,7 @@ function SkillCard({
   return (
     <Link
       to={to}
-      className="flex flex-col gap-2 rounded-lg border border-border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:shadow-sm"
+      className="flex flex-col gap-2 rounded-xl border border-border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:shadow-sm"
     >
       <h3 className="font-semibold leading-tight">{name}</h3>
       <div className="flex flex-wrap items-center gap-1.5">
@@ -95,7 +95,7 @@ function DraftBanner({ draft }: { draft: SkillDraft }) {
   const dismiss = useDismissSkillDraft();
   if (!draft) return null;
   return (
-    <div className="mb-6 flex items-center justify-between gap-3 rounded-lg border border-dashed border-warn/50 bg-background p-4">
+    <div className="mb-6 flex items-center justify-between gap-3 rounded-xl border border-dashed border-warn/50 bg-background p-4">
       <div>
         <p className="text-sm font-semibold">
           Unfinished draft{draft.skill_name ? `: ${draft.skill_name}` : ""}
@@ -179,7 +179,7 @@ function ImportDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
 // workspace until the user happened to start a draft.
 function EmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border p-8 text-center text-muted-2">
+    <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border p-8 text-center text-muted-2">
       <Sparkles className="size-10" />
       <h2 className="text-lg font-bold text-foreground">No skills of your own yet</h2>
       <p className="max-w-sm text-sm">

@@ -95,7 +95,7 @@ function AccountRow({
   const active = connection.status === "ACTIVE";
 
   return (
-    <div className="space-y-2 rounded-lg border border-border p-3 text-sm">
+    <div className="space-y-2 rounded-xl border border-border p-4 text-sm">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="truncate font-medium">{connection.label}</div>

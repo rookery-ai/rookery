@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { timeAgo } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
+import { entityIcon } from "@/lib/entityIcons";
 import { useSession } from "@/lib/session";
 import { CreateWorkspaceDialog } from "@/pages/Workspaces";
 import {
@@ -15,7 +16,14 @@ import {
   useTestPublicURL,
 } from "@/lib/settings";
 import type { Workspace } from "@/lib/session";
-import { BackupSection } from "./BackupSection";
+
+// Each owner section is its own settings page now, so it carries a page-level
+// heading with the same icon its nav entry uses (one shared map, so the two
+// cannot disagree).
+function OwnerIcon({ slug }: { slug: string }) {
+  const Icon = entityIcon(slug);
+  return <Icon className="size-5 shrink-0 text-muted" />;
+}
 
 function errMsg(err: unknown) {
   return err instanceof ApiError ? err.message : "Something went wrong";
@@ -83,7 +91,7 @@ function WorkspaceCard({ ws, activeID }: { ws: Workspace; activeID: string | und
   );
 }
 
-function WorkspacesSection() {
+export function WorkspacesSection() {
   const { data: session } = useSession();
   const [creating, setCreating] = useState(false);
   const workspaces = session?.workspaces ?? [];
@@ -91,7 +99,10 @@ function WorkspacesSection() {
 
   return (
     <div>
-      <h3 className="text-sm font-bold text-muted-2">Workspaces</h3>
+      <div className="flex items-center gap-2.5">
+        <OwnerIcon slug="owner-workspaces" />
+        <h2 className="text-lg font-bold">Workspaces</h2>
+      </div>
       <div className="mt-2 space-y-3">
         {workspaces.map((ws) => (
           <WorkspaceCard key={ws.id} ws={ws} activeID={activeID} />
@@ -113,7 +124,7 @@ function WorkspacesSection() {
 // config.yaml, the per-workspace timeout from the workspace row, and the
 // sandbox memory cap from the sandbox config. The inputs were removed rather
 // than wired up, leaving the two indicators that report something real.
-function SystemStatusSection() {
+export function SystemStatusSection() {
   const { data, isLoading, isError, error } = useAdminSettings();
 
   const sandboxOn = data?.sandbox_on ?? false;
@@ -121,7 +132,10 @@ function SystemStatusSection() {
 
   return (
     <div>
-      <h3 className="text-sm font-bold text-muted-2">System status</h3>
+      <div className="flex items-center gap-2.5">
+        <OwnerIcon slug="owner-system" />
+        <h2 className="text-lg font-bold">System status</h2>
+      </div>
       <p className="mt-1 text-xs text-muted-2">
         Coder and sandbox settings come from <code>config.yaml</code> and each workspace's own
         coder configuration.
@@ -154,7 +168,7 @@ function SystemStatusSection() {
 // consequential setting for connecting a service. Left unset it is detected from
 // the browser's request, which is why the redirect URI used to change depending
 // on how the operator reached the page.
-function InstanceURLSection() {
+export function InstanceURLSection() {
   const { data, isLoading } = usePublicURL();
   const save = useSavePublicURL();
   const test = useTestPublicURL();
@@ -170,7 +184,10 @@ function InstanceURLSection() {
   const source = data?.public_url_source;
   return (
     <div>
-      <h3 className="text-sm font-bold text-muted-2">Instance URL</h3>
+      <div className="flex items-center gap-2.5">
+        <OwnerIcon slug="owner-instance-url" />
+        <h2 className="text-lg font-bold">Instance URL</h2>
+      </div>
       <p className="mt-1 text-xs text-muted-2">
         The address this server is reached at. Every service connection's redirect URI is built
         from it, so providers must be able to accept it. Leave it empty to detect it from your
@@ -236,7 +253,7 @@ function InstanceURLSection() {
 
 // ── Audit log ────────────────────────────────────────────────────────────
 
-function AuditLogSection() {
+export function AuditLogSection() {
   const { data: session } = useSession();
   const [action, setAction] = useState("");
   const [workspaceID, setWorkspaceID] = useState("");
@@ -282,7 +299,10 @@ function AuditLogSection() {
 
   return (
     <div>
-      <h3 className="text-sm font-bold text-muted-2">Audit log</h3>
+      <div className="flex items-center gap-2.5">
+        <OwnerIcon slug="owner-audit" />
+        <h2 className="text-lg font-bold">Audit log</h2>
+      </div>
       <p className="mt-1 text-xs text-muted-2">
         Most recent first, up to 100 matching events.
       </p>
@@ -369,26 +389,5 @@ function AuditLogSection() {
         </div>
       )}
     </div>
-  );
-}
-
-// ── Page ─────────────────────────────────────────────────────────────────
-
-export function OwnerSections() {
-  return (
-    <section>
-      <h2 className="text-lg font-bold">Owner</h2>
-      <p className="mt-1 text-sm text-muted-2">
-        Workspaces, system status, backup, and the audit log.
-      </p>
-
-      <div className="mt-6 space-y-8">
-        <WorkspacesSection />
-        <InstanceURLSection />
-        <SystemStatusSection />
-        <BackupSection />
-        <AuditLogSection />
-      </div>
-    </section>
   );
 }

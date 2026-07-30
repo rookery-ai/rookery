@@ -97,7 +97,7 @@ function EmojiGrid({
           onClick={() => onPick(emoji)}
           aria-label={`Set icon ${emoji}`}
           className={
-            "flex h-8 w-8 items-center justify-center rounded text-lg hover:bg-chrome " +
+            "flex size-9 items-center justify-center rounded-md text-xl hover:bg-chrome " +
             (current === emoji ? "bg-border" : "")
           }
         >

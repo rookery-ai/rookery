@@ -619,3 +619,46 @@ test("NewEntryDialog keeps the typed name when dirPath changes while it is open"
 
   expect(screen.getByLabelText("Name")).toHaveValue("ideas");
 });
+
+// ── Density and the actions menu ───────────────────────────────────────────
+
+test("a tree row and its actions trigger meet the click-target floor", async () => {
+  mockFetch();
+  renderTree();
+  const label = await screen.findByText("Notes");
+  const row = label.closest("div[style]")!;
+
+  // A 26px row (px-1.5 py-1) with an 18px hover-only trigger is what "you need
+  // to aim to click something" was about.
+  expect(row.className).toMatch(/py-2/);
+
+  const trigger = screen.getAllByRole("button", { name: /Actions for/i })[0];
+  expect(trigger.className).toMatch(/size-7/);
+  // ALWAYS mounted, revealed by opacity: mounting a node under the cursor
+  // cancels an in-progress drag-select (CLAUDE.md records this for
+  // MessageMeta's footer), so reveal must never be conditional rendering.
+  expect(trigger.className).toMatch(/opacity-0/);
+  expect(trigger.className).toMatch(/group-hover:opacity-100/);
+});
+
+test("every actions-menu item carries an icon", async () => {
+  mockFetch();
+  renderTree();
+  const user = userEvent.setup();
+  await user.click((await screen.findAllByRole("button", { name: /Actions for notes/i }))[0]);
+
+  for (const name of [/new note/i, /new folder/i, /change icon/i, /rename/i, /delete/i]) {
+    const item = await screen.findByRole("menuitem", { name });
+    expect(item.querySelector("svg"), `no icon on ${name}`).toBeTruthy();
+  }
+});
+
+test("delete is the destructive item, so it reads as the dangerous one", async () => {
+  mockFetch();
+  renderTree();
+  const user = userEvent.setup();
+  await user.click((await screen.findAllByRole("button", { name: /Actions for notes/i }))[0]);
+
+  const del = await screen.findByRole("menuitem", { name: /delete/i });
+  expect(del.getAttribute("data-variant")).toBe("destructive");
+});

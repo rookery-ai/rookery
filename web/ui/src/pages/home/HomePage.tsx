@@ -1,7 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Bell, Bot, Trash2, Clock, AlertTriangle, Plus, Loader2, Check } from "lucide-react";
+import { Bell, Bot, Trash2, Clock, AlertTriangle, Plus, Loader2, Check, CheckCheck } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
 import { ContextPaneHeader, ContextSection } from "@/components/shell/ContextPaneParts";
 import { useToast } from "@/components/shell/Toast";
@@ -228,11 +228,22 @@ function InboxSection() {
       <ContextSection
         title="Inbox"
         action={
-          unread > 0 ? (
+          // The endpoint, hook and tests for this all existed; the button was
+          // a 24px, 12px grey GHOST TEXT button that only rendered while
+          // unread > 0, which is why it read as missing. It is now a real
+          // outlined action with an icon, present whenever there is anything
+          // to mark and merely disabled when there is nothing — discoverable
+          // before it is needed rather than appearing and vanishing.
+          messages.length > 0 ? (
             <div className="flex items-center gap-2">
-              <InboxCountBadge count={unread} />
-              <Button variant="ghost" size="xs" onClick={() => markAll.mutate()}>
-                Mark all read
+              {unread > 0 && <InboxCountBadge count={unread} />}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={unread === 0 || markAll.isPending}
+                onClick={() => markAll.mutate()}
+              >
+                <CheckCheck /> Mark all read
               </Button>
             </div>
           ) : undefined

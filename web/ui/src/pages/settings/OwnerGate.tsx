@@ -20,7 +20,15 @@ const GATE_CODE = "owner_verification_required";
  * timer here could only disagree with it. When the stamp lapses, the next
  * request 403s and the prompt comes back on its own.
  */
-export function OwnerGate({ children }: { children: React.ReactNode }) {
+export function OwnerGate({
+  title = "Owner settings",
+  children,
+}: {
+  /** Names the area being unlocked, so the prompt matches the section the user
+   *  actually clicked now that the five owner sections are separate pages. */
+  title?: string;
+  children: React.ReactNode;
+}) {
   const qc = useQueryClient();
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -60,7 +68,7 @@ export function OwnerGate({ children }: { children: React.ReactNode }) {
     <section className="max-w-sm">
       <div className="flex items-center gap-2">
         <ShieldCheck className="size-5" />
-        <h2 className="text-lg font-bold">Owner settings</h2>
+        <h2 className="text-lg font-bold">{title}</h2>
       </div>
       <p className="mt-1 text-sm text-muted-2">
         These settings cover your whole install — every workspace, and your backups. Confirm

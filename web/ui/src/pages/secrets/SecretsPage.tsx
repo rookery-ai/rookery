@@ -57,7 +57,7 @@ function AddSecretCard({ existing }: { existing: string[] }) {
   }
 
   return (
-    <section className="rounded-lg border border-border bg-background p-4">
+    <section className="rounded-xl border border-border bg-background p-4">
       <div className="flex items-center gap-2">
         <h2 className="text-sm font-semibold">Add secret</h2>
         {saved && (
@@ -335,7 +335,7 @@ export default function SecretsPage() {
       {showEmpty ? (
         <EmptyState />
       ) : (
-        <ul className="divide-y divide-border rounded-lg border border-border bg-background">
+        <ul className="divide-y divide-border rounded-xl border border-border bg-background">
           {filtered.map((s) => (
             <li key={s.name} className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="flex items-center gap-2 min-w-0">

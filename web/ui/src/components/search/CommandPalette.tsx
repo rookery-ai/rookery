@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState, type ComponentType } from "react";
 import { useNavigate } from "react-router";
 import {
-  Bell, Bot, FileText, KeyRound, Loader2, MessageCircleQuestion, MessageSquare, Plug, Plus,
-  Search, Settings, Sparkles,
+  Loader2, MessageCircleQuestion, Plus, Search, Settings,
 } from "lucide-react";
 import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator,
@@ -10,21 +9,29 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSlideOver } from "@/components/shell/AppShell";
+import { entityIcon } from "@/lib/entityIcons";
 import { GlobalChatPanel } from "@/components/chat/GlobalChatButton";
 import { useGlobalSearch, type SearchItem } from "@/lib/search";
 
 const DEBOUNCE_MS = 200;
 
 // kind -> group label + icon, per web/api_search.go's groups.
-const KIND_META: Record<string, { label: string; icon: ComponentType<{ className?: string }> }> = {
-  notes: { label: "Notes", icon: FileText },
-  agents: { label: "Agents", icon: Bot },
-  chats: { label: "Chats", icon: MessageSquare },
-  skills: { label: "Skills", icon: Sparkles },
-  connections: { label: "Connections", icon: Plug },
-  secrets: { label: "Secrets", icon: KeyRound },
-  reminders: { label: "Reminders", icon: Bell },
+// Icons come from the shared entity map so a palette hit and the destination
+// it navigates to show the same glyph. Only the LABELS live here.
+const KIND_LABELS: Record<string, string> = {
+  notes: "Notes",
+  agents: "Agents",
+  chats: "Chats",
+  skills: "Skills",
+  connections: "Connections",
+  secrets: "Secrets",
+  reminders: "Reminders",
 };
+
+const KIND_META: Record<string, { label: string; icon: ComponentType<{ className?: string }> }> =
+  Object.fromEntries(
+    Object.entries(KIND_LABELS).map(([kind, label]) => [kind, { label, icon: entityIcon(kind) }]),
+  );
 
 // The backend's `url` field is a template-era path — most kinds already
 // match the SPA route 1:1, but a few need remapping: chats point at a
@@ -203,7 +210,7 @@ export function CommandPalette({
           <CommandList>
             <CommandEmpty>{query ? "No results." : "Type to search…"}</CommandEmpty>
             {groups.map((group) => {
-              const meta = KIND_META[group.kind] ?? { label: group.kind, icon: FileText };
+              const meta = KIND_META[group.kind] ?? { label: group.kind, icon: entityIcon(group.kind) };
               const Icon = meta.icon;
               return (
                 <CommandGroup key={group.kind} heading={meta.label}>
