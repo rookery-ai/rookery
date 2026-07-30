@@ -17,8 +17,10 @@ import {
 } from "./home";
 import { ApiError } from "./api";
 
-function wrapper() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+// Accepts a client so a test can spy on invalidateQueries; defaults to a fresh
+// one, which is what every existing caller wants.
+function wrapper(client?: QueryClient) {
+  const qc = client ?? new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return ({ children }: { children: React.ReactNode }) =>
     createElement(QueryClientProvider, { client: qc }, children);
 }
@@ -198,4 +200,32 @@ test("splitReminders handles an empty list and an all-done list", () => {
   const allDone = [reminder("a", "2026-07-10T08:00:00Z", true)];
   expect(splitReminders(allDone).pending).toEqual([]);
   expect(splitReminders(allDone).done.map((r) => r.id)).toEqual(["a"]);
+});
+
+// The rail's unread badge reads useInboxPoll, whose query key is
+// ["inbox-poll"] — a DIFFERENT query from the inbox list's ["inbox"]. Only the
+// latter was invalidated, so clicking a notification left the badge counting it
+// until the 30s refetchInterval happened to fire.
+test.each([
+  ["useMarkInboxRead", "/api/v1/inbox/m1/read"],
+  ["useMarkAllInboxRead", "/api/v1/inbox/read-all"],
+  ["useDeleteInboxMessage", "/api/v1/inbox/m1"],
+])("%s invalidates the rail badge query too", async (hookName) => {
+  const mod = await import("./home");
+  const hooks = mod as unknown as Record<string, () => { mutateAsync: (v?: unknown) => Promise<unknown> }>;
+
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const spy = vi.spyOn(qc, "invalidateQueries");
+  vi.stubGlobal("fetch", vi.fn(() => Promise.resolve(
+    new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } }),
+  )));
+
+  const { result } = renderHook(() => hooks[hookName](), { wrapper: wrapper(qc) });
+  await act(async () => {
+    await result.current.mutateAsync("m1");
+  });
+
+  const keys = spy.mock.calls.map((c) => JSON.stringify((c[0] as { queryKey: unknown })?.queryKey));
+  expect(keys).toContain('["inbox"]');
+  expect(keys, "the rail badge query was never invalidated").toContain('["inbox-poll"]');
 });

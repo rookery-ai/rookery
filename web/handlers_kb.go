@@ -28,6 +28,24 @@ var md = goldmark.New(goldmark.WithExtensions(extension.GFM))
 // no content to read a heading from — only agents/<id> has a DB row to name it.
 // Files delegate to kbDisplayTitle so the tree and global search cannot drift
 // apart on what a given path is called.
+// kbSystemFolderLabels gives the vault's own top-level directories a
+// human-readable label. They are created by the platform, not the user, so they
+// render lowercase and indistinguishable from a folder the user made — "notes"
+// beside "Project Plans".
+//
+// Presentation only: DisplayName never feeds navigation. Name and Path keep the
+// real on-disk directory, so Resolve, rename guards and isProtectedPath are
+// untouched by this.
+var kbSystemFolderLabels = map[string]string{
+	"notes":     "Notes",
+	"memory":    "Memory",
+	"skills":    "Skills",
+	"agents":    "Agents",
+	"chats":     "Chats",
+	"inbox":     "Inbox",
+	"reminders": "Reminders",
+}
+
 func (s *Server) enrichKBDisplayNames(workspaceID, parentPath string, nodes []vault.Node) {
 	top := strings.Trim(parentPath, "/")
 	for i := range nodes {
@@ -36,6 +54,13 @@ func (s *Server) enrichKBDisplayNames(workspaceID, parentPath string, nodes []va
 			if top == "agents" {
 				if agent, err := s.db.GetAgent(n.Name); err == nil {
 					n.DisplayName = agent.Name
+				}
+			}
+			// Top level only. A user folder deeper in the tree that happens to be
+			// called "notes" is theirs, and renaming it in the UI would be a lie.
+			if top == "" {
+				if label, ok := kbSystemFolderLabels[n.Name]; ok {
+					n.DisplayName = label
 				}
 			}
 			continue

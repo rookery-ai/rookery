@@ -688,9 +688,16 @@ function TreeRow({
             <NodeIcon
               node={node}
               expanded={expanded}
-              className="size-4 shrink-0 text-base"
+              className="size-5 shrink-0 text-lg"
             />
-            <span className="flex-1 truncate">{node.display_name}</span>
+            <span
+              className={cn(
+                "flex-1 truncate",
+                depth === 0 && node.is_dir && "font-medium",
+              )}
+            >
+              {node.display_name}
+            </span>
           </div>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

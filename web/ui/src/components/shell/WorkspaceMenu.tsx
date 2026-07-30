@@ -54,15 +54,15 @@ export default function WorkspaceMenu() {
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label="Workspace"
-          // size-11 matches the rail items below it (they were size-9 too, and
+          // size-12 matches the rail items below it (they grow together, and
           // the whole column grew) and text-lg/font-extrabold makes the
           // fallback monogram carry at that size instead of floating in it.
-          className="flex size-11 items-center justify-center rounded-lg text-lg font-extrabold transition-opacity hover:opacity-90 active:scale-95"
+          className="flex size-12 items-center justify-center rounded-lg text-xl font-extrabold transition-opacity hover:opacity-90 active:scale-95"
         >
           <WorkspaceAvatar
             name={current?.name}
             icon={current?.icon}
-            className="size-11 text-lg"
+            className="size-12 text-xl"
           />
         </DropdownMenuTrigger>
         <DropdownMenuContent side="right" align="start" className="w-56">

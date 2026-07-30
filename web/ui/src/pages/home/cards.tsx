@@ -27,19 +27,24 @@ const ACTIVITY_LIMIT = 8;
 // buttons, so middle-click and "open in new tab" work — a button with an
 // onClick navigate() silently breaks both.
 export function QuickActions() {
-  const cls = cn(buttonVariants({ variant: "outline", size: "sm" }));
+  // Matches the Agents page header: the primary action is a default-variant
+  // button at default size, secondary actions are outline at the same size.
+  // Home previously rendered all four as outline/sm, which made the same kind
+  // of action look like a different control depending on the page.
+  const primary = cn(buttonVariants());
+  const secondary = cn(buttonVariants({ variant: "outline" }));
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Link to="/agents/new" className={cls}>
+      <Link to="/agents/new" className={primary}>
         <Plus /> New agent
       </Link>
-      <Link to="/kb" className={cls}>
+      <Link to="/kb" className={secondary}>
         <BookOpen /> New note
       </Link>
-      <Link to="/chats" className={cls}>
+      <Link to="/chats" className={secondary}>
         <MessagesSquare /> Start chat
       </Link>
-      <Link to="/connections" className={cls}>
+      <Link to="/connections" className={secondary}>
         <Plug /> Connect a service
       </Link>
     </div>
