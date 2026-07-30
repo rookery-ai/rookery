@@ -45,3 +45,14 @@ test("text-xs is 13px and text-sm is 15px", () => {
   expect(css).toMatch(/--text-xs:\s*0\.8125rem/);
   expect(css).toMatch(/--text-sm:\s*0\.9375rem/);
 });
+
+test("interactive controls get a pointer cursor back", () => {
+  // Tailwind v4's Preflight dropped `button { cursor: pointer }` to match the
+  // browser default — and a <button>'s browser default is `cursor: default`.
+  // Without this rule, 54 raw <button> elements across the app hovered as if
+  // they were inert text, which is how "the KB search results are not
+  // clickable" was reported: FileTree's rows set cursor-pointer explicitly, so
+  // the tree felt interactive and the results in the same pane did not.
+  expect(css).toMatch(/button:not\(:disabled\)/);
+  expect(css).toMatch(/button:disabled\s*\{\s*cursor:\s*not-allowed/);
+});

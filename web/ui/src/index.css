@@ -221,6 +221,29 @@ body {
   * {
     @apply border-border outline-ring/50;
   }
+
+  /* Restore the pointer cursor on interactive controls.
+     Tailwind v4's Preflight deliberately dropped `button { cursor: pointer }`
+     to match the browser default — and the browser default for a <button> is
+     `cursor: default`. The emitted CSS confirmed it: the whole bundle held two
+     cursor:pointer rules, neither for a button.
+     The result was that 54 raw <button> elements across the app hovered as if
+     they were inert text. It showed up most sharply in the KB pane, where
+     FileTree's rows opt into cursor-pointer explicitly while search results did
+     not — so in ONE pane the tree felt clickable and the results did not,
+     which is exactly how "search finds the pages but they are not clickable"
+     was reported. The clicks always worked; the affordance never did.
+     Fixed once here rather than at 54 call sites, so a new button inherits it
+     instead of having to remember. */
+  button:not(:disabled),
+  [role="tab"]:not([aria-disabled="true"]),
+  summary {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
 }
 
 /* Accessibility floor — spec §8: a global reduced-motion rule disables

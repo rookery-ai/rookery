@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/ilijad1/rookery/internal/secrets"
@@ -624,5 +627,43 @@ func TestAPIWorkspaceIconRoundTripsAndValidates(t *testing.T) {
 	}
 	if sess.Workspace.Icon != "" {
 		t.Fatalf("icon = %q after clearing, want empty", sess.Workspace.Icon)
+	}
+}
+
+// TestWorkspaceIconSlugsMatchTheSPA guards two lists that must agree.
+//
+// The Go validator rejects any slug outside its own set, so a preset added only
+// to the SPA is unselectable (the PUT 400s), and one added only to Go is
+// unreachable (no artwork exists for it). Neither failure is visible in either
+// file on its own, which is exactly the kind of pair that drifts silently.
+//
+// Parsing TypeScript from a Go test is ugly, but it is the only place the
+// mismatch can be made to fail the build.
+func TestWorkspaceIconSlugsMatchTheSPA(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("ui", "src", "lib", "workspaceIcons.tsx"))
+	if err != nil {
+		t.Skipf("frontend source not available: %v", err)
+	}
+
+	re := regexp.MustCompile(`\{\s*slug:\s*"([a-z0-9-]+)"`)
+	matches := re.FindAllStringSubmatch(string(src), -1)
+	if len(matches) == 0 {
+		t.Fatal("parsed no preset slugs out of workspaceIcons.tsx — has the shape changed?")
+	}
+
+	spa := make(map[string]bool, len(matches))
+	for _, m := range matches {
+		spa[m[1]] = true
+	}
+
+	for slug := range spa {
+		if !workspaceIcons[slug] {
+			t.Errorf("slug %q has SPA artwork but the Go validator rejects it", slug)
+		}
+	}
+	for slug := range workspaceIcons {
+		if !spa[slug] {
+			t.Errorf("slug %q is accepted by Go but has no SPA preset to render", slug)
+		}
 	}
 }

@@ -2,12 +2,18 @@ import { useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { emojiGroups, filterEmojis } from "./emojiData";
 
-// EmojiPicker is a small, dependency-free emoji chooser rendered in a dialog.
+// EmojiPicker is a dependency-free emoji chooser rendered in a dialog.
 // `onSelect(emoji)` sets the icon; `onSelect(null)` clears it back to the
 // default. Controlled open state so callers own where it's triggered from
 // (a tree row's ⋯ menu, a page's title icon button).
+//
+// It now covers the full Unicode set (1906 emoji — see emojiData.ts), which is
+// why the category tab strip exists: rendering nine groups into one scroll
+// region turns finding anything into scrolling blind. The tabs show one group at
+// a time, and a search cuts across all of them.
 export default function EmojiPicker({
   open,
   onOpenChange,
@@ -20,7 +26,10 @@ export default function EmojiPicker({
   onSelect: (emoji: string | null) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [groupName, setGroupName] = useState(emojiGroups[0]?.name ?? "");
   const filtered = useMemo(() => filterEmojis(query), [query]);
+
+  const activeGroup = emojiGroups.find((g) => g.name === groupName) ?? emojiGroups[0];
 
   function pick(emoji: string | null) {
     onSelect(emoji);
@@ -30,7 +39,7 @@ export default function EmojiPicker({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Choose an icon</DialogTitle>
         </DialogHeader>
@@ -42,30 +51,54 @@ export default function EmojiPicker({
             onChange={(e) => setQuery(e.target.value)}
             aria-label="Search emoji"
           />
-          <div className="max-h-72 overflow-y-auto pr-1">
+
+          {/* Hidden while searching: results already span every category, so a
+              visible category selector would imply it narrows them when it
+              does not. */}
+          {!query && (
+            <div
+              role="tablist"
+              aria-label="Emoji categories"
+              className="flex gap-1 overflow-x-auto pb-1"
+            >
+              {emojiGroups.map((g) => (
+                <button
+                  key={g.name}
+                  type="button"
+                  role="tab"
+                  aria-selected={g.name === activeGroup?.name}
+                  onClick={() => setGroupName(g.name)}
+                  className={cn(
+                    "shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium whitespace-nowrap",
+                    g.name === activeGroup?.name
+                      ? "bg-chrome text-foreground"
+                      : "text-muted-2 hover:bg-chrome hover:text-foreground",
+                  )}
+                >
+                  {g.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* min-h keeps the dialog from resizing as you move between a large
+              group and a small one, or as a search narrows. */}
+          <div className="max-h-[50vh] min-h-72 overflow-y-auto pr-1">
             {query ? (
               filtered.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted-2">No matches.</p>
               ) : (
-                <EmojiGrid
-                  emojis={filtered.map((e) => e.emoji)}
-                  current={current}
-                  onPick={pick}
-                />
+                <EmojiGrid emojis={filtered.map((e) => e.emoji)} current={current} onPick={pick} />
               )
             ) : (
-              emojiGroups.map((g) => (
-                <div key={g.name} className="mb-3">
-                  <p className="mb-1 px-0.5 text-xs font-medium text-muted-2">{g.name}</p>
-                  <EmojiGrid
-                    emojis={g.emojis.map((e) => e.emoji)}
-                    current={current}
-                    onPick={pick}
-                  />
-                </div>
-              ))
+              <EmojiGrid
+                emojis={(activeGroup?.emojis ?? []).map((e) => e.emoji)}
+                current={current}
+                onPick={pick}
+              />
             )}
           </div>
+
           {current && (
             <div className="flex justify-end border-t border-border pt-3">
               <Button variant="outline" size="sm" onClick={() => pick(null)}>
@@ -89,17 +122,17 @@ function EmojiGrid({
   onPick: (emoji: string) => void;
 }) {
   return (
-    <div className="grid grid-cols-8 gap-0.5">
+    <div className="grid grid-cols-10 gap-1">
       {emojis.map((emoji) => (
         <button
           key={emoji}
           type="button"
           onClick={() => onPick(emoji)}
           aria-label={`Set icon ${emoji}`}
-          className={
-            "flex size-9 items-center justify-center rounded-md text-xl hover:bg-chrome " +
-            (current === emoji ? "bg-border" : "")
-          }
+          className={cn(
+            "flex size-9 items-center justify-center rounded-md text-xl hover:bg-chrome",
+            current === emoji && "bg-border",
+          )}
         >
           {emoji}
         </button>

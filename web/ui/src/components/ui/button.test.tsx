@@ -33,3 +33,23 @@ test("the four contract variants are all available", () => {
     unmount();
   }
 });
+
+test("every button carries a pointer cursor, because the browser gives none", () => {
+  // A <button> gets cursor:default from the browser, and this build's Tailwind
+  // preflight adds no button cursor rule — verified by grepping the emitted
+  // CSS, which held only two cursor:pointer rules, neither of them for a
+  // button. So every button in the app hovered as if it were inert.
+  //
+  // This is the same defect that made KB search results read as unclickable:
+  // FileTree's rows opt into cursor-pointer explicitly, so in one pane the tree
+  // felt interactive and the search results did not.
+  render(<Button>Go</Button>);
+  expect(screen.getByRole("button").className).toMatch(/cursor-pointer/);
+});
+
+test("a disabled button shows a not-allowed cursor rather than a pointer", () => {
+  render(<Button disabled>Go</Button>);
+  const btn = screen.getByRole("button");
+  expect(btn.className).toMatch(/disabled:cursor-not-allowed/);
+  expect(btn).toBeDisabled();
+});

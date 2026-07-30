@@ -57,15 +57,17 @@ export default function WorkspaceIconPicker({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Workspace image</DialogTitle>
         </DialogHeader>
 
-        <div className="grid grid-cols-4 gap-2">
+        {/* Scrollable: 28 presets plus the clear tile no longer fit a fixed
+            dialog, and a dialog that grows past the viewport puts its footer
+            out of reach. */}
+        <div className="grid max-h-[55vh] grid-cols-5 gap-2 overflow-y-auto pr-1">
           {/* The clear option first: it is the state every workspace starts in,
-              so it belongs where the eye lands, not appended after twelve
-              tiles. */}
+              so it belongs where the eye lands, not appended after 28 tiles. */}
           <button
             type="button"
             aria-label="No image"
