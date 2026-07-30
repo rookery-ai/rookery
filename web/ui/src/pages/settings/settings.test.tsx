@@ -121,7 +121,45 @@ test("Profile round-trip: prefills from GET, edits, PUT body asserted, shows Sav
 
   const putCall = calls.find((c) => c.url === "/api/v1/settings/profile" && c.method === "PUT");
   expect(putCall).toBeDefined();
-  expect((putCall!.body as { display_name: string }).display_name).toBe("Ilija D.");
+  expect(putCall!.body).toEqual({ display_name: "Ilija D.", timezone: "Europe/Skopje" });
+});
+
+test("Profile offers only the fields the app reads, and says where the rest live", async () => {
+  mockFetch();
+  wrap();
+
+  expect(await screen.findByLabelText("Display name")).toBeInTheDocument();
+  expect(screen.getByLabelText("Timezone")).toBeInTheDocument();
+
+  // Tone, language, notes, email and location moved into memory/ABOUT.md and
+  // memory/STYLE.md — a second editable copy here is exactly the drift this
+  // change removes.
+  expect(screen.queryByLabelText("Tone")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Language")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Notes")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Location")).not.toBeInTheDocument();
+
+  // …and the user is told where they went.
+  expect(screen.getByText("memory/ABOUT.md")).toBeInTheDocument();
+  expect(screen.getByText("memory/STYLE.md")).toBeInTheDocument();
+});
+
+test("Workspace About is read-only, renamed, and never sent on save", async () => {
+  const calls = mockFetch();
+  wrap("/settings?section=workspace");
+
+  expect(await screen.findByText("About Workspace")).toBeInTheDocument();
+  expect(screen.getByText("Personal assistant")).toBeInTheDocument();
+  // No editable control for it any more.
+  expect(screen.queryByLabelText(/^about/i)).not.toBeInTheDocument();
+
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: /save workspace/i }));
+  await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
+
+  const putCall = calls.find((c) => c.url === "/api/v1/settings/workspace" && c.method === "PUT");
+  expect(putCall!.body).toEqual({ name: "Home Server" });
 });
 
 test("Workspace save invalidates the session query (rail refetches)", async () => {

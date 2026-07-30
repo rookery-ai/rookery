@@ -7,9 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CuratedSelect } from "@/components/profile/CuratedSelect";
-import {
-  timezoneOptions, countryOptions, LANGUAGE_OPTIONS, TONE_OPTIONS,
-} from "@/components/profile/options";
+import { timezoneOptions } from "@/components/profile/options";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { useTheme } from "@/theme";
@@ -81,11 +79,9 @@ const EMPTY_PROFILE: Profile = {
 
 function ProfileSection({ profile }: { profile: Profile | undefined }) {
   const [form, setForm] = useState<Profile>(EMPTY_PROFILE);
-  // Built once: timezoneOptions walks the platform tzdb (~400 entries) and
-  // countryOptions runs Intl.DisplayNames over every code, neither of which
-  // should re-run on each keystroke elsewhere in the form.
+  // Built once: timezoneOptions walks the platform tzdb (~400 entries), which
+  // should not re-run on each keystroke elsewhere in the form.
   const timezones = useMemo(() => timezoneOptions(), []);
-  const countries = useMemo(() => countryOptions(), []);
   const [saved, setSaved] = useState(false);
   const save = useSaveProfile();
 
@@ -102,7 +98,7 @@ function ProfileSection({ profile }: { profile: Profile | undefined }) {
     e.preventDefault();
     setSaved(false);
     try {
-      await save.mutateAsync(form);
+      await save.mutateAsync({ display_name: form.display_name, timezone: form.timezone });
       setSaved(true);
     } catch {
       // surfaced below via save.error
@@ -116,7 +112,8 @@ function ProfileSection({ profile }: { profile: Profile | undefined }) {
         <SavedChip show={saved} />
       </div>
       <p className="mt-1 text-sm text-muted-2">
-        Tells your assistant who you are so it can personalize replies.
+Your name and timezone. Your timezone is what makes “remind me next Tuesday at
+        3pm” land at the right moment.
       </p>
 
       {save.isError && <div className="mt-4"><ErrorBanner message={errMessage(save.error)} /></div>}
@@ -131,19 +128,6 @@ function ProfileSection({ profile }: { profile: Profile | undefined }) {
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="email">Email</Label>
-          <Input id="email" type="email" value={form.email} onChange={(e) => set("email", e.target.value)} />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="location">Location</Label>
-          <CuratedSelect
-            id="location"
-            value={form.location}
-            onChange={(v) => set("location", v)}
-            options={countries}
-          />
-        </div>
-        <div className="space-y-1.5">
           <Label htmlFor="timezone">Timezone</Label>
           <CuratedSelect
             id="timezone"
@@ -152,37 +136,18 @@ function ProfileSection({ profile }: { profile: Profile | undefined }) {
             options={timezones}
           />
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="tone">Tone</Label>
-          <CuratedSelect
-            id="tone"
-            value={form.tone}
-            onChange={(v) => set("tone", v)}
-            options={TONE_OPTIONS}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="language">Language</Label>
-          <CuratedSelect
-            id="language"
-            value={form.language}
-            onChange={(v) => set("language", v)}
-            options={LANGUAGE_OPTIONS}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="notes">Notes</Label>
-          <textarea
-            id="notes"
-            value={form.notes}
-            onChange={(e) => set("notes", e.target.value)}
-            className="min-h-24 w-full resize-y rounded-md border border-border bg-background p-3 text-sm outline-none focus:border-ring focus:ring-[3px] focus:ring-ring/50"
-          />
-        </div>
         <Button type="submit" disabled={save.isPending}>
           {save.isPending ? "Saving…" : "Save profile"}
         </Button>
       </form>
+
+      <p className="mt-4 max-w-lg text-sm text-muted-2">
+        Your background, tone and language live in your knowledge base, in{" "}
+        <code className="rounded bg-chrome px-1 py-0.5 text-xs">memory/ABOUT.md</code> and{" "}
+        <code className="rounded bg-chrome px-1 py-0.5 text-xs">memory/STYLE.md</code>. Editing
+        them there is what changes how your assistant talks to you — there is no second copy
+        here to fall out of step with them.
+      </p>
     </section>
   );
 }
@@ -208,7 +173,7 @@ function WorkspaceSection({ workspace }: { workspace: WorkspaceMeta | undefined 
     }
     setNameError("");
     try {
-      await save.mutateAsync(form);
+      await save.mutateAsync({ name: form.name });
       setSaved(true);
     } catch {
       // surfaced below via save.error
@@ -221,7 +186,7 @@ function WorkspaceSection({ workspace }: { workspace: WorkspaceMeta | undefined 
         <h2 className="text-lg font-bold">Workspace</h2>
         <SavedChip show={saved} />
       </div>
-      <p className="mt-1 text-sm text-muted-2">The name and description shown across the app.</p>
+      <p className="mt-1 text-sm text-muted-2">The workspace name shown across the app.</p>
 
       {save.isError && <div className="mt-4"><ErrorBanner message={errMessage(save.error)} /></div>}
 
@@ -241,16 +206,20 @@ function WorkspaceSection({ workspace }: { workspace: WorkspaceMeta | undefined 
           {nameError && <p className="text-xs text-danger">{nameError}</p>}
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="ws_about">About</Label>
-          <textarea
-            id="ws_about"
-            value={form.about}
-            onChange={(e) => {
-              setForm((f) => ({ ...f, about: e.target.value }));
-              setSaved(false);
-            }}
-            className="min-h-24 w-full resize-y rounded-md border border-border bg-background p-3 text-sm outline-none focus:border-ring focus:ring-[3px] focus:ring-ring/50"
-          />
+          <Label>About Workspace</Label>
+          {workspace?.about ? (
+            <p className="rounded-md border border-border bg-chrome/50 p-3 text-sm whitespace-pre-wrap">
+              {workspace.about}
+            </p>
+          ) : (
+            <p className="text-sm text-muted-2">Not set.</p>
+          )}
+          <p className="text-xs text-muted-2">
+            Read-only here. This is what your agents and chat are told the workspace is for —
+            edit it in{" "}
+            <code className="rounded bg-chrome px-1 py-0.5">memory/ABOUT.md</code> in your
+            knowledge base.
+          </p>
         </div>
         <Button type="submit" disabled={save.isPending}>
           {save.isPending ? "Saving…" : "Save workspace"}
