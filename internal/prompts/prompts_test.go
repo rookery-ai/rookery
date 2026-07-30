@@ -555,14 +555,14 @@ func TestForceTier1AbsentByDefault(t *testing.T) {
 // TestNoStaleOrForeignTermsInPrompts locks the wording contract. Each banned
 // string is a real defect that shipped:
 //   - "Obsidian"      — describes the product as a copy of an unrelated one, and
-//                       is the term the model echoed back to the user.
+//     is the term the model echoed back to the user.
 //   - "vault"         — an internal Go package name; the owner only ever sees
-//                       "knowledge base".
+//     "knowledge base".
 //   - "self-hosted"   — irrelevant to the owner and to the model's behaviour.
 //   - USER.md/SOUL.md — renamed; naming them points the model at files that no
-//                       longer exist.
+//     longer exist.
 //   - "reminders/"    — a folder the CLI chat prompt advertised that has never
-//                       existed; reminders are DB-only and never reflected.
+//     existed; reminders are DB-only and never reflected.
 func TestNoStaleOrForeignTermsInPrompts(t *testing.T) {
 	banned := []string{"Obsidian", "obsidian", "self-hosted", "USER.md", "SOUL.md", "reminders/", "vault"}
 	subjects := map[string]string{
@@ -619,6 +619,25 @@ func TestPlatformContextNamesCurrentMemoryFiles(t *testing.T) {
 	for _, want := range []string{"ABOUT.md", "STYLE.md"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("platform context missing %q", want)
+		}
+	}
+}
+
+// Generated skills must carry the same frontmatter a built-in skill does, or
+// the two look like different kinds of object in the list and the viewer.
+func TestSkillPromptsRequireFullFrontmatter(t *testing.T) {
+	subjects := map[string]string{
+		"design":         BuildSkillDesignSystemPrompt(SkillDesignParams{SkillName: "demo"}),
+		"implementation": BuildSkillImplementationPrompt("demo", nil, "", SkillDesignParams{SkillName: "demo"}),
+	}
+	for name, out := range subjects {
+		if strings.Contains(out, "only name + description are strictly required") {
+			t.Errorf("[%s] still says version/license/category are optional", name)
+		}
+		for _, want := range []string{"version", "license", "category", "File Processing", "Meta"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("[%s] prompt missing %q", name, want)
+			}
 		}
 	}
 }

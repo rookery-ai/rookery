@@ -2241,13 +2241,17 @@ A skill folder looks like:
   <name>/scripts/        (optional: deterministic/repetitive code)
   <name>/references/     (optional: docs loaded on demand)
 
-The SKILL.md frontmatter (only name + description are strictly required):
+The SKILL.md frontmatter — every field below is REQUIRED. A built-in skill
+carries all of them, and a skill missing one is displayed differently from the
+rest, so fill them in even when the value is the obvious default:
   ---
   name: my-skill          # lowercase, hyphens, 3-64 chars
   description: ...        # what it does + when to use it (the trigger!)
   version: 1.0.0
   license: MIT-0
   category: File Processing
+  # category must be EXACTLY one of: File Processing, Agent Behaviour,
+  # Web & Research, Development, Productivity, Integrations, Meta, Other
   metadata:
     requires:
       bins: [pandoc]            # tools that MUST be present (or anyBins: at-least-one)
@@ -2364,10 +2368,17 @@ Follow these steps in EXACT order.
    with metadata.install as a SIBLING of requires — there is no vendor
    namespace segment between metadata and these keys)? Which env vars / secrets?
 
-2. CREATE — Write SKILL.md with valid YAML frontmatter. The `+"`description`"+` field is
-   the trigger: say what the skill does AND the specific phrases/contexts that
-   activate it. Write the body in imperative voice with copy-pasteable examples.
-   If scripts/ are needed, write them under scripts/ (minimal, robust).
+2. CREATE — Write SKILL.md with valid YAML frontmatter. ALL FIVE of `+"`name`"+`,
+   `+"`description`"+`, `+"`version`"+`, `+"`license`"+` and `+"`category`"+` are
+   required — a built-in skill carries all of them, and one missing a field is
+   displayed differently from the rest. `+"`category`"+` must be EXACTLY one of:
+   File Processing, Agent Behaviour, Web & Research, Development, Productivity,
+   Integrations, Meta, Other. Use `+"`version: 1.0.0`"+` and
+   `+"`license: MIT-0`"+` unless there is a reason not to.
+   The `+"`description`"+` field is the trigger: say what the skill does AND the
+   specific phrases/contexts that activate it. Write the body in imperative voice
+   with copy-pasteable examples. If scripts/ are needed, write them under
+   scripts/ (minimal, robust).
 
 3. TEST — Run every script to confirm it does not crash:
    `+"`python3 scripts/<file>.py --help`"+` or an import/smoke check against a sample.

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/skilldesigner"
 	"github.com/ilijad1/rookery/internal/skilllibrary"
 	"github.com/ilijad1/rookery/internal/skillstore"
 	"github.com/labstack/echo/v4"
@@ -38,26 +39,72 @@ func (s *Server) registerSkillsAPI(g *echo.Group) {
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
 
+// apiSkillMeta is the frontmatter metadata surfaced for BOTH core and user
+// skills. It exists so the two kinds are described by the same fields parsed by
+// the same parser: before this, only the core path parsed metadata at all, and
+// then dropped it at the DTO boundary — so a built-in skill and a created one
+// could not be shown side by side.
+type apiSkillMeta struct {
+	Category string   `json:"category"`
+	Version  string   `json:"version"`
+	Requires []string `json:"requires"`
+}
+
+// defaultSkillCategory is what an unset or unrecognised category renders as.
+// The UI shows a category chip unconditionally, and an empty one reads as a bug.
+const defaultSkillCategory = "Other"
+
+// flattenRequires renders a skill's tool requirements as display strings, with
+// the KIND encoded in the string rather than in the shape.
+//
+// The nesting ParseMeta returns (bins / anyBins / env) is a Go detail; making
+// the SPA branch across three lists to render one line would put that detail in
+// two languages. "a or b" and "$KEY" carry the same information in a form the
+// UI can print directly.
+func flattenRequires(m skilllibrary.SkillMeta) []string {
+	var out []string
+	out = append(out, m.RequiresBins...)
+	if len(m.AnyBins) > 0 {
+		out = append(out, strings.Join(m.AnyBins, " or "))
+	}
+	for _, e := range m.RequiresEnv {
+		out = append(out, "$"+e)
+	}
+	return out
+}
+
+// skillMetaDTO maps parsed frontmatter into the wire shape. Version stays empty
+// when unset (the UI omits that chip), but Category always resolves.
+func skillMetaDTO(m skilllibrary.SkillMeta) apiSkillMeta {
+	cat := m.Category
+	if cat == "" {
+		cat = defaultSkillCategory
+	}
+	return apiSkillMeta{Category: cat, Version: m.Version, Requires: flattenRequires(m)}
+}
+
+// metaForContent parses a SKILL.md, degrading to the default category when the
+// content is unavailable or its frontmatter is malformed. A skill with broken
+// frontmatter must stay listable and viewable — that is exactly when the owner
+// needs to open it.
+func metaForContent(content string) apiSkillMeta {
+	m, _ := skilllibrary.ParseMeta(content)
+	return skillMetaDTO(m)
+}
+
 type apiSkillListItem struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"created_at"`
-}
-
-func toAPISkillListItem(sk *db.Skill) apiSkillListItem {
-	return apiSkillListItem{
-		ID:          sk.ID,
-		Name:        sk.Name,
-		Description: sk.Description,
-		CreatedAt:   sk.InstalledAt,
-	}
+	apiSkillMeta
 }
 
 type apiCoreSkillListItem struct {
 	Slug        string `json:"slug"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	apiSkillMeta
 }
 
 // toAPISkillDraft maps an in-progress skill-creator draft into the JSON DTO.
@@ -86,12 +133,26 @@ func (s *Server) apiListSkills(c echo.Context) error {
 	}
 	out := make([]apiSkillListItem, 0, len(skills))
 	for _, sk := range skills {
-		out = append(out, toAPISkillListItem(sk))
+		item := apiSkillListItem{
+			ID: sk.ID, Name: sk.Name, Description: sk.Description, CreatedAt: sk.InstalledAt,
+			// Degrades cleanly when the skill store is not configured: the list
+			// must never fail over missing metadata.
+			apiSkillMeta: apiSkillMeta{Category: defaultSkillCategory},
+		}
+		if s.skills != nil {
+			if content, err := s.skills.LoadContent(u.ID, sk.Name); err == nil {
+				item.apiSkillMeta = metaForContent(content)
+			}
+		}
+		out = append(out, item)
 	}
 
 	core := make([]apiCoreSkillListItem, 0)
 	for _, m := range skilllibrary.LoadBundled() {
-		core = append(core, apiCoreSkillListItem{Slug: m.Name, Name: m.Name, Description: m.Description})
+		core = append(core, apiCoreSkillListItem{
+			Slug: m.Name, Name: m.Name, Description: m.Description,
+			apiSkillMeta: skillMetaDTO(m),
+		})
 	}
 
 	var draft *db.SkillDraft
@@ -114,7 +175,16 @@ func (s *Server) apiGetCoreSkill(c echo.Context) error {
 	if !ok || !skilllibrary.IsCoreSkill(slug) {
 		return jsonErr(c, http.StatusNotFound, "not_found", "core skill not found")
 	}
-	return c.JSON(http.StatusOK, map[string]any{"slug": slug, "content": content})
+	m, _ := skilllibrary.ParseMeta(content)
+	meta := skillMetaDTO(m)
+	return c.JSON(http.StatusOK, map[string]any{
+		"slug":        slug,
+		"content":     content,
+		"description": m.Description,
+		"category":    meta.Category,
+		"version":     meta.Version,
+		"requires":    meta.Requires,
+	})
 }
 
 // apiGetSkill ports showSkillDetail. Content degrades to "" when s.skills is
@@ -134,11 +204,15 @@ func (s *Server) apiGetSkill(c echo.Context) error {
 		content, _ = s.skills.LoadContent(u.ID, skill.Name)
 	}
 
+	meta := metaForContent(content)
 	return c.JSON(http.StatusOK, map[string]any{
 		"id":          skill.ID,
 		"name":        skill.Name,
 		"description": skill.Description,
 		"content":     content,
+		"category":    meta.Category,
+		"version":     meta.Version,
+		"requires":    meta.Requires,
 	})
 }
 
@@ -313,6 +387,11 @@ func (s *Server) apiCreateSkillFromContent(c echo.Context, u *db.Workspace, cont
 	if skilllibrary.IsCoreSkill(name) {
 		return jsonErr(c, http.StatusBadRequest, "reserved_name", fmt.Sprintf("%q is a core skill name — pick another", name))
 	}
+
+	// An imported SKILL.md has the same frontmatter gap a generated one can:
+	// only name + description are reliably present. Normalize so an imported
+	// skill is described exactly like a built-in one in the list and the viewer.
+	content = skilldesigner.NormalizeFrontmatter(content, name)
 
 	skill, err := s.skills.Create(u.ID, name, description, content)
 	if err != nil {
