@@ -96,6 +96,6 @@ ARG COMMIT=none
 LABEL org.opencontainers.image.title="rookery" \
       org.opencontainers.image.description="Multi-workspace AI agents control plane" \
       org.opencontainers.image.source="https://github.com/ilijad1/rookery" \
-      org.opencontainers.image.licenses="proprietary" \
+      org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${COMMIT}"
