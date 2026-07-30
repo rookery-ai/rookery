@@ -20,6 +20,7 @@ import (
 	"github.com/ilijad1/rookery/internal/coder"
 	"github.com/ilijad1/rookery/internal/connectors"
 	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/profile"
 	"github.com/ilijad1/rookery/internal/prompts"
 	"github.com/ilijad1/rookery/internal/secrets"
 	"github.com/ilijad1/rookery/internal/skilllibrary"
@@ -297,6 +298,12 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	if r.memStore != nil {
 		userMemory, _ = r.memStore.ContextString(input.WorkspaceID)
 	}
+	// A scheduled run had no idea what day it was: nothing in prompt
+	// construction called time.Now() except the reminder parser.
+	var runtimeCtx string
+	if r.db != nil {
+		runtimeCtx = profile.RuntimeContextString(r.db, input.WorkspaceID, time.Now())
+	}
 
 	skillRefs := make([]prompts.SkillRef, 0, len(allSkills)+8)
 	for _, s := range skilllibrary.LoadBundled() {
@@ -341,6 +348,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
 		AgentMD:         string(agentMD),
 		StateJSON:       string(stateJSON),
+		RuntimeContext:  runtimeCtx,
 		UserMemory:      userMemory,
 		AllSkills:       skillRefs,
 		DeclaredSkills:  declaredSkills,

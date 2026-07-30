@@ -58,9 +58,15 @@ func TestSaveSkill_FullTreeSurvives(t *testing.T) {
 
 	skillDir := skillstore.SkillDir(vaultsBase, workspaceID, "tree-skill")
 
+	// SKILL.md is normalized on save (NormalizeFrontmatter), so the file is not
+	// byte-identical to the generated text: the frontmatter gains the fields a
+	// built-in skill carries. The body and the declared meta must survive.
 	gotSKILLMD, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
 	require.NoError(t, err)
-	require.Equal(t, skillMD, string(gotSKILLMD))
+	require.Equal(t, NormalizeFrontmatter(skillMD, "tree-skill"), string(gotSKILLMD))
+	require.Contains(t, string(gotSKILLMD), "# Tree Skill")
+	require.Contains(t, string(gotSKILLMD), "name: tree-skill")
+	require.Contains(t, string(gotSKILLMD), "category: Other")
 
 	gotParse, err := os.ReadFile(filepath.Join(skillDir, "scripts", "lib", "parse.py"))
 	require.NoError(t, err)

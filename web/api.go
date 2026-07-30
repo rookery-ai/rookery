@@ -100,6 +100,29 @@ func (s *Server) apiLockGate(next echo.HandlerFunc) echo.HandlerFunc {
 	}
 }
 
+// requireOwnerVerified refuses install-level routes until the owner has
+// re-entered their password within ownerVerifyTTL.
+//
+// Ordered AFTER requireOwnerAPI so an unauthenticated caller still gets its 401
+// and never learns this gate exists.
+//
+// 403, not 401: the caller IS authenticated. A 401 would send the SPA's generic
+// handler to the login screen and drop the session — wrong, and hostile.
+//
+// Enforced on the server rather than in the SPA because the Owner tab fronts
+// POST /api/v1/backup/restore, which swaps the whole install on the next boot. A
+// UI-only gate is bypassed by curling that endpoint with the same cookie, which
+// would make it deter shoulder-surfing and nothing else.
+func (s *Server) requireOwnerVerified(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		if !s.isOwnerVerified(c) {
+			return jsonErr(c, http.StatusForbidden, "owner_verification_required",
+				"confirm your owner password to continue")
+		}
+		return next(c)
+	}
+}
+
 // setupAPIRoutes registers the /api/v1 groups. Endpoint registrations are added
 // group-by-group in api_*.go files' registration funcs, called from here.
 func (s *Server) setupAPIRoutes() {
@@ -108,10 +131,17 @@ func (s *Server) setupAPIRoutes() {
 	// Public (no auth): session bootstrap + login.
 	s.registerAuthAPI(api)
 
-	// Owner-gated (no workspace needed): workspaces, admin, audit.
+	// Owner-gated (no workspace needed): workspace list/create/enter/leave.
 	owner := api.Group("", s.requireOwnerAPI, s.apiLockGate)
-	s.registerWorkspacesAPI(owner)
-	s.registerBackupAPI(owner)
+
+	// Install-level: everything that can destroy or replace the whole install,
+	// behind a fresh owner-password confirmation. Backup lives here rather than
+	// on `owner` because one snapshot spans every workspace and
+	// POST /backup/restore swaps the lot on the next boot.
+	ownerVerified := api.Group("", s.requireOwnerAPI, s.apiLockGate, s.requireOwnerVerified)
+
+	s.registerWorkspacesAPI(owner, ownerVerified)
+	s.registerBackupAPI(ownerVerified)
 
 	// Workspace-gated: everything tenant-scoped.
 	dash := api.Group("", s.requireOwnerAPI, s.apiLockGate, s.requireActiveWorkspaceAPI, s.requireSetupCompleteAPI)

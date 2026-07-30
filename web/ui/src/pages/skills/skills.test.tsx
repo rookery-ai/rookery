@@ -6,6 +6,7 @@ import { AppShell } from "@/components/shell/AppShell";
 import SkillsPage from "./SkillsPage";
 import SkillNewPage from "./SkillNewPage";
 import SkillDetailPage, { CoreSkillViewPage } from "./SkillDetailPage";
+import { SkillView } from "./SkillView";
 import type { SkillListItem, CoreSkillListItem, SkillDraft, SkillDetail } from "@/lib/skills";
 
 function jsonResponse(body: unknown, status = 200) {
@@ -26,10 +27,10 @@ let skillDetail: SkillDetail;
 let dismissCalled: boolean;
 
 function resetFixtures() {
-  skills = [{ id: "s1", name: "Invoice Formatter", description: "Formats invoices.", created_at: "2026-07-01T00:00:00Z" }];
-  coreSkills = [{ slug: "pdf", name: "pdf", description: "Read and write PDFs." }];
+  skills = [{ id: "s1", name: "Invoice Formatter", description: "Formats invoices.", created_at: "2026-07-01T00:00:00Z", category: "Productivity", version: "1.0.0", requires: [] }];
+  coreSkills = [{ slug: "pdf", name: "pdf", description: "Read and write PDFs.", category: "File Processing", version: "1.0.0", requires: ["pdftotext or pandoc"] }];
   draft = null;
-  skillDetail = { id: "s1", name: "Invoice Formatter", description: "Formats invoices.", content: "# Invoice Formatter\n\nDo the thing." };
+  skillDetail = { id: "s1", name: "Invoice Formatter", description: "Formats invoices.", content: "# Invoice Formatter\n\nDo the thing.", category: "Productivity", version: "1.0.0", requires: [] };
   dismissCalled = false;
 }
 
@@ -49,7 +50,7 @@ function mockFetch(handlers: Record<string, (body: unknown) => Response | Promis
       }
       if (url === "/api/v1/skills" && method === "POST") {
         const created = { id: "s2", name: "New Skill", description: "", content: (body as { content: string }).content };
-        skills = [...skills, { id: created.id, name: created.name, description: created.description, created_at: "2026-07-17T00:00:00Z" }];
+        skills = [...skills, { id: created.id, name: created.name, description: created.description, created_at: "2026-07-17T00:00:00Z", category: "Other", version: "1.0.0", requires: [] }];
         return Promise.resolve(jsonResponse(created, 201));
       }
       if (url === "/api/v1/skills/s1" && method === "GET") return Promise.resolve(jsonResponse(skillDetail));
@@ -244,6 +245,9 @@ test("SkillDetailPage Save PUTs the edited content", async () => {
   const calls = mockFetch();
   wrap("/skills/s1");
 
+  // The viewer opens on the rendered view now (same as a built-in skill), so
+  // reach the editor through the Raw tab.
+  await userEvent.click(await screen.findByRole("button", { name: /^raw$/i }));
   const textarea = await screen.findByRole("textbox", { name: "SKILL.md" });
   await userEvent.type(textarea, "\nmore");
 
@@ -260,7 +264,7 @@ test("SkillDetailPage Delete confirms then DELETEs and navigates to /skills", as
   mockFetch();
   wrap("/skills/s1");
 
-  await screen.findByRole("textbox", { name: "SKILL.md" });
+  await screen.findByRole("button", { name: /^raw$/i });
   await userEvent.click(screen.getByRole("button", { name: /^delete$/i }));
 
   const heading = await screen.findByRole("heading", { name: /^Delete\s/ });
@@ -268,7 +272,7 @@ test("SkillDetailPage Delete confirms then DELETEs and navigates to /skills", as
 
   await userEvent.click(screen.getByRole("button", { name: "Delete" }));
 
-  await waitFor(() => expect(screen.queryByRole("textbox", { name: "SKILL.md" })).not.toBeInTheDocument());
+  await waitFor(() => expect(screen.queryByRole("button", { name: /^raw$/i })).not.toBeInTheDocument());
 });
 
 test("CoreSkillViewPage renders a readonly markdown render of the core skill content", async () => {
@@ -278,4 +282,77 @@ test("CoreSkillViewPage renders a readonly markdown render of the core skill con
   expect(await screen.findByText("Handle PDFs.")).toBeInTheDocument();
   // Read-only: no textarea/editor present.
   expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+});
+
+// ── SkillView: one viewer for both kinds ─────────────────────────────────
+
+const VIEW_CONTENT = "---\nname: demo\ndescription: d\n---\n\n# Demo\n\nSome **bold** body.\n";
+
+function renderView(kind: "core" | "user", extra: Record<string, unknown> = {}) {
+  return render(
+    <SkillView
+      kind={kind}
+      name="demo"
+      description="Does a demo thing."
+      category="File Processing"
+      version="1.0.0"
+      requires={["pandoc", "pdftotext or mutool"]}
+      content={VIEW_CONTENT}
+      {...extra}
+    />,
+  );
+}
+
+test("SkillView renders the same metadata header for both kinds", () => {
+  for (const kind of ["core", "user"] as const) {
+    const { unmount } = renderView(kind);
+    expect(screen.getByText("demo")).toBeInTheDocument();
+    expect(screen.getByText("File Processing")).toBeInTheDocument();
+    expect(screen.getByText("v1.0.0")).toBeInTheDocument();
+    expect(screen.getByText(/pandoc, pdftotext or mutool/)).toBeInTheDocument();
+    expect(screen.getByText(kind === "core" ? "Built-in" : "Yours")).toBeInTheDocument();
+    unmount();
+  }
+});
+
+test("SkillView defaults to the rendered view for both kinds", () => {
+  renderView("user", { onSave: vi.fn() });
+  // Rendered markdown produces a heading element; the raw source does not.
+  expect(screen.getByRole("heading", { name: "Demo" })).toBeInTheDocument();
+  expect(screen.queryByLabelText("SKILL.md")).not.toBeInTheDocument();
+});
+
+test("SkillView: core skills get a read-only raw view and no write controls", async () => {
+  renderView("core");
+  await userEvent.click(screen.getByRole("button", { name: /^raw$/i }));
+  const ta = screen.getByLabelText("SKILL.md") as HTMLTextAreaElement;
+  expect(ta.readOnly).toBe(true);
+  expect(screen.queryByRole("button", { name: /save skill/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
+});
+
+test("SkillView: user skills have an editable raw view, Save disabled until dirty", async () => {
+  renderView("user", { onSave: vi.fn(), onDelete: vi.fn() });
+  await userEvent.click(screen.getByRole("button", { name: /^raw$/i }));
+  const ta = screen.getByLabelText("SKILL.md") as HTMLTextAreaElement;
+  expect(ta.readOnly).toBe(false);
+  expect(screen.getByRole("button", { name: /save skill/i })).toBeDisabled();
+  await userEvent.type(ta, "x");
+  expect(screen.getByRole("button", { name: /save skill/i })).toBeEnabled();
+});
+
+// The toggle must not be a way to silently lose an edit.
+test("SkillView keeps an unsaved edit across a Raw → Rendered → Raw round trip", async () => {
+  renderView("user", { onSave: vi.fn() });
+  await userEvent.click(screen.getByRole("button", { name: /^raw$/i }));
+  await userEvent.type(screen.getByLabelText("SKILL.md"), "EDITED");
+  await userEvent.click(screen.getByRole("button", { name: /^rendered$/i }));
+  await userEvent.click(screen.getByRole("button", { name: /^raw$/i }));
+  expect((screen.getByLabelText("SKILL.md") as HTMLTextAreaElement).value).toContain("EDITED");
+});
+
+test("SkillView omits the version chip when the version is unset", () => {
+  renderView("user", { category: "Other", version: "" });
+  expect(screen.getByText("Other")).toBeInTheDocument();
+  expect(screen.queryByText(/^v$/)).not.toBeInTheDocument();
 });

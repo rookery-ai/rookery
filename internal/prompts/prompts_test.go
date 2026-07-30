@@ -551,3 +551,117 @@ func TestForceTier1AbsentByDefault(t *testing.T) {
 		}
 	}
 }
+
+// TestNoStaleOrForeignTermsInPrompts locks the wording contract. Each banned
+// string is a real defect that shipped:
+//   - "Obsidian"      — describes the product as a copy of an unrelated one, and
+//     is the term the model echoed back to the user.
+//   - "vault"         — an internal Go package name; the owner only ever sees
+//     "knowledge base".
+//   - "self-hosted"   — irrelevant to the owner and to the model's behaviour.
+//   - USER.md/SOUL.md — renamed; naming them points the model at files that no
+//     longer exist.
+//   - "reminders/"    — a folder the CLI chat prompt advertised that has never
+//     existed; reminders are DB-only and never reflected.
+func TestNoStaleOrForeignTermsInPrompts(t *testing.T) {
+	banned := []string{"Obsidian", "obsidian", "self-hosted", "USER.md", "SOUL.md", "reminders/", "vault"}
+	subjects := map[string]string{
+		"chat/tool-calling": BuildChatSystemPrompt("/kb", BackendToolCalling, nil, nil, ""),
+		"chat/cli":          BuildChatSystemPrompt("/kb", BackendFullCoder, nil, nil, ""),
+		"platform_context":  platformContextBlock(nil, "/kb"),
+	}
+	for name, text := range subjects {
+		for _, b := range banned {
+			if strings.Contains(text, b) {
+				t.Errorf("[%s] contains banned term %q", name, b)
+			}
+		}
+	}
+}
+
+func TestChatPromptStatesIdentityAndLimits(t *testing.T) {
+	p := BuildChatSystemPrompt("/home/u/.rookery/vaults/abc", BackendToolCalling, nil, nil, "")
+	for _, want := range []string{
+		"Rookery",        // it must know what it is
+		"knowledge base", // the term the owner sees
+		"cannot",         // it must state a limit
+		"agents",         // it must know the platform has agents…
+		"skills",         // …and skills…
+		"reminders",      // …and reminders, even though chat cannot create them
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("chat prompt missing %q", want)
+		}
+	}
+	// The observed failure was the model quoting /home/u/.rookery/vaults/… back
+	// at the user, so it must be told not to.
+	if !strings.Contains(p, "absolute") {
+		t.Errorf("chat prompt must forbid quoting the absolute path:\n%s", p)
+	}
+}
+
+// One product description, two consumers. A future edit to one must not be able
+// to drift from the other.
+func TestProductIdentitySharedByBothConsumers(t *testing.T) {
+	marker := "You are part of Rookery, a personal AI platform."
+	for name, text := range map[string]string{
+		"chat":  BuildChatSystemPrompt("/kb", BackendToolCalling, nil, nil, ""),
+		"agent": platformContextBlock(nil, "/kb"),
+	} {
+		if !strings.Contains(text, marker) {
+			t.Errorf("[%s] missing the shared product identity block", name)
+		}
+	}
+}
+
+func TestPlatformContextNamesCurrentMemoryFiles(t *testing.T) {
+	out := platformContextBlock(nil, "/kb")
+	for _, want := range []string{"ABOUT.md", "STYLE.md"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("platform context missing %q", want)
+		}
+	}
+}
+
+// Generated skills must carry the same frontmatter a built-in skill does, or
+// the two look like different kinds of object in the list and the viewer.
+func TestSkillPromptsRequireFullFrontmatter(t *testing.T) {
+	subjects := map[string]string{
+		"design":         BuildSkillDesignSystemPrompt(SkillDesignParams{SkillName: "demo"}),
+		"implementation": BuildSkillImplementationPrompt("demo", nil, "", SkillDesignParams{SkillName: "demo"}),
+	}
+	for name, out := range subjects {
+		if strings.Contains(out, "only name + description are strictly required") {
+			t.Errorf("[%s] still says version/license/category are optional", name)
+		}
+		for _, want := range []string{"version", "license", "category", "File Processing", "Meta"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("[%s] prompt missing %q", name, want)
+			}
+		}
+	}
+}
+
+// The runtime context must NOT be folded into <user_memory>: the prompt tells
+// the model that block IS the memory/ folder, and the current date is not a file
+// in there. This change spent its budget removing prompt claims that were not
+// true; adding one back would be a regression.
+func TestRuntimeContextHasItsOwnBlock(t *testing.T) {
+	out := BuildCoderPrompt(CoderPromptParams{
+		AgentMD:        "# Suggested schedule: none\ndo a thing",
+		RuntimeContext: "[Current context]\n- Timezone: Europe/Skopje\n",
+		UserMemory:     "## ABOUT.md\nI am Peer.",
+	})
+	if !strings.Contains(out, "<current_context>") {
+		t.Errorf("missing <current_context> block:\n%s", out)
+	}
+	memIdx := strings.Index(out, "<user_memory>")
+	ctxIdx := strings.Index(out, "<current_context>")
+	if memIdx < 0 || ctxIdx < 0 {
+		t.Fatalf("both blocks must be present")
+	}
+	memBlock := out[memIdx:strings.Index(out, "</user_memory>")]
+	if strings.Contains(memBlock, "Current context") {
+		t.Errorf("runtime context leaked into <user_memory>:\n%s", memBlock)
+	}
+}

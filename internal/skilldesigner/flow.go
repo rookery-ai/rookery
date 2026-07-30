@@ -913,7 +913,7 @@ func (f *Flow) newSession(workspaceID, skillName string, state DesignState) *Des
 		State:              state,
 		Skills:             f.loadSkillNames(workspaceID),
 		ConnectedPlatforms: f.loadConnectedPlatforms(workspaceID),
-		UserProfile:        f.loadUserProfile(workspaceID),
+		UserProfile:        f.loadRuntimeContext(workspaceID),
 		UserMemory:         f.loadUserMemory(workspaceID),
 		CreatedAt:          time.Now(),
 	}
@@ -962,12 +962,13 @@ func (f *Flow) loadConnectedPlatforms(workspaceID string) []string {
 	return out
 }
 
-func (f *Flow) loadUserProfile(workspaceID string) string {
+// loadRuntimeContext returns the "[Current context]" block (date, time,
+// timezone). Identity comes from memory/ (loadUserMemory), not from here.
+func (f *Flow) loadRuntimeContext(workspaceID string) string {
 	if f.db == nil {
 		return ""
 	}
-	p := profile.Load(f.db, workspaceID)
-	return p.ContextString()
+	return profile.RuntimeContextString(f.db, workspaceID, time.Now())
 }
 
 func (f *Flow) loadUserMemory(workspaceID string) string {

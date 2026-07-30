@@ -86,6 +86,12 @@ func (s *SkillSaver) SaveSkill(workspaceID, name, description, skillMD string, s
 		}
 	}
 
+	// Guarantee the frontmatter a built-in skill carries. The generation prompt
+	// asks for every field, but a weak model that omits one must not produce a
+	// skill the UI renders differently from a core one — and must not fail the
+	// save either, which would lose the whole design conversation.
+	skillMD = NormalizeFrontmatter(skillMD, name)
+
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(skillMD), 0o640); err != nil {
 		return nil, fmt.Errorf("write SKILL.md: %w", err)
 	}

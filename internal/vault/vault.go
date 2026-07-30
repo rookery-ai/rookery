@@ -200,23 +200,13 @@ func (v *Vault) EnsureScaffold(workspaceID string) error {
 		}
 	}
 
-	// Scaffold structured memory files if they don't exist yet.
-	// These are the suggested starting points; users may create additional
-	// .md files in memory/ and they will all be auto-injected into LLM context.
-	userMD := filepath.Join(root, "memory", "USER.md")
-	if _, err := os.Stat(userMD); errors.Is(err, os.ErrNotExist) {
-		content := "# About Me\n\n<!-- Add your name, location, role, and background here -->\n"
-		if err := writeFileAtomic(userMD, []byte(content), 0o640); err != nil {
-			return err
-		}
-	}
-	soulMD := filepath.Join(root, "memory", "SOUL.md")
-	if _, err := os.Stat(soulMD); errors.Is(err, os.ErrNotExist) {
-		content := "# Communication Style\n\n<!-- Add your preferred tone, language, and response style here -->\n"
-		if err := writeFileAtomic(soulMD, []byte(content), 0o640); err != nil {
-			return err
-		}
-	}
+	// Deliberately no memory/*.md here. memory.SeedIdentity owns ABOUT.md and
+	// STYLE.md exclusively, and writes them from the values setup collected.
+	// A placeholder written here would be created by a lazy KB visit and then
+	// rewritten by the next boot's backfill — one file, two writers — and the
+	// placeholder itself was the original bug: it is "effectively empty", so
+	// memory.ContextString dropped it and the workspace's identity reached no
+	// prompt at all.
 	return nil
 }
 

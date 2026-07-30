@@ -114,9 +114,9 @@ type ContextStore interface {
 func BuildUserContext(database *db.DB, memStore ContextStore, workspaceID string) string {
 	var sb strings.Builder
 
-	if p := profile.Load(database, workspaceID).ContextString(); p != "" {
-		sb.WriteString(p)
-	}
+	// Always present, unlike the identity block it replaced: the date is always
+	// worth stating, and identity now arrives via memStore below.
+	sb.WriteString(profile.RuntimeContextString(database, workspaceID, time.Now()))
 
 	if mem, err := memStore.ContextString(workspaceID); err == nil && mem != "" {
 		sb.WriteString("[User memory]\n")

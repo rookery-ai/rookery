@@ -128,7 +128,7 @@ test("useSaveWorkspaceMeta PUTs {name,about} and invalidates settings + session"
 
   const saveHook = renderHook(() => useSaveWorkspaceMeta(), { wrapper: Wrapper });
   await act(async () => {
-    await saveHook.result.current.mutateAsync({ name: "New Name", about: "New about" });
+    await saveHook.result.current.mutateAsync({ name: "New Name" });
   });
 
   const [url, init] = vi.mocked(fetch).mock.calls.find(
@@ -136,10 +136,9 @@ test("useSaveWorkspaceMeta PUTs {name,about} and invalidates settings + session"
   )!;
   expect(url).toBe("/api/v1/settings/workspace");
   expect((init as RequestInit).method).toBe("PUT");
-  expect(JSON.parse(String((init as RequestInit).body))).toEqual({
-    name: "New Name",
-    about: "New about",
-  });
+  // `about` is deliberately absent: memory/ABOUT.md is its source of truth, and
+  // sending it would let a rename blank the workspaces.about seed value.
+  expect(JSON.parse(String((init as RequestInit).body))).toEqual({ name: "New Name" });
 
   await waitFor(() => expect(settingsFetches).toBeGreaterThan(1));
   await waitFor(() => expect(sessionFetches).toBeGreaterThan(1));

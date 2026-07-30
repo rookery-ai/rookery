@@ -22,7 +22,7 @@ func TestBackupConfigRequiresOwner(t *testing.T) {
 // otherwise an owner could not configure backups before setting up a workspace.
 func TestBackupConfigNeedsNoActiveWorkspace(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 
 	rec := doJSON(t, s, http.MethodGet, "/api/v1/backup/config", nil, cookies)
 	if rec.Code != http.StatusOK {
@@ -32,7 +32,7 @@ func TestBackupConfigNeedsNoActiveWorkspace(t *testing.T) {
 
 func TestBackupConfigDefaultsAndNeverLeaksSecrets(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 
 	rec := doJSON(t, s, http.MethodGet, "/api/v1/backup/config", nil, cookies)
 	if rec.Code != http.StatusOK {
@@ -55,7 +55,7 @@ func TestBackupConfigDefaultsAndNeverLeaksSecrets(t *testing.T) {
 
 func TestBackupSaveConfigStoresPassphraseAndDoesNotEchoIt(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 
 	payload := map[string]any{
 		"enabled": true, "destination": "local", "schedule": "weekly",
@@ -88,7 +88,7 @@ func TestBackupSaveConfigStoresPassphraseAndDoesNotEchoIt(t *testing.T) {
 // Saving an unrelated field must not wipe the stored credential.
 func TestBackupSaveConfigKeepsExistingPassphrase(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 	dir := filepath.Join(t.TempDir(), "backups")
 
 	first := map[string]any{
@@ -118,7 +118,7 @@ func TestBackupSaveConfigKeepsExistingPassphrase(t *testing.T) {
 
 func TestBackupSaveConfigRejectsEnabledWithoutPassphrase(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 
 	payload := map[string]any{
 		"enabled": true, "destination": "local", "schedule": "daily",
@@ -133,7 +133,7 @@ func TestBackupSaveConfigRejectsEnabledWithoutPassphrase(t *testing.T) {
 
 func TestBackupRestoreRequiresConfirmation(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 
 	payload := map[string]string{
 		"name": "rookery-20260729-030000.rkb", "passphrase": "pw", "confirm": "nope",
@@ -149,7 +149,7 @@ func TestBackupRestoreRequiresConfirmation(t *testing.T) {
 
 func TestBackupDeleteRejectsForeignName(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 
 	rec := doJSON(t, s, http.MethodDelete, "/api/v1/backup/snapshots/important-tax-return.pdf", nil, cookies)
 	if rec.Code != http.StatusBadRequest {
@@ -159,7 +159,7 @@ func TestBackupDeleteRejectsForeignName(t *testing.T) {
 
 func TestBackupDownloadRejectsForeignName(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 
 	rec := doJSON(t, s, http.MethodGet, "/api/v1/backup/snapshots/secrets.env/download", nil, cookies)
 	if rec.Code != http.StatusBadRequest {
@@ -170,7 +170,7 @@ func TestBackupDownloadRejectsForeignName(t *testing.T) {
 // A full round trip through the API: configure, run, list, verify.
 func TestBackupRunListAndVerifyRoundTrip(t *testing.T) {
 	s, database := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 	s.WithBackupScheduler(newTestBackupScheduler(t, s, database))
 
 	dir := filepath.Join(t.TempDir(), "backups")

@@ -36,6 +36,7 @@ func (s *Server) registerAuthAPI(g *echo.Group) {
 	g.POST("/auth/change-password", s.apiChangePassword, s.requireOwnerAPI)
 	g.POST("/auth/lock", s.apiLock, s.requireOwnerAPI)
 	g.POST("/auth/unlock", s.apiUnlock, s.requireOwnerAPI)
+	g.POST("/auth/owner-verify", s.apiOwnerVerify, s.requireOwnerAPI)
 }
 
 func (s *Server) apiAuthSession(c echo.Context) error {
@@ -68,6 +69,9 @@ func (s *Server) apiAuthSession(c echo.Context) error {
 	// Reported so a reload lands back on the lock screen. The lock is a server
 	// flag, not a client overlay, so this is the SPA's only way to know.
 	out["locked"] = s.isLocked(c)
+	// Reported for the same reason "locked" is: the SPA already loads and caches
+	// this payload once, so a reload lands in the right state without a probe.
+	out["owner_verified"] = s.isOwnerVerified(c)
 	return c.JSON(http.StatusOK, out)
 }
 
@@ -126,6 +130,47 @@ func (s *Server) apiUnlock(c echo.Context) error {
 	}
 	s.audit.Log(w.ID, "unlock_ui", "owner:"+o.ID, "", c.RealIP())
 	return c.JSON(http.StatusOK, map[string]any{"ok": true, "locked": false})
+}
+
+// ── Owner re-authentication ─────────────────────────────────────────────────
+//
+// Install-level settings — whole-install restore, snapshot deletion, workspace
+// deletion, the public URL — were reachable by anyone holding a logged-in owner
+// session, however old. This asks for the owner password again.
+//
+// It is NOT protection against someone who knows that password; nothing at this
+// layer can be. It raises the bar against an unattended-but-unlocked session and
+// against a leaked cookie being used for install-destroying actions.
+//
+// The username comes from the session's owner record, never from the request:
+// the single-owner model means there is exactly one valid username, so accepting
+// one from the client would add an oracle and buy nothing.
+func (s *Server) apiOwnerVerify(c echo.Context) error {
+	o := c.Get("owner").(*db.Owner)
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := bindAPI(c, &req); err != nil {
+		return err
+	}
+	if _, err := auth.Authenticate(s.db, o.Username, req.Password); err != nil {
+		s.audit.Log("", "owner_verify_failed", "owner:"+o.ID, "", c.RealIP())
+		if errors.Is(err, auth.ErrInvalidCreds) {
+			return jsonErr(c, http.StatusUnauthorized, "invalid_password", "wrong owner password")
+		}
+		return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
+	}
+	if err := s.setOwnerVerified(c); err != nil {
+		// Fail CLOSED: a failed stamp just means the owner tries again. (Unlike
+		// the connector approval Parker, where failing closed would silently
+		// halt an autonomous agent nobody gated.)
+		return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
+	}
+	s.audit.Log("", "owner_verified", "owner:"+o.ID, "", c.RealIP())
+	return c.JSON(http.StatusOK, map[string]any{
+		"ok":             true,
+		"verified_until": time.Now().Add(ownerVerifyTTL).UTC().Format(time.RFC3339),
+	})
 }
 
 func (s *Server) apiLogin(c echo.Context) error {

@@ -31,9 +31,9 @@ func TestScaffoldREADMEDescribesTheVault(t *testing.T) {
 		}
 	}
 
-	// The specific memory files EnsureScaffold writes, so a user can connect
-	// the note to what they actually see on disk.
-	for _, f := range []string{"USER.md", "SOUL.md"} {
+	// The specific memory files setup seeds, so a user can connect the note to
+	// what they actually see on disk.
+	for _, f := range []string{"ABOUT.md", "STYLE.md"} {
 		if !strings.Contains(got, f) {
 			t.Errorf("README does not mention %s", f)
 		}
@@ -143,5 +143,40 @@ func TestScaffoldREADMEIsNotRewritten(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(readme); string(b) != edited {
 		t.Errorf("an edited legacy README must be left alone, got:\n%s", b)
+	}
+}
+
+// TestCurrentTemplateIsInLegacyList is the test that stops the NEXT README
+// revision from stranding every existing install.
+//
+// EnsureScaffold upgrades a README only when it byte-matches an entry in
+// legacyREADMEs. Shipping a new template without adding the OUTGOING one to
+// that list means installs that already have the outgoing text keep it
+// forever — precisely the failure the mechanism exists to prevent. Asserting
+// the CURRENT template is present forces the author of the next revision to
+// move it into the list, because this test fails the moment they change
+// readmeTemplate without doing so.
+func TestCurrentTemplateIsInLegacyList(t *testing.T) {
+	if !isPristineREADME([]byte(readmeTemplate)) {
+		t.Fatal("readmeTemplate is not in legacyREADMEs — add it, or every " +
+			"existing install keeps the previous README forever")
+	}
+}
+
+func TestReadmeDescribesFilesThatExist(t *testing.T) {
+	for _, stale := range []string{"USER.md", "SOUL.md", "Obsidian", "vault"} {
+		if strings.Contains(readmeTemplate, stale) {
+			t.Errorf("readmeTemplate still mentions %q", stale)
+		}
+	}
+	for _, want := range []string{"ABOUT.md", "STYLE.md", "knowledge base"} {
+		if !strings.Contains(readmeTemplate, want) {
+			t.Errorf("readmeTemplate missing %q", want)
+		}
+	}
+	// GENERAL.md may be named only as something that appears on demand.
+	if strings.Contains(readmeTemplate, "GENERAL.md") &&
+		!strings.Contains(readmeTemplate, "/memory") {
+		t.Error("if GENERAL.md is named, the README must say it appears when you use /memory")
 	}
 }

@@ -3,6 +3,9 @@ import { api } from "./api";
 
 // Mirrors web/api_settings.go's DTOs (apiGetSettings).
 
+// GET /api/v1/settings still returns every field (older rows are read for the
+// startup backfill), but only display_name and timezone are written back —
+// everything else now lives in memory/ABOUT.md and memory/STYLE.md.
 export type Profile = {
   display_name: string;
   email: string;
@@ -13,7 +16,12 @@ export type Profile = {
   notes: string;
 };
 
+/** The subset Settings may write. See ProfileSection. */
+export type ProfileUpdate = Pick<Profile, "display_name" | "timezone">;
+
+/** `about` is read-only in Settings; the server ignores it on write. */
 export type WorkspaceMeta = { name: string; about: string };
+export type WorkspaceMetaUpdate = Pick<WorkspaceMeta, "name">;
 
 export type CoderConfig = {
   kind: string;
@@ -71,7 +79,7 @@ export function useSettings() {
 export function useSaveProfile() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (profile: Profile) =>
+    mutationFn: (profile: ProfileUpdate) =>
       api.put<{ ok: boolean }>("/api/v1/settings/profile", profile),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["settings"] }),
   });
@@ -82,7 +90,7 @@ export function useSaveProfile() {
 export function useSaveWorkspaceMeta() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (meta: WorkspaceMeta) =>
+    mutationFn: (meta: WorkspaceMetaUpdate) =>
       api.put<{ ok: boolean }>("/api/v1/settings/workspace", meta),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["settings"] });
