@@ -193,14 +193,13 @@ func (s *Server) apiPutSettingsProfile(c echo.Context) error {
 	if err := bindAPI(c, &req); err != nil {
 		return err
 	}
+	// Only the two fields code actually reads are persisted. Tone, language,
+	// location, email and background live in memory/ABOUT.md and memory/STYLE.md,
+	// which the owner edits in the knowledge base — Settings must not offer a
+	// second place to change them.
 	prof := profile.Profile{
 		DisplayName: req.DisplayName,
-		Email:       req.Email,
-		Location:    req.Location,
 		Timezone:    req.Timezone,
-		Tone:        req.Tone, // no tone_custom precedence in JSON — take tone as-is
-		Language:    req.Language,
-		Notes:       req.Notes,
 	}
 	if err := profile.Save(s.db, w.ID, prof); err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", "failed to save settings: "+err.Error())
@@ -220,7 +219,12 @@ func (s *Server) apiPutSettingsWorkspace(c echo.Context) error {
 	if req.Name == "" {
 		return jsonErr(c, http.StatusBadRequest, "missing_field", "workspace name is required")
 	}
-	if err := s.db.UpdateWorkspaceMeta(w.ID, req.Name, req.About); err != nil {
+	// req.About is deliberately ignored: memory/ABOUT.md is the source of truth
+	// for what this workspace is about, and workspaces.about survives only as the
+	// seed value the startup backfill reads. Passing req.About through would let
+	// a rename blank it. Ignored rather than rejected so an older SPA build still
+	// sending the field does not start failing.
+	if err := s.db.UpdateWorkspaceMeta(w.ID, req.Name, w.About); err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", "failed to save: "+err.Error())
 	}
 	s.audit.Log(w.ID, "update_workspace_meta", "workspace:"+w.ID, "", c.RealIP())
@@ -483,6 +487,9 @@ func (s *Server) apiPostSetup(c echo.Context) error {
 		if err := s.db.MarkWorkspaceSetupComplete(w.ID); err != nil {
 			return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
 		}
+		// Seeded here rather than at step 1 or 4: both of those are skippable,
+		// and step 7 is the one point every wizard path passes through.
+		s.seedIdentityFiles(w.ID, "setup_complete")
 		return s.apiSetupOK(c, w)
 	default:
 		return jsonErr(c, http.StatusBadRequest, "invalid_step", "unknown or missing step")

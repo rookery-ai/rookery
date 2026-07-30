@@ -28,6 +28,7 @@ import (
 	"github.com/ilijad1/rookery/internal/gateway"
 	"github.com/ilijad1/rookery/internal/health"
 	"github.com/ilijad1/rookery/internal/memory"
+	"github.com/ilijad1/rookery/internal/profile"
 	"github.com/ilijad1/rookery/internal/prompts"
 	"github.com/ilijad1/rookery/internal/reminder"
 	"github.com/ilijad1/rookery/internal/sandbox"
@@ -223,6 +224,32 @@ func serveCmd() *cli.Command {
 					}
 					if err := memStore.MigrateToStructuredFiles(d.Name()); err != nil {
 						slog.Warn("memory: migrate to structured files", "user", d.Name(), "err", err)
+					}
+					// Then bring memory/ up to the current identity layout:
+					// USER.md → ABOUT.md, SOUL.md → STYLE.md, and a backfill
+					// from the DB for any file still empty. The backfill is what
+					// repairs an EXISTING install — setup values never reached
+					// memory/ before, so every workspace's identity files are
+					// the untouched scaffold, which isEffectivelyEmpty then
+					// dropped from every prompt.
+					w, err := database.GetWorkspaceByID(d.Name())
+					if err != nil {
+						// A vault dir with no workspace row: a deleted tenant's
+						// leftovers. Skip rather than invent an identity.
+						continue
+					}
+					p := profile.Load(database, w.ID)
+					if err := memStore.MigrateIdentityFiles(w.ID, memory.Identity{
+						WorkspaceName:  w.Name,
+						WorkspaceAbout: w.About,
+						DisplayName:    p.DisplayName,
+						Email:          p.Email,
+						Location:       p.Location,
+						Notes:          p.Notes,
+						Tone:           p.Tone,
+						Language:       p.Language,
+					}); err != nil {
+						slog.Warn("memory: migrate identity files", "workspace", w.ID, "err", err)
 					}
 				}
 			}

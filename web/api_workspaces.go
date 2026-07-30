@@ -64,6 +64,10 @@ func (s *Server) apiCreateWorkspace(c echo.Context) error {
 		s.audit.Log(w.ID, "create_workspace", "workspace:"+w.ID, "owner:"+o.ID, c.RealIP())
 	}
 
+	// The About text the owner just typed is what agents and chat are told this
+	// workspace is for, and memory/ABOUT.md is where they read it from.
+	s.seedIdentityFiles(w.ID, "create_workspace")
+
 	// A newly created workspace has no master password yet, so it can't go through
 	// the enter gate — set it active straight away (mirrors handleAdminCreateWorkspace).
 	if err := s.setActiveWorkspace(c, w.ID); err != nil {
