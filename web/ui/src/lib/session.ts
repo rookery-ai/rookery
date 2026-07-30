@@ -19,6 +19,9 @@ export type Session = {
   // Server-side screen lock. The workspace stays entered while locked; every
   // guarded API route answers 423 until the master password is re-entered.
   locked?: boolean;
+  /** True while the owner-password confirmation guarding install-level
+   *  settings is still within its server-side TTL. */
+  owner_verified?: boolean;
   // The active workspace's profile timezone (an IANA name, or "" when unset).
   // Free text server-side, so consumers must tolerate a bogus value — see
   // formatMessageTime.

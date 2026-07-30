@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
 import { OwnerSections } from "./OwnerSections";
+import { OwnerGate } from "./OwnerGate";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -281,4 +282,89 @@ test("Audit log search is debounced into a single server query", async () => {
   // Seven keystrokes must not mean seven requests.
   const searchCalls = calls.filter((c) => c.url.includes("q="));
   expect(searchCalls.length).toBeLessThan(4);
+});
+
+// ── OwnerGate ────────────────────────────────────────────────────────────
+
+function wrapGate() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter>
+        <OwnerGate>
+          <div>owner body</div>
+        </OwnerGate>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+const GATE_403 = () =>
+  jsonResponse(
+    { error: { code: "owner_verification_required", message: "confirm your owner password" } },
+    403,
+  );
+
+test("OwnerGate prompts for the password when an install-level route 403s", async () => {
+  mockFetch({ "GET /api/v1/admin/overview": GATE_403 });
+  wrapGate();
+
+  expect(await screen.findByLabelText(/owner password/i)).toBeInTheDocument();
+  expect(screen.queryByText("owner body")).not.toBeInTheDocument();
+});
+
+test("OwnerGate renders the body after a successful verify", async () => {
+  let verified = false;
+  mockFetch({
+    "GET /api/v1/admin/overview": () =>
+      verified ? jsonResponse({ workspaces: 1 }) : GATE_403(),
+    "POST /api/v1/auth/owner-verify": () => {
+      verified = true;
+      return jsonResponse({ ok: true, verified_until: "2099-01-01T00:00:00Z" });
+    },
+  });
+  wrapGate();
+
+  await userEvent.type(await screen.findByLabelText(/owner password/i), "hunter2");
+  await userEvent.click(screen.getByRole("button", { name: /unlock/i }));
+
+  expect(await screen.findByText("owner body")).toBeInTheDocument();
+});
+
+test("OwnerGate keeps the prompt and shows the error on a wrong password", async () => {
+  mockFetch({
+    "GET /api/v1/admin/overview": GATE_403,
+    "POST /api/v1/auth/owner-verify": () =>
+      jsonResponse({ error: { code: "invalid_password", message: "wrong owner password" } }, 401),
+  });
+  wrapGate();
+
+  await userEvent.type(await screen.findByLabelText(/owner password/i), "nope");
+  await userEvent.click(screen.getByRole("button", { name: /unlock/i }));
+
+  expect(await screen.findByText(/wrong owner password/i)).toBeInTheDocument();
+  expect(screen.getByLabelText(/owner password/i)).toBeInTheDocument();
+});
+
+// An unrelated 403 is a real permission error, not a verification gate — showing
+// a password prompt for it would be a dead end.
+test("OwnerGate does not prompt for an unrelated 403", async () => {
+  mockFetch({
+    "GET /api/v1/admin/overview": () =>
+      jsonResponse({ error: { code: "forbidden", message: "nope" } }, 403),
+  });
+  wrapGate();
+
+  await waitFor(() => expect(screen.getByText("owner body")).toBeInTheDocument());
+  expect(screen.queryByLabelText(/owner password/i)).not.toBeInTheDocument();
+});
+
+// The gate is transparent when the probe succeeds, so an already-verified
+// session sees no prompt at all.
+test("OwnerGate is transparent when already verified", async () => {
+  mockFetch({ "GET /api/v1/admin/overview": () => jsonResponse({ workspaces: 1 }) });
+  wrapGate();
+
+  expect(await screen.findByText("owner body")).toBeInTheDocument();
+  expect(screen.queryByLabelText(/owner password/i)).not.toBeInTheDocument();
 });

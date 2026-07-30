@@ -21,6 +21,7 @@ import {
 } from "@/lib/settings";
 import { ProviderCards } from "./ProviderCards";
 import { CoderSection } from "./CoderSection";
+import { OwnerGate } from "./OwnerGate";
 import { OwnerSections } from "./OwnerSections";
 
 // Section navigation is driven by a `?section=` query param (not scroll
@@ -428,7 +429,11 @@ export default function SettingsPage() {
             )}
             {section === "master-password" && <MasterPasswordSection />}
             {section === "appearance" && <AppearanceSection />}
-            {section === "owner" && <OwnerSections />}
+            {section === "owner" && (
+              <OwnerGate>
+                <OwnerSections />
+              </OwnerGate>
+            )}
           </>
         )}
       </div>
