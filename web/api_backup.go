@@ -10,7 +10,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/ilijad1/simple-agents/internal/backup"
+	"github.com/ilijad1/rookery/internal/backup"
 )
 
 // maxSnapshotUpload bounds a restore upload. It is deliberately far above the
@@ -304,7 +304,7 @@ func (s *Server) openSnapshotForRead(c echo.Context, name string) (io.ReadCloser
 		}
 		defer src.Close()
 
-		tmp, err := os.CreateTemp("", "sa-restore-*.sab")
+		tmp, err := os.CreateTemp("", "rookery-restore-*.rkb")
 		if err != nil {
 			return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 		}

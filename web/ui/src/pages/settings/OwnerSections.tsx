@@ -209,7 +209,7 @@ function InstanceURLSection() {
             {source === "configured"
               ? "(configured here)"
               : source === "env"
-                ? "(from SA_PUBLIC_URL)"
+                ? "(from ROOKERY_PUBLIC_URL)"
                 : "(detected from your browser)"}
           </p>
 

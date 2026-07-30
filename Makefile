@@ -1,16 +1,16 @@
-# simple-agents — build & local deploy helpers.
+# rookery — build & local deploy helpers.
 #
 # `make deploy` is the one-command rebuild+restart: it stops any running
 # server, rebuilds the binary, and starts it in the background with stdout/stderr
 # captured to logs/server.log. The Makefile owns process tracking via
 # logs/server.pid (the app has no pidfile/lock of its own).
 #
-# Defaults used by `serve`: listen 0.0.0.0:8080, data dir ~/.simple-agents-v2
-# (DB auto-migrates on open). Override the port with SA_PORT, e.g.
-#   SA_PORT=8081 make deploy
+# Defaults used by `serve`: listen 0.0.0.0:8080, data dir ~/.rookery
+# (DB auto-migrates on open). Override the port with ROOKERY_PORT, e.g.
+#   ROOKERY_PORT=8081 make deploy
 
-BIN := bin/simple-agents
-PKG := ./cmd/simple-agents
+BIN := bin/rookery
+PKG := ./cmd/rookery
 LOG := logs/server.log
 PID := logs/server.pid
 SHELL := /bin/bash
@@ -20,9 +20,9 @@ SHELL := /bin/bash
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS := -X github.com/ilijad1/simple-agents/internal/buildinfo.Version=$(VERSION) \
-           -X github.com/ilijad1/simple-agents/internal/buildinfo.Commit=$(COMMIT) \
-           -X github.com/ilijad1/simple-agents/internal/buildinfo.Date=$(DATE)
+LDFLAGS := -X github.com/ilijad1/rookery/internal/buildinfo.Version=$(VERSION) \
+           -X github.com/ilijad1/rookery/internal/buildinfo.Commit=$(COMMIT) \
+           -X github.com/ilijad1/rookery/internal/buildinfo.Date=$(DATE)
 
 # Prefer podman, fall back to docker. Overridable: CONTAINER_ENGINE=docker make …
 CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null || echo podman)
@@ -52,7 +52,7 @@ stop:
 		rm -f $(PID); \
 		echo "stopped (pidfile)"; \
 	else \
-		pkill -f '[b]in/simple-agents serve' 2>/dev/null && echo "stopped (pkill)" || echo "not running"; \
+		pkill -f '[b]in/rookery serve' 2>/dev/null && echo "stopped (pkill)" || echo "not running"; \
 	fi
 	@sleep 0.5
 
@@ -76,7 +76,7 @@ logs:
 
 ## status: show the running server process
 status:
-	@pgrep -af '[b]in/simple-agents serve' || echo "not running"
+	@pgrep -af '[b]in/rookery serve' || echo "not running"
 
 ## test: run the unit tests (no -race; see ci-test for the gate's version)
 test:
@@ -116,10 +116,10 @@ ci-ui:
 
 ## docker-build: build the slim container image locally (podman or docker)
 docker-build:
-	$(CONTAINER_ENGINE) build -t simple-agents:local \
+	$(CONTAINER_ENGINE) build -t rookery:local \
 		--build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) .
 
 ## docker-run: run the locally built image with a persistent data volume
 docker-run:
 	$(CONTAINER_ENGINE) run --rm -it -p 8080:8080 \
-		-v simple-agents-data:/data simple-agents:local
+		-v rookery-data:/data rookery:local

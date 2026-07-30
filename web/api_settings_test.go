@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/rookery/internal/secrets"
 )
 
 // TestAPISettingsGetNeverLeaksSecretValues seeds a secret then checks the

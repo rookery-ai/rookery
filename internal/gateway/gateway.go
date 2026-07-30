@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/rookery/internal/db"
 )
 
 // Message is a normalised inbound message from any platform.

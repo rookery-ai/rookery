@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/ilijad1/simple-agents/internal/coder"
-	"github.com/ilijad1/simple-agents/internal/prompts"
+	"github.com/ilijad1/rookery/internal/coder"
+	"github.com/ilijad1/rookery/internal/prompts"
 )
 
 // selectorRetries is how many times the selector call is attempted before giving up.

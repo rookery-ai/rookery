@@ -64,12 +64,12 @@ func TestVerifyRefusesNewerSchema(t *testing.T) {
 }
 
 func TestStageAndApplyRestore(t *testing.T) {
-	t.Setenv("SA_SYSTEM_KEY", "")
+	t.Setenv("ROOKERY_SYSTEM_KEY", "")
 	raw, sysKey := makeSnapshot(t, "pw")
 
 	// A destination install with its own, different data.
 	target := t.TempDir()
-	writeFile(t, filepath.Join(target, "simple-agents.db"), "OLD DATABASE")
+	writeFile(t, filepath.Join(target, "rookery.db"), "OLD DATABASE")
 	writeFile(t, filepath.Join(target, "vaults", "wsOld", "notes", "old.md"), "old note")
 	oldKey := hex.EncodeToString(bytes.Repeat([]byte{0x11}, 32))
 	writeFile(t, filepath.Join(target, "system.key"), oldKey)
@@ -81,7 +81,7 @@ func TestStageAndApplyRestore(t *testing.T) {
 		t.Fatal("staging must leave a pending marker")
 	}
 	// Staging alone must not have touched anything live.
-	if body, _ := os.ReadFile(filepath.Join(target, "simple-agents.db")); string(body) != "OLD DATABASE" {
+	if body, _ := os.ReadFile(filepath.Join(target, "rookery.db")); string(body) != "OLD DATABASE" {
 		t.Fatal("staging must not modify the live database")
 	}
 
@@ -129,12 +129,12 @@ func TestStageAndApplyRestore(t *testing.T) {
 func TestStageRestoreRefusesConflictingEnvKey(t *testing.T) {
 	raw, _ := makeSnapshot(t, "pw")
 	other := hex.EncodeToString(bytes.Repeat([]byte{0x22}, 32))
-	t.Setenv("SA_SYSTEM_KEY", other)
+	t.Setenv("ROOKERY_SYSTEM_KEY", other)
 
 	target := t.TempDir()
 	_, err := StageRestore(bytes.NewReader(raw), target, "pw", "011_pending_actions.up.sql")
 	if !errors.Is(err, ErrSystemKeyConflict) {
-		t.Fatalf("got %v, want ErrSystemKeyConflict — SA_SYSTEM_KEY outranks the restored key", err)
+		t.Fatalf("got %v, want ErrSystemKeyConflict — ROOKERY_SYSTEM_KEY outranks the restored key", err)
 	}
 	if HasPendingRestore(target) {
 		t.Fatal("a refused stage must not leave a marker behind")
@@ -142,7 +142,7 @@ func TestStageRestoreRefusesConflictingEnvKey(t *testing.T) {
 }
 
 func TestStageRestoreWrongPassphraseLeavesNothing(t *testing.T) {
-	t.Setenv("SA_SYSTEM_KEY", "")
+	t.Setenv("ROOKERY_SYSTEM_KEY", "")
 	raw, _ := makeSnapshot(t, "pw")
 	target := t.TempDir()
 
@@ -158,7 +158,7 @@ func TestStageRestoreWrongPassphraseLeavesNothing(t *testing.T) {
 }
 
 func TestCancelRestoreClearsMarkerAndStaging(t *testing.T) {
-	t.Setenv("SA_SYSTEM_KEY", "")
+	t.Setenv("ROOKERY_SYSTEM_KEY", "")
 	raw, _ := makeSnapshot(t, "pw")
 	target := t.TempDir()
 
@@ -217,13 +217,13 @@ func findPreRestoreDir(t *testing.T, dataDir string) string {
 // Each restore leaves a full copy of the database and vaults behind, so only
 // the newest rollback copy is kept.
 func TestApplyPendingRestoreKeepsOnlyNewestPreRestore(t *testing.T) {
-	t.Setenv("SA_SYSTEM_KEY", "")
+	t.Setenv("ROOKERY_SYSTEM_KEY", "")
 	target := t.TempDir()
-	writeFile(t, filepath.Join(target, "simple-agents.db"), "OLD")
+	writeFile(t, filepath.Join(target, "rookery.db"), "OLD")
 
 	// A stale rollback copy from an earlier restore.
 	stale := filepath.Join(target, ".pre-restore-20200101-000000")
-	writeFile(t, filepath.Join(stale, "simple-agents.db"), "ANCIENT")
+	writeFile(t, filepath.Join(stale, "rookery.db"), "ANCIENT")
 
 	raw, _ := makeSnapshot(t, "pw")
 	if _, err := StageRestore(bytes.NewReader(raw), target, "pw", "011_pending_actions.up.sql"); err != nil {

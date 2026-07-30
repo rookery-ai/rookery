@@ -8,8 +8,8 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/gateway"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/gateway"
 )
 
 // saveConnector validates + encrypts + persists a platform's credentials for a

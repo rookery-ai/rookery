@@ -28,7 +28,7 @@ func TestS3PutSignsAndUploads(t *testing.T) {
 	}, "SK")
 
 	body := []byte("encrypted snapshot")
-	name := "simple-agents-20260729-030000.sab"
+	name := "rookery-20260729-030000.rkb"
 	if err := d.Put(context.Background(), name, bytes.NewReader(body), int64(len(body))); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestS3PutRejectsNonSeekableSource(t *testing.T) {
 	// A pipe is not seekable, and S3 needs the payload hash before sending.
 	pr, pw := io.Pipe()
 	pw.Close()
-	if err := d.Put(context.Background(), "simple-agents-20260729-030000.sab", pr, 1); err == nil {
+	if err := d.Put(context.Background(), "rookery-20260729-030000.rkb", pr, 1); err == nil {
 		t.Fatal("a non-seekable source must be refused, not silently mis-signed")
 	}
 }
@@ -77,10 +77,10 @@ func TestS3VirtualHostStyleURL(t *testing.T) {
 			return (&net.Dialer{}).DialContext(ctx, network, strings.TrimPrefix(srv.URL, "http://"))
 		},
 	}
-	if err := d.Put(context.Background(), "simple-agents-20260729-030000.sab", strings.NewReader("x"), 1); err != nil {
+	if err := d.Put(context.Background(), "rookery-20260729-030000.rkb", strings.NewReader("x"), 1); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	if gotPath != "/simple-agents-20260729-030000.sab" {
+	if gotPath != "/rookery-20260729-030000.rkb" {
 		t.Fatalf("virtual-host style must omit the bucket from the path, got %q", gotPath)
 	}
 	if !strings.HasPrefix(gotHost, "mybucket.") {
@@ -91,8 +91,8 @@ func TestS3VirtualHostStyleURL(t *testing.T) {
 func TestS3ListParsesAndFilters(t *testing.T) {
 	const body = `<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult>
-  <Contents><Key>sa/simple-agents-20260728-030000.sab</Key><Size>120</Size><LastModified>2026-07-28T03:00:00.000Z</LastModified></Contents>
-  <Contents><Key>sa/simple-agents-20260729-030000.sab</Key><Size>130</Size><LastModified>2026-07-29T03:00:00.000Z</LastModified></Contents>
+  <Contents><Key>sa/rookery-20260728-030000.rkb</Key><Size>120</Size><LastModified>2026-07-28T03:00:00.000Z</LastModified></Contents>
+  <Contents><Key>sa/rookery-20260729-030000.rkb</Key><Size>130</Size><LastModified>2026-07-29T03:00:00.000Z</LastModified></Contents>
   <Contents><Key>sa/notes.txt</Key><Size>5</Size><LastModified>2026-07-29T03:00:00.000Z</LastModified></Contents>
 </ListBucketResult>`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -116,7 +116,7 @@ func TestS3ListParsesAndFilters(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("got %d entries, want 2 — foreign keys must be filtered out: %+v", len(entries), entries)
 	}
-	if entries[0].Name != "simple-agents-20260728-030000.sab" {
+	if entries[0].Name != "rookery-20260728-030000.rkb" {
 		t.Fatalf("name = %q, want the prefix stripped", entries[0].Name)
 	}
 	if entries[0].Size != 120 {
@@ -131,7 +131,7 @@ func TestS3GetReturnsBody(t *testing.T) {
 	defer srv.Close()
 
 	d := NewS3Destination(S3Config{Endpoint: srv.URL, Region: "us-east-1", Bucket: "b", AccessKey: "AK", PathStyle: true}, "SK")
-	rc, err := d.Get(context.Background(), "simple-agents-20260729-030000.sab")
+	rc, err := d.Get(context.Background(), "rookery-20260729-030000.rkb")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestS3ErrorsCarryStatus(t *testing.T) {
 	defer srv.Close()
 
 	d := NewS3Destination(S3Config{Endpoint: srv.URL, Region: "us-east-1", Bucket: "b", AccessKey: "AK", PathStyle: true}, "SK")
-	err := d.Put(context.Background(), "simple-agents-20260729-030000.sab", strings.NewReader("x"), 1)
+	err := d.Put(context.Background(), "rookery-20260729-030000.rkb", strings.NewReader("x"), 1)
 	if err == nil {
 		t.Fatal("expected an error on 403")
 	}

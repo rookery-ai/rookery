@@ -8,28 +8,28 @@ import (
 	"sync"
 
 	"github.com/gorilla/sessions"
-	"github.com/ilijad1/simple-agents/internal/agentdesigner"
-	"github.com/ilijad1/simple-agents/internal/agentrunner"
-	"github.com/ilijad1/simple-agents/internal/audit"
-	"github.com/ilijad1/simple-agents/internal/backup"
-	"github.com/ilijad1/simple-agents/internal/chat"
-	"github.com/ilijad1/simple-agents/internal/coder"
-	"github.com/ilijad1/simple-agents/internal/config"
-	"github.com/ilijad1/simple-agents/internal/connectors"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/gateway"
-	"github.com/ilijad1/simple-agents/internal/memory"
-	"github.com/ilijad1/simple-agents/internal/secrets"
-	"github.com/ilijad1/simple-agents/internal/skilldesigner"
-	"github.com/ilijad1/simple-agents/internal/skillstore"
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/agentdesigner"
+	"github.com/ilijad1/rookery/internal/agentrunner"
+	"github.com/ilijad1/rookery/internal/audit"
+	"github.com/ilijad1/rookery/internal/backup"
+	"github.com/ilijad1/rookery/internal/chat"
+	"github.com/ilijad1/rookery/internal/coder"
+	"github.com/ilijad1/rookery/internal/config"
+	"github.com/ilijad1/rookery/internal/connectors"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/gateway"
+	"github.com/ilijad1/rookery/internal/memory"
+	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/ilijad1/rookery/internal/skilldesigner"
+	"github.com/ilijad1/rookery/internal/skillstore"
+	"github.com/ilijad1/rookery/internal/vault"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 )
 
 const sessionName = "sa_session"
 
-// Server is the HTTP server for the Simple Agents web UI.
+// Server is the HTTP server for the Rookery web UI.
 type Server struct {
 	// approval resolves parked public_write actions from the web UI. Nil when the
 	// install has no approval service wired, in which case the endpoints say so
@@ -76,7 +76,7 @@ type Server struct {
 func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, designer *agentdesigner.AgentDesigner, homesDir string, skillStore *skillstore.Store, designFlow *agentdesigner.Flow, skillFlow *skilldesigner.Flow, memStore *memory.Store) (*Server, error) {
 	sessionKey := []byte(cfg.Server.SessionKey)
 	if len(sessionKey) == 0 {
-		// Use a fixed dev key if not configured; production MUST set SA_SESSION_KEY.
+		// Use a fixed dev key if not configured; production MUST set ROOKERY_SESSION_KEY.
 		sessionKey = []byte("change-me-in-production-32bytes!!")
 	}
 
@@ -155,7 +155,7 @@ func (s *Server) WithBackupScheduler(b *backup.Scheduler) *Server { s.backupSche
 func (s *Server) WithBridge(b *connectors.Bridge) *Server { s.connBridge = b; return s }
 
 // WithKBBridge attaches the loopback KB bridge so CLI chat coders can reach
-// save_to_kb-equivalent conversion + search (`simple-agents kb convert|search`).
+// save_to_kb-equivalent conversion + search (`rookery kb convert|search`).
 func (s *Server) WithKBBridge(b *vault.Bridge) *Server { s.kbBridge = b; return s }
 
 // WithTitleGenerator enables one-time content-based auto-titling of chats.

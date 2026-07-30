@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/skilllibrary"
-	"github.com/ilijad1/simple-agents/internal/skillstore"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/skilllibrary"
+	"github.com/ilijad1/rookery/internal/skillstore"
 	"github.com/labstack/echo/v4"
 )
 

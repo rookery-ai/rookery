@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/agentdesigner"
-	"github.com/ilijad1/simple-agents/internal/skilllibrary"
+	"github.com/ilijad1/rookery/internal/agentdesigner"
+	"github.com/ilijad1/rookery/internal/skilllibrary"
 	"github.com/stretchr/testify/require"
 )
 

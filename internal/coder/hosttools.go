@@ -19,13 +19,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/ilijad1/simple-agents/internal/connectors"
-	"github.com/ilijad1/simple-agents/internal/convert"
-	"github.com/ilijad1/simple-agents/internal/iolimit"
-	"github.com/ilijad1/simple-agents/internal/llm"
-	"github.com/ilijad1/simple-agents/internal/sandbox"
-	"github.com/ilijad1/simple-agents/internal/vault"
-	"github.com/ilijad1/simple-agents/internal/websearch"
+	"github.com/ilijad1/rookery/internal/connectors"
+	"github.com/ilijad1/rookery/internal/convert"
+	"github.com/ilijad1/rookery/internal/iolimit"
+	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/ilijad1/rookery/internal/sandbox"
+	"github.com/ilijad1/rookery/internal/vault"
+	"github.com/ilijad1/rookery/internal/websearch"
 )
 
 // maxToolResult is the per-result byte cap injected back into the model context.
@@ -85,7 +85,7 @@ type hostToolSet struct {
 	fetchMemo map[string]string
 
 	// Build-time script verification. verifyBuild is set ONLY during agent generation
-	// (SA_BUILD_PHASE=generation) on the API/tool-calling backend — the weaker-model path
+	// (ROOKERY_BUILD_PHASE=generation) on the API/tool-calling backend — the weaker-model path
 	// that, unlike a full CLI coder, does not reliably run-and-fix its own scripts. The
 	// engine uses these to refuse to "finish" a build while the model has authored a
 	// helper script it never once got real output from (see verifyFinishNudge +
@@ -452,7 +452,7 @@ func (h *hostToolSet) buildSpec() BuildSpec {
 //  1. the build's deliverable must exist. A build with no deliverable is useless
 //     regardless of the helper script, and the common trap on a weak tool-calling backend
 //     is the model burning its whole turn budget trying to verify a helper script that
-//     can't reach the live service at build time (SA_BUILD_PHASE blocks outbound) — and
+//     can't reach the live service at build time (ROOKERY_BUILD_PHASE blocks outbound) — and
 //     never writing the deliverable. So the FIRST thing the nudge demands is: write it,
 //     don't keep fixing the script.
 //
@@ -1186,7 +1186,7 @@ func (h *hostToolSet) webFetchOnce(ctx context.Context, client *http.Client, met
 	if err != nil {
 		return "", false, fmt.Errorf("build request: %v", err)
 	}
-	req.Header.Set("User-Agent", "simple-agents/1.0 (+web_fetch)")
+	req.Header.Set("User-Agent", "rookery/1.0 (+web_fetch)")
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -1387,7 +1387,7 @@ const spillHeadBytes = 2 * 1024
 // Dot-prefixed on purpose: ReadToolsTree only walks tools/ and skips dot-dirs, cleanupTestArtifacts
 // removes any dot-dir post-save, and vault.List hides dotfiles — so a spill never ships with a
 // built agent nor shows in the KB browser.
-const spillDirName = ".sa_out"
+const spillDirName = ".rookery_out"
 
 // spillLargeOutput persists an over-cap exec-tool output (run_script / bash stdout) to a file under
 // the agent workDir and returns a compact, STEERING notice: a head of the data plus the file path

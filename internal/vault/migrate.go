@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ilijad1/simple-agents/internal/memory"
+	"github.com/ilijad1/rookery/internal/memory"
 )
 
 // MigrateLegacyLayout moves any pre-vault on-disk data into per-user vaults. It

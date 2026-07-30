@@ -14,14 +14,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/simple-agents/internal/buildphase"
-	"github.com/ilijad1/simple-agents/internal/coder"
-	"github.com/ilijad1/simple-agents/internal/connectors"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/profile"
-	"github.com/ilijad1/simple-agents/internal/prompts"
-	"github.com/ilijad1/simple-agents/internal/skilllibrary"
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/buildphase"
+	"github.com/ilijad1/rookery/internal/coder"
+	"github.com/ilijad1/rookery/internal/connectors"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/profile"
+	"github.com/ilijad1/rookery/internal/prompts"
+	"github.com/ilijad1/rookery/internal/skilllibrary"
+	"github.com/ilijad1/rookery/internal/vault"
 	"github.com/robfig/cron/v3"
 )
 
@@ -1712,7 +1712,7 @@ func decideBuildOutcome(workDir, resultText, backendType string, scriptVerified 
 		// The coder didn't finish the agent's instructions. The most common cause on a
 		// weak tool-calling backend is the build-time verify trap: it authored a helper
 		// script, the verify-finish nudge demanded real output from it, but at build time
-		// (SA_BUILD_PHASE=generation) live service calls are intentionally blocked, so the
+		// (ROOKERY_BUILD_PHASE=generation) live service calls are intentionally blocked, so the
 		// script can never produce real output and the coder spends its budget on that
 		// instead of writing AGENT.md. Steer the next attempt to write AGENT.md FIRST and
 		// not block on script verification — this is the lever that breaks the loop.

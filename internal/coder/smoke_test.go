@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/rookery/internal/db"
 )
 
 // Host-gated: only runs when opencode is installed. Verifies the Smoke pipeline

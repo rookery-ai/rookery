@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/rookery/internal/db"
 )
 
 // approvalFixture builds a workspace + agent bound to n service connections named

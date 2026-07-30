@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/rookery/internal/db"
 )
 
 type stubResolver struct {

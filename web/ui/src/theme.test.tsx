@@ -11,7 +11,7 @@ function Probe() {
 }
 
 test("theme defaults to system and persists explicit choice", () => {
-  localStorage.removeItem("sa-theme");
+  localStorage.removeItem("rookery-theme");
   const { getByTestId } = render(
     <ThemeProvider>
       <Probe />
@@ -19,6 +19,6 @@ test("theme defaults to system and persists explicit choice", () => {
   );
   expect(getByTestId("btn").textContent).toBe("system");
   act(() => getByTestId("btn").click());
-  expect(localStorage.getItem("sa-theme")).toBe("dark");
+  expect(localStorage.getItem("rookery-theme")).toBe("dark");
   expect(document.documentElement.classList.contains("dark")).toBe(true);
 });

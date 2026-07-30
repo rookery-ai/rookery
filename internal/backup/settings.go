@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/rookery/internal/secrets"
 )
 
 // SettingsKey is the system_settings row holding the owner's backup config.

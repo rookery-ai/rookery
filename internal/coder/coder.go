@@ -18,11 +18,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/connectors"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/llm"
-	"github.com/ilijad1/simple-agents/internal/sandbox"
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/connectors"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/ilijad1/rookery/internal/sandbox"
+	"github.com/ilijad1/rookery/internal/vault"
 )
 
 // knownAuthEnvVars are env var names that carry LLM provider credentials.
@@ -42,7 +42,7 @@ type Result struct {
 
 	// ScriptVerified / ScriptOutput carry the API build engine's ground truth: whether an
 	// authored helper script actually RAN with real output this build, and that captured
-	// stdout (secret-redacted). Set only by the API engine during a build (SA_BUILD_PHASE=
+	// stdout (secret-redacted). Set only by the API engine during a build (ROOKERY_BUILD_PHASE=
 	// generation); zero for CLI coders and for runs/chat. The agent designer uses these so a
 	// build the engine confirmed runs isn't falsely flagged "couldn't confirm the helper".
 	ScriptVerified bool
@@ -486,8 +486,8 @@ func (c *Coder) buildCommand(ctx context.Context, workspaceID string, args, env 
 func (c *Coder) sandboxReadOnlyPaths(workspaceID string) []string {
 	ro := sandbox.SystemReadOnlyPaths()
 	ro = append(ro, c.sandboxBinaryDirs()...)
-	// The simple-agents binary's own dir must be RO+execute so a confined CLI coder can run
-	// `simple-agents connector exec …` (the connector bridge client). Without this the child
+	// The rookery binary's own dir must be RO+execute so a confined CLI coder can run
+	// `rookery connector exec …` (the connector bridge client). Without this the child
 	// gets EACCES on exec even though the loopback TCP call itself is allowed.
 	if c.selfExe != "" {
 		ro = append(ro, filepath.Dir(c.selfExe))

@@ -37,8 +37,8 @@ func listServices(t *testing.T) (*Server, servicesDTO) {
 	s, _ := newAPITestServer(t)
 	cookies := bootstrapAndLogin(t, s)
 	cookies, _ = createAndEnterWorkspace(t, s, cookies)
-	// The operator's own SA_PUBLIC_URL must not leak into the test's expectations.
-	t.Setenv("SA_PUBLIC_URL", "")
+	// The operator's own ROOKERY_PUBLIC_URL must not leak into the test's expectations.
+	t.Setenv("ROOKERY_PUBLIC_URL", "")
 
 	rec := doJSON(t, s, http.MethodGet, "/api/v1/services", nil, cookies)
 	if rec.Code != http.StatusOK {
@@ -159,7 +159,7 @@ func TestSavePublicURLDrivesTheRedirectURI(t *testing.T) {
 	s, _ := newAPITestServer(t)
 	cookies := bootstrapAndLogin(t, s)
 	cookies, _ = createAndEnterWorkspace(t, s, cookies)
-	t.Setenv("SA_PUBLIC_URL", "")
+	t.Setenv("ROOKERY_PUBLIC_URL", "")
 
 	rec := doJSON(t, s, http.MethodPut, "/api/v1/admin/public-url",
 		map[string]string{"url": "not-a-url"}, cookies)

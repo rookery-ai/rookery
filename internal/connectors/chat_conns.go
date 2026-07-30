@@ -1,6 +1,6 @@
 package connectors
 
-import "github.com/ilijad1/simple-agents/internal/db"
+import "github.com/ilijad1/rookery/internal/db"
 
 // ActiveBoundConns maps ACTIVE service-connection rows to BoundConns (skips non-ACTIVE rows),
 // for exposing a workspace's whole connection set to one-off chat (chat isn't an agent — there

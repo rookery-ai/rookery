@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/config"
+	"github.com/ilijad1/rookery/internal/config"
 	"github.com/labstack/echo/v4"
 )
 

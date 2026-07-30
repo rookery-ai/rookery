@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/llm"
+	"github.com/ilijad1/rookery/internal/llm"
 )
 
 func TestAPIProviders_CatalogIntegrity(t *testing.T) {

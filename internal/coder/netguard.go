@@ -6,7 +6,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/nethttp"
+	"github.com/ilijad1/rookery/internal/nethttp"
 )
 
 // The actual dial-control implementation lives in internal/nethttp so

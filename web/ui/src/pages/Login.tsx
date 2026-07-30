@@ -38,7 +38,7 @@ export default function Login() {
         onSubmit={submit}
         className="bg-background border border-border rounded-xl p-8 w-full max-w-sm shadow-sm"
       >
-        <h1 className="text-xl font-bold mb-1">Simple Agents</h1>
+        <h1 className="text-xl font-bold mb-1">Rookery</h1>
         <p className="text-muted-2 text-sm mb-6">Sign in to your server</p>
         <div className="space-y-4">
           <div className="space-y-1.5">

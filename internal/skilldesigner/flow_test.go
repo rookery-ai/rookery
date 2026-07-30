@@ -3,7 +3,7 @@ package skilldesigner
 import (
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/skilllibrary"
+	"github.com/ilijad1/rookery/internal/skilllibrary"
 )
 
 // skillFrontmatterName mirrors the finalize step's name extraction (frontmatter

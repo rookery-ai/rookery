@@ -13,11 +13,11 @@ import (
 	"time"
 )
 
-// ErrSystemKeyConflict means SA_SYSTEM_KEY is set to something other than the
+// ErrSystemKeyConflict means ROOKERY_SYSTEM_KEY is set to something other than the
 // snapshot's key. The environment variable outranks the key file, so proceeding
 // would install a key the process then ignores — and the restored data would
 // fail to decrypt with no obvious cause.
-var ErrSystemKeyConflict = errors.New("backup: SA_SYSTEM_KEY conflicts with the snapshot's system key")
+var ErrSystemKeyConflict = errors.New("backup: ROOKERY_SYSTEM_KEY conflicts with the snapshot's system key")
 
 const (
 	stagingDirName = ".restore-staging"
@@ -105,9 +105,9 @@ func StageRestore(src io.Reader, dataDir, passphrase, binarySchema string) (*Man
 		return nil, err
 	}
 
-	if envKey := os.Getenv("SA_SYSTEM_KEY"); envKey != "" && !strings.EqualFold(envKey, m.SystemKey) {
+	if envKey := os.Getenv("ROOKERY_SYSTEM_KEY"); envKey != "" && !strings.EqualFold(envKey, m.SystemKey) {
 		os.RemoveAll(staging)
-		return nil, fmt.Errorf("%w: unset SA_SYSTEM_KEY, or set it to the snapshot's key, then retry",
+		return nil, fmt.Errorf("%w: unset ROOKERY_SYSTEM_KEY, or set it to the snapshot's key, then retry",
 			ErrSystemKeyConflict)
 	}
 	if _, err := hex.DecodeString(m.SystemKey); err != nil || len(m.SystemKey) != 64 {
@@ -166,7 +166,7 @@ func ApplyPendingRestore(dataDir string) error {
 
 	staging := stagingDir(dataDir)
 	if _, err := os.Stat(staging); err != nil {
-		return fmt.Errorf("backup: marker present but staging dir is missing; run 'simple-agents backup cancel-restore'")
+		return fmt.Errorf("backup: marker present but staging dir is missing; run 'rookery backup cancel-restore'")
 	}
 
 	slog.Warn("applying pending restore",
@@ -193,7 +193,7 @@ func ApplyPendingRestore(dataDir string) error {
 	// Move the current install aside. Staging lives inside dataDir so every
 	// rename is within one filesystem: atomic, and never half-complete.
 	for _, name := range []string{
-		"simple-agents.db", "simple-agents.db-wal", "simple-agents.db-shm",
+		"rookery.db", "rookery.db-wal", "rookery.db-shm",
 		"vaults", "system.key",
 	} {
 		src := filepath.Join(dataDir, name)
@@ -205,8 +205,8 @@ func ApplyPendingRestore(dataDir string) error {
 		}
 	}
 
-	if err := os.Rename(filepath.Join(staging, "db", "simple-agents.db"),
-		filepath.Join(dataDir, "simple-agents.db")); err != nil {
+	if err := os.Rename(filepath.Join(staging, "db", "rookery.db"),
+		filepath.Join(dataDir, "rookery.db")); err != nil {
 		return fmt.Errorf("backup: install restored database: %w", err)
 	}
 	stagedVaults := filepath.Join(staging, "vaults")

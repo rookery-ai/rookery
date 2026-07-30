@@ -13,15 +13,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/connectors"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/rookery/internal/connectors"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/secrets"
 )
 
 func main() {
 	ctx := context.Background()
-	dataDir := os.ExpandEnv("$HOME/.simple-agents-v2")
-	d, err := db.Open(dataDir+"/simple-agents.db", "")
+	dataDir := os.ExpandEnv("$HOME/.rookery")
+	d, err := db.Open(dataDir+"/rookery.db", "")
 	must(err)
 	// Resolve the key exactly as the server does, so this harness keeps working
 	// after a restore has installed a recovered <data_dir>/system.key.

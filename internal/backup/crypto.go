@@ -140,7 +140,7 @@ func Decrypt(dst io.Writer, src io.Reader, passphrase string) error {
 		return fmt.Errorf("%w: short header", ErrCorrupt)
 	}
 	if string(header[:8]) != magic {
-		return fmt.Errorf("%w: not a simple-agents snapshot", ErrCorrupt)
+		return fmt.Errorf("%w: not a rookery snapshot", ErrCorrupt)
 	}
 	if header[8] != envelopeVersion {
 		return fmt.Errorf("%w: unsupported snapshot version %d", ErrCorrupt, header[8])

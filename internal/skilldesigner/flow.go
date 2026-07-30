@@ -21,15 +21,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/agentdesigner"
-	"github.com/ilijad1/simple-agents/internal/buildphase"
-	"github.com/ilijad1/simple-agents/internal/coder"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/profile"
-	"github.com/ilijad1/simple-agents/internal/prompts"
-	"github.com/ilijad1/simple-agents/internal/skilllibrary"
-	"github.com/ilijad1/simple-agents/internal/skillstore"
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/agentdesigner"
+	"github.com/ilijad1/rookery/internal/buildphase"
+	"github.com/ilijad1/rookery/internal/coder"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/profile"
+	"github.com/ilijad1/rookery/internal/prompts"
+	"github.com/ilijad1/rookery/internal/skilllibrary"
+	"github.com/ilijad1/rookery/internal/skillstore"
+	"github.com/ilijad1/rookery/internal/vault"
 )
 
 // DesignState is the current step in the conversational skill-creator wizard.

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/rookery/internal/db"
 )
 
 func pendingFixture(t *testing.T) (*db.DB, context.Context, string, string) {

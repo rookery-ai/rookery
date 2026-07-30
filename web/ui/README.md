@@ -1,6 +1,6 @@
-# Simple Agents — SPA
+# Rookery — SPA
 
-Vite + React + TypeScript source for the Simple Agents web UI (Tailwind v4, shadcn/ui). This
+Vite + React + TypeScript source for the Rookery web UI (Tailwind v4, shadcn/ui). This
 replaces the legacy server-rendered templates; it is embedded into the Go binary and served
 at `/app` (see `web/spa.go`).
 

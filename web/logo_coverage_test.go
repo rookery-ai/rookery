@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/coder"
-	"github.com/ilijad1/simple-agents/internal/connectors"
-	"github.com/ilijad1/simple-agents/internal/gateway"
-	"github.com/ilijad1/simple-agents/internal/websearch"
+	"github.com/ilijad1/rookery/internal/coder"
+	"github.com/ilijad1/rookery/internal/connectors"
+	"github.com/ilijad1/rookery/internal/gateway"
+	"github.com/ilijad1/rookery/internal/websearch"
 )
 
 // logoAssetDir is where scripts/vendor-brand-logos.sh writes the committed

@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/publicurl"
+	"github.com/ilijad1/rookery/internal/publicurl"
 	"github.com/labstack/echo/v4"
 )
 

@@ -11,7 +11,7 @@ import { useSession } from "@/lib/session";
 // what the user actually opened means agent churn can never enter the list, with
 // no dir-exclusion list to keep in sync as the vault layout grows.
 //
-// Persisted in localStorage (same approach as sa.paneWidth) rather than
+// Persisted in localStorage (same approach as rookery.paneWidth) rather than
 // server-side: it is a per-browser convenience, not workspace state, and it must
 // be readable synchronously on first paint to decide what to auto-open.
 
@@ -21,7 +21,7 @@ import { useSession } from "@/lib/session";
 // A's history into workspace B: the Recent strip would list A's notes while the
 // user is in B, and the auto-open would either 404 its way down the list or —
 // worse — silently open B's same-named file under A's title.
-const RECENT_KEY_PREFIX = "sa.kb.recent";
+const RECENT_KEY_PREFIX = "rookery.kb.recent";
 
 export function recentStorageKey(workspaceID?: string): string {
   return workspaceID ? `${RECENT_KEY_PREFIX}.${workspaceID}` : RECENT_KEY_PREFIX;

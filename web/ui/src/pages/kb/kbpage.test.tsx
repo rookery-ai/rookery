@@ -274,7 +274,7 @@ test("landing on /kb?new=note opens the new-note dialog", async () => {
 // editor rendered "Couldn't load this note.", the reported symptom.
 test("landing on /kb?new=note does not auto-open the last recent note", async () => {
   localStorage.setItem(
-    "sa.kb.recent.w1",
+    "rookery.kb.recent.w1",
     JSON.stringify([{ path: "notes/stale.md", title: "stale" }]),
   );
   const noteFetches: string[] = [];

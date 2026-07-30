@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ilijad1/simple-agents/internal/agentdesigner"
+	"github.com/ilijad1/rookery/internal/agentdesigner"
 )
 
 // ErrNoSkillMD means the build produced no SKILL.md the flow can identify — either none
@@ -63,7 +63,7 @@ func ReadSkillTree(skillRoot string) (map[string]string, error) {
 			return err
 		}
 		if d.IsDir() {
-			// Skip dotfile dirs (e.g. the API engine's .sa_out spill dir).
+			// Skip dotfile dirs (e.g. the API engine's .rookery_out spill dir).
 			if path != skillRoot && strings.HasPrefix(d.Name(), ".") {
 				return filepath.SkipDir
 			}

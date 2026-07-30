@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/profile"
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/profile"
+	"github.com/ilijad1/rookery/internal/vault"
 )
 
 const (

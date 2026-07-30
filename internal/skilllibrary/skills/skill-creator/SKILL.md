@@ -8,7 +8,7 @@ category: Meta
 
 # Skill Creator
 
-Author new skills for the simple-agents platform. A skill is a folder
+Author new skills for the Rookery platform. A skill is a folder
 (`<name>/SKILL.md` + optional `scripts/`) that teaches an agent how to do a
 recurring capability. Skills are loaded into the agent's context on demand
 (progressive disclosure): only `name` + `description` are always present; the

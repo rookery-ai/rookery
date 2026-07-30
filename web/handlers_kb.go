@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/vault"
 	"github.com/labstack/echo/v4"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"

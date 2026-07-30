@@ -18,7 +18,7 @@ import (
 // engine: a schema_migrations table and a workspaces table.
 func newTestDB(t *testing.T, dir string) (*sql.DB, string) {
 	t.Helper()
-	path := filepath.Join(dir, "simple-agents.db")
+	path := filepath.Join(dir, "rookery.db")
 	database, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +106,7 @@ func TestSnapshotProducesDecryptableArchive(t *testing.T) {
 	if len(m.SystemKey) != 64 {
 		t.Fatalf("system key must be 64 hex chars, got %d", len(m.SystemKey))
 	}
-	if _, err := os.Stat(filepath.Join(out, "db", "simple-agents.db")); err != nil {
+	if _, err := os.Stat(filepath.Join(out, "db", "rookery.db")); err != nil {
 		t.Fatalf("database missing from snapshot: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(out, "vaults", "ws1", ".kb", "links.json")); err != nil {
@@ -147,7 +147,7 @@ func TestSnapshotDatabaseIsQueryable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restored, err := sql.Open("sqlite", filepath.Join(out, "db", "simple-agents.db"))
+	restored, err := sql.Open("sqlite", filepath.Join(out, "db", "rookery.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

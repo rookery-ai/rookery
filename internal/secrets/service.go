@@ -21,7 +21,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/simple-agents/internal/db"
+	"github.com/ilijad1/rookery/internal/db"
 	"golang.org/x/crypto/argon2"
 )
 
@@ -234,20 +234,20 @@ func DecryptMasterPassword(encrypted string, systemKey []byte) (string, error) {
 	return string(plaintext), nil
 }
 
-// SystemKeyFromEnv reads the system key from SA_SYSTEM_KEY env var (hex-encoded 32 bytes).
+// SystemKeyFromEnv reads the system key from ROOKERY_SYSTEM_KEY env var (hex-encoded 32 bytes).
 // If not set, derives a fallback key from the hostname (DEV ONLY — not safe for production).
 func SystemKeyFromEnv() ([]byte, error) {
-	hex64 := os.Getenv("SA_SYSTEM_KEY")
+	hex64 := os.Getenv("ROOKERY_SYSTEM_KEY")
 	if hex64 != "" {
 		key, err := hex.DecodeString(hex64)
 		if err != nil || len(key) != 32 {
-			return nil, fmt.Errorf("SA_SYSTEM_KEY must be 64 hex chars (32 bytes), got %d chars", len(hex64))
+			return nil, fmt.Errorf("ROOKERY_SYSTEM_KEY must be 64 hex chars (32 bytes), got %d chars", len(hex64))
 		}
 		return key, nil
 	}
 	// Fallback: derive from hostname — only acceptable in development.
 	host, _ := os.Hostname()
-	key := argon2.IDKey([]byte(host), []byte("simple-agents-dev-key"), 1, 64*1024, 4, 32)
+	key := argon2.IDKey([]byte(host), []byte("rookery-dev-key"), 1, 64*1024, 4, 32)
 	return key, nil
 }
 
@@ -259,7 +259,7 @@ func SystemKeyPath(dataDir string) string {
 // SystemKey resolves the system key, pinning it to disk so it survives a
 // hostname change. Resolution order:
 //
-//  1. SA_SYSTEM_KEY, if set — still wins, and is never written to disk.
+//  1. ROOKERY_SYSTEM_KEY, if set — still wins, and is never written to disk.
 //  2. <dataDir>/system.key, if present.
 //  3. Derive and persist. When hasWorkspaces is true the install already holds
 //     data encrypted under the legacy hostname-derived key, so that exact key is
@@ -270,10 +270,10 @@ func SystemKeyPath(dataDir string) string {
 // Restore writes the recovered key to this same path, which is how connector
 // tokens and stored master passwords survive a move to new hardware.
 func SystemKey(dataDir string, hasWorkspaces bool) ([]byte, error) {
-	if hex64 := os.Getenv("SA_SYSTEM_KEY"); hex64 != "" {
+	if hex64 := os.Getenv("ROOKERY_SYSTEM_KEY"); hex64 != "" {
 		key, err := hex.DecodeString(hex64)
 		if err != nil || len(key) != 32 {
-			return nil, fmt.Errorf("SA_SYSTEM_KEY must be 64 hex chars (32 bytes), got %d chars", len(hex64))
+			return nil, fmt.Errorf("ROOKERY_SYSTEM_KEY must be 64 hex chars (32 bytes), got %d chars", len(hex64))
 		}
 		return key, nil
 	}
@@ -292,7 +292,7 @@ func SystemKey(dataDir string, hasWorkspaces bool) ([]byte, error) {
 	var key []byte
 	if hasWorkspaces {
 		host, _ := os.Hostname()
-		key = argon2.IDKey([]byte(host), []byte("simple-agents-dev-key"), 1, 64*1024, 4, 32)
+		key = argon2.IDKey([]byte(host), []byte("rookery-dev-key"), 1, 64*1024, 4, 32)
 	} else {
 		key = make([]byte, 32)
 		if _, err := rand.Read(key); err != nil {

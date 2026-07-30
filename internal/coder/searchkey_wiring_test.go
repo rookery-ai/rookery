@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/secrets"
-	"github.com/ilijad1/simple-agents/internal/vault"
-	"github.com/ilijad1/simple-agents/internal/websearch"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/ilijad1/rookery/internal/vault"
+	"github.com/ilijad1/rookery/internal/websearch"
 )
 
 // newWiringTestDB + findWiringMigrations mirror internal/secrets's own test
@@ -78,7 +78,7 @@ func TestChatCoderPicksUpStoredSearchKey(t *testing.T) {
 
 	// lookup has the exact signature both chat surfaces already use to resolve
 	// their own provider's API key (web's s.secretsLookup / the gateway's
-	// secretsLookup closure in cmd/simple-agents/main.go).
+	// secretsLookup closure in cmd/rookery/main.go).
 	lookup := func(ctx context.Context, workspaceID, name string) (string, error) {
 		return secrets.New(database, workspaceID, masterPw, wiringTestSalt).Get(ctx, name)
 	}

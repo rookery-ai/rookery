@@ -11,8 +11,8 @@ import (
 	"os/exec"
 	"runtime"
 
-	"github.com/ilijad1/simple-agents/internal/buildinfo"
-	"github.com/ilijad1/simple-agents/internal/sandbox"
+	"github.com/ilijad1/rookery/internal/buildinfo"
+	"github.com/ilijad1/rookery/internal/sandbox"
 )
 
 // Tools reports presence only — never paths, never versions. /healthz is
@@ -81,7 +81,7 @@ func (r Report) Warnings() []string {
 		w = append(w, fmt.Sprintf("filesystem sandbox unavailable on %s — coder "+
 			"subprocesses run unconfined (Landlock is Linux-only)", runtime.GOOS))
 	} else if !r.Sandbox.Enabled {
-		w = append(w, "filesystem sandbox is supported but DISABLED (SA_SANDBOX) — "+
+		w = append(w, "filesystem sandbox is supported but DISABLED (ROOKERY_SANDBOX) — "+
 			"coder subprocesses run unconfined")
 	}
 	if !r.Tools.Ripgrep {

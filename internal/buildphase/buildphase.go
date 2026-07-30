@@ -5,7 +5,7 @@ package buildphase
 
 const (
 	// EnvVar is set in the coder subprocess/engine environment during a build.
-	EnvVar = "SA_BUILD_PHASE"
+	EnvVar = "ROOKERY_BUILD_PHASE"
 	// Generation is EnvVar's value during agent/skill generation + edit verification. At
 	// build time the connector Execute guard refuses mutating actions (real sends/deletes).
 	Generation = "generation"

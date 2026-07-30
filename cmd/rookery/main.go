@@ -14,37 +14,37 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/agentdesigner"
-	"github.com/ilijad1/simple-agents/internal/agentrunner"
-	"github.com/ilijad1/simple-agents/internal/approval"
-	"github.com/ilijad1/simple-agents/internal/auth"
-	"github.com/ilijad1/simple-agents/internal/backup"
-	"github.com/ilijad1/simple-agents/internal/buildinfo"
-	"github.com/ilijad1/simple-agents/internal/chat"
-	"github.com/ilijad1/simple-agents/internal/coder"
-	"github.com/ilijad1/simple-agents/internal/config"
-	"github.com/ilijad1/simple-agents/internal/connectors"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/gateway"
-	"github.com/ilijad1/simple-agents/internal/health"
-	"github.com/ilijad1/simple-agents/internal/memory"
-	"github.com/ilijad1/simple-agents/internal/prompts"
-	"github.com/ilijad1/simple-agents/internal/reminder"
-	"github.com/ilijad1/simple-agents/internal/sandbox"
-	"github.com/ilijad1/simple-agents/internal/scheduler"
-	"github.com/ilijad1/simple-agents/internal/secrets"
-	"github.com/ilijad1/simple-agents/internal/skilldesigner"
-	"github.com/ilijad1/simple-agents/internal/skilllibrary"
-	"github.com/ilijad1/simple-agents/internal/skillstore"
-	"github.com/ilijad1/simple-agents/internal/vault"
-	"github.com/ilijad1/simple-agents/internal/websearch"
-	"github.com/ilijad1/simple-agents/web"
+	"github.com/ilijad1/rookery/internal/agentdesigner"
+	"github.com/ilijad1/rookery/internal/agentrunner"
+	"github.com/ilijad1/rookery/internal/approval"
+	"github.com/ilijad1/rookery/internal/auth"
+	"github.com/ilijad1/rookery/internal/backup"
+	"github.com/ilijad1/rookery/internal/buildinfo"
+	"github.com/ilijad1/rookery/internal/chat"
+	"github.com/ilijad1/rookery/internal/coder"
+	"github.com/ilijad1/rookery/internal/config"
+	"github.com/ilijad1/rookery/internal/connectors"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/gateway"
+	"github.com/ilijad1/rookery/internal/health"
+	"github.com/ilijad1/rookery/internal/memory"
+	"github.com/ilijad1/rookery/internal/prompts"
+	"github.com/ilijad1/rookery/internal/reminder"
+	"github.com/ilijad1/rookery/internal/sandbox"
+	"github.com/ilijad1/rookery/internal/scheduler"
+	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/ilijad1/rookery/internal/skilldesigner"
+	"github.com/ilijad1/rookery/internal/skilllibrary"
+	"github.com/ilijad1/rookery/internal/skillstore"
+	"github.com/ilijad1/rookery/internal/vault"
+	"github.com/ilijad1/rookery/internal/websearch"
+	"github.com/ilijad1/rookery/web"
 	"github.com/urfave/cli/v3"
 )
 
 func main() {
 	app := &cli.Command{
-		Name:  "simple-agents",
+		Name:  "rookery",
 		Usage: "Multi-user AI Agents Control Plane",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
@@ -75,7 +75,7 @@ func main() {
 func serveCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "serve",
-		Usage: "Start the Simple Agents server",
+		Usage: "Start the Rookery server",
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			cfg, err := config.Load(cmd.Root().String("config"))
 			if err != nil {
@@ -91,7 +91,7 @@ func serveCmd() *cli.Command {
 			// without it the agent-tool AST guardrail self-skips, so a security
 			// control switches itself off with no other signal.
 			rep := health.Detect(cfg.Sandbox.Enabled, cfg.Coder.Mode)
-			slog.Info("simple-agents starting",
+			slog.Info("rookery starting",
 				"version", rep.Version, "commit", rep.Commit,
 				"sandbox_supported", rep.Sandbox.Supported,
 				"sandbox_enabled", rep.Sandbox.Enabled,
@@ -345,8 +345,8 @@ func serveCmd() *cli.Command {
 
 				// Connector + KB bridge wiring: the API engine exposes bound connections
 				// AND save_to_kb as native in-process tools directly. A CLI coder instead
-				// reaches them via loopback bridges (`simple-agents connector exec <tool>`,
-				// `simple-agents kb convert|search`), mirroring agent runs.
+				// reaches them via loopback bridges (`rookery connector exec <tool>`,
+				// `rookery kb convert|search`), mirroring agent runs.
 				// Search-key wiring: resolve any configured SEARCH_KEY_BRAVE/SEARCH_KEY_TAVILY
 				// secrets once, host-side, and inject them into the coder's env so its
 				// web_search tool's searchProviders() picks the keyed provider over the
@@ -392,8 +392,8 @@ func serveCmd() *cli.Command {
 						if kbBin != "" {
 							kbTok := kbBridge.Register(workspaceID, false)
 							defer kbBridge.Unregister(kbTok)
-							extraEnv["SA_KB_URL"] = kbBridge.URL()
-							extraEnv["SA_KB_TOKEN"] = kbTok
+							extraEnv["ROOKERY_KB_URL"] = kbBridge.URL()
+							extraEnv["ROOKERY_KB_TOKEN"] = kbTok
 						}
 					}
 					if connBridge != nil && connBridge.Addr() != "" {
@@ -402,8 +402,8 @@ func serveCmd() *cli.Command {
 							if len(bound) > 0 {
 								tok := connBridge.Register(workspaceID, bound, false)
 								defer connBridge.Unregister(tok)
-								extraEnv["SA_CONNECTOR_URL"] = connBridge.Addr()
-								extraEnv["SA_CONNECTOR_TOKEN"] = tok
+								extraEnv["ROOKERY_CONNECTOR_URL"] = connBridge.Addr()
+								extraEnv["ROOKERY_CONNECTOR_TOKEN"] = tok
 								for _, b := range bound {
 									connRefs = append(connRefs, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
 								}
@@ -573,8 +573,8 @@ func sandboxExecCmd() *cli.Command {
 // connectorCmd is how a CLI coder acts on a connected service: it POSTs to the loopback
 // connector bridge in the host process, which runs the SAME connectors.Execute path the
 // API engine uses in-process (auth/token-refresh stay host-side). The bridge URL + a
-// run-scoped token come from the SA_CONNECTOR_URL / SA_CONNECTOR_TOKEN env vars the runner
-// injects. Usage: simple-agents connector exec <tool> --args '<json>'
+// run-scoped token come from the ROOKERY_CONNECTOR_URL / ROOKERY_CONNECTOR_TOKEN env vars the runner
+// injects. Usage: rookery connector exec <tool> --args '<json>'
 func connectorCmd() *cli.Command {
 	return &cli.Command{
 		Name:  "connector",
@@ -592,8 +592,8 @@ func connectorCmd() *cli.Command {
 					if tool == "" {
 						return fmt.Errorf("usage: connector exec <tool> --args '<json>'")
 					}
-					base := os.Getenv("SA_CONNECTOR_URL")
-					token := os.Getenv("SA_CONNECTOR_TOKEN")
+					base := os.Getenv("ROOKERY_CONNECTOR_URL")
+					token := os.Getenv("ROOKERY_CONNECTOR_TOKEN")
 					if base == "" || token == "" {
 						return fmt.Errorf("no connected-service bridge available in this run")
 					}
@@ -622,10 +622,10 @@ func connectorCmd() *cli.Command {
 // kbCmd is how a CLI coder reaches the knowledge base's conversion and search
 // paths: it POSTs to the loopback KB bridge in the host process, which runs the
 // SAME vault.ImportFile / Searcher code the API engine calls in-process. The
-// bridge URL and a run-scoped token come from SA_KB_URL / SA_KB_TOKEN.
+// bridge URL and a run-scoped token come from ROOKERY_KB_URL / ROOKERY_KB_TOKEN.
 func kbCmd() *cli.Command {
 	post := func(ctx context.Context, endpoint string, payload any) error {
-		base, token := os.Getenv("SA_KB_URL"), os.Getenv("SA_KB_TOKEN")
+		base, token := os.Getenv("ROOKERY_KB_URL"), os.Getenv("ROOKERY_KB_TOKEN")
 		if base == "" || token == "" {
 			return fmt.Errorf("no knowledge-base bridge available in this run")
 		}

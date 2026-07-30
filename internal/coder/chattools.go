@@ -18,7 +18,7 @@ import "strings"
 // services, `kb` for the knowledge-base bridge (save_to_kb/search over
 // convert+import). Chat never gets arbitrary shell.
 //
-// connectorBin and kbBin are each the absolute path of the simple-agents
+// connectorBin and kbBin are each the absolute path of the rookery
 // binary, or "" when that bridge isn't wired for this chat. They are separate
 // parameters (rather than one shared bin) because either bridge can be
 // available independently of the other.

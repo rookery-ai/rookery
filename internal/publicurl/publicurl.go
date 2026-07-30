@@ -53,7 +53,7 @@ func Normalize(raw string) (string, error) {
 }
 
 // Resolve returns the instance's public base URL and where it came from.
-// Precedence: the configured setting, then SA_PUBLIC_URL, then what the current
+// Precedence: the configured setting, then ROOKERY_PUBLIC_URL, then what the current
 // request suggests. A stored value that fails Normalize is skipped rather than
 // used, so a bad setting degrades to detection instead of breaking every
 // connection silently.
@@ -65,7 +65,7 @@ func Resolve(get func(key string) (string, error), detected string) (string, Sou
 			}
 		}
 	}
-	if n, err := Normalize(os.Getenv("SA_PUBLIC_URL")); err == nil {
+	if n, err := Normalize(os.Getenv("ROOKERY_PUBLIC_URL")); err == nil {
 		return n, SourceEnv
 	}
 	if n, err := Normalize(detected); err == nil {

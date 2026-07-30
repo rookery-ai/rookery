@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ilijad1/simple-agents/web/ui"
+	"github.com/ilijad1/rookery/web/ui"
 	"github.com/labstack/echo/v4"
 )
 

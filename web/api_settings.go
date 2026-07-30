@@ -6,13 +6,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ilijad1/simple-agents/internal/auth"
-	"github.com/ilijad1/simple-agents/internal/coder"
-	"github.com/ilijad1/simple-agents/internal/config"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/llm"
-	"github.com/ilijad1/simple-agents/internal/profile"
-	"github.com/ilijad1/simple-agents/internal/secrets"
+	"github.com/ilijad1/rookery/internal/auth"
+	"github.com/ilijad1/rookery/internal/coder"
+	"github.com/ilijad1/rookery/internal/config"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/ilijad1/rookery/internal/profile"
+	"github.com/ilijad1/rookery/internal/secrets"
 	"github.com/labstack/echo/v4"
 )
 
@@ -39,7 +39,7 @@ func (s *Server) detectedCoders() []apiDetectedCoderDTO {
 func (s *Server) rejectLocalInSlim(kind string) error {
 	if s.coderMode() == config.ModeSlim && kind == "local" {
 		return echo.NewHTTPError(http.StatusBadRequest,
-			"this build has no CLI coder (SA_CODER_MODE=slim) — choose the API engine")
+			"this build has no CLI coder (ROOKERY_CODER_MODE=slim) — choose the API engine")
 	}
 	return nil
 }

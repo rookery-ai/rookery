@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// TestKBCLIRoundTrip exercises the REAL `simple-agents kb convert|search` CLI
+// TestKBCLIRoundTrip exercises the REAL `rookery kb convert|search` CLI
 // path a CLI coder uses: build the binary, stand up a bridge, and invoke both
 // subcommands against it with the run-scoped env the runner injects (mirrors
 // connectors/bridge_cli_test.go's TestConnectorExecSubcommandEndToEnd, the
@@ -21,11 +21,11 @@ func TestKBCLIRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bin := filepath.Join(t.TempDir(), "simple-agents")
-	build := exec.Command("go", "build", "-o", bin, "./cmd/simple-agents")
+	bin := filepath.Join(t.TempDir(), "rookery")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/rookery")
 	build.Dir = root
 	if out, err := build.CombinedOutput(); err != nil {
-		t.Skipf("could not build simple-agents binary, skipping CLI round-trip: %v\n%s", err, out)
+		t.Skipf("could not build rookery binary, skipping CLI round-trip: %v\n%s", err, out)
 	}
 
 	v := New(t.TempDir())
@@ -39,7 +39,7 @@ func TestKBCLIRoundTrip(t *testing.T) {
 		t.Fatalf("bridge start: %v", err)
 	}
 	defer b.Close()
-	env := append(os.Environ(), "SA_KB_URL="+b.URL(), "SA_KB_TOKEN="+b.Register("ws1", false))
+	env := append(os.Environ(), "ROOKERY_KB_URL="+b.URL(), "ROOKERY_KB_TOKEN="+b.Register("ws1", false))
 
 	doc := filepath.Join(t.TempDir(), "report.csv")
 	const marker = "zq-unicorn-marker-42"

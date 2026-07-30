@@ -8,7 +8,7 @@ import (
 )
 
 func TestCoderModeDefaultsToFull(t *testing.T) {
-	os.Unsetenv("SA_CODER_MODE")
+	os.Unsetenv("ROOKERY_CODER_MODE")
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -19,7 +19,7 @@ func TestCoderModeDefaultsToFull(t *testing.T) {
 }
 
 func TestCoderModeSlimFromEnv(t *testing.T) {
-	t.Setenv("SA_CODER_MODE", "slim")
+	t.Setenv("ROOKERY_CODER_MODE", "slim")
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -33,9 +33,9 @@ func TestCoderModeSlimFromEnv(t *testing.T) {
 // whose env var was misspelled would otherwise advertise CLI coders it does
 // not contain.
 func TestCoderModeRejectsUnknownValue(t *testing.T) {
-	t.Setenv("SA_CODER_MODE", "minimal")
+	t.Setenv("ROOKERY_CODER_MODE", "minimal")
 	if _, err := Load(""); err == nil {
-		t.Fatal("Load accepted SA_CODER_MODE=minimal, want an error")
+		t.Fatal("Load accepted ROOKERY_CODER_MODE=minimal, want an error")
 	}
 }
 

@@ -4,7 +4,7 @@ category: Developer
 setup_url: https://github.com/settings/developers
 setup_steps:
   - "Go to GitHub → Settings → Developer settings → OAuth Apps → New OAuth App."
-  - "Application name: anything (e.g. Simple Agents)."
+  - "Application name: anything (e.g. Rookery)."
   - "Homepage URL: your dashboard URL (e.g. https://agents.rookie.lan)."
   - "Authorization callback URL: paste {{redirect_uri}} exactly."
   - "Click Register application, then Generate a new client secret."

@@ -11,17 +11,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/simple-agents/internal/agentdesigner"
-	"github.com/ilijad1/simple-agents/internal/chat"
-	"github.com/ilijad1/simple-agents/internal/convert"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/memory"
-	"github.com/ilijad1/simple-agents/internal/profile"
-	"github.com/ilijad1/simple-agents/internal/reminder"
-	"github.com/ilijad1/simple-agents/internal/secrets"
-	"github.com/ilijad1/simple-agents/internal/skilldesigner"
-	"github.com/ilijad1/simple-agents/internal/skilllibrary"
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/agentdesigner"
+	"github.com/ilijad1/rookery/internal/chat"
+	"github.com/ilijad1/rookery/internal/convert"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/memory"
+	"github.com/ilijad1/rookery/internal/profile"
+	"github.com/ilijad1/rookery/internal/reminder"
+	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/ilijad1/rookery/internal/skilldesigner"
+	"github.com/ilijad1/rookery/internal/skilllibrary"
+	"github.com/ilijad1/rookery/internal/vault"
 )
 
 // maxAttachmentBytes caps a chat attachment. Chat platforms already cap uploads
@@ -1257,7 +1257,7 @@ func (r *Router) handleMemory(ctx context.Context, msg Message, arg string, send
 // line applies uniformly and is no longer conditioned on platform.
 func helpText(platform string) string {
 	fileLine := "\nSend a file (document/photo) to save it to your knowledge base.\n"
-	return `**Simple Agents — Commands**
+	return `**Rookery — Commands**
 
 /agent list — list your agents
 /agent create <name> — build a new agent with AI wizard

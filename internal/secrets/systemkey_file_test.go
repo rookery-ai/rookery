@@ -13,7 +13,7 @@ func TestSystemKeyEnvWins(t *testing.T) {
 	for i := range want {
 		want[i] = byte(i)
 	}
-	t.Setenv("SA_SYSTEM_KEY", hex.EncodeToString(want))
+	t.Setenv("ROOKERY_SYSTEM_KEY", hex.EncodeToString(want))
 
 	got, err := SystemKey(dir, false)
 	if err != nil {
@@ -28,7 +28,7 @@ func TestSystemKeyEnvWins(t *testing.T) {
 }
 
 func TestSystemKeyFreshInstallGeneratesRandom(t *testing.T) {
-	t.Setenv("SA_SYSTEM_KEY", "")
+	t.Setenv("ROOKERY_SYSTEM_KEY", "")
 	dirA, dirB := t.TempDir(), t.TempDir()
 
 	a, err := SystemKey(dirA, false)
@@ -48,7 +48,7 @@ func TestSystemKeyFreshInstallGeneratesRandom(t *testing.T) {
 }
 
 func TestSystemKeyPersistsAndReloads(t *testing.T) {
-	t.Setenv("SA_SYSTEM_KEY", "")
+	t.Setenv("ROOKERY_SYSTEM_KEY", "")
 	dir := t.TempDir()
 
 	first, err := SystemKey(dir, false)
@@ -75,7 +75,7 @@ func TestSystemKeyPersistsAndReloads(t *testing.T) {
 // The migration guarantee: an install that already holds encrypted data keeps
 // the exact hostname-derived key it has always used, and merely gains a file.
 func TestSystemKeyExistingInstallKeepsHostnameKey(t *testing.T) {
-	t.Setenv("SA_SYSTEM_KEY", "")
+	t.Setenv("ROOKERY_SYSTEM_KEY", "")
 	dir := t.TempDir()
 
 	legacy, err := SystemKeyFromEnv()
@@ -92,7 +92,7 @@ func TestSystemKeyExistingInstallKeepsHostnameKey(t *testing.T) {
 }
 
 func TestSystemKeyRejectsCorruptFile(t *testing.T) {
-	t.Setenv("SA_SYSTEM_KEY", "")
+	t.Setenv("ROOKERY_SYSTEM_KEY", "")
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "system.key"), []byte("not-hex"), 0o600); err != nil {
 		t.Fatal(err)

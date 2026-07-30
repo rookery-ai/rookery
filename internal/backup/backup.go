@@ -1,10 +1,10 @@
-// Package backup snapshots an entire Simple Agents install — the database and
+// Package backup snapshots an entire Rookery install — the database and
 // every workspace vault — into one passphrase-encrypted file, and restores it.
 //
 // The 32-byte system key travels INSIDE the encrypted envelope. That is the
 // whole reason cross-machine restore works: the key encrypts every workspace's
 // stored master password and every connector and chat-platform token, and it is
-// derived from the hostname on installs that never set SA_SYSTEM_KEY. A restore
+// derived from the hostname on installs that never set ROOKERY_SYSTEM_KEY. A restore
 // without it produces an install that boots, looks healthy, and has silently
 // lost every scheduled agent and every connector.
 package backup
@@ -19,7 +19,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/buildinfo"
+	"github.com/ilijad1/rookery/internal/buildinfo"
 )
 
 // Options configures one Snapshot run.
@@ -79,7 +79,7 @@ func Snapshot(ctx context.Context, opts Options) (string, error) {
 	// VACUUM INTO is a single statement producing a consistent, checkpointed
 	// copy. Copying the .db file directly would be torn: a live install carries
 	// a multi-megabyte WAL that a plain copy does not fold in.
-	dbCopy := filepath.Join(work, "simple-agents.db")
+	dbCopy := filepath.Join(work, "rookery.db")
 	if _, err := opts.DB.ExecContext(ctx, `VACUUM INTO ?`, dbCopy); err != nil {
 		return "", fmt.Errorf("backup: vacuum database: %w", err)
 	}
@@ -97,7 +97,7 @@ func Snapshot(ctx context.Context, opts Options) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	files := append([]archiveFile{{Name: "db/simple-agents.db", Path: dbCopy}}, vaultFiles...)
+	files := append([]archiveFile{{Name: "db/rookery.db", Path: dbCopy}}, vaultFiles...)
 
 	m := Manifest{
 		CreatedAt:      now.UTC(),
@@ -108,7 +108,7 @@ func Snapshot(ctx context.Context, opts Options) (string, error) {
 		WorkspaceCount: wsCount,
 	}
 
-	staged := filepath.Join(work, "snapshot.sab")
+	staged := filepath.Join(work, "snapshot.rkb")
 	if err := buildEncrypted(staged, files, m, opts.Passphrase); err != nil {
 		return "", err
 	}

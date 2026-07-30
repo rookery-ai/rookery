@@ -18,8 +18,8 @@ func TestChatAllowedToolsShape(t *testing.T) {
 		t.Errorf("chat must not get Bash without a connector/kb bridge: %s", base)
 	}
 
-	withBridge := ChatAllowedTools("/usr/local/bin/simple-agents", "")
-	if !strings.Contains(withBridge, "Bash(/usr/local/bin/simple-agents connector exec:*)") {
+	withBridge := ChatAllowedTools("/usr/local/bin/rookery", "")
+	if !strings.Contains(withBridge, "Bash(/usr/local/bin/rookery connector exec:*)") {
 		t.Errorf("connector grant must be scoped to the single exec command: %s", withBridge)
 	}
 	// A bare Bash grant would hand chat arbitrary shell.
@@ -27,12 +27,12 @@ func TestChatAllowedToolsShape(t *testing.T) {
 		t.Errorf("unscoped Bash grant leaked into the chat tool set: %s", withBridge)
 	}
 
-	withKB := ChatAllowedTools("", "/usr/local/bin/simple-agents")
-	if !strings.Contains(withKB, "Bash(/usr/local/bin/simple-agents kb:*)") {
+	withKB := ChatAllowedTools("", "/usr/local/bin/rookery")
+	if !strings.Contains(withKB, "Bash(/usr/local/bin/rookery kb:*)") {
 		t.Errorf("kb grant must be scoped to the kb subcommand: %s", withKB)
 	}
 
-	withBoth := ChatAllowedTools("/usr/local/bin/simple-agents", "/usr/local/bin/simple-agents")
+	withBoth := ChatAllowedTools("/usr/local/bin/rookery", "/usr/local/bin/rookery")
 	if !strings.Contains(withBoth, "connector exec:*") || !strings.Contains(withBoth, "kb:*") {
 		t.Errorf("both bridges must be able to grant independently: %s", withBoth)
 	}

@@ -118,7 +118,7 @@ describe("BackupSection", () => {
 
   it("requires typing RESTORE before the restore button enables", async () => {
     mountWith(mockConfig({ enabled: true, passphrase_set: true }), [
-      { name: "simple-agents-20260729-030000.sab", size: 12345, mod_time: "2026-07-29T03:00:00Z" },
+      { name: "rookery-20260729-030000.rkb", size: 12345, mod_time: "2026-07-29T03:00:00Z" },
     ]);
 
     const open = await screen.findByRole("button", { name: /restore from snapshot/i });

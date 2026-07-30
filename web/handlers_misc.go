@@ -11,17 +11,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/chat"
-	"github.com/ilijad1/simple-agents/internal/coder"
+	"github.com/ilijad1/rookery/internal/chat"
+	"github.com/ilijad1/rookery/internal/coder"
 	// Aliased because this file has a local variable named `coder` that shadows
 	// the package inside the chat handler.
-	codersvc "github.com/ilijad1/simple-agents/internal/coder"
-	"github.com/ilijad1/simple-agents/internal/connectors"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/prompts"
-	"github.com/ilijad1/simple-agents/internal/reminder"
-	"github.com/ilijad1/simple-agents/internal/secrets"
-	"github.com/ilijad1/simple-agents/internal/websearch"
+	codersvc "github.com/ilijad1/rookery/internal/coder"
+	"github.com/ilijad1/rookery/internal/connectors"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/prompts"
+	"github.com/ilijad1/rookery/internal/reminder"
+	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/ilijad1/rookery/internal/websearch"
 	"github.com/labstack/echo/v4"
 )
 
@@ -65,10 +65,10 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 
 	// Connector + KB bridge wiring: the API engine exposes bound connections AND
 	// save_to_kb as native in-process tools directly. A CLI coder instead reaches
-	// them via loopback bridges (`simple-agents connector exec <tool>`,
-	// `simple-agents kb convert|search`), the same mechanism agent runs use. This
+	// them via loopback bridges (`rookery connector exec <tool>`,
+	// `rookery kb convert|search`), the same mechanism agent runs use. This
 	// list must stay in step with the Telegram/Discord/Slack chat path in
-	// cmd/simple-agents; divergence would give one surface a capability the other
+	// cmd/rookery; divergence would give one surface a capability the other
 	// lacks.
 	// Search-key wiring: resolve any configured SEARCH_KEY_BRAVE/SEARCH_KEY_TAVILY
 	// secrets once, host-side, and inject them into the coder's env so its
@@ -120,8 +120,8 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 			if kbBin != "" {
 				kbTok := s.kbBridge.Register(u.ID, false)
 				defer s.kbBridge.Unregister(kbTok)
-				extraEnv["SA_KB_URL"] = s.kbBridge.URL()
-				extraEnv["SA_KB_TOKEN"] = kbTok
+				extraEnv["ROOKERY_KB_URL"] = s.kbBridge.URL()
+				extraEnv["ROOKERY_KB_TOKEN"] = kbTok
 			}
 		}
 		if s.connBridge != nil && s.connBridge.Addr() != "" {
@@ -130,8 +130,8 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 				if len(bound) > 0 {
 					tok := s.connBridge.Register(u.ID, bound, false)
 					defer s.connBridge.Unregister(tok)
-					extraEnv["SA_CONNECTOR_URL"] = s.connBridge.Addr()
-					extraEnv["SA_CONNECTOR_TOKEN"] = tok
+					extraEnv["ROOKERY_CONNECTOR_URL"] = s.connBridge.Addr()
+					extraEnv["ROOKERY_CONNECTOR_TOKEN"] = tok
 					for _, b := range bound {
 						connRefs = append(connRefs, prompts.ConnectionRef{Provider: b.Provider, Label: b.AccountLabel, Identity: b.AccountIdentity})
 					}

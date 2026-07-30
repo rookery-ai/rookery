@@ -3,7 +3,7 @@ package web
 import (
 	"net/http"
 
-	"github.com/ilijad1/simple-agents/internal/health"
+	"github.com/ilijad1/rookery/internal/health"
 	"github.com/labstack/echo/v4"
 )
 

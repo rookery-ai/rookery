@@ -12,7 +12,7 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/ilijad1/simple-agents/internal/convert"
+	"github.com/ilijad1/rookery/internal/convert"
 )
 
 // Scored is a chunk with its relevance score.

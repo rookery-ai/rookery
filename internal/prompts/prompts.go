@@ -249,7 +249,7 @@ func ChatAppsForPlatforms(platforms []string) []ChatAppInfo {
 }
 
 // platformContextBlock returns the platform primer injected into the design, generation,
-// and runtime prompts. It teaches the coder the Simple Agents concepts and terminology —
+// and runtime prompts. It teaches the coder the Rookery concepts and terminology —
 // the flexible ever-growing knowledge base, secrets store, chats, reminders, the
 // connected chat apps and their commands, the output protocol, and the schedule line —
 // so the coder never has to guess how the platform works.
@@ -259,7 +259,7 @@ func ChatAppsForPlatforms(platforms []string) []ChatAppInfo {
 func platformContextBlock(chatApps []ChatAppInfo, vaultRoot string) string {
 	var sb strings.Builder
 	sb.WriteString("<platform_context>\n")
-	sb.WriteString("You are an AI agent running inside Simple Agents — a personal AI platform. Here is\n")
+	sb.WriteString("You are an AI agent running inside Rookery — a personal AI platform. Here is\n")
 	sb.WriteString("everything you need to know about the platform and how it works.\n\n")
 
 	// ── Knowledge base ───────────────────────────────────────────────────────
@@ -1022,7 +1022,7 @@ type ImplementationParams struct {
 	// ignores the tools and flails hunting for API keys/env vars for the service.
 	Connections     []ConnectionRef
 	ConnectionTools []string // the exact tool names those connections expose
-	ConnectorBin    string   // absolute simple-agents path for the CLI connector-exec command
+	ConnectorBin    string   // absolute rookery path for the CLI connector-exec command
 	// Skills is the pool (core + user) offered to the build coder so it can declare the
 	// agent's `# Skills:` header. Without this the header is never emitted.
 	Skills []SkillRef
@@ -1692,14 +1692,14 @@ type CoderPromptParams struct {
 	BackendType     string        // BackendFullCoder | BackendBasicModel | "" (capabilities block)
 	// Connections are the self-managed-OAuth service accounts this agent is bound to.
 	// When non-empty the runtime prompt tells the agent how to act on them: native typed
-	// tools (tool-calling backend) or the `simple-agents connector exec` command (CLI/basic).
+	// tools (tool-calling backend) or the `rookery connector exec` command (CLI/basic).
 	Connections []ConnectionRef
 	// ConnectionTools are the exact tool names those connections expose (e.g.
 	// gmail_send_email, github_create_issue__work) — listed for CLI/basic backends that
 	// invoke them by name via the connector-exec command.
 	ConnectionTools []string
-	// ConnectorBin is the absolute path to the simple-agents binary a CLI coder invokes as
-	// `<bin> connector exec …`. Empty falls back to bare "simple-agents" (relies on PATH).
+	// ConnectorBin is the absolute path to the rookery binary a CLI coder invokes as
+	// `<bin> connector exec …`. Empty falls back to bare "rookery" (relies on PATH).
 	ConnectorBin string
 }
 
@@ -1726,7 +1726,7 @@ func slugToolLabel(s string) string {
 
 // connectedToolsBlock tells the running agent how to act on its bound service accounts.
 // It is backend-aware: a tool-calling backend gets native function tools; a CLI or basic
-// backend gets the `simple-agents connector exec <tool>` command (which reaches the exact
+// backend gets the `rookery connector exec <tool>` command (which reaches the exact
 // same host-side execution path). Either way, the agent never fetches OAuth tokens or
 // hand-rolls the API call — the platform owns auth regardless of coder type.
 func connectedToolsBlock(bound []ConnectionRef, toolNames []string, backendType, connectorBin string) string {
@@ -1735,7 +1735,7 @@ func connectedToolsBlock(bound []ConnectionRef, toolNames []string, backendType,
 	}
 	bin := connectorBin
 	if bin == "" {
-		bin = "simple-agents"
+		bin = "rookery"
 	}
 	var sb strings.Builder
 	sb.WriteString("<connected_service_tools>\n")
@@ -2265,7 +2265,7 @@ func BuildSkillImplementationPrompt(skillName string, history []ChatMessage, ski
 	var sb strings.Builder
 	sb.WriteString("You are creating a skill called \"")
 	sb.WriteString(skillName)
-	sb.WriteString("\" for the simple-agents platform.\n\n")
+	sb.WriteString("\" for the Rookery platform.\n\n")
 
 	sb.WriteString(coderCapabilitiesBlock(p.BackendType))
 

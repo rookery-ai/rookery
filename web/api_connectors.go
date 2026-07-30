@@ -3,8 +3,8 @@ package web
 import (
 	"net/http"
 
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/gateway"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/gateway"
 	"github.com/labstack/echo/v4"
 )
 

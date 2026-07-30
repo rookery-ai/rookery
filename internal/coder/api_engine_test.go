@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ilijad1/simple-agents/internal/buildphase"
-	"github.com/ilijad1/simple-agents/internal/db"
-	"github.com/ilijad1/simple-agents/internal/llm"
-	"github.com/ilijad1/simple-agents/internal/vault"
+	"github.com/ilijad1/rookery/internal/buildphase"
+	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/ilijad1/rookery/internal/vault"
 )
 
 // fakeProvider is an in-process llm.Provider used to drive the API engine in
@@ -324,8 +324,8 @@ func TestToolMilestoneShowsBashCommand(t *testing.T) {
 // becomes "~".
 func TestToolMilestoneStripsHostPaths(t *testing.T) {
 	const (
-		vaultRoot = "/home/rookie/.simple-agents-v2/vaults/fd11c47e-646e-48e0-9ef8-fc54a2f184ac"
-		homeDir   = "/home/rookie/.simple-agents-v2/claude-homes/fd11c47e-646e-48e0-9ef8-fc54a2f184ac"
+		vaultRoot = "/home/rookie/.rookery/vaults/fd11c47e-646e-48e0-9ef8-fc54a2f184ac"
+		homeDir   = "/home/rookie/.rookery/claude-homes/fd11c47e-646e-48e0-9ef8-fc54a2f184ac"
 	)
 	cases := []struct{ name, args, want string }{
 		{"bash", `{"command":"cd ` + vaultRoot + `/notes && ls"}`, "🔧 bash(cd notes && ls)"},
@@ -384,7 +384,7 @@ func TestShortenHostPathsIgnoresDegenerateRoots(t *testing.T) {
 // before stripping the host path would spend the whole character budget on the
 // absolute prefix and cut away the part that says what the command does.
 func TestToolMilestoneTruncatesAfterShortening(t *testing.T) {
-	const vaultRoot = "/home/rookie/.simple-agents-v2/vaults/fd11c47e-646e-48e0-9ef8-fc54a2f184ac"
+	const vaultRoot = "/home/rookie/.rookery/vaults/fd11c47e-646e-48e0-9ef8-fc54a2f184ac"
 	got := toolMilestone(toolCall("bash", `{"command":"cd `+vaultRoot+`/notes && grep -r todo ."}`), vaultRoot, "")
 	if want := "🔧 bash(cd notes && grep -r todo .)"; got != want {
 		t.Errorf("got %q, want %q", got, want)
@@ -886,7 +886,7 @@ func TestAPIEngine_GraceNudge_NonBuildUsesPlainWrapUp(t *testing.T) {
 		return &llm.Response{Content: "wrapped up in plain language"}, nil
 	}
 
-	// Run (not a build): Generate without SA_BUILD_PHASE, so tools.verifyBuild is false.
+	// Run (not a build): Generate without ROOKERY_BUILD_PHASE, so tools.verifyBuild is false.
 	// (Agent runs and builds share Generate; only the build sets the build-phase env.)
 	if _, err := c.Generate(context.Background(), ws, "go"); err != nil {
 		t.Fatalf("Generate: %v", err)

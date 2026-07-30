@@ -36,7 +36,7 @@ var skillsFS embed.FS
 
 // InstallSpec is one entry of metadata.install — how to provision a required
 // tool. ClawHub kinds brew/node/go/uv are recognized; we add `binary` (static
-// download) and `pip` for the simple-agents sandbox.
+// download) and `pip` for the Rookery sandbox.
 type InstallSpec struct {
 	Kind    string   `yaml:"kind" json:"kind"`
 	Bin     string   `yaml:"bin" json:"bin,omitempty"`

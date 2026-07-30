@@ -44,7 +44,7 @@ func TestSignV4CredentialScopeAndHeaders(t *testing.T) {
 func TestSignV4IsDeterministic(t *testing.T) {
 	when := time.Date(2026, 7, 29, 3, 0, 0, 0, time.UTC)
 	sig := func() string {
-		req, _ := http.NewRequest("PUT", "https://b.s3.amazonaws.com/sa/x.sab", nil)
+		req, _ := http.NewRequest("PUT", "https://b.s3.amazonaws.com/sa/x.rkb", nil)
 		signV4(req, "AK", "SK", "us-east-1", "s3", emptyPayloadSHA256, when)
 		return req.Header.Get("Authorization")
 	}

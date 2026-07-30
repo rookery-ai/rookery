@@ -58,8 +58,8 @@ func (p *openaiProvider) Complete(ctx context.Context, req Request) (*Response, 
 	}
 	// OpenRouter accepts extra headers; harmless to others.
 	if p.name == "openrouter" {
-		headers["HTTP-Referer"] = "https://rookie.lan/simple-agents"
-		headers["X-Title"] = "Simple Agents"
+		headers["HTTP-Referer"] = "https://rookery.sh"
+		headers["X-Title"] = "Rookery"
 	}
 
 	url := p.baseURL + "/chat/completions"

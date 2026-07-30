@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/simple-agents/internal/agentdesigner"
+	"github.com/ilijad1/rookery/internal/agentdesigner"
 )
 
 // TestAgentStatePersistsAcrossRunsAsMarkdown proves the runner's state-loading
@@ -353,7 +353,7 @@ func TestApplyAndSaveStateNoUpdatesPreservesOutsideFenceContentByteForByte(t *te
 	path := filepath.Join(dir, "state.md")
 
 	notesBlock := "## Notes\n\nDo not touch the cursor manually — it tracks the last\nprocessed message ID from the source inbox.\n"
-	intro := "*Managed by Simple Agents. The block below is this agent's memory between runs — edit it if you need to fix something by hand.*\n"
+	intro := "*Managed by Rookery. The block below is this agent's memory between runs — edit it if you need to fix something by hand.*\n"
 	heading := "# State — My Agent\n"
 	// Hand-formatted fence: single line, keys in non-alphabetical order —
 	// deliberately NOT what MarshalIndent would produce, so a byte-for-byte
