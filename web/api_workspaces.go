@@ -14,19 +14,29 @@ import (
 // registerWorkspacesAPI registers the owner-gated workspace + admin endpoints on
 // the given group (already guarded by requireOwnerAPI). Direct JSON ports of the
 // template handlers in web/handlers_admin.go.
-func (s *Server) registerWorkspacesAPI(g *echo.Group) {
+// registerWorkspacesAPI splits its routes across two groups.
+//
+// g is owner-gated only: listing is already in the session payload, creating a
+// workspace is additive and reversible, and entering already demands that
+// workspace's own master password — re-asking for the owner password on every
+// switch would be punitive.
+//
+// verified additionally requires a fresh owner-password confirmation: deleting a
+// workspace destroys a tenant, and the admin routes are the install's settings.
+func (s *Server) registerWorkspacesAPI(g, verified *echo.Group) {
 	g.GET("/workspaces", s.apiListWorkspaces)
 	g.POST("/workspaces", s.apiCreateWorkspace)
 	g.POST("/workspaces/leave", s.apiLeaveWorkspace)
 	g.POST("/workspaces/:id/enter", s.apiEnterWorkspace)
-	g.DELETE("/workspaces/:id", s.apiDeleteWorkspace)
 
-	g.GET("/admin/overview", s.apiAdminOverview)
-	g.GET("/admin/audit", s.apiAdminAudit)
-	g.GET("/admin/settings", s.apiAdminGetSettings)
-	g.GET("/admin/public-url", s.apiPublicURLState)
-	g.PUT("/admin/public-url", s.apiSavePublicURL)
-	g.POST("/admin/public-url/test", s.apiTestPublicURL)
+	verified.DELETE("/workspaces/:id", s.apiDeleteWorkspace)
+
+	verified.GET("/admin/overview", s.apiAdminOverview)
+	verified.GET("/admin/audit", s.apiAdminAudit)
+	verified.GET("/admin/settings", s.apiAdminGetSettings)
+	verified.GET("/admin/public-url", s.apiPublicURLState)
+	verified.PUT("/admin/public-url", s.apiSavePublicURL)
+	verified.POST("/admin/public-url/test", s.apiTestPublicURL)
 }
 
 // ── Workspace lifecycle ──────────────────────────────────────────────────────

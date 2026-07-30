@@ -35,7 +35,7 @@ type servicesDTO struct {
 func listServices(t *testing.T) (*Server, servicesDTO) {
 	t.Helper()
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 	cookies, _ = createAndEnterWorkspace(t, s, cookies)
 	// The operator's own ROOKERY_PUBLIC_URL must not leak into the test's expectations.
 	t.Setenv("ROOKERY_PUBLIC_URL", "")
@@ -157,7 +157,7 @@ func TestEchoNonceExpires(t *testing.T) {
 // malformed value must be rejected rather than silently stored.
 func TestSavePublicURLDrivesTheRedirectURI(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 	cookies, _ = createAndEnterWorkspace(t, s, cookies)
 	t.Setenv("ROOKERY_PUBLIC_URL", "")
 
@@ -201,7 +201,7 @@ func TestSavePublicURLDrivesTheRedirectURI(t *testing.T) {
 // degrades into the false negative it was written to prevent.
 func TestSelfTestTreatsUntrustedCertAsWarningNotFailure(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 
 	// httptest's TLS server uses a self-signed cert the default client rejects.
 	tls := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -234,7 +234,7 @@ func TestSelfTestTreatsUntrustedCertAsWarningNotFailure(t *testing.T) {
 // nonce. Minting must sweep, or the map grows without bound.
 func TestSelfTestSweepsExpiredNonces(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 
 	s.echoMu.Lock()
 	s.echoNonces = map[string]echoNonce{

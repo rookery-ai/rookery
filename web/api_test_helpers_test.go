@@ -104,3 +104,26 @@ func createAndEnterWorkspace(t *testing.T, s *Server, cookies []*http.Cookie) ([
 	// Session cookie is rewritten on enter — merge the fresh cookie.
 	return rec.Result().Cookies(), w.ID
 }
+
+// verifyOwnerCookies confirms the owner password so install-level routes
+// (/admin/*, /backup/*, workspace delete) are reachable. Every test touching
+// those needs it now that they sit behind requireOwnerVerified.
+//
+// Returns the refreshed cookies — the session cookie is rewritten by the stamp.
+func verifyOwnerCookies(t *testing.T, s *Server, cookies []*http.Cookie) []*http.Cookie {
+	t.Helper()
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/auth/owner-verify",
+		map[string]string{"password": "password123"}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("owner-verify: %d %s", rec.Code, rec.Body.String())
+	}
+	return rec.Result().Cookies()
+}
+
+// bootstrapLoginAndVerify is bootstrapAndLogin plus the owner-password
+// confirmation, for tests whose subject is an install-level route rather than
+// the gate itself.
+func bootstrapLoginAndVerify(t *testing.T, s *Server) []*http.Cookie {
+	t.Helper()
+	return verifyOwnerCookies(t, s, bootstrapAndLogin(t, s))
+}

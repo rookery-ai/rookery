@@ -2,10 +2,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api";
 
 // Mirrors toAPISkillListItem (web/api_skills.go).
-export type SkillListItem = { id: string; name: string; description: string; created_at: string };
+// Mirrors apiSkillMeta — the SAME fields for both kinds, parsed server-side by
+// one skilllibrary.ParseMeta so a built-in skill and a created one are described
+// identically. `version` may be "" (the chip is then omitted); `category` always
+// resolves, defaulting to "Other".
+export type SkillMeta = { category: string; version: string; requires: string[] };
+
+export type SkillListItem = {
+  id: string;
+  name: string;
+  description: string;
+  created_at: string;
+} & SkillMeta;
 
 // Mirrors apiCoreSkillListItem.
-export type CoreSkillListItem = { slug: string; name: string; description: string };
+export type CoreSkillListItem = { slug: string; name: string; description: string } & SkillMeta;
 
 // Mirrors toAPISkillDraft — nil draft serializes as JSON null.
 export type SkillDraft = {
@@ -16,10 +27,10 @@ export type SkillDraft = {
 } | null;
 
 // Mirrors apiGetSkill / apiSaveSkill / apiCreateSkill's response shape.
-export type SkillDetail = { id: string; name: string; description: string; content: string };
+export type SkillDetail = { id: string; name: string; description: string; content: string } & SkillMeta;
 
 // Mirrors apiGetCoreSkill's response shape.
-export type CoreSkillDetail = { slug: string; content: string };
+export type CoreSkillDetail = { slug: string; content: string; description: string } & SkillMeta;
 
 export function useSkills() {
   return useQuery({

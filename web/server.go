@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/sessions"
 	"github.com/ilijad1/rookery/internal/agentdesigner"
@@ -265,6 +266,45 @@ func (s *Server) setLocked(c echo.Context, locked bool) error {
 	} else {
 		delete(sess.Values, "locked")
 	}
+	return sess.Save(c.Request(), c.Response())
+}
+
+// ownerVerifyTTL is how long one owner-password confirmation lasts.
+//
+// Chosen from the shape of real owner work: saving a backup config, running it,
+// and listing the resulting snapshots is three or four requests over a couple of
+// minutes, which should cost ONE password entry, not four. Short enough that a
+// browser walked away from re-locks within a coffee break.
+const ownerVerifyTTL = 15 * time.Minute
+
+// ownerVerifiedAt returns when the owner last confirmed their password on this
+// session. Stored as Unix seconds because gorilla's default session encoder
+// handles primitives without registering a gob type for time.Time.
+func (s *Server) ownerVerifiedAt(c echo.Context) (time.Time, bool) {
+	sess, err := s.store.Get(c.Request(), sessionName)
+	if err != nil {
+		return time.Time{}, false
+	}
+	secs, ok := sess.Values["owner_verified_at"].(int64)
+	if !ok || secs == 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(secs, 0), true
+}
+
+// isOwnerVerified reports whether the owner has confirmed their password within
+// the TTL. Absent means NOT verified, so an older session cookie can never be
+// read as pre-verified.
+func (s *Server) isOwnerVerified(c echo.Context) bool {
+	at, ok := s.ownerVerifiedAt(c)
+	return ok && time.Since(at) < ownerVerifyTTL
+}
+
+// setOwnerVerified stamps a fresh confirmation. Like setLocked, it deliberately
+// leaves owner_id and active_workspace_id alone.
+func (s *Server) setOwnerVerified(c echo.Context) error {
+	sess, _ := s.store.Get(c.Request(), sessionName)
+	sess.Values["owner_verified_at"] = time.Now().Unix()
 	return sess.Save(c.Request(), c.Response())
 }
 

@@ -8,7 +8,7 @@ import (
 
 func TestAPIWorkspaceLifecycle(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 
 	// Create → 201, becomes active (needs_setup=true).
 	rec := doJSON(t, s, http.MethodPost, "/api/v1/workspaces",
@@ -34,7 +34,7 @@ func TestAPIWorkspaceLifecycle(t *testing.T) {
 
 func TestAPIEnterWorkspaceWrongPassword(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
 	// Re-enter with a wrong password → 401 wrong_master_password.
 	rec := doJSON(t, s, http.MethodPost, "/api/v1/workspaces/"+wsID+"/enter",
@@ -46,7 +46,7 @@ func TestAPIEnterWorkspaceWrongPassword(t *testing.T) {
 
 func TestAPIEnterWorkspaceNeedsSetup(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 
 	// Create → 201, becomes active with needs_setup=true (no master password yet).
 	rec := doJSON(t, s, http.MethodPost, "/api/v1/workspaces",
@@ -78,7 +78,7 @@ func TestAPIEnterWorkspaceNeedsSetup(t *testing.T) {
 
 func TestAPIWorkspaceDeleteActiveClearsSession(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
 
 	rec := doJSON(t, s, http.MethodDelete, "/api/v1/workspaces/"+wsID, nil, cookies)
@@ -95,7 +95,7 @@ func TestAPIWorkspaceDeleteActiveClearsSession(t *testing.T) {
 
 func TestAPIWorkspaceDeleteInactiveKeepsSession(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 	cookies, wsA := createAndEnterWorkspace(t, s, cookies)
 
 	// Create workspace B — creation sets it active (knocking A out momentarily).
@@ -134,7 +134,7 @@ func TestAPIWorkspaceDeleteInactiveKeepsSession(t *testing.T) {
 
 func TestAPIWorkspaceList(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 	rec := doJSON(t, s, http.MethodGet, "/api/v1/workspaces", nil, cookies)
 	if rec.Code != http.StatusOK || !contains(rec.Body.String(), `"workspaces":`) {
 		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
@@ -143,7 +143,7 @@ func TestAPIWorkspaceList(t *testing.T) {
 
 func TestAPIWorkspaceDelete(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
 
 	rec := doJSON(t, s, http.MethodDelete, "/api/v1/workspaces/"+wsID, nil, cookies)
@@ -162,7 +162,7 @@ func TestAPIWorkspaceDelete(t *testing.T) {
 
 func TestAPIAdminOverviewAuditSettings(t *testing.T) {
 	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	cookies := bootstrapLoginAndVerify(t, s)
 	_, _ = createAndEnterWorkspace(t, s, cookies)
 
 	rec := doJSON(t, s, http.MethodGet, "/api/v1/admin/overview", nil, cookies)

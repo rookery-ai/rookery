@@ -13,35 +13,73 @@ import {
 } from "@/components/ui/dialog";
 import { api, ApiError } from "@/lib/api";
 import { timeAgo } from "@/lib/utils";
+import { SkillChip } from "./SkillView";
 import { useSkills, useSkillActions, type SkillListItem, type CoreSkillListItem, type SkillDraft } from "@/lib/skills";
 
-function SkillCard({ skill }: { skill: SkillListItem }) {
+// One card for both kinds. Built-in skills used to render dashed, muted and
+// half-contrast, which read as second-class — they are in fact the skills every
+// workspace actually has. The only difference now is the chip.
+function SkillCard({
+  to,
+  name,
+  description,
+  category,
+  version,
+  footer,
+  badge,
+}: {
+  to: string;
+  name: string;
+  description: string;
+  category: string;
+  version: string;
+  footer: string;
+  badge: "Built-in" | "Yours";
+}) {
   return (
     <Link
-      to={`/skills/${skill.id}`}
+      to={to}
       className="flex flex-col gap-2 rounded-lg border border-border bg-background p-4 text-left transition-colors hover:border-primary/40 hover:shadow-sm"
     >
-      <h3 className="font-semibold leading-tight">{skill.name}</h3>
+      <h3 className="font-semibold leading-tight">{name}</h3>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <SkillChip>{category}</SkillChip>
+        {version && <SkillChip>v{version}</SkillChip>}
+        <SkillChip>{badge}</SkillChip>
+      </div>
       <p className="line-clamp-2 flex-1 text-sm leading-relaxed text-muted-2">
-        {skill.description || <em className="text-muted-2/70">No description</em>}
+        {description || <em className="text-muted-2/70">No description</em>}
       </p>
-      <p className="text-xs text-muted-2/80">Added {timeAgo(skill.created_at)}</p>
+      <p className="text-xs text-muted-2/80">{footer}</p>
     </Link>
+  );
+}
+
+function UserSkillCard({ skill }: { skill: SkillListItem }) {
+  return (
+    <SkillCard
+      to={`/skills/${skill.id}`}
+      name={skill.name}
+      description={skill.description}
+      category={skill.category}
+      version={skill.version}
+      footer={`Added ${timeAgo(skill.created_at)}`}
+      badge="Yours"
+    />
   );
 }
 
 function CoreSkillCard({ skill }: { skill: CoreSkillListItem }) {
   return (
-    <Link
+    <SkillCard
       to={`/skills/core/${skill.slug}`}
-      className="flex flex-col gap-2 rounded-lg border border-dashed border-border bg-chrome/50 p-4 text-left text-muted-2 transition-colors hover:border-primary/40"
-    >
-      <h3 className="font-semibold leading-tight text-foreground/80">{skill.name}</h3>
-      <p className="line-clamp-2 flex-1 text-sm leading-relaxed">
-        {skill.description || <em>No description</em>}
-      </p>
-      <p className="text-xs opacity-80">Built-in</p>
-    </Link>
+      name={skill.name}
+      description={skill.description}
+      category={skill.category}
+      version={skill.version}
+      footer="Always available to every agent"
+      badge="Built-in"
+    />
   );
 }
 
@@ -246,7 +284,7 @@ export default function SkillsPage() {
             </h2>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {filteredSkills.map((s) => (
-                <SkillCard key={s.id} skill={s} />
+                <UserSkillCard key={s.id} skill={s} />
               ))}
             </div>
           </div>
