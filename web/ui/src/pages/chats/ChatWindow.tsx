@@ -1,18 +1,40 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, AlertTriangle, Paperclip } from "lucide-react";
+import {
+  AlertTriangle,
+  MoreHorizontal,
+  Paperclip,
+  Play,
+  Trash2,
+} from "lucide-react";
 import { cn, formatShortDate } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
-import { useChatDetail, useChatAction, useRenameChat, sendChatMessage, type Chat, type ChatMessage } from "@/lib/chats";
+import {
+  useChatDetail,
+  useChatAction,
+  useRenameChat,
+  sendChatMessage,
+  type Chat,
+  type ChatMessage,
+} from "@/lib/chats";
 import { useUploadKBFile } from "@/lib/kb";
 import { useToast } from "@/components/shell/Toast";
 import { ChatScroll } from "@/components/chat/ChatScroll";
 import { ChatMessageBubble, TypingIndicator } from "@/components/chat/Bubbles";
 import { Composer } from "@/components/chat/Composer";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
 // Mirrors web/api_kb.go's maxUploadBytes exactly — a client-side pre-check so
@@ -49,7 +71,10 @@ function attachErrorMessage(err: unknown): string {
 // the two has actually landed server-side yet. Exported for direct unit
 // testing (see reconcile.test.ts) — the scenario it guards is awkward to
 // reproduce end-to-end.
-export function reconcilePending(pending: ChatMessage[], freshMessages: ChatMessage[]): ChatMessage[] {
+export function reconcilePending(
+  pending: ChatMessage[],
+  freshMessages: ChatMessage[],
+): ChatMessage[] {
   const remaining = new Map<string, number>();
   for (const fm of freshMessages) {
     const key = `${fm.role}::${fm.content}`;
@@ -97,7 +122,12 @@ export function ChatWindow({
   initialText,
   autoFocus,
   compact,
-}: { chatId: string; initialText?: string; autoFocus?: boolean; compact?: boolean }) {
+}: {
+  chatId: string;
+  initialText?: string;
+  autoFocus?: boolean;
+  compact?: boolean;
+}) {
   // 10% each side on the full-page surface: messages and composer share one
   // inset column, which is what gives the conversation its compact feel (and
   // moves the Send button clear of the floating action buttons in the corner).
@@ -151,15 +181,27 @@ export function ChatWindow({
   // (handleSend below shows it in the shared banner; attachFiles shows a
   // per-file toast instead, precisely because a shared banner is the wrong
   // vehicle when a batch import can have several independent outcomes.)
-  async function sendTurn(text: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  async function sendTurn(
+    text: string,
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
     // Stamped client-side so a just-sent bubble shows its time immediately
     // instead of blank until the refetch lands. reconcilePending keys on
     // role::content only, so this never disturbs the dedupe.
-    setPending((p) => [...p, { role: "user", content: text, created_at: new Date().toISOString() }]);
+    setPending((p) => [
+      ...p,
+      { role: "user", content: text, created_at: new Date().toISOString() },
+    ]);
     setBusy(true);
     try {
       const response = await sendChatMessage(chatId, text);
-      setPending((p) => [...p, { role: "assistant", content: response, created_at: new Date().toISOString() }]);
+      setPending((p) => [
+        ...p,
+        {
+          role: "assistant",
+          content: response,
+          created_at: new Date().toISOString(),
+        },
+      ]);
       await qc.invalidateQueries({ queryKey: ["chat", chatId] });
       // Also refresh the session list so its updated_at/ordering doesn't go
       // stale after a send (list is a separate query keyed by ["chats"]).
@@ -168,13 +210,19 @@ export function ChatWindow({
       // fetched history instead of setPending([]) unconditionally — closes
       // a transient window where a blind clear could drop a message that
       // hadn't actually landed in the cache yet.
-      const fresh = qc.getQueryData<{ chat: Chat; messages: ChatMessage[] }>(["chat", chatId]);
+      const fresh = qc.getQueryData<{ chat: Chat; messages: ChatMessage[] }>([
+        "chat",
+        chatId,
+      ]);
       setPending((p) => reconcilePending(p, fresh?.messages ?? []));
       return { ok: true };
     } catch (err) {
       // The user bubble already pushed above stays visible — the failure
       // is on the assistant's turn, not the user's message.
-      return { ok: false, message: err instanceof ApiError ? err.message : "Something went wrong" };
+      return {
+        ok: false,
+        message: err instanceof ApiError ? err.message : "Something went wrong",
+      };
     } finally {
       setBusy(false);
     }
@@ -228,7 +276,10 @@ export function ChatWindow({
     try {
       for (const file of files) {
         if (file.size > MAX_ATTACH_BYTES) {
-          toast({ message: `Couldn't attach ${file.name}: that file is too large (max 25 MB).`, variant: "error" });
+          toast({
+            message: `Couldn't attach ${file.name}: that file is too large (max 25 MB).`,
+            variant: "error",
+          });
           continue;
         }
         let res;
@@ -239,10 +290,15 @@ export function ChatWindow({
           // catch is scoped to exactly the upload call above, so the
           // confirmation turn below is only ever reached on a successful
           // import.
-          toast({ message: `Couldn't attach ${file.name}: ${attachErrorMessage(err)}`, variant: "error" });
+          toast({
+            message: `Couldn't attach ${file.name}: ${attachErrorMessage(err)}`,
+            variant: "error",
+          });
           continue;
         }
-        const warningNote = res.warnings?.length ? `\n\n_Note: ${res.warnings.join("; ")}_` : "";
+        const warningNote = res.warnings?.length
+          ? `\n\n_Note: ${res.warnings.join("; ")}_`
+          : "";
         const confirmation = `📎 Attached **${file.name}** to my knowledge base as \`${res.note_path}\`.${warningNote}`;
         const sent = await sendTurn(confirmation);
         if (!sent.ok) {
@@ -294,7 +350,11 @@ export function ChatWindow({
   }
 
   if (isLoading || !data) {
-    return <div className="flex h-full items-center justify-center text-sm text-muted-2">Loading…</div>;
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-2">
+        Loading…
+      </div>
+    );
   }
 
   const { chat, messages } = data;
@@ -348,7 +408,9 @@ export function ChatWindow({
         <div className="flex min-w-0 items-center gap-2">
           <div className="min-w-0">
             <ChatTitle chatId={chatId} name={chat.name} />
-            <span className="text-xs text-muted-2">{formatShortDate(chat.created_at)}</span>
+            <span className="text-xs text-muted-2">
+              {formatShortDate(chat.created_at)}
+            </span>
           </div>
           <StatusChip active={chat.active} />
         </div>
@@ -357,8 +419,14 @@ export function ChatWindow({
             variant="outline"
             size="sm"
             disabled={action.isPending}
-            onClick={() => action.mutate({ id: chatId, action: chat.active ? "stop" : "resume" })}
+            onClick={() =>
+              action.mutate({
+                id: chatId,
+                action: chat.active ? "stop" : "resume",
+              })
+            }
           >
+            <Play />
             {chat.active ? "Stop" : "Resume"}
           </Button>
           <DropdownMenu>
@@ -372,7 +440,10 @@ export function ChatWindow({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => setDeleteOpen(true)}
+              >
                 Delete…
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -382,7 +453,12 @@ export function ChatWindow({
 
       <ChatScroll className={cn(gutter && "px-[10%]")}>
         {allMessages.map((m, i) => (
-          <ChatMessageBubble key={i} role={m.role} content={m.content} createdAt={m.created_at} />
+          <ChatMessageBubble
+            key={i}
+            role={m.role}
+            content={m.content}
+            createdAt={m.created_at}
+          />
         ))}
         {attaching && <TypingIndicator label="Attaching…" />}
         {busy && !attaching && <TypingIndicator />}
@@ -411,8 +487,13 @@ export function ChatWindow({
           </DialogHeader>
           <p className="text-sm text-muted-2">This can’t be undone.</p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleDelete}>Delete</Button>
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete}>
+              <Trash2 />
+              Delete
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -448,7 +529,8 @@ function ChatTitle({ chatId, name }: { chatId: string; name: string }) {
         onError: (err) => {
           setValue(name);
           toast({
-            message: err instanceof ApiError ? err.message : "Couldn't rename chat",
+            message:
+              err instanceof ApiError ? err.message : "Couldn't rename chat",
             variant: "error",
           });
         },

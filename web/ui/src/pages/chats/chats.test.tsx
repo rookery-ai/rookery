@@ -350,12 +350,12 @@ test("opens a newly created chat on the first click", async () => {
   expect(await screen.findByTestId("chat-window")).toBeInTheDocument();
 });
 
-test("+ New chat creates a chat and selects it", async () => {
+test("New chat creates a chat and selects it", async () => {
   mockFetch();
   wrap();
   await screen.findByText("Chat One");
 
-  await userEvent.click(screen.getByRole("button", { name: "+ New chat" }));
+  await userEvent.click(screen.getByRole("button", { name: "New chat" }));
 
   expect(await screen.findByRole("heading", { name: "New chat" })).toBeInTheDocument();
   expect(
@@ -367,12 +367,12 @@ test("+ New chat creates a chat and selects it", async () => {
 
 // ── Composer focus ─────────────────────────────────────────────────────────
 
-test("+ New chat puts the caret in the composer", async () => {
+test("New chat puts the caret in the composer", async () => {
   mockFetch();
   wrap();
   await screen.findByText("Chat One");
 
-  await userEvent.click(screen.getByRole("button", { name: "+ New chat" }));
+  await userEvent.click(screen.getByRole("button", { name: "New chat" }));
   await screen.findByRole("heading", { name: "New chat" });
 
   // Starting a chat is a "let me type now" gesture — having to click into the

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Eraser, FlaskConical, Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { timeAgo } from "@/lib/utils";
@@ -40,7 +40,13 @@ function ErrorNote({ message }: { message: string }) {
 
 // ── Workspaces ───────────────────────────────────────────────────────────
 
-function WorkspaceCard({ ws, activeID }: { ws: Workspace; activeID: string | undefined }) {
+function WorkspaceCard({
+  ws,
+  activeID,
+}: {
+  ws: Workspace;
+  activeID: string | undefined;
+}) {
   const [confirming, setConfirming] = useState(false);
   const del = useDeleteWorkspaceAdmin();
   const isActive = ws.id === activeID;
@@ -60,32 +66,59 @@ function WorkspaceCard({ ws, activeID }: { ws: Workspace; activeID: string | und
         <div className="min-w-0">
           <div className="truncate font-semibold">
             {ws.name}
-            {isActive && <span className="ml-2 text-xs font-normal text-muted-2">(active)</span>}
+            {isActive && (
+              <span className="ml-2 text-xs font-normal text-muted-2">
+                (active)
+              </span>
+            )}
           </div>
-          {ws.about && <div className="truncate text-xs text-muted-2">{ws.about}</div>}
+          {ws.about && (
+            <div className="truncate text-xs text-muted-2">{ws.about}</div>
+          )}
         </div>
       </div>
 
       <div className="mt-3">
         {!confirming ? (
-          <Button size="sm" variant="outline" className="text-danger" onClick={() => setConfirming(true)}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-danger"
+            onClick={() => setConfirming(true)}
+          >
+            <Trash2 />
             Delete
           </Button>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs text-danger">
               Delete “{ws.name}”?{" "}
-              {isActive && "This is your ACTIVE workspace — you'll be logged out of it."}
+              {isActive &&
+                "This is your ACTIVE workspace — you'll be logged out of it."}
             </span>
-            <Button size="sm" variant="outline" onClick={() => setConfirming(false)}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setConfirming(false)}
+            >
               Cancel
             </Button>
-            <Button size="sm" variant="destructive" onClick={() => void handleDelete()} disabled={del.isPending}>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => void handleDelete()}
+              disabled={del.isPending}
+            >
+              <Trash2 />
               Yes, delete
             </Button>
           </div>
         )}
-        {del.isError && <div className="mt-2"><ErrorNote message={errMsg(del.error)} /></div>}
+        {del.isError && (
+          <div className="mt-2">
+            <ErrorNote message={errMsg(del.error)} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -108,10 +141,19 @@ export function WorkspacesSection() {
           <WorkspaceCard key={ws.id} ws={ws} activeID={activeID} />
         ))}
       </div>
-      <Button size="sm" variant="outline" className="mt-3" onClick={() => setCreating(true)}>
-        + Create workspace
+      <Button
+        size="sm"
+        variant="outline"
+        className="mt-3"
+        onClick={() => setCreating(true)}
+      >
+        <Plus />
+        Create workspace
       </Button>
-      <CreateWorkspaceDialog open={creating} onClose={() => setCreating(false)} />
+      <CreateWorkspaceDialog
+        open={creating}
+        onClose={() => setCreating(false)}
+      />
     </div>
   );
 }
@@ -137,22 +179,36 @@ export function SystemStatusSection() {
         <h2 className="text-lg font-bold">System status</h2>
       </div>
       <p className="mt-1 text-xs text-muted-2">
-        Coder and sandbox settings come from <code>config.yaml</code> and each workspace's own
-        coder configuration.
+        Coder and sandbox settings come from <code>config.yaml</code> and each
+        workspace's own coder configuration.
       </p>
       {isLoading && <p className="mt-2 text-xs text-muted-2">Loading…</p>}
-      {isError && <div className="mt-2"><ErrorNote message={errMsg(error)} /></div>}
+      {isError && (
+        <div className="mt-2">
+          <ErrorNote message={errMsg(error)} />
+        </div>
+      )}
       {!isLoading && !isError && (
         <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-xs">
           <div>
             <dt className="text-muted-2">Sandbox</dt>
-            <dd className={sandboxOn ? "font-medium text-ok" : "font-medium text-muted-2"}>
+            <dd
+              className={
+                sandboxOn ? "font-medium text-ok" : "font-medium text-muted-2"
+              }
+            >
               {sandboxOn ? "on" : "off"}
             </dd>
           </div>
           <div>
             <dt className="text-muted-2">Landlock</dt>
-            <dd className={landlockReady ? "font-medium text-ok" : "font-medium text-muted-2"}>
+            <dd
+              className={
+                landlockReady
+                  ? "font-medium text-ok"
+                  : "font-medium text-muted-2"
+              }
+            >
               {landlockReady ? "ready" : "unavailable"}
             </dd>
           </div>
@@ -189,9 +245,9 @@ export function InstanceURLSection() {
         <h2 className="text-lg font-bold">Instance URL</h2>
       </div>
       <p className="mt-1 text-xs text-muted-2">
-        The address this server is reached at. Every service connection's redirect URI is built
-        from it, so providers must be able to accept it. Leave it empty to detect it from your
-        browser.
+        The address this server is reached at. Every service connection's
+        redirect URI is built from it, so providers must be able to accept it.
+        Leave it empty to detect it from your browser.
       </p>
 
       {isLoading && <p className="mt-2 text-xs text-muted-2">Loading…</p>}
@@ -209,14 +265,21 @@ export function InstanceURLSection() {
               className="min-w-64 flex-1"
               aria-label="Instance URL"
             />
-            <Button onClick={() => save.mutate(value.trim())} disabled={save.isPending}>
+            <Button
+              onClick={() => save.mutate(value.trim())}
+              disabled={save.isPending}
+            >
+              <Save />
               {save.isPending ? "Saving…" : "Save"}
             </Button>
             <Button
               variant="secondary"
-              onClick={() => test.mutate((value.trim() || data?.public_url_actual) ?? "")}
+              onClick={() =>
+                test.mutate((value.trim() || data?.public_url_actual) ?? "")
+              }
               disabled={test.isPending}
             >
+            <FlaskConical />
               {test.isPending ? "Testing…" : "Test this URL"}
             </Button>
           </div>
@@ -230,8 +293,16 @@ export function InstanceURLSection() {
                 : "(detected from your browser)"}
           </p>
 
-          {save.isError && <div className="mt-2"><ErrorNote message={errMsg(save.error)} /></div>}
-          {test.isError && <div className="mt-2"><ErrorNote message={errMsg(test.error)} /></div>}
+          {save.isError && (
+            <div className="mt-2">
+              <ErrorNote message={errMsg(save.error)} />
+            </div>
+          )}
+          {test.isError && (
+            <div className="mt-2">
+              <ErrorNote message={errMsg(test.error)} />
+            </div>
+          )}
           {test.data && (
             <p
               className={
@@ -277,8 +348,12 @@ export function AuditLogSection() {
 
   const logs = data?.logs ?? [];
   const workspaces = session?.workspaces ?? [];
-  const workspaceNameById = new Map(workspaces.map((w) => [w.id, w.name] as const));
-  const filtered = Boolean(action || workspaceID || sinceDays || debouncedSearch);
+  const workspaceNameById = new Map(
+    workspaces.map((w) => [w.id, w.name] as const),
+  );
+  const filtered = Boolean(
+    action || workspaceID || sinceDays || debouncedSearch,
+  );
 
   function workspaceLabel(id: string) {
     if (!id) return "—";
@@ -323,7 +398,9 @@ export function AuditLogSection() {
         >
           <option value="">All actions</option>
           {(data?.actions ?? []).map((a) => (
-            <option key={a} value={a}>{a}</option>
+            <option key={a} value={a}>
+              {a}
+            </option>
           ))}
         </select>
         <select
@@ -334,7 +411,9 @@ export function AuditLogSection() {
         >
           <option value="">All workspaces</option>
           {workspaces.map((w) => (
-            <option key={w.id} value={w.id}>{w.name}</option>
+            <option key={w.id} value={w.id}>
+              {w.name}
+            </option>
           ))}
         </select>
         <select
@@ -349,14 +428,24 @@ export function AuditLogSection() {
           <option value="30">Last 30 days</option>
         </select>
         {filtered && (
-          <Button type="button" size="sm" variant="outline" onClick={clearFilters}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={clearFilters}
+          >
+            <Eraser />
             Clear
           </Button>
         )}
       </div>
 
       {isLoading && <p className="mt-2 text-xs text-muted-2">Loading…</p>}
-      {isError && <div className="mt-2"><ErrorNote message={errMsg(error)} /></div>}
+      {isError && (
+        <div className="mt-2">
+          <ErrorNote message={errMsg(error)} />
+        </div>
+      )}
       {!isLoading && !isError && logs.length === 0 && (
         <p className="mt-2 text-xs text-muted-2">
           {filtered ? "No events match these filters." : "No audit events yet."}
@@ -376,7 +465,9 @@ export function AuditLogSection() {
             <tbody>
               {logs.map((l, i) => (
                 <tr key={i} className="border-t border-border">
-                  <td className="whitespace-nowrap px-3 py-2 text-muted-2">{timeAgo(l.created_at)}</td>
+                  <td className="whitespace-nowrap px-3 py-2 text-muted-2">
+                    {timeAgo(l.created_at)}
+                  </td>
                   <td className="whitespace-nowrap px-3 py-2 font-mono text-muted-2">
                     {workspaceLabel(l.workspace_id)}
                   </td>

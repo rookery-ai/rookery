@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useSearchParams } from "react-router";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, MessageSquarePlus } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
 import { ContextPaneHeader } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
@@ -46,8 +46,14 @@ export default function ChatsPage() {
           <ContextPaneHeader
             title="Chats"
             action={
-              <Button variant="outline" size="sm" onClick={handleNew} disabled={createChat.isPending}>
-                + New chat
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleNew}
+                disabled={createChat.isPending}
+              >
+                <MessageSquarePlus />
+                New chat
               </Button>
             }
           />
@@ -67,7 +73,9 @@ export default function ChatsPage() {
                   <span
                     className={cn(
                       "shrink-0 rounded-full px-1.5 py-0.5 text-xs font-medium",
-                      c.active ? "bg-ok-soft text-ok" : "bg-muted-surface text-foreground",
+                      c.active
+                        ? "bg-ok-soft text-ok"
+                        : "bg-muted-surface text-foreground",
                     )}
                   >
                     {c.active ? "Active" : "Stopped"}

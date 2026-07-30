@@ -1,5 +1,11 @@
 import { useMemo, useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Trash2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -29,7 +35,8 @@ export default function EmojiPicker({
   const [groupName, setGroupName] = useState(emojiGroups[0]?.name ?? "");
   const filtered = useMemo(() => filterEmojis(query), [query]);
 
-  const activeGroup = emojiGroups.find((g) => g.name === groupName) ?? emojiGroups[0];
+  const activeGroup =
+    emojiGroups.find((g) => g.name === groupName) ?? emojiGroups[0];
 
   function pick(emoji: string | null) {
     onSelect(emoji);
@@ -86,9 +93,15 @@ export default function EmojiPicker({
           <div className="max-h-[50vh] min-h-72 overflow-y-auto pr-1">
             {query ? (
               filtered.length === 0 ? (
-                <p className="py-6 text-center text-sm text-muted-2">No matches.</p>
+                <p className="py-6 text-center text-sm text-muted-2">
+                  No matches.
+                </p>
               ) : (
-                <EmojiGrid emojis={filtered.map((e) => e.emoji)} current={current} onPick={pick} />
+                <EmojiGrid
+                  emojis={filtered.map((e) => e.emoji)}
+                  current={current}
+                  onPick={pick}
+                />
               )
             ) : (
               <EmojiGrid
@@ -102,6 +115,7 @@ export default function EmojiPicker({
           {current && (
             <div className="flex justify-end border-t border-border pt-3">
               <Button variant="outline" size="sm" onClick={() => pick(null)}>
+                <Trash2 />
                 Remove icon
               </Button>
             </div>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ShieldCheck } from "lucide-react";
+import { AlertTriangle, FlaskConical, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -71,8 +71,8 @@ export function OwnerGate({
         <h2 className="text-lg font-bold">{title}</h2>
       </div>
       <p className="mt-1 text-sm text-muted-2">
-        These settings cover your whole install — every workspace, and your backups. Confirm
-        your owner password to continue.
+        These settings cover your whole install — every workspace, and your
+        backups. Confirm your owner password to continue.
       </p>
       {error && (
         <div className="mt-4 flex items-center gap-2 rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">
@@ -92,6 +92,7 @@ export function OwnerGate({
           />
         </div>
         <Button type="submit" disabled={busy || !password}>
+          <FlaskConical />
           {busy ? "Checking…" : "Unlock"}
         </Button>
       </form>

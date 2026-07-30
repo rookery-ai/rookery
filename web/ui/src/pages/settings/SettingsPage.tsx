@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
-import { AlertTriangle, Check } from "lucide-react";
+import { AlertTriangle, Check, KeyRound, Save } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
 import { PageContainer } from "@/components/shell/PageContainer";
 import { ContextPaneHeader } from "@/components/shell/ContextPaneParts";
@@ -25,7 +25,10 @@ import { ProviderCards } from "./ProviderCards";
 import { CoderSection } from "./CoderSection";
 import { OwnerGate } from "./OwnerGate";
 import {
-  AuditLogSection, InstanceURLSection, SystemStatusSection, WorkspacesSection,
+  AuditLogSection,
+  InstanceURLSection,
+  SystemStatusSection,
+  WorkspacesSection,
 } from "./OwnerSections";
 import { BackupSection } from "./BackupSection";
 
@@ -71,9 +74,10 @@ type SectionSlug = (typeof SECTION_GROUPS)[number]["sections"][number]["slug"];
 // Flattened for slug validation. Typed explicitly rather than inferred: a
 // flatMap over a readonly tuple-of-tuples narrows each group to its own
 // literal shape and then refuses to unify them.
-const SECTIONS: readonly { slug: SectionSlug; label: string }[] = SECTION_GROUPS.flatMap(
-  (g) => g.sections as readonly { slug: SectionSlug; label: string }[],
-);
+const SECTIONS: readonly { slug: SectionSlug; label: string }[] =
+  SECTION_GROUPS.flatMap(
+    (g) => g.sections as readonly { slug: SectionSlug; label: string }[],
+  );
 const DEFAULT_SECTION: SectionSlug = "profile";
 
 // ?section=owner used to render all five owner sub-sections stacked on one
@@ -100,7 +104,13 @@ function ErrorBanner({ message }: { message: string }) {
   );
 }
 
-function SavedChip({ show, label = "Saved" }: { show: boolean; label?: string }) {
+function SavedChip({
+  show,
+  label = "Saved",
+}: {
+  show: boolean;
+  label?: string;
+}) {
   if (!show) return null;
   return (
     <span className="inline-flex items-center gap-1 rounded-full bg-ok-soft px-2 py-0.5 text-xs font-medium text-ok">
@@ -142,7 +152,10 @@ function ProfileSection({ profile }: { profile: Profile | undefined }) {
     e.preventDefault();
     setSaved(false);
     try {
-      await save.mutateAsync({ display_name: form.display_name, timezone: form.timezone });
+      await save.mutateAsync({
+        display_name: form.display_name,
+        timezone: form.timezone,
+      });
       setSaved(true);
     } catch {
       // surfaced below via save.error
@@ -156,13 +169,20 @@ function ProfileSection({ profile }: { profile: Profile | undefined }) {
         <SavedChip show={saved} />
       </div>
       <p className="mt-1 text-sm text-muted-2">
-Your name and timezone. Your timezone is what makes “remind me next Tuesday at
-        3pm” land at the right moment.
+        Your name and timezone. Your timezone is what makes “remind me next
+        Tuesday at 3pm” land at the right moment.
       </p>
 
-      {save.isError && <div className="mt-4"><ErrorBanner message={errMessage(save.error)} /></div>}
+      {save.isError && (
+        <div className="mt-4">
+          <ErrorBanner message={errMessage(save.error)} />
+        </div>
+      )}
 
-      <form onSubmit={(e) => void handleSave(e)} className="mt-4 max-w-lg space-y-4">
+      <form
+        onSubmit={(e) => void handleSave(e)}
+        className="mt-4 max-w-lg space-y-4"
+      >
         <div className="space-y-1.5">
           <Label htmlFor="display_name">Display name</Label>
           <Input
@@ -181,16 +201,22 @@ Your name and timezone. Your timezone is what makes “remind me next Tuesday at
           />
         </div>
         <Button type="submit" disabled={save.isPending}>
+          <Save />
           {save.isPending ? "Saving…" : "Save profile"}
         </Button>
       </form>
 
       <p className="mt-4 max-w-lg text-sm text-muted-2">
         Your background, tone and language live in your knowledge base, in{" "}
-        <code className="rounded bg-chrome px-1 py-0.5 text-xs">memory/ABOUT.md</code> and{" "}
-        <code className="rounded bg-chrome px-1 py-0.5 text-xs">memory/STYLE.md</code>. Editing
-        them there is what changes how your assistant talks to you — there is no second copy
-        here to fall out of step with them.
+        <code className="rounded bg-chrome px-1 py-0.5 text-xs">
+          memory/ABOUT.md
+        </code>{" "}
+        and{" "}
+        <code className="rounded bg-chrome px-1 py-0.5 text-xs">
+          memory/STYLE.md
+        </code>
+        . Editing them there is what changes how your assistant talks to you —
+        there is no second copy here to fall out of step with them.
       </p>
     </section>
   );
@@ -198,7 +224,11 @@ Your name and timezone. Your timezone is what makes “remind me next Tuesday at
 
 // ── Workspace ────────────────────────────────────────────────────────────
 
-function WorkspaceSection({ workspace }: { workspace: WorkspaceMeta | undefined }) {
+function WorkspaceSection({
+  workspace,
+}: {
+  workspace: WorkspaceMeta | undefined;
+}) {
   const [form, setForm] = useState<WorkspaceMeta>({ name: "", about: "" });
   const [saved, setSaved] = useState(false);
   const [nameError, setNameError] = useState("");
@@ -230,11 +260,20 @@ function WorkspaceSection({ workspace }: { workspace: WorkspaceMeta | undefined 
         <h2 className="text-lg font-bold">Workspace</h2>
         <SavedChip show={saved} />
       </div>
-      <p className="mt-1 text-sm text-muted-2">The workspace name shown across the app.</p>
+      <p className="mt-1 text-sm text-muted-2">
+        The workspace name shown across the app.
+      </p>
 
-      {save.isError && <div className="mt-4"><ErrorBanner message={errMessage(save.error)} /></div>}
+      {save.isError && (
+        <div className="mt-4">
+          <ErrorBanner message={errMessage(save.error)} />
+        </div>
+      )}
 
-      <form onSubmit={(e) => void handleSave(e)} className="mt-4 max-w-lg space-y-4">
+      <form
+        onSubmit={(e) => void handleSave(e)}
+        className="mt-4 max-w-lg space-y-4"
+      >
         <div className="space-y-1.5">
           <Label htmlFor="ws_name">Name</Label>
           <Input
@@ -259,13 +298,16 @@ function WorkspaceSection({ workspace }: { workspace: WorkspaceMeta | undefined 
             <p className="text-sm text-muted-2">Not set.</p>
           )}
           <p className="text-xs text-muted-2">
-            Read-only here. This is what your agents and chat are told the workspace is for —
-            edit it in{" "}
-            <code className="rounded bg-chrome px-1 py-0.5">memory/ABOUT.md</code> in your
-            knowledge base.
+            Read-only here. This is what your agents and chat are told the
+            workspace is for — edit it in{" "}
+            <code className="rounded bg-chrome px-1 py-0.5">
+              memory/ABOUT.md
+            </code>{" "}
+            in your knowledge base.
           </p>
         </div>
         <Button type="submit" disabled={save.isPending}>
+          <Save />
           {save.isPending ? "Saving…" : "Save workspace"}
         </Button>
       </form>
@@ -287,9 +329,15 @@ function AppearanceSection() {
   return (
     <section>
       <h2 className="text-lg font-bold">Appearance</h2>
-      <p className="mt-1 text-sm text-muted-2">Applies instantly — no save needed.</p>
+      <p className="mt-1 text-sm text-muted-2">
+        Applies instantly — no save needed.
+      </p>
 
-      <div className="mt-4 grid max-w-lg grid-cols-3 gap-3" role="radiogroup" aria-label="Appearance">
+      <div
+        className="mt-4 grid max-w-lg grid-cols-3 gap-3"
+        role="radiogroup"
+        aria-label="Appearance"
+      >
         {APPEARANCE_OPTIONS.map((opt) => (
           <label
             key={opt.value}
@@ -352,18 +400,25 @@ function MasterPasswordSection() {
         <SavedChip show={saved} label="Changed" />
       </div>
       <p className="mt-1 text-sm text-muted-2">
-        Protects this workspace's secrets. You'll re-enter it whenever you switch into this
-        workspace.
+        Protects this workspace's secrets. You'll re-enter it whenever you
+        switch into this workspace.
       </p>
 
-      {mismatchError && <div className="mt-4"><ErrorBanner message={mismatchError} /></div>}
+      {mismatchError && (
+        <div className="mt-4">
+          <ErrorBanner message={mismatchError} />
+        </div>
+      )}
       {change.isError && !mismatchError && (
         <div className="mt-4">
           <ErrorBanner message={errMessage(change.error)} />
         </div>
       )}
 
-      <form onSubmit={(e) => void handleSave(e)} className="mt-4 max-w-lg space-y-4">
+      <form
+        onSubmit={(e) => void handleSave(e)}
+        className="mt-4 max-w-lg space-y-4"
+      >
         <div className="space-y-1.5">
           <Label htmlFor="current_pw">Current master password</Label>
           <Input
@@ -392,6 +447,7 @@ function MasterPasswordSection() {
           />
         </div>
         <Button type="submit" disabled={change.isPending}>
+            <KeyRound />
           {change.isPending ? "Changing…" : "Change master password"}
         </Button>
       </form>
@@ -407,8 +463,10 @@ export default function SettingsPage() {
   // A legacy ?section=owner link resolves to the first owner section rather
   // than silently falling back to Profile, which is what an unrecognised slug
   // would otherwise do.
-  const aliased = rawSection !== null ? LEGACY_SECTION_ALIASES[rawSection] : undefined;
-  const section: SectionSlug = aliased ?? (isSectionSlug(rawSection) ? rawSection : DEFAULT_SECTION);
+  const aliased =
+    rawSection !== null ? LEGACY_SECTION_ALIASES[rawSection] : undefined;
+  const section: SectionSlug =
+    aliased ?? (isSectionSlug(rawSection) ? rawSection : DEFAULT_SECTION);
 
   // Rewrite the URL for an aliased slug so the address bar, a copied link and a
   // reload all agree on where you are.
@@ -470,14 +528,18 @@ export default function SettingsPage() {
           <div className="text-sm text-muted-2">Loading…</div>
         ) : (
           <>
-            {section === "profile" && <ProfileSection profile={settings?.profile} />}
-            {section === "workspace" && <WorkspaceSection workspace={settings?.workspace} />}
+            {section === "profile" && (
+              <ProfileSection profile={settings?.profile} />
+            )}
+            {section === "workspace" && (
+              <WorkspaceSection workspace={settings?.workspace} />
+            )}
             {section === "ai-providers" && (
               <section>
                 <h2 className="text-lg font-bold">AI Providers</h2>
                 <p className="mt-1 text-sm text-muted-2">
-                  Connect the LLM providers your coder can use — add a key once, then pick a
-                  provider under Coder.
+                  Connect the LLM providers your coder can use — add a key once,
+                  then pick a provider under Coder.
                 </p>
                 <div className="mt-4">
                   <ProviderCards

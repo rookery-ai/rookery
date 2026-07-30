@@ -7,7 +7,7 @@ import { cardClass } from "@/components/ui/card";
 import {
   AgentsAtAGlanceCard, QuickActions, RecentActivityCard, RecentNotesCard,
 } from "./cards";
-import { Bell, Bot, Trash2, Clock, AlertTriangle, Plus, Loader2, Check, CheckCheck } from "lucide-react";
+import { AlertTriangle, Bell, Bot, Check, CheckCheck, Clock, Loader2, Plus, Trash2 } from "lucide-react";
 import { ContextPane } from "@/components/shell/AppShell";
 import { ContextPaneHeader, ContextSection } from "@/components/shell/ContextPaneParts";
 import { useToast } from "@/components/shell/Toast";
@@ -463,6 +463,7 @@ function RemindersSection({ view }: { view: RemindersView }) {
         )}
         {ordered.length > PANE_REMINDER_LIMIT && (
           <Button variant="ghost" size="xs" className="w-full" onClick={() => setAllOpen(true)}>
+            <Bell />
             View all reminders ({ordered.length})
           </Button>
         )}

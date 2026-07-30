@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ExternalLink, Plus } from "lucide-react";
+import { Check, ExternalLink, Plus, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ProviderLogo } from "@/components/brand/ProviderLogo";
@@ -19,7 +19,13 @@ export function coderKeySecretName(provider: string) {
   return "CODER_KEY_" + provider.toUpperCase();
 }
 
-function ProviderCard({ entry, label }: { entry: CoderCatalogEntry; label: string }) {
+function ProviderCard({
+  entry,
+  label,
+}: {
+  entry: CoderCatalogEntry;
+  label: string;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [value, setValue] = useState("");
   const [error, setError] = useState("");
@@ -93,9 +99,14 @@ function ProviderCard({ entry, label }: { entry: CoderCatalogEntry; label: strin
       </button>
 
       {expanded && canAddKey && (
-        <form onSubmit={(e) => void handleSave(e)} className="mt-3 space-y-2 border-t border-border pt-3">
+        <form
+          onSubmit={(e) => void handleSave(e)}
+          className="mt-3 space-y-2 border-t border-border pt-3"
+        >
           {entry.hasKey && (
-            <p className="text-xs text-muted-2">Already set — paste a new key to override.</p>
+            <p className="text-xs text-muted-2">
+              Already set — paste a new key to override.
+            </p>
           )}
           {entry.custom && (
             <p className="text-xs text-muted-2">
@@ -113,9 +124,15 @@ function ProviderCard({ entry, label }: { entry: CoderCatalogEntry; label: strin
           {error && <p className="text-xs text-danger">{error}</p>}
           <div className="flex items-center gap-2">
             <Button type="submit" size="sm" disabled={busy || !value.trim()}>
+              <Save />
               {busy ? "Saving…" : "Save key"}
             </Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => setExpanded(false)}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setExpanded(false)}
+            >
               Cancel
             </Button>
           </div>
@@ -136,12 +153,17 @@ export function ProviderCards({
     return <p className="text-sm text-muted-2">No providers available.</p>;
   }
 
-  const labelFor = (name: string) => providers.find((p) => p.name === name)?.label ?? name;
+  const labelFor = (name: string) =>
+    providers.find((p) => p.name === name)?.label ?? name;
 
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {catalog.map((entry) => (
-        <ProviderCard key={entry.name} entry={entry} label={labelFor(entry.name)} />
+        <ProviderCard
+          key={entry.name}
+          entry={entry}
+          label={labelFor(entry.name)}
+        />
       ))}
     </div>
   );

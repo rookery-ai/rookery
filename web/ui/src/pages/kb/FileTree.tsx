@@ -1,22 +1,41 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Folder, FolderOpen, FileText, Brain, Bot, MessageSquare, Sparkles,
-  ChevronRight, MoreHorizontal, FolderInput, Trash2, X, FilePlus, FolderPlus,
-  Pencil, Smile, type LucideIcon,
-} from "lucide-react";
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { Bot, Brain, ChevronRight, FilePlus, FileText, Folder, FolderInput, FolderOpen, FolderPlus, MessageSquare, MoreHorizontal, Pencil, Plus, Smile, Sparkles, Trash2, X, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import {
-  useKBTree, useNewNote, useDeleteNote, useRenameNote, useSaveKBOrder,
-  useSetKBIcon, isProtectedPath, type KBNode,
+  useKBTree,
+  useNewNote,
+  useDeleteNote,
+  useRenameNote,
+  useSaveKBOrder,
+  useSetKBIcon,
+  isProtectedPath,
+  type KBNode,
 } from "@/lib/kb";
 import { useToast } from "@/components/shell/Toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import EmojiPicker from "./EmojiPicker";
 import { FolderSelect } from "./FolderSelect";
@@ -34,7 +53,6 @@ import { FolderSelect } from "./FolderSelect";
 function isEffectivelySystem(node: KBNode): boolean {
   return node.system && node.name !== "memory";
 }
-
 
 // The vault's own default folders lead, in a fixed order that runs from "who
 // you are" outwards to "what the system produced": memory, agents, chats,
@@ -71,20 +89,27 @@ function rootFolderRank(node: KBNode): number {
 // `isRoot` selects the fixed default-folder ordering above. It applies only to
 // the vault root, because those names are only meaningful there — a folder
 // someone happens to call "chats" inside notes/ is just a folder.
-export function sortNodes(nodes: KBNode[], order: string[] = [], isRoot = false): KBNode[] {
+export function sortNodes(
+  nodes: KBNode[],
+  order: string[] = [],
+  isRoot = false,
+): KBNode[] {
   const rank = new Map(order.map((name, i) => [name, i]));
   return [...nodes].sort((a, b) => {
-    const ra = rank.get(a.name), rb = rank.get(b.name);
+    const ra = rank.get(a.name),
+      rb = rank.get(b.name);
     if (ra !== undefined && rb !== undefined) return ra - rb;
     if (ra !== undefined) return -1;
     if (rb !== undefined) return 1;
 
     // Directories always precede files, at every level.
-    const dirA = a.is_dir ? 0 : 1, dirB = b.is_dir ? 0 : 1;
+    const dirA = a.is_dir ? 0 : 1,
+      dirB = b.is_dir ? 0 : 1;
     if (dirA !== dirB) return dirA - dirB;
 
     if (isRoot && a.is_dir && b.is_dir) {
-      const fa = rootFolderRank(a), fb = rootFolderRank(b);
+      const fa = rootFolderRank(a),
+        fb = rootFolderRank(b);
       if (fa !== fb) return fa - fb;
     }
     return a.name.localeCompare(b.name);
@@ -191,7 +216,13 @@ export function NodeIcon({
 }) {
   if (node.icon) {
     return (
-      <span className={cn("inline-flex items-center justify-center leading-none", className)} aria-hidden>
+      <span
+        className={cn(
+          "inline-flex items-center justify-center leading-none",
+          className,
+        )}
+        aria-hidden
+      >
         {node.icon}
       </span>
     );
@@ -272,21 +303,35 @@ export function NewEntryDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>{kind === "note" ? "New note" : "New folder"}</DialogTitle>
+          <DialogTitle>
+            {kind === "note" ? "New note" : "New folder"}
+          </DialogTitle>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="new-entry-name">Name</Label>
-            <Input id="new-entry-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+            <Input
+              id="new-entry-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+            />
           </div>
           {pickLocation && (
             <div className="space-y-1.5">
               <Label htmlFor="new-entry-location">Location</Label>
-              <FolderSelect id="new-entry-location" value={location} onChange={setLocation} />
+              <FolderSelect
+                id="new-entry-location"
+                value={location}
+                onChange={setLocation}
+              />
             </div>
           )}
           {error && <p className="text-danger text-sm">{error}</p>}
-          <Button type="submit" className="w-full">Create</Button>
+          <Button type="submit" className="w-full">
+            <Plus />
+            Create
+          </Button>
         </form>
       </DialogContent>
     </Dialog>
@@ -334,10 +379,18 @@ function RenameDialog({
         <form onSubmit={submit} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="rename-path">Path</Label>
-            <Input id="rename-path" value={value} onChange={(e) => setValue(e.target.value)} autoFocus />
+            <Input
+              id="rename-path"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              autoFocus
+            />
           </div>
           {error && <p className="text-danger text-sm">{error}</p>}
-          <Button type="submit" className="w-full">Rename</Button>
+          <Button type="submit" className="w-full">
+            <Pencil />
+            Rename
+          </Button>
         </form>
       </DialogContent>
     </Dialog>
@@ -378,15 +431,21 @@ function DeleteDialog({
         <p className="text-sm text-muted-2">This can’t be undone.</p>
         {error && <p className="text-danger text-sm">{error}</p>}
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button variant="destructive" onClick={confirm}>Delete</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={confirm}>
+            <Trash2 />
+            Delete
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-type DialogKind = "new-note" | "new-folder" | "rename" | "delete" | "icon" | null;
+type DialogKind =
+  "new-note" | "new-folder" | "rename" | "delete" | "icon" | null;
 
 function TreeRow({
   node,
@@ -405,7 +464,11 @@ function TreeRow({
   onMoveInto: (dragged: DraggedNode, folder: KBNode) => void;
   // Reorder within the level this row belongs to. Owned by TreeLevel, which
   // is the only component that knows the full sibling list.
-  onReorder: (dragged: DraggedNode, targetName: string, position: "before" | "after") => void;
+  onReorder: (
+    dragged: DraggedNode,
+    targetName: string,
+    position: "before" | "after",
+  ) => void;
   // Fired when OS file(s) are dropped ON THIS ROW specifically — see the
   // dedicated OS-file-drag branch in handleDragOver/handleDrop below. Omitted
   // when the tree as a whole is drop-inert (FileTree's onImportFiles absent).
@@ -442,7 +505,8 @@ function TreeRow({
     // System dirs are excluded from the persisted order (see handleReorder),
     // so a reorder aimed at one could never be saved — don't offer the
     // affordance and then silently do nothing.
-    const sameParent = dragged.parent === parentOf(node.path) && !isEffectivelySystem(node);
+    const sameParent =
+      dragged.parent === parentOf(node.path) && !isEffectivelySystem(node);
     const canMoveInto =
       node.is_dir &&
       !isEffectivelySystem(node) &&
@@ -579,7 +643,7 @@ function TreeRow({
             )}
           />
         )}
-      {/* The dropdown trigger is a SIBLING of the role=button row, not nested
+        {/* The dropdown trigger is a SIBLING of the role=button row, not nested
           inside it (a11y fix — a <button> descendant of a role="button"
           element is an invalid/ambiguous nested-interactive structure, and
           it also meant the trigger's click had to stopPropagation to avoid
@@ -588,73 +652,87 @@ function TreeRow({
           the trigger) keeps working — CSS :hover on a descendant still
           matches its ancestors, so hovering the row still reveals the
           trigger. */}
-      <div className="group flex items-center gap-1.5 pr-1">
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={handleClick}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              handleClick();
-            }
-          }}
-          style={{ paddingLeft: 6 + depth * 14 }}
-          className={cn(
-            "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-sm",
-            dragged ? "cursor-grabbing" : "cursor-pointer",
-            multiSelected ? "bg-accent/20" : selected ? "bg-border" : "hover:bg-chrome",
-            isEffectivelySystem(node) && "text-muted-2",
-          )}
-        >
-          {node.is_dir ? (
-            <ChevronRight
-              className={cn("size-4 shrink-0 text-muted-2 transition-transform", expanded && "rotate-90")}
-            />
-          ) : (
-            <span className="size-4 shrink-0" />
-          )}
-          <NodeIcon node={node} expanded={expanded} className="size-4 shrink-0 text-base" />
-          <span className="flex-1 truncate">{node.display_name}</span>
-        </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              aria-label={`Actions for ${node.display_name}`}
-              className="flex size-7 shrink-0 items-center justify-center rounded-md opacity-0 transition-opacity group-hover:opacity-100 hover:bg-border focus-visible:opacity-100"
-            >
-              <MoreHorizontal className="size-4" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            {node.is_dir && (
-              <>
-                <DropdownMenuItem onSelect={() => setDialog("new-note")}>
-                  <FilePlus /> New note…
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setDialog("new-folder")}>
-                  <FolderPlus /> New folder…
-                </DropdownMenuItem>
-              </>
+        <div className="group flex items-center gap-1.5 pr-1">
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={handleClick}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handleClick();
+              }
+            }}
+            style={{ paddingLeft: 6 + depth * 14 }}
+            className={cn(
+              "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 text-sm",
+              dragged ? "cursor-grabbing" : "cursor-pointer",
+              multiSelected
+                ? "bg-accent/20"
+                : selected
+                  ? "bg-border"
+                  : "hover:bg-chrome",
+              isEffectivelySystem(node) && "text-muted-2",
             )}
-            <DropdownMenuItem onSelect={() => setDialog("icon")}>
-              <Smile /> Change icon…
-            </DropdownMenuItem>
-            {/* Rename/Delete are withheld for system-managed, DB-backed nodes
+          >
+            {node.is_dir ? (
+              <ChevronRight
+                className={cn(
+                  "size-4 shrink-0 text-muted-2 transition-transform",
+                  expanded && "rotate-90",
+                )}
+              />
+            ) : (
+              <span className="size-4 shrink-0" />
+            )}
+            <NodeIcon
+              node={node}
+              expanded={expanded}
+              className="size-4 shrink-0 text-base"
+            />
+            <span className="flex-1 truncate">{node.display_name}</span>
+          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                aria-label={`Actions for ${node.display_name}`}
+                className="flex size-7 shrink-0 items-center justify-center rounded-md opacity-0 transition-opacity group-hover:opacity-100 hover:bg-border focus-visible:opacity-100"
+              >
+                <MoreHorizontal className="size-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {node.is_dir && (
+                <>
+                  <DropdownMenuItem onSelect={() => setDialog("new-note")}>
+                    <FilePlus /> New note…
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setDialog("new-folder")}>
+                    <FolderPlus /> New folder…
+                  </DropdownMenuItem>
+                </>
+              )}
+              <DropdownMenuItem onSelect={() => setDialog("icon")}>
+                <Smile /> Change icon…
+              </DropdownMenuItem>
+              {/* Rename/Delete are withheld for system-managed, DB-backed nodes
                 (agents/chats/inbox/skills/reminders): removing them here would
                 orphan the backing record — delete from the item's own page. */}
-            {!isProtectedPath(node.path) && (
-              <>
-                <DropdownMenuItem onSelect={() => setDialog("rename")}>
-                  <Pencil /> Rename…
-                </DropdownMenuItem>
-                <DropdownMenuItem variant="destructive" onSelect={() => setDialog("delete")}>
-                  <Trash2 /> Delete…
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+              {!isProtectedPath(node.path) && (
+                <>
+                  <DropdownMenuItem onSelect={() => setDialog("rename")}>
+                    <Pencil /> Rename…
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onSelect={() => setDialog("delete")}
+                  >
+                    <Trash2 /> Delete…
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
       {node.is_dir && expanded && (
@@ -673,24 +751,38 @@ function TreeRow({
               clicking it in the tree would — same onSelect, so the two paths
               can't drift. */}
           <NewEntryDialog
-            dirPath={node.path} kind="note"
-            open={dialog === "new-note"} onOpenChange={(o) => setDialog(o ? "new-note" : null)}
+            dirPath={node.path}
+            kind="note"
+            open={dialog === "new-note"}
+            onOpenChange={(o) => setDialog(o ? "new-note" : null)}
             onCreated={(p, isDir) => onSelect(p, isDir)}
           />
           <NewEntryDialog
-            dirPath={node.path} kind="folder"
-            open={dialog === "new-folder"} onOpenChange={(o) => setDialog(o ? "new-folder" : null)}
+            dirPath={node.path}
+            kind="folder"
+            open={dialog === "new-folder"}
+            onOpenChange={(o) => setDialog(o ? "new-folder" : null)}
             onCreated={(p, isDir) => onSelect(p, isDir)}
           />
         </>
       )}
-      <RenameDialog node={node} open={dialog === "rename"} onOpenChange={(o) => setDialog(o ? "rename" : null)} />
-      <DeleteDialog node={node} open={dialog === "delete"} onOpenChange={(o) => setDialog(o ? "delete" : null)} />
+      <RenameDialog
+        node={node}
+        open={dialog === "rename"}
+        onOpenChange={(o) => setDialog(o ? "rename" : null)}
+      />
+      <DeleteDialog
+        node={node}
+        open={dialog === "delete"}
+        onOpenChange={(o) => setDialog(o ? "delete" : null)}
+      />
       <EmojiPicker
         open={dialog === "icon"}
         onOpenChange={(o) => setDialog(o ? "icon" : null)}
         current={node.icon}
-        onSelect={(emoji) => setIcon.mutate({ path: node.path, icon: emoji ?? "" })}
+        onSelect={(emoji) =>
+          setIcon.mutate({ path: node.path, icon: emoji ?? "" })
+        }
       />
     </div>
   );
@@ -726,7 +818,11 @@ function TreeLevel({
     [data?.nodes, data?.order, path],
   );
 
-  function handleReorder(dragged: DraggedNode, targetName: string, position: "before" | "after") {
+  function handleReorder(
+    dragged: DraggedNode,
+    targetName: string,
+    position: "before" | "after",
+  ) {
     // The persisted order is the full sequence of the USER's own rows, not a
     // sparse set of pins — so a later derived-sort change or a rename can't
     // silently shuffle rows they've already arranged.
@@ -750,7 +846,10 @@ function TreeLevel({
       {
         onError: (err) =>
           toast({
-            message: err instanceof ApiError ? err.message : "Couldn't save the new order",
+            message:
+              err instanceof ApiError
+                ? err.message
+                : "Couldn't save the new order",
             variant: "error",
           }),
       },
@@ -759,7 +858,10 @@ function TreeLevel({
 
   if (isLoading) {
     return (
-      <div style={{ paddingLeft: 6 + depth * 14 }} className="py-2 text-xs text-muted-2">
+      <div
+        style={{ paddingLeft: 6 + depth * 14 }}
+        className="py-2 text-xs text-muted-2"
+      >
         Loading…
       </div>
     );
@@ -884,7 +986,10 @@ export default function FileTree({
         onSuccess: () => onMoved?.(from, to),
         onError: (err) =>
           toast({
-            message: err instanceof ApiError ? err.message : `Couldn't move “${baseName(from)}”`,
+            message:
+              err instanceof ApiError
+                ? err.message
+                : `Couldn't move “${baseName(from)}”`,
             variant: "error",
           }),
       },
@@ -892,7 +997,8 @@ export default function FileTree({
   }
 
   function handleMoveInto(d: DraggedNode, folder: KBNode) {
-    const paths = d.selection && d.selection.length > 1 ? d.selection : [d.path];
+    const paths =
+      d.selection && d.selection.length > 1 ? d.selection : [d.path];
     for (const p of paths) {
       // A folder can't be moved into itself or its own subtree.
       if (folder.path === p || folder.path.startsWith(p + "/")) continue;
@@ -903,59 +1009,65 @@ export default function FileTree({
 
   return (
     <DragCtx.Provider value={dragCtx}>
-     <SelectionCtx.Provider value={selectionCtx}>
-      <div
-        ref={containerRef}
-        className={cn(
-          "h-full px-1 py-1",
-          fileDragging && "rounded ring-2 ring-inset ring-ring",
-        )}
-        // This wrapper's own onDrop only ever fires for a drop in the BLANK
-        // GAP below the last row: a drop landing ON a row is now captured by
-        // that row's own handleDrop (see TreeRow), which stopPropagation's it
-        // so it never reaches here — that's what lets a folder row target
-        // itself instead of every drop defaulting to notes/. dragover is
-        // unaffected (rows deliberately let it keep bubbling here — see
-        // TreeRow's handleDragOver comment) so the ring highlight and the
-        // preventDefault that allows a drop at all still apply tree-wide,
-        // gated on `onImportFiles` being provided AND the drag actually
-        // carrying files (`types.includes("Files")`), so the tree's OWN
-        // internal reorder/move drag — which carries no "Files" type — never
-        // trips this.
-        onDragOver={(e) => {
-          if (!onImportFiles || !e.dataTransfer.types.includes("Files")) return;
-          e.preventDefault();
-          e.dataTransfer.dropEffect = "copy";
-          setFileDragging(true);
-        }}
-        onDragLeave={(e) => {
-          // A dragleave fires when moving from this wrapper onto one of its
-          // own row children too — only clear the highlight once the pointer
-          // has actually left the whole tree, or the ring would flicker on
-          // every row boundary crossed while dragging.
-          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-          setFileDragging(false);
-        }}
-        onDrop={(e) => {
-          if (!onImportFiles) return;
-          const files = Array.from(e.dataTransfer.files ?? []);
-          if (files.length === 0) return; // not a file drop — leave it to the row that's actually handling it
-          e.preventDefault();
-          setFileDragging(false);
-          onImportFiles(files); // blank-gap drop: no folder was under the cursor, keep today's default (notes/)
-        }}
-      >
-        <TreeLevel
-          path=""
-          depth={0}
-          selectedPath={selectedPath}
-          onSelect={onSelect}
-          onMoveInto={handleMoveInto}
-          onImportFiles={onImportFiles}
+      <SelectionCtx.Provider value={selectionCtx}>
+        <div
+          ref={containerRef}
+          className={cn(
+            "h-full px-1 py-1",
+            fileDragging && "rounded ring-2 ring-inset ring-ring",
+          )}
+          // This wrapper's own onDrop only ever fires for a drop in the BLANK
+          // GAP below the last row: a drop landing ON a row is now captured by
+          // that row's own handleDrop (see TreeRow), which stopPropagation's it
+          // so it never reaches here — that's what lets a folder row target
+          // itself instead of every drop defaulting to notes/. dragover is
+          // unaffected (rows deliberately let it keep bubbling here — see
+          // TreeRow's handleDragOver comment) so the ring highlight and the
+          // preventDefault that allows a drop at all still apply tree-wide,
+          // gated on `onImportFiles` being provided AND the drag actually
+          // carrying files (`types.includes("Files")`), so the tree's OWN
+          // internal reorder/move drag — which carries no "Files" type — never
+          // trips this.
+          onDragOver={(e) => {
+            if (!onImportFiles || !e.dataTransfer.types.includes("Files"))
+              return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+            setFileDragging(true);
+          }}
+          onDragLeave={(e) => {
+            // A dragleave fires when moving from this wrapper onto one of its
+            // own row children too — only clear the highlight once the pointer
+            // has actually left the whole tree, or the ring would flicker on
+            // every row boundary crossed while dragging.
+            if (e.currentTarget.contains(e.relatedTarget as Node | null))
+              return;
+            setFileDragging(false);
+          }}
+          onDrop={(e) => {
+            if (!onImportFiles) return;
+            const files = Array.from(e.dataTransfer.files ?? []);
+            if (files.length === 0) return; // not a file drop — leave it to the row that's actually handling it
+            e.preventDefault();
+            setFileDragging(false);
+            onImportFiles(files); // blank-gap drop: no folder was under the cursor, keep today's default (notes/)
+          }}
+        >
+          <TreeLevel
+            path=""
+            depth={0}
+            selectedPath={selectedPath}
+            onSelect={onSelect}
+            onMoveInto={handleMoveInto}
+            onImportFiles={onImportFiles}
+          />
+        </div>
+        <SelectionActionBar
+          selected={selected}
+          onClear={clearSelection}
+          onMoved={onMoved}
         />
-      </div>
-      <SelectionActionBar selected={selected} onClear={clearSelection} onMoved={onMoved} />
-     </SelectionCtx.Provider>
+      </SelectionCtx.Provider>
     </DragCtx.Provider>
   );
 }
@@ -998,7 +1110,10 @@ function SelectionActionBar({
         onMoved?.(from, to);
       } catch (err) {
         toast({
-          message: err instanceof ApiError ? `Couldn't move “${baseName(from)}”: ${err.message}` : `Couldn't move “${baseName(from)}”`,
+          message:
+            err instanceof ApiError
+              ? `Couldn't move “${baseName(from)}”: ${err.message}`
+              : `Couldn't move “${baseName(from)}”`,
           variant: "error",
         });
       }
@@ -1015,7 +1130,10 @@ function SelectionActionBar({
         await deleteNote.mutateAsync({ path: p });
       } catch (err) {
         toast({
-          message: err instanceof ApiError ? `Couldn't delete “${baseName(p)}”: ${err.message}` : `Couldn't delete “${baseName(p)}”`,
+          message:
+            err instanceof ApiError
+              ? `Couldn't delete “${baseName(p)}”: ${err.message}`
+              : `Couldn't delete “${baseName(p)}”`,
           variant: "error",
         });
       }
@@ -1030,13 +1148,30 @@ function SelectionActionBar({
       <div className="fixed bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-lg border border-border bg-chrome px-3 py-2 shadow-lg">
         <span className="text-sm text-muted-2">{count} selected</span>
         <div className="mx-1 h-4 w-px bg-border" />
-        <Button variant="ghost" size="sm" onClick={() => { setTarget(""); setMoveOpen(true); }}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setTarget("");
+            setMoveOpen(true);
+          }}
+        >
           <FolderInput className="mr-1 size-4" /> Move…
         </Button>
-        <Button variant="ghost" size="sm" className="text-danger" onClick={() => setDeleteOpen(true)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-danger"
+          onClick={() => setDeleteOpen(true)}
+        >
           <Trash2 className="mr-1 size-4" /> Delete
         </Button>
-        <Button variant="ghost" size="icon-sm" aria-label="Clear selection" onClick={onClear}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Clear selection"
+          onClick={onClear}
+        >
           <X className="size-4" />
         </Button>
       </div>
@@ -1048,11 +1183,25 @@ function SelectionActionBar({
           </DialogHeader>
           <div className="space-y-1.5">
             <Label htmlFor="bulk-move-target">Destination folder</Label>
-            <FolderSelect id="bulk-move-target" value={target} onChange={setTarget} disabledPaths={paths} />
+            <FolderSelect
+              id="bulk-move-target"
+              value={target}
+              onChange={setTarget}
+              disabledPaths={paths}
+            />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setMoveOpen(false)} disabled={busy}>Cancel</Button>
-            <Button onClick={doMove} disabled={busy}>Move</Button>
+            <Button
+              variant="outline"
+              onClick={() => setMoveOpen(false)}
+              disabled={busy}
+            >
+              Cancel
+            </Button>
+            <Button onClick={doMove} disabled={busy}>
+            <FolderInput />
+              Move
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1064,8 +1213,17 @@ function SelectionActionBar({
           </DialogHeader>
           <p className="text-sm text-muted-2">This can’t be undone.</p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={busy}>Cancel</Button>
-            <Button variant="destructive" onClick={doDelete} disabled={busy}>Delete</Button>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteOpen(false)}
+              disabled={busy}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={doDelete} disabled={busy}>
+              <Trash2 />
+              Delete
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

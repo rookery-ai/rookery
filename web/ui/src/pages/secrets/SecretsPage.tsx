@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, KeyRound, Pencil, Search, Trash2 } from "lucide-react";
+import { AlertTriangle, Check, KeyRound, Pencil, Plus, Save, Search, Trash2 } from "lucide-react";
 import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,7 +13,11 @@ import {
 } from "@/components/ui/dialog";
 import { ApiError } from "@/lib/api";
 import {
-  useSecrets, useAddSecret, useUpdateSecret, useDeleteSecret, type Secret,
+  useSecrets,
+  useAddSecret,
+  useUpdateSecret,
+  useDeleteSecret,
+  type Secret,
 } from "@/lib/secrets";
 
 function errMessage(err: unknown): string {
@@ -74,7 +78,10 @@ function AddSecretCard({ existing }: { existing: string[] }) {
         </div>
       )}
 
-      <form onSubmit={(e) => void handleSubmit(e)} className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end">
+      <form
+        onSubmit={(e) => void handleSubmit(e)}
+        className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end"
+      >
         <div className="flex-1 space-y-1.5">
           <Label htmlFor="secret-name">Name</Label>
           <Input
@@ -89,7 +96,8 @@ function AddSecretCard({ existing }: { existing: string[] }) {
             </p>
           ) : (
             <p className="text-xs text-muted-2">
-              UPPER_SNAKE_CASE recommended — agents see these as environment variables.
+              UPPER_SNAKE_CASE recommended — agents see these as environment
+              variables.
             </p>
           )}
         </div>
@@ -106,7 +114,11 @@ function AddSecretCard({ existing }: { existing: string[] }) {
             Write-only: values are never displayed after saving.
           </p>
         </div>
-        <Button type="submit" disabled={!name.trim() || !value || collides || add.isPending}>
+        <Button
+          type="submit"
+          disabled={!name.trim() || !value || collides || add.isPending}
+        >
+            <Plus />
           {add.isPending ? "Adding…" : "Add"}
         </Button>
       </form>
@@ -183,7 +195,8 @@ function UpdateSecretDialog({
               autoFocus
             />
             <p className="text-xs text-muted-2">
-              The current value can&rsquo;t be shown — entering a new one replaces it.
+              The current value can&rsquo;t be shown — entering a new one
+              replaces it.
             </p>
           </div>
           {error && <ErrorBanner message={error} />}
@@ -197,6 +210,7 @@ function UpdateSecretDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={!value || update.isPending}>
+            <Save />
               {update.isPending ? "Saving…" : "Update"}
             </Button>
           </DialogFooter>
@@ -244,7 +258,8 @@ function DeleteSecretDialog({
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>
-            Deleting &ldquo;{secret?.name}&rdquo; — enter your master password to confirm
+            Deleting &ldquo;{secret?.name}&rdquo; — enter your master password
+            to confirm
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-1.5">
@@ -259,7 +274,11 @@ function DeleteSecretDialog({
         </div>
         {error && <ErrorBanner message={error} />}
         <DialogFooter>
-          <Button variant="outline" onClick={() => handleOpenChange(false)} disabled={del.isPending}>
+          <Button
+            variant="outline"
+            onClick={() => handleOpenChange(false)}
+            disabled={del.isPending}
+          >
             Cancel
           </Button>
           <Button
@@ -267,6 +286,7 @@ function DeleteSecretDialog({
             onClick={() => void handleDelete()}
             disabled={!password || del.isPending}
           >
+            <Trash2 />
             {del.isPending ? "Deleting…" : "Delete"}
           </Button>
         </DialogFooter>
@@ -339,13 +359,20 @@ export default function SecretsPage() {
       ) : (
         <ul className="divide-y divide-border rounded-xl border border-border bg-background">
           {filtered.map((s) => (
-            <li key={s.name} className="flex items-center justify-between gap-3 px-4 py-3">
+            <li
+              key={s.name}
+              className="flex items-center justify-between gap-3 px-4 py-3"
+            >
               <div className="flex items-center gap-2 min-w-0">
                 <KeyRound className="size-4 shrink-0 text-muted-2" />
                 <span className="truncate font-mono text-sm">{s.name}</span>
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <Button variant="ghost" size="sm" onClick={() => setPendingUpdate(s)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setPendingUpdate(s)}
+                >
                   <Pencil className="size-4" /> Update
                 </Button>
                 <Button
@@ -362,8 +389,14 @@ export default function SecretsPage() {
         </ul>
       )}
 
-      <UpdateSecretDialog secret={pendingUpdate} onClose={() => setPendingUpdate(null)} />
-      <DeleteSecretDialog secret={pendingDelete} onClose={() => setPendingDelete(null)} />
+      <UpdateSecretDialog
+        secret={pendingUpdate}
+        onClose={() => setPendingUpdate(null)}
+      />
+      <DeleteSecretDialog
+        secret={pendingDelete}
+        onClose={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

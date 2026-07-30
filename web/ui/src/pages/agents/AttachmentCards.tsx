@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
@@ -28,7 +28,12 @@ type SkillsCardProps = {
 // the agent's currently-declared attached_skills; Save PUTs the full checked
 // set (skill_names) — matches how the designer's own `# Skills:` header is
 // the DB-backed source of truth (see agent_skills table).
-export function SkillsCard({ agentId, attachedSkills, coreSkills, allSkills }: SkillsCardProps) {
+export function SkillsCard({
+  agentId,
+  attachedSkills,
+  coreSkills,
+  allSkills,
+}: SkillsCardProps) {
   const { saveSkills } = useAgentActions();
   const [checked, setChecked] = useState<Set<string>>(new Set(attachedSkills));
   const [saving, setSaving] = useState(false);
@@ -60,7 +65,8 @@ export function SkillsCard({ agentId, attachedSkills, coreSkills, allSkills }: S
   }
 
   const dirty =
-    checked.size !== attachedSkills.length || attachedSkills.some((n) => !checked.has(n));
+    checked.size !== attachedSkills.length ||
+    attachedSkills.some((n) => !checked.has(n));
   const empty = coreSkills.length === 0 && allSkills.length === 0;
 
   return (
@@ -73,6 +79,7 @@ export function SkillsCard({ agentId, attachedSkills, coreSkills, allSkills }: S
           onClick={() => void handleSave()}
           disabled={!dirty || saving}
         >
+          <Save />
           Save
         </Button>
       </div>
@@ -90,9 +97,14 @@ export function SkillsCard({ agentId, attachedSkills, coreSkills, allSkills }: S
         <div className="flex flex-col gap-3">
           {coreSkills.length > 0 && (
             <div className="flex flex-col gap-1.5">
-              <p className="text-xs font-medium uppercase tracking-wide text-muted-2">Core</p>
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-2">
+                Core
+              </p>
               {coreSkills.map((sk) => (
-                <label key={sk.name} className="flex items-center gap-2 text-sm">
+                <label
+                  key={sk.name}
+                  className="flex items-center gap-2 text-sm"
+                >
                   <input
                     type="checkbox"
                     checked={checked.has(sk.name)}
@@ -143,7 +155,9 @@ export function ConnectionsCard({
   connections,
 }: ConnectionsCardProps) {
   const { saveConnections } = useAgentActions();
-  const [checked, setChecked] = useState<Set<string>>(new Set(attachedConnectionIds));
+  const [checked, setChecked] = useState<Set<string>>(
+    new Set(attachedConnectionIds),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -187,6 +201,7 @@ export function ConnectionsCard({
             onClick={() => void handleSave()}
             disabled={!dirty || saving}
           >
+            <Save />
             Save
           </Button>
         )}

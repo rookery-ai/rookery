@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ActivityCard, type ActivityStatus } from "@/components/chat/ActivityCard";
+import {
+  ActivityCard,
+  type ActivityStatus,
+} from "@/components/chat/ActivityCard";
 import { openSSE, type SSEHandle } from "@/lib/sse";
 import { ApiError } from "@/lib/api";
 import { useAgentActions } from "@/lib/agents";
@@ -25,7 +28,10 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
   const { run } = useAgentActions();
   const qc = useQueryClient();
   const [isRunning, setIsRunning] = useState(false);
-  const [sse, setSse] = useState<{ lines: string[]; status: ActivityStatus } | null>(null);
+  const [sse, setSse] = useState<{
+    lines: string[];
+    status: ActivityStatus;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Distinct from `error`: an "already running" response is informational
   // (this tab attaches to the live run), not a failure — it must not render
@@ -55,7 +61,8 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
     startedAtRef.current = Date.now();
     setSse({ lines: [], status: "live" });
     const handle = openSSE(`/api/v1/agents/${agentId}/run/progress`, {
-      onMessage: (line) => setSse((s) => (s ? { ...s, lines: [...s.lines, line] } : s)),
+      onMessage: (line) =>
+        setSse((s) => (s ? { ...s, lines: [...s.lines, line] } : s)),
       onDone: () => {
         setSse((s) => (s ? { ...s, status: "done" } : s));
         sseHandleRef.current = null;
@@ -132,7 +139,8 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold">Run</h2>
         <Button size="sm" onClick={() => void handleRun()} disabled={busy}>
-          ▶ Run now
+          <Play />
+          Run now
         </Button>
       </div>
 
@@ -144,7 +152,9 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
       )}
 
       {note && (
-        <div className="rounded-md bg-muted-surface px-3 py-2 text-xs text-foreground">{note}</div>
+        <div className="rounded-md bg-muted-surface px-3 py-2 text-xs text-foreground">
+          {note}
+        </div>
       )}
 
       {sse && (

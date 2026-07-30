@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Link2, RefreshCw, Save, Unlink } from "lucide-react";
 import { useSlideOver } from "@/components/shell/AppShell";
 import { PanelBody } from "@/components/shell/PanelBody";
 import { Button } from "@/components/ui/button";
@@ -32,7 +32,13 @@ const REDIRECT_TOKEN = "{{redirect_uri}}";
 // paste into another site, not a destination to visit — and following it would
 // hit our own callback route with no state parameter, which only ever renders
 // "Invalid or expired authorization request".
-function SetupStep({ text, redirectURI }: { text: string; redirectURI: string }) {
+function SetupStep({
+  text,
+  redirectURI,
+}: {
+  text: string;
+  redirectURI: string;
+}) {
   if (!redirectURI || !text.includes(REDIRECT_TOKEN)) {
     return <Linkify text={text} />;
   }
@@ -100,7 +106,9 @@ function AccountRow({
         <div className="min-w-0">
           <div className="truncate font-medium">{connection.label}</div>
           {connection.identity && (
-            <div className="truncate text-xs text-muted-2">{connection.identity}</div>
+            <div className="truncate text-xs text-muted-2">
+              {connection.identity}
+            </div>
           )}
         </div>
         {active ? (
@@ -117,17 +125,30 @@ function AccountRow({
       <div className="flex flex-wrap items-center gap-2">
         {!active && (
           <Button size="sm" variant="outline" onClick={onReconnect}>
+            <RefreshCw />
             Reconnect
           </Button>
         )}
         {!confirming ? (
-          <Button size="sm" variant="outline" className="text-danger" onClick={() => setConfirming(true)}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-danger"
+            onClick={() => setConfirming(true)}
+          >
+            <Unlink />
             Disconnect
           </Button>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-danger">Disconnect {connection.label}?</span>
-            <Button size="sm" variant="outline" onClick={() => setConfirming(false)}>
+            <span className="text-xs text-danger">
+              Disconnect {connection.label}?
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setConfirming(false)}
+            >
               Cancel
             </Button>
             <Button
@@ -136,6 +157,7 @@ function AccountRow({
               onClick={() => void handleDisconnect()}
               disabled={deleteMutation.isPending}
             >
+              <Unlink />
               Yes, disconnect
             </Button>
           </div>
@@ -153,7 +175,9 @@ function AccountRow({
 // one — same rule the chat-app wizard uses for its connected/not-connected
 // split.
 
-export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps) {
+export function ServiceWizard({
+  provider: initialProvider,
+}: ServiceWizardProps) {
   const { close } = useSlideOver();
 
   // Prefer live data — after a connect/disconnect/reconnect mutation
@@ -164,9 +188,13 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
   // first fetch is in flight, or if the provider ever drops out of the list.
   const servicesQuery = useServices();
   const provider =
-    servicesQuery.data?.providers.find((p) => p.name === initialProvider.name) ?? initialProvider;
+    servicesQuery.data?.providers.find(
+      (p) => p.name === initialProvider.name,
+    ) ?? initialProvider;
 
-  const [view, setView] = useState<"creds" | "connect">(provider.has_creds ? "connect" : "creds");
+  const [view, setView] = useState<"creds" | "connect">(
+    provider.has_creds ? "connect" : "creds",
+  );
   // A hard preflight problem is provably fatal for this provider, so Connect is
   // disabled rather than letting the user walk into a provider error screen.
   // Soft problems only warn — see the never-lock-anyone-out rule in publicurl.
@@ -198,7 +226,11 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
   async function handleSaveCreds() {
     setCredsError(null);
     try {
-      await saveCredsMutation.mutateAsync({ provider: provider.name, clientId, clientSecret });
+      await saveCredsMutation.mutateAsync({
+        provider: provider.name,
+        clientId,
+        clientSecret,
+      });
       setView("connect");
     } catch (err) {
       setCredsError(errMsg(err));
@@ -208,7 +240,11 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
   async function handleConnect() {
     setConnectError(null);
     try {
-      const res = await connectServiceMutation.mutateAsync({ provider: provider.name, label, inputs });
+      const res = await connectServiceMutation.mutateAsync({
+        provider: provider.name,
+        label,
+        inputs,
+      });
       window.location.assign(res.redirect_url);
     } catch (err) {
       setConnectError(errMsg(err));
@@ -235,7 +271,10 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
   if (showActions) {
     return (
       <PanelBody>
-        <ProviderActions provider={provider} onBack={() => setShowActions(false)} />
+        <ProviderActions
+          provider={provider}
+          onBack={() => setShowActions(false)}
+        />
       </PanelBody>
     );
   }
@@ -250,7 +289,8 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
         >
           <span className="font-medium">What can it do?</span>
           <span className="shrink-0 text-xs text-muted-2">
-            {provider.action_count} action{provider.action_count === 1 ? "" : "s"} →
+            {provider.action_count} action
+            {provider.action_count === 1 ? "" : "s"} →
           </span>
         </button>
       )}
@@ -261,7 +301,11 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
             Connected accounts
           </div>
           {provider.connections.map((c) => (
-            <AccountRow key={c.id} connection={c} onReconnect={() => jumpToConnect(c.label)} />
+            <AccountRow
+              key={c.id}
+              connection={c}
+              onReconnect={() => jumpToConnect(c.label)}
+            />
           ))}
         </div>
       )}
@@ -275,7 +319,9 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
             Redirect URI to register
           </div>
           <div className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 break-all text-xs">{provider.redirect_uri}</code>
+            <code className="min-w-0 flex-1 break-all text-xs">
+              {provider.redirect_uri}
+            </code>
             <CopyButton value={provider.redirect_uri} />
           </div>
         </div>
@@ -296,7 +342,11 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
           </div>
         ))}
 
-      <div className={hasConnections ? "space-y-3 border-t border-border pt-4" : "space-y-3"}>
+      <div
+        className={
+          hasConnections ? "space-y-3 border-t border-border pt-4" : "space-y-3"
+        }
+      >
         {provider.kind === "oauth" ? (
           view === "creds" ? (
             <div className="space-y-3">
@@ -321,7 +371,10 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
                         {i + 1}
                       </span>
                       <span className="leading-relaxed">
-                        <SetupStep text={s} redirectURI={provider.redirect_uri} />
+                        <SetupStep
+                          text={s}
+                          redirectURI={provider.redirect_uri}
+                        />
                       </span>
                     </li>
                   ))}
@@ -350,8 +403,11 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
               <div className="flex justify-end">
                 <Button
                   onClick={() => void handleSaveCreds()}
-                  disabled={saveCredsMutation.isPending || !clientId || !clientSecret}
+                  disabled={
+                    saveCredsMutation.isPending || !clientId || !clientSecret
+                  }
                 >
+                  <Save />
                   {saveCredsMutation.isPending ? "Saving…" : "Save & continue"}
                 </Button>
               </div>
@@ -370,7 +426,9 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
                   <Input
                     id={`svc-oauth-input-${ci.key}`}
                     value={inputs[ci.key] ?? ""}
-                    onChange={(e) => setInputs((v) => ({ ...v, [ci.key]: e.target.value }))}
+                    onChange={(e) =>
+                      setInputs((v) => ({ ...v, [ci.key]: e.target.value }))
+                    }
                     autoComplete="off"
                   />
                   {ci.hint && <p className="text-xs text-muted-2">{ci.hint}</p>}
@@ -398,7 +456,10 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
                   onClick={() => void handleConnect()}
                   disabled={connectServiceMutation.isPending || hardBlocked}
                 >
-                  {connectServiceMutation.isPending ? "Connecting…" : `Connect ${provider.label} →`}
+                  <Link2 />
+                  {connectServiceMutation.isPending
+                    ? "Connecting…"
+                    : `Connect ${provider.label} →`}
                 </Button>
               </div>
             </div>
@@ -424,7 +485,9 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
                 <Input
                   id={`svc-input-${ci.key}`}
                   value={inputs[ci.key] ?? ""}
-                  onChange={(e) => setInputs((v) => ({ ...v, [ci.key]: e.target.value }))}
+                  onChange={(e) =>
+                    setInputs((v) => ({ ...v, [ci.key]: e.target.value }))
+                  }
                   autoComplete="off"
                 />
                 {ci.hint && <p className="text-xs text-muted-2">{ci.hint}</p>}
@@ -445,6 +508,7 @@ export function ServiceWizard({ provider: initialProvider }: ServiceWizardProps)
                 onClick={() => void handleConnectAPIKey()}
                 disabled={connectAPIKeyMutation.isPending || !apiKey}
               >
+                <Link2 />
                 {connectAPIKeyMutation.isPending ? "Connecting…" : "Connect"}
               </Button>
             </div>

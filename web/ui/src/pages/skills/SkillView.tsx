@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -115,9 +115,16 @@ export function SkillView({
                 onClick={() => void handleSave()}
                 disabled={!dirty || saving}
               >
+                <Save />
                 Save
               </Button>
-              <Button size="sm" variant="outline" className="text-danger" onClick={onDelete}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-danger"
+                onClick={onDelete}
+              >
+                <Trash2 />
                 Delete
               </Button>
             </>
@@ -133,9 +140,13 @@ export function SkillView({
       </div>
 
       {requires.length > 0 && (
-        <p className="mb-2 text-xs text-muted-2">Needs: {requires.join(", ")}</p>
+        <p className="mb-2 text-xs text-muted-2">
+          Needs: {requires.join(", ")}
+        </p>
       )}
-      {description && <p className="mb-4 max-w-2xl text-sm text-muted-2">{description}</p>}
+      {description && (
+        <p className="mb-4 max-w-2xl text-sm text-muted-2">{description}</p>
+      )}
 
       {error && (
         <div className="mb-4 flex items-center gap-2 rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">

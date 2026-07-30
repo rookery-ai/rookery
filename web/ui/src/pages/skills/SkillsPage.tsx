@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Sparkles, Plus, Search, Upload } from "lucide-react";
+import { Plus, Search, Sparkles, Undo2, Upload } from "lucide-react";
 import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +15,13 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { timeAgo } from "@/lib/utils";
 import { SkillChip } from "./SkillView";
-import { useSkills, useSkillActions, type SkillListItem, type CoreSkillListItem, type SkillDraft } from "@/lib/skills";
+import {
+  useSkills,
+  useSkillActions,
+  type SkillListItem,
+  type CoreSkillListItem,
+  type SkillDraft,
+} from "@/lib/skills";
 
 // One card for both kinds. Built-in skills used to render dashed, muted and
 // half-contrast, which read as second-class — they are in fact the skills every
@@ -87,7 +93,8 @@ function CoreSkillCard({ skill }: { skill: CoreSkillListItem }) {
 function useDismissSkillDraft() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post<{ status: string }>("/api/v1/skills/design/dismiss"),
+    mutationFn: () =>
+      api.post<{ status: string }>("/api/v1/skills/design/dismiss"),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["skills"] }),
   });
 }
@@ -102,7 +109,9 @@ function DraftBanner({ draft }: { draft: SkillDraft }) {
           Unfinished draft{draft.skill_name ? `: ${draft.skill_name}` : ""}
         </p>
         <p className="text-xs text-muted-2">
-          {draft.updated_at ? `Last edited ${timeAgo(draft.updated_at)}` : "In progress"}
+          {draft.updated_at
+            ? `Last edited ${timeAgo(draft.updated_at)}`
+            : "In progress"}
         </p>
       </div>
       <div className="flex items-center gap-2">
@@ -113,6 +122,7 @@ function DraftBanner({ draft }: { draft: SkillDraft }) {
           disabled={dismiss.isPending}
           onClick={() => dismiss.mutate()}
         >
+          <Undo2 />
           Discard
         </Button>
         <Button asChild size="sm">
@@ -123,7 +133,13 @@ function DraftBanner({ draft }: { draft: SkillDraft }) {
   );
 }
 
-function ImportDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+function ImportDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+}) {
   const { create } = useSkillActions();
   const [content, setContent] = useState("");
   const [saving, setSaving] = useState(false);
@@ -150,22 +166,32 @@ function ImportDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v:
           <DialogTitle>Import a skill</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-2">
-          Paste a SKILL.md file&rsquo;s contents (YAML frontmatter + body). ZIP upload isn&rsquo;t
-          supported here yet — use the paste form for now.
+          Paste a SKILL.md file&rsquo;s contents (YAML frontmatter + body). ZIP
+          upload isn&rsquo;t supported here yet — use the paste form for now.
         </p>
         <textarea
           aria-label="SKILL.md content"
-          placeholder={"---\nname: my-skill\ndescription: What it does and when to use it.\n---\n\n..."}
+          placeholder={
+            "---\nname: my-skill\ndescription: What it does and when to use it.\n---\n\n..."
+          }
           value={content}
           onChange={(e) => setContent(e.target.value)}
           className="min-h-56 w-full resize-y rounded-md border border-border bg-background p-3 font-mono text-xs outline-none focus:border-ring focus:ring-[3px] focus:ring-ring/50"
         />
         {error && <p className="text-xs text-danger">{error}</p>}
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={saving}
+          >
             Cancel
           </Button>
-          <Button onClick={() => void handleImport()} disabled={!content.trim() || saving}>
+          <Button
+            onClick={() => void handleImport()}
+            disabled={!content.trim() || saving}
+          >
+            <Upload />
             Import
           </Button>
         </DialogFooter>
@@ -182,10 +208,12 @@ function EmptyState() {
   return (
     <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border p-8 text-center text-muted-2">
       <Sparkles className="size-10" />
-      <h2 className="text-lg font-bold text-foreground">No skills of your own yet</h2>
+      <h2 className="text-lg font-bold text-foreground">
+        No skills of your own yet
+      </h2>
       <p className="max-w-sm text-sm">
-        Skills teach your agents new capabilities — create one by describing it in plain language.
-        The built-in skills below are always available.
+        Skills teach your agents new capabilities — create one by describing it
+        in plain language. The built-in skills below are always available.
       </p>
       <Button asChild>
         <Link to="/skills/new">
@@ -210,11 +238,21 @@ export default function SkillsPage() {
   // that says when it applies.
   const q = query.trim().toLowerCase();
   const filteredSkills = useMemo(
-    () => (q ? skills.filter((s) => `${s.name} ${s.description}`.toLowerCase().includes(q)) : skills),
+    () =>
+      q
+        ? skills.filter((s) =>
+            `${s.name} ${s.description}`.toLowerCase().includes(q),
+          )
+        : skills,
     [skills, q],
   );
   const filteredCore = useMemo(
-    () => (q ? coreSkills.filter((s) => `${s.name} ${s.description}`.toLowerCase().includes(q)) : coreSkills),
+    () =>
+      q
+        ? coreSkills.filter((s) =>
+            `${s.name} ${s.description}`.toLowerCase().includes(q),
+          )
+        : coreSkills,
     [coreSkills, q],
   );
 
@@ -224,7 +262,8 @@ export default function SkillsPage() {
   // an unresolved query looks identical to an empty one, so without it the
   // empty state flashes on every visit before the list lands.
   const showEmpty = !isLoading && !q && skills.length === 0 && !draft;
-  const noMatches = !!q && filteredSkills.length === 0 && filteredCore.length === 0;
+  const noMatches =
+    !!q && filteredSkills.length === 0 && filteredCore.length === 0;
   const total = skills.length + coreSkills.length;
 
   return (
@@ -273,7 +312,9 @@ export default function SkillsPage() {
       <DraftBanner draft={draft} />
 
       {noMatches && (
-        <p className="p-8 text-center text-sm text-muted-2">No skills match “{query.trim()}”.</p>
+        <p className="p-8 text-center text-sm text-muted-2">
+          No skills match “{query.trim()}”.
+        </p>
       )}
 
       {showEmpty ? (

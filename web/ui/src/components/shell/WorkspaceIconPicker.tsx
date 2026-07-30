@@ -1,12 +1,16 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check } from "lucide-react";
+import { Check, Save } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { WORKSPACE_ICONS, WorkspaceAvatar } from "@/lib/workspaceIcons";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 
 // A grid of the bundled workspace images plus a "no image" escape back to the
@@ -49,7 +53,11 @@ export default function WorkspaceIconPicker({
       await qc.invalidateQueries({ queryKey: ["session"] });
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't save the workspace image");
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Couldn't save the workspace image",
+      );
     } finally {
       setSaving(false);
     }
@@ -113,8 +121,13 @@ export default function WorkspaceIconPicker({
         {error && <p className="text-sm text-danger">{error}</p>}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => handleOpenChange(false)}>Cancel</Button>
-          <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+          <Button variant="outline" onClick={() => handleOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            <Save />
+            {saving ? "Saving…" : "Save"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

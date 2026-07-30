@@ -2,10 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
-import { AlertTriangle, Check } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Check, KeyRound, Link2, Plus, Save } from "lucide-react";
 import { CuratedSelect } from "@/components/profile/CuratedSelect";
 import {
-  timezoneOptions, countryOptions, LANGUAGE_OPTIONS, TONE_OPTIONS,
+  timezoneOptions,
+  countryOptions,
+  LANGUAGE_OPTIONS,
+  TONE_OPTIONS,
 } from "@/components/profile/options";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,8 +17,17 @@ import { ProviderLogo } from "@/components/brand/ProviderLogo";
 import { cn } from "@/lib/utils";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import { useSetupQuery, type SetupResponse, type SetupStepResponse } from "@/lib/setup";
-import type { APIProvider, CoderCatalogEntry, DetectedCoder, SaveCoderInput } from "@/lib/settings";
+import {
+  useSetupQuery,
+  type SetupResponse,
+  type SetupStepResponse,
+} from "@/lib/setup";
+import type {
+  APIProvider,
+  CoderCatalogEntry,
+  DetectedCoder,
+  SaveCoderInput,
+} from "@/lib/settings";
 import type { ConnectorPlatform } from "@/lib/connections";
 import { CoderSection } from "@/pages/settings/CoderSection";
 import { ConnectorCredentialsFields } from "@/pages/connections/ConnectorCredentialsFields";
@@ -64,8 +76,12 @@ function StepChips({ step }: { step: number }) {
             >
               {isDone ? <Check className="size-3" /> : i + 1}
             </span>
-            <span className={cn(isActive && "text-foreground")}>{CHIP_LABELS[s]}</span>
-            {i < CHIP_STEPS.length - 1 && <span aria-hidden className="mx-1 h-px w-4 bg-border" />}
+            <span className={cn(isActive && "text-foreground")}>
+              {CHIP_LABELS[s]}
+            </span>
+            {i < CHIP_STEPS.length - 1 && (
+              <span aria-hidden className="mx-1 h-px w-4 bg-border" />
+            )}
           </li>
         );
       })}
@@ -80,7 +96,8 @@ function BackBar({ onBack }: { onBack: () => void }) {
       onClick={onBack}
       className="mb-3 text-xs font-medium text-muted-2 hover:text-foreground"
     >
-      ← Back
+      <ArrowLeft />
+      Back
     </button>
   );
 }
@@ -104,7 +121,11 @@ function BasicsStep({
     setBusy(true);
     setError("");
     try {
-      const res = await api.post<SetupStepResponse>("/api/v1/setup", { step: 1, name, about });
+      const res = await api.post<SetupStepResponse>("/api/v1/setup", {
+        step: 1,
+        name,
+        about,
+      });
       onNext(res.next_step);
     } catch (err) {
       setError(errMsg(err));
@@ -117,12 +138,17 @@ function BasicsStep({
     <form onSubmit={(e) => void submit(e)} className="space-y-4">
       <h2 className="text-lg font-bold">Workspace basics</h2>
       <p className="text-sm text-muted-2">
-        Your agents read this to understand what the workspace is for, so it's worth a
-        sentence or two.
+        Your agents read this to understand what the workspace is for, so it's
+        worth a sentence or two.
       </p>
       <div className="space-y-1.5">
         <Label htmlFor="setup_name">Workspace name</Label>
-        <Input id="setup_name" value={name} onChange={(e) => setName(e.target.value)} required />
+        <Input
+          id="setup_name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          required
+        />
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="setup_about">What is this workspace about?</Label>
@@ -140,6 +166,7 @@ function BasicsStep({
       </div>
       {error && <ErrorNote>{error}</ErrorNote>}
       <Button type="submit" className="w-full" disabled={busy}>
+        <ArrowRight />
         {busy ? "Saving…" : "Continue →"}
       </Button>
     </form>
@@ -148,7 +175,13 @@ function BasicsStep({
 
 // ── Step 2: Master password ──────────────────────────────────────────────
 
-function MasterPasswordStep({ onBack, onNext }: { onBack: () => void; onNext: (next: number) => void }) {
+function MasterPasswordStep({
+  onBack,
+  onNext,
+}: {
+  onBack: () => void;
+  onNext: (next: number) => void;
+}) {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [mismatch, setMismatch] = useState("");
@@ -187,8 +220,9 @@ function MasterPasswordStep({ onBack, onNext }: { onBack: () => void; onNext: (n
       <BackBar onBack={onBack} />
       <h2 className="text-lg font-bold">Set the master password</h2>
       <p className="text-sm text-muted-2">
-        This password encrypts this workspace's secrets (API keys, connector tokens) and is
-        required every time you switch into this workspace. It cannot be recovered if lost.
+        This password encrypts this workspace's secrets (API keys, connector
+        tokens) and is required every time you switch into this workspace. It
+        cannot be recovered if lost.
       </p>
       <div className="space-y-1.5">
         <Label htmlFor="setup_master_password">Master password</Label>
@@ -216,6 +250,7 @@ function MasterPasswordStep({ onBack, onNext }: { onBack: () => void; onNext: (n
       {mismatch && <ErrorNote>{mismatch}</ErrorNote>}
       {error && !mismatch && <ErrorNote>{error}</ErrorNote>}
       <Button type="submit" className="w-full" disabled={busy}>
+            <KeyRound />
         {busy ? "Saving…" : "Set master password →"}
       </Button>
     </form>
@@ -260,8 +295,8 @@ function CoderStep({
       <BackBar onBack={onBack} />
       <h2 className="text-lg font-bold">Choose a coder</h2>
       <p className="text-sm text-muted-2">
-        Pick the engine that runs your agents — a local CLI already on this host, or a direct LLM
-        provider API.
+        Pick the engine that runs your agents — a local CLI already on this
+        host, or a direct LLM provider API.
       </p>
       {!data ? (
         <div className="text-sm text-muted-2">Loading…</div>
@@ -327,8 +362,8 @@ function ProfileStep({
       <BackBar onBack={onBack} />
       <h2 className="text-lg font-bold">Workspace profile</h2>
       <p className="text-sm text-muted-2">
-        Tell your agents who they act for so replies feel personal. All optional and editable
-        later from Settings.
+        Tell your agents who they act for so replies feel personal. All optional
+        and editable later from Settings.
       </p>
       <div className="space-y-1.5">
         <Label htmlFor="setup_display_name">What should we call you?</Label>
@@ -378,9 +413,15 @@ function ProfileStep({
       </div>
       {error && <ErrorNote>{error}</ErrorNote>}
       <Button type="submit" className="w-full" disabled={busy}>
+        <Save />
         {busy ? "Saving…" : "Save and continue →"}
       </Button>
-      <Button type="button" variant="ghost" className="w-full text-muted-2" onClick={onSkip}>
+      <Button
+        type="button"
+        variant="ghost"
+        className="w-full text-muted-2"
+        onClick={onSkip}
+      >
         Skip for now — I'll fill this in later
       </Button>
     </form>
@@ -431,15 +472,17 @@ function ChatAppStep({
   }
 
   const allFilled =
-    !!selected && selected.fields.length > 0 && selected.fields.every((f) => (values[f.name] ?? "").trim() !== "");
+    !!selected &&
+    selected.fields.length > 0 &&
+    selected.fields.every((f) => (values[f.name] ?? "").trim() !== "");
 
   return (
     <div className="space-y-4">
       <BackBar onBack={onBack} />
       <h2 className="text-lg font-bold">Connect a chat app</h2>
       <p className="text-sm text-muted-2">
-        Talk to this workspace from Telegram, Discord, or Slack. You can skip and set this up
-        later from Connections.
+        Talk to this workspace from Telegram, Discord, or Slack. You can skip
+        and set this up later from Connections.
       </p>
 
       {!data ? (
@@ -459,7 +502,12 @@ function ChatAppStep({
               </button>
             ))}
           </div>
-          <Button type="button" variant="ghost" className="w-full text-muted-2" onClick={onSkip}>
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full text-muted-2"
+            onClick={onSkip}
+          >
             Skip for now — I'll set this up later
           </Button>
         </>
@@ -472,7 +520,9 @@ function ChatAppStep({
           >
             ← choose a different app
           </button>
-          {selected.blurb && <p className="text-sm text-muted-2">{selected.blurb}</p>}
+          {selected.blurb && (
+            <p className="text-sm text-muted-2">{selected.blurb}</p>
+          )}
           {selected.setup_steps.length > 0 && (
             <ol className="space-y-2">
               {selected.setup_steps.map((s, i) => (
@@ -493,13 +543,25 @@ function ChatAppStep({
           <ConnectorCredentialsFields
             fields={selected.fields}
             values={values}
-            onChange={(name, value) => setValues((v) => ({ ...v, [name]: value }))}
+            onChange={(name, value) =>
+              setValues((v) => ({ ...v, [name]: value }))
+            }
           />
           {error && <ErrorNote>{error}</ErrorNote>}
-          <Button type="submit" className="w-full" disabled={busy || !allFilled}>
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={busy || !allFilled}
+          >
+            <Link2 />
             {busy ? "Connecting…" : "Connect"}
           </Button>
-          <Button type="button" variant="ghost" className="w-full text-muted-2" onClick={onSkip}>
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full text-muted-2"
+            onClick={onSkip}
+          >
             Skip for now — I'll set this up later
           </Button>
         </form>
@@ -521,19 +583,27 @@ function DoneScreen({
     <div className="space-y-4 py-4 text-center">
       <div className="text-5xl">🎉</div>
       <h1 className="text-2xl font-bold">You're set up</h1>
-      <p className="text-sm text-muted-2">This workspace is configured and ready to use.</p>
+      <p className="text-sm text-muted-2">
+        This workspace is configured and ready to use.
+      </p>
       {botUsername && (
         <div className="rounded-lg border border-primary/30 bg-primary/10 p-4 text-left text-sm">
-          <p className="font-semibold text-primary">✅ Bot connected: {botUsername}</p>
+          <p className="font-semibold text-primary">
+            ✅ Bot connected: {botUsername}
+          </p>
           <p className="mt-1 text-muted-2">
-            Open Telegram, find <strong>{botUsername}</strong>, and send <code>/start</code> to
-            link this workspace.
+            Open Telegram, find <strong>{botUsername}</strong>, and send{" "}
+            <code>/start</code> to link this workspace.
           </p>
         </div>
       )}
       <div className="flex flex-col gap-2 pt-2">
-        <Button onClick={() => onFinish("/agents/new")}>Create your first agent</Button>
+        <Button onClick={() => onFinish("/agents/new")}>
+          <Plus />
+          Create your first agent
+        </Button>
         <Button variant="outline" onClick={() => onFinish("/kb")}>
+            <BookOpen />
           Explore the knowledge base
         </Button>
       </div>
@@ -551,7 +621,9 @@ export default function SetupWizard() {
 
   const [step, setStep] = useState<number | null>(null);
   const [coderData, setCoderData] = useState<CoderStepData | null>(null);
-  const [connectorData, setConnectorData] = useState<{ platforms: ConnectorPlatform[] } | null>(null);
+  const [connectorData, setConnectorData] = useState<{
+    platforms: ConnectorPlatform[];
+  } | null>(null);
   const [botUsername, setBotUsername] = useState<string | null>(null);
   const [finishError, setFinishError] = useState("");
   const [finishing, setFinishing] = useState(false);
@@ -591,7 +663,11 @@ export default function SetupWizard() {
   // then, so a re-GET would no longer include that step's payload.
   async function advance(next: number) {
     setStep(next);
-    if ((next === 3 && !coderData) || (next === 5 && !connectorData) || (next === 7 && botUsername === null)) {
+    if (
+      (next === 3 && !coderData) ||
+      (next === 5 && !connectorData) ||
+      (next === 7 && botUsername === null)
+    ) {
       try {
         const d = await api.get<SetupResponse>("/api/v1/setup");
         applyExtras(d);
@@ -630,12 +706,24 @@ export default function SetupWizard() {
           <ErrorNote>{errMsg(setupQuery.error)}</ErrorNote>
         )}
 
-        {step === 1 && <BasicsStep initialName={workspaceName} onNext={(n) => void advance(n)} />}
+        {step === 1 && (
+          <BasicsStep
+            initialName={workspaceName}
+            onNext={(n) => void advance(n)}
+          />
+        )}
         {step === 2 && (
-          <MasterPasswordStep onBack={() => setStep(1)} onNext={(n) => void advance(n)} />
+          <MasterPasswordStep
+            onBack={() => setStep(1)}
+            onNext={(n) => void advance(n)}
+          />
         )}
         {step === 3 && (
-          <CoderStep data={coderData} onBack={() => setStep(2)} onNext={(n) => void advance(n)} />
+          <CoderStep
+            data={coderData}
+            onBack={() => setStep(2)}
+            onNext={(n) => void advance(n)}
+          />
         )}
         {step === 4 && (
           <ProfileStep
@@ -643,7 +731,10 @@ export default function SetupWizard() {
             onNext={(n) => void advance(n)}
             onSkip={() =>
               void (async () => {
-                const res = await api.post<SetupStepResponse>("/api/v1/setup", { step: 4, skip: true });
+                const res = await api.post<SetupStepResponse>("/api/v1/setup", {
+                  step: 4,
+                  skip: true,
+                });
                 void advance(res.next_step);
               })()
             }
@@ -656,7 +747,10 @@ export default function SetupWizard() {
             onNext={(n) => void advance(n)}
             onSkip={() =>
               void (async () => {
-                const res = await api.post<SetupStepResponse>("/api/v1/setup", { step: 5, skip: true });
+                const res = await api.post<SetupStepResponse>("/api/v1/setup", {
+                  step: 5,
+                  skip: true,
+                });
                 void advance(res.next_step);
               })()
             }
@@ -664,9 +758,16 @@ export default function SetupWizard() {
         )}
         {step === 7 && (
           <>
-            <DoneScreen botUsername={botUsername ?? ""} onFinish={(t) => void finish(t)} />
+            <DoneScreen
+              botUsername={botUsername ?? ""}
+              onFinish={(t) => void finish(t)}
+            />
             {finishError && <ErrorNote>{finishError}</ErrorNote>}
-            {finishing && <p className="mt-2 text-center text-xs text-muted-2">Finishing up…</p>}
+            {finishing && (
+              <p className="mt-2 text-center text-xs text-muted-2">
+                Finishing up…
+              </p>
+            )}
           </>
         )}
       </div>
