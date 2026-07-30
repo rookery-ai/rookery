@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -153,6 +154,12 @@ func RenderStyle(id Identity) string {
 // basics text and the profile step is left with no file rather than a
 // heading-only one.
 func (s *Store) SeedIdentity(workspaceID string, id Identity) error {
+	return s.seedIdentity(workspaceID, id, nil)
+}
+
+// seedIdentity is SeedIdentity with an explicit skip list, used by the migration
+// to leave a file alone when its legacy predecessor is still on disk.
+func (s *Store) seedIdentity(workspaceID string, id Identity, skip []string) error {
 	dir := s.memDir(workspaceID)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("memory dir: %w", err)
@@ -164,7 +171,7 @@ func (s *Store) SeedIdentity(workspaceID string, id Identity) error {
 		{AboutFile, RenderAbout(id)},
 		{StyleFile, RenderStyle(id)},
 	} {
-		if f.content == "" {
+		if f.content == "" || slices.Contains(skip, f.name) {
 			continue
 		}
 		path := filepath.Join(dir, f.name)
@@ -204,6 +211,14 @@ func (s *Store) SeedIdentity(workspaceID string, id Identity) error {
 func (s *Store) MigrateIdentityFiles(workspaceID string, id Identity) error {
 	dir := s.memDir(workspaceID)
 
+	// Files left unresolved by the rename phase. Seeding must skip them: the
+	// legacy file is still present and still injected, so writing DB values into
+	// its successor would produce two identity documents in one prompt — exactly
+	// the duplication the rename exists to prevent. Reachable in practice, since
+	// the README now tells the owner to edit ABOUT.md and they may create it by
+	// hand while USER.md is still there.
+	var blocked []string
+
 	for _, r := range []struct{ from, to string }{
 		{legacyAboutFile, AboutFile},
 		{legacyStyleFile, StyleFile},
@@ -216,13 +231,15 @@ func (s *Store) MigrateIdentityFiles(workspaceID string, id Identity) error {
 		if _, err := os.Stat(dst); err == nil {
 			slog.Warn("memory: identity rename skipped, both names present",
 				"workspace", workspaceID, "legacy", r.from, "current", r.to)
+			blocked = append(blocked, r.to)
 			continue
 		}
 		if err := os.Rename(src, dst); err != nil {
 			slog.Warn("memory: identity rename failed",
 				"workspace", workspaceID, "from", r.from, "to", r.to, "err", err)
+			blocked = append(blocked, r.to)
 		}
 	}
 
-	return s.SeedIdentity(workspaceID, id)
+	return s.seedIdentity(workspaceID, id, blocked)
 }

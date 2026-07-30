@@ -169,21 +169,39 @@ func TestSaveProfileIgnoresProseFields(t *testing.T) {
 	cookies := bootstrapAndLogin(t, s)
 	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
 
+	// Pre-existing prose values, as an upgraded install has: they are the seed
+	// the startup backfill reads, so the save must neither write them nor WIPE
+	// them. profile.Save writes every field unconditionally, so a handler that
+	// built a two-field Profile would blank all five here.
+	existing := map[string]string{
+		"profile_tone": "formal", "profile_language": "Macedonian",
+		"profile_notes": "runs a consultancy", "profile_email": "peer@example.com",
+		"profile_location": "Skopje",
+	}
+	for k, v := range existing {
+		if err := database.SetSetting(wsID, k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	rec := doJSON(t, s, http.MethodPut, "/api/v1/settings/profile", map[string]any{
 		"display_name": "Peer", "timezone": "Europe/Skopje",
-		"tone": "formal", "language": "German", "notes": "ignored",
+		"tone": "casual", "language": "German", "notes": "ignored",
 		"email": "x@y.z", "location": "Nowhere",
 	}, cookies)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT = %d, body %s", rec.Code, rec.Body.String())
 	}
 
-	for _, key := range []string{
-		"profile_tone", "profile_language", "profile_notes",
-		"profile_email", "profile_location",
-	} {
-		if v, err := database.GetSetting(wsID, key); err == nil && v != "" {
-			t.Errorf("%s should no longer be written, got %q", key, v)
+	for key, want := range existing {
+		got, err := database.GetSetting(wsID, key)
+		if err != nil {
+			t.Errorf("%s: %v", key, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s = %q, want the pre-existing %q — the request must neither "+
+				"overwrite it nor blank it", key, got, want)
 		}
 	}
 	if v, _ := database.GetSetting(wsID, "display_name"); v != "Peer" {

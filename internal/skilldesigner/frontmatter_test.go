@@ -155,3 +155,19 @@ func TestNormalizeFrontmatterIsIdempotent(t *testing.T) {
 		t.Errorf("not idempotent:\n--- once ---\n%s\n--- twice ---\n%s", once, twice)
 	}
 }
+
+// Documents the accepted truncation: modelled fields survive, unknown ones do
+// not. A test rather than a comment alone, so the day someone adds a field to
+// SkillMeta they find out this is where it has to be re-emitted.
+func TestNormalizeFrontmatterDropsUnmodelledKeys(t *testing.T) {
+	in := "---\nname: x\ndescription: d\ntopics: [alpha, beta]\nallowed-tools: [Bash]\n---\n\nbody\n"
+	out := NormalizeFrontmatter(in, "x")
+
+	m, _ := skilllibrary.ParseMeta(out)
+	if len(m.Topics) != 2 {
+		t.Errorf("topics must survive, got %v", m.Topics)
+	}
+	if strings.Contains(out, "allowed-tools") {
+		t.Errorf("unexpectedly preserved an unmodelled key — update the doc comment:\n%s", out)
+	}
+}

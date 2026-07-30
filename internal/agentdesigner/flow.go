@@ -64,7 +64,7 @@ type DesignSession struct {
 	History            []db.ChatMessage   // full conversation fed to coder on every turn
 	Skills             []prompts.SkillRef // installed skills (name+description), loaded once on Start
 	ConnectedPlatforms []string           // e.g. ["telegram"] — loaded from platform_connections
-	UserProfile        string             // rendered "[User profile]" block, loaded once on session start
+	UserProfile        string             // "[Current context]" block (date/time/timezone); identity lives in UserMemory
 	UserMemory         string             // bullet list of saved memory entries, loaded once on session start
 	CreatedAt          time.Time
 

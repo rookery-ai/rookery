@@ -193,14 +193,20 @@ func (s *Server) apiPutSettingsProfile(c echo.Context) error {
 	if err := bindAPI(c, &req); err != nil {
 		return err
 	}
-	// Only the two fields code actually reads are persisted. Tone, language,
+	// Only the two fields code actually reads are editable here. Tone, language,
 	// location, email and background live in memory/ABOUT.md and memory/STYLE.md,
 	// which the owner edits in the knowledge base — Settings must not offer a
 	// second place to change them.
-	prof := profile.Profile{
-		DisplayName: req.DisplayName,
-		Timezone:    req.Timezone,
-	}
+	//
+	// Load-then-overwrite rather than constructing a fresh Profile: profile.Save
+	// writes EVERY field unconditionally (deliberately, so a caller can clear
+	// one), so a two-field struct would blank the other five on the first save.
+	// Those five are the seed values the startup identity backfill reads, and
+	// blanking them is unrecoverable — the same reason the workspace handler
+	// above passes w.About through instead of req.About.
+	prof := profile.Load(s.db, w.ID)
+	prof.DisplayName = req.DisplayName
+	prof.Timezone = req.Timezone
 	if err := profile.Save(s.db, w.ID, prof); err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", "failed to save settings: "+err.Error())
 	}

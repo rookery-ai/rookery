@@ -322,3 +322,31 @@ func readMemFile(t *testing.T, base, ws, name string) string {
 	}
 	return string(b)
 }
+
+// The collision case with an EMPTY successor: the rename is skipped because
+// ABOUT.md exists, and the backfill must be skipped too. Seeding it would put
+// DB values in ABOUT.md while the owner's real content stayed in USER.md — and
+// ContextString globs *.md, so BOTH would be injected.
+func TestMigrateCollisionDoesNotSeedOverTheGap(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+	writeMemFile(t, dir, "ws1", "USER.md", "# About Me\n\nmy real content\n")
+	writeMemFile(t, dir, "ws1", AboutFile, "# About This Workspace") // effectively empty
+
+	if err := s.MigrateIdentityFiles("ws1", fullIdentity()); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	if got := readMemFile(t, dir, "ws1", AboutFile); strings.Contains(got, "**Personal**") {
+		t.Errorf("ABOUT.md was seeded while USER.md still holds the real content:\n%s", got)
+	}
+	if got := readMemFile(t, dir, "ws1", "USER.md"); !strings.Contains(got, "my real content") {
+		t.Errorf("USER.md was touched:\n%s", got)
+	}
+
+	// The unblocked file is still backfilled — one collision must not stall the
+	// other file.
+	if got := readMemFile(t, dir, "ws1", StyleFile); !strings.Contains(got, "English") {
+		t.Errorf("STYLE.md should still be seeded:\n%s", got)
+	}
+}

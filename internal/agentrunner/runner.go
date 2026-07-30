@@ -299,11 +299,10 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 		userMemory, _ = r.memStore.ContextString(input.WorkspaceID)
 	}
 	// A scheduled run had no idea what day it was: nothing in prompt
-	// construction called time.Now() except the reminder parser. Prepended to
-	// the same field so the runtime context and the identity files arrive
-	// together.
+	// construction called time.Now() except the reminder parser.
+	var runtimeCtx string
 	if r.db != nil {
-		userMemory = profile.RuntimeContextString(r.db, input.WorkspaceID, time.Now()) + "\n" + userMemory
+		runtimeCtx = profile.RuntimeContextString(r.db, input.WorkspaceID, time.Now())
 	}
 
 	skillRefs := make([]prompts.SkillRef, 0, len(allSkills)+8)
@@ -349,6 +348,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
 		AgentMD:         string(agentMD),
 		StateJSON:       string(stateJSON),
+		RuntimeContext:  runtimeCtx,
 		UserMemory:      userMemory,
 		AllSkills:       skillRefs,
 		DeclaredSkills:  declaredSkills,

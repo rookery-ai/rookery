@@ -51,6 +51,17 @@ func canonicalCategory(v string) string {
 //
 // name is the already-validated slug (the caller re-slugifies before saving), so
 // the file's name field cannot disagree with its directory.
+//
+// ACCEPTED COST — this rewrites the frontmatter from the parsed model, so any
+// key skilllibrary.ParseMeta does not know about is DROPPED. The fields it does
+// model (name, description, version, license, category, topics, metadata.requires,
+// metadata.install) all survive, and those are the only ones this platform reads.
+// A third-party SKILL.md carrying, say, an `allowed-tools:` key from another
+// runtime loses it on import. Preserving unknown keys would mean re-serialising a
+// generic YAML tree, and the value of that is zero until something here reads one.
+// The body is never touched, so nothing the model actually follows is lost.
+// Note this applies to CREATE/IMPORT only — the KB editor's save path
+// (skillstore.SaveContent) does not normalize.
 func NormalizeFrontmatter(content, name string) string {
 	meta, body := skilllibrary.ParseMeta(content)
 
@@ -74,6 +85,9 @@ func NormalizeFrontmatter(content, name string) string {
 	fmt.Fprintf(&sb, "version: %s\n", version)
 	fmt.Fprintf(&sb, "license: %s\n", license)
 	fmt.Fprintf(&sb, "category: %s\n", canonicalCategory(meta.Category))
+	if len(meta.Topics) > 0 {
+		fmt.Fprintf(&sb, "topics: [%s]\n", strings.Join(meta.Topics, ", "))
+	}
 	sb.WriteString(metadataBlock(meta))
 	sb.WriteString("---\n\n")
 	sb.WriteString(strings.TrimSpace(body))

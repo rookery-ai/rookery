@@ -90,7 +90,7 @@ type DesignSystemParams struct {
 	ChatApps           []ChatAppInfo // connected chat platforms + their commands (drives platform context)
 	Skills             []SkillRef
 	Connections        []ConnectionRef // connected service accounts (Gmail, etc.) available to bind
-	UserProfile        string
+	UserProfile        string          // "[Current context]" block (date/time/timezone); identity lives in UserMemory
 	UserMemory         string
 	KBManifest         string // vault.BuildKBContext output: folder summary + relevant passages; "" if no vault attached
 }
@@ -1736,6 +1736,7 @@ endlessly. Do NOT attempt workarounds beyond 3 tries. Emit [BLOCKED] and stop.
 type CoderPromptParams struct {
 	AgentMD         string
 	StateJSON       string
+	RuntimeContext  string // "[Current context]" block: date, time, timezone
 	UserMemory      string
 	AllSkills       []SkillRef
 	DeclaredSkills  []string
@@ -1892,6 +1893,14 @@ func BuildCoderPrompt(p CoderPromptParams) string {
 	sb.WriteString("<state>\n")
 	sb.WriteString(p.StateJSON)
 	sb.WriteString("\n</state>\n\n")
+
+	// Its own block, NOT folded into <user_memory>: the prompt tells the model
+	// <user_memory> IS the memory/ folder, and the date is not a file in there.
+	if p.RuntimeContext != "" {
+		sb.WriteString("<current_context>\n")
+		sb.WriteString(strings.TrimSpace(p.RuntimeContext))
+		sb.WriteString("\n</current_context>\n\n")
+	}
 
 	if p.UserMemory != "" {
 		sb.WriteString("<user_memory>\n")

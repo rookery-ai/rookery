@@ -641,3 +641,27 @@ func TestSkillPromptsRequireFullFrontmatter(t *testing.T) {
 		}
 	}
 }
+
+// The runtime context must NOT be folded into <user_memory>: the prompt tells
+// the model that block IS the memory/ folder, and the current date is not a file
+// in there. This change spent its budget removing prompt claims that were not
+// true; adding one back would be a regression.
+func TestRuntimeContextHasItsOwnBlock(t *testing.T) {
+	out := BuildCoderPrompt(CoderPromptParams{
+		AgentMD:        "# Suggested schedule: none\ndo a thing",
+		RuntimeContext: "[Current context]\n- Timezone: Europe/Skopje\n",
+		UserMemory:     "## ABOUT.md\nI am Peer.",
+	})
+	if !strings.Contains(out, "<current_context>") {
+		t.Errorf("missing <current_context> block:\n%s", out)
+	}
+	memIdx := strings.Index(out, "<user_memory>")
+	ctxIdx := strings.Index(out, "<current_context>")
+	if memIdx < 0 || ctxIdx < 0 {
+		t.Fatalf("both blocks must be present")
+	}
+	memBlock := out[memIdx:strings.Index(out, "</user_memory>")]
+	if strings.Contains(memBlock, "Current context") {
+		t.Errorf("runtime context leaked into <user_memory>:\n%s", memBlock)
+	}
+}
