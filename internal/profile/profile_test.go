@@ -74,26 +74,40 @@ func TestSaveClampsNotes(t *testing.T) {
 	}
 }
 
-func TestContextStringEmptyWhenNoFields(t *testing.T) {
-	if s := (Profile{}).ContextString(); s != "" {
-		t.Fatalf("expected empty string for zero-value profile, got %q", s)
+func TestRuntimeContextString(t *testing.T) {
+	store := newFakeStore()
+	store.m["u1|profile_timezone"] = "Europe/Skopje"
+	now := time.Date(2026, 7, 30, 12, 32, 0, 0, time.UTC)
+	got := RuntimeContextString(store, "u1", now)
+
+	for _, want := range []string{"[Current context]", "Europe/Skopje", "2026", "14:32"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	// Identity lives in memory/ABOUT.md now; duplicating it here would recreate
+	// the two-sources-of-truth problem this replaced.
+	for _, banned := range []string{"[User profile]", "Preferred tone", "Email"} {
+		if strings.Contains(got, banned) {
+			t.Errorf("runtime context must not carry identity (%q):\n%s", banned, got)
+		}
 	}
 }
 
-func TestContextStringPartialFields(t *testing.T) {
-	p := Profile{DisplayName: "Ilija", Timezone: "Europe/Skopje"}
-	s := p.ContextString()
-	if !strings.HasPrefix(s, "[User profile]\n") {
-		t.Fatalf("missing header, got %q", s)
-	}
-	if !strings.Contains(s, "- Name: Ilija") {
-		t.Fatalf("missing name line, got %q", s)
-	}
-	if !strings.Contains(s, "- Timezone: Europe/Skopje") {
-		t.Fatalf("missing timezone line, got %q", s)
-	}
-	if strings.Contains(s, "Email") || strings.Contains(s, "Notes") {
-		t.Fatalf("unset fields should not render, got %q", s)
+// profile.Timezone is free text: "", "CEST" and "UTC+2" all fail
+// time.LoadLocation. None may panic or blank the block.
+func TestRuntimeContextStringBadTimezones(t *testing.T) {
+	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	for _, tz := range []string{"", "CEST", "UTC+2", "Mars/Olympus"} {
+		store := newFakeStore()
+		store.m["u1|profile_timezone"] = tz
+		got := RuntimeContextString(store, "u1", now)
+		if !strings.Contains(got, "[Current context]") {
+			t.Errorf("tz %q produced no block:\n%s", tz, got)
+		}
+		if !strings.Contains(got, "UTC") {
+			t.Errorf("tz %q should fall back to UTC:\n%s", tz, got)
+		}
 	}
 }
 

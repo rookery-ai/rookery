@@ -4,10 +4,7 @@
 // generic per-user key-value settings table — no dedicated schema.
 package profile
 
-import (
-	"strings"
-	"time"
-)
+import "time"
 
 // Getter is the minimal read capability profile needs. *db.DB satisfies this
 // already via GetSetting(workspaceID, key string) (string, error).
@@ -104,27 +101,36 @@ func MarkComplete(s Setter, workspaceID string) error {
 	return s.SetSetting(workspaceID, keyCompleted, "1")
 }
 
-// ContextString renders the full "[User profile]" block for LLM system-prompt
-// injection, including the header. Returns "" if every field is empty —
-// callers must not inject an empty/header-only block.
-func (p Profile) ContextString() string {
-	var lines []string
-	add := func(label, v string) {
-		if v != "" {
-			lines = append(lines, "- "+label+": "+v)
-		}
+// RuntimeContextString renders the "[Current context]" block injected into
+// every LLM prompt.
+//
+// It deliberately carries ONLY what markdown cannot hold without going stale.
+// Identity — who the user is, what the workspace is for, how they want to be
+// spoken to — lives in memory/ABOUT.md and memory/STYLE.md, which the user
+// edits directly and which memory.ContextString injects. This replaced a
+// "[User profile]" block built from the settings table, which was the de-facto
+// source of truth precisely because the memory files were never populated.
+//
+// The timezone stays here because it is editable in Settings and is read
+// programmatically by LoadLocation for reminder parsing; a copy rendered into
+// markdown at setup would silently diverge the moment the user changed it.
+//
+// The current date and time are here because nothing else supplied them: before
+// this, the only time.Now() in prompt construction was the reminder parser, so
+// chat and agent runs could not say what day it was.
+//
+// now is a parameter rather than a call to time.Now() so tests are not
+// clock-dependent. Never returns an error: an unparseable timezone degrades to
+// UTC exactly as LoadLocation does.
+func RuntimeContextString(g Getter, workspaceID string, now time.Time) string {
+	loc := LoadLocation(g, workspaceID)
+	tz := Load(g, workspaceID).Timezone
+	if _, err := time.LoadLocation(tz); tz == "" || err != nil {
+		tz = "UTC"
 	}
-	add("Name", p.DisplayName)
-	add("Email", p.Email)
-	add("Location", p.Location)
-	add("Timezone", p.Timezone)
-	add("Preferred tone", p.Tone)
-	add("Preferred language", p.Language)
-	add("Notes", p.Notes)
-	if len(lines) == 0 {
-		return ""
-	}
-	return "[User profile]\n" + strings.Join(lines, "\n") + "\n"
+	return "[Current context]\n" +
+		"- Current date and time: " + now.In(loc).Format("Monday, 2 January 2006, 15:04") + " (" + tz + ")\n" +
+		"- Timezone: " + tz + "\n"
 }
 
 // LoadLocation resolves the user's saved timezone to a *time.Location,

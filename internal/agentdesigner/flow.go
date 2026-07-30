@@ -344,7 +344,7 @@ func (f *Flow) Start(workspaceID, agentName string) (string, error) {
 
 	skills := f.loadSkillNames(workspaceID)
 	platforms := f.loadConnectedPlatforms(workspaceID)
-	userProfile := f.loadUserProfile(workspaceID)
+	userProfile := f.loadRuntimeContext(workspaceID)
 	userMemory := f.loadUserMemory(workspaceID)
 	f.sessions[workspaceID] = &DesignSession{
 		WorkspaceID:        workspaceID,
@@ -376,7 +376,7 @@ func (f *Flow) StartDesign(ctx context.Context, workspaceID, agentName, firstMes
 
 	skills := f.loadSkillNames(workspaceID)
 	platforms := f.loadConnectedPlatforms(workspaceID)
-	userProfile := f.loadUserProfile(workspaceID)
+	userProfile := f.loadRuntimeContext(workspaceID)
 	userMemory := f.loadUserMemory(workspaceID)
 	sess := &DesignSession{
 		WorkspaceID:        workspaceID,
@@ -415,7 +415,7 @@ func (f *Flow) StartEdit(workspaceID, agentID string) (string, error) {
 	f.mu.Lock()
 	skills := f.loadSkillNames(workspaceID)
 	platforms := f.loadConnectedPlatforms(workspaceID)
-	userProfile := f.loadUserProfile(workspaceID)
+	userProfile := f.loadRuntimeContext(workspaceID)
 	userMemory := f.loadUserMemory(workspaceID)
 	f.sessions[workspaceID] = &DesignSession{
 		WorkspaceID:        workspaceID,
@@ -458,7 +458,7 @@ func (f *Flow) StartEditDesign(ctx context.Context, workspaceID, agentID, firstM
 	f.mu.Lock()
 	skills := f.loadSkillNames(workspaceID)
 	platforms := f.loadConnectedPlatforms(workspaceID)
-	userProfile := f.loadUserProfile(workspaceID)
+	userProfile := f.loadRuntimeContext(workspaceID)
 	userMemory := f.loadUserMemory(workspaceID)
 	sess := &DesignSession{
 		WorkspaceID:        workspaceID,
@@ -800,7 +800,7 @@ func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string) (string, err
 		PendingAgentMD:     draft.PendingAgentMD,
 		Skills:             f.loadSkillNames(workspaceID),
 		ConnectedPlatforms: f.loadConnectedPlatforms(workspaceID),
-		UserProfile:        f.loadUserProfile(workspaceID),
+		UserProfile:        f.loadRuntimeContext(workspaceID),
 		UserMemory:         f.loadUserMemory(workspaceID),
 		CreatedAt:          time.Now(),
 	}
@@ -2610,13 +2610,14 @@ func (f *Flow) loadConnectedPlatforms(workspaceID string) []string {
 	return out
 }
 
-// loadUserProfile returns the rendered "[User profile]" context block for
-// workspaceID, or "" if no db is attached or no profile fields are set.
-func (f *Flow) loadUserProfile(workspaceID string) string {
+// loadRuntimeContext returns the "[Current context]" block (date, time,
+// timezone) for workspaceID, or "" if no db is attached. Identity now comes
+// from memory/ (loadUserMemory).
+func (f *Flow) loadRuntimeContext(workspaceID string) string {
 	if f.db == nil {
 		return ""
 	}
-	return profile.Load(f.db, workspaceID).ContextString()
+	return profile.RuntimeContextString(f.db, workspaceID, time.Now())
 }
 
 // loadUserMemory returns saved memory entries as a bullet list, or "" if none.
