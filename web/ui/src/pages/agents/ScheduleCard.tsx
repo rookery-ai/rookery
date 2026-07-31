@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiError } from "@/lib/api";
@@ -79,6 +79,7 @@ export function ScheduleCard({ agentId, schedule }: ScheduleCardProps) {
           onClick={() => void handleSave()}
           disabled={saving || !cron.trim()}
         >
+          <Save />
           Save
         </Button>
         {schedule && (
@@ -89,6 +90,7 @@ export function ScheduleCard({ agentId, schedule }: ScheduleCardProps) {
             onClick={() => void handleRemove()}
             disabled={removing}
           >
+            <Trash2 />
             Remove
           </Button>
         )}

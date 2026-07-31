@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { Save } from "lucide-react";
 import { useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
+import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,19 +37,36 @@ export default function ChangePassword() {
 
   return (
     <div className="min-h-screen bg-chrome flex items-center justify-center">
-      <form onSubmit={submit} className="bg-background border border-border rounded-xl p-8 w-full max-w-sm shadow-sm">
-        <h1 className="text-xl font-bold mb-6">Change password</h1>
+      <form
+        onSubmit={submit}
+        className="bg-background border border-border rounded-xl p-8 w-full max-w-sm shadow-sm"
+      >
+        <div className="mb-6">
+          <PageTitle icon="master-password" title="Change password" />
+        </div>
         <div className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="password">New password</Label>
-            <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus />
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoFocus
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="confirm">Confirm password</Label>
-            <Input id="confirm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+            <Input
+              id="confirm"
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+            />
           </div>
           {error && <p className="text-danger text-sm">{error}</p>}
           <Button type="submit" className="w-full" disabled={busy}>
+            <Save />
             {busy ? "Saving…" : "Save password"}
           </Button>
         </div>

@@ -110,7 +110,7 @@ export function AppShell() {
                   own inner padding (see ChatWindow's "container-agnostic"
                   note) — a shell-level p-4/gap-4 would double up chrome for
                   any full-height embed like the global chat panel. */}
-              <SheetContent side="right" className="w-full sm:max-w-md p-0 gap-0 flex flex-col">
+              <SheetContent side="right" className="w-[clamp(400px,33vw,720px)] max-w-full p-0 gap-0 flex flex-col">
                 <SheetHeader className="border-b border-border px-4 py-3">
                   <SheetTitle className="text-sm font-bold">{panel?.title ?? ""}</SheetTitle>
                 </SheetHeader>

@@ -1,14 +1,33 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { useEditor, EditorContent } from "@tiptap/react";
-import { AlertTriangle, ChevronDown, Info, Loader2, Link2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  Info,
+  Link2,
+  Loader2,
+  Pencil,
+} from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { useKBNote, useSaveNote, useRenameNote, useDeleteNote, useSetKBIcon, useUploadKBAsset, rawURL } from "@/lib/kb";
+import {
+  useKBNote,
+  useSaveNote,
+  useRenameNote,
+  useDeleteNote,
+  useSetKBIcon,
+  useUploadKBAsset,
+  rawURL,
+} from "@/lib/kb";
 import { useToast } from "@/components/shell/Toast";
 import ImagePicker from "./ImagePicker";
 import { Button } from "@/components/ui/button";
 import { buildExtensions, toMarkdown, checkFidelity } from "./editor";
-import { splitFrontmatter, joinFrontmatter, parseFrontmatterFields } from "./frontmatter";
+import {
+  splitFrontmatter,
+  joinFrontmatter,
+  parseFrontmatterFields,
+} from "./frontmatter";
 import { splitAlias } from "./wikilinks";
 import { slashSuggestion } from "./SlashMenu";
 import BubbleToolbar from "./BubbleToolbar";
@@ -102,7 +121,11 @@ function WysiwygEditor({
         }
         // Vault-relative reference (no scheme, not an in-page anchor): serve it
         // through the raw endpoint so a portable attachment path still opens.
-        if (!/^[a-z][a-z0-9+.-]*:/i.test(href) && !href.startsWith("#") && !href.startsWith("/")) {
+        if (
+          !/^[a-z][a-z0-9+.-]*:/i.test(href) &&
+          !href.startsWith("#") &&
+          !href.startsWith("/")
+        ) {
           window.open(rawURL(href), "_blank", "noopener,noreferrer");
           return true;
         }
@@ -157,7 +180,10 @@ function WysiwygEditor({
         .run();
     } catch (err) {
       toast({
-        message: err instanceof ApiError ? `Couldn't attach: ${err.message}` : "Couldn't attach file",
+        message:
+          err instanceof ApiError
+            ? `Couldn't attach: ${err.message}`
+            : "Couldn't attach file",
         variant: "error",
       });
     }
@@ -349,7 +375,8 @@ export default function NoteEditor({
   // every visit.
   const notifiedMissingRef = useRef(false);
   useEffect(() => {
-    if (!isError || initializedRef.current || notifiedMissingRef.current) return;
+    if (!isError || initializedRef.current || notifiedMissingRef.current)
+      return;
     if (!(error instanceof ApiError && error.status === 404)) return;
     notifiedMissingRef.current = true;
     onMissing?.();
@@ -365,7 +392,10 @@ export default function NoteEditor({
     [onStateChange],
   );
 
-  const idleState = useCallback((): SaveState => (modeRef.current === "raw" ? "raw" : "saved"), []);
+  const idleState = useCallback(
+    (): SaveState => (modeRef.current === "raw" ? "raw" : "saved"),
+    [],
+  );
 
   // Note on the dirty/saving contract (fixes a data-loss bug from an earlier
   // version that cleared dirtyRef unconditionally before the PUT resolved —
@@ -426,7 +456,9 @@ export default function NoteEditor({
         onError: (err) => {
           savingRef.current = false;
           if (mountedRef.current) {
-            setErrorMessage(err instanceof ApiError ? err.message : "Failed to save");
+            setErrorMessage(
+              err instanceof ApiError ? err.message : "Failed to save",
+            );
           }
           report("error");
           inFlightSaveRef.current = null;
@@ -515,7 +547,9 @@ export default function NoteEditor({
     (target: string) => {
       setNotFoundHint(null);
       api
-        .get<{ path: string }>(`/api/v1/kb/resolve?link=${encodeURIComponent(target)}`)
+        .get<{ path: string }>(
+          `/api/v1/kb/resolve?link=${encodeURIComponent(target)}`,
+        )
         .then(({ path: resolved }) => setSearchParams({ path: resolved }))
         .catch((err) => {
           if (err instanceof ApiError && err.status === 404) {
@@ -605,7 +639,9 @@ export default function NoteEditor({
     } catch (err) {
       savingRef.current = false;
       if (mountedRef.current) {
-        setErrorMessage(err instanceof ApiError ? err.message : "Failed to save");
+        setErrorMessage(
+          err instanceof ApiError ? err.message : "Failed to save",
+        );
       }
       report("error");
       return false;
@@ -627,7 +663,9 @@ export default function NoteEditor({
       // with this instance once the rename's navigation unmounted it).
       // dirtyRef is still true and intentionallyInvalidatedRef is still
       // false, so Ctrl+S or the next debounce tick retries normally.
-      setRenameError("Couldn't save your latest edit — rename cancelled. Try again.");
+      setRenameError(
+        "Couldn't save your latest edit — rename cancelled. Try again.",
+      );
       return;
     }
     intentionallyInvalidatedRef.current = true;
@@ -639,7 +677,9 @@ export default function NoteEditor({
           // The rename didn't happen — this instance isn't going anywhere,
           // so restore normal unmount-flush behavior for future edits.
           intentionallyInvalidatedRef.current = false;
-          setRenameError(err instanceof ApiError ? err.message : "Rename failed");
+          setRenameError(
+            err instanceof ApiError ? err.message : "Rename failed",
+          );
         },
       },
     );
@@ -686,7 +726,9 @@ export default function NoteEditor({
             report("dirty");
           }
           setDeleteError(
-            err instanceof ApiError ? `Delete failed: ${err.message}` : "Delete failed",
+            err instanceof ApiError
+              ? `Delete failed: ${err.message}`
+              : "Delete failed",
           );
         },
       },
@@ -742,7 +784,9 @@ export default function NoteEditor({
         rawMode={mode === "raw"}
         onToggleRaw={handleToggleRaw}
         renameError={renameError}
-        lossyInRichText={fidelityFailed && mode === "wysiwyg" && overrideAccepted}
+        lossyInRichText={
+          fidelityFailed && mode === "wysiwyg" && overrideAccepted
+        }
         icon={data.icon}
         onSetIcon={(emoji) => setIcon.mutate({ path, icon: emoji ?? "" })}
       />
@@ -777,6 +821,7 @@ export default function NoteEditor({
             className="shrink-0"
             onClick={() => setOverrideAccepted(true)}
           >
+            <Pencil />
             Edit as rich text anyway
           </Button>
         </div>
@@ -793,7 +838,7 @@ export default function NoteEditor({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {mode === "wysiwyg" ? (
-          <div className="mx-auto max-w-3xl px-6 py-8">
+          <div className="px-[7%] py-8">
             <FrontmatterStrip
               frontmatter={frontmatter}
               open={metaOpen}
@@ -810,7 +855,7 @@ export default function NoteEditor({
         ) : (
           <textarea
             aria-label="Raw markdown"
-            className="h-full w-full resize-none bg-background px-6 py-8 font-mono text-sm text-foreground outline-none"
+            className="h-full w-full resize-none bg-background px-[7%] py-8 font-mono text-sm text-foreground outline-none"
             value={rawText}
             onChange={handleRawChange}
             spellCheck={false}
@@ -859,8 +904,12 @@ function FrontmatterStrip({
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-muted-2 hover:text-foreground"
       >
         <Info className="size-3.5 shrink-0" />
-        <span className="flex-1 truncate">{open ? "Note metadata" : summary || "Note metadata"}</span>
-        <ChevronDown className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+        <span className="flex-1 truncate">
+          {open ? "Note metadata" : summary || "Note metadata"}
+        </span>
+        <ChevronDown
+          className={`size-3.5 shrink-0 transition-transform ${open ? "rotate-180" : ""}`}
+        />
       </button>
       {open && (
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 border-t border-border px-3 py-2">
@@ -905,4 +954,3 @@ function BacklinksStrip({
     </div>
   );
 }
-

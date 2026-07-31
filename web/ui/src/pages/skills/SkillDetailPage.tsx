@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trash2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router";
 import { Button } from "@/components/ui/button";
 import {
@@ -71,10 +72,19 @@ export default function SkillDetailPage() {
           </DialogHeader>
           <p className="text-sm text-muted-2">This can&rsquo;t be undone.</p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={deleting}>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deleting}
+            >
               Cancel
             </Button>
-            <Button variant="destructive" onClick={() => void handleDelete()} disabled={deleting}>
+            <Button
+              variant="destructive"
+              onClick={() => void handleDelete()}
+              disabled={deleting}
+            >
+              <Trash2 />
               Delete
             </Button>
           </DialogFooter>

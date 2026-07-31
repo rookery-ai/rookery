@@ -1,8 +1,14 @@
 import { useState } from "react";
-import { FolderPlus, FilePlus } from "lucide-react";
+import { FilePlus, FolderPlus, Plus } from "lucide-react";
 import { useKBTree, useSetKBIcon, type KBNode } from "@/lib/kb";
 import { Button } from "@/components/ui/button";
-import { NodeIcon, NewEntryDialog, sortNodes, parentOf, baseName } from "./FileTree";
+import {
+  NodeIcon,
+  NewEntryDialog,
+  sortNodes,
+  parentOf,
+  baseName,
+} from "./FileTree";
 import EmojiPicker from "./EmojiPicker";
 
 // FolderPage is the main-pane view of a folder (Notion-style): the folder's own
@@ -37,7 +43,7 @@ export default function FolderPage({
   const children = sortNodes(tree?.nodes ?? [], tree?.order ?? [], path === "");
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-3xl flex-col px-6 py-8">
+    <div className="mx-auto flex h-full w-full max-w-[1600px] flex-col px-8 py-8">
       <div className="mb-6 flex items-center gap-3">
         <button
           type="button"
@@ -47,11 +53,17 @@ export default function FolderPage({
         >
           <NodeIcon node={folderNode} expanded className="size-7 text-2xl" />
         </button>
-        <h1 className="min-w-0 flex-1 truncate text-2xl font-semibold">{displayName}</h1>
+        <h1 className="min-w-0 flex-1 truncate text-xl font-bold">
+          {displayName}
+        </h1>
         <Button variant="outline" size="sm" onClick={() => setNewKind("note")}>
           <FilePlus className="mr-1 size-4" /> New note
         </Button>
-        <Button variant="outline" size="sm" onClick={() => setNewKind("folder")}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setNewKind("folder")}
+        >
           <FolderPlus className="mr-1 size-4" /> New folder
         </Button>
       </div>
@@ -62,8 +74,22 @@ export default function FolderPage({
         <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-muted-2">
           <p className="text-sm">This folder is empty.</p>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => setNewKind("note")}>New note</Button>
-            <Button variant="outline" size="sm" onClick={() => setNewKind("folder")}>New folder</Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setNewKind("note")}
+            >
+              <Plus />
+              New note
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setNewKind("folder")}
+            >
+              <Plus />
+              New folder
+            </Button>
           </div>
         </div>
       ) : (
@@ -72,11 +98,15 @@ export default function FolderPage({
             <li key={child.path}>
               <button
                 type="button"
-                onClick={() => onOpen(child.path, child.is_dir, child.display_name)}
+                onClick={() =>
+                  onOpen(child.path, child.is_dir, child.display_name)
+                }
                 className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-chrome"
               >
-                <NodeIcon node={child} className="size-4 shrink-0 text-[15px]" />
-                <span className="min-w-0 flex-1 truncate">{child.display_name}</span>
+                <NodeIcon node={child} className="size-4 shrink-0 text-base" />
+                <span className="min-w-0 flex-1 truncate">
+                  {child.display_name}
+                </span>
               </button>
             </li>
           ))}

@@ -1,3 +1,12 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import nodePath from "node:path";
+
+// Vite rewrites `new URL(relative, import.meta.url)` into a public asset URL
+// even under vitest, so it resolves to http: rather than the file on disk.
+// Building the path via fileURLToPath sidesteps that transform (the same
+// workaround styles.test.ts documents).
+const dir = nodePath.dirname(fileURLToPath(import.meta.url));
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -178,4 +187,30 @@ test("clicking Lock posts to the lock endpoint", async () => {
     );
     expect(posted).toBe(true);
   });
+});
+
+test("the slide-over is a third of the page, and both width sources agree", () => {
+  // The width used to live in TWO places and had already drifted: sheet.tsx's
+  // side="right" default said sm:max-w-sm (384px) while AppShell's slide-over
+  // override said sm:max-w-md (448px). Asserting both is what stops it
+  // happening again.
+  const CLAMP = "w-[clamp(400px,33vw,720px)]";
+  // Comments are stripped first: both files explain the old values in prose,
+  // and a substring search would match the explanation rather than a live
+  // class and fail for the wrong reason.
+  const stripComments = (src: string) => src.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  const sheet = stripComments(readFileSync(nodePath.join(dir, "../ui/sheet.tsx"), "utf8"));
+  const shell = stripComments(readFileSync(nodePath.join(dir, "AppShell.tsx"), "utf8"));
+
+  expect(sheet).toContain(CLAMP);
+  expect(shell).toContain(CLAMP);
+  expect(sheet).not.toContain("sm:max-w-sm");
+  expect(shell).not.toContain("sm:max-w-md");
+});
+
+test("the slide-over content well keeps its zero padding", () => {
+  // Panel content owns its own inner padding; a shell-level p-4 would double
+  // up chrome for a full-height embed like the global chat panel.
+  const shell = readFileSync(nodePath.join(dir, "AppShell.tsx"), "utf8");
+  expect(shell).toMatch(/p-0 gap-0/);
 });

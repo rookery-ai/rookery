@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { LogIn } from "lucide-react";
 import { useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
@@ -19,12 +20,14 @@ export default function Login() {
     setBusy(true);
     setError("");
     try {
-      const res = await api.post<{ ok: boolean; must_change_password: boolean }>(
-        "/api/v1/auth/login",
-        { username, password },
-      );
+      const res = await api.post<{
+        ok: boolean;
+        must_change_password: boolean;
+      }>("/api/v1/auth/login", { username, password });
       await qc.invalidateQueries({ queryKey: ["session"] });
-      nav(res.must_change_password ? "/change-password" : "/", { replace: true });
+      nav(res.must_change_password ? "/change-password" : "/", {
+        replace: true,
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong");
     } finally {
@@ -43,14 +46,25 @@ export default function Login() {
         <div className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="username">Username</Label>
-            <Input id="username" value={username} onChange={(e) => setUsername(e.target.value)} autoFocus />
+            <Input
+              id="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoFocus
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="password">Password</Label>
-            <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+            <Input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
           </div>
           {error && <p className="text-danger text-sm">{error}</p>}
           <Button type="submit" className="w-full" disabled={busy}>
+            <LogIn />
             {busy ? "Signing in…" : "Log in"}
           </Button>
         </div>

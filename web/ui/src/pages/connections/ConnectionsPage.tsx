@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Search, MessageSquare, Puzzle } from "lucide-react";
+import {
+  KeyRound,
+  Link2,
+  MessageSquare,
+  Puzzle,
+  Save,
+  Search,
+  Trash2,
+} from "lucide-react";
+import { PageContainer } from "@/components/shell/PageContainer";
 import { ContextPane, useSlideOver } from "@/components/shell/AppShell";
 import { ContextPaneHeader } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
@@ -134,6 +143,7 @@ function ChatAppCard({
         size="sm"
         onClick={() => onOpen(platform)}
       >
+        <Link2 />
         {platform.connected ? "Manage" : "Connect"}
       </Button>
     </div>
@@ -163,11 +173,11 @@ function ServiceTile({
         {provider.label}
       </div>
       {count === 0 ? (
-        <div className="text-[11px] text-muted-2">Connect</div>
+        <div className="text-xs text-muted-2">Connect</div>
       ) : needsReauth ? (
-        <div className="text-[11px] text-warn">reconnect needed</div>
+        <div className="text-xs text-warn">reconnect needed</div>
       ) : (
-        <div className="text-[11px] text-ok">
+        <div className="text-xs text-ok">
           ● {count} account{count > 1 ? "s" : ""}
         </div>
       )}
@@ -268,6 +278,7 @@ function SearchKeyRow({
               size="sm"
               onClick={() => setEditing(true)}
             >
+              <KeyRound />
               {configured ? "Replace" : "Add key"}
             </Button>
             {configured && (
@@ -277,6 +288,7 @@ function SearchKeyRow({
                 onClick={() => void handleClear()}
                 disabled={deleteMutation.isPending}
               >
+                <Trash2 />
                 {deleteMutation.isPending ? "Clearing…" : "Clear"}
               </Button>
             )}
@@ -299,6 +311,7 @@ function SearchKeyRow({
             onClick={() => void handleSave()}
             disabled={saveMutation.isPending || !key.trim()}
           >
+            <Save />
             {saveMutation.isPending ? "Saving…" : "Save"}
           </Button>
           <Button variant="outline" size="sm" onClick={cancelEdit}>
@@ -495,7 +508,7 @@ export default function ConnectionsPage() {
         </div>
       </ContextPane>
 
-      <div className="mx-auto max-w-5xl p-6">
+      <PageContainer>
         {landingBanner && (
           <LandingBanner
             kind={landingBanner.kind}
@@ -635,7 +648,7 @@ export default function ConnectionsPage() {
             </div>
           )}
         </section>
-      </div>
+      </PageContainer>
     </>
   );
 }

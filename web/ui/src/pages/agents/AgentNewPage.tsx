@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ArrowRight } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   DesignerSurface,
@@ -11,7 +12,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAgents } from "@/lib/agents";
 import { cn } from "@/lib/utils";
-import { AGENT_TEMPLATES, featuredTemplates, type AgentTemplate } from "./templates";
+import {
+  AGENT_TEMPLATES,
+  featuredTemplates,
+  type AgentTemplate,
+} from "./templates";
 import TemplateGallery from "./TemplateGallery";
 
 const ENDPOINTS: DesignerEndpoints = {
@@ -108,7 +113,9 @@ export default function AgentNewPage() {
   function selectTemplate(template: AgentTemplate) {
     if (
       hasUnsavedCustomText() &&
-      !window.confirm(`Replace what you've written with the "${template.label}" starting point?`)
+      !window.confirm(
+        `Replace what you've written with the "${template.label}" starting point?`,
+      )
     ) {
       return;
     }
@@ -135,7 +142,8 @@ export default function AgentNewPage() {
           <div>
             <h1 className="text-lg font-bold">Create an agent</h1>
             <p className="text-sm text-muted-2">
-              Name it, then start from a template or describe what you want yourself.
+              Name it, then start from a template or describe what you want
+              yourself.
             </p>
           </div>
           <div className="space-y-1.5">
@@ -211,7 +219,12 @@ export default function AgentNewPage() {
             />
           </div>
 
-          <Button onClick={confirmName} disabled={!name.trim()} className="w-full">
+          <Button
+            onClick={confirmName}
+            disabled={!name.trim()}
+            className="w-full"
+          >
+            <ArrowRight />
             Continue
           </Button>
         </div>

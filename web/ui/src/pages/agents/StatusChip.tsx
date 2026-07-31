@@ -6,7 +6,7 @@ import type { Agent } from "@/lib/agents";
 export function StatusChip({ agent }: { agent: Agent }) {
   if (agent.running) {
     return (
-      <span className="flex shrink-0 items-center gap-1 rounded-full bg-warn-soft px-2 py-0.5 text-[10px] font-medium text-warn">
+      <span className="flex shrink-0 items-center gap-1 rounded-full bg-warn-soft px-2 py-0.5 text-xs font-medium text-warn">
         <span className="size-1.5 animate-pulse rounded-full bg-warn" />
         Running
       </span>
@@ -15,7 +15,7 @@ export function StatusChip({ agent }: { agent: Agent }) {
   return (
     <span
       className={cn(
-        "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium",
+        "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
         agent.active ? "bg-ok-soft text-ok" : "bg-muted-surface text-foreground",
       )}
     >

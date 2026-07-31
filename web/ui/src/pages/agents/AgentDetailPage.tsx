@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, Trash2 } from "lucide-react";
+import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,7 +27,7 @@ import { SkillsCard, ConnectionsCard } from "./AttachmentCards";
 function RunStatusChip({ status }: { status: AgentRun["status"] }) {
   if (status === "running") {
     return (
-      <span className="flex shrink-0 items-center gap-1 rounded-full bg-warn-soft px-2 py-0.5 text-[10px] font-medium text-warn">
+      <span className="flex shrink-0 items-center gap-1 rounded-full bg-warn-soft px-2 py-0.5 text-xs font-medium text-warn">
         <span className="size-1.5 animate-pulse rounded-full bg-warn" />
         Running
       </span>
@@ -35,8 +36,10 @@ function RunStatusChip({ status }: { status: AgentRun["status"] }) {
   return (
     <span
       className={cn(
-        "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium",
-        status === "success" ? "bg-ok-soft text-ok" : "bg-danger-soft text-danger",
+        "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
+        status === "success"
+          ? "bg-ok-soft text-ok"
+          : "bg-danger-soft text-danger",
       )}
     >
       {status === "success" ? "OK" : "Failed"}
@@ -58,7 +61,9 @@ function formatDuration(startedAt: string, finishedAt: string): string {
 function RunRow({ run }: { run: AgentRun }) {
   const [expanded, setExpanded] = useState(false);
   const output = [run.stdout, run.stderr].filter(Boolean).join("\n\n");
-  const duration = run.finished_at ? formatDuration(run.started_at, run.finished_at) : "";
+  const duration = run.finished_at
+    ? formatDuration(run.started_at, run.finished_at)
+    : "";
 
   return (
     <li className="flex flex-col gap-1.5 py-2.5">
@@ -66,7 +71,9 @@ function RunRow({ run }: { run: AgentRun }) {
         <div className="flex flex-wrap items-center gap-2">
           <RunStatusChip status={run.status} />
           <span className="text-xs text-muted-2">{run.trigger}</span>
-          <span className="text-xs text-muted-2">{timeAgo(run.started_at)}</span>
+          <span className="text-xs text-muted-2">
+            {timeAgo(run.started_at)}
+          </span>
           {duration && <span className="text-xs text-muted-2">{duration}</span>}
         </div>
         {output && (
@@ -80,7 +87,7 @@ function RunRow({ run }: { run: AgentRun }) {
         )}
       </div>
       {expanded && output && (
-        <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-chrome p-2 font-mono text-[11px]">
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-chrome p-2 font-mono text-xs">
           {output}
         </pre>
       )}
@@ -127,7 +134,7 @@ export default function AgentDetailPage() {
     <div className="flex h-full flex-col overflow-y-auto p-6">
       <div className="mb-1 flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold">{agent.name}</h1>
+          <PageTitle icon="agents" title={agent.name} />
           <StatusChip agent={agent} />
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -145,7 +152,10 @@ export default function AgentDetailPage() {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem variant="destructive" onSelect={() => setDeleteOpen(true)}>
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => setDeleteOpen(true)}
+              >
                 Delete…
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -154,7 +164,9 @@ export default function AgentDetailPage() {
       </div>
 
       {agent.description && (
-        <p className="mb-6 max-w-2xl text-sm text-muted-2">{agent.description}</p>
+        <p className="mb-6 max-w-2xl text-sm text-muted-2">
+          {agent.description}
+        </p>
       )}
 
       <div className="grid grid-cols-1 gap-6 md:grid-cols-[minmax(0,1fr)_320px] md:mt-6">
@@ -174,7 +186,11 @@ export default function AgentDetailPage() {
             )}
           </div>
 
-          <AgentMDCard agentId={id} content={agent_md} missingSecrets={missing_secrets} />
+          <AgentMDCard
+            agentId={id}
+            content={agent_md}
+            missingSecrets={missing_secrets}
+          />
         </div>
 
         <div className="flex flex-col gap-6">
@@ -200,10 +216,19 @@ export default function AgentDetailPage() {
           </DialogHeader>
           <p className="text-sm text-muted-2">This can&rsquo;t be undone.</p>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)} disabled={deleting}>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteOpen(false)}
+              disabled={deleting}
+            >
               Cancel
             </Button>
-            <Button variant="destructive" onClick={() => void handleDelete()} disabled={deleting}>
+            <Button
+              variant="destructive"
+              onClick={() => void handleDelete()}
+              disabled={deleting}
+            >
+              <Trash2 />
               Delete
             </Button>
           </DialogFooter>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   useProviderActions,
@@ -44,7 +44,7 @@ function ActionRow({ action }: { action: ConnectorAction }) {
         <span className="flex shrink-0 items-center gap-2">
           <span
             className={cn(
-              "rounded-full px-2 py-0.5 text-[11px] font-medium",
+              "rounded-full px-2 py-0.5 text-xs font-medium",
               cap.tone,
             )}
           >
@@ -115,7 +115,8 @@ export function ProviderActions({
           onClick={onBack}
           className="shrink-0 text-xs text-muted-2 underline underline-offset-2 hover:text-foreground"
         >
-          ← Back
+          <ArrowLeft className="size-4" />
+          Back
         </button>
       </div>
 

@@ -147,3 +147,16 @@ test("picking an image saves the slug and re-reads the session", async () => {
   // The monogram is gone — the trigger now renders the picked artwork.
   await waitFor(() => expect(screen.getByLabelText("Workspace").textContent).toBe(""));
 });
+
+test("workspace menu actions carry icons", async () => {
+  // Every action button and menu item in the app carries a leading icon; this
+  // menu was one of two places that had none.
+  wrap();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /workspace/i }));
+
+  for (const name of [/change image/i, /create workspace/i, /leave workspace/i]) {
+    const item = await screen.findByRole("menuitem", { name });
+    expect(item.querySelector("svg"), `no icon on ${name}`).toBeTruthy();
+  }
+});

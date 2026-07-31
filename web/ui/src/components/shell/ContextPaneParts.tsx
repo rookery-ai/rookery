@@ -43,7 +43,7 @@ export function ContextSection({ title, action, children }: ContextSectionProps)
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between px-1">
-        <h3 className="text-[11px] font-bold uppercase tracking-wide text-muted-2">{title}</h3>
+        <h3 className="text-xs font-bold uppercase tracking-wide text-muted-2">{title}</h3>
         {action}
       </div>
       {children}

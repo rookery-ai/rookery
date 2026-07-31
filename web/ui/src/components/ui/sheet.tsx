@@ -61,10 +61,15 @@ function SheetContent({
         data-slot="sheet-content"
         className={cn(
           "fixed z-50 flex flex-col gap-4 bg-background shadow-lg transition ease-in-out data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:animate-in data-[state=open]:duration-500",
+          // One third of the viewport, floored so it stays usable on a small
+          // laptop and capped so it does not become a second page on an
+          // ultrawide. AppShell's slide-over MUST use the same clamp — the
+          // width used to live in two places and had already drifted
+          // (sm:max-w-sm here vs sm:max-w-md there).
           side === "right" &&
-            "inset-y-0 right-0 h-full w-3/4 border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-sm",
+            "inset-y-0 right-0 h-full w-[clamp(400px,33vw,720px)] max-w-full border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
           side === "left" &&
-            "inset-y-0 left-0 h-full w-3/4 border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:max-w-sm",
+            "inset-y-0 left-0 h-full w-[clamp(400px,33vw,720px)] max-w-full border-r data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left",
           side === "top" &&
             "inset-x-0 top-0 h-auto border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
           side === "bottom" &&

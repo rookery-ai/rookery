@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { AlertTriangle, Check, Loader2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, Link2, Loader2, RotateCcw, Save, Unlink } from "lucide-react";
 import { useSlideOver } from "@/components/shell/AppShell";
 import { PanelBody } from "@/components/shell/PanelBody";
 import { Button } from "@/components/ui/button";
@@ -38,7 +38,7 @@ function StepChips({ step }: { step: Step }) {
           <li key={s} className="flex items-center gap-2">
             <span
               className={cn(
-                "flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px]",
+                "flex size-5 shrink-0 items-center justify-center rounded-full border text-xs",
                 isActive && "border-foreground bg-foreground text-background",
                 isDone && "border-ok bg-ok text-white",
                 !isActive && !isDone && "border-border text-muted-2",
@@ -46,8 +46,12 @@ function StepChips({ step }: { step: Step }) {
             >
               {isDone ? <Check className="size-3" /> : i + 1}
             </span>
-            <span className={cn(isActive && "text-foreground")}>{STEP_LABELS[s]}</span>
-            {i < STEPS.length - 1 && <span aria-hidden className="mx-1 h-px w-4 bg-border" />}
+            <span className={cn(isActive && "text-foreground")}>
+              {STEP_LABELS[s]}
+            </span>
+            {i < STEPS.length - 1 && (
+              <span aria-hidden className="mx-1 h-px w-4 bg-border" />
+            )}
           </li>
         );
       })}
@@ -107,8 +111,10 @@ function TestResult({
   error?: string;
 }) {
   if (pending) return <Spinner text="Checking the connection…" />;
-  if (ok === true) return <OkNote>Connected as {identity ?? platform} ✓</OkNote>;
-  if (ok === false) return <ErrorNote>{error ?? "Connection failed"}</ErrorNote>;
+  if (ok === true)
+    return <OkNote>Connected as {identity ?? platform} ✓</OkNote>;
+  if (ok === false)
+    return <ErrorNote>{error ?? "Connection failed"}</ErrorNote>;
   return null;
 }
 
@@ -133,11 +139,16 @@ function ConnectWizard({ platform }: { platform: ConnectorPlatform }) {
   async function handleSave() {
     setSaveError(null);
     try {
-      const res = await saveMutation.mutateAsync({ platform: platform.platform, values });
+      const res = await saveMutation.mutateAsync({
+        platform: platform.platform,
+        values,
+      });
       if (res.warning) setWarning(res.warning);
       setStep("test");
     } catch (err) {
-      setSaveError(err instanceof ApiError ? err.message : "Something went wrong");
+      setSaveError(
+        err instanceof ApiError ? err.message : "Something went wrong",
+      );
     }
   }
 
@@ -149,7 +160,9 @@ function ConnectWizard({ platform }: { platform: ConnectorPlatform }) {
 
       {step === "setup" && (
         <div className="space-y-3">
-          {platform.blurb && <p className="text-sm text-muted-2">{platform.blurb}</p>}
+          {platform.blurb && (
+            <p className="text-sm text-muted-2">{platform.blurb}</p>
+          )}
           {platform.setup_steps.length > 0 && (
             <ol className="space-y-2">
               {platform.setup_steps.map((s, i) => (
@@ -157,7 +170,7 @@ function ConnectWizard({ platform }: { platform: ConnectorPlatform }) {
                   key={i}
                   className="flex gap-3 rounded-lg border border-border bg-background p-3 text-sm"
                 >
-                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted-surface text-[11px] font-semibold">
+                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted-surface text-xs font-semibold">
                     {i + 1}
                   </span>
                   <span className="leading-relaxed">
@@ -168,7 +181,10 @@ function ConnectWizard({ platform }: { platform: ConnectorPlatform }) {
             </ol>
           )}
           <div className="flex justify-end">
-            <Button onClick={() => setStep("credentials")}>Next →</Button>
+            <Button onClick={() => setStep("credentials")}>
+              <ArrowRight />
+              Next
+            </Button>
           </div>
         </div>
       )}
@@ -178,14 +194,21 @@ function ConnectWizard({ platform }: { platform: ConnectorPlatform }) {
           <ConnectorCredentialsFields
             fields={platform.fields}
             values={values}
-            onChange={(name, value) => setValues((v) => ({ ...v, [name]: value }))}
+            onChange={(name, value) =>
+              setValues((v) => ({ ...v, [name]: value }))
+            }
           />
           {saveError && <ErrorNote>{saveError}</ErrorNote>}
           <div className="flex justify-between">
             <Button variant="outline" onClick={() => setStep("setup")}>
-              ← Back
+              <ArrowLeft />
+              Back
             </Button>
-            <Button onClick={() => void handleSave()} disabled={saveMutation.isPending}>
+            <Button
+              onClick={() => void handleSave()}
+              disabled={saveMutation.isPending}
+            >
+              <Save />
               {saveMutation.isPending ? "Saving…" : "Save & continue"}
             </Button>
           </div>
@@ -218,6 +241,7 @@ function ConnectWizard({ platform }: { platform: ConnectorPlatform }) {
                   variant="outline"
                   onClick={() => testMutation.mutate(platform.platform)}
                 >
+                  <RotateCcw />
                   Retry
                 </Button>
               )
@@ -245,7 +269,9 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
       await deleteMutation.mutateAsync(platform.platform);
       close();
     } catch (err) {
-      setDisconnectError(err instanceof ApiError ? err.message : "Something went wrong");
+      setDisconnectError(
+        err instanceof ApiError ? err.message : "Something went wrong",
+      );
     }
   }
 
@@ -257,7 +283,9 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
         <div className="flex items-center gap-1.5 text-sm font-medium text-ok">
           <span className="size-1.5 rounded-full bg-ok" /> Connected
         </div>
-        {platform.identity && <div className="text-xs text-muted-2">{platform.identity}</div>}
+        {platform.identity && (
+          <div className="text-xs text-muted-2">{platform.identity}</div>
+        )}
       </div>
 
       <Button
@@ -265,6 +293,7 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
         onClick={() => testMutation.mutate(platform.platform)}
         disabled={testMutation.isPending}
       >
+        <Link2 />
         {testMutation.isPending ? "Checking…" : "Test connection"}
       </Button>
 
@@ -278,16 +307,26 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
 
       <div className="border-t border-border pt-3">
         {!confirming ? (
-          <Button variant="outline" className="text-danger" onClick={() => setConfirming(true)}>
+          <Button
+            variant="outline"
+            className="text-danger"
+            onClick={() => setConfirming(true)}
+          >
+            <Unlink />
             Disconnect…
           </Button>
         ) : (
           <div className="space-y-2 rounded-md border border-danger/30 bg-danger-soft p-3 text-xs text-danger">
             <p>
-              Disconnect {platform.label}? You'll need to reconnect to use it again.
+              Disconnect {platform.label}? You'll need to reconnect to use it
+              again.
             </p>
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => setConfirming(false)}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setConfirming(false)}
+              >
                 Cancel
               </Button>
               <Button
@@ -296,6 +335,7 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
                 onClick={() => void handleDisconnect()}
                 disabled={deleteMutation.isPending}
               >
+                <Unlink />
                 Yes, disconnect
               </Button>
             </div>

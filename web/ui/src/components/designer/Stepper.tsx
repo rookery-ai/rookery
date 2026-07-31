@@ -18,7 +18,7 @@ export function Stepper({ steps, activeIndex }: StepperProps) {
           <li key={label} className="flex items-center gap-2">
             <span
               className={cn(
-                "flex size-5 shrink-0 items-center justify-center rounded-full border text-[10px]",
+                "flex size-5 shrink-0 items-center justify-center rounded-full border text-xs",
                 isActive && "border-foreground bg-foreground text-background",
                 isDone && "border-ok bg-ok text-white",
                 !isActive && !isDone && "border-border text-muted-2",

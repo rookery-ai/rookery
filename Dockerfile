@@ -6,6 +6,16 @@ WORKDIR /src/web/ui
 COPY web/ui/package.json web/ui/package-lock.json ./
 RUN npm ci
 COPY web/ui/ ./
+# The UI font is NOT under web/ui/: it lives in internal/fonts/ as a single copy
+# shared with the Go export path (go:embed cannot reach outside its own package
+# dir, so the font has to live there, and a second copy would drift silently).
+# index.css reaches it through the "@fonts" Vite alias → ../../internal/fonts,
+# which is outside this stage's build context unless it is copied in. Without
+# this line `npm run build` fails with
+#   [postcss] ENOENT ... /src/internal/fonts/InterVariable.woff2
+# — and `make ci` does not catch it, because the container is built only by the
+# separate "Container smoke test" CI job.
+COPY internal/fonts/ /src/internal/fonts/
 RUN npm run build
 
 # ── Go ───────────────────────────────────────────────────────────────────────

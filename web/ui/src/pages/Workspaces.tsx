@@ -1,13 +1,18 @@
 import { useEffect, useState } from "react";
+import { DoorOpen, Plus } from "lucide-react";
 import { useNavigate } from "react-router";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
 import { useSession, type Workspace } from "@/lib/session";
+import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 
 // Every tenant-scoped query key in the app (["agents"], ["skills"],
@@ -26,8 +31,12 @@ export async function resetWorkspaceScopedCache(qc: QueryClient) {
 }
 
 export function EnterWorkspaceDialog({
-  ws, onClose,
-}: { ws: Workspace | null; onClose: () => void }) {
+  ws,
+  onClose,
+}: {
+  ws: Workspace | null;
+  onClose: () => void;
+}) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -75,12 +84,16 @@ export function EnterWorkspaceDialog({
           <div className="space-y-1.5">
             <Label htmlFor="master_password">Master password</Label>
             <Input
-              id="master_password" type="password" value={password}
-              onChange={(e) => setPassword(e.target.value)} autoFocus
+              id="master_password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoFocus
             />
           </div>
           {error && <p className="text-danger text-sm">{error}</p>}
           <Button type="submit" className="w-full" disabled={busy}>
+            <DoorOpen />
             {busy ? "Entering…" : "Enter workspace"}
           </Button>
         </form>
@@ -90,8 +103,12 @@ export function EnterWorkspaceDialog({
 }
 
 export function CreateWorkspaceDialog({
-  open, onClose,
-}: { open: boolean; onClose: () => void }) {
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const nav = useNavigate();
@@ -125,10 +142,18 @@ export function CreateWorkspaceDialog({
         <form onSubmit={create} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="ws-name">Name</Label>
-            <Input id="ws-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+            <Input
+              id="ws-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              autoFocus
+            />
           </div>
           {error && <p className="text-danger text-sm">{error}</p>}
-          <Button type="submit" className="w-full">Create</Button>
+          <Button type="submit" className="w-full">
+            <Plus />
+            Create
+          </Button>
         </form>
       </DialogContent>
     </Dialog>
@@ -155,16 +180,21 @@ export default function Workspaces() {
       await resetWorkspaceScopedCache(qc);
       nav("/", { replace: true });
     } catch (err) {
-      setDirectEnterError(err instanceof ApiError ? err.message : "Something went wrong");
+      setDirectEnterError(
+        err instanceof ApiError ? err.message : "Something went wrong",
+      );
     }
   }
 
   return (
     <div className="min-h-screen bg-chrome flex items-center justify-center p-4">
       <div className="bg-background border border-border rounded-xl p-8 w-full max-w-md shadow-sm">
-        <h1 className="text-xl font-bold mb-1">Workspaces</h1>
+        <div className="mb-1">
+          <PageTitle icon="owner-workspaces" title="Workspaces" />
+        </div>
         <p className="text-muted-2 text-sm mb-6">
-          Pick a workspace to enter — its master password is required every time.
+          Pick a workspace to enter — its master password is required every
+          time.
         </p>
         {directEnterError && (
           <p className="text-danger text-sm mb-4">{directEnterError}</p>
@@ -173,21 +203,37 @@ export default function Workspaces() {
           {list.map((ws) => (
             <li key={ws.id}>
               <button
-                onClick={() => (ws.needs_setup ? void directEnter(ws) : setEntering(ws))}
+                onClick={() =>
+                  ws.needs_setup ? void directEnter(ws) : setEntering(ws)
+                }
                 className="w-full text-left border border-border rounded-lg px-4 py-3 hover:bg-chrome transition-colors"
               >
                 <span className="font-semibold">{ws.name}</span>
-                {ws.needs_setup && <span className="text-warn text-xs ml-2">needs setup</span>}
-                {ws.about && <span className="block text-muted-2 text-xs mt-0.5">{ws.about}</span>}
+                {ws.needs_setup && (
+                  <span className="text-warn text-xs ml-2">needs setup</span>
+                )}
+                {ws.about && (
+                  <span className="block text-muted-2 text-xs mt-0.5">
+                    {ws.about}
+                  </span>
+                )}
               </button>
             </li>
           ))}
         </ul>
-        <Button variant="outline" className="w-full mt-4" onClick={() => setCreating(true)}>
-          + Create workspace
+        <Button
+          variant="outline"
+          className="w-full mt-4"
+          onClick={() => setCreating(true)}
+        >
+          <Plus />
+          Create workspace
         </Button>
         <EnterWorkspaceDialog ws={entering} onClose={() => setEntering(null)} />
-        <CreateWorkspaceDialog open={creating} onClose={() => setCreating(false)} />
+        <CreateWorkspaceDialog
+          open={creating}
+          onClose={() => setCreating(false)}
+        />
       </div>
     </div>
   );

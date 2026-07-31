@@ -1,12 +1,16 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check } from "lucide-react";
+import { Check, Save } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { WORKSPACE_ICONS, WorkspaceAvatar } from "@/lib/workspaceIcons";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 
 // A grid of the bundled workspace images plus a "no image" escape back to the
@@ -49,7 +53,11 @@ export default function WorkspaceIconPicker({
       await qc.invalidateQueries({ queryKey: ["session"] });
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Couldn't save the workspace image");
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Couldn't save the workspace image",
+      );
     } finally {
       setSaving(false);
     }
@@ -57,15 +65,17 @@ export default function WorkspaceIconPicker({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Workspace image</DialogTitle>
         </DialogHeader>
 
-        <div className="grid grid-cols-4 gap-2">
+        {/* Scrollable: 28 presets plus the clear tile no longer fit a fixed
+            dialog, and a dialog that grows past the viewport puts its footer
+            out of reach. */}
+        <div className="grid max-h-[55vh] grid-cols-5 gap-2 overflow-y-auto pr-1">
           {/* The clear option first: it is the state every workspace starts in,
-              so it belongs where the eye lands, not appended after twelve
-              tiles. */}
+              so it belongs where the eye lands, not appended after 28 tiles. */}
           <button
             type="button"
             aria-label="No image"
@@ -111,8 +121,13 @@ export default function WorkspaceIconPicker({
         {error && <p className="text-sm text-danger">{error}</p>}
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => handleOpenChange(false)}>Cancel</Button>
-          <Button onClick={save} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+          <Button variant="outline" onClick={() => handleOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button onClick={save} disabled={saving}>
+            <Save />
+            {saving ? "Saving…" : "Save"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

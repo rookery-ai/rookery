@@ -253,6 +253,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/convert` | Bytes + filename/MIME → markdown. Pure function: no vault, no network, no LLM — which is what makes it testable against golden fixtures and identical across hosts. `ToMarkdown(data, Options) (Result, error)` + `Detect` + `IsTextual`. Handles html (real `x/net/html` parse, prefers `<main>`/`<article>`, drops nav/footer/script), csv/tsv, docx/pptx/xlsx (stdlib `archive/zip`+`encoding/xml`, no vendor SDK), pdf (prefers `pdftotext -layout` when on PATH, pure-Go fallback, **warns whenever extraction looks thin** so a scanned PDF cannot pass as a clean one), json, and images (stub — no OCR). `Result.Warnings` is load-bearing: it flows into the note's frontmatter so a lossy conversion declares itself. Typed sentinel `ErrUnsupportedFormat`. Conversion is ONE-DIRECTIONAL (into markdown); exporting markdown to other formats is a planned future KB action, not an agent capability. |
 | `internal/websearch` | Query → `[]Result` via a provider cascade. Optional keyed provider first (`SEARCH_KEY_BRAVE`/`SEARCH_KEY_TAVILY`, resolved as ordinary encrypted secrets), then a keyless cascade (DDG html → DDG lite → Mojeek → Bing). A provider returning ZERO results means "try the next engine", not "the answer is nothing" — a 200-OK JS-challenge page is indistinguishable from genuine no-results, which is the whole reason the cascade exists. Transient failures (429/5xx/network) retry INSIDE one provider; exhausting every provider is a NON-error empty slice, because the coder's tool loop treats any `error:` as a failing call worth blocking. |
 | `internal/nethttp` | The single private-address dial guard (`GuardedClient`, `DenyPrivateAddr`, `IsBlockedIP`). Enforced at DIAL time via `net.Dialer.Control`, not by URL inspection — the only approach that catches a hostname RESOLVING into private space and every redirect hop. Blocks loopback/RFC1918/link-local/unique-local/CGNAT-tailscale/cloud-metadata, plus the NAT64/6to4/Teredo transition ranges that embed an IPv4 address (partial by nature — a network-specific NAT64 prefix cannot be enumerated). Load-bearing because chat can now reach the web and the loopback interface hosts the connector + KB bridges and their per-run bearer tokens. `internal/coder/netguard.go` delegates here; do not fork a second copy. |
+| `internal/fonts` | The single copy of the UI font (`InterVariable.woff2`, latin subset, ~48 KB). Its own package because `go:embed` cannot reach outside its own directory and TWO consumers need these exact bytes: `internal/export` (which base64-inlines it into exported HTML/PDF) and the SPA (via the `@fonts` Vite alias). A second checked-in copy would drift silently, so there is deliberately only one. A test asserts the embedded bytes are a real woff2 (`wOF2` magic) and not a truncated or LFS-pointer checkout. |
 | `internal/iolimit` | `ReadCapped` + `ErrTooLarge` — the shared capped read every ingest door uses (KB upload, web-chat attachment, Telegram/Discord/Slack attachment, KB bridge, `save_to_kb` URL fetch), all enforcing one 25 MiB cap. Reads `cap+1` and REJECTS rather than truncating: a silently truncated import writes a note whose frontmatter states a byte count that is not the source's. `CappingWriter` is the write-side analogue — bounds a stream written into an `io.Writer` (Slack's `slack.Client.GetFile` insists on an `io.Writer` and has no size bound; there is no stdlib `io.LimitWriter`), rejecting at the same `cap+1` boundary. |
 | `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface: one struct per coder — Claude/OpenCode/Codex/Gemini/Cursor, plus a generic fallback). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host tools (`read_file`/`write_file`/`edit_file`/`list_dir` + read-only discovery `search_files`/`glob` + exec tools `run_script`/`bash`/`web_fetch`/`web_search`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
@@ -686,6 +687,97 @@ machinery, the `web/templates/` + `web/static/` directories, and their `template
 config plus the two environment overrides that fed them are gone. The SPA talks to the JSON API for
 everything.
 
+#### Design system (tokens first, not per-page)
+
+**The type scale, radii and colours are remapped in `index.css`'s `@theme inline`, never at call
+sites.** Tailwind v4 resolves every `text-*` utility from a `--text-*` token, so raising the scale in
+one file grew all ~405 existing `text-xs`/`text-sm` uses at once. Two traps: **each `--text-X` must
+be set together with its `--text-X--line-height` partner** (size alone leaves line-height pinned to
+the old metric, making text *cramped* rather than more readable), and **raising `body { font-size }`
+does not do this** — `text-sm` is an absolute rem value, so the body rule only reaches elements
+carrying no `text-*` class. `density.test.ts` fails the build on any `text-[<n>px]` literal, because
+a hardcoded pixel size is immune to the token remap and stays small forever.
+
+**`contrast.test.ts` computes WCAG ratios out of the stylesheet itself**, in both themes, for
+`--foreground`/`--muted`/`--muted-2` and for `--ok`/`--warn`/`--danger` against `--background`,
+`--chrome` **and their own `-soft` fill** (the tightest constraint). This exists because an earlier
+review measured `--ok` at 3.68:1 on `--ok-soft` and darkened it — a manual finding that nothing
+stopped the next palette edit from undoing. Changing a colour token means running this.
+
+**`button { cursor: pointer }` is restored in an `@layer base` rule.** Tailwind v4's Preflight
+dropped it to match the browser, and a `<button>`'s browser default is `cursor: default` — so 54 raw
+buttons across the app hovered as if inert. It read worst in the KB pane, where `FileTree`'s rows opt
+into `cursor-pointer` explicitly while search results did not, which is how "KB search finds the
+pages but they are not clickable" was reported. The clicks always worked; the affordance never did.
+Fixed once in base so new buttons inherit it.
+
+**The UI font is vendored at `internal/fonts/InterVariable.woff2` — one copy, two consumers.** It is
+its own Go package because `go:embed` cannot reach outside its own directory, and both the Go export
+path and the SPA (via the `@fonts` Vite alias) need the same bytes; a second checked-in copy would
+drift silently. A CDN `@import` is not an option — Rookery ships as a single binary for offline/LAN
+installs. It is declared in **three** places: `index.css` (`--font-sans`), `pages/kb/editor.css`
+(explicitly, so a future body-style change cannot silently drop the KB editor back to a system font),
+and `internal/export/html.go`, which **base64-inlines it as a `data:` URI** rather than naming it —
+`ToPDF` shells out to a headless renderer on the *server*, which will not have Inter installed, so a
+named font would silently fall back while still reporting success. DOCX can only *name* the font
+(embedding in OOXML is out of scope), which is recorded in `docx.go` as a stated limitation.
+
+**`lib/entityIcons.tsx` is the single icon map**, read by the rail, `PageTitle`, the command
+palette's kind labels and the settings nav. Rules: lucide only, `currentColor` always (never coloured
+except `text-danger`/`-warn`/`-ok`), `size-4` inline / `size-5` in a page title. The one exception is
+`components/brand/ProviderLogo.tsx`, which keeps brand colour — a monochrome Slack mark is harder to
+recognise than a coloured one. Before this map, `SettingsPage` held **emoji strings** for its section
+nav while every other surface used lucide, which is the whole reason settings looked "coloured and
+everything else grey"; a test fails the build if emoji return.
+
+**Buttons**: `default` = primary, `outline` = secondary, `ghost` = tertiary/inline, `destructive` =
+removes data. Every *action* button carries a leading icon, with two deliberate carve-outs because
+the blanket rule reads worse: dialog footer **pairs** (Cancel/Save) and the `link` variant stay
+text-only. A destructive *confirm* keeps its icon — there the icon is the warning.
+
+**`PageContainer`** (`mx-auto w-full max-w-[1600px] px-8 py-6`) is the one page wrapper; it replaced
+four independent hardcoded widths that centred content and left ~900px empty on a 1920px display.
+`mx-auto` only bites past the cap, so a 1440px viewport is genuinely fluid. It keeps `px`/`py`
+separate rather than a `p-*` shorthand **on purpose**: tailwind-merge treats `p` and `px` as
+different groups, so `cn("p-8","px-[7%]")` keeps BOTH and lets stylesheet order pick the winner —
+the same trap CLAUDE.md records for `ChatScroll`. The KB editor relies on overriding it (`px-[7%]`,
+applied to **both** the WYSIWYG container and the raw textarea; changing only one makes switching
+modes jump sideways). Forms still cap their own field column (~640px) — a 1500px text input is worse,
+not better.
+
+**`PageTitle`** owns only the heading *group* (icon + `<h1>` + optional subtitle), not the whole
+header row: pages already have their own search boxes and actions, so scoping it to the part that was
+inconsistent made it adoptable at all 16 sites without restructuring them.
+
+**The side slide-over is `w-[clamp(400px,33vw,720px)]`, set in BOTH `sheet.tsx` and `AppShell`** —
+the width used to live in two places and had already drifted (`sm:max-w-sm` vs `sm:max-w-md`). A test
+asserts they agree. `AppShell`'s `p-0 gap-0` on the content well stays: panel content owns its inner
+padding, and a shell-level `p-4` would double chrome for a full-height embed like the global chat.
+
+**Owner settings is five separate sections, not one stacked page** (`owner-workspaces`,
+`owner-instance-url`, `owner-system`, `owner-backup`, `owner-audit`), under an `OWNER` group in the
+settings pane nav; `?section=owner` redirects to the first. Each mounts `OwnerGate` **independently**,
+which costs nothing extra: the gate's probe is a react-query on the shared `["admin","overview"]`
+key, so five mounts share one request, and one unlock covers all five because **the server owns the
+verification stamp** — the component is the affordance, not the protection. A test asserts every
+owner slug renders gated, so a missed wrap fails the build rather than quietly exposing an
+install-level section.
+
+**Emoji are generated, not curated.** `scripts/gen-emoji.mjs` turns a vendored Unicode data file into
+`pages/kb/emojiData.generated.ts` (1906 emoji, 9 standard groups, keyword search) with **zero runtime
+dependencies** — emoji-mart was the escape hatch the old curated file itself named, but a ~200 KB
+runtime dep with its own styling to theme is a poor trade for data. The generated file is
+**committed** so the release build never runs the generator, and `emojiData.test.ts` re-runs it and
+compares, so a stale commit fails CI instead of shipping an old set.
+
+**Workspace presets are 28 inline SVGs** (`lib/workspaceIcons.tsx`) — gradient + one simple motif,
+legible at the 20px the rail actually renders. `web/api_settings.go`'s `workspaceIcons` validator
+must list the same slugs, and `TestWorkspaceIconSlugsMatchTheSPA` parses the TSX to assert it: a
+preset added only to the SPA 400s on save, one added only to Go has no artwork, and neither failure
+is visible in either file alone. **Custom upload is deliberately not built** — it is the one item
+needing a multipart endpoint, an `iolimit` cap, MIME sniffing (SVG is an XSS vector), vault storage
+and a two-shape icon field.
+
 **Shell primitives** (`web/ui/src/components/shell/`): every page renders inside `AppShell` —
 an icon rail + list panel + a `ContextPane` slot. The context pane is user-resizable —
 `usePaneWidth`/`PaneResizeHandle` (`usePaneWidth.tsx`) persist a 200–560px width to `localStorage`
@@ -921,6 +1013,13 @@ cannot be pruned.
 - **Discord adapter** — implemented (DM-only); live WS round-trip is operator-verified. **Slack adapter** — implemented (DM-only, Socket Mode); live loop operator-verified. Note: Slack's Socket Mode inbound loop does not auto-restart after a *fatal* reconnect failure (reconnect exhaustion) — outbound still works, but inbound DMs stop until the connector is re-saved or the server restarts; a per-adapter supervisor is a future framework enhancement. Mattermost/Matrix adapters — not yet implemented (framework ready: adapter registry + `CredSpec` + render subsystem all support a new platform via `init()` registration alone; Mattermost should be a hand-rolled thin REST+WS client, NOT the heavy official SDK; Matrix E2EE needs `-tags goolm` to stay CGo-free). The connectors UI (SPA `/connections` → Chat apps tab, backed by `/api/v1/connectors`) is `CredSpec`-driven — a new platform's connect card is data, not hand-written markup. **Design stance:** all adapters use an **outbound** connection (bot dials out; zero inbound port) — a deliberate security property for self-hosted/home installs (works behind NAT, home firewall can drop-by-default, no forgeable public endpoint). **Webhook-based platforms** (WhatsApp/Viber/LINE/Teams/Messenger/Google Chat) are deferred OUT of the home-install core; if built, they must be tunnel/relay-first (outbound), never a raw open port. Future outbound-only candidates: Zulip (event-queue long-poll), XMPP. See `docs/superpowers/specs/2026-07-15-multi-platform-chat-adapters-design.md`.
 - **Skill editing + import via chat** — `/skill` covers list/create/cancel, but there is no `/skill edit` (the skill designer has no edit mode at all, unlike `agentdesigner.StartEdit`) and no skill import (ZIP / pasted SKILL.md) over chat, which needs per-adapter file-upload handling. The remaining half of the skill parity gap.
 - **MCP servers** — `mcp_servers` table exists; MCP tool execution not implemented.
+- **Custom workspace image upload** — the 28 presets are inline SVG on purpose (no endpoint, no
+  storage, no MIME validation, crisp at any size). Uploading a custom image is the one requested UI
+  item deliberately deferred: it needs a multipart endpoint, a 25 MiB `iolimit` cap, MIME sniffing
+  (SVG is an XSS vector needing sanitising or rasterising), a vault storage location with backup
+  implications, and relaxing `web/api_settings.go`'s slug validator into a two-shape field
+  (`preset:<slug>` vs `upload:<id>`). Bundling it into a visual-polish change would have put a
+  security review on that change's critical path.
 - **Connector provider configs (non-Google) unverified against live APIs** — google/github/notion verified end-to-end against real accounts; outlook/jira were hand-authored (rendering unit-tested only). Verify each against live docs before relying on it. A dev harness for this lives at `cmd/livecheck` (uncommitted; runs `connectors.Execute` against real stored tokens).
 - **Connector native tools for CLI coders** — CLI coders reach connector actions via the `rookery connector exec` command (loopback bridge), not as native function tools in their own loop; true native parity for MCP-capable coders (claude-code) would be an MCP transport over the same `connectors.Execute` (not built).
 - **Build-time connector testing exposes ALL workspace connections** (the agent hasn't declared bindings yet); a real run exposes only the agent's bound connections (`agent_connections`).

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import type { UseMutationResult } from "@tanstack/react-query";
-import { AlertTriangle, Check, ChevronDown, Loader2 } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Loader2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -65,7 +65,9 @@ export function CoderSection({
   // installed right now on a build that does support them.
   coderMode?: "full" | "slim";
 }) {
-  const [engine, setEngine] = useState<Engine>(coderMode === "slim" ? "api" : "local");
+  const [engine, setEngine] = useState<Engine>(
+    coderMode === "slim" ? "api" : "local",
+  );
   const [bin, setBin] = useState("");
   const [timeoutS, setTimeoutS] = useState(120);
   const [provider, setProvider] = useState("");
@@ -103,7 +105,9 @@ export function CoderSection({
     setSaved(false);
     setBaseURLError("");
     if (engine === "api" && isCustom && !baseURL.trim()) {
-      setBaseURLError("A base URL is required for a Custom (OpenAI-compatible) provider");
+      setBaseURLError(
+        "A base URL is required for a Custom (OpenAI-compatible) provider",
+      );
       setAdvancedOpen(true);
       return;
     }
@@ -144,8 +148,15 @@ export function CoderSection({
         </div>
       )}
 
-      <form onSubmit={(e) => void handleSave(e)} className="mt-4 max-w-lg space-y-4">
-        <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Engine">
+      <form
+        onSubmit={(e) => void handleSave(e)}
+        className="mt-4 max-w-lg space-y-4"
+      >
+        <div
+          className="grid grid-cols-2 gap-2"
+          role="radiogroup"
+          aria-label="Engine"
+        >
           {engines.map((eng) => (
             <label
               key={eng}
@@ -173,7 +184,9 @@ export function CoderSection({
           <div className="space-y-1.5">
             <Label htmlFor="coder_bin">Coder CLI</Label>
             {detectedCoders.length === 0 ? (
-              <p className="text-xs text-muted-2">No coder CLIs found on the server.</p>
+              <p className="text-xs text-muted-2">
+                No coder CLIs found on the server.
+              </p>
             ) : (
               <select
                 id="coder_bin"
@@ -210,7 +223,11 @@ export function CoderSection({
                   return (
                     <option key={c.name} value={c.name} disabled={!usable}>
                       {c.name}
-                      {!usable ? (showApiKeyInput ? " (enter your API key below)" : " (add key above)") : ""}
+                      {!usable
+                        ? showApiKeyInput
+                          ? " (enter your API key below)"
+                          : " (add key above)"
+                        : ""}
                     </option>
                   );
                 })}
@@ -236,12 +253,15 @@ export function CoderSection({
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder={
-                    selectedEntry?.hasKey ? "leave blank to keep current key" : "paste your provider API key"
+                    selectedEntry?.hasKey
+                      ? "leave blank to keep current key"
+                      : "paste your provider API key"
                   }
                 />
                 <p className="text-xs text-muted-2">
                   Stored securely as a secret.
-                  {selectedEntry?.hasKey && " Already set — leave blank to keep it."}
+                  {selectedEntry?.hasKey &&
+                    " Already set — leave blank to keep it."}
                   {selectedEntry?.docs && (
                     <>
                       {" "}
@@ -266,14 +286,18 @@ export function CoderSection({
                 className="flex items-center gap-1 text-xs font-medium text-muted-2 hover:text-foreground"
               >
                 <ChevronDown
-                  className={cn("size-3.5 transition-transform", advancedOpen && "rotate-180")}
+                  className={cn(
+                    "size-3.5 transition-transform",
+                    advancedOpen && "rotate-180",
+                  )}
                 />
                 Advanced
               </button>
               {advancedOpen && (
                 <div className="mt-2 space-y-1.5">
                   <Label htmlFor="coder_base_url">
-                    Base URL {isCustom && <span className="text-danger">*</span>}
+                    Base URL{" "}
+                    {isCustom && <span className="text-danger">*</span>}
                   </Label>
                   <Input
                     id="coder_base_url"
@@ -281,7 +305,9 @@ export function CoderSection({
                     onChange={(e) => setBaseURL(e.target.value)}
                     placeholder="https://api.example.com/v1"
                   />
-                  {baseURLError && <p className="text-xs text-danger">{baseURLError}</p>}
+                  {baseURLError && (
+                    <p className="text-xs text-danger">{baseURLError}</p>
+                  )}
                 </div>
               )}
             </div>
@@ -300,10 +326,16 @@ export function CoderSection({
 
         <div className="flex items-center gap-3">
           <Button type="submit" disabled={save.isPending}>
+            <Save />
             {save.isPending ? "Saving…" : "Save coder"}
           </Button>
           {!hideTest && (
-            <Button type="button" variant="outline" onClick={() => test.mutate()} disabled={test.isPending}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => test.mutate()}
+              disabled={test.isPending}
+            >
               {test.isPending && <Loader2 className="size-3.5 animate-spin" />}
               {test.isPending ? "Testing…" : "Test"}
             </Button>
@@ -312,7 +344,9 @@ export function CoderSection({
 
         {!hideTest && (
           <>
-            <p className="text-xs text-muted-2">Tests the last saved configuration.</p>
+            <p className="text-xs text-muted-2">
+              Tests the last saved configuration.
+            </p>
             {test.isPending && (
               <p className="text-xs text-muted-2">
                 Running a live test call — this can take up to a minute…
@@ -324,9 +358,13 @@ export function CoderSection({
               </p>
             )}
             {test.data && !test.data.ok && (
-              <p className="text-sm text-danger">{test.data.error ?? "Test failed"}</p>
+              <p className="text-sm text-danger">
+                {test.data.error ?? "Test failed"}
+              </p>
             )}
-            {test.isError && <p className="text-sm text-danger">{errMsg(test.error)}</p>}
+            {test.isError && (
+              <p className="text-sm text-danger">{errMsg(test.error)}</p>
+            )}
           </>
         )}
       </form>
