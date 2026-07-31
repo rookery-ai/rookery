@@ -153,3 +153,22 @@ describe("BackupSection", () => {
     });
   });
 });
+
+test("Backup uses the same page-level heading as the other owner sections", async () => {
+  // When Owner settings split into five pages, four sections were promoted to a
+  // page-level h2 with an icon. BackupSection lives in its own module and was
+  // missed, so it kept a small muted h3 — which is what read as "the owner page
+  // is not following the same font".
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const nodePath = await import("node:path");
+  const here = nodePath.dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(nodePath.join(here, "BackupSection.tsx"), "utf8");
+
+  expect(src).not.toContain('<h3 className="text-sm font-bold text-muted-2">Backup</h3>');
+  // It renders a heading in four states (loading, error, locked, loaded) and
+  // all four must match, or the page changes typeface as it loads.
+  expect(src.match(/<h2 className="text-lg font-bold">Backup<\/h2>/g)?.length).toBe(4);
+  // The same icon component the nav and the other sections use, not a copy.
+  expect(src).toContain('OwnerIcon slug="owner-backup"');
+});

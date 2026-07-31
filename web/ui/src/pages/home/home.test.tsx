@@ -540,3 +540,18 @@ test("recent notes offers a way into the knowledge base when empty", async () =>
   const card = await screen.findByLabelText("Recently edited notes");
   expect(within(card).getByRole("link", { name: /browse the knowledge base/i })).toBeInTheDocument();
 });
+
+test("quick actions use the same button treatment as the Agents page", async () => {
+  mockFetch();
+  wrap();
+  // Agents renders its primary action as a default-variant button at default
+  // size. Home had all four as outline/sm, so the same kind of action looked
+  // like a different control depending on which page you were on.
+  const primary = await screen.findByRole("link", { name: /new agent/i });
+  expect(primary.className).toContain("bg-primary");
+  expect(primary.className).toContain("h-10");
+
+  const secondary = await screen.findByRole("link", { name: /new note/i });
+  expect(secondary.className).toContain("h-10");
+  expect(secondary.className).not.toContain("bg-primary");
+});

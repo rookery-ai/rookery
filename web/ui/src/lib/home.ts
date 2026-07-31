@@ -137,11 +137,19 @@ export function useInbox() {
   });
 }
 
+// Both keys, deliberately. The inbox LIST is ["inbox"]; the rail's unread
+// badge is ["inbox-poll"] (see useInboxPoll). Invalidating only the first is
+// why reading a notification left the badge counting it for up to 30 seconds.
+function invalidateInbox(qc: ReturnType<typeof useQueryClient>) {
+  void qc.invalidateQueries({ queryKey: ["inbox"] });
+  void qc.invalidateQueries({ queryKey: ["inbox-poll"] });
+}
+
 export function useMarkInboxRead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.post<{ ok: boolean }>(`/api/v1/inbox/${id}/read`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["inbox"] }),
+    onSuccess: () => invalidateInbox(qc),
   });
 }
 
@@ -149,7 +157,7 @@ export function useMarkAllInboxRead() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.post<{ ok: boolean }>("/api/v1/inbox/read-all"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["inbox"] }),
+    onSuccess: () => invalidateInbox(qc),
   });
 }
 
@@ -160,7 +168,7 @@ export function useDeleteInboxMessage() {
     // useDeferredDelete's `beforeunload` flush can fire on tab close.
     mutationFn: (id: string) =>
       api.del<{ ok: boolean }>(`/api/v1/inbox/${id}`, undefined, { keepalive: true }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["inbox"] }),
+    onSuccess: () => invalidateInbox(qc),
   });
 }
 

@@ -255,3 +255,20 @@ test("add: refuses a name that already exists and points at Update", async () =>
   expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
   expect(calls.filter((c) => c.method === "POST")).toHaveLength(0);
 });
+
+test("the Add button lines up with the inputs, not below the helper text", async () => {
+  // The row was sm:items-end while each field column is label + input + helper
+  // paragraph, so "end" aligned the button to the bottom of the HELPER TEXT —
+  // which is why it sat visibly low.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const nodePath = await import("node:path");
+  const here = nodePath.dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(nodePath.join(here, "SecretsPage.tsx"), "utf8");
+
+  expect(src).toContain("sm:items-start");
+  expect(src).not.toContain("sm:items-end");
+  // The spacer uses the real Label component, so alignment survives a change to
+  // the label's font size — a hardcoded top margin would not.
+  expect(src).toMatch(/<Label aria-hidden="true"[\s\S]*?opacity-0/);
+});

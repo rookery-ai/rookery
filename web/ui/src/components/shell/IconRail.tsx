@@ -67,7 +67,7 @@ export default function IconRail() {
     <nav
       aria-label="Primary"
       className="fixed bottom-0 inset-x-0 z-20 flex flex-row items-center justify-around border-t border-border bg-chrome px-2 py-1
-                 md:static md:h-full md:w-16 md:flex-col md:justify-start md:border-t-0 md:border-r md:py-3 md:gap-1"
+                 md:static md:h-full md:w-20 md:flex-col md:justify-start md:border-t-0 md:border-r md:py-3 md:gap-1"
     >
       <div className="md:mb-2">
         <WorkspaceMenu />
@@ -84,7 +84,7 @@ export default function IconRail() {
                 to={to}
                 aria-label={ariaLabel}
                 className={cn(
-                  "relative flex size-11 items-center justify-center rounded-lg transition-colors",
+                  "relative flex size-12 items-center justify-center rounded-lg transition-colors",
                   // active:scale-95 gives the press a tactile beat. It sits
                   // under index.css's global prefers-reduced-motion rule,
                   // which flattens the transition for anyone who asked the
@@ -110,7 +110,7 @@ export default function IconRail() {
                 {/* stroke-[2.25]: a lucide glyph is stroked, not a font —
                     "bold" here means widening the stroke, which a font-weight
                     cannot do to an SVG. */}
-                <Icon className="size-5 stroke-[2.25]" />
+                <Icon className="size-6 stroke-[2.25]" />
                 {to === "/" && <UnreadBadge count={unread} />}
               </NavLink>
             </TooltipTrigger>
@@ -129,11 +129,11 @@ export default function IconRail() {
               onClick={() => void lock()}
               disabled={locking}
               aria-label="Lock"
-              className="relative flex size-11 items-center justify-center rounded-lg text-muted
+              className="relative flex size-12 items-center justify-center rounded-lg text-muted
                          transition-colors hover:bg-muted-surface hover:text-foreground
                          active:scale-95 disabled:opacity-50"
             >
-              <Lock className="size-5 stroke-[2.25]" />
+              <Lock className="size-6 stroke-[2.25]" />
             </button>
           </TooltipTrigger>
           <TooltipContent side="right">Lock</TooltipContent>
@@ -152,7 +152,7 @@ export default function IconRail() {
               to="/settings"
               aria-label="Profile & Settings"
               className={cn(
-                "relative flex size-11 items-center justify-center rounded-lg transition-colors active:scale-95",
+                "relative flex size-12 items-center justify-center rounded-lg transition-colors active:scale-95",
                 settingsActive
                   ? "bg-accent-soft text-accent"
                   : "text-muted hover:bg-muted-surface hover:text-foreground",
@@ -166,7 +166,7 @@ export default function IconRail() {
                              md:inset-x-auto md:top-auto md:left-0 md:h-6 md:w-[3px]"
                 />
               )}
-              <ENTITY_ICONS.settings className="size-5 stroke-[2.25]" />
+              <ENTITY_ICONS.settings className="size-6 stroke-[2.25]" />
             </NavLink>
           </TooltipTrigger>
           <TooltipContent side="right">Profile &amp; Settings</TooltipContent>

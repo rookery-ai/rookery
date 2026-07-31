@@ -80,7 +80,7 @@ function AddSecretCard({ existing }: { existing: string[] }) {
 
       <form
         onSubmit={(e) => void handleSubmit(e)}
-        className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end"
+        className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-start"
       >
         <div className="flex-1 space-y-1.5">
           <Label htmlFor="secret-name">Name</Label>
@@ -114,13 +114,22 @@ function AddSecretCard({ existing }: { existing: string[] }) {
             Write-only: values are never displayed after saving.
           </p>
         </div>
-        <Button
-          type="submit"
-          disabled={!name.trim() || !value || collides || add.isPending}
-        >
+        {/* The button gets its own column with an invisible Label spacer so it
+            lines up with the INPUTS, not with the bottom of the helper text.
+            Using the real Label component (rather than a hardcoded top margin)
+            keeps the alignment correct if the label's font size ever changes. */}
+        <div className="space-y-1.5">
+          <Label aria-hidden="true" className="pointer-events-none select-none opacity-0">
+            Add
+          </Label>
+          <Button
+            type="submit"
+            disabled={!name.trim() || !value || collides || add.isPending}
+          >
             <Plus />
-          {add.isPending ? "Adding…" : "Add"}
-        </Button>
+            {add.isPending ? "Adding…" : "Add"}
+          </Button>
+        </div>
       </form>
     </section>
   );

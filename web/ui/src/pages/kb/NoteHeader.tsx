@@ -222,12 +222,12 @@ export default function NoteHeader({
           type="button"
           aria-label="Change note icon"
           onClick={() => setIconOpen(true)}
-          className="flex size-7 shrink-0 items-center justify-center rounded text-lg hover:bg-chrome"
+          className="flex size-10 shrink-0 items-center justify-center rounded-md text-2xl hover:bg-chrome"
         >
           {icon ? (
             <span aria-hidden>{icon}</span>
           ) : (
-            <FileText className="size-4 text-muted-2" />
+            <FileText className="size-6 text-muted-2" />
           )}
         </button>
       )}

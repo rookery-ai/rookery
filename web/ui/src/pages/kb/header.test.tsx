@@ -278,3 +278,16 @@ test("clicking a breadcrumb ancestor routes path + a dir=1 hint (not just path)"
   await user.click(screen.getByText("notes"));
   expect(screen.getByTestId("params-probe").textContent).toBe("path=notes&dir=1");
 });
+
+test("an open note's icon is the largest affordance on the page", async () => {
+  // It was size-7 — smaller than the tree row that led to it.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const nodePath = await import("node:path");
+  const here = nodePath.dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(nodePath.join(here, "NoteHeader.tsx"), "utf8");
+
+  expect(src).toContain("size-10");
+  expect(src).toContain("text-2xl");
+  expect(src).not.toContain("size-7 shrink-0 items-center justify-center rounded text-lg");
+});

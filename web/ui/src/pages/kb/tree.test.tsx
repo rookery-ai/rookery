@@ -662,3 +662,26 @@ test("delete is the destructive item, so it reads as the dangerous one", async (
   const del = await screen.findByRole("menuitem", { name: /delete/i });
   expect(del.getAttribute("data-variant")).toBe("destructive");
 });
+
+test("tree node icons are large enough to read at a glance", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const nodePath = await import("node:path");
+  const here = nodePath.dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(nodePath.join(here, "FileTree.tsx"), "utf8");
+
+  // The node icon carries the meaning (emoji or file kind), so it grows. The
+  // chevron stays size-4 on purpose: it is a disclosure control, not content,
+  // and growing it competes with the icon beside it.
+  expect(src).toContain('className="size-5 shrink-0 text-lg"');
+});
+
+test("a top-level system folder renders its capitalised label as structure", async () => {
+  mockFetch();
+  renderTree();
+  // display_name comes from the server (enrichKBDisplayNames); the tree simply
+  // renders it, and weights depth-0 folders so the vault's structure reads as
+  // structure rather than as another item in the list.
+  const label = await screen.findByText("Notes");
+  expect(label.className).toContain("font-medium");
+});

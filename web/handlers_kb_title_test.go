@@ -166,3 +166,58 @@ func TestKBTreeShowsRealFilenamesInsideAgentDirs(t *testing.T) {
 		t.Errorf("chat label = %q, want the heading", chats[0].DisplayName)
 	}
 }
+
+// The vault's own top-level directories are created by the platform, not the
+// user, so they arrived lowercase and looked identical to a folder the user
+// made — "notes" sitting beside "Project Plans".
+func TestEnrichKBDisplayNamesLabelsTopLevelSystemFolders(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	_, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	nodes := []vault.Node{
+		{Name: "notes", Path: "notes", IsDir: true},
+		{Name: "memory", Path: "memory", IsDir: true},
+		{Name: "chats", Path: "chats", IsDir: true},
+		{Name: "skills", Path: "skills", IsDir: true},
+		{Name: "agents", Path: "agents", IsDir: true},
+		{Name: "Project Plans", Path: "Project Plans", IsDir: true},
+	}
+	s.enrichKBDisplayNames(wsID, "", nodes)
+
+	want := map[string]string{
+		"notes": "Notes", "memory": "Memory", "chats": "Chats",
+		"skills": "Skills", "agents": "Agents",
+	}
+	for _, n := range nodes {
+		if w, ok := want[n.Name]; ok {
+			if n.DisplayName != w {
+				t.Errorf("%q: display name = %q, want %q", n.Name, n.DisplayName, w)
+			}
+			// Presentation only — the real directory must survive untouched, or
+			// navigation, rename guards and Resolve would all break.
+			if n.Path != n.Name {
+				t.Errorf("%q: path was rewritten to %q", n.Name, n.Path)
+			}
+		}
+	}
+	// A user's own folder is left exactly as they named it.
+	if dn := nodes[len(nodes)-1].DisplayName; dn != "" && dn != "Project Plans" {
+		t.Errorf("user folder was relabelled to %q", dn)
+	}
+}
+
+// Only the TOP level. A user folder deeper in the tree that happens to be
+// called "notes" is theirs, and renaming it in the UI would be a lie.
+func TestEnrichKBDisplayNamesLeavesNestedFoldersAlone(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	_, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	nodes := []vault.Node{{Name: "notes", Path: "notes/notes", IsDir: true}}
+	s.enrichKBDisplayNames(wsID, "notes", nodes)
+
+	if nodes[0].DisplayName == "Notes" {
+		t.Error("a nested folder called \"notes\" was relabelled as the system folder")
+	}
+}

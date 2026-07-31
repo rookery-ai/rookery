@@ -33,9 +33,9 @@ export function PageTitle({
       {/* Nudged down so the glyph sits on the title's optical centre rather
           than its ascender line, and stays put when a subtitle makes the
           block taller. */}
-      <Icon className="mt-0.5 size-5 shrink-0 text-muted" />
+      <Icon className="mt-0.5 size-6 shrink-0 text-muted" />
       <div className="min-w-0">
-        <h1 className="min-w-0 truncate text-xl font-bold">{title}</h1>
+        <h1 className="min-w-0 truncate text-2xl font-bold">{title}</h1>
         {subtitle && <p className="mt-0.5 text-sm text-muted-2">{subtitle}</p>}
       </div>
     </div>

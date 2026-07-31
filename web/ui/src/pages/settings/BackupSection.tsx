@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Download, HardDriveDownload, HardDriveUpload, Save, ShieldCheck, Trash2 } from "lucide-react";
+import { OwnerIcon } from "./OwnerSections";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { timeAgo } from "@/lib/utils";
@@ -150,7 +151,10 @@ export function BackupSection() {
   if (isLoading || (!data && !isError)) {
     return (
       <div>
-        <h3 className="text-sm font-bold text-muted-2">Backup</h3>
+        <div className="flex items-center gap-2.5">
+        <OwnerIcon slug="owner-backup" />
+        <h2 className="text-lg font-bold">Backup</h2>
+      </div>
         <p className="mt-2 text-xs text-muted-2">Loading…</p>
       </div>
     );
@@ -158,7 +162,10 @@ export function BackupSection() {
   if (isError || !data) {
     return (
       <div>
-        <h3 className="text-sm font-bold text-muted-2">Backup</h3>
+        <div className="flex items-center gap-2.5">
+        <OwnerIcon slug="owner-backup" />
+        <h2 className="text-lg font-bold">Backup</h2>
+      </div>
         <div className="mt-2">
           <ErrorNote
             message={
@@ -176,7 +183,10 @@ export function BackupSection() {
   if (!form) {
     return (
       <div>
-        <h3 className="text-sm font-bold text-muted-2">Backup</h3>
+        <div className="flex items-center gap-2.5">
+        <OwnerIcon slug="owner-backup" />
+        <h2 className="text-lg font-bold">Backup</h2>
+      </div>
         <p className="mt-2 text-xs text-muted-2">Loading…</p>
       </div>
     );
@@ -184,7 +194,10 @@ export function BackupSection() {
 
   return (
     <div>
-      <h3 className="text-sm font-bold text-muted-2">Backup</h3>
+      <div className="flex items-center gap-2.5">
+        <OwnerIcon slug="owner-backup" />
+        <h2 className="text-lg font-bold">Backup</h2>
+      </div>
       <p className="mt-1 text-xs text-muted-2">
         A snapshot covers every workspace — knowledge base, agents, skills,
         secrets and settings — in one encrypted file. Times are in the server's

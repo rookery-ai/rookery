@@ -61,3 +61,29 @@ test("no page still hardcodes its own centred max width", () => {
     .map((f) => path.basename(f));
   expect(offenders).toEqual([]);
 });
+
+test("the page title and its icon are sized for a title bar", () => {
+  // Round one left the title at the same text-xl the old <h1>s used, so after
+  // the type scale rose it no longer read as the largest thing on the page.
+  const { container } = render(<PageTitle icon="agents" title="Agents" />);
+  expect(container.querySelector("h1")!.className).toContain("text-2xl");
+  expect(container.querySelector("svg")!.getAttribute("class")).toContain("size-6");
+});
+
+test("the icon rail is wide enough for its larger targets", () => {
+  const src = readFileSync(path.join(here, "IconRail.tsx"), "utf8");
+  expect(src).toContain("md:w-20");
+  expect(src).toContain("size-12");
+  // Glyphs grow with the targets, or a size-12 button holds a size-5 icon
+  // floating in whitespace.
+  expect(src).toContain('className="size-6 stroke-[2.25]"');
+  expect(src).not.toContain("md:w-16");
+});
+
+test("the workspace avatar matches the rail item size", () => {
+  // It sits at the top of the same column; if it does not grow with the rail
+  // it reads as a different control.
+  const src = readFileSync(path.join(here, "WorkspaceMenu.tsx"), "utf8");
+  expect(src).toContain("size-12");
+  expect(src).not.toMatch(/className="[^"]*size-11/);
+});

@@ -334,3 +334,17 @@ test("the command palette is wide and sits high", async () => {
   expect(src).toContain("top-[12%]");
   expect(src).not.toContain("max-w-xl ");
 });
+
+test("the search input is sized to match the widened palette", async () => {
+  // Round one widened the PANEL to max-w-3xl but left the input at the compact
+  // 36px row with text-sm, which is why the search still read as small.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const nodePath = await import("node:path");
+  const here = nodePath.dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(nodePath.join(here, "../ui/command.tsx"), "utf8");
+
+  expect(src).toContain("h-14"); // input row
+  expect(src).toContain("text-base"); // query text
+  expect(src).not.toContain('className="flex h-9 items-center gap-2 border-b px-3"');
+});

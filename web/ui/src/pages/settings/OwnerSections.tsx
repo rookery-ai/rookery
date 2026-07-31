@@ -20,7 +20,7 @@ import type { Workspace } from "@/lib/session";
 // Each owner section is its own settings page now, so it carries a page-level
 // heading with the same icon its nav entry uses (one shared map, so the two
 // cannot disagree).
-function OwnerIcon({ slug }: { slug: string }) {
+export function OwnerIcon({ slug }: { slug: string }) {
   const Icon = entityIcon(slug);
   return <Icon className="size-5 shrink-0 text-muted" />;
 }

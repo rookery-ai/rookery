@@ -103,7 +103,7 @@ export default function FolderPage({
                 }
                 className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-chrome"
               >
-                <NodeIcon node={child} className="size-4 shrink-0 text-base" />
+                <NodeIcon node={child} className="size-5 shrink-0 text-lg" />
                 <span className="min-w-0 flex-1 truncate">
                   {child.display_name}
                 </span>
