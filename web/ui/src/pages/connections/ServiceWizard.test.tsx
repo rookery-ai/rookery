@@ -456,3 +456,66 @@ test("warns but still allows Connect on a soft problem", async () => {
   expect(await screen.findByText("Unconfirmed suffix.")).toBeInTheDocument();
   expect(await screen.findByRole("button", { name: /connect github/i })).toBeEnabled();
 });
+
+const KEYLESS: ServiceProvider = {
+  name: "open_meteo",
+  label: "Open-Meteo",
+  category: "Data & Reference",
+  kind: "keyless",
+  setup_url: "https://open-meteo.com/en/docs",
+  setup_steps: [
+    "Open-Meteo needs no account and no API key — press Connect.",
+    "The free tier is for non-commercial use, limited to 10,000 calls per day.",
+  ],
+  has_creds: false,
+  action_count: 4,
+  connect_inputs: [], redirect_uri: "", preflight: [],
+  connections: [],
+};
+
+test("a keyless provider renders a bare Connect button and no credential field", async () => {
+  mockFetch({});
+  const user = userEvent.setup();
+  wrap(KEYLESS);
+
+  await user.click(screen.getByText("open wizard"));
+
+  // The setup steps still render — they carry the licence terms.
+  expect(
+    await screen.findByText(/needs no account and no API key/i),
+  ).toBeInTheDocument();
+
+  // No credential input of any kind: this is the whole point of the kind.
+  expect(screen.queryByLabelText(/API key/i)).toBeNull();
+  expect(screen.queryByLabelText(/Client ID/i)).toBeNull();
+  expect(screen.queryByLabelText(/Client secret/i)).toBeNull();
+  // No redirect URI panel — a keyless provider never leaves the browser.
+  expect(screen.queryByText(/Redirect URI to register/i)).toBeNull();
+
+  // Connect is enabled with nothing typed.
+  const btn = screen.getByRole("button", { name: /Connect Open-Meteo/i });
+  expect(btn).toBeEnabled();
+});
+
+test("connecting a keyless provider posts an empty key to the apikey endpoint", async () => {
+  let captured: { key: string } | null = null;
+  let calledProvider = "";
+  mockFetch({
+    apikey: (provider, body) => {
+      calledProvider = provider;
+      captured = body;
+      return jsonResponse({ ok: true });
+    },
+  });
+  const user = userEvent.setup();
+  wrap(KEYLESS);
+
+  await user.click(screen.getByText("open wizard"));
+  await user.click(await screen.findByRole("button", { name: /Connect Open-Meteo/i }));
+
+  expect(calledProvider).toBe("open_meteo");
+  // An empty key is correct here — the server relaxes its key requirement for
+  // kind=none and stores no ciphertext.
+  expect(captured).not.toBeNull();
+  expect(captured!.key).toBe("");
+});
