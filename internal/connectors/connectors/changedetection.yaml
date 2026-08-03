@@ -11,6 +11,8 @@ actions:
     request:
       method: GET
       url: "{{conn.base_url}}/api/v1/watch"
+      query:
+        recheck_all: "{{recheck}}"
     response_extract: "$"
 
   - name: cd_get_watch

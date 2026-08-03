@@ -1,13 +1,12 @@
 provider: tmdb
 actions:
   - name: tmdb_search
-    description: "Search movies, TV shows and people by name. Returns TMDB ids needed by the other actions. Read-only. Data by TMDB — attribution is required when it is displayed."
+    description: "Search movies, TV shows and people in one call — each result carries a media_type saying which it is. Returns TMDB ids needed by the other actions. Read-only. Data by TMDB — attribution is required when it is displayed."
     mutating: false
     params:
       type: object
       properties:
         query: {type: string, description: "title or name to search for"}
-        kind:  {type: string, description: "movie | tv | person | multi (default multi)"}
         year:  {type: integer, description: "restrict to a release year"}
       required: [query]
     request:

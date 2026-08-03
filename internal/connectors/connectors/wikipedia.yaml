@@ -1,13 +1,12 @@
 provider: wikipedia
 actions:
   - name: wikipedia_search
-    description: "Search Wikipedia article titles and return matches with short descriptions. Call this first to find the exact title the other actions need. lang is a wiki code such as en, mk or de. Read-only. Content is CC BY-SA — say which article a quote came from."
+    description: "Search Wikipedia article titles and return matches with short descriptions. Call this first to find the exact title the other actions need. This connector covers ENGLISH Wikipedia only. Read-only. Content is CC BY-SA — say which article a quote came from."
     mutating: false
     params:
       type: object
       properties:
         query: {type: string, description: "search terms"}
-        lang:  {type: string, description: "wiki language code, e.g. en, mk, de. Default en."}
         limit: {type: integer, description: "max results, default 5"}
       required: [query]
     request:
