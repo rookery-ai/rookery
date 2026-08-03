@@ -1,0 +1,21 @@
+name: fitbit
+label: Fitbit
+category: Health & Fitness
+unverified: true
+authorize_url: https://www.fitbit.com/oauth2/authorize
+token_url: https://api.fitbit.com/oauth2/token
+userinfo_url: https://api.fitbit.com/1/user/-/profile.json
+identity_path: user.displayName
+# Fitbit requires HTTP Basic client authentication on the token endpoint.
+token_auth: basic
+default_scopes:
+  - activity
+  - heartrate
+  - sleep
+  - profile
+setup_url: https://dev.fitbit.com/apps/new
+setup_steps:
+  - "Register an application at https://dev.fitbit.com/apps/new."
+  - "Set OAuth 2.0 Application Type to 'Personal' so you can read your own intraday data."
+  - "Set the Redirect URL to {{redirect_uri}} exactly."
+  - "Copy the OAuth 2.0 Client ID and Client Secret into the fields below."

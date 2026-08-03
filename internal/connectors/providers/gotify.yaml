@@ -1,0 +1,22 @@
+name: gotify
+label: Gotify
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: X-Gotify-Key
+  value_prefix: ""
+  key_label: "Gotify application token"
+  key_hint: "the APPLICATION token (A...), not a client token"
+  setup_url: https://gotify.net/docs/pushmsg
+connect_inputs:
+  - key: base_url
+    label: "Gotify URL"
+    hint: "e.g. http://gotify.local:8080"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In Gotify open Apps and create an application, then copy its token."
+  - "Use the APPLICATION token, not a client token — only applications may send messages."
+  - "Enter it with your Gotify URL below."

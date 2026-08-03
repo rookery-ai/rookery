@@ -1,0 +1,59 @@
+provider: portainer
+actions:
+  - name: portainer_list_endpoints
+    description: "List the Docker/Kubernetes environments Portainer manages, with their ids. Call this first — container actions need an environment id. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/endpoints"
+    response_extract: "$"
+
+  - name: portainer_list_containers
+    description: "Containers in one environment with their state, image and names. all=true includes stopped ones. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        endpoint_id: {type: integer, description: "from portainer_list_endpoints"}
+        all:         {type: boolean, description: "include stopped containers"}
+      required: [endpoint_id]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/endpoints/{{endpoint_id}}/docker/containers/json"
+      query:
+        all: "{{all}}"
+    response_extract: "$"
+
+  - name: portainer_container_logs
+    description: "Recent log lines from one container. tail caps how many — always pass it, since a container's full log is unbounded. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        endpoint_id:  {type: integer}
+        container_id: {type: string}
+        tail:         {type: integer, description: "how many trailing lines, e.g. 100"}
+      required: [endpoint_id, container_id, tail]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/endpoints/{{endpoint_id}}/docker/containers/{{container_id}}/logs"
+      query:
+        tail: "{{tail}}"
+        stdout: "true"
+        stderr: "true"
+    response_extract: "$"
+
+  - name: portainer_restart_container
+    description: "Restart a container. This interrupts whatever it is serving. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        endpoint_id:  {type: integer}
+        container_id: {type: string}
+      required: [endpoint_id, container_id]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/api/endpoints/{{endpoint_id}}/docker/containers/{{container_id}}/restart"
+    response_extract: "$"

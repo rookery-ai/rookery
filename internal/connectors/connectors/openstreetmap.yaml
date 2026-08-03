@@ -1,0 +1,43 @@
+provider: openstreetmap
+actions:
+  - name: osm_geocode
+    description: "Turn a place name or address into coordinates and a structured address. Nominatim allows at most 1 request per second — do not loop over a list. Read-only. © OpenStreetMap contributors."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query:        {type: string, description: "address or place name"}
+        country_code: {type: string, description: "ISO 3166-1 alpha-2 to restrict the search, e.g. mk"}
+        limit:        {type: integer, description: "max results, default 5"}
+      required: [query]
+    request:
+      method: GET
+      url: "https://nominatim.openstreetmap.org/search"
+      query:
+        q: "{{query}}"
+        countrycodes: "{{country_code}}"
+        limit: "{{limit}}"
+        format: "jsonv2"
+        addressdetails: "1"
+    response_extract: "$"
+
+  - name: osm_reverse_geocode
+    description: "Turn coordinates into the nearest address. Read-only. © OpenStreetMap contributors."
+    mutating: false
+    params:
+      type: object
+      properties:
+        latitude:  {type: number}
+        longitude: {type: number}
+        zoom:      {type: integer, description: "detail level 0–18; 18 is building level"}
+      required: [latitude, longitude]
+    request:
+      method: GET
+      url: "https://nominatim.openstreetmap.org/reverse"
+      query:
+        lat: "{{latitude}}"
+        lon: "{{longitude}}"
+        zoom: "{{zoom}}"
+        format: "jsonv2"
+        addressdetails: "1"
+    response_extract: "$"

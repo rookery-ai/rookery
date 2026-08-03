@@ -1,0 +1,17 @@
+name: oura
+label: Oura
+category: Health & Fitness
+unverified: true
+authorize_url: https://cloud.ouraring.com/oauth/authorize
+token_url: https://api.ouraring.com/oauth/token
+userinfo_url: https://api.ouraring.com/v2/usercollection/personal_info
+identity_path: email
+default_scopes:
+  - daily
+  - personal
+setup_url: https://cloud.ouraring.com/oauth/applications
+setup_steps:
+  - "Register an application at https://cloud.ouraring.com/oauth/applications."
+  - "Set the Redirect URI to {{redirect_uri}} exactly."
+  - "Copy the Client ID and Client Secret into the fields below."
+  - "Oura DEPRECATED personal access tokens in December 2025, so OAuth is now the only way in."

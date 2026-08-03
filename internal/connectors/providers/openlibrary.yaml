@@ -1,0 +1,13 @@
+name: openlibrary
+label: Open Library
+category: Data & Reference
+auth:
+  kind: none
+# Open Library asks every client to identify itself so they can contact you about
+# excessive traffic; anonymous bulk access is explicitly discouraged.
+static_headers:
+  User-Agent: "Rookery/1.0 (https://rookery.sh; self-hosted personal assistant)"
+setup_url: https://openlibrary.org/developers/api
+setup_steps:
+  - "Open Library needs no account and no API key — press Connect."
+  - "It is run by the Internet Archive; its catalogue data is open, and covers editions, authors and cover art."

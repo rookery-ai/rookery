@@ -1,0 +1,21 @@
+name: linkwarden
+label: Linkwarden
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Linkwarden access token"
+  key_hint: "from Settings → Access Tokens"
+  setup_url: https://docs.linkwarden.app/api/api-introduction
+connect_inputs:
+  - key: base_url
+    label: "Linkwarden URL"
+    hint: "e.g. https://links.example.com"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In Linkwarden open Settings → Access Tokens and create one."
+  - "Copy it and enter it with your Linkwarden URL below."

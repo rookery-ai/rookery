@@ -1,0 +1,20 @@
+name: trakt
+label: Trakt
+category: Publishing & Media
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: trakt-api-key
+  value_prefix: ""
+  key_label: "Trakt client ID"
+  key_hint: "the application's Client ID — these actions read PUBLIC data only"
+  setup_url: https://trakt.tv/oauth/applications
+# Trakt refuses any request that does not declare the API version.
+static_headers:
+  trakt-api-version: "2"
+  Content-Type: "application/json"
+setup_steps:
+  - "Create an application at https://trakt.tv/oauth/applications — approval is instant."
+  - "Copy the Client ID and paste it below."
+  - "These actions read PUBLIC Trakt data (trending, search, show details). Reading your own watch history needs full OAuth, which this connector does not do yet."

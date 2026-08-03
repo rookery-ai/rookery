@@ -1,0 +1,63 @@
+provider: openlibrary
+actions:
+  - name: openlibrary_search
+    description: "Search books by title, author or keyword. Returns works with their Open Library keys, first publication year and author names. limit caps the result. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query:  {type: string, description: "title, author or free text"}
+        author: {type: string, description: "restrict to an author name"}
+        limit:  {type: integer, description: "max results, default 10"}
+      required: [query]
+    request:
+      method: GET
+      url: "https://openlibrary.org/search.json"
+      query:
+        q: "{{query}}"
+        author: "{{author}}"
+        limit: "{{limit}}"
+        fields: "key,title,author_name,first_publish_year,isbn,number_of_pages_median,subject"
+    response_extract: "$.docs"
+
+  - name: openlibrary_get_by_isbn
+    description: "Look a book up by ISBN-10 or ISBN-13 — the precise way in when you have the barcode. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        isbn: {type: string, description: "ISBN-10 or ISBN-13, digits only"}
+      required: [isbn]
+    request:
+      method: GET
+      url: "https://openlibrary.org/isbn/{{isbn}}.json"
+    response_extract: "$"
+
+  - name: openlibrary_get_work
+    description: "Get a work by its Open Library key (e.g. OL45804W) for the description, subjects and covers. Keys come from openlibrary_search. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        work_key: {type: string, description: "e.g. OL45804W"}
+      required: [work_key]
+    request:
+      method: GET
+      url: "https://openlibrary.org/works/{{work_key}}.json"
+    response_extract: "$"
+
+  - name: openlibrary_author_works
+    description: "List an author's works by their Open Library author key (e.g. OL23919A). limit caps the result. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        author_key: {type: string, description: "e.g. OL23919A"}
+        limit:      {type: integer, description: "max works, default 20"}
+      required: [author_key]
+    request:
+      method: GET
+      url: "https://openlibrary.org/authors/{{author_key}}/works.json"
+      query:
+        limit: "{{limit}}"
+    response_extract: "$.entries"

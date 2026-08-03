@@ -1,0 +1,22 @@
+name: vikunja
+label: Vikunja
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Vikunja API token"
+  key_hint: "from Settings → API Tokens"
+  setup_url: https://vikunja.io/docs/api-documentation/
+connect_inputs:
+  - key: base_url
+    label: "Vikunja URL"
+    hint: "e.g. https://tasks.example.com"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In Vikunja open Settings → API Tokens and create one."
+  - "Grant it only the scopes the agent needs — tasks read and write is usually enough."
+  - "Copy it and enter it with your Vikunja URL below."

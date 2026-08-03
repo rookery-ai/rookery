@@ -1,0 +1,12 @@
+name: openfoodfacts
+label: Open Food Facts
+category: Data & Reference
+auth:
+  kind: none
+static_headers:
+  User-Agent: "Rookery/1.0 (https://rookery.sh; self-hosted personal assistant)"
+setup_url: https://openfoodfacts.github.io/openfoodfacts-server/api/
+setup_steps:
+  - "Open Food Facts needs no account and no API key — press Connect."
+  - "It is a collaborative database of food products: look one up by its barcode for ingredients, allergens and nutrition."
+  - "Data is contributed by volunteers and is licensed ODbL, so completeness varies by product and country."
