@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -35,6 +36,9 @@ func newAPITestServerWithSkills(t *testing.T) (*Server, *db.DB) {
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
+	// Search-key saves must not reach the network from a unit test: install a
+	// stub verifier so PUT /search-keys exercises the storage path, not Brave.
+	s.searchKeyVerify = func(context.Context, string, string) error { return nil }
 	return s, database
 }
 

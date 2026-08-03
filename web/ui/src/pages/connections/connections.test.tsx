@@ -31,6 +31,9 @@ let connectorsStatus = 200;
 let servicesStatus = 200;
 let searchKeysState: { brave: boolean; tavily: boolean };
 let searchKeysStatus = 200;
+// Response the PUT mock returns. Mirrors apiPutSearchKeyResponse: the save now
+// reports whether the key was actually proven against the live provider.
+let searchKeyPutResponse: { ok: boolean; verified?: boolean; note?: string };
 
 function resetFixtures() {
   platforms = [
@@ -94,6 +97,7 @@ function resetFixtures() {
   connectorsStatus = 200;
   servicesStatus = 200;
   searchKeysState = { brave: false, tavily: false };
+  searchKeyPutResponse = { ok: true, verified: true };
   searchKeysStatus = 200;
 }
 
@@ -137,7 +141,7 @@ function mockFetch() {
         const body = JSON.parse(String(init?.body ?? "{}")) as { provider: string; key: string };
         if (body.provider === "brave") searchKeysState.brave = true;
         if (body.provider === "tavily") searchKeysState.tavily = true;
-        return Promise.resolve(jsonResponse({ ok: true }));
+        return Promise.resolve(jsonResponse(searchKeyPutResponse));
       }
 
       if (url.startsWith("/api/v1/search-keys/") && method === "DELETE") {
@@ -434,7 +438,9 @@ test("saving a key calls PUT /api/v1/search-keys and flips the row to Configured
   await user.type(input, "sekrit-brave-value");
   await user.click(within(braveRow).getByRole("button", { name: "Save" }));
 
-  await waitFor(() => expect(within(braveRow).getByText("Configured")).toBeInTheDocument());
+  // Matches both "Configured" and "Configured — key verified": this test is
+  // about the row flipping state, not about the verification wording.
+  await waitFor(() => expect(within(braveRow).getByText(/^Configured/)).toBeInTheDocument());
   expect(searchKeysState.brave).toBe(true);
   // The pasted value never lingers in the DOM after save.
   expect(screen.queryByDisplayValue("sekrit-brave-value")).not.toBeInTheDocument();
@@ -472,4 +478,46 @@ test("shows an error banner when the search-keys list fails to load", async () =
   wrap();
 
   expect(await screen.findByText("could not load web search settings")).toBeInTheDocument();
+});
+
+test("a verified save says so, so 'configured' is not mistaken for 'working'", async () => {
+  searchKeyPutResponse = { ok: true, verified: true };
+  mockFetch();
+  const user = userEvent.setup();
+  wrap();
+
+  await screen.findByText("Brave Search");
+  const braveRow = screen.getByText("Brave Search").closest("div.rounded-lg") as HTMLElement;
+  await user.click(within(braveRow).getByRole("button", { name: "Add key" }));
+  await user.type(within(braveRow).getByPlaceholderText("Brave Search API key"), "good-key");
+  await user.click(within(braveRow).getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(within(braveRow).getByText("Configured — key verified")).toBeInTheDocument(),
+  );
+});
+
+test("an unverifiable save surfaces the server's note instead of looking like success", async () => {
+  // The exact case that made this whole change necessary: the provider host is
+  // unreachable, the key is stored anyway, and without this note the row would
+  // read "Configured" while search silently fell back to keyless scraping.
+  searchKeyPutResponse = {
+    ok: true,
+    verified: false,
+    note: "saved, but brave's API host could not be reached — it resolved into blocked address space, which usually means local DNS filtering.",
+  };
+  mockFetch();
+  const user = userEvent.setup();
+  wrap();
+
+  await screen.findByText("Brave Search");
+  const braveRow = screen.getByText("Brave Search").closest("div.rounded-lg") as HTMLElement;
+  await user.click(within(braveRow).getByRole("button", { name: "Add key" }));
+  await user.type(within(braveRow).getByPlaceholderText("Brave Search API key"), "fine-key");
+  await user.click(within(braveRow).getByRole("button", { name: "Save" }));
+
+  await waitFor(() =>
+    expect(within(braveRow).getByText(/blocked address space/i)).toBeInTheDocument(),
+  );
+  expect(within(braveRow).queryByText("Configured — key verified")).not.toBeInTheDocument();
 });

@@ -208,6 +208,12 @@ slower.
 A provider outage must not block a save, so only a definitive auth rejection is
 fatal. The cost is one API call per save — negligible against Brave's free tier.
 
+The check reaches the handler through a `Server.searchKeyVerify` field rather
+than a direct call, defaulting to `verifySearchKey`. Without that seam every
+test that saves a key would make a live request to Brave, which is both flaky
+and rude; the existing `TestAPISearchKeysConfiguredStateAndDelete` would have
+started failing on a 401 the moment this landed.
+
 At runtime, `ErrInvalidKey` still falls through to the next provider. Search
 degrades rather than fails; the difference is that it is now logged at `Warn`.
 

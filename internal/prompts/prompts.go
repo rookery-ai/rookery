@@ -491,7 +491,7 @@ text. The available tools are:
   endpoint — a weather API, an RSS/JSON feed, a web page. It CANNOT send secrets (you don't
   have the values), so if the request needs an API key, token, or auth header, use run_script
   or bash instead.
-- web_search(query): search the public web (DuckDuckGo) and get a few results back as
+- web_search(query): search the public web and get a few results back as
   numbered title / url / snippet entries. Use it to FIND a URL when you don't have one yet
   ("top news Macedonia today"), THEN call web_fetch to READ the page you chose. It is
   query-only and cannot carry secrets — there is nothing to authenticate.

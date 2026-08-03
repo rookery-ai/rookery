@@ -217,6 +217,10 @@ function SearchKeyRow({
   const [editing, setEditing] = useState(false);
   const [key, setKey] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Outcome of the last save's live check. The server does not persist this
+  // (configured != working), so it is shown only for the save that produced it.
+  const [saveNote, setSaveNote] = useState<string | null>(null);
+  const [verified, setVerified] = useState(false);
   const saveMutation = useSaveSearchKey();
   const deleteMutation = useDeleteSearchKey();
 
@@ -230,8 +234,11 @@ function SearchKeyRow({
     const trimmed = key.trim();
     if (!trimmed) return;
     setError(null);
+    setSaveNote(null);
     try {
-      await saveMutation.mutateAsync({ provider, key: trimmed });
+      const res = await saveMutation.mutateAsync({ provider, key: trimmed });
+      setVerified(res.verified);
+      setSaveNote(res.note ?? null);
       cancelEdit();
     } catch (err) {
       setError(errorMessage(err));
@@ -240,6 +247,8 @@ function SearchKeyRow({
 
   async function handleClear() {
     setError(null);
+    setSaveNote(null);
+    setVerified(false);
     try {
       await deleteMutation.mutateAsync(provider);
     } catch (err) {
@@ -256,7 +265,8 @@ function SearchKeyRow({
             <div className="truncate font-semibold">{label}</div>
             {configured ? (
               <div className="flex items-center gap-1 text-xs text-ok">
-                <span className="size-1.5 rounded-full bg-ok" /> Configured
+                <span className="size-1.5 rounded-full bg-ok" />
+                {verified ? "Configured — key verified" : "Configured"}
               </div>
             ) : (
               <div className="text-xs text-muted-2">Not configured</div>
@@ -320,6 +330,7 @@ function SearchKeyRow({
         </div>
       )}
       {error && <div className="text-xs text-danger">{error}</div>}
+      {saveNote && <div className="text-xs text-warn">{saveNote}</div>}
     </div>
   );
 }

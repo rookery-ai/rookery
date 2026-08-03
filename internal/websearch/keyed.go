@@ -4,12 +4,46 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
+
+	"github.com/ilijad1/rookery/internal/nethttp"
 )
+
+// ErrInvalidKey means the provider rejected the credential itself (401/403).
+// It is separated from every other failure because it is the one the user can
+// actually fix, and because retrying it is pointless: a wrong key stays wrong.
+// At search time it still falls through to the next provider (search should
+// degrade, not fail); at key-save time it is the signal to refuse the key.
+var ErrInvalidKey = errors.New("invalid api key")
+
+// verifyQuery is the throwaway query Verify sends. Its content is irrelevant —
+// Verify is testing whether the credential is accepted, not what it returns, so
+// a 200 carrying zero results still means the key works.
+const verifyQuery = "example"
+
+// Verify checks one provider's credential with a single request. It returns
+// nil when the credential is accepted, ErrInvalidKey when the provider rejects
+// it, and the underlying error otherwise ("could not check right now").
+//
+// It deliberately does NOT retry. The caller needs to distinguish "rejected"
+// from "could not check", and a retry loop only makes an interactive settings
+// save slower without changing which of those two answers it gets.
+func Verify(ctx context.Context, hc *http.Client, p Provider) error {
+	if p == nil {
+		return fmt.Errorf("no provider configured")
+	}
+	if hc == nil {
+		hc = nethttp.GuardedClient(10 * time.Second)
+	}
+	_, err := p.Search(ctx, hc, verifyQuery)
+	return err
+}
 
 // Production endpoints for the keyed providers.
 const (
@@ -161,6 +195,11 @@ func doJSON(hc *http.Client, req *http.Request, apiKey string) ([]byte, error) {
 		return nil, Transient(fmt.Errorf("HTTP %d", resp.StatusCode))
 	}
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	// 401/403 is the credential being refused, not a request the provider
+	// disliked — the one failure the user can fix, so it gets its own type.
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("%w: HTTP %d: %s", ErrInvalidKey, resp.StatusCode, errSnippet(data, apiKey))
+	}
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, errSnippet(data, apiKey))
 	}
