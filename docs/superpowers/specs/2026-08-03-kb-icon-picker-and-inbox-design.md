@@ -181,6 +181,23 @@ was never the record.
 
 ---
 
+## Found during implementation
+
+Two things the design missed, both caught before the PR:
+
+- **The vertical axis had the same bug.** Capping the dialog at
+  `max-h-[calc(100dvh-4rem)]` does nothing while the scroll region keeps
+  `min-h-72` — a `min-height` is a floor that beats flex shrinking, so at a
+  470px viewport height the emoji grid pushed straight out of the bottom of the
+  modal. Verified by screenshot, then fixed by giving the dialog a definite
+  height (`h-[min(36rem,calc(100dvh-4rem))]`) and letting the scroll region flex
+  into the remainder (`min-h-0 flex-1`). Re-verified at 470/620/900px.
+- **The SPA had its own copies of the system-folder list.**
+  `web/api_kb.go`'s `kbSystemDirs`, `lib/kb.ts`'s `PROTECTED_TOP_DIRS` and
+  `NoteEditor.tsx`'s `isSystemLogNote` all still claimed `inbox`/`reminders`.
+  Left alone, a user folder named `inbox` would render as muted chrome, refuse
+  to rename, and hide its backlink strip. All three now match the Go side.
+
 ## Testing
 
 - `dialog.test.tsx` — the width/`grid-cols-1` pinning guard (new).
