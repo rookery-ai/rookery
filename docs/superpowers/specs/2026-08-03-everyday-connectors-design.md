@@ -87,20 +87,25 @@ re-consent task is needed. The one non-code prerequisite: the Google Cloud Conso
 must have the Calendar and Tasks scopes registered, or consent fails before any Rookery code
 runs.
 
-### `logocoverage.test.ts` does not exist
+### The logo-coverage guard exists, but not where its comment says
 
-`web/ui/src/components/brand/logos.ts` carries a comment stating that
-`logocoverage.test.ts` "asserts every slug the app can actually render has a file, so a
-provider added on the Go side without a logo fails the test run rather than silently
-degrading to a letter tile."
+`web/ui/src/components/brand/logos.ts` states that `logocoverage.test.ts` "asserts every
+slug the app can actually render has a file, so a provider added on the Go side without a
+logo fails the test run rather than silently degrading to a letter tile."
 
-No such file is in the tree. `ProviderLogo.test.tsx` validates only that *vendored* assets
-are well-formed SVGs with a viewBox. A provider with no logo degrades to a letter tile and
-nothing fails.
+**No such TypeScript file exists** — but the guard is real: it is
+`web/logo_coverage_test.go`, a **Go** test in the `web` package, which enumerates
+connector providers, chat platforms, coder providers and web-search providers and fails
+when any lacks `web/ui/src/assets/logos/<slug>.svg`. `ProviderLogo.test.tsx` covers only
+that vendored assets are well-formed.
 
-This lowers the per-provider cost, but the degradation is real: five of the candidates below
-have no mark in simple-icons, and a letter tile on a page whose entire purpose is visual
-browsing reads as unfinished. The fix is in "Framework changes" below.
+So every new provider genuinely does need a logo, and the correction is to the comment,
+not to the coverage. It matters practically: three wave-1 providers (YNAB, Raindrop.io,
+Open-Meteo) have no mark in lobehub, worldvectorlogo **or** simple-icons, and their own
+sites publish no fetchable SVG — every candidate URL 404s. They take a documented
+exemption in that test's `allowNoLogo` map rather than an approximated mark, because
+drawing someone else's logo ourselves misrepresents their brand, which is worse than a
+legible coloured initial.
 
 ### Live-documentation corrections
 
@@ -116,6 +121,9 @@ Checked this session, against the vendors' own docs:
 | **AdGuard Home** | HTTP Basic, `username:password`. Fits `basic_user_template` as-is. |
 
 ## Wave 1 — nine providers
+
+**Delivered.** All nine ship with ~51 curated actions. The "Verify" column below records
+the plan; what was actually achieved is in "Verification outcome" further down.
 
 | # | Provider | Auth | Category | Verify |
 |---|---|---|---|---|
@@ -292,6 +300,18 @@ So, for every wave-1 action:
 
 This is a correctness requirement, not an optimisation. An action that reliably truncates is
 an action the agent cannot use.
+
+## Verification outcome
+
+**Open-Meteo is live-verified** against the real API — it is keyless, so no credential is
+needed and the check runs anywhere. All four actions return correctly narrowed payloads:
+geocode 271 bytes, current 178, forecast 362, air quality 121 — every one far under the
+8 KiB bridge cap. The test lives behind a `//go:build livecheck` tag so CI never depends
+on a third party being reachable.
+
+**The other eight carry `unverified: true`** — no credential was available at build time.
+`TestWave1ProvidersDeclareVerificationStatus` fails if a wave-1 provider is neither
+verified nor marked, so the honest state is enforced rather than remembered.
 
 ## Verification plan
 
