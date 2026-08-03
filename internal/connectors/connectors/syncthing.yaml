@@ -1,0 +1,43 @@
+provider: syncthing
+actions:
+  - name: syncthing_status
+    description: "System status: device id, uptime and whether a restart is pending. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/rest/system/status"
+    response_extract: "$"
+
+  - name: syncthing_connections
+    description: "Connected devices with transfer totals — answers 'is my other machine reachable'. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/rest/system/connections"
+    response_extract: "$"
+
+  - name: syncthing_folder_status
+    description: "One folder's sync state by id: how many files are out of sync, global vs local byte counts, and any error. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        folder_id: {type: string, description: "folder id from the Syncthing config"}
+      required: [folder_id]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/rest/db/status"
+      query:
+        folder: "{{folder_id}}"
+    response_extract: "$"
+
+  - name: syncthing_errors
+    description: "Recent system errors — the 'is anything wrong' check. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/rest/system/error"
+    response_extract: "$.errors"

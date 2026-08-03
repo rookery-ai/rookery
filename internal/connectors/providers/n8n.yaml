@@ -1,0 +1,22 @@
+name: n8n
+label: n8n
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: X-N8N-API-KEY
+  value_prefix: ""
+  key_label: "n8n API key"
+  key_hint: "from Settings → n8n API"
+  setup_url: https://docs.n8n.io/api/authentication/
+connect_inputs:
+  - key: base_url
+    label: "n8n URL"
+    hint: "e.g. http://n8n.local:5678 — a path prefix is fine"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In n8n open Settings → n8n API and create an API key."
+  - "Copy it and enter it with your n8n URL below."
+  - "The public API is unavailable on n8n Cloud trial plans and must be enabled on self-hosted instances."

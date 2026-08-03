@@ -1,0 +1,22 @@
+name: grafana
+label: Grafana
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Grafana service account token"
+  key_hint: "glsa_... — from Administration → Service accounts"
+  setup_url: https://grafana.com/docs/grafana/latest/administration/service-accounts/
+connect_inputs:
+  - key: base_url
+    label: "Grafana URL"
+    hint: "e.g. http://grafana.local:3000 — a path prefix is fine"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In Grafana open Administration → Users and access → Service accounts and add one."
+  - "Give it the Viewer role unless the agent genuinely needs to change dashboards, then create a token."
+  - "Copy the token and enter it with your Grafana URL below. API keys are deprecated in favour of service accounts."

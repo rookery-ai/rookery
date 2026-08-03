@@ -1,0 +1,76 @@
+provider: n8n
+actions:
+  - name: n8n_list_workflows
+    description: "List workflows with their ids and active state. limit caps the result. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        active: {type: boolean, description: "restrict to active or inactive workflows"}
+        limit:  {type: integer, description: "max workflows, default 20"}
+      required: []
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/workflows"
+      query:
+        active: "{{active}}"
+        limit: "{{limit}}"
+    response_extract: "$.data"
+
+  - name: n8n_list_executions
+    description: "Recent workflow executions with status. status is error, success or waiting — pass error for a failure digest. limit caps the result. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        status:      {type: string, description: "error | success | waiting"}
+        workflow_id: {type: string, description: "restrict to one workflow"}
+        limit:       {type: integer, description: "max executions, default 20"}
+      required: [limit]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/executions"
+      query:
+        status: "{{status}}"
+        workflowId: "{{workflow_id}}"
+        limit: "{{limit}}"
+    response_extract: "$.data"
+
+  - name: n8n_get_execution
+    description: "One execution's detail by id, including the error when it failed. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        execution_id: {type: integer}
+      required: [execution_id]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/executions/{{execution_id}}"
+    response_extract: "$"
+
+  - name: n8n_activate_workflow
+    description: "Activate a workflow so its triggers run. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        workflow_id: {type: string}
+      required: [workflow_id]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/api/v1/workflows/{{workflow_id}}/activate"
+    response_extract: "$"
+
+  - name: n8n_deactivate_workflow
+    description: "Deactivate a workflow so its triggers stop firing. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        workflow_id: {type: string}
+      required: [workflow_id]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/api/v1/workflows/{{workflow_id}}/deactivate"
+    response_extract: "$"

@@ -1,0 +1,20 @@
+name: lastfm
+label: Last.fm
+category: Data & Reference
+unverified: true
+auth:
+  kind: api_key
+  placement: query
+  param_name: api_key
+  key_label: "Last.fm API key"
+  key_hint: "from last.fm/api/account/create"
+  setup_url: https://www.last.fm/api/account/create
+connect_inputs:
+  - key: username
+    label: "Last.fm username"
+    hint: "the scrobbling account to read"
+    required: true
+setup_steps:
+  - "Create an API account at https://www.last.fm/api/account/create — no review, instant."
+  - "Copy the API key (not the shared secret; these read-only actions do not need it)."
+  - "Enter it with your Last.fm username below."

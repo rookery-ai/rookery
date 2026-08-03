@@ -1,0 +1,82 @@
+provider: gitea
+actions:
+  - name: gitea_list_repos
+    description: "Repositories the authenticated user can see. limit caps the result. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max repos, default 20"}
+      required: []
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/user/repos"
+      query:
+        limit: "{{limit}}"
+    response_extract: "$"
+
+  - name: gitea_list_issues
+    description: "Issues in one repository. state is open, closed or all. limit caps the result. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        owner: {type: string}
+        repo:  {type: string}
+        state: {type: string, description: "open | closed | all"}
+        limit: {type: integer, description: "max issues, default 20"}
+      required: [owner, repo]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/repos/{{owner}}/{{repo}}/issues"
+      query:
+        state: "{{state}}"
+        limit: "{{limit}}"
+    response_extract: "$"
+
+  - name: gitea_create_issue
+    description: "Open an issue on a repository. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        owner: {type: string}
+        repo:  {type: string}
+        title: {type: string}
+        body:  {type: string}
+      required: [owner, repo, title]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/api/v1/repos/{{owner}}/{{repo}}/issues"
+      body:
+        title: "{{title}}"
+        body: "{{body}}"
+    response_extract: "$"
+
+  - name: gitea_list_commits
+    description: "Recent commits on a repository branch. limit caps the result. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        owner: {type: string}
+        repo:  {type: string}
+        sha:   {type: string, description: "branch or commit to start from"}
+        limit: {type: integer, description: "max commits, default 20"}
+      required: [owner, repo]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/repos/{{owner}}/{{repo}}/commits"
+      query:
+        sha: "{{sha}}"
+        limit: "{{limit}}"
+    response_extract: "$"
+
+  - name: gitea_version
+    description: "Gitea's version — a cheap reachability check. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/version"
+    response_extract: "$"

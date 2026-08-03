@@ -1,0 +1,50 @@
+provider: audiobookshelf
+actions:
+  - name: abs_list_libraries
+    description: "List libraries (audiobooks, podcasts) with their ids. Call this first — the other actions need a library id. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/libraries"
+    response_extract: "$.libraries"
+
+  - name: abs_search_library
+    description: "Search one library by title or author. limit caps the result. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        library_id: {type: string}
+        query:      {type: string, description: "title or author"}
+        limit:      {type: integer, description: "max results, default 12"}
+      required: [library_id, query]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/libraries/{{library_id}}/search"
+      query:
+        q: "{{query}}"
+        limit: "{{limit}}"
+    response_extract: "$"
+
+  - name: abs_listening_progress
+    description: "The authenticated user's in-progress items — what you are partway through. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/me/items-in-progress"
+    response_extract: "$.libraryItems"
+
+  - name: abs_get_item
+    description: "One library item's full metadata by id: title, author, narrator, duration, series. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        item_id: {type: string}
+      required: [item_id]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/items/{{item_id}}"
+    response_extract: "$"

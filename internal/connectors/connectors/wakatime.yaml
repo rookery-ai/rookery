@@ -1,0 +1,49 @@
+provider: wakatime
+actions:
+  - name: wakatime_status_bar
+    description: "Today's coding time so far, already formatted as a human string. The cheapest 'how much have I coded today' answer. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://wakatime.com/api/v1/users/current/status_bar/today"
+    response_extract: "$.data"
+
+  - name: wakatime_summaries
+    description: "Per-day totals between two dates (YYYY-MM-DD), broken down by language, project and editor. Both bounds are required. The free plan keeps only the last 14 days. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start: {type: string, description: "YYYY-MM-DD"}
+        end:   {type: string, description: "YYYY-MM-DD"}
+      required: [start, end]
+    request:
+      method: GET
+      url: "https://wakatime.com/api/v1/users/current/summaries"
+      query:
+        start: "{{start}}"
+        end: "{{end}}"
+    response_extract: "$.data"
+
+  - name: wakatime_stats
+    description: "Aggregate stats over a range: last_7_days, last_30_days, last_6_months, last_year or all_time. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        range: {type: string, description: "last_7_days | last_30_days | last_6_months | last_year | all_time"}
+      required: [range]
+    request:
+      method: GET
+      url: "https://wakatime.com/api/v1/users/current/stats/{{range}}"
+    response_extract: "$.data"
+
+  - name: wakatime_projects
+    description: "Projects WakaTime has seen, with their names and repository URLs. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://wakatime.com/api/v1/users/current/projects"
+    response_extract: "$.data"

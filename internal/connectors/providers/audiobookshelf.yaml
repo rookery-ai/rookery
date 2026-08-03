@@ -1,0 +1,22 @@
+name: audiobookshelf
+label: Audiobookshelf
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Audiobookshelf API key"
+  key_hint: "from config → users → your account"
+  setup_url: https://audiobookshelf.org/docs/documentation/server-management/api-keys/
+connect_inputs:
+  - key: base_url
+    label: "Audiobookshelf URL"
+    hint: "e.g. http://abs.local:13378"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "Log into Audiobookshelf as an admin and open config → users, then your own account."
+  - "Copy the API token shown there and enter it with your server URL below."
+  - "API keys are part of the JWT auth system introduced in Audiobookshelf 2.26.0."

@@ -1,0 +1,22 @@
+name: gitea
+label: Gitea
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "token "
+  key_label: "Gitea access token"
+  key_hint: "from Settings → Applications → Access Tokens"
+  setup_url: https://docs.gitea.com/development/api-usage
+connect_inputs:
+  - key: base_url
+    label: "Gitea URL"
+    hint: "e.g. https://git.example.com — a path prefix is fine"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In Gitea open Settings → Applications and generate a new access token."
+  - "Select only the scopes the agent needs — a token with repo read is enough for reporting."
+  - "Copy it and enter it with your Gitea URL below. Note Gitea uses 'token <key>', not 'Bearer'."

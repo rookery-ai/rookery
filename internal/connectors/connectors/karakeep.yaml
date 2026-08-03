@@ -1,0 +1,62 @@
+provider: karakeep
+actions:
+  - name: karakeep_list_bookmarks
+    description: "List saved bookmarks, newest first. limit caps the result — a library grows without bound. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max bookmarks, default 20"}
+      required: []
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/bookmarks"
+      query:
+        limit: "{{limit}}"
+    response_extract: "$.bookmarks"
+
+  - name: karakeep_search_bookmarks
+    description: "Search bookmarks by text across titles, content and tags. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "search terms"}
+        limit: {type: integer, description: "max results, default 20"}
+      required: [query]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/bookmarks/search"
+      query:
+        q: "{{query}}"
+        limit: "{{limit}}"
+    response_extract: "$.bookmarks"
+
+  - name: karakeep_create_bookmark
+    description: "Save a URL. Karakeep fetches the title and content itself. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        url:   {type: string}
+        title: {type: string}
+        note:  {type: string}
+      required: [url]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/api/v1/bookmarks"
+      body:
+        type: "link"
+        url: "{{url}}"
+        title: "{{title}}"
+        note: "{{note}}"
+    response_extract: "$"
+
+  - name: karakeep_list_lists
+    description: "List the bookmark lists with their ids. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/lists"
+    response_extract: "$.lists"

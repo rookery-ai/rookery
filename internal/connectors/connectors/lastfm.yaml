@@ -1,0 +1,72 @@
+provider: lastfm
+actions:
+  - name: lastfm_recent_tracks
+    description: "Recently scrobbled tracks, newest first. limit caps the result; when a track is playing now it is marked nowplaying. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max tracks, default 20"}
+      required: []
+    request:
+      method: GET
+      url: "https://ws.audioscrobbler.com/2.0/"
+      query:
+        method: "user.getrecenttracks"
+        user: "{{conn.username}}"
+        limit: "{{limit}}"
+        format: "json"
+    response_extract: "$.recenttracks"
+
+  - name: lastfm_top_artists
+    description: "Most-played artists over a period: 7day, 1month, 3month, 6month, 12month or overall. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        period: {type: string, description: "7day | 1month | 3month | 6month | 12month | overall"}
+        limit:  {type: integer, description: "max artists, default 10"}
+      required: [period]
+    request:
+      method: GET
+      url: "https://ws.audioscrobbler.com/2.0/"
+      query:
+        method: "user.gettopartists"
+        user: "{{conn.username}}"
+        period: "{{period}}"
+        limit: "{{limit}}"
+        format: "json"
+    response_extract: "$.topartists"
+
+  - name: lastfm_top_tracks
+    description: "Most-played tracks over a period: 7day, 1month, 3month, 6month, 12month or overall. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        period: {type: string, description: "7day | 1month | 3month | 6month | 12month | overall"}
+        limit:  {type: integer, description: "max tracks, default 10"}
+      required: [period]
+    request:
+      method: GET
+      url: "https://ws.audioscrobbler.com/2.0/"
+      query:
+        method: "user.gettoptracks"
+        user: "{{conn.username}}"
+        period: "{{period}}"
+        limit: "{{limit}}"
+        format: "json"
+    response_extract: "$.toptracks"
+
+  - name: lastfm_user_info
+    description: "Profile summary: total scrobbles, registration date and country. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://ws.audioscrobbler.com/2.0/"
+      query:
+        method: "user.getinfo"
+        user: "{{conn.username}}"
+        format: "json"
+    response_extract: "$.user"
