@@ -49,22 +49,24 @@ var ErrEscapes = errors.New("path escapes vault")
 
 // protectedTopDirs are the system-managed, DB-backed top-level vault
 // directories whose contents mirror database rows — agents, reflected chat
-// transcripts, inbox notifications, skills, and reflected reminders — plus the
-// hidden internal dir. Deleting or renaming any of these (or anything inside
-// them) from the KB browser would orphan the backing record and leave the
-// agent/chat/skill/inbox item broken, so those user-initiated mutations are
-// refused at the KB API layer and hidden in the file tree — the item must be
-// deleted from its own page instead. This is the single source of truth for
-// *user-initiated KB-browser* mutation protection; it deliberately does NOT
-// gate the vault primitives (Delete/Rename), which legitimate deletion from an
-// item's own page also calls.
+// transcripts and skills — plus the hidden internal dir. Deleting or renaming
+// any of these (or anything inside them) from the KB browser would orphan the
+// backing record and leave the agent/chat/skill broken, so those user-initiated
+// mutations are refused at the KB API layer and hidden in the file tree — the
+// item must be deleted from its own page instead. This is the single source of
+// truth for *user-initiated KB-browser* mutation protection; it deliberately
+// does NOT gate the vault primitives (Delete/Rename), which legitimate deletion
+// from an item's own page also calls.
+//
+// `inbox` and `reminders` were listed here while notifications and reminders
+// were reflected into the vault. Neither is written any more, and the platform
+// no longer owns those names — a user folder called "inbox" is an ordinary user
+// folder and must be renameable like any other.
 var protectedTopDirs = map[string]bool{
 	InternalDir: true, // .kb
 	"agents":    true,
 	"chats":     true,
-	"inbox":     true,
 	"skills":    true,
-	"reminders": true,
 }
 
 // IsUserMutationProtected reports whether rel lives inside a system-managed,

@@ -37,13 +37,11 @@ var md = goldmark.New(goldmark.WithExtensions(extension.GFM))
 // real on-disk directory, so Resolve, rename guards and isProtectedPath are
 // untouched by this.
 var kbSystemFolderLabels = map[string]string{
-	"notes":     "Notes",
-	"memory":    "Memory",
-	"skills":    "Skills",
-	"agents":    "Agents",
-	"chats":     "Chats",
-	"inbox":     "Inbox",
-	"reminders": "Reminders",
+	"notes":  "Notes",
+	"memory": "Memory",
+	"skills": "Skills",
+	"agents": "Agents",
+	"chats":  "Chats",
 }
 
 func (s *Server) enrichKBDisplayNames(workspaceID, parentPath string, nodes []vault.Node) {
@@ -121,7 +119,7 @@ func (s *Server) kbDisplayTitle(workspaceID, path string) string {
 
 	// Reflected/system notes are UUID-named but carry a real "# " heading.
 	switch parts[0] {
-	case "chats", "inbox", "reminders", "memory":
+	case "chats", "memory":
 		if title := kbReadFirstHeading(s.vault, workspaceID, rel); title != "" {
 			return title
 		}

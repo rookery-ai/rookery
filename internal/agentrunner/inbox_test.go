@@ -2,7 +2,6 @@ package agentrunner
 
 import (
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -29,9 +28,12 @@ func inboxTestDB(t *testing.T) (*db.DB, *db.Agent, string) {
 	return database, agent, workspaceID
 }
 
-// TestRecordInboxWritesRowAndNote proves the runner's delivery-hook seam writes a
-// DB row + vault note for ok and error notifications, and skips empty bodies.
-func TestRecordInboxWritesRowAndNote(t *testing.T) {
+// TestRecordInboxWritesRowOnly proves the runner's delivery-hook seam writes a
+// DB row for ok and error notifications, skips empty bodies, and writes NOTHING
+// to the vault. The delivered text is already archived by ReflectAgentRun in
+// agents/<id>/logs/run_<ts>.md; a second copy under inbox/ only cluttered the KB
+// browser and polluted designer retrieval.
+func TestRecordInboxWritesRowOnly(t *testing.T) {
 	database, agent, workspaceID := inboxTestDB(t)
 	vlt := vault.New(t.TempDir())
 	r := &Runner{db: database, reflector: vlt.Reflector()}
@@ -40,7 +42,7 @@ func TestRecordInboxWritesRowAndNote(t *testing.T) {
 	// ok path
 	r.recordInbox(in, agent, "run-ok", "BTC is $66k", "ok")
 	// error path
-	r.recordInbox(in, agent, "run-err", "⚠️ Price Tracker failed: out of quota", "error")
+	r.recordInbox(in, agent, "run-err", "\u26a0\ufe0f Price Tracker failed: out of quota", "error")
 	// empty body is skipped (no notification)
 	r.recordInbox(in, agent, "run-empty", "", "ok")
 
@@ -55,36 +57,18 @@ func TestRecordInboxWritesRowAndNote(t *testing.T) {
 	if msgs[0].AgentName != agent.Name || msgs[0].Trigger != "manual" {
 		t.Fatalf("err row missing denormalized fields: %+v", msgs[0])
 	}
+	if msgs[1].Body != "BTC is $66k" {
+		t.Fatalf("ok row body = %q", msgs[1].Body)
+	}
 
-	// Two vault notes written (one per non-empty notification).
-	nodes, err := vlt.List(workspaceID, "inbox")
-	if err != nil {
-		t.Fatalf("list inbox dir: %v", err)
-	}
-	if len(nodes) != 2 {
-		t.Fatalf("inbox notes = %d, want 2", len(nodes))
-	}
-	// The ok note carries the agent name + body.
-	notes := map[string]string{}
-	for _, n := range nodes {
-		b, _ := vlt.ReadNote(workspaceID, "inbox/"+n.Name)
-		notes[n.Name] = string(b)
-	}
-	var found bool
-	for _, s := range notes {
-		if strings.Contains(s, "Price Tracker") && strings.Contains(s, "BTC is $66k") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("ok inbox note not found among %v", notes)
+	// Nothing reflected into the vault.
+	if nodes, err := vlt.List(workspaceID, "inbox"); err == nil && len(nodes) > 0 {
+		t.Fatalf("inbox/ notes written = %d, want none", len(nodes))
 	}
 }
 
-// TestRecordInboxNilReflector proves the vault reflection is skipped (but the DB
-// row still lands) when no vault is wired — the scheduler/manual-run paths that
-// don't set WithVault must not panic.
+// TestRecordInboxNilReflector proves the DB row still lands when no vault is
+// wired — the scheduler/manual-run paths that don't set WithVault must not panic.
 func TestRecordInboxNilReflector(t *testing.T) {
 	database, agent, workspaceID := inboxTestDB(t)
 	r := &Runner{db: database, reflector: nil}

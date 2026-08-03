@@ -41,30 +41,27 @@ func ParseWikilinks(content string) []Wikilink {
 var agentLogRE = regexp.MustCompile(`^agents/[^/]+/logs/`)
 
 // linkSourceExcluded reports whether a note should be ignored when collecting
-// who-links-here. System-generated transcripts — inbox notifications, reflected
-// chats, and agent run logs — mention other notes by name incidentally; letting
-// them register as backlinks buries a user's real, meaningful references under
-// machine spam. Targets are unaffected: a link TO any note still resolves.
+// who-links-here. System-generated transcripts — reflected chats and agent run
+// logs — mention other notes by name incidentally; letting them register as
+// backlinks buries a user's real, meaningful references under machine spam.
+// Targets are unaffected: a link TO any note still resolves.
 func linkSourceExcluded(rel string) bool {
-	return strings.HasPrefix(rel, "inbox/") ||
-		strings.HasPrefix(rel, "chats/") ||
-		agentLogRE.MatchString(rel)
+	return strings.HasPrefix(rel, "chats/") || agentLogRE.MatchString(rel)
 }
 
 // namePriority ranks candidate locations for resolving a bare [[Name]] link when
 // several notes share a basename. User-authored knowledge (notes/, memory/, the
-// root) wins over system-generated notes (agents/, chats/, inbox/, reminders/),
-// so a link to "Foo" resolves to the user's notes/Foo.md rather than an agent's
-// own Foo.md that merely sorts earlier in the walk. Higher wins; ties keep the
-// first-seen (the walk is deterministic).
+// root) wins over system-generated notes (agents/, chats/), so a link to "Foo"
+// resolves to the user's notes/Foo.md rather than an agent's own Foo.md that
+// merely sorts earlier in the walk. Higher wins; ties keep the first-seen (the
+// walk is deterministic).
 func namePriority(rel string) int {
 	switch {
 	case strings.HasPrefix(rel, "notes/"), strings.HasPrefix(rel, "memory/"):
 		return 3
 	case !strings.Contains(rel, "/"): // a root-level note
 		return 3
-	case strings.HasPrefix(rel, "agents/"), strings.HasPrefix(rel, "chats/"),
-		strings.HasPrefix(rel, "inbox/"), strings.HasPrefix(rel, "reminders/"):
+	case strings.HasPrefix(rel, "agents/"), strings.HasPrefix(rel, "chats/"):
 		return 1
 	default: // skills/ and any other user-organizable folder
 		return 2

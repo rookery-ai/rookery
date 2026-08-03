@@ -213,6 +213,12 @@ func serveCmd() *cli.Command {
 			if err := vlt.MigrateSessionsToChats(); err != nil {
 				slog.Warn("vault sessions→chats migration", "err", err)
 			}
+			// Sweep inbox/ notes written by builds that still reflected
+			// notifications into the vault. The rows they projected are still in
+			// inbox_messages; only the projection is gone.
+			if err := vlt.RemoveLegacyInboxNotes(); err != nil {
+				slog.Warn("vault legacy inbox sweep", "err", err)
+			}
 
 			// Consolidate any legacy UUID-keyed memory notes into GENERAL.md.
 			// Must run after MigrateLegacyLayout (which may have just created UUID files
@@ -495,7 +501,7 @@ func serveCmd() *cli.Command {
 			sched := scheduler.New(database, runner, sysKey).WithSender(gwManager)
 			go sched.Run(ctx)
 
-			reminderSvc := reminder.New(database, gwManager).WithReflector(vlt.Reflector()).WithSearcher(vaultSearcher)
+			reminderSvc := reminder.New(database, gwManager).WithSearcher(vaultSearcher)
 			go reminderSvc.Run(ctx)
 
 			sessionSvc := chat.New(database).WithReflector(vlt.Reflector())

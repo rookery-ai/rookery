@@ -526,6 +526,12 @@ func (r *Runner) reflectRun(input RunInput, agent *db.Agent, runID string, exitC
 // delivered to the user (the friendly error, the [CHAT] output, or the
 // no-notification warning). Best-effort: a failure never affects the run.
 // Silent ([SILENT]) runs never reach a SendOutput site, so they post nothing.
+//
+// The row is the whole record. The notification is NOT reflected into the vault:
+// ReflectAgentRun has already archived the exact delivered text in
+// agents/<id>/logs/run_<ts>.md under "Output sent to user", so an inbox/<uuid>.md
+// note was a third copy that cluttered the KB browser and fed designer retrieval
+// with weather reports.
 func (r *Runner) recordInbox(input RunInput, agent *db.Agent, runID, body, status string) {
 	if body == "" || r.db == nil {
 		return
@@ -538,15 +544,6 @@ func (r *Runner) recordInbox(input RunInput, agent *db.Agent, runID, body, statu
 		Trigger: input.Trigger, Body: body, Status: status, CreatedAt: now,
 	}); err != nil {
 		slog.Warn("inbox: create agent_run", "run_id", runID, "err", err)
-		return
-	}
-	if r.reflector != nil {
-		if err := r.reflector.ReflectInbox(input.WorkspaceID, vault.InboxNote{
-			ID: id, Source: "agent_run", AgentName: agent.Name,
-			Trigger: input.Trigger, Body: body, Status: status, CreatedAt: now,
-		}); err != nil {
-			slog.Warn("inbox: reflect agent_run", "run_id", runID, "err", err)
-		}
 	}
 }
 

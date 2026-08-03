@@ -117,14 +117,12 @@ func TestResolvePrefersUserContentOnCollision(t *testing.T) {
 }
 
 // Backlinks on a user note must appear (the reported bug), and must NOT include
-// machine-generated sources: inbox notifications, reflected chats, agent run
-// logs.
+// machine-generated sources: reflected chats and agent run logs.
 func TestBacklinksExcludesSystemSourcesAndCoversUserNotes(t *testing.T) {
 	v := New(t.TempDir())
 	const user = "u1"
 	mustWrite(t, v, user, "notes/Target.md", "# Target")
 	mustWrite(t, v, user, "notes/Author.md", "see [[Target]]")            // real user backlink
-	mustWrite(t, v, user, "inbox/msg1.md", "agent mentioned [[Target]]")  // excluded source
 	mustWrite(t, v, user, "agents/abc/logs/run_1.md", "wrote [[Target]]") // excluded source
 	mustWrite(t, v, user, "chats/c1.md", "chat about [[Target]]")         // excluded source
 

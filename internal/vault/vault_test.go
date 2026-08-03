@@ -16,10 +16,13 @@ func TestIsUserMutationProtected(t *testing.T) {
 		{"agents/abc/AGENT.md", true},
 		{"agents", true},
 		{"/chats/x.md", true},
-		{"inbox/n.md", true},
 		{"skills/s/SKILL.md", true},
-		{"reminders/r.md", true},
 		{".kb/db-export/x.json", true},
+		// The platform stopped writing inbox/ and never wrote reminders/, so it
+		// no longer owns those names: a user folder called "inbox" is an
+		// ordinary user folder and must stay renameable.
+		{"inbox/n.md", false},
+		{"reminders/r.md", false},
 		{"notes/../chats/x.md", true}, // resolves into chats/
 		{"notes/mine.md", false},
 		{"memory/USER.md", false},

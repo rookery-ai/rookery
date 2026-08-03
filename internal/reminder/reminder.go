@@ -22,22 +22,18 @@ type Sender interface {
 }
 
 // Service polls for due reminders and sends them.
+//
+// It writes nothing to the vault — hence no Reflector. Reminders live only in
+// the DB and the reminders UI tab.
 type Service struct {
-	db        *db.DB
-	sender    Sender
-	reflector *vault.Reflector // optional; mirrors reminders into the user's vault
-	searcher  vault.Searcher   // optional; enriches fired reminders with related KB notes
+	db       *db.DB
+	sender   Sender
+	searcher vault.Searcher // optional; enriches fired reminders with related KB notes
 }
 
 // New creates a Service.
 func New(database *db.DB, sender Sender) *Service {
 	return &Service{db: database, sender: sender}
-}
-
-// WithReflector enables mirroring fired reminders into each user's vault.
-func (s *Service) WithReflector(r *vault.Reflector) *Service {
-	s.reflector = r
-	return s
 }
 
 // WithSearcher enables enriching fired reminder messages with related vault notes.
@@ -108,25 +104,19 @@ func (s *Service) tick() {
 
 // recordInbox drops one inbox notification for a fired reminder whose body is
 // the exact message that was just sent. Best-effort; never blocks the send.
+//
+// Nothing is written to the vault. Reminders live only in the DB and the
+// reminders UI tab — reflecting the fired notification was a back door around
+// that rule, and it produced a pile of notes all titled "⏰ Reminder".
 func (s *Service) recordInbox(workspaceID, reminderID, body string) {
 	if s.db == nil || body == "" {
 		return
 	}
-	id := uuid.New().String()
-	now := time.Now().UTC()
 	if err := s.db.CreateInboxMessage(&db.InboxMessage{
-		ID: id, WorkspaceID: workspaceID, Source: "reminder",
-		RefID: reminderID, Body: body, Status: "ok", CreatedAt: now,
+		ID: uuid.New().String(), WorkspaceID: workspaceID, Source: "reminder",
+		RefID: reminderID, Body: body, Status: "ok", CreatedAt: time.Now().UTC(),
 	}); err != nil {
 		slog.Warn("inbox: create reminder", "reminder_id", reminderID, "err", err)
-		return
-	}
-	if s.reflector != nil {
-		if err := s.reflector.ReflectInbox(workspaceID, vault.InboxNote{
-			ID: id, Source: "reminder", Body: body, Status: "ok", CreatedAt: now,
-		}); err != nil {
-			slog.Warn("inbox: reflect reminder", "reminder_id", reminderID, "err", err)
-		}
 	}
 }
 

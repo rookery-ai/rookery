@@ -113,6 +113,56 @@ func anyExists(paths ...string) bool {
 	return false
 }
 
+// RemoveLegacyInboxNotes deletes the `inbox/` directory and the matching
+// `.kb/db-export/inbox_messages/` sidecars from every vault. Earlier builds
+// reflected each inbox notification into `inbox/<uuid>.md`; notifications are no
+// longer reflected at all (see the note above ChatNote in reflect.go for why),
+// so what those builds wrote is now orphaned clutter that still pollutes
+// retrieval and search.
+//
+// It deletes rather than archives because the notes were only ever a projection:
+// every one of them has a live row in `inbox_messages`, which the Home inbox
+// renders and the database backup covers. Nothing is lost that the record does
+// not still hold.
+//
+// Idempotent and near-free on every startup — two stats per workspace once the
+// directories are gone. Failures are logged and skipped rather than returned:
+// reflection was always best-effort, and an unremovable leftover note must not
+// stop the server from booting.
+func (v *Vault) RemoveLegacyInboxNotes() error {
+	workspaces, err := os.ReadDir(v.VaultsDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	swept := 0
+	for _, w := range workspaces {
+		if !w.IsDir() {
+			continue
+		}
+		root := v.Root(w.Name())
+		for _, dir := range []string{
+			filepath.Join(root, "inbox"),
+			filepath.Join(root, InternalDir, "db-export", "inbox_messages"),
+		} {
+			if _, statErr := os.Stat(dir); statErr != nil {
+				continue
+			}
+			if rmErr := os.RemoveAll(dir); rmErr != nil {
+				slog.Warn("vault: remove legacy inbox notes", "workspace", w.Name(), "dir", dir, "err", rmErr)
+				continue
+			}
+			swept++
+		}
+	}
+	if swept > 0 {
+		slog.Info("vault: removed legacy inbox notes", "dirs", swept)
+	}
+	return nil
+}
+
 // MigrateSessionsToChats renames the legacy per-user vault `sessions/` directory
 // to `chats/` and rewrites the home-note `[[sessions]]` wikilink to `[[chats]]`.
 // Idempotent and safe on every startup: it only acts when a `sessions/` dir (or

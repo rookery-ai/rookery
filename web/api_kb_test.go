@@ -140,9 +140,12 @@ func TestAPIKBDeleteAndRename(t *testing.T) {
 }
 
 // A user must not be able to delete or rename a DB-backed, system-managed vault
-// path (agents/chats/inbox/skills/reminders) from the KB browser — doing so
-// would orphan the backing record. The guard fires before touching the vault,
-// so it holds even for a path that doesn't exist on disk.
+// path (agents/chats/skills) from the KB browser — doing so would orphan the
+// backing record. The guard fires before touching the vault, so it holds even
+// for a path that doesn't exist on disk.
+//
+// inbox/ and reminders/ are deliberately NOT protected any more: the platform
+// writes neither, so a folder by either name is the user's own.
 func TestAPIKBProtectedPathsRefused(t *testing.T) {
 	s, _ := newAPITestServer(t)
 	cookies := bootstrapAndLogin(t, s)
@@ -151,9 +154,7 @@ func TestAPIKBProtectedPathsRefused(t *testing.T) {
 	protected := []string{
 		"agents/some-agent-id/AGENT.md",
 		"chats/some-chat.md",
-		"inbox/some-note.md",
 		"skills/some-skill/SKILL.md",
-		"reminders/some-reminder.md",
 	}
 	for _, p := range protected {
 		rec := doJSON(t, s, http.MethodDelete, "/api/v1/kb/note?path="+p, nil, cookies)
