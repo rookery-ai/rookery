@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -16,6 +17,55 @@ import (
 
 	"github.com/ilijad1/rookery/internal/nethttp"
 )
+
+// Outcome is the result of one cascade run. Provider names the engine that
+// actually served the results — the single most useful fact this package can
+// report, and the one it used to throw away at the moment it was known.
+// It is empty when every provider was exhausted. Tried lists every engine
+// attempted, in order, so a caller can tell the user what was actually looked
+// at rather than a bare "no results".
+type Outcome struct {
+	Results  []Result
+	Provider string
+	Tried    []string
+}
+
+// Label maps a provider's internal Name() to a human display string. It is the
+// single source for these strings: the web_search tool description and the
+// per-result provenance tag both render through it, so they cannot drift apart
+// and start naming the same engine differently.
+func Label(name string) string {
+	switch name {
+	case "brave":
+		return "Brave Search"
+	case "tavily":
+		return "Tavily"
+	case "ddg-html", "ddg-lite":
+		return "DuckDuckGo"
+	case "mojeek":
+		return "Mojeek"
+	case "bing":
+		return "Bing"
+	}
+	return name
+}
+
+// Labels maps provider names to display strings, collapsing duplicates while
+// preserving order — the keyless cascade holds two DuckDuckGo entries
+// (ddg-html, ddg-lite) that a user has no reason to see listed twice.
+func Labels(names []string) []string {
+	seen := make(map[string]bool, len(names))
+	out := make([]string, 0, len(names))
+	for _, n := range names {
+		l := Label(n)
+		if seen[l] {
+			continue
+		}
+		seen[l] = true
+		out = append(out, l)
+	}
+	return out
+}
 
 // Result is one search hit.
 type Result struct {
@@ -56,7 +106,15 @@ func Transient(err error) error { return transientError{err} }
 // isTransient reports whether err (or anything it wraps) is a transientError.
 // errors.As already walks the Unwrap() chain, which is all a hand-rolled loop
 // would do here, so we lean on the stdlib rather than reimplement it.
+//
+// A dial-guard rejection is explicitly NOT transient even though it arrives as
+// a network error: the host resolved into blocked address space, and it will
+// resolve there again on every retry. Retrying it just triples the latency
+// before the cascade moves on.
 func isTransient(err error) bool {
+	if errors.Is(err, nethttp.ErrBlockedAddr) {
+		return false
+	}
 	var t transientError
 	return errors.As(err, &t)
 }
@@ -70,10 +128,14 @@ func isTransient(err error) bool {
 // nil error. The caller renders that as an explicit "no results" notice. An
 // error result would be treated by the coder's oscillation guard as a failing
 // call worth blocking, which is wrong for a query that simply matched nothing.
-func (c *Client) Search(ctx context.Context, query string) ([]Result, error) {
+// Every log line here carries the provider, the status and the result count —
+// and deliberately NEVER the query, which is user content. Knowing that Brave
+// served six results is what an operator needs; knowing what was searched for
+// is not theirs to have in a log file.
+func (c *Client) Search(ctx context.Context, query string) (Outcome, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return nil, fmt.Errorf("query is required")
+		return Outcome{}, fmt.Errorf("query is required")
 	}
 	hc := c.HTTP
 	if hc == nil {
@@ -89,22 +151,41 @@ func (c *Client) Search(ctx context.Context, query string) ([]Result, error) {
 		base = 500 * time.Millisecond
 	}
 
+	out := Outcome{}
 	for _, p := range c.Providers {
+		out.Tried = append(out.Tried, p.Name())
 		results, err := c.runProvider(ctx, hc, base, p, query)
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil, ctx.Err()
+				return Outcome{}, ctx.Err()
+			}
+			// A blocked host is logged distinctly: it reads as a network error
+			// but the cause is local DNS policy, and telling the two apart is
+			// the difference between "search is flaky" and "your resolver is
+			// answering api.search.brave.com with 0.0.0.0".
+			if errors.Is(err, nethttp.ErrBlockedAddr) {
+				slog.Warn("websearch provider blocked",
+					"provider", p.Name(), "err", err,
+					"hint", "resolved into blocked address space; check local DNS filtering")
+			} else {
+				slog.Warn("websearch provider failed", "provider", p.Name(), "err", err)
 			}
 			continue // hard failure for this engine — try the next
 		}
 		if len(results) > 0 {
-			return dedupe(results), nil
+			out.Results = dedupe(results)
+			out.Provider = p.Name()
+			slog.Debug("websearch provider served",
+				"provider", p.Name(), "results", len(out.Results))
+			return out, nil
 		}
+		slog.Debug("websearch provider empty", "provider", p.Name())
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return Outcome{}, ctx.Err()
 		}
 	}
-	return nil, nil
+	slog.Warn("websearch exhausted every provider", "tried", strings.Join(out.Tried, ","))
+	return out, nil
 }
 
 // runProvider retries one provider's transient failures with exponential backoff.

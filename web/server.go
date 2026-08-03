@@ -59,6 +59,12 @@ type Server struct {
 	kbBridge   *vault.Bridge         // loopback bridge so CLI chat coders can reach KB convert/search
 	titleGen   chat.TitleGenerator   // optional; auto-titles a chat from its first exchange
 
+	// searchKeyVerify proves a search API key against the live provider before
+	// it is stored. It is a field rather than a direct call so tests can save a
+	// key without reaching the network — verifySearchKey is the production
+	// implementation and is installed by NewServer.
+	searchKeyVerify func(ctx context.Context, provider, key string) error
+
 	// backupSched drives owner-level snapshots. Shared with the background
 	// ticker started in serve so the "Back up now" button and the schedule run
 	// the exact same path. Nil in tests, where the endpoint says so rather than

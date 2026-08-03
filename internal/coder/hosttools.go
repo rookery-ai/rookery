@@ -190,8 +190,9 @@ func (h *hostToolSet) tools() []llm.Tool {
 		},
 		{
 			Name: "web_search",
-			Description: "Search the public web (DuckDuckGo) and return a few results as numbered `title / url / snippet` entries — " +
+			Description: "Search the public web (" + h.searchEngineBlurb() + ") and return a few results as numbered `title / url / snippet` entries — " +
 				`e.g. web_search with query "weather Skopje today". Use it to FIND a URL when you don't have one yet; then call web_fetch to READ the page you chose. ` +
+				"Each result set names the engine that actually served it; trust that over this description. " +
 				"It is query-only and CANNOT carry secrets — there is nothing to authenticate, so it needs no key/token.",
 			Parameters: rawSchema(`{"type":"object","properties":{"query":{"type":"string","description":"the web search query"}},"required":["query"]}`),
 		},
@@ -1300,7 +1301,7 @@ func (h *hostToolSet) webSearch(ctx context.Context, query string) (string, erro
 		base = 500 * time.Millisecond
 	}
 
-	results, err := (&websearch.Client{
+	out, err := (&websearch.Client{
 		HTTP:      client,
 		RetryBase: base,
 		Providers: h.searchProviders(),
@@ -1308,17 +1309,49 @@ func (h *hostToolSet) webSearch(ctx context.Context, query string) (string, erro
 	if err != nil {
 		return "", err
 	}
-	if len(results) == 0 {
-		return "(no search results)", nil
+	// Name what was actually tried rather than a bare "no results" — otherwise a
+	// total cascade failure and a genuinely empty query look identical to the
+	// model, and it reports the second when it should report the first.
+	if len(out.Results) == 0 {
+		tried := websearch.Labels(out.Tried)
+		if len(tried) == 0 {
+			return "(no search results)", nil
+		}
+		return "(no search results — tried " + strings.Join(tried, ", ") + ")", nil
 	}
+	results := out.Results
 	if len(results) > maxWebSearchResults {
 		results = results[:maxWebSearchResults]
 	}
+	// The provenance line is ground truth for the whole turn: it is the only
+	// thing that stops the model reporting the engine it was CONFIGURED with
+	// (or, worse, the one named in its tool description) instead of the one
+	// that actually answered.
 	var sb strings.Builder
+	fmt.Fprintf(&sb, "Results via %s:\n", websearch.Label(out.Provider))
 	for i, r := range results {
 		fmt.Fprintf(&sb, "%d. %s\n   %s\n   %s\n", i+1, r.Title, r.URL, r.Snippet)
 	}
 	return strings.TrimSpace(sb.String()), nil
+}
+
+// searchEngineBlurb renders the configured cascade for the web_search tool
+// description, so a workspace with a Brave key is not told it is on DuckDuckGo.
+// It lists the first three engines: naming every fallback is noise, and the
+// per-result provenance tag is what settles the question anyway.
+func (h *hostToolSet) searchEngineBlurb() string {
+	names := make([]string, 0, 4)
+	for _, p := range h.searchProviders() {
+		names = append(names, p.Name())
+	}
+	labels := websearch.Labels(names)
+	if len(labels) == 0 {
+		return "public search engines"
+	}
+	if len(labels) > 3 {
+		labels = labels[:3]
+	}
+	return strings.Join(labels, ", ")
 }
 
 // searchProviders builds the provider list for this toolset. A workspace that

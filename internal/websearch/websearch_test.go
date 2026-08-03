@@ -28,7 +28,8 @@ func TestSearchFirstProviderWins(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(&ddgProvider{name: "ddg-html", base: srv.URL})
-	got, err := c.Search(context.Background(), "weather skopje")
+	outcome, err := c.Search(context.Background(), "weather skopje")
+	got := outcome.Results
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -59,7 +60,8 @@ func TestSearchFallsThroughOnZeroResults(t *testing.T) {
 		&ddgProvider{name: "ddg-html", base: challenge.URL},
 		&ddgProvider{name: "ddg-lite", base: good.URL},
 	)
-	got, err := c.Search(context.Background(), "anything")
+	outcome, err := c.Search(context.Background(), "anything")
+	got := outcome.Results
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -79,7 +81,8 @@ func TestSearchFallsThroughOnHardFailure(t *testing.T) {
 	defer good.Close()
 
 	c := testClient(&ddgProvider{name: "a", base: dead.URL}, &ddgProvider{name: "b", base: good.URL})
-	got, err := c.Search(context.Background(), "q")
+	outcome, err := c.Search(context.Background(), "q")
+	got := outcome.Results
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -101,7 +104,8 @@ func TestSearchRetriesTransientWithinProvider(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(&ddgProvider{name: "a", base: srv.URL})
-	got, err := c.Search(context.Background(), "q")
+	outcome, err := c.Search(context.Background(), "q")
+	got := outcome.Results
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
@@ -120,7 +124,8 @@ func TestSearchAllEnginesFailReturnsEmptyNotError(t *testing.T) {
 	defer dead.Close()
 
 	c := testClient(&ddgProvider{name: "a", base: dead.URL}, &ddgProvider{name: "b", base: dead.URL})
-	got, err := c.Search(context.Background(), "q")
+	outcome, err := c.Search(context.Background(), "q")
+	got := outcome.Results
 	if err != nil {
 		t.Fatalf("all-engines-fail must NOT be an error (it would trip the tool oscillation guard): %v", err)
 	}
@@ -140,7 +145,8 @@ func TestSearchDedupesByURL(t *testing.T) {
 	defer srv.Close()
 
 	c := testClient(&ddgProvider{name: "a", base: srv.URL})
-	got, _ := c.Search(context.Background(), "q")
+	outcome, _ := c.Search(context.Background(), "q")
+	got := outcome.Results
 	if len(got) != 1 {
 		t.Errorf("trailing-slash duplicate should collapse, got %d: %+v", len(got), got)
 	}
@@ -177,7 +183,8 @@ func TestSearchRetryBudgetIsPerProvider(t *testing.T) {
 		&ddgProvider{name: "a", base: srv1.URL},
 		&ddgProvider{name: "b", base: srv2.URL},
 	)
-	got, err := c.Search(context.Background(), "q")
+	outcome, err := c.Search(context.Background(), "q")
+	got := outcome.Results
 	if err != nil {
 		t.Fatalf("all-engines-fail must NOT be an error: %v", err)
 	}

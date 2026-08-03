@@ -7,12 +7,22 @@
 package nethttp
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"syscall"
 	"time"
 )
+
+// ErrBlockedAddr means the host resolved into address space this guard refuses
+// (loopback, RFC1918, link-local, CGNAT, cloud metadata). It is deliberately
+// distinct from an ordinary network failure: retrying cannot help, because the
+// address will not change, and the usual cause is local DNS policy answering a
+// public name with 0.0.0.0 — a DNS-filtering setup, not a flaky link. Callers
+// that would otherwise report "network error, try again" can use this to point
+// the operator at their resolver instead.
+var ErrBlockedAddr = errors.New("blocked address")
 
 // BlockedCIDRStrings lists private, loopback, and other special-purpose
 // ranges a guarded client must never dial. Blocking is enforced at DIAL time
@@ -90,11 +100,11 @@ func IsBlockedIP(ip net.IP) bool {
 func DenyPrivateAddr(network, address string, _ syscall.RawConn) error {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
-		return fmt.Errorf("blocked: cannot parse address %q", address)
+		return fmt.Errorf("%w: cannot parse address %q", ErrBlockedAddr, address)
 	}
 	ip := net.ParseIP(host)
 	if IsBlockedIP(ip) {
-		return fmt.Errorf("blocked: %s is a private or loopback address", host)
+		return fmt.Errorf("%w: %s is a private or loopback address", ErrBlockedAddr, host)
 	}
 	return nil
 }

@@ -8,8 +8,15 @@ import { api } from "./api";
 
 export type SearchKeyProvider = "brave" | "tavily";
 
-// Mirrors apiSearchKeysResponse.
+// Mirrors apiSearchKeysResponse. Note this reports CONFIGURED, not working —
+// a key is proven at save time (see SaveSearchKeyResult), and the result is
+// deliberately not persisted.
 export type SearchKeysState = { brave: boolean; tavily: boolean };
+
+// Mirrors apiPutSearchKeyResponse. `verified` is false when the provider could
+// not be reached at all; the key is still stored in that case (an outage must
+// not block a save) and `note` explains what to look at.
+export type SaveSearchKeyResult = { ok: boolean; verified: boolean; note?: string };
 
 export function useSearchKeys() {
   return useQuery({
@@ -22,7 +29,7 @@ export function useSaveSearchKey() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ provider, key }: { provider: SearchKeyProvider; key: string }) =>
-      api.put<{ ok: boolean }>("/api/v1/search-keys", { provider, key }),
+      api.put<SaveSearchKeyResult>("/api/v1/search-keys", { provider, key }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["search-keys"] }),
   });
 }
