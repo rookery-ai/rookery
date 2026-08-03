@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Bot, Plus, Search, Undo2 } from "lucide-react";
 import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { api } from "@/lib/api";
 import { timeAgo } from "@/lib/utils";
 import { useAgents, type Agent, type AgentDraft } from "@/lib/agents";
@@ -143,7 +143,7 @@ export default function AgentsPage() {
         <div className="flex items-center gap-2">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-2" />
-            <Input
+            <SearchInput
               aria-label="Search agents"
               placeholder="Search agents…"
               value={query}

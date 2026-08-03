@@ -120,6 +120,7 @@ function ProviderCard({
             aria-label={`${label} API key`}
             value={value}
             onChange={(e) => setValue(e.target.value)}
+            autoComplete="new-password"
           />
           {error && <p className="text-xs text-danger">{error}</p>}
           <div className="flex items-center gap-2">

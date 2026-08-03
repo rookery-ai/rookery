@@ -6,7 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { emojiGroups, filterEmojis } from "./emojiData";
@@ -58,7 +58,7 @@ export default function EmojiPicker({
         </DialogHeader>
         <div className="flex min-h-0 flex-col gap-3">
           <div className="flex items-center gap-3">
-            <Input
+            <SearchInput
               autoFocus
               placeholder="Search emoji…"
               value={query}

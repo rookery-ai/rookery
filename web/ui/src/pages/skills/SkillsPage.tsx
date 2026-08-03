@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Search, Sparkles, Undo2, Upload } from "lucide-react";
 import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import {
   Dialog,
   DialogContent,
@@ -289,7 +289,7 @@ export default function SkillsPage() {
           {total > 0 && (
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-2" />
-              <Input
+              <SearchInput
                 aria-label="Search skills"
                 placeholder="Search skills…"
                 value={query}

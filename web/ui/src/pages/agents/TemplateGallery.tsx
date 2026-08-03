@@ -3,7 +3,7 @@ import { Search } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import {
   AGENT_TEMPLATES, SCRATCH_TEMPLATE_ID, templateMatches,
   type AgentTemplate, type TemplateCategory,
@@ -65,7 +65,7 @@ export default function TemplateGallery({
         <div className="border-b border-border px-4 py-3">
           <div className="relative">
             <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-2" />
-            <Input
+            <SearchInput
               autoFocus
               value={query}
               onChange={(e) => setQuery(e.target.value)}
