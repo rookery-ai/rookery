@@ -218,6 +218,18 @@ type RequestTemplate struct {
 	Form map[string]string `yaml:"form"`
 }
 
+// ResponseFilter narrows a JSON ARRAY response client-side, for APIs that offer no
+// server-side filter of their own. Home Assistant is the motivating case: GET
+// /api/states returns every entity in the house, so an entity_prefix parameter that
+// the request ignored would be a lie — the filter is what makes it true.
+type ResponseFilter struct {
+	// Field is the object key each array element is matched on (e.g. "entity_id").
+	Field string `yaml:"field"`
+	// PrefixArg names the action argument holding the prefix to match. An absent or
+	// empty argument means no filtering, so the action still works unfiltered.
+	PrefixArg string `yaml:"prefix_arg"`
+}
+
 // Action is one curated, typed operation on a provider.
 type Action struct {
 	Name        string `yaml:"name"`
@@ -236,7 +248,9 @@ type Action struct {
 	ParamsRaw       map[string]any  `yaml:"params"`
 	Request         RequestTemplate `yaml:"request"`
 	ResponseExtract string          `yaml:"response_extract"`
-	Params          json.RawMessage `yaml:"-"` // compiled JSON schema from ParamsRaw
+	// ResponseFilter optionally narrows an array response after ResponseExtract runs.
+	ResponseFilter ResponseFilter  `yaml:"response_filter"`
+	Params         json.RawMessage `yaml:"-"` // compiled JSON schema from ParamsRaw
 }
 
 type manifest struct {

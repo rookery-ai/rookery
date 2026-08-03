@@ -216,7 +216,11 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 	if status >= 400 {
 		return Result{}, mapHTTPError(status, raw)
 	}
-	return Result{Data: extract(a.ResponseExtract, raw)}, nil
+	data := extract(a.ResponseExtract, raw)
+	if a.ResponseFilter.Field != "" {
+		data = applyResponseFilter(data, a.ResponseFilter, asString(args[a.ResponseFilter.PrefixArg]))
+	}
+	return Result{Data: data}, nil
 }
 
 func mapHTTPError(status int, raw []byte) *ConnectorError {
@@ -239,15 +243,56 @@ func extract(path string, raw []byte) json.RawMessage {
 	if path == "" || path == "$" {
 		return raw
 	}
-	if strings.HasPrefix(path, "$.") {
-		var m map[string]json.RawMessage
-		if json.Unmarshal(raw, &m) == nil {
-			if v, ok := m[strings.TrimPrefix(path, "$.")]; ok {
-				return v
-			}
-		}
+	if !strings.HasPrefix(path, "$.") {
+		return raw
 	}
-	return raw
+	cur := json.RawMessage(raw)
+	for _, seg := range strings.Split(strings.TrimPrefix(path, "$."), ".") {
+		if seg == "" {
+			return raw
+		}
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal(cur, &m); err != nil {
+			return raw
+		}
+		v, ok := m[seg]
+		if !ok {
+			return raw
+		}
+		cur = v
+	}
+	return cur
+}
+
+// applyResponseFilter keeps only the elements of a JSON array whose f.Field value
+// starts with prefix. A non-array body, an empty prefix, a non-object element, or an
+// element missing the field are all pass-through/no-match rather than errors — this
+// runs on real third-party payloads and must never panic or invent an empty result.
+func applyResponseFilter(raw json.RawMessage, f ResponseFilter, prefix string) json.RawMessage {
+	if f.Field == "" || prefix == "" {
+		return raw
+	}
+	var arr []json.RawMessage
+	if err := json.Unmarshal(raw, &arr); err != nil {
+		return raw
+	}
+	kept := make([]json.RawMessage, 0, len(arr))
+	for _, el := range arr {
+		var obj map[string]any
+		if json.Unmarshal(el, &obj) != nil {
+			continue
+		}
+		s, ok := obj[f.Field].(string)
+		if !ok || !strings.HasPrefix(s, prefix) {
+			continue
+		}
+		kept = append(kept, el)
+	}
+	out, err := json.Marshal(kept)
+	if err != nil {
+		return raw
+	}
+	return out
 }
 
 func truncate(s string, n int) string {
