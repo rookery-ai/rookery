@@ -15,6 +15,7 @@ import { ContextPane, useSlideOver } from "@/components/shell/AppShell";
 import { ContextPaneHeader } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { ProviderLogo } from "@/components/brand/ProviderLogo";
@@ -313,7 +314,7 @@ function SearchKeyRow({
             placeholder={`${label} API key`}
             value={key}
             onChange={(e) => setKey(e.target.value)}
-            autoComplete="off"
+            autoComplete="new-password"
             className="h-8 text-sm"
           />
           <Button
@@ -450,7 +451,7 @@ export default function ConnectionsPage() {
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-2" />
-              <Input
+              <SearchInput
                 aria-label="Search providers"
                 placeholder="Search providers…"
                 value={input}

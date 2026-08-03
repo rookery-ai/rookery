@@ -402,6 +402,7 @@ export function BackupSection() {
                 placeholder={data.s3.secret_key_set ? "unchanged" : ""}
                 value={form.s3SecretKey}
                 onChange={(e) => set("s3SecretKey", e.target.value)}
+                autoComplete="new-password"
               />
             </label>
             <label className="flex items-center gap-2 text-xs sm:col-span-2">
@@ -439,6 +440,7 @@ export function BackupSection() {
                 type="password"
                 value={form.passphrase}
                 onChange={(e) => set("passphrase", e.target.value)}
+                autoComplete="new-password"
               />
             </label>
           )}
@@ -545,6 +547,7 @@ export function BackupSection() {
                 type="password"
                 value={restorePassphrase}
                 onChange={(e) => setRestorePassphrase(e.target.value)}
+                autoComplete="new-password"
               />
             </label>
             <label className="text-xs">

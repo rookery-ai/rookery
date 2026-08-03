@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, Eraser, FlaskConical, Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { timeAgo } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { entityIcon } from "@/lib/entityIcons";
@@ -383,7 +384,7 @@ export function AuditLogSection() {
       </p>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <Input
+        <SearchInput
           aria-label="Search audit log"
           placeholder="Search target, detail or IP…"
           value={search}

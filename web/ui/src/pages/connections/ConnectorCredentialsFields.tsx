@@ -27,7 +27,10 @@ export function ConnectorCredentialsFields({
             type={f.secret ? "password" : "text"}
             value={values[f.name] ?? ""}
             onChange={(e) => onChange(f.name, e.target.value)}
-            autoComplete="off"
+            // A secret field needs "new-password", not "off" — Chrome ignores
+            // "off" on password inputs and pairs them with a nearby text input
+            // that it then fills as the username (see SearchInput's note).
+            autoComplete={f.secret ? "new-password" : "off"}
           />
         </div>
       ))}

@@ -109,7 +109,8 @@ test("search filters the grid client-side", async () => {
   wrap();
   await screen.findByText("Inbox Triager");
 
-  const search = screen.getByRole("textbox", { name: /search/i });
+  // SearchInput renders type="search", whose implicit role is searchbox.
+  const search = screen.getByRole("searchbox", { name: /search/i });
   await userEvent.type(search, "backup");
 
   expect(screen.queryByText("Inbox Triager")).not.toBeInTheDocument();

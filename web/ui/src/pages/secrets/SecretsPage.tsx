@@ -3,6 +3,7 @@ import { AlertTriangle, Check, KeyRound, Pencil, Plus, Save, Search, Trash2 } fr
 import { PageTitle } from "@/components/shell/PageTitle";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { Label } from "@/components/ui/label";
 import {
   Dialog,
@@ -108,7 +109,7 @@ function AddSecretCard({ existing }: { existing: string[] }) {
             type="password"
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            autoComplete="off"
+            autoComplete="new-password"
           />
           <p className="text-xs text-muted-2">
             Write-only: values are never displayed after saving.
@@ -200,7 +201,7 @@ function UpdateSecretDialog({
               type="password"
               value={value}
               onChange={(e) => setValue(e.target.value)}
-              autoComplete="off"
+              autoComplete="new-password"
               autoFocus
             />
             <p className="text-xs text-muted-2">
@@ -348,7 +349,7 @@ export default function SecretsPage() {
         {secrets.length > 0 && (
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-2" />
-            <Input
+            <SearchInput
               aria-label="Search secrets"
               placeholder="Search secrets…"
               value={query}

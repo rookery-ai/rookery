@@ -396,7 +396,10 @@ export function ServiceWizard({
                   type="password"
                   value={clientSecret}
                   onChange={(e) => setClientSecret(e.target.value)}
-                  autoComplete="off"
+                  // Not "off": Chrome ignores that on password fields and
+                  // pairs them with a nearby text input it fills as the
+                  // username. "new-password" opts out of the pairing.
+                  autoComplete="new-password"
                 />
               </div>
               {credsError && <ErrorNote>{credsError}</ErrorNote>}
@@ -473,7 +476,7 @@ export function ServiceWizard({
                 type="password"
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                autoComplete="off"
+                autoComplete="new-password"
               />
             </div>
             {provider.connect_inputs.map((ci) => (

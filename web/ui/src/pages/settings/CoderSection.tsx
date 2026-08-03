@@ -249,7 +249,7 @@ export function CoderSection({
                 <Input
                   id="coder_api_key"
                   type="password"
-                  autoComplete="off"
+                  autoComplete="new-password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder={

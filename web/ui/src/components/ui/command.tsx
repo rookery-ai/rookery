@@ -72,6 +72,12 @@ function CommandInput({
       <SearchIcon className="size-5 shrink-0 opacity-50" />
       <CommandPrimitive.Input
         data-slot="command-input"
+        // Same autofill opt-out as SearchInput — an autofill-eligible search
+        // box silently filters the palette to zero results. cmdk already sets
+        // autoComplete="off"; it also pins type="text" AFTER its own prop
+        // spread, so `type="search"` cannot be passed in from here.
+        data-1p-ignore=""
+        data-lpignore="true"
         className={cn(
           "flex h-12 w-full rounded-md bg-transparent py-3 text-base outline-hidden placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
           className
