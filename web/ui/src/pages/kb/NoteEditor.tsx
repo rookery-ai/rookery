@@ -38,16 +38,12 @@ export type SaveState = "saved" | "saving" | "dirty" | "error" | "raw";
 
 const AUTOSAVE_MS = 1000;
 
-// System-generated transcripts — inbox notifications, reflected chats, and agent
-// run logs — are machine output, not knowledge with a link graph. The "Linked
-// from" strip is hidden on them (mirroring the backend, which also excludes them
-// as backlink SOURCES — see internal/vault/links.go's linkSourceExcluded).
+// System-generated transcripts — reflected chats and agent run logs — are
+// machine output, not knowledge with a link graph. The "Linked from" strip is
+// hidden on them (mirroring the backend, which also excludes them as backlink
+// SOURCES — see internal/vault/links.go's linkSourceExcluded).
 function isSystemLogNote(path: string): boolean {
-  return (
-    path.startsWith("inbox/") ||
-    path.startsWith("chats/") ||
-    /^agents\/[^/]+\/logs\//.test(path)
-  );
+  return path.startsWith("chats/") || /^agents\/[^/]+\/logs\//.test(path);
 }
 
 // Every note opens in the rich text editor by default. This banner explains the
@@ -309,7 +305,7 @@ export default function NoteEditor({
   //
   // The fidelity check runs on the BODY, with any YAML frontmatter split off
   // first. That block is the sole reason every platform-written note (reflected
-  // chats, inbox notifications, reminders, agent run logs) used to open in raw
+  // chats, agent run logs) used to open in raw
   // mode — markdown reads it as a horizontal rule plus a setext heading, so it
   // cannot survive a round trip, while the bodies underneath round-trip fine.
   // See ./frontmatter.ts for the full rationale and the preservation contract.

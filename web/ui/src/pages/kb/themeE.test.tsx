@@ -53,9 +53,9 @@ test("an agent run-log note hides the Linked-from strip", async () => {
   expect(screen.queryByText(/linked from/i)).not.toBeInTheDocument();
 });
 
-test("an inbox note hides the Linked-from strip", async () => {
-  mockNote("inbox/msg1.md", ["notes/author.md"]);
-  renderAt("inbox/msg1.md");
+test("a reflected chat note hides the Linked-from strip", async () => {
+  mockNote("chats/c1.md", ["notes/author.md"]);
+  renderAt("chats/c1.md");
   await screen.findByLabelText("Note title");
   expect(screen.queryByText(/linked from/i)).not.toBeInTheDocument();
 });

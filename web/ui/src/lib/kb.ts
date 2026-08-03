@@ -43,13 +43,14 @@ export const rawURL = (path: string) => `/api/v1/kb/raw?path=${encodeURIComponen
 // Mirrors the backend's vault.IsUserMutationProtected (web/api_kb.go's
 // protectedPathMessage): the DB-backed, system-managed subtrees a user must not
 // delete or rename from the KB browser, because doing so orphans the backing
-// record and breaks the agent/chat/skill/inbox/reminder. Those items are removed
-// from their OWN pages instead. `memory` and `assets` are user content and stay
-// editable. The backend rejects these mutations authoritatively (403
+// record and breaks the agent/chat/skill. Those items are removed from their OWN
+// pages instead. `memory` and `assets` are user content and stay editable, as
+// are `inbox` and `reminders` — the platform stopped reflecting notifications
+// into the vault, so it no longer owns those names. The backend rejects these mutations authoritatively (403
 // protected_path) even if the UI misses a vector; the SPA hides the affordances
 // so the user never hits that error. Path-based (not the tree's root-only
 // `system` flag), so it also covers a drilled-in child like `agents/<id>/AGENT.md`.
-const PROTECTED_TOP_DIRS = new Set(["agents", "chats", "inbox", "skills", "reminders", ".kb"]);
+const PROTECTED_TOP_DIRS = new Set(["agents", "chats", "skills", ".kb"]);
 
 export function isProtectedPath(path: string): boolean {
   const top = path.replace(/^\/+/, "").split("/")[0];

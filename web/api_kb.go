@@ -435,9 +435,14 @@ func (s *Server) apiSaveKBOrder(c echo.Context) error {
 // to give these dirs friendlier labels — so this is this endpoint's own
 // derivation: a root-level node whose name is one of these is marked
 // system:true.
+//
+// `inbox` and `reminders` are absent for the same reason they left
+// protectedTopDirs and kbSystemFolderLabels: notifications and reminders are no
+// longer reflected into the vault, so the platform does not own those names and
+// a user folder called "inbox" is the user's own knowledge, not chrome.
 var kbSystemDirs = map[string]bool{
 	"agents": true, "chats": true, "memory": true,
-	"skills": true, "reminders": true, "inbox": true, "assets": true,
+	"skills": true, "assets": true,
 }
 
 // protectedPathMessage returns a user-facing explanation when rel is a
