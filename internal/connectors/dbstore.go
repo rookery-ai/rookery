@@ -52,6 +52,12 @@ func (s *DBTokenStore) AccessToken(ctx context.Context, conn ConnRef) (string, e
 		return "", &ConnectorError{KindNeedsReauth, fmt.Sprintf("connection %s is %s — reconnect it in Settings → Connectors", row.AccountLabel, row.Status)}
 	}
 	prov, _ := s.Reg.ProviderByName(row.Provider)
+	// Keyless providers (Open-Meteo) carry no credential. Return empty rather than
+	// falling through: an unset expiry reads as "expired", which would send this row
+	// down the refresh path and fail with "missing OAuth app credentials".
+	if prov.IsKeyless() {
+		return "", nil
+	}
 	// session_exchange: the STORED credential (an app password) never expires, but the
 	// value sent on a request does. Swap on demand and cache, rather than persisting a
 	// short-lived JWT that would be stale for most of its life in the DB.

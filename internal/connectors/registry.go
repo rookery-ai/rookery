@@ -147,10 +147,19 @@ type ConnectInput struct {
 	Label    string `yaml:"label"`
 	Hint     string `yaml:"hint"`
 	Required bool   `yaml:"required"`
+	// Normalize names a canonicalizer applied to the pasted value at connect time.
+	// "" (default) stores the value verbatim. "base_url" runs NormalizeBaseURL —
+	// see internal/connectors/baseurl.go.
+	Normalize string `yaml:"normalize"`
 }
 
 // IsAPIKey reports whether this provider authenticates with a static API key.
 func (p Provider) IsAPIKey() bool { return p.Auth.Kind == "api_key" }
+
+// IsKeyless reports whether this provider needs no credential at all (Open-Meteo).
+// Its connections store no secret, are never refreshed, and connect with a bare
+// button rather than a paste-a-key form.
+func (p Provider) IsKeyless() bool { return p.Auth.Kind == "none" }
 
 // UsesSessionExchange reports whether the stored credential is swapped for a
 // short-lived bearer token on use (Bluesky: handle + app password → accessJwt).

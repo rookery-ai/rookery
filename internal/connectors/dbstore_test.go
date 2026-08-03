@@ -174,3 +174,63 @@ func TestAccessTokenRefreshFailureFlipsStatus(t *testing.T) {
 		t.Fatalf("status should flip to NEEDS_REAUTH, got %q", got.Status)
 	}
 }
+
+// A keyless connection has no credential, no expiry and no refresh token. AccessToken
+// must hand back an empty string cleanly rather than falling through to the refresh
+// path, which would fail with "missing OAuth app credentials" on the first call.
+func TestAccessTokenKeylessReturnsEmptyWithoutRefreshing(t *testing.T) {
+	d, ws := storeTestDB(t)
+	ctx := context.Background()
+
+	id := uuid.New().String()
+	if err := d.InsertServiceConnection(ctx, db.ServiceConnection{
+		ID: id, WorkspaceID: ws, Provider: "open_meteo",
+		AccountLabel: "Open-Meteo", AccountIdentity: "Open-Meteo",
+		Status: "ACTIVE",
+	}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	reg := &Registry{
+		providers: map[string]Provider{
+			"open_meteo": {Name: "open_meteo", Auth: AuthConfig{Kind: "none"}},
+		},
+		actions: map[string][]Action{},
+	}
+	// No OAuth client and no HTTP client: if the store attempts a refresh, it fails
+	// rather than silently succeeding against a stub.
+	s := &DBTokenStore{DB: d, SystemKey: mkKey(), Reg: reg}
+
+	tok, err := s.AccessToken(ctx, ConnRef{ID: id, Provider: "open_meteo"})
+	if err != nil {
+		t.Fatalf("AccessToken: %v", err)
+	}
+	if tok != "" {
+		t.Errorf("token = %q, want empty", tok)
+	}
+}
+
+// A keyless connection stores no expiry and no refresh token, so the background
+// refresh loop must never pick it up. This holds today only because
+// ConnectionsNearExpiry filters on both columns being non-empty — pin it, since
+// relaxing that query would put keyless rows into a refresh path they cannot survive.
+func TestRefreshDueSkipsKeylessConnections(t *testing.T) {
+	d, ws := storeTestDB(t)
+	ctx := context.Background()
+
+	if err := d.InsertServiceConnection(ctx, db.ServiceConnection{
+		ID: uuid.New().String(), WorkspaceID: ws, Provider: "open_meteo",
+		AccountLabel: "Open-Meteo", AccountIdentity: "Open-Meteo", Status: "ACTIVE",
+	}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	s := &DBTokenStore{DB: d, SystemKey: mkKey(), Reg: &Registry{
+		providers: map[string]Provider{"open_meteo": {Name: "open_meteo", Auth: AuthConfig{Kind: "none"}}},
+		actions:   map[string][]Action{},
+	}}
+
+	if n := refreshDue(ctx, s); n != 0 {
+		t.Errorf("refreshDue refreshed %d keyless connections, want 0", n)
+	}
+}
