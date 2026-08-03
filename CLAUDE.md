@@ -508,6 +508,19 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
   vs the `connector exec` command) so the coder knows the tools exist and is told there is **no
   Composio/SDK/service keys** in the env.
 
+**Connectors deliberately do NOT use the private-address dial guard.**
+`connectors.Execute` falls back to a plain `&http.Client{Timeout: 30s}`, and every
+call site passes nil or an unguarded client — unlike `internal/websearch`, the coder's
+`web_fetch`, and the Discord attachment fetcher, which all use
+`nethttp.GuardedClient`. This is the property the **self-hosted tier** (Home Assistant,
+Immich, Paperless-ngx) is built on: those services live at RFC1918 or Tailscale
+addresses that the guard blocks at dial time. The guard's threat model is untrusted
+content steering a fetch; a connector's host comes from vendored YAML or from a value
+the single owner typed into their own install, so it does not apply here.
+`connectors.TestExecuteReachesPrivateAddresses` pins this, and its failure message
+says what breaks. Revisit if Rookery ever becomes multi-tenant — that test is where
+the conversation should start.
+
 **UI:** the SPA connections page (backed by the `/api/v1/services` JSON endpoints) — per-workspace
 OAuth-app creds + connect per provider, with per-provider setup guidance
 (`label`/`setup_url`/`setup_steps` in the provider YAML). The OAuth **callback** is the one
