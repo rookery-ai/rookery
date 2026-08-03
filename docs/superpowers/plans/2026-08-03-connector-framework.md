@@ -1799,3 +1799,31 @@ The PR title must itself be a valid Conventional Commit — merges are squashes,
 **Sequencing note.** Task 5 must run before Tasks 3 and 6, because the `open_meteo` and `immich` fixture YAMLs declare categories that `category_test.go` rejects until Task 5 lands. This is stated inline in Task 3, Step 1.
 
 **Known soft spots**, flagged rather than papered over: three tasks tell the implementer to read actual helper/field names before writing (the `web` package's test harness in Task 3, the wizard's mutation names in Task 4, the vendor script's strip helper in Task 8) rather than inventing signatures this plan cannot verify. Task 8's `UPSTREAM` manifest needs a real pinned commit SHA resolved at implementation time — a URL cannot be fabricated here.
+
+---
+
+## As-built notes (implemented 2026-08-03)
+
+This plan was executed. Deviations from what was written, and why:
+
+- **Task 8 was wrong about the coverage guard.** `logocoverage.test.ts` does not exist,
+  but `web/logo_coverage_test.go` does — a Go test enumerating connector, chat-platform,
+  coder and web-search slugs, failing when any lacks a vendored SVG. The guard is real;
+  only the comment in `logos.ts` names the wrong file. No new test was needed.
+- **A latent bug in `scripts/vendor-brand-logos.sh` surfaced.** All three manifest loops
+  used `for pair in $VAR`, which word-splits — so a comment line inside a manifest became
+  bogus "pairs" and wrote a junk `#.svg` that then failed the well-formedness test. All
+  three loops now read line-wise and skip blanks/comments.
+- **Three brands could not be vendored.** YNAB, Raindrop.io and Open-Meteo have no mark
+  in lobehub, worldvectorlogo or simple-icons, and every candidate upstream URL 404s.
+  They take a documented exemption in `allowNoLogo` rather than a hand-drawn
+  approximation, which would misrepresent someone else's brand.
+- **Task 10's blast-radius check found more than predicted.** Not two silently-broken
+  actions but **four**: reddit's two `$.data.children` plus tiktok's `$.data.user` and
+  `$.data.videos`. All four now narrow for the first time.
+- **`connectAPIKeyCore` needed one extra change.** Encrypting the empty string still
+  yields ciphertext, so a keyless row stored a secret-shaped value that decrypts to
+  nothing. It now stores an empty token for `kind: none`.
+- **`TestOAuthSetupStepsNameTheRedirectURI` needed the keyless exemption**, exactly as the
+  plan predicted in Task 3 Step 5 — a keyless provider is neither `PastesCredential()` nor
+  an `auth_parent` child, so it was being asked to name a redirect URI it does not have.

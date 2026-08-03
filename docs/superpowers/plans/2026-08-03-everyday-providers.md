@@ -2348,3 +2348,26 @@ gh pr create --draft \
 **Extractor dependency, resolved during planning rather than during implementation.** Every `response_extract` in this plan was checked against the real `extract` implementation. `$.items`, `$.results`, `$.current`, `$.daily`, `$.item` and `$.calendars` work today. `$.data.budgets`, `$.data.transactions`, `$.data.month`, `$.data.category_groups` and `$.assets.items` do **not** — they need Plan 1 Task 10, which also fixes the two already-shipped `$.data.children` actions in `reddit.yaml` that have been silently returning whole envelopes. Home Assistant's filter is a declared `response_filter`, not a JSONPath expression, because this repo's extractor is deliberately not a JSONPath engine.
 
 **Known risk carried forward.** `calendar_freebusy` needs `items: [{"id": …}]`, which `renderBody` substitutes but cannot restructure — the same limitation that produced the `ga4_report` body builder. Flagged inline in Task 1 with the fallback (a `body_builder`, which would be a Plan 1 follow-up) rather than discovered during live verification.
+
+---
+
+## As-built notes (implemented 2026-08-03)
+
+This plan was executed. Deviations from what was written, and why:
+
+- **`ha_call_service`'s `data` field was dropped**, as the plan recommended: `renderBody`
+  substitutes values but cannot merge one object into another, and a declared parameter
+  the request discards is worse than an absent one. The action description says so.
+- **`raindrop_create_bookmark`'s nested `collection: {"$id": …}` was dropped** for the
+  same class of reason. Bookmarks land in Unsorted, which the description states.
+- **`calendar_freebusy` was narrowed to one calendar**, not a list. `renderBody` can
+  substitute an array but cannot restructure one into `[{"id": …}]`, so the action takes
+  a single `calendar_id` and templates the item inline.
+- **Verification outcome differs from the plan's optimistic list.** Only Open-Meteo was
+  live-verified — it is keyless, so it needs no credential; all four actions returned
+  correctly narrowed payloads of 121–362 bytes. The other eight carry `unverified: true`
+  because no credential was available. `TestWave1ProvidersDeclareVerificationStatus`
+  enforces that honesty rather than leaving it to memory.
+- **The live test is behind a `//go:build livecheck` tag** so CI never depends on a third
+  party being reachable. Run it with
+  `go test ./internal/connectors/ -tags livecheck -run TestLiveOpenMeteo -v`.
