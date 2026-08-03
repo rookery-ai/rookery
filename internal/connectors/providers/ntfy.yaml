@@ -1,0 +1,26 @@
+name: ntfy
+label: ntfy
+category: Communication
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "ntfy access token"
+  key_hint: "tk_... — from Account → Access tokens"
+  setup_url: https://ntfy.sh/account
+connect_inputs:
+  - key: base_url
+    label: "ntfy server URL"
+    hint: "https://ntfy.sh for the public service, or your own self-hosted address"
+    required: true
+    normalize: base_url
+  - key: topic
+    label: "Default topic"
+    hint: "the topic notifications are published to, e.g. rookery-alerts"
+    required: true
+setup_steps:
+  - "On ntfy.sh open Account → Access tokens and create a token (or use your self-hosted server's)."
+  - "Enter the server URL, the topic to publish to, and the token below."
+  - "Anyone who knows a topic name can subscribe to it, so pick a hard-to-guess one."

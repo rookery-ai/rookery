@@ -1,0 +1,19 @@
+name: strava
+label: Strava
+category: Health & Fitness
+unverified: true
+authorize_url: https://www.strava.com/oauth/authorize
+token_url: https://www.strava.com/oauth/token
+userinfo_url: https://www.strava.com/api/v3/athlete
+identity_path: username
+default_scopes:
+  - read
+  - activity:read_all
+authorize_extra:
+  approval_prompt: auto
+setup_url: https://www.strava.com/settings/api
+setup_steps:
+  - "Open https://www.strava.com/settings/api and create an application (any name and website will do for personal use)."
+  - "Set the Authorization Callback Domain to the HOST of {{redirect_uri}} — Strava wants the bare domain, with no scheme and no path."
+  - "Copy the Client ID and Client Secret into the fields below."
+  - "Strava's access tokens expire every 6 hours; the refresh token is stored and renewed automatically."

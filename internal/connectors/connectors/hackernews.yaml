@@ -1,0 +1,45 @@
+provider: hackernews
+actions:
+  - name: hn_top_stories
+    description: "Ids of the current top stories, best first. Returns ids only — pass each to hn_get_item for the story itself. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://hacker-news.firebaseio.com/v0/topstories.json"
+    response_extract: "$"
+
+  - name: hn_new_stories
+    description: "Ids of the newest submissions. Returns ids only — pass each to hn_get_item. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://hacker-news.firebaseio.com/v0/newstories.json"
+    response_extract: "$"
+
+  - name: hn_get_item
+    description: "Get one story, comment, job or poll by id: title, url, score, author, and the ids of its child comments. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        item_id: {type: integer}
+      required: [item_id]
+    request:
+      method: GET
+      url: "https://hacker-news.firebaseio.com/v0/item/{{item_id}}.json"
+    response_extract: "$"
+
+  - name: hn_get_user
+    description: "Get a Hacker News user by username: karma, account age and their recent submission ids. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        username: {type: string}
+      required: [username]
+    request:
+      method: GET
+      url: "https://hacker-news.firebaseio.com/v0/user/{{username}}.json"
+    response_extract: "$"

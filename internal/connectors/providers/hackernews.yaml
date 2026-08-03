@@ -1,0 +1,9 @@
+name: hackernews
+label: Hacker News
+category: Data & Reference
+auth:
+  kind: none
+setup_url: https://github.com/HackerNews/API
+setup_steps:
+  - "Hacker News needs no account and no API key — press Connect."
+  - "This is the official read-only Firebase API: stories, comments and users, no posting."

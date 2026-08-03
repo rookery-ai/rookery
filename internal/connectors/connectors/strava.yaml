@@ -1,0 +1,55 @@
+provider: strava
+actions:
+  - name: strava_athlete
+    description: "The authenticated athlete's profile: name, location, follower counts and measurement preference. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://www.strava.com/api/v3/athlete"
+    response_extract: "$"
+
+  - name: strava_list_activities
+    description: "List the athlete's activities, newest first. per_page caps the result; after/before are UNIX epoch seconds and bound the window. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        per_page: {type: integer, description: "max activities, default 30"}
+        after:    {type: integer, description: "epoch seconds; only activities after this"}
+        before:   {type: integer, description: "epoch seconds; only activities before this"}
+      required: [per_page]
+    request:
+      method: GET
+      url: "https://www.strava.com/api/v3/athlete/activities"
+      query:
+        per_page: "{{per_page}}"
+        after: "{{after}}"
+        before: "{{before}}"
+    response_extract: "$"
+
+  - name: strava_get_activity
+    description: "Full detail for one activity by id: distance, moving time, elevation, average and max speed, heart rate and splits. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        activity_id: {type: integer}
+      required: [activity_id]
+    request:
+      method: GET
+      url: "https://www.strava.com/api/v3/activities/{{activity_id}}"
+    response_extract: "$"
+
+  - name: strava_athlete_stats
+    description: "Lifetime and year-to-date totals by sport — distance, time, elevation and count. Needs the athlete id from strava_athlete. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        athlete_id: {type: integer, description: "from strava_athlete"}
+      required: [athlete_id]
+    request:
+      method: GET
+      url: "https://www.strava.com/api/v3/athletes/{{athlete_id}}/stats"
+    response_extract: "$"

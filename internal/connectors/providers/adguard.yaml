@@ -1,0 +1,27 @@
+name: adguard
+label: AdGuard Home
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: basic
+  # AdGuard Home uses plain HTTP Basic with the web-UI credentials: the username is
+  # collected as a connect input, the password is the pasted credential.
+  basic_user_template: "{{conn.username}}"
+  key_label: "AdGuard Home password"
+  key_hint: "the password for the web interface user below"
+  setup_url: https://github.com/AdguardTeam/AdGuardHome/wiki/Getting-Started
+connect_inputs:
+  - key: base_url
+    label: "AdGuard Home URL"
+    hint: "e.g. http://192.168.1.1:3000 — a LAN address is fine"
+    required: true
+    normalize: base_url
+  - key: username
+    label: "Web interface username"
+    hint: "the account you log into AdGuard Home with"
+    required: true
+setup_steps:
+  - "AdGuard Home has no separate API key — its REST API uses the same credentials as the web interface."
+  - "Enter your AdGuard Home URL, your web username, and that user's password below."
+  - "If password protection is disabled entirely, any username and password will be accepted."

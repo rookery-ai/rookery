@@ -1,0 +1,10 @@
+name: frankfurter
+label: Frankfurter
+category: Finance
+auth:
+  kind: none
+setup_url: https://frankfurter.dev
+setup_steps:
+  - "Frankfurter needs no account and no API key — press Connect."
+  - "It publishes European Central Bank reference rates, updated once per working day around 16:00 CET."
+  - "These are reference rates for reporting, not a dealing service — do not treat them as a live trading price."

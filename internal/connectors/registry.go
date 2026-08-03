@@ -38,6 +38,12 @@ type AuthConfig struct {
 	// alongside the credential (Bluesky's handle).
 	SessionIdentityKey string `yaml:"session_identity_key"`
 
+	// BasicPassLiteral, for placement=="basic", makes the CREDENTIAL the username and
+	// this fixed string the password — the inverse of BasicUserTemplate. Toggl Track is
+	// why it exists: it wants the API token as the user and the literal "api_token" as
+	// the password. BasicUserTemplate wins when both are set.
+	BasicPassLiteral string `yaml:"basic_pass_literal"`
+
 	// BasicUserTemplate, for placement=="basic", is a {{conn.<key>}} template resolved
 	// against the connection's Extra to produce the HTTP Basic username (the credential
 	// is always the password). Empty means the legacy behavior: credential as username,

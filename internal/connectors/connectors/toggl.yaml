@@ -1,0 +1,86 @@
+provider: toggl
+actions:
+  - name: toggl_me
+    description: "Get the authenticated user with their default workspace id. Call this first — most other actions need workspace_id. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://api.track.toggl.com/api/v9/me"
+    response_extract: "$"
+
+  - name: toggl_current_entry
+    description: "Get the timer running right now, or null when nothing is running. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://api.track.toggl.com/api/v9/me/time_entries/current"
+    response_extract: "$"
+
+  - name: toggl_list_entries
+    description: "List time entries between two dates (YYYY-MM-DD). Both bounds are required — the full history is unbounded. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start_date: {type: string, description: "YYYY-MM-DD, inclusive"}
+        end_date:   {type: string, description: "YYYY-MM-DD, exclusive"}
+      required: [start_date, end_date]
+    request:
+      method: GET
+      url: "https://api.track.toggl.com/api/v9/me/time_entries"
+      query:
+        start_date: "{{start_date}}"
+        end_date: "{{end_date}}"
+    response_extract: "$"
+
+  - name: toggl_list_projects
+    description: "List projects in a workspace with their ids. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        workspace_id: {type: integer}
+      required: [workspace_id]
+    request:
+      method: GET
+      url: "https://api.track.toggl.com/api/v9/workspaces/{{workspace_id}}/projects"
+    response_extract: "$"
+
+  - name: toggl_start_timer
+    description: "Start a timer. duration must be -1 for a running entry, and start is an RFC3339 timestamp — Toggl encodes 'running' that way. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        workspace_id: {type: integer}
+        description:  {type: string, description: "what you are working on"}
+        project_id:   {type: integer}
+        start:        {type: string, description: "RFC3339 start time, usually now"}
+      required: [workspace_id, description, start]
+    request:
+      method: POST
+      url: "https://api.track.toggl.com/api/v9/workspaces/{{workspace_id}}/time_entries"
+      body:
+        description: "{{description}}"
+        project_id: "{{project_id}}"
+        start: "{{start}}"
+        duration: -1
+        created_with: "rookery"
+        workspace_id: "{{workspace_id}}"
+    response_extract: "$"
+
+  - name: toggl_stop_timer
+    description: "Stop a running timer by its entry id. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        workspace_id:  {type: integer}
+        time_entry_id: {type: integer}
+      required: [workspace_id, time_entry_id]
+    request:
+      method: PATCH
+      url: "https://api.track.toggl.com/api/v9/workspaces/{{workspace_id}}/time_entries/{{time_entry_id}}/stop"
+    response_extract: "$"

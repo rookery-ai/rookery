@@ -1,0 +1,22 @@
+name: firefly_iii
+label: Firefly III
+category: Finance
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Firefly III personal access token"
+  key_hint: "from Options → Profile → OAuth → Personal Access Tokens"
+  setup_url: https://docs.firefly-iii.org/how-to/firefly-iii/features/api/
+connect_inputs:
+  - key: base_url
+    label: "Firefly III URL"
+    hint: "e.g. https://money.example.com — a path prefix is fine"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In Firefly III open Options → Profile → OAuth and find Personal Access Tokens."
+  - "Create a token and copy it — Firefly III shows it only once, and it is very long."
+  - "Enter it with your Firefly III URL below."

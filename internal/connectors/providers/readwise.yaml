@@ -1,0 +1,16 @@
+name: readwise
+label: Readwise
+category: Productivity
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Token "
+  key_label: "Readwise access token"
+  key_hint: "from readwise.io/access_token"
+  setup_url: https://readwise.io/access_token
+setup_steps:
+  - "Open https://readwise.io/access_token while logged in and copy the token shown."
+  - "Paste it below. The same token covers both Readwise highlights and Readwise Reader."
+  - "Readwise rate-limits to 240 requests/minute, and the Reader endpoints to 50/minute."

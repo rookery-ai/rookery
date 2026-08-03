@@ -1,0 +1,59 @@
+provider: tmdb
+actions:
+  - name: tmdb_search
+    description: "Search movies, TV shows and people by name. Returns TMDB ids needed by the other actions. Read-only. Data by TMDB — attribution is required when it is displayed."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "title or name to search for"}
+        kind:  {type: string, description: "movie | tv | person | multi (default multi)"}
+        year:  {type: integer, description: "restrict to a release year"}
+      required: [query]
+    request:
+      method: GET
+      url: "https://api.themoviedb.org/3/search/multi"
+      query:
+        query: "{{query}}"
+        year: "{{year}}"
+    response_extract: "$.results"
+
+  - name: tmdb_movie_details
+    description: "Full details for a movie by TMDB id: overview, runtime, genres, release date, rating. Read-only. Data by TMDB."
+    mutating: false
+    params:
+      type: object
+      properties:
+        movie_id: {type: integer}
+      required: [movie_id]
+    request:
+      method: GET
+      url: "https://api.themoviedb.org/3/movie/{{movie_id}}"
+    response_extract: "$"
+
+  - name: tmdb_tv_details
+    description: "Full details for a TV show by TMDB id: overview, seasons, episode counts, status, rating. Read-only. Data by TMDB."
+    mutating: false
+    params:
+      type: object
+      properties:
+        tv_id: {type: integer}
+      required: [tv_id]
+    request:
+      method: GET
+      url: "https://api.themoviedb.org/3/tv/{{tv_id}}"
+    response_extract: "$"
+
+  - name: tmdb_trending
+    description: "What is trending on TMDB. media_type is all, movie, tv or person; window is day or week. Read-only. Data by TMDB."
+    mutating: false
+    params:
+      type: object
+      properties:
+        media_type: {type: string, description: "all | movie | tv | person"}
+        window:     {type: string, description: "day | week"}
+      required: [media_type, window]
+    request:
+      method: GET
+      url: "https://api.themoviedb.org/3/trending/{{media_type}}/{{window}}"
+    response_extract: "$.results"

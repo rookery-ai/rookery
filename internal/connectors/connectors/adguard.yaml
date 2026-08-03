@@ -1,0 +1,64 @@
+provider: adguard
+actions:
+  - name: adguard_status
+    description: "Server status: whether filtering and protection are enabled, plus version and uptime. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/control/status"
+    response_extract: "$"
+
+  - name: adguard_stats
+    description: "DNS statistics: total queries, how many were blocked, average processing time, and the top queried and blocked domains. This is the 'how much did AdGuard block today' answer. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/control/stats"
+    response_extract: "$"
+
+  - name: adguard_query_log
+    description: "Recent DNS queries, newest first. limit caps the result and search narrows by domain — the raw log is enormous on a busy network, so always pass one. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit:           {type: integer, description: "max entries, default 50"}
+        search:          {type: string, description: "domain substring to match"}
+        response_status: {type: string, description: "all | filtered | blocked | processed"}
+      required: [limit]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/control/querylog"
+      query:
+        limit: "{{limit}}"
+        search: "{{search}}"
+        response_status: "{{response_status}}"
+    response_extract: "$.data"
+
+  - name: adguard_list_filters
+    description: "Blocklists in use, with their rule counts and last-update times. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/control/filtering/status"
+    response_extract: "$"
+
+  - name: adguard_set_protection
+    description: "Turn DNS filtering on or off, optionally for a limited time. Turning it OFF disables ad and tracker blocking for the whole network. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        enabled:  {type: boolean, description: "true to enable protection, false to disable"}
+        duration: {type: integer, description: "milliseconds to stay disabled; omit for indefinite"}
+      required: [enabled]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/control/protection"
+      body:
+        enabled: "{{enabled}}"
+        duration: "{{duration}}"
+    response_extract: "$"

@@ -1,0 +1,45 @@
+provider: wikipedia
+actions:
+  - name: wikipedia_search
+    description: "Search Wikipedia article titles and return matches with short descriptions. Call this first to find the exact title the other actions need. lang is a wiki code such as en, mk or de. Read-only. Content is CC BY-SA — say which article a quote came from."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "search terms"}
+        lang:  {type: string, description: "wiki language code, e.g. en, mk, de. Default en."}
+        limit: {type: integer, description: "max results, default 5"}
+      required: [query]
+    request:
+      method: GET
+      url: "https://en.wikipedia.org/w/rest.php/v1/search/page"
+      query:
+        q: "{{query}}"
+        limit: "{{limit}}"
+    response_extract: "$.pages"
+
+  - name: wikipedia_summary
+    description: "Get an article's lead summary by exact title — a few sentences plus its description and canonical URL. Prefer this over reading the whole article. Read-only. Content is CC BY-SA."
+    mutating: false
+    params:
+      type: object
+      properties:
+        title: {type: string, description: "exact article title, e.g. Skopje"}
+      required: [title]
+    request:
+      method: GET
+      url: "https://en.wikipedia.org/api/rest_v1/page/summary/{{title|escape}}"
+    response_extract: "$"
+
+  - name: wikipedia_article
+    description: "Get an article's full source by exact title. This is LONG — prefer wikipedia_summary unless the whole text is genuinely needed. Read-only. Content is CC BY-SA."
+    mutating: false
+    params:
+      type: object
+      properties:
+        title: {type: string, description: "exact article title"}
+      required: [title]
+    request:
+      method: GET
+      url: "https://en.wikipedia.org/w/rest.php/v1/page/{{title|escape}}"
+    response_extract: "$.source"
