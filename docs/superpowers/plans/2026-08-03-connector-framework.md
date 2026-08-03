@@ -1535,6 +1535,26 @@ func TestApplyResponseFilterEmptyPrefixIsNoOp(t *testing.T) {
 	}
 }
 
+// The prefix is read out of the args map at the END of Execute, long after
+// renderRequest has run over the same map. A MISSING key must therefore yield an
+// empty prefix — which the no-op case above turns into "return everything".
+//
+// This is the sharp edge: if a missing key stringified to anything non-empty, the
+// filter would match nothing and ha_list_states would return [], which reads to the
+// model as "you have no sensors" rather than "the filter broke". Silent, plausible
+// emptiness is the worst possible failure here, so pin the contract.
+func TestMissingFilterArgYieldsEmptyPrefix(t *testing.T) {
+	args := map[string]any{"something_else": "x"}
+	if got := asString(args["entity_prefix"]); got != "" {
+		t.Fatalf("asString(missing key) = %q, want \"\" — a non-empty value would make the filter drop everything", got)
+	}
+	raw := []byte(`[{"entity_id":"sensor.a"},{"entity_id":"light.b"}]`)
+	got := applyResponseFilter(raw, ResponseFilter{Field: "entity_id", PrefixArg: "entity_prefix"}, asString(args["entity_prefix"]))
+	if string(got) != string(raw) {
+		t.Errorf("filter = %s, want everything unchanged when the arg is absent", got)
+	}
+}
+
 // A non-array body cannot be filtered; pass it through rather than erroring.
 func TestApplyResponseFilterNonArrayPassesThrough(t *testing.T) {
 	raw := []byte(`{"entity_id":"light.kitchen"}`)
@@ -1672,6 +1692,21 @@ with:
 
 `asString` already exists in `render.go` and is what `subst` uses for argument values.
 
+**Three preconditions this wiring depends on. All three hold today — confirm them rather than assuming, because each fails silently:**
+
+1. **`asString(nil)` returns `""`** (`render.go:22-24`, the `case nil` branch). A missing map key yields a nil `any`, so an absent filter argument produces an empty prefix and the filter no-ops. If this ever changed, the filter would match nothing and return `[]`.
+2. **`renderRequest` does not mutate `args`.** It only reads through `subst`, so a param consumed during rendering is still present at line 219. Re-check with `grep -n 'args\[' internal/connectors/render.go` — any assignment into `args` breaks this.
+3. **A declared param that appears in no template is legal.** `validateArgs` checks required-present and type-match on supplied properties; it does not require every declared property to be referenced by the request. `entity_prefix` is exactly such a param — declared, validated, never templated, consumed only by the filter.
+
+- [ ] **Step 4b: Verify all three preconditions**
+
+```bash
+sed -n 21,35p internal/connectors/render.go     # asString's nil branch
+grep -n 'args\[' internal/connectors/render.go  # expect NO assignments into args
+```
+
+Expected: `case nil: return ""` present; no `args[...] =` writes.
+
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `go test ./internal/connectors/ -run 'TestExtract|TestApplyResponseFilter' -count=1`
@@ -1686,7 +1721,15 @@ Dotted extracts that were silently inert now really narrow. Find them:
 grep -rn 'response_extract: "\$\.[^"]*\.' internal/connectors/connectors/
 ```
 
-Expected: `reddit.yaml`'s two `$.data.children` actions. Confirm that path is right for Reddit's listing envelope (`{"kind":"Listing","data":{"children":[…]}}`) — it is, which is why it was authored that way. Note in the commit message that those two actions start working for the first time.
+Expected: `reddit.yaml`'s two `$.data.children` actions. Confirm that path is right for Reddit's listing envelope (`{"kind":"Listing","data":{"children":[…]}}`) — it is, which is why it was authored that way. **Those two actions have never once returned narrowed data**, so nobody has seen them work; if a Reddit credential is available, run them through `cmd/livecheck` rather than trusting the shape.
+
+Now check the **other** direction, which the grep above does not cover: a path that worked before and might break now. The risk is a response whose top-level key contains a literal dot — previously matched as one whole key, now split and walked into. The 32 `$.data` uses are single-segment and unaffected.
+
+```bash
+grep -rn 'response_extract:' internal/connectors/connectors/ | grep -v '"\$"' | grep -v '"\$\.[a-z_]*"'
+```
+
+Expected: only the dotted paths already identified. Anything else is a path this change alters — inspect it before proceeding. The full package suite in Step 7 is the backstop.
 
 - [ ] **Step 7: Run the full package and commit**
 
@@ -1736,8 +1779,12 @@ Expected: `/healthz` returns 200 JSON. Then open the SPA's connections page and 
 git push -u origin HEAD
 gh pr create --draft \
   --title "feat(connectors): framework for everyday connectors" \
-  --body "Implements Plan 1 of docs/superpowers/specs/2026-08-03-everyday-connectors-design.md: keyless auth kind, four new categories, shared base-URL normalizer, pinned SSRF stance, upstream logo source, and the committed live-check harness. Plan 2 (the nine wave-1 providers) builds on this."
+  --body "Implements Plan 1 of docs/superpowers/specs/2026-08-03-everyday-connectors-design.md: keyless auth kind, four new categories, shared base-URL normalizer, pinned SSRF stance, upstream logo source, and the committed live-check harness. Plan 2 (the nine wave-1 providers) builds on this.
+
+**Reviewers: one commit here is a BUG FIX, not framework work.** \`fix(connectors): walk dotted response_extract paths\` changes runtime behaviour for two already-shipped Reddit actions. \`extract\` resolved only a single top-level key, so \`\$.data.children\` silently returned the entire envelope; those two actions now narrow for the first time. Please review that commit as a behaviour change rather than skimming it as part of the feature."
 ```
+
+The PR body deliberately calls out the extractor commit: it is a fix that arrived during feature planning, it touches a path two shipped actions depend on, and it is the one change here a reviewer could otherwise skim past as scaffolding.
 
 The PR title must itself be a valid Conventional Commit — merges are squashes, and the title becomes the commit release-please reads.
 
