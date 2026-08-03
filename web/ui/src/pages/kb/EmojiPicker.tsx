@@ -46,18 +46,34 @@ export default function EmojiPicker({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      {/* The dialog owns its height and the grid flexes into what's left. A
+          `min-h` on the scroll region instead — which is what this used to have,
+          to stop the picker resizing as you move between a large group and a
+          small one — is a FLOOR, so it beats the dialog's own max-h and
+          overflows the bottom of the modal on a short viewport. Fixing the
+          height here keeps the anti-jump behaviour and cannot overflow. */}
+      <DialogContent className="flex h-[min(36rem,calc(100dvh-4rem))] max-w-2xl flex-col">
         <DialogHeader>
           <DialogTitle>Choose an icon</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3">
-          <Input
-            autoFocus
-            placeholder="Search emoji…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search emoji"
-          />
+        <div className="flex min-h-0 flex-col gap-3">
+          <div className="flex items-center gap-3">
+            <Input
+              autoFocus
+              placeholder="Search emoji…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Search emoji"
+            />
+            {query && (
+              <span
+                aria-live="polite"
+                className="shrink-0 text-sm whitespace-nowrap text-muted-2"
+              >
+                {filtered.length === 1 ? "1 match" : `${filtered.length} matches`}
+              </span>
+            )}
+          </div>
 
           {/* Hidden while searching: results already span every category, so a
               visible category selector would imply it narrows them when it
@@ -88,13 +104,14 @@ export default function EmojiPicker({
             </div>
           )}
 
-          {/* min-h keeps the dialog from resizing as you move between a large
-              group and a small one, or as a search narrows. */}
-          <div className="max-h-[50vh] min-h-72 overflow-y-auto pr-1">
+          {/* min-h-0 is what lets a flex child actually shrink — without it the
+              automatic minimum is content-based and the grid pushes out of the
+              column instead of scrolling inside it. */}
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
             {query ? (
               filtered.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted-2">
-                  No matches.
+                  No emoji match “{query}”.
                 </p>
               ) : (
                 <EmojiGrid
@@ -135,8 +152,11 @@ function EmojiGrid({
   current?: string;
   onPick: (emoji: string) => void;
 }) {
+  // auto-fill rather than a fixed column count: the dialog's width is not the
+  // grid's to assume, and a fixed 10 columns of 2.25rem is either cramped or
+  // overflowing at every width but the one it was measured at.
   return (
-    <div className="grid grid-cols-10 gap-1">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(2.25rem,1fr))] gap-1">
       {emojis.map((emoji) => (
         <button
           key={emoji}

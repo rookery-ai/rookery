@@ -47,6 +47,24 @@ function DialogOverlay({
   )
 }
 
+// DialogContent's default width is `w-[calc(100%-2rem)] max-w-lg`, and the grid
+// is `grid-cols-1`. All three are deliberate, and dialog.test.tsx pins them:
+//
+//   - The cap is UNPREFIXED. It used to be `sm:max-w-lg`, which tailwind-merge
+//     treats as a different conflict group from a caller's `max-w-2xl` — so
+//     both survived and the responsive one won at ≥640px. Every dialog in the
+//     app rendered at 512px no matter what it asked for. (Third instance of
+//     this trap; see ChatScroll and PageContainer in CLAUDE.md.)
+//   - The small-viewport inset lives on `w-`, not `max-w-`. As
+//     `max-w-[calc(100%-2rem)]` it shared a group with the caller's `max-w-*`
+//     and was merged away, so a narrow viewport lost its margin entirely.
+//   - `grid-cols-1` emits `repeat(1, minmax(0, 1fr))`. With the implicit `auto`
+//     track a grid item's automatic minimum size is content-based (CSS Grid
+//     §6.6), so one wide non-wrapping child — the icon picker's category tab
+//     strip, ~880px of max-content, whose own `overflow-x: auto` does NOT zero
+//     its min-content contribution — stretched the track and every sibling
+//     with it, right through the side of the modal. A `0` min sizing function
+//     drops the automatic minimum to zero and contains it.
 function DialogContent({
   className,
   children,
@@ -61,7 +79,9 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 sm:max-w-lg",
+          // Three width/overflow details here are load-bearing — see the
+          // comment block below.
+          "fixed top-[50%] left-[50%] z-50 grid max-h-[calc(100dvh-4rem)] w-[calc(100%-2rem)] max-w-lg grid-cols-1 translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
           className
         )}
         {...props}

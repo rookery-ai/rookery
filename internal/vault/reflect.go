@@ -25,90 +25,18 @@ type Reflector struct {
 // Reflector returns a Reflector for this vault.
 func (v *Vault) Reflector() *Reflector { return &Reflector{v: v} }
 
-// ReminderNote is the reflected view of a reminder row.
-type ReminderNote struct {
-	ID         string
-	Message    string
-	RemindAt   time.Time
-	Recurrence string
-	Sent       bool
-	CreatedAt  time.Time
-}
-
-// ReflectReminder writes reminders/<id>.md plus its sidecar.
-func (r *Reflector) ReflectReminder(workspaceID string, n ReminderNote) error {
-	if r == nil {
-		return nil
-	}
-	status := "pending"
-	if n.Sent {
-		status = "sent"
-	}
-	fm := frontmatter(map[string]string{
-		"type":       "reminder",
-		"id":         n.ID,
-		"remind_at":  ts(n.RemindAt),
-		"recurrence": n.Recurrence,
-		"status":     status,
-		"created_at": ts(n.CreatedAt),
-	})
-	body := fmt.Sprintf("# Reminder\n\n%s\n\n- **When:** %s\n- **Status:** %s\n",
-		n.Message, ts(n.RemindAt), status)
-	if n.Recurrence != "" {
-		body += "- **Repeats:** " + n.Recurrence + "\n"
-	}
-	return r.write(workspaceID, filepath.Join("reminders", safeName(n.ID)+".md"), fm+body, "reminders", n.ID, n)
-}
-
-// InboxNote is the reflected view of one inbox notification (an agent run's
-// delivered output/error, or a fired reminder).
-type InboxNote struct {
-	ID        string
-	Source    string // "agent_run" | "reminder"
-	AgentName string // empty for reminders
-	Trigger   string // cron|manual|chat; empty for reminders
-	Body      string // the actual delivered notification
-	Status    string // "ok" | "error"
-	CreatedAt time.Time
-}
-
-// ReflectInbox writes inbox/<id>.md plus its sidecar.
-func (r *Reflector) ReflectInbox(workspaceID string, n InboxNote) error {
-	if r == nil {
-		return nil
-	}
-	fm := frontmatter(map[string]string{
-		"type":       "inbox",
-		"id":         n.ID,
-		"source":     n.Source,
-		"agent":      n.AgentName,
-		"trigger":    n.Trigger,
-		"status":     n.Status,
-		"created_at": ts(n.CreatedAt),
-	})
-	body := fmt.Sprintf("# %s\n\n%s\n", inboxSenderLabel(n), n.Body)
-	return r.write(workspaceID, filepath.Join("inbox", safeName(n.ID)+".md"), fm+body, "inbox_messages", n.ID, n)
-}
-
-// inboxSenderLabel renders the human sender line for the note heading.
-func inboxSenderLabel(n InboxNote) string {
-	switch n.Source {
-	case "reminder":
-		return "⏰ Reminder"
-	case "agent_run":
-		if n.AgentName != "" {
-			label := "🤖 " + n.AgentName
-			if n.Trigger != "" {
-				label += " (" + n.Trigger + ")"
-			}
-			if n.Status == "error" {
-				label += " — run failed"
-			}
-			return label
-		}
-	}
-	return "Inbox"
-}
+// Notifications are deliberately NOT reflected. An inbox message is a delivery
+// record, not knowledge: the row lives in inbox_messages, the Home inbox renders
+// it, and for an agent run the exact delivered text is already archived in
+// agents/<id>/logs/run_<ts>.md under "Output sent to user". Projecting it a
+// third time into inbox/<uuid>.md gave every note the same non-distinguishing
+// heading ("⏰ Reminder", "🤖 weather (cron)"), grew the vault by one file per
+// notification forever, and — because inbox/ was never added to
+// kbExcludedDirs — fed a stream of "🌤 25°C, clear sky" into the agent- and
+// skill-designer retrieval that is supposed to quote the user's own knowledge.
+// Reminders in particular were never meant to reach the vault at all.
+//
+// vault.RemoveLegacyInboxNotes sweeps what earlier builds wrote.
 
 // ChatNote is the reflected view of a chat and its messages.
 type ChatNote struct {
@@ -257,19 +185,11 @@ func (r *Reflector) Unreflect(workspaceID, relMarkdown, table, id string) error 
 	return firstErr
 }
 
-// UnreflectChat / UnreflectInbox / UnreflectReminder name the note path and table
-// alongside the ReflectX method that wrote them, so the two halves cannot drift:
-// a change to where a note is written is a compile-visible change here too.
+// UnreflectChat names the note path and table alongside the ReflectX method that
+// wrote them, so the two halves cannot drift: a change to where a note is
+// written is a compile-visible change here too.
 func (r *Reflector) UnreflectChat(workspaceID, chatID string) error {
 	return r.Unreflect(workspaceID, filepath.Join("chats", safeName(chatID)+".md"), "chats", chatID)
-}
-
-func (r *Reflector) UnreflectInbox(workspaceID, messageID string) error {
-	return r.Unreflect(workspaceID, filepath.Join("inbox", safeName(messageID)+".md"), "inbox_messages", messageID)
-}
-
-func (r *Reflector) UnreflectReminder(workspaceID, reminderID string) error {
-	return r.Unreflect(workspaceID, filepath.Join("reminders", safeName(reminderID)+".md"), "reminders", reminderID)
 }
 
 // UnreflectAgentRuns drops the db-export sidecars of every run belonging to one
@@ -347,7 +267,7 @@ func ts(t time.Time) string {
 // in a stable order.
 func frontmatter(kv map[string]string) string {
 	order := []string{"type", "id", "run_id", "agent_id", "platform", "trigger",
-		"status", "remind_at", "recurrence", "created_at", "started_at", "finished_at",
+		"status", "created_at", "started_at", "finished_at",
 		"prompt_tokens", "completion_tokens", "total_tokens"}
 	var b strings.Builder
 	b.WriteString("---\n")

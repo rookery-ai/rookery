@@ -63,6 +63,42 @@ func TestMigrateNoLegacyIsNoop(t *testing.T) {
 	}
 }
 
+// TestRemoveLegacyInboxNotes: builds before the notification-reflection removal
+// wrote inbox/<uuid>.md plus a sidecar per message. Both go; nothing else may.
+func TestRemoveLegacyInboxNotes(t *testing.T) {
+	v := New(t.TempDir())
+	const user = "u1"
+	mustWrite(t, v, user, "inbox/0a107b38.md", "# ⏰ Reminder\n\n⏰ Reminder: put quinoa\n")
+	mustWrite(t, v, user, "inbox/92e2068a.md", "# 🤖 weather (cron)\n\n25°C\n")
+	mustWrite(t, v, user, ".kb/db-export/inbox_messages/0a107b38.json", "{}")
+	mustWrite(t, v, user, ".kb/db-export/chats/c1.json", "{}")
+	mustWrite(t, v, user, "notes/keep.md", "mine")
+
+	for i := 0; i < 2; i++ { // idempotent: a second boot must be a clean no-op
+		if err := v.RemoveLegacyInboxNotes(); err != nil {
+			t.Fatalf("RemoveLegacyInboxNotes pass %d: %v", i, err)
+		}
+	}
+
+	root := v.Root(user)
+	for _, gone := range []string{"inbox", filepath.Join(InternalDir, "db-export", "inbox_messages")} {
+		if _, err := os.Stat(filepath.Join(root, gone)); !os.IsNotExist(err) {
+			t.Errorf("%s survived the sweep: err=%v", gone, err)
+		}
+	}
+	for _, kept := range []string{"notes/keep.md", ".kb/db-export/chats/c1.json"} {
+		if _, err := v.ReadNote(user, kept); err != nil {
+			t.Errorf("sweep removed %s: %v", kept, err)
+		}
+	}
+}
+
+func TestRemoveLegacyInboxNotesOnEmptyVaultsDir(t *testing.T) {
+	if err := New(t.TempDir()).RemoveLegacyInboxNotes(); err != nil {
+		t.Fatalf("no vaults dir should be a no-op: %v", err)
+	}
+}
+
 func mkfile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {

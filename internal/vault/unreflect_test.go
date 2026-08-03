@@ -49,12 +49,12 @@ func TestUnreflectIsIdempotent(t *testing.T) {
 	if err := r.UnreflectChat("u1", "never-existed"); err != nil {
 		t.Errorf("unreflecting a note that was never written: %v", err)
 	}
-	if err := r.ReflectInbox("u1", InboxNote{ID: "i1", Source: "reminder", Body: "x"}); err != nil {
-		t.Fatalf("ReflectInbox: %v", err)
+	if err := r.ReflectChat("u1", ChatNote{ID: "c1", Name: "Chat"}); err != nil {
+		t.Fatalf("ReflectChat: %v", err)
 	}
 	for i := 0; i < 2; i++ {
-		if err := r.UnreflectInbox("u1", "i1"); err != nil {
-			t.Errorf("UnreflectInbox pass %d: %v", i, err)
+		if err := r.UnreflectChat("u1", "c1"); err != nil {
+			t.Errorf("UnreflectChat pass %d: %v", i, err)
 		}
 	}
 	// A nil reflector is a no-op, matching every other method here.

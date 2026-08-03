@@ -9,8 +9,8 @@ import (
 
 // TestKBDisplayTitleResolvesReflectedNotes pins the fix for UUID-named results in
 // global search. Reflected notes are named after a row id, so the filename tells
-// the user nothing: chats/<uuid>.md, inbox/<uuid>.md, and — the case the old
-// parent-dir-keyed enricher could not reach at all — agents/<uuid>/logs/run_<ts>.md,
+// the user nothing: chats/<uuid>.md and — the case the old parent-dir-keyed
+// enricher could not reach at all — agents/<uuid>/logs/run_<ts>.md,
 // whose immediate parent is "logs", two levels below the dir that identifies it.
 func TestKBDisplayTitleResolvesReflectedNotes(t *testing.T) {
 	s, _ := newAPITestServer(t)
@@ -26,8 +26,6 @@ func TestKBDisplayTitleResolvesReflectedNotes(t *testing.T) {
 	}
 	write("chats/33139123-6939-4d12-9bf8-409b2e042d24.md",
 		"---\ntype: chat\n---\n\n# Chat 2026-06-25 12:22\n\nhey\n")
-	write("inbox/0a107b38-db68-4666-a400-9e2bd663eb99.md",
-		"---\ntype: inbox\n---\n\n# 🤖 linkedin-post-scraper (manual)\n\nfailed\n")
 	write("notes/ohrid-trip.md", "lake apartments")
 	runLog := "agents/" + agent.ID + "/logs/run_20260624_101329.md"
 	write(runLog, "# Run of [[Digest]] — ok\n")
@@ -36,7 +34,6 @@ func TestKBDisplayTitleResolvesReflectedNotes(t *testing.T) {
 
 	cases := []struct{ path, want string }{
 		{"chats/33139123-6939-4d12-9bf8-409b2e042d24.md", "Chat 2026-06-25 12:22"},
-		{"inbox/0a107b38-db68-4666-a400-9e2bd663eb99.md", "🤖 linkedin-post-scraper (manual)"},
 		{runLog, "Digest — run 20260624_101329"},
 		{agentFile, "Digest — AGENT"},
 		// A user-authored note's filename IS its title — resolution must not

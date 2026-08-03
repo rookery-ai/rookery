@@ -41,7 +41,7 @@ import EmojiPicker from "./EmojiPicker";
 import { FolderSelect } from "./FolderSelect";
 
 // The backend (web/api_kb.go's kbSystemDirs) marks the root-level `memory`
-// dir system:true — it groups it with agents/chats/skills/reminders/inbox as
+// dir system:true — it groups it with agents/chats/skills as
 // "not user-authored knowledge". But memory/ is content the user writes and
 // edits directly, so it should not be muted or drag-locked alongside the
 // rest of that set. Rather than special-casing memory/ in the backend's
@@ -723,7 +723,7 @@ function TreeRow({
                 <Smile /> Change icon…
               </DropdownMenuItem>
               {/* Rename/Delete are withheld for system-managed, DB-backed nodes
-                (agents/chats/inbox/skills/reminders): removing them here would
+                (agents/chats/skills): removing them here would
                 orphan the backing record — delete from the item's own page. */}
               {!isProtectedPath(node.path) && (
                 <>

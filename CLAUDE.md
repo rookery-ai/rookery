@@ -309,7 +309,7 @@ them in. `EnsureScaffold` creates `USER.md` and `SOUL.md` with placeholder conte
 
 Key types in `internal/vault`:
 - **`Vault`** — `Root/AgentsDir/AgentDir/MemoryDir/SkillsDir`; **`Resolve(workspaceID, rel)`** is the security primitive every read/write path uses (rejects `..`/absolute escapes); `WriteNote` (atomic), `Read/Delete/Rename/List/EnsureScaffold`. `List` hides dotfiles.
-- **`Reflector`** — `ReflectChat/ReflectAgentRun`: markdown note + `.kb/db-export/<table>/<id>.json` sidecar. Reminders are NOT reflected.
+- **`Reflector`** — `ReflectChat/ReflectAgentRun`: markdown note + `.kb/db-export/<table>/<id>.json` sidecar. **Reminders and inbox notifications are NOT reflected.** An inbox message is a delivery record, not knowledge: the row lives in `inbox_messages`, the Home inbox renders it, and an agent run's delivered text is already archived in `agents/<id>/logs/run_<ts>.md` under "Output sent to user". The old `inbox/<uuid>.md` projection was a third copy that gave every note a non-distinguishing heading ("⏰ Reminder", "🤖 weather (cron)"), grew one file per notification forever, and — because `inbox` was never added to `kbExcludedDirs` — fed a stream of "🌤 25°C, clear sky" into the agent-/skill-designer retrieval meant to quote the user's own knowledge. `vault.RemoveLegacyInboxNotes` (startup, idempotent) sweeps `inbox/` + `.kb/db-export/inbox_messages/` from installs that had it; deleting rather than archiving is safe because every note's source row is still in the DB. Consequently `inbox`/`reminders` are no longer in `protectedTopDirs`, `kbSystemFolderLabels`, `kbDisplayTitle` or `links.go`'s priority/exclusion lists — the platform does not own those names, so a user folder called `inbox` is an ordinary user folder.
 - **`LinkIndex`** — `[[wikilink]]` parsing/resolution + `RenderHTMLLinks`; `Backlinks`.
 - **`Searcher`** — `ripgrepSearcher` (rg `--json`, pure-Go fallback).
 - **`Guard`** — detective post-run write-scope enforcement (snapshot/revert). No longer wired into agent runs (the policy changed to let agents edit the KB directly — see "Agent access model"); the type + tests remain as a reusable utility.
@@ -748,6 +748,22 @@ not better.
 **`PageTitle`** owns only the heading *group* (icon + `<h1>` + optional subtitle), not the whole
 header row: pages already have their own search boxes and actions, so scoping it to the part that was
 inconsistent made it adoptable at all 16 sites without restructuring them.
+
+**`DialogContent`'s width cap must stay unprefixed, and its grid must stay
+`grid-cols-1`** (`dialog.test.tsx` pins both). The base used to end
+`sm:max-w-lg`, a different tailwind-merge conflict group from a caller's
+`max-w-2xl` — so both survived the merge and the responsive one won at ≥640px,
+pinning **every dialog in the app** to 512px regardless of what it asked for.
+The same merge ate `max-w-[calc(100%-2rem)]`, so the small-viewport inset now
+lives on `w-`, not `max-w-`. Separately, with the implicit `auto` grid track a
+grid item's automatic minimum size is content-based (CSS Grid §6.6), so one wide
+non-wrapping child — the KB icon picker's category tab strip, ~880px of
+max-content, whose own `overflow-x: auto` does **not** zero its min-content
+contribution — stretched the track and every sibling with it straight through
+the side of the modal. `grid-cols-1` emits `repeat(1, minmax(0, 1fr))`, whose
+`0` min sizing function contains it; no `min-w-0` is needed. This is the third
+recorded instance of the tailwind-merge group trap (see `ChatScroll` and
+`PageContainer` below).
 
 **The side slide-over is `w-[clamp(400px,33vw,720px)]`, set in BOTH `sheet.tsx` and `AppShell`** —
 the width used to live in two places and had already drifted (`sm:max-w-sm` vs `sm:max-w-md`). A test
