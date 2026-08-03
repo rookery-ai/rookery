@@ -46,7 +46,13 @@ export default function EmojiPicker({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-w-2xl flex-col">
+      {/* The dialog owns its height and the grid flexes into what's left. A
+          `min-h` on the scroll region instead — which is what this used to have,
+          to stop the picker resizing as you move between a large group and a
+          small one — is a FLOOR, so it beats the dialog's own max-h and
+          overflows the bottom of the modal on a short viewport. Fixing the
+          height here keeps the anti-jump behaviour and cannot overflow. */}
+      <DialogContent className="flex h-[min(36rem,calc(100dvh-4rem))] max-w-2xl flex-col">
         <DialogHeader>
           <DialogTitle>Choose an icon</DialogTitle>
         </DialogHeader>
@@ -98,12 +104,10 @@ export default function EmojiPicker({
             </div>
           )}
 
-          {/* min-h keeps the dialog from resizing as you move between a large
-              group and a small one, or as a search narrows; max-h keeps it from
-              pushing the modal past the viewport. The wrapper's own min-h-0 is
-              what lets this region shrink inside the flex column rather than
-              overflowing it. */}
-          <div className="max-h-[50vh] min-h-72 overflow-y-auto pr-1">
+          {/* min-h-0 is what lets a flex child actually shrink — without it the
+              automatic minimum is content-based and the grid pushes out of the
+              column instead of scrolling inside it. */}
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
             {query ? (
               filtered.length === 0 ? (
                 <p className="py-6 text-center text-sm text-muted-2">
