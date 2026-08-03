@@ -1,0 +1,15 @@
+name: todoist
+label: Todoist
+category: Productivity
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Todoist API token"
+  key_hint: "from Settings → Integrations → Developer"
+  setup_url: https://app.todoist.com/app/settings/integrations/developer
+setup_steps:
+  - "In Todoist open Settings → Integrations → Developer."
+  - "Copy the API token shown there."
+  - "Paste it below. The token is personal and does not expire until you reset it."

@@ -1,0 +1,12 @@
+name: google_calendar
+label: Google Calendar
+category: Google
+auth_parent: google
+default_scopes:
+  - https://www.googleapis.com/auth/calendar.events
+  - https://www.googleapis.com/auth/calendar.readonly
+setup_url: https://console.cloud.google.com/apis/credentials
+setup_steps:
+  - "Google Calendar reuses your Google (Gmail) OAuth app. Set up Google first on its card above."
+  - "In Google Cloud Console, also enable the Google Calendar API."
+  - "Then click Connect here to authorize Calendar access on the same Google account."

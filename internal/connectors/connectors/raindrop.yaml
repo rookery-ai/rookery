@@ -1,0 +1,89 @@
+provider: raindrop
+actions:
+  - name: raindrop_list_collections
+    description: "List collections with their ids. Collection 0 means 'all bookmarks' and -1 means 'unsorted'. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://api.raindrop.io/rest/v1/collections"
+    response_extract: "$.items"
+
+  - name: raindrop_list_bookmarks
+    description: "List bookmarks in a collection, newest first. Use collection_id 0 for all bookmarks and -1 for unsorted. Pages are 25 items unless perpage says otherwise. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        collection_id: {type: integer, description: "collection id; 0 = all, -1 = unsorted"}
+        perpage:       {type: integer, description: "items per page, max 50"}
+        page:          {type: integer, description: "zero-based page number"}
+      required: [collection_id]
+    request:
+      method: GET
+      url: "https://api.raindrop.io/rest/v1/raindrops/{{collection_id}}"
+      query:
+        perpage: "{{perpage}}"
+        page: "{{page}}"
+        sort: "-created"
+    response_extract: "$.items"
+
+  - name: raindrop_search
+    description: "Search bookmarks by text across all collections. Supports Raindrop's own search syntax, e.g. '#tag' or 'type:article'. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        search:  {type: string, description: "search query"}
+        perpage: {type: integer, description: "items per page, max 50"}
+        page:    {type: integer, description: "zero-based page number"}
+      required: [search]
+    request:
+      method: GET
+      url: "https://api.raindrop.io/rest/v1/raindrops/0"
+      query:
+        search: "{{search}}"
+        perpage: "{{perpage}}"
+        page: "{{page}}"
+    response_extract: "$.items"
+
+  - name: raindrop_create_bookmark
+    description: "Save a URL as a bookmark. Raindrop fetches the title and excerpt itself when they are omitted. Bookmarks land in Unsorted. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        link:    {type: string, description: "the URL to save"}
+        title:   {type: string}
+        excerpt: {type: string}
+        tags:    {type: array, items: {type: string}}
+      required: [link]
+    request:
+      method: POST
+      url: "https://api.raindrop.io/rest/v1/raindrop"
+      body:
+        link: "{{link}}"
+        title: "{{title}}"
+        excerpt: "{{excerpt}}"
+        tags: "{{tags}}"
+    response_extract: "$.item"
+
+  - name: raindrop_update_bookmark
+    description: "Update a bookmark's title, excerpt or tags by id. Omitted fields are left alone; supplying tags REPLACES the existing set. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        raindrop_id: {type: integer}
+        title:       {type: string}
+        excerpt:     {type: string}
+        tags:        {type: array, items: {type: string}, description: "replaces the existing tags"}
+      required: [raindrop_id]
+    request:
+      method: PUT
+      url: "https://api.raindrop.io/rest/v1/raindrop/{{raindrop_id}}"
+      body:
+        title: "{{title}}"
+        excerpt: "{{excerpt}}"
+        tags: "{{tags}}"
+    response_extract: "$.item"

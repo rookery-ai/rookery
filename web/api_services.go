@@ -173,7 +173,16 @@ func (s *Server) apiListServices(c echo.Context) error {
 			// session_exchange (Bluesky) is an OAuth-less paste-a-credential flow like
 			// api_key, so it renders the same connect form. They differ only in what
 			// happens to the stored value at request time, which the UI does not care about.
-			if p.PastesCredential() {
+			switch {
+			case p.IsKeyless():
+				// A third kind, not a variant of api_key: the wizard must render no
+				// credential field at all, and there is no redirect URI or preflight
+				// because nothing ever leaves the browser.
+				kind = "keyless"
+				if p.Auth.SetupURL != "" {
+					setupURL = p.Auth.SetupURL
+				}
+			case p.PastesCredential():
 				kind = "api_key"
 				if p.Auth.SetupURL != "" {
 					setupURL = p.Auth.SetupURL
@@ -355,7 +364,7 @@ func (s *Server) apiConnectAPIKey(c echo.Context) error {
 	// session_exchange providers connect through this same paste-a-credential endpoint;
 	// gating on IsAPIKey alone would make Bluesky unconnectable despite its form rendering.
 	prov, ok := s.connectors.ProviderByName(provider)
-	if !ok || !prov.PastesCredential() {
+	if !ok || !(prov.PastesCredential() || prov.IsKeyless()) {
 		return jsonErr(c, http.StatusNotFound, "not_found", "unknown or non-API-key provider: "+provider)
 	}
 
@@ -364,8 +373,24 @@ func (s *Server) apiConnectAPIKey(c echo.Context) error {
 		return err
 	}
 	apiKey := strings.TrimSpace(req.Key)
-	if apiKey == "" {
+	// A keyless provider has nothing to paste. Every other kind still must.
+	if apiKey == "" && !prov.IsKeyless() {
 		return jsonErr(c, http.StatusBadRequest, "missing_field", "key is required")
+	}
+	if prov.IsKeyless() {
+		// Two keyless connections to one provider would produce two identical tool
+		// sets that ToolDefs slugs by label — harmless but useless, and confusing on
+		// the page. Reject rather than relying on the user not to create it.
+		existing, lerr := s.db.ListServiceConnections(c.Request().Context(), w.ID)
+		if lerr != nil {
+			return jsonErr(c, http.StatusInternalServerError, "internal", lerr.Error())
+		}
+		for _, e := range existing {
+			if e.Provider == provider {
+				return jsonErr(c, http.StatusBadRequest, "already_connected",
+					prov.Label+" needs no credential, so one connection is all there is — it is already connected.")
+			}
+		}
 	}
 	label := strings.TrimSpace(req.Label)
 

@@ -347,7 +347,40 @@ export function ServiceWizard({
           hasConnections ? "space-y-3 border-t border-border pt-4" : "space-y-3"
         }
       >
-        {provider.kind === "oauth" ? (
+        {provider.kind === "keyless" ? (
+          <div className="space-y-3">
+            {/* Setup steps render as plain text, not through SetupStep: that
+                component substitutes {{redirect_uri}}, and a keyless provider
+                has none. */}
+            {provider.setup_steps.length > 0 && (
+              <ol className="space-y-2">
+                {provider.setup_steps.map((s, i) => (
+                  <li
+                    key={i}
+                    className="flex gap-3 rounded-lg border border-border bg-background p-3 text-sm"
+                  >
+                    <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted-surface text-xs font-semibold">
+                      {i + 1}
+                    </span>
+                    <span className="leading-relaxed">{s}</span>
+                  </li>
+                ))}
+              </ol>
+            )}
+            {keyError && <ErrorNote>{keyError}</ErrorNote>}
+            <div className="flex justify-end">
+              <Button
+                onClick={() => void handleConnectAPIKey()}
+                disabled={connectAPIKeyMutation.isPending}
+              >
+                <Link2 />
+                {connectAPIKeyMutation.isPending
+                  ? "Connecting…"
+                  : `Connect ${provider.label} →`}
+              </Button>
+            </div>
+          </div>
+        ) : provider.kind === "oauth" ? (
           view === "creds" ? (
             <div className="space-y-3">
               {provider.setup_url && (

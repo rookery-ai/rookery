@@ -1,0 +1,21 @@
+name: paperless
+label: Paperless-ngx
+category: Self-hosted
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Token "
+  key_label: "Paperless-ngx API token"
+  key_hint: "from My Profile in the user dropdown"
+  setup_url: https://docs.paperless-ngx.com/api/
+connect_inputs:
+  - key: base_url
+    label: "Paperless-ngx URL"
+    hint: "e.g. https://paper.example.com — a path prefix like /paperless is fine"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In Paperless-ngx open the user dropdown at the top right and click 'My Profile'."
+  - "Press the circular arrow next to the API token to generate one, then copy it."
+  - "Enter your Paperless-ngx URL and the token below. Make sure the account holds the permissions for the documents you want the agent to reach."

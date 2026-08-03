@@ -189,7 +189,14 @@ func (s *Server) buildConsentURL(c echo.Context, w *db.Workspace, provider, labe
 // DB insert failed) — both callers treat a non-nil err as an internal error.
 func (s *Server) connectAPIKeyCore(ctx context.Context, w *db.Workspace, prov connectors.Provider, provider, apiKey, label string, inputs map[string]string) (conn *db.ServiceConnection, userErrMsg string, err error) {
 	if label == "" {
-		label = "default"
+		// A keyless connection has no account behind it, so FetchIdentity cannot run
+		// and "default" says nothing. Use the provider's own label — it is what the
+		// connections page and ToolDefs' multi-account slug both read.
+		if prov.IsKeyless() && prov.Label != "" {
+			label = prov.Label
+		} else {
+			label = "default"
+		}
 	}
 
 	extra := map[string]string{}
@@ -222,9 +229,16 @@ func (s *Server) connectAPIKeyCore(ctx context.Context, w *db.Workspace, prov co
 		}
 	}
 
-	enc, encErr := secrets.EncryptWithSystemKey(apiKey, s.systemKey)
-	if encErr != nil {
-		return nil, "", errors.New("Failed to store the API key.")
+	// A keyless provider has no credential to store. Encrypting the empty string
+	// would still yield ciphertext, leaving a secret-shaped value in the row that
+	// decrypts to nothing — misleading to read and pointless to keep.
+	enc := ""
+	if !prov.IsKeyless() {
+		var encErr error
+		enc, encErr = secrets.EncryptWithSystemKey(apiKey, s.systemKey)
+		if encErr != nil {
+			return nil, "", errors.New("Failed to store the API key.")
+		}
 	}
 
 	row := db.ServiceConnection{

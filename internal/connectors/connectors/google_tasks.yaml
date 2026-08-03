@@ -1,0 +1,82 @@
+provider: google_tasks
+actions:
+  - name: tasks_list_tasklists
+    description: "List the task lists on this account, with their ids. Call this first — every other action needs a tasklist_id. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://tasks.googleapis.com/tasks/v1/users/@me/lists"
+    response_extract: "$.items"
+
+  - name: tasks_list_tasks
+    description: "List tasks in a list. show_completed defaults to false, so this returns outstanding work unless asked otherwise. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        tasklist_id:    {type: string}
+        max_results:    {type: integer, description: "cap on returned tasks, default 25"}
+        show_completed: {type: boolean, description: "include completed tasks"}
+        due_min:        {type: string, description: "RFC3339 earliest due date"}
+        due_max:        {type: string, description: "RFC3339 latest due date"}
+      required: [tasklist_id]
+    request:
+      method: GET
+      url: "https://tasks.googleapis.com/tasks/v1/lists/{{tasklist_id}}/tasks"
+      query:
+        maxResults: "{{max_results}}"
+        showCompleted: "{{show_completed}}"
+        dueMin: "{{due_min}}"
+        dueMax: "{{due_max}}"
+    response_extract: "$.items"
+
+  - name: tasks_create_task
+    description: "Create a task in a list. due is an RFC3339 timestamp; Google Tasks stores only the date part. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        tasklist_id: {type: string}
+        title:       {type: string}
+        notes:       {type: string}
+        due:         {type: string, description: "RFC3339 due date"}
+      required: [tasklist_id, title]
+    request:
+      method: POST
+      url: "https://tasks.googleapis.com/tasks/v1/lists/{{tasklist_id}}/tasks"
+      body:
+        title: "{{title}}"
+        notes: "{{notes}}"
+        due: "{{due}}"
+    response_extract: "$"
+
+  - name: tasks_complete_task
+    description: "Mark a task completed. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        tasklist_id: {type: string}
+        task_id:     {type: string}
+      required: [tasklist_id, task_id]
+    request:
+      method: PATCH
+      url: "https://tasks.googleapis.com/tasks/v1/lists/{{tasklist_id}}/tasks/{{task_id}}"
+      body:
+        status: "completed"
+    response_extract: "$"
+
+  - name: tasks_delete_task
+    description: "Delete a task by id. Mutating and irreversible."
+    mutating: true
+    params:
+      type: object
+      properties:
+        tasklist_id: {type: string}
+        task_id:     {type: string}
+      required: [tasklist_id, task_id]
+    request:
+      method: DELETE
+      url: "https://tasks.googleapis.com/tasks/v1/lists/{{tasklist_id}}/tasks/{{task_id}}"
+    response_extract: "$"

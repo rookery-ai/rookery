@@ -1,0 +1,130 @@
+provider: google_calendar
+actions:
+  - name: calendar_list_calendars
+    description: "List the calendars on this account, with their ids. Call this first — every other action needs a calendar_id, and 'primary' is the default one. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://www.googleapis.com/calendar/v3/users/me/calendarList"
+    response_extract: "$.items"
+
+  - name: calendar_list_events
+    description: "List events in a time window. time_min/time_max are RFC3339 timestamps, e.g. 2026-08-03T00:00:00Z. Always pass a window — a calendar can hold years of events. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        calendar_id: {type: string, description: "calendar id, or 'primary'"}
+        time_min:    {type: string, description: "RFC3339 lower bound, inclusive"}
+        time_max:    {type: string, description: "RFC3339 upper bound, exclusive"}
+        max_results: {type: integer, description: "cap on returned events, default 25"}
+        query:       {type: string, description: "free-text search over event fields"}
+      required: [calendar_id, time_min, time_max]
+    request:
+      method: GET
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events"
+      query:
+        timeMin: "{{time_min}}"
+        timeMax: "{{time_max}}"
+        maxResults: "{{max_results}}"
+        q: "{{query}}"
+        singleEvents: "true"
+        orderBy: "startTime"
+    response_extract: "$.items"
+
+  - name: calendar_get_event
+    description: "Get one event by id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        calendar_id: {type: string}
+        event_id:    {type: string}
+      required: [calendar_id, event_id]
+    request:
+      method: GET
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events/{{event_id}}"
+    response_extract: "$"
+
+  - name: calendar_create_event
+    description: "Create an event. start/end are RFC3339 timestamps. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        calendar_id: {type: string}
+        summary:     {type: string, description: "event title"}
+        description: {type: string}
+        location:    {type: string}
+        start:       {type: string, description: "RFC3339 start"}
+        end:         {type: string, description: "RFC3339 end"}
+      required: [calendar_id, summary, start, end]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events"
+      body:
+        summary: "{{summary}}"
+        description: "{{description}}"
+        location: "{{location}}"
+        start: {dateTime: "{{start}}"}
+        end: {dateTime: "{{end}}"}
+    response_extract: "$"
+
+  - name: calendar_update_event
+    description: "Update an event's fields by id (PATCH = partial: omitted fields are left alone). Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        calendar_id: {type: string}
+        event_id:    {type: string}
+        summary:     {type: string}
+        description: {type: string}
+        location:    {type: string}
+        start:       {type: string, description: "RFC3339 start"}
+        end:         {type: string, description: "RFC3339 end"}
+      required: [calendar_id, event_id]
+    request:
+      method: PATCH
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events/{{event_id}}"
+      body:
+        summary: "{{summary}}"
+        description: "{{description}}"
+        location: "{{location}}"
+        start: {dateTime: "{{start}}"}
+        end: {dateTime: "{{end}}"}
+    response_extract: "$"
+
+  - name: calendar_delete_event
+    description: "Delete an event by id. Mutating and irreversible."
+    mutating: true
+    params:
+      type: object
+      properties:
+        calendar_id: {type: string}
+        event_id:    {type: string}
+      required: [calendar_id, event_id]
+    request:
+      method: DELETE
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events/{{event_id}}"
+    response_extract: "$"
+
+  - name: calendar_freebusy
+    description: "Query busy periods on one calendar in a window — use this to find a free slot rather than listing every event. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        calendar_id: {type: string, description: "calendar id, or 'primary'"}
+        time_min:    {type: string, description: "RFC3339 lower bound"}
+        time_max:    {type: string, description: "RFC3339 upper bound"}
+      required: [calendar_id, time_min, time_max]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/calendar/v3/freeBusy"
+      body:
+        timeMin: "{{time_min}}"
+        timeMax: "{{time_max}}"
+        items: [{id: "{{calendar_id}}"}]
+    response_extract: "$.calendars"
