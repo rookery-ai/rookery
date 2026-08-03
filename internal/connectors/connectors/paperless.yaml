@@ -1,0 +1,92 @@
+provider: paperless
+actions:
+  - name: paperless_search_documents
+    description: "Full-text search across documents. query searches the OCR'd content as well as titles. Returns metadata only — use paperless_get_document_text for the content. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query:     {type: string, description: "full-text search query"}
+        page_size: {type: integer, description: "results per page, default 10"}
+        page:      {type: integer, description: "one-based page number"}
+      required: [query]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/documents/"
+      query:
+        query: "{{query}}"
+        page_size: "{{page_size}}"
+        page: "{{page}}"
+    response_extract: "$.results"
+
+  - name: paperless_get_document
+    description: "Get one document's metadata by id: title, correspondent, tags, document type, created date. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        document_id: {type: integer}
+      required: [document_id]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/documents/{{document_id}}/"
+    response_extract: "$"
+
+  - name: paperless_get_document_text
+    description: "Get a document's OCR'd text content by id. Use this to read what a document actually says — it may be long, so prefer searching first to find the right document. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        document_id: {type: integer}
+      required: [document_id]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/documents/{{document_id}}/"
+    response_extract: "$.content"
+
+  - name: paperless_list_tags
+    description: "List tags with their ids and document counts. Tag ids are needed to update a document's tags. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        page_size: {type: integer, description: "results per page, default 100"}
+      required: []
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/tags/"
+      query:
+        page_size: "{{page_size}}"
+    response_extract: "$.results"
+
+  - name: paperless_list_correspondents
+    description: "List correspondents (who a document is from or to) with their ids and document counts. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        page_size: {type: integer, description: "results per page, default 100"}
+      required: []
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/correspondents/"
+      query:
+        page_size: "{{page_size}}"
+    response_extract: "$.results"
+
+  - name: paperless_update_document_tags
+    description: "Replace a document's tags. tag_ids REPLACES the existing set, so read the current tags first and send the full list you want. Get ids from paperless_list_tags. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        document_id: {type: integer}
+        tag_ids:     {type: array, items: {type: integer}, description: "the complete tag set to apply"}
+      required: [document_id, tag_ids]
+    request:
+      method: PATCH
+      url: "{{conn.base_url}}/api/documents/{{document_id}}/"
+      body:
+        tags: "{{tag_ids}}"
+    response_extract: "$"

@@ -8,6 +8,12 @@ import "net/http"
 // (e.g. Zendesk's "{{conn.email}}/token").
 func applyAuth(req *http.Request, prov Provider, credential string, connExtra map[string]string) {
 	a := prov.Auth
+	// Keyless providers have no credential: leave the request exactly as rendered.
+	// The default branch below would set "Authorization: Bearer " with an empty
+	// value, which is worse than no header at all.
+	if a.Kind == "none" {
+		return
+	}
 	if a.Kind != "api_key" {
 		req.Header.Set("Authorization", "Bearer "+credential)
 		return

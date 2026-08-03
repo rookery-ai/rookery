@@ -47,7 +47,11 @@ type AuthConfig struct {
 
 // Provider is one service's OAuth configuration.
 type Provider struct {
-	Name          string   `yaml:"name"`
+	Name string `yaml:"name"`
+	// Unverified marks a provider whose action manifest has NOT been confirmed against
+	// the live API with cmd/livecheck. It is data rather than a comment so the UI can
+	// surface it, and so "which providers are guesses" is answerable by a test.
+	Unverified    bool     `yaml:"unverified"`
 	AuthorizeURL  string   `yaml:"authorize_url"`
 	TokenURL      string   `yaml:"token_url"`
 	UserinfoURL   string   `yaml:"userinfo_url"`
@@ -147,10 +151,19 @@ type ConnectInput struct {
 	Label    string `yaml:"label"`
 	Hint     string `yaml:"hint"`
 	Required bool   `yaml:"required"`
+	// Normalize names a canonicalizer applied to the pasted value at connect time.
+	// "" (default) stores the value verbatim. "base_url" runs NormalizeBaseURL —
+	// see internal/connectors/baseurl.go.
+	Normalize string `yaml:"normalize"`
 }
 
 // IsAPIKey reports whether this provider authenticates with a static API key.
 func (p Provider) IsAPIKey() bool { return p.Auth.Kind == "api_key" }
+
+// IsKeyless reports whether this provider needs no credential at all (Open-Meteo).
+// Its connections store no secret, are never refreshed, and connect with a bare
+// button rather than a paste-a-key form.
+func (p Provider) IsKeyless() bool { return p.Auth.Kind == "none" }
 
 // UsesSessionExchange reports whether the stored credential is swapped for a
 // short-lived bearer token on use (Bluesky: handle + app password → accessJwt).
@@ -209,6 +222,18 @@ type RequestTemplate struct {
 	Form map[string]string `yaml:"form"`
 }
 
+// ResponseFilter narrows a JSON ARRAY response client-side, for APIs that offer no
+// server-side filter of their own. Home Assistant is the motivating case: GET
+// /api/states returns every entity in the house, so an entity_prefix parameter that
+// the request ignored would be a lie — the filter is what makes it true.
+type ResponseFilter struct {
+	// Field is the object key each array element is matched on (e.g. "entity_id").
+	Field string `yaml:"field"`
+	// PrefixArg names the action argument holding the prefix to match. An absent or
+	// empty argument means no filtering, so the action still works unfiltered.
+	PrefixArg string `yaml:"prefix_arg"`
+}
+
 // Action is one curated, typed operation on a provider.
 type Action struct {
 	Name        string `yaml:"name"`
@@ -227,7 +252,9 @@ type Action struct {
 	ParamsRaw       map[string]any  `yaml:"params"`
 	Request         RequestTemplate `yaml:"request"`
 	ResponseExtract string          `yaml:"response_extract"`
-	Params          json.RawMessage `yaml:"-"` // compiled JSON schema from ParamsRaw
+	// ResponseFilter optionally narrows an array response after ResponseExtract runs.
+	ResponseFilter ResponseFilter  `yaml:"response_filter"`
+	Params         json.RawMessage `yaml:"-"` // compiled JSON schema from ParamsRaw
 }
 
 type manifest struct {

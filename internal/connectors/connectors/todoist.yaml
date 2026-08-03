@@ -1,0 +1,104 @@
+provider: todoist
+actions:
+  - name: todoist_list_projects
+    description: "List projects with their ids. Call this first when a task needs a specific project. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://api.todoist.com/api/v1/projects"
+    response_extract: "$.results"
+
+  - name: todoist_list_tasks
+    description: "List active (not completed) tasks. Narrow with project_id or a Todoist filter expression such as 'today | overdue' — an unfiltered account can hold hundreds of tasks. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        project_id: {type: string, description: "restrict to one project"}
+        filter:     {type: string, description: "Todoist filter query, e.g. 'today | overdue'"}
+        limit:      {type: integer, description: "cap on returned tasks, default 30"}
+      required: []
+    request:
+      method: GET
+      url: "https://api.todoist.com/api/v1/tasks"
+      query:
+        project_id: "{{project_id}}"
+        filter: "{{filter}}"
+        limit: "{{limit}}"
+    response_extract: "$.results"
+
+  - name: todoist_create_task
+    description: "Create a task. due_string accepts natural language Todoist parses itself, e.g. 'tomorrow at 9am'. priority is 1 (normal) to 4 (urgent). Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        content:     {type: string, description: "the task text"}
+        description: {type: string}
+        project_id:  {type: string}
+        due_string:  {type: string, description: "natural language due date"}
+        priority:    {type: integer, description: "1 normal … 4 urgent"}
+      required: [content]
+    request:
+      method: POST
+      url: "https://api.todoist.com/api/v1/tasks"
+      body:
+        content: "{{content}}"
+        description: "{{description}}"
+        project_id: "{{project_id}}"
+        due_string: "{{due_string}}"
+        priority: "{{priority}}"
+    response_extract: "$"
+
+  - name: todoist_close_task
+    description: "Complete a task by id. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        task_id: {type: string}
+      required: [task_id]
+    request:
+      method: POST
+      url: "https://api.todoist.com/api/v1/tasks/{{task_id}}/close"
+    response_extract: "$"
+
+  - name: todoist_update_task
+    description: "Update a task's fields by id. Omitted fields are left alone. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        task_id:     {type: string}
+        content:     {type: string}
+        description: {type: string}
+        due_string:  {type: string, description: "natural language due date"}
+        priority:    {type: integer, description: "1 normal … 4 urgent"}
+      required: [task_id]
+    request:
+      method: POST
+      url: "https://api.todoist.com/api/v1/tasks/{{task_id}}"
+      body:
+        content: "{{content}}"
+        description: "{{description}}"
+        due_string: "{{due_string}}"
+        priority: "{{priority}}"
+    response_extract: "$"
+
+  - name: todoist_add_comment
+    description: "Add a comment to a task. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        task_id: {type: string}
+        content: {type: string}
+      required: [task_id, content]
+    request:
+      method: POST
+      url: "https://api.todoist.com/api/v1/comments"
+      body:
+        task_id: "{{task_id}}"
+        content: "{{content}}"
+    response_extract: "$"

@@ -1,0 +1,10 @@
+name: open_meteo
+label: Open-Meteo
+category: Data & Reference
+auth:
+  kind: none
+setup_url: https://open-meteo.com/en/docs
+setup_steps:
+  - "Open-Meteo needs no account and no API key — press Connect."
+  - "The free tier is for non-commercial use, limited to 10,000 calls per day."
+  - "Weather data is licensed CC BY 4.0; agents citing a forecast should credit Open-Meteo."

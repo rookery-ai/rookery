@@ -42,7 +42,9 @@ func TestOAuthSetupStepsNameTheRedirectURI(t *testing.T) {
 	}
 	for _, name := range r.ProviderNames() {
 		p, ok := r.ProviderByName(name)
-		if !ok || p.PastesCredential() || len(p.SetupSteps) == 0 {
+		// A keyless provider (Open-Meteo) runs no OAuth flow, so it has no redirect
+		// URI to name — requiring the placeholder would force a lie into its steps.
+		if !ok || p.PastesCredential() || p.IsKeyless() || len(p.SetupSteps) == 0 {
 			continue
 		}
 		// Aliased children inherit their parent's guidance and ship none of their own.

@@ -70,6 +70,8 @@ export type ServiceProvider = {
   name: string;
   label: string;
   category: string;
+  // "oauth" | "api_key" | "keyless". Keyless providers (Open-Meteo) need no
+  // credential: the wizard shows setup steps and a bare Connect button.
   kind: string;
   setup_url: string;
   setup_steps: string[];
@@ -109,6 +111,10 @@ export const CATEGORY_ORDER = [
   "Advertising",
   "Productivity",
   "Communication",
+  "Self-hosted",
+  "Health & Fitness",
+  "Finance",
+  "Data & Reference",
   "Commerce",
   "Developer",
   "Support",

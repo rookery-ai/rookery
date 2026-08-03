@@ -1,0 +1,19 @@
+name: ynab
+label: YNAB
+category: Finance
+# Not yet confirmed against the live API with cmd/livecheck — no credential
+# was available at authoring time. Remove this once a real call succeeds.
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "YNAB personal access token"
+  key_hint: "from Account Settings → Developer Settings"
+  setup_url: https://app.ynab.com/settings/developer
+setup_steps:
+  - "In YNAB open Account Settings → Developer Settings."
+  - "Under Personal Access Tokens press New Token, enter your password and press Generate."
+  - "Copy the token and paste it below — YNAB shows it only once."
+  - "The API is rate-limited to 200 requests per hour per token."

@@ -1,0 +1,25 @@
+name: immich
+label: Immich
+category: Self-hosted
+# Not yet confirmed against the live API with cmd/livecheck — no credential
+# was available at authoring time. Remove this once a real call succeeds.
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: x-api-key
+  value_prefix: ""
+  key_label: "Immich API key"
+  key_hint: "generated in Account Settings → API Keys"
+  setup_url: https://immich.app/docs/features/command-line-interface
+connect_inputs:
+  - key: base_url
+    label: "Immich server URL"
+    hint: "e.g. https://photos.example.com — a path prefix like /immich is fine"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In Immich open Account Settings → API Keys and press New API Key."
+  - "Copy the key — Immich shows it only once."
+  - "Enter your server's URL and the key below."
+  - "Immich has changed its API across major releases, so a failing action may mean a version mismatch rather than a bad key."

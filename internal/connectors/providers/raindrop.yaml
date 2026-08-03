@@ -1,0 +1,18 @@
+name: raindrop
+label: Raindrop.io
+category: Productivity
+# Not yet confirmed against the live API with cmd/livecheck — no credential
+# was available at authoring time. Remove this once a real call succeeds.
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Raindrop.io test token"
+  key_hint: "from Settings → Integrations → your app → Test token"
+  setup_url: https://app.raindrop.io/settings/integrations
+setup_steps:
+  - "In Raindrop.io open Settings → Integrations and press 'Create new app'. Any name will do — it is only a container for your own token."
+  - "Open the app you just created and copy the 'Test token'."
+  - "Paste it below. Test tokens do not expire, and this flow needs no OAuth app."

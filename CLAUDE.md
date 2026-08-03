@@ -257,7 +257,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/iolimit` | `ReadCapped` + `ErrTooLarge` — the shared capped read every ingest door uses (KB upload, web-chat attachment, Telegram/Discord/Slack attachment, KB bridge, `save_to_kb` URL fetch), all enforcing one 25 MiB cap. Reads `cap+1` and REJECTS rather than truncating: a silently truncated import writes a note whose frontmatter states a byte count that is not the source's. `CappingWriter` is the write-side analogue — bounds a stream written into an `io.Writer` (Slack's `slack.Client.GetFile` insists on an `io.Writer` and has no size bound; there is no stdlib `io.LimitWriter`), rejecting at the same `cap+1` boundary. |
 | `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface: one struct per coder — Claude/OpenCode/Codex/Gemini/Cursor, plus a generic fallback). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host tools (`read_file`/`write_file`/`edit_file`/`list_dir` + read-only discovery `search_files`/`glob` + exec tools `run_script`/`bash`/`web_fetch`/`web_search`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
-| `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **32 providers** (Google-family incl. AdSense/GA4/Search Console, YouTube, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing, `ProviderNames()` backing the connections page), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
+| `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **54 providers** (Google-family incl. Calendar/Tasks/AdSense/GA4/Search Console, YouTube, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing, `ProviderNames()` backing the connections page), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
 | `internal/buildphase` | Tiny package holding `ROOKERY_BUILD_PHASE`/`generation` marker (set during agent/skill builds; the connector `Execute` build-guard refuses mutating actions when present). Its own package so it outlives any one integration. |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal); `statefile.go` (`StateFilePath`/`ReadState`/`WriteState`/`RenderStateTemplate`) owns an agent's `state.md` format (see "Agent state" below); `migrate_files.go` (`MigrateAgentFilesToMarkdown`) is the idempotent startup migration off the old `state.json`/`agent.json` pair; `ParseRequiredSecrets` (`flow.go`) parses AGENT.md's `# Required secrets:` header — the only source of an agent's declared secrets now that `agent.json` is gone |
 | `internal/skilldesigner` | Conversational skill-creator wizard mirroring `agentdesigner.Flow` (FSM Idle→AwaitingResume→Describing→Designing→Verifying→Done, SSE progress, 7-day drafts, approval triggers); `SkillSaver` writes SKILL.md+scripts/ to vault + DB upsert; generation runs with the `skill-creator` core skill, vetting runs the `skill-vetter` core skill as a text-only audit; `vettingBlocksSave()` parses the verdict line. Wired to BOTH surfaces: the SPA (`/api/v1/skills/design`) and chat platforms (`/skill`). `Start` is the chat entry point (opens in `StateDescribing`, asks for a description, no coder call); `StartDesign` is the web one (its form collects the description up front). |
@@ -376,7 +376,7 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
 
 - **Data files, not code.** Adding a service = a `providers/<p>.yaml` (auth config) + a
   `connectors/<p>.yaml` (curated action manifest), both `go:embed`ed. `LoadBundled()` parses them.
-  **45 providers (~272 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
+  **54 providers (~323 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
   Search Console**), **YouTube**, GitHub, Slack, OpenAI, Notion, Outlook, Teams, Jira, HubSpot,
   Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce,
   Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello.
@@ -507,6 +507,57 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
   ones. The build/impl AND runtime prompts inject `connectedToolsBlock` (backend-aware: native tools
   vs the `connector exec` command) so the coder knows the tools exist and is told there is **no
   Composio/SDK/service keys** in the env.
+
+**The everyday tier** (wave 1, 2026-08) opened a second axis alongside the business/SaaS
+providers: services people use in their own lives. Three shapes, all data-only —
+**personal cloud** (Todoist, YNAB, Raindrop.io) paste a token; **self-hosted**
+(Home Assistant, Immich, Paperless-ngx) pair a token with the user's own `base_url`,
+collected via `connect_inputs` with `normalize: base_url` (`NormalizeBaseURL` requires a
+scheme and strips trailing slashes but **preserves a path prefix** — `/nextcloud` and a
+reverse-proxied `/paperless` are mainstream) and reached because connectors deliberately
+do not use the private-address dial guard; and **keyless** (Open-Meteo) needs no
+credential at all via `auth.kind: none`. Google Calendar and Google Tasks ride the
+existing Google OAuth app through `auth_parent` — `buildConsentURL` passes the CHILD's
+own scopes to the PARENT's endpoint, so each child consents separately and adding them
+did not disturb existing Gmail connections.
+
+`auth.kind: "none"` touches five places: `applyAuth` returns early (the default branch
+would send `Authorization: Bearer ` with an empty value), `DBTokenStore.AccessToken`
+returns `("", nil)` before the expiry check (an unset expiry reads as *expired* and
+would route the row into a refresh it cannot survive), the connect endpoint relaxes the
+key requirement and rejects a duplicate, `connectAPIKeyCore` stores no ciphertext and
+names the row after the provider, and the SPA renders `kind: "keyless"` as a bare
+Connect button. `RunRefreshLoop` needs no change — `ConnectionsNearExpiry` already
+filters on `expires_at <> '' AND encrypted_refresh_token <> ''`.
+
+Providers not confirmed against their live API carry `unverified: true` in their YAML;
+`TestWave1ProvidersDeclareVerificationStatus` fails if a wave-1 provider is neither
+verified nor marked. Open-Meteo is verified by a `//go:build livecheck` test that calls
+the real API — excluded from the normal run so CI never depends on a third party.
+
+**`response_extract` walks DOTTED paths, and `response_filter` narrows arrays.**
+`extract` originally resolved a single top-level key, so any nested path silently
+returned the whole body — `$.data.children` (Reddit) and `$.data.user`/`$.data.videos`
+(TikTok) had never once narrowed. The failure is invisible in the YAML and surfaces only
+as a truncated blob against the bridge's 8 KiB cap, which is why the fix matters more
+than it looks. `ResponseFilter{Field, PrefixArg}` is the client-side complement, for APIs
+with no server-side filter: Home Assistant's `/api/states` returns every entity in the
+house, so `ha_list_states`'s `entity_prefix` is honoured after extraction. A missing
+filter argument yields an empty prefix and no-ops — matching nothing would return `[]`,
+which reads to the model as "you have no sensors".
+
+**Connectors deliberately do NOT use the private-address dial guard.**
+`connectors.Execute` falls back to a plain `&http.Client{Timeout: 30s}`, and every
+call site passes nil or an unguarded client — unlike `internal/websearch`, the coder's
+`web_fetch`, and the Discord attachment fetcher, which all use
+`nethttp.GuardedClient`. This is the property the **self-hosted tier** (Home Assistant,
+Immich, Paperless-ngx) is built on: those services live at RFC1918 or Tailscale
+addresses that the guard blocks at dial time. The guard's threat model is untrusted
+content steering a fetch; a connector's host comes from vendored YAML or from a value
+the single owner typed into their own install, so it does not apply here.
+`connectors.TestExecuteReachesPrivateAddresses` pins this, and its failure message
+says what breaks. Revisit if Rookery ever becomes multi-tenant — that test is where
+the conversation should start.
 
 **UI:** the SPA connections page (backed by the `/api/v1/services` JSON endpoints) — per-workspace
 OAuth-app creds + connect per provider, with per-provider setup guidance

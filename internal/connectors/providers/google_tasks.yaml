@@ -1,0 +1,14 @@
+name: google_tasks
+label: Google Tasks
+category: Google
+# Not yet confirmed against the live API with cmd/livecheck — no credential
+# was available at authoring time. Remove this once a real call succeeds.
+unverified: true
+auth_parent: google
+default_scopes:
+  - https://www.googleapis.com/auth/tasks
+setup_url: https://console.cloud.google.com/apis/credentials
+setup_steps:
+  - "Google Tasks reuses your Google (Gmail) OAuth app. Set up Google first on its card above."
+  - "In Google Cloud Console, also enable the Google Tasks API."
+  - "Then click Connect here to authorize Tasks access on the same Google account."

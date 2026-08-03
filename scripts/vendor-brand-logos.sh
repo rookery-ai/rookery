@@ -112,6 +112,15 @@ x:siX
 threads:siThreads
 pinterest:siPinterest
 bluesky:siBluesky
+# Everyday-connector providers. simple-icons carries all six of these; YNAB,
+# Raindrop.io and Open-Meteo have no mark in ANY of the three sources and are
+# exempted in web/logo_coverage_test.go's allowNoLogo instead.
+google_calendar:siGooglecalendar
+google_tasks:siGoogletasks
+todoist:siTodoist
+home_assistant:siHomeassistant
+immich:siImmich
+paperless:siPaperlessngx
 "
 
 # strip_svg removes the XML prolog, DOCTYPE, comments, any <script>/<style>
@@ -138,7 +147,8 @@ strip_svg() {
 echo "→ lobehub (@lobehub/icons-static-svg@$LOBEHUB_VERSION)"
 ( cd "$TMP" && npm pack "@lobehub/icons-static-svg@$LOBEHUB_VERSION" >/dev/null 2>&1 \
   && tar xzf "lobehub-icons-static-svg-$LOBEHUB_VERSION.tgz" )
-for pair in $LOBEHUB; do
+echo "$LOBEHUB" | while read -r pair; do
+  case "$pair" in ""|"#"*) continue ;; esac
   ours="${pair%%:*}"; theirs="${pair##*:}"
   src="$TMP/package/icons/$theirs.svg"
   [ -f "$src" ] || { echo "  MISSING lobehub:$theirs" >&2; exit 1; }
@@ -147,7 +157,8 @@ for pair in $LOBEHUB; do
 done
 
 echo "→ worldvectorlogo"
-for pair in $WVL; do
+echo "$WVL" | while read -r pair; do
+  case "$pair" in ""|"#"*) continue ;; esac
   ours="${pair%%:*}"; theirs="${pair##*:}"
   code=$(curl -sSL -A "$UA" -o "$TMP/dl.svg" -w "%{http_code}" \
     "https://cdn.worldvectorlogo.com/logos/$theirs.svg")
@@ -158,7 +169,8 @@ for pair in $WVL; do
 done
 
 echo "→ simple-icons"
-for pair in $SIMPLE; do
+echo "$SIMPLE" | while read -r pair; do
+  case "$pair" in ""|"#"*) continue ;; esac
   ours="${pair%%:*}"; theirs="${pair##*:}"
   # run from web/ui so node resolves simple-icons out of the SPA's node_modules.
   # No <title> and no role: the tile that inlines this already supplies both.

@@ -1,0 +1,81 @@
+provider: open_meteo
+actions:
+  - name: weather_geocode
+    description: "Turn a place name into coordinates, e.g. 'Skopje' → latitude 41.99, longitude 21.43. Call this FIRST — every other weather action needs coordinates. Read-only. Data by Open-Meteo (CC BY 4.0)."
+    mutating: false
+    params:
+      type: object
+      properties:
+        name:  {type: string, description: "city or place name"}
+        count: {type: integer, description: "max matches to return, default 5"}
+      required: [name]
+    request:
+      method: GET
+      url: "https://geocoding-api.open-meteo.com/v1/search"
+      query:
+        name: "{{name}}"
+        count: "{{count}}"
+        format: "json"
+    response_extract: "$.results"
+
+  - name: weather_current
+    description: "Current conditions at a coordinate: temperature, apparent temperature, humidity, precipitation, wind and a WMO weather code. Use weather_geocode first to get coordinates. Read-only. Data by Open-Meteo (CC BY 4.0)."
+    mutating: false
+    params:
+      type: object
+      properties:
+        latitude:  {type: number}
+        longitude: {type: number}
+        timezone:  {type: string, description: "IANA timezone, e.g. Europe/Skopje; 'auto' uses the coordinate's own"}
+      required: [latitude, longitude]
+    request:
+      method: GET
+      url: "https://api.open-meteo.com/v1/forecast"
+      query:
+        latitude: "{{latitude}}"
+        longitude: "{{longitude}}"
+        timezone: "{{timezone}}"
+        current: "temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m"
+    response_extract: "$.current"
+
+  - name: weather_forecast
+    description: "Daily forecast at a coordinate: min/max temperature, precipitation sum and probability, sunrise, sunset and a WMO weather code. forecast_days defaults to 7 and caps at 16. Use weather_geocode first. Read-only. Data by Open-Meteo (CC BY 4.0)."
+    mutating: false
+    params:
+      type: object
+      properties:
+        latitude:      {type: number}
+        longitude:     {type: number}
+        forecast_days: {type: integer, description: "1–16, default 7"}
+        timezone:      {type: string, description: "IANA timezone, e.g. Europe/Skopje"}
+      required: [latitude, longitude]
+    request:
+      method: GET
+      url: "https://api.open-meteo.com/v1/forecast"
+      query:
+        latitude: "{{latitude}}"
+        longitude: "{{longitude}}"
+        forecast_days: "{{forecast_days}}"
+        timezone: "{{timezone}}"
+        daily: "weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,sunrise,sunset"
+    response_extract: "$.daily"
+
+  - name: weather_air_quality
+    description: "Current air quality at a coordinate: European AQI, PM2.5, PM10, ozone and nitrogen dioxide. Use weather_geocode first. Read-only. Data by Open-Meteo (CC BY 4.0)."
+    mutating: false
+    params:
+      type: object
+      properties:
+        latitude:  {type: number}
+        longitude: {type: number}
+        timezone:  {type: string, description: "IANA timezone"}
+      required: [latitude, longitude]
+    request:
+      method: GET
+      url: "https://air-quality-api.open-meteo.com/v1/air-quality"
+      query:
+        latitude: "{{latitude}}"
+        longitude: "{{longitude}}"
+        timezone: "{{timezone}}"
+        current: "european_aqi,pm2_5,pm10,ozone,nitrogen_dioxide"
+    response_extract: "$.current"

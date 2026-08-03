@@ -1,0 +1,81 @@
+provider: immich
+actions:
+  - name: immich_search_assets
+    description: "Search the photo library by natural-language description, e.g. 'dog on a beach'. Immich runs this as a semantic search over its own index. size caps the result — a library can hold tens of thousands of assets. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "natural-language description"}
+        size:  {type: integer, description: "max assets to return, default 20"}
+      required: [query]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/api/search/smart"
+      body:
+        query: "{{query}}"
+        size: "{{size}}"
+    response_extract: "$.assets.items"
+
+  - name: immich_get_asset
+    description: "Get one asset's metadata by id: capture time, camera, location, people. Returns metadata only, never image bytes. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        asset_id: {type: string}
+      required: [asset_id]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/assets/{{asset_id}}"
+    response_extract: "$"
+
+  - name: immich_list_albums
+    description: "List albums with their ids and asset counts. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/albums"
+    response_extract: "$"
+
+  - name: immich_get_album
+    description: "Get one album with its assets by id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        album_id: {type: string}
+      required: [album_id]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/albums/{{album_id}}"
+    response_extract: "$"
+
+  - name: immich_create_album
+    description: "Create an album, optionally seeded with asset ids. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        album_name:  {type: string}
+        description: {type: string}
+        asset_ids:   {type: array, items: {type: string}}
+      required: [album_name]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/api/albums"
+      body:
+        albumName: "{{album_name}}"
+        description: "{{description}}"
+        assetIds: "{{asset_ids}}"
+    response_extract: "$"
+
+  - name: immich_server_statistics
+    description: "Server totals: photo count, video count and disk usage. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/server/statistics"
+    response_extract: "$"
