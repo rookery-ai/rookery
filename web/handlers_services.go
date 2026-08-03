@@ -198,9 +198,19 @@ func (s *Server) connectAPIKeyCore(ctx context.Context, w *db.Workspace, prov co
 		if ci.Required && v == "" {
 			return nil, ci.Label + " is required.", nil
 		}
-		if v != "" {
-			extra[ci.Key] = v
+		if v == "" {
+			continue
 		}
+		// A declared normalizer canonicalizes the pasted value before it is stored,
+		// so every action template concatenating onto it sees one shape.
+		if ci.Normalize == "base_url" {
+			norm, nerr := connectors.NormalizeBaseURL(v)
+			if nerr != nil {
+				return nil, ci.Label + ": " + nerr.Error(), nil
+			}
+			v = norm
+		}
+		extra[ci.Key] = v
 	}
 	for k, v := range connectors.DeriveKeyExtra(prov, apiKey) {
 		extra[k] = v
