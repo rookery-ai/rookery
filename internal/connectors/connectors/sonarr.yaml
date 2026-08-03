@@ -1,0 +1,81 @@
+provider: sonarr
+actions:
+  - name: sonarr_calendar
+    description: "Episodes airing between two dates (RFC3339 or YYYY-MM-DD) — the 'what's on this week' answer. Both bounds are required. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start: {type: string, description: "YYYY-MM-DD, inclusive"}
+        end:   {type: string, description: "YYYY-MM-DD, exclusive"}
+      required: [start, end]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v3/calendar"
+      query:
+        start: "{{start}}"
+        end: "{{end}}"
+    response_extract: "$"
+
+  - name: sonarr_queue
+    description: "What is downloading right now, with progress and estimated completion. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        page_size: {type: integer, description: "max records, default 20"}
+      required: []
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v3/queue"
+      query:
+        pageSize: "{{page_size}}"
+    response_extract: "$.records"
+
+  - name: sonarr_search_series
+    description: "Look up a series by name against Sonarr's metadata provider. Returns tvdbId and title — use before adding. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        term: {type: string, description: "series name"}
+      required: [term]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v3/series/lookup"
+      query:
+        term: "{{term}}"
+    response_extract: "$"
+
+  - name: sonarr_list_series
+    description: "Series already in the library, with monitoring state and episode counts. This can be large on a big library. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v3/series"
+    response_extract: "$"
+
+  - name: sonarr_wanted_missing
+    description: "Monitored episodes that have aired but are missing from disk — the gap list. page_size caps it. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        page_size: {type: integer, description: "max records, default 20"}
+      required: []
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v3/wanted/missing"
+      query:
+        pageSize: "{{page_size}}"
+    response_extract: "$.records"
+
+  - name: sonarr_system_status
+    description: "Sonarr version, start time and health — use to confirm the instance is reachable. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v3/system/status"
+    response_extract: "$"

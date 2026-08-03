@@ -1,0 +1,91 @@
+provider: firefly_iii
+actions:
+  - name: firefly_list_accounts
+    description: "List accounts with their current balances. type narrows to asset, expense, revenue or liability. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        type: {type: string, description: "asset | expense | revenue | liability | all"}
+      required: []
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/accounts"
+      query:
+        type: "{{type}}"
+    response_extract: "$.data"
+
+  - name: firefly_list_transactions
+    description: "List transactions between two dates (YYYY-MM-DD). Both bounds are required — the full ledger is unbounded. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start: {type: string, description: "YYYY-MM-DD, inclusive"}
+        end:   {type: string, description: "YYYY-MM-DD, inclusive"}
+        type:  {type: string, description: "withdrawal | deposit | transfer | all"}
+        limit: {type: integer, description: "results per page, default 50"}
+      required: [start, end]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/transactions"
+      query:
+        start: "{{start}}"
+        end: "{{end}}"
+        type: "{{type}}"
+        limit: "{{limit}}"
+    response_extract: "$.data"
+
+  - name: firefly_create_transaction
+    description: "Record a transaction. type is withdrawal (money out), deposit (money in) or transfer. amount is a decimal STRING, e.g. \"12.50\". date is YYYY-MM-DD. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        type:        {type: string, description: "withdrawal | deposit | transfer"}
+        date:        {type: string, description: "YYYY-MM-DD"}
+        amount:      {type: string, description: "decimal string, e.g. \"12.50\""}
+        description: {type: string}
+        source_name: {type: string, description: "account the money leaves"}
+        destination_name: {type: string, description: "account the money arrives in"}
+        category_name:    {type: string}
+      required: [type, date, amount, description]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/api/v1/transactions"
+      body:
+        transactions:
+          - type: "{{type}}"
+            date: "{{date}}"
+            amount: "{{amount}}"
+            description: "{{description}}"
+            source_name: "{{source_name}}"
+            destination_name: "{{destination_name}}"
+            category_name: "{{category_name}}"
+    response_extract: "$.data"
+
+  - name: firefly_list_budgets
+    description: "List budgets with their spending limits. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/budgets"
+    response_extract: "$.data"
+
+  - name: firefly_summary
+    description: "Net-worth and balance summary for a date range — the 'how am I doing this month' answer. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start: {type: string, description: "YYYY-MM-DD"}
+        end:   {type: string, description: "YYYY-MM-DD"}
+      required: [start, end]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/summary/basic"
+      query:
+        start: "{{start}}"
+        end: "{{end}}"
+    response_extract: "$"

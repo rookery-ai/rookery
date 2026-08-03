@@ -1,0 +1,20 @@
+name: steam
+label: Steam
+category: Data & Reference
+unverified: true
+auth:
+  kind: api_key
+  placement: query
+  param_name: key
+  key_label: "Steam Web API key"
+  key_hint: "from steamcommunity.com/dev/apikey"
+  setup_url: https://steamcommunity.com/dev/apikey
+connect_inputs:
+  - key: steam_id
+    label: "Your SteamID64"
+    hint: "the 17-digit id from your profile URL — find it at steamid.io if unsure"
+    required: true
+setup_steps:
+  - "Open https://steamcommunity.com/dev/apikey while logged in and register a key (any domain will do for personal use)."
+  - "Find your 17-digit SteamID64 — steamid.io resolves a profile URL to it."
+  - "Enter both below. Your Steam profile and game details must be PUBLIC or the API returns nothing."

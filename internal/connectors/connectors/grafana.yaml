@@ -1,0 +1,46 @@
+provider: grafana
+actions:
+  - name: grafana_search_dashboards
+    description: "Search dashboards by title, returning uid and url. limit caps the result. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "title substring"}
+        limit: {type: integer, description: "max results, default 20"}
+      required: []
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/search"
+      query:
+        query: "{{query}}"
+        limit: "{{limit}}"
+        type: "dash-db"
+    response_extract: "$"
+
+  - name: grafana_list_alerts
+    description: "Current Alertmanager alerts — what is firing right now. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/alertmanager/grafana/api/v2/alerts"
+    response_extract: "$"
+
+  - name: grafana_list_datasources
+    description: "Configured data sources with their types and uids. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/datasources"
+    response_extract: "$"
+
+  - name: grafana_health
+    description: "Grafana version and database health — a cheap reachability check. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/health"
+    response_extract: "$"

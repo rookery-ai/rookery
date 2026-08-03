@@ -1,0 +1,81 @@
+provider: clockify
+actions:
+  - name: clockify_me
+    description: "The authenticated user with their active workspace id. Call this first — the other actions need workspace_id and user_id. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://api.clockify.me/api/v1/user"
+    response_extract: "$"
+
+  - name: clockify_list_time_entries
+    description: "Time entries for a user in a workspace. start/end are RFC3339 and bound the window — required, because the full history is unbounded. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        workspace_id: {type: string}
+        user_id:      {type: string}
+        start:        {type: string, description: "RFC3339 lower bound"}
+        end:          {type: string, description: "RFC3339 upper bound"}
+        page_size:    {type: integer, description: "max entries, default 50"}
+      required: [workspace_id, user_id, start, end]
+    request:
+      method: GET
+      url: "https://api.clockify.me/api/v1/workspaces/{{workspace_id}}/user/{{user_id}}/time-entries"
+      query:
+        start: "{{start}}"
+        end: "{{end}}"
+        page-size: "{{page_size}}"
+    response_extract: "$"
+
+  - name: clockify_list_projects
+    description: "Projects in a workspace with their ids. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        workspace_id: {type: string}
+      required: [workspace_id]
+    request:
+      method: GET
+      url: "https://api.clockify.me/api/v1/workspaces/{{workspace_id}}/projects"
+    response_extract: "$"
+
+  - name: clockify_start_timer
+    description: "Start a timer in a workspace. start is an RFC3339 timestamp, usually now. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        workspace_id: {type: string}
+        description:  {type: string, description: "what you are working on"}
+        project_id:   {type: string}
+        start:        {type: string, description: "RFC3339 start time"}
+      required: [workspace_id, description, start]
+    request:
+      method: POST
+      url: "https://api.clockify.me/api/v1/workspaces/{{workspace_id}}/time-entries"
+      body:
+        start: "{{start}}"
+        description: "{{description}}"
+        projectId: "{{project_id}}"
+    response_extract: "$"
+
+  - name: clockify_stop_timer
+    description: "Stop the running timer for a user. end is an RFC3339 timestamp, usually now. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        workspace_id: {type: string}
+        user_id:      {type: string}
+        end:          {type: string, description: "RFC3339 end time"}
+      required: [workspace_id, user_id, end]
+    request:
+      method: PATCH
+      url: "https://api.clockify.me/api/v1/workspaces/{{workspace_id}}/user/{{user_id}}/time-entries"
+      body:
+        end: "{{end}}"
+    response_extract: "$"

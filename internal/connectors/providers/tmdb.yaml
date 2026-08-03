@@ -1,0 +1,16 @@
+name: tmdb
+label: TMDB
+category: Data & Reference
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "TMDB API Read Access Token"
+  key_hint: "the v4 token, NOT the shorter v3 API key"
+  setup_url: https://www.themoviedb.org/settings/api
+setup_steps:
+  - "Open your TMDB account's API settings at https://www.themoviedb.org/settings/api."
+  - "Copy the 'API Read Access Token' — the long v4 one, not the short v3 API key."
+  - "Paste it below. TMDB requires attribution when its data is displayed."

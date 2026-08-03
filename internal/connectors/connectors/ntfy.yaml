@@ -1,0 +1,25 @@
+provider: ntfy
+actions:
+  - name: ntfy_publish
+    description: "Push a notification to the connected topic — it arrives on every subscribed phone or desktop. priority is 1 (min) to 5 (max); tags are emoji shortcodes such as warning or white_check_mark. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        message:  {type: string, description: "the notification body"}
+        title:    {type: string}
+        priority: {type: integer, description: "1 min … 5 max, default 3"}
+        tags:     {type: array, items: {type: string}, description: "emoji shortcodes, e.g. [\"warning\"]"}
+        click:    {type: string, description: "URL opened when the notification is tapped"}
+      required: [message]
+    request:
+      method: POST
+      url: "{{conn.base_url}}"
+      body:
+        topic: "{{conn.topic}}"
+        message: "{{message}}"
+        title: "{{title}}"
+        priority: "{{priority}}"
+        tags: "{{tags}}"
+        click: "{{click}}"
+    response_extract: "$"

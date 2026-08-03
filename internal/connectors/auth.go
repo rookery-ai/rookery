@@ -24,10 +24,15 @@ func applyAuth(req *http.Request, prov Provider, credential string, connExtra ma
 		q.Set(a.ParamName, credential)
 		req.URL.RawQuery = q.Encode()
 	case "basic":
-		if a.BasicUserTemplate != "" {
+		switch {
+		case a.BasicUserTemplate != "":
 			user := subst(a.BasicUserTemplate, nil, connExtra)
 			req.SetBasicAuth(user, credential)
-		} else {
+		case a.BasicPassLiteral != "":
+			// The inverse arrangement: the credential is the USERNAME and the password
+			// is a fixed constant. Toggl Track wants literally "api_token" there.
+			req.SetBasicAuth(credential, a.BasicPassLiteral)
+		default:
 			req.SetBasicAuth(credential, "")
 		}
 	default: // "header"

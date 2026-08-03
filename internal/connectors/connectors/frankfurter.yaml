@@ -1,0 +1,45 @@
+provider: frankfurter
+actions:
+  - name: fx_latest
+    description: "Latest European Central Bank reference rates for one base currency. base is an ISO code such as EUR or USD; symbols narrows the result, e.g. 'USD,GBP,MKD'. Rates update once per working day around 16:00 CET. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        base:    {type: string, description: "ISO 4217 base currency, e.g. EUR"}
+        symbols: {type: string, description: "comma-separated target codes, e.g. USD,GBP"}
+      required: [base]
+    request:
+      method: GET
+      url: "https://api.frankfurter.dev/v1/latest"
+      query:
+        base: "{{base}}"
+        symbols: "{{symbols}}"
+    response_extract: "$"
+
+  - name: fx_historical
+    description: "Reference rates on a specific past date (YYYY-MM-DD). The ECB publishes nothing on weekends and holidays, so a request for such a date returns the previous working day. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        date:    {type: string, description: "YYYY-MM-DD"}
+        base:    {type: string, description: "ISO 4217 base currency"}
+        symbols: {type: string, description: "comma-separated target codes"}
+      required: [date, base]
+    request:
+      method: GET
+      url: "https://api.frankfurter.dev/v1/{{date}}"
+      query:
+        base: "{{base}}"
+        symbols: "{{symbols}}"
+    response_extract: "$"
+
+  - name: fx_currencies
+    description: "List the currency codes Frankfurter supports, with their full names. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://api.frankfurter.dev/v1/currencies"
+    response_extract: "$"

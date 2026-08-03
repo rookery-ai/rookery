@@ -1,0 +1,22 @@
+name: syncthing
+label: Syncthing
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: X-API-Key
+  value_prefix: ""
+  key_label: "Syncthing API key"
+  key_hint: "from Actions → Settings → GUI"
+  setup_url: https://docs.syncthing.net/dev/rest.html
+connect_inputs:
+  - key: base_url
+    label: "Syncthing URL"
+    hint: "e.g. http://127.0.0.1:8384"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In Syncthing open Actions → Settings → GUI and copy the API Key."
+  - "Enter it with your Syncthing URL below."
+  - "The REST API exposes folder and device status — useful for 'is everything in sync' checks."

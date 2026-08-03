@@ -1,0 +1,16 @@
+name: clockify
+label: Clockify
+category: Productivity
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: X-Api-Key
+  value_prefix: ""
+  key_label: "Clockify API key"
+  key_hint: "from Profile settings → API"
+  setup_url: https://app.clockify.me/user/settings
+setup_steps:
+  - "In Clockify open your Profile settings and scroll to the API section."
+  - "Generate a key and copy it."
+  - "Paste it below."

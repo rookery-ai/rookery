@@ -35,8 +35,29 @@ func TestAPIServices_GET_Authed_ListsGoogle(t *testing.T) {
 	if contains(body, `"connections":null`) || contains(body, `"connect_inputs":null`) || contains(body, `"setup_steps":null`) {
 		t.Fatalf("array fields must serialize as [] not null: %s", body)
 	}
-	if contains(body, "client_secret") || contains(body, "encrypted") || contains(body, "access_token") {
-		t.Fatalf("response must never leak credential material: %s", body)
+	// Credential material must never reach this response. The check matches JSON KEYS
+	// rather than bare substrings: a leak means a field like "client_secret":"…"
+	// appearing in the DTO, and only a key match expresses that.
+	//
+	// The bare-substring form was wrong, and Readwise proved it — its token page is
+	// literally readwise.io/access_token, so a legitimate setup_url (a field whose
+	// whole purpose is to be shown to the user) tripped a security test. Any provider
+	// whose documentation URL happens to contain "token" or "encrypted" would do the
+	// same, so the substring form would keep failing as the catalog grows and would
+	// eventually be silenced — which is how a real check gets lost.
+	for _, key := range []string{
+		`"client_secret"`, `"client_id"`, `"access_token"`, `"refresh_token"`,
+		`"encrypted_access_token"`, `"encrypted_refresh_token"`, `"encrypted_client_id"`,
+		`"encrypted_client_secret"`, `"api_key"`, `"secret"`,
+	} {
+		if contains(body, key+":") {
+			t.Fatalf("response leaks credential field %s: %s", key, body)
+		}
+	}
+	// Belt and braces: the DTO is a fixed shape, so anything resembling a stored
+	// ciphertext blob should not appear regardless of what key carries it.
+	if contains(body, "encrypted_") {
+		t.Fatalf("response contains an encrypted_* value: %s", body)
 	}
 }
 

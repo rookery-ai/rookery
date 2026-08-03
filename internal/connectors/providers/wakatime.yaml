@@ -1,0 +1,16 @@
+name: wakatime
+label: WakaTime
+category: Developer
+unverified: true
+auth:
+  kind: api_key
+  placement: basic
+  # WakaTime takes the API key as the Basic USERNAME with an empty password, which is
+  # the default arrangement when neither basic template field is set.
+  key_label: "WakaTime API key"
+  key_hint: "waka_... — from Settings → API Key"
+  setup_url: https://wakatime.com/settings/api-key
+setup_steps:
+  - "Open https://wakatime.com/settings/api-key and copy your API key."
+  - "Paste it below."
+  - "The free plan keeps only the last 14 days of detailed stats."

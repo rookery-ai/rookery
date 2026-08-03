@@ -1,0 +1,22 @@
+name: changedetection
+label: Changedetection.io
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: x-api-key
+  value_prefix: ""
+  key_label: "Changedetection.io API key"
+  key_hint: "from Settings → API"
+  setup_url: https://changedetection.io/docs/api_v1/index.html
+connect_inputs:
+  - key: base_url
+    label: "Changedetection.io URL"
+    hint: "e.g. http://changedetection.local:5000"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In Changedetection.io open Settings → API and make sure 'API Access Token Enabled' is ticked."
+  - "Copy the API key shown there and enter it with your server URL below."
+  - "This watches web pages for changes — a natural pair with a scheduled agent that reports what moved."

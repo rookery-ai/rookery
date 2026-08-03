@@ -1,0 +1,21 @@
+name: karakeep
+label: Karakeep
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Karakeep API key"
+  key_hint: "from Settings → API Keys"
+  setup_url: https://docs.karakeep.app/api/karakeep-api/
+connect_inputs:
+  - key: base_url
+    label: "Karakeep URL"
+    hint: "e.g. https://karakeep.example.com"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In Karakeep open Settings → API Keys and create a key."
+  - "Copy it and enter it with your Karakeep URL below."

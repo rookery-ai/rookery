@@ -1,0 +1,60 @@
+provider: steam
+actions:
+  - name: steam_owned_games
+    description: "Games on the connected account with total and recent playtime (minutes). The profile's game details must be PUBLIC or this returns nothing. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/"
+      query:
+        steamid: "{{conn.steam_id}}"
+        include_appinfo: "1"
+        include_played_free_games: "1"
+        format: "json"
+    response_extract: "$.response"
+
+  - name: steam_recently_played
+    description: "Games played in the last two weeks, with playtime — the 'what have I been playing' answer. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        count: {type: integer, description: "max games, default 10"}
+      required: []
+    request:
+      method: GET
+      url: "https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v1/"
+      query:
+        steamid: "{{conn.steam_id}}"
+        count: "{{count}}"
+        format: "json"
+    response_extract: "$.response"
+
+  - name: steam_player_summary
+    description: "Profile summary: display name, avatar, online state and the game currently being played, if any. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/"
+      query:
+        steamids: "{{conn.steam_id}}"
+        format: "json"
+    response_extract: "$.response"
+
+  - name: steam_game_achievements
+    description: "Achievement progress for one game by its Steam app id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        appid: {type: integer, description: "Steam app id, from steam_owned_games"}
+      required: [appid]
+    request:
+      method: GET
+      url: "https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v1/"
+      query:
+        steamid: "{{conn.steam_id}}"
+        appid: "{{appid}}"
+    response_extract: "$.playerstats"

@@ -1,0 +1,69 @@
+provider: jellyfin
+actions:
+  - name: jellyfin_list_libraries
+    description: "List media libraries (Movies, Shows, Music) with their ids. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/Library/VirtualFolders"
+    response_extract: "$"
+
+  - name: jellyfin_search
+    description: "Search the library by name. limit caps the result — a media server can hold tens of thousands of items. include_types narrows to Movie, Series, Episode or Audio. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query:         {type: string, description: "search term"}
+        limit:         {type: integer, description: "max items to return, default 20"}
+        include_types: {type: string, description: "comma-separated: Movie,Series,Episode,Audio"}
+      required: [query]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/Items"
+      query:
+        searchTerm: "{{query}}"
+        limit: "{{limit}}"
+        includeItemTypes: "{{include_types}}"
+        recursive: "true"
+    response_extract: "$.Items"
+
+  - name: jellyfin_recently_added
+    description: "Most recently added items across the server — the natural 'what's new' query. limit defaults to 20. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit:         {type: integer, description: "max items, default 20"}
+        include_types: {type: string, description: "comma-separated: Movie,Series,Episode,Audio"}
+      required: []
+    request:
+      method: GET
+      url: "{{conn.base_url}}/Items/Latest"
+      query:
+        limit: "{{limit}}"
+        includeItemTypes: "{{include_types}}"
+    response_extract: "$"
+
+  - name: jellyfin_get_item
+    description: "Get one item's full metadata by id: overview, cast, genres, runtime, community rating. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        item_id: {type: string}
+      required: [item_id]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/Items/{{item_id}}"
+    response_extract: "$"
+
+  - name: jellyfin_active_sessions
+    description: "What is playing right now and on which device — use this to answer 'is anyone watching something'. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/Sessions"
+    response_extract: "$"

@@ -1,0 +1,17 @@
+name: toggl
+label: Toggl Track
+category: Productivity
+unverified: true
+auth:
+  kind: api_key
+  placement: basic
+  # Toggl is the inverse of every other Basic provider: the token is the USERNAME and
+  # the password is the literal string "api_token".
+  basic_pass_literal: api_token
+  key_label: "Toggl Track API token"
+  key_hint: "from Profile → API Token"
+  setup_url: https://track.toggl.com/profile
+setup_steps:
+  - "In Toggl Track click your avatar and open Profile."
+  - "Scroll to the API Token section at the bottom and copy the token."
+  - "Paste it below."

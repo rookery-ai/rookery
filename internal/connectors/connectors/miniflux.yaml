@@ -1,0 +1,74 @@
+provider: miniflux
+actions:
+  - name: miniflux_list_feeds
+    description: "List subscribed feeds with their ids, titles and categories. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/v1/feeds"
+    response_extract: "$"
+
+  - name: miniflux_list_entries
+    description: "List entries. status is unread, read or removed; limit caps the result. Pass status=unread with a limit for the everyday 'what's new in my feeds' question. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        status:    {type: string, description: "unread | read | removed"}
+        limit:     {type: integer, description: "max entries, default 20"}
+        direction: {type: string, description: "asc | desc, default desc"}
+        feed_id:   {type: integer, description: "restrict to one feed"}
+      required: [status, limit]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/v1/entries"
+      query:
+        status: "{{status}}"
+        limit: "{{limit}}"
+        direction: "{{direction}}"
+        feed_id: "{{feed_id}}"
+    response_extract: "$.entries"
+
+  - name: miniflux_get_entry
+    description: "Get one entry with its full content by id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        entry_id: {type: integer}
+      required: [entry_id]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/v1/entries/{{entry_id}}"
+    response_extract: "$"
+
+  - name: miniflux_mark_entries
+    description: "Mark entries read or unread by id. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        entry_ids: {type: array, items: {type: integer}}
+        status:    {type: string, description: "read | unread"}
+      required: [entry_ids, status]
+    request:
+      method: PUT
+      url: "{{conn.base_url}}/v1/entries"
+      body:
+        entry_ids: "{{entry_ids}}"
+        status: "{{status}}"
+    response_extract: "$"
+
+  - name: miniflux_toggle_bookmark
+    description: "Star or unstar an entry (Miniflux toggles, so calling twice restores the original state). Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        entry_id: {type: integer}
+      required: [entry_id]
+    request:
+      method: PUT
+      url: "{{conn.base_url}}/v1/entries/{{entry_id}}/bookmark"
+    response_extract: "$"

@@ -1,0 +1,99 @@
+provider: readwise
+actions:
+  - name: readwise_list_highlights
+    description: "List saved highlights, newest first. updated_after (ISO 8601) narrows to what changed since a date — pass it for digests rather than pulling the whole library. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        updated_after: {type: string, description: "ISO 8601 timestamp; only highlights updated after it"}
+        book_id:       {type: integer, description: "restrict to one book/article"}
+        page_size:     {type: integer, description: "results per page, max 1000, default 20"}
+      required: []
+    request:
+      method: GET
+      url: "https://readwise.io/api/v2/highlights/"
+      query:
+        updated__gt: "{{updated_after}}"
+        book_id: "{{book_id}}"
+        page_size: "{{page_size}}"
+    response_extract: "$.results"
+
+  - name: readwise_list_books
+    description: "List the sources highlights came from — books, articles, podcasts — with their ids and highlight counts. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        category:  {type: string, description: "books | articles | tweets | podcasts"}
+        page_size: {type: integer, description: "results per page, default 20"}
+      required: []
+    request:
+      method: GET
+      url: "https://readwise.io/api/v2/books/"
+      query:
+        category: "{{category}}"
+        page_size: "{{page_size}}"
+    response_extract: "$.results"
+
+  - name: readwise_create_highlight
+    description: "Save a highlight. title/author identify the source; Readwise groups highlights that share them. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        text:           {type: string, description: "the highlighted passage"}
+        title:          {type: string, description: "source title"}
+        author:         {type: string}
+        source_url:     {type: string}
+        note:           {type: string, description: "your own annotation"}
+      required: [text]
+    request:
+      method: POST
+      url: "https://readwise.io/api/v2/highlights/"
+      body:
+        highlights:
+          - text: "{{text}}"
+            title: "{{title}}"
+            author: "{{author}}"
+            source_url: "{{source_url}}"
+            note: "{{note}}"
+    response_extract: "$"
+
+  - name: readwise_list_documents
+    description: "List documents saved in Readwise Reader (the read-later app), newest first. location filters by shelf: new, later, shortlist, archive or feed. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        location:      {type: string, description: "new | later | shortlist | archive | feed"}
+        category:      {type: string, description: "article | email | rss | pdf | epub | tweet | video"}
+        updated_after: {type: string, description: "ISO 8601 timestamp"}
+      required: []
+    request:
+      method: GET
+      url: "https://readwise.io/api/v3/list/"
+      query:
+        location: "{{location}}"
+        category: "{{category}}"
+        updatedAfter: "{{updated_after}}"
+    response_extract: "$.results"
+
+  - name: readwise_save_document
+    description: "Save a URL to Readwise Reader. Reader fetches the title and content itself. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        url:      {type: string, description: "the URL to save"}
+        location: {type: string, description: "new | later | shortlist | archive | feed"}
+        tags:     {type: array, items: {type: string}}
+      required: [url]
+    request:
+      method: POST
+      url: "https://readwise.io/api/v3/save/"
+      body:
+        url: "{{url}}"
+        location: "{{location}}"
+        tags: "{{tags}}"
+    response_extract: "$"

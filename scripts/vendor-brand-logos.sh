@@ -115,6 +115,31 @@ bluesky:siBluesky
 # Everyday-connector providers. simple-icons carries all six of these; YNAB,
 # Raindrop.io and Open-Meteo have no mark in ANY of the three sources and are
 # exempted in web/logo_coverage_test.go's allowNoLogo instead.
+# Wave 3 — the homelab stack plus a few cloud services. All have marks.
+sonarr:siSonarr
+radarr:siRadarr
+grafana:siGrafana
+n8n:siN8n
+gitea:siGitea
+karakeep:siKarakeep
+audiobookshelf:siAudiobookshelf
+changedetection:siChangedetection
+syncthing:siSyncthing
+steam:siSteam
+lastfm:siLastdotfm
+clockify:siClockify
+wakatime:siWakatime
+# Wave 2. Readwise, Miniflux and Frankfurter have no mark in any source and are
+# exempted in web/logo_coverage_test.go instead.
+ntfy:siNtfy
+toggl:siToggl
+jellyfin:siJellyfin
+adguard:siAdguard
+firefly_iii:siFireflyiii
+tmdb:siThemoviedatabase
+wikipedia:siWikipedia
+hackernews:siYcombinator
+strava:siStrava
 google_calendar:siGooglecalendar
 google_tasks:siGoogletasks
 todoist:siTodoist

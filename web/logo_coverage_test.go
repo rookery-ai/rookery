@@ -40,10 +40,13 @@ func TestBrandLogoCoverage(t *testing.T) {
 	// logo misrepresents someone else's brand, which is worse than a letter.
 	// Removing a name from this map is the whole fix once a source appears.
 	allowNoLogo := map[string]bool{
-		"generic":    true,
-		"ynab":       true,
-		"raindrop":   true,
-		"open_meteo": true,
+		"generic":     true,
+		"ynab":        true,
+		"raindrop":    true,
+		"open_meteo":  true,
+		"readwise":    true,
+		"miniflux":    true,
+		"frankfurter": true,
 	}
 
 	var slugs []string

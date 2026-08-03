@@ -1,0 +1,61 @@
+provider: changedetection
+actions:
+  - name: cd_list_watches
+    description: "List watched pages with their titles, URLs and last-checked times. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        recheck: {type: boolean, description: "also queue every watch for an immediate recheck"}
+      required: []
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/watch"
+      query:
+        recheck_all: "{{recheck}}"
+    response_extract: "$"
+
+  - name: cd_get_watch
+    description: "One watch's detail by uuid, including whether it currently has an unviewed change. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        uuid: {type: string}
+      required: [uuid]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/watch/{{uuid}}"
+    response_extract: "$"
+
+  - name: cd_get_latest_snapshot
+    description: "The most recent captured text for a watch — what the page said at the last check. This is page content and can be long. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        uuid: {type: string}
+      required: [uuid]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/watch/{{uuid}}/history/latest"
+    response_extract: "$"
+
+  - name: cd_create_watch
+    description: "Start watching a URL for changes. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        url:   {type: string, description: "the page to watch"}
+        title: {type: string}
+        tag:   {type: string, description: "group label"}
+      required: [url]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/api/v1/watch"
+      body:
+        url: "{{url}}"
+        title: "{{title}}"
+        tag: "{{tag}}"
+    response_extract: "$"
