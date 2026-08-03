@@ -1,9 +1,14 @@
 package connectors
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/ilijad1/rookery/internal/db"
 )
 
 // actionsOf returns a provider's actions keyed by name, failing the test if the
@@ -545,4 +550,114 @@ func TestWave1ProvidersDeclareVerificationStatus(t *testing.T) {
 			t.Errorf("%s was not live-verified, so its YAML must set unverified: true", name)
 		}
 	}
+}
+
+// The whole point of the keyless kind is that an agent or chat can actually CALL the
+// provider. Storage is not enough: a connection has to survive ActiveBoundConns and
+// then produce tool definitions. Neither ActiveBoundConns nor ListServiceConnections
+// filters on encrypted_access_token today — but ConnectionsNearExpiry DOES filter on
+// exactly that shape for the refresh column, so the pattern exists in this package and
+// nothing but this test would catch it being copied onto the access-token column.
+//
+// If this regresses, Open-Meteo connects, shows on the connections page, passes every
+// other test here, and the model silently never sees a weather tool.
+func TestKeylessConnectionIsExposedAsTools(t *testing.T) {
+	reg, err := LoadBundled()
+	if err != nil {
+		t.Fatalf("LoadBundled: %v", err)
+	}
+	// A keyless row exactly as connectAPIKeyCore writes it: ACTIVE, labelled after the
+	// provider, and carrying NO credential.
+	rows := []db.ServiceConnection{{
+		ID: "c-keyless", WorkspaceID: "w1", Provider: "open_meteo",
+		AccountLabel: "Open-Meteo", AccountIdentity: "Open-Meteo",
+		EncryptedAccessToken: "", Status: "ACTIVE",
+	}}
+
+	bound := ActiveBoundConns(rows)
+	if len(bound) != 1 {
+		t.Fatalf("ActiveBoundConns dropped the credential-less connection: %+v", bound)
+	}
+	if bound[0].Provider != "open_meteo" {
+		t.Fatalf("bound provider = %q, want open_meteo", bound[0].Provider)
+	}
+
+	defs := reg.ToolDefs(bound)
+	got := map[string]bool{}
+	for _, d := range defs {
+		got[d.Name] = true
+	}
+	for _, want := range []string{"weather_geocode", "weather_forecast", "weather_current", "weather_air_quality"} {
+		if !got[want] {
+			t.Errorf("tool %q not exposed for a keyless connection; got %d tools", want, len(defs))
+		}
+	}
+}
+
+// ha_list_states end to end through the REAL Execute path, against a stub Home
+// Assistant. This is the one action whose correctness depends on three things holding
+// at once: validateArgs accepting a required param that appears in NO request template,
+// renderRequest leaving that param in args, and applyResponseFilter reading it after
+// the response comes back. Each was verified by reading render.go; this executes them.
+func TestHomeAssistantListStatesFiltersThroughExecute(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[
+			{"entity_id":"sensor.kitchen_temp","state":"21"},
+			{"entity_id":"light.kitchen","state":"on"},
+			{"entity_id":"lock.front_door","state":"locked"},
+			{"entity_id":"sensor.hall_temp","state":"19"}
+		]`))
+	}))
+	defer srv.Close()
+
+	reg, err := LoadBundled()
+	if err != nil {
+		t.Fatalf("LoadBundled: %v", err)
+	}
+	// Point the shipped manifest's {{conn.base_url}} at the stub.
+	ref := ConnRef{ID: "c1", Provider: "home_assistant", Extra: map[string]string{"base_url": srv.URL}}
+
+	res, err := Execute(context.Background(), reg, keylessStore{}, nil, ref,
+		"ha_list_states", map[string]any{"entity_prefix": "sensor."}, Policy{})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var out []map[string]any
+	if err := json.Unmarshal(res.Data, &out); err != nil {
+		t.Fatalf("payload %s: %v", res.Data, err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("got %d entities, want only the 2 sensors: %s", len(out), res.Data)
+	}
+	for _, e := range out {
+		if !strings.HasPrefix(e["entity_id"].(string), "sensor.") {
+			t.Errorf("leaked a non-sensor entity: %v", e)
+		}
+	}
+}
+
+// The same action with NO prefix argument must return everything rather than nothing.
+// An empty result would read to the model as "you have no entities".
+func TestHomeAssistantListStatesMissingPrefixReturnsAll(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[{"entity_id":"sensor.a"},{"entity_id":"light.b"}]`))
+	}))
+	defer srv.Close()
+
+	reg, _ := LoadBundled()
+	ref := ConnRef{ID: "c1", Provider: "home_assistant", Extra: map[string]string{"base_url": srv.URL}}
+
+	// validateArgs rejects the call outright when a required arg is missing, which is
+	// the correct guard — so exercise the filter's no-op path directly against the
+	// same manifest config rather than through a call that cannot be made.
+	acts := actionsOf(t, "home_assistant")
+	raw := []byte(`[{"entity_id":"sensor.a"},{"entity_id":"light.b"}]`)
+	got := applyResponseFilter(raw, acts["ha_list_states"].ResponseFilter, asString(map[string]any{}["entity_prefix"]))
+	if string(got) != string(raw) {
+		t.Errorf("filter = %s, want everything unchanged when the prefix is absent", got)
+	}
+	_ = reg
+	_ = ref
 }
