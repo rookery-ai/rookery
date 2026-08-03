@@ -47,7 +47,11 @@ type AuthConfig struct {
 
 // Provider is one service's OAuth configuration.
 type Provider struct {
-	Name          string   `yaml:"name"`
+	Name string `yaml:"name"`
+	// Unverified marks a provider whose action manifest has NOT been confirmed against
+	// the live API with cmd/livecheck. It is data rather than a comment so the UI can
+	// surface it, and so "which providers are guesses" is answerable by a test.
+	Unverified    bool     `yaml:"unverified"`
 	AuthorizeURL  string   `yaml:"authorize_url"`
 	TokenURL      string   `yaml:"token_url"`
 	UserinfoURL   string   `yaml:"userinfo_url"`

@@ -1,6 +1,9 @@
 name: google_tasks
 label: Google Tasks
 category: Google
+# Not yet confirmed against the live API with cmd/livecheck — no credential
+# was available at authoring time. Remove this once a real call succeeds.
+unverified: true
 auth_parent: google
 default_scopes:
   - https://www.googleapis.com/auth/tasks

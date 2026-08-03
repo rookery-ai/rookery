@@ -1,6 +1,9 @@
 name: raindrop
 label: Raindrop.io
 category: Productivity
+# Not yet confirmed against the live API with cmd/livecheck — no credential
+# was available at authoring time. Remove this once a real call succeeds.
+unverified: true
 auth:
   kind: api_key
   placement: header
