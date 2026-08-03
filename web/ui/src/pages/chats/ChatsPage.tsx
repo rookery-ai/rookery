@@ -68,19 +68,7 @@ export default function ChatsPage() {
                   selected === c.id ? "bg-border" : "hover:bg-chrome",
                 )}
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-medium">{c.name}</span>
-                  <span
-                    className={cn(
-                      "shrink-0 rounded-full px-1.5 py-0.5 text-xs font-medium",
-                      c.active
-                        ? "bg-ok-soft text-ok"
-                        : "bg-muted-surface text-foreground",
-                    )}
-                  >
-                    {c.active ? "Active" : "Stopped"}
-                  </span>
-                </div>
+                <span className="truncate font-medium">{c.name}</span>
                 <span className="text-xs text-muted-2">
                   {formatShortDate(c.created_at)} · {timeAgo(c.updated_at)}
                 </span>

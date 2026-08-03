@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   MoreHorizontal,
   Paperclip,
-  Play,
   Trash2,
 } from "lucide-react";
 import { cn, formatShortDate } from "@/lib/utils";
@@ -91,19 +90,6 @@ export function reconcilePending(
   });
 }
 
-function StatusChip({ active }: { active: boolean }) {
-  return (
-    <span
-      className={cn(
-        "shrink-0 rounded-full px-2 py-0.5 text-xs font-medium",
-        active ? "bg-ok-soft text-ok" : "bg-muted-surface text-foreground",
-      )}
-    >
-      {active ? "Active" : "Stopped"}
-    </span>
-  );
-}
-
 // Container-agnostic: no page margins/max-width here — Task 3's slide-over
 // mounts this directly, KBPage-style embedding would double up chrome.
 // initialText: optional prefill forwarded to the Composer — the ⌘K palette's
@@ -149,21 +135,28 @@ export function ChatWindow({
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Opening a stopped chat resumes it — the "Stopped" chip is presentational
-  // (handleChatMessage never checks chat.active before running a turn), so
-  // making the user find and press Resume before typing was pure friction.
+  // Opening a stopped chat resumes it. `chat.active` is not a web concept and
+  // is deliberately not surfaced in this UI: handleChatMessage never checks it
+  // before running a turn. What the flag really gates is (a) which chat a bare
+  // DM belongs to on Telegram/Discord/Slack, via GetActiveChatForPlatform, and
+  // (b) whether internal/chat's idle sweeper will ever mirror the transcript
+  // into the vault — ListStaleChats is `active=1 AND last_seen < cutoff`, so a
+  // chat left stopped is invisible to it forever.
+  //
+  // This resume is NOT what keeps (b) working — don't preserve it on that
+  // belief. handlers_misc.go resumes on send, before the coder call, so any
+  // chat you actually add turns to is swept and re-reflected regardless. All
+  // this buys is reactivation on OPEN, before any turn. It is kept because it
+  // is also harmless, and it predates the chips being removed; the one visible
+  // cost is that opening an old chat resets last_seen and so defers its
+  // mirroring by another 30 minutes.
   //
   // The ref latches on the FIRST load of this mount — before the active check,
-  // not after it. That ordering is what makes this once-per-OPEN rather than a
-  // standing policy that the chat must be active: a chat opened active and then
-  // Stopped by the user has already spent its decision, so Stop sticks instead
-  // of being instantly undone. ChatWindow is keyed by chatId at every call
-  // site, so the decision resets only when a DIFFERENT chat is opened.
-  // GlobalChatPanel is unaffected on both of its paths: it mounts this either
-  // for a chat it filtered as active, or for one it just created (also active).
-  // Its `pinnedId` chat could later be stopped elsewhere — the 30-minute idle
-  // auto-stop in internal/chat — while the panel stays mounted, but the latch
-  // is per-mount and already spent by then, so no resume POST fires from there.
+  // not after it — so this is once-per-OPEN rather than a standing policy that
+  // the chat must stay active. ChatWindow is keyed by chatId at every call
+  // site, so the decision resets only when a DIFFERENT chat is opened, and a
+  // chat stopped elsewhere mid-mount (the 30-minute idle auto-stop, or /chat
+  // stop from a chat platform) is not instantly undone.
   const autoResumeDecidedRef = useRef(false);
   useEffect(() => {
     if (autoResumeDecidedRef.current || !data) return;
@@ -412,23 +405,8 @@ export function ChatWindow({
               {formatShortDate(chat.created_at)}
             </span>
           </div>
-          <StatusChip active={chat.active} />
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={action.isPending}
-            onClick={() =>
-              action.mutate({
-                id: chatId,
-                action: chat.active ? "stop" : "resume",
-              })
-            }
-          >
-            <Play />
-            {chat.active ? "Stop" : "Resume"}
-          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
