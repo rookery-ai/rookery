@@ -128,7 +128,13 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-test("lists chat sessions with name, Active/Stopped chip, and relative time", async () => {
+// The list row shows name + date only. `chat.active` is a chat-platform routing
+// pointer and the idle sweeper's reflection gate, not a web lifecycle the user
+// acts on — surfacing it meant every chat you clicked visibly flipped to
+// "Active" (ChatWindow resumes on open), which read as a bug because it was
+// reporting an internal flag as if it were state the user chose. Fixture chats
+// One and Two differ on `active`, so a re-introduced chip fails here.
+test("lists chat sessions with name and relative time, and no status chip", async () => {
   mockFetch();
   wrap();
 
@@ -136,12 +142,12 @@ test("lists chat sessions with name, Active/Stopped chip, and relative time", as
   expect(screen.getByText("Chat Two")).toBeInTheDocument();
 
   const rowOne = screen.getByText("Chat One").closest("button")!;
-  expect(rowOne.textContent).toContain("Active");
   expect(rowOne.textContent).toContain("10m ago");
+  expect(rowOne.textContent).not.toContain("Active");
 
   const rowTwo = screen.getByText("Chat Two").closest("button")!;
-  expect(rowTwo.textContent).toContain("Stopped");
   expect(rowTwo.textContent).toContain("Jul 10");
+  expect(rowTwo.textContent).not.toContain("Stopped");
 });
 
 test("no chat selected shows the empty state", async () => {
@@ -232,41 +238,17 @@ test("a 200-with-error response shows an inline banner, keeps the user bubble, a
   expect(screen.getByText("ping")).toBeInTheDocument();
 });
 
-test("Stop posts to the stop endpoint and flips the chip/button to Resume", async () => {
+// The chat header carries no Stop/Resume control. Its label flipped on
+// `chat.active`, which would have kept reporting an internal flag after the
+// chips were dropped. The endpoints it called are still registered and still
+// used — by the auto-resume below, and by the chat platforms.
+test("the chat header offers no Stop or Resume control", async () => {
   mockFetch();
   wrap("/?chat=c1");
   await screen.findByText("hi");
 
-  await userEvent.click(screen.getByRole("button", { name: "Stop" }));
-
-  await waitFor(() =>
-    expect(
-      vi.mocked(fetch).mock.calls.some(
-        (c) => String(c[0]) === "/api/v1/chats/c1/stop" && (c[1] as RequestInit | undefined)?.method === "POST",
-      ),
-    ).toBe(true),
-  );
-  expect(await screen.findByRole("button", { name: "Resume" })).toBeInTheDocument();
-});
-
-// Reaching the manual Resume button now takes a Stop first: opening a chat
-// that is ALREADY stopped auto-resumes it (see the auto-resume tests below), so
-// the only way the control is on screen is after the user stopped it here.
-test("Resume posts to the resume endpoint", async () => {
-  mockFetch();
-  wrap("/?chat=c1");
-  await screen.findByText("hi");
-
-  await userEvent.click(screen.getByRole("button", { name: "Stop" }));
-  await userEvent.click(await screen.findByRole("button", { name: "Resume" }));
-
-  await waitFor(() =>
-    expect(
-      vi.mocked(fetch).mock.calls.some(
-        (c) => String(c[0]) === "/api/v1/chats/c1/resume" && (c[1] as RequestInit | undefined)?.method === "POST",
-      ),
-    ).toBe(true),
-  );
+  expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
 });
 
 test("Delete confirms, DELETEs the chat, and clears the selection", async () => {
@@ -421,9 +403,14 @@ test("opening an already-active chat resumes nothing", async () => {
   expect(actionCalls).toEqual([]);
 });
 
-// The auto-resume is a per-open gesture, not a policy that a chat must be
-// active: pressing Stop afterwards has to stick.
-test("stopping a chat after an auto-resume does not re-resume it", async () => {
+// The auto-resume is a per-OPEN gesture, not a standing policy that the chat
+// must stay active. Nothing in the web UI stops a chat any more, but two things
+// outside it do — the 30-minute idle sweeper in internal/chat, and `/chat stop`
+// from a chat platform — and either can land while this window sits mounted.
+// The fixture is mutated directly to stand in for that, then a send forces the
+// detail refetch that surfaces it. The latch is per-mount and already spent, so
+// no second resume fires.
+test("a chat stopped elsewhere mid-mount is not re-resumed", async () => {
   mockFetch();
   const user = userEvent.setup();
   wrap();
@@ -431,10 +418,12 @@ test("stopping a chat after an auto-resume does not re-resume it", async () => {
   await user.click(await screen.findByText("Chat Two"));
   await waitFor(() => expect(actionCalls).toEqual(["c2/resume"]));
 
-  await user.click(await screen.findByRole("button", { name: "Stop" }));
-  await waitFor(() => expect(actionCalls).toEqual(["c2/resume", "c2/stop"]));
-  await new Promise((r) => setTimeout(r, 50));
-  expect(actionCalls).toEqual(["c2/resume", "c2/stop"]);
+  chats = chats.map((c) => (c.id === "c2" ? { ...c, active: false } : c));
+
+  await user.type(await screen.findByPlaceholderText("Message…"), "ping{Enter}");
+  await screen.findByText("echo: ping");
+
+  expect(actionCalls).toEqual(["c2/resume"]);
 });
 
 // ── FAB clearance ───────────────────────────────────────────────────────────
