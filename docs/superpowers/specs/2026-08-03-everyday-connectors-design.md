@@ -70,6 +70,23 @@ build: `auth_parent: google` plus scopes plus one connectors YAML, exactly as
 This was discovered during design, not planned, and it displaces two weaker candidates from
 wave 1.
 
+**The cost claim was verified, because it rests on how `auth_parent` resolves scopes.** If an
+aliased child shared the parent's token, a workspace that had already connected Gmail would
+hold a token carrying Gmail scopes only, and every `google_calendar` action would 403 with
+insufficient scope — presenting as a broken connector rather than a missing consent.
+
+It does not work that way. `web/handlers_services.go` calls
+`oauth.ConsentURL(clientID, redirectURI, state, child.DefaultScopes)`: the **parent's**
+authorize endpoint and app credentials, the **child's own** scopes. The callback stores those
+child scopes on the child's own connection row. `oauth.go` states the intent directly —
+scopes are passed explicitly "so a child provider aliased via auth_parent can request ITS OWN
+scopes against the PARENT's authorize endpoint."
+
+So each child consents separately, existing Gmail connections are untouched, and no
+re-consent task is needed. The one non-code prerequisite: the Google Cloud Console OAuth app
+must have the Calendar and Tasks scopes registered, or consent fails before any Rookery code
+runs.
+
 ### `logocoverage.test.ts` does not exist
 
 `web/ui/src/components/brand/logos.ts` carries a comment stating that
@@ -156,6 +173,29 @@ so a third kind is an established pattern, not an invention.
 - `DBTokenStore.AccessToken` returns empty for this kind without attempting a refresh, and
   `RunRefreshLoop` skips it.
 - The SPA connector card renders a bare "Connect" button with no key field.
+- **Identity.** A keyless connection has no account behind it, so `FetchIdentity` cannot run.
+  The row takes the provider's label verbatim ("Open-Meteo") rather than an account
+  identifier. A second connection to the same keyless provider is harmless but pointless —
+  `ToolDefs` would slug both by label and produce two identical tool sets — so the connect
+  endpoint rejects a duplicate for `kind == "none"` instead of relying on the user not to.
+
+**Why this kind is worth five touch-points for one wave-1 provider.** It spans `applyAuth`,
+the token store, the refresh loop, the connect endpoint and the SPA card, and serves only
+Open-Meteo today. Tier D lists five further candidates (Wikipedia, arXiv, Hacker News,
+exchange rates, CoinGecko), so it amortizes — but the sharper argument is that keyless
+services have the *highest* everyday value per unit of setup, precisely because there is no
+credential to obtain. Weather is the single most requested everyday agent task and it should
+not require a signup.
+
+**Why not just let the agent `web_fetch` the same URL.** CLAUDE.md records core skills being
+merged away for duplicating native tools, so this deserves an answer. A curated typed action
+gives three things `web_fetch` cannot: validated arguments (`latitude`/`longitude` typed and
+required, so a malformed call fails before the request), a `response_extract` that returns a
+usable forecast rather than a JSON blob against the 8 KiB cap, and a `geocode` action that
+turns "Skopje" into coordinates — without which the model must already know the lat/lon it is
+asking about. `web_fetch` is also unavailable in chat (it is exec-gated to agent builds and
+runs), while connector tools are exposed to chat. The typed action is the difference between
+weather working conversationally and not.
 
 ### 2. `validCategories` grows by four
 
@@ -176,9 +216,16 @@ thing enforcing its shape is prose in a hint field ("include https://, no traili
 One normalizer, applied at connect:
 
 - require a scheme (`http` or `https`);
+- **allow an optional path prefix**;
 - strip any trailing slash;
-- reject a path, query or fragment;
+- reject a query string or fragment;
 - reject anything that does not parse as a URL.
+
+The path prefix must be allowed, not rejected. `https://host/nextcloud` and a Paperless-ngx
+sitting behind a reverse proxy at `/paperless` are mainstream homelab deployments, and
+Paperless is in wave 1 — rejecting a path would refuse working installs at connect time.
+Action templates read `{{conn.base_url}}/api/...` and concatenate correctly with or without
+a prefix, which is exactly why stripping the trailing slash is the load-bearing part.
 
 Rejecting at connect matters because the alternative is a 404 at action time that reads as a
 broken connector rather than a mistyped URL.
@@ -260,8 +307,12 @@ running on the install.
 **Marked otherwise:** a provider not live-verified carries an explicit marker in its provider
 YAML. The marker is data, so the SPA can surface it later without another schema change.
 
-`cmd/livecheck` is currently uncommitted. Wave 1 should commit it — the verification bar is
-unenforceable without the harness that enforces it.
+`cmd/livecheck` is currently **uncommitted**, which has a practical consequence: it exists in
+the primary working tree but not on any branch, so a worktree-isolated implementation does
+not have it. Committing it is a wave-1 task, not a footnote — the verification bar is
+unenforceable without the harness that enforces it. Note also that its `connectors.Execute`
+call passes `connectors.Policy{}`, so it predates nothing, but it should be re-checked
+against the current signature when it lands.
 
 ## Curated catalog for later waves
 
@@ -326,6 +377,22 @@ Uptime Kuma is **excluded**: it has no REST API, only push endpoints.
 | Frankfurter / exchange rates | Finance | |
 | CoinGecko | Finance | demo key now required for some endpoints **[?]** |
 
+## Implementation sequencing — two plans, not one
+
+There is a clean dependency seam: none of the nine providers can be authored until the four
+new categories, the `none` auth kind and the `base_url` normalizer exist. Splitting on it
+gives one small fully-testable plan and one repetitive parallelizable plan, instead of a
+single plan whose first half gates its second.
+
+**Plan 1 — framework.** The `none` auth kind, the four categories on both sides, the
+`base_url` normalizer, the SSRF stance test and CLAUDE.md paragraph, the `upstream` logo
+source, resolving the `logocoverage.test.ts` comment, and committing `cmd/livecheck`. Small
+surface, every item independently testable, no external credentials required.
+
+**Plan 2 — the nine providers.** Eighteen YAML files (provider + connector per service),
+~50 actions, logos, and the tier-A live verification pass. Highly repetitive and
+parallelizable once plan 1 has landed.
+
 ## Testing
 
 New YAMLs must clear the existing gates — `schema_test.go`, `category_test.go`,
@@ -337,8 +404,9 @@ placeholder), and `redirect_policy_test.go`. Beyond those:
   the provider's actions from that row.
 - **Category parity** — every category a provider declares is in the SPA's ordering, and
   vice versa. The failure this prevents is invisible in either file alone.
-- **`base_url` normalization** — a table test over schemeless input, trailing slashes, paths,
-  query strings and junk.
+- **`base_url` normalization** — a table test over schemeless input, trailing slashes, query
+  strings and junk, plus positive cases asserting a path prefix (`https://host/nextcloud`)
+  survives normalization intact.
 - **SSRF stance** — the assertion described above, that connectors do not use the guarded
   client.
 - **Extract narrowly** — a manifest test asserting no list-shaped wave-1 action uses
