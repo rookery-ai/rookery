@@ -2,6 +2,12 @@ package coder
 
 import "strings"
 
+// placeholderLocalKey is stored as the API key for a provider that needs none
+// (the local tier). llm.New rejects an empty key, so the field cannot simply be
+// blank; the value is never sent as a meaningful credential — a local server
+// accepts any bearer string.
+const placeholderLocalKey = "no-key"
+
 // CoderKeySecretName is the reserved auto-secret name that holds a provider's
 // API key when the user pastes it on the coder form.
 func CoderKeySecretName(provider string) string {
@@ -23,7 +29,7 @@ type KeySecretPlan struct {
 //	currentSecret — coder_api_key_secret already stored (edit case; may be empty)
 //
 // Rules: a pasted key is stored under CODER_KEY_<PROVIDER>. A provider that
-// needs no key (ollama_local) gets a dummy "ollama" value so llm.New's
+// needs no key (the local tier) gets placeholderLocalKey so llm.New's
 // key-required check passes. On edit with a blank key and an already-referenced
 // secret, the existing secret is retained (no re-paste required). Otherwise the
 // key is required.
@@ -33,7 +39,7 @@ func PlanKeySecret(provider, pastedKey, currentSecret string) KeySecretPlan {
 		return KeySecretPlan{SecretName: name, WriteValue: pastedKey, WriteSecret: true}
 	}
 	if !providerRequiresKey(provider) {
-		return KeySecretPlan{SecretName: name, WriteValue: "ollama", WriteSecret: true}
+		return KeySecretPlan{SecretName: name, WriteValue: placeholderLocalKey, WriteSecret: true}
 	}
 	if currentSecret != "" {
 		return KeySecretPlan{SecretName: currentSecret}
