@@ -14,7 +14,14 @@ export type ConnectorPlatform = {
   setup_steps: string[];
   fields: ConnectorField[];
   connected: boolean;
-  identity: string;
+  identity: string; // the BOT's username
+  // `connected` means the token authenticates; `linked` means the operator
+  // completed the /start handshake and the integration is actually usable.
+  linked: boolean;
+  linked_identity: string;
+  primary: boolean;
+  dm_url: string;
+  invite_url: string;
 };
 
 // Mirrors apiSaveConnectorResponse.
@@ -23,10 +30,14 @@ export type SaveConnectorResponse = { ok: boolean; identity?: string; warning?: 
 // Mirrors apiTestConnectorResponse.
 export type TestConnectorResponse = { ok: boolean; identity?: string; error?: string };
 
-export function useConnectors() {
+// opts.refetchInterval lets the "Link your account" step poll for the
+// operator's /start handshake while unlinked; every other caller omits it and
+// gets today's non-polling behaviour.
+export function useConnectors(opts?: { refetchInterval?: number | false }) {
   return useQuery({
     queryKey: ["connectors"],
     queryFn: () => api.get<{ platforms: ConnectorPlatform[] }>("/api/v1/connectors"),
+    refetchInterval: opts?.refetchInterval,
   });
 }
 
@@ -52,6 +63,28 @@ export function useTestConnector() {
   return useMutation({
     mutationFn: (platform: string) =>
       api.post<TestConnectorResponse>(`/api/v1/connectors/${platform}/test`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["connectors"] }),
+  });
+}
+
+// Marks a linked platform as the one that receives unprompted delivery. 400s
+// server-side if the platform isn't linked yet.
+export function useSetPrimaryConnector() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (platform: string) =>
+      api.put<{ ok: boolean }>(`/api/v1/connectors/${platform}/primary`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["connectors"] }),
+  });
+}
+
+// Removes the operator's /start link while keeping the saved bot credentials
+// — the platform falls back to connected-but-unlinked, not disconnected.
+export function useUnlinkConnector() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (platform: string) =>
+      api.del<{ ok: boolean }>(`/api/v1/connectors/${platform}/identity`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["connectors"] }),
   });
 }

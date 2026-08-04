@@ -37,6 +37,11 @@ const NOT_CONNECTED: ConnectorPlatform = {
   fields: [{ name: "bot_token", label: "Bot token", secret: true }],
   connected: false,
   identity: "",
+  linked: false,
+  linked_identity: "",
+  primary: false,
+  dm_url: "",
+  invite_url: "",
 };
 
 const CONNECTED: ConnectorPlatform = {
@@ -47,6 +52,11 @@ const CONNECTED: ConnectorPlatform = {
   fields: [{ name: "bot_token", label: "Bot token", secret: true }],
   connected: true,
   identity: "@rookie_assistant_bot",
+  linked: true,
+  linked_identity: "123456789",
+  primary: true,
+  dm_url: "",
+  invite_url: "",
 };
 
 type Handlers = {
@@ -120,6 +130,53 @@ function wrap(platform: ConnectorPlatform) {
   );
 }
 
+// Mounts ChatAppWizard directly (not behind an "open wizard" click) inside
+// the same AppShell/QueryClientProvider/MemoryRouter wrapper the other tests
+// use — the shell still supplies useSlideOver's context, ChatAppWizard just
+// isn't behind the Sheet this time. Stubs fetch for the session probe, the
+// connectors list (so the link step's poll has something to read), a save
+// that authenticates, and a test call that reports the platform's own
+// declared identity.
+function renderWizard(platform: ConnectorPlatform) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+
+      if (url === "/api/v1/auth/session") return Promise.resolve(jsonResponse(SESSION_FIXTURE));
+
+      if (url === "/api/v1/connectors" && method === "GET") {
+        return Promise.resolve(jsonResponse({ platforms: [platform] }));
+      }
+
+      if (url === "/api/v1/connectors" && method === "POST") {
+        return Promise.resolve(jsonResponse({ ok: true, identity: "rookery_bot" }));
+      }
+
+      const testMatch = url.match(/^\/api\/v1\/connectors\/([^/]+)\/test$/);
+      if (testMatch && method === "POST") {
+        return Promise.resolve(jsonResponse({ ok: true, identity: platform.identity || "rookery_bot" }));
+      }
+
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={["/"]}>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route path="/" element={<ChatAppWizard platform={platform} />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
 test("setup step renders numbered steps with linkified URLs, chips, and Next advances to credentials", async () => {
   mockFetch();
   const user = userEvent.setup();
@@ -182,7 +239,7 @@ test("save posts {platform, values}; 400 invalid_credentials shows inline error 
   expect(screen.getByLabelText("Bot token")).toBeInTheDocument();
 });
 
-test("save success carries a warning to the test step; test auto-fires ok; Done closes the panel", async () => {
+test("save success carries a warning through to the link step; test auto-fires ok and advances automatically (no premature Done)", async () => {
   mockFetch({
     save: () => jsonResponse({ ok: true, identity: "@bot", warning: "bot failed to start" }),
     test: () => jsonResponse({ ok: true, identity: "@bot" }),
@@ -196,13 +253,13 @@ test("save success carries a warning to the test step; test auto-fires ok; Done 
   await user.click(screen.getByRole("button", { name: /save/i }));
 
   expect(await screen.findByText(/bot failed to start/)).toBeInTheDocument();
-  expect(await screen.findByText(/Connected as @bot/)).toBeInTheDocument();
-
-  await user.click(screen.getByRole("button", { name: /^done$/i }));
-  expect(screen.queryByText(/Connected as @bot/)).not.toBeInTheDocument();
+  // A successful token test is not proof the integration works — the wizard
+  // must land on the link step, not a Done button, once the test succeeds.
+  expect(await screen.findByText(/waiting for you to send/i)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^done$/i })).not.toBeInTheDocument();
 });
 
-test("test step failure shows the error and Retry re-fires the test call", async () => {
+test("test step failure shows the error and Retry re-fires the test call, landing on the link step once it succeeds", async () => {
   let calls = 0;
   mockFetch({
     save: () => jsonResponse({ ok: true, identity: "@bot" }),
@@ -223,7 +280,7 @@ test("test step failure shows the error and Retry re-fires the test call", async
 
   expect(await screen.findByText("connection refused")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: /retry/i }));
-  expect(await screen.findByText(/Connected as @bot/)).toBeInTheDocument();
+  expect(await screen.findByText(/waiting for you to send/i)).toBeInTheDocument();
   expect(calls).toBe(2);
 });
 
@@ -272,4 +329,57 @@ test("Manage: Disconnect asks for confirmation; confirming deletes and closes th
 
   expect(deletedPlatform).toBe("telegram");
   expect(screen.queryByText(/@rookie_assistant_bot/)).not.toBeInTheDocument();
+});
+
+// ── Step 4: Link your account ───────────────────────────────────────────────
+
+const LINK_STEP_PLATFORM: ConnectorPlatform = {
+  platform: "discord",
+  label: "Discord",
+  blurb: "",
+  setup_steps: ["Open the Discord Developer Portal and click New Application"],
+  fields: [{ name: "token", label: "Bot Token", secret: true }],
+  connected: true,
+  identity: "rookery_bot",
+  linked: false,
+  linked_identity: "",
+  primary: false,
+  dm_url: "https://discord.com/users/42",
+  invite_url:
+    "https://discord.com/api/oauth2/authorize?client_id=42&scope=bot&permissions=0",
+};
+
+test("shows no Done button and no success state while unlinked", async () => {
+  renderWizard({ ...LINK_STEP_PLATFORM, connected: false });
+
+  await userEvent.click(screen.getByRole("button", { name: /next/i }));
+  await userEvent.type(screen.getByLabelText(/bot token/i), "tok");
+  await userEvent.click(screen.getByRole("button", { name: /save & continue/i }));
+
+  // Step 4 is reached but unlinked: the wizard must not offer completion.
+  expect(await screen.findByText(/waiting for you to send/i)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^done$/i })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /invite/i })).toHaveAttribute(
+    "href",
+    LINK_STEP_PLATFORM.invite_url,
+  );
+});
+
+test("offers Done once the identity row appears", async () => {
+  renderWizard({ ...LINK_STEP_PLATFORM, linked: true, linked_identity: "ilija#4821" });
+
+  expect(await screen.findByText(/ilija#4821/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^done$/i })).toBeInTheDocument();
+  expect(screen.queryByText(/waiting for you to send/i)).not.toBeInTheDocument();
+});
+
+test("the escape hatch never reads as success", async () => {
+  renderWizard({ ...LINK_STEP_PLATFORM, connected: false });
+
+  await userEvent.click(screen.getByRole("button", { name: /next/i }));
+  await userEvent.type(screen.getByLabelText(/bot token/i), "tok");
+  await userEvent.click(screen.getByRole("button", { name: /save & continue/i }));
+
+  const escape = await screen.findByRole("button", { name: /finish later/i });
+  expect(escape).toHaveTextContent(/not linked/i);
 });

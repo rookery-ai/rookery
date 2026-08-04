@@ -45,6 +45,11 @@ function resetFixtures() {
       fields: [{ name: "bot_token", label: "Bot token", secret: true }],
       connected: true,
       identity: "@rookie_assistant_bot",
+      linked: true,
+      linked_identity: "123456789",
+      primary: true,
+      dm_url: "",
+      invite_url: "",
     },
     {
       platform: "slack",
@@ -54,6 +59,11 @@ function resetFixtures() {
       fields: [],
       connected: false,
       identity: "",
+      linked: false,
+      linked_identity: "",
+      primary: false,
+      dm_url: "",
+      invite_url: "",
     },
   ];
   providers = [
