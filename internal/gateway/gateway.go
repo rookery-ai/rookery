@@ -217,12 +217,44 @@ func (m *GatewayManager) Send(platform, workspaceID, platformUserID, text string
 	return gw.Send(platformUserID, text)
 }
 
-// SendToUser looks up the user's linked platform identity and sends a message.
-// It tries all known platforms in order; the first successful send wins.
+// PrimaryPlatformSettingKey names the workspace setting holding which linked
+// chat app receives UNPROMPTED delivery (scheduled agent runs, reminders).
+// Replies to a message the user typed always go back to the platform it arrived
+// on — that is handled in dispatch, not here.
+const PrimaryPlatformSettingKey = "chat.primary_platform"
+
+// ResolveDeliveryOrder returns this workspace's linked identities with the
+// configured primary first. An unset or stale primary is not an error: the
+// order simply falls back to ListPlatformIdentities' deterministic ordering, so
+// unlinking the primary can never silence delivery altogether.
+func ResolveDeliveryOrder(database *db.DB, workspaceID string) ([]*db.PlatformIdentity, error) {
+	identities, err := database.ListPlatformIdentities(workspaceID, "")
+	if err != nil {
+		return nil, err
+	}
+	primary, _ := database.GetSetting(workspaceID, PrimaryPlatformSettingKey)
+	if primary == "" || len(identities) < 2 {
+		return identities, nil
+	}
+	ordered := make([]*db.PlatformIdentity, 0, len(identities))
+	for _, i := range identities {
+		if i.Platform == primary {
+			ordered = append(ordered, i)
+		}
+	}
+	for _, i := range identities {
+		if i.Platform != primary {
+			ordered = append(ordered, i)
+		}
+	}
+	return ordered, nil
+}
+
+// SendToUser delivers an unprompted message to the workspace's primary chat app,
+// falling back through the remaining linked apps if it fails.
 // Satisfies the reminder.Sender interface.
 func (m *GatewayManager) SendToUser(workspaceID, text string) error {
-	// Find all platform identities for this user.
-	identities, err := m.db.ListPlatformIdentities(workspaceID, "")
+	identities, err := ResolveDeliveryOrder(m.db, workspaceID)
 	if err != nil || len(identities) == 0 {
 		return fmt.Errorf("no platform identity for user %s", workspaceID)
 	}
