@@ -3,6 +3,11 @@
 **Date:** 2026-08-04
 **Status:** Approved, ready for implementation planning
 
+> **Open item for the reviewer.** Step 4's escape hatch (see "Step 4 is escapable, but
+> never reads as success") was decided by the author, not chosen by the requester. It is
+> the one place this design exercised judgment on the requester's behalf. Nothing else
+> depends on it — dropping the escape is a local change to one component.
+
 ## Problem
 
 A user connected Discord, saw the wizard report success, and could not use it.
@@ -196,16 +201,25 @@ confirmation reply then exercises the **outbound** path. Both directions are the
 proven by the time step 4 turns green — which is precisely what the current token-only
 check does not establish.
 
-#### Assumption: step 4 is escapable
+#### Step 4 is escapable, but never reads as success
 
-An "I'll do this later" action closes the wizard and leaves the card reading "Not linked
-yet". **This is a deviation from the chosen option and needs a ruling.** The selected
-design ("live-polling final step") was picked over "static status, no polling" on the
-strength of its *blocking* on real linkage; making it escapable moves it part-way toward
-the declined option. The argument for the escape is that a user who wants to save a token
-now and link later would otherwise be stranded, and the card's honest "Not linked yet"
-status is preserved either way. If blocking is preferred, drop the escape — nothing else in
-the design depends on it.
+Step 4 offers a way out, because a user who is configuring this on a desktop while their
+Discord is on their phone would otherwise be stranded mid-wizard. The property being
+protected is not blocking for its own sake — it is that **the product must never signal
+completion it has not verified**. The escape is therefore constrained so it cannot be
+mistaken for finishing:
+
+| | Unlinked | Linked |
+|---|---|---|
+| Primary action | *(none — there is no Done button)* | **Done** |
+| Escape | "Finish later — I'm not linked yet" (secondary text link) | — |
+| Card state | amber "Not linked yet" | green "Linked as \<you\>" |
+
+No green check and no **Done** button exists until the identity row lands. Leaving early is
+possible but is always an explicitly incomplete act, named as such in both the wizard and
+the card it returns to. This keeps the escape from collapsing into the "static status"
+option that was declined, whose defect was precisely that it let a user believe they were
+finished.
 
 ### 3. Primary app for unprompted delivery
 
@@ -237,8 +251,9 @@ governs unprompted delivery only.
   `ListPlatformIdentities` order; `handleStart` label per platform; link-status DTO shape;
   bot identifiers surviving a `SplitCreds` → encrypt → decrypt → read-back round trip, and
   Discord's validator parsing `id` as well as `username`.
-- **Component** — step 4's waiting → linked transition; the "I'll do this later" escape
-  leaving the card in "Not linked yet".
+- **Component** — step 4's waiting → linked transition; the escape leaving the card in
+  "Not linked yet"; and an assertion that **no Done button and no green state renders while
+  unlinked**, which is the invariant the whole design exists to establish.
 - **Guard** — assert Discord's steps name the MESSAGE CONTENT INTENT, and that no
   platform's `SetupSteps` instruct the user to DM the bot. The false `OR` branch is exactly
   the kind of prose that regressed unnoticed; a test is the only thing that would have
