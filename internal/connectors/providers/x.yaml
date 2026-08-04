@@ -23,3 +23,6 @@ setup_steps:
   - "Under User authentication settings, enable OAuth 2.0, set App type to 'Web App', and add {{redirect_uri}} exactly."
   - "Copy the OAuth 2.0 Client ID and Client Secret and paste them below."
   - "Request the tweet.write scope — reading alone will not let an agent post."
+oauth_creds:
+  id_hint: "from User authentication settings → OAuth 2.0 — NOT the API Key on the Keys and tokens tab"
+  secret_hint: "the OAuth 2.0 Client Secret — NOT the API Key Secret"

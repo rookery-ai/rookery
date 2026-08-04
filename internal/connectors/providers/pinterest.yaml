@@ -17,3 +17,6 @@ setup_steps:
   - "Add {{redirect_uri}} exactly."
   - "Copy the App ID and App secret key and paste them below."
   - "Trial access is usually granted within a business day or two; request Standard when you need real, publicly visible pins."
+oauth_creds:
+  id_label: "App ID"
+  secret_label: "App secret key"

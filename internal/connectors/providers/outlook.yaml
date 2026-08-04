@@ -9,6 +9,9 @@ setup_steps:
   - "After creating, copy the Application (client) ID."
   - "Certificates & secrets → New client secret → copy its Value (not the Secret ID)."
   - "Paste the client ID and secret Value below."
+oauth_creds:
+  id_label: "Application (client) ID"
+  secret_hint: "the secret's Value, not the Secret ID"
 authorize_url: https://login.microsoftonline.com/common/oauth2/v2.0/authorize
 token_url: https://login.microsoftonline.com/common/oauth2/v2.0/token
 userinfo_url: https://graph.microsoft.com/v1.0/me

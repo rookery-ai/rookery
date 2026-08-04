@@ -10,3 +10,6 @@ setup_steps:
   - "Salesforce Setup → App Manager → New Connected App → Enable OAuth Settings."
   - "Add {{redirect_uri}} as the Callback URL; select scopes: Manage user data via APIs (api) + refresh_token."
   - "After saving, copy the Consumer Key (client id) and Consumer Secret (client secret) below."
+oauth_creds:
+  id_label: "Consumer Key"
+  secret_label: "Consumer Secret"
