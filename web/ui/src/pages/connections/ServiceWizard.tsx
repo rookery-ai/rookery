@@ -503,7 +503,9 @@ export function ServiceWizard({
         ) : (
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label htmlFor="svc-api-key">{provider.label} API key</Label>
+              <Label htmlFor="svc-api-key">
+                {provider.key_label || `${provider.label} API key`}
+              </Label>
               <Input
                 id="svc-api-key"
                 type="password"
@@ -511,6 +513,9 @@ export function ServiceWizard({
                 onChange={(e) => setApiKey(e.target.value)}
                 autoComplete="new-password"
               />
+              {provider.key_hint && (
+                <p className="text-xs text-muted-2">{provider.key_hint}</p>
+              )}
             </div>
             {provider.connect_inputs.map((ci) => (
               <div key={ci.key} className="space-y-1">

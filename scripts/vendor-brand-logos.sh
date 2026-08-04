@@ -24,6 +24,12 @@
 #            three brands neither of the above carries. Emitted as a one-path
 #            SVG in the brand's own hex.
 #
+#   upstream a pinned URL to the project's own published asset, for brands NONE of
+#            the three sets above carry. Two shapes: a real .svg is stripped and
+#            written as-is; a .png is wrapped in an <svg><image href="data:..."/>
+#            because ProviderLogo INLINES these files, so every one must be an svg.
+#            A full-colour raster needs no currentColor, so wrapping costs nothing.
+#
 # Logos are used nominatively to identify each integration. Files are kept
 # byte-for-byte as published apart from the comment/metadata strip below.
 set -euo pipefail
@@ -148,8 +154,8 @@ adguard:siAdguard
 firefly_iii:siFireflyiii
 tmdb:siThemoviedatabase
 wikipedia:siWikipedia
-hackernews:siYcombinator
 strava:siStrava
+google_health:siGoogle
 google_calendar:siGooglecalendar
 google_tasks:siGoogletasks
 todoist:siTodoist
@@ -217,6 +223,83 @@ echo "$SIMPLE" | while read -r pair; do
       );
     " ) > "$OUT/$ours.svg"
   printf '  %-14s ← %s\n' "$ours" "$theirs"
+done
+
+# ── upstream ────────────────────────────────────────────────────────────────
+# our-slug|url   — brands no other source carries. Verified reachable 2026-08-04.
+UPSTREAM_SVG="
+hackernews|https://news.ycombinator.com/y18.svg
+openlibrary|https://openlibrary.org/static/images/openlibrary-logo-tighter.svg
+frankfurter|https://frankfurter.dev/images/logo.svg
+gotify|https://raw.githubusercontent.com/gotify/logo/master/gotify-logo-small.svg
+"
+
+# Raster-only brands: no vector mark is published anywhere we can reach.
+UPSTREAM_PNG="
+ynab|https://cdn.prod.website-files.com/640f69143ec11b21d42015c6/6732b255e4999d561f33e7bb_Frame%202%20(1).png
+raindrop|https://raindrop.io/_next/static/media/icon_128.6bddf89e.png
+oura|https://ouraring.com/assets/icons/apple-touch-icon.png
+open_meteo|https://open-meteo.com/apple-touch-icon.png
+linkwarden|https://linkwarden.app/apple-touch-icon.png
+openfoodfacts|https://world.openfoodfacts.org/images/favicon/off/apple-touch-icon.png
+"
+
+echo "→ upstream (svg)"
+echo "$UPSTREAM_SVG" | while read -r pair; do
+  case "$pair" in ""|"#"*) continue ;; esac
+  ours="${pair%%|*}"; url="${pair#*|}"
+  curl -fsSL -A "$UA" "$url" -o "$TMP/$ours.raw.svg" || { echo "  !! $ours failed"; continue; }
+  strip_svg "$TMP/$ours.raw.svg" > "$OUT/$ours.svg"
+  printf '  %-14s ← %s\n' "$ours" "$url"
+done
+
+echo "→ upstream (png → inlined svg)"
+echo "$UPSTREAM_PNG" | while read -r pair; do
+  case "$pair" in ""|"#"*) continue ;; esac
+  ours="${pair%%|*}"; url="${pair#*|}"
+  curl -fsSL -A "$UA" "$url" -o "$TMP/$ours.png" || { echo "  !! $ours failed"; continue; }
+  python3 - "$TMP/$ours.png" "$OUT/$ours.svg" <<'PY'
+import base64, re, subprocess, sys
+src, dst = sys.argv[1], sys.argv[2]
+info = subprocess.run(["file", "-b", src], capture_output=True, text=True).stdout
+m = re.search(r"(\d+) x (\d+)", info)
+w, h = (m.group(1), m.group(2)) if m else ("256", "256")
+data = base64.b64encode(open(src, "rb").read()).decode()
+open(dst, "w").write(
+    f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}">'
+    f'<image href="data:image/png;base64,{data}" width="{w}" height="{h}"/></svg>'
+)
+PY
+  printf '  %-14s ← %s\n' "$ours" "$url"
+done
+
+# Miniflux publishes no PNG or SVG we can reach — only a favicon.ico — so its largest
+# frame is re-encoded as PNG and wrapped like the rasters above.
+UPSTREAM_ICO="
+miniflux|https://reader.miniflux.app/favicon.ico
+"
+
+echo "→ upstream (ico → inlined svg)"
+echo "$UPSTREAM_ICO" | while read -r pair; do
+  case "$pair" in ""|"#"*) continue ;; esac
+  ours="${pair%%|*}"; url="${pair#*|}"
+  curl -fsSL -A "$UA" "$url" -o "$TMP/$ours.ico" || { echo "  !! $ours failed"; continue; }
+  python3 - "$TMP/$ours.ico" "$OUT/$ours.svg" <<'PY'
+import base64, io, sys
+from PIL import Image
+src, dst = sys.argv[1], sys.argv[2]
+im = Image.open(src)
+best = max(im.info.get("sizes", [im.size]))
+im = Image.open(src); im.size = best; im.load()
+im = im.convert("RGBA")
+buf = io.BytesIO(); im.save(buf, "PNG", optimize=True)
+data = base64.b64encode(buf.getvalue()).decode()
+open(dst, "w").write(
+    f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {im.width} {im.height}">'
+    f'<image href="data:image/png;base64,{data}" width="{im.width}" height="{im.height}"/></svg>'
+)
+PY
+  printf '  %-14s ← %s\n' "$ours" "$url"
 done
 
 # linkedin_ads has no separate brand mark — it is the LinkedIn Marketing Developer

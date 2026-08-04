@@ -156,3 +156,31 @@ func TestServicesListReportsKeylessKind(t *testing.T) {
 		t.Error("open_meteo missing from the services list")
 	}
 }
+
+// The paste form must name the credential the way the provider YAML does. AdGuard Home
+// has no API key at all — it reuses the web-UI login — so a form labelled "AdGuard Home
+// API key" told the user to find something that does not exist. key_label/key_hint were
+// carefully written in every provider YAML and reached nothing until this shipped.
+func TestServicesListExposesCredentialLabels(t *testing.T) {
+	s, cookies, _ := keylessTestServer(t)
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/services", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`"key_label":"AdGuard Home password"`,
+		`"key_label":"Nextcloud app password"`,
+		`"key_label":"Todoist API token"`,
+	} {
+		if !contains(body, want) {
+			t.Errorf("services list is missing %s", want)
+		}
+	}
+	// A keyless provider has nothing to paste, so it must not advertise a label.
+	if contains(body, `"name":"open_meteo","label":"Open-Meteo","category":"Data & Reference","kind":"keyless","setup_url":"https://open-meteo.com/en/docs","setup_steps":`) &&
+		contains(body, `"key_label":"Open-Meteo`) {
+		t.Error("keyless provider must not declare a credential label")
+	}
+}

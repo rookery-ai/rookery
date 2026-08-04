@@ -39,20 +39,14 @@ func TestBrandLogoCoverage(t *testing.T) {
 	// found. Drawing one ourselves is not the alternative: an approximated
 	// logo misrepresents someone else's brand, which is worse than a letter.
 	// Removing a name from this map is the whole fix once a source appears.
+	// Readwise is the only brand still without a mark: its site is behind a JS/CDN
+	// challenge that serves an HTML document for every icon path, and no other source
+	// carries it. It renders as a coloured initial until one appears. Drawing one
+	// ourselves is not the alternative — an approximated logo misrepresents someone
+	// else's brand, which is worse than a letter.
 	allowNoLogo := map[string]bool{
-		"generic":     true,
-		"ynab":        true,
-		"raindrop":    true,
-		"open_meteo":  true,
-		"readwise":    true,
-		"miniflux":    true,
-		"frankfurter": true,
-		// Wave 4.
-		"openlibrary":   true,
-		"openfoodfacts": true,
-		"gotify":        true,
-		"linkwarden":    true,
-		"oura":          true,
+		"generic":  true,
+		"readwise": true,
 	}
 
 	var slugs []string

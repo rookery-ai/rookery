@@ -1,0 +1,20 @@
+name: google_health
+label: Google Health
+category: Health & Fitness
+unverified: true
+auth_parent: google
+# Fitbit's own Web API is DECOMMISSIONED in September 2026 and its OAuth server with
+# it; Google Health replaces it and authenticates through the ordinary Google OAuth app,
+# which is why this is an auth_parent child rather than a provider of its own. Existing
+# Fitbit tokens do not carry over — every user re-consents here.
+default_scopes:
+  - https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly
+  - https://www.googleapis.com/auth/googlehealth.sleep.readonly
+  - https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly
+  - https://www.googleapis.com/auth/googlehealth.profile.readonly
+setup_url: https://developers.google.com/health/setup
+setup_steps:
+  - "Google Health reuses your Google (Gmail) OAuth app. Set up Google first on its card above."
+  - "In Google Cloud Console, also enable the Google Health API."
+  - "Your Fitbit account must have been migrated to a Google Account — Fitbit required this by 19 May 2026."
+  - "Then click Connect here to authorize health access on the same Google account."
