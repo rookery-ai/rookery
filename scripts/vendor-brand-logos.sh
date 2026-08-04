@@ -63,6 +63,24 @@ brave:brave-color
 tavily:tavily-color
 notion:notion
 github:github
+# Wave 1 coder providers (2026-08). Verified present in
+# @lobehub/icons-static-svg@1.94.0. nebius publishes only a monochrome mark (no
+# -color variant) — that is its published form, themed via currentColor.
+# github_models deliberately reuses the GitHub mark: it is a GitHub product.
+# llama.cpp, LocalAI and Jan have no mark in ANY of the three sources and are
+# exempted in web/logo_coverage_test.go's allowNoLogo instead.
+bedrock:bedrock-color
+alibaba:alibabacloud-color
+together:together-color
+fireworks:fireworks-color
+cerebras:cerebras-color
+sambanova:sambanova-color
+nebius:nebius
+deepinfra:deepinfra-color
+huggingface:huggingface-color
+github_models:github
+lmstudio:lmstudio
+vllm:vllm-color
 "
 
 # our-slug:worldvectorlogo-slug

@@ -154,17 +154,46 @@ export function ProviderCards({
     return <p className="text-sm text-muted-2">No providers available.</p>;
   }
 
-  const labelFor = (name: string) =>
-    providers.find((p) => p.name === name)?.label ?? name;
+  const labelFor = (entry: CoderCatalogEntry) =>
+    entry.label ||
+    providers.find((p) => p.name === entry.name)?.label ||
+    entry.name;
+
+  // Two tiers rather than one flat wall: at thirty-one providers the list is
+  // long, and "No key needed" reads as a property of the local group rather
+  // than an inconsistency once the groups are visible. An entry with an
+  // unrecognised group falls into Hosted — a card filed under the wrong
+  // heading is a far better failure than one that silently disappears.
+  const sections = [
+    {
+      key: "hosted",
+      title: "Hosted",
+      entries: catalog.filter((c) => c.group !== "local"),
+    },
+    {
+      key: "local",
+      title: "Local & self-hosted",
+      entries: catalog.filter((c) => c.group === "local"),
+    },
+  ].filter((s) => s.entries.length > 0);
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-      {catalog.map((entry) => (
-        <ProviderCard
-          key={entry.name}
-          entry={entry}
-          label={labelFor(entry.name)}
-        />
+    <div className="space-y-6">
+      {sections.map((section) => (
+        <div key={section.key}>
+          <h3 className="mb-2 text-sm font-semibold text-muted-2">
+            {section.title}
+          </h3>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {section.entries.map((entry) => (
+              <ProviderCard
+                key={entry.name}
+                entry={entry}
+                label={labelFor(entry)}
+              />
+            ))}
+          </div>
+        </div>
       ))}
     </div>
   );

@@ -42,12 +42,14 @@ function catalog(overrides: Partial<CoderCatalogEntry> = {}): CoderCatalogEntry[
   return [
     {
       name: "openrouter",
+      label: "OpenRouter",
       base: "https://openrouter.ai/api/v1",
       model: "glm-5.2",
       docs: "https://openrouter.ai/keys",
       requiresKey: true,
       custom: false,
       hasKey: false,
+      group: "hosted",
       ...overrides,
     },
   ];
@@ -74,7 +76,7 @@ test("hasKey shows the green 'Key saved' state", () => {
 
 test("requiresKey===false shows a muted 'No key needed' state and is not expandable", async () => {
   const entries: CoderCatalogEntry[] = [
-    { name: "ollama_local", base: "http://localhost:11434/v1", model: "qwen2.5-coder", docs: "https://docs.ollama.com", requiresKey: false, custom: false, hasKey: false },
+    { name: "ollama_local", label: "Ollama (Local)", base: "http://localhost:11434/v1", model: "qwen2.5-coder", docs: "https://docs.ollama.com", requiresKey: false, custom: false, hasKey: false, group: "local" },
   ];
   wrap(entries);
   expect(screen.getByText("No key needed")).toBeInTheDocument();
@@ -140,7 +142,10 @@ test("hasKey===true shows an 'already set' hint when expanded", async () => {
 });
 
 test("custom provider shows a base-URL note when expanded", async () => {
-  wrap(catalog({ name: "generic", custom: true, docs: "", hasKey: false }), PROVIDERS);
+  wrap(
+    catalog({ name: "generic", label: "Custom (OpenAI-compatible)", custom: true, docs: "", hasKey: false }),
+    PROVIDERS,
+  );
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: /custom \(openai-compatible\)/i }));
   expect(screen.getByText(/base url/i)).toBeInTheDocument();
@@ -149,4 +154,23 @@ test("custom provider shows a base-URL note when expanded", async () => {
 test("never renders the saved key value anywhere", () => {
   wrap(catalog({ hasKey: true }));
   expect(screen.queryByText(/sk-/)).not.toBeInTheDocument();
+});
+
+// Thirty-one flat cards is a wall, and mixing the tiers makes the local tier's
+// "No key needed" read as an inconsistency rather than a property of the group.
+test("cards are split into hosted and local sections", () => {
+  const entries: CoderCatalogEntry[] = [
+    ...catalog(),
+    { name: "ollama_local", label: "Ollama (Local)", base: "http://localhost:11434/v1", model: "qwen2.5-coder", docs: "https://docs.ollama.com", requiresKey: false, custom: false, hasKey: false, group: "local" },
+  ];
+  wrap(entries);
+  expect(screen.getByRole("heading", { name: /^hosted$/i })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: /local & self-hosted/i })).toBeInTheDocument();
+});
+
+// A card filed under the wrong heading is recoverable; one that vanishes is not.
+test("an unrecognised group falls back to the hosted section", () => {
+  wrap(catalog({ group: "" }));
+  expect(screen.getByRole("heading", { name: /^hosted$/i })).toBeInTheDocument();
+  expect(screen.getByText("OpenRouter")).toBeInTheDocument();
 });

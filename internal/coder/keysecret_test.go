@@ -18,10 +18,19 @@ func TestPlanKeySecret_PastedKeyStored(t *testing.T) {
 	}
 }
 
-func TestPlanKeySecret_NoKeyProviderStoresDummy(t *testing.T) {
-	p := PlanKeySecret("ollama_local", "", "")
-	if !p.WriteSecret || p.SecretName != "CODER_KEY_OLLAMA_LOCAL" || p.WriteValue != "ollama" || p.Err != "" {
-		t.Fatalf("unexpected plan: %+v", p)
+func TestPlanKeySecret_LocalProviderStoresPlaceholder(t *testing.T) {
+	// A local server accepts any bearer string, but llm.New rejects an empty
+	// key — so a placeholder is stored rather than nothing. The value is
+	// deliberately self-describing: "ollama" read like a bug once four more
+	// local servers joined the tier.
+	for _, name := range []string{"ollama_local", "lmstudio", "vllm", "localai", "jan", "llamacpp"} {
+		p := PlanKeySecret(name, "", "")
+		if !p.WriteSecret || p.WriteValue != placeholderLocalKey || p.Err != "" {
+			t.Errorf("PlanKeySecret(%q): unexpected plan %+v", name, p)
+		}
+		if want := CoderKeySecretName(name); p.SecretName != want {
+			t.Errorf("PlanKeySecret(%q).SecretName = %q, want %q", name, p.SecretName, want)
+		}
 	}
 }
 

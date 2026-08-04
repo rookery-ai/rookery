@@ -73,7 +73,7 @@ function setupGetBody(s: BackendState) {
   if (step === 3) {
     body.detected_coders = [];
     body.api_providers = [{ name: "openrouter", label: "OpenRouter", schema: "", model_placeholder: "glm-5.2", docs_url: "https://openrouter.ai/keys", requires_key: true, custom: false }];
-    body.coder_catalog = [{ name: "openrouter", base: "https://openrouter.ai/api/v1", model: "glm-5.2", docs: "https://openrouter.ai/keys", requiresKey: true, custom: false, hasKey: false }];
+    body.coder_catalog = [{ name: "openrouter", label: "OpenRouter", base: "https://openrouter.ai/api/v1", model: "glm-5.2", docs: "https://openrouter.ai/keys", requiresKey: true, custom: false, hasKey: false, group: "hosted" }];
   }
   if (step === 5) {
     body.platforms = PLATFORMS;
