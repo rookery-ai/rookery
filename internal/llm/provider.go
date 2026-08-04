@@ -136,6 +136,34 @@ var (
 		"opencode_go":  "https://opencode.ai/zen/go/v1",
 		"perplexity":   "https://api.perplexity.ai",
 		"moonshot":     "https://api.moonshot.ai/v1",
+
+		// ── Wave 1 (2026-08) hosted tier ──
+		// Bedrock: AWS documents three path shapes; this is the `bedrock-mantle`
+		// endpoint AWS explicitly recommends, and the only one that accepts a
+		// Bedrock API key as a plain bearer token with no SigV4 signing — which
+		// is the whole reason Bedrock is a drop-in here. The region is baked to
+		// us-east-1; another region goes in the per-workspace base-URL override.
+		"bedrock":       "https://bedrock-mantle.us-east-1.api.aws/v1",
+		"alibaba":       "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+		"together":      "https://api.together.xyz/v1",
+		"fireworks":     "https://api.fireworks.ai/inference/v1",
+		"cerebras":      "https://api.cerebras.ai/v1",
+		"sambanova":     "https://api.sambanova.ai/v1",
+		"nebius":        "https://api.studio.nebius.com/v1",
+		"deepinfra":     "https://api.deepinfra.com/v1/openai",
+		"huggingface":   "https://router.huggingface.co/v1",
+		"github_models": "https://models.github.ai/inference",
+
+		// ── Wave 1 (2026-08) local tier ──
+		// Each is the default its own docs publish. llamacpp and localai share
+		// 8080: they are alternative servers, not concurrent ones, and a user
+		// running both overrides one — the workflow the base-URL prefill makes
+		// discoverable.
+		"lmstudio": "http://localhost:1234/v1",
+		"llamacpp": "http://localhost:8080/v1",
+		"vllm":     "http://localhost:8000/v1",
+		"localai":  "http://localhost:8080/v1",
+		"jan":      "http://localhost:1337/v1",
 	}
 )
 

@@ -47,6 +47,12 @@ func TestBrandLogoCoverage(t *testing.T) {
 	allowNoLogo := map[string]bool{
 		"generic":  true,
 		"readwise": true,
+		// Wave 1 coder providers (2026-08). llama.cpp, LocalAI and Jan have no
+		// mark in lobehub, worldvectorlogo or simple-icons — verified against
+		// @lobehub/icons-static-svg@1.94.0 and the installed simple-icons.
+		"llamacpp": true,
+		"localai":  true,
+		"jan":      true,
 	}
 
 	var slugs []string

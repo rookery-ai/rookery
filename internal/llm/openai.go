@@ -225,6 +225,11 @@ func init() {
 		"openai", "openrouter", "generic", // no registry default for generic — New() requires an explicit base_url
 		"zai", "ollama", "ollama_local", "deepseek", "groq", "xai",
 		"mistral", "gemini", "opencode_zen", "opencode_go", "perplexity", "moonshot",
+		// Wave 1 (2026-08) — hosted tier.
+		"bedrock", "alibaba", "together", "fireworks", "cerebras", "sambanova",
+		"nebius", "deepinfra", "huggingface", "github_models",
+		// Wave 1 (2026-08) — local tier (self-hosted OpenAI-compatible servers).
+		"lmstudio", "llamacpp", "vllm", "localai", "jan",
 	} {
 		RegisterProvider(name, factory)
 	}
