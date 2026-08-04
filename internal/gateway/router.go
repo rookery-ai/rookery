@@ -222,13 +222,20 @@ func (r *Router) handleStart(ctx context.Context, msg Message, send func(string)
 		return fmt.Errorf("link identity: %w", err)
 	}
 
+	// The platform's own label, so linking via Discord does not claim Telegram.
+	label := msg.Platform
+	if spec, ok := CredSpecFor(msg.Platform); ok && spec.Label != "" {
+		label = spec.Label
+	}
+
 	w, err := r.db.GetWorkspaceByID(msg.WorkspaceID)
 	if err != nil {
 		send("Linked successfully! Send /help to get started.")
 		return nil
 	}
 
-	send(fmt.Sprintf("Hi **%s**! Your Telegram account is now linked. Send /help to see what you can do.", w.Name))
+	send(fmt.Sprintf("Hi **%s**! Your %s account is now linked. Send /help to see what you can do.",
+		w.Name, label))
 	return nil
 }
 

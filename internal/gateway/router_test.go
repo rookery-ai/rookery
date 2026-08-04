@@ -415,3 +415,31 @@ func TestHelpTextFileLineUniformAcrossPlatforms(t *testing.T) {
 		t.Errorf("Telegram /help should still mention file uploads, got:\n%s", (*got2)[0])
 	}
 }
+
+func TestHandleStartNamesTheActualPlatform(t *testing.T) {
+	for _, tc := range []struct{ platform, want string }{
+		{"telegram", "Telegram"},
+		{"discord", "Discord"},
+		{"slack", "Slack"},
+	} {
+		t.Run(tc.platform, func(t *testing.T) {
+			r, _, _, _ := newTestRouter(t)
+			msg := testMsg("/start")
+			msg.Platform = tc.platform
+			msg.PlatformUserID = "user-" + tc.platform
+
+			var got string
+			if err := r.Handle(t.Context(), msg, func(s string) { got = s }, nil, nil, nil); err != nil {
+				t.Fatalf("handle: %v", err)
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("reply %q does not name %q", got, tc.want)
+			}
+			for _, other := range []string{"Telegram", "Discord", "Slack"} {
+				if other != tc.want && strings.Contains(got, other) {
+					t.Fatalf("reply %q names the wrong platform %q", got, other)
+				}
+			}
+		})
+	}
+}
