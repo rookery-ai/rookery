@@ -116,7 +116,7 @@ test("API engine: providers missing a key are disabled in the select", async () 
   await user.click(screen.getByRole("radio", { name: /^api$/i }));
 
   const openrouterOpt = screen.getByRole("option", { name: /openrouter/i }) as HTMLOptionElement;
-  const zaiOpt = screen.getByRole("option", { name: /zai/i }) as HTMLOptionElement;
+  const zaiOpt = screen.getByRole("option", { name: /z\.ai/i }) as HTMLOptionElement;
   expect(openrouterOpt.disabled).toBe(false);
   expect(zaiOpt.disabled).toBe(true);
 });
@@ -220,7 +220,7 @@ test("showApiKeyInput: a provider with no saved key yet is still selectable, and
   const user = userEvent.setup();
   await user.click(screen.getByRole("radio", { name: /^api$/i }));
 
-  const zaiOption = screen.getByRole("option", { name: /zai/i }) as HTMLOptionElement;
+  const zaiOption = screen.getByRole("option", { name: /z\.ai/i }) as HTMLOptionElement;
   expect(zaiOption.disabled).toBe(false);
 
   await user.selectOptions(screen.getByLabelText(/^provider$/i), "zai");
@@ -296,4 +296,94 @@ test("full build still offers the Local CLI engine option", () => {
   mockFetch();
   wrap(LOCAL_CODER, DETECTED, CATALOG, "full");
   expect(screen.getByText("Local CLI")).toBeInTheDocument();
+});
+
+// ─── Base URL discoverability ────────────────────────────────────────────────
+//
+// Overriding a self-hosted server's port was always possible and always
+// persisted; it was simply undiscoverable. The field sat behind Advanced,
+// started empty, and showed a generic example placeholder, so a user running
+// Ollama on a non-default port had no way to learn the override existed or what
+// shape to type. These tests pin the fix AND the storage semantics it must not
+// change: an unmodified prefill still means "follow the registry default".
+
+test("API engine: the provider dropdown shows human labels, not registry slugs", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap(undefined);
+  await user.click(screen.getByRole("radio", { name: /api/i }));
+  expect(
+    screen.getByRole("option", { name: /ollama \(local\)/i }),
+  ).toBeInTheDocument();
+});
+
+test("API engine: selecting a provider prefills its default base URL", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap(undefined);
+  await user.click(screen.getByRole("radio", { name: /api/i }));
+  await user.selectOptions(screen.getByLabelText(/provider/i), "ollama_local");
+  // Local providers auto-expand Advanced, so the field is visible without a click.
+  expect(screen.getByLabelText(/base url/i)).toHaveValue(
+    "http://localhost:11434/v1",
+  );
+});
+
+test("API engine: an unmodified prefill posts an empty base_url", async () => {
+  const calls = mockFetch();
+  const user = userEvent.setup();
+  wrap(undefined);
+  await user.click(screen.getByRole("radio", { name: /api/i }));
+  await user.selectOptions(screen.getByLabelText(/provider/i), "ollama_local");
+  await user.type(screen.getByLabelText(/^model$/i), "qwen2.5-coder");
+  await user.click(screen.getByRole("button", { name: /save coder/i }));
+  await waitFor(() => {
+    const put = calls.find((c) => c.method === "PUT");
+    expect(put).toBeTruthy();
+    // Storing the default explicitly would pin this workspace to today's URL if
+    // the registry default ever changed. Empty means "follow the default".
+    expect((put!.body as { base_url: string }).base_url).toBe("");
+  });
+});
+
+test("API engine: an edited base URL is posted verbatim", async () => {
+  const calls = mockFetch();
+  const user = userEvent.setup();
+  wrap(undefined);
+  await user.click(screen.getByRole("radio", { name: /api/i }));
+  await user.selectOptions(screen.getByLabelText(/provider/i), "ollama_local");
+  const field = screen.getByLabelText(/base url/i);
+  await user.clear(field);
+  await user.type(field, "http://192.168.1.50:12345/v1");
+  await user.type(screen.getByLabelText(/^model$/i), "qwen2.5-coder");
+  await user.click(screen.getByRole("button", { name: /save coder/i }));
+  await waitFor(() => {
+    const put = calls.find((c) => c.method === "PUT");
+    expect((put!.body as { base_url: string }).base_url).toBe(
+      "http://192.168.1.50:12345/v1",
+    );
+  });
+});
+
+test("API engine: a saved override survives a provider switch", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap({
+    kind: "api",
+    bin: "",
+    timeout_s: 90,
+    provider: "ollama_local",
+    model: "qwen2.5-coder",
+    base_url: "http://nas.lan:11434/v1",
+    api_key_secret: "CODER_KEY_OLLAMA_LOCAL",
+  });
+  // A stored override must not be clobbered by the prefill on mount...
+  expect(screen.getByLabelText(/base url/i)).toHaveValue(
+    "http://nas.lan:11434/v1",
+  );
+  // ...nor by a later provider change.
+  await user.selectOptions(screen.getByLabelText(/provider/i), "zai");
+  expect(screen.getByLabelText(/base url/i)).toHaveValue(
+    "http://nas.lan:11434/v1",
+  );
 });

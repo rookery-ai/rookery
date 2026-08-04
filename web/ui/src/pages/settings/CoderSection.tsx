@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import type { UseMutationResult } from "@tanstack/react-query";
 import { AlertTriangle, Check, ChevronDown, Loader2, Save } from "lucide-react";
@@ -73,6 +73,11 @@ export function CoderSection({
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
   const [baseURL, setBaseURL] = useState("");
+  // True once the base URL holds a value the user chose — either typed here or
+  // loaded from a saved config. The prefill must never overwrite one of those,
+  // and a plain equality check against the default cannot tell them apart,
+  // because a user may legitimately type the default back in.
+  const baseURLTouched = useRef(false);
   const [apiKey, setApiKey] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [baseURLError, setBaseURLError] = useState("");
@@ -89,8 +94,17 @@ export function CoderSection({
     setTimeoutS(coder.timeout_s || 120);
     setProvider(coder.provider);
     setModel(coder.model);
-    setBaseURL(coder.base_url);
-  }, [coder, coderMode]);
+    const entry = catalog.find((c) => c.name === coder.provider);
+    if (coder.base_url) {
+      setBaseURL(coder.base_url);
+      baseURLTouched.current = true;
+    } else {
+      // Empty means "follow the registry default" — show that default rather
+      // than a blank box, so the value is editable instead of merely absent.
+      setBaseURL(entry?.base ?? "");
+    }
+    if (entry?.group === "local") setAdvancedOpen(true);
+  }, [coder, coderMode, catalog]);
 
   // A slim build ships no CLI coder binary, so "local" is not offered. This
   // mirrors the server-side guard in rejectLocalInSlim — the UI is the
@@ -99,6 +113,16 @@ export function CoderSection({
 
   const selectedEntry = catalog.find((c) => c.name === provider);
   const isCustom = selectedEntry?.custom ?? false;
+
+  function handleProviderChange(name: string) {
+    setProvider(name);
+    const entry = catalog.find((c) => c.name === name);
+    if (!baseURLTouched.current) setBaseURL(entry?.base ?? "");
+    // A self-hosted server is the case where the URL routinely needs editing —
+    // a different port, a different host. Open the section rather than making
+    // the user discover it.
+    if (entry?.group === "local") setAdvancedOpen(true);
+  }
 
   async function handleSave(e: FormEvent) {
     e.preventDefault();
@@ -111,6 +135,12 @@ export function CoderSection({
       setAdvancedOpen(true);
       return;
     }
+    // An unmodified prefill is not an override. Posting it verbatim would pin
+    // this workspace to today's URL forever; empty keeps it following the
+    // registry default, exactly as before this field was prefilled.
+    const trimmedBase = baseURL.trim();
+    const effectiveBase =
+      trimmedBase === (selectedEntry?.base ?? "") ? "" : trimmedBase;
     try {
       await save.mutateAsync({
         kind: engine,
@@ -118,7 +148,7 @@ export function CoderSection({
         timeout_s: timeoutS,
         provider: engine === "api" ? provider : "",
         model: engine === "api" ? model : "",
-        base_url: engine === "api" ? baseURL : "",
+        base_url: engine === "api" ? effectiveBase : "",
         api_key: showApiKeyInput && engine === "api" ? apiKey.trim() : "",
       });
       setSaved(true);
@@ -210,7 +240,7 @@ export function CoderSection({
               <select
                 id="coder_provider"
                 value={provider}
-                onChange={(e) => setProvider(e.target.value)}
+                onChange={(e) => handleProviderChange(e.target.value)}
                 className="w-full rounded-md border border-border bg-background p-2 text-sm outline-none focus:border-ring focus:ring-[3px] focus:ring-ring/50"
               >
                 <option value="">Select a provider…</option>
@@ -222,7 +252,7 @@ export function CoderSection({
                   const usable = c.hasKey || !c.requiresKey || showApiKeyInput;
                   return (
                     <option key={c.name} value={c.name} disabled={!usable}>
-                      {c.name}
+                      {c.label || c.name}
                       {!usable
                         ? showApiKeyInput
                           ? " (enter your API key below)"
@@ -292,6 +322,14 @@ export function CoderSection({
                   )}
                 />
                 Advanced
+                {!advancedOpen && baseURL && (
+                  // The effective URL, visible without opening the section —
+                  // this is what makes a Bedrock region or a self-hosted port
+                  // discoverable rather than hidden one click away.
+                  <span className="truncate font-normal text-muted-2">
+                    · {baseURL}
+                  </span>
+                )}
               </button>
               {advancedOpen && (
                 <div className="mt-2 space-y-1.5">
@@ -302,12 +340,20 @@ export function CoderSection({
                   <Input
                     id="coder_base_url"
                     value={baseURL}
-                    onChange={(e) => setBaseURL(e.target.value)}
-                    placeholder="https://api.example.com/v1"
+                    onChange={(e) => {
+                      baseURLTouched.current = true;
+                      setBaseURL(e.target.value);
+                    }}
+                    placeholder={
+                      selectedEntry?.base || "https://api.example.com/v1"
+                    }
                   />
                   {baseURLError && (
                     <p className="text-xs text-danger">{baseURLError}</p>
                   )}
+                  <p className="text-xs text-muted-2">
+                    Change the port here if your server listens somewhere else.
+                  </p>
                 </div>
               )}
             </div>
