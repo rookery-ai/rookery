@@ -1,0 +1,77 @@
+provider: mealie
+actions:
+  - name: mealie_search_recipes
+    description: "Search recipes by name or ingredient. per_page caps the result. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query:    {type: string, description: "search terms"}
+        per_page: {type: integer, description: "max recipes, default 20"}
+      required: [query]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/recipes"
+      query:
+        search: "{{query}}"
+        perPage: "{{per_page}}"
+    response_extract: "$.items"
+
+  - name: mealie_get_recipe
+    description: "Get one recipe by its slug: ingredients, instructions, yield and times. Slugs come from mealie_search_recipes. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        slug: {type: string, description: "recipe slug, e.g. tomato-soup"}
+      required: [slug]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/recipes/{{slug}}"
+    response_extract: "$"
+
+  - name: mealie_list_meal_plan
+    description: "The meal plan between two dates (YYYY-MM-DD) — what is scheduled to be cooked. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+      required: [start_date, end_date]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/households/mealplans"
+      query:
+        start_date: "{{start_date}}"
+        end_date: "{{end_date}}"
+    response_extract: "$.items"
+
+  - name: mealie_list_shopping_lists
+    description: "Shopping lists with their ids and item counts. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/households/shopping/lists"
+    response_extract: "$.items"
+
+  - name: mealie_add_shopping_item
+    description: "Add an item to a shopping list by list id. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        shopping_list_id: {type: string}
+        note:             {type: string, description: "the item text, e.g. 2 kg potatoes"}
+        quantity:         {type: number}
+      required: [shopping_list_id, note]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/api/households/shopping/items"
+      body:
+        shoppingListId: "{{shopping_list_id}}"
+        note: "{{note}}"
+        quantity: "{{quantity}}"
+        isFood: false
+    response_extract: "$"

@@ -1,0 +1,83 @@
+provider: spotify
+actions:
+  - name: spotify_recently_played
+    description: "Recently played tracks, newest first. limit caps the result (max 50). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max tracks, 1–50, default 20"}
+      required: []
+    request:
+      method: GET
+      url: "https://api.spotify.com/v1/me/player/recently-played"
+      query:
+        limit: "{{limit}}"
+    response_extract: "$.items"
+
+  - name: spotify_top_items
+    description: "Your most-played tracks or artists. item_type is tracks or artists; time_range is short_term (4 weeks), medium_term (6 months) or long_term (years). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        item_type:  {type: string, description: "tracks | artists"}
+        time_range: {type: string, description: "short_term | medium_term | long_term"}
+        limit:      {type: integer, description: "max items, 1–50, default 20"}
+      required: [item_type, time_range]
+    request:
+      method: GET
+      url: "https://api.spotify.com/v1/me/top/{{item_type}}"
+      query:
+        time_range: "{{time_range}}"
+        limit: "{{limit}}"
+    response_extract: "$.items"
+
+  - name: spotify_list_playlists
+    description: "Your playlists with their ids and track counts. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max playlists, 1–50, default 20"}
+      required: []
+    request:
+      method: GET
+      url: "https://api.spotify.com/v1/me/playlists"
+      query:
+        limit: "{{limit}}"
+    response_extract: "$.items"
+
+  - name: spotify_search
+    description: "Search Spotify's catalogue. item_type is track, artist, album or playlist. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query:     {type: string, description: "search terms"}
+        item_type: {type: string, description: "track | artist | album | playlist"}
+        limit:     {type: integer, description: "max results, 1–50, default 10"}
+      required: [query, item_type]
+    request:
+      method: GET
+      url: "https://api.spotify.com/v1/search"
+      query:
+        q: "{{query}}"
+        type: "{{item_type}}"
+        limit: "{{limit}}"
+    response_extract: "$"
+
+  - name: spotify_saved_tracks
+    description: "Tracks saved to Your Library, newest first. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max tracks, 1–50, default 20"}
+      required: []
+    request:
+      method: GET
+      url: "https://api.spotify.com/v1/me/tracks"
+      query:
+        limit: "{{limit}}"
+    response_extract: "$.items"

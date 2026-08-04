@@ -1,0 +1,64 @@
+provider: trakt
+actions:
+  - name: trakt_trending_shows
+    description: "Shows being watched most right now, with viewer counts. Public data — no user authorization needed. limit caps the result. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max shows, default 10"}
+      required: []
+    request:
+      method: GET
+      url: "https://api.trakt.tv/shows/trending"
+      query:
+        limit: "{{limit}}"
+    response_extract: "$"
+
+  - name: trakt_trending_movies
+    description: "Movies being watched most right now, with viewer counts. Public data. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max movies, default 10"}
+      required: []
+    request:
+      method: GET
+      url: "https://api.trakt.tv/movies/trending"
+      query:
+        limit: "{{limit}}"
+    response_extract: "$"
+
+  - name: trakt_search
+    description: "Search Trakt for shows, movies, episodes or people. item_type is a comma-separated list such as 'show,movie'. Public data. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query:     {type: string, description: "search terms"}
+        item_type: {type: string, description: "comma-separated: show,movie,episode,person"}
+        limit:     {type: integer, description: "max results, default 10"}
+      required: [query, item_type]
+    request:
+      method: GET
+      url: "https://api.trakt.tv/search/{{item_type}}"
+      query:
+        query: "{{query}}"
+        limit: "{{limit}}"
+    response_extract: "$"
+
+  - name: trakt_show_summary
+    description: "Full detail for one show by its Trakt slug or id: overview, status, network, runtime and rating. Public data. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        show_id: {type: string, description: "Trakt slug or numeric id, from trakt_search"}
+      required: [show_id]
+    request:
+      method: GET
+      url: "https://api.trakt.tv/shows/{{show_id}}"
+      query:
+        extended: "full"
+    response_extract: "$"

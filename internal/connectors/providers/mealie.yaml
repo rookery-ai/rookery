@@ -1,0 +1,22 @@
+name: mealie
+label: Mealie
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Mealie API token"
+  key_hint: "from your profile → Manage API Tokens"
+  setup_url: https://docs.mealie.io/api/redoc/
+connect_inputs:
+  - key: base_url
+    label: "Mealie URL"
+    hint: "e.g. http://mealie.local:9000"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In Mealie open your user profile and choose 'Manage API Tokens'."
+  - "Create a token, copy it, and enter it with your Mealie URL below."
+  - "This is a recipe manager — a natural pair with an agent that plans meals or builds a shopping list."

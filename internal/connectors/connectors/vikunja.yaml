@@ -1,0 +1,65 @@
+provider: vikunja
+actions:
+  - name: vikunja_list_projects
+    description: "List projects with their ids and titles. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/projects"
+    response_extract: "$"
+
+  - name: vikunja_list_tasks
+    description: "Tasks assigned to the authenticated user across projects. filter_by/filter_value narrow it, e.g. done=false. per_page caps the result. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        per_page: {type: integer, description: "max tasks, default 25"}
+        page:     {type: integer, description: "one-based page number"}
+      required: [per_page]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/tasks/all"
+      query:
+        per_page: "{{per_page}}"
+        page: "{{page}}"
+        sort_by: "due_date"
+    response_extract: "$"
+
+  - name: vikunja_create_task
+    description: "Create a task in a project. due_date is RFC3339. priority is 1 (low) to 5 (DO NOW). Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        project_id:  {type: integer}
+        title:       {type: string}
+        description: {type: string}
+        due_date:    {type: string, description: "RFC3339 timestamp"}
+        priority:    {type: integer, description: "1 low … 5 DO NOW"}
+      required: [project_id, title]
+    request:
+      method: PUT
+      url: "{{conn.base_url}}/api/v1/projects/{{project_id}}/tasks"
+      body:
+        title: "{{title}}"
+        description: "{{description}}"
+        due_date: "{{due_date}}"
+        priority: "{{priority}}"
+    response_extract: "$"
+
+  - name: vikunja_complete_task
+    description: "Mark a task done by id. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        task_id: {type: integer}
+      required: [task_id]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/api/v1/tasks/{{task_id}}"
+      body:
+        done: true
+    response_extract: "$"

@@ -1,0 +1,32 @@
+name: nextcloud
+label: Nextcloud
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: basic
+  # Nextcloud takes the username as the Basic user and an APP PASSWORD as the password —
+  # never the account password, which would also bypass two-factor auth.
+  basic_user_template: "{{conn.username}}"
+  key_label: "Nextcloud app password"
+  key_hint: "generated in Settings → Security → Devices & sessions"
+  setup_url: https://docs.nextcloud.com/server/latest/user_manual/en/session_management.html
+# The OCS API refuses any request without this header, and defaults to XML without the
+# Accept — both are mandatory rather than optional politeness.
+static_headers:
+  OCS-APIRequest: "true"
+  Accept: "application/json"
+connect_inputs:
+  - key: base_url
+    label: "Nextcloud URL"
+    hint: "e.g. https://cloud.example.com — a path prefix like /nextcloud is fine"
+    required: true
+    normalize: base_url
+  - key: username
+    label: "Nextcloud username"
+    hint: "the account the app password belongs to"
+    required: true
+setup_steps:
+  - "In Nextcloud open Settings → Security and scroll to 'Devices & sessions'."
+  - "Create a new app password — do NOT use your account password, which would bypass two-factor auth."
+  - "Enter your Nextcloud URL, username and the app password below."

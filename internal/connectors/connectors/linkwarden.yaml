@@ -1,0 +1,59 @@
+provider: linkwarden
+actions:
+  - name: linkwarden_list_links
+    description: "List saved links, newest first. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        collection_id: {type: integer, description: "restrict to one collection"}
+      required: []
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/links"
+      query:
+        collectionId: "{{collection_id}}"
+    response_extract: "$.response"
+
+  - name: linkwarden_search_links
+    description: "Search saved links by text across titles, descriptions and tags. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "search terms"}
+      required: [query]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/links"
+      query:
+        searchQueryString: "{{query}}"
+    response_extract: "$.response"
+
+  - name: linkwarden_create_link
+    description: "Save a URL. Linkwarden fetches the title and archives the page itself. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        url:         {type: string}
+        name:        {type: string, description: "title; Linkwarden fetches one when omitted"}
+        description: {type: string}
+      required: [url]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/api/v1/links"
+      body:
+        url: "{{url}}"
+        name: "{{name}}"
+        description: "{{description}}"
+    response_extract: "$.response"
+
+  - name: linkwarden_list_collections
+    description: "List collections with their ids and link counts. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/collections"
+    response_extract: "$.response"

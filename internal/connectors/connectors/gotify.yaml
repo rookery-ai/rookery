@@ -1,0 +1,20 @@
+provider: gotify
+actions:
+  - name: gotify_push
+    description: "Push a message to every device subscribed to this Gotify application. priority 0–10; anything above 4 typically triggers a sound. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        message:  {type: string, description: "the notification body"}
+        title:    {type: string}
+        priority: {type: integer, description: "0–10; above 4 usually alerts audibly"}
+      required: [message]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/message"
+      body:
+        message: "{{message}}"
+        title: "{{title}}"
+        priority: "{{priority}}"
+    response_extract: "$"

@@ -1,0 +1,20 @@
+name: spotify
+label: Spotify
+category: Publishing & Media
+unverified: true
+authorize_url: https://accounts.spotify.com/authorize
+token_url: https://accounts.spotify.com/api/token
+userinfo_url: https://api.spotify.com/v1/me
+identity_path: display_name
+token_auth: basic
+default_scopes:
+  - user-read-recently-played
+  - user-top-read
+  - playlist-read-private
+  - user-library-read
+setup_url: https://developer.spotify.com/dashboard
+setup_steps:
+  - "Create an app in the Spotify developer dashboard at https://developer.spotify.com/dashboard."
+  - "Add {{redirect_uri}} to the app's Redirect URIs exactly, and tick the Web API checkbox."
+  - "Copy the Client ID and Client Secret into the fields below."
+  - "A new app starts in development mode, which is fine for your own account."

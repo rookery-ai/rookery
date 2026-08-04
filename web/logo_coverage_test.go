@@ -47,6 +47,12 @@ func TestBrandLogoCoverage(t *testing.T) {
 		"readwise":    true,
 		"miniflux":    true,
 		"frankfurter": true,
+		// Wave 4.
+		"openlibrary":   true,
+		"openfoodfacts": true,
+		"gotify":        true,
+		"linkwarden":    true,
+		"oura":          true,
 	}
 
 	var slugs []string

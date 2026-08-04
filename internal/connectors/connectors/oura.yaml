@@ -1,0 +1,61 @@
+provider: oura
+actions:
+  - name: oura_daily_sleep
+    description: "Daily sleep scores and contributors between two dates (YYYY-MM-DD). Both bounds are required. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+      required: [start_date, end_date]
+    request:
+      method: GET
+      url: "https://api.ouraring.com/v2/usercollection/daily_sleep"
+      query:
+        start_date: "{{start_date}}"
+        end_date: "{{end_date}}"
+    response_extract: "$.data"
+
+  - name: oura_daily_readiness
+    description: "Daily readiness scores and contributors between two dates (YYYY-MM-DD) — the 'how recovered am I' signal. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+      required: [start_date, end_date]
+    request:
+      method: GET
+      url: "https://api.ouraring.com/v2/usercollection/daily_readiness"
+      query:
+        start_date: "{{start_date}}"
+        end_date: "{{end_date}}"
+    response_extract: "$.data"
+
+  - name: oura_daily_activity
+    description: "Daily activity: steps, calories and activity score between two dates (YYYY-MM-DD). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+      required: [start_date, end_date]
+    request:
+      method: GET
+      url: "https://api.ouraring.com/v2/usercollection/daily_activity"
+      query:
+        start_date: "{{start_date}}"
+        end_date: "{{end_date}}"
+    response_extract: "$.data"
+
+  - name: oura_personal_info
+    description: "The ring owner's age, weight, height and email. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://api.ouraring.com/v2/usercollection/personal_info"
+    response_extract: "$"

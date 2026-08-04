@@ -1,0 +1,55 @@
+provider: nextcloud
+actions:
+  - name: nextcloud_user_info
+    description: "The authenticated user's quota, storage used and email — the 'how full is my cloud' answer. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/ocs/v2.php/cloud/user"
+      query:
+        format: "json"
+    response_extract: "$.ocs"
+
+  - name: nextcloud_list_shares
+    description: "Shares the user has created, with their targets and permissions. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/ocs/v2.php/apps/files_sharing/api/v1/shares"
+      query:
+        format: "json"
+    response_extract: "$.ocs.data"
+
+  - name: nextcloud_list_notifications
+    description: "Pending Nextcloud notifications. Requires the Notifications app to be enabled. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/ocs/v2.php/apps/notifications/api/v2/notifications"
+      query:
+        format: "json"
+    response_extract: "$.ocs.data"
+
+  - name: nextcloud_create_share
+    description: "Create a public link share for a file or folder path. share_type 3 is a public link; permissions 1 is read-only. This makes the item reachable by anyone holding the link. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        path:        {type: string, description: "path relative to the user's files root, e.g. /Documents/report.pdf"}
+        share_type:  {type: integer, description: "3 = public link, 0 = user, 1 = group"}
+        permissions: {type: integer, description: "1 read, 2 update, 4 create, 8 delete, 16 share"}
+      required: [path, share_type]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/ocs/v2.php/apps/files_sharing/api/v1/shares"
+      query:
+        format: "json"
+      body:
+        path: "{{path}}"
+        shareType: "{{share_type}}"
+        permissions: "{{permissions}}"
+    response_extract: "$.ocs.data"
