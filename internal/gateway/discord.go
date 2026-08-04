@@ -56,10 +56,9 @@ func init() {
 		Fields:   []CredField{{Key: "token", Label: "Bot Token", Placeholder: "your bot token", Secret: true}},
 		SetupURL: "https://discord.com/developers/applications",
 		SetupSteps: []string{
-			"Open the Discord Developer Portal and create a New Application",
+			"Open the Discord Developer Portal and click New Application",
 			"Open the Bot tab, click Reset Token, and copy the token",
-			"On the Bot tab, enable the MESSAGE CONTENT INTENT (Privileged Gateway Intents)",
-			"Invite the bot to a server OR just DM it after connecting; send /start to link",
+			"Still on the Bot tab, enable the MESSAGE CONTENT INTENT under Privileged Gateway Intents",
 		},
 		Validate: func(v map[string]string) (BotIdentity, error) { return validateDiscordToken(v["token"]) },
 		LinkURLs: func(b BotIdentity) LinkTargets {

@@ -45,12 +45,13 @@ func init() {
 		},
 		SetupURL: "https://api.slack.com/apps",
 		SetupSteps: []string{
-			"Create a Slack app at api.slack.com/apps (From scratch)",
-			"Socket Mode → enable it; generate an App-Level Token with connections:write (xapp-...)",
-			"OAuth & Permissions → add bot scopes chat:write, im:history, im:write, files:read; Install to Workspace; copy the Bot Token (xoxb-...)",
-			"Event Subscriptions → enable; subscribe to bot event message.im; reinstall if prompted",
-			"App Home → Messages Tab → enable it and check 'Allow users to send Slash commands and messages from the messages tab'",
-			"Paste BOTH tokens here, then DM your bot /start",
+			"Create a Slack app at api.slack.com/apps, choosing From scratch",
+			"Open Socket Mode and enable it",
+			"Generate an App-Level Token with the connections:write scope, then copy the xapp- token",
+			"Open OAuth & Permissions and add the bot scopes chat:write, im:history, im:write and files:read",
+			"Click Install to Workspace, then copy the xoxb- Bot Token",
+			"Open Event Subscriptions, enable it, and subscribe to the bot event message.im",
+			"Open App Home, enable the Messages Tab, and allow users to send messages from it",
 		},
 		Validate: func(v map[string]string) (BotIdentity, error) {
 			if v["app_token"] == "" {
