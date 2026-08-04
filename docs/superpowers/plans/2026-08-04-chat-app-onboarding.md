@@ -18,6 +18,18 @@
 - Conventional Commits (`type(scope): summary`). Branch `worktree-chat-onboarding-spec`; never commit to `main`.
 - Go tests: `go test ./... -count=1`. Frontend: `cd web/ui && npx vitest run`.
 
+### Concurrency: another branch is being implemented in parallel
+
+`worktree-oauth-cred-labels` is adding per-provider OAuth credential field labels. Its file set and this one's are disjoint **except for a single file**:
+
+> **`web/ui/src/lib/connections.ts` is shared.** That branch edits the **Services** half (`ServiceProvider`, `ServiceConnection`, the `/api/v1/services` hooks — everything below the `// ── Services …` divider). This branch edits only the **Connectors** half (`ConnectorField`, `ConnectorPlatform`, `useConnectors`/`useSaveConnector`/`useDeleteConnector`/`useTestConnector`, plus the two new chat-app hooks appended immediately after `useTestConnector`).
+
+Rules that keep the merge clean:
+
+- Confine every edit to the Connectors half. Add the new hooks directly after `useTestConnector`, **above** the Services divider — never at the end of the file.
+- Do not reorder, reformat, re-sort imports, or run a formatter across the whole file. A whole-file reformat turns a trivially-mergeable change into a conflict in every hunk.
+- `ServiceWizard.tsx` belongs to that branch; this branch touches `ChatAppWizard.tsx` and `ConnectionsPage.tsx` only. If a task appears to need a `ServiceWizard.tsx` change, stop — it is out of scope.
+
 ## File Structure
 
 | File | Responsibility | Task |
