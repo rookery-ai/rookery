@@ -199,6 +199,17 @@ func TestAPIConnectors_GET_BuildsDiscordInviteFromStoredIdentity(t *testing.T) {
 	cookies := bootstrapAndLogin(t, s)
 	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
 
+	// Identity/link fields are only surfaced while the platform is actually
+	// connected (see TestAPIConnectors_GET_DisconnectedPlatformReportsNoIdentity),
+	// so this needs a real connection row alongside the stored identity setting.
+	if err := database.UpsertPlatformConnection(&db.PlatformConnection{
+		ID:          "conn-discord",
+		WorkspaceID: wsID,
+		Platform:    "discord",
+		Active:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	encoded, err := gateway.BotIdentity{Username: "rookery_bot", UserID: "42"}.MarshalSetting()
 	if err != nil {
 		t.Fatal(err)
@@ -254,6 +265,17 @@ func TestAPIConnectors_Unlink_KeepsCredentialsAndClearsPrimary(t *testing.T) {
 	cookies := bootstrapAndLogin(t, s)
 	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
 
+	// Seed a real credentials row so "keeps credentials" is actually exercised —
+	// without this, an implementation that also deleted the connection would
+	// pass this test just as well.
+	if err := database.UpsertPlatformConnection(&db.PlatformConnection{
+		ID:          "conn-1",
+		WorkspaceID: wsID,
+		Platform:    "discord",
+		Active:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
 		ID: "id1", WorkspaceID: wsID, Platform: "discord", PlatformUserID: "u1",
 	}); err != nil {
@@ -275,8 +297,83 @@ func TestAPIConnectors_Unlink_KeepsCredentialsAndClearsPrimary(t *testing.T) {
 	if len(rows) != 0 {
 		t.Fatalf("identity survived unlink: %+v", rows)
 	}
+	// The credentials themselves must survive — unlink only removes the
+	// operator's identity link, so a wrong link stays self-serviceable.
+	conn, err := database.GetPlatformConnection(wsID, "discord")
+	if err != nil {
+		t.Fatalf("credentials did not survive unlink: %v", err)
+	}
+	if !conn.Active {
+		t.Fatalf("credentials survived unlink but were deactivated: %+v", conn)
+	}
 	// A primary naming a now-unlinked platform must not persist.
 	if got, _ := database.GetSetting(wsID, gateway.PrimaryPlatformSettingKey); got != "" {
 		t.Fatalf("stale primary survived: %q", got)
+	}
+}
+
+// TestAPIConnectors_GET_PrimaryFallback_PicksFirstLinked links two platforms
+// with the primary setting left unset and asserts the FIRST-linked one is
+// reported primary. Discord is inserted first and telegram second, and
+// "discord" < "telegram" alphabetically — so this is deterministic under
+// ListPlatformIdentities' `ORDER BY linked_at, platform, id` regardless of
+// whether the two inserts land in the same one-second linked_at bucket or not:
+// if linked_at differs, chronological order (discord first) wins; if it ties,
+// alphabetical order (discord < telegram) wins. Either column names the same
+// row, so there is no flake window.
+func TestAPIConnectors_GET_PrimaryFallback_PicksFirstLinked(t *testing.T) {
+	s, database := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+		ID: "id-discord", WorkspaceID: wsID, Platform: "discord", PlatformUserID: "u-discord",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+		ID: "id-telegram", WorkspaceID: wsID, Platform: "telegram", PlatformUserID: "u-telegram",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// No primary setting written — this is the fallback path.
+	list := decodeConnectorList(t, doJSON(t, s, http.MethodGet, "/api/v1/connectors", nil, cookies))
+	dc := findPlatform(t, list, "discord")
+	tg := findPlatform(t, list, "telegram")
+	if !dc.Primary {
+		t.Fatalf("expected discord (first-linked) to be primary; discord=%+v telegram=%+v", dc, tg)
+	}
+	if tg.Primary {
+		t.Fatalf("telegram should not be primary when discord was linked first: %+v", tg)
+	}
+}
+
+// TestAPIConnectors_GET_DisconnectedPlatformReportsNoIdentity pins the fix for
+// a regression: identity/link fields must come from an ACTIVE connection, not
+// merely a leftover bot_identity setting from a previous connect. A platform
+// with no platform_connections row must report empty identity, dm_url and
+// invite_url even when the setting is still present.
+func TestAPIConnectors_GET_DisconnectedPlatformReportsNoIdentity(t *testing.T) {
+	s, database := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	encoded, err := gateway.BotIdentity{Username: "rookery_bot", UserID: "42"}.MarshalSetting()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SetSetting(wsID, gateway.BotIdentitySettingKey("discord"), encoded); err != nil {
+		t.Fatal(err)
+	}
+	// Deliberately no platform_connections row for discord.
+
+	list := decodeConnectorList(t, doJSON(t, s, http.MethodGet, "/api/v1/connectors", nil, cookies))
+	dc := findPlatform(t, list, "discord")
+	if dc.Connected {
+		t.Fatalf("discord should not report connected: %+v", dc)
+	}
+	if dc.Identity != "" || dc.DMURL != "" || dc.InviteURL != "" {
+		t.Fatalf("disconnected platform must not surface a stale identity/links: %+v", dc)
 	}
 }

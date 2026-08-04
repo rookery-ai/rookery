@@ -115,13 +115,16 @@ func (s *Server) connectorPlatformList(u *db.Workspace) []apiConnectorPlatform {
 
 		if conn, err := s.db.GetPlatformConnection(u.ID, spec.Platform); err == nil {
 			entry.Connected = conn.Active
-		}
 
-		bot := gateway.BotIdentityFromSetting(mustSetting(s, u.ID, gateway.BotIdentitySettingKey(spec.Platform)))
-		entry.Identity = bot.Username
-		if spec.LinkURLs != nil {
-			targets := spec.LinkURLs(bot)
-			entry.DMURL, entry.InviteURL = targets.DMURL, targets.InviteURL
+			// Without credentials there is no bot, so a username and an
+			// invite link would be stale artefacts of a previous connection —
+			// only surface them while the platform is actually connected.
+			bot := gateway.BotIdentityFromSetting(mustSetting(s, u.ID, gateway.BotIdentitySettingKey(spec.Platform)))
+			entry.Identity = bot.Username
+			if spec.LinkURLs != nil {
+				targets := spec.LinkURLs(bot)
+				entry.DMURL, entry.InviteURL = targets.DMURL, targets.InviteURL
+			}
 		}
 
 		if id, ok := linkedBy[spec.Platform]; ok {
@@ -196,6 +199,9 @@ func (s *Server) apiDeleteConnector(c echo.Context) error {
 	if err := s.db.DeletePlatformConnection(u.ID, platform); err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", "failed to delete connector")
 	}
+	// A disconnected platform must not retain a bot identity — best-effort,
+	// like the write side; a failure here must not fail the disconnect.
+	_ = s.db.SetSetting(u.ID, gateway.BotIdentitySettingKey(platform), "")
 
 	s.audit.Log(u.ID, "disconnect_platform", "platform:"+platform, "", c.RealIP())
 	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
