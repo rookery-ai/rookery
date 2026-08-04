@@ -63,6 +63,11 @@ type Handlers = {
   save?: (body: { platform: string; values: Record<string, string> }) => Response;
   test?: (platform: string) => Response;
   del?: (platform: string) => Response;
+  // GET /api/v1/connectors — only needed by tests that reach the link step's
+  // polling read (LinkStep, whether via ConnectWizard or Manage's unlinked
+  // branch). Every other test's default fallback response ({}) is harmless
+  // there because ConnectorPlatform.find falls back to the static prop.
+  list?: () => Response;
 };
 
 function mockFetch(handlers: Handlers = {}) {
@@ -73,6 +78,10 @@ function mockFetch(handlers: Handlers = {}) {
       const method = init?.method ?? "GET";
 
       if (url === "/api/v1/auth/session") return Promise.resolve(jsonResponse(SESSION_FIXTURE));
+
+      if (url === "/api/v1/connectors" && method === "GET") {
+        return Promise.resolve(handlers.list ? handlers.list() : jsonResponse({}));
+      }
 
       if (url === "/api/v1/connectors" && method === "POST") {
         const body = init?.body ? JSON.parse(String(init.body)) : { platform: "", values: {} };
@@ -239,7 +248,7 @@ test("save posts {platform, values}; 400 invalid_credentials shows inline error 
   expect(screen.getByLabelText("Bot token")).toBeInTheDocument();
 });
 
-test("save success carries a warning through to the link step; test auto-fires ok and advances automatically (no premature Done)", async () => {
+test("save success carries a warning to the test step; test auto-fires ok; Next advances to the link step (no premature Done)", async () => {
   mockFetch({
     save: () => jsonResponse({ ok: true, identity: "@bot", warning: "bot failed to start" }),
     test: () => jsonResponse({ ok: true, identity: "@bot" }),
@@ -253,13 +262,19 @@ test("save success carries a warning through to the link step; test auto-fires o
   await user.click(screen.getByRole("button", { name: /save/i }));
 
   expect(await screen.findByText(/bot failed to start/)).toBeInTheDocument();
-  // A successful token test is not proof the integration works — the wizard
-  // must land on the link step, not a Done button, once the test succeeds.
-  expect(await screen.findByText(/waiting for you to send/i)).toBeInTheDocument();
+  expect(await screen.findByText(/Connected as @bot/)).toBeInTheDocument();
+
+  // A successful token test is not proof the integration works — Next (not
+  // Done) is what's offered, and it lands on the link step, not a green
+  // completion state.
   expect(screen.queryByRole("button", { name: /^done$/i })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /^next$/i }));
+  expect(await screen.findByText(/waiting for you to send/i)).toBeInTheDocument();
+  // The warning carries through to the link step too.
+  expect(screen.getByText(/bot failed to start/)).toBeInTheDocument();
 });
 
-test("test step failure shows the error and Retry re-fires the test call, landing on the link step once it succeeds", async () => {
+test("test step failure shows the error and Retry re-fires the test call; Next then lands on the link step", async () => {
   let calls = 0;
   mockFetch({
     save: () => jsonResponse({ ok: true, identity: "@bot" }),
@@ -280,8 +295,11 @@ test("test step failure shows the error and Retry re-fires the test call, landin
 
   expect(await screen.findByText("connection refused")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: /retry/i }));
-  expect(await screen.findByText(/waiting for you to send/i)).toBeInTheDocument();
+  expect(await screen.findByText(/Connected as @bot/)).toBeInTheDocument();
   expect(calls).toBe(2);
+
+  await user.click(screen.getByRole("button", { name: /^next$/i }));
+  expect(await screen.findByText(/waiting for you to send/i)).toBeInTheDocument();
 });
 
 test("connected platform opens the Manage view: identity shown, Test connection ok/fail branches", async () => {
@@ -355,6 +373,9 @@ test("shows no Done button and no success state while unlinked", async () => {
   await userEvent.click(screen.getByRole("button", { name: /next/i }));
   await userEvent.type(screen.getByLabelText(/bot token/i), "tok");
   await userEvent.click(screen.getByRole("button", { name: /save & continue/i }));
+  // The token test succeeds — that's not proof of a real link, so it offers
+  // Next (not Done) into the step that waits for the actual handshake.
+  await userEvent.click(await screen.findByRole("button", { name: /^next$/i }));
 
   // Step 4 is reached but unlinked: the wizard must not offer completion.
   expect(await screen.findByText(/waiting for you to send/i)).toBeInTheDocument();
@@ -379,7 +400,67 @@ test("the escape hatch never reads as success", async () => {
   await userEvent.click(screen.getByRole("button", { name: /next/i }));
   await userEvent.type(screen.getByLabelText(/bot token/i), "tok");
   await userEvent.click(screen.getByRole("button", { name: /save & continue/i }));
+  await userEvent.click(await screen.findByRole("button", { name: /^next$/i }));
 
   const escape = await screen.findByRole("button", { name: /finish later/i });
   expect(escape).toHaveTextContent(/not linked/i);
+});
+
+// ── connected-but-unlinked routing: Manage must not skip the link gate ─────
+//
+// A platform can be `connected` (the saved token authenticates) without
+// being `linked` (the operator never sent /start, or unlinked). That state
+// must open the Manage entry point — Disconnect has to stay reachable — but
+// must show the link step in place of the green "Connected" header, never
+// both a green header AND an unlinked state.
+
+test("a connected-but-unlinked platform opens on the link step, not the green Connected header, and keeps Disconnect reachable", async () => {
+  renderWizard(LINK_STEP_PLATFORM); // connected: true, linked: false
+
+  expect(await screen.findByText(/waiting for you to send/i)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^done$/i })).not.toBeInTheDocument();
+  expect(screen.queryByText(/^connected$/i)).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /disconnect/i })).toBeInTheDocument();
+});
+
+test("a connected and linked platform reaches the normal Manage panel with its identity header", async () => {
+  renderWizard({ ...LINK_STEP_PLATFORM, linked: true, linked_identity: "ilija#4821" });
+
+  expect(await screen.findByText("rookery_bot")).toBeInTheDocument();
+  expect(screen.getByText(/ilija#4821/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /test connection/i })).toBeInTheDocument();
+  expect(screen.queryByText(/waiting for you to send/i)).not.toBeInTheDocument();
+});
+
+// ── Done actually closes the panel ──────────────────────────────────────────
+//
+// renderWizard mounts ChatAppWizard directly, so close() is a no-op there —
+// these assert through wrap()/Opener, which opens the real slide-over.
+
+test("Manage: Done closes the panel", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap(CONNECTED); // linked: true
+
+  await user.click(screen.getByText("open wizard"));
+  expect(await screen.findByText("@rookie_assistant_bot")).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: /^done$/i }));
+  expect(screen.queryByText("@rookie_assistant_bot")).not.toBeInTheDocument();
+});
+
+test("Manage's link step: Done closes the panel once the identity row appears", async () => {
+  const unlinked: ConnectorPlatform = { ...CONNECTED, linked: false, linked_identity: "" };
+  mockFetch({
+    list: () =>
+      jsonResponse({
+        platforms: [{ ...unlinked, linked: true, linked_identity: "@ilija" }],
+      }),
+  });
+  const user = userEvent.setup();
+  wrap(unlinked);
+
+  await user.click(screen.getByText("open wizard"));
+  await user.click(await screen.findByRole("button", { name: /^done$/i }));
+  expect(screen.queryByText(/@ilija/)).not.toBeInTheDocument();
 });

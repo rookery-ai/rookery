@@ -208,15 +208,9 @@ function LinkStep({
 
 // ── Not-connected: 4-step guided wizard ─────────────────────────────────────
 
-function ConnectWizard({
-  platform,
-  initialStep,
-}: {
-  platform: ConnectorPlatform;
-  initialStep?: Step;
-}) {
+function ConnectWizard({ platform }: { platform: ConnectorPlatform }) {
   const { close } = useSlideOver();
-  const [step, setStep] = useState<Step>(initialStep ?? "setup");
+  const [step, setStep] = useState<Step>("setup");
   const [values, setValues] = useState<Record<string, string>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -229,12 +223,6 @@ function ConnectWizard({
     if (step === "test") testMutation.mutate(platform.platform);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
-
-  // A token check is not proof the integration works — only advance past it
-  // automatically into the step that waits for the real /start handshake.
-  useEffect(() => {
-    if (step === "test" && testMutation.data?.ok) setStep("link");
-  }, [step, testMutation.data]);
 
   async function handleSave() {
     setSaveError(null);
@@ -332,20 +320,24 @@ function ConnectWizard({
                 : "Something went wrong"}
             </ErrorNote>
           )}
-          {/* testOk === true never lingers here — the effect above advances
-              to the link step the moment the mutation resolves, so a green
-              "Connected" state is never the final word. */}
-          {testOk === false && !testMutation.isPending && (
-            <div className="flex justify-end">
-              <Button
-                variant="outline"
-                onClick={() => testMutation.mutate(platform.platform)}
-              >
-                <RotateCcw />
-                Retry
+          <div className="flex justify-end">
+            {testOk === true ? (
+              <Button onClick={() => setStep("link")}>
+                <ArrowRight />
+                Next
               </Button>
-            </div>
-          )}
+            ) : (
+              !testMutation.isPending && (
+                <Button
+                  variant="outline"
+                  onClick={() => testMutation.mutate(platform.platform)}
+                >
+                  <RotateCcw />
+                  Retry
+                </Button>
+              )
+            )}
+          </div>
         </div>
       )}
 
@@ -386,36 +378,49 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
 
   return (
     <PanelBody>
-      <div className="space-y-1">
-        <div className="flex items-center gap-1.5 text-sm font-medium text-ok">
-          <span className="size-1.5 rounded-full bg-ok" /> Connected
-        </div>
-        {platform.identity && (
-          <div className="text-xs text-muted-2">{platform.identity}</div>
-        )}
-        {platform.linked && (
-          <div className="flex items-center gap-1.5 text-sm font-medium text-ok">
-            <Check className="size-4" /> Linked as {platform.linked_identity}
+      {/* A connected-but-unlinked platform must never show this green header
+          — that's the same "Connected ✓" claim the link step exists to
+          withhold, just reachable from Manage instead of the connect flow.
+          Disconnect stays reachable in BOTH branches below: a token that
+          authenticates as the wrong bot still has to be removable. */}
+      {platform.linked ? (
+        <>
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 text-sm font-medium text-ok">
+              <span className="size-1.5 rounded-full bg-ok" /> Connected
+            </div>
+            {platform.identity && (
+              <div className="text-xs text-muted-2">{platform.identity}</div>
+            )}
+            <div className="flex items-center gap-1.5 text-sm font-medium text-ok">
+              <Check className="size-4" /> Linked as {platform.linked_identity}
+            </div>
           </div>
-        )}
-      </div>
 
-      <Button
-        variant="outline"
-        onClick={() => testMutation.mutate(platform.platform)}
-        disabled={testMutation.isPending}
-      >
-        <Link2 />
-        {testMutation.isPending ? "Checking…" : "Test connection"}
-      </Button>
+          <Button
+            variant="outline"
+            onClick={() => testMutation.mutate(platform.platform)}
+            disabled={testMutation.isPending}
+          >
+            <Link2 />
+            {testMutation.isPending ? "Checking…" : "Test connection"}
+          </Button>
 
-      <TestResult
-        platform={platform.label}
-        pending={testMutation.isPending}
-        ok={testOk}
-        identity={testMutation.data?.identity}
-        error={testMutation.data?.error}
-      />
+          <TestResult
+            platform={platform.label}
+            pending={testMutation.isPending}
+            ok={testOk}
+            identity={testMutation.data?.identity}
+            error={testMutation.data?.error}
+          />
+        </>
+      ) : (
+        <LinkStep
+          platform={platform}
+          onFinishLater={() => close()}
+          onDone={() => close()}
+        />
+      )}
 
       <div className="border-t border-border pt-3">
         {!confirming ? (
@@ -456,23 +461,23 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
         {disconnectError && <ErrorNote>{disconnectError}</ErrorNote>}
       </div>
 
-      <div className="flex justify-end">
-        <Button onClick={() => close()}>Done</Button>
-      </div>
+      {platform.linked && (
+        <div className="flex justify-end">
+          <Button onClick={() => close()}>Done</Button>
+        </div>
+      )}
     </PanelBody>
   );
 }
 
 // ── Entry point ──────────────────────────────────────────────────────────────
-//
-// `connected` only proves the token authenticates. A connected-but-unlinked
-// platform still routes back into the wizard's link step, not Manage — Manage
-// (and its Done button) is reserved for a platform the operator has actually
-// linked, so a stale/never-linked connection can never present as green.
+
 export function ChatAppWizard({ platform }: ChatAppWizardProps) {
-  if (!platform.connected) return <ConnectWizard platform={platform} />;
-  if (!platform.linked) return <ConnectWizard platform={platform} initialStep="link" />;
-  return <ManageWizard platform={platform} />;
+  return platform.connected ? (
+    <ManageWizard platform={platform} />
+  ) : (
+    <ConnectWizard platform={platform} />
+  );
 }
 
 export default ChatAppWizard;
