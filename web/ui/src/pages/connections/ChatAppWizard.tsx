@@ -12,6 +12,7 @@ import {
   useSaveConnector,
   useTestConnector,
   useDeleteConnector,
+  useUnlinkConnector,
   type ConnectorPlatform,
 } from "@/lib/connections";
 import { ConnectorCredentialsFields } from "./ConnectorCredentialsFields";
@@ -361,6 +362,7 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
 
   const testMutation = useTestConnector();
   const deleteMutation = useDeleteConnector();
+  const unlinkMutation = useUnlinkConnector();
 
   async function handleDisconnect() {
     setDisconnectError(null);
@@ -396,6 +398,22 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
               <Check className="size-4" /> Linked as {platform.linked_identity}
             </div>
           </div>
+
+          {/* Unlink drops the operator's /start link but keeps the saved bot
+              credentials — the platform falls back to connected-but-unlinked,
+              not disconnected. This is what makes a wrong link
+              self-serviceable instead of a dead end ("contact your
+              administrator" in a single-owner product). Distinct from
+              Disconnect below, which does remove credentials. */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => unlinkMutation.mutate(platform.platform)}
+            disabled={unlinkMutation.isPending}
+          >
+            <Unlink />
+            {unlinkMutation.isPending ? "Unlinking…" : "Unlink this account"}
+          </Button>
 
           <Button
             variant="outline"

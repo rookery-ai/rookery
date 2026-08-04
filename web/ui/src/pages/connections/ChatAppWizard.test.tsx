@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router";
@@ -68,6 +68,9 @@ type Handlers = {
   // branch). Every other test's default fallback response ({}) is harmless
   // there because ConnectorPlatform.find falls back to the static prop.
   list?: () => Response;
+  // DELETE /api/v1/connectors/:platform/identity — Unlink. Distinct from
+  // `del` (Disconnect), which hits the bare platform path.
+  unlink?: (platform: string) => Response;
 };
 
 function mockFetch(handlers: Handlers = {}) {
@@ -96,6 +99,13 @@ function mockFetch(handlers: Handlers = {}) {
           handlers.test
             ? handlers.test(testMatch[1])
             : jsonResponse({ ok: true, identity: "identity-x" }),
+        );
+      }
+
+      const unlinkMatch = url.match(/^\/api\/v1\/connectors\/([^/]+)\/identity$/);
+      if (unlinkMatch && method === "DELETE") {
+        return Promise.resolve(
+          handlers.unlink ? handlers.unlink(unlinkMatch[1]) : jsonResponse({ ok: true }),
         );
       }
 
@@ -347,6 +357,48 @@ test("Manage: Disconnect asks for confirmation; confirming deletes and closes th
 
   expect(deletedPlatform).toBe("telegram");
   expect(screen.queryByText(/@rookie_assistant_bot/)).not.toBeInTheDocument();
+});
+
+// ── Unlink: self-serviceable re-link, distinct from Disconnect ─────────────
+//
+// Unlink drops the operator's /start handshake but keeps the saved bot
+// credentials — the router otherwise answers a re-link attempt with "contact
+// your administrator", a dead end in a single-owner product.
+
+test("Manage (linked): Unlink calls the identity-removal endpoint, leaving Disconnect untouched", async () => {
+  let unlinkedPlatform: string | null = null;
+  mockFetch({
+    unlink: (platform) => {
+      unlinkedPlatform = platform;
+      return jsonResponse({ ok: true });
+    },
+  });
+  const user = userEvent.setup();
+  wrap(CONNECTED);
+
+  await user.click(screen.getByText("open wizard"));
+  expect(await screen.findByText("@rookie_assistant_bot")).toBeInTheDocument();
+
+  const unlinkButton = screen.getByRole("button", { name: /unlink this account/i });
+  await user.click(unlinkButton);
+
+  await waitFor(() => expect(unlinkedPlatform).toBe("telegram"));
+  // Disconnect (which does remove credentials) is a separate control and
+  // stays reachable.
+  expect(screen.getByRole("button", { name: /disconnect/i })).toBeInTheDocument();
+});
+
+test("Manage (not yet linked): no Unlink button — there is no link to remove", async () => {
+  mockFetch();
+  const user = userEvent.setup();
+  wrap({ ...CONNECTED, linked: false, linked_identity: "" });
+
+  await user.click(screen.getByText("open wizard"));
+  await screen.findByRole("button", { name: /disconnect/i });
+
+  expect(
+    screen.queryByRole("button", { name: /unlink this account/i }),
+  ).not.toBeInTheDocument();
 });
 
 // ── Step 4: Link your account ───────────────────────────────────────────────

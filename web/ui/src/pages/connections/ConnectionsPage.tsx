@@ -24,6 +24,7 @@ import { ServiceWizard } from "./ServiceWizard";
 import {
   useConnectors,
   useServices,
+  useSetPrimaryConnector,
   type ConnectorPlatform,
   groupByCategory,
   type ServiceProvider,
@@ -114,6 +115,28 @@ function EmptyNote({ text }: { text: string }) {
 
 // ── Chat apps ────────────────────────────────────────────────────────────
 
+// `connected` means the saved token authenticates; `linked` means the
+// operator's /start handshake completed and the integration is actually
+// usable. A connected-but-unlinked platform must never render green — this
+// is the invariant the whole onboarding fix exists to enforce, and the card
+// badge was the last place it wasn't.
+function ChatAppStatus({ app }: { app: ConnectorPlatform }) {
+  if (!app.connected) return <span className="text-xs text-muted-2">Not connected</span>;
+  if (!app.linked)
+    return (
+      <span className="flex items-center gap-1.5 text-xs font-medium text-warn">
+        <span className="size-1.5 rounded-full bg-warn" />
+        Not linked yet
+      </span>
+    );
+  return (
+    <span className="flex items-center gap-1.5 text-xs font-medium text-ok">
+      <span className="size-1.5 rounded-full bg-ok" />
+      Linked as {app.linked_identity}
+    </span>
+  );
+}
+
 function ChatAppCard({
   platform,
   onOpen,
@@ -127,13 +150,7 @@ function ChatAppCard({
         <ProviderLogo name={platform.platform} size={34} />
         <div className="min-w-0">
           <div className="truncate font-semibold">{platform.label}</div>
-          {platform.connected ? (
-            <div className="flex items-center gap-1 text-xs text-ok">
-              <span className="size-1.5 rounded-full bg-ok" /> Connected
-            </div>
-          ) : (
-            <div className="text-xs text-muted-2">Not connected</div>
-          )}
+          <ChatAppStatus app={platform} />
         </div>
       </div>
       {platform.connected && platform.identity && (
@@ -377,6 +394,15 @@ export default function ConnectionsPage() {
   const searchKeysQuery = useSearchKeys();
 
   const platforms = connectorsQuery.data?.platforms ?? [];
+  // The primary-delivery chooser only makes sense for apps the operator can
+  // actually reach — an unlinked app offered a radio would 400 server-side
+  // the moment it's picked. Derived off the full (unfiltered) list so the
+  // search box narrowing the card grid doesn't also hide this control.
+  const linkedApps = useMemo(
+    () => platforms.filter((p) => p.linked),
+    [platforms],
+  );
+  const setPrimary = useSetPrimaryConnector();
   const services = servicesQuery.data?.providers ?? [];
   const summary = servicesQuery.data?.summary;
   const configuredSearchKeysCount = SEARCH_KEY_PROVIDERS.filter(
@@ -564,6 +590,37 @@ export default function ConnectionsPage() {
                 ))}
               </div>
             )}
+
+          {linkedApps.length > 0 && (
+            <div className="mt-4 space-y-2 rounded-lg border border-border p-3">
+              <p className="text-sm font-medium">
+                Where should agent runs and reminders go?
+              </p>
+              {linkedApps.map((app) => (
+                <label
+                  key={app.platform}
+                  className="flex items-center gap-2 text-sm"
+                >
+                  <input
+                    type="radio"
+                    name="primary-chat-app"
+                    checked={app.primary}
+                    onChange={() => setPrimary.mutate(app.platform)}
+                  />
+                  {app.label}
+                </label>
+              ))}
+              <p className="text-xs text-muted-2">
+                {/* The backend always reports exactly one `primary: true`
+                    among linked apps (defaulting to the first-linked one when
+                    unset), so this never needs a client-side "none selected"
+                    fallback — the non-null assertion reflects that
+                    contract. */}
+                Delivered to {linkedApps.find((a) => a.primary)!.label}. You
+                can chat with your agents from any linked app.
+              </p>
+            </div>
+          )}
         </section>
 
         <section ref={servicesRef} className="scroll-mt-4">
