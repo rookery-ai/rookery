@@ -65,6 +65,17 @@ export type ServiceConnection = { id: string; label: string; identity: string; s
 // Mirrors apiServiceConnectInput.
 export type ServiceConnectInput = { key: string; label: string; hint: string; required: boolean };
 
+// Mirrors apiOAuthCreds. What the provider's own developer console calls its OAuth app
+// credentials — Meta says "App ID"/"App Secret", Salesforce "Consumer Key". Each field
+// falls back independently to "Client ID"/"Client secret", which is correct for the
+// eight providers whose console genuinely says that.
+export type OAuthCreds = {
+  id_label?: string;
+  id_hint?: string;
+  secret_label?: string;
+  secret_hint?: string;
+};
+
 // Mirrors apiServiceProvider.
 export type ServiceProvider = {
   name: string;
@@ -80,6 +91,8 @@ export type ServiceProvider = {
   // must not assume "API key". Empty falls back to a generic label.
   key_label?: string;
   key_hint?: string;
+  // Optional so existing test fixtures that omit it still typecheck.
+  oauth_creds?: OAuthCreds;
   has_creds: boolean;
   action_count: number;
   connect_inputs: ServiceConnectInput[];
