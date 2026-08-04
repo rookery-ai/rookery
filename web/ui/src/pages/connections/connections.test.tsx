@@ -179,7 +179,10 @@ function mockFetch() {
 }
 
 // Every ConnectorPlatform field, for tests that only care about a couple of
-// them — spread over it and override.
+// them — spread over it and override. `primary: false` by default: a test
+// that needs a primary app sets it explicitly, so an unlinked entry spread
+// over this fixture never silently describes the impossible
+// `linked: false, primary: true` combination.
 const CHAT_APP_FIXTURE: ConnectorPlatform = {
   platform: "telegram",
   label: "Telegram",
@@ -190,7 +193,7 @@ const CHAT_APP_FIXTURE: ConnectorPlatform = {
   identity: "@bot",
   linked: true,
   linked_identity: "123",
-  primary: true,
+  primary: false,
   dm_url: "",
   invite_url: "",
 };

@@ -611,13 +611,20 @@ export default function ConnectionsPage() {
                 </label>
               ))}
               <p className="text-xs text-muted-2">
-                {/* The backend always reports exactly one `primary: true`
-                    among linked apps (defaulting to the first-linked one when
-                    unset), so this never needs a client-side "none selected"
-                    fallback — the non-null assertion reflects that
-                    contract. */}
-                Delivered to {linkedApps.find((a) => a.primary)!.label}. You
-                can chat with your agents from any linked app.
+                {/* The backend guarantees exactly one `primary: true` among
+                    linked apps, but that's not an invariant this render can
+                    trust blindly: unlink clears the stale primary setting
+                    best-effort (the write can fail while the unlink itself
+                    still reports success), and the list endpoint's two reads
+                    (identities, then the primary setting) aren't
+                    transactional, so a race between tabs/clicks can briefly
+                    return a linked set with no primary. The SPA has no
+                    ErrorBoundary, so a non-null assertion here would blank
+                    the whole page on that transient state instead of just
+                    showing a label that the next refetch corrects. */}
+                Delivered to{" "}
+                {linkedApps.find((a) => a.primary)?.label ?? linkedApps[0].label}
+                . You can chat with your agents from any linked app.
               </p>
             </div>
           )}
