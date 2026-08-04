@@ -359,6 +359,18 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
   const { close } = useSlideOver();
   const [confirming, setConfirming] = useState(false);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
+  const [unlinkError, setUnlinkError] = useState<string | null>(null);
+
+  // `AppShell`'s slide-over is `useState<{node: ReactNode}>`, so the element
+  // ConnectionsPage passes to `open()` is created once and never re-created —
+  // this component's `platform` prop is a frozen snapshot from the moment the
+  // panel opened. Unlink flips `linked` server-side and invalidates the
+  // `["connectors"]` query, but a prop can't observe that; without reading the
+  // live query result here, the green header and Done button below would keep
+  // rendering after a successful Unlink. Mirrors `LinkStep`'s own `live` read.
+  const { data } = useConnectors();
+  const live =
+    data?.platforms?.find((p) => p.platform === platform.platform) ?? platform;
 
   const testMutation = useTestConnector();
   const deleteMutation = useDeleteConnector();
@@ -376,6 +388,17 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
     }
   }
 
+  async function handleUnlink() {
+    setUnlinkError(null);
+    try {
+      await unlinkMutation.mutateAsync(platform.platform);
+    } catch (err) {
+      setUnlinkError(
+        err instanceof ApiError ? err.message : "Something went wrong",
+      );
+    }
+  }
+
   const testOk = testMutation.data ? testMutation.data.ok : null;
 
   return (
@@ -385,17 +408,17 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
           withhold, just reachable from Manage instead of the connect flow.
           Disconnect stays reachable in BOTH branches below: a token that
           authenticates as the wrong bot still has to be removable. */}
-      {platform.linked ? (
+      {live.linked ? (
         <>
           <div className="space-y-1">
             <div className="flex items-center gap-1.5 text-sm font-medium text-ok">
               <span className="size-1.5 rounded-full bg-ok" /> Connected
             </div>
-            {platform.identity && (
-              <div className="text-xs text-muted-2">{platform.identity}</div>
+            {live.identity && (
+              <div className="text-xs text-muted-2">{live.identity}</div>
             )}
             <div className="flex items-center gap-1.5 text-sm font-medium text-ok">
-              <Check className="size-4" /> Linked as {platform.linked_identity}
+              <Check className="size-4" /> Linked as {live.linked_identity}
             </div>
           </div>
 
@@ -408,12 +431,13 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => unlinkMutation.mutate(platform.platform)}
+            onClick={() => void handleUnlink()}
             disabled={unlinkMutation.isPending}
           >
             <Unlink />
             {unlinkMutation.isPending ? "Unlinking…" : "Unlink this account"}
           </Button>
+          {unlinkError && <ErrorNote>{unlinkError}</ErrorNote>}
 
           <Button
             variant="outline"
@@ -434,7 +458,7 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
         </>
       ) : (
         <LinkStep
-          platform={platform}
+          platform={live}
           onFinishLater={() => close()}
           onDone={() => close()}
         />
@@ -479,7 +503,7 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
         {disconnectError && <ErrorNote>{disconnectError}</ErrorNote>}
       </div>
 
-      {platform.linked && (
+      {live.linked && (
         <div className="flex justify-end">
           <Button onClick={() => close()}>Done</Button>
         </div>

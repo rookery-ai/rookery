@@ -388,6 +388,63 @@ test("Manage (linked): Unlink calls the identity-removal endpoint, leaving Disco
   expect(screen.getByRole("button", { name: /disconnect/i })).toBeInTheDocument();
 });
 
+// `AppShell`'s slide-over is a `useState<{node: ReactNode}>`, so the element
+// ConnectionsPage passes to `open()` is created once and never re-created —
+// ManageWizard's `platform` prop is a frozen snapshot from the moment the
+// panel opened. `useUnlinkConnector` invalidates the `["connectors"]` query
+// and the page refetches, but a stale prop can't observe that on its own.
+// This test's `list` handler tracks the DELETE and reports the platform as
+// unlinked afterwards — the fake server, not the frozen prop — the way the
+// real API does.
+test("Manage (linked): after Unlink succeeds, the green header and Done button disappear", async () => {
+  let linked = true;
+  mockFetch({
+    unlink: () => {
+      linked = false;
+      return jsonResponse({ ok: true });
+    },
+    list: () =>
+      jsonResponse({
+        platforms: [
+          { ...CONNECTED, linked, linked_identity: linked ? CONNECTED.linked_identity : "" },
+        ],
+      }),
+  });
+  const user = userEvent.setup();
+  wrap(CONNECTED);
+
+  await user.click(screen.getByText("open wizard"));
+  expect(await screen.findByText(/linked as 123456789/i)).toBeInTheDocument();
+  expect(screen.queryByText(/^connected$/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^done$/i })).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: /unlink this account/i }));
+
+  await waitFor(() =>
+    expect(screen.queryByText(/linked as 123456789/i)).not.toBeInTheDocument(),
+  );
+  expect(screen.queryByText(/^connected$/i)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^done$/i })).not.toBeInTheDocument();
+  // Falls through to the link step, proving the panel re-read live state
+  // rather than just hiding the old one.
+  expect(await screen.findByText(/waiting for you to send/i)).toBeInTheDocument();
+});
+
+test("Manage (linked): a failed Unlink surfaces an inline error instead of silently no-opping", async () => {
+  mockFetch({
+    unlink: () => jsonResponse({ error: { code: "server_error", message: "unlink failed" } }, 500),
+  });
+  const user = userEvent.setup();
+  wrap(CONNECTED);
+
+  await user.click(screen.getByText("open wizard"));
+  await user.click(await screen.findByRole("button", { name: /unlink this account/i }));
+
+  expect(await screen.findByText("unlink failed")).toBeInTheDocument();
+  // The green header is untouched — the unlink never actually took effect.
+  expect(screen.getByText(/linked as 123456789/i)).toBeInTheDocument();
+});
+
 test("Manage (not yet linked): no Unlink button — there is no link to remove", async () => {
   mockFetch();
   const user = userEvent.setup();

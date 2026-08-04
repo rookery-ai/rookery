@@ -471,6 +471,32 @@ test("no linked apps: the primary chooser is omitted entirely", async () => {
   ).not.toBeInTheDocument();
 });
 
+// Disconnect removes the credentials row but not the identity row, so a
+// platform can read `linked: true` while `connected: false` — the card shows
+// "Not connected" but the identity from a past link is still on file. That
+// combination must not be offered as a delivery target: filtering `linked`
+// alone would 400 the moment it's picked, since there's no live connection
+// left to deliver through.
+test("a linked-but-disconnected app (Disconnect removed the credentials) gets no radio", async () => {
+  renderConnections([
+    {
+      ...CHAT_APP_FIXTURE,
+      platform: "discord",
+      label: "Discord",
+      connected: false,
+      linked: true,
+      linked_identity: "ilija#4821",
+      primary: false,
+    },
+  ]);
+
+  await screen.findByText("Not connected");
+  expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(/where should agent runs and reminders go/i),
+  ).not.toBeInTheDocument();
+});
+
 test("shows an error banner when the services list fails to load", async () => {
   servicesStatus = 500;
   mockFetch();

@@ -71,7 +71,7 @@ func init() {
 				// DM-only bot needs none. It also creates no role on join and
 				// the consent screen asks for nothing.
 				InviteURL: "https://discord.com/api/oauth2/authorize?client_id=" +
-					b.UserID + "&scope=bot&permissions=0",
+					url.QueryEscape(b.UserID) + "&scope=bot&permissions=0",
 			}
 		},
 	})

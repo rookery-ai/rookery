@@ -398,10 +398,12 @@ export default function ConnectionsPage() {
   // actually reach — an unlinked app offered a radio would 400 server-side
   // the moment it's picked. Derived off the full (unfiltered) list so the
   // search box narrowing the card grid doesn't also hide this control.
-  const linkedApps = useMemo(
-    () => platforms.filter((p) => p.linked),
-    [platforms],
-  );
+  // Requires BOTH flags: Disconnect removes the credentials row but leaves
+  // the identity row in place, so `linked` alone can outlive `connected` —
+  // an identity outlives its credentials, so link state alone does not mean
+  // the app can still be delivered to. `platforms` is a fresh array on every
+  // render, so memoizing this filter over it bought nothing.
+  const linkedApps = platforms.filter((p) => p.linked && p.connected);
   const setPrimary = useSetPrimaryConnector();
   const services = servicesQuery.data?.providers ?? [];
   const summary = servicesQuery.data?.summary;

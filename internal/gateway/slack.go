@@ -63,8 +63,9 @@ func init() {
 			if b.UserID == "" || b.TeamID == "" {
 				return LinkTargets{}
 			}
-			// The slack:// scheme opens the desktop app; browser-only users get
-			// the app.slack.com equivalent, which resolves the same DM.
+			// A single https://app.slack.com/client/<team>/<user> deep link
+			// resolves the same DM whether it's opened by the desktop app or a
+			// browser — no separate slack:// scheme is used.
 			return LinkTargets{DMURL: "https://app.slack.com/client/" + b.TeamID + "/" + b.UserID}
 		},
 	})
