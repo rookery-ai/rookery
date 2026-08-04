@@ -42,12 +42,14 @@ function catalog(overrides: Partial<CoderCatalogEntry> = {}): CoderCatalogEntry[
   return [
     {
       name: "openrouter",
+      label: "OpenRouter",
       base: "https://openrouter.ai/api/v1",
       model: "glm-5.2",
       docs: "https://openrouter.ai/keys",
       requiresKey: true,
       custom: false,
       hasKey: false,
+      group: "hosted",
       ...overrides,
     },
   ];
@@ -74,7 +76,7 @@ test("hasKey shows the green 'Key saved' state", () => {
 
 test("requiresKey===false shows a muted 'No key needed' state and is not expandable", async () => {
   const entries: CoderCatalogEntry[] = [
-    { name: "ollama_local", base: "http://localhost:11434/v1", model: "qwen2.5-coder", docs: "https://docs.ollama.com", requiresKey: false, custom: false, hasKey: false },
+    { name: "ollama_local", label: "Ollama (Local)", base: "http://localhost:11434/v1", model: "qwen2.5-coder", docs: "https://docs.ollama.com", requiresKey: false, custom: false, hasKey: false, group: "local" },
   ];
   wrap(entries);
   expect(screen.getByText("No key needed")).toBeInTheDocument();

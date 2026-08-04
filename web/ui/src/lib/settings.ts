@@ -49,12 +49,14 @@ export type APIProvider = {
 // the existing template-page JS contract, deliberately not snake_case).
 export type CoderCatalogEntry = {
   name: string;
+  label: string;
   base: string;
   model: string;
   docs: string;
   requiresKey: boolean;
   custom: boolean;
   hasKey: boolean;
+  group: string; // "hosted" | "local" — mirrors coder.GroupHosted/GroupLocal
 };
 
 export type Settings = {

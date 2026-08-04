@@ -23,9 +23,10 @@ const DETECTED: DetectedCoder[] = [
 ];
 
 const CATALOG: CoderCatalogEntry[] = [
-  { name: "openrouter", base: "https://openrouter.ai/api/v1", model: "glm-5.2", docs: "https://openrouter.ai/keys", requiresKey: true, custom: false, hasKey: true },
-  { name: "zai", base: "https://api.z.ai/v1", model: "glm-4.7", docs: "https://z.ai", requiresKey: true, custom: false, hasKey: false },
-  { name: "generic", base: "", model: "", docs: "", requiresKey: true, custom: true, hasKey: false },
+  { name: "openrouter", label: "OpenRouter", base: "https://openrouter.ai/api/v1", model: "glm-5.2", docs: "https://openrouter.ai/keys", requiresKey: true, custom: false, hasKey: true, group: "hosted" },
+  { name: "zai", label: "Z.AI (GLM)", base: "https://api.z.ai/v1", model: "glm-4.7", docs: "https://z.ai", requiresKey: true, custom: false, hasKey: false, group: "hosted" },
+  { name: "ollama_local", label: "Ollama (Local)", base: "http://localhost:11434/v1", model: "qwen2.5-coder", docs: "https://docs.ollama.com", requiresKey: false, custom: false, hasKey: false, group: "local" },
+  { name: "generic", label: "Custom (OpenAI-compatible)", base: "", model: "", docs: "", requiresKey: true, custom: true, hasKey: false, group: "hosted" },
 ];
 
 type Handlers = {

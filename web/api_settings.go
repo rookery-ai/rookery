@@ -67,12 +67,14 @@ func (s *Server) registerSettingsAPI(g *echo.Group) {
 // consume (see coderCatalogSlice below — the sole surviving builder).
 type apiCoderCatalogEntry struct {
 	Name        string `json:"name"`
+	Label       string `json:"label"`
 	Base        string `json:"base"`
 	Model       string `json:"model"`
 	Docs        string `json:"docs"`
 	RequiresKey bool   `json:"requiresKey"`
 	Custom      bool   `json:"custom"`
 	HasKey      bool   `json:"hasKey"`
+	Group       string `json:"group"` // coder.GroupHosted | coder.GroupLocal
 }
 
 // coderCatalogSlice builds the direct-LLM-API provider catalog as a plain slice.
@@ -88,9 +90,11 @@ func (s *Server) coderCatalogSlice(secretNames []string) []apiCoderCatalogEntry 
 	out := make([]apiCoderCatalogEntry, 0, len(cat))
 	for _, p := range cat {
 		out = append(out, apiCoderCatalogEntry{
-			Name: p.Name, Base: llm.DefaultBaseURL(p.Name), Model: p.ModelPlaceholder,
-			Docs: p.DocsURL, RequiresKey: p.RequiresKey, Custom: p.Custom,
+			Name: p.Name, Label: p.Label, Base: llm.DefaultBaseURL(p.Name),
+			Model: p.ModelPlaceholder,
+			Docs:  p.DocsURL, RequiresKey: p.RequiresKey, Custom: p.Custom,
 			HasKey: have[coder.CoderKeySecretName(p.Name)],
+			Group:  p.Group,
 		})
 	}
 	return out
