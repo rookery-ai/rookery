@@ -25,13 +25,13 @@ var slackAPINew = func(botToken string, opts ...slack.Option) *slack.Client {
 	return slack.New(botToken, opts...)
 }
 
-// validateSlackToken confirms a bot token via auth.test, returning the bot user name.
-func validateSlackToken(botToken string) (string, error) {
+// validateSlackToken confirms a bot token via auth.test, returning the bot identity.
+func validateSlackToken(botToken string) (BotIdentity, error) {
 	resp, err := slackAPINew(botToken).AuthTest()
 	if err != nil {
-		return "", fmt.Errorf("slack rejected bot token: %w", err)
+		return BotIdentity{}, fmt.Errorf("slack rejected bot token: %w", err)
 	}
-	return resp.User, nil
+	return BotIdentity{Username: resp.User, UserID: resp.UserID, TeamID: resp.TeamID}, nil
 }
 
 func init() {
@@ -52,11 +52,19 @@ func init() {
 			"App Home → Messages Tab → enable it and check 'Allow users to send Slash commands and messages from the messages tab'",
 			"Paste BOTH tokens here, then DM your bot /start",
 		},
-		Validate: func(v map[string]string) (string, error) {
+		Validate: func(v map[string]string) (BotIdentity, error) {
 			if v["app_token"] == "" {
-				return "", fmt.Errorf("app-level token (xapp-) is required for Socket Mode")
+				return BotIdentity{}, fmt.Errorf("app-level token (xapp-) is required for Socket Mode")
 			}
 			return validateSlackToken(v["token"])
+		},
+		LinkURLs: func(b BotIdentity) LinkTargets {
+			if b.UserID == "" || b.TeamID == "" {
+				return LinkTargets{}
+			}
+			// The slack:// scheme opens the desktop app; browser-only users get
+			// the app.slack.com equivalent, which resolves the same DM.
+			return LinkTargets{DMURL: "https://app.slack.com/client/" + b.TeamID + "/" + b.UserID}
 		},
 	})
 

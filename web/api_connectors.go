@@ -139,7 +139,7 @@ func (s *Server) apiSaveConnector(c echo.Context) error {
 	}
 	s.audit.Log(u.ID, "connect_platform", "platform:"+req.Platform, "", c.RealIP())
 
-	resp := apiSaveConnectorResponse{OK: true, Identity: identity}
+	resp := apiSaveConnectorResponse{OK: true, Identity: identity.Username}
 	if botStartErr != nil {
 		resp.Warning = "Connector saved but bot failed to start: " + botStartErr.Error()
 	}
@@ -184,5 +184,5 @@ func (s *Server) apiTestConnector(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusOK, apiTestConnectorResponse{OK: false, Error: err.Error()})
 	}
-	return c.JSON(http.StatusOK, apiTestConnectorResponse{OK: true, Identity: identity})
+	return c.JSON(http.StatusOK, apiTestConnectorResponse{OK: true, Identity: identity.Username})
 }

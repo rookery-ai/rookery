@@ -46,9 +46,9 @@ func TestValidateDiscordToken(t *testing.T) {
 	discordAPIBase = srv.URL
 	defer func() { discordAPIBase = old }()
 
-	name, err := validateDiscordToken("good-token")
-	if err != nil || name != "MyBot" {
-		t.Fatalf("good token: name=%q err=%v", name, err)
+	identity, err := validateDiscordToken("good-token")
+	if err != nil || identity.Username != "MyBot" || identity.UserID != "1" {
+		t.Fatalf("good token: identity=%+v err=%v", identity, err)
 	}
 	if _, err := validateDiscordToken("bad-token"); err == nil {
 		t.Fatal("bad token must error")
@@ -62,6 +62,35 @@ func TestDiscordSpecRegistered(t *testing.T) {
 	}
 	if spec.Label != "Discord" || len(spec.Fields) != 1 || spec.Fields[0].Key != "token" {
 		t.Fatalf("unexpected discord spec: %+v", spec)
+	}
+}
+
+func TestDiscordLinkURLsBuildInviteWithNoPermissions(t *testing.T) {
+	spec, ok := CredSpecFor("discord")
+	if !ok {
+		t.Fatal("discord spec not registered")
+	}
+	if spec.LinkURLs == nil {
+		t.Fatal("discord spec has no LinkURLs builder")
+	}
+	got := spec.LinkURLs(BotIdentity{Username: "rookery_bot", UserID: "987654321"})
+
+	// permissions=0 is deliberate: guild permissions do not govern 1:1 DMs,
+	// and a no-permission invite creates no role and asks for nothing.
+	want := "https://discord.com/api/oauth2/authorize?client_id=987654321&scope=bot&permissions=0"
+	if got.InviteURL != want {
+		t.Fatalf("InviteURL = %q, want %q", got.InviteURL, want)
+	}
+	if got.DMURL != "https://discord.com/users/987654321" {
+		t.Fatalf("DMURL = %q", got.DMURL)
+	}
+}
+
+func TestDiscordLinkURLsEmptyWithoutBotID(t *testing.T) {
+	spec, _ := CredSpecFor("discord")
+	got := spec.LinkURLs(BotIdentity{})
+	if got.InviteURL != "" || got.DMURL != "" {
+		t.Fatalf("expected empty targets without a bot id, got %+v", got)
 	}
 }
 

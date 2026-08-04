@@ -143,7 +143,9 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 	s.setupRoutes()
 
 	if spec, ok := gateway.CredSpecFor("telegram"); ok && spec.Validate == nil {
-		spec.Validate = func(v map[string]string) (string, error) { return testTelegramToken(v["token"]) }
+		spec.Validate = func(v map[string]string) (gateway.BotIdentity, error) {
+			return testTelegramToken(v["token"])
+		}
 		gateway.RegisterCredSpec(spec)
 	}
 
