@@ -93,3 +93,38 @@ func TestDivergentOAuthLabelsStayDeclared(t *testing.T) {
 		}
 	}
 }
+
+// Two ways a declaration can be wrong without any other test noticing.
+//
+// A whitespace-only value is truthy in the SPA's `label || "Client ID"` fallback, so it
+// renders as a blank label rather than degrading to the default — worse than declaring
+// nothing.
+//
+// And a provider with auth_parent set has no OAuth app of its own: web/api_services.go
+// resolves teams → outlook and google_calendar → google via OAuthProvider() BEFORE reading
+// these labels, so a block on the child is never shown. Leaving one in place would assert
+// something false about where the credentials go, and would look correct in the YAML.
+func TestOAuthCredLabelsAreNonBlank(t *testing.T) {
+	r, err := LoadBundled()
+	if err != nil {
+		t.Fatalf("LoadBundled: %v", err)
+	}
+	for _, name := range r.ProviderNames() {
+		p, _ := r.ProviderByName(name)
+		oc := p.OAuthCreds
+		if p.AuthParent != "" && oc != (OAuthCreds{}) {
+			t.Errorf("%s reuses %s's OAuth app but declares oauth_creds — it would never be read",
+				name, p.AuthParent)
+		}
+		for what, v := range map[string]string{
+			"id_label":     oc.IDLabel,
+			"id_hint":      oc.IDHint,
+			"secret_label": oc.SecretLabel,
+			"secret_hint":  oc.SecretHint,
+		} {
+			if v != "" && strings.TrimSpace(v) == "" {
+				t.Errorf("%s %s is whitespace-only — it renders as a blank label instead of falling back", name, what)
+			}
+		}
+	}
+}
