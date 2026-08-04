@@ -256,7 +256,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/fonts` | The single copy of the UI font (`InterVariable.woff2`, latin subset, ~48 KB). Its own package because `go:embed` cannot reach outside its own directory and TWO consumers need these exact bytes: `internal/export` (which base64-inlines it into exported HTML/PDF) and the SPA (via the `@fonts` Vite alias). A second checked-in copy would drift silently, so there is deliberately only one. A test asserts the embedded bytes are a real woff2 (`wOF2` magic) and not a truncated or LFS-pointer checkout. |
 | `internal/iolimit` | `ReadCapped` + `ErrTooLarge` — the shared capped read every ingest door uses (KB upload, web-chat attachment, Telegram/Discord/Slack attachment, KB bridge, `save_to_kb` URL fetch), all enforcing one 25 MiB cap. Reads `cap+1` and REJECTS rather than truncating: a silently truncated import writes a note whose frontmatter states a byte count that is not the source's. `CappingWriter` is the write-side analogue — bounds a stream written into an `io.Writer` (Slack's `slack.Client.GetFile` insists on an `io.Writer` and has no size bound; there is no stdlib `io.LimitWriter`), rejecting at the same `cap+1` boundary. |
 | `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface: one struct per coder — Claude/OpenCode/Codex/Gemini/Cursor, plus a generic fallback). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host tools (`read_file`/`write_file`/`edit_file`/`list_dir` + read-only discovery `search_files`/`glob` + exec tools `run_script`/`bash`/`web_fetch`/`web_search`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
-| `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
+| `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible, plus ~27 further providers registered against the OpenAI schema — see `coder.APIProviders()`); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
 | `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **91 providers** (Google-family incl. Calendar/Tasks/AdSense/GA4/Search Console, YouTube, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing, `ProviderNames()` backing the connections page), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
 | `internal/buildphase` | Tiny package holding `ROOKERY_BUILD_PHASE`/`generation` marker (set during agent/skill builds; the connector `Execute` build-guard refuses mutating actions when present). Its own package so it outlives any one integration. |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal); `statefile.go` (`StateFilePath`/`ReadState`/`WriteState`/`RenderStateTemplate`) owns an agent's `state.md` format (see "Agent state" below); `migrate_files.go` (`MigrateAgentFilesToMarkdown`) is the idempotent startup migration off the old `state.json`/`agent.json` pair; `ParseRequiredSecrets` (`flow.go`) parses AGENT.md's `# Required secrets:` header — the only source of an agent's declared secrets now that `agent.json` is gone |
@@ -1026,7 +1026,48 @@ Each workspace inlines its own coder config on the `workspaces` row (`coder_kind
 `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`). `coder.ForWorkspace(w, …)`
 builds a `*coder.Coder` from it — a **local** CLI coder or the **api** engine — falling back to the
 system defaults when unset; `coder.DetectInstalled()` probes PATH + `~/.local/bin` for supported
-binaries (claude/claude-code, opencode, codex, cursor) and `coder.APIProviders()` returns a curated catalog of ~16 named providers (OpenAI, Anthropic, OpenRouter, Z.AI, Ollama Cloud/Local, DeepSeek, Groq, xAI, Mistral, Gemini, OpenCode Zen/Go, Perplexity, Moonshot) plus a "Custom (OpenAI-compatible)" escape hatch; base URLs are single-sourced in `internal/llm.DefaultBaseURL(name)` and are not duplicated in the catalog; the coder form accepts an inline API key pasted directly into a settings field, which `coder.PlanKeySecret` transparently stores as an encrypted `CODER_KEY_<PROVIDER>` secret, with an Advanced base-URL override available per provider (required only for Custom). The web `coderForWorkspace(id)` and the runner's injected coder
+binaries (claude/claude-code, opencode, codex, cursor) and `coder.APIProviders()` returns a curated catalog of ~31 named providers in two
+tiers. **Hosted** covers the frontier labs (OpenAI, Anthropic, Gemini, xAI,
+Mistral, DeepSeek, Moonshot, Z.AI), the routers (OpenRouter, OpenCode Zen/Go,
+Perplexity), the enterprise clouds (**AWS Bedrock**, **Alibaba Cloud/Qwen**) and
+the open-weight inference clouds (Groq, Ollama Cloud, Together, Fireworks,
+Cerebras, SambaNova, Nebius, DeepInfra, plus the Hugging Face and GitHub Models
+aggregators). **Local** covers self-hosted OpenAI-compatible servers — Ollama,
+LM Studio, llama.cpp, vLLM, LocalAI and Jan — which need no API key
+(`RequiresKey: false`, enforced as an **iff** against `Group == GroupLocal` by
+`TestAPIProviders_KeylessIsLocalTier`, so a hosted provider cannot forget its
+key requirement and a local one cannot demand a key it does not need).
+`coder.PlanKeySecret` stores `placeholderLocalKey` for that tier, because
+`llm.New` rejects an empty key. A "Custom (OpenAI-compatible)" escape hatch
+remains **last** in the list (`TestAPIProviders_CustomIsGenericAndLast`).
+
+Base URLs are single-sourced in `internal/llm.DefaultBaseURL(name)`, are not
+duplicated in the catalog, and are **always resolved, never templated**:
+`llm.New` assigns the value straight into the HTTP client with no validation,
+so a `{region}` placeholder would satisfy every other test and then fail at
+request time with an opaque DNS error. Bedrock therefore ships `us-east-1` (on
+the `bedrock-mantle` endpoint AWS recommends — the one that takes a Bedrock API
+key as a plain bearer token, with no SigV4 signing, which is the only reason
+Bedrock is a drop-in) and region variation goes through the per-workspace
+override. `TestAPIProviders_BaseURLsAreDialable` pins this.
+
+The coder form accepts an inline API key pasted directly into a settings field,
+which `coder.PlanKeySecret` transparently stores as an encrypted
+`CODER_KEY_<PROVIDER>` secret. The **base-URL override is prefilled** with the
+selected provider's default rather than left blank, auto-expands for the local
+tier, and shows the effective URL on the collapsed Advanced toggle — the
+capability always existed and always persisted, but was undiscoverable behind a
+generic placeholder, so a non-default Ollama port could not be configured in
+practice. An unmodified prefill still posts an empty `base_url`, so a workspace
+keeps following the registry default rather than freezing on today's URL.
+
+**Azure OpenAI and Google Vertex AI are deliberately absent** — see
+`docs/superpowers/specs/2026-08-04-llm-provider-expansion-design.md`. Azure uses
+an `api-key` header, a deployment name in the path and a mandatory
+`api-version` query parameter; Vertex mints short-lived OAuth tokens from a
+service account, which `llm.Config.APIKey` (a plain string `llm.New` rejects
+when empty) cannot express. Each needs its own provider implementation rather
+than a catalog row. The web `coderForWorkspace(id)` and the runner's injected coder
 factory (`Runner.WithCoderFactory`, wired in `main.go`) both use `ForWorkspace` — as do the agent
 designer, skill creator, and Telegram chat (via the `coderFor(workspaceID)` factory in `main.go`) —
 so scheduled + manual runs, generation, and chat all honor the workspace's coder.
