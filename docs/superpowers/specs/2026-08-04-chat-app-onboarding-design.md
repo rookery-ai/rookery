@@ -38,6 +38,21 @@ design (bot dials out, zero inbound port), a deliberate property for self-hosted
 behind NAT. The mutual-server path is therefore the only one available, and the
 instructions must describe it accurately.
 
+### Confirmed against the live install
+
+```
+platform_connections   telegram  active  2026-07-30 06:58:26
+                       discord   active  2026-08-03 12:19:37
+
+platform_identities    telegram  1843540314  2026-07-30 06:58:52
+                       (no discord row)
+```
+
+Telegram linked 26 seconds after it was connected. Discord has been connected and
+**unlinked for over a day** — the bot is running and the token is valid, but no inbound
+message has ever reached it. This is the failure mode described above, visible in the data:
+the operator could not reach the bot to send `/start`, and nothing in the product said so.
+
 ## The gap is not Discord-specific
 
 `web/api_connectors.go` never references `PlatformIdentity`. **No endpoint reports whether
@@ -94,11 +109,13 @@ endpoint and currently parses only `username`. Capturing `id` lets step 4 render
 ready-made invite button:
 
 ```
-https://discord.com/api/oauth2/authorize?client_id=<id>&scope=bot&permissions=3072
+https://discord.com/api/oauth2/authorize?client_id=<id>&scope=bot&permissions=0
 ```
 
-(`3072` = View Channels + Send Messages.) This replaces the single hardest instruction with
-one click.
+`permissions=0` is deliberate: guild permissions do not govern 1:1 DMs, so a DM-only bot
+needs none. It also creates no role on join, and the consent screen asks for nothing —
+requesting channel access the bot will never use is exactly the friction that makes an
+invite feel unsafe. This replaces the single hardest instruction with one click.
 
 Slack's dense step 3 (four scopes, install, copy token) splits into discrete steps.
 Telegram's three steps are already correct and stay as they are.
@@ -171,9 +188,24 @@ token-probing work stays in the existing explicit *Test connection* action.
 
 Green then means *you can use this*, not *the token parses*.
 
-**Step 4 is escapable.** An "I'll do this later" action closes the wizard and leaves the
-card reading "Not linked yet". Blocking outright would strand a user who wants to save a
-token now and link later; the honest status signal is preserved either way.
+#### What "linked" proves
+
+The `platform_identities` row is created only when the operator's `/start` actually reaches
+the bot, so its existence proves the **inbound** path end to end. `handleStart`'s
+confirmation reply then exercises the **outbound** path. Both directions are therefore
+proven by the time step 4 turns green — which is precisely what the current token-only
+check does not establish.
+
+#### Assumption: step 4 is escapable
+
+An "I'll do this later" action closes the wizard and leaves the card reading "Not linked
+yet". **This is a deviation from the chosen option and needs a ruling.** The selected
+design ("live-polling final step") was picked over "static status, no polling" on the
+strength of its *blocking* on real linkage; making it escapable moves it part-way toward
+the declined option. The argument for the escape is that a user who wants to save a token
+now and link later would otherwise be stranded, and the card's honest "Not linked yet"
+status is preserved either way. If blocking is preferred, drop the escape — nothing else in
+the design depends on it.
 
 ### 3. Primary app for unprompted delivery
 
@@ -181,9 +213,11 @@ Store `chat.primary_platform` as a row in the generic `workspace_settings` table
 schema migration.**
 
 `SendToUser` resolves the primary first, then falls back through the remaining identities.
-`ListPlatformIdentities` gains `ORDER BY linked_at, platform` regardless, so the fallback
-is deterministic rather than dependent on SQLite rowid order. An unset primary means "first
-linked" — defined, not arbitrary.
+`ListPlatformIdentities` gains `ORDER BY linked_at, platform, id` regardless, so the
+fallback is deterministic rather than dependent on SQLite rowid order. The `id` tiebreaker
+is load-bearing: `linked_at` is stored as a string and two identities created in the same
+second tie, which would leave the "deterministic" order undefined in exactly the case it
+exists to pin down. An unset primary means "first linked" — defined, not arbitrary.
 
 The connections page renders a radio per linked app, with a line stating where agent runs
 and reminders are delivered. All linked apps remain fully usable for chatting; the setting
