@@ -1,10 +1,14 @@
 package web
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/gateway"
 )
 
 func TestAPIConnectors_GET_Unauthenticated(t *testing.T) {
@@ -131,5 +135,148 @@ func TestAPIConnectors_TEST_NotConnected(t *testing.T) {
 	}
 	if !contains(rec.Body.String(), `"ok":false`) {
 		t.Fatalf("expected ok:false, got: %s", rec.Body.String())
+	}
+}
+
+// decodeConnectorList unwraps GET /api/v1/connectors into the DTO.
+func decodeConnectorList(t *testing.T, rec *httptest.ResponseRecorder) []apiConnectorPlatform {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body apiConnectorListResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v — body %s", err, rec.Body.String())
+	}
+	return body.Platforms
+}
+
+func findPlatform(t *testing.T, list []apiConnectorPlatform, name string) apiConnectorPlatform {
+	t.Helper()
+	for _, p := range list {
+		if p.Platform == name {
+			return p
+		}
+	}
+	t.Fatalf("%s not present in the platform list", name)
+	return apiConnectorPlatform{}
+}
+
+func TestAPIConnectors_GET_ReportsLinkState(t *testing.T) {
+	s, database := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	list := decodeConnectorList(t, doJSON(t, s, http.MethodGet, "/api/v1/connectors", nil, cookies))
+	for _, p := range list {
+		if p.Linked {
+			t.Fatalf("%s reported linked with no identity row", p.Platform)
+		}
+	}
+
+	if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+		ID: "id1", WorkspaceID: wsID, Platform: "telegram", PlatformUserID: "1843540314",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	list = decodeConnectorList(t, doJSON(t, s, http.MethodGet, "/api/v1/connectors", nil, cookies))
+	tg := findPlatform(t, list, "telegram")
+	if !tg.Linked || tg.LinkedIdentity != "1843540314" {
+		t.Fatalf("telegram: linked=%v identity=%q", tg.Linked, tg.LinkedIdentity)
+	}
+	// The sole linked platform is the implicit primary.
+	if !tg.Primary {
+		t.Fatal("sole linked platform should be primary")
+	}
+	if dc := findPlatform(t, list, "discord"); dc.Linked {
+		t.Fatal("discord should not be linked")
+	}
+}
+
+func TestAPIConnectors_GET_BuildsDiscordInviteFromStoredIdentity(t *testing.T) {
+	s, database := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	encoded, err := gateway.BotIdentity{Username: "rookery_bot", UserID: "42"}.MarshalSetting()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SetSetting(wsID, gateway.BotIdentitySettingKey("discord"), encoded); err != nil {
+		t.Fatal(err)
+	}
+
+	list := decodeConnectorList(t, doJSON(t, s, http.MethodGet, "/api/v1/connectors", nil, cookies))
+	dc := findPlatform(t, list, "discord")
+	if !strings.Contains(dc.InviteURL, "client_id=42") {
+		t.Fatalf("InviteURL = %q", dc.InviteURL)
+	}
+	// permissions=0 is load-bearing: guild permissions do not govern 1:1 DMs.
+	if !strings.Contains(dc.InviteURL, "permissions=0") {
+		t.Fatalf("invite must request no permissions: %q", dc.InviteURL)
+	}
+	if dc.DMURL != "https://discord.com/users/42" {
+		t.Fatalf("DMURL = %q", dc.DMURL)
+	}
+	if dc.Identity != "rookery_bot" {
+		t.Fatalf("Identity = %q", dc.Identity)
+	}
+}
+
+func TestAPIConnectors_Primary_RequiresALinkedPlatform(t *testing.T) {
+	s, database := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	// Unlinked: refused, so the setting can never name an unreachable target.
+	rec := doJSON(t, s, http.MethodPut, "/api/v1/connectors/discord/primary", nil, cookies)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for an unlinked platform, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+		ID: "id1", WorkspaceID: wsID, Platform: "discord", PlatformUserID: "u1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec = doJSON(t, s, http.MethodPut, "/api/v1/connectors/discord/primary", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got, _ := database.GetSetting(wsID, gateway.PrimaryPlatformSettingKey); got != "discord" {
+		t.Fatalf("primary setting = %q", got)
+	}
+}
+
+func TestAPIConnectors_Unlink_KeepsCredentialsAndClearsPrimary(t *testing.T) {
+	s, database := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
+		ID: "id1", WorkspaceID: wsID, Platform: "discord", PlatformUserID: "u1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.SetSetting(wsID, gateway.PrimaryPlatformSettingKey, "discord"); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := doJSON(t, s, http.MethodDelete, "/api/v1/connectors/discord/identity", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rows, err := database.ListPlatformIdentities(wsID, "discord")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("identity survived unlink: %+v", rows)
+	}
+	// A primary naming a now-unlinked platform must not persist.
+	if got, _ := database.GetSetting(wsID, gateway.PrimaryPlatformSettingKey); got != "" {
+		t.Fatalf("stale primary survived: %q", got)
 	}
 }

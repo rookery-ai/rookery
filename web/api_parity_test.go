@@ -45,6 +45,7 @@ func TestAPIParityInventory(t *testing.T) {
 		"GET /api/v1/search-keys", "PUT /api/v1/search-keys", "DELETE /api/v1/search-keys/:provider",
 		"GET /api/v1/connectors", "POST /api/v1/connectors",
 		"DELETE /api/v1/connectors/:platform", "POST /api/v1/connectors/:platform/test",
+		"PUT /api/v1/connectors/:platform/primary", "DELETE /api/v1/connectors/:platform/identity",
 		"GET /api/v1/services", "GET /api/v1/services/:provider/actions",
 		"POST /api/v1/services/:provider/creds",
 		"POST /api/v1/services/:provider/connect", "POST /api/v1/services/:provider/apikey",
