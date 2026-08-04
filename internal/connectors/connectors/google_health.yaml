@@ -1,0 +1,57 @@
+provider: google_health
+actions:
+  - name: health_identity
+    description: "The connected Google Health user's identity — a cheap check that the connection works before asking for data. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://health.googleapis.com/v4/users/me/identity"
+    response_extract: "$"
+
+  - name: health_list_data_points
+    description: "Read raw data points for one data type. data_type is kebab-case, e.g. steps, heart-rate, sleep, body-fat, active-minutes. page_size caps the result — always pass it, since a data type can hold years of samples. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        data_type: {type: string, description: "kebab-case, e.g. steps, heart-rate, sleep, body-fat"}
+        page_size: {type: integer, description: "max data points, e.g. 50"}
+        filter:    {type: string, description: "Google Health filter expression; note filter fields are snake_case (body_fat) while the path is kebab-case (body-fat)"}
+      required: [data_type, page_size]
+    request:
+      method: GET
+      url: "https://health.googleapis.com/v4/users/me/dataTypes/{{data_type}}/dataPoints"
+      query:
+        page_size: "{{page_size}}"
+        filter: "{{filter}}"
+    response_extract: "$.dataPoints"
+
+  - name: health_daily_totals
+    description: "Daily roll-up of one data type between two dates — the 'steps per day this week' answer, and far smaller than reading raw points. data_type is kebab-case; dates are YYYY-MM-DD. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        data_type:  {type: string, description: "kebab-case, e.g. steps, active-minutes"}
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+      required: [data_type, start_date, end_date]
+    request:
+      method: POST
+      url: "https://health.googleapis.com/v4/users/me/dataTypes/{{data_type}}/dataPoints:dailyRollUp"
+      body:
+        windowSizeDays: 1
+        civilTimeRange:
+          startDate: "{{start_date}}"
+          endDate: "{{end_date}}"
+    response_extract: "$"
+
+  - name: health_paired_devices
+    description: "Devices paired to the account — which tracker or watch the data is coming from. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://health.googleapis.com/v4/users/me/pairedDevices"
+    response_extract: "$"

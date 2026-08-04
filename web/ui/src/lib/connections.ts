@@ -75,6 +75,11 @@ export type ServiceProvider = {
   kind: string;
   setup_url: string;
   setup_steps: string[];
+  // What the paste form should call the credential, from the provider YAML. Providers
+  // differ a lot here ("AdGuard Home password", "Nextcloud app password"), so the form
+  // must not assume "API key". Empty falls back to a generic label.
+  key_label?: string;
+  key_hint?: string;
   has_creds: boolean;
   action_count: number;
   connect_inputs: ServiceConnectInput[];

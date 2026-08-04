@@ -172,25 +172,10 @@ func TestB2_Dropbox(t *testing.T) {
 	}
 }
 
-func TestB2_Zoom(t *testing.T) {
-	r := b2Reg(t)
-	p, ok := r.ProviderByName("zoom")
-	if !ok || p.IsAPIKey() {
-		t.Fatal("zoom must load as OAuth")
-	}
-	if p.TokenAuth != "basic" {
-		t.Fatalf("zoom token endpoint must use basic auth, got %q", p.TokenAuth)
-	}
-	m := renderB2(t, r, "zoom", "zoom_create_meeting", map[string]any{"topic": "Sync", "type": float64(2)})
-	if m["topic"] != "Sync" {
-		t.Fatalf("zoom create_meeting body: %v", m)
-	}
-}
-
 func TestB2_AllProvidersLoad(t *testing.T) {
 	r := b2Reg(t)
 	apiKey := []string{"hubspot", "calendly", "asana", "airtable", "sendgrid", "intercom", "clickup", "monday"}
-	oauth := []string{"dropbox", "zoom"}
+	oauth := []string{"dropbox"}
 	for _, name := range apiKey {
 		p, ok := r.ProviderByName(name)
 		if !ok || !p.IsAPIKey() {

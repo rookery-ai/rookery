@@ -64,12 +64,18 @@ type apiServiceConnectInput struct {
 }
 
 type apiServiceProvider struct {
-	Name          string                   `json:"name"`
-	Label         string                   `json:"label"`
-	Category      string                   `json:"category"`
-	Kind          string                   `json:"kind"`
-	SetupURL      string                   `json:"setup_url"`
-	SetupSteps    []string                 `json:"setup_steps"`
+	Name       string   `json:"name"`
+	Label      string   `json:"label"`
+	Category   string   `json:"category"`
+	Kind       string   `json:"kind"`
+	SetupURL   string   `json:"setup_url"`
+	SetupSteps []string `json:"setup_steps"`
+	// KeyLabel/KeyHint name the credential the paste form asks for. Providers say
+	// very different things here — "AdGuard Home password", "Nextcloud app password",
+	// "Todoist API token" — and the wizard used to hardcode "<Provider> API key",
+	// which was simply wrong for the ones that do not take an API key at all.
+	KeyLabel      string                   `json:"key_label"`
+	KeyHint       string                   `json:"key_hint"`
 	HasCreds      bool                     `json:"has_creds"`
 	ConnectInputs []apiServiceConnectInput `json:"connect_inputs"`
 	RedirectURI   string                   `json:"redirect_uri"`
@@ -155,6 +161,7 @@ func (s *Server) apiListServices(c echo.Context) error {
 		}
 
 		label, setupURL, setupSteps, kind := provider, "", []string{}, "oauth"
+		keyLabel, keyHint := "", ""
 		// A provider with no declared category groups under "Other" rather than
 		// dropping out of the page entirely.
 		category := "Other"
@@ -173,6 +180,7 @@ func (s *Server) apiListServices(c echo.Context) error {
 			// session_exchange (Bluesky) is an OAuth-less paste-a-credential flow like
 			// api_key, so it renders the same connect form. They differ only in what
 			// happens to the stored value at request time, which the UI does not care about.
+			keyLabel, keyHint = p.Auth.KeyLabel, p.Auth.KeyHint
 			switch {
 			case p.IsKeyless():
 				// A third kind, not a variant of api_key: the wizard must render no
@@ -225,6 +233,8 @@ func (s *Server) apiListServices(c echo.Context) error {
 			// link, and clicking our own callback route without a state parameter
 			// only ever produces "Invalid or expired authorization request".
 			SetupSteps:    setupSteps,
+			KeyLabel:      keyLabel,
+			KeyHint:       keyHint,
 			RedirectURI:   redirectURI,
 			Preflight:     preflight,
 			HasCreds:      cfgForCreds != nil,

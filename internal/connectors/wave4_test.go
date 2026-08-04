@@ -15,7 +15,7 @@ var wave4 = map[string]string{
 	"gotify":        "Self-hosted",
 	"linkwarden":    "Self-hosted",
 	"portainer":     "Self-hosted",
-	"fitbit":        "Health & Fitness",
+	"google_health": "Health & Fitness",
 	"oura":          "Health & Fitness",
 	"spotify":       "Publishing & Media",
 	"trakt":         "Publishing & Media",
@@ -115,7 +115,7 @@ func TestTraktDeclaresItsAPIVersion(t *testing.T) {
 // endpoint; sending the client id and secret in the body fails with invalid_client.
 func TestOAuthProvidersNeedingBasicTokenAuthDeclareIt(t *testing.T) {
 	r, _ := LoadBundled()
-	for _, name := range []string{"fitbit", "spotify"} {
+	for _, name := range []string{"spotify"} {
 		p, ok := r.ProviderByName(name)
 		if !ok {
 			t.Errorf("%s not loaded", name)
@@ -181,11 +181,62 @@ func TestWave4VerificationStatus(t *testing.T) {
 
 func TestReadOnlyWave4ProvidersHaveNoWrites(t *testing.T) {
 	r, _ := LoadBundled()
-	for _, name := range []string{"openlibrary", "openstreetmap", "openfoodfacts", "fitbit", "oura", "spotify", "trakt"} {
+	for _, name := range []string{"openlibrary", "openstreetmap", "openfoodfacts", "google_health", "oura", "spotify", "trakt"} {
 		for _, a := range r.Actions(name) {
 			if a.Mutating {
 				t.Errorf("%s/%s is mutating, but this provider is exposed read-only", name, a.Name)
 			}
+		}
+	}
+}
+
+// Two providers were REMOVED deliberately. Without this test the obvious fix for
+// "Fitbit is missing" is to re-add fitbit.yaml, which would ship a connector against an
+// API that stops answering in September 2026.
+func TestRemovedProvidersStayRemoved(t *testing.T) {
+	r, _ := LoadBundled()
+	for name, why := range map[string]string{
+		"fitbit": "Fitbit's Web API is decommissioned in September 2026 and its OAuth server " +
+			"with it. Google Health replaces it and is already present as google_health, " +
+			"authenticating through the shared Google OAuth app. Existing Fitbit tokens do " +
+			"not carry over, so there is nothing to preserve by keeping this.",
+		"zoom": "Zoom's connect flow could not be completed against a real account: its app " +
+			"types and scope model did not match what this connector assumed. It was pulled " +
+			"rather than left on the page as an integration that looks available and is not. " +
+			"Re-adding it needs a verified end-to-end connect, not just a YAML.",
+	} {
+		if _, ok := r.ProviderByName(name); ok {
+			t.Errorf("%s is back in the registry. It was removed on purpose: %s", name, why)
+		}
+	}
+}
+
+// Google Health must ride the shared Google OAuth app rather than defining its own.
+func TestGoogleHealthUsesTheGoogleOAuthApp(t *testing.T) {
+	r, _ := LoadBundled()
+	p, ok := r.ProviderByName("google_health")
+	if !ok {
+		t.Fatal("google_health not loaded")
+	}
+	if p.AuthParent != "google" {
+		t.Errorf("auth_parent = %q, want google", p.AuthParent)
+	}
+	op, ok := r.OAuthProvider("google_health")
+	if !ok || op.Name != "google" {
+		t.Errorf("OAuthProvider = %v/%q, want google", ok, op.Name)
+	}
+	// Every scope must be a googlehealth one; a stray Fitbit scope would fail consent.
+	for _, sc := range p.DefaultScopes {
+		if !strings.Contains(sc, "googleapis.com/auth/googlehealth") {
+			t.Errorf("scope %q is not a Google Health scope", sc)
+		}
+	}
+	if len(p.DefaultScopes) == 0 {
+		t.Error("no scopes — consent would request nothing")
+	}
+	for _, a := range r.Actions("google_health") {
+		if !strings.HasPrefix(a.Request.URL, "https://health.googleapis.com/") {
+			t.Errorf("%s targets %q, want the health.googleapis.com host", a.Name, a.Request.URL)
 		}
 	}
 }
