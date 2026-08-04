@@ -94,7 +94,7 @@ func TestDivergentOAuthLabelsStayDeclared(t *testing.T) {
 	}
 }
 
-// Two ways a declaration can be wrong without any other test noticing.
+// Three ways a declaration can be wrong without any other test noticing.
 //
 // A whitespace-only value is truthy in the SPA's `label || "Client ID"` fallback, so it
 // renders as a blank label rather than degrading to the default — worse than declaring
@@ -104,6 +104,11 @@ func TestDivergentOAuthLabelsStayDeclared(t *testing.T) {
 // resolves teams → outlook and google_calendar → google via OAuthProvider() BEFORE reading
 // these labels, so a block on the child is never shown. Leaving one in place would assert
 // something false about where the credentials go, and would look correct in the YAML.
+//
+// And a provider that isn't OAuth at all — api_key, keyless, or session_exchange — never
+// renders the OAuth creds form in the first place: the connect wizard only reads
+// oauth_creds on the OAuth path. A block on one of these is dead data with nothing to
+// check it against, and would look meaningful sitting next to a real one in the YAML.
 func TestOAuthCredLabelsAreNonBlank(t *testing.T) {
 	r, err := LoadBundled()
 	if err != nil {
@@ -115,6 +120,10 @@ func TestOAuthCredLabelsAreNonBlank(t *testing.T) {
 		if p.AuthParent != "" && oc != (OAuthCreds{}) {
 			t.Errorf("%s reuses %s's OAuth app but declares oauth_creds — it would never be read",
 				name, p.AuthParent)
+		}
+		if (p.IsAPIKey() || p.IsKeyless() || p.UsesSessionExchange()) && oc != (OAuthCreds{}) {
+			t.Errorf("%s authenticates without OAuth but declares oauth_creds — the connect wizard never shows the OAuth creds form for it, so the block is dead data",
+				name)
 		}
 		for what, v := range map[string]string{
 			"id_label":     oc.IDLabel,

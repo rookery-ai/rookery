@@ -67,9 +67,11 @@ type apiServiceConnectInput struct {
 // developer console does, so the connect form stops asking for a "Client ID" the user
 // cannot find on the page they are looking at.
 //
-// A VALUE, not a pointer: api_services_test.go asserts nothing on this payload
-// serializes as null — the convention connections, connect_inputs and setup_steps
-// already follow. Empty fields are the SPA's signal to fall back.
+// A VALUE, not a pointer, so it always serializes as an object rather than null —
+// matching the convention connections, connect_inputs and setup_steps already
+// follow. TestChildProvidersInheritParentCredLabels (api_services_oauth_labels_test.go)
+// asserts this field specifically never serializes as null. Empty fields are the
+// SPA's signal to fall back.
 type apiOAuthCreds struct {
 	IDLabel     string `json:"id_label"`
 	IDHint      string `json:"id_hint"`

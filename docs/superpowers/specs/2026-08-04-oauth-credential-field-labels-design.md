@@ -115,11 +115,13 @@ type apiOAuthCreds struct {
 OAuthCreds apiOAuthCreds `json:"oauth_creds"`
 ```
 
-It must be a **value struct, not a pointer**. `web/api_services_test.go:35` asserts
-that no field on this payload serializes as `null` — the convention `connections`,
-`connect_inputs` and `setup_steps` already follow. A pointer would emit
-`"oauth_creds":null` for every api_key and keyless provider and break that test; a
-value emits `{}`.
+It must be a **value struct, not a pointer**, so it always serializes as an object
+rather than `null` — the convention `connections`, `connect_inputs` and
+`setup_steps` already follow. `web/api_services_test.go:35` checks those three
+array fields for `:null`, not this one; `TestChildProvidersInheritParentCredLabels`
+(`web/api_services_oauth_labels_test.go`) is the test that asserts specifically on
+`oauth_creds`. A pointer would emit `"oauth_creds":null` for every api_key and
+keyless provider and break that test; a value emits `{}`.
 
 ### Rendering
 
