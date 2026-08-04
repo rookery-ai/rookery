@@ -9,8 +9,21 @@ import (
 // tells the user to DM the bot is how the false "OR just DM it after
 // connecting" branch got in — it read plausibly and nothing checked it.
 func TestSetupStepsDoNotInstructLinking(t *testing.T) {
-	banned := []string{"/start", "dm it", "dm your bot", "dm the bot", "message the bot"}
-	for _, spec := range CredSpecs() {
+	specs := CredSpecs()
+	// Without this, a registration failure would empty the list and both
+	// checks below would pass by vacuum — the exact "green against a broken
+	// implementation" failure these tests exist to prevent.
+	if len(specs) == 0 {
+		t.Fatal("no CredSpecs registered — the guard would pass vacuously")
+	}
+	banned := []string{
+		"/start",
+		"dm it", "dm the bot", "dm your bot", "dm the app",
+		"open a dm", "send a dm",
+		"message the bot", "text the bot", "chat with the bot",
+		"reply to the bot", "ping the bot",
+	}
+	for _, spec := range specs {
 		for i, step := range spec.SetupSteps {
 			lower := strings.ToLower(step)
 			for _, b := range banned {
@@ -35,10 +48,22 @@ func TestDiscordSetupStepsNameTheMessageContentIntent(t *testing.T) {
 	}
 }
 
-// Every step should be one action. A step carrying several semicolons is the
-// dense-instruction smell that made Slack's step 3 unfollowable.
-func TestSetupStepsAreSingleActions(t *testing.T) {
-	for _, spec := range CredSpecs() {
+// TestSetupStepsHaveNoMultiClauseSemicolons is a regression pin, not a general
+// "one action per step" check. Slack's old step 3 chained four actions with
+// semicolons and was unfollowable; this fails the build if that specific
+// pattern returns. It deliberately does NOT catch comma-joined actions —
+// detecting those without false-positiving on ordinary prose is not something
+// a substring rule can do, and a check that overstates its own coverage is
+// worse than one that states it plainly.
+func TestSetupStepsHaveNoMultiClauseSemicolons(t *testing.T) {
+	specs := CredSpecs()
+	// Without this, a registration failure would empty the list and both
+	// checks below would pass by vacuum — the exact "green against a broken
+	// implementation" failure these tests exist to prevent.
+	if len(specs) == 0 {
+		t.Fatal("no CredSpecs registered — the guard would pass vacuously")
+	}
+	for _, spec := range specs {
 		for i, step := range spec.SetupSteps {
 			if strings.Count(step, ";") > 1 {
 				t.Errorf("%s step %d packs several actions: %q", spec.Platform, i+1, step)
