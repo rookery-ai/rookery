@@ -63,6 +63,20 @@ type apiServiceConnectInput struct {
 	Required bool   `json:"required"`
 }
 
+// apiOAuthCreds names the OAuth app's two credential fields the way the provider's own
+// developer console does, so the connect form stops asking for a "Client ID" the user
+// cannot find on the page they are looking at.
+//
+// A VALUE, not a pointer: api_services_test.go asserts nothing on this payload
+// serializes as null — the convention connections, connect_inputs and setup_steps
+// already follow. Empty fields are the SPA's signal to fall back.
+type apiOAuthCreds struct {
+	IDLabel     string `json:"id_label"`
+	IDHint      string `json:"id_hint"`
+	SecretLabel string `json:"secret_label"`
+	SecretHint  string `json:"secret_hint"`
+}
+
 type apiServiceProvider struct {
 	Name       string   `json:"name"`
 	Label      string   `json:"label"`
@@ -74,8 +88,11 @@ type apiServiceProvider struct {
 	// very different things here — "AdGuard Home password", "Nextcloud app password",
 	// "Todoist API token" — and the wizard used to hardcode "<Provider> API key",
 	// which was simply wrong for the ones that do not take an API key at all.
-	KeyLabel      string                   `json:"key_label"`
-	KeyHint       string                   `json:"key_hint"`
+	KeyLabel string `json:"key_label"`
+	KeyHint  string `json:"key_hint"`
+	// OAuthCreds is the OAuth-path analogue of KeyLabel/KeyHint. Resolved through
+	// auth_parent — see the assignment below.
+	OAuthCreds    apiOAuthCreds            `json:"oauth_creds"`
 	HasCreds      bool                     `json:"has_creds"`
 	ConnectInputs []apiServiceConnectInput `json:"connect_inputs"`
 	RedirectURI   string                   `json:"redirect_uri"`
@@ -204,8 +221,20 @@ func (s *Server) apiListServices(c echo.Context) error {
 		}
 
 		credsProvider := provider
-		if op, ok := s.connectors.OAuthProvider(provider); ok && op.Name != provider {
-			credsProvider = op.Name
+		oauthCreds := apiOAuthCreds{}
+		if op, ok := s.connectors.OAuthProvider(provider); ok {
+			if op.Name != provider {
+				credsProvider = op.Name
+			}
+			// Read the labels off the RESOLVED provider, never off p: a child
+			// (teams → outlook, google_calendar → google) has no OAuth app of its own,
+			// and the fields it is being asked for belong to the parent's app.
+			oauthCreds = apiOAuthCreds{
+				IDLabel:     op.OAuthCreds.IDLabel,
+				IDHint:      op.OAuthCreds.IDHint,
+				SecretLabel: op.OAuthCreds.SecretLabel,
+				SecretHint:  op.OAuthCreds.SecretHint,
+			}
 		}
 		cfgForCreds, _ := s.db.GetServiceProviderConfig(ctx, w.ID, credsProvider)
 
@@ -235,6 +264,7 @@ func (s *Server) apiListServices(c echo.Context) error {
 			SetupSteps:    setupSteps,
 			KeyLabel:      keyLabel,
 			KeyHint:       keyHint,
+			OAuthCreds:    oauthCreds,
 			RedirectURI:   redirectURI,
 			Preflight:     preflight,
 			HasCreds:      cfgForCreds != nil,
