@@ -18,3 +18,6 @@ setup_steps:
   - "In App settings → Basic, copy the App ID and App Secret and paste them below."
   - "Keep the app in DEVELOPMENT mode: it then has full access to ad accounts YOU have a role on, with no App Review. App Review is only needed to reach other businesses' accounts."
   - "Make sure your Facebook user is an admin of the ad account you want to read."
+oauth_creds:
+  id_label: "App ID"
+  secret_label: "App Secret"

@@ -19,3 +19,7 @@ setup_steps:
   - "Copy the Threads App ID and Threads App Secret — these are DIFFERENT from the Facebook app id/secret — and paste them below."
   - "Production use of threads_content_publish requires App Review; a Development-mode app works against accounts with a role on it."
   - "Note: 250 posts per 24 hours, and any image must be at a PUBLICLY reachable URL."
+oauth_creds:
+  id_label: "Threads App ID"
+  id_hint: "under the Threads API product — DIFFERENT from the Facebook app id"
+  secret_label: "Threads App Secret"

@@ -20,3 +20,6 @@ setup_steps:
   - "In App settings → Basic, copy the App ID and App Secret and paste them below."
   - "Keep the app in DEVELOPMENT mode: it then has full access to Pages YOU administer, with no App Review."
   - "You must be an admin of the Page. Connecting links the FIRST Page you manage — to use a different one, connect again after changing your Page roles."
+oauth_creds:
+  id_label: "App ID"
+  secret_label: "App Secret"
