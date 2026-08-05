@@ -460,6 +460,67 @@ export function ServiceWizard({
             </div>
           ) : (
             <div className="space-y-3">
+              {/* Update-mode guidance. Credentials already exist — either the user
+                  saved them, or this is an aliased child inheriting its parent's app
+                  — so the wizard opens straight on Connect and the setup steps were
+                  never rendered at all. That hid the per-service instruction that
+                  matters most for a child ("also enable the Google Calendar API"),
+                  and left the user with no statement of WHICH application to edit.
+                  The redirect URI block above is deliberately not repeated here. */}
+              {provider.setup_mode === "update" &&
+                provider.setup_steps.length > 0 && (
+                  <div className="space-y-2 rounded-lg border border-border bg-muted-surface p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-2">
+                      Update your existing{" "}
+                      {provider.app_label || provider.label} application
+                    </div>
+                    <p className="text-sm text-muted-2">
+                      Edit the application you already registered — do not create a
+                      second one. Confirm the redirect URI above is listed under its
+                      authorized redirect URIs.
+                    </p>
+                    <ol className="space-y-2">
+                      {provider.setup_steps.map((s, i) => (
+                        <li
+                          key={i}
+                          className="flex gap-3 rounded-lg border border-border bg-background p-3 text-sm"
+                        >
+                          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted-surface text-xs font-semibold">
+                            {i + 1}
+                          </span>
+                          <span className="leading-relaxed">
+                            <SetupStep
+                              text={s}
+                              redirectURI={provider.redirect_uri}
+                            />
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                    {provider.setup_url && (
+                      <a
+                        href={provider.setup_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-medium text-primary underline underline-offset-2"
+                      >
+                        {provider.setup_url}
+                      </a>
+                    )}
+                    <div className="flex justify-end">
+                      {/* Without this there is no route back to the credentials form
+                          once has_creds flips true, so a wrong client secret could
+                          not be corrected from this screen at all. */}
+                      <Button
+                        variant="ghost"
+                        onClick={() => setView("creds")}
+                      >
+                        <Save />
+                        Re-enter credentials
+                      </Button>
+                    </div>
+                  </div>
+                )}
               {/* connect_inputs on the OAuth path: values that cannot be discovered
                   from any API (a Google Ads developer token) and so must be collected
                   BEFORE consent — they ride the signed state through the provider. */}

@@ -16,7 +16,13 @@ userinfo_url: https://www.googleapis.com/oauth2/v2/userinfo
 identity_path: email
 authorize_extra:
   access_type: offline
-  prompt: consent
+  # "select_account consent" — prompt is a space-delimited list (OpenID Connect
+  # Core 3.1.2.1). consent alone reuses whichever Google account is already
+  # signed in, so connecting a SECOND account silently re-authorized the first
+  # and multi-account was impossible in practice. select_account shows the
+  # chooser; consent is retained because dropping it stops Google issuing a
+  # refresh token on re-consent.
+  prompt: select_account consent
   include_granted_scopes: "true"
 default_scopes:
   - https://www.googleapis.com/auth/gmail.readonly

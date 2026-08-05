@@ -18,6 +18,10 @@ userinfo_url: https://graph.microsoft.com/v1.0/me
 identity_path: userPrincipalName
 authorize_extra:
   include_granted_scopes: "true"
+  # Without this the Microsoft identity platform reuses the signed-in account, so
+  # a second connect re-authorizes the first and multi-account cannot be reached.
+  # Applies to the aliased child (teams) too, which consents through this app.
+  prompt: select_account
 default_scopes:
   - offline_access
   - https://graph.microsoft.com/Mail.Read

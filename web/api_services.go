@@ -79,6 +79,16 @@ type apiOAuthCreds struct {
 	SecretHint  string `json:"secret_hint"`
 }
 
+// setupMode names the two shapes the connect wizard's guidance takes. Kept as a
+// function rather than an inline conditional so both the handler and its tests
+// spell the values one way.
+func setupMode(hasCreds bool) string {
+	if hasCreds {
+		return "update"
+	}
+	return "create"
+}
+
 type apiServiceProvider struct {
 	Name       string   `json:"name"`
 	Label      string   `json:"label"`
@@ -94,8 +104,20 @@ type apiServiceProvider struct {
 	KeyHint  string `json:"key_hint"`
 	// OAuthCreds is the OAuth-path analogue of KeyLabel/KeyHint. Resolved through
 	// auth_parent — see the assignment below.
-	OAuthCreds    apiOAuthCreds            `json:"oauth_creds"`
-	HasCreds      bool                     `json:"has_creds"`
+	OAuthCreds apiOAuthCreds `json:"oauth_creds"`
+	HasCreds   bool          `json:"has_creds"`
+	// AppProvider/AppLabel name the provider that OWNS the OAuth application this
+	// one authenticates through — itself, or its auth_parent when aliased. The
+	// wizard needs them to say WHICH application to update ("your Google (Gmail)
+	// app") rather than naming the service the user just clicked, which does not
+	// exist as an app in the provider's console.
+	AppProvider string `json:"app_provider"`
+	AppLabel    string `json:"app_label"`
+	// SetupMode is "create" when no credentials are stored yet and "update" when
+	// they are. An aliased child inherits its parent's credentials, so it reports
+	// "update" on the very first visit — which is correct: the user must edit the
+	// existing application, not create a second one.
+	SetupMode     string                   `json:"setup_mode"`
 	ConnectInputs []apiServiceConnectInput `json:"connect_inputs"`
 	RedirectURI   string                   `json:"redirect_uri"`
 	Preflight     []apiPreflightProblem    `json:"preflight"`
@@ -222,11 +244,15 @@ func (s *Server) apiListServices(c echo.Context) error {
 			}
 		}
 
-		credsProvider := provider
+		credsProvider, appLabel := provider, label
 		oauthCreds := apiOAuthCreds{}
 		if op, ok := s.connectors.OAuthProvider(provider); ok {
 			if op.Name != provider {
 				credsProvider = op.Name
+				appLabel = op.Label
+				if appLabel == "" {
+					appLabel = op.Name
+				}
 			}
 			// Read the labels off the RESOLVED provider, never off p: a child
 			// (teams → outlook, google_calendar → google) has no OAuth app of its own,
@@ -244,7 +270,10 @@ func (s *Server) apiListServices(c echo.Context) error {
 		// leaves the browser, so emitting one would be a false instruction.
 		redirectURI, preflight := "", []apiPreflightProblem{}
 		if kind == "oauth" {
-			redirectURI = base + "/dashboard/connectors/services/callback/" + provider
+			// Scoped to the OAuth APPLICATION, not the service: an aliased child
+			// (google_calendar → google) authenticates through the parent's app, so
+			// the parent's URI is the one that must be registered. See oauthAppName.
+			redirectURI = base + "/dashboard/connectors/services/callback/" + credsProvider
 			preflight = toAPIPreflight(publicurl.Check(base, s.connectors.RedirectPolicy(provider)))
 			if len(preflight) == 0 {
 				cleanProviders++
@@ -270,6 +299,9 @@ func (s *Server) apiListServices(c echo.Context) error {
 			RedirectURI:   redirectURI,
 			Preflight:     preflight,
 			HasCreds:      cfgForCreds != nil,
+			AppProvider:   credsProvider,
+			AppLabel:      appLabel,
+			SetupMode:     setupMode(cfgForCreds != nil),
 			ConnectInputs: connectInputs,
 			Connections:   conns,
 			ActionCount:   len(s.connectors.Actions(provider)),

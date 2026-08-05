@@ -80,9 +80,31 @@ func (s *Server) redirectWithError(c echo.Context, path, msg string) error {
 	return c.Redirect(http.StatusSeeOther, path+"?error="+url.QueryEscape(msg))
 }
 
+// oauthAppName resolves a provider to the provider that OWNS the OAuth
+// application it authenticates through: the `auth_parent` when the provider is
+// aliased (google_calendar → google, teams → outlook), else the provider itself.
+//
+// The redirect URI is a property of the OAuth APPLICATION, not of the service
+// being connected. Building it from the child name meant every aliased provider
+// sent a URI its app had never registered — Google has …/callback/google
+// registered, so connecting Calendar sent …/callback/google_calendar and was
+// rejected with redirect_uri_mismatch at the CONSENT screen, before any code was
+// issued and therefore before explainOAuthError could ever run.
+//
+// An unknown provider resolves to itself: callers validate the name separately,
+// and returning "" here would produce a silently truncated URI.
+func (s *Server) oauthAppName(provider string) string {
+	if op, ok := s.connectors.OAuthProvider(provider); ok && op.Name != "" {
+		return op.Name
+	}
+	return provider
+}
+
 // callbackURL is the redirect URI the workspace registers with the provider.
+// Scoped to the OAuth application (see oauthAppName), so one registered URI
+// covers a parent and every child that reuses its app.
 func (s *Server) callbackURL(c echo.Context, provider string) string {
-	return s.publicBaseURL(c) + "/dashboard/connectors/services/callback/" + provider
+	return s.publicBaseURL(c) + "/dashboard/connectors/services/callback/" + s.oauthAppName(provider)
 }
 
 // publicBaseURL is the instance's externally-reachable base URL: the configured
@@ -127,6 +149,63 @@ type consentURLError struct {
 }
 
 func (e *consentURLError) Error() string { return e.Msg }
+
+// duplicateConnectionMsg reports a user-facing refusal when this connect would
+// collide with an existing connection, or "" when it is safe to proceed.
+//
+// Three cases, deliberately distinguished:
+//
+//   - same label, same identity — a reconnect. Allowed: the upsert refreshes the
+//     tokens in place and preserves the row id (and its agent bindings).
+//   - same label, DIFFERENT identity — refused. This is the silent-overwrite case.
+//   - different label, same identity — refused. A second row for one account would
+//     produce two tool-name variants pointing at the same mailbox, and the user
+//     almost certainly meant to pick a different account at the consent screen.
+//
+// An empty identity means the provider exposes no userinfo endpoint, so identity
+// comparison is impossible; only the label rule can be enforced, and a same-label
+// reconnect stays allowed rather than being refused on a value we cannot read.
+func (s *Server) duplicateConnectionMsg(ctx context.Context, workspaceID, provider, label, identity string) string {
+	conns, err := s.db.ListServiceConnections(ctx, workspaceID)
+	if err != nil {
+		// Fail OPEN: refusing a legitimate connect because a read failed is worse
+		// than the collision this guards against, which the upsert has always had.
+		slog.Warn("oauth callback: duplicate check failed; allowing connect",
+			"provider", provider, "err", err)
+		return ""
+	}
+	for _, cn := range conns {
+		if cn.Provider != provider {
+			continue
+		}
+		if msg := duplicateDecision(cn.AccountLabel, cn.AccountIdentity, label, identity); msg != "" {
+			return msg
+		}
+	}
+	return ""
+}
+
+// duplicateDecision is the pure core of duplicateConnectionMsg: given one
+// existing connection and the incoming one, report the refusal message, or ""
+// when this pairing is fine. Split out so the decision table is testable without
+// a database, which is where the interesting cases live.
+func duplicateDecision(existingLabel, existingIdentity, incomingLabel, incomingIdentity string) string {
+	switch {
+	case existingLabel == incomingLabel:
+		// A reconnect. Allowed — the upsert refreshes tokens in place and keeps the
+		// row id, so agent bindings survive. Only refuse when we can PROVE the
+		// accounts differ; an unknown identity on either side is not proof.
+		if incomingIdentity == "" || existingIdentity == "" || existingIdentity == incomingIdentity {
+			return ""
+		}
+		return "The name \"" + incomingLabel + "\" is already used by " + existingIdentity +
+			". Choose a different name for this account."
+	case incomingIdentity != "" && existingIdentity == incomingIdentity:
+		return "You have already connected " + incomingIdentity + " as \"" + existingLabel +
+			"\". Reconnect under that name to refresh it, or pick a different account at the sign-in screen."
+	}
+	return ""
+}
 
 // buildConsentURL resolves a provider's saved OAuth app credentials and
 // constructs the signed-state consent URL the user visits to authorize this
@@ -268,9 +347,20 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 	parts := strings.Split(payload, "~")
 	// 4 fields is a state issued before connect_inputs existed; the 10-minute TTL means
 	// such a state can still be in flight across a deploy, so both shapes are accepted.
-	if len(parts) < 4 || len(parts) > 6 || parts[0] != w.ID || parts[1] != provider {
+	if len(parts) < 4 || len(parts) > 6 || parts[0] != w.ID {
 		return s.redirectWithError(c, "/connections", "Authorization did not match this workspace; try again.")
 	}
+	// The state carries the CHILD provider (google_calendar); the path now carries
+	// the OAuth application that authenticated it (google). Accept either shape:
+	// the new one, and the legacy child-in-path form for states already in flight
+	// across a deploy, bounded by the 10-minute state TTL. Anything else is a state
+	// issued for a different provider and must not be honoured.
+	if provider != parts[1] && provider != s.oauthAppName(parts[1]) {
+		return s.redirectWithError(c, "/connections", "Authorization did not match this workspace; try again.")
+	}
+	// Everything downstream — scopes, post_connect, the stored row's provider, the
+	// success redirect — belongs to the CHILD, not to the app that authenticated it.
+	provider = parts[1]
 	label := parts[2]
 	connectInputs := map[string]string{}
 	if len(parts) == 5 && parts[4] != "" {
@@ -329,6 +419,16 @@ func (s *Server) handleOAuthCallback(c echo.Context) error {
 		return s.redirectWithError(c, "/connections", explainOAuthError(label, redirectURI, err))
 	}
 	identity, _ := oauth.FetchIdentity(ctx, authProv, ts.AccessToken)
+
+	// Multi-account safety. InsertServiceConnection upserts on
+	// (workspace_id, provider, account_label), so connecting a DIFFERENT account
+	// under a label already in use silently overwrote the first one's tokens — no
+	// error, and every agent bound to it quietly started acting as the new
+	// account. Adding the consent account-chooser makes that easier to trigger,
+	// not harder, so the collision is refused explicitly here.
+	if msg := s.duplicateConnectionMsg(ctx, w.ID, provider, label, identity); msg != "" {
+		return s.redirectWithError(c, "/connections", msg)
+	}
 
 	// Post-connect resolution (e.g. Jira cloud id) + token_extra fields (e.g. Salesforce
 	// instance_url) → merged into extra, exposed to request templates as {{conn.<key>}}.

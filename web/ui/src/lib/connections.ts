@@ -131,6 +131,16 @@ export type ServiceProvider = {
   // Optional so existing test fixtures that omit it still typecheck.
   oauth_creds?: OAuthCreds;
   has_creds: boolean;
+  // The provider owning the OAuth application this one authenticates through —
+  // itself, or its auth_parent when aliased (google_calendar → google). The
+  // wizard names it so the user knows WHICH app to edit; a child has no app of
+  // its own in the provider's console. Optional so older fixtures typecheck.
+  app_provider?: string;
+  app_label?: string;
+  // "create" (no stored credentials) or "update" (credentials exist, possibly
+  // inherited from the parent). Drives whether the guidance says create an
+  // application or update the existing one.
+  setup_mode?: string;
   action_count: number;
   connect_inputs: ServiceConnectInput[];
   // The exact URI to register with the provider. Empty for api_key providers,

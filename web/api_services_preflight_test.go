@@ -18,8 +18,13 @@ type preflightDTO struct {
 
 type providerDTO struct {
 	Name        string         `json:"name"`
+	Label       string         `json:"label"`
 	Kind        string         `json:"kind"`
 	RedirectURI string         `json:"redirect_uri"`
+	AppProvider string         `json:"app_provider"`
+	AppLabel    string         `json:"app_label"`
+	SetupMode   string         `json:"setup_mode"`
+	HasCreds    bool           `json:"has_creds"`
 	Preflight   []preflightDTO `json:"preflight"`
 }
 
@@ -90,13 +95,59 @@ func TestListServicesCarriesRedirectURI(t *testing.T) {
 	}
 }
 
-// An aliased child registers its OWN callback path against the parent's OAuth
-// app, so its redirect URI must name the child.
-func TestListServicesChildHasOwnRedirectPath(t *testing.T) {
+// An aliased child authenticates through its PARENT's OAuth application, so its
+// redirect URI must name the parent.
+//
+// This assertion is inverted from what it originally pinned ("a child registers
+// its OWN callback path"), because that was the defect rather than the contract.
+// Google Cloud only ever had …/callback/google registered, so sending
+// …/callback/google_drive was rejected with redirect_uri_mismatch — at the
+// CONSENT screen, before a code is issued and therefore before explainOAuthError
+// could translate it. Every one of the thirteen aliased providers was unusable.
+// Scoping the URI to the OAuth app means one registered URI covers the parent and
+// all its children, and an install that already set up Gmail needs no console
+// visit at all. See web/oauth_parent_redirect_test.go for the resolution table.
+func TestListServicesChildSharesTheParentRedirectPath(t *testing.T) {
 	_, body := listServices(t)
+
+	for _, child := range []string{"google_drive", "google_calendar", "youtube"} {
+		p := findProvider(t, body, child)
+		if !strings.HasSuffix(p.RedirectURI, "/callback/google") {
+			t.Errorf("%s redirect_uri = %q, want it to end in /callback/google", child, p.RedirectURI)
+		}
+	}
+
+	// The parent keeps its own path — that is the URI existing installs registered.
+	parent := findProvider(t, body, "google")
+	if !strings.HasSuffix(parent.RedirectURI, "/callback/google") {
+		t.Errorf("google redirect_uri = %q", parent.RedirectURI)
+	}
+}
+
+// TestListServicesReportsTheOwningAppAndSetupMode covers the fields the wizard
+// needs to say WHICH application to edit. A child inherits its parent's stored
+// credentials, so it reports setup_mode "update" even on a first visit — correct,
+// because the user must edit the existing app rather than create a second one.
+func TestListServicesReportsTheOwningAppAndSetupMode(t *testing.T) {
+	_, body := listServices(t)
+
 	child := findProvider(t, body, "google_drive")
-	if !strings.HasSuffix(child.RedirectURI, "/callback/google_drive") {
-		t.Fatalf("google_drive redirect_uri = %q", child.RedirectURI)
+	if child.AppProvider != "google" {
+		t.Errorf("google_drive app_provider = %q, want google", child.AppProvider)
+	}
+	if child.AppLabel == "" || child.AppLabel == child.Label {
+		t.Errorf("google_drive app_label = %q, want the parent's label", child.AppLabel)
+	}
+
+	// No credentials are stored in this fixture, so both report "create".
+	if child.SetupMode != setupMode(child.HasCreds) {
+		t.Errorf("google_drive setup_mode = %q, inconsistent with has_creds=%v",
+			child.SetupMode, child.HasCreds)
+	}
+
+	parent := findProvider(t, body, "google")
+	if parent.AppProvider != "google" {
+		t.Errorf("google app_provider = %q, want itself", parent.AppProvider)
 	}
 }
 
