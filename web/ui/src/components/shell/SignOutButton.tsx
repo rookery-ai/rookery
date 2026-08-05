@@ -45,8 +45,15 @@ export function SignOutButton() {
       await api.post("/api/v1/auth/logout", {});
       // Same discipline as a tenant switch (resetWorkspaceScopedCache): drop
       // every cached query but keep ["session"], whose own refetch is what
-      // sends RequireAuth to /login. Clearing it instead would blank the app
-      // behind a loading fallback on the way out.
+      // sends the route guard to /login. Clearing it instead would blank the
+      // app behind a loading fallback on the way out.
+      //
+      // The redirect is the GUARD's job, not this handler's — declarative, like
+      // every other redirect in router.tsx, and it covers a logged-out visitor
+      // typing the URL too. Both screens this button mounts on are guarded:
+      // the lock screen by RequireAuth, the picker by RequireOwnerSession.
+      // The picker had no guard at all until that was added, which is why
+      // signing out used to leave the owner sitting on it.
       qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "session" });
       await qc.invalidateQueries({ queryKey: ["session"] });
     } finally {

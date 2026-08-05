@@ -83,6 +83,63 @@ test("a must_change_password owner is redirected to /change-password even for a 
   ).toBeInTheDocument();
 });
 
+// The workspace picker is where Sign out lives, so an unauthenticated session
+// sitting on it must land on the login screen. It used to be a bare route with
+// no guard at all: signing out flipped the session to unauthenticated and
+// nothing navigated, leaving the owner on an empty picker. This also covers a
+// logged-out visitor typing /workspaces directly.
+test("an unauthenticated session on /workspaces is sent to the login screen", async () => {
+  vi.resetModules();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ authenticated: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    ),
+  );
+  window.history.pushState({}, "", "/workspaces");
+  const { default: App } = await import("./App");
+  render(<App />);
+
+  expect(await screen.findByLabelText(/password/i, undefined, LAZY)).toBeInTheDocument();
+  expect(screen.queryByText(/pick a workspace/i)).not.toBeInTheDocument();
+});
+
+// The guard must not over-reach: an authenticated owner with no active
+// workspace is exactly who the picker is FOR. RequireAuth cannot be reused here
+// because it redirects that same session to /workspaces — an infinite loop.
+test("an authenticated owner with no active workspace still sees the picker", async () => {
+  vi.resetModules();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            authenticated: true,
+            owner: { id: "1", username: "admin", must_change_password: false },
+            workspace: null,
+            workspaces: [
+              { id: "ws1", name: "Test WS", icon: "", about: "", needs_setup: false, created_at: "" },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    ),
+  );
+  window.history.pushState({}, "", "/workspaces");
+  const { default: App } = await import("./App");
+  render(<App />);
+
+  expect(await screen.findByText("Test WS", undefined, LAZY)).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: /sign out/i })).toBeInTheDocument();
+});
+
 // /kb is route-split (React.lazy + Suspense in router.tsx) because it pulls
 // in the whole TipTap editor. Proves the split works end to end through the
 // real app router + auth guard: the Suspense fallback shows first, then the
