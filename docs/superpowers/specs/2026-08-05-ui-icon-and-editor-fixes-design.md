@@ -10,7 +10,7 @@ this document because they were found in one pass, not because they interact.
 |---|---|---|---|
 | A | `/skills/core/<slug>` throws `Cannot read properties of null (reading 'length')` | Go nil slice marshals to `null`; a TS default parameter does not fire on `null` | crash |
 | B | Slash menu opens below the viewport | `position()` never checks viewport bounds | broken affordance |
-| C | Blank space under a note; scrolling drags the whole shell | no click-to-append; `scrollIntoView` chains to every ancestor | friction |
+| C | Scrolling past the end of a note drags the whole shell off-screen | overscroll chains to a scrollable document | friction |
 | D | Moonshot (Kimi) shows no icon | white mark vendored onto a white tile | cosmetic |
 | E | llama.cpp, LocalAI, Jan, Readwise show letter tiles | deliberate exemptions, now stale | cosmetic |
 | F | Open Library's strokes are missing | vendoring strips `<style>`, mark uses `class="st0"` | cosmetic |
@@ -90,10 +90,16 @@ el.style.top  = `${rect.bottom + 4}px`;
 ```
 
 The element is `position: fixed`, so those are viewport coordinates, and
-nothing bounds them. A caret near the bottom of the window puts a ~330px
-twelve-item menu below the fold; a caret near the right edge pushes it off the
-side. Neither is recoverable — the menu is `position: fixed`, so no ancestor
-can scroll it into view.
+nothing bounds them. Measured with the caret on the last line of a long note
+in a 1600×900 viewport, the popup renders at `top: 868`, `height: 442`, so its
+bottom lands at 1310 — **410px below the fold**, leaving roughly 32px of it
+visible. A caret near the right edge pushes it off the side the same way.
+Neither is recoverable: the menu is `position: fixed`, so no ancestor can
+scroll it into view.
+
+The 442px measurement matters for the fix — the menu is tall enough that on a
+short viewport it may not fit on *either* side, so "flip above" alone is not
+sufficient.
 
 ### Fix
 
@@ -130,49 +136,69 @@ side chosen), caret near the right edge (clamped `left`).
 
 ### Cause
 
-Two separate things reported as one.
+Measured in a real browser (headless Chromium, 1600×900, against an isolated
+instance) rather than reasoned about, because jsdom has no layout engine and
+cannot answer any of this. Two of the three theories in the first draft of this
+spec were wrong and are recorded here so they are not re-attempted.
 
-`editor.css:5` sets `.note-editor-content .tiptap { min-height: 60vh }`. A
-short note therefore renders a tall empty region below its last block. That
-region is inert: it is inside the editor's padded wrapper but outside the
-ProseMirror content area, so clicking it neither focuses the editor nor places
-a caret. It reads as dead background.
+**The actual defect is overscroll chaining.** With a long note, once the
+editor pane is scrolled to its bottom, one more wheel notch scrolls the
+**document**, which drags the entire `h-screen` shell — icon rail, context
+pane, file tree — up and out of the viewport:
 
-Separately, moving the caret to a position near the bottom of the pane scrolls
-more than the pane. ProseMirror's `scrollIntoView` walks the ancestor chain and
-scrolls **every** scrollable ancestor it finds; `AppShell`'s `<main>`
-(`AppShell.tsx:89`) is `overflow-y-auto`, so the whole shell can move. Wheel
-and trackpad input at the end of the editor's own scroll range chains outward
-for the same reason.
+| state | `documentElement.scrollTop` | rail `top` | pane `scrollTop` |
+|---|---|---|---|
+| initial | 0 | 0 | 0 |
+| pane pinned to its bottom | 0 | 0 | 1491 |
+| after wheeling further | **1459** | **−1459** | 1491 |
+
+That single row is both reported symptoms at once: the page scrolls instead of
+the editor, and what you scroll into is blank background — you are scrolling
+the whole app shell off-screen and seeing what lies beneath it.
+
+It is possible because the document is genuinely scrollable on a long note:
+`documentElement.scrollHeight` is 2359 against a `clientHeight` of 900, even
+though `body.scrollHeight` is 900. Setting `documentElement.scrollTop = 600`
+directly moves the rail to `top: -600`, confirming it. The tall editor content
+propagates its scrollable overflow to the initial containing block.
+
+**Disproved — do not re-attempt:**
+
+- *"The blank region is inert."* It is not. Clicking the 472px empty band on a
+  short note already focuses the editor and places the caret
+  (`focused: true`, `selInsideEditor: true`). `min-height: 60vh` gives a short
+  note a working click target, which is what it is for. No click-to-append
+  handler is needed, and adding one would risk hijacking ordinary clicks for
+  no gain.
+- *"`scrollIntoView` chains to every scrollable ancestor."* It does not here.
+  `scrollIntoView({block:"nearest"})` on the last block moved the pane
+  (`scrollTop` 0 → 1459) and left `documentElement.scrollTop` at 0. Likewise
+  `Ctrl+End` scrolled only the pane. Caret movement is not the trigger.
 
 ### Fix
 
-Keep `min-height` — a short note needs a click target, and removing it makes
-new notes cramped. Make the empty region behave like the editor instead:
+Scroll containment only — the smaller change, and the one the evidence
+supports:
 
-- **Click-to-append.** A click handler on the padded wrapper detects a click
-  landing below the last block and responds by focusing the editor and placing
-  the caret at the end of the document. This is the Notion/Obsidian behaviour
-  and is what makes the space feel like part of the note rather than a gap
-  beneath it.
-- **Scroll only the editor pane.** The caret move must not call
-  `scrollIntoView`. Instead, compute the caret's rect and adjust the editor
-  pane's own `scrollTop` directly, leaving every ancestor untouched. The rail
-  and the file tree stay put.
-- **Contain overscroll.** `overscroll-behavior: contain` on the editor's
-  scroll container (`NoteEditor.tsx:835`) stops wheel/trackpad momentum at
-  either end from chaining out to `<main>`.
+- **`overscroll-behavior: contain`** on the editor's scroll container
+  (`NoteEditor.tsx:835`). This stops wheel and trackpad momentum at either end
+  of the pane from chaining outward.
+- **`overflow-hidden` on the `h-screen` shell root** (`AppShell.tsx:78`). The
+  app shell is a fixed-height, non-scrolling frame by design; every scrolling
+  region inside it is explicit. Making that explicit means no page can scroll
+  its own chrome out of view, which protects every route rather than just this
+  one. This is the load-bearing half — containment alone still leaves a
+  document that *can* be scrolled by other means.
 
-The click-to-append fix also removes the most common way to reach defect B: a
-caret placed at the very bottom of a long note.
+`min-height: 60vh` stays exactly as it is.
 
 ### Tests
 
-- The wrapper click handler places the caret at document end and focuses the
-  editor.
-- A click landing *on* existing content is left to ProseMirror — the handler
-  must not hijack normal clicks.
 - The editor's scroll container carries `overscroll-behavior: contain`.
+- The shell root carries `overflow-hidden`.
+- Browser-level verification (not a unit test — jsdom cannot express it):
+  re-run the measurement above and assert that wheeling past the end of the
+  pane leaves `documentElement.scrollTop` at 0 and the rail at `top: 0`.
 
 ---
 
@@ -301,6 +327,12 @@ keep the vendoring run single.
 - **`TestBrandLogoAssetsAreWellFormed` runs over every file in the directory**,
   so a badly-converted new asset fails the suite rather than shipping. That is
   the desired behaviour and needs no change.
-- **The click-to-append handler must not hijack ordinary clicks.** Getting
-  this wrong makes every click in the note jump the caret to the end, which is
-  far worse than the gap it fixes. This is the change most worth testing.
+- **`overflow-hidden` on the shell root is app-wide.** It is the right
+  default — every scrolling region inside the shell is already explicit — but
+  a route that was quietly relying on the document scrolling would lose its
+  scrollbar. Check the long pages (settings, connections, agents) in a browser
+  after the change, not only the KB.
+- **Defect C can only be verified in a real browser.** jsdom reports 0 for
+  every geometry, so the unit tests can assert the CSS declarations but not the
+  behaviour. The measurement harness that found this must be re-run to confirm
+  the fix.
