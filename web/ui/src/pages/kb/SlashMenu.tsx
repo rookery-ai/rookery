@@ -197,6 +197,13 @@ export function slashSuggestion(): AnyExtension {
             let el: HTMLDivElement | null = null;
             let reposition: (() => void) | null = null;
             let sizeObserver: ResizeObserver | null = null;
+            // The caret moves as the query is typed, and @tiptap/suggestion
+            // hands out a FRESH props object (with a fresh clientRect closure)
+            // on every update. The listeners below fire outside those calls, so
+            // they must read the latest props rather than closing over the ones
+            // onStart happened to receive — otherwise a resize triggered by the
+            // list filtering would re-place the menu against a stale caret.
+            let latest: SuggestionProps<SlashItem> | null = null;
 
             const position = (props: SuggestionProps<SlashItem>) => {
               if (!el) return;
@@ -225,7 +232,8 @@ export function slashSuggestion(): AnyExtension {
                 el.style.zIndex = "50";
                 el.appendChild(renderer.element as HTMLElement);
                 document.body.appendChild(el);
-                reposition = () => position(props);
+                latest = props;
+                reposition = () => latest && position(latest);
                 reposition();
                 // Re-place whenever the popup's own size changes.
                 //
@@ -247,6 +255,7 @@ export function slashSuggestion(): AnyExtension {
                 window.addEventListener("resize", reposition);
               },
               onUpdate: (props) => {
+                latest = props;
                 renderer?.updateProps(props);
                 position(props);
               },
@@ -276,6 +285,7 @@ export function slashSuggestion(): AnyExtension {
                 renderer?.destroy();
                 el = null;
                 renderer = null;
+                latest = null;
               },
             };
           },
