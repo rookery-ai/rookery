@@ -5,6 +5,7 @@ import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
 import { useOwnerVerify } from "@/lib/ownerVerify";
 import { useSession, type Workspace } from "@/lib/session";
+import { WorkspaceAvatar } from "@/lib/workspaceIcons";
 import { PageTitle } from "@/components/shell/PageTitle";
 import { SignOutButton } from "@/components/shell/SignOutButton";
 import { Button } from "@/components/ui/button";
@@ -284,17 +285,33 @@ export default function Workspaces() {
                 onClick={() =>
                   ws.needs_setup ? void directEnter(ws) : setEntering(ws)
                 }
-                className="w-full text-left border border-border rounded-lg px-4 py-3 hover:bg-chrome transition-colors"
+                className="flex w-full items-center gap-3 text-left border border-border rounded-lg px-4 py-3 hover:bg-chrome transition-colors"
               >
-                <span className="font-semibold">{ws.name}</span>
-                {ws.needs_setup && (
-                  <span className="text-warn text-xs ml-2">needs setup</span>
-                )}
-                {ws.about && (
-                  <span className="block text-muted-2 text-xs mt-0.5">
-                    {ws.about}
-                  </span>
-                )}
+                {/* Same avatar the rail's switcher uses, so a workspace is
+                    recognised by the same picture in both places. `shrink-0`
+                    keeps it square: it is a flex item next to a text column
+                    that can wrap, and without it a long name compresses the
+                    avatar into an ellipse. */}
+                <WorkspaceAvatar
+                  name={ws.name}
+                  icon={ws.icon}
+                  className="size-9 shrink-0 text-base"
+                />
+                {/* min-w-0 lets the text column shrink below its content width;
+                    a flex item's automatic minimum size is content-based, so an
+                    unbroken `about` line would otherwise push the row wider than
+                    the card. */}
+                <span className="min-w-0 flex-1">
+                  <span className="font-semibold">{ws.name}</span>
+                  {ws.needs_setup && (
+                    <span className="text-warn text-xs ml-2">needs setup</span>
+                  )}
+                  {ws.about && (
+                    <span className="block text-muted-2 text-xs mt-0.5">
+                      {ws.about}
+                    </span>
+                  )}
+                </span>
               </button>
             </li>
           ))}
