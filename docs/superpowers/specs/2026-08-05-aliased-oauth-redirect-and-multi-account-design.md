@@ -58,12 +58,17 @@ const [view, setView] = useState<"creds" | "connect">(
 
 `has_creds` is computed against the **resolved parent** (`api_services.go:225-241,272`),
 so every aliased child reports `has_creds: true` the moment its parent is
-configured. The wizard therefore opens directly on the Connect step and the
-user never sees the setup steps, the redirect URI block, or the child's own
-"also enable the Google Calendar API" instruction.
+configured. The wizard therefore opens directly on the Connect step.
 
-The two failures compound: the connect is broken, and the screen that would
-explain how to fix it is the screen that is skipped.
+Precisely what that hides: `setup_url` and `setup_steps` live inside the
+`view === "creds"` branch and are skipped, so the child's own instruction —
+"In Google Cloud Console, also enable the Google Calendar API" — is never
+rendered. The redirect URI block is **not** hidden; it sits outside the branch
+(`ServiceWizard.tsx:313-328`) and shows on both steps. The URI was always
+visible — it was simply the wrong URI.
+
+The two failures compound: the connect is broken, and the per-service setup
+instruction that would at least hint at the cause is the part that is skipped.
 
 ### 3. Connecting a second account is unsafe
 
@@ -131,20 +136,17 @@ The services API gains, per provider:
 
 `ServiceWizard` keeps opening on the Connect step when `has_creds` is true —
 forcing credential re-entry to show one paragraph would be worse — but for
-every OAuth provider it now **always** renders a setup section above the
-Connect control:
+in `update` mode it renders a guidance section above the Connect control:
 
-- In `update` mode it is headed as an instruction to update the existing
-  application, not to create one, and names the parent app.
-- It shows the redirect URI as copyable code (reusing the existing
-  `{{redirect_uri}}` substitution and `CopyButton`), with the instruction to
-  add it to the existing application's authorized redirect URIs if it is not
-  already there.
-- It renders the provider's own `setup_steps`, which for children already carry
-  the per-service instruction ("In Google Cloud Console, also enable the Google
-  Calendar API").
-- It notes that an unverified Google application admits at most 100 test users
-  and each account must be added as a test user before it can consent.
+- Headed as an instruction to update the existing application, not to create
+  one, naming the **parent** app ("Update your existing Google (Gmail)
+  application") — a child has no application of its own in the console.
+- It renders the provider's own `setup_steps` through the existing `SetupStep`
+  component, which for children already carry the per-service instruction ("In
+  Google Cloud Console, also enable the Google Calendar API").
+- It tells the user to confirm the redirect URI is listed under the existing
+  application's authorized redirect URIs. The URI block itself is **not**
+  duplicated here — it already renders above, on both steps.
 
 A "Re-enter credentials" control returns the wizard to the `creds` view, so
 `has_creds` stops being a one-way door — today there is no path back to fix a

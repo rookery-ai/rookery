@@ -565,3 +565,79 @@ test("oauth provider renames the credential fields to match its own console", as
 
   expect(captured).toEqual({ client_id: "cid-123", client_secret: "csecret-456" });
 });
+
+// An aliased child (google_calendar → google) inherits its PARENT's stored
+// credentials, so has_creds is true on the very first visit and the wizard opens
+// straight on Connect. That skipped the setup steps entirely — including the one
+// instruction that is genuinely per-service ("also enable the Google Calendar
+// API") — and left no statement of which application to edit. The redirect URI
+// block was always visible; the steps were not.
+const ALIASED_CHILD: ServiceProvider = {
+  name: "google_calendar",
+  label: "Google Calendar",
+  category: "Google",
+  kind: "oauth",
+  setup_url: "https://console.cloud.google.com/apis/credentials",
+  setup_steps: [
+    "Google Calendar reuses your Google (Gmail) OAuth app.",
+    "In Google Cloud Console, also enable the Google Calendar API.",
+  ],
+  has_creds: true,
+  app_provider: "google",
+  app_label: "Google (Gmail)",
+  setup_mode: "update",
+  action_count: 4,
+  connect_inputs: [],
+  redirect_uri: "https://rookery.example.com/dashboard/connectors/services/callback/google",
+  preflight: [],
+  connections: [],
+};
+
+test("an aliased child names the parent app to update and still shows its setup steps", async () => {
+  mockFetch({});
+  const user = userEvent.setup();
+  wrap(ALIASED_CHILD);
+
+  await user.click(screen.getByText("open wizard"));
+
+  // Names the OAuth application, not the service that was clicked.
+  expect(
+    await screen.findByText(/Update your existing Google \(Gmail\) application/i),
+  ).toBeInTheDocument();
+  expect(screen.getByText(/do not create a second one/i)).toBeInTheDocument();
+
+  // The per-service step is what was previously unreachable.
+  expect(
+    screen.getByText(/also enable the Google Calendar API/i),
+  ).toBeInTheDocument();
+
+  // The redirect URI is the PARENT's — this is the bug that made every Google
+  // child fail with redirect_uri_mismatch at the consent screen.
+  expect(screen.getByText(/\/callback\/google$/)).toBeInTheDocument();
+});
+
+test("update mode offers a route back to the credentials form", async () => {
+  mockFetch({});
+  const user = userEvent.setup();
+  wrap(ALIASED_CHILD);
+
+  await user.click(screen.getByText("open wizard"));
+  await user.click(
+    await screen.findByRole("button", { name: /re-enter credentials/i }),
+  );
+
+  // Without this, has_creds was a one-way door: a wrong client secret could not
+  // be corrected from this screen at all.
+  expect(await screen.findByText("Client ID")).toBeInTheDocument();
+});
+
+test("a provider with no stored creds shows no update-mode guidance", async () => {
+  mockFetch({});
+  const user = userEvent.setup();
+  wrap(OAUTH_NO_CREDS);
+
+  await user.click(screen.getByText("open wizard"));
+
+  expect(await screen.findByText("Client ID")).toBeInTheDocument();
+  expect(screen.queryByText(/Update your existing/i)).not.toBeInTheDocument();
+});
