@@ -3,12 +3,56 @@ package gateway
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 	"sync"
 )
 
 type CredField struct {
 	Key, Label, Placeholder string
 	Secret                  bool
+}
+
+// BotIdentity is what a platform's Validate probe learns about the BOT account
+// behind a set of credentials. Every field is a PUBLIC identifier — a bot's
+// username and id are meant to be shared, and Discord's invite URL embeds the
+// id — so this is persisted as a plain workspace setting rather than in the
+// encrypted config blob. Keeping it out of ciphertext is what lets the
+// connectors list endpoint stay DB-only and therefore cheap to poll.
+type BotIdentity struct {
+	Username string `json:"username,omitempty"` // display handle, e.g. "rookery_bot"
+	UserID   string `json:"user_id,omitempty"`  // the bot's platform user id; on Discord this is ALSO the application id
+	TeamID   string `json:"team_id,omitempty"`  // Slack only: the team id its DM deep link needs
+}
+
+// LinkTargets are the platform-specific URLs the wizard's linking step renders.
+// They are built here rather than in the SPA so that adding a platform stays a
+// gateway-package change alone.
+type LinkTargets struct {
+	DMURL     string // opens a DM with the bot
+	InviteURL string // Discord only: adds the bot to a server, a PREREQUISITE for DMs
+}
+
+// MarshalSetting encodes the identity for db.SetSetting.
+func (b BotIdentity) MarshalSetting() (string, error) {
+	out, err := json.Marshal(b)
+	return string(out), err
+}
+
+// BotIdentityFromSetting decodes a value written by MarshalSetting. It never
+// errors: a missing, truncated or hand-edited setting degrades to an empty
+// identity, and the wizard falls back to prose instructions.
+func BotIdentityFromSetting(s string) BotIdentity {
+	var b BotIdentity
+	if json.Unmarshal([]byte(s), &b) != nil {
+		return BotIdentity{}
+	}
+	return b
+}
+
+// BotIdentitySettingKey namespaces the identity per platform in the shared
+// workspace settings table.
+func BotIdentitySettingKey(platform string) string {
+	return "bot_identity." + strings.ToLower(platform)
 }
 
 type CredSpec struct {
@@ -18,7 +62,12 @@ type CredSpec struct {
 	Fields     []CredField
 	SetupURL   string
 	SetupSteps []string
-	Validate   func(values map[string]string) (identity string, err error)
+	// Validate probes the credentials against the platform and reports the bot
+	// account behind them. Nil means "nothing to probe".
+	Validate func(values map[string]string) (BotIdentity, error)
+	// LinkURLs builds the deep links the wizard's linking step shows. Nil means
+	// the step falls back to prose ("open a DM with the bot").
+	LinkURLs func(b BotIdentity) LinkTargets
 }
 
 var (

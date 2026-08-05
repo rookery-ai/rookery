@@ -225,6 +225,12 @@ func init() {
 			"Open @BotFather in Telegram", "Send /newbot and follow the prompts",
 			"Copy the token it gives you and paste it here",
 		},
+		LinkURLs: func(b BotIdentity) LinkTargets {
+			if b.Username == "" {
+				return LinkTargets{}
+			}
+			return LinkTargets{DMURL: "https://t.me/" + strings.TrimPrefix(b.Username, "@")}
+		},
 	})
 }
 

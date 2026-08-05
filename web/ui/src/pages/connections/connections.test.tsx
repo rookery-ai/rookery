@@ -31,6 +31,10 @@ let connectorsStatus = 200;
 let servicesStatus = 200;
 let searchKeysState: { brave: boolean; tavily: boolean };
 let searchKeysStatus = 200;
+// Last platform PUT /api/v1/connectors/:platform/primary was called with —
+// lets tests assert the primary-radio's onChange actually reaches the API,
+// not just that the radio renders checked.
+let lastPrimaryPut: string | null = null;
 // Response the PUT mock returns. Mirrors apiPutSearchKeyResponse: the save now
 // reports whether the key was actually proven against the live provider.
 let searchKeyPutResponse: { ok: boolean; verified?: boolean; note?: string };
@@ -45,6 +49,11 @@ function resetFixtures() {
       fields: [{ name: "bot_token", label: "Bot token", secret: true }],
       connected: true,
       identity: "@rookie_assistant_bot",
+      linked: true,
+      linked_identity: "123456789",
+      primary: true,
+      dm_url: "",
+      invite_url: "",
     },
     {
       platform: "slack",
@@ -54,6 +63,11 @@ function resetFixtures() {
       fields: [],
       connected: false,
       identity: "",
+      linked: false,
+      linked_identity: "",
+      primary: false,
+      dm_url: "",
+      invite_url: "",
     },
   ];
   providers = [
@@ -99,6 +113,7 @@ function resetFixtures() {
   searchKeysState = { brave: false, tavily: false };
   searchKeyPutResponse = { ok: true, verified: true };
   searchKeysStatus = 200;
+  lastPrimaryPut = null;
 }
 
 function mockFetch() {
@@ -151,9 +166,45 @@ function mockFetch() {
         return Promise.resolve(jsonResponse({ ok: true }));
       }
 
+      const primaryMatch = url.match(/^\/api\/v1\/connectors\/([^/]+)\/primary$/);
+      if (primaryMatch && method === "PUT") {
+        lastPrimaryPut = primaryMatch[1];
+        platforms = platforms.map((p) => ({ ...p, primary: p.platform === primaryMatch[1] }));
+        return Promise.resolve(jsonResponse({ ok: true }));
+      }
+
       return Promise.resolve(jsonResponse({}));
     }),
   );
+}
+
+// Every ConnectorPlatform field, for tests that only care about a couple of
+// them — spread over it and override. `primary: false` by default: a test
+// that needs a primary app sets it explicitly, so an unlinked entry spread
+// over this fixture never silently describes the impossible
+// `linked: false, primary: true` combination.
+const CHAT_APP_FIXTURE: ConnectorPlatform = {
+  platform: "telegram",
+  label: "Telegram",
+  blurb: "",
+  setup_steps: [],
+  fields: [],
+  connected: true,
+  identity: "@bot",
+  linked: true,
+  linked_identity: "123",
+  primary: false,
+  dm_url: "",
+  invite_url: "",
+};
+
+// Stubs GET /api/v1/connectors with exactly the given platforms (overriding
+// the shared `platforms` fixture used elsewhere in this file) and renders the
+// page.
+function renderConnections(platformsList: ConnectorPlatform[]) {
+  platforms = platformsList;
+  mockFetch();
+  return wrap();
 }
 
 function wrap(initialPath = "/") {
@@ -183,14 +234,18 @@ beforeEach(() => {
   resetFixtures();
 });
 
-test("renders chat-app cards: connected shows identity + Manage, not-connected shows Connect", async () => {
+test("renders chat-app cards: linked shows identity + Manage, not-connected shows Connect", async () => {
   mockFetch();
   wrap();
 
-  expect(await screen.findByText("Telegram")).toBeInTheDocument();
+  // "Telegram" also appears in the primary-delivery chooser below (it's the
+  // only linked app), so scope the card lookup to the first match.
+  expect((await screen.findAllByText("Telegram"))[0]).toBeInTheDocument();
   expect(screen.getByText("@rookie_assistant_bot")).toBeInTheDocument();
-  expect(screen.getByText("Connected")).toBeInTheDocument();
-  const telegramCard = screen.getByText("Telegram").closest("div.rounded-lg")!;
+  // The Telegram fixture is connected AND linked, so the card must show the
+  // linked-identity status, never the bare "Connected" claim.
+  expect(screen.getByText(/linked as 123456789/i)).toBeInTheDocument();
+  const telegramCard = screen.getAllByText("Telegram")[0].closest("div.rounded-lg")!;
   expect(telegramCard.textContent).toContain("Manage");
 
   expect(screen.getByText("Slack")).toBeInTheDocument();
@@ -218,7 +273,7 @@ test("category rows show correct counts: chat apps total, services connected-of-
   mockFetch();
   wrap();
 
-  await screen.findByText("Telegram");
+  await screen.findAllByText("Telegram");
   const chatAppsRow = screen.getByRole("button", { name: /chat apps/i });
   expect(chatAppsRow.textContent).toContain("2");
 
@@ -234,7 +289,7 @@ test("clicking a category row scrolls to its section", async () => {
   const user = userEvent.setup();
   wrap();
 
-  await screen.findByText("Telegram");
+  await screen.findAllByText("Telegram");
   await user.click(screen.getByRole("button", { name: /chat apps/i }));
   expect(scrollSpy).toHaveBeenCalledTimes(1);
 
@@ -245,7 +300,7 @@ test("clicking a category row scrolls to its section", async () => {
 test("explainer card shows the mockup copy", async () => {
   mockFetch();
   wrap();
-  await screen.findByText("Telegram");
+  await screen.findAllByText("Telegram");
   expect(screen.getByText(/are where you talk to your assistant/)).toBeInTheDocument();
   expect(screen.getByText(/are the accounts your agents can act on/)).toBeInTheDocument();
 });
@@ -292,8 +347,8 @@ test("clicking Manage on a connected chat-app card opens the manage wizard", asy
   const user = userEvent.setup();
   wrap();
 
-  await screen.findByText("Telegram");
-  const telegramCard = screen.getByText("Telegram").closest("div.rounded-lg") as HTMLElement;
+  await screen.findAllByText("Telegram");
+  const telegramCard = screen.getAllByText("Telegram")[0].closest("div.rounded-lg") as HTMLElement;
   await user.click(within(telegramCard).getByRole("button", { name: "Manage" }));
 
   expect(await screen.findByText("Manage Telegram")).toBeInTheDocument();
@@ -336,6 +391,110 @@ test("shows an error banner when the connectors list fails to load", async () =>
   wrap();
 
   expect(await screen.findByText("could not load chat apps")).toBeInTheDocument();
+});
+
+// ── Link state + primary chooser ────────────────────────────────────────────
+
+test("a connected but unlinked app is not shown as ready", async () => {
+  renderConnections([
+    { ...CHAT_APP_FIXTURE, platform: "discord", label: "Discord", connected: true, linked: false },
+  ]);
+
+  expect(await screen.findByText(/not linked yet/i)).toBeInTheDocument();
+  expect(screen.queryByText(/^connected$/i)).not.toBeInTheDocument();
+});
+
+test("primary radio is offered only to linked apps", async () => {
+  renderConnections([
+    {
+      ...CHAT_APP_FIXTURE,
+      platform: "telegram",
+      label: "Telegram",
+      connected: true,
+      linked: true,
+      linked_identity: "1843540314",
+      primary: true,
+    },
+    { ...CHAT_APP_FIXTURE, platform: "discord", label: "Discord", connected: true, linked: false },
+  ]);
+
+  const radios = await screen.findAllByRole("radio");
+  expect(radios).toHaveLength(1);
+  expect(radios[0]).toBeChecked();
+  expect(screen.getByText(/delivered to Telegram/i)).toBeInTheDocument();
+});
+
+test("clicking a non-primary linked app's radio calls PUT .../primary for that platform", async () => {
+  const user = userEvent.setup();
+  renderConnections([
+    {
+      ...CHAT_APP_FIXTURE,
+      platform: "telegram",
+      label: "Telegram",
+      connected: true,
+      linked: true,
+      linked_identity: "1843540314",
+      primary: true,
+    },
+    {
+      ...CHAT_APP_FIXTURE,
+      platform: "discord",
+      label: "Discord",
+      connected: true,
+      linked: true,
+      linked_identity: "ilija#4821",
+      primary: false,
+    },
+  ]);
+
+  const radios = await screen.findAllByRole("radio");
+  expect(radios).toHaveLength(2);
+  const discordRadio = screen.getByRole("radio", { name: /discord/i });
+  expect(discordRadio).not.toBeChecked();
+
+  await user.click(discordRadio);
+
+  await waitFor(() => expect(lastPrimaryPut).toBe("discord"));
+  // The list refetches on mutation success and the radio flips to reflect it.
+  await waitFor(() => expect(discordRadio).toBeChecked());
+});
+
+test("no linked apps: the primary chooser is omitted entirely", async () => {
+  renderConnections([
+    { ...CHAT_APP_FIXTURE, platform: "discord", label: "Discord", connected: true, linked: false },
+  ]);
+
+  await screen.findByText(/not linked yet/i);
+  expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(/where should agent runs and reminders go/i),
+  ).not.toBeInTheDocument();
+});
+
+// Disconnect removes the credentials row but not the identity row, so a
+// platform can read `linked: true` while `connected: false` — the card shows
+// "Not connected" but the identity from a past link is still on file. That
+// combination must not be offered as a delivery target: filtering `linked`
+// alone would 400 the moment it's picked, since there's no live connection
+// left to deliver through.
+test("a linked-but-disconnected app (Disconnect removed the credentials) gets no radio", async () => {
+  renderConnections([
+    {
+      ...CHAT_APP_FIXTURE,
+      platform: "discord",
+      label: "Discord",
+      connected: false,
+      linked: true,
+      linked_identity: "ilija#4821",
+      primary: false,
+    },
+  ]);
+
+  await screen.findByText("Not connected");
+  expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(/where should agent runs and reminders go/i),
+  ).not.toBeInTheDocument();
 });
 
 test("shows an error banner when the services list fails to load", async () => {

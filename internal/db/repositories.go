@@ -368,10 +368,12 @@ func (d *DB) ListPlatformIdentities(workspaceID, platform string) ([]*PlatformId
 	)
 	if platform == "" {
 		rows, err = d.Query(`SELECT id,workspace_id,platform,platform_user_id,linked_at
-			FROM platform_identities WHERE workspace_id=?`, workspaceID)
+			FROM platform_identities WHERE workspace_id=?
+			ORDER BY linked_at, platform, id`, workspaceID)
 	} else {
 		rows, err = d.Query(`SELECT id,workspace_id,platform,platform_user_id,linked_at
-			FROM platform_identities WHERE workspace_id=? AND platform=?`, workspaceID, platform)
+			FROM platform_identities WHERE workspace_id=? AND platform=?
+			ORDER BY linked_at, platform, id`, workspaceID, platform)
 	}
 	if err != nil {
 		return nil, err
@@ -388,6 +390,15 @@ func (d *DB) ListPlatformIdentities(workspaceID, platform string) ([]*PlatformId
 		out = append(out, &i)
 	}
 	return out, rows.Err()
+}
+
+// DeletePlatformIdentity unlinks a workspace from one chat platform. Deleting an
+// identity that is not there is a no-op: the Unlink action can race a link that
+// was already removed, and reporting that as an error would be noise.
+func (d *DB) DeletePlatformIdentity(workspaceID, platform string) error {
+	_, err := d.Exec(`DELETE FROM platform_identities WHERE workspace_id=? AND platform=?`,
+		workspaceID, platform)
+	return err
 }
 
 // HasPlatformIdentity returns true when the user has at least one linked

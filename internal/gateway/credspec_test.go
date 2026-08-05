@@ -57,3 +57,30 @@ func TestCredSpecsSorted(t *testing.T) {
 		t.Fatalf("CredSpecs not sorted: aaa-sort at %d, zzz-sort at %d", ai, zi)
 	}
 }
+
+func TestBotIdentitySettingRoundTrip(t *testing.T) {
+	in := BotIdentity{Username: "rookery_bot", UserID: "123456789", TeamID: "T01"}
+	s, err := in.MarshalSetting()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := BotIdentityFromSetting(s); got != in {
+		t.Fatalf("round trip: got %+v want %+v", got, in)
+	}
+}
+
+func TestBotIdentityFromSettingToleratesGarbage(t *testing.T) {
+	// A setting written by an older build (or hand-edited) must degrade to an
+	// empty identity, never panic — the wizard falls back to prose links.
+	for _, s := range []string{"", "not json", "{", `{"username":123}`} {
+		if got := BotIdentityFromSetting(s); got != (BotIdentity{}) {
+			t.Fatalf("BotIdentityFromSetting(%q) = %+v, want zero", s, got)
+		}
+	}
+}
+
+func TestBotIdentitySettingKeyIsPerPlatform(t *testing.T) {
+	if got := BotIdentitySettingKey("discord"); got != "bot_identity.discord" {
+		t.Fatalf("key = %q", got)
+	}
+}

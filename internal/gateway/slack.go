@@ -25,13 +25,13 @@ var slackAPINew = func(botToken string, opts ...slack.Option) *slack.Client {
 	return slack.New(botToken, opts...)
 }
 
-// validateSlackToken confirms a bot token via auth.test, returning the bot user name.
-func validateSlackToken(botToken string) (string, error) {
+// validateSlackToken confirms a bot token via auth.test, returning the bot identity.
+func validateSlackToken(botToken string) (BotIdentity, error) {
 	resp, err := slackAPINew(botToken).AuthTest()
 	if err != nil {
-		return "", fmt.Errorf("slack rejected bot token: %w", err)
+		return BotIdentity{}, fmt.Errorf("slack rejected bot token: %w", err)
 	}
-	return resp.User, nil
+	return BotIdentity{Username: resp.User, UserID: resp.UserID, TeamID: resp.TeamID}, nil
 }
 
 func init() {
@@ -45,18 +45,28 @@ func init() {
 		},
 		SetupURL: "https://api.slack.com/apps",
 		SetupSteps: []string{
-			"Create a Slack app at api.slack.com/apps (From scratch)",
-			"Socket Mode → enable it; generate an App-Level Token with connections:write (xapp-...)",
-			"OAuth & Permissions → add bot scopes chat:write, im:history, im:write, files:read; Install to Workspace; copy the Bot Token (xoxb-...)",
-			"Event Subscriptions → enable; subscribe to bot event message.im; reinstall if prompted",
-			"App Home → Messages Tab → enable it and check 'Allow users to send Slash commands and messages from the messages tab'",
-			"Paste BOTH tokens here, then DM your bot /start",
+			"Create a Slack app at api.slack.com/apps, choosing From scratch",
+			"Open Socket Mode and enable it",
+			"Generate an App-Level Token with the connections:write scope, then copy the xapp- token",
+			"Open OAuth & Permissions and add the bot scopes chat:write, im:history, im:write and files:read",
+			"Click Install to Workspace, then copy the xoxb- Bot Token",
+			"Open Event Subscriptions, enable it, and subscribe to the bot event message.im",
+			"Open App Home, enable the Messages Tab, and allow users to send messages from it",
 		},
-		Validate: func(v map[string]string) (string, error) {
+		Validate: func(v map[string]string) (BotIdentity, error) {
 			if v["app_token"] == "" {
-				return "", fmt.Errorf("app-level token (xapp-) is required for Socket Mode")
+				return BotIdentity{}, fmt.Errorf("app-level token (xapp-) is required for Socket Mode")
 			}
 			return validateSlackToken(v["token"])
+		},
+		LinkURLs: func(b BotIdentity) LinkTargets {
+			if b.UserID == "" || b.TeamID == "" {
+				return LinkTargets{}
+			}
+			// A single https://app.slack.com/client/<team>/<user> deep link
+			// resolves the same DM whether it's opened by the desktop app or a
+			// browser — no separate slack:// scheme is used.
+			return LinkTargets{DMURL: "https://app.slack.com/client/" + b.TeamID + "/" + b.UserID}
 		},
 	})
 

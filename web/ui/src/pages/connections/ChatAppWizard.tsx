@@ -8,23 +8,26 @@ import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { Linkify } from "@/lib/linkify";
 import {
+  useConnectors,
   useSaveConnector,
   useTestConnector,
   useDeleteConnector,
+  useUnlinkConnector,
   type ConnectorPlatform,
 } from "@/lib/connections";
 import { ConnectorCredentialsFields } from "./ConnectorCredentialsFields";
 
 type ChatAppWizardProps = { platform: ConnectorPlatform };
 
-// ── Step chips (1 Setup — 2 Credentials — 3 Test) ───────────────────────────
+// ── Step chips (1 Setup — 2 Credentials — 3 Test — 4 Link) ─────────────────
 
-type Step = "setup" | "credentials" | "test";
-const STEPS: Step[] = ["setup", "credentials", "test"];
+type Step = "setup" | "credentials" | "test" | "link";
+const STEPS: Step[] = ["setup", "credentials", "test", "link"];
 const STEP_LABELS: Record<Step, string> = {
   setup: "Setup",
   credentials: "Credentials",
   test: "Test",
+  link: "Link",
 };
 
 function StepChips({ step }: { step: Step }) {
@@ -118,7 +121,93 @@ function TestResult({
   return null;
 }
 
-// ── Not-connected: 3-step guided wizard ─────────────────────────────────────
+// ── Step 4: Link your account ───────────────────────────────────────────────
+//
+// The identity row is created only when the operator's /start actually reaches
+// the bot, so its presence proves the inbound path end to end — which a token
+// check cannot. Until it lands there is deliberately no Done button and no
+// green state: the product must never signal completion it has not verified.
+function LinkStep({
+  platform,
+  onFinishLater,
+  onDone,
+}: {
+  platform: ConnectorPlatform;
+  onFinishLater: () => void;
+  onDone: () => void;
+}) {
+  // `linked` starts from the platform snapshot the wizard opened with and is
+  // latched true the moment the poll confirms it — so the poll can actually
+  // stop once linked, rather than running for the rest of the panel's life.
+  const [linked, setLinked] = useState(platform.linked);
+  const { data } = useConnectors({ refetchInterval: linked ? false : 2000 });
+  const live =
+    data?.platforms?.find((p) => p.platform === platform.platform) ?? platform;
+
+  useEffect(() => {
+    if (live.linked && !linked) setLinked(true);
+  }, [live.linked, linked]);
+
+  if (live.linked) {
+    return (
+      <div className="space-y-3">
+        <OkNote>Linked as {live.linked_identity}</OkNote>
+        <div className="flex justify-end">
+          <Button onClick={onDone}>Done</Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {live.invite_url && (
+        <div className="space-y-2 rounded-lg border border-border bg-background p-3 text-sm">
+          <p className="font-medium">First, add the bot to a server</p>
+          <p className="text-muted-2">
+            Discord only allows a direct message between accounts that share a
+            server. Afterwards, check the server's Privacy Settings and make sure
+            Direct Messages are allowed.
+          </p>
+          <Button asChild variant="outline" size="sm">
+            <a href={live.invite_url} target="_blank" rel="noreferrer">
+              <Link2 />
+              Invite to a server
+            </a>
+          </Button>
+        </div>
+      )}
+
+      <div className="space-y-2 rounded-lg border border-border bg-background p-3 text-sm">
+        <p className="font-medium">Then send the bot a message</p>
+        <p className="text-muted-2">
+          Open a direct message with{" "}
+          <b className="text-foreground">{live.identity || live.label}</b> and
+          send:
+        </p>
+        <code className="block rounded bg-muted-surface px-2 py-1 font-mono">/start</code>
+        {live.dm_url && (
+          <Button asChild variant="outline" size="sm">
+            <a href={live.dm_url} target="_blank" rel="noreferrer">
+              <ArrowRight />
+              Open {live.label}
+            </a>
+          </Button>
+        )}
+      </div>
+
+      <Spinner text="Waiting for you to send /start…" />
+
+      <div className="flex justify-end">
+        <Button variant="link" onClick={onFinishLater}>
+          Finish later — I'm not linked yet
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ── Not-connected: 4-step guided wizard ─────────────────────────────────────
 
 function ConnectWizard({ platform }: { platform: ConnectorPlatform }) {
   const { close } = useSlideOver();
@@ -157,6 +246,7 @@ function ConnectWizard({ platform }: { platform: ConnectorPlatform }) {
   return (
     <PanelBody>
       <StepChips step={step} />
+      {warning && <WarningNote>{warning}</WarningNote>}
 
       {step === "setup" && (
         <div className="space-y-3">
@@ -217,7 +307,6 @@ function ConnectWizard({ platform }: { platform: ConnectorPlatform }) {
 
       {step === "test" && (
         <div className="space-y-3">
-          {warning && <WarningNote>{warning}</WarningNote>}
           <TestResult
             platform={platform.label}
             pending={testMutation.isPending}
@@ -234,7 +323,10 @@ function ConnectWizard({ platform }: { platform: ConnectorPlatform }) {
           )}
           <div className="flex justify-end">
             {testOk === true ? (
-              <Button onClick={() => close()}>Done</Button>
+              <Button onClick={() => setStep("link")}>
+                <ArrowRight />
+                Next
+              </Button>
             ) : (
               !testMutation.isPending && (
                 <Button
@@ -249,6 +341,14 @@ function ConnectWizard({ platform }: { platform: ConnectorPlatform }) {
           </div>
         </div>
       )}
+
+      {step === "link" && (
+        <LinkStep
+          platform={platform}
+          onFinishLater={() => close()}
+          onDone={() => close()}
+        />
+      )}
     </PanelBody>
   );
 }
@@ -259,9 +359,22 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
   const { close } = useSlideOver();
   const [confirming, setConfirming] = useState(false);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
+  const [unlinkError, setUnlinkError] = useState<string | null>(null);
+
+  // `AppShell`'s slide-over is `useState<{node: ReactNode}>`, so the element
+  // ConnectionsPage passes to `open()` is created once and never re-created —
+  // this component's `platform` prop is a frozen snapshot from the moment the
+  // panel opened. Unlink flips `linked` server-side and invalidates the
+  // `["connectors"]` query, but a prop can't observe that; without reading the
+  // live query result here, the green header and Done button below would keep
+  // rendering after a successful Unlink. Mirrors `LinkStep`'s own `live` read.
+  const { data } = useConnectors();
+  const live =
+    data?.platforms?.find((p) => p.platform === platform.platform) ?? platform;
 
   const testMutation = useTestConnector();
   const deleteMutation = useDeleteConnector();
+  const unlinkMutation = useUnlinkConnector();
 
   async function handleDisconnect() {
     setDisconnectError(null);
@@ -275,35 +388,81 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
     }
   }
 
+  async function handleUnlink() {
+    setUnlinkError(null);
+    try {
+      await unlinkMutation.mutateAsync(platform.platform);
+    } catch (err) {
+      setUnlinkError(
+        err instanceof ApiError ? err.message : "Something went wrong",
+      );
+    }
+  }
+
   const testOk = testMutation.data ? testMutation.data.ok : null;
 
   return (
     <PanelBody>
-      <div className="space-y-1">
-        <div className="flex items-center gap-1.5 text-sm font-medium text-ok">
-          <span className="size-1.5 rounded-full bg-ok" /> Connected
-        </div>
-        {platform.identity && (
-          <div className="text-xs text-muted-2">{platform.identity}</div>
-        )}
-      </div>
+      {/* A connected-but-unlinked platform must never show this green header
+          — that's the same "Connected ✓" claim the link step exists to
+          withhold, just reachable from Manage instead of the connect flow.
+          Disconnect stays reachable in BOTH branches below: a token that
+          authenticates as the wrong bot still has to be removable. */}
+      {live.linked ? (
+        <>
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 text-sm font-medium text-ok">
+              <span className="size-1.5 rounded-full bg-ok" /> Connected
+            </div>
+            {live.identity && (
+              <div className="text-xs text-muted-2">{live.identity}</div>
+            )}
+            <div className="flex items-center gap-1.5 text-sm font-medium text-ok">
+              <Check className="size-4" /> Linked as {live.linked_identity}
+            </div>
+          </div>
 
-      <Button
-        variant="outline"
-        onClick={() => testMutation.mutate(platform.platform)}
-        disabled={testMutation.isPending}
-      >
-        <Link2 />
-        {testMutation.isPending ? "Checking…" : "Test connection"}
-      </Button>
+          {/* Unlink drops the operator's /start link but keeps the saved bot
+              credentials — the platform falls back to connected-but-unlinked,
+              not disconnected. This is what makes a wrong link
+              self-serviceable instead of a dead end ("contact your
+              administrator" in a single-owner product). Distinct from
+              Disconnect below, which does remove credentials. */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleUnlink()}
+            disabled={unlinkMutation.isPending}
+          >
+            <Unlink />
+            {unlinkMutation.isPending ? "Unlinking…" : "Unlink this account"}
+          </Button>
+          {unlinkError && <ErrorNote>{unlinkError}</ErrorNote>}
 
-      <TestResult
-        platform={platform.label}
-        pending={testMutation.isPending}
-        ok={testOk}
-        identity={testMutation.data?.identity}
-        error={testMutation.data?.error}
-      />
+          <Button
+            variant="outline"
+            onClick={() => testMutation.mutate(platform.platform)}
+            disabled={testMutation.isPending}
+          >
+            <Link2 />
+            {testMutation.isPending ? "Checking…" : "Test connection"}
+          </Button>
+
+          <TestResult
+            platform={platform.label}
+            pending={testMutation.isPending}
+            ok={testOk}
+            identity={testMutation.data?.identity}
+            error={testMutation.data?.error}
+          />
+        </>
+      ) : (
+        <LinkStep
+          platform={live}
+          onFinishLater={() => close()}
+          onDone={() => close()}
+        />
+      )}
 
       <div className="border-t border-border pt-3">
         {!confirming ? (
@@ -343,6 +502,12 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
         )}
         {disconnectError && <ErrorNote>{disconnectError}</ErrorNote>}
       </div>
+
+      {live.linked && (
+        <div className="flex justify-end">
+          <Button onClick={() => close()}>Done</Button>
+        </div>
+      )}
     </PanelBody>
   );
 }

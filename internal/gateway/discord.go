@@ -21,29 +21,31 @@ import (
 // discordAPIBase is the Discord REST base; overridable in tests.
 var discordAPIBase = "https://discord.com/api/v10"
 
-// validateDiscordToken confirms a bot token by fetching the bot user, returning its username.
-func validateDiscordToken(token string) (string, error) {
+// validateDiscordToken confirms a bot token by fetching the bot user, returning its identity.
+func validateDiscordToken(token string) (BotIdentity, error) {
 	req, err := http.NewRequest(http.MethodGet, discordAPIBase+"/users/@me", nil)
 	if err != nil {
-		return "", err
+		return BotIdentity{}, err
 	}
 	req.Header.Set("Authorization", "Bot "+token)
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
-		return "", fmt.Errorf("discord api unreachable: %w", err)
+		return BotIdentity{}, fmt.Errorf("discord api unreachable: %w", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("discord rejected token (status %d)", resp.StatusCode)
+		return BotIdentity{}, fmt.Errorf("discord rejected token (status %d)", resp.StatusCode)
 	}
 	var out struct {
+		ID       string `json:"id"`
 		Username string `json:"username"`
 	}
+	// A bot's user id IS its application id, which is what the invite URL needs.
 	if err := json.Unmarshal(body, &out); err != nil || out.Username == "" {
-		return "", fmt.Errorf("invalid response from discord")
+		return BotIdentity{}, fmt.Errorf("invalid response from discord")
 	}
-	return out.Username, nil
+	return BotIdentity{Username: out.Username, UserID: out.ID}, nil
 }
 
 func init() {
@@ -54,12 +56,24 @@ func init() {
 		Fields:   []CredField{{Key: "token", Label: "Bot Token", Placeholder: "your bot token", Secret: true}},
 		SetupURL: "https://discord.com/developers/applications",
 		SetupSteps: []string{
-			"Open the Discord Developer Portal and create a New Application",
+			"Open the Discord Developer Portal and click New Application",
 			"Open the Bot tab, click Reset Token, and copy the token",
-			"On the Bot tab, enable the MESSAGE CONTENT INTENT (Privileged Gateway Intents)",
-			"Invite the bot to a server OR just DM it after connecting; send /start to link",
+			"Still on the Bot tab, enable the MESSAGE CONTENT INTENT under Privileged Gateway Intents",
 		},
-		Validate: func(v map[string]string) (string, error) { return validateDiscordToken(v["token"]) },
+		Validate: func(v map[string]string) (BotIdentity, error) { return validateDiscordToken(v["token"]) },
+		LinkURLs: func(b BotIdentity) LinkTargets {
+			if b.UserID == "" {
+				return LinkTargets{}
+			}
+			return LinkTargets{
+				DMURL: "https://discord.com/users/" + b.UserID,
+				// permissions=0: guild permissions do not govern 1:1 DMs, so a
+				// DM-only bot needs none. It also creates no role on join and
+				// the consent screen asks for nothing.
+				InviteURL: "https://discord.com/api/oauth2/authorize?client_id=" +
+					url.QueryEscape(b.UserID) + "&scope=bot&permissions=0",
+			}
+		},
 	})
 
 	RegisterAdapter("discord", func(token, config, ws string, d DispatchFunc) (Gateway, error) {

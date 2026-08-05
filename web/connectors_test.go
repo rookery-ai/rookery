@@ -50,15 +50,17 @@ func TestTestConnectorUsesSpecValidate(t *testing.T) {
 
 	// A spec whose Validate echoes a fixed identity, no network.
 	gateway.RegisterCredSpec(gateway.CredSpec{Platform: "cs-validate", Label: "CSV", Fields: []gateway.CredField{{Key: "token"}},
-		Validate: func(v map[string]string) (string, error) { return "bot-ident", nil }})
+		Validate: func(v map[string]string) (gateway.BotIdentity, error) {
+			return gateway.BotIdentity{Username: "bot-ident"}, nil
+		}})
 	enc, _ := gateway.EncryptToken("tok", make([]byte, 32))
 	if err := d.UpsertPlatformConnection(&db.PlatformConnection{ID: uuid.New().String(), WorkspaceID: ws, Platform: "cs-validate", EncryptedToken: enc, Active: true}); err != nil {
 		t.Fatal(err)
 	}
 	s := &Server{db: d, systemKey: make([]byte, 32)}
 	id, err := s.testConnectorIdentity(ws, "cs-validate")
-	if err != nil || id != "bot-ident" {
-		t.Fatalf("testConnectorIdentity = %q, %v", id, err)
+	if err != nil || id.Username != "bot-ident" {
+		t.Fatalf("testConnectorIdentity = %+v, %v", id, err)
 	}
 }
 
