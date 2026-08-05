@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/ilijad1/rookery/compare/v0.2.0...v0.3.0) (2026-08-05)
+
+
+### Features
+
+* **gateway:** advertise every command in the Telegram, Discord and Slack menus ([#95](https://github.com/ilijad1/rookery/issues/95)) ([04cd87d](https://github.com/ilijad1/rookery/commit/04cd87dade746852497e7c9b035000a48a7fcc2f))
+* **web/auth:** add sign out, and gate workspace creation on the owner password ([#96](https://github.com/ilijad1/rookery/issues/96)) ([c9f6eea](https://github.com/ilijad1/rookery/commit/c9f6eeabbe0b2387facdfaa58956ce6b387e92c7))
+* **web/workspaces:** show each workspace's icon in the picker ([#101](https://github.com/ilijad1/rookery/issues/101)) ([32ef2a2](https://github.com/ilijad1/rookery/commit/32ef2a221770ef92433321c3cab5ac4228dde532))
+
+
+### Bug Fixes
+
+* **connectors:** scope the OAuth redirect URI to the app, not the service ([#94](https://github.com/ilijad1/rookery/issues/94)) ([1fb352e](https://github.com/ilijad1/rookery/commit/1fb352ee6eb7b72c75b0e53f4027550199108309))
+* **gateway:** stop dropping long designer messages and losing detached builds ([#97](https://github.com/ilijad1/rookery/issues/97)) ([cb17098](https://github.com/ilijad1/rookery/commit/cb17098eaf99fa53c656b0559f49fed87efaf9f1))
+* **web/auth:** send a signed-out owner to the login screen, not the picker ([#99](https://github.com/ilijad1/rookery/issues/99)) ([8cdf78c](https://github.com/ilijad1/rookery/commit/8cdf78c5c05153e4c74988a738cacae04a3e8ecf))
+
 ## [0.2.0](https://github.com/ilijad1/rookery/compare/v0.1.0...v0.2.0) (2026-08-05)
 
 
