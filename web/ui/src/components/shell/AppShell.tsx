@@ -75,7 +75,13 @@ export function AppShell() {
       <DockedComposerCtx.Provider value={dockedValue}>
       <ToastProvider>
         <TooltipProvider>
-          <div className="h-screen flex flex-col md:flex-row bg-background">
+          {/* overflow-hidden: the shell is a fixed-height frame and every
+              scrolling region inside it is explicit. Without this, tall content
+              in a pane (a long KB note) propagates its scrollable overflow to
+              the initial containing block, making the DOCUMENT scrollable — and
+              a scrollable document means the rail and context pane can be
+              scrolled out of view, which is never wanted on any route. */}
+          <div className="h-screen overflow-hidden flex flex-col md:flex-row bg-background">
             <IconRail />
             {contextPane && (
               <aside

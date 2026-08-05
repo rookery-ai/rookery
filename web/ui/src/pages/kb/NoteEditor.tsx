@@ -832,7 +832,11 @@ export default function NoteEditor({
 
       <BacklinksStrip backlinks={backlinks} onNavigate={navigateToPath} />
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* overscroll-contain: without it, wheeling past the end of a long note
+          chains out to the document and scrolls the whole app shell — rail and
+          file tree included — off the top of the viewport, which reads as
+          "scrolling past the content into blank background". */}
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         {mode === "wysiwyg" ? (
           <div className="px-[7%] py-8">
             <FrontmatterStrip

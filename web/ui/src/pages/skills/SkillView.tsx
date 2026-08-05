@@ -29,7 +29,8 @@ export type SkillViewProps = {
   description?: string;
   category: string;
   version?: string;
-  requires?: string[];
+  /** Nullable: the API emits null, not [], when a skill declares no tooling. */
+  requires?: string[] | null;
   content: string;
   /** Present only for kind="user" — a core skill is embedded in the binary. */
   onSave?: (content: string) => Promise<void>;
@@ -53,7 +54,7 @@ export function SkillView({
   description,
   category,
   version,
-  requires = [],
+  requires,
   content,
   onSave,
   onDelete,
@@ -65,6 +66,11 @@ export function SkillView({
   const [draft, setDraft] = useState(content);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Normalised rather than defaulted: a Go nil slice arrives as null, and a
+  // default parameter substitutes only for undefined. Reading `.length` off
+  // the raw prop crashed the route for every skill declaring no tooling.
+  const requiredTools = requires ?? [];
 
   // Resets only when the LOADED content changes, never on a tab switch, so
   // toggling views cannot silently discard an unsaved edit.
@@ -139,9 +145,9 @@ export function SkillView({
         <SkillChip>{kind === "core" ? "Built-in" : "Yours"}</SkillChip>
       </div>
 
-      {requires.length > 0 && (
+      {requiredTools.length > 0 && (
         <p className="mb-2 text-xs text-muted-2">
-          Needs: {requires.join(", ")}
+          Needs: {requiredTools.join(", ")}
         </p>
       )}
       {description && (

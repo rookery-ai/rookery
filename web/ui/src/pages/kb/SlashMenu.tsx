@@ -121,6 +121,56 @@ const SlashList = forwardRef<ListHandle, SuggestionProps<SlashItem>>(function Sl
   );
 });
 
+export type Placement = { left: number; top: number; maxHeight: number | null };
+
+/**
+ * Decide where the fixed-position slash popup goes.
+ *
+ * Pure, and measurements-in/measurements-out, so it is actually testable:
+ * jsdom has no layout engine and returns 0 for every rect, so a test driving
+ * the real popup can prove it OPENS but never prove WHERE it lands. That gap
+ * is how the original shipped — it set `top = caret.bottom + 4` with no bounds
+ * check at all, and with the caret on the last line of a long note the menu
+ * rendered 410px below the fold with ~32px visible.
+ *
+ * The menu is ~442px tall at twelve items — more than half a laptop viewport —
+ * so flipping above is not sufficient on its own: when neither side fits, the
+ * list has to cap and scroll. Clipping instead would hide items with no way to
+ * reach them.
+ */
+export function placeMenu(
+  caret: { top: number; bottom: number; left: number },
+  menu: { width: number; height: number },
+  viewport: { width: number; height: number },
+  gap = 4,
+): Placement {
+  const below = viewport.height - caret.bottom - gap;
+  const above = caret.top - gap;
+
+  let top: number;
+  let maxHeight: number | null = null;
+
+  if (menu.height <= below) {
+    top = caret.bottom + gap;
+  } else if (menu.height <= above) {
+    top = caret.top - gap - menu.height;
+  } else if (above >= below) {
+    maxHeight = Math.max(above, 0);
+    top = gap;
+  } else {
+    maxHeight = Math.max(below, 0);
+    top = caret.bottom + gap;
+  }
+
+  // Math.max on the ceiling keeps `left` non-negative on a viewport narrower
+  // than the menu: an overhang on the right is recoverable, a negative left
+  // puts the start of every item permanently off-screen.
+  const maxLeft = viewport.width - menu.width - gap;
+  const left = Math.min(Math.max(caret.left, gap), Math.max(maxLeft, gap));
+
+  return { left, top, maxHeight };
+}
+
 const SLASH_EXTENSION_NAME = "slashCommand";
 
 // Suggestion-based extension: "/" triggers a floating block-type menu.
@@ -145,13 +195,33 @@ export function slashSuggestion(): AnyExtension {
           render: () => {
             let renderer: ReactRenderer<ListHandle, SuggestionProps<SlashItem>> | null = null;
             let el: HTMLDivElement | null = null;
+            let reposition: (() => void) | null = null;
+            let sizeObserver: ResizeObserver | null = null;
+            // The caret moves as the query is typed, and @tiptap/suggestion
+            // hands out a FRESH props object (with a fresh clientRect closure)
+            // on every update. The listeners below fire outside those calls, so
+            // they must read the latest props rather than closing over the ones
+            // onStart happened to receive — otherwise a resize triggered by the
+            // list filtering would re-place the menu against a stale caret.
+            let latest: SuggestionProps<SlashItem> | null = null;
 
             const position = (props: SuggestionProps<SlashItem>) => {
               if (!el) return;
-              const rect = props.clientRect?.();
-              if (!rect) return;
-              el.style.left = `${rect.left}px`;
-              el.style.top = `${rect.bottom + 4}px`;
+              const caret = props.clientRect?.();
+              if (!caret) return;
+              // Measured as rendered rather than assumed: the item count
+              // changes as the query narrows, so a constant height would be
+              // wrong the moment you type.
+              const box = el.getBoundingClientRect();
+              const p = placeMenu(
+                { top: caret.top, bottom: caret.bottom, left: caret.left },
+                { width: box.width, height: box.height },
+                { width: window.innerWidth, height: window.innerHeight },
+              );
+              el.style.left = `${p.left}px`;
+              el.style.top = `${p.top}px`;
+              el.style.maxHeight = p.maxHeight === null ? "" : `${p.maxHeight}px`;
+              el.style.overflowY = p.maxHeight === null ? "" : "auto";
             };
 
             return {
@@ -162,9 +232,30 @@ export function slashSuggestion(): AnyExtension {
                 el.style.zIndex = "50";
                 el.appendChild(renderer.element as HTMLElement);
                 document.body.appendChild(el);
-                position(props);
+                latest = props;
+                reposition = () => latest && position(latest);
+                reposition();
+                // Re-place whenever the popup's own size changes.
+                //
+                // Load-bearing, not defensive: ReactRenderer has not laid the
+                // list out yet at appendChild time, so the measure above reads
+                // height 0. Zero fits anywhere, so the very first placement
+                // always chose "below" — and with nothing else to correct it,
+                // a menu opened at the bottom of a long note stayed 410px off
+                // the fold, which is the exact bug this was meant to fix.
+                // The observer also handles the height changing as a query
+                // narrows the item list.
+                sizeObserver = new ResizeObserver(() => reposition?.());
+                sizeObserver.observe(el);
+                // The popup is position:fixed while the caret is not, so any
+                // scroll desynchronises them. capture:true because scroll does
+                // not bubble — without it a scroll of the editor pane (the one
+                // that actually moves the caret) would never be seen.
+                window.addEventListener("scroll", reposition, true);
+                window.addEventListener("resize", reposition);
               },
               onUpdate: (props) => {
+                latest = props;
                 renderer?.updateProps(props);
                 position(props);
               },
@@ -183,10 +274,18 @@ export function slashSuggestion(): AnyExtension {
                 return renderer?.ref?.onKeyDown(props) ?? false;
               },
               onExit: () => {
+                sizeObserver?.disconnect();
+                sizeObserver = null;
+                if (reposition) {
+                  window.removeEventListener("scroll", reposition, true);
+                  window.removeEventListener("resize", reposition);
+                  reposition = null;
+                }
                 el?.remove();
                 renderer?.destroy();
                 el = null;
                 renderer = null;
+                latest = null;
               },
             };
           },

@@ -58,7 +58,11 @@ mistral:mistral-color
 gemini:gemini-color
 google:google-color
 perplexity:perplexity-color
-moonshot:kimi-color
+# The MONO mark, not kimi-color: for this brand the "-color" variant is a white
+# mark on a transparent field, drawn for Moonshot's own blue container, and
+# ProviderLogo renders on a white tile — it showed an empty square with a speck
+# in the corner. Mono paints with currentColor and the tile supplies contrast.
+moonshot:kimi
 brave:brave-color
 tavily:tavily-color
 notion:notion
@@ -108,7 +112,10 @@ teams:microsoft-teams-1
 trello:trello
 twilio:twilio-2
 zendesk:zendesk-1
-zoom:zoom-communications-logo
+# zoom deliberately absent: the provider was removed (its connect flow could not
+# be completed against a real account) and its logo deleted in the same commit,
+# but this manifest line was left behind — so the next re-vendor silently
+# recreated zoom.svg. Pinned by connectors.TestRemovedProvidersStayRemoved.
 linkedin:linkedin-icon-2
 youtube:youtube-2
 facebook:facebook-4
@@ -146,7 +153,11 @@ nextcloud:siNextcloud
 mealie:siMealie
 vikunja:siVikunja
 portainer:siPortainer
-fitbit:siFitbit
+# fitbit deliberately absent: replaced by google_health (Fitbit's Web API is
+# decommissioned in September 2026 along with its OAuth server). Its logo was
+# deleted with the provider, but this manifest line survived and recreated
+# fitbit.svg on the next re-vendor. Pinned by
+# connectors.TestRemovedProvidersStayRemoved.
 spotify:siSpotify
 trakt:siTrakt
 # Wave 3 — the homelab stack plus a few cloud services. All have marks.
@@ -182,16 +193,121 @@ immich:siImmich
 paperless:siPaperlessngx
 "
 
-# strip_svg removes the XML prolog, DOCTYPE, comments, any <script>/<style>
-# block, and the mark's own <title>, then collapses whitespace.
+# inline_class_styles resolves simple class-based paint rules into presentation
+# attributes BEFORE strip_svg removes the <style> block that defined them.
 #
-# Two reasons this matters, both because ProviderLogo INLINES these files:
+# This is not a nicety. Illustrator and Inkscape both export marks as
+# `<rect class="st2"/>` plus a `<style>.st2{fill:#1b1f20}</style>`, and
+# strip_svg has to remove that <style> (these files are inlined into the DOM
+# with dangerouslySetInnerHTML). Without the rule, every classed element falls
+# back to the SVG default `fill: black`:
+#
+#   - llama.cpp rendered as a SOLID BLACK SQUARE — its background <rect> is
+#     .st2 and the llama itself .st0, so the plate swallowed the mark entirely.
+#   - Open Library lost three stroke paths — .st0 is `fill:none;stroke:...`, so
+#     they became zero-area black and vanished. That one looked merely plain
+#     rather than broken, which is why it sat unnoticed.
+#
+# Both passed every structural test: they start with <svg>, carry a viewBox,
+# have no <script> and no <title>. Only rendering them reveals it. Handling it
+# here means the next Illustrator export is fixed on arrival instead of
+# becoming a third per-brand patch.
+#
+# Deliberately simple: single-class selectors and paint properties only. A rule
+# it cannot express is left alone rather than half-applied.
+inline_class_styles() {
+  python3 - "$1" <<'PY'
+import re, sys
+
+PAINT = {
+    "fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin",
+    "stroke-miterlimit", "stroke-dasharray", "opacity", "fill-opacity",
+    "stroke-opacity", "fill-rule",
+}
+
+
+def drop_at_blocks(css):
+    """Remove @media/@supports blocks, braces balanced.
+
+    Their rules must NOT be applied unconditionally. Frankfurter ships a
+    `@media (prefers-color-scheme: dark)` block that repaints its mark for a
+    dark background; ProviderLogo always renders on a WHITE tile, so the
+    light-mode rules are the correct ones and the dark ones would invert it.
+    A presentation attribute cannot express a media query either way.
+    """
+    out, i = [], 0
+    while i < len(css):
+        if css[i] == "@":
+            depth, j = 0, i
+            while j < len(css):
+                if css[j] == "{":
+                    depth += 1
+                elif css[j] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        j += 1
+                        break
+                j += 1
+            i = j
+            continue
+        out.append(css[i])
+        i += 1
+    return "".join(out)
+
+
+src = open(sys.argv[1]).read()
+rules = {}
+for block in re.findall(r"<style[^>]*>(.*?)</style>", src, re.S | re.I):
+    for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", drop_at_blocks(block)):
+        decls = {}
+        for decl in body.split(";"):
+            if ":" not in decl:
+                continue
+            prop, _, val = decl.partition(":")
+            prop, val = prop.strip().lower(), val.strip()
+            # Paint properties only. Anything else (transforms, filters,
+            # animation) is out of scope and safer left unapplied.
+            if prop in PAINT and val:
+                decls[prop] = val
+        if not decls:
+            continue
+        # Selector LISTS matter: frankfurter writes `.p, .s { fill: #1a1a1a }`,
+        # and reading only the last class would leave .p unpainted (i.e. black).
+        # Anything that is not a bare single class — descendant, attribute or
+        # element selectors — is skipped rather than guessed at.
+        for one in sel.split(","):
+            one = one.strip()
+            if re.fullmatch(r"\.[A-Za-z_][\w-]*", one):
+                rules.setdefault(one[1:], {}).update(decls)
+
+if rules:
+    def sub(m):
+        attrs = {}
+        for n in m.group(1).split():
+            attrs.update(rules.get(n, {}))
+        if not attrs:
+            return m.group(0)
+        return " ".join(f'{k}="{v}"' for k, v in attrs.items())
+
+    src = re.sub(r'class="([^"]*)"', sub, src)
+
+sys.stdout.write(src)
+PY
+}
+
+# strip_svg removes the XML prolog, DOCTYPE, comments, any <script>/<style>
+# block, and the mark's own <title>, then collapses whitespace. Class-based
+# paint rules are inlined first (see above) so removing <style> cannot silently
+# repaint the mark black.
+#
+# Two reasons the stripping matters, both because ProviderLogo INLINES these
+# files:
 #   - anything executable must not survive vendoring;
 #   - a nested <title> becomes a second accessible name inside the tile, which
 #     already carries role="img" + aria-label. Leaving it in makes the brand
 #     name match twice in the accessibility tree.
 strip_svg() {
-  perl -0777 -pe '
+  inline_class_styles "$1" | perl -0777 -pe '
     s/<\?xml.*?\?>//gs;
     s/<!DOCTYPE.*?>//gs;
     s/<!--.*?-->//gs;
@@ -200,7 +316,7 @@ strip_svg() {
     s/<title\b.*?<\/title>//gsi;
     s/\s+/ /g;
     s/^ //; s/ $//;
-  ' "$1"
+  '
 }
 
 echo "→ lobehub (@lobehub/icons-static-svg@$LOBEHUB_VERSION)"
@@ -250,6 +366,10 @@ hackernews|https://news.ycombinator.com/y18.svg
 openlibrary|https://openlibrary.org/static/images/openlibrary-logo-tighter.svg
 frankfurter|https://frankfurter.dev/images/logo.svg
 gotify|https://raw.githubusercontent.com/gotify/logo/master/gotify-logo-small.svg
+# llama.cpp publishes a real square svg in its own repo. It is in none of the
+# three sources above, which is why it was exempted in
+# web/logo_coverage_test.go until 2026-08-05.
+llamacpp|https://raw.githubusercontent.com/ggml-org/llama.cpp/master/media/llama1-icon.svg
 "
 
 # Raster-only brands: no vector mark is published anywhere we can reach.
@@ -260,6 +380,13 @@ oura|https://ouraring.com/assets/icons/apple-touch-icon.png
 open_meteo|https://open-meteo.com/apple-touch-icon.png
 linkwarden|https://linkwarden.app/apple-touch-icon.png
 openfoodfacts|https://world.openfoodfacts.org/images/favicon/off/apple-touch-icon.png
+# Readwise: readwise.io/favicon.ico and every /static/ path 403 behind their CDN
+# challenge, which is why this was exempted rather than vendored. Their home page
+# serves 200 to a browser UA and links this apple-touch-icon on a CDN host that
+# answers unchallenged. The URL embeds a content hash, so it will change when
+# they redeploy — a re-vendor run then fails loudly while the committed SVG keeps
+# rendering, which is the right way round.
+readwise|https://d34adp677peecb.cloudfront.net/static/images/favicons/apple-touch-icon.8284936de99b.png
 "
 
 echo "→ upstream (svg)"
@@ -291,10 +418,46 @@ PY
   printf '  %-14s ← %s\n' "$ours" "$url"
 done
 
+# Oversized square rasters: downscaled before wrapping, because these files are
+# INLINED into the DOM and every byte is paid on render.
+#
+# LocalAI is the one that forced this. Its favicon.svg is a genuine square
+# vector, but a 41-path illustration at ~110 KB — 78 KB even after trimming
+# coordinate precision, which alone grew the ProviderLogo chunk from 286 KB to
+# 376 KB. Its logo.png is the same mark at 1024x1024 and downscales to ~17 KB.
+# ProviderLogo renders a 32-48 px tile, so 128 px is still 3-4x the rendered
+# size and stays crisp on a hi-DPI display.
+UPSTREAM_PNG_LARGE="
+localai|https://raw.githubusercontent.com/mudler/LocalAI/master/core/http/static/logo.png
+"
+
+echo "→ upstream (large png → downscaled + inlined svg)"
+echo "$UPSTREAM_PNG_LARGE" | while read -r pair; do
+  case "$pair" in ""|"#"*) continue ;; esac
+  ours="${pair%%|*}"; url="${pair#*|}"
+  curl -fsSL -A "$UA" "$url" -o "$TMP/$ours.big.png" || { echo "  !! $ours failed"; continue; }
+  python3 - "$TMP/$ours.big.png" "$OUT/$ours.svg" <<'PY'
+import base64, io, sys
+from PIL import Image
+src, dst = sys.argv[1], sys.argv[2]
+im = Image.open(src).convert("RGBA")
+im.thumbnail((128, 128), Image.LANCZOS)
+buf = io.BytesIO(); im.save(buf, "PNG", optimize=True)
+data = base64.b64encode(buf.getvalue()).decode()
+open(dst, "w").write(
+    f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {im.width} {im.height}">'
+    f'<image href="data:image/png;base64,{data}" width="{im.width}" height="{im.height}"/></svg>'
+)
+PY
+  printf '  %-14s ← %s\n' "$ours" "$url"
+done
+
 # Miniflux publishes no PNG or SVG we can reach — only a favicon.ico — so its largest
 # frame is re-encoded as PNG and wrapped like the rasters above.
 UPSTREAM_ICO="
 miniflux|https://reader.miniflux.app/favicon.ico
+# Jan publishes no svg or png we can reach — only this favicon.
+jan|https://jan.ai/favicon.ico
 "
 
 echo "→ upstream (ico → inlined svg)"
