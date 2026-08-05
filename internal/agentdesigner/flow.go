@@ -254,6 +254,9 @@ type Flow struct {
 	mu       sync.Mutex
 	sessions map[string]*DesignSession // keyed by workspaceID
 
+	// onBuildComplete delivers a detached build's outcome. See BuildCompleteFunc.
+	onBuildComplete BuildCompleteFunc
+
 	coderFor      func(workspaceID string) *coder.Coder
 	designer      *AgentDesigner
 	db            dbDesignStore
@@ -615,6 +618,22 @@ func (f *Flow) IsGenerating(workspaceID string) bool {
 	defer f.mu.Unlock()
 	sess, ok := f.sessions[workspaceID]
 	return ok && sess.progressCh != nil
+}
+
+// MarkGeneratingForTest makes IsGenerating report true without running a build.
+//
+// Exported solely so tests in OTHER packages can exercise code gated on
+// IsGenerating — chiefly the chat router's concurrency guard, which lives in
+// internal/gateway and cannot reach this package's unexported state. An
+// export_test.go file would not work: it is visible only within this package.
+//
+// Not used by any production path.
+func (f *Flow) MarkGeneratingForTest(workspaceID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if sess, ok := f.sessions[workspaceID]; ok && sess.progressCh == nil {
+		sess.progressCh = make(chan string, 1)
+	}
 }
 
 // DesignSnapshot is a race-free copy of a live session's user-facing state,
@@ -996,7 +1015,7 @@ func (f *Flow) stepDesigning(ctx context.Context, workspaceID, input string) (st
 	f.mu.Unlock()
 
 	if isApproval(input) {
-		return f.runGeneration(ctx, workspaceID)
+		return f.startGeneration(workspaceID)
 	}
 	if genFailed && isKeepAsIs(input) {
 		// The weak-backend gate held this build back as "unverified", but the user
@@ -1031,7 +1050,7 @@ func (f *Flow) stepDesigning(ctx context.Context, workspaceID, input string) (st
 		// carries ("fix it by using the results field") reaches the generation coder — a
 		// bare "try again" adds harmless context, a specific one steers the rebuild.
 		f.appendUserHistory(workspaceID, input)
-		return f.runGeneration(ctx, workspaceID)
+		return f.startGeneration(workspaceID)
 	}
 	if genFailed && !isDesignQuestion(input) {
 		// A CHANGE REQUEST after a failed build rebuilds with that change applied.
@@ -1049,7 +1068,7 @@ func (f *Flow) stepDesigning(ctx context.Context, workspaceID, input string) (st
 		// rebuilding: an unnecessary build costs minutes, but a misrouted change request
 		// re-creates the exact trap this branch removes.
 		f.appendUserHistory(workspaceID, input)
-		return f.runGeneration(ctx, workspaceID)
+		return f.startGeneration(workspaceID)
 	}
 
 	// Ordinary design turn. If a build had failed, that state is over — the user asked
@@ -1171,6 +1190,67 @@ func dbMessagesToPrompt(msgs []db.ChatMessage) []prompts.ChatMessage {
 
 // ─── Generation (triggered by approval) ──────────────────────────────────────
 
+// BuildCompleteFunc is called when a DETACHED build finishes, with whatever
+// runGeneration produced. Registered once at wiring time (not per request), so
+// it outlives the turn that started the build.
+//
+// This is chat's recovery channel. The web surface already had one — the SSE
+// progress stream plus GET /design/state — but on chat the only delivery was the
+// send() closure of the message that triggered the build, so a build that
+// outlived its deadline had nowhere to report to and was simply lost.
+type BuildCompleteFunc func(workspaceID, response string, isDone bool, agentID string, err error)
+
+// OnBuildComplete registers the completion hook. Nil disables delivery, which is
+// the correct default for tests and for the web surface, which polls instead.
+func (f *Flow) OnBuildComplete(fn BuildCompleteFunc) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onBuildComplete = fn
+}
+
+// buildingMessage is what a turn that STARTS a build returns immediately. The
+// SPA already understands this contract: DesignerSurface sets
+// awaitingBuildResultRef on `building: true`, attaches the SSE stream and
+// refetches /state when it closes (pinned by designer.test.tsx). So detaching
+// unifies the two surfaces rather than forking chat away from web.
+const buildingMessage = "🤖 Building your agent — this can take a few minutes. I'll send the result here as soon as it's done."
+
+// startGeneration launches a build and returns immediately.
+//
+// progressCh is created HERE, under the lock, before the goroutine starts.
+// IsGenerating keys off it, so creating it inside the goroutine would leave a
+// window in which a build is running and IsGenerating still reports false —
+// exactly the concurrency guard this change exists to make reliable.
+func (f *Flow) startGeneration(workspaceID string) (string, bool, string, error) {
+	f.mu.Lock()
+	sess, ok := f.sessions[workspaceID]
+	if !ok {
+		f.mu.Unlock()
+		return "", false, "", fmt.Errorf("no active design session")
+	}
+	if sess.progressCh != nil {
+		// Already building. Never start a second coder run on one session.
+		f.mu.Unlock()
+		return buildingMessage, false, "", nil
+	}
+	sess.progressCh = make(chan string, 8)
+	done := f.onBuildComplete
+	f.mu.Unlock()
+
+	go func() {
+		// context.Background(), not the caller's: the build is deliberately
+		// detached so a finished HTTP request or chat turn cannot kill it.
+		// runGeneration applies the coder's own timeout internally, so this stays
+		// bounded, and Cancel() still stops it via the stored cancelGenerate.
+		resp, isDone, agentID, err := f.runGeneration(context.Background(), workspaceID)
+		if done != nil {
+			done(workspaceID, resp, isDone, agentID, err)
+		}
+	}()
+
+	return buildingMessage, false, "", nil
+}
+
 // runGeneration creates agent files by giving Claude Code full tool access to
 // write files, run them, fix errors, and verify output — all in one pass.
 // Only after the coder confirms things work does the user see the results.
@@ -1270,7 +1350,8 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// Generate() returns — a session lookup would then silently no-op and the SSE
 	// goroutine would block forever.
 	var progressOnce sync.Once
-	closeProgress := func() {
+	closeProgress := func() { //nolint:revive // deferred below AND called explicitly on early returns
+
 		progressOnce.Do(func() {
 			// Nil out the session's field under lock so GetProgressChan can't hand
 			// out the closed channel to a new caller.
@@ -1282,6 +1363,16 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 			close(progressCh)
 		})
 	}
+	// Belt-and-braces. progressCh being non-nil is what IsGenerating reports, and
+	// TWO new callers now depend on it: the chat router's concurrency guard and
+	// startGeneration's "already building" check. A return path that missed
+	// closeProgress used to be a minor annoyance for the web's concurrent-POST
+	// guard; it would now wedge the session permanently — the user could neither
+	// talk to the designer nor start another build without /agent cancel.
+	//
+	// progressOnce makes this safe alongside the explicit calls on the paths that
+	// need to close it BEFORE doing more work.
+	defer closeProgress()
 
 	if coderSvc == nil {
 		closeProgress()

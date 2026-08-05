@@ -452,40 +452,76 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 		}
 	}
 
-	// updatePlaceholder edits the placeholder message WITHOUT consuming it, so the
-	// final send() call can still do the definitive edit. Used by the router to
-	// push mid-generation progress updates (milestones) to the Telegram chat.
-	updatePlaceholder := func(text string) {
-		if placeholderID == "" {
-			return
-		}
+	// phMu guards placeholderID.
+	//
+	// Agent builds are DETACHED now, so progress milestones arrive on the build
+	// goroutine long after this handler returned, while send() may still be
+	// mutating placeholderID here. When generation was synchronous both ran on
+	// this goroutine and no lock was needed; the detach is what made one
+	// necessary. It is held across the platform call so milestones cannot
+	// interleave out of order.
+	var phMu sync.Mutex
+
+	typingGateway := func() (TypingGateway, bool) {
 		m.mu.RLock()
 		gw, ok := m.gateways[key(msg.Platform, msg.WorkspaceID)]
 		m.mu.RUnlock()
-		if ok {
-			if tg, ok := gw.(TypingGateway); ok {
-				_ = tg.EditMessage(msg.PlatformUserID, placeholderID, text)
-			}
+		if !ok {
+			return nil, false
 		}
+		tg, ok := gw.(TypingGateway)
+		return tg, ok
+	}
+
+	// updatePlaceholder edits the placeholder message WITHOUT consuming it, so the
+	// final send() call can still do the definitive edit. Used by the router to
+	// push mid-generation progress updates (milestones) to the chat.
+	//
+	// It CREATES a placeholder when none exists rather than returning. Since a
+	// build detached, the turn that starts it delivers its "building…" line
+	// through here and no longer through send() — if this stayed a no-op without a
+	// placeholder, a build begun by a command (no placeholder is created for "/"
+	// messages) would emit nothing at all until it finished. Creating one also
+	// means every later milestone edits in place instead of posting a new message
+	// per tool call.
+	updatePlaceholder := func(text string) {
+		tg, ok := typingGateway()
+		if !ok {
+			return
+		}
+		phMu.Lock()
+		defer phMu.Unlock()
+		if placeholderID == "" {
+			if id, err := tg.SendMessageGetID(msg.PlatformUserID, text); err == nil {
+				placeholderID = id
+			}
+			return
+		}
+		_ = tg.EditMessage(msg.PlatformUserID, placeholderID, text)
 	}
 
 	send := func(text string) {
-		if placeholderID != "" {
-			m.mu.RLock()
-			gw, ok := m.gateways[key(msg.Platform, msg.WorkspaceID)]
-			m.mu.RUnlock()
-			if ok {
-				if tg, ok := gw.(TypingGateway); ok {
-					if err := tg.EditMessage(msg.PlatformUserID, placeholderID, text); err == nil {
-						placeholderID = "" // mark used so subsequent sends go through normally
-						return
-					}
+		phMu.Lock()
+		id := placeholderID
+		if id != "" {
+			if tg, ok := typingGateway(); ok {
+				if err := tg.EditMessage(msg.PlatformUserID, id, text); err == nil {
+					placeholderID = "" // mark used so subsequent sends go through normally
+					phMu.Unlock()
+					return
 				}
 			}
 			placeholderID = ""
 		}
+		phMu.Unlock()
 		if err := m.Send(msg.Platform, msg.WorkspaceID, msg.PlatformUserID, text); err != nil {
-			fmt.Printf("gateway: send error: %v\n", err)
+			// Was a bare fmt.Printf to stdout. That is how an over-long message
+			// being rejected with a 400 stayed invisible to BOTH the user and the
+			// operator: the reply simply never arrived and nothing recorded why.
+			// The length is logged because it is the first thing to check.
+			slog.Error("gateway: send failed",
+				"platform", msg.Platform, "workspace_id", msg.WorkspaceID,
+				"chars", msgLen(text), "err", err)
 		}
 	}
 	// deleteIncoming silently removes the user's incoming message from chat.

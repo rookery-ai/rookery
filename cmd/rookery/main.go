@@ -490,6 +490,33 @@ func serveCmd() *cli.Command {
 			// earlier so the runner can reference it.
 			approvalSvc.WithNotifier(gwManager)
 
+			// Deliver a DETACHED build's result to chat.
+			//
+			// This is the recovery channel chat has never had. The web surface
+			// reconnects to a running build through the SSE stream and
+			// GET /design/state; on chat the only delivery was the send() closure
+			// belonging to the message that started the build, so a build that
+			// outlived its deadline had nowhere to report and was simply lost — the
+			// user saw a progress line and then silence.
+			//
+			// SendToUser is used rather than a request-scoped closure precisely
+			// because the turn that started the build returned minutes earlier. A
+			// workspace with no linked chat platform errors here, which is expected
+			// and not worth surfacing: that user is on the web surface, which polls.
+			designFlow.OnBuildComplete(func(workspaceID, response string, _ bool, _ string, err error) {
+				text := response
+				if err != nil {
+					text = gateway.FriendlyDesignError("agent", err)
+				}
+				if strings.TrimSpace(text) == "" {
+					return
+				}
+				if sendErr := gwManager.SendToUser(workspaceID, text); sendErr != nil {
+					slog.Debug("agentdesigner: build result not delivered to chat",
+						"workspace_id", workspaceID, "err", sendErr)
+				}
+			})
+
 			go func() {
 				if err := gwManager.StartAll(ctx); err != nil {
 					slog.Error("gateway start error", "err", err)

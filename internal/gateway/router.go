@@ -301,7 +301,14 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 		if err != nil {
 			return err
 		}
+		// An unfinished draft is invisible everywhere else in chat, which is how a
+		// user ends up believing an agent exists that /run cannot find.
+		draftLine := r.unfinishedDraftLine(msg.WorkspaceID)
 		if len(agents) == 0 {
+			if draftLine != "" {
+				send("You have no saved agents yet.\n\n" + draftLine)
+				return nil
+			}
 			send("You have no agents yet. Use /agent create <name> to build one.")
 			return nil
 		}
@@ -317,6 +324,9 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 				b.WriteString(" — " + a.Description)
 			}
 			b.WriteByte('\n')
+		}
+		if draftLine != "" {
+			b.WriteString("\n" + draftLine + "\n")
 		}
 		b.WriteString("\n_/run <name> to run · /agent create <name> to build a new one_")
 		send(b.String())
@@ -533,6 +543,20 @@ func (r *Router) handleRun(ctx context.Context, msg Message, arg string, send fu
 		return nil
 	}
 
+	// Distinguish "no such agent" from "a build exists but was never saved".
+	//
+	// A build that never reached approval leaves agents/draft_<slug>/ on disk with
+	// no agents row, so /run answered a flat `agent "x" not found` immediately
+	// after the designer said it had built one. Two true statements that read as a
+	// contradiction, with nothing pointing at the way out.
+	//
+	// Checked BEFORE the execution-wiring guard: "you never saved it" is the more
+	// useful answer either way, and it is true whether or not runs are available.
+	if hint := r.unsavedDraftHint(msg.WorkspaceID, name); hint != "" {
+		send(hint)
+		return nil
+	}
+
 	if r.onAgentRun == nil {
 		send("Agent execution is not yet available. Check back soon!")
 		return nil
@@ -540,6 +564,52 @@ func (r *Router) handleRun(ctx context.Context, msg Message, arg string, send fu
 
 	send(fmt.Sprintf("Running agent **%s**...", name))
 	return r.onAgentRun(ctx, msg.WorkspaceID, name, send)
+}
+
+// unfinishedDraftLine renders the workspace's in-progress draft as a list
+// section, or "" when there is none. There is at most one draft per workspace
+// (agent_drafts holds a single row per workspace), so this is one line, not a
+// list.
+func (r *Router) unfinishedDraftLine(workspaceID string) string {
+	if r.designFlow == nil {
+		return ""
+	}
+	draft := r.designFlow.HasDraft(workspaceID)
+	if draft == nil || strings.TrimSpace(draft.AgentName) == "" {
+		return ""
+	}
+	verb := "create"
+	if draft.IsEdit {
+		verb = "edit"
+	}
+	return fmt.Sprintf("**Unfinished:** ○ %s — not saved yet. `/agent %s %s` to pick it up.",
+		draft.AgentName, verb, draft.AgentName)
+}
+
+// unsavedDraftHint returns a user-facing explanation when `name` matches an
+// unfinished draft rather than a saved agent, or "" when the normal run path
+// should proceed.
+//
+// Deliberately conservative: it returns "" whenever it cannot PROVE the agent is
+// absent and a matching draft is present, so a DB hiccup degrades to today's
+// behaviour instead of refusing to run a real agent.
+func (r *Router) unsavedDraftHint(workspaceID, name string) string {
+	if r.db == nil || r.designFlow == nil {
+		return ""
+	}
+	if agent, err := r.db.GetAgentByName(workspaceID, name); err == nil && agent != nil {
+		return "" // a real agent — run it
+	}
+	draft := r.designFlow.HasDraft(workspaceID)
+	if draft == nil || !strings.EqualFold(strings.TrimSpace(draft.AgentName), name) {
+		return ""
+	}
+	if draft.IsEdit {
+		return fmt.Sprintf("**%s** has an unfinished edit. Send `/agent edit %s` to pick it up.", name, name)
+	}
+	return fmt.Sprintf(
+		"**%s** was built but never saved, so there's nothing to run yet. "+
+			"Send `/agent create %s` to pick the draft back up and approve it.", name, name)
 }
 
 func (r *Router) handleSecret(ctx context.Context, msg Message, arg string, send func(string)) error {
@@ -990,6 +1060,14 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 
 	// If the user has an active design session, route all text there.
 	if r.designFlow != nil && r.designFlow.GetSession(msg.WorkspaceID) != nil {
+		// Reject a turn while a build is running. The web surface has always done
+		// this (handleDesignChat); chat never did, so a message sent mid-build
+		// stepped the FSM concurrently with the build still writing to the same
+		// session — which is how a live build ended up answered as ordinary chat.
+		if r.designFlow.IsGenerating(msg.WorkspaceID) {
+			send("⏳ Still building your agent — I'll send the result here as soon as it's done.")
+			return nil
+		}
 		sess := r.designFlow.GetSession(msg.WorkspaceID)
 		// Register the progress callback for ANY message while in Designing, so the
 		// Telegram placeholder streams milestones for every build trigger — not only
@@ -1000,7 +1078,25 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 		}
 		response, _, _, err := r.designFlow.Step(ctx, msg.WorkspaceID, msg.Text)
 		if err != nil {
-			send("Design session error: " + err.Error())
+			send(friendlyDesignError("agent", err))
+			return nil
+		}
+		// If that turn STARTED a build, deliver its "building…" line through the
+		// progress channel rather than send().
+		//
+		// send() consumes the placeholder on a successful edit (it clears
+		// placeholderID), and every subsequent milestone is pushed through
+		// updatePlaceholder — so using send() here would silently drop every
+		// 🔧 tool-call milestone for the whole build. That is the exact symptom
+		// this change set exists to fix ("we are missing outputs and actions that
+		// the agent designer is doing"), and detaching generation is what would
+		// have reintroduced it: the old synchronous build called send() only after
+		// the build, leaving the placeholder live throughout.
+		//
+		// The final result arrives separately, as a fresh message from the
+		// build-completion hook.
+		if sendProgress != nil && r.designFlow.IsGenerating(msg.WorkspaceID) {
+			sendProgress(response)
 			return nil
 		}
 		send(response)
@@ -1010,13 +1106,17 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 	// Same for an active skill design session. The two are mutually exclusive (see
 	// otherSessionBlock), so the order of these two branches never decides anything.
 	if r.skillFlow != nil && r.skillFlow.GetSession(msg.WorkspaceID) != nil {
+		if r.skillFlow.IsGenerating(msg.WorkspaceID) {
+			send("⏳ Still building your skill — I'll send the result here as soon as it's done.")
+			return nil
+		}
 		sess := r.skillFlow.GetSession(msg.WorkspaceID)
 		if sess != nil && sess.State == skilldesigner.StateDesigning && sendProgress != nil {
 			r.skillFlow.SetProgressHandler(msg.WorkspaceID, sendProgress)
 		}
 		response, _, _, err := r.skillFlow.Step(ctx, msg.WorkspaceID, msg.Text)
 		if err != nil {
-			send("Skill session error: " + err.Error())
+			send(friendlyDesignError("skill", err))
 			return nil
 		}
 		send(response)

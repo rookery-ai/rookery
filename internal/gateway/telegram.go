@@ -97,12 +97,38 @@ func (g *TelegramGateway) Send(platformUserID, text string) error {
 		return fmt.Errorf("invalid telegram chat id %q: %w", platformUserID, err)
 	}
 	chat := &telebot.Chat{ID: chatID}
-	rendered := render.For("telegram").Render(text)
-	_, err = g.bot.Send(chat, rendered, telebot.ModeMarkdownV2)
-	if err != nil {
-		// Fall back to plain text if MarkdownV2 parsing fails.
-		_, err = g.bot.Send(chat, text) // plain-text fallback uses the neutral source
+	for _, chunk := range telegramChunks(text) {
+		if err := g.sendChunk(chat, chunk); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+// telegramChunks splits the NEUTRAL source, not the rendered form, so each chunk
+// has one and only one plain-text counterpart. Splitting the rendered text
+// instead would leave the MarkdownV2 and plain-text paths with different chunk
+// counts, and the fallback would have to guess which plain chunk corresponds to
+// a failed rendered one.
+//
+// MarkdownV2 escaping only ever grows a string (it inserts backslashes), so a
+// neutral chunk at the limit can render past it. sendChunk handles that by
+// falling back to the neutral chunk, which fits by construction.
+func telegramChunks(text string) []string {
+	return splitMessage(text, telegramMessageLimit)
+}
+
+// sendChunk sends one neutral chunk, preferring MarkdownV2 and degrading to
+// plain text when the rendered form either overflows the limit or fails to
+// parse. The plain form is the neutral chunk, which is already within the limit.
+func (g *TelegramGateway) sendChunk(chat *telebot.Chat, chunk string) error {
+	rendered := render.For("telegram").Render(chunk)
+	if msgLen(rendered) <= telegramMessageLimit {
+		if _, err := g.bot.Send(chat, rendered, telebot.ModeMarkdownV2); err == nil {
+			return nil
+		}
+	}
+	_, err := g.bot.Send(chat, chunk)
 	return err
 }
 
@@ -122,13 +148,21 @@ func (g *TelegramGateway) SendMessageGetID(platformUserID, text string) (string,
 		return "", fmt.Errorf("invalid telegram chat id %q: %w", platformUserID, err)
 	}
 	chat := &telebot.Chat{ID: chatID}
-	rendered := render.For("telegram").Render(text)
+	// The FIRST chunk is the placeholder anchor; any remainder follows as
+	// ordinary messages, since only one message can be edited later.
+	chunks := telegramChunks(text)
+	rendered := render.For("telegram").Render(chunks[0])
 	sent, err := g.bot.Send(chat, rendered, telebot.ModeMarkdownV2)
 	if err != nil {
-		sent, err = g.bot.Send(chat, text) // plain-text fallback uses the neutral source
+		sent, err = g.bot.Send(chat, chunks[0]) // plain-text fallback uses the neutral source
 	}
 	if err != nil {
 		return "", err
+	}
+	for _, chunk := range chunks[1:] {
+		if err := g.sendChunk(chat, chunk); err != nil {
+			return strconv.Itoa(sent.ID), err
+		}
 	}
 	return strconv.Itoa(sent.ID), nil
 }
@@ -156,14 +190,27 @@ func (g *TelegramGateway) EditMessage(platformUserID, msgID, text string) error 
 	if err != nil {
 		return fmt.Errorf("invalid telegram message id %q: %w", msgID, err)
 	}
-	msg := &telebot.Message{ID: id, Chat: &telebot.Chat{ID: chatID}}
-	rendered := render.For("telegram").Render(text)
+	chat := &telebot.Chat{ID: chatID}
+	msg := &telebot.Message{ID: id, Chat: chat}
+	// An edit carries one message's worth. The first chunk replaces the
+	// placeholder and the rest follow as new messages, so a long result arrives
+	// in full instead of failing the edit and disappearing.
+	chunks := telegramChunks(text)
+	rendered := render.For("telegram").Render(chunks[0])
 	_, err = g.bot.Edit(msg, rendered, telebot.ModeMarkdownV2)
 	if err != nil {
 		// Fall back to plain text if markdown parsing fails on the response.
-		_, err = g.bot.Edit(msg, text) // plain-text fallback uses the neutral source
+		_, err = g.bot.Edit(msg, chunks[0]) // plain-text fallback uses the neutral source
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	for _, chunk := range chunks[1:] {
+		if err := g.sendChunk(chat, chunk); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (g *TelegramGateway) handle(tc telebot.Context) error {

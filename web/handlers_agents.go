@@ -72,9 +72,19 @@ func designHistoryDTO(hist []db.ChatMessage) []designHistEntry {
 // appears until the user sends a throwaway second message.
 func designTurnResponse(response string, snap agentdesigner.DesignSnapshot) map[string]interface{} {
 	return map[string]interface{}{
-		"response":          response,
-		"done":              false,
-		"state":             snap.State,
+		"response": response,
+		"done":     false,
+		"state":    snap.State,
+		// Generation is now detached on BOTH surfaces, so the turn that starts a
+		// build returns immediately with a placeholder rather than the build's
+		// result. Without this flag the SPA would render that placeholder and wait
+		// forever: DesignerSurface only attaches the SSE stream — and only refetches
+		// /state when it closes — when `building` is true.
+		//
+		// Reading it from the snapshot rather than hardcoding keeps one source of
+		// truth with IsGenerating, which is also what the chat router's concurrency
+		// guard reads.
+		"building":          snap.Generating,
 		"generation_failed": snap.GenerationFailed,
 		"can_keep_as_is":    snap.CanKeepAsIs,
 	}
