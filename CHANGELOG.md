@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/ilijad1/rookery/compare/v0.3.0...v0.3.1) (2026-08-05)
+
+
+### Build
+
+* **deps:** keep the container's node base image on the LTS line ([#102](https://github.com/ilijad1/rookery/issues/102)) ([4ca8dca](https://github.com/ilijad1/rookery/commit/4ca8dca04af2552954366daa3f39f2e1b49897e1))
+
 ## [0.3.0](https://github.com/ilijad1/rookery/compare/v0.2.0...v0.3.0) (2026-08-05)
 
 
