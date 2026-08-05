@@ -7,6 +7,7 @@ import { useSession } from "@/lib/session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SignOutButton } from "@/components/shell/SignOutButton";
 
 // LockScreen covers the whole app while the session is locked.
 //
@@ -53,6 +54,9 @@ export default function LockScreen() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background p-6">
+      {/* Logout is exempt from the server's lock gate precisely so the owner
+          can always leave; this is that escape hatch's only affordance. */}
+      <SignOutButton />
       <div className="w-full max-w-sm text-center">
         <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-chrome">
           <Lock className="size-5 text-muted-2" aria-hidden="true" />

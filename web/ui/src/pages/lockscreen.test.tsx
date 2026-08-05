@@ -81,3 +81,19 @@ test("a rejected password shows a specific message and keeps the form up", async
   // Still locked, still asking — a failed unlock must not fall through.
   expect(screen.getByLabelText(/master password/i)).toBeInTheDocument();
 });
+
+// api_auth.go leaves logout reachable while locked specifically so "the user
+// can always escape it". The escape hatch shipped with no affordance; this is
+// the one that pins it existing.
+test("the lock screen offers sign out", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: RequestInfo | URL) =>
+      Promise.resolve(
+        String(url).endsWith("/auth/session") ? jsonResponse(SESSION) : jsonResponse({}),
+      ),
+    ),
+  );
+  wrap();
+  expect(await screen.findByRole("button", { name: /sign out/i })).toBeInTheDocument();
+});

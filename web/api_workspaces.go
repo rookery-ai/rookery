@@ -16,19 +16,25 @@ import (
 // template handlers in web/handlers_admin.go.
 // registerWorkspacesAPI splits its routes across two groups.
 //
-// g is owner-gated only: listing is already in the session payload, creating a
-// workspace is additive and reversible, and entering already demands that
-// workspace's own master password — re-asking for the owner password on every
-// switch would be punitive.
+// g is owner-gated only: listing is already in the session payload, and
+// entering already demands that workspace's own master password — re-asking for
+// the owner password on every switch would be punitive. Both must stay open or
+// the verification gate becomes inescapable (see
+// TestOwnerGateLeavesEscapeHatchesOpen).
 //
 // verified additionally requires a fresh owner-password confirmation: deleting a
 // workspace destroys a tenant, and the admin routes are the install's settings.
+//
+// Creating is on verified too. It reads as additive and reversible, which is why
+// it originally sat on g — but a workspace is a TENANT, and anyone holding an
+// unattended owner session could mint one. Delete was gated from the start; the
+// asymmetry predates this gate rather than expressing anything.
 func (s *Server) registerWorkspacesAPI(g, verified *echo.Group) {
 	g.GET("/workspaces", s.apiListWorkspaces)
-	g.POST("/workspaces", s.apiCreateWorkspace)
 	g.POST("/workspaces/leave", s.apiLeaveWorkspace)
 	g.POST("/workspaces/:id/enter", s.apiEnterWorkspace)
 
+	verified.POST("/workspaces", s.apiCreateWorkspace)
 	verified.DELETE("/workspaces/:id", s.apiDeleteWorkspace)
 
 	verified.GET("/admin/overview", s.apiAdminOverview)
