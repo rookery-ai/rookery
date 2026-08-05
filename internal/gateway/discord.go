@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -177,9 +178,52 @@ func downloadDiscordAttachment(rawURL string) ([]byte, error) {
 // IntentGuildMessages — the adapter's DM-only intent set is unchanged. That is
 // why this is preferred over replying to guild messages, which would have the
 // bot receive every message in every server it joins.
-var startCommand = &discordgo.ApplicationCommand{
-	Name:        "start",
-	Description: "Link your account to this workspace",
+// discordArgsOption is the single free-text option every command carries. Flat,
+// rather than a subcommand tree: the router already parses "create <name>" out
+// of one string, so a typed option schema per command would be a second grammar
+// to keep in sync with it for no behavioural gain.
+const discordArgsOption = "args"
+
+// discordMaxDescription is Discord's hard limit on a command or option
+// description. Registration fails for the WHOLE bulk payload if any one entry
+// exceeds it, so it is asserted by test rather than trusted.
+const discordMaxDescription = 100
+
+// discordCommands builds the application commands from the shared table.
+func discordCommands() []*discordgo.ApplicationCommand {
+	out := make([]*discordgo.ApplicationCommand, 0, len(Commands))
+	for _, c := range Commands {
+		cmd := &discordgo.ApplicationCommand{
+			Name:        c.Name,
+			Description: c.Description,
+		}
+		if c.UsageHint != "" {
+			cmd.Options = []*discordgo.ApplicationCommandOption{{
+				Type:        discordgo.ApplicationCommandOptionString,
+				Name:        discordArgsOption,
+				Description: c.UsageHint,
+				Required:    false,
+			}}
+		}
+		out = append(out, cmd)
+	}
+	return out
+}
+
+// discordInteractionText rebuilds the router's text form from an interaction:
+// "/agent" plus its args option becomes "/agent create foo". Returning the same
+// shape a typed message would have is what keeps the router unchanged.
+func discordInteractionText(data discordgo.ApplicationCommandInteractionData) string {
+	text := "/" + data.Name
+	for _, opt := range data.Options {
+		if opt.Name != discordArgsOption {
+			continue
+		}
+		if v := strings.TrimSpace(opt.StringValue()); v != "" {
+			text += " " + v
+		}
+	}
+	return text
 }
 
 // discordInteractionUserID resolves the invoking user. Discord populates
@@ -221,7 +265,8 @@ func (g *DiscordGateway) onInteractionCreate(s *discordgo.Session, i *discordgo.
 	if i == nil || i.Interaction == nil || i.Type != discordgo.InteractionApplicationCommand {
 		return
 	}
-	if i.ApplicationCommandData().Name != startCommand.Name {
+	data := i.ApplicationCommandData()
+	if !isRegisteredCommand(data.Name) {
 		return
 	}
 	userID := discordInteractionUserID(i)
@@ -231,12 +276,19 @@ func (g *DiscordGateway) onInteractionCreate(s *discordgo.Session, i *discordgo.
 
 	// Acknowledge FIRST and ephemerally. The dispatch below reaches the DB and
 	// the router, and Discord expires an unacknowledged interaction after 3
-	// seconds; ephemeral keeps the reply out of a public channel, so linking
-	// never posts the operator's business where others can read it.
+	// seconds; ephemeral keeps the reply out of a public channel, so the
+	// operator's business is never posted where others can read it.
+	//
+	// /start says so explicitly because linking is the one command a user runs
+	// before they have a DM open with the bot at all.
+	ack := "Working on it — I'll reply in your direct messages."
+	if data.Name == "start" {
+		ack = "Linking your account — I'll reply in your direct messages."
+	}
 	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
-			Content: "Linking your account — I'll reply in your direct messages.",
+			Content: ack,
 			Flags:   discordgo.MessageFlagsEphemeral,
 		},
 	}); err != nil {
@@ -247,8 +299,20 @@ func (g *DiscordGateway) onInteractionCreate(s *discordgo.Session, i *discordgo.
 		Platform:       "discord",
 		PlatformUserID: userID,
 		WorkspaceID:    g.ownerWorkspaceID,
-		Text:           "/start",
+		Text:           discordInteractionText(data),
 	})
+}
+
+// isRegisteredCommand reports whether a name is one this bot registered. An
+// interaction for anything else belongs to another integration and must be
+// ignored rather than dispatched.
+func isRegisteredCommand(name string) bool {
+	for _, c := range Commands {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *DiscordGateway) Platform() string    { return "discord" }
@@ -264,9 +328,14 @@ func (g *DiscordGateway) Start(ctx context.Context) error {
 	// is degraded, not broken. Registered globally (empty guild id) because a
 	// guild-scoped command is not available in DMs, which is where this bot
 	// actually operates.
+	//
+	// Bulk overwrite, not create-per-command: ApplicationCommandCreate can add a
+	// command but never remove one, so a command dropped from the table would
+	// linger in every user's client indefinitely with nothing dispatching it.
 	if g.session.State != nil && g.session.State.User != nil {
-		if _, err := g.session.ApplicationCommandCreate(g.session.State.User.ID, "", startCommand); err != nil {
-			slog.Warn("gateway: discord /start command registration failed", "err", err)
+		if _, err := g.session.ApplicationCommandBulkOverwrite(
+			g.session.State.User.ID, "", discordCommands()); err != nil {
+			slog.Warn("gateway: discord command registration failed", "err", err)
 		}
 	}
 

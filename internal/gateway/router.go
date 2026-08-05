@@ -1258,44 +1258,6 @@ func (r *Router) handleMemory(ctx context.Context, msg Message, arg string, send
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// helpText renders /help. All three platforms (Telegram, Discord, Slack) now
-// implement attachment download — Slack's Socket Mode handler imports the
-// first file off a file_share message via SlackGateway — so the file-upload
-// line applies uniformly and is no longer conditioned on platform.
-func helpText(platform string) string {
-	fileLine := "\nSend a file (document/photo) to save it to your knowledge base.\n"
-	return `**Rookery — Commands**
-
-/agent list — list your agents
-/agent create <name> — build a new agent with AI wizard
-/agent edit <name> — change an existing agent with AI wizard
-/agent cancel — cancel active agent creation or edit
-/skill list — list your skills and the built-in ones
-/skill create <name> — build a new skill with AI wizard
-/skill cancel — cancel active skill creation
-/run <name> — run an agent
-/secret list — list stored secret names
-/secret show <name> — reveal a secret value (requires master password)
-/secret delete <name> — delete a secret (requires master password)
-/remind <when> to <message> — set a reminder (e.g. /remind in 10 minutes to check oven)
-/remind list — list your reminders
-/remind delete <n> — delete a reminder by number
-/chat start [name] — start a chat (saves history)
-/chat list — list all chats with IDs
-/chat stop — stop current chat
-/chat resume <id> — resume a previous chat
-/chat delete <id> — delete a chat and its history
-/memory list — list saved memory entries
-/memory add <text> — save a new memory entry
-/memory delete <n> — delete entry by number
-/pending — list posts waiting for your approval
-/approve <id> — publish a waiting post
-/reject <id> — decline a waiting post
-/help — this message
-` + fileLine + `
-_Add secrets at the web dashboard — no master password needed to add_`
-}
-
 // isApprovalText returns true when the user message is one of the exact approval
 // triggers recognised by agentdesigner.Flow. Mirrors the list in flow.go so the
 // router can register a progress callback before Step() blocks on generation.

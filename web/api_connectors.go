@@ -2,6 +2,7 @@ package web
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/ilijad1/rookery/internal/db"
@@ -32,13 +33,17 @@ type apiConnectorField struct {
 }
 
 type apiConnectorPlatform struct {
-	Platform   string              `json:"platform"`
-	Label      string              `json:"label"`
-	Blurb      string              `json:"blurb"`
-	SetupSteps []string            `json:"setup_steps"`
-	Fields     []apiConnectorField `json:"fields"`
-	Connected  bool                `json:"connected"`
-	Identity   string              `json:"identity"` // the BOT's username
+	Platform   string   `json:"platform"`
+	Label      string   `json:"label"`
+	Blurb      string   `json:"blurb"`
+	SetupSteps []string `json:"setup_steps"`
+	// SetupManifest is a config blob the setup steps tell the user to paste
+	// (Slack's app manifest). Empty for every other platform; the wizard renders
+	// the block only when it is non-empty.
+	SetupManifest string              `json:"setup_manifest"`
+	Fields        []apiConnectorField `json:"fields"`
+	Connected     bool                `json:"connected"`
+	Identity      string              `json:"identity"` // the BOT's username
 	// Linked reports whether the OPERATOR has completed the /start handshake.
 	// Connected means only that the token authenticates; Linked is what makes
 	// the integration usable, and the two are routinely different.
@@ -118,6 +123,21 @@ func (s *Server) connectorPlatformList(u *db.Workspace) []apiConnectorPlatform {
 			Blurb:      spec.Blurb,
 			SetupSteps: orEmpty(spec.SetupSteps),
 			Fields:     fields,
+		}
+
+		// Slack's app manifest — the only way to declare slash commands without a
+		// rotating app-configuration token. Generated from the command table, so a
+		// render failure means the table produced something unserializable: log it
+		// and omit the block rather than failing the whole connectors page, which
+		// would take every platform down with it.
+		if spec.SetupManifest != nil {
+			manifest, err := spec.SetupManifest()
+			if err != nil {
+				slog.Error("connectors: setup manifest render failed",
+					"platform", spec.Platform, "err", err)
+			} else {
+				entry.SetupManifest = manifest
+			}
 		}
 
 		if conn, err := s.db.GetPlatformConnection(u.ID, spec.Platform); err == nil {

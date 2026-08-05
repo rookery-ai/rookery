@@ -62,6 +62,14 @@ type CredSpec struct {
 	Fields     []CredField
 	SetupURL   string
 	SetupSteps []string
+	// SetupManifest is a config blob the setup steps tell the user to paste —
+	// Slack's app manifest, which is the only way to declare slash commands
+	// without a rotating app-configuration token. Rendered as copyable code, not
+	// as a step. Empty for platforms that need none, which is every other one.
+	//
+	// A func, not a string, because it is GENERATED from the command table: a
+	// checked-in blob would drift the moment a command is added or renamed.
+	SetupManifest func() (string, error)
 	// Validate probes the credentials against the platform and reports the bot
 	// account behind them. Nil means "nothing to probe".
 	Validate func(values map[string]string) (BotIdentity, error)

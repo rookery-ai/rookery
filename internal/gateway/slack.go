@@ -44,15 +44,22 @@ func init() {
 			{Key: "app_token", Label: "App-Level Token (xapp-)", Placeholder: "xapp-...", Secret: true},
 		},
 		SetupURL: "https://api.slack.com/apps",
+		// Manifest-based creation, replacing seven manual steps. It is not merely
+		// shorter: slash commands cannot be registered with a bot token, so the
+		// manifest is the ONLY way to declare them without a rotating
+		// app-configuration token. Scopes, the message.im subscription, Socket
+		// Mode and App Home all arrive declared in the same paste.
+		//
+		// An app created the old way keeps working but has no slash commands, and
+		// Rookery cannot add them — hence the final step.
 		SetupSteps: []string{
-			"Create a Slack app at api.slack.com/apps, choosing From scratch",
-			"Open Socket Mode and enable it",
-			"Generate an App-Level Token with the connections:write scope, then copy the xapp- token",
-			"Open OAuth & Permissions and add the bot scopes chat:write, im:history, im:write and files:read",
-			"Click Install to Workspace, then copy the xoxb- Bot Token",
-			"Open Event Subscriptions, enable it, and subscribe to the bot event message.im",
-			"Open App Home, enable the Messages Tab, and allow users to send messages from it",
+			"Go to api.slack.com/apps and click Create New App → From an app manifest",
+			"Pick your workspace, then paste the manifest shown below and create the app",
+			"Open Basic Information → App-Level Tokens, generate a token with the connections:write scope, and copy the xapp- token",
+			"Click Install to Workspace, then copy the xoxb- Bot Token from OAuth & Permissions",
+			"Already have a Rookery Slack app? Open App Manifest, replace it with the manifest below, and reinstall — that is what adds the slash commands",
 		},
+		SetupManifest: SlackAppManifest,
 		Validate: func(v map[string]string) (BotIdentity, error) {
 			if v["app_token"] == "" {
 				return BotIdentity{}, fmt.Errorf("app-level token (xapp-) is required for Socket Mode")
@@ -301,6 +308,10 @@ func (g *SlackGateway) handleEvent(evt socketmode.Event) {
 		}
 	}()
 
+	if evt.Type == socketmode.EventTypeSlashCommand {
+		g.handleSlashCommand(evt)
+		return
+	}
 	if evt.Type != socketmode.EventTypeEventsAPI {
 		return
 	}
@@ -328,6 +339,47 @@ func (g *SlackGateway) handleEvent(evt socketmode.Event) {
 	msg.WorkspaceID = g.ownerWorkspaceID
 	msg.Attachment = slackAttachmentFromEvent(me, g.downloader)
 	g.dispatch(context.Background(), msg)
+}
+
+// slashCommandText rebuilds the router's text form from a Slack slash command,
+// mapping the Slack-side name back to the canonical one: "/rookery-remind" with
+// text "in 10 minutes to check oven" becomes "/remind in 10 minutes to check
+// oven". Exported shape kept as a pure function so the mapping is testable
+// without a Socket Mode connection.
+func slashCommandText(command, text string) string {
+	name := CanonicalCommandName("slack", command)
+	if text = strings.TrimSpace(text); text != "" {
+		return "/" + name + " " + text
+	}
+	return "/" + name
+}
+
+// handleSlashCommand routes a Slack slash command into the same router path a
+// typed message takes.
+//
+// The ack is ephemeral and says the reply is coming by DM: a slash command can
+// be invoked from a channel, while Rookery always replies in the DM, so without
+// this an in-channel invocation looks like it did nothing at all.
+func (g *SlackGateway) handleSlashCommand(evt socketmode.Event) {
+	cmd, ok := evt.Data.(slack.SlashCommand)
+	if !ok {
+		return
+	}
+	if evt.Request != nil {
+		g.sm.Ack(*evt.Request, map[string]string{
+			"response_type": "ephemeral",
+			"text":          "Working on it — I'll reply in your direct messages.",
+		})
+	}
+	if cmd.UserID == "" {
+		return
+	}
+	g.dispatch(context.Background(), Message{
+		Platform:       "slack",
+		PlatformUserID: cmd.UserID,
+		WorkspaceID:    g.ownerWorkspaceID,
+		Text:           slashCommandText(cmd.Command, cmd.Text),
+	})
 }
 
 func (g *SlackGateway) resolveDM(userID string) (string, error) {

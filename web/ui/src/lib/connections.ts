@@ -12,6 +12,9 @@ export type ConnectorPlatform = {
   label: string;
   blurb: string;
   setup_steps: string[];
+  // A config blob the setup steps say to paste (Slack's app manifest). Empty
+  // for every other platform; the wizard renders the block only when set.
+  setup_manifest?: string;
   fields: ConnectorField[];
   connected: boolean;
   identity: string; // the BOT's username
