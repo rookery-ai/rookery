@@ -62,7 +62,12 @@ const defaultSkillCategory = "Other"
 // two languages. "a or b" and "$KEY" carry the same information in a form the
 // UI can print directly.
 func flattenRequires(m skilllibrary.SkillMeta) []string {
-	var out []string
+	// Initialised, not declared: a nil slice marshals to JSON null, and the
+	// SPA's default-parameter fallback (`requires = []`) fires only on
+	// undefined — never on null. A skill declaring no tooling therefore
+	// crashed its own detail page on `requires.length`. Every empty slice
+	// crossing this boundary must serialise as [].
+	out := []string{}
 	out = append(out, m.RequiresBins...)
 	if len(m.AnyBins) > 0 {
 		out = append(out, strings.Join(m.AnyBins, " or "))

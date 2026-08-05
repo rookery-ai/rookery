@@ -356,3 +356,22 @@ test("SkillView omits the version chip when the version is unset", () => {
   expect(screen.getByText("Other")).toBeInTheDocument();
   expect(screen.queryByText(/^v$/)).not.toBeInTheDocument();
 });
+
+// Regression: a Go nil slice marshals to null, and a TS default parameter
+// substitutes only for undefined — so `requires = []` never fired and
+// `requires.length` threw, blanking the whole route with "Unexpected
+// Application Error". Every core skill with no declared tooling hit this.
+test("SkillView tolerates a null requires from the API", () => {
+  expect(() =>
+    render(
+      <SkillView
+        kind="core"
+        name="agent-collaboration"
+        category="Agent Behaviour"
+        content="# Agent collaboration"
+        requires={null}
+      />,
+    ),
+  ).not.toThrow();
+  expect(screen.queryByText(/^Needs:/)).toBeNull();
+});

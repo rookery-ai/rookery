@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ilijad1/rookery/internal/skilllibrary"
@@ -79,12 +80,33 @@ func TestFlattenRequiresShapes(t *testing.T) {
 		"anyBins pair": {skilllibrary.SkillMeta{AnyBins: []string{"a", "b"}}, []string{"a or b"}},
 		"anyBins trio": {skilllibrary.SkillMeta{AnyBins: []string{"a", "b", "c"}}, []string{"a or b or c"}},
 		"env":          {skilllibrary.SkillMeta{RequiresEnv: []string{"KEY"}}, []string{"$KEY"}},
-		"none":         {skilllibrary.SkillMeta{}, nil},
+		"none":         {skilllibrary.SkillMeta{}, []string{}},
 	}
 	for name, tc := range cases {
 		if got := flattenRequires(tc.meta); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("[%s] flattenRequires = %v, want %v", name, got, tc.want)
 		}
+	}
+}
+
+// A core skill that declares no tooling must serialise requires as [], never
+// null. The SPA's SkillView took `requires = []` as a default parameter, and a
+// default parameter does not fire on null — so `null` here crashed the page
+// with "Cannot read properties of null (reading 'length')".
+//
+// Asserted on the raw response bytes deliberately: decoding into []string
+// erases the null-vs-[] distinction that IS the bug.
+func TestCoreSkillRequiresIsNeverNull(t *testing.T) {
+	s, _ := newAPITestServerWithSkills(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/skills/core/agent-collaboration", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET core skill = %d: %s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); strings.Contains(body, `"requires":null`) {
+		t.Errorf("requires serialised as null, want []: %s", body)
 	}
 }
 
