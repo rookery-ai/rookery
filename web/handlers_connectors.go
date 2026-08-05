@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,60 @@ import (
 	"github.com/ilijad1/rookery/internal/db"
 	"github.com/ilijad1/rookery/internal/gateway"
 )
+
+// ErrBotAlreadyConnected is returned when the credentials name a bot that
+// another workspace already uses. Typed so the JSON layer can answer with its
+// own error code instead of the generic invalid_credentials, which would be a
+// lie — the credentials are perfectly valid, they are just spoken for.
+var ErrBotAlreadyConnected = errors.New("bot already connected to another workspace")
+
+// ensureBotUnused refuses to connect a bot that another workspace already uses.
+//
+// Sharing one bot across workspaces cannot work, and fails in a way that looks
+// like a product bug rather than a misconfiguration. platform_identities carries
+// UNIQUE(platform, platform_user_id), so a given chat account can be linked to
+// exactly ONE workspace; the second workspace's /start is refused by
+// Router.handleStart ("You're already linked!") and its connect wizard waits for
+// a handshake that can never arrive. Worse, both workspaces open their own
+// gateway session for the same token, so every inbound DM is delivered twice,
+// dispatched twice, and answered twice — by the FIRST workspace both times,
+// since GatewayManager.dispatch resolves the identity globally. The user sees
+// duplicate replies and pays for two coder turns per message.
+//
+// Keyed on the bot's platform user id rather than the token: a token reset in
+// the provider's console yields the same bot with different bytes, which a
+// token hash would wave straight through.
+//
+// Fails OPEN when the identity is unknown (a platform with no Validate, or one
+// that returns no user id). Blocking then would reject every connect on that
+// platform to prevent a collision we cannot even detect.
+func (s *Server) ensureBotUnused(workspaceID, platform string, spec gateway.CredSpec, identity gateway.BotIdentity) error {
+	if identity.UserID == "" {
+		return nil
+	}
+
+	rows, err := s.db.ListPlatformBotIdentities(platform, workspaceID, gateway.BotIdentitySettingKey(platform))
+	if err != nil {
+		// Fail open: a read failure here must not block an otherwise valid
+		// connect. The cost of a missed duplicate is confusion; the cost of a
+		// false block is an unusable product.
+		return nil
+	}
+
+	for _, r := range rows {
+		if gateway.BotIdentityFromSetting(r.IdentityJSON).UserID != identity.UserID {
+			continue
+		}
+		label := spec.Label
+		if label == "" {
+			label = platform
+		}
+		return fmt.Errorf("%w: this %s bot is already connected to the workspace %q. "+
+			"Each workspace needs its own bot — create a second one and use its token here",
+			ErrBotAlreadyConnected, label, r.WorkspaceName)
+	}
+	return nil
+}
 
 // saveConnector validates + encrypts + persists a platform's credentials for a
 // workspace, stores the bot username (Telegram), and (re)starts the gateway
@@ -28,6 +83,10 @@ func (s *Server) saveConnector(workspaceID, platform string, values map[string]s
 		if identity, err = spec.Validate(values); err != nil {
 			return gateway.BotIdentity{}, nil, fmt.Errorf("invalid credentials: %w", err)
 		}
+	}
+
+	if err := s.ensureBotUnused(workspaceID, platform, spec, identity); err != nil {
+		return gateway.BotIdentity{}, nil, err
 	}
 
 	token, configJSON, err := gateway.SplitCreds(spec, values)

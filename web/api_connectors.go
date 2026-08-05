@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/ilijad1/rookery/internal/db"
@@ -182,6 +183,12 @@ func (s *Server) apiSaveConnector(c echo.Context) error {
 
 	identity, botStartErr, err := s.saveConnector(u.ID, req.Platform, values)
 	if err != nil {
+		// The credentials are valid here — the bot is simply already spoken
+		// for — so invalid_credentials would send the user back to re-check a
+		// token that is perfectly fine.
+		if errors.Is(err, ErrBotAlreadyConnected) {
+			return jsonErr(c, http.StatusConflict, "bot_already_connected", err.Error())
+		}
 		return jsonErr(c, http.StatusBadRequest, "invalid_credentials", err.Error())
 	}
 	s.audit.Log(u.ID, "connect_platform", "platform:"+req.Platform, "", c.RealIP())
@@ -203,12 +210,20 @@ func (s *Server) apiDeleteConnector(c echo.Context) error {
 		return jsonErr(c, http.StatusNotFound, "not_found", "unknown platform: "+platform)
 	}
 
-	if s.gateway != nil {
-		_ = s.gateway.Reload(c.Request().Context(), u.ID, platform)
-	}
-
+	// Delete the row BEFORE reloading. Reload stops the adapter, re-reads the
+	// connection and starts it again when the row is still present and active
+	// — so calling it first stopped the bot and immediately RESTARTED it, and
+	// the delete then removed the row out from under a live adapter. The bot
+	// kept its gateway session and went on answering messages for a connector
+	// the UI reported as disconnected, until the next server restart.
+	// Reload's own "connection was deleted — nothing to start" branch is what
+	// this ordering is meant to hit.
 	if err := s.db.DeletePlatformConnection(u.ID, platform); err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", "failed to delete connector")
+	}
+
+	if s.gateway != nil {
+		_ = s.gateway.Reload(c.Request().Context(), u.ID, platform)
 	}
 	// A disconnected platform must not retain a bot identity — best-effort,
 	// like the write side; a failure here must not fail the disconnect.

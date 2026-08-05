@@ -107,6 +107,16 @@ func RegisterAdapter(platform string, f AdapterFactory) {
 	adapterRegistry[platform] = f
 }
 
+// UnregisterAdapter removes a platform's factory. It exists for tests, which
+// must leave the global registry as they found it: RegisteredAdapterPlatforms
+// feeds web's brand-logo coverage check, so a throwaway platform left behind by
+// one test makes an unrelated one demand a logo for a fixture.
+func UnregisterAdapter(platform string) {
+	adapterMu.Lock()
+	defer adapterMu.Unlock()
+	delete(adapterRegistry, platform)
+}
+
 func adapterFactory(platform string) (AdapterFactory, bool) {
 	adapterMu.RLock()
 	defer adapterMu.RUnlock()
