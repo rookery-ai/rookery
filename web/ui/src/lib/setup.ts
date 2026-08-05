@@ -20,7 +20,18 @@ export type SetupResponse = {
   // "slim" builds ship no CLI coder binary; the wizard hides the local engine.
   coder_mode?: "full" | "slim";
   platforms?: ConnectorPlatform[];
-  bot_username?: string;
+  // Step-7 summary of the connected chat app. Replaces the old
+  // `bot_username`, which read a Telegram-only setting key and therefore left
+  // a Discord install with no bot name and no linking instruction at all.
+  // Absent when the operator skipped the chat-app step.
+  platform?: string;
+  platform_label?: string;
+  bot_identity?: string;
+  linked?: boolean;
+  linked_identity?: string;
+  dm_url?: string;
+  invite_url?: string;
+  bot_online?: boolean;
 };
 
 export function useSetupQuery() {

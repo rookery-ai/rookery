@@ -52,10 +52,17 @@ type BackendState = {
   profileDone: boolean;
   connCount: number;
   connSkipped: boolean;
+  // Which platform the wizard connected, and whether the operator's /start has
+  // landed — the link step polls for exactly this transition.
+  connPlatform: string;
+  connLinked: boolean;
 };
 
 function freshState(): BackendState {
-  return { basicsDone: false, secretsSalt: false, coderDone: false, profileDone: false, connCount: 0, connSkipped: false };
+  return {
+    basicsDone: false, secretsSalt: false, coderDone: false, profileDone: false,
+    connCount: 0, connSkipped: false, connPlatform: "", connLinked: false,
+  };
 }
 
 function computeStep(s: BackendState): number {
@@ -78,10 +85,43 @@ function setupGetBody(s: BackendState) {
   if (step === 5) {
     body.platforms = PLATFORMS;
   }
-  if (step === 7) {
-    body.bot_username = "";
+  if (step === 7 && s.connCount > 0) {
+    // Mirrors apiGetSetup's step-7 branch: the platform-keyed summary that
+    // replaced the Telegram-only bot_username key.
+    body.platform = s.connPlatform;
+    body.platform_label = s.connPlatform === "discord" ? "Discord" : "Telegram";
+    body.bot_identity = s.connPlatform === "discord" ? "rookery" : "@rookie_bot";
+    body.linked = s.connLinked;
+    body.linked_identity = s.connLinked ? "operator-1" : "";
+    body.dm_url = "https://example.test/dm";
+    body.invite_url = "https://example.test/invite";
+    body.bot_online = true;
   }
   return body;
+}
+
+// The connected platform as /api/v1/setup/platforms reports it — the source
+// the shared LinkStep polls during onboarding.
+function setupPlatformsBody(s: BackendState) {
+  return {
+    platforms: PLATFORMS.map((p) => ({
+      ...p,
+      linked: false,
+      linked_identity: "",
+      primary: false,
+      dm_url: "https://example.test/dm",
+      invite_url: "https://example.test/invite",
+      bot_online: true,
+      ...(p.platform === s.connPlatform && s.connCount > 0
+        ? {
+            connected: true,
+            identity: p.platform === "discord" ? "rookery" : "@rookie_bot",
+            linked: s.connLinked,
+            linked_identity: s.connLinked ? "operator-1" : "",
+          }
+        : {}),
+    })),
+  };
 }
 
 function mockFetch(state: BackendState, posts: { url: string; body: unknown }[]) {
@@ -96,6 +136,17 @@ function mockFetch(state: BackendState, posts: { url: string; body: unknown }[])
 
       if (url === "/api/v1/setup" && method === "GET") {
         return Promise.resolve(jsonResponse(setupGetBody(state)));
+      }
+
+      // The setup-scoped mirrors the wizard's test and link phases use. They
+      // exist because every /api/v1/connectors route 403s while needs_setup
+      // is true.
+      if (url === "/api/v1/setup/platforms" && method === "GET") {
+        return Promise.resolve(jsonResponse(setupPlatformsBody(state)));
+      }
+      if (url.startsWith("/api/v1/setup/platforms/") && url.endsWith("/test")) {
+        posts.push({ url, body });
+        return Promise.resolve(jsonResponse({ ok: true, identity: "@rookie_bot" }));
       }
 
       if (url === "/api/v1/setup" && method === "POST") {
@@ -125,7 +176,10 @@ function mockFetch(state: BackendState, posts: { url: string; body: unknown }[])
               state.connSkipped = true;
             } else {
               const fields = (req.fields ?? {}) as Record<string, string>;
-              if (req.platform && fields.token) state.connCount += 1;
+              if (req.platform && fields.token) {
+                state.connCount += 1;
+                state.connPlatform = String(req.platform);
+              }
             }
             break;
           case 7:
@@ -316,9 +370,75 @@ test("Chat app step: picking a platform reveals its credential fields; Save is d
   expect(connect).not.toBeDisabled();
   await user.click(connect);
 
-  await waitFor(() => expect(posts).toHaveLength(1));
+  await waitFor(() => expect(posts.length).toBeGreaterThanOrEqual(1));
   expect(posts[0].body).toEqual({ step: 5, platform: "telegram", fields: { token: "123:abc" } });
+
+  // Saving credentials must NOT finish the wizard. setupStep() flips 5 → 7 the
+  // instant a connection row exists, and onboarding used to navigate straight
+  // there on next_step — which is exactly how a chat app was left connected
+  // but never linked, with the operator never shown a /start instruction.
+  expect(await screen.findByText(/connected as/i)).toBeInTheDocument();
+  expect(screen.queryByText(/you're set up/i)).not.toBeInTheDocument();
+});
+
+test("Chat app step: a passing test advances to the link step, which waits for /start and offers no Done", async () => {
+  const state = freshState();
+  state.basicsDone = true;
+  state.secretsSalt = true;
+  state.coderDone = true;
+  state.profileDone = true;
+  const posts: { url: string; body: unknown }[] = [];
+  mockFetch(state, posts);
+  wrap();
+
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /telegram/i }));
+  await user.type(await screen.findByLabelText(/bot token/i), "123:abc");
+  await user.click(screen.getByRole("button", { name: /^connect$/i }));
+
+  await user.click(await screen.findByRole("button", { name: /^next$/i }));
+
+  expect(await screen.findByText(/waiting for you to send/i)).toBeInTheDocument();
+  // The invariant the whole flow exists to hold: no completion signalled
+  // before the identity row proves the inbound path works.
+  expect(screen.queryByRole("button", { name: /^done$/i })).not.toBeInTheDocument();
+});
+
+test("Done screen names the real platform — never Telegram for a Discord install", async () => {
+  const state = freshState();
+  state.basicsDone = true;
+  state.secretsSalt = true;
+  state.coderDone = true;
+  state.profileDone = true;
+  state.connCount = 1;
+  state.connPlatform = "discord";
+  state.connLinked = true;
+  mockFetch(state, []);
+  wrap();
+
   expect(await screen.findByText(/you're set up/i)).toBeInTheDocument();
+  expect(screen.getByText(/discord linked as operator-1/i)).toBeInTheDocument();
+  // The old Done screen read a Telegram-only setting key and printed "Open
+  // Telegram…" regardless of the platform actually connected.
+  expect(screen.queryByText(/telegram/i)).not.toBeInTheDocument();
+});
+
+test("Done screen tells an unlinked chat app how to link, and says a server message is ignored", async () => {
+  const state = freshState();
+  state.basicsDone = true;
+  state.secretsSalt = true;
+  state.coderDone = true;
+  state.profileDone = true;
+  state.connCount = 1;
+  state.connPlatform = "discord";
+  state.connLinked = false;
+  mockFetch(state, []);
+  wrap();
+
+  expect(await screen.findByText(/connected but not linked yet/i)).toBeInTheDocument();
+  expect(
+    screen.getByText(/message posted in a server channel is ignored/i),
+  ).toBeInTheDocument();
 });
 
 test("Chat app step: Skip posts {step:5,skip:true} and lands on Done", async () => {

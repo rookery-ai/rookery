@@ -481,8 +481,25 @@ func (s *Server) apiGetSetup(c echo.Context) error {
 	case 5:
 		resp["platforms"] = s.connectorPlatformList(w)
 	case 7:
-		botUsername, _ := s.db.GetSetting(w.ID, "telegram_bot_username")
-		resp["bot_username"] = botUsername
+		// Was telegram_bot_username, which saveConnector writes ONLY for
+		// Telegram (web/handlers_connectors.go) — so a Discord install reached
+		// Done with an empty bot name, no linking instruction, and no mention
+		// of Discord at all. Read the platform-keyed state the connectors list
+		// already builds instead, and let the SPA name the real platform.
+		for _, p := range s.connectorPlatformList(w) {
+			if !p.Connected {
+				continue
+			}
+			resp["platform"] = p.Platform
+			resp["platform_label"] = p.Label
+			resp["bot_identity"] = p.Identity
+			resp["linked"] = p.Linked
+			resp["linked_identity"] = p.LinkedIdentity
+			resp["dm_url"] = p.DMURL
+			resp["invite_url"] = p.InviteURL
+			resp["bot_online"] = p.BotOnline
+			break
+		}
 	}
 	return c.JSON(http.StatusOK, resp)
 }
