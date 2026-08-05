@@ -48,6 +48,28 @@ function RequireAuth() {
   return <Outlet />;
 }
 
+// Guards the workspace picker: an owner session, with or without an active
+// workspace.
+//
+// Deliberately NOT RequireAuth, which redirects a session with no active
+// workspace TO /workspaces — using it here would be an infinite redirect. That
+// asymmetry is why the picker was left unguarded entirely, and why signing out
+// stranded the owner on it: logout flips the session to unauthenticated, but
+// with no guard on the route nothing navigated, so the picker simply re-rendered
+// with an empty list. It also meant /workspaces rendered for a logged-out
+// visitor typing the URL (harmless — every API call 401s — but the wrong
+// screen).
+//
+// The lock screen never had this problem: it renders INSIDE RequireAuth, whose
+// authenticated check already sends a signed-out session to /login.
+function RequireOwnerSession() {
+  const { data: session, isLoading } = useSession();
+  if (isLoading) return <RouteFallback />;
+  if (!session?.authenticated) return <Navigate to="/login" replace />;
+  if (session.owner?.must_change_password) return <Navigate to="/change-password" replace />;
+  return <Outlet />;
+}
+
 // Guards the full-screen onboarding wizard: must be an authenticated owner
 // with an active workspace that still needs setup — otherwise there's
 // nothing for /setup to do, so bounce to "/" (which itself redirects
@@ -66,7 +88,10 @@ export const router = createBrowserRouter(
   [
     { path: "/login", element: <Login /> },
     { path: "/change-password", element: <ChangePassword /> },
-    { path: "/workspaces", element: <Workspaces /> },
+    {
+      element: <RequireOwnerSession />,
+      children: [{ path: "/workspaces", element: <Workspaces /> }],
+    },
     {
       element: <RequireSetupWorkspace />,
       children: [
