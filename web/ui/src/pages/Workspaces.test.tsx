@@ -125,3 +125,86 @@ test("creating a workspace asks for a name only, and posts no about", async () =
   const post = calls.find((c) => c.url.endsWith("/api/v1/workspaces"))!;
   expect(post.body).toEqual({ name: "Work" });
 });
+
+// A workspace is a tenant, so creating one sits behind requireOwnerVerified.
+// The dialog does not predict whether the confirmation is still fresh — it
+// submits, and only a server refusal turns it into a password step. The typed
+// name must survive that swap, and the create must be retried automatically.
+test("create asks for the owner password when the server demands it, then retries", async () => {
+  const calls: Array<{ url: string; body: unknown }> = [];
+  let createAttempts = 0;
+  const fetchMock = vi.fn().mockImplementation((url: RequestInfo | URL, init?: RequestInit) => {
+    const u = String(url);
+    if (u.endsWith("/auth/session")) {
+      return Promise.resolve(
+        new Response(JSON.stringify(session), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+    calls.push({ url: u, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+    if (u.endsWith("/api/v1/workspaces")) {
+      createAttempts++;
+      // Refused until confirmed, exactly as requireOwnerVerified answers.
+      if (createAttempts === 1) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              error: {
+                code: "owner_verification_required",
+                message: "confirm your owner password to continue",
+              },
+            }),
+            { status: 403, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify({ id: "w2", name: "Work", about: "", needs_setup: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    }
+    return Promise.resolve(
+      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  wrap();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole("button", { name: /create workspace/i }));
+  await user.type(await screen.findByLabelText(/^name$/i), "Work");
+  await user.click(screen.getByRole("button", { name: /^create$/i }));
+
+  // Refused → the dialog becomes an owner-password step.
+  const pw = await screen.findByLabelText(/owner password/i);
+  await user.type(pw, "owner-pw");
+  await user.click(screen.getByRole("button", { name: /confirm and create/i }));
+
+  await waitFor(() => expect(createAttempts).toBe(2));
+  expect(calls.some((c) => c.url.endsWith("/api/v1/auth/owner-verify"))).toBe(true);
+  // The name typed before the gate appeared is carried through, not re-asked.
+  const retry = calls.filter((c) => c.url.endsWith("/api/v1/workspaces")).at(-1)!;
+  expect(retry.body).toEqual({ name: "Work" });
+});
+
+// Sign out is reachable from the workspace picker — the screen an owner lands
+// on after leaving a workspace, and the app's only sign-out affordance.
+test("the workspace picker offers sign out", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation((url: RequestInfo | URL) =>
+      Promise.resolve(
+        new Response(String(url).endsWith("/auth/session") ? JSON.stringify(session) : "{}", {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    ),
+  );
+  wrap();
+  expect(await screen.findByRole("button", { name: /sign out/i })).toBeInTheDocument();
+});

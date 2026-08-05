@@ -132,6 +132,37 @@ func TestAPIWorkspaceDeleteInactiveKeepsSession(t *testing.T) {
 	}
 }
 
+// Creating a workspace mints a tenant, so it demands a fresh owner-password
+// confirmation — the same gate that already guarded deleting one. Without it an
+// unattended owner session was one click from a new tenant.
+//
+// TestEveryInstallLevelRouteIsGated proves the middleware is attached; this
+// proves the route still WORKS once confirmed, which that test cannot show
+// because it only ever asserts the 403.
+func TestAPICreateWorkspaceRequiresOwnerVerification(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/workspaces",
+		map[string]string{"name": "ungated"}, cookies)
+	if rec.Code != http.StatusForbidden ||
+		!contains(rec.Body.String(), "owner_verification_required") {
+		t.Fatalf("unverified create = %d %s, want 403 owner_verification_required",
+			rec.Code, rec.Body.String())
+	}
+	// The gate must run BEFORE the handler, not merely alongside it.
+	if wss, err := s.db.ListWorkspaces(); err != nil || len(wss) != 0 {
+		t.Fatalf("refused create still made a workspace: %d exist (err %v)", len(wss), err)
+	}
+
+	cookies = verifyOwnerCookies(t, s, cookies)
+	rec = doJSON(t, s, http.MethodPost, "/api/v1/workspaces",
+		map[string]string{"name": "gated"}, cookies)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("verified create = %d %s, want 201", rec.Code, rec.Body.String())
+	}
+}
+
 func TestAPIWorkspaceList(t *testing.T) {
 	s, _ := newAPITestServer(t)
 	cookies := bootstrapLoginAndVerify(t, s)

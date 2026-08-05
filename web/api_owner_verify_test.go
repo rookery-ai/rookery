@@ -218,7 +218,8 @@ func TestEveryInstallLevelRouteIsGated(t *testing.T) {
 	for _, r := range s.echo.Routes() {
 		gated := strings.HasPrefix(r.Path, "/api/v1/admin/") ||
 			strings.HasPrefix(r.Path, "/api/v1/backup/") ||
-			(r.Path == "/api/v1/workspaces/:id" && r.Method == http.MethodDelete)
+			(r.Path == "/api/v1/workspaces/:id" && r.Method == http.MethodDelete) ||
+			(r.Path == "/api/v1/workspaces" && r.Method == http.MethodPost)
 		if !gated {
 			continue
 		}

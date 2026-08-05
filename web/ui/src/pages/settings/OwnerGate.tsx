@@ -5,8 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, ApiError } from "@/lib/api";
-
-const GATE_CODE = "owner_verification_required";
+import { OWNER_GATE_CODE } from "@/lib/ownerVerify";
 
 /**
  * Wraps the Owner settings tab.
@@ -44,7 +43,7 @@ export function OwnerGate({
   const gated =
     probe.error instanceof ApiError &&
     probe.error.status === 403 &&
-    probe.error.code === GATE_CODE;
+    probe.error.code === OWNER_GATE_CODE;
 
   async function verify(e: React.FormEvent) {
     e.preventDefault();

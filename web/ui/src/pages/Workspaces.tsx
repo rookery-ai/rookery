@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { DoorOpen, Plus } from "lucide-react";
+import { DoorOpen, Plus, ShieldCheck } from "lucide-react";
 import { useNavigate } from "react-router";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api";
+import { useOwnerVerify } from "@/lib/ownerVerify";
 import { useSession, type Workspace } from "@/lib/session";
 import { PageTitle } from "@/components/shell/PageTitle";
+import { SignOutButton } from "@/components/shell/SignOutButton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -102,6 +104,16 @@ export function EnterWorkspaceDialog({
   );
 }
 
+/**
+ * Rendered by both the workspace picker and the icon rail's workspace menu, so
+ * the owner-password gate below reaches every entry point at once.
+ *
+ * A workspace is a TENANT, and the create endpoint sits behind
+ * requireOwnerVerified for that reason. This dialog never predicts whether the
+ * confirmation is still fresh — it submits, and only if the server refuses does
+ * it swap in a password step, keeping the typed name. See useOwnerVerify for
+ * why a client-side check of session.owner_verified is the wrong shape.
+ */
 export function CreateWorkspaceDialog({
   open,
   onClose,
@@ -110,24 +122,56 @@ export function CreateWorkspaceDialog({
   onClose: () => void;
 }) {
   const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const nav = useNavigate();
   const qc = useQueryClient();
+  const gate = useOwnerVerify();
 
-  async function create(e: React.FormEvent) {
+  // A reopened dialog starts clean — including dropping any action the gate is
+  // still holding from a dismissed attempt.
+  useEffect(() => {
+    if (open) return;
+    setName("");
+    setPassword("");
+    setError("");
+    gate.reset();
+    // gate.reset is stable (useCallback with no deps); listing it would re-run
+    // this on every render of the hook's state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  async function createWorkspace() {
+    // Name only. "What is this workspace about?" is asked once, by the
+    // setup wizard the new workspace lands in — it was previously collected
+    // here as well, so the same question appeared twice in a row.
+    await api.post<Workspace>("/api/v1/workspaces", { name });
+    // A freshly created workspace is auto-activated — same tenant switch as
+    // entering one, so the previous workspace's cached rows must go too.
+    await resetWorkspaceScopedCache(qc);
+    // A freshly created workspace is auto-activated and needs_setup — just
+    // navigate home and let RequireAuth route to /setup.
+    nav("/", { replace: true });
+    onClose();
+  }
+
+  async function submitName(e: React.FormEvent) {
     e.preventDefault();
+    setError("");
     try {
-      // Name only. "What is this workspace about?" is asked once, by the
-      // setup wizard the new workspace lands in — it was previously collected
-      // here as well, so the same question appeared twice in a row.
-      await api.post<Workspace>("/api/v1/workspaces", { name });
-      // A freshly created workspace is auto-activated — same tenant switch as
-      // entering one, so the previous workspace's cached rows must go too.
-      await resetWorkspaceScopedCache(qc);
-      // A freshly created workspace is auto-activated and needs_setup — just
-      // navigate home and let RequireAuth route to /setup.
-      nav("/", { replace: true });
-      onClose();
+      await gate.run(createWorkspace);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Something went wrong");
+    }
+  }
+
+  async function submitPassword(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    try {
+      // Confirms, then retries the create with the name already typed.
+      await gate.verify(password);
+      setPassword("");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong");
     }
@@ -137,24 +181,55 @@ export function CreateWorkspaceDialog({
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Create workspace</DialogTitle>
+          <DialogTitle>
+            {gate.needsPassword ? "Confirm it’s you" : "Create workspace"}
+          </DialogTitle>
         </DialogHeader>
-        <form onSubmit={create} className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="ws-name">Name</Label>
-            <Input
-              id="ws-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              autoFocus
-            />
-          </div>
-          {error && <p className="text-danger text-sm">{error}</p>}
-          <Button type="submit" className="w-full">
-            <Plus />
-            Create
-          </Button>
-        </form>
+        {gate.needsPassword ? (
+          <form onSubmit={submitPassword} className="space-y-4">
+            <p className="text-muted-2 text-sm">
+              A workspace is a separate tenant with its own data. Confirm your
+              owner password to create “{name}”.
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="ws-owner-password">Owner password</Label>
+              <Input
+                id="ws-owner-password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoFocus
+              />
+            </div>
+            {error && <p className="text-danger text-sm">{error}</p>}
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={gate.busy || !password}
+            >
+              <ShieldCheck />
+              {gate.busy ? "Creating…" : "Confirm and create"}
+            </Button>
+          </form>
+        ) : (
+          <form onSubmit={submitName} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="ws-name">Name</Label>
+              <Input
+                id="ws-name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                autoFocus
+              />
+            </div>
+            {error && <p className="text-danger text-sm">{error}</p>}
+            <Button type="submit" className="w-full" disabled={gate.busy}>
+              <Plus />
+              {gate.busy ? "Creating…" : "Create"}
+            </Button>
+          </form>
+        )}
       </DialogContent>
     </Dialog>
   );
@@ -188,6 +263,9 @@ export default function Workspaces() {
 
   return (
     <div className="min-h-screen bg-chrome flex items-center justify-center p-4">
+      {/* The app's only sign-out. Leaving a workspace lands here, which is what
+          makes one button on this screen reach the whole app. */}
+      <SignOutButton />
       <div className="bg-background border border-border rounded-xl p-8 w-full max-w-md shadow-sm">
         <div className="mb-1">
           <PageTitle icon="owner-workspaces" title="Workspaces" />

@@ -381,6 +381,10 @@ func TestAPISetupPostBlockedAfterCompletion(t *testing.T) {
 // connector yet) and returns updated cookies + its id.
 func freshUnsetupWorkspace(t *testing.T, s *Server, cookies []*http.Cookie, name string) ([]*http.Cookie, string) {
 	t.Helper()
+	// Creating a workspace is install-level (it mints a tenant), so it sits
+	// behind requireOwnerVerified. Stamp here rather than in each caller: the
+	// gate is incidental to what these setup-wizard tests are about.
+	cookies = verifyOwnerCookies(t, s, cookies)
 	rec := doJSON(t, s, http.MethodPost, "/api/v1/workspaces", map[string]string{"name": name}, cookies)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create workspace: %d %s", rec.Code, rec.Body.String())

@@ -113,7 +113,9 @@ func TestSetupCompletionSeedsIdentityFiles(t *testing.T) {
 
 func TestCreateWorkspaceSeedsIdentityFiles(t *testing.T) {
 	s, _, dataDir := newIdentityTestServer(t)
-	cookies := bootstrapAndLogin(t, s)
+	// Creating a workspace sits behind requireOwnerVerified; this test's
+	// subject is the identity files it seeds, not the gate.
+	cookies := bootstrapLoginAndVerify(t, s)
 
 	rec := doJSON(t, s, http.MethodPost, "/api/v1/workspaces",
 		map[string]string{"name": "Research", "about": "papers and reading notes"}, cookies)
