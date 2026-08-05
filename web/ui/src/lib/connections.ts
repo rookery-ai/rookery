@@ -22,6 +22,10 @@ export type ConnectorPlatform = {
   primary: boolean;
   dm_url: string;
   invite_url: string;
+  // Whether a live adapter is running server-side right now. Advisory: it
+  // distinguishes "waiting for /start" from "nothing is listening", but only
+  // `linked` ever proves the handshake completed.
+  bot_online: boolean;
 };
 
 // Mirrors apiSaveConnectorResponse.
