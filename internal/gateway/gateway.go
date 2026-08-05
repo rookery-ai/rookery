@@ -206,6 +206,21 @@ func (m *GatewayManager) Reload(ctx context.Context, workspaceID, platform strin
 	return m.start(ctx, conn)
 }
 
+// IsRunning reports whether a live adapter is currently held for this
+// workspace+platform.
+//
+// Advisory only: it proves an adapter object exists, NOT that the platform's
+// gateway is reachable right now. Callers must keep treating the
+// platform_identities row as the only proof of a completed link. Its purpose
+// is to distinguish "waiting for you to send /start" from "there is no process
+// listening" — two states the UI otherwise renders identically.
+func (m *GatewayManager) IsRunning(workspaceID, platform string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.gateways[key(platform, workspaceID)]
+	return ok
+}
+
 // Send delivers a message to a platform user on behalf of a user's bot.
 func (m *GatewayManager) Send(platform, workspaceID, platformUserID, text string) error {
 	m.mu.RLock()
@@ -295,6 +310,11 @@ func (m *GatewayManager) start(ctx context.Context, conn *db.PlatformConnection)
 	m.gateways[k] = gw
 	m.cancels[k] = cancel
 	m.mu.Unlock()
+
+	// StartAll logs only failures, so a healthy install produced no evidence
+	// that a bot was ever connected — which is most of why diagnosing a dead
+	// adapter meant reconstructing it from the database instead of one grep.
+	slog.Info("gateway: adapter started", "platform", conn.Platform, "workspace_id", conn.WorkspaceID)
 
 	go func() {
 		if err := gw.Start(gwCtx); err != nil && gwCtx.Err() == nil {
