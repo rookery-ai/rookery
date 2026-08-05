@@ -208,3 +208,58 @@ test("the workspace picker offers sign out", async () => {
   wrap();
   expect(await screen.findByRole("button", { name: /sign out/i })).toBeInTheDocument();
 });
+
+// Each row carries its own image, matching the rail's workspace switcher — so a
+// workspace is recognised by the same picture wherever it appears, rather than
+// by reading names in one place and scanning pictures in the other.
+test("each workspace row shows its icon", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ...session,
+          workspaces: [
+            { id: "w1", name: "personal", icon: "aurora", about: "", needs_setup: false, created_at: "" },
+            { id: "w2", name: "work", icon: "ember", about: "", needs_setup: false, created_at: "" },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ),
+  );
+  const { container } = wrap();
+
+  expect(await screen.findByText("personal")).toBeInTheDocument();
+  // The avatar is a decorative <svg>, so it is queried structurally: it carries
+  // aria-hidden by design and has no accessible name to select on.
+  const rows = container.querySelectorAll("ul > li");
+  expect(rows).toHaveLength(2);
+  for (const row of rows) {
+    expect(row.querySelector("svg")).not.toBeNull();
+  }
+});
+
+// A workspace with no icon set still needs something on the left, or rows with
+// and without one would not line up.
+test("a workspace with no icon falls back to a monogram", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ...session,
+          workspaces: [
+            { id: "w1", name: "personal", about: "", needs_setup: false, created_at: "" },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    ),
+  );
+  wrap();
+
+  expect(await screen.findByText("personal")).toBeInTheDocument();
+  // WorkspaceAvatar's no-preset branch renders the first letter.
+  expect(screen.getByText("P")).toBeInTheDocument();
+});
