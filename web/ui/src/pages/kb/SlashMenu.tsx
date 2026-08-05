@@ -196,6 +196,7 @@ export function slashSuggestion(): AnyExtension {
             let renderer: ReactRenderer<ListHandle, SuggestionProps<SlashItem>> | null = null;
             let el: HTMLDivElement | null = null;
             let reposition: (() => void) | null = null;
+            let sizeObserver: ResizeObserver | null = null;
 
             const position = (props: SuggestionProps<SlashItem>) => {
               if (!el) return;
@@ -224,12 +225,24 @@ export function slashSuggestion(): AnyExtension {
                 el.style.zIndex = "50";
                 el.appendChild(renderer.element as HTMLElement);
                 document.body.appendChild(el);
-                position(props);
+                reposition = () => position(props);
+                reposition();
+                // Re-place whenever the popup's own size changes.
+                //
+                // Load-bearing, not defensive: ReactRenderer has not laid the
+                // list out yet at appendChild time, so the measure above reads
+                // height 0. Zero fits anywhere, so the very first placement
+                // always chose "below" — and with nothing else to correct it,
+                // a menu opened at the bottom of a long note stayed 410px off
+                // the fold, which is the exact bug this was meant to fix.
+                // The observer also handles the height changing as a query
+                // narrows the item list.
+                sizeObserver = new ResizeObserver(() => reposition?.());
+                sizeObserver.observe(el);
                 // The popup is position:fixed while the caret is not, so any
                 // scroll desynchronises them. capture:true because scroll does
                 // not bubble — without it a scroll of the editor pane (the one
                 // that actually moves the caret) would never be seen.
-                reposition = () => position(props);
                 window.addEventListener("scroll", reposition, true);
                 window.addEventListener("resize", reposition);
               },
@@ -252,6 +265,8 @@ export function slashSuggestion(): AnyExtension {
                 return renderer?.ref?.onKeyDown(props) ?? false;
               },
               onExit: () => {
+                sizeObserver?.disconnect();
+                sizeObserver = null;
                 if (reposition) {
                   window.removeEventListener("scroll", reposition, true);
                   window.removeEventListener("resize", reposition);
