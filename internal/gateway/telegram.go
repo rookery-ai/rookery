@@ -13,6 +13,19 @@ import (
 	telebot "gopkg.in/telebot.v4"
 )
 
+// telegramCommands maps the shared table onto telebot's Command type for
+// setMyCommands. Telegram rejects the whole call if any single entry is invalid
+// — names must be lowercase letters, digits and underscores (1-32) and
+// descriptions 3-256 characters — which is why TestTelegramCommandNamesAreValid
+// asserts the constraint rather than trusting the table to stay compliant.
+func telegramCommands() []telebot.Command {
+	out := make([]telebot.Command, 0, len(Commands))
+	for _, c := range Commands {
+		out = append(out, telebot.Command{Text: c.Name, Description: c.Description})
+	}
+	return out
+}
+
 // TelegramGateway is one user's Telegram bot instance.
 type TelegramGateway struct {
 	bot              *telebot.Bot
@@ -46,14 +59,21 @@ func (g *TelegramGateway) Start(ctx context.Context) error {
 	g.bot.Handle(telebot.OnText, g.handle)
 	g.bot.Handle(telebot.OnDocument, g.handle)
 	g.bot.Handle(telebot.OnPhoto, g.handle)
-	g.bot.Handle("/start", g.handle)
-	g.bot.Handle("/help", g.handle)
-	g.bot.Handle("/agent", g.handle)
-	g.bot.Handle("/secret", g.handle)
-	g.bot.Handle("/remind", g.handle)
-	g.bot.Handle("/run", g.handle)
-	g.bot.Handle("/chat", g.handle)
-	g.bot.Handle("/memory", g.handle)
+	// Registered from the shared table rather than a hand-written list, which had
+	// already drifted: /skill, /pending, /approve and /reject were absent. They
+	// still reached the router via the OnText fallback, so nothing was broken —
+	// but the list read as the set of supported commands and was not.
+	for _, c := range Commands {
+		g.bot.Handle("/"+c.Name, g.handle)
+	}
+
+	// Populate the client's Menu button. Telegram delivers commands as ordinary
+	// text messages whether or not they are registered here, so this is purely
+	// discoverability and a failure must never stop the adapter — a bot that
+	// cannot advertise its commands is degraded, not broken.
+	if err := g.bot.SetCommands(telegramCommands()); err != nil {
+		slog.Warn("gateway: telegram setMyCommands failed", "err", err)
+	}
 
 	// Stop the bot when context is cancelled.
 	go func() {

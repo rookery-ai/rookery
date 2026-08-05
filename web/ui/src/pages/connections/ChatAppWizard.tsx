@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { Linkify } from "@/lib/linkify";
+import { CopyButton } from "@/components/CopyButton";
 import {
   useConnectors,
   useSaveConnector,
@@ -126,6 +127,23 @@ function ConnectWizard({ platform }: { platform: ConnectorPlatform }) {
                 </li>
               ))}
             </ol>
+          )}
+          {/* Slack's app manifest. Slash commands cannot be registered with a bot
+              token, so pasting this is the only way to declare them without a
+              rotating app-configuration token — which is also why it replaced the
+              seven manual setup steps rather than being added alongside them. */}
+          {platform.setup_manifest && (
+            <div className="space-y-2 rounded-lg border border-border bg-muted-surface p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-2">
+                  App manifest
+                </div>
+                <CopyButton value={platform.setup_manifest} />
+              </div>
+              <pre className="max-h-72 overflow-auto rounded-md bg-background p-3 text-xs leading-relaxed">
+                <code>{platform.setup_manifest}</code>
+              </pre>
+            </div>
           )}
           <div className="flex justify-end">
             <Button onClick={() => setStep("credentials")}>
