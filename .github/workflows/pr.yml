@@ -200,7 +200,7 @@ jobs:
       # multi-arch build cannot do (you cannot start an arm64 container here
       # without emulation). The multi-arch build happens at release.
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
