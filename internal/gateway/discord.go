@@ -70,8 +70,14 @@ func init() {
 				// permissions=0: guild permissions do not govern 1:1 DMs, so a
 				// DM-only bot needs none. It also creates no role on join and
 				// the consent screen asks for nothing.
+				//
+				// applications.commands is required for the app's slash
+				// commands to appear in the guild — `bot` alone authorizes the
+				// bot user but surfaces no commands, so /start would silently
+				// not exist there. A guild authorized before this change must
+				// be re-invited once for the command to show up.
 				InviteURL: "https://discord.com/api/oauth2/authorize?client_id=" +
-					url.QueryEscape(b.UserID) + "&scope=bot&permissions=0",
+					url.QueryEscape(b.UserID) + "&scope=bot%20applications.commands&permissions=0",
 			}
 		},
 	})
@@ -158,6 +164,41 @@ func downloadDiscordAttachment(rawURL string) ([]byte, error) {
 	return data, nil
 }
 
+// startCommand is the application command registered when the adapter opens.
+//
+// Typing "/" in Discord opens the client's slash-command picker, so telling an
+// operator to "send /start" as a plain message fights Discord's own UI — and a
+// /start typed in a server channel is discarded by mapDiscordDM with NO reply
+// at all, while a wrong DM at least answers. Absolute silence for the most
+// likely first action was the defect.
+//
+// An application command is delivered as an INTERACTION, so it works in both a
+// DM and a guild and needs neither IntentMessageContent nor
+// IntentGuildMessages — the adapter's DM-only intent set is unchanged. That is
+// why this is preferred over replying to guild messages, which would have the
+// bot receive every message in every server it joins.
+var startCommand = &discordgo.ApplicationCommand{
+	Name:        "start",
+	Description: "Link your account to this workspace",
+}
+
+// discordInteractionUserID resolves the invoking user. Discord populates
+// Interaction.User in a DM and Interaction.Member.User in a guild; reading only
+// one returns nil in the other context, which would reintroduce exactly the
+// silence this command exists to remove.
+func discordInteractionUserID(i *discordgo.InteractionCreate) string {
+	if i == nil || i.Interaction == nil {
+		return ""
+	}
+	if i.User != nil {
+		return i.User.ID
+	}
+	if i.Member != nil && i.Member.User != nil {
+		return i.Member.User.ID
+	}
+	return ""
+}
+
 // NewDiscord creates (does not start) a Discord adapter.
 func NewDiscord(token, ownerWorkspaceID string, dispatch DispatchFunc) (*DiscordGateway, error) {
 	sess, err := discordgo.New("Bot " + token)
@@ -167,7 +208,47 @@ func NewDiscord(token, ownerWorkspaceID string, dispatch DispatchFunc) (*Discord
 	sess.Identify.Intents = discordgo.IntentDirectMessages | discordgo.IntentMessageContent
 	g := &DiscordGateway{session: sess, ownerWorkspaceID: ownerWorkspaceID, dispatch: dispatch, dmChannels: map[string]string{}}
 	sess.AddHandler(g.onMessageCreate)
+	sess.AddHandler(g.onInteractionCreate)
 	return g, nil
+}
+
+// onInteractionCreate handles the /start application command. The
+// message-based /start path in onMessageCreate is KEPT, not replaced: it is
+// the only path on Telegram and Slack, it already works, and a freshly
+// registered global command does not propagate instantly. Both converge on the
+// same Router.handleStart via dispatch.
+func (g *DiscordGateway) onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	if i == nil || i.Interaction == nil || i.Type != discordgo.InteractionApplicationCommand {
+		return
+	}
+	if i.ApplicationCommandData().Name != startCommand.Name {
+		return
+	}
+	userID := discordInteractionUserID(i)
+	if userID == "" {
+		return
+	}
+
+	// Acknowledge FIRST and ephemerally. The dispatch below reaches the DB and
+	// the router, and Discord expires an unacknowledged interaction after 3
+	// seconds; ephemeral keeps the reply out of a public channel, so linking
+	// never posts the operator's business where others can read it.
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{
+			Content: "Linking your account — I'll reply in your direct messages.",
+			Flags:   discordgo.MessageFlagsEphemeral,
+		},
+	}); err != nil {
+		slog.Warn("gateway: discord interaction ack failed", "err", err)
+	}
+
+	g.dispatch(context.Background(), Message{
+		Platform:       "discord",
+		PlatformUserID: userID,
+		WorkspaceID:    g.ownerWorkspaceID,
+		Text:           "/start",
+	})
 }
 
 func (g *DiscordGateway) Platform() string    { return "discord" }
@@ -177,6 +258,18 @@ func (g *DiscordGateway) Start(ctx context.Context) error {
 	if err := g.session.Open(); err != nil {
 		return fmt.Errorf("discord open: %w", err)
 	}
+
+	// Best-effort: a registration failure must never stop the adapter. The
+	// message-based /start still works, so a bot that cannot register commands
+	// is degraded, not broken. Registered globally (empty guild id) because a
+	// guild-scoped command is not available in DMs, which is where this bot
+	// actually operates.
+	if g.session.State != nil && g.session.State.User != nil {
+		if _, err := g.session.ApplicationCommandCreate(g.session.State.User.ID, "", startCommand); err != nil {
+			slog.Warn("gateway: discord /start command registration failed", "err", err)
+		}
+	}
+
 	<-ctx.Done()
 	return g.session.Close()
 }
