@@ -352,8 +352,13 @@ func (g *SlackGateway) Send(platformUserID, text string) error {
 	if err != nil {
 		return err
 	}
-	_, _, err = g.api.PostMessage(ch, slack.MsgOptionText(render.For("slack").Render(text), false))
-	return err
+	// Slack's cap is far above anything Rookery produces, but every adapter goes
+	// through the same path rather than leaving one silently unbounded.
+	return sendChunked(render.For("slack").Render(text), slackMessageLimit,
+		func(chunk string) error {
+			_, _, err := g.api.PostMessage(ch, slack.MsgOptionText(chunk, false))
+			return err
+		})
 }
 
 // SendTyping is a no-op: Slack has no reliable typing indicator over Socket Mode.

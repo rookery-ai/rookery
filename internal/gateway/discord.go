@@ -329,13 +329,24 @@ func (g *DiscordGateway) resolveDM(userID string) (string, error) {
 }
 
 // Send delivers a message to a Discord user (via their DM channel).
+// Send delivers text to the user's DM, splitting it across messages when it
+// exceeds Discord's 2000-character limit.
+//
+// Before chunking, an over-long message was rejected with an HTTP 400 whose
+// error dispatch then discarded — so the agent overview a user needs in order to
+// approve a build was silently dropped while every short message arrived.
 func (g *DiscordGateway) Send(platformUserID, text string) error {
 	ch, err := g.resolveDM(platformUserID)
 	if err != nil {
 		return err
 	}
-	_, err = g.session.ChannelMessageSend(ch, render.For("discord").Render(text))
-	return err
+	// Split the RENDERED text: the limit applies to what is transmitted, and each
+	// platform's renderer produces different output.
+	return sendChunked(render.For("discord").Render(text), discordMessageLimit,
+		func(chunk string) error {
+			_, err := g.session.ChannelMessageSend(ch, chunk)
+			return err
+		})
 }
 
 func (g *DiscordGateway) SendTyping(platformUserID string) error {
@@ -351,9 +362,17 @@ func (g *DiscordGateway) SendMessageGetID(platformUserID, text string) (string, 
 	if err != nil {
 		return "", err
 	}
-	sent, err := g.session.ChannelMessageSend(ch, render.For("discord").Render(text))
+	// The FIRST chunk is the placeholder anchor; any remainder follows as
+	// ordinary messages, since only one message can be edited later.
+	chunks := splitMessage(render.For("discord").Render(text), discordMessageLimit)
+	sent, err := g.session.ChannelMessageSend(ch, chunks[0])
 	if err != nil {
 		return "", err
+	}
+	for _, chunk := range chunks[1:] {
+		if _, err := g.session.ChannelMessageSend(ch, chunk); err != nil {
+			return sent.ID, err
+		}
 	}
 	return sent.ID, nil
 }
@@ -363,8 +382,19 @@ func (g *DiscordGateway) EditMessage(platformUserID, msgID, text string) error {
 	if err != nil {
 		return err
 	}
-	_, err = g.session.ChannelMessageEdit(ch, msgID, render.For("discord").Render(text))
-	return err
+	// An edit can only carry one message's worth. Put the first chunk in the
+	// placeholder and send the rest as follow-ups, so a long result still arrives
+	// in full rather than failing the edit and vanishing.
+	chunks := splitMessage(render.For("discord").Render(text), discordMessageLimit)
+	if _, err = g.session.ChannelMessageEdit(ch, msgID, chunks[0]); err != nil {
+		return err
+	}
+	for _, chunk := range chunks[1:] {
+		if _, err := g.session.ChannelMessageSend(ch, chunk); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (g *DiscordGateway) DeleteMessage(platformUserID, msgID string) error {

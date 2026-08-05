@@ -291,6 +291,21 @@ func (f *Flow) GetSession(workspaceID string) *DesignSession {
 	return f.sessions[workspaceID]
 }
 
+// IsGenerating reports whether a build is currently running for this workspace.
+// progressCh is non-nil only between runGeneration setting it up and
+// closeProgress clearing it, so it is an accurate in-progress signal — the same
+// mechanism agentdesigner.Flow.IsGenerating uses.
+//
+// The chat router needs it to reject a turn mid-build: without the guard a
+// message stepped the FSM concurrently with the build still writing to the same
+// session.
+func (f *Flow) IsGenerating(workspaceID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sess, ok := f.sessions[workspaceID]
+	return ok && sess.progressCh != nil
+}
+
 // ─── FSM step handlers ────────────────────────────────────────────────────────
 
 func (f *Flow) stepAwaitingResume(ctx context.Context, workspaceID, msg string) (string, bool, string, error) {

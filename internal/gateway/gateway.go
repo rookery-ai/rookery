@@ -485,7 +485,13 @@ func (m *GatewayManager) dispatch(ctx context.Context, msg Message) {
 			placeholderID = ""
 		}
 		if err := m.Send(msg.Platform, msg.WorkspaceID, msg.PlatformUserID, text); err != nil {
-			fmt.Printf("gateway: send error: %v\n", err)
+			// Was a bare fmt.Printf to stdout. That is how an over-long message
+			// being rejected with a 400 stayed invisible to BOTH the user and the
+			// operator: the reply simply never arrived and nothing recorded why.
+			// The length is logged because it is the first thing to check.
+			slog.Error("gateway: send failed",
+				"platform", msg.Platform, "workspace_id", msg.WorkspaceID,
+				"chars", msgLen(text), "err", err)
 		}
 	}
 	// deleteIncoming silently removes the user's incoming message from chat.
