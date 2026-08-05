@@ -167,6 +167,14 @@ func TestAuthConfigIsCoherent(t *testing.T) {
 			if p.Auth.Placement == "query" && p.Auth.ParamName == "" {
 				t.Errorf("%s uses query placement with no param_name", prov)
 			}
+		case p.UsesSessionExchange():
+			// Bluesky pastes an app password into the SAME form an api_key provider uses,
+			// and the wizard reads key_label to name it. The switch covered only keyless
+			// and api_key, so a blank label here would have shipped an unlabelled field
+			// with every test green.
+			if p.Auth.KeyLabel == "" {
+				t.Errorf("%s uses session_exchange but has no key_label — the form would show a blank field", prov)
+			}
 		}
 	}
 }

@@ -414,16 +414,23 @@ export function ServiceWizard({
                 </ol>
               )}
               <div className="space-y-1">
-                <Label htmlFor="svc-client-id">Client ID</Label>
+                <Label htmlFor="svc-client-id">
+                  {provider.oauth_creds?.id_label || "Client ID"}
+                </Label>
                 <Input
                   id="svc-client-id"
                   value={clientId}
                   onChange={(e) => setClientId(e.target.value)}
                   autoComplete="off"
                 />
+                {provider.oauth_creds?.id_hint && (
+                  <p className="text-xs text-muted-2">{provider.oauth_creds.id_hint}</p>
+                )}
               </div>
               <div className="space-y-1">
-                <Label htmlFor="svc-client-secret">Client secret</Label>
+                <Label htmlFor="svc-client-secret">
+                  {provider.oauth_creds?.secret_label || "Client secret"}
+                </Label>
                 <Input
                   id="svc-client-secret"
                   type="password"
@@ -434,6 +441,9 @@ export function ServiceWizard({
                   // username. "new-password" opts out of the pairing.
                   autoComplete="new-password"
                 />
+                {provider.oauth_creds?.secret_hint && (
+                  <p className="text-xs text-muted-2">{provider.oauth_creds.secret_hint}</p>
+                )}
               </div>
               {credsError && <ErrorNote>{credsError}</ErrorNote>}
               <div className="flex justify-end">

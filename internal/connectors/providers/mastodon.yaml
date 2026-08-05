@@ -23,3 +23,7 @@ setup_steps:
   - "Set the redirect URI to {{redirect_uri}} exactly, and tick the read and write:statuses scopes."
   - "Copy the Client key and Client secret into the fields below, then enter your instance URL when connecting."
   - "Mastodon access tokens do not expire, so there is nothing to refresh."
+oauth_creds:
+  id_label: "Client key"
+  id_hint: "from Preferences → Development on YOUR OWN instance, not a central provider"
+  secret_label: "Client secret"

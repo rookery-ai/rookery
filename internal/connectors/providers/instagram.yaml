@@ -23,3 +23,6 @@ setup_steps:
   - "In App settings → Basic, copy the App ID and App Secret and paste them below."
   - "Keep the app in DEVELOPMENT mode: full access to accounts YOU administer, no App Review."
   - "Note: Instagram allows 25 published posts per 24 hours, and images must be at a PUBLICLY reachable URL — the API cannot upload a local file."
+oauth_creds:
+  id_label: "App ID"
+  secret_label: "App Secret"

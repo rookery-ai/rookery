@@ -23,3 +23,7 @@ setup_steps:
   - "Set the redirect uri to {{redirect_uri}} exactly."
   - "Copy the client id (under the app name) and the secret, and paste them below."
   - "Request access via the Reddit Data API contact form, selecting the 'developer' category and describing your use case."
+oauth_creds:
+  id_label: "client ID"
+  id_hint: "the string shown under the app name, not the app name itself"
+  secret_label: "secret"

@@ -6,8 +6,11 @@ setup_steps:
   - "Go to Notion → My integrations → New integration → choose \"Public\" (OAuth)."
   - "Fill in the basic info; under OAuth Domain & URIs add {{redirect_uri}} exactly."
   - "Save, then open the integration's Secrets/OAuth section."
-  - "Copy the OAuth client ID and client secret and paste them below."
+  - "Copy the OAuth client ID and OAuth client secret and paste them below."
   - "After connecting, share the specific Notion pages/databases with the integration so it can access them."
+oauth_creds:
+  id_label: "OAuth client ID"
+  secret_label: "OAuth client secret"
 authorize_url: https://api.notion.com/v1/oauth/authorize
 token_url: https://api.notion.com/v1/oauth/token
 userinfo_url: ""

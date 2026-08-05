@@ -51,6 +51,33 @@ type AuthConfig struct {
 	BasicUserTemplate string `yaml:"basic_user_template"`
 }
 
+// OAuthCreds names the two fields a provider's own developer console shows for its OAuth
+// app, so the connect form asks for what the user is actually looking at. Meta says
+// "App ID"/"App Secret", Salesforce "Consumer Key"/"Consumer Secret", Outlook
+// "Application (client) ID" — the form hardcoded "Client ID"/"Client secret" for all of
+// them, leaving the user to guess the two were the same thing.
+//
+// Every field is optional and defaults INDEPENDENTLY. X declares only hints, because its
+// portal shows TWO credential pairs (OAuth 1.0a "API Key" and OAuth 2.0 "Client ID") and
+// the labels are already right — the disambiguation is the whole value. An empty field
+// falls back to "Client ID"/"Client secret", which is correct for the eight providers
+// whose console genuinely says that.
+//
+// This lives at the provider top level rather than inside AuthConfig because most OAuth
+// providers (google, github, notion) declare no auth: block at all, and nesting would
+// force one into files that do not otherwise need it.
+//
+// A provider with AuthParent set must leave this empty: OAuthProvider() resolves the child
+// to its parent before the labels are read, so a block on the child would never be shown,
+// and its presence would state something false about where the credentials go.
+// TestOAuthCredLabelsAreNonBlank rejects it.
+type OAuthCreds struct {
+	IDLabel     string `yaml:"id_label"`
+	IDHint      string `yaml:"id_hint"`
+	SecretLabel string `yaml:"secret_label"`
+	SecretHint  string `yaml:"secret_hint"`
+}
+
 // Provider is one service's OAuth configuration.
 type Provider struct {
 	Name string `yaml:"name"`
@@ -110,6 +137,10 @@ type Provider struct {
 	Label      string   `yaml:"label"`       // human-friendly name, e.g. "Google (Gmail)"
 	SetupURL   string   `yaml:"setup_url"`   // link to the provider's developer console
 	SetupSteps []string `yaml:"setup_steps"` // numbered instructions to create the OAuth client
+
+	// OAuthCreds renames the two credential fields on the connect form to match this
+	// provider's console. Empty means "Client ID"/"Client secret".
+	OAuthCreds OAuthCreds `yaml:"oauth_creds"`
 
 	Auth AuthConfig `yaml:"auth"`
 

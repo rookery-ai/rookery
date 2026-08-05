@@ -15,4 +15,7 @@ setup_steps:
   - "Go to dropbox.com/developers/apps → Create app → Scoped access → Full Dropbox."
   - "On the Permissions tab, enable files.metadata.read, files.content.read, files.content.write, sharing.write."
   - "On Settings, add {{redirect_uri}} under OAuth 2 Redirect URIs."
-  - "Copy the App key (client id) and App secret (client secret) and paste them below."
+  - "Copy the App key and App secret and paste them below."
+oauth_creds:
+  id_label: "App key"
+  secret_label: "App secret"

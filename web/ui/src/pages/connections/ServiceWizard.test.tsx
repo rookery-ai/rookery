@@ -96,6 +96,24 @@ const API_KEY_PROVIDER: ServiceProvider = {
   connections: [],
 };
 
+const OAUTH_RENAMED_FIELDS: ServiceProvider = {
+  name: "facebook",
+  label: "Facebook",
+  category: "Publishing & Media",
+  kind: "oauth",
+  setup_url: "",
+  setup_steps: [],
+  has_creds: false,
+  action_count: 0,
+  connect_inputs: [], redirect_uri: "", preflight: [],
+  connections: [],
+  oauth_creds: {
+    id_label: "App ID",
+    secret_label: "App Secret",
+    secret_hint: "App settings → Basic",
+  },
+};
+
 type Handlers = {
   creds?: (provider: string, body: { client_id: string; client_secret: string }) => Response;
   connect?: (provider: string, body: { label: string }) => Response;
@@ -518,4 +536,32 @@ test("connecting a keyless provider posts an empty key to the apikey endpoint", 
   // kind=none and stores no ciphertext.
   expect(captured).not.toBeNull();
   expect(captured!.key).toBe("");
+});
+
+// Meta's console shows "App ID"/"App Secret" while the form said "Client ID"/"Client
+// secret", leaving the user to guess the two were the same thing. The rename is
+// PRESENTATION ONLY — the POST body must still be {client_id, client_secret}, which is
+// the half of this that a careless refactor would break silently.
+test("oauth provider renames the credential fields to match its own console", async () => {
+  let captured: { client_id: string; client_secret: string } | null = null;
+  mockFetch({
+    creds: (_provider, body) => {
+      captured = body;
+      return jsonResponse({ ok: true });
+    },
+  });
+  const user = userEvent.setup();
+  wrap(OAUTH_RENAMED_FIELDS);
+
+  await user.click(screen.getByText("open wizard"));
+
+  expect(await screen.findByText("App ID")).toBeInTheDocument();
+  expect(screen.queryByText("Client ID")).not.toBeInTheDocument();
+  expect(screen.getByText("App settings → Basic")).toBeInTheDocument();
+
+  await user.type(screen.getByLabelText("App ID"), "cid-123");
+  await user.type(screen.getByLabelText("App Secret"), "csecret-456");
+  await user.click(screen.getByRole("button", { name: /save & continue/i }));
+
+  expect(captured).toEqual({ client_id: "cid-123", client_secret: "csecret-456" });
 });
