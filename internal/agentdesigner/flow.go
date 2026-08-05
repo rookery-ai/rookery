@@ -1350,7 +1350,8 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// Generate() returns — a session lookup would then silently no-op and the SSE
 	// goroutine would block forever.
 	var progressOnce sync.Once
-	closeProgress := func() {
+	closeProgress := func() { //nolint:revive // deferred below AND called explicitly on early returns
+
 		progressOnce.Do(func() {
 			// Nil out the session's field under lock so GetProgressChan can't hand
 			// out the closed channel to a new caller.
@@ -1362,6 +1363,16 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 			close(progressCh)
 		})
 	}
+	// Belt-and-braces. progressCh being non-nil is what IsGenerating reports, and
+	// TWO new callers now depend on it: the chat router's concurrency guard and
+	// startGeneration's "already building" check. A return path that missed
+	// closeProgress used to be a minor annoyance for the web's concurrent-POST
+	// guard; it would now wedge the session permanently — the user could neither
+	// talk to the designer nor start another build without /agent cancel.
+	//
+	// progressOnce makes this safe alongside the explicit calls on the paths that
+	// need to close it BEFORE doing more work.
+	defer closeProgress()
 
 	if coderSvc == nil {
 		closeProgress()

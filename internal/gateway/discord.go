@@ -391,7 +391,14 @@ func (g *DiscordGateway) EditMessage(platformUserID, msgID, text string) error {
 	}
 	for _, chunk := range chunks[1:] {
 		if _, err := g.session.ChannelMessageSend(ch, chunk); err != nil {
-			return err
+			// Deliberately NOT returned. GatewayManager.dispatch treats an
+			// EditMessage error as "the edit did not happen" and re-sends the ENTIRE
+			// message as a new one — so reporting a follow-up failure after the edit
+			// already succeeded would deliver chunk 1 twice plus the whole text
+			// again. Log it and report the edit's own outcome.
+			slog.Error("gateway: discord follow-up chunk failed",
+				"channel", ch, "chars", msgLen(chunk), "err", err)
+			return nil
 		}
 	}
 	return nil

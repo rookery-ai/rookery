@@ -1081,6 +1081,24 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 			send(friendlyDesignError("agent", err))
 			return nil
 		}
+		// If that turn STARTED a build, deliver its "building…" line through the
+		// progress channel rather than send().
+		//
+		// send() consumes the placeholder on a successful edit (it clears
+		// placeholderID), and every subsequent milestone is pushed through
+		// updatePlaceholder — so using send() here would silently drop every
+		// 🔧 tool-call milestone for the whole build. That is the exact symptom
+		// this change set exists to fix ("we are missing outputs and actions that
+		// the agent designer is doing"), and detaching generation is what would
+		// have reintroduced it: the old synchronous build called send() only after
+		// the build, leaving the placeholder live throughout.
+		//
+		// The final result arrives separately, as a fresh message from the
+		// build-completion hook.
+		if sendProgress != nil && r.designFlow.IsGenerating(msg.WorkspaceID) {
+			sendProgress(response)
+			return nil
+		}
 		send(response)
 		return nil
 	}
