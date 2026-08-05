@@ -56,3 +56,17 @@ updates:
     groups:
       docker-minor-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # Node ships an LTS line on EVEN majors only. Odd majors (25, 27, …) are
+      # the "Current" line: they go end-of-life about six months after release
+      # and never become LTS. `node:` here builds the SPA for the image we
+      # actually ship, and `.nvmrc` pins the same major for CI — so following
+      # Dependabot onto an odd major would put the release image on an
+      # unsupported runtime AND split it from the version CI builds with, for a
+      # bump whose green checks say nothing about either. Both failures are
+      # invisible in a passing PR, which is why this is a standing rule rather
+      # than a per-PR judgement call (declined once already as #84, node 24→25).
+      # Bump this BY HAND to the next EVEN major once it reaches Active LTS,
+      # updating `.nvmrc` in the same commit.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
