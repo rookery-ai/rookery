@@ -210,12 +210,20 @@ func (s *Server) apiDeleteConnector(c echo.Context) error {
 		return jsonErr(c, http.StatusNotFound, "not_found", "unknown platform: "+platform)
 	}
 
-	if s.gateway != nil {
-		_ = s.gateway.Reload(c.Request().Context(), u.ID, platform)
-	}
-
+	// Delete the row BEFORE reloading. Reload stops the adapter, re-reads the
+	// connection and starts it again when the row is still present and active
+	// — so calling it first stopped the bot and immediately RESTARTED it, and
+	// the delete then removed the row out from under a live adapter. The bot
+	// kept its gateway session and went on answering messages for a connector
+	// the UI reported as disconnected, until the next server restart.
+	// Reload's own "connection was deleted — nothing to start" branch is what
+	// this ordering is meant to hit.
 	if err := s.db.DeletePlatformConnection(u.ID, platform); err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", "failed to delete connector")
+	}
+
+	if s.gateway != nil {
+		_ = s.gateway.Reload(c.Request().Context(), u.ID, platform)
 	}
 	// A disconnected platform must not retain a bot identity — best-effort,
 	// like the write side; a failure here must not fail the disconnect.
