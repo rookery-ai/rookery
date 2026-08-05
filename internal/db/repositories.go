@@ -299,6 +299,46 @@ func (d *DB) DeletePlatformConnection(workspaceID, platform string) error {
 	return err
 }
 
+// WorkspaceBotIdentity pairs a workspace with the bot identity setting stored
+// for one platform.
+type WorkspaceBotIdentity struct {
+	WorkspaceID   string
+	WorkspaceName string
+	IdentityJSON  string
+}
+
+// ListPlatformBotIdentities returns the stored bot identity of every workspace
+// that currently has a connection for this platform, excluding one workspace
+// (the one being saved, so re-saving a rotated token for the SAME workspace is
+// not mistaken for a collision).
+//
+// It JOINS platform_connections deliberately rather than reading the settings
+// table alone: disconnecting DELETEs the connection row but leaves the
+// bot_identity.<platform> setting behind, so a settings-only query would report
+// a workspace that no longer uses the bot at all and block a legitimate
+// reconnect forever.
+func (d *DB) ListPlatformBotIdentities(platform, excludeWorkspaceID, settingKey string) ([]WorkspaceBotIdentity, error) {
+	rows, err := d.Query(`SELECT pc.workspace_id, w.name, s.value
+		FROM platform_connections pc
+		JOIN workspaces w ON w.id = pc.workspace_id
+		JOIN workspace_settings s ON s.workspace_id = pc.workspace_id AND s.key = ?
+		WHERE pc.platform = ? AND pc.workspace_id <> ?`, settingKey, platform, excludeWorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []WorkspaceBotIdentity
+	for rows.Next() {
+		var e WorkspaceBotIdentity
+		if err := rows.Scan(&e.WorkspaceID, &e.WorkspaceName, &e.IdentityJSON); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 func (d *DB) ListWorkspacePlatformConnections(workspaceID string) ([]*PlatformConnection, error) {
 	rows, err := d.Query(`SELECT id,workspace_id,platform,encrypted_token,encrypted_config,active,created_at,updated_at
 		FROM platform_connections WHERE workspace_id=?`, workspaceID)

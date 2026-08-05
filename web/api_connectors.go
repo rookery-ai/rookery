@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/ilijad1/rookery/internal/db"
@@ -182,6 +183,12 @@ func (s *Server) apiSaveConnector(c echo.Context) error {
 
 	identity, botStartErr, err := s.saveConnector(u.ID, req.Platform, values)
 	if err != nil {
+		// The credentials are valid here — the bot is simply already spoken
+		// for — so invalid_credentials would send the user back to re-check a
+		// token that is perfectly fine.
+		if errors.Is(err, ErrBotAlreadyConnected) {
+			return jsonErr(c, http.StatusConflict, "bot_already_connected", err.Error())
+		}
 		return jsonErr(c, http.StatusBadRequest, "invalid_credentials", err.Error())
 	}
 	s.audit.Log(u.ID, "connect_platform", "platform:"+req.Platform, "", c.RealIP())

@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -742,6 +743,9 @@ func (s *Server) apiSetupConnector(c echo.Context, w *db.Workspace, req apiSetup
 	}
 	identity, botStartErr, err := s.saveConnector(w.ID, req.Platform, values)
 	if err != nil {
+		if errors.Is(err, ErrBotAlreadyConnected) {
+			return jsonErr(c, http.StatusConflict, "bot_already_connected", err.Error())
+		}
 		return jsonErr(c, http.StatusBadRequest, "invalid_connector_config", err.Error())
 	}
 	s.audit.Log(w.ID, "connect_platform", "platform:"+req.Platform, "", c.RealIP())
