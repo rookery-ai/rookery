@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { LogOut } from "lucide-react";
+import { useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,7 @@ import {
  */
 export function SignOutButton() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -44,11 +46,22 @@ export function SignOutButton() {
     try {
       await api.post("/api/v1/auth/logout", {});
       // Same discipline as a tenant switch (resetWorkspaceScopedCache): drop
-      // every cached query but keep ["session"], whose own refetch is what
-      // sends RequireAuth to /login. Clearing it instead would blank the app
-      // behind a loading fallback on the way out.
+      // every cached query but keep ["session"]. Clearing it instead would blank
+      // the app behind a loading fallback on the way out.
       qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "session" });
       await qc.invalidateQueries({ queryKey: ["session"] });
+      // Navigate EXPLICITLY rather than letting the session refetch push a guard
+      // to /login.
+      //
+      // That indirection only works from a screen sitting under RequireAuth, and
+      // neither screen mounting this button does. The lock screen is rendered in
+      // place BY RequireAuth so it happens to work; the workspace picker is a
+      // top-level route (`{ path: "/workspaces", element: <Workspaces /> }`, no
+      // guard), so signing out there re-rendered the picker against a
+      // now-unauthenticated session and left the user staring at the screen they
+      // started on. Being on the right screen must not depend on which route
+      // happens to be guarded.
+      navigate("/login", { replace: true });
     } finally {
       setBusy(false);
       setConfirming(false);

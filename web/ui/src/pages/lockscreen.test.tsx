@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router";
 import LockScreen from "./LockScreen";
 
 const SESSION = {
@@ -18,11 +19,16 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+// A router is required, not incidental: LockScreen mounts SignOutButton, which
+// navigates to /login on the way out rather than waiting for a guard to notice
+// the session is gone.
 function wrap() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <LockScreen />
+      <MemoryRouter initialEntries={["/"]}>
+        <LockScreen />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
