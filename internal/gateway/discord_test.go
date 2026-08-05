@@ -4,8 +4,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/bwmarrin/discordgo"
 )
 
 // withTestDiscordAttachment points downloadDiscordAttachment's CDN allowlist
@@ -77,7 +80,11 @@ func TestDiscordLinkURLsBuildInviteWithNoPermissions(t *testing.T) {
 
 	// permissions=0 is deliberate: guild permissions do not govern 1:1 DMs,
 	// and a no-permission invite creates no role and asks for nothing.
-	want := "https://discord.com/api/oauth2/authorize?client_id=987654321&scope=bot&permissions=0"
+	//
+	// applications.commands rides alongside `bot` so the app's /start slash
+	// command actually appears in the guild — with `bot` alone the command is
+	// simply absent, with nothing anywhere reporting why.
+	want := "https://discord.com/api/oauth2/authorize?client_id=987654321&scope=bot%20applications.commands&permissions=0"
 	if got.InviteURL != want {
 		t.Fatalf("InviteURL = %q, want %q", got.InviteURL, want)
 	}
@@ -172,5 +179,54 @@ func TestMapDiscordDM(t *testing.T) {
 	// A guild (non-DM) message → skipped (GuildID non-empty).
 	if _, ok := mapDiscordDM("user-1", "guild-1", "x", "m", "bot-1", false); ok {
 		t.Fatal("guild messages must be skipped (DM-only)")
+	}
+}
+
+// TestInviteURLRequestsCommandsScope guards the scope the invite asks for.
+// `bot` alone authorizes the bot user but surfaces none of the app's slash
+// commands in the guild, so /start would silently fail to appear — the same
+// class of invisible, prose-level regression as the impossible "OR just DM
+// it" branch this connector shipped before.
+func TestInviteURLRequestsCommandsScope(t *testing.T) {
+	spec, ok := CredSpecFor("discord")
+	if !ok {
+		t.Fatal("discord credspec missing")
+	}
+	got := spec.LinkURLs(BotIdentity{UserID: "123"}).InviteURL
+	if !strings.Contains(got, "applications.commands") {
+		t.Fatalf("invite URL must request applications.commands, got %q", got)
+	}
+	// permissions=0 stays: guild permissions do not govern 1:1 DMs, and the
+	// consent screen should keep asking for nothing.
+	if !strings.Contains(got, "permissions=0") {
+		t.Fatalf("invite URL must keep permissions=0, got %q", got)
+	}
+}
+
+// TestInteractionUserIDFromBothContexts pins the resolution the slash command
+// depends on. Discord populates Interaction.User in a DM and
+// Interaction.Member.User in a guild; reading only one returns nil in the
+// other context, which would reintroduce exactly the silence the command
+// exists to remove.
+func TestInteractionUserIDFromBothContexts(t *testing.T) {
+	dm := &discordgo.InteractionCreate{Interaction: &discordgo.Interaction{
+		User: &discordgo.User{ID: "dm-user"},
+	}}
+	if got := discordInteractionUserID(dm); got != "dm-user" {
+		t.Fatalf("dm context: got %q, want dm-user", got)
+	}
+
+	guild := &discordgo.InteractionCreate{Interaction: &discordgo.Interaction{
+		Member: &discordgo.Member{User: &discordgo.User{ID: "guild-user"}},
+	}}
+	if got := discordInteractionUserID(guild); got != "guild-user" {
+		t.Fatalf("guild context: got %q, want guild-user", got)
+	}
+
+	if got := discordInteractionUserID(&discordgo.InteractionCreate{Interaction: &discordgo.Interaction{}}); got != "" {
+		t.Fatalf("empty interaction: got %q, want empty", got)
+	}
+	if got := discordInteractionUserID(nil); got != "" {
+		t.Fatalf("nil interaction: got %q, want empty", got)
 	}
 }

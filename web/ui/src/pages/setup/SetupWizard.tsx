@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
-import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Check, KeyRound, Link2, Plus, Save } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Check, KeyRound, Link2, Plus, RotateCcw, Save } from "lucide-react";
 import { CuratedSelect } from "@/components/profile/CuratedSelect";
 import {
   timezoneOptions,
@@ -31,6 +31,9 @@ import type {
 import type { ConnectorPlatform } from "@/lib/connections";
 import { CoderSection } from "@/pages/settings/CoderSection";
 import { ConnectorCredentialsFields } from "@/pages/connections/ConnectorCredentialsFields";
+import { TestResult } from "@/components/chat-connect/notes";
+import { LinkStep } from "@/components/chat-connect/LinkStep";
+import { setupSource } from "@/components/chat-connect/source";
 import { Linkify } from "@/lib/linkify";
 
 function errMsg(err: unknown) {
@@ -445,12 +448,31 @@ function ChatAppStep({
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Credentials are only the halfway point: the connections page also tests the
+  // token and waits for the operator's /start. Onboarding used to jump straight
+  // to Done here, which is what left a chat app saved-but-unlinked.
+  const [phase, setPhase] = useState<"form" | "test" | "link">("form");
+  // setupStep() flips 5 → 7 the instant a connection row exists, so the
+  // server's next_step is already "Done" by the time credentials save. Stash it
+  // and navigate only once the link step finishes or is escaped — navigating
+  // here is precisely what skipped test and link.
+  const [nextStep, setNextStep] = useState<number | null>(null);
+
+  const testMutation = setupSource.useTest();
 
   function pick(p: ConnectorPlatform) {
     setSelected(p);
     setValues({});
     setError("");
+    setPhase("form");
   }
+
+  // Auto-fire the live test the moment the test phase is entered, mirroring
+  // ConnectWizard's step 3.
+  useEffect(() => {
+    if (phase === "test" && selected) testMutation.mutate(selected.platform);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -463,13 +485,20 @@ function ChatAppStep({
         platform: selected.platform,
         fields: values,
       });
-      onNext(res.next_step);
+      setNextStep(res.next_step);
+      setPhase("test");
     } catch (err) {
       setError(errMsg(err));
     } finally {
       setBusy(false);
     }
   }
+
+  function leaveStep() {
+    onNext(nextStep ?? 7);
+  }
+
+  const testOk = testMutation.data ? testMutation.data.ok : null;
 
   const allFilled =
     !!selected &&
@@ -485,7 +514,43 @@ function ChatAppStep({
         and set this up later from Connections.
       </p>
 
-      {!data ? (
+      {selected && phase === "test" ? (
+        <div className="space-y-3">
+          <TestResult
+            platform={selected.label}
+            pending={testMutation.isPending}
+            ok={testOk}
+            identity={testMutation.data?.identity}
+            error={testMutation.data?.error}
+          />
+          {testMutation.isError && <ErrorNote>{errMsg(testMutation.error)}</ErrorNote>}
+          <div className="flex justify-end">
+            {testOk === true ? (
+              <Button onClick={() => setPhase("link")}>
+                <ArrowRight />
+                Next
+              </Button>
+            ) : (
+              !testMutation.isPending && (
+                <Button
+                  variant="outline"
+                  onClick={() => testMutation.mutate(selected.platform)}
+                >
+                  <RotateCcw />
+                  Retry
+                </Button>
+              )
+            )}
+          </div>
+        </div>
+      ) : selected && phase === "link" ? (
+        <LinkStep
+          platform={selected}
+          source={setupSource}
+          onFinishLater={leaveStep}
+          onDone={leaveStep}
+        />
+      ) : !data ? (
         <div className="text-sm text-muted-2">Loading…</div>
       ) : !selected ? (
         <>
@@ -572,11 +637,22 @@ function ChatAppStep({
 
 // ── Done ─────────────────────────────────────────────────────────────────
 
+/** What step 7 knows about the chat app, if one was connected. */
+export type DoneChatApp = {
+  platform: string;
+  label: string;
+  botIdentity: string;
+  linked: boolean;
+  linkedIdentity: string;
+  dmURL: string;
+  inviteURL: string;
+};
+
 function DoneScreen({
-  botUsername,
+  chatApp,
   onFinish,
 }: {
-  botUsername: string;
+  chatApp: DoneChatApp | null;
   onFinish: (target: string) => void;
 }) {
   return (
@@ -586,15 +662,49 @@ function DoneScreen({
       <p className="text-sm text-muted-2">
         This workspace is configured and ready to use.
       </p>
-      {botUsername && (
-        <div className="rounded-lg border border-primary/30 bg-primary/10 p-4 text-left text-sm">
-          <p className="font-semibold text-primary">
-            ✅ Bot connected: {botUsername}
+      {/* Named from the platform-keyed identity, never from the Telegram-only
+          setting this used to read — which is why a Discord install finished
+          onboarding with no bot name and no instruction at all. */}
+      {chatApp && chatApp.linked && (
+        <div className="rounded-lg border border-ok/30 bg-ok-soft p-4 text-left text-sm">
+          <p className="font-semibold text-ok">
+            ✅ {chatApp.label} linked as {chatApp.linkedIdentity}
           </p>
           <p className="mt-1 text-muted-2">
-            Open Telegram, find <strong>{botUsername}</strong>, and send{" "}
-            <code>/start</code> to link this workspace.
+            Message <strong>{chatApp.botIdentity || chatApp.label}</strong> any
+            time to talk to this workspace.
           </p>
+        </div>
+      )}
+      {chatApp && !chatApp.linked && (
+        <div className="rounded-lg border border-warn/30 bg-warn-soft p-4 text-left text-sm">
+          <p className="font-semibold text-warn">
+            {chatApp.label} is connected but not linked yet
+          </p>
+          <p className="mt-1 text-muted-2">
+            Open a direct message with{" "}
+            <strong>{chatApp.botIdentity || chatApp.label}</strong> and send{" "}
+            <code>/start</code> to link this workspace. A message posted in a
+            server channel is ignored.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {chatApp.inviteURL && (
+              <Button asChild variant="outline" size="sm">
+                <a href={chatApp.inviteURL} target="_blank" rel="noreferrer">
+                  <Link2 />
+                  Invite to a server
+                </a>
+              </Button>
+            )}
+            {chatApp.dmURL && (
+              <Button asChild variant="outline" size="sm">
+                <a href={chatApp.dmURL} target="_blank" rel="noreferrer">
+                  <ArrowRight />
+                  Open {chatApp.label}
+                </a>
+              </Button>
+            )}
+          </div>
         </div>
       )}
       <div className="flex flex-col gap-2 pt-2">
@@ -624,7 +734,9 @@ export default function SetupWizard() {
   const [connectorData, setConnectorData] = useState<{
     platforms: ConnectorPlatform[];
   } | null>(null);
-  const [botUsername, setBotUsername] = useState<string | null>(null);
+  // null means "not fetched yet"; a fetched-but-absent chat app is `false`,
+  // so a skipped chat-app step doesn't re-GET on every advance.
+  const [chatApp, setChatApp] = useState<DoneChatApp | null | false>(null);
   const [finishError, setFinishError] = useState("");
   const [finishing, setFinishing] = useState(false);
 
@@ -640,8 +752,20 @@ export default function SetupWizard() {
     if (d.step === 5 && !connectorData) {
       setConnectorData({ platforms: d.platforms ?? [] });
     }
-    if (d.step === 7 && botUsername === null) {
-      setBotUsername(d.bot_username ?? "");
+    if (d.step === 7 && chatApp === null) {
+      setChatApp(
+        d.platform
+          ? {
+              platform: d.platform,
+              label: d.platform_label ?? d.platform,
+              botIdentity: d.bot_identity ?? "",
+              linked: d.linked ?? false,
+              linkedIdentity: d.linked_identity ?? "",
+              dmURL: d.dm_url ?? "",
+              inviteURL: d.invite_url ?? "",
+            }
+          : false,
+      );
     }
   }
 
@@ -658,7 +782,7 @@ export default function SetupWizard() {
   // Advancing forward keeps the client in sync with the server's computed
   // step, so a plain re-GET at the moment we land on 3/5/7 for the first
   // time carries that step's payload. This does NOT refire on Back
-  // navigation (coderData/connectorData/botUsername stay cached once set),
+  // navigation (coderData/connectorData/chatApp stay cached once set),
   // which is deliberate — the server's computed step has moved past 3/5 by
   // then, so a re-GET would no longer include that step's payload.
   async function advance(next: number) {
@@ -666,7 +790,7 @@ export default function SetupWizard() {
     if (
       (next === 3 && !coderData) ||
       (next === 5 && !connectorData) ||
-      (next === 7 && botUsername === null)
+      (next === 7 && chatApp === null)
     ) {
       try {
         const d = await api.get<SetupResponse>("/api/v1/setup");
@@ -759,7 +883,7 @@ export default function SetupWizard() {
         {step === 7 && (
           <>
             <DoneScreen
-              botUsername={botUsername ?? ""}
+              chatApp={chatApp === null || chatApp === false ? null : chatApp}
               onFinish={(t) => void finish(t)}
             />
             {finishError && <ErrorNote>{finishError}</ErrorNote>}

@@ -54,6 +54,7 @@ function resetFixtures() {
       primary: true,
       dm_url: "",
       invite_url: "",
+      bot_online: true,
     },
     {
       platform: "slack",
@@ -68,6 +69,7 @@ function resetFixtures() {
       primary: false,
       dm_url: "",
       invite_url: "",
+      bot_online: false,
     },
   ];
   providers = [
@@ -196,6 +198,7 @@ const CHAT_APP_FIXTURE: ConnectorPlatform = {
   primary: false,
   dm_url: "",
   invite_url: "",
+  bot_online: true,
 };
 
 // Stubs GET /api/v1/connectors with exactly the given platforms (overriding

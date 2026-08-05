@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, Link2, Loader2, RotateCcw, Save, Unlink } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Link2, RotateCcw, Save, Unlink } from "lucide-react";
 import { useSlideOver } from "@/components/shell/AppShell";
 import { PanelBody } from "@/components/shell/PanelBody";
 import { Button } from "@/components/ui/button";
@@ -15,6 +14,9 @@ import {
   useUnlinkConnector,
   type ConnectorPlatform,
 } from "@/lib/connections";
+import { ErrorNote, TestResult, WarningNote } from "@/components/chat-connect/notes";
+import { LinkStep } from "@/components/chat-connect/LinkStep";
+import { connectorsSource } from "@/components/chat-connect/source";
 import { ConnectorCredentialsFields } from "./ConnectorCredentialsFields";
 
 type ChatAppWizardProps = { platform: ConnectorPlatform };
@@ -59,151 +61,6 @@ function StepChips({ step }: { step: Step }) {
         );
       })}
     </ol>
-  );
-}
-
-function ErrorNote({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">
-      <AlertTriangle className="size-3.5 shrink-0" />
-      {children}
-    </div>
-  );
-}
-
-function WarningNote({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 rounded-md bg-warn-soft px-3 py-2 text-xs text-warn">
-      <AlertTriangle className="size-3.5 shrink-0" />
-      {children}
-    </div>
-  );
-}
-
-function OkNote({ children }: { children: ReactNode }) {
-  return (
-    <div className="flex items-center gap-2 rounded-md bg-ok-soft px-3 py-2 text-sm font-medium text-ok">
-      <Check className="size-4 shrink-0" />
-      {children}
-    </div>
-  );
-}
-
-function Spinner({ text }: { text: string }) {
-  return (
-    <div className="flex items-center gap-2 text-sm text-muted-2">
-      <Loader2 className="size-4 shrink-0 animate-spin" />
-      {text}
-    </div>
-  );
-}
-
-// ── Test-connection result (shared by the wizard's step 3 and Manage) ──────
-
-function TestResult({
-  platform,
-  pending,
-  ok,
-  identity,
-  error,
-}: {
-  platform: string;
-  pending: boolean;
-  ok: boolean | null;
-  identity?: string;
-  error?: string;
-}) {
-  if (pending) return <Spinner text="Checking the connection…" />;
-  if (ok === true)
-    return <OkNote>Connected as {identity ?? platform} ✓</OkNote>;
-  if (ok === false)
-    return <ErrorNote>{error ?? "Connection failed"}</ErrorNote>;
-  return null;
-}
-
-// ── Step 4: Link your account ───────────────────────────────────────────────
-//
-// The identity row is created only when the operator's /start actually reaches
-// the bot, so its presence proves the inbound path end to end — which a token
-// check cannot. Until it lands there is deliberately no Done button and no
-// green state: the product must never signal completion it has not verified.
-function LinkStep({
-  platform,
-  onFinishLater,
-  onDone,
-}: {
-  platform: ConnectorPlatform;
-  onFinishLater: () => void;
-  onDone: () => void;
-}) {
-  // `linked` starts from the platform snapshot the wizard opened with and is
-  // latched true the moment the poll confirms it — so the poll can actually
-  // stop once linked, rather than running for the rest of the panel's life.
-  const [linked, setLinked] = useState(platform.linked);
-  const { data } = useConnectors({ refetchInterval: linked ? false : 2000 });
-  const live =
-    data?.platforms?.find((p) => p.platform === platform.platform) ?? platform;
-
-  useEffect(() => {
-    if (live.linked && !linked) setLinked(true);
-  }, [live.linked, linked]);
-
-  if (live.linked) {
-    return (
-      <div className="space-y-3">
-        <OkNote>Linked as {live.linked_identity}</OkNote>
-        <div className="flex justify-end">
-          <Button onClick={onDone}>Done</Button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      {live.invite_url && (
-        <div className="space-y-2 rounded-lg border border-border bg-background p-3 text-sm">
-          <p className="font-medium">First, add the bot to a server</p>
-          <p className="text-muted-2">
-            Discord only allows a direct message between accounts that share a
-            server. Afterwards, check the server's Privacy Settings and make sure
-            Direct Messages are allowed.
-          </p>
-          <Button asChild variant="outline" size="sm">
-            <a href={live.invite_url} target="_blank" rel="noreferrer">
-              <Link2 />
-              Invite to a server
-            </a>
-          </Button>
-        </div>
-      )}
-
-      <div className="space-y-2 rounded-lg border border-border bg-background p-3 text-sm">
-        <p className="font-medium">Then send the bot a message</p>
-        <p className="text-muted-2">
-          Open a direct message with{" "}
-          <b className="text-foreground">{live.identity || live.label}</b> and
-          send:
-        </p>
-        <code className="block rounded bg-muted-surface px-2 py-1 font-mono">/start</code>
-        {live.dm_url && (
-          <Button asChild variant="outline" size="sm">
-            <a href={live.dm_url} target="_blank" rel="noreferrer">
-              <ArrowRight />
-              Open {live.label}
-            </a>
-          </Button>
-        )}
-      </div>
-
-      <Spinner text="Waiting for you to send /start…" />
-
-      <div className="flex justify-end">
-        <Button variant="link" onClick={onFinishLater}>
-          Finish later — I'm not linked yet
-        </Button>
-      </div>
-    </div>
   );
 }
 
@@ -345,6 +202,7 @@ function ConnectWizard({ platform }: { platform: ConnectorPlatform }) {
       {step === "link" && (
         <LinkStep
           platform={platform}
+          source={connectorsSource}
           onFinishLater={() => close()}
           onDone={() => close()}
         />
@@ -459,6 +317,7 @@ function ManageWizard({ platform }: { platform: ConnectorPlatform }) {
       ) : (
         <LinkStep
           platform={live}
+          source={connectorsSource}
           onFinishLater={() => close()}
           onDone={() => close()}
         />

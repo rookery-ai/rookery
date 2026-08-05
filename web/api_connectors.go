@@ -46,6 +46,12 @@ type apiConnectorPlatform struct {
 	Primary        bool   `json:"primary"`         // receives unprompted delivery
 	DMURL          string `json:"dm_url"`
 	InviteURL      string `json:"invite_url"`
+	// BotOnline reports whether a live adapter is running for this platform
+	// right now. A saved connection whose server is down is otherwise
+	// indistinguishable from one simply waiting for /start — the exact
+	// ambiguity that made a dead server read as a misconfigured Discord app.
+	// Advisory: Linked remains the only proof the handshake completed.
+	BotOnline bool `json:"bot_online"`
 }
 
 type apiConnectorListResponse struct {
@@ -115,6 +121,11 @@ func (s *Server) connectorPlatformList(u *db.Workspace) []apiConnectorPlatform {
 
 		if conn, err := s.db.GetPlatformConnection(u.ID, spec.Platform); err == nil {
 			entry.Connected = conn.Active
+
+			// A nil gateway is the test/no-wiring case: report offline rather
+			// than claim a liveness we cannot observe.
+			entry.BotOnline = conn.Active && s.gateway != nil &&
+				s.gateway.IsRunning(u.ID, spec.Platform)
 
 			// Without credentials there is no bot, so a username and an
 			// invite link would be stale artefacts of a previous connection —

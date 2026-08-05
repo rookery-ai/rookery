@@ -42,6 +42,7 @@ const NOT_CONNECTED: ConnectorPlatform = {
   primary: false,
   dm_url: "",
   invite_url: "",
+  bot_online: false,
 };
 
 const CONNECTED: ConnectorPlatform = {
@@ -57,6 +58,7 @@ const CONNECTED: ConnectorPlatform = {
   primary: true,
   dm_url: "",
   invite_url: "",
+  bot_online: true,
 };
 
 type Handlers = {
@@ -473,7 +475,10 @@ const LINK_STEP_PLATFORM: ConnectorPlatform = {
   primary: false,
   dm_url: "https://discord.com/users/42",
   invite_url:
-    "https://discord.com/api/oauth2/authorize?client_id=42&scope=bot&permissions=0",
+    "https://discord.com/api/oauth2/authorize?client_id=42&scope=bot%20applications.commands&permissions=0",
+  // Online: this fixture drives the ordinary "waiting for /start" path, which
+  // must not be shadowed by the bot-offline warning.
+  bot_online: true,
 };
 
 test("shows no Done button and no success state while unlinked", async () => {

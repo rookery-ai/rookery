@@ -10,6 +10,7 @@ import (
 	"github.com/ilijad1/rookery/internal/coder"
 	"github.com/ilijad1/rookery/internal/config"
 	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/gateway"
 	"github.com/ilijad1/rookery/internal/llm"
 	"github.com/ilijad1/rookery/internal/profile"
 	"github.com/ilijad1/rookery/internal/secrets"
@@ -59,6 +60,44 @@ func (s *Server) registerSettingsAPI(g *echo.Group) {
 
 	g.GET("/setup", s.apiGetSetup)
 	g.POST("/setup", s.apiPostSetup)
+
+	// Setup-scoped mirrors of two connector endpoints. Every /connectors route
+	// sits on this same group behind requireSetupCompleteAPI, so the wizard
+	// 403s on all of them while needs_setup is true — which is why onboarding
+	// could never run the test-and-link steps the connections page runs.
+	//
+	// Mirroring exactly these two (read + test) rather than exempting the
+	// /connectors group keeps a half-configured workspace away from the
+	// delete, re-save and unlink endpoints that share it. The guard exempts by
+	// PREFIX ("/api/v1/setup"), so these need no change to it.
+	g.GET("/setup/platforms", s.apiSetupPlatforms)
+	g.POST("/setup/platforms/:platform/test", s.apiSetupTestPlatform)
+}
+
+// apiSetupPlatforms serves the same catalog as apiListConnectors, reachable
+// while the setup wizard is still running.
+// GET /api/v1/setup/platforms → {"platforms":[...]}
+func (s *Server) apiSetupPlatforms(c echo.Context) error {
+	w := c.Get("workspace").(*db.Workspace)
+	return c.JSON(http.StatusOK, apiConnectorListResponse{Platforms: s.connectorPlatformList(w)})
+}
+
+// apiSetupTestPlatform is apiTestConnector for the setup wizard: it proves the
+// saved token still authenticates before the wizard asks the operator to go
+// send /start. POST /api/v1/setup/platforms/:platform/test
+func (s *Server) apiSetupTestPlatform(c echo.Context) error {
+	w := c.Get("workspace").(*db.Workspace)
+	platform := c.Param("platform")
+
+	if _, ok := gateway.CredSpecFor(platform); !ok {
+		return jsonErr(c, http.StatusNotFound, "not_found", "unknown platform: "+platform)
+	}
+
+	identity, err := s.testConnectorIdentity(w.ID, platform)
+	if err != nil {
+		return c.JSON(http.StatusOK, apiTestConnectorResponse{OK: false, Error: err.Error()})
+	}
+	return c.JSON(http.StatusOK, apiTestConnectorResponse{OK: true, Identity: identity.Username})
 }
 
 // ── Shared catalog builder ───────────────────────────────────────────────────
@@ -442,8 +481,25 @@ func (s *Server) apiGetSetup(c echo.Context) error {
 	case 5:
 		resp["platforms"] = s.connectorPlatformList(w)
 	case 7:
-		botUsername, _ := s.db.GetSetting(w.ID, "telegram_bot_username")
-		resp["bot_username"] = botUsername
+		// Was telegram_bot_username, which saveConnector writes ONLY for
+		// Telegram (web/handlers_connectors.go) — so a Discord install reached
+		// Done with an empty bot name, no linking instruction, and no mention
+		// of Discord at all. Read the platform-keyed state the connectors list
+		// already builds instead, and let the SPA name the real platform.
+		for _, p := range s.connectorPlatformList(w) {
+			if !p.Connected {
+				continue
+			}
+			resp["platform"] = p.Platform
+			resp["platform_label"] = p.Label
+			resp["bot_identity"] = p.Identity
+			resp["linked"] = p.Linked
+			resp["linked_identity"] = p.LinkedIdentity
+			resp["dm_url"] = p.DMURL
+			resp["invite_url"] = p.InviteURL
+			resp["bot_online"] = p.BotOnline
+			break
+		}
 	}
 	return c.JSON(http.StatusOK, resp)
 }
