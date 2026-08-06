@@ -35,15 +35,24 @@
   --muted: #716f6b;
   --muted-2: #726f6a;
   --muted-surface: #e3dfd7;
-  --accent: #2d5a74;
-  --accent-soft: #e7f0f5;
+  /* Ember — the brand accent, adopted from the identity spec
+     (docs/superpowers/specs/2026-08-06-brand-identity-and-narrative-design.md).
+     Replaced the slate #2d5a74. */
+  --accent: #a94c1c;
+  --accent-soft: #f6e6dc;
   /* --ok/--warn/--danger darkened (same hue/sat, lower lightness) so they
      hold 4.5:1+ as text against --background, --chrome, AND their own
      -soft fill (the tightest constraint) — SP8 review flagged --ok at
      3.68:1 on --ok-soft; --warn/--danger were below 4.5:1 the same way. */
   --ok: #3b7154;
   --ok-soft: #dbeddb;
-  --warn: #985a2e;
+  /* Retuned from #985a2e to gold when --accent became ember. The old value
+     sat 4.5 DEGREES of hue from the accent — the same colour to the eye — so
+     a primary button and a warning were indistinguishable at a glance. This
+     is 21.3deg away and still holds 4.5:1 on all three grounds (5.65 / 5.23 /
+     4.85). contrast.test.ts guards the ratios but NOT the hue gap, so if you
+     move either value, re-check the separation by hand. */
+  --warn: #85610f;
   --warn-soft: #fdecc8;
   --danger: #be322c;
   --danger-soft: #ffe2dd;
@@ -53,7 +62,7 @@
   --card-foreground: #37352f;
   --popover: #ffffff;
   --popover-foreground: #37352f;
-  --primary: #2d5a74;
+  --primary: #a94c1c;
   --primary-foreground: #ffffff;
   --secondary: #f7f6f3;
   --secondary-foreground: #37352f;
@@ -61,20 +70,24 @@
   --accent-foreground: #ffffff;
   --destructive: #be322c;
   --input: #dcd8d2;
-  --ring: #2d5a74;
-  --chart-1: #2d5a74;
+  --ring: #a94c1c;
+  /* The chart ramp is currently unused (no --color-chart-* consumer in the
+     SPA). --chart-1 tracks --primary as it always has; --chart-3 and -4 are
+     now both close to ember, so this ramp needs a proper categorical pass
+     before anything renders with it. Left as-is rather than invented here. */
+  --chart-1: #a94c1c;
   --chart-2: #448361;
   --chart-3: #c77d48;
   --chart-4: #d44c47;
   --chart-5: #6fa2bd;
   --sidebar: #ffffff;
   --sidebar-foreground: #37352f;
-  --sidebar-primary: #2d5a74;
+  --sidebar-primary: #a94c1c;
   --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: #f7f6f3;
-  --sidebar-accent-foreground: #2d5a74;
+  --sidebar-accent-foreground: #a94c1c;
   --sidebar-border: #dcd8d2;
-  --sidebar-ring: #2d5a74;
+  --sidebar-ring: #a94c1c;
 }
 
 .dark {
@@ -86,11 +99,15 @@
   --muted: #a3a09a;
   --muted-2: #8b8882;
   --muted-surface: #33332f;
-  --accent: #6fa2bd;
-  --accent-soft: #24313a;
+  /* Ember, lightened for a dark ground. See the :root note. */
+  --accent: #e08d51;
+  --accent-soft: #2f2118;
   --ok: #6fbf8f;
   --ok-soft: #1e3328;
-  --warn: #d99a66;
+  /* Retuned from #d99a66, which sat TWO degrees of hue from the dark accent —
+     even closer than the light pair. Now 23.8deg away, ratios 10.09 / 9.35 /
+     7.66. See the :root note on why the test does not catch this. */
+  --warn: #dac462;
   --warn-soft: #3a2d1e;
   --danger: #e0716c;
   --danger-soft: #3a2322;
@@ -99,28 +116,31 @@
   --card-foreground: #e6e4e0;
   --popover: #202020;
   --popover-foreground: #e6e4e0;
-  --primary: #6fa2bd;
+  --primary: #e08d51;
   --primary-foreground: #191919;
-  --secondary: #2d3e4f;
+  /* Warmed from the blue-slate #2d3e4f: a cool secondary fill under an ember
+     primary read as a leftover from the old palette. */
+  --secondary: #3a2b20;
   --secondary-foreground: #e6e4e0;
   --muted-foreground: #a3a09a;
   --accent-foreground: #191919;
   --destructive: #e0716c;
   --input: #3f3f3b;
-  --ring: #6fa2bd;
-  --chart-1: #6fa2bd;
+  --ring: #e08d51;
+  /* Unused ramp — see the :root note. */
+  --chart-1: #e08d51;
   --chart-2: #6fbf8f;
   --chart-3: #d99a66;
   --chart-4: #e0716c;
   --chart-5: #2d5a74;
   --sidebar: #202020;
   --sidebar-foreground: #e6e4e0;
-  --sidebar-primary: #6fa2bd;
+  --sidebar-primary: #e08d51;
   --sidebar-primary-foreground: #191919;
-  --sidebar-accent: #2d3e4f;
-  --sidebar-accent-foreground: #6fa2bd;
+  --sidebar-accent: #3a2b20;
+  --sidebar-accent-foreground: #e08d51;
   --sidebar-border: #3f3f3b;
-  --sidebar-ring: #6fa2bd;
+  --sidebar-ring: #e08d51;
 }
 
 @variant dark (.dark &);
