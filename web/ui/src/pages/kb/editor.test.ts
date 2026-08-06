@@ -355,29 +355,65 @@ test("an untitled callout still round-trips exactly as before (no title regressi
   expect(out.trim()).toBe("> [!note]\n> Body text here.".trim());
 });
 
-// markdown-it (html:true) treats "<details>" and "<summary>" as type-6 HTML
-// block tags: the opening line "<details><summary>Show details</summary>" is
-// consumed verbatim up to the next blank line, and a blank-line-separated
-// body in between is rendered as an ordinary paragraph ("<p>...</p>"), not
-// left as bare text. Since Toggle/ToggleSummary declare no markdown spec,
-// serialization falls back to tiptap-markdown's generic HTML-node writer,
-// which reflects the doc's real DOM shape back out — literal "<p>" tags,
-// glued directly to the preceding element (no blank line). That output form
-// is what a round trip actually stabilizes on, so it — not the blank-line
-// style a human might hand-type — is the byte-for-byte fixed point the
-// fidelity contract requires.
+// The brief's own literal input: <details> and <summary> glued on one
+// opening line, blank-line-separated body — the standard idiomatic way to
+// hand-write (or have an agent write) this construct. Toggle's custom
+// markdown.serialize (nodes/toggle.ts) is what makes this exact byte
+// sequence a genuine fixed point; without it, the generic HTML-node
+// fallback instead reflects the doc's literal DOM shape back out (a real
+// <p> tag glued straight to </summary>, no blank line) — a different,
+// though visually equivalent, string that fails this exact comparison.
 test("a toggle list survives a markdown round trip", () => {
   expect(
     checkFidelity(
-      "<details>\n<summary>Show details</summary><p>Hidden body.</p>\n</details>\n",
+      "<details><summary>Show details</summary>\n\nHidden body.\n\n</details>\n",
     ),
   ).toBe(true);
 });
 
 test("a toggle inserted via setToggle() and saved immediately round trips", () => {
   // The empty-body case a user hits by opening the slash menu and saving
-  // before typing anything: an empty <p></p> body must not be lost.
+  // before typing anything: an empty body must not be lost.
   expect(
-    checkFidelity("<details>\n<summary>Toggle</summary><p></p>\n</details>\n"),
+    checkFidelity("<details><summary>Toggle</summary>\n\n</details>\n"),
+  ).toBe(true);
+});
+
+test("a toggle with a multi-paragraph body round-trips", () => {
+  expect(
+    checkFidelity(
+      "<details><summary>Show details</summary>\n\nFirst paragraph.\n\nSecond paragraph.\n\n</details>\n",
+    ),
+  ).toBe(true);
+});
+
+test("a toggle body containing bold/italic marks round-trips", () => {
+  // The body is ordinary markdown (not on markdown-it's raw HTML block
+  // line), so "**bold**"/"*italic*" parse as real marks and serialize back
+  // through the normal markdown mark machinery — same path any other
+  // paragraph's marks take.
+  expect(
+    checkFidelity(
+      "<details><summary>Show details</summary>\n\nSome **bold** and *italic* text.\n\n</details>\n",
+    ),
+  ).toBe(true);
+});
+
+test("a toggle summary containing an inline mark round-trips", () => {
+  // Unlike the body, the summary sits on markdown-it's raw HTML block line,
+  // so a real mark can only get in via an actual HTML tag in the source
+  // (markdown "**" syntax typed there stays literal text — verified
+  // separately, see nodes/toggle.ts's comment above ToggleSummary). This
+  // pins that <strong> case specifically because it was the one that broke
+  // under an earlier, since-reverted design (routing the summary through
+  // the mark-aware inline serializer): that design wrote a real <strong>
+  // mark back out as markdown "**", which is literal text on the next
+  // parse, then gets backslash-escaped, and diverges further with every
+  // subsequent save. Leaving the summary on the generic raw-HTML fallback
+  // (see nodes/toggle.ts) avoids the mismatch entirely.
+  expect(
+    checkFidelity(
+      "<details><summary>Show <strong>bold</strong> details</summary>\n\nBody.\n\n</details>\n",
+    ),
   ).toBe(true);
 });

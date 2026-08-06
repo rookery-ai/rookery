@@ -160,6 +160,13 @@
   cursor: pointer;
   font-weight: 600;
 }
+/* Author-origin CSS beats the UA's own (non-!important) closed-details
+   rule, so this is architecturally sound, but — like the KB shell/scroll
+   declarations documented in scrollcontainment.test.tsx — jsdom has no
+   layout engine, so nothing in this test suite can assert that a closed
+   <details> actually renders its body open. Unverified by automated tests;
+   check by hand (or via scripts/verify-kb-layout.py-style browser
+   verification) after touching this rule. */
 .note-editor-content .tiptap details > *:not(summary) {
   display: block;
 }
