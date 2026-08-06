@@ -2,12 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  ExternalLink,
   KeyRound,
   Link2,
   MessageSquare,
   Puzzle,
   Save,
   Search,
+  Settings,
   Trash2,
 } from "lucide-react";
 import { PageContainer } from "@/components/shell/PageContainer";
@@ -16,6 +18,13 @@ import { ContextPaneHeader } from "@/components/shell/ContextPaneParts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SearchInput } from "@/components/ui/search-input";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { ProviderLogo } from "@/components/brand/ProviderLogo";
@@ -170,27 +179,55 @@ function ChatAppCard({
 
 // ── Services ─────────────────────────────────────────────────────────────
 
+// A provider is blocked when the instance URL provably cannot complete its
+// OAuth flow. Only `hard` counts: `soft` (e.g. unverified_host, which any
+// PSL-private host like github.io produces) is a warning, and treating it as
+// fatal would lock users out over a policy we only PREDICT.
+//
+// A provider with existing connections is never blocked — those connections
+// still work, and the wizard is the only way to inspect or delete them.
+//
+// Exported for direct unit testing: this predicate is the whole contract
+// between the preflight payload and whether a tile is reachable.
+export function isServiceBlocked(provider: ServiceProvider): boolean {
+  if (provider.connections.length > 0) return false;
+  return provider.preflight.some((p) => p.severity === "hard");
+}
+
 function ServiceTile({
   provider,
   onOpen,
+  onBlocked,
 }: {
   provider: ServiceProvider;
   onOpen: (provider: ServiceProvider) => void;
+  onBlocked: (provider: ServiceProvider) => void;
 }) {
   const count = provider.connections.length;
   const needsReauth = provider.connections.some((c) => c.status !== "ACTIVE");
+  const blocked = isServiceBlocked(provider);
 
   return (
     <button
       type="button"
-      onClick={() => onOpen(provider)}
-      className="flex flex-col items-center gap-1.5 rounded-lg border border-border bg-background p-3 text-center transition-colors hover:border-primary/40 hover:shadow-sm"
+      // aria-disabled, NOT disabled: a disabled button fires no click, and the
+      // click is what explains why the tile is blocked.
+      aria-disabled={blocked || undefined}
+      onClick={() => (blocked ? onBlocked(provider) : onOpen(provider))}
+      className={cn(
+        "flex flex-col items-center gap-1.5 rounded-lg border border-border bg-background p-3 text-center transition-colors",
+        blocked
+          ? "opacity-60 hover:border-warn/40"
+          : "hover:border-primary/40 hover:shadow-sm",
+      )}
     >
       <ProviderLogo name={provider.name} size={30} />
       <div className="w-full truncate text-xs font-semibold">
         {provider.label}
       </div>
-      {count === 0 ? (
+      {blocked ? (
+        <div className="text-xs text-warn">Needs a public URL</div>
+      ) : count === 0 ? (
         <div className="text-xs text-muted-2">Connect</div>
       ) : needsReauth ? (
         <div className="text-xs text-warn">reconnect needed</div>
@@ -200,6 +237,54 @@ function ServiceTile({
         </div>
       )}
     </button>
+  );
+}
+
+// Shown instead of the wizard when a tile is blocked. It quotes the API's own
+// message/fix strings rather than restating them, so the tile and the wizard
+// cannot drift into two different explanations of the same problem.
+function BlockedServiceDialog({
+  provider,
+  onClose,
+  onOpenAnyway,
+}: {
+  provider: ServiceProvider | null;
+  onClose: () => void;
+  onOpenAnyway: (provider: ServiceProvider) => void;
+}) {
+  const problem = provider?.preflight.find((p) => p.severity === "hard");
+  return (
+    <Dialog open={provider !== null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{provider?.label} needs a public instance URL</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          {problem && <p className="text-foreground">{problem.message}</p>}
+          {problem?.fix && <p className="text-muted-2">{problem.fix}</p>}
+        </div>
+        <DialogFooter>
+          {/* Open anyway is not politeness. The hard block predicts a third
+              party's rules rather than expressing an invariant we own, so a
+              stale redirect_policy entry in a YAML file must never become a
+              lockout with no override. Connect stays disabled inside the
+              wizard regardless. */}
+          <Button
+            variant="ghost"
+            onClick={() => provider && onOpenAnyway(provider)}
+          >
+            <ExternalLink className="size-4" />
+            Open anyway
+          </Button>
+          <Button asChild>
+            <Link to="/settings?section=owner-instance-url">
+              <Settings className="size-4" />
+              Change the instance URL
+            </Link>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -368,6 +453,8 @@ export default function ConnectionsPage() {
   const initialConnected = useRef(searchParams.get("connected"));
   const initialErrorParam = useRef(searchParams.get("error"));
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [blockedProvider, setBlockedProvider] =
+    useState<ServiceProvider | null>(null);
 
   useEffect(() => {
     if (!initialConnected.current && !initialErrorParam.current) return;
@@ -406,7 +493,6 @@ export default function ConnectionsPage() {
   const linkedApps = platforms.filter((p) => p.linked && p.connected);
   const setPrimary = useSetPrimaryConnector();
   const services = servicesQuery.data?.providers ?? [];
-  const summary = servicesQuery.data?.summary;
   const configuredSearchKeysCount = SEARCH_KEY_PROVIDERS.filter(
     (p) => searchKeysQuery.data?.[p.id],
   ).length;
@@ -595,23 +681,31 @@ export default function ConnectionsPage() {
 
           {linkedApps.length > 0 && (
             <div className="mt-4 space-y-2 rounded-lg border border-border p-3">
-              <p className="text-sm font-medium">
-                Where should agent runs and reminders go?
-              </p>
-              {linkedApps.map((app) => (
-                <label
-                  key={app.platform}
-                  className="flex items-center gap-2 text-sm"
-                >
-                  <input
-                    type="radio"
-                    name="primary-chat-app"
-                    checked={app.primary}
-                    onChange={() => setPrimary.mutate(app.platform)}
-                  />
-                  {app.label}
-                </label>
-              ))}
+              {/* The picker itself (heading + radios) only earns its place once
+                  there's an actual choice to make — with exactly one linked app
+                  there's nothing to pick between, so only the plain delivery
+                  sentence below renders. */}
+              {linkedApps.length > 1 && (
+                <>
+                  <p className="text-sm font-medium">
+                    Where should agent runs and reminders go?
+                  </p>
+                  {linkedApps.map((app) => (
+                    <label
+                      key={app.platform}
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      <input
+                        type="radio"
+                        name="primary-chat-app"
+                        checked={app.primary}
+                        onChange={() => setPrimary.mutate(app.platform)}
+                      />
+                      {app.label}
+                    </label>
+                  ))}
+                </>
+              )}
               <p className="text-xs text-muted-2">
                 {/* The backend guarantees exactly one `primary: true` among
                     linked apps, but that's not an invariant this render can
@@ -637,25 +731,6 @@ export default function ConnectionsPage() {
           <p className="mb-4 text-sm text-muted-2">
             Give your agents superpowers — connect the tools they'll work with.
           </p>
-          {/* The remedy tier: per-provider preflight says what is broken HERE,
-              this says what the current instance URL costs overall — while the
-              user is still in a position to change it. */}
-          {summary &&
-            summary.oauth_providers > 0 &&
-            summary.clean_providers < summary.oauth_providers && (
-              <div className="mb-4 rounded-lg border border-border bg-muted-surface p-3 text-sm">
-                <span className="font-medium">
-                  {summary.base_url} works with {summary.clean_providers} of{" "}
-                  {summary.oauth_providers} sign-in services.
-                </span>{" "}
-                <span className="text-muted-2">
-                  A public domain name over https unlocks the rest.{" "}
-                  <Link to="/settings" className="underline underline-offset-2">
-                    Change the instance URL
-                  </Link>
-                </span>
-              </div>
-            )}
           {servicesQuery.isError && (
             <ErrorBanner message={errorMessage(servicesQuery.error)} />
           )}
@@ -690,6 +765,7 @@ export default function ConnectionsPage() {
                           key={p.name}
                           provider={p}
                           onOpen={openServiceWizard}
+                          onBlocked={setBlockedProvider}
                         />
                       ))}
                     </div>
@@ -726,6 +802,15 @@ export default function ConnectionsPage() {
             </div>
           )}
         </section>
+
+        <BlockedServiceDialog
+          provider={blockedProvider}
+          onClose={() => setBlockedProvider(null)}
+          onOpenAnyway={(p) => {
+            setBlockedProvider(null);
+            openServiceWizard(p);
+          }}
+        />
       </PageContainer>
     </>
   );

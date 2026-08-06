@@ -47,15 +47,6 @@ type apiPreflightProblem struct {
 	Fix      string `json:"fix"`
 }
 
-// apiPublicURLSummary answers "what does my current instance URL cost me?" in
-// one line. Per-provider preflight cannot answer that — a user comparing URLs
-// would otherwise have to open all 18 OAuth cards and tally them by hand.
-type apiPublicURLSummary struct {
-	BaseURL        string `json:"base_url"`
-	OAuthProviders int    `json:"oauth_providers"`
-	CleanProviders int    `json:"clean_providers"`
-}
-
 type apiServiceConnectInput struct {
 	Key      string `json:"key"`
 	Label    string `json:"label"`
@@ -131,7 +122,6 @@ type apiServiceProvider struct {
 
 type apiServicesListResponse struct {
 	Providers []apiServiceProvider `json:"providers"`
-	Summary   apiPublicURLSummary  `json:"summary"`
 }
 
 // apiConnectorAction is one curated action a provider exposes. Deliberately a
@@ -188,7 +178,6 @@ func (s *Server) apiListServices(c echo.Context) error {
 	// internally, so resolving per-iteration would mean ~90 GetSystemSetting
 	// reads on every page load.
 	base, _ := s.resolvePublicURL(c)
-	oauthProviders, cleanProviders := 0, 0
 	out := make([]apiServiceProvider, 0, len(providers))
 	for _, provider := range providers {
 		conns := make([]apiServiceConnection, 0)
@@ -275,10 +264,6 @@ func (s *Server) apiListServices(c echo.Context) error {
 			// the parent's URI is the one that must be registered. See oauthAppName.
 			redirectURI = base + "/dashboard/connectors/services/callback/" + credsProvider
 			preflight = toAPIPreflight(publicurl.Check(base, s.connectors.RedirectPolicy(provider)))
-			if len(preflight) == 0 {
-				cleanProviders++
-			}
-			oauthProviders++
 		}
 
 		out = append(out, apiServiceProvider{
@@ -308,14 +293,7 @@ func (s *Server) apiListServices(c echo.Context) error {
 		})
 	}
 
-	return c.JSON(http.StatusOK, apiServicesListResponse{
-		Providers: out,
-		Summary: apiPublicURLSummary{
-			BaseURL:        base,
-			OAuthProviders: oauthProviders,
-			CleanProviders: cleanProviders,
-		},
-	})
+	return c.JSON(http.StatusOK, apiServicesListResponse{Providers: out})
 }
 
 // apiListProviderActions lists the curated actions a provider exposes. GET

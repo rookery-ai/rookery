@@ -113,6 +113,38 @@ with sync_playwright() as p:
             "left=%(left)s right=%(right)s (viewport %(vw)s)" % menu,
         )
 
+    # 3. The root element must have nothing to scroll. jsdom cannot see this at
+    #    all: every container from the editor pane up to <body> measured 900/900
+    #    and clipped correctly, while <html> reported scrollHeight 13425 against
+    #    clientHeight 900. Wheeling with the pointer over the icon rail then
+    #    scrolled the document and carried the rail out of view.
+    root = page.evaluate(
+        "() => ({ scrollH: document.documentElement.scrollHeight,"
+        "         clientH: document.documentElement.clientHeight })"
+    )
+    check(
+        "root element has no scrollable overflow",
+        root["scrollH"] <= root["clientH"] + 1,
+        f"documentElement scrollHeight={root['scrollH']} clientHeight={root['clientH']}",
+    )
+
+    rail = page.locator('nav[aria-label="Primary"]').first
+    box = rail.bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + 200)
+    for _ in range(8):
+        page.mouse.wheel(0, 400)
+        page.wait_for_timeout(60)
+    after = page.evaluate(
+        "() => ({ top: document.documentElement.scrollTop,"
+        "         rail: Math.round(document.querySelector('nav[aria-label=\\\"Primary\\\"]')"
+        "                 .getBoundingClientRect().top) })"
+    )
+    check(
+        "wheeling over the icon rail does not scroll the shell",
+        after["top"] == 0 and after["rail"] == 0,
+        f"documentElement.scrollTop={after['top']} railTop={after['rail']}",
+    )
+
     browser.close()
 
 if failures:
