@@ -418,81 +418,104 @@ being present rather than merely informative.
 
 ### Symptom
 
-With a note longer than the viewport, scrolling moves the whole page: the icon rail and
-the file-tree pane scroll out of view instead of staying fixed while only the editor
-pane scrolls.
+With a note longer than the viewport, the editor pane scrolls correctly when the
+pointer is over it. But with the pointer over the **icon rail** or the **context pane**,
+the wheel scrolls the whole page instead — the rail and the file tree travel out of
+view, and the travel distance is the note's full content height.
 
-### What is already in place
+### Measured, not inferred
 
-This exact class of bug was fixed once and is guarded. `AppShell.tsx:84` is
-`h-screen overflow-hidden flex flex-col md:flex-row`, `NoteEditor.tsx:839` is
-`min-h-0 flex-1 overflow-y-auto overscroll-contain`, and `scrollcontainment.test.tsx`
-asserts both declaration strings still exist. Both are present and both tests pass, so
-this is **not** a regression of that fix — it is a case that fix does not cover.
+Reproduced on a throwaway instance driven with Playwright, at 1440x900 with an
+~13,400px note. Walking the ancestor chain from the note content up to `<html>`:
 
-### Diagnosis
+| element | `overflow-y` | clientHeight | scrollHeight |
+|---|---|---|---|
+| `.px-[7%] py-8` (note body) | visible | 13400 | 13400 |
+| `.min-h-0 flex-1 overflow-y-auto overscroll-contain` | auto | 843 | 13400 |
+| `.flex h-full flex-col` (NoteEditor root) | visible | 900 | 900 |
+| `<main>` | auto | 900 | 900 |
+| `.h-screen overflow-hidden` (shell root) | hidden | 900 | 900 |
+| `#root` | visible | 900 | 900 |
+| `<body>` | visible | 900 | 900 |
+| **`<html>`** | **visible** | **900** | **13425** |
 
-The shell is a row of three flex items — `IconRail`, the context-pane `aside`, and
-`main` — inside a `h-screen overflow-hidden` container. On a wide viewport `main` is
-`flex-1 min-w-0 overflow-y-auto`, its height comes from `align-items: stretch` (so
-`NoteEditor`'s `h-full` resolves against a definite 100vh), and the note's own pane is
-the only thing that scrolls. That path is correct.
+Every container from the editor pane up to `<body>` is correctly sized and clipping.
+The overflow appears only at the **root element**: `<html>` has a 900px client box and
+a 13425px scroll box. Wheeling over the rail scrolls that root box —
+`documentElement.scrollTop` 0 → 3200 and the rail's `top` 0 → −3200 — while
+`main`, the `aside` and the shell all stay at 0.
 
-Below the `md` breakpoint the container flips to `flex-col`, and the same three items
-become a **column**. Two things then change at once:
+The shell's `overflow: hidden` does not stop it because **the shell is
+`position: static`**. An `overflow` value clips a descendant only when the clipping
+element is in that descendant's containing-block chain, so the editor's
+out-of-flow content resolves against the initial containing block, escapes the shell
+entirely, and lands in the root element's scrollable overflow.
 
-1. `main` carries `min-w-0` but **not `min-h-0`**. In a column flex container a flex
-   item's automatic minimum size is content-based (CSS Flexbox §4.5), so `min-height:
-   auto` lets `main` grow to its content instead of holding its flex share. A long note
-   therefore makes `main` taller than the viewport.
-2. `overflow: hidden` does not prevent scrolling — it creates a scroll container and
-   only removes the scrollbar. So the oversized `main` makes the `h-screen` shell
-   itself scrollable, and scrolling it carries `IconRail` and the context pane with it.
-
-That is exactly the reported symptom, and it reaches a normal desktop user through
-browser zoom: zooming in shrinks the effective viewport width, and past roughly 768 CSS
-pixels the column layout engages. The original fix was verified at a single desktop
-viewport, which is why it did not surface.
-
-This is the **leading hypothesis, not a confirmed reproduction** — it is derived from
-the source, and `scripts/verify-kb-layout.py` is the only thing that can observe the
-behaviour. Confirming it at a narrow viewport is the first implementation step; if the
-measurement disagrees, the fix is re-derived from what it shows rather than from this.
+**An earlier hypothesis in this spec — that `main` was missing `min-h-0` and the bug
+was specific to the sub-`md` column layout — was tested and is wrong.** It is recorded
+here because it is the intuitive reading of the source and someone will propose it
+again. `main { min-height: 0 }` leaves the leak exactly as it was, and the bug
+reproduces at a full desktop width, not only below the breakpoint.
 
 ### Fix
 
-Add `min-h-0` to `main` in `AppShell.tsx`, so it holds its flex share in the column
-layout and its own `overflow-y-auto` absorbs the excess instead of the shell doing it.
-The rule generalises: **every flex item between the `h-screen` root and a scrolling pane
-must carry `min-h-0`**, or the automatic minimum size defeats the containment. The KB
-column chain already follows this (`KBPage.tsx:279`, `:285`, `NoteEditor.tsx:839`);
-`main` is the one link that does not.
+Add `relative` to the shell root in `AppShell.tsx:84`. That gives the shell a
+containing block, which makes its existing `overflow: hidden` authoritative for the
+descendants that currently escape it.
 
-The fix belongs in `AppShell`, not in `NoteEditor`. `main` wraps every route, so a long
-page on any other surface has the same latent bug — fixing it at the shell fixes all of
-them, and matches the recorded design intent that the shell is a fixed-height frame in
-which every scrolling region is explicit.
+Six candidates were measured against the reproduction. Only this one removes the
+overflow rather than hiding it:
+
+| candidate | rail stays put | `documentElement.scrollHeight` |
+|---|---|---|
+| baseline | no — rail → −3200 | 13425 |
+| `html, body { height:100%; overflow:hidden }` | yes | 13425 |
+| `html { overflow:hidden }` | yes | 13425 |
+| `#root { height:100%; overflow:hidden }` | no | 13425 |
+| `overflow: clip` on the shell | no | 13425 |
+| `main { min-height: 0 }` | no | 13425 |
+| **`position: relative` on the shell** | **yes** | **900** |
+
+The two `overflow:hidden`-on-the-root variants stop the *user* from scrolling while
+leaving the document 13425px tall. That is a mask, not a fix: the oversized scroll box
+survives, so programmatic scrolling, `scrollIntoView` and anchor navigation still act on
+a page that is mostly empty space, and any genuinely overflowing element later would be
+silently unreachable instead of visibly wrong. `position: relative` drops
+`scrollHeight` to 900 — the document has nothing to scroll because nothing overflows.
+
+In every candidate the editor pane itself kept scrolling normally, so no fix breaks the
+behaviour that already works.
+
+### Regression check already performed
+
+Making the shell a containing block means its `overflow: hidden` now clips
+absolutely-positioned descendants that previously escaped — which could clip the
+floating editor UI. Measured with a selection deep in a long note: the bubble toolbar
+renders at `top=327 left=422`, 28×28, fully inside the viewport, **identical with and
+without the fix**. The slash menu is unaffected by construction — `SlashMenu.tsx`
+appends it to `document.body` with `position: fixed`, so it is not a descendant of the
+shell at all.
 
 ### Tests
 
-`scrollcontainment.test.tsx` gains a declaration assertion for `main`'s `min-h-0`,
-matching how the two existing cases are guarded — jsdom has no layout engine, so a
-stylesheet-level assertion is the most a vitest suite can do here.
+`scrollcontainment.test.tsx` gains an assertion that the shell root carries `relative`,
+alongside the two declaration assertions it already makes. The comment must say why,
+because `relative` on a flex container looks like a no-op to a future reader and is
+exactly the kind of class a cleanup would remove.
 
-`scripts/verify-kb-layout.py` gains a **narrow-viewport pass**: it currently drives one
-desktop viewport, and the whole point of this bug is that the desktop pass is clean. The
-new pass loads a long note at a sub-`md` width, scrolls to the bottom of the editor
-pane, wheels again, and asserts both `documentElement.scrollTop` and the icon rail's
-`top` are unchanged — the same two measurements the existing check already records for
-the desktop case. Running it needs a throwaway instance and a session cookie, so it is
-an explicit manual verification step in the plan, not a CI job.
+`scripts/verify-kb-layout.py` gains a case asserting
+`documentElement.scrollHeight === documentElement.clientHeight` on a long note, and that
+wheeling with the pointer over the rail leaves `documentElement.scrollTop` and the rail's
+`top` at 0. The existing harness already measures both of those values for its own case,
+so this reuses its vocabulary. Running it needs a throwaway instance and a session
+cookie, so it stays a manual verification step rather than a CI job.
 
 ## Build order
 
 1. **List CSS** — smallest change, fixes the visible bug, no dependencies.
-2. **Scroll containment** — reproduce at a narrow viewport first, then the one-class
-   fix in `AppShell`. Ordered early because it touches the shell every later step
-   renders inside, and because a wrong diagnosis is cheaper to discover now.
+2. **Scroll containment** — the one-class fix in `AppShell`, already diagnosed and
+   verified against a live reproduction. Ordered early because it touches the shell
+   every later step renders inside.
 3. **Connections** — remove the banner, then block the tiles. Independent of the
    editor, no shared risk.
 4. **Formatting constructs** — underline → colours → callout → toggle, each landing
