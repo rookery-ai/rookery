@@ -461,9 +461,12 @@ test("a blocked tile explains itself instead of opening the wizard", async () =>
   // The dialog quotes the API's own strings — one wording, not two.
   expect(await screen.findByText(/Plain http is rejected/)).toBeInTheDocument();
   expect(screen.getByText(/Serve the instance over https/)).toBeInTheDocument();
-  expect(
-    screen.getByRole("link", { name: /Change the instance URL/ }),
-  ).toBeInTheDocument();
+  const remedyLink = screen.getByRole("link", { name: /Change the instance URL/ });
+  expect(remedyLink).toBeInTheDocument();
+  // The instance URL setting lives at the owner-instance-url settings
+  // section, not the default Profile section — landing on Profile would
+  // defeat the whole point of this button.
+  expect(remedyLink).toHaveAttribute("href", "/settings?section=owner-instance-url");
 });
 
 test("Open anyway reaches the wizard from a blocked tile", async () => {
@@ -522,6 +525,9 @@ test("an unblocked tile opens the wizard directly", async () => {
   wrap();
 
   await user.click(await screen.findByRole("button", { name: /GitHub/ }));
+  // Positive assertion: the wizard actually opened, not merely that the
+  // blocked-tile dialog didn't.
+  expect(await screen.findByText("Connect GitHub")).toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: /Open anyway/ }),
   ).not.toBeInTheDocument();
@@ -546,7 +552,10 @@ test("a connected but unlinked app is not shown as ready", async () => {
   expect(screen.queryByText(/^connected$/i)).not.toBeInTheDocument();
 });
 
-test("primary radio is offered only to linked apps", async () => {
+// Also proves the radio list is filtered to truly linked apps: Discord here
+// is connected but not linked, so only Telegram counts — leaving exactly one
+// linked app, which per the finding below must render the sentence alone.
+test("exactly one linked app: shows the delivery line without a picker", async () => {
   renderConnections([
     {
       ...CHAT_APP_FIXTURE,
@@ -560,8 +569,45 @@ test("primary radio is offered only to linked apps", async () => {
     { ...CHAT_APP_FIXTURE, platform: "discord", label: "Discord", connected: true, linked: false },
   ]);
 
-  const radios = await screen.findAllByRole("radio");
-  expect(radios).toHaveLength(1);
+  // With a single linked app there's nothing to choose between — the heading
+  // and radio are noise, so only the plain sentence renders.
+  expect(await screen.findByText(/delivered to Telegram/i)).toBeInTheDocument();
+  expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(/where should agent runs and reminders go/i),
+  ).not.toBeInTheDocument();
+});
+
+test("two or more linked apps: shows the picker with one radio per linked app", async () => {
+  renderConnections([
+    {
+      ...CHAT_APP_FIXTURE,
+      platform: "telegram",
+      label: "Telegram",
+      connected: true,
+      linked: true,
+      linked_identity: "1843540314",
+      primary: true,
+    },
+    {
+      ...CHAT_APP_FIXTURE,
+      platform: "discord",
+      label: "Discord",
+      connected: true,
+      linked: true,
+      linked_identity: "ilija#4821",
+      primary: false,
+    },
+    // Connected but unlinked — must not count toward the 2+ gate nor appear
+    // as a radio option.
+    { ...CHAT_APP_FIXTURE, platform: "slack", label: "Slack", connected: true, linked: false },
+  ]);
+
+  expect(
+    await screen.findByText(/where should agent runs and reminders go/i),
+  ).toBeInTheDocument();
+  const radios = screen.getAllByRole("radio");
+  expect(radios).toHaveLength(2);
   expect(radios[0]).toBeChecked();
   expect(screen.getByText(/delivered to Telegram/i)).toBeInTheDocument();
 });

@@ -21,6 +21,7 @@ import { SearchInput } from "@/components/ui/search-input";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -258,30 +259,30 @@ function BlockedServiceDialog({
         <DialogHeader>
           <DialogTitle>{provider?.label} needs a public instance URL</DialogTitle>
         </DialogHeader>
-        <div className="space-y-3 px-6 pb-6 text-sm">
+        <div className="space-y-3 text-sm">
           {problem && <p className="text-foreground">{problem.message}</p>}
           {problem?.fix && <p className="text-muted-2">{problem.fix}</p>}
-          <div className="flex items-center justify-end gap-2 pt-2">
-            {/* Open anyway is not politeness. The hard block predicts a third
-                party's rules rather than expressing an invariant we own, so a
-                stale redirect_policy entry in a YAML file must never become a
-                lockout with no override. Connect stays disabled inside the
-                wizard regardless. */}
-            <Button
-              variant="ghost"
-              onClick={() => provider && onOpenAnyway(provider)}
-            >
-              <ExternalLink className="size-4" />
-              Open anyway
-            </Button>
-            <Button asChild>
-              <Link to="/settings">
-                <Settings className="size-4" />
-                Change the instance URL
-              </Link>
-            </Button>
-          </div>
         </div>
+        <DialogFooter>
+          {/* Open anyway is not politeness. The hard block predicts a third
+              party's rules rather than expressing an invariant we own, so a
+              stale redirect_policy entry in a YAML file must never become a
+              lockout with no override. Connect stays disabled inside the
+              wizard regardless. */}
+          <Button
+            variant="ghost"
+            onClick={() => provider && onOpenAnyway(provider)}
+          >
+            <ExternalLink className="size-4" />
+            Open anyway
+          </Button>
+          <Button asChild>
+            <Link to="/settings?section=owner-instance-url">
+              <Settings className="size-4" />
+              Change the instance URL
+            </Link>
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -680,23 +681,31 @@ export default function ConnectionsPage() {
 
           {linkedApps.length > 0 && (
             <div className="mt-4 space-y-2 rounded-lg border border-border p-3">
-              <p className="text-sm font-medium">
-                Where should agent runs and reminders go?
-              </p>
-              {linkedApps.map((app) => (
-                <label
-                  key={app.platform}
-                  className="flex items-center gap-2 text-sm"
-                >
-                  <input
-                    type="radio"
-                    name="primary-chat-app"
-                    checked={app.primary}
-                    onChange={() => setPrimary.mutate(app.platform)}
-                  />
-                  {app.label}
-                </label>
-              ))}
+              {/* The picker itself (heading + radios) only earns its place once
+                  there's an actual choice to make — with exactly one linked app
+                  there's nothing to pick between, so only the plain delivery
+                  sentence below renders. */}
+              {linkedApps.length > 1 && (
+                <>
+                  <p className="text-sm font-medium">
+                    Where should agent runs and reminders go?
+                  </p>
+                  {linkedApps.map((app) => (
+                    <label
+                      key={app.platform}
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      <input
+                        type="radio"
+                        name="primary-chat-app"
+                        checked={app.primary}
+                        onChange={() => setPrimary.mutate(app.platform)}
+                      />
+                      {app.label}
+                    </label>
+                  ))}
+                </>
+              )}
               <p className="text-xs text-muted-2">
                 {/* The backend guarantees exactly one `primary: true` among
                     linked apps, but that's not an invariant this render can
