@@ -3,9 +3,10 @@
 **Date:** 2026-08-06
 **Status:** Approved design
 
-Six requested changes across three subsystems: the knowledge-base rich text editor,
+Seven requested changes across three subsystems: the knowledge-base rich text editor,
 a new AI-assist endpoint driven from a text selection, and two misleading elements on
-the connections page.
+the connections page — plus a scroll-containment bug in the app shell that lets a long
+note scroll the icon rail and file tree out of view.
 
 ---
 
@@ -347,28 +348,160 @@ the 91 registered services (`internal/connectors/providers/` holds 91 YAML files
 which ~35 are neither `api_key` nor `none`). Presented without that qualifier it reads
 as though the whole catalogue is 34 services and most of it is unavailable, when in
 fact the majority are API-key or keyless and entirely unaffected by the instance URL.
-And it is **redundant** — per-provider preflight (`Preflight []apiPreflightProblem`,
-`web/api_services.go:277`) already reports the specific problem on the specific card, at
-the moment the user tries to connect, which is where it is actionable.
+And it states a global tally when the useful information is per-service.
 
 Remove the banner. `summary` then has no consumer in the SPA, so
 `apiPublicURLSummary` and its `Summary` field come out of `web/api_services.go` too,
-along with the summary assertions in `web/api_services_preflight_test.go`. Per-provider
-`preflight` is untouched — it is the mechanism that makes removing the banner safe.
+along with the summary assertions in `web/api_services_preflight_test.go`.
+
+### Disable the cards that cannot work
+
+The per-provider check already exists and is already computed for every card:
+`Preflight []apiPreflightProblem` (`web/api_services.go:277`) ships on every provider in
+the list payload. Today the SPA ignores it on the card and only surfaces it *inside* the
+wizard — `ServiceWizard.tsx:201` computes `hardBlocked` and `:564` disables the Connect
+button. So the user learns a service cannot work only after picking it.
+
+Use the data that is already there. `ServiceTile`
+(`ConnectionsPage.tsx:173`) gains the same derivation:
+
+```ts
+const blocked = provider.preflight.some((p) => p.severity === "hard");
+```
+
+Severity is the existing two-value model (`internal/publicurl/policy.go:26`).
+`SeverityHard` is only ever produced for a provably fatal condition — a raw IP, an
+RFC-reserved host suffix, or plain `http` on a public domain — and only a provider
+policy marked `verified: true` can produce one at all. `SeveritySoft` (including
+`unverified_host`) must **not** disable anything; it stays a warning inside the wizard
+exactly as today.
+
+A blocked tile renders dimmed with its status line replaced by "Needs a public URL"
+in `text-warn`, and carries `aria-disabled` rather than the `disabled` attribute — a
+`disabled` button fires no click, and the click is the whole point.
+
+**One exception: a provider with existing connections is never disabled.** Those
+connections still work and the user must be able to reach the wizard to inspect or
+delete them. A blocked provider with `connections.length > 0` keeps its normal tile and
+its account count; only the Connect action inside the wizard stays disabled, which is
+already the behaviour.
+
+### The click
+
+Clicking a blocked tile opens a small dialog instead of the full wizard, carrying the
+first hard problem's `message` and `fix` verbatim from the API — the same strings the
+wizard already renders, so there is one wording, not two. It offers:
+
+- **Change the instance URL** (primary) → `/settings`, the actual remedy.
+- **Open anyway** (ghost) → opens the normal `ServiceWizard`, where Connect is disabled
+  and the full preflight list is shown.
+
+"Open anyway" is not optional politeness. The hard block is **UI-only by design** — it
+predicts a third party's rules rather than expressing an invariant we own, so a stale
+`redirect_policy` entry in a YAML file must never become a lockout with no override.
+That reasoning is already recorded for the server side; disabling the card is a stronger
+gate than disabling a button, so the escape hatch has to be explicit. It also means the
+change stays purely presentational: no endpoint, no server-side gate, no schema change.
+
+### Tests
+
+Vitest against `ConnectionsPage`: a provider with a hard problem and no connections
+renders blocked and opens the dialog rather than the wizard; the same provider *with* a
+connection renders normally; a provider with only a soft problem renders normally; and
+"Open anyway" reaches the wizard. A Go test asserts `preflight` is populated on the list
+payload for a hard-blocked provider, since the SPA behaviour now depends on that field
+being present rather than merely informative.
 
 ---
+
+## 6. Editor scroll containment
+
+### Symptom
+
+With a note longer than the viewport, scrolling moves the whole page: the icon rail and
+the file-tree pane scroll out of view instead of staying fixed while only the editor
+pane scrolls.
+
+### What is already in place
+
+This exact class of bug was fixed once and is guarded. `AppShell.tsx:84` is
+`h-screen overflow-hidden flex flex-col md:flex-row`, `NoteEditor.tsx:839` is
+`min-h-0 flex-1 overflow-y-auto overscroll-contain`, and `scrollcontainment.test.tsx`
+asserts both declaration strings still exist. Both are present and both tests pass, so
+this is **not** a regression of that fix — it is a case that fix does not cover.
+
+### Diagnosis
+
+The shell is a row of three flex items — `IconRail`, the context-pane `aside`, and
+`main` — inside a `h-screen overflow-hidden` container. On a wide viewport `main` is
+`flex-1 min-w-0 overflow-y-auto`, its height comes from `align-items: stretch` (so
+`NoteEditor`'s `h-full` resolves against a definite 100vh), and the note's own pane is
+the only thing that scrolls. That path is correct.
+
+Below the `md` breakpoint the container flips to `flex-col`, and the same three items
+become a **column**. Two things then change at once:
+
+1. `main` carries `min-w-0` but **not `min-h-0`**. In a column flex container a flex
+   item's automatic minimum size is content-based (CSS Flexbox §4.5), so `min-height:
+   auto` lets `main` grow to its content instead of holding its flex share. A long note
+   therefore makes `main` taller than the viewport.
+2. `overflow: hidden` does not prevent scrolling — it creates a scroll container and
+   only removes the scrollbar. So the oversized `main` makes the `h-screen` shell
+   itself scrollable, and scrolling it carries `IconRail` and the context pane with it.
+
+That is exactly the reported symptom, and it reaches a normal desktop user through
+browser zoom: zooming in shrinks the effective viewport width, and past roughly 768 CSS
+pixels the column layout engages. The original fix was verified at a single desktop
+viewport, which is why it did not surface.
+
+This is the **leading hypothesis, not a confirmed reproduction** — it is derived from
+the source, and `scripts/verify-kb-layout.py` is the only thing that can observe the
+behaviour. Confirming it at a narrow viewport is the first implementation step; if the
+measurement disagrees, the fix is re-derived from what it shows rather than from this.
+
+### Fix
+
+Add `min-h-0` to `main` in `AppShell.tsx`, so it holds its flex share in the column
+layout and its own `overflow-y-auto` absorbs the excess instead of the shell doing it.
+The rule generalises: **every flex item between the `h-screen` root and a scrolling pane
+must carry `min-h-0`**, or the automatic minimum size defeats the containment. The KB
+column chain already follows this (`KBPage.tsx:279`, `:285`, `NoteEditor.tsx:839`);
+`main` is the one link that does not.
+
+The fix belongs in `AppShell`, not in `NoteEditor`. `main` wraps every route, so a long
+page on any other surface has the same latent bug — fixing it at the shell fixes all of
+them, and matches the recorded design intent that the shell is a fixed-height frame in
+which every scrolling region is explicit.
+
+### Tests
+
+`scrollcontainment.test.tsx` gains a declaration assertion for `main`'s `min-h-0`,
+matching how the two existing cases are guarded — jsdom has no layout engine, so a
+stylesheet-level assertion is the most a vitest suite can do here.
+
+`scripts/verify-kb-layout.py` gains a **narrow-viewport pass**: it currently drives one
+desktop viewport, and the whole point of this bug is that the desktop pass is clean. The
+new pass loads a long note at a sub-`md` width, scrolls to the bottom of the editor
+pane, wheels again, and asserts both `documentElement.scrollTop` and the icon rail's
+`top` are unchanged — the same two measurements the existing check already records for
+the desktop case. Running it needs a throwaway instance and a session cookie, so it is
+an explicit manual verification step in the plan, not a CI job.
 
 ## Build order
 
 1. **List CSS** — smallest change, fixes the visible bug, no dependencies.
-2. **Connections cleanup** — independent of the editor, no shared risk.
-3. **Formatting constructs** — underline → colours → callout → toggle, each landing
+2. **Scroll containment** — reproduce at a narrow viewport first, then the one-class
+   fix in `AppShell`. Ordered early because it touches the shell every later step
+   renders inside, and because a wrong diagnosis is cheaper to discover now.
+3. **Connections** — remove the banner, then block the tiles. Independent of the
+   editor, no shared risk.
+4. **Formatting constructs** — underline → colours → callout → toggle, each landing
    with its fidelity round-trip test. Verify `tiptap-markdown`'s `parse.setup` hook
    before starting the callout.
-4. **Image resize** — needs the NodeView, independent of everything above.
-5. **AI assist** — Go endpoint and prompt first, then the panel.
+5. **Image resize** — needs the NodeView, independent of everything above.
+6. **AI assist** — Go endpoint and prompt first, then the panel.
 
-Steps 3–5 each touch `editor.ts`'s extension list or `BubbleToolbar.tsx`, so they land
+Steps 4–6 each touch `editor.ts`'s extension list or `BubbleToolbar.tsx`, so they land
 in sequence rather than in parallel.
 
 ## Out of scope
@@ -379,3 +512,8 @@ in sequence rather than in parallel.
 - Any AI action that writes without an explicit Accept.
 - Persisting an Explain answer into the note.
 - Height-based or percentage image resize. Width only, aspect preserved.
+- Any broader rework of the sub-`md` layout. Section 6 fixes the containment leak that
+  makes a long note scroll the shell; how the rail and context pane are best presented
+  on a genuinely small screen is a separate question.
+- A server-side gate on a hard-blocked provider. The block stays UI-only and
+  overridable, for the reason recorded in section 5.
