@@ -39,8 +39,8 @@ describe("filterSlashItems", () => {
 });
 
 describe("slashItems run() against a headless editor", () => {
-  test("all seventeen items are declared", () => {
-    expect(slashItems).toHaveLength(17);
+  test("all eighteen items are declared", () => {
+    expect(slashItems).toHaveLength(18);
   });
 
   test("Image and File attachment items dispatch their window events", () => {

@@ -24,6 +24,7 @@ import {
   AlertTriangle,
   OctagonAlert,
   StickyNote,
+  ChevronRight,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,7 @@ export const ICONS: Record<string, LucideIcon> = {
   "Callout: info": Info,
   "Callout: warning": AlertTriangle,
   "Callout: danger": OctagonAlert,
+  "Toggle list": ChevronRight,
   "Code block": Code,
   Divider: Minus,
   Table: TableIcon,

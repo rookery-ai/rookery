@@ -52,6 +52,11 @@ export const slashItems: SlashItem[] = [
     run: (editor: Editor) => editor.chain().focus().setCallout(kind).run(),
   })),
   {
+    title: "Toggle list",
+    keywords: "toggle collapsible details accordion expand fold",
+    run: (editor) => editor.chain().focus().setToggle().run(),
+  },
+  {
     title: "Code block",
     keywords: "code codeblock pre fenced snippet",
     run: (editor) => editor.chain().focus().toggleCodeBlock().run(),

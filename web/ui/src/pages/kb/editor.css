@@ -146,3 +146,20 @@
   font-weight: 700;
   margin-bottom: 0.5em;
 }
+
+/* Toggle lists (<details>/<summary>). renderHTML deliberately omits the
+   `open` attribute (it would round-trip into the saved markdown, force-
+   expanding the toggle forever), so this rule keeps the body visible while
+   editing regardless of the (absent) open state. */
+.note-editor-content .tiptap details {
+  border: 1px solid var(--color-border);
+  border-radius: 0.375rem;
+  padding: 0.5em 0.75em;
+}
+.note-editor-content .tiptap details > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.note-editor-content .tiptap details > *:not(summary) {
+  display: block;
+}

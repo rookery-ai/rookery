@@ -354,3 +354,30 @@ test("an untitled callout still round-trips exactly as before (no title regressi
   // No stray title text/attribute leaked onto or before the body line.
   expect(out.trim()).toBe("> [!note]\n> Body text here.".trim());
 });
+
+// markdown-it (html:true) treats "<details>" and "<summary>" as type-6 HTML
+// block tags: the opening line "<details><summary>Show details</summary>" is
+// consumed verbatim up to the next blank line, and a blank-line-separated
+// body in between is rendered as an ordinary paragraph ("<p>...</p>"), not
+// left as bare text. Since Toggle/ToggleSummary declare no markdown spec,
+// serialization falls back to tiptap-markdown's generic HTML-node writer,
+// which reflects the doc's real DOM shape back out — literal "<p>" tags,
+// glued directly to the preceding element (no blank line). That output form
+// is what a round trip actually stabilizes on, so it — not the blank-line
+// style a human might hand-type — is the byte-for-byte fixed point the
+// fidelity contract requires.
+test("a toggle list survives a markdown round trip", () => {
+  expect(
+    checkFidelity(
+      "<details>\n<summary>Show details</summary><p>Hidden body.</p>\n</details>\n",
+    ),
+  ).toBe(true);
+});
+
+test("a toggle inserted via setToggle() and saved immediately round trips", () => {
+  // The empty-body case a user hits by opening the slash menu and saving
+  // before typing anything: an empty <p></p> body must not be lost.
+  expect(
+    checkFidelity("<details>\n<summary>Toggle</summary><p></p>\n</details>\n"),
+  ).toBe(true);
+});
