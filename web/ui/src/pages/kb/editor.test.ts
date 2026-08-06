@@ -229,3 +229,24 @@ test("toggleUnderline writes a <u> tag", () => {
   expect(toMarkdown(editor)).toContain("<u>alpha</u>");
   editor.destroy();
 });
+
+test("a text colour survives a markdown round trip", () => {
+  expect(
+    checkFidelity('The <span style="color:#ef4444">deadline</span> is Friday.\n'),
+  ).toBe(true);
+});
+
+test("a highlight survives a markdown round trip", () => {
+  expect(
+    checkFidelity(
+      'Due <span style="background-color:#fef08a;color:#18181b">Friday</span>.\n',
+    ),
+  ).toBe(true);
+});
+
+test("a note with no colours is byte-for-byte unchanged", () => {
+  // The whole fidelity contract: adding these marks must not alter any note
+  // that does not use them.
+  const md = "# Title\n\nPlain prose with a [[wikilink]] and **bold**.\n";
+  expect(fidelityRoundTrip(md).trim()).toBe(md.trim());
+});

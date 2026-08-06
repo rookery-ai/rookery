@@ -11,6 +11,7 @@ import { Markdown, type MarkdownStorage } from "tiptap-markdown";
 import { Wikilink } from "./wikilinks";
 import { PipeSafeTable } from "./pipeSafeTable";
 import { KBImage } from "./kbImage";
+import { KBTextColor, KBBgColor } from "./marks/colors";
 
 // tiptap-markdown ships types for its own extension but doesn't merge them
 // into @tiptap/core's Storage interface, so `editor.storage.markdown` is
@@ -54,6 +55,8 @@ export function buildExtensions(extra: AnyExtension[] = []): AnyExtension[] {
     // once viewed as rich text.
     Markdown.configure({ html: true, linkify: false, breaks: false }),
     Wikilink,
+    KBTextColor,
+    KBBgColor,
     ...extra,
   ];
 }

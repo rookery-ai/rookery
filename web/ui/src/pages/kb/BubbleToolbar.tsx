@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { Editor } from "@tiptap/core";
 import { BubbleMenu } from "@tiptap/react/menus";
 import {
@@ -13,8 +13,11 @@ import {
   List,
   ListTodo,
   Quote,
+  Baseline,
+  Ban,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TEXT_COLORS, HIGHLIGHT_COLORS, HIGHLIGHT_FG } from "./marks/colors";
 
 function ToolbarButton({
   label,
@@ -50,12 +53,91 @@ function ToolbarButton({
   );
 }
 
+// Fixed swatch grid — deliberately not a colour picker. Two rows of eight plus
+// a "none" control per row.
+function ColorSwatches({ editor, onDone }: { editor: Editor; onDone: () => void }) {
+  return (
+    <div className="w-56 space-y-2 p-2">
+      <div>
+        <div className="mb-1 text-xs text-muted-2">Text</div>
+        <div className="flex flex-wrap gap-1">
+          {TEXT_COLORS.map((c) => (
+            <button
+              key={c.name}
+              type="button"
+              title={`Text ${c.name}`}
+              aria-label={`Text ${c.name}`}
+              // Mousedown, not click: a click steals focus and collapses the
+              // selection the toolbar is acting on.
+              onMouseDown={(e) => {
+                e.preventDefault();
+                editor.chain().focus().setKBTextColor(c.hex).run();
+                onDone();
+              }}
+              className="size-5 rounded-sm border border-border"
+              style={{ backgroundColor: c.hex }}
+            />
+          ))}
+          <button
+            type="button"
+            title="No text colour"
+            aria-label="No text colour"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              editor.chain().focus().unsetKBTextColor().run();
+              onDone();
+            }}
+            className="flex size-5 items-center justify-center rounded-sm border border-border"
+          >
+            <Ban className="size-3 text-muted-2" />
+          </button>
+        </div>
+      </div>
+      <div>
+        <div className="mb-1 text-xs text-muted-2">Highlight</div>
+        <div className="flex flex-wrap gap-1">
+          {HIGHLIGHT_COLORS.map((c) => (
+            <button
+              key={c.name}
+              type="button"
+              title={`Highlight ${c.name}`}
+              aria-label={`Highlight ${c.name}`}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                editor.chain().focus().setKBBgColor(c.hex).run();
+                onDone();
+              }}
+              className="size-5 rounded-sm border border-border"
+              style={{ backgroundColor: c.hex, color: HIGHLIGHT_FG }}
+            />
+          ))}
+          <button
+            type="button"
+            title="No highlight"
+            aria-label="No highlight"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              editor.chain().focus().unsetKBBgColor().run();
+              onDone();
+            }}
+            className="flex size-5 items-center justify-center rounded-sm border border-border"
+          >
+            <Ban className="size-3 text-muted-2" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Shown as a floating menu over a non-empty text selection (TipTap
 // BubbleMenu — v3 moved this from @tiptap/react's root export to the
 // @tiptap/react/menus subpath; no separate package install needed, it
 // ships inside @tiptap/react and depends on the already-installed
 // @tiptap/extension-bubble-menu transitive dep).
 export default function BubbleToolbar({ editor }: { editor: Editor | null }) {
+  const [colorsOpen, setColorsOpen] = useState(false);
+
   if (!editor) return null;
 
   const setLink = () => {
@@ -71,7 +153,11 @@ export default function BubbleToolbar({ editor }: { editor: Editor | null }) {
 
   return (
     <BubbleMenu editor={editor} shouldShow={({ state }) => !state.selection.empty}>
-      <div className="flex items-center gap-0.5 rounded-md border border-border bg-popover p-1 shadow-md">
+      <div className="rounded-md border border-border bg-popover shadow-md">
+        {colorsOpen ? (
+          <ColorSwatches editor={editor} onDone={() => setColorsOpen(false)} />
+        ) : (
+          <div className="flex items-center gap-0.5 p-1">
         <ToolbarButton
           label="Bold"
           active={editor.isActive("bold")}
@@ -92,6 +178,13 @@ export default function BubbleToolbar({ editor }: { editor: Editor | null }) {
           onClick={() => editor.chain().focus().toggleUnderline().run()}
         >
           <UnderlineIcon className="size-4" />
+        </ToolbarButton>
+        <ToolbarButton
+          label="Colour"
+          active={colorsOpen}
+          onClick={() => setColorsOpen((v) => !v)}
+        >
+          <Baseline className="size-4" />
         </ToolbarButton>
         <ToolbarButton
           label="Strikethrough"
@@ -147,6 +240,8 @@ export default function BubbleToolbar({ editor }: { editor: Editor | null }) {
         >
           <Quote className="size-4" />
         </ToolbarButton>
+          </div>
+        )}
       </div>
     </BubbleMenu>
   );
