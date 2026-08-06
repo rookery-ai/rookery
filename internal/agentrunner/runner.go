@@ -442,7 +442,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 
 	if runErr != nil {
 		_ = r.db.FinishAgentRun(runID, -1, strings.Join(rctx.chatLines, "\n"), strings.Join(rctx.warnings, "\n")+"\n"+runErr.Error(), rctx.usage.PromptTokens, rctx.usage.CompletionTokens, rctx.usage.TotalTokens)
-		friendly := friendlyRunError(runErr, coderSvc.Name())
+		friendly := FriendlyRunError(runErr, coderSvc.Name())
 		// A multi-turn run (e.g. one that made a [CALL: agent] to a child agent, or
 		// completed some turns before the final one failed) may have already
 		// accumulated real [CHAT] output before the error — don't let a late failure
@@ -680,14 +680,18 @@ func (r *Runner) runCoderTurns(
 	return nil
 }
 
-// friendlyRunError converts a low-level run failure into a message safe to
+// FriendlyRunError converts a low-level run failure into a message safe to
 // show the user directly (web UI error banner, or sent as a chat message for
 // cron-triggered runs). Usage-limit hits are an expected, recurring condition
 // — not an agent bug — so they get a distinct, reassuring message instead of
 // a raw exit code. coderName identifies the underlying CLI binary (e.g.
 // "claude") so the message stays accurate across different coder profiles;
 // pass "" to fall back to a generic phrase.
-func friendlyRunError(err error, coderName string) string {
+//
+// Exported because the KB assist endpoint (web/api_kb_assist.go) needs the same
+// wording: a workspace out of quota must not get one sentence from a scheduled
+// run and a different one from the note editor.
+func FriendlyRunError(err error, coderName string) string {
 	who := "The coder"
 	if coderName != "" {
 		who = coderName
