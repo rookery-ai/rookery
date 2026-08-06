@@ -462,6 +462,52 @@ test("an unsized image is byte-for-byte unchanged", () => {
   expect(fidelityRoundTrip(md).trim()).toBe(md.trim());
 });
 
+// Regression coverage for a review-caught bug: KBImage's markdown serializer
+// wrote the image with state.write() but never called state.closeBlock(node)
+// afterward. This node is BLOCK-level (@tiptap/extension-image's default
+// inline: false -> group "block"), and prosemirror-markdown's serializer
+// state tracks block separation via that write()/closeBlock() pair — every
+// OTHER block-level custom serializer in this file set (code-block.js,
+// html.js, table.js, and this app's own toggle.ts) calls closeBlock(), so a
+// missing call here meant a block image followed by any other block glued
+// straight onto it with no blank line: "![a](x.png)\n\nText.\n" round-tripped
+// to "![a](x.png)Text." — a note with a block image followed by ANYTHING
+// else silently opened read-only. See kbImage.ts's serialize() comment for
+// the mechanism.
+describe("block image serialization (closeBlock regression)", () => {
+  test("a block image followed by a paragraph is a fixed point", () => {
+    expect(checkFidelity("![a](assets/x.png)\n\nText after.\n")).toBe(true);
+  });
+
+  test("an image alone is a fixed point", () => {
+    expect(checkFidelity("![a](assets/x.png)\n")).toBe(true);
+  });
+
+  // NOT fixed by the closeBlock fix, and not expected to be: this is a
+  // SEPARATE, pre-existing limitation unrelated to block spacing. KBImage is
+  // schema-level block-only (inline: false), so when markdown-it parses this
+  // as an INLINE token in the middle of a paragraph, ProseMirror's
+  // content-fitting logic splits the surrounding paragraph into three
+  // separate blocks (paragraph / image / paragraph) rather than keeping one
+  // paragraph with an inline image — verified broken identically before this
+  // change (confirms closeBlock isn't what's missing here).
+  test("an inline image mid-paragraph is NOT a fixed point (separate, pre-existing limitation)", () => {
+    expect(checkFidelity("Some text ![a](assets/x.png) more text.\n")).toBe(false);
+  });
+
+  test("an image with a title is a fixed point", () => {
+    expect(checkFidelity('![a](assets/x.png "A title")\n')).toBe(true);
+  });
+
+  test("an image with a width is a fixed point", () => {
+    expect(checkFidelity("![a|420](assets/x.png)\n")).toBe(true);
+  });
+
+  test("two consecutive images are a fixed point", () => {
+    expect(checkFidelity("![a](assets/x.png)\n\n![b](assets/y.png)\n")).toBe(true);
+  });
+});
+
 // checkFidelity only runs at note LOAD, never on the save path (toMarkdown),
 // so an editing-session insert (kb:insertImage -> commands.setImage) that
 // produces a src containing markdown-significant characters is never

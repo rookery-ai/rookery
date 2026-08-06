@@ -90,6 +90,22 @@ export const KBImage = Image.extend({
             ? ` "${String(node.attrs.title).replace(/"/g, '\\"')}"`
             : "";
           state.write(`![${state.esc(label)}](${src}${title})`);
+          // This node is BLOCK-level (@tiptap/extension-image's default
+          // `inline: false` → group "block"), and prosemirror-markdown's
+          // MarkdownSerializerState tracks block separation via a
+          // write()/closeBlock() pair: closeBlock() marks this node as the
+          // last-written block so the NEXT block's own write() flushes a
+          // blank-line separator before it (state.flushClose, called from
+          // write()). Every other block-level custom serializer in this file
+          // set (code-block.js, html.js, table.js, toggle.ts) calls
+          // closeBlock(); this one didn't, so "closed" was never set, the
+          // next block never flushed a separator, and a block image followed
+          // by ANY other block ("![a](x.png)\n\nText.\n") round-tripped to
+          // "![a](x.png)Text." — silently glued together. Confirmed via
+          // corpus.test.ts and editor.test.ts's image fixity cases: adding
+          // this one call turns "image + trailing block" from lossy
+          // (read-only note) into a fixed point.
+          state.closeBlock(node);
         },
         parse: {
           // handled by markdown-it + parseHTML above
