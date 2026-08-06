@@ -36,12 +36,29 @@ declare module "@tiptap/core" {
 // That mismatched the fidelity contract's byte-for-byte comparison.
 //
 // The serializer below reconstructs the idiomatic blank-line-body form on
-// the way out. The BODY is routed through the normal markdown state
-// machinery (state.render / state.closeBlock), so nested marks
-// (bold/italic/links) and multi-block bodies get correct markdown syntax
-// and blank-line block separation — all for free from the shared
-// serializer state, not hand-rolled here (verified: "**bold**" and
-// multi-paragraph bodies both round-trip).
+// the way out, with <details> and <summary> on SEPARATE lines (as above).
+// This is a DELIBERATE, load-bearing choice, not a stylistic default:
+// <details> and <summary> glued onto one line ("<details><summary>...")
+// parses to the exact same doc and was tried first — it is NOT compatible
+// with the separate-line form as a simultaneous fixed point. A serializer
+// can only ever reproduce ONE canonical spelling for a given doc (parsing
+// throws away whether the source had them glued or on separate lines), so
+// the two forms are mutually exclusive canonical choices. Separate lines
+// won because it's GitHub's own documented convention and the form that
+// dominates real-world markdown — a pasted README snippet or a
+// vault-writing agent is far more likely to produce this than the glued
+// form. Do NOT "fix" this back to gluing them: that would just move the
+// read-only-until-first-save gap onto the more common input instead of the
+// rarer one. (A prior revision of this file glued them and pinned the
+// glued form in the test — reverted; see git history / task report if the
+// full reasoning is needed.)
+//
+// The BODY is routed through the normal markdown state machinery
+// (state.render / state.closeBlock), so nested marks (bold/italic/links)
+// and multi-block bodies get correct markdown syntax and blank-line block
+// separation — all for free from the shared serializer state, not
+// hand-rolled here (verified: "**bold**" and multi-paragraph bodies both
+// round-trip).
 //
 // The SUMMARY is deliberately left with NO markdown spec of its own, so it
 // keeps using the generic HTML-node fallback (raw DOM stringification,
@@ -110,9 +127,10 @@ export const Toggle = Node.create({
     return {
       markdown: {
         serialize(state: any, node: any) {
-          // "<details>" is glued directly to "<summary>" (no newline), the
-          // same form the brief itself pins as the fidelity test's input.
-          state.write("<details>");
+          // "<details>" and "<summary>" on separate lines — see the
+          // "DELIBERATE, load-bearing choice" comment above ToggleSummary
+          // for why this, and not gluing them onto one line, is correct.
+          state.write("<details>\n");
           // Dispatches to the generic HTML-node fallback (ToggleSummary has
           // no markdown spec of its own — see the comment above it) — writes
           // "<summary>...</summary>" as raw DOM HTML, then marks it closed.

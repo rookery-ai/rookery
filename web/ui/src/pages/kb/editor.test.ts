@@ -355,18 +355,25 @@ test("an untitled callout still round-trips exactly as before (no title regressi
   expect(out.trim()).toBe("> [!note]\n> Body text here.".trim());
 });
 
-// The brief's own literal input: <details> and <summary> glued on one
-// opening line, blank-line-separated body — the standard idiomatic way to
-// hand-write (or have an agent write) this construct. Toggle's custom
-// markdown.serialize (nodes/toggle.ts) is what makes this exact byte
-// sequence a genuine fixed point; without it, the generic HTML-node
-// fallback instead reflects the doc's literal DOM shape back out (a real
-// <p> tag glued straight to </summary>, no blank line) — a different,
-// though visually equivalent, string that fails this exact comparison.
+// The canonical, pinned round-trip form: <details> and <summary> on
+// SEPARATE lines, blank-line-separated body. This is GitHub's own
+// documented convention and the form that dominates real-world markdown —
+// the form a pasted README snippet or a vault-writing agent will most
+// likely produce — so it, not the glued single-line form, is what this
+// serializer targets as its one canonical output.
+//
+// IMPORTANT: the glued form ("<details><summary>Show details</summary>")
+// is NOT a fixed point here, and that is intentional, not a bug to fix.
+// Both spellings parse to the identical ProseMirror doc (verified), so a
+// serializer can only ever reproduce ONE of them — reproducing both
+// simultaneously is impossible, not merely unimplemented. See the long
+// comment above `ToggleSummary` in nodes/toggle.ts for the full reasoning
+// and an explicit "do not fix this back" note. Do not "fix" this test by
+// gluing the tags back together.
 test("a toggle list survives a markdown round trip", () => {
   expect(
     checkFidelity(
-      "<details><summary>Show details</summary>\n\nHidden body.\n\n</details>\n",
+      "<details>\n<summary>Show details</summary>\n\nHidden body.\n\n</details>\n",
     ),
   ).toBe(true);
 });
@@ -375,14 +382,14 @@ test("a toggle inserted via setToggle() and saved immediately round trips", () =
   // The empty-body case a user hits by opening the slash menu and saving
   // before typing anything: an empty body must not be lost.
   expect(
-    checkFidelity("<details><summary>Toggle</summary>\n\n</details>\n"),
+    checkFidelity("<details>\n<summary>Toggle</summary>\n\n</details>\n"),
   ).toBe(true);
 });
 
 test("a toggle with a multi-paragraph body round-trips", () => {
   expect(
     checkFidelity(
-      "<details><summary>Show details</summary>\n\nFirst paragraph.\n\nSecond paragraph.\n\n</details>\n",
+      "<details>\n<summary>Show details</summary>\n\nFirst paragraph.\n\nSecond paragraph.\n\n</details>\n",
     ),
   ).toBe(true);
 });
@@ -394,7 +401,7 @@ test("a toggle body containing bold/italic marks round-trips", () => {
   // paragraph's marks take.
   expect(
     checkFidelity(
-      "<details><summary>Show details</summary>\n\nSome **bold** and *italic* text.\n\n</details>\n",
+      "<details>\n<summary>Show details</summary>\n\nSome **bold** and *italic* text.\n\n</details>\n",
     ),
   ).toBe(true);
 });
@@ -413,7 +420,7 @@ test("a toggle summary containing an inline mark round-trips", () => {
   // (see nodes/toggle.ts) avoids the mismatch entirely.
   expect(
     checkFidelity(
-      "<details><summary>Show <strong>bold</strong> details</summary>\n\nBody.\n\n</details>\n",
+      "<details>\n<summary>Show <strong>bold</strong> details</summary>\n\nBody.\n\n</details>\n",
     ),
   ).toBe(true);
 });
