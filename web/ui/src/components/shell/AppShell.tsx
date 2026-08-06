@@ -80,8 +80,18 @@ export function AppShell() {
               in a pane (a long KB note) propagates its scrollable overflow to
               the initial containing block, making the DOCUMENT scrollable — and
               a scrollable document means the rail and context pane can be
-              scrolled out of view, which is never wanted on any route. */}
-          <div className="h-screen overflow-hidden flex flex-col md:flex-row bg-background">
+              scrolled out of view, which is never wanted on any route.
+              relative is what makes that overflow-hidden actually bite. An
+              overflow value clips a descendant only when the clipping element
+              is in that descendant's containing-block chain; a static shell is
+              not, so a long note's overflowing content escaped to the initial
+              containing block and became the ROOT element's scroll box —
+              measured at <html> clientHeight 900 against scrollHeight 13425.
+              The visible symptom was wheeling over the icon rail scrolling the
+              whole page. Setting overflow:hidden on html/body instead only
+              suppresses the user's scroll and leaves the oversized document in
+              place. */}
+          <div className="relative h-screen overflow-hidden flex flex-col md:flex-row bg-background">
             <IconRail />
             {contextPane && (
               <aside

@@ -29,3 +29,18 @@ test("the app shell root cannot scroll", () => {
     /h-screen overflow-hidden flex flex-col md:flex-row bg-background/,
   );
 });
+
+test("the app shell root is a containing block", () => {
+  // `relative` on a flex container looks like a no-op and is exactly the kind
+  // of class a cleanup removes. It is load-bearing: `overflow` only clips a
+  // descendant when the clipping element is in that descendant's
+  // containing-block chain, and the shell is otherwise position:static — so
+  // the editor's overflowing content escaped it entirely and landed in the
+  // ROOT element's scroll box. Measured before the fix: <html> clientHeight
+  // 900 vs scrollHeight 13425, and wheeling over the icon rail moved
+  // documentElement.scrollTop 0 -> 3200 with the rail's top 0 -> -3200.
+  // With the fix, scrollHeight is 900 and nothing scrolls but the note.
+  expect(src("../../components/shell/AppShell.tsx")).toMatch(
+    /className="relative h-screen overflow-hidden/,
+  );
+});
