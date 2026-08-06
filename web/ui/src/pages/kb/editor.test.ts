@@ -424,3 +424,14 @@ test("a toggle summary containing an inline mark round-trips", () => {
     ),
   ).toBe(true);
 });
+
+test("a sized image survives a markdown round trip", () => {
+  expect(checkFidelity("![Architecture|420](assets/arch.png)\n")).toBe(true);
+});
+
+test("an unsized image is byte-for-byte unchanged", () => {
+  // The whole point of putting the width in the alt slot: a note with no
+  // resized image must serialize exactly as it does today.
+  const md = "![Architecture](assets/arch.png)\n";
+  expect(fidelityRoundTrip(md).trim()).toBe(md.trim());
+});

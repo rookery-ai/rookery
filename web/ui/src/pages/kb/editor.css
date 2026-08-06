@@ -170,3 +170,28 @@
 .note-editor-content .tiptap details > *:not(summary) {
   display: block;
 }
+
+/* Image resize handle. The NodeView wraps the <img> in this span so the
+   handle can be positioned relative to it without disturbing the image's own
+   box; .kb-image-handle is only visible on hover (see the drag affordance
+   comment above kb-image-handle:hover below the definition). */
+.note-editor-content .tiptap .kb-image {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+.note-editor-content .tiptap .kb-image img { max-width: 100%; height: auto; border-radius: 0.5rem; }
+.note-editor-content .tiptap .kb-image-handle {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-background);
+  border-radius: 9999px;
+  background: var(--color-accent);
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.note-editor-content .tiptap .kb-image:hover .kb-image-handle { opacity: 1; }
