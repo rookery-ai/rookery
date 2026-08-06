@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/ilijad1/rookery/compare/v0.3.1...v0.3.2) (2026-08-06)
+
+
+### Bug Fixes
+
+* **web:** KB list rendering, shell scroll containment, connections cleanup ([#106](https://github.com/ilijad1/rookery/issues/106)) ([7582cb6](https://github.com/ilijad1/rookery/commit/7582cb61a2016fbb5eb4197b7b871558b86da824))
+
 ## [0.3.1](https://github.com/ilijad1/rookery/compare/v0.3.0...v0.3.1) (2026-08-05)
 
 
