@@ -29,7 +29,7 @@ afterEach(() => vi.restoreAllMocks());
 
 test("a rewrite action shows the result with Accept and Discard", async () => {
   const user = userEvent.setup();
-  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response(JSON.stringify({ action: "improve", result: "The pipeline runs on every merge." }),
       { status: 200, headers: { "Content-Type": "application/json" } }),
   );
@@ -40,6 +40,10 @@ test("a rewrite action shows the result with Accept and Discard", async () => {
   expect(await screen.findByText("The pipeline runs on every merge.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Accept/ })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Discard/ })).toBeInTheDocument();
+  // A mouse click must fire the action exactly once — this is a paid coder
+  // call, not a free idempotent editor command, so a duplicated
+  // mousedown+click handler pair would double the request on every click.
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
 test("Discard leaves the document untouched", async () => {

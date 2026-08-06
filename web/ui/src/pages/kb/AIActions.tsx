@@ -72,6 +72,12 @@ export default function AIActions({ editor, path }: { editor: Editor; path: stri
     reset();
   }
 
+  function openChat() {
+    open(<GlobalChatPanel forceNew initialText={selectionChatPrompt(path, selectionMarkdown(editor))} />, {
+      title: "Chat",
+    });
+  }
+
   if (!action) {
     return (
       <div className="flex items-center gap-0.5 border-t border-border p-1">
@@ -82,15 +88,21 @@ export default function AIActions({ editor, path }: { editor: Editor; path: stri
             aria-label={label}
             title={label}
             // Mousedown, not click — a click collapses the selection first.
-            // onClick is ALSO wired for keyboard activation (Tab, then
-            // Enter/Space fires only a click, never a mousedown); both firing
-            // on a mouse click is harmless since the range is re-captured
-            // fresh each time and the request is otherwise identical.
+            // These actions spend a real LLM call, so — unlike the idempotent
+            // colour swatches above — onClick is deliberately NOT also wired
+            // (that would double-fire on every mouse click, i.e. 2x the
+            // request). onKeyDown covers Enter/Space keyboard activation
+            // instead, which never fires alongside a mouse click.
             onMouseDown={(e) => {
               e.preventDefault();
               run(id);
             }}
-            onClick={() => run(id)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                run(id);
+              }
+            }}
             className="inline-flex items-center gap-1 rounded-sm px-1.5 py-1 text-xs text-foreground hover:bg-accent"
           >
             <Icon className="size-3.5" />
@@ -101,19 +113,20 @@ export default function AIActions({ editor, path }: { editor: Editor; path: stri
           type="button"
           aria-label="Edit with AI"
           title="Edit with AI"
+          // Same reasoning as the action buttons above: opening the chat
+          // panel is not free to double-fire (forceNew creates a new chat),
+          // so keyboard access goes through onKeyDown, not a duplicate
+          // onClick.
           onMouseDown={(e) => {
             e.preventDefault();
-            open(
-              <GlobalChatPanel forceNew initialText={selectionChatPrompt(path, selectionMarkdown(editor))} />,
-              { title: "Chat" },
-            );
+            openChat();
           }}
-          onClick={() =>
-            open(
-              <GlobalChatPanel forceNew initialText={selectionChatPrompt(path, selectionMarkdown(editor))} />,
-              { title: "Chat" },
-            )
-          }
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              openChat();
+            }
+          }}
           className="inline-flex items-center gap-1 rounded-sm px-1.5 py-1 text-xs text-accent hover:bg-accent-soft"
         >
           Edit with AI
