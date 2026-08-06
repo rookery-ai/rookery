@@ -37,7 +37,26 @@ function selectionMarkdown(editor: Editor): string {
   return editor.state.doc.textBetween(from, to, "\n");
 }
 
-export default function AIActions({ editor, path }: { editor: Editor; path: string }) {
+export type AIActionsState = {
+  action: KBAssistAction | null;
+  assist: ReturnType<typeof useKBAssist>;
+  run: (id: KBAssistAction) => void;
+  reset: () => void;
+  accept: () => void;
+  openChat: () => void;
+};
+
+// Owns everything that must OUTLIVE the bubble menu's mount cycle: the
+// captured range, which action is running/done, and the mutation itself.
+// AIActions (the panel) is mounted inside TipTap's BubbleMenu, which
+// unmounts its children whenever the selection collapses — a click
+// elsewhere, a scroll, an arrow key. A rewrite call takes real seconds, and
+// the request has already been sent (and billed) by the time that happens,
+// so the result must not live in the component that's about to disappear.
+// Call this once in a component that stays mounted for the life of the
+// editor (WysiwygEditor in NoteEditor.tsx) and pass the returned object
+// down as a controlled prop — AIActions itself holds no state of its own.
+export function useAIActions(editor: Editor | null, path: string): AIActionsState {
   const assist = useKBAssist();
   const { open } = useSlideOver();
   // Captured at CLICK time. The selection must survive an async round trip and
@@ -47,6 +66,7 @@ export default function AIActions({ editor, path }: { editor: Editor; path: stri
   const [action, setAction] = useState<KBAssistAction | null>(null);
 
   function run(id: KBAssistAction) {
+    if (!editor) return;
     const { from, to } = editor.state.selection;
     setRange({ from, to });
     setAction(id);
@@ -60,7 +80,11 @@ export default function AIActions({ editor, path }: { editor: Editor; path: stri
   }
 
   function accept() {
-    if (!range || !assist.data) return;
+    // Explain's result is an answer ABOUT the passage, never a replacement
+    // FOR it. This guard is the actual guarantee — the panel simply never
+    // rendering an Accept button in that branch is UI, not enforcement.
+    if (action === "explain") return;
+    if (!editor || !range || !assist.data) return;
     const storage = editor.storage.markdown as unknown as MDStorage;
     const html = storage?.parser?.parse(assist.data.result, { inline: true });
     editor
@@ -73,10 +97,20 @@ export default function AIActions({ editor, path }: { editor: Editor; path: stri
   }
 
   function openChat() {
+    if (!editor) return;
     open(<GlobalChatPanel forceNew initialText={selectionChatPrompt(path, selectionMarkdown(editor))} />, {
       title: "Chat",
     });
   }
+
+  return { action, assist, run, reset, accept, openChat };
+}
+
+// Purely presentational: every action reads/writes through `state`, which is
+// owned by useAIActions above and lives in a component that survives this
+// one's own mount/unmount cycle inside the bubble menu.
+export default function AIActions({ state }: { state: AIActionsState }) {
+  const { action, assist, run, reset, accept, openChat } = state;
 
   if (!action) {
     return (
@@ -89,10 +123,10 @@ export default function AIActions({ editor, path }: { editor: Editor; path: stri
             title={label}
             // Mousedown, not click — a click collapses the selection first.
             // These actions spend a real LLM call, so — unlike the idempotent
-            // colour swatches above — onClick is deliberately NOT also wired
-            // (that would double-fire on every mouse click, i.e. 2x the
-            // request). onKeyDown covers Enter/Space keyboard activation
-            // instead, which never fires alongside a mouse click.
+            // colour swatches in BubbleToolbar — onClick is deliberately NOT
+            // also wired (that would double-fire on every mouse click, i.e.
+            // 2x the request). onKeyDown covers Enter/Space keyboard
+            // activation instead, which never fires alongside a mouse click.
             onMouseDown={(e) => {
               e.preventDefault();
               run(id);

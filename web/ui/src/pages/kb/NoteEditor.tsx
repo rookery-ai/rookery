@@ -31,6 +31,7 @@ import {
 import { splitAlias } from "./wikilinks";
 import { slashSuggestion } from "./SlashMenu";
 import BubbleToolbar from "./BubbleToolbar";
+import { useAIActions } from "./AIActions";
 import NoteHeader from "./NoteHeader";
 import "./editor.css";
 
@@ -132,6 +133,13 @@ function WysiwygEditor({
     },
   });
 
+  // Owned HERE, not inside AIActions/BubbleToolbar: this component stays
+  // mounted for the life of the note, while BubbleToolbar's BubbleMenu (and
+  // everything inside it, including AIActions) unmounts every time the
+  // selection collapses. A rewrite request already sent — and billed — must
+  // not disappear just because the user clicked away while it was running.
+  const aiActions = useAIActions(editor, path);
+
   // `editable` can flip after mount (the "Edit as rich text anyway" override on
   // a lossy note) without remounting this component, so push it onto the live
   // editor instance rather than relying on the initial useEditor option alone.
@@ -189,7 +197,7 @@ function WysiwygEditor({
 
   return (
     <>
-      <BubbleToolbar editor={editor} path={path} />
+      <BubbleToolbar editor={editor} aiActions={aiActions} />
       <EditorContent editor={editor} className="note-editor-content" />
       <ImagePicker
         open={imagePickerOpen}
