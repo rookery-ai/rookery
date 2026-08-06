@@ -173,8 +173,8 @@
 
 /* Image resize handle. The NodeView wraps the <img> in this span so the
    handle can be positioned relative to it without disturbing the image's own
-   box; .kb-image-handle is only visible on hover (see the drag affordance
-   comment above kb-image-handle:hover below the definition). */
+   box; .kb-image-handle is only visible on hover, and ONLY when the editor
+   itself is editable. */
 .note-editor-content .tiptap .kb-image {
   position: relative;
   display: inline-block;
@@ -194,4 +194,10 @@
   opacity: 0;
   transition: opacity 120ms;
 }
-.note-editor-content .tiptap .kb-image:hover .kb-image-handle { opacity: 1; }
+/* Keyed off the ProseMirror root's own `contenteditable` attribute (set to
+   the literal string "true"/"false" by ProseMirror on the same element that
+   carries the `.tiptap` class — see Editor.createView in @tiptap/core) rather
+   than a React `editable` prop, which is what NodeView DOM actually reflects:
+   a read-only note must never show the drag affordance at all, matching the
+   pointerdown bail in kbImage.ts. */
+.note-editor-content .tiptap[contenteditable="true"] .kb-image:hover .kb-image-handle { opacity: 1; }

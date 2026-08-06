@@ -65,13 +65,14 @@ const READONLY_BANNER =
 // re-serializing — and only lossy — content the user never touched. TipTap's
 // click handlers (handleClickOn/handleClick) fire regardless of `editable`, so
 // links stay clickable in the read-only view.
-function WysiwygEditor({
+export function WysiwygEditor({
   content,
   editable,
   onDirty,
   onNavigate,
   registerGetContent,
   path,
+  registerEditorForTest,
 }: {
   content: string;
   editable: boolean;
@@ -79,6 +80,12 @@ function WysiwygEditor({
   onNavigate: (target: string) => void;
   registerGetContent: (fn: () => string) => void;
   path: string;
+  // Test-only escape hatch: hands back the live tiptap Editor instance so a
+  // test can dispatch a transaction directly (e.g. setNodeMarkup), bypassing
+  // kbImage.ts's own pointerdown guard, to prove the onUpdate guard below is
+  // real defense in depth rather than dead code. Never passed in production
+  // (NoteEditor doesn't pass it).
+  registerEditorForTest?: (editor: ReturnType<typeof useEditor>) => void;
 }) {
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
   const uploadAsset = useUploadKBAsset();
@@ -92,7 +99,17 @@ function WysiwygEditor({
     // args) is unaffected by the slash-menu suggestion plugin.
     extensions: buildExtensions([slashSuggestion()]),
     content,
-    onUpdate: () => onDirty(),
+    // Defense in depth (see kbImage.ts's pointerdown bail and editor.css's
+    // matching `[contenteditable="true"]` gate on the resize handle): those
+    // two layers are what SHOULD stop a dispatch to a read-only note, but
+    // this is the layer that actually prevents a write reaching disk if
+    // either of them is ever bypassed by some other path — `editor.isEditable`
+    // (not the closed-over `editable` prop, which this callback's closure can
+    // outlive across a setEditable(true) flip) reflects the LIVE state.
+    onUpdate: ({ editor: liveEditor }) => {
+      if (!liveEditor.isEditable) return;
+      onDirty();
+    },
     // Click-to-navigate for wikilink pills: handled here via editorProps
     // rather than inside the Wikilink node itself (see wikilinks.ts's top
     // comment) — this is the "click handler lives in NoteEditor via editor
@@ -146,6 +163,10 @@ function WysiwygEditor({
   useEffect(() => {
     editor?.setEditable(editable);
   }, [editor, editable]);
+
+  useEffect(() => {
+    if (editor && registerEditorForTest) registerEditorForTest(editor);
+  }, [editor, registerEditorForTest]);
 
   useEffect(() => {
     if (!editor) return;

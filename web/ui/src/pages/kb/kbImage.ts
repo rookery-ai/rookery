@@ -115,6 +115,13 @@ export const KBImage = Image.extend({
       dom.appendChild(handle);
 
       handle.addEventListener("pointerdown", (event) => {
+        // A read-only note (failed checkFidelity, not yet opted into editing —
+        // see NoteEditor's READONLY_BANNER) still mounts this NodeView, so the
+        // handle must refuse to start a drag rather than rely on the CSS hover
+        // reveal alone (defense in depth: see editor.css's matching gate on
+        // `.kb-image:hover .kb-image-handle`, and NoteEditor's markDirty/flush
+        // guard for the third layer).
+        if (!editor.isEditable) return;
         event.preventDefault();
         const startX = event.clientX;
         const startWidth = img.getBoundingClientRect().width;
