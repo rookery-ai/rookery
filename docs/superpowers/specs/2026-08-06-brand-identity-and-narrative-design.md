@@ -28,8 +28,8 @@ open-source release ships.
 | Mark | The Weave | Chosen directly, from four rendered candidates |
 | Type for reading | Warm sans, not monospace | Follows from audience — §3 |
 | Voice | Transcribed from the product, not the repo | Follows from audience — §6 |
-| Colour scope | Marketing surfaces only | **Inferred** — see below |
-| App UI re-skin | No | Chosen directly |
+| Colour scope | Brand **and** the app accent | Chosen directly — §4 |
+| App UI re-skin | Accent only, not a full re-skin | Chosen directly |
 
 The audience row is load-bearing and was added after the first draft. It
 invalidated two sections of this spec — the monospace-for-reading type direction
@@ -37,15 +37,16 @@ invalidated two sections of this spec — the monospace-for-reading type directi
 positioning intact. Warm-and-living and a notes-first frame are *more* right for
 a non-technical audience, not less.
 
-**The colour-scope row is an inference, not a stated choice.** The question
-offered three ways to resolve the ember/`--warn` collision (§4): (a) brand-only
-colour, (b) adopt ember as the product accent and retune `--warn`, (c) promote
-dusk to accent. The answer was truncated. But the same round of answers ruled
-out re-skinning the app, and both (b) and (c) require editing shipping tokens in
-`web/ui/src/index.css`. Only (a) is consistent with "brand only", so (a) is what
-this spec builds on. A later reader should treat it as settled by implication
-rather than by preference, and (b) remains the more coherent long-term answer if
-the app is ever re-skinned.
+**The colour-scope row was revised.** The first draft of this spec resolved the
+ember/`--warn` collision (§4) with option (a) — brand-only colour, app keeps its
+slate accent — because the answer selecting between the three options had been
+truncated and "no app re-skin" appeared to rule the others out. That inference
+was superseded by a direct instruction to bring ember into the app, which is
+option **(b)**: adopt ember as `--accent` and retune `--warn` to clear it.
+
+This is a narrower change than "re-skinning the app". The chrome, the type scale,
+the borders and the layout are all untouched; only the accent and the one status
+colour that collided with it moved. §4 records the work and the measurements.
 
 ### Positioning
 
@@ -196,36 +197,75 @@ and it is what keeps the direction out of generic-warm territory.
 Dark-mode equivalents: ground `#17140F`, surface `#211D18`, ink `#ECE5DB`,
 ember `#E08D51`, dusk `#3B3550`.
 
-### The collision, and why the palette stops at the brand
+### Ember is the app accent too
 
-Ember at `#A94C1C` sits close to two semantic colours the app already ships:
-`--warn: #985a2e` and `--danger: #be322c`. If ember became the in-product accent,
-a primary button would read as a warning state to anyone scanning quickly.
+`web/ui/src/index.css` now carries ember as `--accent` / `--primary` / `--ring` /
+`--sidebar-*`, in both themes: `#a94c1c` on light, `#e08d51` on dark. The slate
+`#2d5a74` is gone. Nothing outside that file referenced it, so no component
+changed.
 
-**These tokens therefore do not enter `web/ui/src/index.css`.** The app keeps
-`--accent: #2d5a74` and its existing warm-grey Notion chrome. The brand palette
-governs the marketing site, the README, social cards, slides and any published
-asset — nothing else.
+**The collision was worse than first stated, and it was measured rather than
+eyeballed.** The claim in the first draft was that ember sat "close to" the
+existing `--warn`. In fact:
 
-### Accepted cost
+| Pair | Hue gap | Verdict |
+|---|---|---|
+| light ember `#a94c1c` vs old `--warn` `#985a2e` | **4.5°** | the same colour to the eye |
+| dark ember `#e08d51` vs old `--warn` `#d99a66` | **2.0°** | worse |
 
-Someone clicking from rookery.sh into an app screenshot sees a different colour
-world: ember and dusk outside, slate and warm grey inside. This is recorded as a
-decision, not allowed to be discovered later as drift. It is defensible — brand
-colour diverging from product accent is common and the two palettes share a warm
-neutral ground, so they read as relatives rather than strangers — but it is a
-cost. Revisit it if and when the app is re-skinned, at which point option (b)
-from §1 (adopt ember as `--accent`, retune `--warn` toward a yellower amber)
-becomes the coherent move. That change would need a pass through
-`web/ui/src/contrast.test.ts`, which computes WCAG ratios directly out of the
-stylesheet in both themes and fails the build on a sloppy retune.
+A primary button and a warning would have been indistinguishable at a glance.
+`--warn` was therefore retuned to gold, keeping warning semantics while clearing
+the accent:
+
+| Token | Was | Now | Hue gap from ember | Ratios (bg / chrome / own soft) |
+|---|---|---|---|---|
+| `--warn` light | `#985a2e` | `#85610f` | 21.3° | 5.65 / 5.23 / 4.85 |
+| `--warn` dark | `#d99a66` | `#dac462` | 23.8° | 10.09 / 9.35 / 7.66 |
+
+Dark `--secondary` and `--sidebar-accent` also moved from the blue-slate
+`#2d3e4f` to a warm `#3a2b20`; a cool fill under an ember primary read as a
+leftover from the old palette.
+
+### The guard that was missing
+
+`contrast.test.ts` computes WCAG ratios out of the stylesheet in both themes and
+would have failed the build on a sloppy retune — but **it never caught this
+collision, and could not have.** Every one of the old values passed every ratio
+assertion. A luminance ratio is blind to hue.
+
+Two tests were added there: `--accent` must clear each status colour by a hue
+floor (60° from `--ok`, 18° from `--warn`, 15° from `--danger`), and `--warn` and
+`--danger` must stay 25° apart. Verified by reverting `--warn` to `#985a2e` and
+confirming the suite fails at 4.48° against the 18° floor — a test that has never
+failed proves nothing.
+
+### Residual, accepted
+
+Light ember and `--danger` `#be322c` sit **18.0°** apart — the tightest pair that
+survives. They are not retuned further because they separate on lightness and
+saturation as well as hue, and because the design system already requires a
+destructive *confirm* to carry an icon, where the icon is the warning. The test
+floor is set at 15° for this pair specifically so the constraint is visible in
+code rather than remembered. If `--danger` is ever restyled, this is the pair to
+re-check.
 
 ---
 
-## 5. The one repository change
+## 5. Repository changes
 
-Brand-only scope has exactly one seam with shipping code: **the favicon lives
-inside the app.**
+Three files, all shipped and verified (§4 covers the palette work):
+
+| File | Change |
+|---|---|
+| `web/ui/src/index.css` | Ember as `--accent`/`--primary`/`--ring`/`--sidebar-*`, `--warn` retuned, dark `--secondary`/`--sidebar-accent` warmed. Both themes. |
+| `web/ui/src/contrast.test.ts` | Two hue-separation tests — the guard that was missing. |
+| `web/ui/public/favicon.svg` | The Weave, replacing the scaffold purple. Below. |
+
+Verified with `tsc -b` (clean), `vitest run` (96 files, 923 tests, all pass),
+`oxlint` (no new warnings) and `vite build` — the four checks the CI Frontend job
+runs.
+
+### The favicon
 
 `web/ui/public/favicon.svg` currently renders three white dots on a `#7e14ff`
 rounded square. Git shows that purple was inherited verbatim from the Vite
@@ -263,8 +303,9 @@ Two things about these numbers are deliberate and should not be "cleaned up":
 The bare-mark form in §2 keeps `stroke-width="3.1"` and is the one to use
 anywhere the mark is not on a filled tile.
 
-This is deliberately the *only* file the brand touches. No token changes, no
-component changes, no re-skin.
+The tile fill is `--accent`'s light value, so the favicon and the app's primary
+colour are now literally the same ember rather than two things that happen to
+look alike.
 
 ---
 
@@ -362,7 +403,7 @@ rest believable. Volunteering it in kernel-security vocabulary is not.
 
 In scope for the identity, produced against this spec:
 
-- `favicon.svg` (§5) — the only repository change.
+- The three repository changes in §5 — palette, hue guard, favicon. **Shipped.**
 - Mark as standalone SVG, at 32 and as a filled tile.
 - The three wordmark lockups (§3).
 - Palette tokens as a CSS custom-property block for reuse by the landing page.
@@ -400,9 +441,16 @@ The §6 translation table quotes `prompts.go` verbatim, including its own use of
 source writes them; this decision governs *new* brand and product copy, not
 citations of existing code.
 
-**Whether the app is ever re-skinned to the brand palette.** Answered "no" for
-this release. §4 records what changes if that answer changes, so the decision can
-be revisited without re-deriving the reasoning.
+**How far the app re-skin goes — partially answered.** The *accent* is now ember
+in both themes (§4). What remains untouched, deliberately, is the surrounding
+chrome: `--background`, `--chrome` and `--foreground` are still the original
+Notion-ish white / warm-grey / near-black, not the brand's bone / paper / bark.
+That is a defensible stopping point — the accent is what carries brand
+recognition, and the neutrals are what carry readability across a dense
+information UI — but it does mean the app's neutrals and the marketing site's
+neutrals are near-relatives rather than identical. Taking it further would touch
+every contrast assertion in `contrast.test.ts` and is a larger piece of work than
+this spec.
 
 **Who the landing page addresses at OSS launch — deferred to spec 2, deliberately.**
 There is a real gap between the person who *installs* Rookery today (registers

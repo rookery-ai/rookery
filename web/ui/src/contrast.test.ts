@@ -27,6 +27,25 @@ export function ratio(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+// Hue angle in degrees. A luminance ratio is blind to hue, so two colours can
+// pass every contrast assertion above and still be the same colour to a reader.
+function hue(hex: string): number {
+  const h = hex.replace("#", "");
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b);
+  const d = max - Math.min(r, g, b);
+  if (d === 0) return 0;
+  const deg = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return (deg * 60 + 360) % 360;
+}
+
+// Shortest angular distance, so a pair straddling 0deg (red) is not reported
+// as ~350deg apart when it is really ~10deg.
+export function hueGap(a: string, b: string): number {
+  const d = Math.abs(hue(a) - hue(b)) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
 // Reads a token from one specific block so both themes can be checked from the
 // single stylesheet. Slices to the block's closing brace so a later block's
 // definition of the same token cannot be picked up by mistake.
@@ -78,4 +97,25 @@ describe.each([":root", ".dark"] as const)("contrast in %s", (block) => {
       expect(ratio(token(block, name), chrome)).toBeGreaterThanOrEqual(4.5);
     },
   );
+
+  // Contrast is necessary but not sufficient. When --accent became ember, the
+  // OLD --warn (#985a2e light, #d99a66 dark) still passed every ratio above
+  // while sitting 4.5 and 2.0 DEGREES of hue from the accent respectively —
+  // i.e. the same colour to the eye. A primary button and a warning were
+  // indistinguishable at a glance, and nothing here caught it, because a
+  // luminance ratio cannot see hue. This is that missing check.
+  test("--accent is not mistakable for a status colour", () => {
+    const accent = token(block, "--accent");
+    // --danger is the loosest of the three: ember and red are genuinely
+    // adjacent, and they are separated by lightness, saturation and (per the
+    // design system) a mandatory icon on destructive confirms.
+    const floors: Record<string, number> = { "--ok": 60, "--warn": 18, "--danger": 15 };
+    for (const [name, floor] of Object.entries(floors)) {
+      expect(hueGap(accent, token(block, name))).toBeGreaterThanOrEqual(floor);
+    }
+  });
+
+  test("--warn and --danger stay distinct from each other", () => {
+    expect(hueGap(token(block, "--warn"), token(block, "--danger"))).toBeGreaterThanOrEqual(25);
+  });
 });
