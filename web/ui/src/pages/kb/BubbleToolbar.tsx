@@ -4,6 +4,7 @@ import { BubbleMenu } from "@tiptap/react/menus";
 import {
   Bold,
   Italic,
+  Underline as UnderlineIcon,
   Strikethrough,
   Code,
   Heading1,
@@ -84,6 +85,13 @@ export default function BubbleToolbar({ editor }: { editor: Editor | null }) {
           onClick={() => editor.chain().focus().toggleItalic().run()}
         >
           <Italic className="size-4" />
+        </ToolbarButton>
+        <ToolbarButton
+          label="Underline"
+          active={editor.isActive("underline")}
+          onClick={() => editor.chain().focus().toggleUnderline().run()}
+        >
+          <UnderlineIcon className="size-4" />
         </ToolbarButton>
         <ToolbarButton
           label="Strikethrough"

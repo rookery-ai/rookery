@@ -1,5 +1,5 @@
 import { Editor } from "@tiptap/core";
-import { fidelityRoundTrip, checkFidelity, buildExtensions } from "./editor";
+import { fidelityRoundTrip, checkFidelity, buildExtensions, toMarkdown } from "./editor";
 
 const CLEAN = `# Title
 
@@ -210,4 +210,22 @@ describe("table cell fidelity", () => {
     expect(out).toContain("<table");
     expect(out).not.toMatch(/\|\s*---/); // no markdown delimiter row was emitted
   });
+});
+
+test("underline survives a markdown round trip", () => {
+  // No custom serializer: tiptap-markdown maps every mark with no markdown
+  // spec to its HTML representation, and html:true parses it back.
+  expect(checkFidelity("Some <u>underlined</u> text.\n")).toBe(true);
+});
+
+test("toggleUnderline writes a <u> tag", () => {
+  const editor = new Editor({
+    element: document.createElement("div"),
+    extensions: buildExtensions(),
+    content: "<p>alpha</p>",
+  });
+  editor.commands.selectAll();
+  editor.commands.toggleUnderline();
+  expect(toMarkdown(editor)).toContain("<u>alpha</u>");
+  editor.destroy();
 });
