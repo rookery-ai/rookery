@@ -1,4 +1,5 @@
 import type { Editor } from "@tiptap/core";
+import { CALLOUT_KINDS } from "./nodes/callout";
 
 export type SlashItem = {
   title: string;
@@ -45,6 +46,11 @@ export const slashItems: SlashItem[] = [
     keywords: "blockquote quote citation",
     run: (editor) => editor.chain().focus().toggleBlockquote().run(),
   },
+  ...CALLOUT_KINDS.map((kind) => ({
+    title: `Callout: ${kind}`,
+    keywords: `callout admonition ${kind} aside box`,
+    run: (editor: Editor) => editor.chain().focus().setCallout(kind).run(),
+  })),
   {
     title: "Code block",
     keywords: "code codeblock pre fenced snippet",

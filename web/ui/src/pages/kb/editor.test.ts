@@ -320,3 +320,16 @@ describe("colour mark composition", () => {
     expect(out).toContain('background-color:#fef08a;color:#18181b');
   });
 });
+
+test.each(["note", "tip", "info", "warning", "danger"])(
+  "a %s callout survives a markdown round trip",
+  (kind) => {
+    expect(checkFidelity(`> [!${kind}]\n> Body text here.\n`)).toBe(true);
+  },
+);
+
+test("a plain blockquote is still a plain blockquote", () => {
+  // The updateDOM hook must claim ONLY blockquotes opening with [!kind].
+  const md = "> Just a quotation.\n";
+  expect(fidelityRoundTrip(md).trim()).toBe(md.trim());
+});

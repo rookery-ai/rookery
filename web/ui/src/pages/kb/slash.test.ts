@@ -1,6 +1,7 @@
 import { Editor } from "@tiptap/core";
 import { buildExtensions } from "./editor";
 import { slashItems, filterSlashItems } from "./slashItems";
+import { ICONS } from "./SlashMenu";
 
 function headlessEditor(): Editor {
   return new Editor({
@@ -38,8 +39,8 @@ describe("filterSlashItems", () => {
 });
 
 describe("slashItems run() against a headless editor", () => {
-  test("all twelve items are declared", () => {
-    expect(slashItems).toHaveLength(12);
+  test("all seventeen items are declared", () => {
+    expect(slashItems).toHaveLength(17);
   });
 
   test("Image and File attachment items dispatch their window events", () => {
@@ -153,4 +154,11 @@ describe("slashItems run() against a headless editor", () => {
     }
     editor.destroy();
   });
+});
+
+test("every slash item has an icon", () => {
+  // A missing entry renders the row with no icon rather than failing, so
+  // nothing else would catch it.
+  const missing = slashItems.filter((i) => !ICONS[i.title]).map((i) => i.title);
+  expect(missing).toEqual([]);
 });

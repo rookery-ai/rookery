@@ -107,3 +107,26 @@
 .wikilink-pill:hover {
   filter: brightness(1.08);
 }
+
+/* Callouts. Colours map to existing tokens rather than new ones, so
+   contrast.test.ts's guarantees already cover them and a palette edit cannot
+   silently break a callout. */
+.note-editor-content .tiptap .kb-callout {
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-accent-soft);
+  border-radius: 0.375rem;
+  padding: 0.6em 0.9em;
+}
+.note-editor-content .tiptap .kb-callout > * + * { margin-top: 0.5em; }
+.note-editor-content .tiptap .kb-callout[data-callout="tip"] {
+  border-left-color: var(--color-ok);
+  background: var(--color-ok-soft);
+}
+.note-editor-content .tiptap .kb-callout[data-callout="warning"] {
+  border-left-color: var(--color-warn);
+  background: var(--color-warn-soft);
+}
+.note-editor-content .tiptap .kb-callout[data-callout="danger"] {
+  border-left-color: var(--color-danger);
+  background: var(--color-danger-soft);
+}

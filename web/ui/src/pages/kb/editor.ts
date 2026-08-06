@@ -12,6 +12,7 @@ import { Wikilink } from "./wikilinks";
 import { PipeSafeTable } from "./pipeSafeTable";
 import { KBImage } from "./kbImage";
 import { KBTextColor, KBBgColor } from "./marks/colors";
+import { Callout } from "./nodes/callout";
 
 // tiptap-markdown ships types for its own extension but doesn't merge them
 // into @tiptap/core's Storage interface, so `editor.storage.markdown` is
@@ -65,6 +66,7 @@ export function buildExtensions(extra: AnyExtension[] = []): AnyExtension[] {
     // colour still renders its own pinned foreground since nothing is nested
     // inside it to override it.
     KBBgColor,
+    Callout,
     KBTextColor,
     ...extra,
   ];
