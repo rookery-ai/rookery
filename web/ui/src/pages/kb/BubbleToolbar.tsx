@@ -1,9 +1,10 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { Editor } from "@tiptap/core";
 import { BubbleMenu } from "@tiptap/react/menus";
 import {
   Bold,
   Italic,
+  Underline as UnderlineIcon,
   Strikethrough,
   Code,
   Heading1,
@@ -12,8 +13,12 @@ import {
   List,
   ListTodo,
   Quote,
+  Baseline,
+  Ban,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { TEXT_COLORS, HIGHLIGHT_COLORS, HIGHLIGHT_FG } from "./marks/colors";
+import AIActions, { type AIActionsState } from "./AIActions";
 
 function ToolbarButton({
   label,
@@ -49,12 +54,128 @@ function ToolbarButton({
   );
 }
 
+// Fixed swatch grid — deliberately not a colour picker. Two rows of eight plus
+// a "none" control per row.
+function ColorSwatches({ editor, onDone }: { editor: Editor; onDone: () => void }) {
+  return (
+    <div className="w-56 space-y-2 p-2">
+      <div>
+        <div className="mb-1 text-xs text-muted-2">Text</div>
+        <div className="flex flex-wrap gap-1">
+          {TEXT_COLORS.map((c) => (
+            <button
+              key={c.name}
+              type="button"
+              title={`Text ${c.name}`}
+              aria-label={`Text ${c.name}`}
+              // Mousedown, not click: a click steals focus and collapses the
+              // selection the toolbar is acting on. onClick is ALSO wired
+              // (redundant on a mouse click, since preventDefault on
+              // mousedown stops the click from doing anything harmful — but
+              // it's the only event a keyboard activation (Tab, then Enter/
+              // Space) fires, so without it the swatch is keyboard-dead.
+              // setKBTextColor/unsetKBTextColor are idempotent, so both
+              // handlers firing on one interaction is harmless.
+              onMouseDown={(e) => {
+                e.preventDefault();
+                editor.chain().focus().setKBTextColor(c.hex).run();
+                onDone();
+              }}
+              onClick={() => {
+                editor.chain().focus().setKBTextColor(c.hex).run();
+                onDone();
+              }}
+              className="size-5 rounded-sm border border-border"
+              style={{ backgroundColor: c.hex }}
+            />
+          ))}
+          <button
+            type="button"
+            title="No text colour"
+            aria-label="No text colour"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              editor.chain().focus().unsetKBTextColor().run();
+              onDone();
+            }}
+            onClick={() => {
+              editor.chain().focus().unsetKBTextColor().run();
+              onDone();
+            }}
+            className="flex size-5 items-center justify-center rounded-sm border border-border"
+          >
+            <Ban className="size-3 text-muted-2" />
+          </button>
+        </div>
+      </div>
+      <div>
+        <div className="mb-1 text-xs text-muted-2">Highlight</div>
+        <div className="flex flex-wrap gap-1">
+          {HIGHLIGHT_COLORS.map((c) => (
+            <button
+              key={c.name}
+              type="button"
+              title={`Highlight ${c.name}`}
+              aria-label={`Highlight ${c.name}`}
+              // See the text-swatch comment above: onClick covers keyboard
+              // activation, onMouseDown+preventDefault preserves the
+              // selection on a mouse click. Both call the same idempotent
+              // command.
+              onMouseDown={(e) => {
+                e.preventDefault();
+                editor.chain().focus().setKBBgColor(c.hex).run();
+                onDone();
+              }}
+              onClick={() => {
+                editor.chain().focus().setKBBgColor(c.hex).run();
+                onDone();
+              }}
+              className="size-5 rounded-sm border border-border"
+              style={{ backgroundColor: c.hex, color: HIGHLIGHT_FG }}
+            />
+          ))}
+          <button
+            type="button"
+            title="No highlight"
+            aria-label="No highlight"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              editor.chain().focus().unsetKBBgColor().run();
+              onDone();
+            }}
+            onClick={() => {
+              editor.chain().focus().unsetKBBgColor().run();
+              onDone();
+            }}
+            className="flex size-5 items-center justify-center rounded-sm border border-border"
+          >
+            <Ban className="size-3 text-muted-2" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Shown as a floating menu over a non-empty text selection (TipTap
 // BubbleMenu — v3 moved this from @tiptap/react's root export to the
 // @tiptap/react/menus subpath; no separate package install needed, it
 // ships inside @tiptap/react and depends on the already-installed
 // @tiptap/extension-bubble-menu transitive dep).
-export default function BubbleToolbar({ editor }: { editor: Editor | null }) {
+// `aiActions` is owned by WysiwygEditor (via useAIActions) and passed down
+// as a controlled prop — it must NOT be created here, since this whole
+// component (and everything under it) unmounts whenever BubbleMenu hides,
+// which would otherwise drop an in-flight or just-landed AI result the
+// instant the selection collapses. See useAIActions's doc comment.
+export default function BubbleToolbar({
+  editor,
+  aiActions,
+}: {
+  editor: Editor | null;
+  aiActions: AIActionsState;
+}) {
+  const [colorsOpen, setColorsOpen] = useState(false);
+
   if (!editor) return null;
 
   const setLink = () => {
@@ -69,8 +190,23 @@ export default function BubbleToolbar({ editor }: { editor: Editor | null }) {
   };
 
   return (
-    <BubbleMenu editor={editor} shouldShow={({ state }) => !state.selection.empty}>
-      <div className="flex items-center gap-0.5 rounded-md border border-border bg-popover p-1 shadow-md">
+    <BubbleMenu
+      editor={editor}
+      // Restores the `editor.isEditable` term TipTap's own DEFAULT
+      // shouldShow includes (see @tiptap/extension-bubble-menu's
+      // BubbleMenuPlugin) — overriding shouldShow here entirely dropped it,
+      // so the whole toolbar (underline, both colour swatch grids, and the
+      // billable AI actions row) stayed live over a read-only note. Without
+      // this, a selection on a read-only note could fire a paid coder call
+      // via Improve/Explain/Reformat and then autosave the rewrite, closing
+      // the spend BEFORE it happens rather than guarding accept() after.
+      shouldShow={({ editor: e, state }) => e.isEditable && !state.selection.empty}
+    >
+      <div className="rounded-md border border-border bg-popover shadow-md">
+        {colorsOpen ? (
+          <ColorSwatches editor={editor} onDone={() => setColorsOpen(false)} />
+        ) : (
+          <div className="flex items-center gap-0.5 p-1">
         <ToolbarButton
           label="Bold"
           active={editor.isActive("bold")}
@@ -84,6 +220,25 @@ export default function BubbleToolbar({ editor }: { editor: Editor | null }) {
           onClick={() => editor.chain().focus().toggleItalic().run()}
         >
           <Italic className="size-4" />
+        </ToolbarButton>
+        <ToolbarButton
+          label="Underline"
+          active={editor.isActive("underline")}
+          onClick={() => editor.chain().focus().toggleUnderline().run()}
+        >
+          <UnderlineIcon className="size-4" />
+        </ToolbarButton>
+        <ToolbarButton
+          label="Colour"
+          // This whole button row unmounts whenever the swatch panel is open
+          // (see the colorsOpen ? <ColorSwatches> : <row> branch below), so
+          // this button can never be ON SCREEN while colorsOpen is true —
+          // passing colorsOpen here would claim a pressed state that can
+          // never actually render.
+          active={false}
+          onClick={() => setColorsOpen((v) => !v)}
+        >
+          <Baseline className="size-4" />
         </ToolbarButton>
         <ToolbarButton
           label="Strikethrough"
@@ -139,6 +294,9 @@ export default function BubbleToolbar({ editor }: { editor: Editor | null }) {
         >
           <Quote className="size-4" />
         </ToolbarButton>
+          </div>
+        )}
+        <AIActions state={aiActions} />
       </div>
     </BubbleMenu>
   );

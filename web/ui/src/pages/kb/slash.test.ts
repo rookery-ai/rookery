@@ -1,6 +1,7 @@
 import { Editor } from "@tiptap/core";
 import { buildExtensions } from "./editor";
 import { slashItems, filterSlashItems } from "./slashItems";
+import { ICONS } from "./SlashMenu";
 
 function headlessEditor(): Editor {
   return new Editor({
@@ -38,8 +39,8 @@ describe("filterSlashItems", () => {
 });
 
 describe("slashItems run() against a headless editor", () => {
-  test("all twelve items are declared", () => {
-    expect(slashItems).toHaveLength(12);
+  test("all eighteen items are declared", () => {
+    expect(slashItems).toHaveLength(18);
   });
 
   test("Image and File attachment items dispatch their window events", () => {
@@ -106,6 +107,26 @@ describe("slashItems run() against a headless editor", () => {
     editor.destroy();
   });
 
+  test.each(["note", "tip", "info", "warning", "danger"])(
+    "Callout: %s wraps the selection in a callout node of that kind",
+    (kind) => {
+      const editor = headlessEditor();
+      findItem(`Callout: ${kind}`).run(editor);
+      expect(editor.isActive("callout", { kind })).toBe(true);
+      editor.destroy();
+    },
+  );
+
+  test("Toggle list inserts a toggle node with a summary and an empty body", () => {
+    const editor = headlessEditor();
+    findItem("Toggle list").run(editor);
+    expect(editor.isActive("toggle")).toBe(true);
+    const json = JSON.stringify(editor.getJSON());
+    expect(json).toContain('"type":"toggle"');
+    expect(json).toContain('"type":"toggleSummary"');
+    editor.destroy();
+  });
+
   test("Code block activates codeBlock", () => {
     const editor = headlessEditor();
     findItem("Code block").run(editor);
@@ -153,4 +174,11 @@ describe("slashItems run() against a headless editor", () => {
     }
     editor.destroy();
   });
+});
+
+test("every slash item has an icon", () => {
+  // A missing entry renders the row with no icon rather than failing, so
+  // nothing else would catch it.
+  const missing = slashItems.filter((i) => !ICONS[i.title]).map((i) => i.title);
+  expect(missing).toEqual([]);
 });

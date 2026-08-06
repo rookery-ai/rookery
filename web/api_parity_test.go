@@ -65,6 +65,7 @@ func TestAPIParityInventory(t *testing.T) {
 		"PUT /api/v1/kb/icon", "GET /api/v1/kb/folders",
 		"GET /api/v1/kb/export", "GET /api/v1/kb/export/formats",
 		"POST /api/v1/kb/asset", "GET /api/v1/kb/assets",
+		"POST /api/v1/kb/assist",
 		"GET /api/v1/settings", "PUT /api/v1/settings/profile", "PUT /api/v1/settings/workspace",
 		"PUT /api/v1/settings/workspace/icon",
 		"PUT /api/v1/settings/coder", "POST /api/v1/settings/coder/test",

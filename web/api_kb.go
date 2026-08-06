@@ -74,6 +74,7 @@ func (s *Server) registerKBAPI(g *echo.Group) {
 	g.GET("/kb/export/formats", s.apiExportFormats)
 	g.POST("/kb/asset", s.apiUploadKBAsset)
 	g.GET("/kb/assets", s.apiListKBAssets)
+	g.POST("/kb/assist", s.apiKBAssist)
 }
 
 // ── Assets (images & attachments) ─────────────────────────────────────────────

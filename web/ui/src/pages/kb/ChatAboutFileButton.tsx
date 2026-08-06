@@ -20,6 +20,21 @@ export function chatPrompt(path: string): string {
   return `About my knowledge base file \`${path}\` — `;
 }
 
+// The selection-scoped sibling of chatPrompt. It NAMES the file and QUOTES the
+// passage — the passage because that is the thing the user is asking about,
+// the path because the chat coder runs rooted at the vault with file tools and
+// can open the note itself for surrounding context.
+//
+// Exported for direct unit testing: the exact wording is the contract between
+// this button and the coder's ability to act on the right text.
+export function selectionChatPrompt(path: string, selection: string): string {
+  return `In my knowledge base file \`${path}\`, I've selected this passage:
+
+> ${selection.split("\n").join("\n> ")}
+
+`;
+}
+
 // A "Chat about this file" affordance for the knowledge base. Opens the SAME
 // slide-over the global chat button uses, but always on a FRESH chat
 // (forceNew) so a question about a note never lands mid-thread in an unrelated
