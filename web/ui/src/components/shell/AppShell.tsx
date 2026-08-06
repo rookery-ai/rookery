@@ -81,16 +81,31 @@ export function AppShell() {
               the initial containing block, making the DOCUMENT scrollable — and
               a scrollable document means the rail and context pane can be
               scrolled out of view, which is never wanted on any route.
-              relative is what makes that overflow-hidden actually bite. An
-              overflow value clips a descendant only when the clipping element
-              is in that descendant's containing-block chain; a static shell is
-              not, so a long note's overflowing content escaped to the initial
-              containing block and became the ROOT element's scroll box —
-              measured at <html> clientHeight 900 against scrollHeight 13425.
-              The visible symptom was wheeling over the icon rail scrolling the
-              whole page. Setting overflow:hidden on html/body instead only
-              suppresses the user's scroll and leaves the oversized document in
-              place. */}
+              relative is what makes that overflow-hidden actually bite. The
+              evidence, measured with a real browser (jsdom has no layout
+              engine and can't see any of this — see verify-kb-layout.py):
+              before this fix, with a long note open, documentElement reported
+              clientHeight 900 against scrollHeight 13425, and wheeling with
+              the pointer over the icon rail moved documentElement.scrollTop
+              from 0 to 3200 and the rail's own `top` from 0 to −3200, while
+              `main`, the `aside` and this shell div itself all stayed put at
+              scrollTop 0 — the DOCUMENT was scrolling, not any pane inside it.
+              Six candidate fixes were measured; only adding `relative` here
+              removed the overflow rather than masking it. `html, body {
+              overflow: hidden }` contained the user's scroll gesture but left
+              the document 13425px tall; `main { min-height: 0 }`, `#root {
+              overflow: hidden }` and `overflow: clip` on the shell did not
+              contain it at all. Adding `relative` dropped
+              documentElement.scrollHeight back to 900. The likely mechanism —
+              inference from the measurements above, not independently
+              confirmed — is that overflow:hidden only clips a descendant that
+              sits in its containing-block chain, and this shell was static
+              (not positioned) and so wasn't in that chain for whatever was
+              escaping; `relative` makes the shell itself a containing block
+              and the clip finally bites. Don't revert this on a theoretical
+              argument that overflow:hidden should already clip in-flow
+              content — the measurements are what's load-bearing, not this
+              explanation. */}
           <div className="relative h-screen overflow-hidden flex flex-col md:flex-row bg-background">
             <IconRail />
             {contextPane && (
