@@ -108,9 +108,15 @@
   filter: brightness(1.08);
 }
 
-/* Callouts. Colours map to existing tokens rather than new ones, so
-   contrast.test.ts's guarantees already cover them and a palette edit cannot
-   silently break a callout. */
+/* Callouts. Colours map to existing tokens rather than new ones — no
+   hardcoded hex introduced here. That statement is only PARTIALLY covered by
+   contrast.test.ts: its 4.5:1-on-all-three-grounds check is parametrized over
+   exactly ["ok", "warn", "danger"] (contrast.test.ts:67), so the tip/warning/
+   danger variants below (--color-ok/-warn/-danger) get that guarantee for
+   free on every future palette edit. The base/note/info variant uses
+   --color-accent/--color-accent-soft, which is NOT in that parametrized set —
+   a future edit to the accent palette is not automatically re-checked for
+   contrast in this specific soft-background usage. */
 .note-editor-content .tiptap .kb-callout {
   border-left: 3px solid var(--color-accent);
   background: var(--color-accent-soft);
@@ -129,4 +135,14 @@
 .note-editor-content .tiptap .kb-callout[data-callout="danger"] {
   border-left-color: var(--color-danger);
   background: var(--color-danger-soft);
+}
+/* Optional title (e.g. "> [!note] My Title") rendered as generated content
+   from the data-title attribute set by callout.ts's updateDOM parser — not
+   part of the editable content, so no NodeView/child node is needed just to
+   show it as a heading within the callout. */
+.note-editor-content .tiptap .kb-callout[data-title]::before {
+  content: attr(data-title);
+  display: block;
+  font-weight: 700;
+  margin-bottom: 0.5em;
 }

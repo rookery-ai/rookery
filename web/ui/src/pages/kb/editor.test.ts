@@ -333,3 +333,24 @@ test("a plain blockquote is still a plain blockquote", () => {
   const md = "> Just a quotation.\n";
   expect(fidelityRoundTrip(md).trim()).toBe(md.trim());
 });
+
+// Fix round 1, finding 1: "> [!kind] Title" (marker followed by title text on
+// the same line) is Obsidian's own documented, most common callout form.
+// Before this fix the serializer always emitted a bare "> [!kind]" and
+// reflowed any title text onto the body line, so this exact input failed
+// checkFidelity and an imported Obsidian vault using titled callouts opened
+// read-only.
+test("a titled note callout survives a markdown round trip", () => {
+  expect(checkFidelity("> [!note] My Title\n> Body.\n")).toBe(true);
+});
+
+test("a titled callout of another kind (warning) survives a markdown round trip", () => {
+  expect(checkFidelity("> [!warning] Careful now\n> Body.\n")).toBe(true);
+});
+
+test("an untitled callout still round-trips exactly as before (no title regression)", () => {
+  expect(checkFidelity("> [!note]\n> Body text here.\n")).toBe(true);
+  const out = fidelityRoundTrip("> [!note]\n> Body text here.\n");
+  // No stray title text/attribute leaked onto or before the body line.
+  expect(out.trim()).toBe("> [!note]\n> Body text here.".trim());
+});
