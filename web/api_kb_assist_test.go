@@ -6,6 +6,19 @@ import (
 	"testing"
 )
 
+// WARNING for anyone adding a case to this file: TestKBAssistRejectsPathTraversal
+// below clears the action and selection validation (a real action, a
+// non-empty short selection) and is stopped ONLY by vault.Resolve rejecting
+// "../../etc/passwd" — not by validateAssistRequest. A future test in this
+// file that combines a valid action, a non-empty selection, AND a path that
+// resolves to a real note would sail straight past every guard and reach the
+// real coder — a paid, multi-second LLM call on every CI run (worse locally,
+// where a `claude` binary on PATH with live credentials makes it a real API
+// call, not just a slow one). Assert boundary/gating behaviour directly
+// against validateAssistRequest instead, the way
+// TestValidateAssistRequestSelectionCapBoundary below does, unless the test's
+// entire point is the HTTP-level wiring.
+
 func TestKBAssistRejectsUnknownAction(t *testing.T) {
 	s, _ := newAPITestServer(t)
 	cookies := bootstrapAndLogin(t, s)

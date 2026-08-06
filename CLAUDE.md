@@ -325,7 +325,8 @@ Key types in `internal/vault`:
 
 **KB selection assist (`POST /api/v1/kb/assist`).** One blocking, text-only coder call over a
 passage the user selected in the editor — the backend half of the editor's Improve/Proofread/
-Explain/Reformat panel (the panel itself is a separate, later change). The action set is closed
+Explain/Reformat panel (`AIActions.tsx`, surfaced from `BubbleToolbar.tsx`'s bubble menu; see
+"KB rich-text editor: five formatting/AI constructs" below for the panel itself). The action set is closed
 (`prompts.KBAssistActions()`: `improve`, `proofread`, `explain`, `reformat`) and the prompt text
 lives entirely in `prompts.BuildKBAssistPrompt` (`internal/prompts/kbassist.go`), per the
 project's standing rule that no prompt text lives outside `internal/prompts`. Three actions ask
@@ -341,6 +342,55 @@ exactly the kind of thing that quietly becomes a real read later. Quota/rate-lim
 failures reuse `agentrunner.FriendlyRunError` (exported for this reason) so a workspace out of
 quota gets the identical sentence here as it does from a scheduled agent run, returned as a 503
 `coder_unavailable` rather than a generic 500.
+
+**KB rich-text editor: five formatting/AI constructs.** The WYSIWYG editor (`web/ui/src/pages/kb/`)
+adds underline, two colour marks, callouts, toggle lists, resizable images, and the AI actions panel
+above, all as TipTap/ProseMirror extensions layered on `buildExtensions()` (`editor.ts`). Three
+constraints turned out to be load-bearing enough that they're worth knowing before touching any of
+this — each currently documented only inline, in the file it governs:
+
+- **Mark registration order sets DOM nesting, which sets colour precedence.** `buildExtensions()`
+  registers `KBBgColor` before `KBTextColor` — TipTap ranks marks by registration order, and the
+  lower-rank (earlier) mark renders as the OUTER span on serialize, the higher-rank (later) mark as
+  the INNER one. Since an element's own `color` is applied directly rather than inherited, whichever
+  span sits closest to the text wins — so `KBTextColor` must be innermost for a text colour applied
+  inside a highlight to override the highlight's pinned foreground, while a highlight with no text
+  colour still shows its own pinned foreground (nothing nested inside it to override it). Reordering
+  those two registrations silently flips which colour wins wherever both are applied to the same
+  text. See the comment above `KBBgColor` in `editor.ts`.
+- **ProseMirror's `renderSpec` hazard forces the colour marks to build real DOM nodes instead of spec
+  arrays.** Returning the usual `["span", attrs, 0]` tuple from `renderHTML` breaks colour fidelity:
+  `prosemirror-model`'s `renderSpec` special-cases an attrs key literally named `style` by assigning
+  it via `dom.style.cssText = …` rather than `dom.setAttribute("style", …)`, and `cssText` assignment
+  round-trips through the CSSOM, which canonicalizes any recognized colour into `rgb(...)` — so
+  `"#ef4444"` comes back as `"rgb(239, 68, 68)"` the moment the mark serializes, independent of
+  parsing, and `checkFidelity`'s byte-for-byte comparison then fails and the note opens read-only.
+  `KBTextColor.renderHTML`/`KBBgColor.renderHTML` in `marks/colors.ts` sidestep this by constructing
+  the `<span>` element themselves and calling `setAttribute` directly, preserving the literal hex.
+  `kbImage.ts`'s width attribute hits the identical hazard for the same reason (see its
+  `renderHTML` comment) — its NodeView applies the pixel width as inline style directly on the DOM
+  element rather than through an attrs-keyed `style`.
+- **The toggle's canonical serialized form is `<details>`/`<summary>` on SEPARATE lines, and the
+  glued-together spelling (`<details><summary>...`) is not a fixed point alongside it.** Both forms
+  parse to the identical ProseMirror doc (markdown-it treats each as CommonMark "type 6" raw HTML
+  blocks), but a serializer can only ever reproduce ONE canonical spelling — parsing throws away
+  whether the source had them glued or on separate lines — so the two are mutually exclusive
+  canonical choices, not a matter of preference. Separate lines won because it's GitHub's own
+  documented convention and the form real-world markdown (a pasted README snippet, a vault-writing
+  agent) actually produces. `nodes/toggle.ts`'s top comment has the full reasoning, including the
+  prior reverted attempt that glued them — do not "fix" this back to gluing, it would only move the
+  read-only-until-first-save gap onto the more common input.
+
+Also worth carrying over: `AIActions.tsx`'s `selectionMarkdown`/`accept()` are what make the AI
+actions panel selection-aware rather than document-wide (captured range remapped through every
+editor transaction while the bubble menu is unmounted, verified live before writing); `lib/copyText`
+is the ONE clipboard write in the whole app for the reason given at its top (`navigator.clipboard`
+is undefined over plain HTTP on a LAN, the normal way to reach a self-hosted install) — a KB or chat
+surface reaching for `navigator.clipboard` directly instead is a bug, not a style choice. Marks and
+toggles both round-trip through markdown but are raw HTML on the wire (`<span style>`, `<details>`),
+so none of the five constructs survive `internal/export`'s HTML/PDF/DOCX path — see
+`marks/colors.ts`'s top comment for why (goldmark built without `html.WithUnsafe()`, on purpose, so
+a note can never inject a `<script>`).
 
 **Chat knowledge-base access (on-demand retrieval + editing).** The one-off chat coder runs with `WithDir(vaultRoot).WithAllowedTools("Read,Write,Edit,Glob,Grep")` and a system instruction (`prompts.BuildChatSystemPrompt`) naming the vault root. The LLM retrieves and edits the user's notes **on demand** — only on turns that touch the KB — instead of having the vault injected every prompt. `chat.BuildUserContext` now returns identity-only context (profile/memory/agents/MCP); the old always-on `[Related knowledge base]` keyword-snippet block was removed. The tool set is file-only (no `Bash`/`WebFetch`): the chat can create/edit/read notes but cannot delete, rename, or run shell commands. The same applies to agents (RW over the vault via the sandbox). The detective `Guard` is no longer wired into agent runs — it would revert the KB edits that are now intentional — so agent/chat KB edits persist.
 

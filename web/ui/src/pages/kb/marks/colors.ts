@@ -1,8 +1,14 @@
 import { Mark, mergeAttributes } from "@tiptap/core";
 
-// Fixed palette, no picker. Stored as an inline `style` attribute so a
-// coloured note renders correctly in Obsidian and in HTML export — the vault
-// stays portable.
+// Fixed palette, no picker. Stored as an inline `style` attribute — the same
+// mechanism Obsidian itself uses for inline colour, so a coloured note renders
+// correctly there. That does NOT extend to this app's own HTML/PDF/DOCX
+// export: internal/export/markdown.go and web/handlers_kb.go both build
+// goldmark WITHOUT html.WithUnsafe (deliberately, so a note can never inject
+// a <script>), which means raw HTML — this mark's `<span style="color:…">`,
+// KBBgColor's highlight span, and the toggle's `<details>` — is dropped
+// rather than rendered on every one of those paths. The trade-off is real,
+// not just theoretical: portable to Obsidian, silently lost on export.
 //
 // Contrast is the cost of that choice and is stated honestly: no single hex
 // reaches WCAG AA body text (4.5:1) against BOTH #ffffff and #191919. The best
