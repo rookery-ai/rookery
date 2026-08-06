@@ -21,6 +21,7 @@ open-source release ships.
 | Decision | Value | Provenance |
 |---|---|---|
 | Audience | Normal people, not programmers | Chosen directly |
+| Name for the thing | "Agent", on every surface | Chosen directly — §8 |
 | Brand temperature | Warm and living | Chosen directly |
 | Positioned against | Obsidian / Notion | Chosen directly |
 | Narrative | "Your notes grew hands" | Follows from positioning |
@@ -304,8 +305,12 @@ and ships its own translation table:
 | cron, schedule expression | run schedule — "every morning at 9" |
 | vault, knowledge base | your notes |
 | write to `state.md` | the assistant will remember this |
-| agent run, invocation | each time it runs |
+| invocation, execution | each time it runs |
 | script, tool, Python | *say what it does, not how* |
+
+Note that **"agent" itself is not banned** and is the approved word for the thing
+a user creates (§8). What the blocklist governs is the vocabulary of how it is
+*implemented*, not the name of the thing itself.
 
 **That block is the source of truth for brand copy too.** Marketing that uses a
 word the product is contractually forbidden from saying is not a style
@@ -372,30 +377,28 @@ Out of scope, deferred to spec 2 (landing page) and spec 3 (launch GTM):
 
 ## 8. Open questions
 
-**"Agent" or "assistant"? — needs an answer, blocks brand copy.**
+**"Agent" or "assistant"? — RESOLVED: agent, everywhere.**
 
-The product currently says both, and the split is not random. The conversational
-layer is contractually **assistant**: the designer prompts say "your assistant",
-and `<constraints>` forbids the technical vocabulary that "agent" travels with.
-Every other surface says **agent**: the SPA (176 uses against 75 of "assistant"),
-the `/api/v1/agents` routes, the `agents` table, the `/agent` chat command, the
-CLI and the README.
+The product said both. The SPA, the `/api/v1/agents` routes, the `agents` table,
+the `/agent` chat command, the CLI and the README all say **agent** (176 uses in
+the SPA against 75 of "assistant"); the designer prompts lean **assistant** when
+addressing a person.
 
-The brand has to pick one word and use it everywhere, and each choice has a cost:
+**Decision: "agent", on every surface — brand copy included.** It is what the
+code, the API, the docs and the wider ecosystem already say, and it is the term a
+technical evaluator searches for.
 
-- **"Assistant"** is the right word for the stated audience and is what the
-  product already says to a person's face. Cost: the SPA chrome, the docs and the
-  README drift further from it until someone does a rename pass. Route and table
-  names can stay — those are internal.
-- **"Agent"** is what the code, the API and the ecosystem say, and it is the term
-  a technical evaluator will search for. Cost: it is exactly the register §6
-  rules out, and the product's own designer is forbidden from using it
-  conversationally, so the landing page would introduce a word the product then
-  avoids.
+One correction is recorded here because it was mis-stated when the question was
+put: **the bare word "agent" is not on the `<constraints>` blocklist.** Only
+`AGENT.md`, the filename, is. The blocklist governs implementation vocabulary
+(Python, script, vault, cron, shell, webhook…), not the name of the thing the
+user is creating. So this decision costs nothing — it needs no rename pass and
+does not conflict with the enforced rules in §6, which continue to apply in full.
 
-Recommendation: **"assistant"** for all brand and user-facing copy, "agent"
-retained as the internal/API term. But this implies future UI copy work, so it is
-the user's call, not this spec's.
+The §6 translation table quotes `prompts.go` verbatim, including its own use of
+"the assistant will remember this". Those quotations are left exactly as the
+source writes them; this decision governs *new* brand and product copy, not
+citations of existing code.
 
 **Whether the app is ever re-skinned to the brand palette.** Answered "no" for
 this release. §4 records what changes if that answer changes, so the decision can
