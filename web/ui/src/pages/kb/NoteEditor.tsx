@@ -31,6 +31,7 @@ import {
 import { splitAlias } from "./wikilinks";
 import { slashSuggestion } from "./SlashMenu";
 import BubbleToolbar from "./BubbleToolbar";
+import { useAIActions } from "./AIActions";
 import NoteHeader from "./NoteHeader";
 import "./editor.css";
 
@@ -64,18 +65,27 @@ const READONLY_BANNER =
 // re-serializing — and only lossy — content the user never touched. TipTap's
 // click handlers (handleClickOn/handleClick) fire regardless of `editable`, so
 // links stay clickable in the read-only view.
-function WysiwygEditor({
+export function WysiwygEditor({
   content,
   editable,
   onDirty,
   onNavigate,
   registerGetContent,
+  path,
+  registerEditorForTest,
 }: {
   content: string;
   editable: boolean;
   onDirty: () => void;
   onNavigate: (target: string) => void;
   registerGetContent: (fn: () => string) => void;
+  path: string;
+  // Test-only escape hatch: hands back the live tiptap Editor instance so a
+  // test can dispatch a transaction directly (e.g. setNodeMarkup), bypassing
+  // kbImage.ts's own pointerdown guard, to prove the onUpdate guard below is
+  // real defense in depth rather than dead code. Never passed in production
+  // (NoteEditor doesn't pass it).
+  registerEditorForTest?: (editor: ReturnType<typeof useEditor>) => void;
 }) {
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
   const uploadAsset = useUploadKBAsset();
@@ -89,7 +99,17 @@ function WysiwygEditor({
     // args) is unaffected by the slash-menu suggestion plugin.
     extensions: buildExtensions([slashSuggestion()]),
     content,
-    onUpdate: () => onDirty(),
+    // Defense in depth (see kbImage.ts's pointerdown bail and editor.css's
+    // matching `[contenteditable="true"]` gate on the resize handle): those
+    // two layers are what SHOULD stop a dispatch to a read-only note, but
+    // this is the layer that actually prevents a write reaching disk if
+    // either of them is ever bypassed by some other path — `editor.isEditable`
+    // (not the closed-over `editable` prop, which this callback's closure can
+    // outlive across a setEditable(true) flip) reflects the LIVE state.
+    onUpdate: ({ editor: liveEditor }) => {
+      if (!liveEditor.isEditable) return;
+      onDirty();
+    },
     // Click-to-navigate for wikilink pills: handled here via editorProps
     // rather than inside the Wikilink node itself (see wikilinks.ts's top
     // comment) — this is the "click handler lives in NoteEditor via editor
@@ -130,12 +150,23 @@ function WysiwygEditor({
     },
   });
 
+  // Owned HERE, not inside AIActions/BubbleToolbar: this component stays
+  // mounted for the life of the note, while BubbleToolbar's BubbleMenu (and
+  // everything inside it, including AIActions) unmounts every time the
+  // selection collapses. A rewrite request already sent — and billed — must
+  // not disappear just because the user clicked away while it was running.
+  const aiActions = useAIActions(editor, path);
+
   // `editable` can flip after mount (the "Edit as rich text anyway" override on
   // a lossy note) without remounting this component, so push it onto the live
   // editor instance rather than relying on the initial useEditor option alone.
   useEffect(() => {
     editor?.setEditable(editable);
   }, [editor, editable]);
+
+  useEffect(() => {
+    if (editor && registerEditorForTest) registerEditorForTest(editor);
+  }, [editor, registerEditorForTest]);
 
   useEffect(() => {
     if (!editor) return;
@@ -187,7 +218,7 @@ function WysiwygEditor({
 
   return (
     <>
-      <BubbleToolbar editor={editor} />
+      <BubbleToolbar editor={editor} aiActions={aiActions} />
       <EditorContent editor={editor} className="note-editor-content" />
       <ImagePicker
         open={imagePickerOpen}
@@ -850,6 +881,7 @@ export default function NoteEditor({
               onDirty={markDirty}
               onNavigate={handleNavigate}
               registerGetContent={registerGetContent}
+              path={path}
             />
           </div>
         ) : (

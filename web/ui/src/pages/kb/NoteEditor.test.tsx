@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useSearchParams } from "react-router";
 import { ToastProvider } from "@/components/shell/Toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import NoteEditor from "./NoteEditor";
+import NoteEditor, { WysiwygEditor } from "./NoteEditor";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -134,6 +134,128 @@ test("a lossy note opens as a read-only rich view; 'Edit as rich text anyway' un
   // Accepting the override removes the banner (the editor becomes editable).
   await user.click(screen.getByRole("button", { name: /edit as rich text anyway/i }));
   await waitFor(() => expect(screen.queryByText(/read-only rich view/i)).toBeNull());
+});
+
+// Review finding: a read-only note (failed checkFidelity, not opted into
+// editing) was silently rewritten on disk — the image NodeView's resize
+// handle dispatched setNodeMarkup regardless of editability, onUpdate fired,
+// and markDirty/flush had no editable guard, so the whole document was
+// re-serialized and PUT to disk without the user's consent. Fixed at three
+// layers (kbImage.ts's pointerdown bail, editor.css's contenteditable-gated
+// hover reveal, and this component's onUpdate guard below). This test
+// targets the THIRD layer directly — dispatching setNodeMarkup by hand,
+// bypassing kbImage.ts's own pointerdown guard entirely — to prove
+// NoteEditor's own guard is real defense in depth, not dead code that only
+// looks load-bearing because the first layer already caught everything.
+test("dispatching setNodeMarkup on a non-editable WYSIWYG editor never marks it dirty", async () => {
+  const onDirty = vi.fn();
+  let liveEditor: import("@tiptap/core").Editor | null = null;
+
+  render(
+    <MemoryRouter>
+      <QueryClientProvider client={new QueryClient()}>
+        <ToastProvider>
+          <WysiwygEditor
+            content={"![Architecture](assets/arch.png)\n\nThe pipeline runs on merge.\n"}
+            editable={false}
+            onDirty={onDirty}
+            onNavigate={() => {}}
+            registerGetContent={() => {}}
+            registerEditorForTest={(e) => {
+              liveEditor = e;
+            }}
+            path="notes/arch.md"
+          />
+        </ToastProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+
+  await waitFor(() => expect(liveEditor).not.toBeNull());
+  const editor = liveEditor!;
+
+  let imagePos = -1;
+  let imageNode: import("@tiptap/pm/model").Node | null = null;
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === "image") {
+      imagePos = pos;
+      imageNode = node;
+    }
+  });
+  expect(imagePos).toBeGreaterThanOrEqual(0);
+
+  // The exact dispatch the resize handle's pointerup performs, called
+  // directly rather than via a simulated drag — proving the guard lives in
+  // onUpdate itself, not merely in the handle's own event listener.
+  editor.view.dispatch(
+    editor.view.state.tr.setNodeMarkup(imagePos, undefined, {
+      ...(imageNode as unknown as { attrs: Record<string, unknown> }).attrs,
+      width: 300,
+    }),
+  );
+
+  // The transaction DID apply — ProseMirror doesn't block a programmatic
+  // dispatch just because `editable` is false, which is exactly why the
+  // onUpdate-level guard is necessary rather than redundant.
+  expect(editor.state.doc.nodeAt(imagePos)?.attrs.width).toBe(300);
+  expect(onDirty).not.toHaveBeenCalled();
+});
+
+// editor.css's hover-reveal gate (`.tiptap[contenteditable="true"]
+// .kb-image:hover .kb-image-handle`) is unverifiable by this suite in the
+// way that matters (jsdom has no layout engine, so nothing here can assert
+// the handle is actually invisible on hover — see scrollcontainment.test.tsx
+// for the same limitation elsewhere in this pane). What IS verifiable, and
+// load-bearing, is the selector's PREMISE: that ProseMirror puts a literal
+// "true"/"false" `contenteditable` attribute on the same DOM element that
+// carries the `.tiptap` class. If that premise is wrong (e.g. the attribute
+// is missing, or ProseMirror ever used `plaintext-only` instead of the
+// literal strings this selector matches on), the CSS selector silently never
+// matches in EITHER direction — an editable note would then never show the
+// resize handle at all, killing the feature COMMIT 6 exists to unblock, with
+// this whole suite still green.
+test("the ProseMirror root's contenteditable attribute reflects editable state (editor.css's selector premise)", async () => {
+  const { container, rerender } = render(
+    <MemoryRouter>
+      <QueryClientProvider client={new QueryClient()}>
+        <ToastProvider>
+          <WysiwygEditor
+            content="Hello.\n"
+            editable={false}
+            onDirty={() => {}}
+            onNavigate={() => {}}
+            registerGetContent={() => {}}
+            path="notes/x.md"
+          />
+        </ToastProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+
+  await waitFor(() =>
+    expect(container.querySelector(".tiptap")?.getAttribute("contenteditable")).toBe("false"),
+  );
+
+  rerender(
+    <MemoryRouter>
+      <QueryClientProvider client={new QueryClient()}>
+        <ToastProvider>
+          <WysiwygEditor
+            content="Hello.\n"
+            editable={true}
+            onDirty={() => {}}
+            onNavigate={() => {}}
+            registerGetContent={() => {}}
+            path="notes/x.md"
+          />
+        </ToastProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+
+  await waitFor(() =>
+    expect(container.querySelector(".tiptap")?.getAttribute("contenteditable")).toBe("true"),
+  );
 });
 
 // Regression test for a review-caught bug: flush() used to clear dirtyRef

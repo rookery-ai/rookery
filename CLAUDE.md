@@ -323,6 +323,91 @@ Key types in `internal/vault`:
 
 **KB file kinds.** The note endpoint (`GET /api/v1/kb/note`) sniffs content rather than trusting the extension — `kind: "markdown"` for `.md` files (the existing WYSIWYG/raw editor, unchanged), `"code"` for any other file that decodes as valid UTF-8 under the 1 MiB inline cap (a read-only monospace view, no save affordance), or `"binary"` otherwise (a download-only panel; content omitted). A file exactly at the 1 MiB boundary is classified `"code"`. Navigation carries an explicit `dir` hint instead of guessing from the filename, so extensionless files still open correctly.
 
+**KB selection assist (`POST /api/v1/kb/assist`).** One blocking, text-only coder call over a
+passage the user selected in the editor — the backend half of the editor's Improve/Proofread/
+Explain/Reformat panel (`AIActions.tsx`, surfaced from `BubbleToolbar.tsx`'s bubble menu; see
+"KB rich-text editor: five formatting/AI constructs" below for the panel itself). The action set is closed
+(`prompts.KBAssistActions()`: `improve`, `proofread`, `explain`, `reformat`) and the prompt text
+lives entirely in `prompts.BuildKBAssistPrompt` (`internal/prompts/kbassist.go`), per the
+project's standing rule that no prompt text lives outside `internal/prompts`. Three actions ask
+for a straight replacement passage; `explain` deliberately does not — its prompt tells the model
+NOT to rewrite, because the result is shown read-only and must never be pasted over the user's
+prose. The selected passage is capped at `maxAssistSelectionBytes` (16 KiB) and an over-cap
+selection is **rejected, not truncated** — the same reject-not-truncate contract as
+`internal/iolimit`, but intentionally a separate, much smaller constant: iolimit's 25 MiB governs
+ingest doors (uploads, attachments, the KB bridge), not a single LLM call. `path` is only prompt
+context (the call runs `WithNoTools`, so the model cannot open the file itself) but still passes
+through `vault.Resolve` — an endpoint that echoes an unvalidated path into a model prompt is
+exactly the kind of thing that quietly becomes a real read later. Quota/rate-limit/auth coder
+failures reuse `agentrunner.FriendlyRunError` (exported for this reason) so a workspace out of
+quota gets the identical sentence here as it does from a scheduled agent run, returned as a 503
+`coder_unavailable` rather than a generic 500.
+
+**KB rich-text editor: five formatting/AI constructs.** The WYSIWYG editor (`web/ui/src/pages/kb/`)
+adds underline, two colour marks, callouts, toggle lists, resizable images, and the AI actions panel
+above, all as TipTap/ProseMirror extensions layered on `buildExtensions()` (`editor.ts`). Three
+constraints turned out to be load-bearing enough that they're worth knowing before touching any of
+this — each currently documented only inline, in the file it governs:
+
+- **Mark registration order sets DOM nesting, which sets colour precedence.** `buildExtensions()`
+  registers `KBBgColor` before `KBTextColor` — TipTap ranks marks by registration order, and the
+  lower-rank (earlier) mark renders as the OUTER span on serialize, the higher-rank (later) mark as
+  the INNER one. Since an element's own `color` is applied directly rather than inherited, whichever
+  span sits closest to the text wins — so `KBTextColor` must be innermost for a text colour applied
+  inside a highlight to override the highlight's pinned foreground, while a highlight with no text
+  colour still shows its own pinned foreground (nothing nested inside it to override it). Reordering
+  those two registrations silently flips which colour wins wherever both are applied to the same
+  text. See the comment above `KBBgColor` in `editor.ts`.
+- **ProseMirror's `renderSpec` hazard forces the colour marks to build real DOM nodes instead of spec
+  arrays.** Returning the usual `["span", attrs, 0]` tuple from `renderHTML` breaks colour fidelity:
+  `prosemirror-model`'s `renderSpec` special-cases an attrs key literally named `style` by assigning
+  it via `dom.style.cssText = …` rather than `dom.setAttribute("style", …)`, and `cssText` assignment
+  round-trips through the CSSOM, which canonicalizes any recognized colour into `rgb(...)` — so
+  `"#ef4444"` comes back as `"rgb(239, 68, 68)"` the moment the mark serializes, independent of
+  parsing, and `checkFidelity`'s byte-for-byte comparison then fails and the note opens read-only.
+  `KBTextColor.renderHTML`/`KBBgColor.renderHTML` in `marks/colors.ts` sidestep this by constructing
+  the `<span>` element themselves and calling `setAttribute` directly, preserving the literal hex.
+  `kbImage.ts`'s width attribute hits the identical hazard for the same reason (see its
+  `renderHTML` comment) — its NodeView applies the pixel width as inline style directly on the DOM
+  element rather than through an attrs-keyed `style`.
+- **The toggle's canonical serialized form is `<details>`/`<summary>` on SEPARATE lines, and the
+  glued-together spelling (`<details><summary>...`) is not a fixed point alongside it.** Both forms
+  parse to the identical ProseMirror doc (markdown-it treats each as CommonMark "type 6" raw HTML
+  blocks), but a serializer can only ever reproduce ONE canonical spelling — parsing throws away
+  whether the source had them glued or on separate lines — so the two are mutually exclusive
+  canonical choices, not a matter of preference. Separate lines won because it's GitHub's own
+  documented convention and the form real-world markdown (a pasted README snippet, a vault-writing
+  agent) actually produces. `nodes/toggle.ts`'s top comment has the full reasoning, including the
+  prior reverted attempt that glued them — do not "fix" this back to gluing, it would only move the
+  read-only-until-first-save gap onto the more common input.
+
+Also worth carrying over: `AIActions.tsx`'s `selectionMarkdown`/`accept()` are what make the AI
+actions panel selection-aware rather than document-wide (captured range remapped through every
+editor transaction while the bubble menu is unmounted, verified live before writing); `lib/copyText`
+is the ONE clipboard write in the whole app for the reason given at its top (`navigator.clipboard`
+is undefined over plain HTTP on a LAN, the normal way to reach a self-hosted install) — a KB or chat
+surface reaching for `navigator.clipboard` directly instead is a bug, not a style choice.
+
+**Export fidelity is NOT uniform across the five constructs** — `internal/export`'s HTML/PDF/DOCX
+path (goldmark built without `html.WithUnsafe()`, so raw HTML is replaced with the literal comment
+`<!-- raw HTML omitted -->` rather than rendered, precisely so a note can never inject a `<script>`)
+degrades each one differently depending on whether it's raw HTML on the wire or plain markdown:
+- **Toggle** — worst case: `<details>`/`<summary>` are both raw HTML on the wire, so the wrapper
+  AND the summary TEXT are dropped together (the summary's words live inside the omitted block, not
+  beside it). The body survives, but as an ordinary paragraph with no indication it was ever inside
+  a collapsible.
+- **Underline, both colour marks** — the `<span style>`/`<u>` wrapper is raw HTML and is dropped,
+  but the enclosed TEXT is an ordinary child node the renderer still walks, so the words survive with
+  formatting stripped.
+- **Callouts, resized images** — markdown, not raw HTML, so both survive structurally, just
+  degraded: a callout serializes as a plain `> [!kind] title` blockquote (`nodes/callout.ts`), which
+  goldmark renders as an ordinary `<blockquote>` with the literal `[!kind]` marker text visible,
+  since it has no notion of Obsidian's callout syntax; a resized image's width lives in the alt
+  slot (`![alt|420](src)`, `kbImage.ts`), so the exported `<img>`'s alt text carries the literal
+  `|420` as visible noise rather than an actual size.
+
+See `marks/colors.ts`'s top comment for the toggle/colour-mark case specifically.
+
 **Chat knowledge-base access (on-demand retrieval + editing).** The one-off chat coder runs with `WithDir(vaultRoot).WithAllowedTools("Read,Write,Edit,Glob,Grep")` and a system instruction (`prompts.BuildChatSystemPrompt`) naming the vault root. The LLM retrieves and edits the user's notes **on demand** — only on turns that touch the KB — instead of having the vault injected every prompt. `chat.BuildUserContext` now returns identity-only context (profile/memory/agents/MCP); the old always-on `[Related knowledge base]` keyword-snippet block was removed. The tool set is file-only (no `Bash`/`WebFetch`): the chat can create/edit/read notes but cannot delete, rename, or run shell commands. The same applies to agents (RW over the vault via the sandbox). The detective `Guard` is no longer wired into agent runs — it would revert the KB edits that are now intentional — so agent/chat KB edits persist.
 
 **Chat connector access.** One-off chat (both web `handleChatMessage` and Telegram) also exposes the workspace's **ACTIVE** service connections to the chat coder (`connectors.ActiveBoundConns` — all of them; chat isn't an agent so there's no per-agent binding), wired identically to how the API/CLI split works elsewhere: the **API engine** gets them as native function tools (`coder.WithConnectors`), a **CLI coder** reaches them via the loopback bridge (`bridge.Register` → `ROOKERY_CONNECTOR_URL`/`ROOKERY_CONNECTOR_TOKEN` env → `rookery connector exec`, plus a scoped `Bash(<bin> connector exec:*)` grant since chat is otherwise file-only). Both paths hit the same `connectors.Execute` (mutating allowed — chat is like a run, `buildPhase=false`). `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` appends `connectedToolsBlock` so the model knows the tools exist; with no active connections / no bridge, chat behaves exactly as the file-only default.
@@ -717,7 +802,7 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
 
 ### Usage-limit / rate-limit detection
 
-`coder.ErrUsageLimit` — CLI: non-zero exit with empty stdout+stderr; API: provider 402 (credits/quota exhausted, `ErrQuotaExhausted`). `coder.ErrRateLimited` — API transient 429 that didn't clear within the retry budget (distinct so the message says "try again in a moment", not "out of quota"). `coder.ErrAPIAuth` (bad/missing key) and `coder.ErrMaxTurns` (budget exhausted) are config/run errors, not usage limits. `agentrunner.friendlyRunError` converts each to a user-facing message sent via `input.SendOutput` on every run failure. Also handled softly during generation and design conversation turns. API token usage is accumulated across the loop (`coder.Usage`) and persisted per run.
+`coder.ErrUsageLimit` — CLI: non-zero exit with empty stdout+stderr; API: provider 402 (credits/quota exhausted, `ErrQuotaExhausted`). `coder.ErrRateLimited` — API transient 429 that didn't clear within the retry budget (distinct so the message says "try again in a moment", not "out of quota"). `coder.ErrAPIAuth` (bad/missing key) and `coder.ErrMaxTurns` (budget exhausted) are config/run errors, not usage limits. `agentrunner.FriendlyRunError` converts each to a user-facing message sent via `input.SendOutput` on every run failure. Also handled softly during generation and design conversation turns. API token usage is accumulated across the loop (`coder.Usage`) and persisted per run.
 
 ### Guardrails
 
@@ -1051,7 +1136,7 @@ duplicating the full list here. Route groups:
 - **services** — self-managed-OAuth service connections: list, per-provider creds/connect/apikey, delete
 - **chats** — CRUD, messages, resume/stop
 - **reminders + inbox** — reminders CRUD + poll; inbox list/poll/read/read-all/delete
-- **kb** — tree, note read/write/new/delete/rename, search, raw, resolve
+- **kb** — tree, note read/write/new/delete/rename, search, raw, resolve, selection assist (AI actions)
 - **settings + setup** — profile/workspace/coder/master-password settings, coder test, setup wizard
 - **search** — global search
 

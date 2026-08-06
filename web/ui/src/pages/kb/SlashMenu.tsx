@@ -19,12 +19,18 @@ import {
   Table as TableIcon,
   Image as ImageIcon,
   Paperclip,
+  Info,
+  Lightbulb,
+  AlertTriangle,
+  OctagonAlert,
+  StickyNote,
+  ChevronRight,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { filterSlashItems, type SlashItem } from "./slashItems";
 
-const ICONS: Record<string, LucideIcon> = {
+export const ICONS: Record<string, LucideIcon> = {
   "Heading 1": Heading1,
   "Heading 2": Heading2,
   "Heading 3": Heading3,
@@ -32,6 +38,12 @@ const ICONS: Record<string, LucideIcon> = {
   "Numbered list": ListOrdered,
   "To-do list": ListTodo,
   Quote: Quote,
+  "Callout: note": StickyNote,
+  "Callout: tip": Lightbulb,
+  "Callout: info": Info,
+  "Callout: warning": AlertTriangle,
+  "Callout: danger": OctagonAlert,
+  "Toggle list": ChevronRight,
   "Code block": Code,
   Divider: Minus,
   Table: TableIcon,
