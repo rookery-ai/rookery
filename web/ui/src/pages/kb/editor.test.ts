@@ -435,3 +435,25 @@ test("an unsized image is byte-for-byte unchanged", () => {
   const md = "![Architecture](assets/arch.png)\n";
   expect(fidelityRoundTrip(md).trim()).toBe(md.trim());
 });
+
+// checkFidelity only runs at note LOAD, never on the save path (toMarkdown),
+// so an editing-session insert (kb:insertImage -> commands.setImage) that
+// produces a src containing markdown-significant characters is never
+// re-checked. tiptap-markdown's stock image serializer backslash-escapes
+// parens in the destination and quotes in the title
+// (prosemirror-markdown's `image` node spec); KBImage's custom serializer
+// (needed to carry the width) must preserve that escaping exactly, or a
+// resized/inserted image whose path legitimately contains a paren
+// serializes to markdown that mis-parses on the very next load.
+test("an image src containing parens survives the save path", () => {
+  const editor = new Editor({
+    element: document.createElement("div"),
+    extensions: buildExtensions(),
+    content: "<p></p>",
+  });
+  editor.commands.setImage({ src: "assets/img(1).png", alt: "shot" });
+  const out = toMarkdown(editor);
+  editor.destroy();
+  expect(out).toContain("assets/img\\(1\\).png");
+  expect(checkFidelity(out)).toBe(true);
+});

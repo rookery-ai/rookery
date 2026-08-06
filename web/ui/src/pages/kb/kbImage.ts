@@ -78,11 +78,18 @@ export const KBImage = Image.extend({
       markdown: {
         // tiptap-markdown's own image serializer writes ![alt](src) and knows
         // nothing about the width, so it is overridden here rather than
-        // letting the width silently drop on every save.
+        // letting the width silently drop on every save. Mirrors
+        // prosemirror-markdown's stock `image` serializer spec exactly (down
+        // to escaping parens in the destination and quotes in the title) —
+        // dropping those escapes would corrupt any src/title containing them
+        // on the SAVE path, which checkFidelity's load-time gate can't catch.
         serialize(state: any, node: any) {
           const label = joinAltWidth(node.attrs.alt || "", node.attrs.width ?? null);
-          const title = node.attrs.title ? ` "${node.attrs.title}"` : "";
-          state.write(`![${state.esc(label)}](${node.attrs.src}${title})`);
+          const src = String(node.attrs.src ?? "").replace(/[()]/g, "\\$&");
+          const title = node.attrs.title
+            ? ` "${String(node.attrs.title).replace(/"/g, '\\"')}"`
+            : "";
+          state.write(`![${state.esc(label)}](${src}${title})`);
         },
         parse: {
           // handled by markdown-it + parseHTML above
