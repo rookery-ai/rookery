@@ -146,6 +146,46 @@ func TestListServicesReportsTheOwningAppAndSetupMode(t *testing.T) {
 	}
 }
 
+// The SPA now DISABLES a provider tile on a hard preflight problem, so an
+// empty preflight array is no longer merely uninformative — it silently
+// re-enables a tile whose OAuth flow provably cannot complete.
+func TestOAuthProviderCarriesHardPreflightOnNonPublicURL(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapLoginAndVerify(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+	t.Setenv("ROOKERY_PUBLIC_URL", "")
+
+	rec := doJSON(t, s, http.MethodPut, "/api/v1/admin/public-url",
+		map[string]string{"url": "http://192.168.1.194:8080"}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/services", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	var body servicesDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	var checked int
+	for _, p := range body.Providers {
+		if p.Kind != "oauth" {
+			continue
+		}
+		for _, pf := range p.Preflight {
+			if pf.Severity == "hard" {
+				checked++
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no OAuth provider reported a hard preflight problem on a raw-IP " +
+			"instance URL; the SPA's tile blocking depends on this field")
+	}
+}
+
 // The summary tally was removed: it counted only OAuth providers while
 // reading as a count of the whole catalogue, and per-provider preflight
 // already reports the actionable problem on the card itself.
