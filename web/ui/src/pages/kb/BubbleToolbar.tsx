@@ -190,7 +190,18 @@ export default function BubbleToolbar({
   };
 
   return (
-    <BubbleMenu editor={editor} shouldShow={({ state }) => !state.selection.empty}>
+    <BubbleMenu
+      editor={editor}
+      // Restores the `editor.isEditable` term TipTap's own DEFAULT
+      // shouldShow includes (see @tiptap/extension-bubble-menu's
+      // BubbleMenuPlugin) — overriding shouldShow here entirely dropped it,
+      // so the whole toolbar (underline, both colour swatch grids, and the
+      // billable AI actions row) stayed live over a read-only note. Without
+      // this, a selection on a read-only note could fire a paid coder call
+      // via Improve/Explain/Reformat and then autosave the rewrite, closing
+      // the spend BEFORE it happens rather than guarding accept() after.
+      shouldShow={({ editor: e, state }) => e.isEditable && !state.selection.empty}
+    >
       <div className="rounded-md border border-border bg-popover shadow-md">
         {colorsOpen ? (
           <ColorSwatches editor={editor} onDone={() => setColorsOpen(false)} />
