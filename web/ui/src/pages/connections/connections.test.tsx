@@ -3,8 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route, useSearchParams } from "react-router";
 import { AppShell } from "@/components/shell/AppShell";
-import ConnectionsPage from "./ConnectionsPage";
-import type { ConnectorPlatform, ServiceProvider } from "@/lib/connections";
+import ConnectionsPage, { isServiceBlocked } from "./ConnectionsPage";
+import type { ConnectorPlatform, PreflightProblem, ServiceProvider } from "@/lib/connections";
 
 // MemoryRouter keeps its own in-memory history, decoupled from
 // window.location — so "the params got cleared" has to be observed through
@@ -386,6 +386,145 @@ test("clicking a not-yet-connected service tile opens the Connect-titled wizard"
   await user.click(notionTile.closest("button")!);
 
   expect(await screen.findByText("Connect Notion")).toBeInTheDocument();
+});
+
+// ── Blocked service tiles (preflight) ───────────────────────────────────────
+// Preflight already ships on every provider and the wizard already disables
+// Connect on a hard problem; these pin the tile-level signal that lets a user
+// learn about it before picking the service at all.
+
+const HARD_PROBLEM: PreflightProblem = {
+  severity: "hard",
+  code: "scheme_not_https",
+  message: "Plain http is rejected by this provider.",
+  fix: "Serve the instance over https.",
+};
+const SOFT_PROBLEM: PreflightProblem = {
+  severity: "soft",
+  code: "unverified_host",
+  message: "This host has not been verified.",
+  fix: "",
+};
+
+test("a hard preflight problem blocks a provider with no connections", () => {
+  expect(
+    isServiceBlocked({ preflight: [HARD_PROBLEM], connections: [] } as never),
+  ).toBe(true);
+});
+
+test("a soft preflight problem never blocks", () => {
+  // unverified_host is soft precisely so a stale policy cannot lock anyone out.
+  expect(
+    isServiceBlocked({ preflight: [SOFT_PROBLEM], connections: [] } as never),
+  ).toBe(false);
+});
+
+test("a provider with existing connections is never blocked", () => {
+  // Those connections still work; the wizard is the only way to inspect or
+  // delete them, so the tile has to stay reachable.
+  expect(
+    isServiceBlocked({
+      preflight: [HARD_PROBLEM],
+      connections: [{ id: "c1" }],
+    } as never),
+  ).toBe(false);
+});
+
+test("a blocked tile explains itself instead of opening the wizard", async () => {
+  const user = userEvent.setup();
+  providers = [
+    {
+      name: "google",
+      label: "Google",
+      // A category distinct from the label itself — with category and label
+      // both "Google", findByText(/Google/) below would match the category
+      // heading too, not just the tile and the dialog title.
+      category: "Other",
+      kind: "oauth",
+      setup_url: "",
+      setup_steps: [],
+      has_creds: false,
+      action_count: 0,
+      redirect_uri: "",
+      preflight: [HARD_PROBLEM],
+      connect_inputs: [],
+      connections: [],
+    },
+  ];
+  mockFetch();
+  wrap();
+
+  const tile = await screen.findByRole("button", { name: /Google/ });
+  expect(tile).toHaveAttribute("aria-disabled", "true");
+  await user.click(tile);
+
+  // The dialog quotes the API's own strings — one wording, not two.
+  expect(await screen.findByText(/Plain http is rejected/)).toBeInTheDocument();
+  expect(screen.getByText(/Serve the instance over https/)).toBeInTheDocument();
+  expect(
+    screen.getByRole("link", { name: /Change the instance URL/ }),
+  ).toBeInTheDocument();
+});
+
+test("Open anyway reaches the wizard from a blocked tile", async () => {
+  // The hard block predicts a third party's rules rather than an invariant we
+  // own, so a stale redirect_policy entry must never become a lockout.
+  const user = userEvent.setup();
+  providers = [
+    {
+      name: "google",
+      label: "Google",
+      // A category distinct from the label itself — with category and label
+      // both "Google", findByText(/Google/) below would match the category
+      // heading too, not just the tile and the dialog title.
+      category: "Other",
+      kind: "oauth",
+      setup_url: "",
+      setup_steps: [],
+      has_creds: false,
+      action_count: 0,
+      redirect_uri: "",
+      preflight: [HARD_PROBLEM],
+      connect_inputs: [],
+      connections: [],
+    },
+  ];
+  mockFetch();
+  wrap();
+
+  await user.click(await screen.findByRole("button", { name: /Google/ }));
+  await user.click(await screen.findByRole("button", { name: /Open anyway/ }));
+  // Exact text, not a substring/alternation: the blocked tile itself stays
+  // mounted behind the slide-over (it's a panel, not a route swap), so a
+  // bare /Google/ match would also hit the tile's own label.
+  expect(await screen.findByText("Connect Google")).toBeInTheDocument();
+});
+
+test("an unblocked tile opens the wizard directly", async () => {
+  const user = userEvent.setup();
+  providers = [
+    {
+      name: "github",
+      label: "GitHub",
+      category: "Developer",
+      kind: "oauth",
+      setup_url: "",
+      setup_steps: [],
+      has_creds: true,
+      action_count: 0,
+      redirect_uri: "",
+      preflight: [],
+      connect_inputs: [],
+      connections: [],
+    },
+  ];
+  mockFetch();
+  wrap();
+
+  await user.click(await screen.findByRole("button", { name: /GitHub/ }));
+  expect(
+    screen.queryByRole("button", { name: /Open anyway/ }),
+  ).not.toBeInTheDocument();
 });
 
 test("shows an error banner when the connectors list fails to load", async () => {
