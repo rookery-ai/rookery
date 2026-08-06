@@ -107,6 +107,16 @@ describe("slashItems run() against a headless editor", () => {
     editor.destroy();
   });
 
+  test.each(["note", "tip", "info", "warning", "danger"])(
+    "Callout: %s wraps the selection in a callout node of that kind",
+    (kind) => {
+      const editor = headlessEditor();
+      findItem(`Callout: ${kind}`).run(editor);
+      expect(editor.isActive("callout", { kind })).toBe(true);
+      editor.destroy();
+    },
+  );
+
   test("Code block activates codeBlock", () => {
     const editor = headlessEditor();
     findItem("Code block").run(editor);
