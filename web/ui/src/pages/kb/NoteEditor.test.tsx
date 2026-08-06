@@ -201,6 +201,63 @@ test("dispatching setNodeMarkup on a non-editable WYSIWYG editor never marks it 
   expect(onDirty).not.toHaveBeenCalled();
 });
 
+// editor.css's hover-reveal gate (`.tiptap[contenteditable="true"]
+// .kb-image:hover .kb-image-handle`) is unverifiable by this suite in the
+// way that matters (jsdom has no layout engine, so nothing here can assert
+// the handle is actually invisible on hover — see scrollcontainment.test.tsx
+// for the same limitation elsewhere in this pane). What IS verifiable, and
+// load-bearing, is the selector's PREMISE: that ProseMirror puts a literal
+// "true"/"false" `contenteditable` attribute on the same DOM element that
+// carries the `.tiptap` class. If that premise is wrong (e.g. the attribute
+// is missing, or ProseMirror ever used `plaintext-only` instead of the
+// literal strings this selector matches on), the CSS selector silently never
+// matches in EITHER direction — an editable note would then never show the
+// resize handle at all, killing the feature COMMIT 6 exists to unblock, with
+// this whole suite still green.
+test("the ProseMirror root's contenteditable attribute reflects editable state (editor.css's selector premise)", async () => {
+  const { container, rerender } = render(
+    <MemoryRouter>
+      <QueryClientProvider client={new QueryClient()}>
+        <ToastProvider>
+          <WysiwygEditor
+            content="Hello.\n"
+            editable={false}
+            onDirty={() => {}}
+            onNavigate={() => {}}
+            registerGetContent={() => {}}
+            path="notes/x.md"
+          />
+        </ToastProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+
+  await waitFor(() =>
+    expect(container.querySelector(".tiptap")?.getAttribute("contenteditable")).toBe("false"),
+  );
+
+  rerender(
+    <MemoryRouter>
+      <QueryClientProvider client={new QueryClient()}>
+        <ToastProvider>
+          <WysiwygEditor
+            content="Hello.\n"
+            editable={true}
+            onDirty={() => {}}
+            onNavigate={() => {}}
+            registerGetContent={() => {}}
+            path="notes/x.md"
+          />
+        </ToastProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+
+  await waitFor(() =>
+    expect(container.querySelector(".tiptap")?.getAttribute("contenteditable")).toBe("true"),
+  );
+});
+
 // Regression test for a review-caught bug: flush() used to clear dirtyRef
 // BEFORE the PUT resolved, so a failed save left the flag falsely clean —
 // Ctrl/Cmd+S became a silent no-op and the unmount-flush skipped, losing the

@@ -79,6 +79,21 @@ function renderHarness(editable: boolean) {
   return { ...utils, getEditor: () => editor };
 }
 
+// Every frontend test must mock fetch: /api/v1/kb/assist is billable (a real
+// coder call) and a `claude` CLI can be live on PATH in some environments.
+// This file renders the Improve/Explain/etc. row (via AIActions, inside the
+// toolbar) but never clicks it — no test here should ever call kbAssist's
+// mutation — this stub exists purely so an accidental future click (or a
+// stray effect) can never reach a real network call.
+beforeEach(() => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(
+    new Response(JSON.stringify({ action: "improve", result: "unused" }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  );
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
 });

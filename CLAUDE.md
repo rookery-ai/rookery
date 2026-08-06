@@ -386,11 +386,27 @@ actions panel selection-aware rather than document-wide (captured range remapped
 editor transaction while the bubble menu is unmounted, verified live before writing); `lib/copyText`
 is the ONE clipboard write in the whole app for the reason given at its top (`navigator.clipboard`
 is undefined over plain HTTP on a LAN, the normal way to reach a self-hosted install) — a KB or chat
-surface reaching for `navigator.clipboard` directly instead is a bug, not a style choice. Marks and
-toggles both round-trip through markdown but are raw HTML on the wire (`<span style>`, `<details>`),
-so none of the five constructs survive `internal/export`'s HTML/PDF/DOCX path — see
-`marks/colors.ts`'s top comment for why (goldmark built without `html.WithUnsafe()`, on purpose, so
-a note can never inject a `<script>`).
+surface reaching for `navigator.clipboard` directly instead is a bug, not a style choice.
+
+**Export fidelity is NOT uniform across the five constructs** — `internal/export`'s HTML/PDF/DOCX
+path (goldmark built without `html.WithUnsafe()`, so raw HTML is replaced with the literal comment
+`<!-- raw HTML omitted -->` rather than rendered, precisely so a note can never inject a `<script>`)
+degrades each one differently depending on whether it's raw HTML on the wire or plain markdown:
+- **Toggle** — worst case: `<details>`/`<summary>` are both raw HTML on the wire, so the wrapper
+  AND the summary TEXT are dropped together (the summary's words live inside the omitted block, not
+  beside it). The body survives, but as an ordinary paragraph with no indication it was ever inside
+  a collapsible.
+- **Underline, both colour marks** — the `<span style>`/`<u>` wrapper is raw HTML and is dropped,
+  but the enclosed TEXT is an ordinary child node the renderer still walks, so the words survive with
+  formatting stripped.
+- **Callouts, resized images** — markdown, not raw HTML, so both survive structurally, just
+  degraded: a callout serializes as a plain `> [!kind] title` blockquote (`nodes/callout.ts`), which
+  goldmark renders as an ordinary `<blockquote>` with the literal `[!kind]` marker text visible,
+  since it has no notion of Obsidian's callout syntax; a resized image's width lives in the alt
+  slot (`![alt|420](src)`, `kbImage.ts`), so the exported `<img>`'s alt text carries the literal
+  `|420` as visible noise rather than an actual size.
+
+See `marks/colors.ts`'s top comment for the toggle/colour-mark case specifically.
 
 **Chat knowledge-base access (on-demand retrieval + editing).** The one-off chat coder runs with `WithDir(vaultRoot).WithAllowedTools("Read,Write,Edit,Glob,Grep")` and a system instruction (`prompts.BuildChatSystemPrompt`) naming the vault root. The LLM retrieves and edits the user's notes **on demand** — only on turns that touch the KB — instead of having the vault injected every prompt. `chat.BuildUserContext` now returns identity-only context (profile/memory/agents/MCP); the old always-on `[Related knowledge base]` keyword-snippet block was removed. The tool set is file-only (no `Bash`/`WebFetch`): the chat can create/edit/read notes but cannot delete, rename, or run shell commands. The same applies to agents (RW over the vault via the sandbox). The detective `Guard` is no longer wired into agent runs — it would revert the KB edits that are now intentional — so agent/chat KB edits persist.
 
