@@ -38,6 +38,26 @@
   padding-left: 1em;
   color: var(--color-muted);
 }
+/* Tailwind v4's Preflight resets `ul, ol { list-style: none; padding: 0 }`.
+   Without restoring it here a bullet or numbered list renders as flat
+   unmarked lines — which is what made the slash menu's list items look
+   broken even though the commands and the saved markdown were always
+   correct. The taskList rule below is more specific (it adds an attribute
+   selector) and keeps winning, so checkbox lists stay unmarkered. */
+.note-editor-content .tiptap ul,
+.note-editor-content .tiptap ol {
+  padding-left: 1.5em;
+}
+.note-editor-content .tiptap ul { list-style: disc; }
+.note-editor-content .tiptap ol { list-style: decimal; }
+.note-editor-content .tiptap ul ul { list-style: circle; }
+.note-editor-content .tiptap ul ul ul { list-style: square; }
+.note-editor-content .tiptap ol ol { list-style: lower-alpha; }
+.note-editor-content .tiptap ol ol ol { list-style: lower-roman; }
+/* `.tiptap > * + *` puts 0.75em above every sibling block; a list item's
+   inner <p> would inherit that and double-space the list. */
+.note-editor-content .tiptap li > p { margin-top: 0; }
+.note-editor-content .tiptap li + li { margin-top: 0.25em; }
 .note-editor-content .tiptap ul[data-type="taskList"] { list-style: none; padding-left: 0; }
 .note-editor-content .tiptap ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 0.5em; }
 .note-editor-content .tiptap ul[data-type="taskList"] li > label { margin-top: 0.35em; }
