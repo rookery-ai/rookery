@@ -117,6 +117,16 @@ describe("slashItems run() against a headless editor", () => {
     },
   );
 
+  test("Toggle list inserts a toggle node with a summary and an empty body", () => {
+    const editor = headlessEditor();
+    findItem("Toggle list").run(editor);
+    expect(editor.isActive("toggle")).toBe(true);
+    const json = JSON.stringify(editor.getJSON());
+    expect(json).toContain('"type":"toggle"');
+    expect(json).toContain('"type":"toggleSummary"');
+    editor.destroy();
+  });
+
   test("Code block activates codeBlock", () => {
     const editor = headlessEditor();
     findItem("Code block").run(editor);

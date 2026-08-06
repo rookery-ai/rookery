@@ -91,6 +91,32 @@ test("buildExtensions() registers an image node and markdown round-trips a plain
   expect(out).toContain("![alt text](https://example.com/img.png)");
 });
 
+// AIActions.tsx's selectionMarkdown/accept() cast editor.storage.markdown
+// through `unknown` to reach `.parser.parse`/`.serializer.serialize` — real
+// runtime fields (tiptap-markdown's Markdown.js addStorage) that its own
+// published .d.ts doesn't declare, so TypeScript can't catch a rename on a
+// dependency bump. Both call sites optional-chain with a silent fallback: a
+// missing `.serializer` degrades Reformat's selection markdown to plain text
+// (selectionMarkdown falls back to textBetween), and a missing `.parser`
+// makes accept() insert the LLM's raw markdown as literal text — a returned
+// "- item" list becomes literal "- item" characters in the note instead of a
+// real bullet, with zero error or warning either way. This test turns a
+// silent capability regression into a CI failure.
+test("editor.storage.markdown exposes .parser.parse and .serializer.serialize as functions", () => {
+  const editor = new Editor({
+    element: document.createElement("div"),
+    extensions: buildExtensions(),
+    content: "<p></p>",
+  });
+  const storage = editor.storage.markdown as unknown as {
+    parser?: { parse: unknown };
+    serializer?: { serialize: unknown };
+  };
+  expect(typeof storage.parser?.parse).toBe("function");
+  expect(typeof storage.serializer?.serialize).toBe("function");
+  editor.destroy();
+});
+
 describe("table cell fidelity", () => {
   it("a cell containing a literal pipe round-trips (no corruption)", () => {
     const md = "| a | b |\n| --- | --- |\n| x \\| y | z |\n";

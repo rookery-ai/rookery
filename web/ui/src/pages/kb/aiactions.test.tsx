@@ -147,7 +147,12 @@ test("Accept replaces the captured range, not the live selection", async () => {
   await screen.findByText("REWRITTEN");
   editor.commands.setTextSelection(1); // collapse the selection mid-flight
   await user.click(screen.getByRole("button", { name: /Accept/ }));
-  await waitFor(() => expect(editor.getText()).toContain("REWRITTEN"));
+  // toContain would pass even if the rewrite were spliced in at the wrong
+  // place (e.g. appended after the live, now-collapsed selection instead of
+  // replacing the captured range) — selectAll() captured the WHOLE document,
+  // so an exact match proves the captured range's content, not just its
+  // presence somewhere, is what got replaced.
+  await waitFor(() => expect(editor.getText().trim()).toBe("REWRITTEN"));
 });
 
 test("Explain offers Copy and never Accept", async () => {
