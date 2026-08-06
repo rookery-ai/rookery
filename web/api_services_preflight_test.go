@@ -30,11 +30,6 @@ type providerDTO struct {
 
 type servicesDTO struct {
 	Providers []providerDTO `json:"providers"`
-	Summary   struct {
-		BaseURL        string `json:"base_url"`
-		OAuthProviders int    `json:"oauth_providers"`
-		CleanProviders int    `json:"clean_providers"`
-	} `json:"summary"`
 }
 
 func listServices(t *testing.T) (*Server, servicesDTO) {
@@ -151,17 +146,21 @@ func TestListServicesReportsTheOwningAppAndSetupMode(t *testing.T) {
 	}
 }
 
-func TestListServicesSummaryCountsCleanProviders(t *testing.T) {
-	_, body := listServices(t)
-	if body.Summary.OAuthProviders < 10 {
-		t.Fatalf("expected the bundled OAuth providers to be counted, got %d", body.Summary.OAuthProviders)
+// The summary tally was removed: it counted only OAuth providers while
+// reading as a count of the whole catalogue, and per-provider preflight
+// already reports the actionable problem on the card itself.
+func TestServicesListHasNoSummaryField(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapLoginAndVerify(t, s)
+	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+	t.Setenv("ROOKERY_PUBLIC_URL", "")
+
+	rec := doJSON(t, s, http.MethodGet, "/api/v1/services", nil, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
 	}
-	if body.Summary.CleanProviders > body.Summary.OAuthProviders {
-		t.Fatalf("clean (%d) cannot exceed total (%d)",
-			body.Summary.CleanProviders, body.Summary.OAuthProviders)
-	}
-	if body.Summary.BaseURL == "" {
-		t.Fatalf("summary must carry the base URL it judged")
+	if strings.Contains(rec.Body.String(), `"summary"`) {
+		t.Errorf("response still carries a summary field:\n%s", rec.Body.String())
 	}
 }
 

@@ -163,13 +163,6 @@ export type PreflightProblem = {
   fix: string;
 };
 
-// Mirrors apiPublicURLSummary — "what does my current instance URL cost me?"
-export type PublicURLSummary = {
-  base_url: string;
-  oauth_providers: number;
-  clean_providers: number;
-};
-
 // CATEGORY_ORDER fixes the section order on the connections page. A fixed array
 // rather than sorting alphabetically: the groups have a natural priority, and
 // alphabetical order would reshuffle the page as providers are added.
@@ -218,8 +211,7 @@ export function groupByCategory(
 export function useServices() {
   return useQuery({
     queryKey: ["services"],
-    queryFn: () =>
-      api.get<{ providers: ServiceProvider[]; summary: PublicURLSummary }>("/api/v1/services"),
+    queryFn: () => api.get<{ providers: ServiceProvider[] }>("/api/v1/services"),
   });
 }
 

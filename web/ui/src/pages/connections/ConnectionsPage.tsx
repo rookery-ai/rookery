@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   KeyRound,
@@ -406,7 +406,6 @@ export default function ConnectionsPage() {
   const linkedApps = platforms.filter((p) => p.linked && p.connected);
   const setPrimary = useSetPrimaryConnector();
   const services = servicesQuery.data?.providers ?? [];
-  const summary = servicesQuery.data?.summary;
   const configuredSearchKeysCount = SEARCH_KEY_PROVIDERS.filter(
     (p) => searchKeysQuery.data?.[p.id],
   ).length;
@@ -637,25 +636,6 @@ export default function ConnectionsPage() {
           <p className="mb-4 text-sm text-muted-2">
             Give your agents superpowers — connect the tools they'll work with.
           </p>
-          {/* The remedy tier: per-provider preflight says what is broken HERE,
-              this says what the current instance URL costs overall — while the
-              user is still in a position to change it. */}
-          {summary &&
-            summary.oauth_providers > 0 &&
-            summary.clean_providers < summary.oauth_providers && (
-              <div className="mb-4 rounded-lg border border-border bg-muted-surface p-3 text-sm">
-                <span className="font-medium">
-                  {summary.base_url} works with {summary.clean_providers} of{" "}
-                  {summary.oauth_providers} sign-in services.
-                </span>{" "}
-                <span className="text-muted-2">
-                  A public domain name over https unlocks the rest.{" "}
-                  <Link to="/settings" className="underline underline-offset-2">
-                    Change the instance URL
-                  </Link>
-                </span>
-              </div>
-            )}
           {servicesQuery.isError && (
             <ErrorBanner message={errorMessage(servicesQuery.error)} />
           )}
