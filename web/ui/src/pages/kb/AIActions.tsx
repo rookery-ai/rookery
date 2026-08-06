@@ -7,6 +7,7 @@ import { useSlideOver } from "@/components/shell/AppShell";
 import { useToast } from "@/components/shell/Toast";
 import { GlobalChatPanel } from "@/components/chat/GlobalChatButton";
 import { useKBAssist, type KBAssistAction } from "@/lib/kbAssist";
+import { copyText } from "@/lib/copyText";
 import { selectionChatPrompt } from "./ChatAboutFileButton";
 
 const ACTIONS: { id: KBAssistAction; label: string; icon: typeof Sparkles }[] = [
@@ -38,6 +39,8 @@ function selectionMarkdown(editor: Editor): string {
   return editor.state.doc.textBetween(from, to, "\n");
 }
 
+export type CopyStatus = "idle" | "copied" | "failed";
+
 export type AIActionsState = {
   action: KBAssistAction | null;
   assist: ReturnType<typeof useKBAssist>;
@@ -45,6 +48,8 @@ export type AIActionsState = {
   reset: () => void;
   accept: () => void;
   openChat: () => void;
+  copyStatus: CopyStatus;
+  copyResult: () => void;
 };
 
 // The range AND the text it covered, captured at CLICK time.
@@ -65,6 +70,9 @@ export function useAIActions(editor: Editor | null, path: string): AIActionsStat
   const { open } = useSlideOver();
   const { toast } = useToast();
   const [action, setAction] = useState<KBAssistAction | null>(null);
+  const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
+  const copyStatusTimerRef = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(copyStatusTimerRef.current), []);
   // A mutable ref, not React state: it must be updated synchronously off the
   // editor's own "transaction" event below — which fires independently of
   // any React render, including while this whole panel is unmounted and
@@ -109,13 +117,32 @@ export function useAIActions(editor: Editor | null, path: string): AIActionsStat
     const { from, to } = editor.state.selection;
     pendingRef.current = { from, to, text: editor.state.doc.textBetween(from, to, "\n") };
     setAction(id);
+    setCopyStatus("idle");
     assist.mutate({ action: id, path, selection: selectionMarkdown(editor) });
   }
 
   function reset() {
     pendingRef.current = null;
     setAction(null);
+    setCopyStatus("idle");
     assist.reset();
+  }
+
+  // Explain's Copy button is its ONLY affordance — the result can never be
+  // accepted into the note (see accept()'s explain guard below) — so a
+  // silent clipboard failure leaves the user with no way to use the answer
+  // at all. lib/copyText is the app's single clipboard write, precisely
+  // because `navigator.clipboard` is undefined over plain HTTP on a LAN,
+  // which is the normal way to reach a self-hosted install; a direct
+  // `navigator.clipboard?.writeText` call here would silently no-op there,
+  // same as MessageMeta's copy button before that fix.
+  function copyResult() {
+    if (!assist.data) return;
+    void copyText(assist.data.result).then((ok) => {
+      setCopyStatus(ok ? "copied" : "failed");
+      window.clearTimeout(copyStatusTimerRef.current);
+      copyStatusTimerRef.current = window.setTimeout(() => setCopyStatus("idle"), 1500);
+    });
   }
 
   function accept() {
@@ -158,14 +185,14 @@ export function useAIActions(editor: Editor | null, path: string): AIActionsStat
     });
   }
 
-  return { action, assist, run, reset, accept, openChat };
+  return { action, assist, run, reset, accept, openChat, copyStatus, copyResult };
 }
 
 // Purely presentational: every action reads/writes through `state`, which is
 // owned by useAIActions above and lives in a component that survives this
 // one's own mount/unmount cycle inside the bubble menu.
 export default function AIActions({ state }: { state: AIActionsState }) {
-  const { action, assist, run, reset, accept, openChat } = state;
+  const { action, assist, run, reset, accept, openChat, copyStatus, copyResult } = state;
 
   if (!action) {
     return (
@@ -262,18 +289,26 @@ export default function AIActions({ state }: { state: AIActionsState }) {
           <div className="mt-2 flex items-center justify-end gap-2">
             {action === "explain" ? (
               // Explain never writes to the note — it is a question about the
-              // passage, not an edit of it.
+              // passage, not an edit of it. Copy is its ONLY affordance, so a
+              // failure (or success) is surfaced via the label/icon rather
+              // than silently no-oping — see copyResult's doc comment.
               <Button
                 size="sm"
                 variant="outline"
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  void navigator.clipboard?.writeText(assist.data!.result);
+                  copyResult();
                 }}
-                onClick={() => void navigator.clipboard?.writeText(assist.data!.result)}
+                onClick={copyResult}
               >
-                <Copy className="size-4" />
-                Copy
+                {copyStatus === "copied" ? (
+                  <Check className="size-4" />
+                ) : copyStatus === "failed" ? (
+                  <X className="size-4" />
+                ) : (
+                  <Copy className="size-4" />
+                )}
+                {copyStatus === "copied" ? "Copied" : copyStatus === "failed" ? "Copy failed" : "Copy"}
               </Button>
             ) : (
               <>

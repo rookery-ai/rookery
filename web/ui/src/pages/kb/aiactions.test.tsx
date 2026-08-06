@@ -94,6 +94,11 @@ function renderPanel(editor: Editor, path = "notes/ci.md") {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  // vi.stubGlobal("navigator", ...) (used by the Explain-copy-fallback tests
+  // below) isn't undone by restoreAllMocks — without this, a stubbed
+  // navigator missing userAgent leaks into every later test in this file and
+  // breaks tiptap's isiOS() check inside Editor construction.
+  vi.unstubAllGlobals();
   mockOpen.mockClear();
 });
 
@@ -156,6 +161,54 @@ test("Explain offers Copy and never Accept", async () => {
   expect(await screen.findByText("It means X.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Copy/ })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Accept/ })).not.toBeInTheDocument();
+});
+
+// Review finding: Explain's Copy called `navigator.clipboard?.writeText`
+// directly instead of going through lib/copyText — "the app's single
+// clipboard write", which exists precisely because `navigator.clipboard` is
+// undefined over plain HTTP on a LAN (the normal way to reach a self-hosted
+// install). Copy is Explain's ONLY affordance (its result can never be
+// accepted into the note), so this made Explain entirely unusable there,
+// with no feedback — the same failure messagemeta.test.tsx already pins for
+// the chat copy button.
+test("Explain's Copy falls back to execCommand when the Clipboard API is unavailable", async () => {
+  const user = userEvent.setup();
+  mockAssistFetch({ action: "explain", result: "It means X." });
+  // Editor construction reads navigator.userAgent (tiptap's isiOS check), so
+  // it must happen BEFORE the navigator stub below replaces it with a plain
+  // object that lacks that property.
+  const editor = makeEditor();
+  editor.commands.selectAll();
+  vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
+  const execCommand = vi.fn().mockReturnValue(true);
+  document.execCommand = execCommand;
+
+  renderPanel(editor);
+
+  await user.click(screen.getByRole("button", { name: /Explain/ }));
+  await screen.findByText("It means X.");
+  await user.click(screen.getByRole("button", { name: /^Copy$/ }));
+
+  expect(execCommand).toHaveBeenCalledWith("copy");
+  await waitFor(() => expect(screen.getByRole("button", { name: /Copied/ })).toBeInTheDocument());
+});
+
+// A silent no-op is exactly what let the original bug hide unnoticed.
+test("Explain's Copy reports a failure when both the Clipboard API and execCommand fail", async () => {
+  const user = userEvent.setup();
+  mockAssistFetch({ action: "explain", result: "It means X." });
+  const editor = makeEditor();
+  editor.commands.selectAll();
+  vi.stubGlobal("navigator", { ...navigator, clipboard: undefined });
+  document.execCommand = vi.fn().mockReturnValue(false);
+
+  renderPanel(editor);
+
+  await user.click(screen.getByRole("button", { name: /Explain/ }));
+  await screen.findByText("It means X.");
+  await user.click(screen.getByRole("button", { name: /^Copy$/ }));
+
+  await waitFor(() => expect(screen.getByRole("button", { name: /Copy failed/ })).toBeInTheDocument());
 });
 
 test("a failed request shows the server's message", async () => {
