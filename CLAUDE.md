@@ -323,6 +323,25 @@ Key types in `internal/vault`:
 
 **KB file kinds.** The note endpoint (`GET /api/v1/kb/note`) sniffs content rather than trusting the extension — `kind: "markdown"` for `.md` files (the existing WYSIWYG/raw editor, unchanged), `"code"` for any other file that decodes as valid UTF-8 under the 1 MiB inline cap (a read-only monospace view, no save affordance), or `"binary"` otherwise (a download-only panel; content omitted). A file exactly at the 1 MiB boundary is classified `"code"`. Navigation carries an explicit `dir` hint instead of guessing from the filename, so extensionless files still open correctly.
 
+**KB selection assist (`POST /api/v1/kb/assist`).** One blocking, text-only coder call over a
+passage the user selected in the editor — the backend half of the editor's Improve/Proofread/
+Explain/Reformat panel (the panel itself is a separate, later change). The action set is closed
+(`prompts.KBAssistActions()`: `improve`, `proofread`, `explain`, `reformat`) and the prompt text
+lives entirely in `prompts.BuildKBAssistPrompt` (`internal/prompts/kbassist.go`), per the
+project's standing rule that no prompt text lives outside `internal/prompts`. Three actions ask
+for a straight replacement passage; `explain` deliberately does not — its prompt tells the model
+NOT to rewrite, because the result is shown read-only and must never be pasted over the user's
+prose. The selected passage is capped at `maxAssistSelectionBytes` (16 KiB) and an over-cap
+selection is **rejected, not truncated** — the same reject-not-truncate contract as
+`internal/iolimit`, but intentionally a separate, much smaller constant: iolimit's 25 MiB governs
+ingest doors (uploads, attachments, the KB bridge), not a single LLM call. `path` is only prompt
+context (the call runs `WithNoTools`, so the model cannot open the file itself) but still passes
+through `vault.Resolve` — an endpoint that echoes an unvalidated path into a model prompt is
+exactly the kind of thing that quietly becomes a real read later. Quota/rate-limit/auth coder
+failures reuse `agentrunner.FriendlyRunError` (exported for this reason) so a workspace out of
+quota gets the identical sentence here as it does from a scheduled agent run, returned as a 503
+`coder_unavailable` rather than a generic 500.
+
 **Chat knowledge-base access (on-demand retrieval + editing).** The one-off chat coder runs with `WithDir(vaultRoot).WithAllowedTools("Read,Write,Edit,Glob,Grep")` and a system instruction (`prompts.BuildChatSystemPrompt`) naming the vault root. The LLM retrieves and edits the user's notes **on demand** — only on turns that touch the KB — instead of having the vault injected every prompt. `chat.BuildUserContext` now returns identity-only context (profile/memory/agents/MCP); the old always-on `[Related knowledge base]` keyword-snippet block was removed. The tool set is file-only (no `Bash`/`WebFetch`): the chat can create/edit/read notes but cannot delete, rename, or run shell commands. The same applies to agents (RW over the vault via the sandbox). The detective `Guard` is no longer wired into agent runs — it would revert the KB edits that are now intentional — so agent/chat KB edits persist.
 
 **Chat connector access.** One-off chat (both web `handleChatMessage` and Telegram) also exposes the workspace's **ACTIVE** service connections to the chat coder (`connectors.ActiveBoundConns` — all of them; chat isn't an agent so there's no per-agent binding), wired identically to how the API/CLI split works elsewhere: the **API engine** gets them as native function tools (`coder.WithConnectors`), a **CLI coder** reaches them via the loopback bridge (`bridge.Register` → `ROOKERY_CONNECTOR_URL`/`ROOKERY_CONNECTOR_TOKEN` env → `rookery connector exec`, plus a scoped `Bash(<bin> connector exec:*)` grant since chat is otherwise file-only). Both paths hit the same `connectors.Execute` (mutating allowed — chat is like a run, `buildPhase=false`). `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` appends `connectedToolsBlock` so the model knows the tools exist; with no active connections / no bridge, chat behaves exactly as the file-only default.
@@ -717,7 +736,7 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
 
 ### Usage-limit / rate-limit detection
 
-`coder.ErrUsageLimit` — CLI: non-zero exit with empty stdout+stderr; API: provider 402 (credits/quota exhausted, `ErrQuotaExhausted`). `coder.ErrRateLimited` — API transient 429 that didn't clear within the retry budget (distinct so the message says "try again in a moment", not "out of quota"). `coder.ErrAPIAuth` (bad/missing key) and `coder.ErrMaxTurns` (budget exhausted) are config/run errors, not usage limits. `agentrunner.friendlyRunError` converts each to a user-facing message sent via `input.SendOutput` on every run failure. Also handled softly during generation and design conversation turns. API token usage is accumulated across the loop (`coder.Usage`) and persisted per run.
+`coder.ErrUsageLimit` — CLI: non-zero exit with empty stdout+stderr; API: provider 402 (credits/quota exhausted, `ErrQuotaExhausted`). `coder.ErrRateLimited` — API transient 429 that didn't clear within the retry budget (distinct so the message says "try again in a moment", not "out of quota"). `coder.ErrAPIAuth` (bad/missing key) and `coder.ErrMaxTurns` (budget exhausted) are config/run errors, not usage limits. `agentrunner.FriendlyRunError` converts each to a user-facing message sent via `input.SendOutput` on every run failure. Also handled softly during generation and design conversation turns. API token usage is accumulated across the loop (`coder.Usage`) and persisted per run.
 
 ### Guardrails
 
@@ -1051,7 +1070,7 @@ duplicating the full list here. Route groups:
 - **services** — self-managed-OAuth service connections: list, per-provider creds/connect/apikey, delete
 - **chats** — CRUD, messages, resume/stop
 - **reminders + inbox** — reminders CRUD + poll; inbox list/poll/read/read-all/delete
-- **kb** — tree, note read/write/new/delete/rename, search, raw, resolve
+- **kb** — tree, note read/write/new/delete/rename, search, raw, resolve, selection assist (AI actions)
 - **settings + setup** — profile/workspace/coder/master-password settings, coder test, setup wizard
 - **search** — global search
 

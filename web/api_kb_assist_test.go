@@ -1,7 +1,6 @@
 package web
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -64,20 +63,27 @@ func TestKBAssistRejectsPathTraversal(t *testing.T) {
 	}
 }
 
-func TestKBAssistAcceptsSelectionAtTheCap(t *testing.T) {
-	s, _ := newAPITestServer(t)
-	cookies := bootstrapAndLogin(t, s)
-	cookies, _ = createAndEnterWorkspace(t, s, cookies)
+// A selection exactly at the cap must be accepted, and one byte over must be
+// rejected — the off-by-one boundary the reject-not-truncate contract lives
+// on. This is asserted directly against validateAssistRequest rather than
+// over HTTP: an HTTP round trip that clears validation reaches the real
+// coder, and in a dev environment with a `claude` binary on PATH and live
+// credentials available, that means a real (paid, multi-second) API call on
+// every test run. validateAssistRequest is the exact gate that decides
+// whether Generate is ever called, so testing it directly proves the
+// boundary without paying that cost.
+func TestValidateAssistRequestSelectionCapBoundary(t *testing.T) {
+	base := apiKBAssistRequest{Action: "improve", Path: "notes/a.md"}
 
-	atCap := strings.Repeat("a", maxAssistSelectionBytes)
-	rec := doJSON(t, s, http.MethodPost, "/api/v1/kb/assist",
-		map[string]string{"action": "improve", "path": "notes/a.md", "selection": atCap}, cookies)
-	// The coder is not configured in tests, so this must NOT be a 400 — it
-	// fails later, at the coder call. Anything in the 4xx range other than a
-	// coder-unavailable 503 means the cap is off by one.
-	if rec.Code == http.StatusBadRequest {
-		t.Fatalf("a selection exactly at the cap was rejected: %s", rec.Body.String())
+	atCap := base
+	atCap.Selection = strings.Repeat("a", maxAssistSelectionBytes)
+	if _, _, ok := validateAssistRequest(atCap); !ok {
+		t.Fatal("a selection exactly at the cap was rejected")
 	}
-	var body map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+
+	overCap := base
+	overCap.Selection = strings.Repeat("a", maxAssistSelectionBytes+1)
+	if _, _, ok := validateAssistRequest(overCap); ok {
+		t.Fatal("a selection one byte over the cap was accepted")
+	}
 }

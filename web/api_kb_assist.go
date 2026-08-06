@@ -40,6 +40,27 @@ func validAssistAction(action string) bool {
 	return false
 }
 
+// validateAssistRequest checks the request against the closed action set, the
+// empty-selection guard, and the size cap — everything that can be decided
+// without a coder call. It is a pure function, deliberately split out of the
+// handler, so the cap's reject-not-truncate boundary (the property that
+// matters most here: an off-by-one would silently rewrite text the user never
+// selected) can be asserted directly without spending a real coder call — the
+// handler's `path` check is excluded because it needs the vault and isn't part
+// of that boundary.
+func validateAssistRequest(req apiKBAssistRequest) (code, msg string, ok bool) {
+	if !validAssistAction(req.Action) {
+		return "invalid_request", "unknown action: " + req.Action, false
+	}
+	if strings.TrimSpace(req.Selection) == "" {
+		return "invalid_request", "select some text first", false
+	}
+	if len(req.Selection) > maxAssistSelectionBytes {
+		return "invalid_request", "that selection is too long — select a smaller passage", false
+	}
+	return "", "", true
+}
+
 // apiKBAssist runs one text-only coder call over a selected passage.
 //
 // POST /api/v1/kb/assist {action,path,selection} → 200 {action,result}
@@ -50,17 +71,8 @@ func (s *Server) apiKBAssist(c echo.Context) error {
 	if err := bindAPI(c, &req); err != nil {
 		return err
 	}
-	if !validAssistAction(req.Action) {
-		return jsonErr(c, http.StatusBadRequest, "invalid_request",
-			"unknown action: "+req.Action)
-	}
-	if strings.TrimSpace(req.Selection) == "" {
-		return jsonErr(c, http.StatusBadRequest, "invalid_request",
-			"select some text first")
-	}
-	if len(req.Selection) > maxAssistSelectionBytes {
-		return jsonErr(c, http.StatusBadRequest, "invalid_request",
-			"that selection is too long — select a smaller passage")
+	if code, msg, ok := validateAssistRequest(req); !ok {
+		return jsonErr(c, http.StatusBadRequest, code, msg)
 	}
 	// The path is only prompt context, but it still goes through the vault's
 	// safety primitive: an endpoint that echoes an unvalidated path into a
