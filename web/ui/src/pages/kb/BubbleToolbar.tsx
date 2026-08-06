@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TEXT_COLORS, HIGHLIGHT_COLORS, HIGHLIGHT_FG } from "./marks/colors";
+import AIActions from "./AIActions";
 
 function ToolbarButton({
   label,
@@ -161,7 +162,7 @@ function ColorSwatches({ editor, onDone }: { editor: Editor; onDone: () => void 
 // @tiptap/react/menus subpath; no separate package install needed, it
 // ships inside @tiptap/react and depends on the already-installed
 // @tiptap/extension-bubble-menu transitive dep).
-export default function BubbleToolbar({ editor }: { editor: Editor | null }) {
+export default function BubbleToolbar({ editor, path }: { editor: Editor | null; path: string }) {
   const [colorsOpen, setColorsOpen] = useState(false);
 
   if (!editor) return null;
@@ -273,6 +274,7 @@ export default function BubbleToolbar({ editor }: { editor: Editor | null }) {
         </ToolbarButton>
           </div>
         )}
+        <AIActions editor={editor} path={path} />
       </div>
     </BubbleMenu>
   );

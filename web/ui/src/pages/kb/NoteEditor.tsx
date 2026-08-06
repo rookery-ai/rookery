@@ -70,12 +70,14 @@ function WysiwygEditor({
   onDirty,
   onNavigate,
   registerGetContent,
+  path,
 }: {
   content: string;
   editable: boolean;
   onDirty: () => void;
   onNavigate: (target: string) => void;
   registerGetContent: (fn: () => string) => void;
+  path: string;
 }) {
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
   const uploadAsset = useUploadKBAsset();
@@ -187,7 +189,7 @@ function WysiwygEditor({
 
   return (
     <>
-      <BubbleToolbar editor={editor} />
+      <BubbleToolbar editor={editor} path={path} />
       <EditorContent editor={editor} className="note-editor-content" />
       <ImagePicker
         open={imagePickerOpen}
@@ -850,6 +852,7 @@ export default function NoteEditor({
               onDirty={markDirty}
               onNavigate={handleNavigate}
               registerGetContent={registerGetContent}
+              path={path}
             />
           </div>
         ) : (
