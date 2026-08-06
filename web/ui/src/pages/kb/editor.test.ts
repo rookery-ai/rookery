@@ -250,3 +250,73 @@ test("a note with no colours is byte-for-byte unchanged", () => {
   const md = "# Title\n\nPlain prose with a [[wikilink]] and **bold**.\n";
   expect(fidelityRoundTrip(md).trim()).toBe(md.trim());
 });
+
+// Composition: KBBgColor is registered before KBTextColor in editor.ts on
+// purpose. Registration order sets mark rank, which sets DOM nesting order
+// on serialize (lower rank = outer). With the highlight outer and the text
+// colour inner, the text-colour span sits closest to the actual text, so
+// its own `color` — which isn't inherited, it directly styles that span —
+// wins over the highlight's pinned foreground. Getting the order backwards
+// makes red text on a yellow highlight unreachable: the highlight's pinned
+// #18181b would always win.
+describe("colour mark composition", () => {
+  it("renders the text-colour span innermost regardless of application order", () => {
+    // Two different source nestings should normalize to the SAME output
+    // nesting, because ProseMirror sorts a node's marks by rank, not by
+    // how the HTML happened to nest them going in.
+    const highlightThenColor = fidelityRoundTrip(
+      '<span style="background-color:#fef08a;color:#18181b"><span style="color:#ef4444">beta</span></span>',
+    );
+    const colorThenHighlight = fidelityRoundTrip(
+      '<span style="color:#ef4444"><span style="background-color:#fef08a;color:#18181b">beta</span></span>',
+    );
+    for (const out of [highlightThenColor, colorThenHighlight]) {
+      // The highlight span is outer (carries the background), the text
+      // colour span is inner (sits directly on "beta") — so #ef4444 is the
+      // color actually applied to the text, not the highlight's #18181b.
+      expect(out).toMatch(
+        /<span style="background-color:#fef08a;color:#18181b"><span style="color:#ef4444">beta<\/span><\/span>/,
+      );
+    }
+  });
+
+  it("the source order matching mark rank (highlight outer) round-trips byte-for-byte", () => {
+    expect(
+      checkFidelity(
+        '<span style="background-color:#fef08a;color:#18181b"><span style="color:#ef4444">beta</span></span>\n',
+      ),
+    ).toBe(true);
+  });
+
+  // KNOWN LIMITATION, not a regression from this fix: ProseMirror sorts a
+  // node's marks by RANK on every serialize, so composed marks always come
+  // back out in ONE canonical nesting order — never in whatever order the
+  // source HTML happened to use. Exactly one of the two possible source
+  // nestings can match that canonical order byte-for-byte; the other
+  // necessarily fails checkFidelity's strict string comparison, even though
+  // no information is lost (same two marks, same two colours — only the
+  // literal span nesting differs) and the visual result is identical either
+  // way. This was already true before this fix (previously the OTHER source
+  // order — text-colour outer — was the one that matched); putting KBBgColor
+  // first only relocated which direction wins, it did not introduce a new
+  // failure. A hand-authored or externally-imported note using the
+  // now-nonconforming nesting falls back to raw/read-only view on open —
+  // narrow (composed colour+highlight HTML from outside this editor), but
+  // real. Flagged in the task-2 fix report rather than worked around, per
+  // instruction: fixing it for real would need a custom nesting-preserving
+  // serializer, which is out of scope here.
+  it("the other source order (text colour outer) is detected as non-matching, not silently corrupted", () => {
+    expect(
+      checkFidelity(
+        '<span style="color:#ef4444"><span style="background-color:#fef08a;color:#18181b">beta</span></span>\n',
+      ),
+    ).toBe(false);
+  });
+
+  it("a highlight with no text colour still carries the pinned foreground", () => {
+    const out = fidelityRoundTrip(
+      '<span style="background-color:#fef08a;color:#18181b">Friday</span>\n',
+    );
+    expect(out).toContain('background-color:#fef08a;color:#18181b');
+  });
+});

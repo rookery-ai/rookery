@@ -55,8 +55,17 @@ export function buildExtensions(extra: AnyExtension[] = []): AnyExtension[] {
     // once viewed as rich text.
     Markdown.configure({ html: true, linkify: false, breaks: false }),
     Wikilink,
-    KBTextColor,
+    // Registration order sets mark rank, which sets DOM nesting order on
+    // serialize: the lower-rank (earlier) mark renders as the OUTER span, the
+    // higher-rank (later) mark as the INNER one. KBBgColor must come first so
+    // KBTextColor is innermost — an element's own `color` isn't inherited,
+    // it's applied directly, so whichever span sits closest to the text wins.
+    // With KBTextColor innermost, a text colour applied inside a highlight
+    // overrides the highlight's pinned foreground; a highlight with no text
+    // colour still renders its own pinned foreground since nothing is nested
+    // inside it to override it.
     KBBgColor,
+    KBTextColor,
     ...extra,
   ];
 }

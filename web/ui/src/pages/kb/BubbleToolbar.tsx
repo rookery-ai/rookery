@@ -68,9 +68,19 @@ function ColorSwatches({ editor, onDone }: { editor: Editor; onDone: () => void 
               title={`Text ${c.name}`}
               aria-label={`Text ${c.name}`}
               // Mousedown, not click: a click steals focus and collapses the
-              // selection the toolbar is acting on.
+              // selection the toolbar is acting on. onClick is ALSO wired
+              // (redundant on a mouse click, since preventDefault on
+              // mousedown stops the click from doing anything harmful — but
+              // it's the only event a keyboard activation (Tab, then Enter/
+              // Space) fires, so without it the swatch is keyboard-dead.
+              // setKBTextColor/unsetKBTextColor are idempotent, so both
+              // handlers firing on one interaction is harmless.
               onMouseDown={(e) => {
                 e.preventDefault();
+                editor.chain().focus().setKBTextColor(c.hex).run();
+                onDone();
+              }}
+              onClick={() => {
                 editor.chain().focus().setKBTextColor(c.hex).run();
                 onDone();
               }}
@@ -84,6 +94,10 @@ function ColorSwatches({ editor, onDone }: { editor: Editor; onDone: () => void 
             aria-label="No text colour"
             onMouseDown={(e) => {
               e.preventDefault();
+              editor.chain().focus().unsetKBTextColor().run();
+              onDone();
+            }}
+            onClick={() => {
               editor.chain().focus().unsetKBTextColor().run();
               onDone();
             }}
@@ -102,8 +116,16 @@ function ColorSwatches({ editor, onDone }: { editor: Editor; onDone: () => void 
               type="button"
               title={`Highlight ${c.name}`}
               aria-label={`Highlight ${c.name}`}
+              // See the text-swatch comment above: onClick covers keyboard
+              // activation, onMouseDown+preventDefault preserves the
+              // selection on a mouse click. Both call the same idempotent
+              // command.
               onMouseDown={(e) => {
                 e.preventDefault();
+                editor.chain().focus().setKBBgColor(c.hex).run();
+                onDone();
+              }}
+              onClick={() => {
                 editor.chain().focus().setKBBgColor(c.hex).run();
                 onDone();
               }}
@@ -117,6 +139,10 @@ function ColorSwatches({ editor, onDone }: { editor: Editor; onDone: () => void 
             aria-label="No highlight"
             onMouseDown={(e) => {
               e.preventDefault();
+              editor.chain().focus().unsetKBBgColor().run();
+              onDone();
+            }}
+            onClick={() => {
               editor.chain().focus().unsetKBBgColor().run();
               onDone();
             }}
@@ -181,7 +207,12 @@ export default function BubbleToolbar({ editor }: { editor: Editor | null }) {
         </ToolbarButton>
         <ToolbarButton
           label="Colour"
-          active={colorsOpen}
+          // This whole button row unmounts whenever the swatch panel is open
+          // (see the colorsOpen ? <ColorSwatches> : <row> branch below), so
+          // this button can never be ON SCREEN while colorsOpen is true —
+          // passing colorsOpen here would claim a pressed state that can
+          // never actually render.
+          active={false}
           onClick={() => setColorsOpen((v) => !v)}
         >
           <Baseline className="size-4" />
