@@ -1,9 +1,10 @@
-import { useState } from "react";
-import type { Editor } from "@tiptap/core";
+import { useEffect, useRef, useState } from "react";
+import type { Editor, EditorEvents } from "@tiptap/core";
 import type { Fragment } from "@tiptap/pm/model";
 import { Sparkles, SpellCheck, Lightbulb, WandSparkles, Loader2, Copy, Check, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useSlideOver } from "@/components/shell/AppShell";
+import { useToast } from "@/components/shell/Toast";
 import { GlobalChatPanel } from "@/components/chat/GlobalChatButton";
 import { useKBAssist, type KBAssistAction } from "@/lib/kbAssist";
 import { selectionChatPrompt } from "./ChatAboutFileButton";
@@ -46,6 +47,9 @@ export type AIActionsState = {
   openChat: () => void;
 };
 
+// The range AND the text it covered, captured at CLICK time.
+type PendingRange = { from: number; to: number; text: string };
+
 // Owns everything that must OUTLIVE the bubble menu's mount cycle: the
 // captured range, which action is running/done, and the mutation itself.
 // AIActions (the panel) is mounted inside TipTap's BubbleMenu, which
@@ -59,22 +63,57 @@ export type AIActionsState = {
 export function useAIActions(editor: Editor | null, path: string): AIActionsState {
   const assist = useKBAssist();
   const { open } = useSlideOver();
-  // Captured at CLICK time. The selection must survive an async round trip and
-  // a re-render; applying to the LIVE selection would paste the rewrite
-  // wherever the caret happens to be when the response lands.
-  const [range, setRange] = useState<{ from: number; to: number } | null>(null);
+  const { toast } = useToast();
   const [action, setAction] = useState<KBAssistAction | null>(null);
+  // A mutable ref, not React state: it must be updated synchronously off the
+  // editor's own "transaction" event below — which fires independently of
+  // any React render, including while this whole panel is unmounted and
+  // nothing is subscribed to re-render on its change — and nothing here
+  // needs a re-render; it is read only inside accept().
+  const pendingRef = useRef<PendingRange | null>(null);
+
+  // Keep the captured range aligned with the document through every edit
+  // made while an action is pending — including edits made while the bubble
+  // menu (and this whole panel) is unmounted, since collapsing the
+  // selection to type elsewhere is exactly what hides it. Without this,
+  // accept() would splice the rewrite into whatever now sits at the
+  // ORIGINAL absolute positions, which after an intervening edit is not the
+  // text that was rewritten — silent document corruption, not just a
+  // wrong-place paste. Subscribed for the life of the component (guarded
+  // internally by pendingRef.current being non-null), never per-action, so
+  // this can't leak a handler.
+  useEffect(() => {
+    if (!editor) return;
+    const onTransaction = ({ transaction, appendedTransactions }: EditorEvents["transaction"]) => {
+      const pending = pendingRef.current;
+      if (!pending) return;
+      let from = pending.from;
+      let to = pending.to;
+      for (const tr of [transaction, ...appendedTransactions]) {
+        // -1/+1 bias: an insertion exactly AT a boundary lands OUTSIDE the
+        // captured range (from stays put, to stays put) rather than being
+        // silently absorbed into "the text being rewritten".
+        from = tr.mapping.map(from, -1);
+        to = tr.mapping.map(to, 1);
+      }
+      pendingRef.current = { ...pending, from, to };
+    };
+    editor.on("transaction", onTransaction);
+    return () => {
+      editor.off("transaction", onTransaction);
+    };
+  }, [editor]);
 
   function run(id: KBAssistAction) {
     if (!editor) return;
     const { from, to } = editor.state.selection;
-    setRange({ from, to });
+    pendingRef.current = { from, to, text: editor.state.doc.textBetween(from, to, "\n") };
     setAction(id);
     assist.mutate({ action: id, path, selection: selectionMarkdown(editor) });
   }
 
   function reset() {
-    setRange(null);
+    pendingRef.current = null;
     setAction(null);
     assist.reset();
   }
@@ -84,14 +123,30 @@ export function useAIActions(editor: Editor | null, path: string): AIActionsStat
     // FOR it. This guard is the actual guarantee — the panel simply never
     // rendering an Accept button in that branch is UI, not enforcement.
     if (action === "explain") return;
-    if (!editor || !range || !assist.data) return;
+    const pending = pendingRef.current;
+    if (!editor || !pending || !assist.data) return;
+    // Mapping (above) keeps the range aligned through ordinary edits, but it
+    // cannot express every case — most notably the selected text itself
+    // being deleted out from under the mapped range. Verify the live text
+    // still matches what was captured at click time before writing
+    // anything; refuse rather than risk splicing the rewrite into content
+    // it was never generated from.
+    const liveText = editor.state.doc.textBetween(pending.from, pending.to, "\n");
+    if (liveText !== pending.text) {
+      toast({
+        message:
+          "The selected passage changed since this rewrite was generated, so it wasn't applied. You can still copy the result.",
+        variant: "error",
+      });
+      return;
+    }
     const storage = editor.storage.markdown as unknown as MDStorage;
     const html = storage?.parser?.parse(assist.data.result, { inline: true });
     editor
       .chain()
       .focus()
-      .deleteRange(range)
-      .insertContentAt(range.from, html ?? assist.data.result)
+      .deleteRange(pending)
+      .insertContentAt(pending.from, html ?? assist.data.result)
       .run();
     reset();
   }
@@ -240,7 +295,19 @@ export default function AIActions({ state }: { state: AIActionsState }) {
                     e.preventDefault();
                     accept();
                   }}
-                  onClick={accept}
+                  // No duplicate onClick here, unlike Discard/Copy above:
+                  // accept()'s refusal path (the range's live text no longer
+                  // matches what was captured) shows a toast, which is NOT
+                  // idempotent to double-fire the way reset()/a clipboard
+                  // write is — a live mouse click would otherwise stack two
+                  // identical toasts. onKeyDown covers Enter/Space instead,
+                  // same as the four action buttons above.
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      accept();
+                    }
+                  }}
                 >
                   <Check className="size-4" />
                   Accept
