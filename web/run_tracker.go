@@ -10,6 +10,7 @@ import (
 
 	"github.com/ilijad1/rookery/internal/agentrunner"
 	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/gateway"
 	"github.com/labstack/echo/v4"
 )
 
@@ -63,11 +64,17 @@ func (s *Server) startManualRun(workspaceID string, agent *db.Agent, masterPw st
 			default: // buffer full — drop for the live view; run history keeps the record
 			}
 		}
+		agentName := agent.Name
 		send := func(msg string) {
 			// Durable delivery to the user's chat platform (same path cron runs use),
 			// so the result arrives even after the user has left the page.
+			//
+			// Labelled with the agent name for the same reason the scheduler does
+			// it: on the chat side these messages are otherwise anonymous. Only
+			// the CHAT copy is labelled — OnProgress feeds the live SSE view,
+			// which is already scoped to this agent's page.
 			if s.gateway != nil {
-				_ = s.gateway.SendToUser(workspaceID, msg)
+				_ = s.gateway.SendToUser(workspaceID, gateway.AgentPrefixed(agentName, msg))
 			}
 		}
 

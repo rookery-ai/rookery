@@ -488,7 +488,10 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 			input.OnProgress(finalOutput)
 		}
 	case !rctx.silentSignaled:
-		warn := fmt.Sprintf("⚠️ %s ran but produced no notification — see the run log.", agent.Name)
+		// No agent name here: the chat copy is labelled at the send site by
+		// gateway.AgentPrefixed, and the inbox copy carries AgentName as its
+		// own column — repeating it would read "🤖 weather … ⚠️ weather ran…".
+		warn := "⚠️ Ran but produced no notification — see the run log."
 		if input.SendOutput != nil {
 			input.SendOutput(warn)
 		}
