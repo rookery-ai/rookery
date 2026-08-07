@@ -559,7 +559,54 @@ server-first regardless.
 
 ## 13. Open questions
 
-**Where the site is deployed.** `/site` is static, so any host works. Not decided
-here because it does not affect what gets built.
+**Where the site is deployed.** The build is static, so any host works. Not
+decided here because it does not affect what gets built.
 
 **Whether the docs enumerate providers truthfully against a "100+" hero** — §11.
+Built as specced: the hero says 100+, and
+`/docs/reference/connected-services` enumerates honestly.
+
+---
+
+## 14. Implementation status
+
+The site was built while this spec was being written, so this section records
+where the built site and the spec diverge. Read it before treating anything
+above as a description of what exists.
+
+**Built and live** in `ilijad1/rookery-web`:
+
+- Landing page — hero with the OS-detecting install block, the designer
+  transcript, ten feature sections, searchable Connections and Models walls,
+  install repeat, support, footer.
+- Documentation — 23 pages across Getting started, Installation, Concepts,
+  Operations and Reference, with Starlight's sidebar, ordered previous/next and
+  static Pagefind search.
+
+**Diverged from the spec, deliberately:**
+
+- **Feature media is built HTML, not video captures.** §7 specifies WebM loops of
+  the real product for all ten sections. Five are instead interactive components
+  written in HTML — the knowledge base's AI selection actions, workspaces, agents,
+  chat, secrets, scheduling and notifications. They stay crisp, weigh nothing and
+  cannot silently drift out of date, but they show a *concept* rather than
+  claiming to be a recording. The video plan still stands for the sections where
+  seeing the real interface matters most; the fixture-instance dependency in §7 is
+  unchanged.
+- **The Connections wall shows a curated 54 marks, not all of them.** Inlining
+  every one cost 182 KB of gzipped HTML for a single section. The full list lives
+  in the docs, linked from the wall.
+- **Model provider counts and vendor names were dropped from the landing page**
+  entirely (they go stale between releases); the docs carry the current list.
+
+**Still outstanding:**
+
+- **`install.sh` / `install.ps1` do not exist.** §1 stands: the hero is an
+  unrunnable command until they do. This remains the only hard blocker to going
+  live.
+- **The designer transcript is placeholder text**, marked as such in the source.
+  §6's verbatim-capture requirement is unmet.
+- **Two spec'd docs pages are unwritten** — "Reaching it from outside" (TLS,
+  reverse proxy) and "Security model".
+- **No screenshots in the documentation.** Install and connection pages would
+  benefit most, and need the same fixture instance as the feature captures.
