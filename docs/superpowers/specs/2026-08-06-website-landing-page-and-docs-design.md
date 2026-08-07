@@ -65,7 +65,7 @@ with a always-on Linux host.
                         4.4  Skills
                         4.5  Connections   (logo grid lives here)
                         4.6  Chat
-                        4.7  Chat apps
+                        4.7  Notifications — inbox and chat apps
                         4.8  Bring your own model
                         4.9  Secrets
                         4.10 Scheduling and reminders
@@ -197,15 +197,35 @@ already-vendored `web/ui/src/assets/logos/`. See §11 for the count decision.
 **4.6 Chat.** Talk to your knowledge and act through it — ask what you know, have
 it write notes, or have it do something in a connected account, in the moment.
 
-**4.7 Chat apps.** Reach your agents from Telegram, Discord or Slack, and have
-them reach you. For a machine running around the clock this is the point of
-contact: it messages you when something needs you. All three connect outbound —
-the bot dials out, nothing listens on an open port.
+**4.7 Notifications — the inbox and chat apps.** *You find out the moment it
+happens.* An agent finished, a connected service returned something new, a
+reminder came due, something needs a decision.
 
-**4.8 Bring your own model.** Works with the coder CLI you already use
-(claude-code, opencode, codex, cursor, gemini) or talks directly to **31 model
-providers** — including **six that run entirely on your own hardware**: Ollama,
-LM Studio, llama.cpp, vLLM, LocalAI and Jan. Nothing forces a hosted model.
+The line is deliberately neutral about whether the news is good or bad. An
+earlier draft said "when something breaks", which framed the whole feature as
+failure alerting — but most of what Rookery reports is ordinary news from a
+machine that never stops watching.
+
+Two places it reaches you, and the section covers both:
+
+- **The inbox**, in the app — every notification lands here, grouped by day,
+  unread marked, each one linking back to whatever produced it. This is the
+  durable record; it is where you look when you were away.
+- **Chat apps** — Telegram, Discord or Slack, for when you are not looking at the
+  app. Two-way: they carry notifications out, and you can talk to your agents
+  back through them. All three connect **outbound** — the bot dials out, so
+  nothing listens on an open port and it works from behind a home firewall
+  without forwarding anything.
+
+**4.8 Bring your own model.** Works with the coder CLI you already use, or talks
+directly to the model provider of your choice — hosted or **running locally on
+your own hardware**. Nothing forces a hosted model, and nothing ties you to one
+vendor.
+
+*No provider counts or vendor names on this page:* the list grows continuously,
+so any figure or enumeration goes stale and becomes a copy-maintenance burden.
+The **documentation** carries the current list; the landing page states the
+capability.
 
 **4.9 Secrets.** Credentials encrypted at rest, decrypted only into the process
 that needs them, scoped to one workspace, never handed to a third party.
@@ -261,9 +281,12 @@ Concepts and features            (the sequence, in order)
   5  Chat                        one-off chat, knowledge access, acting through connections
   6  Secrets                     how they are stored, how agents receive them
   7  Connections                 connecting a service, own OAuth apps, per-agent binding
-  8  Chat apps                   Telegram, Discord, Slack
+  8  Notifications               the inbox; Telegram, Discord, Slack; what gets sent
   9  Scheduling and reminders
   10 Backup and restore          snapshots, destinations, restoring on new hardware
+  11 Models                      CLI coders, hosted providers, running a local
+                                 model. The CURRENT enumerated provider list
+                                 lives here, never on the landing page.
 
 Operations
   Configuration                  every ROOKERY_* variable, defaults, effects
@@ -361,6 +384,18 @@ also states "100+" without enumerating, or the mismatch is accepted knowingly.
 The default this spec assumes is that **the docs page enumerates truthfully**,
 because a reference page that will not list what it counts is worse than a
 hero that rounds. Flag if the other way is preferred.
+
+**No model-provider counts or vendor names on the landing page.** Chosen
+directly: the provider list grows continuously, so any figure or enumeration is
+a copy-maintenance burden that goes stale between releases. The page states the
+capability — works with your CLI coder, hosted providers, or a local model on
+your own hardware — and the documentation (Concepts → *Models*) carries the
+current list.
+
+Noted alongside the "100+" decision above so the two are visible together: the
+connections count is stated as a rounded-up figure, and the model count is not
+stated at all. Both are deliberate owner decisions, made for different reasons —
+reach in the first case, staleness-avoidance in the second.
 
 **"Machine" not "server" in the subhead.** Chosen directly, despite the
 deployment story being server-first (§2). "Machine" is the broader, friendlier
