@@ -236,6 +236,70 @@ that needs them, scoped to one workspace, never handed to a third party.
 words, or when you ask. Reminders in plain language — "remind me in 10 minutes to
 call the doctor."
 
+### Feature media
+
+Every feature section carries a **motion showcase of the real product**, not a
+text block. This is the most expensive content on the site and the most
+persuasive; it is also where the page can most easily become slow.
+
+**Format: looping video, not GIF.** GIF was suggested and is the wrong container
+for screen recordings, for reasons that are technical rather than aesthetic:
+
+| | GIF | WebM / MP4 |
+|---|---|---|
+| A 10s UI capture at 1280×800 | roughly 5–15 MB | roughly 300–600 KB |
+| Colour | 256-colour palette — banding on gradients, dithered text | full colour |
+| Decoding | CPU, per frame | hardware |
+| Controllable | no | pause, poster, reduced-motion |
+
+A ten-feature page built from GIFs would weigh 50–150 MB. Built from video it
+weighs a few megabytes, and looks better — GIF's palette is especially unkind to
+antialiased UI text, which is most of what these captures contain.
+
+**Delivery.**
+
+- `<video autoplay muted loop playsinline preload="none">` with **WebM (VP9)** and
+  an **MP4 (H.264)** fallback source.
+- A **WebP poster frame** on every one. Nothing loads until the section is near
+  the viewport; the poster is what the visitor sees first and what they keep if
+  the video never loads.
+- **`prefers-reduced-motion`: do not autoplay.** Show the poster with a play
+  control. The product already honours this discipline; the site does not get to
+  ignore it.
+- Total media budget for the page: **under 5 MB** with everything played. If the
+  captures do not fit, shorten them — a 6-second loop that shows one clear thing
+  beats a 20-second tour.
+
+**Framing.** One consistent treatment across all ten so the page reads as a
+system: a rounded, bordered panel with a soft dusk-tinted shadow, scaling in
+slightly as it enters the viewport. **No fake browser chrome** — the address-bar
+mockup is dated and adds nothing for an audience that will self-host.
+
+**What each capture shows.** One specific action, not a tour:
+
+| Section | Capture |
+|---|---|
+| Workspaces | Switching workspace; the whole app's contents change |
+| Knowledge base | Selecting text → the AI toolbar → **Improve / Proofread / Explain / Reformat** rewriting in place |
+| Agents | The designer conversation building and testing an agent |
+| Skills | Attaching a skill to an agent |
+| Connections | The searchable grid filtering as you type |
+| Chat | Asking a question and watching it read notes to answer |
+| Notifications | An item arriving in the inbox, and the same one on Telegram |
+| Models | Switching from a hosted provider to a local one |
+| Secrets | Adding a credential; it becomes unreadable |
+| Scheduling | Typing "every weekday at 8" and it becoming a schedule |
+
+The knowledge-base capture is the strongest of the ten and should lead: the AI
+selection actions are verified as shipping in
+`web/ui/src/pages/kb/AIActions.tsx`.
+
+**Production dependency.** These require a running instance holding *plausible,
+non-embarrassing* data — real-looking notes, agents and connections, with nothing
+private in frame. Building that fixture instance is a task in its own right and
+must not be discovered late. Capture at 2× on a fixed viewport so every asset
+crops identically.
+
 ---
 
 ## 8. Support the project
@@ -360,13 +424,34 @@ repository. That is superseded. The reasoning for separating:
   binaries.
 - The site can be public before the product repository is.
 
-**Framework: Astro, with Starlight for the documentation.** This is a change of
-recommendation, forced by documentation becoming mandatory (§9). Plain HTML was
-the right call for a single landing page; it is the wrong call for a ~25-page
-sequenced documentation site, where the hand-maintained navigation, previous/next
-links and search become the whole cost. Starlight supplies all three, outputs
-static files, and ships no JavaScript for content pages by default — so the
-no-CDN, no-tracker discipline below survives intact.
+### Stack: Astro + React + Tailwind, with Starlight for documentation
+
+**The landing page is React and Tailwind** — the same stack as `web/ui`, so
+existing knowledge transfers and the design tokens from spec 1 drop straight in.
+Motion (`framer-motion`) for animation.
+
+**Astro is the shell around it, not an alternative to it.** Astro renders React
+components as *islands*: a component marked `client:visible` hydrates when it
+scrolls into view, and everything else ships as static HTML. That maps exactly
+onto a page of scroll-revealed feature sections — each one becomes interactive at
+the moment it appears, and the page's initial load carries almost no JavaScript.
+
+**Starlight** — Astro's documentation framework — supplies the things that make a
+~25-page sequenced site expensive by hand: sidebar navigation from the file tree,
+ordered previous/next links, per-page contents, and **search via Pagefind, which
+builds a static index at build time**. That last point is not a convenience: the
+usual docs-search choice (Algolia DocSearch) is a third-party request and would
+break the no-tracker rule outright.
+
+Two earlier positions in this spec are superseded and recorded so they are not
+revived: **plain HTML** (proposed here, never requested, and wrong for both an
+ultra-modern landing page and a 25-page docs site), and the implication that
+choosing Astro meant *not* using React. It does not.
+
+**The landing page is expected to be visually ambitious**, not a text page with a
+logo: scroll-driven reveals, motion on the feature media, and genuinely
+interactive components. At minimum the OS-detecting install block (§5), the
+self-typing transcript (§6), and a live searchable/filterable connections grid.
 
 ### The vendoring problem separation creates
 
