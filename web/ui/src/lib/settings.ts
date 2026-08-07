@@ -153,6 +153,19 @@ export function useChangeMasterPassword() {
 export type AdminSettings = {
   sandbox_on: boolean;
   landlock_ready: boolean;
+  // The rest mirrors /healthz, which computed all of this already while the
+  // owner's System status page showed only the two booleans above.
+  version: string;
+  commit: string;
+  landlock_abi: number;
+  coder_mode: string;
+  tools: {
+    python3: boolean;
+    rg: boolean;
+    pdftotext: boolean;
+    tesseract: boolean;
+  };
+  warnings: string[];
 };
 
 export function useAdminSettings() {

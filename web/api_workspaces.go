@@ -8,6 +8,7 @@ import (
 
 	"github.com/ilijad1/rookery/internal/auth"
 	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/health"
 	"github.com/labstack/echo/v4"
 )
 
@@ -239,16 +240,41 @@ func (s *Server) apiAdminAudit(c echo.Context) error {
 // memory cap from cfg.Sandbox.DefaultMemoryMB. They were a form that appeared
 // to configure the system but did not, so they were removed rather than wired
 // up — inventing runtime meaning for them was never asked for.
+// It now carries the whole health.Report as well. The owner's System status
+// page reported two booleans, of which only one was ever green, so it read as
+// "Landlock, and nothing else" — while /healthz already computed the version,
+// commit, Landlock ABI, coder mode and host-tool presence, and nothing showed
+// them to the operator. Warnings matter most: without python3 the agent-tool
+// AST guardrail silently self-skips, and only /healthz said so.
+//
+// Booleans only, never paths — the same disclosure rule /healthz follows.
 type apiAdminSettings struct {
 	SandboxOn     bool `json:"sandbox_on"`
 	LandlockReady bool `json:"landlock_ready"`
+
+	Version     string       `json:"version"`
+	Commit      string       `json:"commit"`
+	LandlockABI int          `json:"landlock_abi"`
+	CoderMode   string       `json:"coder_mode"`
+	Tools       health.Tools `json:"tools"`
+	Warnings    []string     `json:"warnings"`
 }
 
 func (s *Server) apiLoadAdminSettings() apiAdminSettings {
 	d := s.loadAdminSettings()
+	rep := health.Detect(s.sandboxEnabled(), s.coderMode())
 	return apiAdminSettings{
 		SandboxOn:     d.SandboxOn,
 		LandlockReady: d.LandlockReady,
+		Version:       rep.Version,
+		Commit:        rep.Commit,
+		LandlockABI:   rep.Sandbox.ABI,
+		CoderMode:     rep.CoderMode,
+		Tools:         rep.Tools,
+		// Never nil: a nil slice marshals to JSON null, and a TypeScript
+		// default parameter substitutes only for undefined — so `warnings.map`
+		// would throw and unmount the whole settings route.
+		Warnings: orEmpty(rep.Warnings()),
 	}
 }
 

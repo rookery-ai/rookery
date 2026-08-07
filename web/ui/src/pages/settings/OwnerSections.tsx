@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Eraser, FlaskConical, Plus, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, Eraser, FlaskConical, LogIn, Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SearchInput } from "@/components/ui/search-input";
@@ -7,7 +7,7 @@ import { timeAgo } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { entityIcon } from "@/lib/entityIcons";
 import { useSession } from "@/lib/session";
-import { CreateWorkspaceDialog } from "@/pages/Workspaces";
+import { CreateWorkspaceDialog, EnterWorkspaceDialog } from "@/pages/Workspaces";
 import {
   useAdminSettings,
   useAuditLog,
@@ -32,7 +32,7 @@ function errMsg(err: unknown) {
 
 function ErrorNote({ message }: { message: string }) {
   return (
-    <div className="flex items-center gap-2 rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">
+    <div className="flex items-center gap-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
       <AlertTriangle className="size-3.5 shrink-0" />
       {message}
     </div>
@@ -49,6 +49,7 @@ function WorkspaceCard({
   activeID: string | undefined;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [entering, setEntering] = useState(false);
   const del = useDeleteWorkspaceAdmin();
   const isActive = ws.id === activeID;
 
@@ -74,25 +75,37 @@ function WorkspaceCard({
             )}
           </div>
           {ws.about && (
-            <div className="truncate text-xs text-muted-2">{ws.about}</div>
+            <div className="truncate text-sm text-muted-2">{ws.about}</div>
           )}
         </div>
       </div>
 
       <div className="mt-3">
         {!confirming ? (
-          <Button
-            size="sm"
-            variant="outline"
-            className="text-danger"
-            onClick={() => setConfirming(true)}
-          >
-            <Trash2 />
-            Delete
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Entering was reachable only from the workspace picker and the
+                shell menu, so this page listed workspaces it could not open —
+                and with Delete as its sole control, the one thing it offered
+                was the destructive one. */}
+            {!isActive && (
+              <Button size="sm" onClick={() => setEntering(true)}>
+                <LogIn />
+                Enter
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-danger"
+              onClick={() => setConfirming(true)}
+            >
+              <Trash2 />
+              Delete
+            </Button>
+          </div>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-danger">
+            <span className="text-sm text-danger">
               Delete “{ws.name}”?{" "}
               {isActive &&
                 "This is your ACTIVE workspace — you'll be logged out of it."}
@@ -120,6 +133,10 @@ function WorkspaceCard({
             <ErrorNote message={errMsg(del.error)} />
           </div>
         )}
+        <EnterWorkspaceDialog
+          ws={entering ? ws : null}
+          onClose={() => setEntering(false)}
+        />
       </div>
     </div>
   );
@@ -142,12 +159,10 @@ export function WorkspacesSection() {
           <WorkspaceCard key={ws.id} ws={ws} activeID={activeID} />
         ))}
       </div>
-      <Button
-        size="sm"
-        variant="outline"
-        className="mt-3"
-        onClick={() => setCreating(true)}
-      >
+      {/* Primary, not outline. Every control on this page used to be a small
+          outline button — a white box with a #dcd8d2 hairline on a white page
+          — so the section read as having no buttons at all. */}
+      <Button size="sm" className="mt-3" onClick={() => setCreating(true)}>
         <Plus />
         Create workspace
       </Button>
@@ -179,41 +194,121 @@ export function SystemStatusSection() {
         <OwnerIcon slug="owner-system" />
         <h2 className="text-lg font-bold">System status</h2>
       </div>
-      <p className="mt-1 text-xs text-muted-2">
+      <p className="mt-1 text-sm text-muted-2">
         Coder and sandbox settings come from <code>config.yaml</code> and each
         workspace's own coder configuration.
       </p>
-      {isLoading && <p className="mt-2 text-xs text-muted-2">Loading…</p>}
+      {isLoading && <p className="mt-2 text-sm text-muted-2">Loading…</p>}
       {isError && (
         <div className="mt-2">
           <ErrorNote message={errMsg(error)} />
         </div>
       )}
       {!isLoading && !isError && (
-        <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-xs">
-          <div>
-            <dt className="text-muted-2">Sandbox</dt>
-            <dd
-              className={
-                sandboxOn ? "font-medium text-ok" : "font-medium text-muted-2"
-              }
-            >
-              {sandboxOn ? "on" : "off"}
-            </dd>
-          </div>
-          <div>
-            <dt className="text-muted-2">Landlock</dt>
-            <dd
-              className={
-                landlockReady
-                  ? "font-medium text-ok"
-                  : "font-medium text-muted-2"
-              }
-            >
-              {landlockReady ? "ready" : "unavailable"}
-            </dd>
-          </div>
-        </dl>
+        <>
+          {/* Warnings first: these are the states that change how the install
+              behaves. Without python3 the agent-tool AST guardrail silently
+              self-skips, and until now only /healthz said so. */}
+          {(data?.warnings ?? []).length > 0 && (
+            <ul className="mt-3 space-y-2">
+              {(data?.warnings ?? []).map((w) => (
+                <li
+                  key={w}
+                  className="flex items-start gap-2 rounded-md bg-warn-soft px-3 py-2 text-sm text-warn"
+                >
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                  <span>{w}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-sm">
+            <div>
+              <dt className="text-muted-2">Version</dt>
+              <dd className="font-medium">{data?.version || "unknown"}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-2">Commit</dt>
+              <dd className="font-mono font-medium">
+                {data?.commit || "unknown"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-2">Coder mode</dt>
+              <dd className="font-medium">{data?.coder_mode || "unknown"}</dd>
+            </div>
+            <div>
+              <dt className="text-muted-2">Python 3</dt>
+              <dd
+                className={
+                  data?.tools?.python3
+                    ? "font-medium text-ok"
+                    : "font-medium text-warn"
+                }
+              >
+                {data?.tools?.python3 ? "present" : "missing"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-2">ripgrep</dt>
+              <dd
+                className={
+                  data?.tools?.rg ? "font-medium text-ok" : "font-medium text-muted-2"
+                }
+              >
+                {data?.tools?.rg ? "present" : "missing"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-2">pdftotext</dt>
+              <dd
+                className={
+                  data?.tools?.pdftotext
+                    ? "font-medium text-ok"
+                    : "font-medium text-muted-2"
+                }
+              >
+                {data?.tools?.pdftotext ? "present" : "missing"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-2">tesseract</dt>
+              <dd
+                className={
+                  data?.tools?.tesseract
+                    ? "font-medium text-ok"
+                    : "font-medium text-muted-2"
+                }
+              >
+                {data?.tools?.tesseract ? "present" : "missing"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-2">Sandbox</dt>
+              <dd
+                className={
+                  sandboxOn ? "font-medium text-ok" : "font-medium text-warn"
+                }
+              >
+                {sandboxOn ? "on" : "off"}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-2">Landlock</dt>
+              <dd
+                className={
+                  landlockReady
+                    ? "font-medium text-ok"
+                    : "font-medium text-warn"
+                }
+              >
+                {landlockReady
+                  ? `ready (ABI ${data?.landlock_abi ?? 0})`
+                  : "unavailable"}
+              </dd>
+            </div>
+          </dl>
+        </>
       )}
     </div>
   );
@@ -245,13 +340,13 @@ export function InstanceURLSection() {
         <OwnerIcon slug="owner-instance-url" />
         <h2 className="text-lg font-bold">Instance URL</h2>
       </div>
-      <p className="mt-1 text-xs text-muted-2">
+      <p className="mt-1 text-sm text-muted-2">
         The address this server is reached at. Every service connection's
         redirect URI is built from it, so providers must be able to accept it.
         Leave it empty to detect it from your browser.
       </p>
 
-      {isLoading && <p className="mt-2 text-xs text-muted-2">Loading…</p>}
+      {isLoading && <p className="mt-2 text-sm text-muted-2">Loading…</p>}
 
       {!isLoading && (
         <>
@@ -285,7 +380,7 @@ export function InstanceURLSection() {
             </Button>
           </div>
 
-          <p className="mt-2 text-xs text-muted-2">
+          <p className="mt-2 text-sm text-muted-2">
             Currently using <code>{data?.public_url_actual}</code>{" "}
             {source === "configured"
               ? "(configured here)"
@@ -308,8 +403,8 @@ export function InstanceURLSection() {
             <p
               className={
                 test.data.ok && !test.data.warning
-                  ? "mt-2 text-xs font-medium text-ok"
-                  : "mt-2 text-xs text-muted-2"
+                  ? "mt-2 text-sm font-medium text-ok"
+                  : "mt-2 text-sm text-muted-2"
               }
             >
               {test.data.ok && !test.data.warning
@@ -371,7 +466,7 @@ export function AuditLogSection() {
   }
 
   const selectClass =
-    "h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring";
+    "h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
   return (
     <div>
@@ -379,7 +474,7 @@ export function AuditLogSection() {
         <OwnerIcon slug="owner-audit" />
         <h2 className="text-lg font-bold">Audit log</h2>
       </div>
-      <p className="mt-1 text-xs text-muted-2">
+      <p className="mt-1 text-sm text-muted-2">
         Most recent first, up to 100 matching events.
       </p>
 
@@ -441,20 +536,20 @@ export function AuditLogSection() {
         )}
       </div>
 
-      {isLoading && <p className="mt-2 text-xs text-muted-2">Loading…</p>}
+      {isLoading && <p className="mt-2 text-sm text-muted-2">Loading…</p>}
       {isError && (
         <div className="mt-2">
           <ErrorNote message={errMsg(error)} />
         </div>
       )}
       {!isLoading && !isError && logs.length === 0 && (
-        <p className="mt-2 text-xs text-muted-2">
+        <p className="mt-2 text-sm text-muted-2">
           {filtered ? "No events match these filters." : "No audit events yet."}
         </p>
       )}
       {!isLoading && !isError && logs.length > 0 && (
         <div className="mt-2 overflow-x-auto rounded-md border border-border">
-          <table className="w-full text-left text-xs">
+          <table className="w-full text-left text-sm">
             <thead className="bg-chrome text-muted-2">
               <tr>
                 <th className="px-3 py-2 font-medium">Time</th>
