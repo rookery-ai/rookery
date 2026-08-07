@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -171,5 +172,19 @@ func TestKBAssetUploadLandsInUploads(t *testing.T) {
 	}
 	if !strings.HasPrefix(body.Path, "uploads/") {
 		t.Errorf("an editor upload must land in uploads/, got %q", body.Path)
+	}
+
+	// Asserting the returned string alone would not catch the move breaking
+	// image display: the editor renders an image by handing this path to
+	// /kb/raw. Both that endpoint and the export inliner's regex are
+	// path-agnostic (they resolve any scheme-less vault path rather than
+	// matching an "assets/" prefix), and this proves it for the new location.
+	raw := doJSON(t, s, http.MethodGet,
+		"/api/v1/kb/raw?path="+url.QueryEscape(body.Path), nil, cookies)
+	if raw.Code != http.StatusOK {
+		t.Fatalf("GET /kb/raw for %q = %d: %s", body.Path, raw.Code, raw.Body.String())
+	}
+	if got := raw.Body.String(); !strings.Contains(got, "PNG") {
+		t.Errorf("raw fetch returned the wrong bytes for %q", body.Path)
 	}
 }
