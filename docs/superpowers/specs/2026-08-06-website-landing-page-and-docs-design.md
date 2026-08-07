@@ -1,7 +1,9 @@
 # Website: landing page and documentation — design
 
 **Date:** 2026-08-06
-**Scope:** rookery.sh — the landing page and the documentation site, as one property.
+**Scope:** rookery.sh — the landing page and the documentation site, as one
+property, built and released from **its own repository** (`ilijad1/rookery-web`)
+and never compiled into the product binary. See §10.
 **Status:** Approved for writing. Spec 2 of 3.
 
 Spec 1 (`2026-08-06-brand-identity-and-narrative-design.md`) fixed the mark, the
@@ -341,18 +343,71 @@ install docs that cannot instruct anyone.
 
 ## 10. Build, hosting and privacy
 
-**Location.** `/site` in this repository. Plain HTML, CSS and JavaScript — no
-framework, no build step beyond a small script that generates counts (§11) and
-the logo grid.
+### The website is its own repository and its own application
 
-Rationale: it matches the single-binary, no-CDN discipline the product already
-holds; it adds no toolchain to a repo that already maintains Go and Node; and the
-fonts (`internal/fonts`) and brand logos (`web/ui/src/assets/logos/`) it needs
-are already vendored here.
+**`ilijad1/rookery-web`, separate from `ilijad1/rookery`.** It is never compiled
+into the binary, never embedded with `go:embed`, and shares no build with the
+product.
 
-**Fonts self-hosted.** Inter, the same `internal/fonts/InterVariable.woff2` the
-product ships. No CDN import — the product refuses one and the site holds the
-same line.
+An earlier draft of this spec put the site at `/site` inside the product
+repository. That is superseded. The reasoning for separating:
+
+- The binary stays exactly what it claims to be. `web/ui` is already embedded in
+  it; a marketing site has no business travelling inside a self-hosted server
+  someone runs on their own hardware.
+- The site's release cadence is unrelated to the product's. A typo fix should
+  not touch a repository whose merges drive release-please and cut versioned
+  binaries.
+- The site can be public before the product repository is.
+
+**Framework: Astro, with Starlight for the documentation.** This is a change of
+recommendation, forced by documentation becoming mandatory (§9). Plain HTML was
+the right call for a single landing page; it is the wrong call for a ~25-page
+sequenced documentation site, where the hand-maintained navigation, previous/next
+links and search become the whole cost. Starlight supplies all three, outputs
+static files, and ships no JavaScript for content pages by default — so the
+no-CDN, no-tracker discipline below survives intact.
+
+### The vendoring problem separation creates
+
+Spec 1 is emphatic that the UI font has **one copy and two consumers**, because a
+second checked-in copy drifts silently. A separate repository needs its own copy
+of both the font and the brand logos, which reintroduces exactly that risk.
+
+How each is handled, and why they differ:
+
+- **Brand logos** — the website runs its **own copy of
+  `scripts/vendor-brand-logos.sh`**. These assets are *generated from upstream*,
+  not hand-authored, so regenerating is the correct operation and there is no
+  drift to speak of. The script's rules from `CLAUDE.md` carry over verbatim:
+  never hand-edit the output, `inline_class_styles` before stripping `<style>`,
+  and check `git status` after a run.
+- **Inter** — **copied**, with provenance recorded in the file's directory:
+  canonical source is `internal/fonts/InterVariable.woff2` in the product
+  repository. A copy is unavoidable across a repository boundary; a submodule for
+  one 48 KB file costs more than it saves. The mitigating rule: the website's copy
+  is refreshed from the product repository whenever the product's is, and the
+  provenance note names that obligation.
+- **The Weave mark and the palette** — copied as small literal values (SVG path,
+  hex tokens) from spec 1. These are the identity; they are meant to be stable,
+  and spec 1 is the canonical record.
+
+**Fonts self-hosted.** No CDN import — the product refuses one and the site holds
+the same line.
+
+### Cross-repository consequences
+
+- **The spec stays canonical in the product repository**, at
+  `docs/superpowers/specs/`, alongside specs 1 and 3. The website repository's
+  README links to it rather than copying it — a duplicated living document is the
+  same drift trap as a duplicated font, with none of the excuse.
+- **The connections count** (§11) cannot be generated from `internal/connectors/`
+  any more, because the website cannot see it. This makes the "100+" decision
+  moot as an engineering question: the figure is hand-written either way now.
+- **Docs accuracy** (§9) gets harder, not easier: a writer in the website
+  repository cannot grep the source to check a default. The rule stands, and the
+  practical answer is that whoever writes a page has both repositories checked
+  out. Worth stating plainly rather than discovering.
 
 **No analytics. No cookies. No third-party requests of any kind.** Stated on the
 page in plain words: *"No trackers on this site."* A privacy-first, self-hosted
