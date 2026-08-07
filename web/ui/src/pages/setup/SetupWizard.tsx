@@ -54,7 +54,10 @@ function ErrorNote({ children }: { children: React.ReactNode }) {
 const CHIP_STEPS = [1, 2, 3, 4, 5] as const;
 const CHIP_LABELS: Record<(typeof CHIP_STEPS)[number], string> = {
   1: "Basics",
-  2: "Master password",
+  // "Password", not "Master password": the widened card alone leaves the
+  // tracker one long label away from wrapping again, and the step's own
+  // heading already says which password it means.
+  2: "Password",
   3: "Coder",
   4: "Profile",
   5: "Chat app",
@@ -92,16 +95,20 @@ function StepChips({ step }: { step: number }) {
   );
 }
 
+// A raw <button> got neither the `gap-2` nor the
+// `[&_svg:not([class*='size-'])]:size-4` rule, so ArrowLeft rendered at
+// lucide's default 24px, unspaced, beside 13px text.
 function BackBar({ onBack }: { onBack: () => void }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="link"
       onClick={onBack}
-      className="mb-3 text-xs font-medium text-muted-2 hover:text-foreground"
+      className="mb-3 h-auto p-0 text-muted-2 hover:text-foreground"
     >
       <ArrowLeft />
       Back
-    </button>
+    </Button>
   );
 }
 
@@ -170,7 +177,7 @@ function BasicsStep({
       {error && <ErrorNote>{error}</ErrorNote>}
       <Button type="submit" className="w-full" disabled={busy}>
         <ArrowRight />
-        {busy ? "Saving…" : "Continue →"}
+        {busy ? "Saving…" : "Continue"}
       </Button>
     </form>
   );
@@ -254,7 +261,7 @@ function MasterPasswordStep({
       {error && !mismatch && <ErrorNote>{error}</ErrorNote>}
       <Button type="submit" className="w-full" disabled={busy}>
             <KeyRound />
-        {busy ? "Saving…" : "Set master password →"}
+        {busy ? "Saving…" : "Set master password"}
       </Button>
     </form>
   );
@@ -417,7 +424,7 @@ function ProfileStep({
       {error && <ErrorNote>{error}</ErrorNote>}
       <Button type="submit" className="w-full" disabled={busy}>
         <Save />
-        {busy ? "Saving…" : "Save and continue →"}
+        {busy ? "Saving…" : "Save and continue"}
       </Button>
       <Button
         type="button"
@@ -807,8 +814,16 @@ export default function SetupWizard() {
     setFinishError("");
     try {
       await api.post("/api/v1/setup", { step: 7 });
-      await qc.invalidateQueries({ queryKey: ["session"] });
+      // Navigate BEFORE invalidating, and do not await the invalidation.
+      //
+      // Awaiting it resolves only once the session refetch has landed, so
+      // `needs_setup` flipped to false while /setup was still the matched
+      // route — and RequireSetupWorkspace redirects to "/" in exactly that
+      // state. Both Done-screen buttons therefore landed on home no matter
+      // which target they passed, which is what made this look like a broken
+      // link rather than a race.
       nav(target);
+      void qc.invalidateQueries({ queryKey: ["session"] });
     } catch (err) {
       setFinishError(errMsg(err));
     } finally {
@@ -820,7 +835,11 @@ export default function SetupWizard() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-chrome p-4">
-      <div className="w-full max-w-xl rounded-xl border border-border bg-background p-8 shadow-sm">
+      {/* max-w-2xl, not max-w-xl: the 5-step tracker needs ~266px of fixed
+          chrome (five 20px circles, four 24px connectors, the gaps), and at
+          max-w-xl only ~246px was left for 41 characters of label — so "Chat
+          app" wrapped to a second row, leaving a dangling connector behind. */}
+      <div className="w-full max-w-2xl rounded-xl border border-border bg-background p-8 shadow-sm">
         {step !== null && step !== 7 && <StepChips step={step} />}
 
         {setupQuery.isLoading && step === null && (

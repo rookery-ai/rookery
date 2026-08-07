@@ -68,7 +68,7 @@ const ENDPOINTS: DesignerEndpoints = {
 
 const LABELS: DesignerLabels = {
   steps: ["Describe", "Design", "Build", "Review"],
-  buildButton: "🔨 Build it",
+  buildButton: "Build it",
   saveButton: "✅ Save agent",
   entityName: "agent",
 };

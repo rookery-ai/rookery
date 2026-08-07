@@ -517,7 +517,7 @@ test("step chips show Basics through Chat app, and hide on the Done screen", asy
   await screen.findByLabelText(/workspace name/i);
   const chips = screen.getByRole("list");
   expect(within(chips).getByText("Basics")).toBeInTheDocument();
-  expect(within(chips).getByText("Master password")).toBeInTheDocument();
+  expect(within(chips).getByText("Password")).toBeInTheDocument();
   expect(within(chips).getByText("Coder")).toBeInTheDocument();
   expect(within(chips).getByText("Profile")).toBeInTheDocument();
   expect(within(chips).getByText("Chat app")).toBeInTheDocument();

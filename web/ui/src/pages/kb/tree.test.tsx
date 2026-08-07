@@ -106,14 +106,17 @@ function rowWrapper(name: string): HTMLElement {
   return screen.getByText(name).closest("[draggable]") as HTMLElement;
 }
 
-test("renders root nodes with muted system rows, lazy-loads a directory, and selects a file", async () => {
+test("renders root nodes, lazy-loads a directory, and selects a file", async () => {
   mockFetch();
   const onSelect = renderTree();
 
   expect(await screen.findByText("README.md")).toBeInTheDocument();
 
+  // System dirs are NOT muted. They used to render text-muted-2 because the
+  // backend marks them system:true, which made Agents/Chats/Skills read as
+  // disabled beside Memory and Notes — to a user all five are just folders.
   const chatsRow = screen.getByText("Chats").closest("div");
-  expect(chatsRow?.className).toMatch(/text-muted-2/);
+  expect(chatsRow?.className).not.toMatch(/text-muted-2/);
 
   // notes/a.md hasn't been fetched yet (lazy per-dir loading)
   expect(screen.queryByText("a.md")).not.toBeInTheDocument();
@@ -134,7 +137,7 @@ test("renders root nodes with muted system rows, lazy-loads a directory, and sel
 // user's own editable knowledge and should sort/style WITH user content,
 // not muted alongside agents/chats/skills. FileTree overrides the flag by
 // name for exactly this one directory.
-test("memory/ sorts before muted system dirs and is NOT styled muted, despite the backend marking it system:true", async () => {
+test("root folders sort in the fixed ranking and none of them is styled muted", async () => {
   mockFetch((url) => {
     if (url === "/api/v1/kb/tree?path=") {
       return jsonResponse({
@@ -154,12 +157,14 @@ test("memory/ sorts before muted system dirs and is NOT styled muted, despite th
   const notesRow = screen.getByText("Notes").closest("div");
   const chatsRow = screen.getByText("Chats").closest("div");
 
-  // memory/ is NOT muted — it keeps its Brain icon (unchanged) but drops the
-  // system-styling class, same as an ordinary (never-system) user dir.
+  // No root folder is muted any more. Memory and Notes never were; Chats,
+  // Agents and Skills used to be, purely because the backend marks them
+  // system:true, and the contrast difference read as "disabled" rather than
+  // "system-managed". They keep their own icons, and the drag/reorder rules
+  // that actually protect them are unchanged (see foldercolor.test.ts).
   expect(memoryRow?.className).not.toMatch(/text-muted-2/);
   expect(notesRow?.className).not.toMatch(/text-muted-2/);
-  // chats/ is untouched — still muted, as a real system dir should be.
-  expect(chatsRow?.className).toMatch(/text-muted-2/);
+  expect(chatsRow?.className).not.toMatch(/text-muted-2/);
 
   // Root order is the fixed default-folder ranking: memory, agents, chats,
   // skills, then anything else, with notes/ deliberately last.
