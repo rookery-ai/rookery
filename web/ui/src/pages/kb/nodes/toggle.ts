@@ -110,12 +110,11 @@ export const Toggle = Node.create({
     // instead (see editor.css).
     return ["details", mergeAttributes(HTMLAttributes), 0];
   },
-  // The disclosure arrow's clickable zone, measured from the summary's left
-  // edge, and kept in step with the `summary::before` box in editor.css.
-  //
-  // Only this zone toggles. Making the whole summary toggle would mean you
-  // could not click into the title to edit it without collapsing the thing
-  // you were trying to read.
+  // The NodeView exists for ONE reason: to keep `open` alive. See
+  // ignoreMutation below — without it ProseMirror treats the browser's own
+  // toggle as a dirty attribute mutation and re-renders the node from doc
+  // state, wiping it on every click. That, plus a CSS rule that force-showed
+  // the body, is why a toggle never collapsed.
   addNodeView() {
     return () => {
       const dom = document.createElement("details");
