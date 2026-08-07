@@ -151,7 +151,21 @@ test("System status renders the sandbox/landlock indicators", async () => {
   mockFetch();
   wrap();
   expect(await screen.findByText("on")).toBeInTheDocument();
-  expect(screen.getByText("ready")).toBeInTheDocument();
+  // Landlock reports its ABI alongside readiness — the page used to show two
+  // bare booleans while /healthz already knew the version, commit, ABI, coder
+  // mode and host-tool presence, and showed none of it to the operator.
+  expect(screen.getByText(/^ready/)).toBeInTheDocument();
+});
+
+test("System status reports the host tools and build identity", async () => {
+  mockFetch();
+  wrap();
+  await screen.findByText("on");
+  // Labels, not values: the fixture may report a tool either way, and what
+  // this pins is that the page ASKS about each one at all.
+  for (const label of ["Version", "Commit", "Coder mode", "Python 3", "ripgrep", "pdftotext", "tesseract"]) {
+    expect(screen.getByText(label)).toBeInTheDocument();
+  }
 });
 
 test("System status offers no editable settings", async () => {

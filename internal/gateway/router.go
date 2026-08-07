@@ -175,7 +175,7 @@ func (r *Router) Handle(ctx context.Context, msg Message, send func(string), del
 	case "remind":
 		return r.handleRemind(ctx, msg, arg, send)
 	case "run":
-		return r.handleRun(ctx, msg, arg, send)
+		return r.handleRun(ctx, msg, arg, send, sendProgress)
 	case "chat":
 		return r.handleChat(ctx, msg, arg, send)
 	case "memory":
@@ -536,7 +536,7 @@ func (r *Router) handleSkill(ctx context.Context, msg Message, arg string, send 
 	return nil
 }
 
-func (r *Router) handleRun(ctx context.Context, msg Message, arg string, send func(string)) error {
+func (r *Router) handleRun(ctx context.Context, msg Message, arg string, send func(string), sendProgress func(string)) error {
 	name := strings.TrimSpace(arg)
 	if name == "" {
 		send("Usage: /run <agent_name>")
@@ -562,8 +562,34 @@ func (r *Router) handleRun(ctx context.Context, msg Message, arg string, send fu
 		return nil
 	}
 
-	send(fmt.Sprintf("Running agent **%s**...", name))
-	return r.onAgentRun(ctx, msg.WorkspaceID, name, send)
+	// The running notice goes through sendProgress rather than send so it
+	// creates a placeholder whose message id is retained. That lets the
+	// finished state EDIT this line instead of leaving "Running agent…"
+	// stranded above (or, on a silent run, alone in) the conversation.
+	sendProgress(fmt.Sprintf("Running agent **%s**...", name))
+
+	delivered := false
+	track := func(text string) {
+		delivered = true
+		send(text)
+	}
+
+	if err := r.onAgentRun(ctx, msg.WorkspaceID, name, track); err != nil {
+		// The runner already delivered FriendlyRunError through SendOutput.
+		// Returning the error as well would make GatewayManager.dispatch append
+		// "An error occurred: …" — the same failure posted to the user twice.
+		if delivered {
+			return nil
+		}
+		return err
+	}
+	if !delivered {
+		// A [SILENT] run never reaches a SendOutput site — runCoderAgent's
+		// switch has no matching case — so without this the user is left
+		// looking at "Running agent…" forever with no idea the run finished.
+		sendProgress(fmt.Sprintf("✅ **%s** finished — no notification.", name))
+	}
+	return nil
 }
 
 // unfinishedDraftLine renders the workspace's in-progress draft as a list

@@ -18,8 +18,8 @@ const ENDPOINTS: DesignerEndpoints = {
 
 const LABELS: DesignerLabels = {
   steps: ["Describe", "Diagnose", "Build", "Review"],
-  buildButton: "🔨 Build it",
-  saveButton: "✅ Save agent",
+  buildButton: "Build it",
+  saveButton: "Save agent",
   entityName: "agent",
 };
 

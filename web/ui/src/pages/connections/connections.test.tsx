@@ -527,7 +527,12 @@ test("an unblocked tile opens the wizard directly", async () => {
   await user.click(await screen.findByRole("button", { name: /GitHub/ }));
   // Positive assertion: the wizard actually opened, not merely that the
   // blocked-tile dialog didn't.
-  expect(await screen.findByText("Connect GitHub")).toBeInTheDocument();
+  // Match the sheet's heading specifically: the wizard's submit button now
+  // carries the same words (its trailing "→" was removed, since the button
+  // already renders a lucide icon), so a bare text query matches both.
+  expect(
+    await screen.findByRole("heading", { name: "Connect GitHub" }),
+  ).toBeInTheDocument();
   expect(
     screen.queryByRole("button", { name: /Open anyway/ }),
   ).not.toBeInTheDocument();

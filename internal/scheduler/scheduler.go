@@ -10,6 +10,7 @@ import (
 
 	"github.com/ilijad1/rookery/internal/agentrunner"
 	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/gateway"
 	"github.com/ilijad1/rookery/internal/secrets"
 	"github.com/robfig/cron/v3"
 )
@@ -122,8 +123,17 @@ func (s *Scheduler) fire(ctx context.Context, sched *db.AgentSchedule, firedAt t
 	if s.sender != nil {
 		sender := s.sender
 		workspaceID := sched.WorkspaceID
+		// Label the notification with the agent that produced it. A workspace
+		// with several scheduled agents otherwise receives a stream of messages
+		// with nothing to say which one is speaking. Looked up here rather than
+		// inside the runner because the runner reuses SendOutput as a collector
+		// for child-agent recursion, whose text goes into an LLM prompt.
+		agentName := ""
+		if a, err := s.db.GetAgent(sched.AgentID); err == nil && a != nil {
+			agentName = a.Name
+		}
 		sendFn = func(msg string) {
-			_ = sender.SendToUser(workspaceID, msg)
+			_ = sender.SendToUser(workspaceID, gateway.AgentPrefixed(agentName, msg))
 		}
 	}
 

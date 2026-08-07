@@ -37,11 +37,12 @@ var md = goldmark.New(goldmark.WithExtensions(extension.GFM))
 // real on-disk directory, so Resolve, rename guards and isProtectedPath are
 // untouched by this.
 var kbSystemFolderLabels = map[string]string{
-	"notes":  "Notes",
-	"memory": "Memory",
-	"skills": "Skills",
-	"agents": "Agents",
-	"chats":  "Chats",
+	"notes":   "Notes",
+	"memory":  "Memory",
+	"skills":  "Skills",
+	"agents":  "Agents",
+	"chats":   "Chats",
+	"uploads": "Uploads",
 }
 
 func (s *Server) enrichKBDisplayNames(workspaceID, parentPath string, nodes []vault.Node) {

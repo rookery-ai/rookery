@@ -52,6 +52,19 @@ with sync_playwright() as p:
         "domain": "127.0.0.1", "path": "/", "httpOnly": True,
     }])
 
+    # Reset the note to a known baseline before anything else. The editor
+    # autosaves, so a previous run's toggle is still in the note on the next
+    # one — they accumulate, and every check here depends on the note's length
+    # and on where the caret lands, so the suite slowly goes flaky.
+    page.request.put(
+        BASE + "/api/v1/kb/note",
+        data={
+            "path": "notes/verify-long.md",
+            "content": "# Verify\n\n"
+            + "Filler paragraph for scroll testing.\n\n" * 60,
+        },
+    )
+
     page.goto(BASE + "/kb?path=" + NOTE)
     page.wait_for_selector(".note-editor-content .tiptap", timeout=20000)
     page.wait_for_timeout(900)
@@ -143,6 +156,84 @@ with sync_playwright() as p:
         "wheeling over the icon rail does not scroll the shell",
         after["top"] == 0 and after["rail"] == 0,
         f"documentElement.scrollTop={after['top']} railTop={after['rail']}",
+    )
+
+    # 3. A toggle list must actually collapse and expand.
+    #
+    # jsdom has no layout engine and no <details> semantics, so the vitest
+    # suite can only assert that the NodeView and CSS exist. Whether clicking
+    # the arrow hides the body is observable ONLY in a real browser, which is
+    # the whole reason this harness exists.
+    #
+    # Before the fix there was no NodeView at all: nothing ever set `open`, and
+    # ProseMirror's DOMObserver wiped the attribute if the browser set it, so
+    # the toggle was permanently expanded.
+    page.goto(BASE + "/kb?path=" + NOTE)
+    page.wait_for_selector(".note-editor-content .tiptap", timeout=20000)
+    page.wait_for_timeout(900)
+
+    page.click(".note-editor-content .tiptap")
+    page.keyboard.press("Control+End")
+    page.keyboard.press("Enter")
+    page.keyboard.type("/toggle")
+    page.wait_for_timeout(400)
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(300)
+
+    details = page.locator(".note-editor-content .tiptap details").last
+    check(
+        "a toggle inserted from the slash menu starts expanded",
+        details.evaluate("el => el.open") is True,
+        "details.open=%s" % details.evaluate("el => el.open"),
+    )
+    check(
+        "the toggle body starts as a bulleted list",
+        details.locator("ul li").count() >= 1,
+        "found %d list items" % details.locator("ul li").count(),
+    )
+
+    # Measure the <details> box itself, not its children: a closed <details>
+    # hides its body at the rendering ancestor, and its light-DOM children can
+    # still report a stale rect, so summing them proves nothing.
+    #
+    # Re-measure the summary before EVERY click. Collapsing removes the body
+    # from layout, which moves the summary — reusing the first box then clicks
+    # empty space, and a working toggle looks broken.
+    def click_summary_and_read(offset_from_left):
+        details.scroll_into_view_if_needed()
+        page.wait_for_timeout(150)
+        box = details.locator("summary").first.bounding_box()
+        x = (
+            box["x"] + offset_from_left
+            if offset_from_left >= 0
+            else box["x"] + box["width"] + offset_from_left
+        )
+        page.mouse.click(x, box["y"] + box["height"] / 2)
+        # Beyond the double-click threshold, so consecutive clicks at the same
+        # spot are independent activations, not a word-selecting dblclick.
+        page.wait_for_timeout(700)
+        return (
+            details.evaluate("el => el.open"),
+            details.evaluate("el => el.getBoundingClientRect().height"),
+        )
+
+    expanded_h = details.evaluate("el => el.getBoundingClientRect().height")
+    # Clicking the summary toggles, which is <summary>'s own native behaviour
+    # and what it does everywhere else. Both clicks are performed before
+    # asserting, so a failed first assertion cannot leave the toggle in a state
+    # that makes the second meaningless.
+    open1, h1 = click_summary_and_read(8)
+    open2, h2 = click_summary_and_read(8)
+
+    check(
+        "clicking the summary collapses the toggle body",
+        open1 is False and h1 < expanded_h,
+        f"open={open1} height {expanded_h} -> {h1}",
+    )
+    check(
+        "clicking it again expands the body",
+        open2 is True and h2 >= expanded_h,
+        f"open={open2} height={h2}",
     )
 
     browser.close()

@@ -108,5 +108,5 @@ test("the Build button appears after the first reply", async () => {
   await userEvent.type(box, "run it once a day");
   fireEvent.keyDown(box, { key: "Enter", code: "Enter" });
 
-  expect(await screen.findByRole("button", { name: "🔨 Build it" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "Build it" })).toBeInTheDocument();
 });

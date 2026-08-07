@@ -117,13 +117,16 @@ describe("slashItems run() against a headless editor", () => {
     },
   );
 
-  test("Toggle list inserts a toggle node with a summary and an empty body", () => {
+  test("Toggle list inserts a toggle with a summary and a bulleted body", () => {
     const editor = headlessEditor();
     findItem("Toggle list").run(editor);
     expect(editor.isActive("toggle")).toBe(true);
     const json = JSON.stringify(editor.getJSON());
     expect(json).toContain('"type":"toggle"');
     expect(json).toContain('"type":"toggleSummary"');
+    // A toggle is nearly always used to hide a list, so the body starts as one
+    // rather than as a bare paragraph the user has to convert by hand.
+    expect(json).toContain('"type":"bulletList"');
     editor.destroy();
   });
 

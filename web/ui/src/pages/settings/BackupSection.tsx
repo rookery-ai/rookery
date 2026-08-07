@@ -24,7 +24,7 @@ function errMsg(err: unknown) {
 
 function ErrorNote({ message }: { message: string }) {
   return (
-    <div className="flex items-center gap-2 rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">
+    <div className="flex items-center gap-2 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
       <AlertTriangle className="size-3.5 shrink-0" />
       {message}
     </div>
@@ -155,7 +155,7 @@ export function BackupSection() {
         <OwnerIcon slug="owner-backup" />
         <h2 className="text-lg font-bold">Backup</h2>
       </div>
-        <p className="mt-2 text-xs text-muted-2">Loading…</p>
+        <p className="mt-2 text-sm text-muted-2">Loading…</p>
       </div>
     );
   }
@@ -187,7 +187,7 @@ export function BackupSection() {
         <OwnerIcon slug="owner-backup" />
         <h2 className="text-lg font-bold">Backup</h2>
       </div>
-        <p className="mt-2 text-xs text-muted-2">Loading…</p>
+        <p className="mt-2 text-sm text-muted-2">Loading…</p>
       </div>
     );
   }
@@ -198,21 +198,21 @@ export function BackupSection() {
         <OwnerIcon slug="owner-backup" />
         <h2 className="text-lg font-bold">Backup</h2>
       </div>
-      <p className="mt-1 text-xs text-muted-2">
+      <p className="mt-1 text-sm text-muted-2">
         A snapshot covers every workspace — knowledge base, agents, skills,
         secrets and settings — in one encrypted file. Times are in the server's
         local timezone.
       </p>
 
       {data.pending_restore && (
-        <div className="mt-3 rounded-md bg-warning-soft px-3 py-2 text-xs text-warning">
+        <div className="mt-3 rounded-md bg-warn-soft px-3 py-2 text-sm text-warn">
           A restore is staged and will be applied the next time the server
           starts. Run <code>rookery backup cancel-restore</code> to abandon it.
         </div>
       )}
 
       {/* Status */}
-      <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-xs">
+      <dl className="mt-3 flex flex-wrap gap-x-8 gap-y-2 text-sm">
         <div>
           <dt className="text-muted-2">Last run</dt>
           <dd
@@ -251,7 +251,7 @@ export function BackupSection() {
 
       {/* Settings form */}
       <div className="mt-4 space-y-3">
-        <label className="flex items-center gap-2 text-xs">
+        <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
             checked={form.enabled}
@@ -261,10 +261,10 @@ export function BackupSection() {
         </label>
 
         <div className="flex flex-wrap gap-3">
-          <label className="text-xs">
+          <label className="text-sm">
             <span className="block text-muted-2">Destination</span>
             <select
-              className="mt-1 rounded-md border border-line bg-transparent px-2 py-1"
+              className="mt-1 rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-ring focus:ring-[3px] focus:ring-ring/50"
               value={form.destination}
               onChange={(e) =>
                 set("destination", e.target.value as "local" | "s3")
@@ -275,10 +275,10 @@ export function BackupSection() {
             </select>
           </label>
 
-          <label className="text-xs">
+          <label className="text-sm">
             <span className="block text-muted-2">Frequency</span>
             <select
-              className="mt-1 rounded-md border border-line bg-transparent px-2 py-1"
+              className="mt-1 rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-ring focus:ring-[3px] focus:ring-ring/50"
               value={form.schedule}
               onChange={(e) =>
                 set("schedule", e.target.value as "daily" | "weekly")
@@ -290,10 +290,10 @@ export function BackupSection() {
           </label>
 
           {form.schedule === "weekly" && (
-            <label className="text-xs">
+            <label className="text-sm">
               <span className="block text-muted-2">Day</span>
               <select
-                className="mt-1 rounded-md border border-line bg-transparent px-2 py-1"
+                className="mt-1 rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-ring focus:ring-[3px] focus:ring-ring/50"
                 value={form.weekday}
                 onChange={(e) => set("weekday", Number(e.target.value))}
               >
@@ -306,10 +306,10 @@ export function BackupSection() {
             </label>
           )}
 
-          <label className="text-xs">
+          <label className="text-sm">
             <span className="block text-muted-2">Hour (server local time)</span>
             <select
-              className="mt-1 rounded-md border border-line bg-transparent px-2 py-1"
+              className="mt-1 rounded-md border border-border bg-background px-2 py-1 text-sm outline-none focus:border-ring focus:ring-[3px] focus:ring-ring/50"
               value={form.hour}
               onChange={(e) => set("hour", Number(e.target.value))}
             >
@@ -321,7 +321,7 @@ export function BackupSection() {
             </select>
           </label>
 
-          <label className="text-xs">
+          <label className="text-sm">
             <span className="block text-muted-2">Keep last</span>
             <Input
               type="number"
@@ -334,7 +334,7 @@ export function BackupSection() {
         </div>
 
         {form.destination === "local" ? (
-          <label className="block text-xs">
+          <label className="block text-sm">
             <span className="block text-muted-2">Backup folder</span>
             <Input
               className="mt-1"
@@ -345,7 +345,7 @@ export function BackupSection() {
           </label>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
-            <label className="text-xs">
+            <label className="text-sm">
               <span className="block text-muted-2">Bucket</span>
               <Input
                 className="mt-1"
@@ -353,7 +353,7 @@ export function BackupSection() {
                 onChange={(e) => set("s3Bucket", e.target.value)}
               />
             </label>
-            <label className="text-xs">
+            <label className="text-sm">
               <span className="block text-muted-2">Region</span>
               <Input
                 className="mt-1"
@@ -361,7 +361,7 @@ export function BackupSection() {
                 onChange={(e) => set("s3Region", e.target.value)}
               />
             </label>
-            <label className="text-xs">
+            <label className="text-sm">
               <span className="block text-muted-2">
                 Endpoint (blank for AWS)
               </span>
@@ -372,7 +372,7 @@ export function BackupSection() {
                 onChange={(e) => set("s3Endpoint", e.target.value)}
               />
             </label>
-            <label className="text-xs">
+            <label className="text-sm">
               <span className="block text-muted-2">Prefix</span>
               <Input
                 className="mt-1"
@@ -381,7 +381,7 @@ export function BackupSection() {
                 onChange={(e) => set("s3Prefix", e.target.value)}
               />
             </label>
-            <label className="text-xs">
+            <label className="text-sm">
               <span className="block text-muted-2">Access key</span>
               <Input
                 className="mt-1"
@@ -389,7 +389,7 @@ export function BackupSection() {
                 onChange={(e) => set("s3AccessKey", e.target.value)}
               />
             </label>
-            <label className="text-xs">
+            <label className="text-sm">
               <span className="block text-muted-2">
                 Secret key{" "}
                 {data.s3.secret_key_set && (
@@ -405,7 +405,7 @@ export function BackupSection() {
                 autoComplete="new-password"
               />
             </label>
-            <label className="flex items-center gap-2 text-xs sm:col-span-2">
+            <label className="flex items-center gap-2 text-sm sm:col-span-2">
               <input
                 type="checkbox"
                 checked={form.s3PathStyle}
@@ -421,19 +421,20 @@ export function BackupSection() {
         {/* Passphrase */}
         <div>
           {data.passphrase_set && !changingPassphrase ? (
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex items-center gap-2 text-sm">
               <ShieldCheck className="size-3.5 text-ok" />
               <span>Passphrase is set.</span>
-              <button
+              <Button
                 type="button"
-                className="underline text-muted-2"
+                variant="link"
+                className="h-auto p-0 text-muted-2"
                 onClick={() => setChangingPassphrase(true)}
               >
                 Change
-              </button>
+              </Button>
             </div>
           ) : (
-            <label className="block text-xs">
+            <label className="block text-sm">
               <span className="block text-muted-2">Encryption passphrase</span>
               <Input
                 className="mt-1"
@@ -444,12 +445,12 @@ export function BackupSection() {
               />
             </label>
           )}
-          <p className="mt-1 text-xs text-danger">
+          <p className="mt-1 text-sm text-danger">
             Write this down. It is the only way to recover your data — nobody
             can reset it for you.
           </p>
           {data.passphrase_set && (
-            <p className="mt-1 text-xs text-muted-2">
+            <p className="mt-1 text-sm text-muted-2">
               Changing it does not re-encrypt existing snapshots; each stays
               readable with the passphrase in force when it was written.
             </p>
@@ -457,7 +458,7 @@ export function BackupSection() {
         </div>
 
         {save.isError && <ErrorNote message={errMsg(save.error)} />}
-        {notice && <p className="text-xs text-ok">{notice}</p>}
+        {notice && <p className="text-sm text-ok">{notice}</p>}
 
         <div className="flex gap-2">
           <Button onClick={onSave} disabled={save.isPending}>
@@ -483,16 +484,16 @@ export function BackupSection() {
       {/* Snapshots */}
       {configured && (
         <div className="mt-5">
-          <h4 className="text-xs font-bold text-muted-2">Snapshots</h4>
+          <h4 className="text-xs font-bold tracking-wide text-muted-2 uppercase">Snapshots</h4>
           {snapshots.isError && (
             <div className="mt-2">
               <ErrorNote message={errMsg(snapshots.error)} />
             </div>
           )}
           {snapshots.data?.length === 0 && (
-            <p className="mt-2 text-xs text-muted-2">No snapshots yet.</p>
+            <p className="mt-2 text-sm text-muted-2">No snapshots yet.</p>
           )}
-          <ul className="mt-2 divide-y divide-line text-xs">
+          <ul className="mt-2 divide-y divide-border text-sm">
             {snapshots.data?.map((s) => (
               <li
                 key={s.name}
@@ -500,27 +501,38 @@ export function BackupSection() {
               >
                 <span className="font-mono">{s.name}</span>
                 <span className="text-muted-2">{formatBytes(s.size)}</span>
+                {/* Real Buttons, not underlined text: these are actions, and
+                    one of them opens a destructive restore. As raw elements
+                    they also missed the variant's own icon sizing, which is
+                    why the icons were hand-set to size-3.5. */}
                 <span className="ml-auto flex items-center gap-2">
-                  <a
-                    className="underline text-muted-2"
-                    href={`/api/v1/backup/snapshots/${encodeURIComponent(s.name)}/download`}
-                  >
-                    <Download className="inline size-3.5" /> Download
-                  </a>
-                  <button
+                  <Button asChild variant="outline" size="sm">
+                    <a
+                      href={`/api/v1/backup/snapshots/${encodeURIComponent(s.name)}/download`}
+                    >
+                      <Download />
+                      Download
+                    </a>
+                  </Button>
+                  <Button
                     type="button"
-                    className="underline text-muted-2"
+                    variant="outline"
+                    size="sm"
                     onClick={() => setRestoreTarget(s.name)}
                   >
+                    <HardDriveUpload />
                     Restore from snapshot
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     type="button"
-                    className="underline text-danger"
+                    variant="outline"
+                    size="sm"
+                    className="text-danger"
                     onClick={() => del.mutate(s.name)}
                   >
-                    <Trash2 className="inline size-3.5" /> Delete
-                  </button>
+                    <Trash2 />
+                    Delete
+                  </Button>
                 </span>
               </li>
             ))}
@@ -531,16 +543,16 @@ export function BackupSection() {
       {/* Restore dialog */}
       {restoreTarget && (
         <div className="mt-4 rounded-md border border-danger p-3">
-          <p className="text-xs font-medium text-danger">
+          <p className="text-sm font-medium text-danger">
             Restore {restoreTarget}? This replaces the database and every
             workspace vault.
           </p>
-          <p className="mt-1 text-xs text-muted-2">
+          <p className="mt-1 text-sm text-muted-2">
             The current data is moved aside into a <code>.pre-restore-*</code>{" "}
             folder first.
           </p>
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            <label className="text-xs">
+            <label className="text-sm">
               <span className="block text-muted-2">Passphrase</span>
               <Input
                 className="mt-1"
@@ -550,7 +562,7 @@ export function BackupSection() {
                 autoComplete="new-password"
               />
             </label>
-            <label className="text-xs">
+            <label className="text-sm">
               <span className="block text-muted-2">
                 Type RESTORE to confirm
               </span>
@@ -568,7 +580,7 @@ export function BackupSection() {
             </div>
           )}
           {restore.data && (
-            <p className="mt-2 text-xs text-warning">{restore.data.message}</p>
+            <p className="mt-2 text-sm text-warn">{restore.data.message}</p>
           )}
           <div className="mt-2 flex gap-2">
             <Button

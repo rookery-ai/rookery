@@ -213,6 +213,12 @@ func serveCmd() *cli.Command {
 			if err := vlt.MigrateSessionsToChats(); err != nil {
 				slog.Warn("vault sessions→chats migration", "err", err)
 			}
+			// Rename files/ → uploads/ and rewrite the two references every
+			// imported note carries into it. Runs before anything serves the
+			// tree, or a note's "Converted from" link would 404.
+			if err := vlt.MigrateFilesToUploads(); err != nil {
+				slog.Warn("vault files→uploads migration", "err", err)
+			}
 			// Sweep inbox/ notes written by builds that still reflected
 			// notifications into the vault. The rows they projected are still in
 			// inbox_messages; only the projection is gone.
@@ -471,7 +477,14 @@ func serveCmd() *cli.Command {
 			// MasterPw is empty here — agents without secret injection still run.
 			// Phase 7 adds a session-stored master password.
 			agentRunHandler := func(ctx context.Context, workspaceID, agentName string, send func(string)) error {
-				return runner.RunByName(ctx, workspaceID, agentName, "", send)
+				// Label the reply with the agent that produced it, at the send
+				// site rather than inside the runner: runCoderAgent reuses
+				// SendOutput as a collector for child-agent recursion, and that
+				// text is fed into the PARENT agent's LLM prompt.
+				labelled := func(msg string) {
+					send(gateway.AgentPrefixed(agentName, msg))
+				}
+				return runner.RunByName(ctx, workspaceID, agentName, "", labelled)
 			}
 
 			// The SAME skillFlow instance the web layer uses — two would each hold

@@ -376,7 +376,7 @@ export function ServiceWizard({
                 <Link2 />
                 {connectAPIKeyMutation.isPending
                   ? "Connecting…"
-                  : `Connect ${provider.label} →`}
+                  : `Connect ${provider.label}`}
               </Button>
             </div>
           </div>
@@ -566,7 +566,7 @@ export function ServiceWizard({
                   <Link2 />
                   {connectServiceMutation.isPending
                     ? "Connecting…"
-                    : `Connect ${provider.label} →`}
+                    : `Connect ${provider.label}`}
                 </Button>
               </div>
             </div>

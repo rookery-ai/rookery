@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -235,4 +236,98 @@ func drainInto(srcDir, dstDir string) error {
 	}
 	_ = os.Remove(srcDir) // if now empty
 	return nil
+}
+
+// legacyFilesDir is the pre-rename name of FilesDir. It exists only so
+// MigrateFilesToUploads can still find installs that use it.
+const legacyFilesDir = "files"
+
+// MigrateFilesToUploads renames the legacy per-workspace `files/` directory to
+// `uploads/` and rewrites the note references that point into it.
+//
+// The rename alone is not enough. renderImportedNote embeds the original's path
+// TWICE in every imported note — once as `original_file: "files/x.pdf"` in the
+// frontmatter and once as a `[x.pdf](files/x.pdf)` body link — so renaming the
+// directory without rewriting them orphans both in every note the user ever
+// imported.
+//
+// The rewrite is deliberately scoped to those two exact emitted patterns rather
+// than a blind `files/` → `uploads/` replace, which would corrupt any note whose
+// prose happens to mention such a path (an agent's notes about a repo, say).
+//
+// Idempotent and safe on every startup: it acts only while a `files/` directory
+// or a stale reference still exists.
+func (v *Vault) MigrateFilesToUploads() error {
+	users, err := os.ReadDir(v.VaultsDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	migrated, rewritten := 0, 0
+	for _, u := range users {
+		if !u.IsDir() {
+			continue
+		}
+		workspaceID := u.Name()
+		root := v.Root(workspaceID)
+
+		src := filepath.Join(root, legacyFilesDir)
+		dst := filepath.Join(root, FilesDir)
+		if _, err := os.Stat(src); err == nil {
+			if _, err := os.Stat(dst); err != nil {
+				if err := os.Rename(src, dst); err != nil {
+					slog.Warn("vault: migrate files→uploads", "workspace", workspaceID, "err", err)
+				} else {
+					migrated++
+				}
+			} else {
+				// Both exist: drain files/ into uploads/, never clobbering.
+				_ = drainInto(src, dst)
+			}
+		}
+
+		rewritten += rewriteUploadRefs(root)
+	}
+	if migrated > 0 || rewritten > 0 {
+		slog.Info("vault: renamed files/ to uploads/", "dirs", migrated, "notes_rewritten", rewritten)
+	}
+	return nil
+}
+
+// rewriteUploadRefs rewrites the two references renderImportedNote emits, across
+// every markdown note under root, and reports how many notes changed.
+func rewriteUploadRefs(root string) int {
+	changed := 0
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // tolerate unreadable entries
+		}
+		if d.IsDir() {
+			if p != root && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(strings.ToLower(d.Name()), ".md") {
+			return nil
+		}
+		b, readErr := os.ReadFile(p)
+		if readErr != nil {
+			return nil
+		}
+		orig := string(b)
+		updated := strings.ReplaceAll(orig,
+			`original_file: "`+legacyFilesDir+`/`, `original_file: "`+FilesDir+`/`)
+		updated = strings.ReplaceAll(updated,
+			"]("+legacyFilesDir+"/", "]("+FilesDir+"/")
+		if updated != orig {
+			if err := os.WriteFile(p, []byte(updated), 0o640); err == nil {
+				changed++
+			}
+		}
+		return nil
+	})
+	return changed
 }

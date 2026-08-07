@@ -672,7 +672,14 @@ function TreeRow({
                 : selected
                   ? "bg-border"
                   : "hover:bg-chrome",
-              isEffectivelySystem(node) && "text-muted-2",
+              // No `text-muted-2` for system dirs. Muting them made Agents,
+              // Chats and Skills read as disabled beside Memory and Notes,
+              // which are the same kind of thing to a user — a folder they
+              // open. isEffectivelySystem still gates the DRAG rules below
+              // (reorder, move-into) and reorder persistence, which is why the
+              // predicate itself must stay: those folders are DB-backed and
+              // must not be rearranged. Rename/Delete are withheld separately
+              // by isProtectedPath, so nothing destructive is exposed here.
             )}
           >
             {node.is_dir ? (
