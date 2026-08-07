@@ -238,7 +238,9 @@ func TestBuildKBContextExcludesChatsAndAgentState(t *testing.T) {
 // designer's limited passage budget. The notes/ copy must still be found.
 func TestBuildKBContextExcludesFilesDir(t *testing.T) {
 	v, ws := seedDesignerVault(t)
-	if err := v.WriteNote(ws, "files/report.csv", []byte(
+	// Uses the FilesDir constant rather than a literal, so the exclusion keeps
+	// being tested against the real directory name after a rename.
+	if err := v.WriteNote(ws, FilesDir+"/report.csv", []byte(
 		"item,cost\nzzqinvoice77,4500\n",
 	)); err != nil {
 		t.Fatalf("write preserved original: %v", err)
@@ -251,8 +253,8 @@ func TestBuildKBContextExcludesFilesDir(t *testing.T) {
 
 	got := BuildKBContext(v, ws, "zzqinvoice77")
 
-	if strings.Contains(got, "files/report.csv") {
-		t.Errorf("files/ (the preserved original) must be excluded from designer retrieval, got:\n%s", got)
+	if strings.Contains(got, FilesDir+"/report.csv") {
+		t.Errorf("%s/ (the preserved original) must be excluded from designer retrieval, got:\n%s", FilesDir, got)
 	}
 	if !strings.Contains(got, "notes/report.md") {
 		t.Errorf("the converted notes/ copy must still be found, got:\n%s", got)

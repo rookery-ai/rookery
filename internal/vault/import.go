@@ -14,7 +14,17 @@ import (
 )
 
 // FilesDir is the vault folder holding preserved original uploads.
-const FilesDir = "files"
+//
+// Named "uploads" rather than "files": it holds everything the user uploaded,
+// from a chat-app attachment as much as from the web UI, and the KB editor's
+// image/attachment picker writes here too. It is displayed as "Uploads" via
+// kbSystemFolderLabels — the on-disk name stays lowercase like every other
+// system folder (notes, memory, skills, agents, chats).
+//
+// Installs created before this carried "files"; MigrateFilesToUploads renames
+// the directory and rewrites the two places renderImportedNote embeds the
+// path into every imported note.
+const FilesDir = "uploads"
 
 // ErrSystemDir is returned by ImportFile when DestDir (after cleaning)
 // targets a system-managed area (.kb, chats/, agents/). This is a property

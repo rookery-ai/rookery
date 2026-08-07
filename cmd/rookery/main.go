@@ -213,6 +213,12 @@ func serveCmd() *cli.Command {
 			if err := vlt.MigrateSessionsToChats(); err != nil {
 				slog.Warn("vault sessions→chats migration", "err", err)
 			}
+			// Rename files/ → uploads/ and rewrite the two references every
+			// imported note carries into it. Runs before anything serves the
+			// tree, or a note's "Converted from" link would 404.
+			if err := vlt.MigrateFilesToUploads(); err != nil {
+				slog.Warn("vault files→uploads migration", "err", err)
+			}
 			// Sweep inbox/ notes written by builds that still reflected
 			// notifications into the vault. The rows they projected are still in
 			// inbox_messages; only the projection is gone.

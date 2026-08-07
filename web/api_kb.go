@@ -177,7 +177,11 @@ func (s *Server) apiUploadKBAsset(c echo.Context) error {
 		return jsonErr(c, http.StatusBadRequest, "invalid_request", "could not read the upload")
 	}
 
-	rel := path.Join("assets", assetName(fh.Filename))
+	// Editor images and attachments are uploads too, so they land in the same
+	// uploads/ folder as every other ingest door rather than a second folder of
+	// their own. assetName already appends four random bytes, so this cannot
+	// collide with the originals ImportFile writes here via uniquePath.
+	rel := path.Join(vault.FilesDir, assetName(fh.Filename))
 	if err := s.vault.WriteNote(u.ID, rel, data); err != nil {
 		status, code := vaultErrStatus(err)
 		return jsonErr(c, status, code, "could not store asset: "+err.Error())
@@ -354,7 +358,16 @@ func (s *Server) apiKBFolders(c echo.Context) error {
 	if err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", "could not list folders: "+err.Error())
 	}
-	return c.JSON(http.StatusOK, map[string]any{"folders": orEmpty(folders)})
+	// Hidden in the tree, so it must be hidden here too — otherwise the legacy
+	// assets/ folder is only half-hidden and still selectable as a destination.
+	visible := make([]string, 0, len(folders))
+	for _, f := range folders {
+		if f == legacyAssetsDir {
+			continue
+		}
+		visible = append(visible, f)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"folders": orEmpty(visible)})
 }
 
 // ── Tree ordering ────────────────────────────────────────────────────────────
@@ -441,6 +454,29 @@ func (s *Server) apiSaveKBOrder(c echo.Context) error {
 // protectedTopDirs and kbSystemFolderLabels: notifications and reminders are no
 // longer reflected into the vault, so the platform does not own those names and
 // a user folder called "inbox" is the user's own knowledge, not chrome.
+// legacyAssetsDir is the folder editor images used to land in before uploads/
+// consolidated every ingest door. Nothing writes to it any more.
+//
+// It is HIDDEN rather than migrated: existing notes reference their images as
+// `![](assets/foo.png)`, and those keep resolving because /kb/raw goes through
+// vault.Resolve, never the tree listing. Rewriting image references across
+// every user note is the only change in this area with real corruption risk,
+// and it buys nothing once the folder is out of sight.
+//
+// Hiding also closes a latent hazard: `assets` was marked system:true but was
+// absent from both protectedTopDirs and the SPA's PROTECTED_TOP_DIRS, so a user
+// could rename or delete it and orphan every image link in the vault.
+const legacyAssetsDir = "assets"
+
+// isHiddenLegacyAssetsDir reports whether a tree/folder entry is the legacy
+// root-level assets/ directory.
+//
+// Root-level ONLY: skills keep their own skills/<name>/assets/ directory
+// (skillstore.go), and a blanket name match would hide those too.
+func isHiddenLegacyAssetsDir(isRoot bool, name string, isDir bool) bool {
+	return isRoot && isDir && name == legacyAssetsDir
+}
+
 var kbSystemDirs = map[string]bool{
 	"agents": true, "chats": true, "memory": true,
 	"skills": true, "assets": true,
@@ -582,6 +618,9 @@ func (s *Server) apiKBTree(c echo.Context) error {
 	isRoot := rel == ""
 	out := make([]apiKBNode, 0, len(nodes))
 	for _, n := range nodes {
+		if isHiddenLegacyAssetsDir(isRoot, n.Name, n.IsDir) {
+			continue
+		}
 		display := n.DisplayName
 		if display == "" {
 			display = n.Name
