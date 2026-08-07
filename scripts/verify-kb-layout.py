@@ -145,6 +145,74 @@ with sync_playwright() as p:
         f"documentElement.scrollTop={after['top']} railTop={after['rail']}",
     )
 
+    # 3. A toggle list must actually collapse and expand.
+    #
+    # jsdom has no layout engine and no <details> semantics, so the vitest
+    # suite can only assert that the NodeView and CSS exist. Whether clicking
+    # the arrow hides the body is observable ONLY in a real browser, which is
+    # the whole reason this harness exists.
+    #
+    # Before the fix there was no NodeView at all: nothing ever set `open`, and
+    # ProseMirror's DOMObserver wiped the attribute if the browser set it, so
+    # the toggle was permanently expanded.
+    page.click(".note-editor-content .tiptap")
+    page.keyboard.press("Control+End")
+    page.keyboard.press("Enter")
+    page.keyboard.type("/toggle")
+    page.wait_for_timeout(400)
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(300)
+
+    details = page.locator(".note-editor-content .tiptap details").last
+    check(
+        "a toggle inserted from the slash menu starts expanded",
+        details.evaluate("el => el.open") is True,
+        "details.open=%s" % details.evaluate("el => el.open"),
+    )
+    check(
+        "the toggle body starts as a bulleted list",
+        details.locator("ul li").count() >= 1,
+        "found %d list items" % details.locator("ul li").count(),
+    )
+
+    def body_height():
+        return details.evaluate(
+            "el => { const kids = [...el.children].filter(c => c.tagName !== 'SUMMARY');"
+            "        return kids.reduce((h, c) => h + c.getBoundingClientRect().height, 0); }"
+        )
+
+    expanded_h = body_height()
+    summary = details.locator("summary").first
+    sbox = summary.bounding_box()
+    # Click the ARROW, not the title: only the arrow zone toggles, so that
+    # clicking the title can still place a caret to edit it.
+    page.mouse.click(sbox["x"] + 8, sbox["y"] + sbox["height"] / 2)
+    page.wait_for_timeout(250)
+    collapsed_h = body_height()
+    check(
+        "clicking the arrow collapses the toggle body",
+        details.evaluate("el => el.open") is False and collapsed_h < expanded_h,
+        f"open={details.evaluate('el => el.open')} height {expanded_h} -> {collapsed_h}",
+    )
+
+    page.mouse.click(sbox["x"] + 8, sbox["y"] + sbox["height"] / 2)
+    page.wait_for_timeout(250)
+    check(
+        "clicking the arrow again expands it",
+        details.evaluate("el => el.open") is True and body_height() >= expanded_h,
+        f"open={details.evaluate('el => el.open')} height={body_height()}",
+    )
+
+    # Clicking the TITLE must not toggle — otherwise the summary cannot be
+    # edited without collapsing the thing you are reading.
+    page.mouse.click(sbox["x"] + sbox["width"] - 12, sbox["y"] + sbox["height"] / 2)
+    page.wait_for_timeout(250)
+    check(
+        "clicking the title places a caret instead of toggling",
+        details.evaluate("el => el.open") is True,
+        "open=%s" % details.evaluate("el => el.open"),
+    )
+
     browser.close()
 
 if failures:

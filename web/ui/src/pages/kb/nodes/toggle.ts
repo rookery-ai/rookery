@@ -1,5 +1,11 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 
+// Width of the disclosure arrow's clickable zone, measured from the summary's
+// left edge. Must match the `summary::before` box in editor.css: too wide and
+// clicking the first character of the title collapses the toggle instead of
+// placing a caret.
+const ARROW_HIT_PX = 22;
+
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
     kbToggle: {
@@ -109,6 +115,67 @@ export const Toggle = Node.create({
     // instead (see editor.css).
     return ["details", mergeAttributes(HTMLAttributes), 0];
   },
+  // The disclosure arrow's clickable zone, measured from the summary's left
+  // edge, and kept in step with the `summary::before` box in editor.css.
+  //
+  // Only this zone toggles. Making the whole summary toggle would mean you
+  // could not click into the title to edit it without collapsing the thing
+  // you were trying to read.
+  addNodeView() {
+    return ({ editor }) => {
+      const dom = document.createElement("details");
+      // Editor-only state, held on the DOM and nowhere else.
+      //
+      // `open` is deliberately NOT a node attribute and NOT in renderHTML:
+      // tiptap-markdown's HTML fallback writes every rendered attribute back
+      // into the saved markdown, so it leaked as `<details open="">` and
+      // force-expanded the toggle forever. Keeping it here means the
+      // serializer never sees it, fidelity is untouched, and toggling
+      // dispatches no transaction (so it cannot dirty the note or trigger an
+      // autosave for state the format cannot store).
+      //
+      // The trade-off, stated plainly: open/closed is not persisted. Markdown
+      // has nowhere to put it, so a toggle opens expanded and collapses only
+      // for the current session.
+      dom.open = true;
+
+      dom.addEventListener("click", (event) => {
+        // A read-only note (failed checkFidelity, not yet opted into editing)
+        // still mounts NodeViews — same guard kbImage's resize handle uses.
+        if (!editor.isEditable) return;
+        const target = event.target as HTMLElement | null;
+        const summary = target?.closest?.("summary");
+        if (!summary || !dom.contains(summary)) return;
+        if (event.clientX - summary.getBoundingClientRect().left > ARROW_HIT_PX) return;
+        event.preventDefault();
+        dom.open = !dom.open;
+      });
+
+      return {
+        dom,
+        // contentDOM is the <details> itself so <summary> stays a DIRECT
+        // child. The markdown serializer stringifies the summary's own DOM,
+        // so any wrapper element invented here would land in the saved note
+        // and break every toggle fidelity test.
+        contentDOM: dom,
+        // Keep this DOM across updates instead of letting ProseMirror destroy
+        // and rebuild the NodeView, which would reset `open` to true. Content
+        // edits are applied through contentDOM by ProseMirror itself, so there
+        // is nothing to re-render here; without this, typing in the summary of
+        // a COLLAPSED toggle would pop it open on each keystroke.
+        update: (node: { type: { name: string } }) => node.type.name === "toggle",
+        // Without this, ProseMirror's DOMObserver sees the `open` attribute
+        // change, finds a contentDOM (so the base ignoreMutation returns
+        // false), marks the node dirty and re-renders it from doc state —
+        // wiping `open` on every single click. This is the reason a plain
+        // <details> in the editor never collapsed.
+        // Typed structurally rather than as MutationRecord: ProseMirror's
+        // ViewMutationRecord is a union that also carries a synthetic
+        // {type:"selection"} record, which MutationRecord does not describe.
+        ignoreMutation: (mutation: { type: string }) => mutation.type === "attributes",
+      };
+    };
+  },
   addCommands() {
     return {
       setToggle:
@@ -118,7 +185,15 @@ export const Toggle = Node.create({
             type: this.name,
             content: [
               { type: "toggleSummary", content: [{ type: "text", text: "Toggle" }] },
-              { type: "paragraph" },
+              // A bulleted body, not a bare paragraph: a toggle is nearly
+              // always used to hide a list, and every candidate bullet form
+              // was verified to round-trip through checkFidelity before this
+              // changed (a body that is not a fixed point would make the
+              // first save open the note read-only).
+              {
+                type: "bulletList",
+                content: [{ type: "listItem", content: [{ type: "paragraph" }] }],
+              },
             ],
           }),
     };

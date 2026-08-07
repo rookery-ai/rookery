@@ -147,28 +147,51 @@
   margin-bottom: 0.5em;
 }
 
-/* Toggle lists (<details>/<summary>). renderHTML deliberately omits the
-   `open` attribute (it would round-trip into the saved markdown, force-
-   expanding the toggle forever), so this rule keeps the body visible while
-   editing regardless of the (absent) open state. */
+/* Toggle lists (<details>/<summary>).
+
+   `open` is owned by the node's NodeView (nodes/toggle.ts) as editor-only DOM
+   state — renderHTML still omits it, so it can never round-trip into the saved
+   markdown and force-expand the toggle forever.
+
+   An earlier revision carried `details > *:not(summary) { display: block }` to
+   keep the body visible "regardless of the (absent) open state". That rule is
+   what made the toggle non-collapsible, and it never worked as described
+   anyway: a closed <details> is hidden at the rendering ancestor (the UA's
+   shadow slot / ::details-content), not by styling light-DOM children, so
+   display:block on a child cannot un-hide a subtree whose flat-tree parent is
+   hidden. It is gone.
+
+   jsdom has no layout engine and no <details> semantics, so nothing in the
+   vitest suite can assert that clicking actually collapses the body — see
+   scripts/verify-kb-layout.py, which drives a real browser and does. */
 .note-editor-content .tiptap details {
   border: 1px solid var(--color-border);
   border-radius: 0.375rem;
   padding: 0.5em 0.75em;
 }
+/* Hide the UA's own marker and draw our own, so the arrow is a known box the
+   NodeView's hit test (ARROW_HIT_PX) can be kept in step with. */
 .note-editor-content .tiptap details > summary {
   cursor: pointer;
   font-weight: 600;
+  list-style: none;
+  display: flex;
+  align-items: baseline;
+  gap: 0.375em;
 }
-/* Author-origin CSS beats the UA's own (non-!important) closed-details
-   rule, so this is architecturally sound, but — like the KB shell/scroll
-   declarations documented in scrollcontainment.test.tsx — jsdom has no
-   layout engine, so nothing in this test suite can assert that a closed
-   <details> actually renders its body open. Unverified by automated tests;
-   check by hand (or via scripts/verify-kb-layout.py-style browser
-   verification) after touching this rule. */
-.note-editor-content .tiptap details > *:not(summary) {
-  display: block;
+.note-editor-content .tiptap details > summary::-webkit-details-marker {
+  display: none;
+}
+.note-editor-content .tiptap details > summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 1em;
+  flex: 0 0 1em;
+  color: var(--color-muted-2);
+  transition: transform 120ms ease;
+}
+.note-editor-content .tiptap details[open] > summary::before {
+  transform: rotate(90deg);
 }
 
 /* Image resize handle. The NodeView wraps the <img> in this span so the

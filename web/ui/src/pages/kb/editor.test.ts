@@ -412,6 +412,27 @@ test("a toggle inserted via setToggle() and saved immediately round trips", () =
   ).toBe(true);
 });
 
+// setToggle inserts a BULLETED body, so these are the forms a freshly inserted
+// toggle actually serializes to. They are pinned because a body that is not a
+// fidelity fixed point would make the very first save open the note read-only
+// — the failure mode is invisible until a user hits it, and it hits everyone.
+test("a toggle with a bulleted body round-trips", () => {
+  // Straight after insertion: one empty item, which serializes to a bare dash.
+  expect(
+    checkFidelity("<details>\n<summary>Toggle</summary>\n\n-\n\n</details>\n"),
+  ).toBe(true);
+  expect(
+    checkFidelity("<details>\n<summary>Toggle</summary>\n\n- First item\n\n</details>\n"),
+  ).toBe(true);
+  expect(
+    checkFidelity("<details>\n<summary>Toggle</summary>\n\n- One\n- Two\n\n</details>\n"),
+  ).toBe(true);
+  // A list followed by prose — the body is `block+`, not a single list.
+  expect(
+    checkFidelity("<details>\n<summary>Toggle</summary>\n\n- One\n\nAfter.\n\n</details>\n"),
+  ).toBe(true);
+});
+
 test("a toggle with a multi-paragraph body round-trips", () => {
   expect(
     checkFidelity(
