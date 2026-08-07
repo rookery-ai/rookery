@@ -169,8 +169,9 @@
   border-radius: 0.375rem;
   padding: 0.5em 0.75em;
 }
-/* Hide the UA's own marker and draw our own, so the arrow is a known box the
-   NodeView's hit test (ARROW_HIT_PX) can be kept in step with. */
+/* Hide the UA's own marker and draw our own, so the disclosure arrow follows
+   the app's own type and colour rather than the platform's default triangle.
+   It rotates off `[open]`, which the NodeView keeps alive. */
 .note-editor-content .tiptap details > summary {
   cursor: pointer;
   font-weight: 600;

@@ -52,6 +52,19 @@ with sync_playwright() as p:
         "domain": "127.0.0.1", "path": "/", "httpOnly": True,
     }])
 
+    # Reset the note to a known baseline before anything else. The editor
+    # autosaves, so a previous run's toggle is still in the note on the next
+    # one — they accumulate, and every check here depends on the note's length
+    # and on where the caret lands, so the suite slowly goes flaky.
+    page.request.put(
+        BASE + "/api/v1/kb/note",
+        data={
+            "path": "notes/verify-long.md",
+            "content": "# Verify\n\n"
+            + "Filler paragraph for scroll testing.\n\n" * 60,
+        },
+    )
+
     page.goto(BASE + "/kb?path=" + NOTE)
     page.wait_for_selector(".note-editor-content .tiptap", timeout=20000)
     page.wait_for_timeout(900)
@@ -155,6 +168,10 @@ with sync_playwright() as p:
     # Before the fix there was no NodeView at all: nothing ever set `open`, and
     # ProseMirror's DOMObserver wiped the attribute if the browser set it, so
     # the toggle was permanently expanded.
+    page.goto(BASE + "/kb?path=" + NOTE)
+    page.wait_for_selector(".note-editor-content .tiptap", timeout=20000)
+    page.wait_for_timeout(900)
+
     page.click(".note-editor-content .tiptap")
     page.keyboard.press("Control+End")
     page.keyboard.press("Enter")
@@ -175,42 +192,48 @@ with sync_playwright() as p:
         "found %d list items" % details.locator("ul li").count(),
     )
 
-    def body_height():
-        return details.evaluate(
-            "el => { const kids = [...el.children].filter(c => c.tagName !== 'SUMMARY');"
-            "        return kids.reduce((h, c) => h + c.getBoundingClientRect().height, 0); }"
+    # Measure the <details> box itself, not its children: a closed <details>
+    # hides its body at the rendering ancestor, and its light-DOM children can
+    # still report a stale rect, so summing them proves nothing.
+    #
+    # Re-measure the summary before EVERY click. Collapsing removes the body
+    # from layout, which moves the summary — reusing the first box then clicks
+    # empty space, and a working toggle looks broken.
+    def click_summary_and_read(offset_from_left):
+        details.scroll_into_view_if_needed()
+        page.wait_for_timeout(150)
+        box = details.locator("summary").first.bounding_box()
+        x = (
+            box["x"] + offset_from_left
+            if offset_from_left >= 0
+            else box["x"] + box["width"] + offset_from_left
+        )
+        page.mouse.click(x, box["y"] + box["height"] / 2)
+        # Beyond the double-click threshold, so consecutive clicks at the same
+        # spot are independent activations, not a word-selecting dblclick.
+        page.wait_for_timeout(700)
+        return (
+            details.evaluate("el => el.open"),
+            details.evaluate("el => el.getBoundingClientRect().height"),
         )
 
-    expanded_h = body_height()
-    summary = details.locator("summary").first
-    sbox = summary.bounding_box()
-    # Click the ARROW, not the title: only the arrow zone toggles, so that
-    # clicking the title can still place a caret to edit it.
-    page.mouse.click(sbox["x"] + 8, sbox["y"] + sbox["height"] / 2)
-    page.wait_for_timeout(250)
-    collapsed_h = body_height()
-    check(
-        "clicking the arrow collapses the toggle body",
-        details.evaluate("el => el.open") is False and collapsed_h < expanded_h,
-        f"open={details.evaluate('el => el.open')} height {expanded_h} -> {collapsed_h}",
-    )
+    expanded_h = details.evaluate("el => el.getBoundingClientRect().height")
+    # Clicking the summary toggles, which is <summary>'s own native behaviour
+    # and what it does everywhere else. Both clicks are performed before
+    # asserting, so a failed first assertion cannot leave the toggle in a state
+    # that makes the second meaningless.
+    open1, h1 = click_summary_and_read(8)
+    open2, h2 = click_summary_and_read(8)
 
-    page.mouse.click(sbox["x"] + 8, sbox["y"] + sbox["height"] / 2)
-    page.wait_for_timeout(250)
     check(
-        "clicking the arrow again expands it",
-        details.evaluate("el => el.open") is True and body_height() >= expanded_h,
-        f"open={details.evaluate('el => el.open')} height={body_height()}",
+        "clicking the summary collapses the toggle body",
+        open1 is False and h1 < expanded_h,
+        f"open={open1} height {expanded_h} -> {h1}",
     )
-
-    # Clicking the TITLE must not toggle — otherwise the summary cannot be
-    # edited without collapsing the thing you are reading.
-    page.mouse.click(sbox["x"] + sbox["width"] - 12, sbox["y"] + sbox["height"] / 2)
-    page.wait_for_timeout(250)
     check(
-        "clicking the title places a caret instead of toggling",
-        details.evaluate("el => el.open") is True,
-        "open=%s" % details.evaluate("el => el.open"),
+        "clicking it again expands the body",
+        open2 is True and h2 >= expanded_h,
+        f"open={open2} height={h2}",
     )
 
     browser.close()

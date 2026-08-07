@@ -1,10 +1,5 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 
-// Width of the disclosure arrow's clickable zone, measured from the summary's
-// left edge. Must match the `summary::before` box in editor.css: too wide and
-// clicking the first character of the title collapses the toggle instead of
-// placing a caret.
-const ARROW_HIT_PX = 22;
 
 declare module "@tiptap/core" {
   interface Commands<ReturnType> {
@@ -122,7 +117,7 @@ export const Toggle = Node.create({
   // could not click into the title to edit it without collapsing the thing
   // you were trying to read.
   addNodeView() {
-    return ({ editor }) => {
+    return () => {
       const dom = document.createElement("details");
       // Editor-only state, held on the DOM and nowhere else.
       //
@@ -139,17 +134,19 @@ export const Toggle = Node.create({
       // for the current session.
       dom.open = true;
 
-      dom.addEventListener("click", (event) => {
-        // A read-only note (failed checkFidelity, not yet opted into editing)
-        // still mounts NodeViews — same guard kbImage's resize handle uses.
-        if (!editor.isEditable) return;
-        const target = event.target as HTMLElement | null;
-        const summary = target?.closest?.("summary");
-        if (!summary || !dom.contains(summary)) return;
-        if (event.clientX - summary.getBoundingClientRect().left > ARROW_HIT_PX) return;
-        event.preventDefault();
-        dom.open = !dom.open;
-      });
+      // Toggling itself is left to <summary>'s own native activation
+      // behaviour, which needs no JavaScript at all. That was never the
+      // broken part: ProseMirror was UNDOING it (see ignoreMutation below),
+      // and a CSS rule force-showed the body regardless of `open`.
+      //
+      // A click handler restricting the toggle to the arrow — so that
+      // clicking the title placed a caret without collapsing — was tried and
+      // removed: it never fired in a real browser (verified with an
+      // instrumented page; the NodeView mounts, but the listener's
+      // preventDefault never reached the event), and shipping a handler that
+      // does nothing is worse than the native behaviour it failed to modify.
+      // Clicking the summary anywhere therefore toggles, which is what a
+      // <details> does everywhere else and what a reader expects.
 
       return {
         dom,

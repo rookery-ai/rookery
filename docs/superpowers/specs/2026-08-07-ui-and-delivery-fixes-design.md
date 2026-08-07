@@ -502,12 +502,21 @@ Add a NodeView holding `open` as **editor-only DOM state**:
   (`state.render(node.firstChild, …)`), so any invented wrapper markup would break every
   fidelity test.
 - `ignoreMutation: (m) => m.type === "attributes"` — without it, PM's redraw wipes `open`.
-- A click handler toggles `open` only when the click lands in the **arrow region**
-  (`e.clientX - summary.getBoundingClientRect().left < ARROW_HIT_PX`), with the native
-  marker hidden and our own arrow drawn via `summary::before`. Toggling on the whole
-  summary would make it impossible to click into the title to edit it.
-- `if (!editor.isEditable) return` — the established guard from `kbImage.ts:129`, since a
-  read-only note still mounts NodeViews.
+- Toggling itself is left to `<summary>`'s **native activation behaviour**, which needs no
+  JavaScript. That was never the broken part — ProseMirror was undoing it, and the CSS was
+  force-showing the body regardless of `open`.
+- The UA marker is hidden and the arrow drawn via `summary::before`, rotating off `[open]`,
+  so the disclosure control follows the app's own type and colour.
+
+**Amended after browser verification.** The design originally restricted toggling to an
+arrow hit-zone, so that clicking the title placed a caret without collapsing. That handler
+was implemented and then **removed**: instrumented in a real browser, the NodeView mounts
+(a marker attribute confirms it) but the listener's `preventDefault` never reaches the
+event, and every observed toggle came from the native behaviour instead. Shipping a
+handler that demonstrably does nothing is worse than the native behaviour it failed to
+modify, so clicking the summary anywhere toggles — which is what a `<details>` does
+everywhere else. Recorded here rather than silently dropped, because the next person to
+want arrow-only behaviour should know it was tried and why it was not kept.
 
 `renderHTML` and the markdown serializer are **not touched**, so fidelity risk is zero and
 no transaction is dispatched (no spurious autosave).
