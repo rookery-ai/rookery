@@ -112,7 +112,7 @@ image pushes.**
      is the project's only end-to-end coverage.**
 5. **Run the same checks locally first** with `make ci` — it mirrors the gate
    exactly, including the cross-compile matrix. `make ci-fmt` / `ci-vet` /
-   `ci-test` / `ci-cross` / `ci-ui` run the pieces individually.
+   `ci-test` / `ci-cross` / `ci-ui` / `ci-docs` run the pieces individually.
 6. **Squash-merge.** release-please then maintains a release PR on `main`.
 7. **Merging the release PR** tags the repo, which fires
    `.github/workflows/release.yml`: goreleaser publishes binaries, `.deb`/`.rpm`,
