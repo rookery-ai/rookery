@@ -137,6 +137,7 @@ Measured from source on 2026-08-10, independently of both the old README and
 | Curated actions | **471** | `grep -h '^  - name:' internal/connectors/connectors/*.yaml` |
 | Bundled core skills | **22** | `ls -d internal/skilllibrary/skills/*/` |
 | User-facing CLI commands | **7** | `serve`, `owner`, `backup`, `connector`, `kb`, `healthcheck`, `version` |
+| Public `ROOKERY_` variables | **9** | 14 in source, less the 5 subprocess-injected — see gate 4 |
 
 There is no `rookery db migrate`. Migrations apply automatically when the
 database opens.
@@ -169,7 +170,7 @@ Self-hosted AI agents that run on your own machine, around the clock.
 
 [ architecture.svg ]
 
-## Configuration         the eight public ROOKERY_ variables
+## Configuration         the nine public ROOKERY_ variables
 ## Platform support      the existing four-row table
 ## Health                /healthz, and why a python3 warning is not cosmetic
 ## Documentation         → rookery.cloud/docs
@@ -196,9 +197,11 @@ would put two different "real" transcripts in front of the same reader.
 
 ### Voice rules
 
-- Prose says **Rookery**, capitalised. This is not only style — see the CLI gate
-  below, where a lowercase `rookery` followed by an ordinary English word fails
-  the build.
+- Prose says **Rookery**, capitalised, because it is a proper noun. This is a
+  style rule and nothing more. An earlier draft of this spec justified it by the
+  `check_cli` gate below; that justification is withdrawn — the gate's prose
+  over-match is a defect its author is fixing, and prose should not be bent
+  around a checker. Lowercase `rookery` mid-sentence would also be acceptable.
 - No `N+` counts. Say 91, not "100+". The site's two "100+ services" claims are
   being corrected to 91 by the parallel session for the same reason.
 - Every claim is measured, never copied forward from the old README or from
@@ -273,19 +276,46 @@ they exist because the README was wrong by half.
 
 **3 — `check_cli`.** For each of `CLAUDE.md` and `README.md`, every match of
 `rookery ([a-z][a-z-]+)` must be a `Name:` string declared in `cmd/rookery`.
-**This is the trap.** The regex does not know prose from a command line, so
-`rookery reads your vault` fails on `reads`. Capitalising the brand in prose —
-`Rookery reads your vault` — is what keeps the gate green. `rookery.cloud` is
-safe: the regex requires a literal space.
+
+As first written this over-matched: the regex cannot tell an invocation from a
+sentence, so `rookery reads your vault` would fail on `reads`. It passes today
+only because no such sentence exists in either file — and a README rewritten in
+the site's voice is precisely a file full of them. Reported to the checker's
+author, who agreed it is a defect rather than a hazard to route around and is
+**restricting the scan to code contexts** (backtick spans and fenced blocks)
+before wiring the gate into `make ci`. That preserves the real detection — the
+`rookery db migrate` case that motivated the check lived inside a ```bash fence —
+while making prose structurally incapable of false-firing.
+
+**Verify before relying on it.** That fix is a commitment, not yet a landed
+commit. At implementation time, confirm the narrowed scan is present in
+`scripts/check-docs-sync.py`; if it is not, run `make docs-sync-check` against
+the drafted README and treat any prose hit as the checker's bug to fix, not the
+README's wording to change. `rookery.cloud` is safe either way — the regex
+requires a literal space.
 
 **4 — `check_env`.** Asserts the **website's**
 `src/content/docs/docs/operations/configuration.md` documents every public
 `ROOKERY_` variable, where "public" is source-derived minus
 `scripts/docs-sync-internal-env.txt`. The README is not gated by this one, but
-its Configuration table should agree with the website's, and the fourteen
-`ROOKERY_` names in source include internal ones (`ROOKERY_BUILD_PHASE`,
-`ROOKERY_CONNECTOR_URL`/`_TOKEN`, `ROOKERY_KB_URL`/`_TOKEN`, `ROOKERY_CLAUDE_BIN`)
-that are set by the host for subprocesses and are not user configuration.
+its Configuration table should agree with the website's.
+
+**Fourteen `ROOKERY_` names appear in source: five internal, nine public.** The
+internal five — `ROOKERY_BUILD_PHASE`, `ROOKERY_CONNECTOR_URL`/`_TOKEN`,
+`ROOKERY_KB_URL`/`_TOKEN` — are *written into* a subprocess environment by the
+host and are never operator-set. The distinguishing test is the direction of the
+call: an internal variable is assigned into `extraEnv` (e.g.
+`agentrunner/runner.go:419`), while a public one is read with `os.Getenv` in
+`internal/config`.
+
+By that test **`ROOKERY_CLAUDE_BIN` is public**, not internal — it is read at
+`internal/config/config.go:133`, structurally identically to `ROOKERY_HOST`, and
+overrides the coder binary path. An earlier draft of this spec listed it as
+internal; that was wrong.
+
+This matters for Part B: the README's current Configuration table has **eight**
+rows and omits `ROOKERY_CLAUDE_BIN` entirely. The restructured table carries all
+**nine**.
 
 ## Sequencing
 
@@ -326,6 +356,11 @@ Ownership of `README.md` and of the rename is ours.
   carries `rookery.cloud`.
 - Every count in the README is re-measured against source at implementation
   time, not copied from this spec.
+- The Configuration table lists exactly the nine public `ROOKERY_` variables,
+  cross-checked against the website's `operations/configuration.md` so the two
+  cannot drift.
+- `check_cli`'s narrowed, code-context-only scan is confirmed present before the
+  README's prose is judged against it.
 - Both SVGs render in GitHub's light and dark themes without a font dependency.
 
 ## Out of scope
