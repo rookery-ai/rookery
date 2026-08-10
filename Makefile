@@ -82,6 +82,13 @@ status:
 test:
 	go test ./... -count=1 -timeout $(GOTEST_TIMEOUT)
 
+## docs-sync-check: assert the docs agree with the source (both repos)
+docs-sync-check:
+	python3 scripts/check-docs-sync.py
+
+docs-sync-selftest:
+	python3 scripts/check-docs-sync.py --selftest
+
 ## clean: remove the built binary
 clean:
 	rm -f $(BIN)
