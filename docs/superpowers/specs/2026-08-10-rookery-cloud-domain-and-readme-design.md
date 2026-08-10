@@ -241,10 +241,18 @@ the site are visibly the same product:
 
 Two constraints on the SVG itself:
 
-- **Text is converted to paths, or the banner is drawn without live text.**
-  GitHub sanitises SVG and does not load remote fonts, so a `font-family: Inter`
-  reference falls back to whatever the viewer has. The banner must not depend on
-  a font being present.
+- **Live `<text>` with a system font stack, styled by presentation attributes.**
+  GitHub does not load remote fonts, so naming Inter would silently fall back to
+  whatever the viewer happens to have. Converting the wordmark to outlines is the
+  usual answer and is **not available here**: that needs a rasterizer or font
+  tooling this host does not have, and hand-authoring eight glyphs as béziers
+  with no way to render and check them would be worse than the problem. So the
+  files use live text with
+  `ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif`
+  — no remote dependency, legible everywhere, at the cost of not being Inter
+  exactly. Styling is by attribute rather than a `<style>` block, which GitHub's
+  SVG sanitiser may strip. If outlining tooling is installed later, converting
+  the wordmark is a clean follow-on.
 - **The palette is light-committed, matching the site's own decision** to have no
   dark mode on the landing page. Both files paint an explicit `--bone` background
   rather than relying on transparency, so they do not invert or wash out against
