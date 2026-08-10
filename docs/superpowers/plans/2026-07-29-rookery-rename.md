@@ -988,7 +988,7 @@ This is the moment the rename is proven complete. Do not add exemptions to `allo
 - `bin/simple-agents` → `bin/rookery`; `<data_dir>/simple-agents.pid` → `rookery.pid`; `db/simple-agents.db` → `rookery.db`; `.sa_out` → `.rookery_out`; `.sab` → `.rkb`; `sa.paneWidth` → `rookery.paneWidth`.
 - The sentence recording that `SA_TEMPLATES_DIR`/`SA_STATIC_DIR` config is gone: keep the fact, drop the dead variable names, so the file no longer contains a legacy token.
 - The `internal/backup` row's `.sab` mention → `.rkb`.
-- Add one line under **Distribution** recording the project name and that `rookery.sh` is the documented `ROOKERY_PUBLIC_URL` example for installs whose LAN hostname fails OAuth redirect validation.
+- Add one line under **Distribution** recording the project name and that `rookery.cloud` is the documented `ROOKERY_PUBLIC_URL` example for installs whose LAN hostname fails OAuth redirect validation.
 
 Leave the OAuth callback path exactly as written — it is frozen.
 
@@ -1257,7 +1257,7 @@ The image is slim: it ships no CLI coder binary and sets
 
 `ROOKERY_PUBLIC_URL` matters more than it looks: OAuth providers reject redirect
 URIs on non-public hostnames, so a `.lan` address fails Google's validation. Use
-a real hostname — `rookery.sh` is the documented example — or `http://localhost`.
+a real hostname — `rookery.cloud` is the documented example — or `http://localhost`.
 
 ## Platform support
 
@@ -1309,7 +1309,7 @@ The current description predates the workspace model, the connector layer and th
 ```bash
 gh repo edit ilijad1/rookery \
   --description 'Self-hosted AI agents that live on your knowledge base and act through your connected services' \
-  --homepage 'https://rookery.sh' \
+  --homepage 'https://rookery.cloud' \
   --add-topic ai-agents \
   --add-topic self-hosted \
   --add-topic golang \
@@ -1344,7 +1344,7 @@ Spec: `docs/superpowers/specs/2026-07-29-rookery-rename-design.md`
 - **Repository description and topics** — the old description predated the
   workspace model, the connector layer and the SPA.
 
-Deferred to a follow-on "go public" spec: the docs site on rookery.sh,
+Deferred to a follow-on "go public" spec: the docs site on rookery.cloud,
 `install.sh`/`install.ps1`, the Homebrew tap, making the GHCR package public,
 and flipping repository visibility.
 

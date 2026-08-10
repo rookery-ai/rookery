@@ -7,7 +7,7 @@ auth:
 # so a descriptive one is mandatory rather than polite. Found by live verification —
 # every action 403'd until this was set. See https://w.wiki/4wJS.
 static_headers:
-  User-Agent: "Rookery/1.0 (https://rookery.sh; self-hosted personal assistant)"
+  User-Agent: "Rookery/1.0 (https://rookery.cloud; self-hosted personal assistant)"
 setup_url: https://www.mediawiki.org/wiki/API:REST_API
 setup_steps:
   - "Wikipedia needs no account and no API key — press Connect."

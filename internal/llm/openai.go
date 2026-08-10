@@ -58,7 +58,7 @@ func (p *openaiProvider) Complete(ctx context.Context, req Request) (*Response, 
 	}
 	// OpenRouter accepts extra headers; harmless to others.
 	if p.name == "openrouter" {
-		headers["HTTP-Referer"] = "https://rookery.sh"
+		headers["HTTP-Referer"] = "https://rookery.cloud"
 		headers["X-Title"] = "Rookery"
 	}
 
