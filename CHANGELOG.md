@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.4.0](https://github.com/ilijad1/rookery/compare/v0.3.2...v0.4.0) (2026-08-07)
+## [0.4.0](https://github.com/ilijad1/rookery/compare/v0.3.2...v0.4.0) (2026-08-10)
 
 
 ### Features
@@ -8,6 +8,11 @@
 * **kb:** editor formatting, image resize, and AI selection actions ([#109](https://github.com/ilijad1/rookery/issues/109)) ([782f2ee](https://github.com/ilijad1/rookery/commit/782f2ee3c86e0efb9b980f6354dd17d7c121bdc1))
 * **ui:** adopt the Rookery brand identity and ember accent ([#110](https://github.com/ilijad1/rookery/issues/110)) ([29244ae](https://github.com/ilijad1/rookery/commit/29244ae4a7128dfe1a8827a8d1dca03a68656f0a))
 * **ui:** agent identity in chat, uploads consolidation, and reported UI fixes ([#111](https://github.com/ilijad1/rookery/issues/111)) ([8dae3db](https://github.com/ilijad1/rookery/commit/8dae3db0c598ecb0c02493a1226b677ef2401815))
+
+
+### Documentation
+
+* website landing page and documentation design ([#113](https://github.com/ilijad1/rookery/issues/113)) ([b40292e](https://github.com/ilijad1/rookery/commit/b40292e749086a6b9908797f98382d0c25850f90))
 
 ## [0.3.2](https://github.com/ilijad1/rookery/compare/v0.3.1...v0.3.2) (2026-08-06)
 
