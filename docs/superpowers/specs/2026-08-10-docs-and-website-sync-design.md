@@ -25,8 +25,14 @@ source in the same commit:
 | "reach 45 external services" | `README.md:6` | 91 |
 | "45 providers, ~272 curated actions" | `README.md:45` | 91 providers, 471 actions |
 | Zoom listed among the providers | `CLAUDE.md:260` | removed; no `zoom.yaml` exists |
+| `./bin/rookery db migrate` documented | `CLAUDE.md` | no `db` or `migrate` subcommand is registered |
 | "100+ services" | `rookery-web/src/pages/index.astro:380` | 91 |
 | 124 brand logos | product `web/ui/src/assets/logos/` | website carries 126 |
+
+The last of those is the sharpest illustration: the website correctly states
+that there is no separate migration command, while `CLAUDE.md` gives the command
+line for one. Two surfaces contradict each other outright, and the surface that
+is wrong is the one an agent reads first.
 
 The two numeric errors point in opposite directions — the README understates the
 product by half, the landing page overstates it — which is the signature of
@@ -73,6 +79,12 @@ one line naming the affected website pages.
 Silence is the default, and any failure is silent too — the same discipline as
 the existing `cbm-code-discovery-gate` hook, which never blocks a call and exits
 0 on every error path.
+
+The hook is **best-effort, and its silence proves nothing**. An edit made
+through `Bash` — a `sed` invocation, a Python one-liner — never matches an
+`Edit|Write` matcher and produces no reminder. The hook exists to catch the
+common path cheaply, not to be the gate; that is layer 3's job, and it is the
+reason layer 3 is the one wired into `make ci`.
 
 A blanket `Stop` hook was rejected. It would fire on every Go edit in the
 repository, become noise within a week, and be disabled — which is worse than
@@ -232,8 +244,21 @@ The mechanism proves itself on its first run by fixing what already drifted:
 - `README.md:6` — 45 external services becomes 91.
 - `README.md:45` — 45 providers and ~272 actions becomes 91 and ~471.
 - `CLAUDE.md:260` — Zoom leaves the provider list.
+- `CLAUDE.md` — the `db migrate` command is removed, and the automatic-on-open
+  behaviour stated instead, matching `reference/cli.md`.
 - `index.astro:380` — "100+ services" becomes a claim that is true.
-- The 126-against-124 logo difference is reconciled, or recorded as intended.
+
+The logo difference needs no reconciliation: the website's two extra files are
+`claude.svg` and `cursor.svg`, coder marks shown on the landing page that have no
+connector provider behind them. This is why the logo assertion is coverage
+rather than set equality.
+
+**Reconciliation lands before the gate.** The claims table asserts `README.md`'s
+provider count, and `README.md` is wrong today. Wiring `make docs-sync-check`
+into `make ci` first would turn the next unrelated pull request red for
+pre-existing drift, and the cheapest way out of that is to weaken the assertion —
+which is how a gate dies in its first week. Reconciliation commit first, `make
+ci` wiring second.
 
 ## What this does not do
 
