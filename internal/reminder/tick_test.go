@@ -29,7 +29,7 @@ func (s *stubSender) SendToUser(workspaceID, text string) error {
 // No platform identity is created — that is the condition under test.
 func tickTestDB(t *testing.T) (*db.DB, string, string) {
 	t.Helper()
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../../migrations")
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

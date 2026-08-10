@@ -3,12 +3,14 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"unicode"
 
+	"github.com/ilijad1/rookery/migrations"
 	_ "modernc.org/sqlite"
 )
 
@@ -18,8 +20,12 @@ type DB struct {
 }
 
 // Open opens (or creates) the SQLite database at path, applies WAL+FK pragmas,
-// and runs any pending migrations from migrationsDir.
-func Open(path, migrationsDir string) (*DB, error) {
+// and runs any pending migrations.
+//
+// The migrations are compiled into the binary (see the root migrations package),
+// not read from disk: the deb, rpm and release archives ship the binary alone, so
+// a disk lookup failed on first use for every packaged install.
+func Open(path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
@@ -39,11 +45,9 @@ func Open(path, migrationsDir string) (*DB, error) {
 
 	d := &DB{sqldb}
 
-	if migrationsDir != "" {
-		if err := d.migrate(migrationsDir); err != nil {
-			d.Close()
-			return nil, err
-		}
+	if err := d.migrate(); err != nil {
+		d.Close()
+		return nil, err
 	}
 
 	return d, nil
@@ -79,7 +83,7 @@ func min(a, b int) int {
 	return b
 }
 
-func (d *DB) migrate(dir string) error {
+func (d *DB) migrate() error {
 	// Ensure the migrations tracker table exists.
 	if _, err := d.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
 		name TEXT PRIMARY KEY,
@@ -88,9 +92,9 @@ func (d *DB) migrate(dir string) error {
 		return fmt.Errorf("create migrations table: %w", err)
 	}
 
-	entries, err := os.ReadDir(dir)
+	entries, err := fs.ReadDir(migrations.FS, ".")
 	if err != nil {
-		return fmt.Errorf("read migrations dir: %w", err)
+		return fmt.Errorf("read embedded migrations: %w", err)
 	}
 
 	var files []string
@@ -110,7 +114,7 @@ func (d *DB) migrate(dir string) error {
 			continue
 		}
 
-		data, err := os.ReadFile(filepath.Join(dir, name))
+		data, err := fs.ReadFile(migrations.FS, name)
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}

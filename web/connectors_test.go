@@ -10,7 +10,7 @@ import (
 )
 
 func TestSaveConnectorStoresConfigForMultiField(t *testing.T) {
-	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../migrations")
+	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestSaveConnectorStoresConfigForMultiField(t *testing.T) {
 }
 
 func TestTestConnectorUsesSpecValidate(t *testing.T) {
-	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../migrations")
+	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

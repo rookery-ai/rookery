@@ -17,7 +17,7 @@ func TestPrimaryPlatformSettingKeyIsStable(t *testing.T) {
 }
 
 func TestResolveDeliveryOrderPrefersPrimary(t *testing.T) {
-	database, err := db.Open(filepath.Join(t.TempDir(), "t.db"), "../../migrations")
+	database, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

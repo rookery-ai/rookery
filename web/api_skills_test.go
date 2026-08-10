@@ -24,7 +24,7 @@ func newAPITestServerWithSkills(t *testing.T) (*Server, *db.DB) {
 	t.Helper()
 	t.Setenv("ROOKERY_SYSTEM_KEY", strings.Repeat("ab", 32))
 	dir := t.TempDir()
-	database, err := db.Open(filepath.Join(dir, "test.db"), "../migrations")
+	database, err := db.Open(filepath.Join(dir, "test.db"))
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
 	}

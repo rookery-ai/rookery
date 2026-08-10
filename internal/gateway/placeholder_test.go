@@ -68,7 +68,7 @@ func (r *recordingRouter) Handle(ctx context.Context, msg Message, send func(str
 
 func newDispatchHarness(t *testing.T, run func(send, sendProgress func(string))) (*GatewayManager, *fakeTypingGateway) {
 	t.Helper()
-	database, err := db.Open(filepath.Join(t.TempDir(), "t.db"), "../../migrations")
+	database, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

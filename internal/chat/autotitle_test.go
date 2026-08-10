@@ -53,7 +53,7 @@ func TestSanitizeTitle(t *testing.T) {
 // internal/db's own tests (e.g. inboxTestDB in internal/db/inbox_test.go).
 func newTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../../migrations")
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

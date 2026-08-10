@@ -32,7 +32,7 @@ CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || command -v docker 2
 GOTEST_TIMEOUT ?= 900s
 
 .PHONY: ui build-go build stop start deploy restart logs status clean test \
-        ci ci-fmt ci-vet ci-test ci-cross ci-ui docker-build docker-run
+        ci ci-fmt ci-vet ci-test ci-cross ci-ui ci-package docker-build docker-run
 
 ## ui: build the SPA (web/ui/dist) — requires node; run before `build`
 ui:
@@ -113,6 +113,15 @@ ci-cross:
 
 ci-ui:
 	cd web/ui && npm ci && npx tsc -b && npm run lint && npx vitest run
+
+## ci-package: build a goreleaser snapshot and smoke-test the deb, rpm and tar.gz
+##
+## Deliberately NOT part of `make ci`: a snapshot rebuilds the SPA and all six
+## binaries, so it runs in minutes rather than seconds. Run it when touching
+## packaging, the Dockerfile, or anything the binary reads at startup.
+ci-package:
+	goreleaser release --clean --snapshot --skip=sign,sbom
+	CONTAINER_ENGINE=$(CONTAINER_ENGINE) scripts/smoke-package.sh dist
 
 ## docker-build: build the slim container image locally (podman or docker)
 docker-build:

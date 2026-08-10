@@ -68,10 +68,6 @@ RUN groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --create-home --home-dir /home/app app
 
 COPY --from=build /out/rookery /usr/bin/rookery
-# Beside the binary on purpose: resolveDir() looks EXE-relative first and only
-# then falls back to a CWD-relative path, so this is found no matter what
-# working directory the container is started with.
-COPY migrations /usr/bin/migrations
 
 # HOME must sit inside the volume: the per-workspace claude-homes trees live
 # under the data dir and must be writable and persistent.

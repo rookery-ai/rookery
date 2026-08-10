@@ -15,7 +15,7 @@ import (
 // same bot" or "a different bot" without any network call.
 func uniqueBotFixture(t *testing.T, platform string) (*Server, string, string) {
 	t.Helper()
-	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../migrations")
+	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
