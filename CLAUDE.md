@@ -86,6 +86,28 @@ AST guardrail tests shell out to `python3`. If Python is not available, those te
   it's OK to `make deploy` from the feature branch locally before the PR merges —
   that's for testing, not production.
 
+## Documentation sync
+
+Four surfaces describe this project and each can be wrong without anything
+failing: `README.md`, `CLAUDE.md`, the documentation site and the landing page
+(both in `ilijad1/rookery-web`, checked out at `~/rookery-web`).
+
+**Before opening a pull request, use the `docs-sync` skill.** It holds the
+change-to-page trigger map and the cross-repository procedure. A change that
+alters a connector provider, a `ROOKERY_*` variable, a CLI subcommand, a core
+skill, a chat adapter, a backup destination, an `/api/v1` route or a packaging
+target has a documentation obligation in both repositories.
+
+`make docs-sync-check` mechanises the checkable half — counts, variable
+names, command names, provider names, logo coverage — against the source
+rather than against other prose, and runs inside `make ci` (`ci-docs`); it
+skips website assertions when `~/rookery-web` is absent. It does not check
+whether a paragraph describes a feature correctly.
+
+Verify every claim against source, never against another document. The
+provider count in `README.md` once drifted for months because it was copied
+forward instead of measured.
+
 ## CI/CD and release process
 
 **Every change ships through this path. There are no manual tags and no manual
