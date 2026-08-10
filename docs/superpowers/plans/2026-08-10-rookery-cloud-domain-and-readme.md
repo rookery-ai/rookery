@@ -1005,7 +1005,28 @@ ls -d internal/skilllibrary/skills/*/ | wc -l
 
 Cross-check each against the README text. A number that has drifted since Task 7 means a connector or skill landed mid-flight — update the README and re-run Task 8 Step 2.
 
-- [ ] **Step 4: Open PR 2**
+- [ ] **Step 4: Confirm the Configuration table carries every public variable**
+
+The checker's author is adding an assertion that the README's table row set matches source-minus-allowlist, so a tenth public variable added later cannot quietly miss the table. That gate may land before or after this PR; check it directly either way:
+
+```bash
+python3 - <<'PY'
+import re, pathlib, subprocess
+src = set(subprocess.run(
+    ["grep","-rhoE","ROOKERY_[A-Z_]+","--include=*.go","internal/","cmd/"],
+    capture_output=True, text=True).stdout.split())
+internal = {"ROOKERY_BUILD_PHASE","ROOKERY_CONNECTOR_URL","ROOKERY_CONNECTOR_TOKEN",
+            "ROOKERY_KB_URL","ROOKERY_KB_TOKEN"}
+table = set(re.findall(r"\| `(ROOKERY_[A-Z_]+)`", pathlib.Path("README.md").read_text()))
+public = src - internal
+print("missing from the README table:", sorted(public - table) or "none")
+print("in the table but not in source:", sorted(table - public) or "none")
+PY
+```
+
+Expected: both `none`. If a name is missing, add a row — this is the exact defect the restructure exists to fix, since the old table omitted `ROOKERY_CLAUDE_BIN` outright. If `internal` needs updating, read the variable's usage first: a variable assigned into `extraEnv` for a subprocess is internal; one read with `os.Getenv` in `internal/config` is public.
+
+- [ ] **Step 5: Open PR 2**
 
 Title: `docs: restructure the README onto the website's shape`
 
