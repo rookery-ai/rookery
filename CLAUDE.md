@@ -36,8 +36,8 @@ go test -v ./internal/agentdesigner/... -run TestFlow
 # Reset the owner password (single-owner model, no login required)
 ./bin/rookery owner reset-password -p <new-password>
 
-# Database migration
-./bin/rookery db migrate
+# Migrations are applied automatically when the database is opened —
+# there is no separate migration command.
 
 # Deploy / restart the server (build + run in background, logs to logs/server.log)
 make deploy    # stop existing server, rebuild, start in background

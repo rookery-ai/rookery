@@ -255,6 +255,49 @@ def _env_selftest() -> None:
 check_env.selftest = _env_selftest
 
 
+def declared_cli_names() -> set[str]:
+    """Every Name: string in cmd/rookery — commands and flags alike.
+
+    Deliberately does not distinguish the two. See the plan: reconstructing the
+    command tree from source is unreliable, and a flag name in the set only ever
+    makes this check more permissive, never wrong in the failing direction.
+    """
+    d = product_root() / "cmd" / "rookery"
+    blob = "\n".join(read(p) for p in sorted(d.glob("*.go")))
+    return set(re.findall(r'Name:\s*"([^"]+)"', blob))
+
+
+@register
+def check_cli() -> None:
+    declared = declared_cli_names()
+    web = web_root()
+    if web is not None:
+        path = web / "src/content/docs/docs/reference/cli.md"
+        for m in re.finditer(r"^## (\S+)", read(path), re.M):
+            if m.group(1) not in declared:
+                fail("cli", f"reference/cli.md documents '{m.group(1)}', which no source file declares")
+    # Product docs invoke commands inline. A command named here that does not
+    # exist is how CLAUDE.md came to document `rookery db migrate`.
+    for rel in ("CLAUDE.md", "README.md"):
+        text = read(product_root() / rel)
+        for m in re.finditer(r"rookery ([a-z][a-z-]+)\b", text):
+            word = m.group(1)
+            if word not in declared:
+                line = text[: m.start()].count("\n") + 1
+                fail("cli", f"{rel}:{line} invokes 'rookery {word}', which no source file declares")
+
+
+def _cli_selftest() -> None:
+    declared = {"serve", "owner", "backup", "dir"}
+    documented = ["serve", "owner", "backup", "db"]
+    missing = [d for d in documented if d not in declared]
+    assert missing == ["db"], "must flag a documented command the source never declares"
+    assert "serve" in declared, "a real command must not be flagged"
+
+
+check_cli.selftest = _cli_selftest
+
+
 def selftest() -> int:
     """Run each assertion's inline cases against synthetic input.
 
