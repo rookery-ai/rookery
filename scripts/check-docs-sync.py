@@ -125,10 +125,11 @@ def _flex_ws(pattern: str) -> str:
 # skills claim lives in the `description:` field of concepts/skills.md, not in
 # its prose, and a body-only scan would match nothing and pass silently.
 CLAIMS = [
-    ("product", "README.md", r"reach (\d+) external services", "providers"),
-    ("product", "README.md", r"\*\*Connectors\*\* — (\d+) providers", "providers"),
-    ("product", "README.md", r"providers, ~(\d+) curated actions", "actions"),
-    ("product", "README.md", r"reusable capability documents, (\d+) bundled", "skills"),
+    ("product", "README.md", r"reaches (\d+) external services", "providers"),
+    ("product", "README.md", r"credentials you own: (\d+) providers", "providers"),
+    ("product", "README.md", r"providers and (\d+) curated actions", "actions"),
+    ("product", "README.md", r"\*\*(\d+) services\. No middleman", "providers"),
+    ("product", "README.md", r"(\d+) built in and ready to attach", "skills"),
     ("web", "src/pages/index.astro", r"(\d+)\+? services", "providers"),
     ("web", "src/content/docs/docs/concepts/skills.md", r"— (\d+) built in", "skills"),
 ]
@@ -174,10 +175,11 @@ def _claims_selftest() -> None:
     # must be exercised against a deliberately re-wrapped copy of text it is
     # supposed to match, through _flex_ws, the same way check_claims calls it.
     rewrapped_cases = [
-        (r"reach (\d+) external services", "we reach 91\nexternal services today", "91"),
-        (r"\*\*Connectors\*\* — (\d+) providers", "**Connectors**\n—\n91 providers", "91"),
-        (r"providers, ~(\d+) curated actions", "providers,\n~471 curated\nactions", "471"),
-        (r"reusable capability documents, (\d+) bundled", "reusable capability\ndocuments, 22\nbundled", "22"),
+        (r"reaches (\d+) external services", "it reaches\n91 external services today", "91"),
+        (r"credentials you own: (\d+) providers", "credentials you\nown: 91 providers", "91"),
+        (r"providers and (\d+) curated actions", "91 providers and 471\ncurated actions", "471"),
+        (r"\*\*(\d+) services\. No middleman", "**91\nservices. No middleman", "91"),
+        (r"(\d+) built in and ready to attach", "22 built\nin and ready to attach", "22"),
         (r"(\d+)\+? services", "91\nservices", "91"),
         (r"— (\d+) built in", "—\n22 built\nin", "22"),
     ]
