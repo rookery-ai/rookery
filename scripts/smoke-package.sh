@@ -89,6 +89,60 @@ smoke_in_container "rpm on fedora" "fedora:latest" "$RPM" \
 smoke_in_container "deb on debian" "debian:stable-slim" "$DEB" \
 	'dpkg -i /artifact'
 
+# The host tools are weak dependencies, and a weak dependency naming a package
+# that does not exist is dropped in silence: the install succeeds, the tool is
+# absent, and nothing anywhere says why. That is how the rpm shipped the Debian
+# spelling `tesseract-ocr` — which Fedora does not have, its package being
+# `tesseract` — and installed no OCR for the whole life of the package.
+#
+# Declared names are checked against the artifact rather than against
+# .goreleaser.yaml, so a per-format override that fails to apply is caught too.
+# Resolving each name against the distribution's own metadata is the half that
+# actually catches a plausible-looking name for a package nobody publishes.
+assert_recommends() {
+	local label="$1" image="$2" artifact="$3" probe="$4"
+	shift 4
+	local expected="$*"
+	echo "==> $label recommends: $expected"
+	"$ENGINE" run --rm \
+		-v "$(realpath "$artifact")":/artifact:ro,Z \
+		-e EXPECTED="$expected" \
+		"$image" \
+		bash -c "set -euo pipefail; $probe" \
+		|| fail "$label recommends check failed"
+	echo "==> $label recommends OK"
+}
+
+readonly RPM_RECOMMENDS_PROBE='
+got="$(rpm -qp --recommends /artifact 2>/dev/null | awk "{print \$1}" | sort | tr "\n" " ")"
+want="$(printf "%s\n" $EXPECTED | sort | tr "\n" " ")"
+[ "$got" = "$want" ] || { echo "rpm recommends = [$got], want [$want]" >&2; exit 1; }
+dnf -q -y makecache >/dev/null 2>&1 || true
+for p in $EXPECTED; do
+	dnf -q list --available "$p" >/dev/null 2>&1 || dnf -q list --installed "$p" >/dev/null 2>&1 \
+		|| { echo "no Fedora package named $p — a weak dep on it installs nothing, silently" >&2; exit 1; }
+done
+echo "OK: every recommended package exists on Fedora"
+'
+
+readonly DEB_RECOMMENDS_PROBE='
+got="$(dpkg-deb -f /artifact Recommends | tr -d " " | tr "," "\n" | sort | tr "\n" " ")"
+want="$(printf "%s\n" $EXPECTED | sort | tr "\n" " ")"
+[ "$got" = "$want" ] || { echo "deb Recommends = [$got], want [$want]" >&2; exit 1; }
+apt-get -qq update >/dev/null 2>&1
+for p in $EXPECTED; do
+	apt-cache show "$p" >/dev/null 2>&1 \
+		|| { echo "no Debian package named $p — a weak dep on it installs nothing, silently" >&2; exit 1; }
+done
+echo "OK: every recommended package exists on Debian"
+'
+
+assert_recommends "rpm on fedora" "fedora:latest" "$RPM" "$RPM_RECOMMENDS_PROBE" \
+	python3 ripgrep poppler-utils tesseract
+
+assert_recommends "deb on debian" "debian:stable-slim" "$DEB" "$DEB_RECOMMENDS_PROBE" \
+	python3 ripgrep poppler-utils tesseract-ocr
+
 # The archive runs on the host, extracted to one directory and executed from a
 # completely different one. That is the case the deleted exe-relative probe used
 # to accidentally paper over whenever someone ran from the source tree.

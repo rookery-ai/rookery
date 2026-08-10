@@ -32,14 +32,17 @@ On Windows, in PowerShell:
 irm https://rookery.cloud/install.ps1 | iex
 ```
 
-Then create the owner account and start the server:
+The installer puts a verified binary on your `PATH` and offers the host tools
+Rookery degrades without. Then set the install up:
 
 ```bash
-rookery owner bootstrap -u <username> -p <password>
-rookery serve
+rookery onboard
 ```
 
 Open `http://localhost:8080`, log in, and create your first workspace.
+
+> While this repository is private, `curl | sh` returns `404` — release assets
+> need an authenticated request. Build from source until the public release.
 
 <details>
 <summary>Build from source instead</summary>
