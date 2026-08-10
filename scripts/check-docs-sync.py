@@ -143,6 +143,46 @@ def _claims_selftest() -> None:
 check_claims.selftest = _claims_selftest
 
 
+# An exact-number regex cannot catch "100+ services" against a real 91: the
+# claim is approximate, and false in the direction that matters.
+INFLATABLE = [
+    ("src/pages/index.astro", r"(\d+)\+\s*services", "providers"),
+    ("src/content/docs/docs/reference/connected-services.md", r"(\d+)\+\s*services", "providers"),
+]
+
+
+@register
+def check_inflated() -> None:
+    web = web_root()
+    if web is None:
+        return
+    values = derived()
+    for rel, pattern, key in INFLATABLE:
+        path = web / rel
+        if not path.exists():
+            continue
+        text = read(path)
+        for m in re.finditer(pattern, text):
+            claimed, actual = int(m.group(1)), values[key]
+            if claimed > actual:
+                line = text[: m.start()].count("\n") + 1
+                fail(
+                    "inflated",
+                    f"{rel}:{line} claims {claimed}+ {key}, but there are only {actual}",
+                )
+
+
+def _inflated_selftest() -> None:
+    m = re.search(r"(\d+)\+\s*services", "100+ services")
+    assert m and int(m.group(1)) == 100, "must capture an N+ claim"
+    assert 100 > 91, "an N+ claim above the real count is a failure"
+    assert re.search(r"(\d+)\+\s*services", "91 services") is None, \
+        "an exact claim is the claims table's job, not this one"
+
+
+check_inflated.selftest = _inflated_selftest
+
+
 def selftest() -> int:
     """Run each assertion's inline cases against synthetic input.
 
