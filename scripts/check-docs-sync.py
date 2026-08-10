@@ -209,6 +209,52 @@ def _inflated_selftest() -> None:
 check_inflated.selftest = _inflated_selftest
 
 
+def env_vars() -> set[str]:
+    out = subprocess.run(
+        ["grep", "-rhoE", r'"ROOKERY_[A-Z_]+"', "internal", "cmd", "web"],
+        cwd=product_root(), capture_output=True, text=True,
+    ).stdout
+    return {line.strip('"') for line in out.split() if line}
+
+
+def internal_env() -> set[str]:
+    path = product_root() / "scripts" / "docs-sync-internal-env.txt"
+    names = set()
+    for line in read(path).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        names.add(line.split()[0])
+    return names
+
+
+@register
+def check_env() -> None:
+    web = web_root()
+    if web is None:
+        return
+    path = web / "src/content/docs/docs/operations/configuration.md"
+    documented = set(re.findall(r"ROOKERY_[A-Z_]+", read(path)))
+    expected = env_vars() - internal_env()
+    missing = expected - documented
+    for name in sorted(missing):
+        fail("env", f"{name} is read by the source but absent from operations/configuration.md")
+    stale = documented - env_vars()
+    for name in sorted(stale):
+        fail("env", f"{name} is documented but no longer read by any source file")
+
+
+def _env_selftest() -> None:
+    source = {"ROOKERY_PORT", "ROOKERY_KB_TOKEN", "ROOKERY_NEW"}
+    internal = {"ROOKERY_KB_TOKEN"}
+    documented = {"ROOKERY_PORT", "ROOKERY_GONE"}
+    assert (source - internal) - documented == {"ROOKERY_NEW"}, "must flag an undocumented public var"
+    assert documented - source == {"ROOKERY_GONE"}, "must flag a documented var the source dropped"
+
+
+check_env.selftest = _env_selftest
+
+
 def selftest() -> int:
     """Run each assertion's inline cases against synthetic input.
 
