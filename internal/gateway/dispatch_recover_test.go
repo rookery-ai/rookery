@@ -53,7 +53,7 @@ func (f *fakeGateway) Send(platformUserID, text string) error {
 func newDispatchTestManager(t *testing.T, router messageHandler, platform, workspaceID, platformUserID string) (*GatewayManager, *fakeGateway) {
 	t.Helper()
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../../migrations")
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

@@ -13,7 +13,7 @@ import (
 // and returns the DB, agentID, and workspaceID.
 func connTestDB(t *testing.T) (*db.DB, string, string) {
 	t.Helper()
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../../migrations")
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

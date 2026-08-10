@@ -117,8 +117,7 @@ func serveCmd() *cli.Command {
 			}
 			defer installLock.Release()
 
-			migrationsDir := resolveDir("migrations")
-			database, err := db.Open(cfg.Database.Path, migrationsDir)
+			database, err := db.Open(cfg.Database.Path)
 			if err != nil {
 				return fmt.Errorf("open db: %w", err)
 			}
@@ -778,8 +777,7 @@ func adminCmd() *cli.Command {
 						return fmt.Errorf("load config: %w", err)
 					}
 
-					migrationsDir := resolveDir("migrations")
-					database, err := db.Open(cfg.Database.Path, migrationsDir)
+					database, err := db.Open(cfg.Database.Path)
 					if err != nil {
 						return fmt.Errorf("open db: %w", err)
 					}
@@ -805,8 +803,7 @@ func adminCmd() *cli.Command {
 						return fmt.Errorf("load config: %w", err)
 					}
 
-					migrationsDir := resolveDir("migrations")
-					database, err := db.Open(cfg.Database.Path, migrationsDir)
+					database, err := db.Open(cfg.Database.Path)
 					if err != nil {
 						return fmt.Errorf("open db: %w", err)
 					}
