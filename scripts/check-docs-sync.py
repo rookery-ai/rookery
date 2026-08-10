@@ -66,6 +66,83 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def providers() -> set[str]:
+    d = product_root() / "internal" / "connectors" / "providers"
+    return {p.stem for p in d.glob("*.yaml")}
+
+
+def action_count() -> int:
+    d = product_root() / "internal" / "connectors" / "connectors"
+    return sum(
+        len(re.findall(r"^  - name:", read(p), re.M)) for p in d.glob("*.yaml")
+    )
+
+
+def core_skills() -> set[str]:
+    d = product_root() / "internal" / "skilllibrary" / "skills"
+    return {p.name for p in d.iterdir() if p.is_dir()}
+
+
+def derived() -> dict[str, int]:
+    return {
+        "providers": len(providers()),
+        "actions": action_count(),
+        "skills": len(core_skills()),
+    }
+
+
+# (repo, relative path, regex with exactly one capture group, derived key)
+# The regex is matched against the WHOLE file including YAML frontmatter: the
+# skills claim lives in the `description:` field of concepts/skills.md, not in
+# its prose, and a body-only scan would match nothing and pass silently.
+CLAIMS = [
+    ("product", "README.md", r"reach (\d+) external services", "providers"),
+    ("product", "README.md", r"\*\*Connectors\*\* — (\d+) providers", "providers"),
+    ("product", "README.md", r"providers, ~(\d+) curated actions", "actions"),
+    ("product", "README.md", r"reusable capability documents, (\d+) bundled", "skills"),
+    ("web", "src/pages/index.astro", r"(\d+)\+? services", "providers"),
+    ("web", "src/content/docs/docs/concepts/skills.md", r"— (\d+) built in", "skills"),
+]
+
+
+@register
+def check_claims() -> None:
+    values = derived()
+    web = web_root()
+    for repo, rel, pattern, key in CLAIMS:
+        if repo == "web":
+            if web is None:
+                continue
+            path = web / rel
+        else:
+            path = product_root() / rel
+        if not path.exists():
+            fail("claims", f"{rel}: file not found")
+            continue
+        text = read(path)
+        m = re.search(pattern, text)
+        if not m:
+            fail("claims", f"{rel}: no text matched /{pattern}/ — the claim moved or was reworded")
+            continue
+        claimed, actual = int(m.group(1)), values[key]
+        if claimed != actual:
+            line = text[: m.start()].count("\n") + 1
+            fail("claims", f"{rel}:{line} claims {claimed} {key}, source has {actual}")
+    if web is None:
+        skip("rookery-web not found — website claims not checked")
+
+
+def _claims_selftest() -> None:
+    text = "we reach 45 external services today"
+    m = re.search(r"reach (\d+) external services", text)
+    assert m and int(m.group(1)) == 45, "claim regex must capture the number"
+    assert re.search(r"reach (\d+) external services", "reach ninety-one") is None, \
+        "claim regex must not match prose numbers"
+
+
+check_claims.selftest = _claims_selftest
+
+
 def selftest() -> int:
     """Run each assertion's inline cases against synthetic input.
 

@@ -3,7 +3,7 @@
 **Self-hosted AI agents that live on your knowledge base and act through your connected services.**
 
 Rookery is a single-binary control plane for AI agents you own. Agents read and
-write an Obsidian-style markdown vault, reach 45 external services through a
+write an Obsidian-style markdown vault, reach 91 external services through a
 self-managed OAuth connector layer, run on a schedule or on demand, and talk to
 you over Telegram, Discord or Slack. Everything runs on your hardware: the
 database is SQLite, secrets are encrypted at rest, and coder subprocesses are
@@ -42,7 +42,7 @@ The image is slim: it ships no CLI coder binary and sets
   vault and write durable knowledge back into it across runs.
 - **Agents** — created by conversation, not configuration. Describe what you
   want; the designer proposes a plan, generates and really tests it, then saves.
-- **Connectors** — 45 providers, ~272 curated actions, self-managed OAuth. No
+- **Connectors** — 91 providers, ~471 curated actions, self-managed OAuth. No
   third-party integration broker.
 - **Skills** — reusable capability documents, 22 bundled plus your own.
 - **Scheduling, reminders and chat** — cron-driven runs, natural-language
