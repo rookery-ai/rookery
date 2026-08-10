@@ -846,19 +846,6 @@ func buildLLMTimeParserFn(coderSvc *coder.Coder) reminder.TimeParserFunc {
 	}
 }
 
-// resolveDir returns the given subdir relative to the binary's location,
-// falling back to the current working directory.
-func resolveDir(sub string) string {
-	exe, err := os.Executable()
-	if err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), sub)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-	}
-	return sub
-}
-
 // versionCmd prints the build identity stamped in at link time. An installed
 // binary that cannot say what it is cannot be supported.
 func versionCmd() *cli.Command {
