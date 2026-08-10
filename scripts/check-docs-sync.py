@@ -267,6 +267,42 @@ def declared_cli_names() -> set[str]:
     return set(re.findall(r'Name:\s*"([^"]+)"', blob))
 
 
+CLI_INVOCATION_RE = re.compile(r"rookery ([a-z][a-z-]+)\b")
+
+
+def _code_spans(text: str) -> list[tuple[int, int]]:
+    """Offset spans of markdown CODE CONTEXT: fenced ``` blocks and inline
+    `single-backtick` spans. A command-invocation check must only look where
+    a reader would recognize a command — plain prose describing the product
+    ("rookery reads your vault") must be structurally incapable of matching.
+    Fenced spans are found first and masked out of a working copy before the
+    inline-span search runs, so a fence's own triple backticks can never be
+    mistaken for a pair of inline spans."""
+    spans: list[tuple[int, int]] = []
+    masked = list(text)
+    for m in re.finditer(r"```.*?```", text, re.S):
+        spans.append((m.start(), m.end()))
+        for i in range(m.start(), m.end()):
+            masked[i] = " "
+    for m in re.finditer(r"`[^`\n]+`", "".join(masked)):
+        spans.append((m.start(), m.end()))
+    spans.sort()
+    return spans
+
+
+def _undeclared_cli_invocations(text: str, declared: set[str]) -> list[tuple[int, str]]:
+    """(offset, word) for every `rookery <word>` invocation found in a CODE
+    context of `text` whose word is not in `declared`. Scanning is restricted
+    to `_code_spans` on purpose — see its docstring."""
+    out: list[tuple[int, str]] = []
+    for start, end in _code_spans(text):
+        for m in CLI_INVOCATION_RE.finditer(text[start:end]):
+            word = m.group(1)
+            if word not in declared:
+                out.append((start + m.start(), word))
+    return out
+
+
 @register
 def check_cli() -> None:
     declared = declared_cli_names()
@@ -276,15 +312,16 @@ def check_cli() -> None:
         for m in re.finditer(r"^## (\S+)", read(path), re.M):
             if m.group(1) not in declared:
                 fail("cli", f"reference/cli.md documents '{m.group(1)}', which no source file declares")
-    # Product docs invoke commands inline. A command named here that does not
-    # exist is how CLAUDE.md came to document `rookery db migrate`.
+    # Product docs invoke commands inline, inside code context only (fenced
+    # blocks or backtick spans) — never in prose. This is exactly the shape
+    # of how CLAUDE.md came to document `rookery db migrate`, and it is what
+    # keeps ordinary prose ("rookery reads your vault") from ever tripping
+    # this check once the README is rewritten in full sentences.
     for rel in ("CLAUDE.md", "README.md"):
         text = read(product_root() / rel)
-        for m in re.finditer(r"rookery ([a-z][a-z-]+)\b", text):
-            word = m.group(1)
-            if word not in declared:
-                line = text[: m.start()].count("\n") + 1
-                fail("cli", f"{rel}:{line} invokes 'rookery {word}', which no source file declares")
+        for offset, word in _undeclared_cli_invocations(text, declared):
+            line = text[:offset].count("\n") + 1
+            fail("cli", f"{rel}:{line} invokes 'rookery {word}', which no source file declares")
 
 
 def _cli_selftest() -> None:
@@ -293,6 +330,26 @@ def _cli_selftest() -> None:
     missing = [d for d in documented if d not in declared]
     assert missing == ["db"], "must flag a documented command the source never declares"
     assert "serve" in declared, "a real command must not be flagged"
+
+    # A fenced invocation of a non-existent command must still be caught —
+    # this is the exact shape of the real `rookery db migrate` bug this
+    # check was built to catch, and the fix to scan code-context-only must
+    # not lose it.
+    fenced = "Run it:\n\n```bash\nrookery db migrate\n```\n"
+    hits = [w for _, w in _undeclared_cli_invocations(fenced, declared)]
+    assert hits == ["db"], "a fenced invocation of an undeclared command must still be caught"
+
+    # An inline backtick invocation must also be caught.
+    inline = "Use `rookery frobnicate` to do the thing."
+    hits = [w for _, w in _undeclared_cli_invocations(inline, declared)]
+    assert hits == ["frobnicate"], "an inline-backtick invocation of an undeclared command must be caught"
+
+    # Plain prose carries no backticks at all, so it is structurally
+    # incapable of matching — this is the false-positive a README rewrite
+    # into full sentences would otherwise trigger.
+    prose = "rookery reads your vault and writes notes back to it."
+    assert _undeclared_cli_invocations(prose, declared) == [], \
+        "prose outside code context must never be caught"
 
 
 check_cli.selftest = _cli_selftest
@@ -331,13 +388,43 @@ REMOVED_PROVIDERS = {"Zoom", "Fitbit"}
 # A removed-provider name surviving in prose that is deliberately narrating
 # the removal itself (not claiming the provider still exists) is not a
 # violation — e.g. "Zoom was pulled after its connect flow could not be
-# completed". Exempt only a match whose own PARAGRAPH (the blank-line-
-# delimited block it sits in — CLAUDE.md's prose wraps one thought across
-# several physical lines, so a single-line check would miss a removal verb
-# that lands one line above or below the name) also carries an explicit
-# removal verb. This is deliberately narrow: a paragraph that merely lists
-# the name (a current-provider enumeration) has no such verb anywhere in it
-# and still fails, which is what catches CLAUDE.md's stale Zoom listing.
+# completed". The evidence unit is the SENTENCE, not the paragraph: a
+# sentence pairing the removal verb with the name is exempt.
+#
+# Paragraph-wide scope (checking whether ANY sentence in the paragraph has a
+# removal verb ANYWHERE, regardless of which name it's about) was tried
+# first and is too wide — confirmed false negative:
+#     "Fitbit was removed in 2026.\nProviders include Gmail, Zoom and Slack."
+# Zoom went unreported because the removal verb sat in an unrelated sentence
+# about a DIFFERENT provider, elsewhere in the same paragraph.
+#
+# The opposite extreme — requiring the CURRENT mention's own single sentence
+# to carry the verb — is also too narrow for real prose: CLAUDE.md's actual
+# Fitbit-removal paragraph spreads the narrative across several sentences
+# ("Fitbit was replaced by `google_health`... Existing Fitbit tokens do not
+# carry over... the obvious fix for 'Fitbit is missing' is to re-add the
+# YAML..."), and only the first two of four Fitbit-mentioning sentences
+# repeat a removal verb — the rest lean on paragraph context, which is
+# ordinary, unremarkable writing.
+#
+# So the actual rule (`_removal_narrated_for`) is NAME-AWARE, scoped to the
+# paragraph: a mention is exempt when SOME sentence within its paragraph
+# pairs THIS SPECIFIC name with a removal verb — not just any sentence with
+# a verb (that was the original bug: name-agnostic), and not only the
+# mention's own sentence (too narrow for multi-sentence narratives). This
+# still catches the adversarial case above (no sentence anywhere in that
+# paragraph pairs "Zoom" with a removal verb) while accepting CLAUDE.md's
+# real multi-sentence Fitbit narrative, and it still tolerates a sentence
+# that line-wraps across several physical lines (`_sentence_spans` is built
+# on `_paragraph_spans`, so a sentence never crosses a blank-line or
+# markdown-table-row boundary).
+#
+# A sentence containing BOTH the removal verb and the name — e.g. "Zoom was
+# removed and Fitbit was replaced." — stays exempt for both names, even
+# though "replaced" alone isn't a removal verb: the sentence contains
+# "removed" AND "Fitbit" together, and word-presence (not grammatical
+# binding) is deliberately the whole test. That is correct, not a gap: the
+# sentence is genuinely narrating removal history.
 REMOVAL_CONTEXT = re.compile(r"\b(removed|removal|deleted|pulled|decommissioned)\b", re.I)
 
 
@@ -374,6 +461,68 @@ def _paragraph_at(text: str, offset: int) -> str:
     return ""
 
 
+def _sentence_spans(text: str) -> list[tuple[int, int]]:
+    """Sentence boundaries within paragraph spans.
+
+    Built ON TOP OF `_paragraph_spans` rather than independently, for two
+    reasons: a markdown-table row must stay its own unit exactly as it does
+    for paragraphs (a sentence search must never cross into an unrelated
+    table row), and a sentence must never be found to span a blank-line
+    paragraph break.
+
+    A sentence ends at '.', '!' or '?' followed by whitespace — which, since
+    prose wraps across physical lines, may include a newline — or at the end
+    of its paragraph. Splitting on terminator-plus-whitespace means a
+    sentence that line-wraps mid-thought ("...could not be\\ncompleted ...
+    was pulled.") still counts as ONE sentence: the same line-wrap tolerance
+    paragraph scope was originally chosen for, just narrowed to exactly one
+    sentence instead of everything between blank lines.
+    """
+    spans: list[tuple[int, int]] = []
+    for pstart, pend in _paragraph_spans(text):
+        para = text[pstart:pend]
+        sent_start = 0
+        for m in re.finditer(r"[.!?](?=\s|$)", para):
+            sent_end = m.end()
+            spans.append((pstart + sent_start, pstart + sent_end))
+            sent_start = sent_end
+        if sent_start < len(para):
+            spans.append((pstart + sent_start, pend))
+    return spans
+
+
+def _sentence_at(text: str, offset: int) -> str:
+    for start, end in _sentence_spans(text):
+        if start <= offset < end:
+            return text[start:end]
+    return ""
+
+
+def _removal_narrated_for(text: str, name: str, offset: int) -> bool:
+    """True when the `name` mention at `offset` is exempt from the
+    removed-provider check: some sentence within the mention's own paragraph
+    pairs THIS name with an explicit removal verb. See REMOVAL_CONTEXT's
+    comment for why this is name-aware-but-paragraph-searched, rather than
+    either name-agnostic-paragraph-scope (the original bug) or
+    current-sentence-only scope (too narrow for a real multi-sentence
+    removal narrative)."""
+    para_start = para_end = None
+    for pstart, pend in _paragraph_spans(text):
+        if pstart <= offset < pend:
+            para_start, para_end = pstart, pend
+            break
+    if para_start is None:
+        return False
+    name_re = re.compile(rf"\b{re.escape(name)}\b")
+    for sstart, send in _sentence_spans(text):
+        if sstart < para_start or send > para_end:
+            continue
+        sentence = text[sstart:send]
+        if name_re.search(sentence) and REMOVAL_CONTEXT.search(sentence):
+            return True
+    return False
+
+
 def display_name(slug: str) -> str:
     return DISPLAY_NAMES.get(slug, slug.replace("_", " ").title())
 
@@ -401,10 +550,18 @@ def check_provider_names() -> None:
             if gone in slugs:
                 continue
             for m in re.finditer(rf"\b{gone}\b", text):
-                if REMOVAL_CONTEXT.search(_paragraph_at(text, m.start())):
+                if _removal_narrated_for(text, gone, m.start()):
                     continue
                 line_no = text[: m.start()].count("\n") + 1
                 fail("providers", f"{label}:{line_no} names '{gone}', which is no longer a provider")
+
+
+def _missing_logos(provider_slugs: set[str], logo_stems: set[str]) -> set[str]:
+    """Providers with no logo. Deliberately ONE-DIRECTIONAL: a logo with no
+    matching provider (claude.svg, cursor.svg — coder marks shown on the
+    landing page, not connector providers) must never be reported. Set
+    equality is NOT the contract here."""
+    return provider_slugs - logo_stems
 
 
 @register
@@ -413,35 +570,90 @@ def check_logos() -> None:
     if web is None:
         return
     logos = {p.stem for p in (web / "src" / "assets" / "logos").glob("*.svg")}
-    # Set equality is NOT asserted: the website legitimately carries logos with
-    # no connector behind them (claude.svg, cursor.svg are coder marks shown on
-    # the landing page). Coverage in one direction only.
-    for slug in sorted(providers() - logos):
+    for slug in sorted(_missing_logos(providers(), logos)):
         fail("logos", f"provider '{slug}' has no logo at src/assets/logos/{slug}.svg")
+
+
+def _logos_selftest() -> None:
+    slugs, logos = {"gmail", "notion"}, {"gmail", "claude", "cursor"}
+    assert _missing_logos(slugs, logos) == {"notion"}, \
+        "a provider with no logo must be flagged"
+    assert _missing_logos(slugs, logos | {"notion"}) == set(), \
+        "once every provider has a logo, nothing is flagged"
+    # One-directional: website-only logos (coder marks with no provider
+    # behind them, e.g. claude.svg/cursor.svg on the landing page) must
+    # never be reported just because they have no provider counterpart.
+    assert _missing_logos({"gmail"}, {"gmail", "claude", "cursor"}) == set(), \
+        "extra website-only logos with no matching provider must never be flagged"
+
+
+check_logos.selftest = _logos_selftest
 
 
 def _provider_selftest() -> None:
     assert display_name("clickup") == "Clickup", "slug should title-case"
     assert display_name("firefly_iii") == "Firefly III", "override should win"
     assert display_name("hackernews") == "Hacker News", "override should win"
-    slugs, logos = {"gmail", "notion"}, {"gmail", "claude", "cursor"}
-    assert slugs - logos == {"notion"}, "must flag a provider with no logo"
-    assert not (logos - slugs) & slugs, "extra website logos must not be flagged"
-    # A removed-provider mention narrating its own removal must not fire, even
-    # when the removal verb lands on a different physical line of the same
-    # paragraph (CLAUDE.md wraps prose across lines).
+
+    # The confirmed adversarial false negative under (name-agnostic)
+    # paragraph scope: a removal sentence about ONE provider must not exempt
+    # a stale current-provider listing of a DIFFERENT provider sharing the
+    # same paragraph. Exact string from the confirmed false negative.
+    adversarial = "Fitbit was removed in 2026.\nProviders include Gmail, Zoom and Slack."
+    m_zoom = list(re.finditer(r"\bZoom\b", adversarial))[0]
+    assert not _removal_narrated_for(adversarial, "Zoom", m_zoom.start()), \
+        "a removal verb paired with a DIFFERENT name must not exempt a stale listing of this one"
+
+    # A genuine removal narration — name and verb in the SAME sentence —
+    # stays exempt even when it line-wraps across several physical lines
+    # (prose wraps; that is why sentence scope tolerates wrapping instead of
+    # regressing to single-line scope).
     doc = (
         "Intro paragraph, unrelated.\n\n"
-        "Zoom was a provider. Its connect flow could not be\n"
-        "completed against a real account, so it was pulled.\n\n"
+        "Zoom was pulled after its connect flow could not be\n"
+        "completed against a real account, so it was removed.\n\n"
         "Dropbox, Zoom, Calendly, Asana are current providers.\n"
     )
     m_history = list(re.finditer(r"\bZoom\b", doc))[0]
     m_current = list(re.finditer(r"\bZoom\b", doc))[1]
-    assert REMOVAL_CONTEXT.search(_paragraph_at(doc, m_history.start())), \
-        "a removal verb elsewhere in the same paragraph must exempt the mention"
-    assert not REMOVAL_CONTEXT.search(_paragraph_at(doc, m_current.start())), \
-        "a plain current-provider list in its own paragraph must not be exempted"
+    assert _removal_narrated_for(doc, "Zoom", m_history.start()), \
+        "a removal verb in the SAME sentence (even line-wrapped) must exempt the mention"
+    assert not _removal_narrated_for(doc, "Zoom", m_current.start()), \
+        "a plain current-provider list in its own paragraph, with no sentence pairing it to a verb, must not be exempted"
+
+    # The case that discriminates name-aware-paragraph-search from strict
+    # current-sentence-only scope: real removal narratives (CLAUDE.md's
+    # actual Fitbit paragraph is shaped exactly like this) spread the verb
+    # and the name across MULTIPLE sentences of one paragraph. A later
+    # sentence in the SAME paragraph that re-mentions the name without
+    # repeating the verb must still be exempt — that is ordinary writing,
+    # not a stale claim.
+    spread = (
+        "Fitbit was replaced by Google Health and its old API was removed. "
+        "Existing Fitbit tokens do not carry over; every user re-consents. "
+        "The old Fitbit connector is gone for good.\n"
+    )
+    m_first = list(re.finditer(r"\bFitbit\b", spread))[0]
+    m_later = list(re.finditer(r"\bFitbit\b", spread))[1]
+    assert _removal_narrated_for(spread, "Fitbit", m_first.start()), \
+        "the sentence that actually pairs the name with the verb must be exempt"
+    assert _removal_narrated_for(spread, "Fitbit", m_later.start()), \
+        "a later same-paragraph sentence about the SAME name, with no verb of its own, must still be exempt " \
+        "— strict current-sentence-only scope would wrongly flag this as a stale claim"
+
+    # But that widening must stay NAME-AWARE: a different name mentioned in
+    # the same paragraph, with no sentence anywhere pairing IT to a verb,
+    # must still be caught — this is the adversarial case again, restated as
+    # a multi-sentence paragraph to make sure paragraph-wide search doesn't
+    # quietly regress into the original name-agnostic bug.
+    mixed = (
+        "Fitbit was replaced by Google Health and its old API was removed. "
+        "Zoom, Calendly and Asana are current providers.\n"
+    )
+    m_zoom2 = list(re.finditer(r"\bZoom\b", mixed))[0]
+    assert not _removal_narrated_for(mixed, "Zoom", m_zoom2.start()), \
+        "widening the search to the whole paragraph must not exempt an unrelated name — that is the original bug"
+
     # A table row must not merge with unrelated rows (no blank lines between
     # them) just because some other row far away happens to say "removed".
     table = (
@@ -451,8 +663,8 @@ def _provider_selftest() -> None:
         "| `internal/connectors` | 91 providers (..., Zoom, Calendly, ...) |\n"
     )
     m_table = list(re.finditer(r"\bZoom\b", table))[0]
-    assert not REMOVAL_CONTEXT.search(_paragraph_at(table, m_table.start())), \
-        "a table row must be its own paragraph, not merged with a distant row"
+    assert not _removal_narrated_for(table, "Zoom", m_table.start()), \
+        "a table row must be its own unit, not merged with a distant row"
 
 
 check_provider_names.selftest = _provider_selftest
@@ -463,17 +675,27 @@ def selftest() -> int:
 
     The real repository is not a regression test: once drift is fixed, a
     broken assertion passes silently. These cases keep the detectors honest.
+
+    Every REGISTERED assertion must carry a `.selftest` — an assertion with
+    none is silently skipped from the loop below, which is indistinguishable
+    from one that ran and passed (this is exactly how `check_logos` went
+    unpinned for a full assertion's lifetime). So a missing `.selftest` is
+    itself a failure here, named, rather than a silent omission.
     """
-    cases = [fn for fn in ASSERTIONS if hasattr(fn, "selftest")]
     errors = 0
-    for fn in cases:
+    for fn in ASSERTIONS:
+        if not hasattr(fn, "selftest"):
+            print(f"selftest FAILED: {fn.__name__}: no .selftest attached — "
+                  f"an unpinned assertion is indistinguishable from a passing one")
+            errors += 1
+            continue
         try:
             fn.selftest()
             print(f"selftest ok: {fn.__name__}")
         except AssertionError as exc:
             print(f"selftest FAILED: {fn.__name__}: {exc}")
             errors += 1
-    if not cases:
+    if not ASSERTIONS:
         print("selftest: no cases registered")
     return 1 if errors else 0
 
