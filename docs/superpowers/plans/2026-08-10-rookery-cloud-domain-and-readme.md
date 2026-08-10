@@ -180,8 +180,8 @@ This is deliberate and was chosen by the owner. It leaves the 2026-07-29 design 
 
 ```bash
 grep -rn 'rookery\.sh' . --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=bin \
-  --exclude=docs/superpowers/plans/2026-08-10-rookery-cloud-domain-and-readme.md \
-  --exclude=docs/superpowers/specs/2026-08-10-rookery-cloud-domain-and-readme-design.md
+  --exclude=2026-08-10-rookery-cloud-domain-and-readme.md \
+  --exclude=2026-08-10-rookery-cloud-domain-and-readme-design.md
 grep -rn '\.sh\b' docs/ | grep -v -E '(install|deploy|setup|build|run|ci)\.sh\b'
 ```
 
@@ -987,8 +987,8 @@ because the README was previously wrong by half."
 
 ```bash
 grep -rn 'rookery\.sh' /home/rookie/rookery --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=bin --exclude-dir=worktrees \
-  --exclude=docs/superpowers/plans/2026-08-10-rookery-cloud-domain-and-readme.md \
-  --exclude=docs/superpowers/specs/2026-08-10-rookery-cloud-domain-and-readme-design.md
+  --exclude=2026-08-10-rookery-cloud-domain-and-readme.md \
+  --exclude=2026-08-10-rookery-cloud-domain-and-readme-design.md
 grep -rn 'rookery\.sh' /home/rookie/rookery-web --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.astro
 grep -rn '\.sh\b' /home/rookie/rookery/docs /home/rookie/rookery-web/docs | grep -v -E '(install|deploy|setup|build|run|ci)\.sh\b'
 ```
