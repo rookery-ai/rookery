@@ -91,6 +91,35 @@ def derived() -> dict[str, int]:
     }
 
 
+def _flex_ws(pattern: str) -> str:
+    """Make every literal space in a hand-written regex pattern
+    whitespace-flexible (`\\s+`), so a claim survives an ordinary prose
+    re-wrap that turns an inter-word space into a newline.
+
+    Applied at MATCH TIME ONLY — the searched TEXT is never touched. A
+    confirmed peer finding: 2 of 5 CLAIMS/INFLATABLE patterns matched nothing
+    against a real 80-column re-wrap of the README, purely because the
+    pattern's literal space could no longer see across the new line break.
+    That is the gate-killing failure mode (a correct document going red), not
+    a silent miss, but it is exactly the kind of false positive that trains a
+    maintainer to weaken the assertion instead of fixing the regex.
+
+    Normalising the TEXT instead (collapsing its whitespace before matching)
+    was considered and rejected: `fail()` computes `file:line` from the
+    match offset, so matching against a whitespace-collapsed copy of the
+    file would report a line number that does not correspond to the real
+    file and send a maintainer to the wrong line. Only the pattern moves.
+
+    Safe for every pattern in CLAIMS/INFLATABLE: none of them use a literal
+    space to mean anything other than "one or more characters of inter-word
+    whitespace here" — no character classes, no quoted-space literals — and
+    a plain `str.replace` only touches the space character, leaving `(\\d+)`,
+    escaped markdown (`\\*\\*Connectors\\*\\*`), the em-dash and the comma
+    untouched.
+    """
+    return pattern.replace(" ", r"\s+")
+
+
 # (repo, relative path, regex with exactly one capture group, derived key)
 # The regex is matched against the WHOLE file including YAML frontmatter: the
 # skills claim lives in the `description:` field of concepts/skills.md, not in
@@ -120,7 +149,7 @@ def check_claims() -> None:
             fail("claims", f"{rel}: file not found")
             continue
         text = read(path)
-        m = re.search(pattern, text)
+        m = re.search(_flex_ws(pattern), text)
         if not m:
             fail("claims", f"{rel}: no text matched /{pattern}/ — the claim moved or was reworded")
             continue
@@ -138,6 +167,33 @@ def _claims_selftest() -> None:
     assert m and int(m.group(1)) == 45, "claim regex must capture the number"
     assert re.search(r"reach (\d+) external services", "reach ninety-one") is None, \
         "claim regex must not match prose numbers"
+
+    # The bug this change fixes: a literal-space pattern matches nothing once
+    # prose re-wraps a space into a newline. Proving the UN-wrapped form still
+    # matches (above) says nothing about that bug — every real CLAIMS pattern
+    # must be exercised against a deliberately re-wrapped copy of text it is
+    # supposed to match, through _flex_ws, the same way check_claims calls it.
+    rewrapped_cases = [
+        (r"reach (\d+) external services", "we reach 91\nexternal services today", "91"),
+        (r"\*\*Connectors\*\* — (\d+) providers", "**Connectors**\n—\n91 providers", "91"),
+        (r"providers, ~(\d+) curated actions", "providers,\n~471 curated\nactions", "471"),
+        (r"reusable capability documents, (\d+) bundled", "reusable capability\ndocuments, 22\nbundled", "22"),
+        (r"(\d+)\+? services", "91\nservices", "91"),
+        (r"— (\d+) built in", "—\n22 built\nin", "22"),
+    ]
+    assert len(rewrapped_cases) == len(CLAIMS), \
+        "every pattern in CLAIMS must have a re-wrap case here, not a sample of them"
+    for pattern, rewrapped, expect in rewrapped_cases:
+        # The unfixed (literal-space) pattern must actually fail here — this
+        # is the confirmed peer finding (2 of 5 patterns broke on a real
+        # 80-column re-wrap) reproduced synthetically, so this test would
+        # catch a regression back to literal-space matching.
+        assert re.search(pattern, rewrapped) is None, \
+            f"fixture is not a real re-wrap test: literal pattern {pattern!r} " \
+            f"still matched {rewrapped!r} — sharpen the fixture"
+        m = re.search(_flex_ws(pattern), rewrapped)
+        assert m and m.group(1) == expect, \
+            f"_flex_ws({pattern!r}) must still match its re-wrapped text {rewrapped!r}"
 
 
 check_claims.selftest = _claims_selftest
@@ -176,7 +232,7 @@ def check_inflated() -> None:
         if not path.exists():
             continue
         text = read(path)
-        for m in re.finditer(pattern, text):
+        for m in re.finditer(_flex_ws(pattern), text):
             claimed, actual, noun = int(m.group(1)), values[key], m.group(2)
             if claimed > actual:
                 line = text[: m.start()].count("\n") + 1
@@ -204,6 +260,17 @@ def _inflated_selftest() -> None:
     # a real sentence that is true and must not fire.
     assert re.search(pattern, "load-tested with 1000+ connections open simultaneously") is None, \
         "must not fire on unrelated uses of 'connections' — that word must stay out of INFLATED_NOUNS"
+
+    # check_inflated runs every pattern through _flex_ws too (see CLAIMS'
+    # selftest for the fixed-vs-unfixed proof) — for INFLATABLE it is
+    # currently a no-op (the pattern already uses \s* between "+" and the
+    # noun, which already tolerates a wrapped newline), but the call must
+    # stay wired so a future INFLATABLE pattern with a literal space is
+    # covered by the same fix rather than silently exempt.
+    flexed = _flex_ws(pattern)
+    m3 = re.search(flexed, "100+\nservices")
+    assert m3 and int(m3.group(1)) == 100, \
+        "_flex_ws(pattern) must still catch an N+ claim that wraps before the noun"
 
 
 check_inflated.selftest = _inflated_selftest
@@ -253,6 +320,98 @@ def _env_selftest() -> None:
 
 
 check_env.selftest = _env_selftest
+
+
+def _readme_table_names_from_text(text: str) -> set[str]:
+    """ROOKERY_* variable names that appear as a row in a markdown table —
+    i.e. a line of the form `| `ROOKERY_X` | ... | ... |` — as opposed to
+    any other mention of the name in the same document.
+
+    README.md mentions several ROOKERY_ vars OUTSIDE the configuration
+    table too (a `ROOKERY_CODER_MODE=slim` aside, a `ROOKERY_PUBLIC_URL`
+    callout paragraph) — check_env's whole-file scan is fine for the
+    website's configuration.md, which is essentially just the table plus
+    per-variable expansions of rows already in it, but reusing that same
+    whole-file approach here would let a variable satisfy "documented" by a
+    passing prose mention while never actually getting a table ROW, which is
+    the specific gap check_readme_env_table exists to close.
+    """
+    return set(re.findall(r"^\|\s*`(ROOKERY_[A-Z_]+)`\s*\|", text, re.M))
+
+
+def readme_env_table_names() -> set[str]:
+    return _readme_table_names_from_text(read(product_root() / "README.md"))
+
+
+@register
+def check_readme_env_table() -> None:
+    """README.md's configuration table must list exactly the public
+    ROOKERY_* variables — the same `env_vars() - internal_env()` set
+    check_env already computes for the website, reused rather than
+    re-derived. Runs unconditionally (no `web_root() is None` guard): this
+    reads only product files, so it must still catch a stale README even
+    when rookery-web isn't checked out alongside this repo.
+    """
+    documented = readme_env_table_names()
+    expected = env_vars() - internal_env()
+    missing = expected - documented
+    for name in sorted(missing):
+        fail("readme-env", f"{name} is a public variable but has no row in README.md's configuration table")
+    extra = documented - expected
+    for name in sorted(extra):
+        fail("readme-env", f"README.md's configuration table lists {name}, which is not a public variable read by the source")
+
+
+def _readme_env_table_selftest() -> None:
+    # Red case #1 (this is the point of the change — pin the failing case,
+    # not just the passing one): a public variable whose table row was
+    # removed must be caught. This is literally what today's real README
+    # looked like before the ROOKERY_CLAUDE_BIN row was added — the exact
+    # gap this assertion was written to close.
+    text_row_removed = (
+        "| Variable | Default | What it does |\n"
+        "|---|---|---|\n"
+        "| `ROOKERY_HOST` | `0.0.0.0` | bind address |\n"
+    )
+    names = _readme_table_names_from_text(text_row_removed)
+    expected = {"ROOKERY_HOST", "ROOKERY_CLAUDE_BIN"}
+    missing = expected - names
+    assert missing == {"ROOKERY_CLAUDE_BIN"}, \
+        "a public variable missing its table row must be caught"
+
+    # Red case #2, the reverse direction: a table row naming a variable the
+    # source does not read at all.
+    text_extra_row = (
+        "| Variable | Default | What it does |\n"
+        "|---|---|---|\n"
+        "| `ROOKERY_HOST` | `0.0.0.0` | bind address |\n"
+        "| `ROOKERY_GHOST` | — | not read by any source file |\n"
+    )
+    names2 = _readme_table_names_from_text(text_extra_row)
+    extra = names2 - expected
+    assert extra == {"ROOKERY_GHOST"}, \
+        "a table row naming a variable the source does not read must be caught"
+
+    # Green case: once the row exists, both directions are silent.
+    text_complete = (
+        "| Variable | Default | What it does |\n"
+        "|---|---|---|\n"
+        "| `ROOKERY_HOST` | `0.0.0.0` | bind address |\n"
+        "| `ROOKERY_CLAUDE_BIN` | detected | override the path to a coder binary |\n"
+    )
+    names3 = _readme_table_names_from_text(text_complete)
+    assert expected - names3 == set() and names3 - expected == set(), \
+        "once every public variable has a row and nothing extra is listed, nothing should be flagged"
+
+    # A ROOKERY_ mention outside the table (no leading `|`) must not count as
+    # documentation — this is the whole reason check_env's whole-file scan
+    # was not reused as-is for the README.
+    prose_only = "See `ROOKERY_CLAUDE_BIN` above for details on overriding the coder binary.\n"
+    assert _readme_table_names_from_text(prose_only) == set(), \
+        "a prose mention outside the table must not be treated as a documented row"
+
+
+check_readme_env_table.selftest = _readme_env_table_selftest
 
 
 def declared_cli_names() -> set[str]:

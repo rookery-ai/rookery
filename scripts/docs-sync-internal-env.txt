@@ -2,6 +2,18 @@
 # sets these, so they are deliberately absent from the public configuration
 # reference. One reason per line — if you cannot write a reason, the variable is
 # user-facing and belongs in the docs instead.
+#
+# How to classify a NEW variable — the test is DIRECTION OF CALL, not the
+# name. Name-based intuition gets it backwards in both directions:
+#   - Read with os.Getenv(...) in internal/config -> operator-set, PUBLIC,
+#     belongs in README.md's table + the website's configuration.md.
+#     ROOKERY_CLAUDE_BIN sounds like internal infrastructure and is public.
+#   - Assigned INTO extraEnv (or similar) for a subprocess to read -> internal,
+#     add it to this file instead. ROOKERY_KB_TOKEN sounds like configuration
+#     and is internal.
+# When in doubt, grep for the name: `os.Getenv("ROOKERY_X")` reading FROM the
+# environment is public; a literal `"ROOKERY_X="` (or map key) written INTO a
+# subprocess's env is internal.
 ROOKERY_BUILD_PHASE      # set during agent/skill builds; gates mutating connector actions
 ROOKERY_CONNECTOR_URL    # loopback connector bridge address, per run
 ROOKERY_CONNECTOR_TOKEN  # per-run bearer token for the connector bridge

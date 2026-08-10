@@ -60,6 +60,7 @@ The image is slim: it ships no CLI coder binary and sets
 | `ROOKERY_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks |
 | `ROOKERY_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |
 | `ROOKERY_CODER_MODE` | `full` | `slim` removes the local CLI coder kind |
+| `ROOKERY_CLAUDE_BIN` | detected | override the path to a coder binary |
 
 `ROOKERY_PUBLIC_URL` matters more than it looks: OAuth providers reject redirect
 URIs on non-public hostnames, so a `.lan` address fails Google's validation. Use
