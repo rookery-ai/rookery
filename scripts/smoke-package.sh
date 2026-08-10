@@ -26,14 +26,20 @@ pick_artifact() {
 	# rpm-conventional rookery-<ver>.x86_64.rpm. Both spellings are accepted so
 	# that setting a template later cannot silently break this gate.
 	#
-	# `linux` is required too: the archive formats (tar.gz) are also built for
-	# darwin, and "amd64" alone matches rookery_<ver>_darwin_amd64.tar.gz just as
-	# well as the linux one, which would make this "exactly 1" check pass while
-	# silently picking the wrong OS's archive.
+	# Excluding darwin/windows by name (rather than requiring the literal string
+	# "linux") is what actually discriminates the OS here: the archive formats
+	# (tar.gz) are also built for darwin, and "amd64" alone matches
+	# rookery_<ver>_darwin_amd64.tar.gz just as well as the linux one, which
+	# would make this "exactly 1" check pass while silently picking the wrong
+	# OS's archive. Requiring "*linux*" would also wrongly reject the
+	# rpm-conventional spelling above, which contains no "linux" substring —
+	# excluding the other two OSes is the only condition that holds for both
+	# accepted rpm spellings.
 	local ext="$1"
 	local -a hits
-	mapfile -t hits < <(find "$DIST" -maxdepth 1 -name "*.$ext" -name '*linux*' \
-		\( -name '*amd64*' -o -name '*x86_64*' \) | sort)
+	mapfile -t hits < <(find "$DIST" -maxdepth 1 -name "*.$ext" \
+		\( -name '*amd64*' -o -name '*x86_64*' \) \
+		! -name '*darwin*' ! -name '*windows*' | sort)
 	[ "${#hits[@]}" -eq 1 ] \
 		|| fail "expected exactly 1 linux amd64 .$ext in $DIST, found ${#hits[@]}: ${hits[*]:-none}"
 	printf '%s\n' "${hits[0]}"
@@ -81,7 +87,7 @@ smoke_in_container "rpm on fedora" "fedora:latest" "$RPM" \
 	'rpm -i /artifact'
 
 smoke_in_container "deb on debian" "debian:stable-slim" "$DEB" \
-	'apt-get update -qq >/dev/null; dpkg -i /artifact'
+	'dpkg -i /artifact'
 
 # The archive runs on the host, extracted to one directory and executed from a
 # completely different one. That is the case the deleted exe-relative probe used

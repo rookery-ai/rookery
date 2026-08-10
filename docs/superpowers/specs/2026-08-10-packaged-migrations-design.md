@@ -142,8 +142,13 @@ New `pr.yml` job, sibling to `Container smoke test`, on `ubuntu-latest`:
 3. **DEB** — `sudo dpkg -i`, same bootstrap from `/`.
 4. **tar.gz** — extract to a scratch dir, `cd` somewhere unrelated, run from
    there. This is the case the exe-relative probe used to paper over.
-5. For each: `serve`, then assert `/healthz`, the SPA root and the session
-   endpoint answer.
+5. For each: `serve`, then assert `/healthz` via `rookery healthcheck` (not
+   the SPA root or the session endpoint — `curl` is not guaranteed present in
+   a minimal base image, which is exactly why the built-in healthcheck
+   subcommand is used instead). Narrowing to `/healthz` alone is acceptable
+   here: goreleaser's `before.hooks` run `npm ci` + `npm run build`, so a
+   broken SPA already fails the snapshot build before the smoke step is ever
+   reached.
 
 **Stated limitation:** darwin and windows remain compile-verified only, as today.
 A three-OS matrix was considered and declined on CI cost (macOS bills at 10×,

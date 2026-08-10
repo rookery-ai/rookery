@@ -48,6 +48,7 @@ When protection does become available, require these checks:
 - `Frontend`
 - `Security scan`
 - `Container smoke test`
+- `Package smoke test`
 
 Also enable:
 
