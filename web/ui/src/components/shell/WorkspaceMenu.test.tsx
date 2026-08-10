@@ -99,7 +99,7 @@ test("entering a workspace closes the dialog and drops the previous workspace's 
 
 // The session fixture above has no `icon`, so the trigger falls back to the
 // name's initial — the state every workspace starts in.
-test("with no image set, the trigger shows the workspace initial", async () => {
+test("with no image set, the trigger shows the Rookery mark", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn(() =>
@@ -110,8 +110,12 @@ test("with no image set, the trigger shows the workspace initial", async () => {
   );
   wrap();
 
+  // The default used to be the workspace's initial on a solid square. It is now
+  // the Rookery mark, so a fresh install looks like the product before anyone
+  // has picked anything.
   const trigger = await screen.findByLabelText("Workspace");
-  await waitFor(() => expect(trigger.textContent).toBe("P"));
+  await waitFor(() => expect(trigger.querySelector("svg")).toBeTruthy());
+  expect(trigger.textContent).not.toBe("P");
 });
 
 test("picking an image saves the slug and re-reads the session", async () => {
