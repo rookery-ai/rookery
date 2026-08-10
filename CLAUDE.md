@@ -108,21 +108,27 @@ image pushes.**
    - `Security scan` — govulncheck, Trivy (fs), gitleaks. CodeQL runs in its own
      workflow because it needs `security-events: write`.
    - `Container smoke test` — builds the image, Trivy-scans it, runs it, and
-     asserts `/healthz`, the SPA root and the session endpoint all answer. **This
-     is the project's only end-to-end coverage.**
+     asserts `/healthz`, the SPA root and the session endpoint all answer. **One
+     of the project's two end-to-end gates** — this one covers the container
+     image.
    - `Package smoke test` — builds a goreleaser snapshot, then installs the
      **rpm** (in a Fedora container), the **deb** (in a Debian container) and
      extracts the **tar.gz**, running `owner bootstrap` + `serve` + `healthcheck`
-     from a working directory unrelated to the source tree. This is the guard
-     that keeps the packaged artifacts *runnable*; nothing had ever installed one,
-     which is exactly how they shipped unable to open their own database. Run it
-     locally with `make ci-package` — it is deliberately excluded from `make ci`
-     because a snapshot build takes minutes.
-5. **Run the same checks locally first** with `make ci` — it mirrors the gate
-   exactly, including the cross-compile matrix, with the single exception of
-   `Package smoke test` (`make ci-package`, kept separate for runtime).
-   `make ci-fmt` / `ci-vet` / `ci-test` / `ci-cross` / `ci-ui` run the pieces
-   individually.
+     from a working directory unrelated to the source tree. **The project's other
+     end-to-end gate** — this one covers the native deb/rpm/tar.gz artifacts;
+     nothing had ever installed one before it existed, which is exactly how they
+     shipped unable to open their own database. Run it locally with
+     `make ci-package` — it is deliberately excluded from `make ci` because a
+     snapshot build takes minutes.
+5. **Run the same checks locally first** with `make ci` — it covers `Go build
+   and test` and `Cross-compile` in full, and `Frontend` through typecheck/lint/
+   vitest but not the `vite build` step the CI job also runs. It does **not**
+   run four of the seven gates at all: `Conventional commit title` (needs the
+   PR title, not anything runnable locally), `Security scan`, `Container smoke
+   test`, and `Package smoke test` — the last is available separately as
+   `make ci-package`, kept out of `make ci` because a snapshot build takes
+   minutes. `make ci-fmt` / `ci-vet` / `ci-test` / `ci-cross` / `ci-ui` run the
+   covered pieces individually.
 6. **Squash-merge.** release-please then maintains a release PR on `main`.
 7. **Merging the release PR** tags the repo, which fires
    `.github/workflows/release.yml`: goreleaser publishes binaries, `.deb`/`.rpm`,
@@ -1329,7 +1335,7 @@ cannot be pruned.
 
 ## Known gaps
 
-- **Thin e2e coverage.** The CI container smoke test (`pr.yml` → `Container smoke test`) is the only end-to-end check: it starts the real image and asserts `/healthz`, the SPA root and the session endpoint answer. Everything above that — coder subprocess round-trips (real edit → test → approve), agent runs, connector calls — is still exercised manually. Unit tests cover logic boundaries.
+- **Thin e2e coverage.** CI has two end-to-end gates: the container smoke test (`pr.yml` → `Container smoke test`) starts the real image and asserts `/healthz`, the SPA root and the session endpoint answer, and the package smoke test (`pr.yml` → `Package smoke test`) installs the built deb/rpm and extracts the tar.gz, running `owner bootstrap` + `serve` + `healthcheck` on each. Everything above that — coder subprocess round-trips (real edit → test → approve), agent runs, connector calls — is still exercised manually. Unit tests cover logic boundaries.
 - **Local-coder Model field not in the settings UI** — the coder settings/setup form collects a model only for the `api` coder kind; the `#coder_local` section has just the binary picker. So `workspaces.CoderModel` cannot be set for a **local** CLI coder through the UI, even though the runner already passes it as `-m`/`--model` (opencode/cursor). This blocks OpenCode out of the box (see "OpenCode requires an explicit model" above — with no model it 401s on its OpenRouter default). Until a Model input is added to `#coder_local` (+ read in `handleSaveWorkspaceCoder`/`handleSetupCoder`), `CoderModel` for a local coder must be set another way (e.g. directly in the DB). Two clean fixes, not yet built: (1) add the local Model field; (2) have `opencodeBackend` fall back to a host-configured default model when `CoderModel` is empty. Codex/Gemini also don't yet receive `cliModel` (noted in `selectBackend`).
 - **Discord adapter** — implemented (DM-only); live WS round-trip is operator-verified. **Slack adapter** — implemented (DM-only, Socket Mode); live loop operator-verified. Note: Slack's Socket Mode inbound loop does not auto-restart after a *fatal* reconnect failure (reconnect exhaustion) — outbound still works, but inbound DMs stop until the connector is re-saved or the server restarts; a per-adapter supervisor is a future framework enhancement. Mattermost/Matrix adapters — not yet implemented (framework ready: adapter registry + `CredSpec` + render subsystem all support a new platform via `init()` registration alone; Mattermost should be a hand-rolled thin REST+WS client, NOT the heavy official SDK; Matrix E2EE needs `-tags goolm` to stay CGo-free). The connectors UI (SPA `/connections` → Chat apps tab, backed by `/api/v1/connectors`) is `CredSpec`-driven — a new platform's connect card is data, not hand-written markup. **Design stance:** all adapters use an **outbound** connection (bot dials out; zero inbound port) — a deliberate security property for self-hosted/home installs (works behind NAT, home firewall can drop-by-default, no forgeable public endpoint). **Webhook-based platforms** (WhatsApp/Viber/LINE/Teams/Messenger/Google Chat) are deferred OUT of the home-install core; if built, they must be tunnel/relay-first (outbound), never a raw open port. Future outbound-only candidates: Zulip (event-queue long-poll), XMPP. See `docs/superpowers/specs/2026-07-15-multi-platform-chat-adapters-design.md`.
 - **Skill editing + import via chat** — `/skill` covers list/create/cancel, but there is no `/skill edit` (the skill designer has no edit mode at all, unlike `agentdesigner.StartEdit`) and no skill import (ZIP / pasted SKILL.md) over chat, which needs per-adapter file-upload handling. The remaining half of the skill parity gap.
