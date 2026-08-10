@@ -146,7 +146,7 @@ consumer.**
 
 The project is **Rookery** (`github.com/ilijad1/rookery`); the binary, module and
 package are all lowercase `rookery`, and every environment variable is prefixed
-`ROOKERY_`. The project domain is **rookery.sh** — it is the documented
+`ROOKERY_`. The project domain is **rookery.cloud** — it is the documented
 `ROOKERY_PUBLIC_URL` example because OAuth providers reject redirect URIs on
 non-public hostnames, so a `.lan` address fails Google's validation outright.
 

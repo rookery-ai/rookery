@@ -63,7 +63,7 @@ The image is slim: it ships no CLI coder binary and sets
 
 `ROOKERY_PUBLIC_URL` matters more than it looks: OAuth providers reject redirect
 URIs on non-public hostnames, so a `.lan` address fails Google's validation. Use
-a real hostname — `rookery.sh` is the documented example — or `http://localhost`.
+a real hostname — `rookery.cloud` is the documented example — or `http://localhost`.
 
 ## Platform support
 
