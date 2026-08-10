@@ -136,6 +136,11 @@ the stated audience (§6): monospace running text signals "this is for people wh
 live in a terminal" on every single line, which is precisely the impression the
 product's own interface works to avoid.
 
+*(The genre argument above was written when the domain was `.sh`; the project
+now ships on `.cloud`, which sets no CLI genre on its own. The monospace
+wordmark decision is unaffected — it stands on its own merits, not on the
+domain.)*
+
 | Role | Face |
 |---|---|
 | Wordmark, and only the wordmark | `ui-monospace, "SFMono-Regular", "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace` |
@@ -174,7 +179,7 @@ self-hosts. That discipline is part of the story, not a footnote to it.
 - Three approved lockups:
   1. **Primary** — mark in ember, then `rookery` in ink. Mark height equals cap
      height plus ~15%.
-  2. **With domain** — mark in ink, then `rookery` in ink with `.sh` in stone.
+  2. **With domain** — mark in ink, then `rookery` in ink with `.cloud` in stone.
      The TLD is set lighter so it reads as an address, not as part of the name.
   3. **Mark alone** — favicon, avatar, tile grids, anywhere under 32px.
 

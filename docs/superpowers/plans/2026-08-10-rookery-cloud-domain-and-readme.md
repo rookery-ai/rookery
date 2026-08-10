@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **Domain:** `rookery.cloud`. Never `rookery.sh`. The completion bar is that `grep -rn 'rookery\.sh'` returns nothing in either repository, excluding `.git`, `node_modules`, `dist`, `.astro` and sibling worktrees.
+- **Domain:** `rookery.cloud`. Never `rookery.sh`. The completion bar is that no live or reader-facing surface — code, config, shipped documentation, published repository metadata — names the old domain, with documents whose subject is the migration itself (this plan and `docs/superpowers/specs/2026-08-10-rookery-cloud-domain-and-readme-design.md`) explicitly exempt, since naming the old domain is what makes their sentences mean anything. Verify with two checks: a literal `grep -rn 'rookery\.sh'` (excluding `.git`, `node_modules`, `dist`, `.astro`, sibling worktrees and the two documents above) returning nothing in either repository, and a `grep -n '\.sh\b'` sweep over `docs/` and the brand assets — filtered to ignore genuine shell-script names such as `install.sh` and `*.sh` — that turns up nothing else naming the old TLD. Published GitHub repository metadata (homepage URL, repository description) is part of the bar but is not file-based, so it is verified and set outside the repository.
 - **Historical documents are in scope.** The owner chose a full rewrite including `docs/superpowers/specs/2026-07-29-rookery-rename-design.md` and `docs/superpowers/plans/2026-07-29-rookery-rename.md`, against a recommendation to leave the record intact. Do not re-litigate this.
 - **Measured counts, never copied.** 91 connector providers, 471 curated actions, 22 bundled core skills, 7 user-facing CLI commands, 9 public `ROOKERY_` variables. Re-measure each at implementation time with the commands in Task 7; do not trust this line, the old README, or `CLAUDE.md`.
 - **No `N+` counts.** Write `91 services`, never `100+ services`. `check_inflated` in `scripts/check-docs-sync.py` rejects `N+` against the nouns `services` and `supported`.
@@ -179,10 +179,15 @@ This is deliberate and was chosen by the owner. It leaves the 2026-07-29 design 
 - [ ] **Step 3: Verify the product repository is clean**
 
 ```bash
-grep -rn 'rookery\.sh' . --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=bin
+grep -rn 'rookery\.sh' . --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=bin \
+  --exclude=docs/superpowers/plans/2026-08-10-rookery-cloud-domain-and-readme.md \
+  --exclude=docs/superpowers/specs/2026-08-10-rookery-cloud-domain-and-readme-design.md
+grep -rn '\.sh\b' docs/ | grep -v -E '(install|deploy|setup|build|run|ci)\.sh\b'
 ```
 
-Expected: no output.
+Expected: no output from the first command. The second may surface genuine
+shell-script filenames — discard those on inspection; no hit naming the old
+TLD (e.g. a bare `` `.sh` `` domain reference) should survive.
 
 - [ ] **Step 4: Confirm nothing else broke**
 
@@ -981,11 +986,20 @@ because the README was previously wrong by half."
 - [ ] **Step 1: Assert the domain bar across both repositories**
 
 ```bash
-grep -rn 'rookery\.sh' /home/rookie/rookery --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=bin --exclude-dir=worktrees
+grep -rn 'rookery\.sh' /home/rookie/rookery --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=bin --exclude-dir=worktrees \
+  --exclude=docs/superpowers/plans/2026-08-10-rookery-cloud-domain-and-readme.md \
+  --exclude=docs/superpowers/specs/2026-08-10-rookery-cloud-domain-and-readme-design.md
 grep -rn 'rookery\.sh' /home/rookie/rookery-web --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.astro
+grep -rn '\.sh\b' /home/rookie/rookery/docs /home/rookie/rookery-web/docs | grep -v -E '(install|deploy|setup|build|run|ci)\.sh\b'
 ```
 
-Expected: no output from either. This is the owner's stated completion bar.
+Expected: no output from the first two commands. The third may surface genuine
+shell-script filenames — discard those on inspection; no hit naming the old
+TLD should survive. This is the owner's stated completion bar: no live or
+reader-facing surface names the old domain, with the two 2026-08-10 migration
+documents exempt. Published GitHub repository metadata (homepage URL,
+description) is part of the bar too, but is verified and set outside the
+repository, not by grep.
 
 - [ ] **Step 2: Run the full test suite**
 

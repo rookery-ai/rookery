@@ -44,10 +44,11 @@ unavailable after the fact.
 
 ## Scope
 
-Three parts, shipping as **two** pull requests. Part A has no dependency on the
-parallel session and ships first; Parts B and C wait.
+Three parts, shipping as **three** pull requests. Part A has no dependency on
+the parallel session and ships first, split across the two repositories it
+touches; Parts B and C wait.
 
-- **Part A — domain rename.** 34 references, 19 files, both repositories.
+- **Part A — domain rename.** 34 references, 18 files, both repositories.
 - **Part B — README restructure.** `README.md` in the product repository.
 - **Part C — SVG assets.** A hero banner and one architecture diagram.
 
@@ -58,7 +59,7 @@ parallel session and ships first; Parts B and C wait.
 Measured on 2026-08-10, excluding `.git`, `node_modules`, `dist`, `.astro`,
 build output and sibling worktrees.
 
-**Product repository — 15 references, 8 files**
+**Product repository — 15 references, 9 files**
 
 | File | Lines | Kind |
 |---|---|---|
@@ -72,7 +73,7 @@ build output and sibling worktrees.
 | `docs/superpowers/plans/2026-07-29-rookery-rename.md` | 991, 1260, 1312, 1347 | historical |
 | `docs/superpowers/specs/2026-07-29-rookery-rename-design.md` | 58, 63, 106, 267 | historical |
 
-**Website repository — 19 references, 8 files**
+**Website repository — 19 references, 9 files**
 
 | File | Lines | Kind |
 |---|---|---|
@@ -327,22 +328,25 @@ rows and omits `ROOKERY_CLAUDE_BIN` entirely. The restructured table carries all
 
 ## Sequencing
 
-**PR 1 — domain rename.** Independent of the parallel session in the product
-repository. Ships immediately: the five live identifiers are the urgent part. It
+**PR 1a — domain rename (product repository).** Independent of the parallel
+session. Ships immediately: the five live identifiers are the urgent part. It
 does swap `README.md:66`, even though Part B later rewrites that sentence away —
 PR 2 waits on an external merge, and leaving a stale domain in the README until
 then to save one line of churn is the wrong trade.
-In the website repository it touches `astro.config.mjs`, which the parallel
-session will also edit (a sidebar entry, a different line) — a trivial conflict,
-expected rather than discovered.
+
+**PR 1b — domain rename (website repository).** Independent of PR 1a. It
+touches `astro.config.mjs`, which the parallel session will also edit (a
+sidebar entry, a different line) — a trivial conflict, expected rather than
+discovered.
 
 **PR 2 — README restructure and assets.** Branches after the parallel session's
 PR merges. Carries the README, both SVGs, and the `CLAIMS` update, together —
 the rewrite and the checker have to land in one commit or `make ci` is red
 between them.
 
-Two repositories means two sets of pull requests; the product and website changes
-are independent and neither blocks the other.
+Two repositories means two of the three pull requests belong to Part A (1a and
+1b); those two are independent of each other and ship immediately, and neither
+blocks PR 2.
 
 ## Coordination
 
@@ -354,9 +358,15 @@ Ownership of `README.md` and of the rename is ours.
 
 ## Verification
 
-- `grep -rn 'rookery\.sh'` returns nothing in either repository, excluding
-  `.git`, `node_modules`, `dist`, `.astro` and sibling worktrees. This is the
-  owner's stated bar, and it is why the historical documents are in scope.
+- No live or reader-facing surface names the old domain — code, config, shipped
+  documentation, published repository metadata — with this plan and this spec
+  themselves exempt, since naming the old domain is what makes their sentences
+  mean anything. Verified with two checks: a literal `grep -rn 'rookery\.sh'`
+  (excluding `.git`, `node_modules`, `dist`, `.astro`, sibling worktrees, and
+  the two 2026-08-10 migration documents) returning nothing, and a
+  `grep -n '\.sh\b'` sweep over `docs/` and the brand assets — filtered to
+  ignore genuine shell-script names — returning nothing beyond those. This is
+  the owner's stated bar, and it is why the historical documents are in scope.
 - `go test ./... -count=1` passes, in particular the two `User-Agent` tests.
 - `make ci` passes, including `make docs-sync-check` once the parallel session's
   PR has landed.

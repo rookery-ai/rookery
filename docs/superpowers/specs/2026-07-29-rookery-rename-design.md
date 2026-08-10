@@ -56,8 +56,7 @@ variables are written once in a unit file and read many times. Precedent:
 `DOCKER_`, `POSTGRES_`, `GITHUB_`.
 
 **Domain: `rookery.cloud`.** `.com`, `.dev`, `.ai`, `.io`, `.app`, `.org` and `.net`
-are all taken. `.sh` is idiomatic for a self-hosted, CLI-shipped tool and matches
-the install-script story that follows once the repository is public. This is not
+are all taken, and `.cloud` reads cleanly for a self-hosted platform. This is not
 only branding: per `internal/publicurl`, a **publicly valid hostname decides
 whether Google's OAuth consent flow works at all**, and a `.lan` host fails it. So
 `rookery.cloud` becomes the documented `ROOKERY_PUBLIC_URL` example and the escape
