@@ -132,6 +132,16 @@ CLAIMS = [
     ("product", "README.md", r"(\d+) built in and ready to attach", "skills"),
     ("web", "src/pages/index.astro", r"(\d+)\+? services", "providers"),
     ("web", "src/content/docs/docs/concepts/skills.md", r"— (\d+) built in", "skills"),
+    # CLAUDE.md is the surface an agent reads first, and where the original
+    # errors (a stale Zoom listing, a nonexistent `db migrate` command) were
+    # actually found — it had no pinned claims at all until now. Two distinct
+    # "N providers" sites exist (the internal/connectors table row and the
+    # connector-service-layer prose); their surrounding words differ enough
+    # to anchor each separately, so both are pinned rather than picking one.
+    ("product", "CLAUDE.md", r"for \*\*(\d+) providers\*\* \(Google-family", "providers"),
+    ("product", "CLAUDE.md", r"\*\*(\d+) providers \(~\d+ actions\)", "providers"),
+    ("product", "CLAUDE.md", r"\(~(\d+) actions\)", "actions"),
+    ("product", "CLAUDE.md", r"(\d+) bundled skills", "skills"),
 ]
 
 
@@ -182,6 +192,10 @@ def _claims_selftest() -> None:
         (r"(\d+) built in and ready to attach", "22 built\nin and ready to attach", "22"),
         (r"(\d+)\+? services", "91\nservices", "91"),
         (r"— (\d+) built in", "—\n22 built\nin", "22"),
+        (r"for \*\*(\d+) providers\*\* \(Google-family", "for **91\nproviders** (Google-family", "91"),
+        (r"\*\*(\d+) providers \(~\d+ actions\)", "**91 providers\n(~471 actions)", "91"),
+        (r"\(~(\d+) actions\)", "(~471\nactions)", "471"),
+        (r"(\d+) bundled skills", "22 bundled\nskills", "22"),
     ]
     assert len(rewrapped_cases) == len(CLAIMS), \
         "every pattern in CLAIMS must have a re-wrap case here, not a sample of them"
@@ -279,8 +293,16 @@ check_inflated.selftest = _inflated_selftest
 
 
 def env_vars() -> set[str]:
+    # --include/--exclude restrict this to production Go source: a *_test.go
+    # file scanned alongside it could name a test-only ROOKERY_* variable no
+    # operator can ever set, which check_env / check_readme_env_table would
+    # then both demand documentation for — a false positive on correct docs.
+    # `--exclude` matches the BASENAME only (not the full path), which is
+    # exactly what's needed here: a path-bearing exclude pattern would
+    # silently match nothing and exclude no file at all.
     out = subprocess.run(
-        ["grep", "-rhoE", r'"ROOKERY_[A-Z_]+"', "internal", "cmd", "web"],
+        ["grep", "-rhoE", "--include=*.go", "--exclude=*_test.go",
+         r'"ROOKERY_[A-Z_]+"', "internal", "cmd", "web"],
         cwd=product_root(), capture_output=True, text=True,
     ).stdout
     return {line.strip('"') for line in out.split() if line}
@@ -688,6 +710,35 @@ def display_name(slug: str) -> str:
     return DISPLAY_NAMES.get(slug, slug.replace("_", " ").title())
 
 
+def _stale_provider_mentions(text: str, slugs: set[str]) -> list[tuple[int, str]]:
+    """(offset, name) for every REMOVED_PROVIDERS display name that still
+    appears in `text` as though it were a live provider — i.e. its slug is
+    genuinely absent from `slugs` and the mention isn't itself narrating the
+    removal (`_removal_narrated_for`).
+
+    The slug comparison is case-INSENSITIVE on purpose: REMOVED_PROVIDERS
+    holds display names ("Zoom", "Fitbit") but `providers()` returns
+    lowercase filename stems ("zoom", "fitbit") — a case-sensitive
+    `gone in slugs` is always False, so the escape hatch meant to stop
+    complaining once a provider comes BACK never actually fired. That
+    escape hatch matters: without it, re-adding `zoom.yaml` would make this
+    check simultaneously demand "Zoom" appear on the services page (forward
+    coverage) and fail on every mention of it as "no longer a provider" —
+    red on correct documentation, with no way to green it except editing
+    the checker.
+    """
+    lower_slugs = {s.lower() for s in slugs}
+    out: list[tuple[int, str]] = []
+    for gone in sorted(REMOVED_PROVIDERS):
+        if gone.lower() in lower_slugs:
+            continue
+        for m in re.finditer(rf"\b{gone}\b", text):
+            if _removal_narrated_for(text, gone, m.start()):
+                continue
+            out.append((m.start(), gone))
+    return out
+
+
 @register
 def check_provider_names() -> None:
     slugs = providers()
@@ -707,14 +758,9 @@ def check_provider_names() -> None:
                         "connected-services.md"))
     for path, label in targets:
         text = read(path)
-        for gone in sorted(REMOVED_PROVIDERS):
-            if gone in slugs:
-                continue
-            for m in re.finditer(rf"\b{gone}\b", text):
-                if _removal_narrated_for(text, gone, m.start()):
-                    continue
-                line_no = text[: m.start()].count("\n") + 1
-                fail("providers", f"{label}:{line_no} names '{gone}', which is no longer a provider")
+        for offset, gone in _stale_provider_mentions(text, slugs):
+            line_no = text[:offset].count("\n") + 1
+            fail("providers", f"{label}:{line_no} names '{gone}', which is no longer a provider")
 
 
 def _missing_logos(provider_slugs: set[str], logo_stems: set[str]) -> set[str]:
@@ -826,6 +872,22 @@ def _provider_selftest() -> None:
     m_table = list(re.finditer(r"\bZoom\b", table))[0]
     assert not _removal_narrated_for(table, "Zoom", m_table.start()), \
         "a table row must be its own unit, not merged with a distant row"
+
+    # Defect 1: REMOVED_PROVIDERS holds display names ("Zoom") but
+    # providers() returns lowercase filename stems ("zoom") — a
+    # case-sensitive `gone in slugs` check is always False, so the escape
+    # hatch that's supposed to stop complaining once a provider comes BACK
+    # never actually fired. Prove the guard now fires: once the provider's
+    # slug reappears, a plain (non-narrated) mention must be silently
+    # accepted.
+    reappeared = "Zoom, Calendly and Asana are current providers.\n"
+    assert _stale_provider_mentions(reappeared, {"zoom", "calendly", "asana"}) == [], \
+        "once a removed provider's slug reappears, a plain mention of it must not be flagged " \
+        "— this is the escape hatch Defect 1 fixed (case-insensitive slug compare)"
+    # And with the slug genuinely absent, the identical text must still be
+    # flagged — proves the fix didn't just disable the check outright.
+    assert [name for _, name in _stale_provider_mentions(reappeared, {"calendly", "asana"})] == ["Zoom"], \
+        "when the slug is genuinely absent, a plain mention must still be flagged"
 
 
 check_provider_names.selftest = _provider_selftest
