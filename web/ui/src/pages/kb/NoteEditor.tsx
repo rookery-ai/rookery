@@ -21,6 +21,8 @@ import {
 } from "@/lib/kb";
 import { useToast } from "@/components/shell/Toast";
 import ImagePicker from "./ImagePicker";
+import { TableSizePicker } from "./TableSizePicker";
+import { TableControls } from "./TableControls";
 import { Button } from "@/components/ui/button";
 import { buildExtensions, toMarkdown, checkFidelity } from "./editor";
 import {
@@ -88,9 +90,11 @@ export function WysiwygEditor({
   registerEditorForTest?: (editor: ReturnType<typeof useEditor>) => void;
 }) {
   const [imagePickerOpen, setImagePickerOpen] = useState(false);
+  const [tablePickerOpen, setTablePickerOpen] = useState(false);
   const uploadAsset = useUploadKBAsset();
   const { toast } = useToast();
   const attachInputRef = useRef<HTMLInputElement>(null);
+  const editorWrapRef = useRef<HTMLDivElement>(null);
   const editor = useEditor({
     editable,
     // buildExtensions()'s `extra` param exists precisely so UI-only
@@ -181,11 +185,14 @@ export function WysiwygEditor({
     if (!editor) return;
     const onInsertImage = () => setImagePickerOpen(true);
     const onInsertAttachment = () => attachInputRef.current?.click();
+    const onInsertTable = () => setTablePickerOpen(true);
     window.addEventListener("kb:insertImage", onInsertImage);
     window.addEventListener("kb:insertAttachment", onInsertAttachment);
+    window.addEventListener("kb:insertTable", onInsertTable);
     return () => {
       window.removeEventListener("kb:insertImage", onInsertImage);
       window.removeEventListener("kb:insertAttachment", onInsertAttachment);
+      window.removeEventListener("kb:insertTable", onInsertTable);
     };
   }, [editor]);
 
@@ -219,11 +226,22 @@ export function WysiwygEditor({
   return (
     <>
       <BubbleToolbar editor={editor} aiActions={aiActions} />
-      <EditorContent editor={editor} className="note-editor-content" />
+      {/* `relative` makes this the positioned ancestor the table handles are
+          placed against — tableGeometry returns container-relative coordinates,
+          so without it they would be laid out against the page. */}
+      <div ref={editorWrapRef} className="relative">
+        <EditorContent editor={editor} className="note-editor-content" />
+        <TableControls editor={editor} editable={editable} containerRef={editorWrapRef} />
+      </div>
       <ImagePicker
         open={imagePickerOpen}
         onOpenChange={setImagePickerOpen}
         onPick={(path) => editor?.chain().focus().setImage({ src: path }).run()}
+      />
+      <TableSizePicker
+        open={tablePickerOpen}
+        onOpenChange={setTablePickerOpen}
+        onPick={(opts) => editor?.chain().focus().insertTable(opts).run()}
       />
       <input
         ref={attachInputRef}
