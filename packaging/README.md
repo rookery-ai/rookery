@@ -9,7 +9,7 @@ sudo dpkg -i rookery_<version>_linux_amd64.deb
 ## Fedora / RHEL
 
 ```bash
-sudo rpm -i rookery-<version>.x86_64.rpm
+sudo rpm -i rookery_<version>_linux_amd64.rpm
 ```
 
 ## Running it so it survives a reboot

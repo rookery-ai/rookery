@@ -96,7 +96,7 @@ image pushes.**
 3. **Open a PR.** Its **title** must itself be a valid Conventional Commit —
    merges are squashes, so the title becomes the commit that lands on `main` and
    is what release-please reads to compute the next version.
-4. **PR checks must pass** (`.github/workflows/pr.yml`, six jobs):
+4. **PR checks must pass** (`.github/workflows/pr.yml`, seven jobs):
    - `Conventional commit title`
    - `Go build and test` — gofmt, `go vet`, `go test -race` (**900s timeout**,
      not 600s: the `web` package alone measures ~343s under `-race`, 13× its
@@ -110,9 +110,19 @@ image pushes.**
    - `Container smoke test` — builds the image, Trivy-scans it, runs it, and
      asserts `/healthz`, the SPA root and the session endpoint all answer. **This
      is the project's only end-to-end coverage.**
+   - `Package smoke test` — builds a goreleaser snapshot, then installs the
+     **rpm** (in a Fedora container), the **deb** (in a Debian container) and
+     extracts the **tar.gz**, running `owner bootstrap` + `serve` + `healthcheck`
+     from a working directory unrelated to the source tree. This is the guard
+     that keeps the packaged artifacts *runnable*; nothing had ever installed one,
+     which is exactly how they shipped unable to open their own database. Run it
+     locally with `make ci-package` — it is deliberately excluded from `make ci`
+     because a snapshot build takes minutes.
 5. **Run the same checks locally first** with `make ci` — it mirrors the gate
-   exactly, including the cross-compile matrix. `make ci-fmt` / `ci-vet` /
-   `ci-test` / `ci-cross` / `ci-ui` run the pieces individually.
+   exactly, including the cross-compile matrix, with the single exception of
+   `Package smoke test` (`make ci-package`, kept separate for runtime).
+   `make ci-fmt` / `ci-vet` / `ci-test` / `ci-cross` / `ci-ui` run the pieces
+   individually.
 6. **Squash-merge.** release-please then maintains a release PR on `main`.
 7. **Merging the release PR** tags the repo, which fires
    `.github/workflows/release.yml`: goreleaser publishes binaries, `.deb`/`.rpm`,
@@ -175,9 +185,14 @@ python3, ripgrep, poppler-utils and tesseract, so `/healthz` reports no
 capability warnings inside it. ~270 MB.
 
 Two container notes worth knowing: **Podman ignores `HEALTHCHECK`** unless built
-with `--format docker` (Docker/buildx honours it), and `migrations/` is copied
-*beside* the binary because `resolveDir()` looks exe-relative before
-CWD-relative.
+with `--format docker` (Docker/buildx honours it), and the image no longer
+copies `migrations/` beside the binary — the SQL is embedded (root `migrations`
+package, `//go:embed *.sql`), so the container and the native binaries run the
+identical code path. That copy existed to satisfy an exe-relative lookup which
+made the deb, rpm and every archive fail on first use with `read migrations
+dir`; embedding removed the lookup and the whole class of bug. `//go:embed`
+fails the build when it matches nothing, so a missing migration set can no
+longer reach a user.
 
 ### Environment variables
 
