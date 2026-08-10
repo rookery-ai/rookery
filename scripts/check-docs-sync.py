@@ -298,6 +298,166 @@ def _cli_selftest() -> None:
 check_cli.selftest = _cli_selftest
 
 
+# Provider slugs whose display name cannot be derived from the filename. Most
+# entries here exist because reference/connected-services.md groups the
+# Google family under one "## Google" heading and names each product without
+# repeating "Google" per item (e.g. "Calendar, Drive, Sheets, Docs, Tasks,
+# Analytics, Ads, AdSense" rather than "Google Calendar, Google Drive, ...") —
+# the page covers each product, just under a shorter name than title-casing
+# the slug would produce, which is a checker limitation, not a docs gap.
+DISPLAY_NAMES = {
+    "google_searchconsole": "Search Console",
+    "firefly_iii": "Firefly III",
+    "home_assistant": "Home Assistant",
+    "hackernews": "Hacker News",
+    "google_ads": "Ads",
+    "google_adsense": "AdSense",
+    "google_analytics": "Analytics",
+    "google_calendar": "Calendar",
+    "google_docs": "Docs",
+    "google_drive": "Drive",
+    "google_sheets": "Sheets",
+    "google_tasks": "Tasks",
+    "lastfm": "Last.fm",
+    "open_meteo": "Open-Meteo",
+    "openfoodfacts": "Open Food Facts",
+    "openlibrary": "Open Library",
+}
+
+# Names that were once providers and must never reappear in prose as though
+# they still are. Removing a provider means removing every mention of it.
+REMOVED_PROVIDERS = {"Zoom", "Fitbit"}
+
+# A removed-provider name surviving in prose that is deliberately narrating
+# the removal itself (not claiming the provider still exists) is not a
+# violation — e.g. "Zoom was pulled after its connect flow could not be
+# completed". Exempt only a match whose own PARAGRAPH (the blank-line-
+# delimited block it sits in — CLAUDE.md's prose wraps one thought across
+# several physical lines, so a single-line check would miss a removal verb
+# that lands one line above or below the name) also carries an explicit
+# removal verb. This is deliberately narrow: a paragraph that merely lists
+# the name (a current-provider enumeration) has no such verb anywhere in it
+# and still fails, which is what catches CLAUDE.md's stale Zoom listing.
+REMOVAL_CONTEXT = re.compile(r"\b(removed|removal|deleted|pulled|decommissioned)\b", re.I)
+
+
+def _paragraph_spans(text: str) -> list[tuple[int, int]]:
+    """Paragraph boundaries: a blank line, AND a markdown table row (starts
+    with '|'). A table row needs its own rule because CLAUDE.md's Key
+    packages table has no blank lines between rows — without this, the whole
+    ~15 KB table collapses into one blank-line-delimited "paragraph", and a
+    removal verb anywhere else in that table (there are several, describing
+    unrelated features) would exempt every provider name in it, including a
+    genuinely stale current-provider mention."""
+    spans: list[tuple[int, int]] = []
+    para_start = 0
+    pos = 0
+    for line in text.splitlines(keepends=True):
+        line_start = pos
+        pos += len(line)
+        stripped = line.strip()
+        if stripped == "" or stripped.startswith("|"):
+            if line_start > para_start:
+                spans.append((para_start, line_start))
+            if stripped.startswith("|"):
+                spans.append((line_start, pos))
+            para_start = pos
+    if para_start < len(text):
+        spans.append((para_start, len(text)))
+    return spans
+
+
+def _paragraph_at(text: str, offset: int) -> str:
+    for start, end in _paragraph_spans(text):
+        if start <= offset < end:
+            return text[start:end]
+    return ""
+
+
+def display_name(slug: str) -> str:
+    return DISPLAY_NAMES.get(slug, slug.replace("_", " ").title())
+
+
+@register
+def check_provider_names() -> None:
+    slugs = providers()
+    web = web_root()
+    if web is not None:
+        path = web / "src/content/docs/docs/reference/connected-services.md"
+        text = read(path)
+        for slug in sorted(slugs):
+            name = display_name(slug)
+            if name.lower() not in text.lower():
+                fail("providers", f"provider '{name}' is not named in reference/connected-services.md")
+    # A provider that was removed must not survive in prose anywhere.
+    targets = [(product_root() / "CLAUDE.md", "CLAUDE.md"),
+               (product_root() / "README.md", "README.md")]
+    if web is not None:
+        targets.append((web / "src/content/docs/docs/reference/connected-services.md",
+                        "connected-services.md"))
+    for path, label in targets:
+        text = read(path)
+        for gone in sorted(REMOVED_PROVIDERS):
+            if gone in slugs:
+                continue
+            for m in re.finditer(rf"\b{gone}\b", text):
+                if REMOVAL_CONTEXT.search(_paragraph_at(text, m.start())):
+                    continue
+                line_no = text[: m.start()].count("\n") + 1
+                fail("providers", f"{label}:{line_no} names '{gone}', which is no longer a provider")
+
+
+@register
+def check_logos() -> None:
+    web = web_root()
+    if web is None:
+        return
+    logos = {p.stem for p in (web / "src" / "assets" / "logos").glob("*.svg")}
+    # Set equality is NOT asserted: the website legitimately carries logos with
+    # no connector behind them (claude.svg, cursor.svg are coder marks shown on
+    # the landing page). Coverage in one direction only.
+    for slug in sorted(providers() - logos):
+        fail("logos", f"provider '{slug}' has no logo at src/assets/logos/{slug}.svg")
+
+
+def _provider_selftest() -> None:
+    assert display_name("clickup") == "Clickup", "slug should title-case"
+    assert display_name("firefly_iii") == "Firefly III", "override should win"
+    assert display_name("hackernews") == "Hacker News", "override should win"
+    slugs, logos = {"gmail", "notion"}, {"gmail", "claude", "cursor"}
+    assert slugs - logos == {"notion"}, "must flag a provider with no logo"
+    assert not (logos - slugs) & slugs, "extra website logos must not be flagged"
+    # A removed-provider mention narrating its own removal must not fire, even
+    # when the removal verb lands on a different physical line of the same
+    # paragraph (CLAUDE.md wraps prose across lines).
+    doc = (
+        "Intro paragraph, unrelated.\n\n"
+        "Zoom was a provider. Its connect flow could not be\n"
+        "completed against a real account, so it was pulled.\n\n"
+        "Dropbox, Zoom, Calendly, Asana are current providers.\n"
+    )
+    m_history = list(re.finditer(r"\bZoom\b", doc))[0]
+    m_current = list(re.finditer(r"\bZoom\b", doc))[1]
+    assert REMOVAL_CONTEXT.search(_paragraph_at(doc, m_history.start())), \
+        "a removal verb elsewhere in the same paragraph must exempt the mention"
+    assert not REMOVAL_CONTEXT.search(_paragraph_at(doc, m_current.start())), \
+        "a plain current-provider list in its own paragraph must not be exempted"
+    # A table row must not merge with unrelated rows (no blank lines between
+    # them) just because some other row far away happens to say "removed".
+    table = (
+        "| Package | Notes |\n"
+        "|---|---|\n"
+        "| `internal/foo` | some other feature that was removed long ago |\n"
+        "| `internal/connectors` | 91 providers (..., Zoom, Calendly, ...) |\n"
+    )
+    m_table = list(re.finditer(r"\bZoom\b", table))[0]
+    assert not REMOVAL_CONTEXT.search(_paragraph_at(table, m_table.start())), \
+        "a table row must be its own paragraph, not merged with a distant row"
+
+
+check_provider_names.selftest = _provider_selftest
+
+
 def selftest() -> int:
     """Run each assertion's inline cases against synthetic input.
 
