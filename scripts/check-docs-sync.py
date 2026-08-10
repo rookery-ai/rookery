@@ -145,9 +145,16 @@ check_claims.selftest = _claims_selftest
 
 # An exact-number regex cannot catch "100+ services" against a real 91: the
 # claim is approximate, and false in the direction that matters.
+#
+# The noun after "N+" varies by sentence ("100+ services", "the 100+
+# supported", "100+ providers/connections/integrations") — a pattern that
+# only recognizes "services" leaves every other phrasing of the same false
+# claim undetected while the check reports green. The alternation below is
+# non-capturing so group(1) is still always the number.
+INFLATED_NOUNS = r"(?:services|supported|providers|connections|integrations)"
 INFLATABLE = [
-    ("src/pages/index.astro", r"(\d+)\+\s*services", "providers"),
-    ("src/content/docs/docs/reference/connected-services.md", r"(\d+)\+\s*services", "providers"),
+    ("src/pages/index.astro", rf"(\d+)\+\s*{INFLATED_NOUNS}", "providers"),
+    ("src/content/docs/docs/reference/connected-services.md", rf"(\d+)\+\s*{INFLATED_NOUNS}", "providers"),
 ]
 
 
@@ -173,11 +180,18 @@ def check_inflated() -> None:
 
 
 def _inflated_selftest() -> None:
-    m = re.search(r"(\d+)\+\s*services", "100+ services")
+    pattern = rf"(\d+)\+\s*{INFLATED_NOUNS}"
+    m = re.search(pattern, "100+ services")
     assert m and int(m.group(1)) == 100, "must capture an N+ claim"
     assert 100 > 91, "an N+ claim above the real count is a failure"
-    assert re.search(r"(\d+)\+\s*services", "91 services") is None, \
+    assert re.search(pattern, "91 services") is None, \
         "an exact claim is the claims table's job, not this one"
+    # The noun varies by sentence — "A selection of the 100+ supported."
+    # (index.astro:395) is the same false claim, worded differently, and
+    # must be caught too, not just the "N+ services" spelling.
+    m2 = re.search(pattern, "A selection of the 100+ supported.")
+    assert m2 and int(m2.group(1)) == 100, \
+        "must also catch 'N+ supported', not just 'N+ services'"
 
 
 check_inflated.selftest = _inflated_selftest
