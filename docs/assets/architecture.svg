@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 690" width="1200" height="690" role="img" aria-labelledby="t">
+  <title id="t">Rookery architecture: chat platforms and browser reach one binary on your machine, which holds isolated workspaces and reaches out through the connector layer</title>
+  <rect width="1200" height="690" fill="#ece5db"/>
+  <g font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+
+    <text x="600" y="34" font-size="13" font-weight="600" letter-spacing="2.4" fill="#6f6760" text-anchor="middle">YOU</text>
+    <g fill="#f8f4ee" stroke="#d9cfc2">
+      <rect x="273" y="48" width="150" height="46" rx="23"/>
+      <rect x="441" y="48" width="150" height="46" rx="23"/>
+      <rect x="609" y="48" width="150" height="46" rx="23"/>
+      <rect x="777" y="48" width="150" height="46" rx="23"/>
+    </g>
+    <g font-size="17" fill="#211d1a" text-anchor="middle">
+      <text x="348" y="77">Telegram</text>
+      <text x="516" y="77">Discord</text>
+      <text x="684" y="77">Slack</text>
+      <text x="852" y="77">Browser</text>
+    </g>
+
+    <path d="M600 100V136" stroke="#a94c1c" stroke-width="2.5"/>
+    <path d="M593 130l7 12 7-12z" fill="#a94c1c"/>
+
+    <rect x="70" y="150" width="1060" height="392" rx="24" fill="#f8f4ee" stroke="#d9cfc2" stroke-width="1.5"/>
+    <text x="98" y="186" font-size="14" font-weight="600" letter-spacing="1.6" fill="#a94c1c">YOUR MACHINE — ONE BINARY, ONE PROCESS</text>
+
+    <rect x="98" y="204" width="1004" height="312" rx="18" fill="none" stroke="#d9cfc2" stroke-dasharray="6 5"/>
+    <text x="122" y="234" font-size="15" fill="#6f6760">workspace — an isolated tenant, entered with its own password</text>
+
+    <g fill="#ece5db" stroke="#d9cfc2">
+      <rect x="122" y="252" width="228" height="150" rx="14"/>
+      <rect x="374" y="252" width="228" height="150" rx="14"/>
+      <rect x="626" y="252" width="228" height="150" rx="14"/>
+      <rect x="878" y="252" width="200" height="150" rx="14"/>
+    </g>
+    <g font-size="18" font-weight="600" fill="#211d1a">
+      <text x="146" y="288">Knowledge base</text>
+      <text x="398" y="288">Agents</text>
+      <text x="650" y="288">Coder</text>
+      <text x="902" y="288">Secrets</text>
+    </g>
+    <g font-size="14.5" fill="#6f6760">
+      <text x="146" y="316">Markdown vault</text>
+      <text x="146" y="338">on your own disk.</text>
+      <text x="146" y="360">Agents read and</text>
+      <text x="146" y="382">write it directly.</text>
+      <text x="398" y="316">Built by describing</text>
+      <text x="398" y="338">them. Run on a</text>
+      <text x="398" y="360">schedule, on demand,</text>
+      <text x="398" y="382">or when you ask.</text>
+      <text x="650" y="316">Your CLI tool or a</text>
+      <text x="650" y="338">provider API. Confined</text>
+      <text x="650" y="360">with Landlock on</text>
+      <text x="650" y="382">Linux.</text>
+      <text x="902" y="316">Encrypted at rest,</text>
+      <text x="902" y="338">unlocked only into</text>
+      <text x="902" y="360">the thing that</text>
+      <text x="902" y="382">needs them.</text>
+    </g>
+
+    <text x="122" y="440" font-size="15" fill="#6f6760">SQLite is the system of record — chats, schedules, runs. Nothing leaves this box unless you connect something.</text>
+    <text x="122" y="484" font-size="15" fill="#6f6760">Other workspaces sit alongside, sealed: separate vault, separate credentials, separate agents.</text>
+
+    <path d="M600 546V582" stroke="#a94c1c" stroke-width="2.5"/>
+    <path d="M593 576l7 12 7-12z" fill="#a94c1c"/>
+
+    <rect x="150" y="592" width="900" height="76" rx="20" fill="#f6e6dc" stroke="#a94c1c" stroke-opacity="0.25"/>
+    <text x="600" y="624" font-size="19" font-weight="600" fill="#211d1a" text-anchor="middle">91 connected services — direct OAuth, credentials you own</text>
+    <text x="600" y="650" font-size="14.5" fill="#6f6760" text-anchor="middle">Google · GitHub · Notion · Slack · Home Assistant · Spotify · Todoist · and 84 more</text>
+  </g>
+</svg>
