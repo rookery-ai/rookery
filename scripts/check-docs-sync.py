@@ -147,14 +147,21 @@ check_claims.selftest = _claims_selftest
 # claim is approximate, and false in the direction that matters.
 #
 # The noun after "N+" varies by sentence ("100+ services", "the 100+
-# supported", "100+ providers/connections/integrations") — a pattern that
-# only recognizes "services" leaves every other phrasing of the same false
-# claim undetected while the check reports green. The alternation below is
-# non-capturing so group(1) is still always the number.
-INFLATED_NOUNS = r"(?:services|supported|providers|connections|integrations)"
+# supported") — a pattern that only recognizes "services" leaves other
+# phrasings of the same false claim undetected while the check reports
+# green. But the noun list must stay SHORT and each entry demonstrably
+# needed: a noun only belongs here if it can only mean "connector services
+# here" in context. "connections"/"integrations"/"providers" are ordinary
+# English words with unrelated senses ("load-tested with 1000+ connections
+# open simultaneously" is a true, unrelated claim) — including them turns a
+# targeted check into one that fires on honest prose, and a gate that fires
+# on true sentences is a gate that gets disabled. Widen this list only when
+# real text in one of the INFLATABLE files needs the new noun, and say
+# which line justified it (grep first).
+INFLATED_NOUNS = r"(?:services|supported)"
 INFLATABLE = [
-    ("src/pages/index.astro", rf"(\d+)\+\s*{INFLATED_NOUNS}", "providers"),
-    ("src/content/docs/docs/reference/connected-services.md", rf"(\d+)\+\s*{INFLATED_NOUNS}", "providers"),
+    ("src/pages/index.astro", rf"(\d+)\+\s*({INFLATED_NOUNS})", "providers"),
+    ("src/content/docs/docs/reference/connected-services.md", rf"(\d+)\+\s*({INFLATED_NOUNS})", "providers"),
 ]
 
 
@@ -170,17 +177,17 @@ def check_inflated() -> None:
             continue
         text = read(path)
         for m in re.finditer(pattern, text):
-            claimed, actual = int(m.group(1)), values[key]
+            claimed, actual, noun = int(m.group(1)), values[key], m.group(2)
             if claimed > actual:
                 line = text[: m.start()].count("\n") + 1
                 fail(
                     "inflated",
-                    f"{rel}:{line} claims {claimed}+ {key}, but there are only {actual}",
+                    f"{rel}:{line} claims {claimed}+ {noun}, but there are only {actual}",
                 )
 
 
 def _inflated_selftest() -> None:
-    pattern = rf"(\d+)\+\s*{INFLATED_NOUNS}"
+    pattern = rf"(\d+)\+\s*({INFLATED_NOUNS})"
     m = re.search(pattern, "100+ services")
     assert m and int(m.group(1)) == 100, "must capture an N+ claim"
     assert 100 > 91, "an N+ claim above the real count is a failure"
@@ -192,6 +199,11 @@ def _inflated_selftest() -> None:
     m2 = re.search(pattern, "A selection of the 100+ supported.")
     assert m2 and int(m2.group(1)) == 100, \
         "must also catch 'N+ supported', not just 'N+ services'"
+    # False-positive guard: "connections"/"integrations" are ordinary words
+    # with unrelated senses, so they must NOT be in INFLATED_NOUNS — this is
+    # a real sentence that is true and must not fire.
+    assert re.search(pattern, "load-tested with 1000+ connections open simultaneously") is None, \
+        "must not fire on unrelated uses of 'connections' — that word must stay out of INFLATED_NOUNS"
 
 
 check_inflated.selftest = _inflated_selftest
