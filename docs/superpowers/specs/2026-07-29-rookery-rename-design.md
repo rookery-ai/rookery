@@ -55,12 +55,11 @@ abbreviation would reproduce exactly the problem being paid for. Environment
 variables are written once in a unit file and read many times. Precedent:
 `DOCKER_`, `POSTGRES_`, `GITHUB_`.
 
-**Domain: `rookery.sh`.** `.com`, `.dev`, `.ai`, `.io`, `.app`, `.org` and `.net`
-are all taken. `.sh` is idiomatic for a self-hosted, CLI-shipped tool and matches
-the install-script story that follows once the repository is public. This is not
+**Domain: `rookery.cloud`.** `.com`, `.dev`, `.ai`, `.io`, `.app`, `.org` and `.net`
+are all taken, and `.cloud` reads cleanly for a self-hosted platform. This is not
 only branding: per `internal/publicurl`, a **publicly valid hostname decides
 whether Google's OAuth consent flow works at all**, and a `.lan` host fails it. So
-`rookery.sh` becomes the documented `ROOKERY_PUBLIC_URL` example and the escape
+`rookery.cloud` becomes the documented `ROOKERY_PUBLIC_URL` example and the escape
 hatch for self-hosters whose LAN hostname is rejected.
 
 **License: Apache-2.0.** The repository currently has no LICENSE at all, which
@@ -103,7 +102,7 @@ This table is the authoritative source for every string change in PR1.
 | Container image | `ghcr.io/ilijad1/simple-agents-v2` | `ghcr.io/ilijad1/rookery` |
 | Docker volume | `simple-agents-data` | `rookery-data` |
 | systemd unit | `simple-agents.service` | `rookery.service` |
-| Domain | — | `rookery.sh` |
+| Domain | — | `rookery.cloud` |
 | License | *(none)* | Apache-2.0 |
 
 The Go module path and the repository name **already disagree** today
@@ -264,7 +263,7 @@ Recorded so they are not silently re-added.
   would be a second rename larger than the first — `workspace_id` is in every
   tenant table, every API route and the two-level session model — for zero
   functional gain.
-- **Deferred to a follow-on "go public" spec:** the docs site on `rookery.sh`,
+- **Deferred to a follow-on "go public" spec:** the docs site on `rookery.cloud`,
   `install.sh` / `install.ps1`, the Homebrew tap, Windows service registration,
   making the GHCR package public, and flipping repository visibility. Release
   assets on a private repository require an authenticated request, so `curl | sh`

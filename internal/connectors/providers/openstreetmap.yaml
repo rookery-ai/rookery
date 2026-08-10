@@ -6,7 +6,7 @@ auth:
 # Nominatim's usage policy REQUIRES an identifying User-Agent and blocks generic ones
 # outright — the same trap Wikimedia sets.
 static_headers:
-  User-Agent: "Rookery/1.0 (https://rookery.sh; self-hosted personal assistant)"
+  User-Agent: "Rookery/1.0 (https://rookery.cloud; self-hosted personal assistant)"
 setup_url: https://operations.osmfoundation.org/policies/nominatim/
 setup_steps:
   - "OpenStreetMap needs no account and no API key — press Connect."

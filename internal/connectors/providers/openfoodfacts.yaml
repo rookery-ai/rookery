@@ -4,7 +4,7 @@ category: Data & Reference
 auth:
   kind: none
 static_headers:
-  User-Agent: "Rookery/1.0 (https://rookery.sh; self-hosted personal assistant)"
+  User-Agent: "Rookery/1.0 (https://rookery.cloud; self-hosted personal assistant)"
 setup_url: https://openfoodfacts.github.io/openfoodfacts-server/api/
 setup_steps:
   - "Open Food Facts needs no account and no API key — press Connect."
