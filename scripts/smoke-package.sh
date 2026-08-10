@@ -81,7 +81,7 @@ smoke_in_container "rpm on fedora" "fedora:latest" "$RPM" \
 	'rpm -i /artifact'
 
 smoke_in_container "deb on debian" "debian:stable-slim" "$DEB" \
-	'apt-get update -qq >/dev/null && dpkg -i /artifact'
+	'apt-get update -qq >/dev/null; dpkg -i /artifact'
 
 # The archive runs on the host, extracted to one directory and executed from a
 # completely different one. That is the case the deleted exe-relative probe used
@@ -90,7 +90,14 @@ echo "==> tar.gz from an unrelated CWD"
 extract_dir="$(mktemp -d)"
 run_dir="$(mktemp -d)"
 data_dir="$(mktemp -d)"
-trap 'rm -rf "$extract_dir" "$run_dir" "$data_dir"' EXIT
+serve_pid=""
+cleanup_tgz() {
+	# Kill the backgrounded server on every exit path (success, failure, or
+	# early `fail()`) so the run leaves nothing behind.
+	[ -n "$serve_pid" ] && kill "$serve_pid" 2>/dev/null || true
+	rm -rf "$extract_dir" "$run_dir" "$data_dir"
+}
+trap cleanup_tgz EXIT
 
 tar -xzf "$TGZ" -C "$extract_dir"
 [ -x "$extract_dir/rookery" ] || fail "archive has no executable rookery at its root"
@@ -100,6 +107,32 @@ tar -xzf "$TGZ" -C "$extract_dir"
 	export ROOKERY_DATA_DIR="$data_dir" ROOKERY_PORT=18099
 	"$extract_dir/rookery" owner bootstrap -u smoke -p 'smoke-pw-12345'
 ) || fail "tar.gz bootstrap failed from an unrelated CWD"
+
+# `serve` is started in THIS shell (not a subshell) so `$!` is the real PID and
+# the process is a direct child the trap can kill outright, instead of relying
+# on a background job surviving a subshell's exit/reparenting.
+cd "$run_dir"
+export ROOKERY_DATA_DIR="$data_dir" ROOKERY_PORT=18099
+"$extract_dir/rookery" serve >"$run_dir/serve.log" 2>&1 &
+serve_pid=$!
+
+# `rookery healthcheck` resolves its target port the same way `serve` does
+# (config.Load reads ROOKERY_PORT from the environment), so probing with the
+# same env var — rather than hardcoding 8080 or reaching for curl, which a
+# minimal host may lack — reuses the exact mechanism the container cases use.
+healthy=0
+for i in $(seq 1 45); do
+	if ROOKERY_PORT=18099 "$extract_dir/rookery" healthcheck >/dev/null 2>&1; then
+		healthy=1
+		break
+	fi
+	sleep 1
+done
+if [ "$healthy" -ne 1 ]; then
+	echo "tar.gz server never became healthy" >&2
+	cat "$run_dir/serve.log" >&2
+	fail "tar.gz serve failed from an unrelated CWD"
+fi
 echo "==> tar.gz OK"
 
 echo "all package smoke tests passed"
