@@ -1,30 +1,61 @@
+<p align="center">
+  <img src="docs/assets/hero-banner.svg" alt="Rookery — your knowledge grew hands" width="100%">
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-a94c1c"></a>
+  <a href="https://github.com/ilijad1/rookery/releases"><img alt="Release" src="https://img.shields.io/github/v/release/ilijad1/rookery?color=a94c1c"></a>
+  <a href="https://github.com/ilijad1/rookery/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/ilijad1/rookery/pr.yml?branch=main"></a>
+  <a href="https://github.com/ilijad1/rookery/pkgs/container/rookery"><img alt="Container" src="https://img.shields.io/badge/ghcr.io-rookery-a94c1c"></a>
+</p>
+
 # Rookery
 
-**Self-hosted AI agents that live on your knowledge base and act through your connected services.**
+**Self-hosted AI agents that run on your own machine, around the clock.**
 
-Rookery is a single-binary control plane for AI agents you own. Agents read and
-write an Obsidian-style markdown vault, reach 91 external services through a
-self-managed OAuth connector layer, run on a schedule or on demand, and talk to
-you over Telegram, Discord or Slack. Everything runs on your hardware: the
-database is SQLite, secrets are encrypted at rest, and coder subprocesses are
-confined with Landlock on Linux.
+Rookery is a single binary. It keeps your knowledge as plain markdown on your
+own disk, builds agents from a conversation rather than a config file, reaches
+91 external services with credentials you own, and talks to you on Telegram,
+Discord or Slack. The database is SQLite, secrets are encrypted at rest, and
+coder subprocesses are confined with Landlock on Linux.
+
+Full documentation lives at **[rookery.cloud/docs](https://rookery.cloud/docs)**.
 
 ## Quickstart
 
 ```bash
-# Build (requires Go 1.26 and Node 24)
-make build
+curl -fsSL https://rookery.cloud/install.sh | sh
+```
 
-# Create the owner account — first run only
-./bin/rookery owner bootstrap -u <username> -p <password>
+On Windows, in PowerShell:
 
-# Start the server on 0.0.0.0:8080
-./bin/rookery serve
+```powershell
+irm https://rookery.cloud/install.ps1 | iex
+```
+
+Then create the owner account and start the server:
+
+```bash
+rookery owner bootstrap -u <username> -p <password>
+rookery serve
 ```
 
 Open `http://localhost:8080`, log in, and create your first workspace.
 
-### Container
+<details>
+<summary>Build from source instead</summary>
+
+Requires Go 1.26 and Node 24.
+
+```bash
+make build
+./bin/rookery owner bootstrap -u <username> -p <password>
+./bin/rookery serve
+```
+</details>
+
+<details>
+<summary>Run the container instead</summary>
 
 ```bash
 podman run -d --name rookery -p 8080:8080 \
@@ -33,20 +64,129 @@ podman run -d --name rookery -p 8080:8080 \
 
 The image is slim: it ships no CLI coder binary and sets
 `ROOKERY_CODER_MODE=slim`, so workspaces must use the `api` coder kind.
+</details>
 
-## What it does
+## What it's like
 
-- **Workspaces** — fully isolated tenants, each with its own vault, secrets,
-  agents and connections. One owner enters a workspace with its master password.
-- **Knowledge base** — a markdown vault per workspace. Agents read the whole
-  vault and write durable knowledge back into it across runs.
-- **Agents** — created by conversation, not configuration. Describe what you
-  want; the designer proposes a plan, generates and really tests it, then saves.
-- **Connectors** — 91 providers, ~471 curated actions, self-managed OAuth. No
-  third-party integration broker.
-- **Skills** — reusable capability documents, 22 bundled plus your own.
-- **Scheduling, reminders and chat** — cron-driven runs, natural-language
-  reminders, and one-off chat with read/write access to your notes.
+<!--
+  PLACEHOLDER CONTENT, mirroring src/components/Transcript.tsx in the website
+  repository. That file carries the same obligation and states the reason: a
+  scripted demo alongside claims that are checkable would be a demo that lies.
+  Replace this with a VERBATIM capture from a real designer build before
+  launch, redaction being the only permitted edit — and replace BOTH copies
+  from the SAME capture, or the two surfaces will show different "real" runs.
+-->
+
+> **You** — Every morning, tell me if any of my sites went down overnight.
+>
+> **Rookery** — Two quick questions. Which sites should I watch, and should I
+> message you every morning or only when something is actually wrong?
+>
+> **You** — rookery.cloud and my blog. Only when something is wrong.
+>
+> **Rookery** — Here is the agent I will build:
+> - Checks both sites every morning at 7am
+> - Messages you only if one is unreachable or slow
+> - Writes every check into your notes, under Uptime
+>
+> Type approve and I will build it and test it for real.
+>
+> **You** — approve
+
+It then writes the agent, runs it against the real services, reports what came
+back, and saves only once you have seen that.
+
+## Workspaces
+
+**One machine. Sealed, separate worlds.**
+
+Every workspace is its own tenant — its own knowledge, its own credentials, its
+own connected accounts, its own agents. You enter one with its password, and
+nothing crosses between them.
+
+## Knowledge base
+
+**Everything you know, as plain markdown on your own disk.**
+
+What you write, what your agents learn, and what your connected services bring
+in, all in one vault. Open it in Rookery or in any editor you like. Agents read
+the whole vault and write durable knowledge back into it across runs.
+
+## Agents
+
+**Describe it. Don't configure it.**
+
+Say what you want in your own words. Rookery asks a couple of questions,
+proposes a plan, builds it, tests it against the real services, and shows you
+what happened before anything is saved. Then it just runs.
+
+## Skills
+
+**Things your agents already know how to do.**
+
+22 built in and ready to attach to any agent — reading PDFs and spreadsheets,
+web research, browser automation, git, email triage — plus any you create the
+same conversational way.
+
+Every agent gets the same tools, whatever model is behind it. A small model on
+your own machine and a frontier one are given exactly the same reach. The model
+decides how *well* a job is done — never whether it can be done at all.
+
+## Connections
+
+**91 services. No middleman holding your keys.**
+
+Rookery talks to them directly, using credentials you own: 91 providers and 471
+curated actions, over self-managed OAuth. There is no third-party integration
+broker in the path.
+
+Google, GitHub, Notion, Slack, Jira, Stripe, Shopify — and the self-hosted tier
+too: Home Assistant, Immich, Paperless-ngx, Nextcloud, Jellyfin.
+
+## Chat
+
+**Ask what you know. Then have it act.**
+
+Talk to your knowledge the way you'd talk to someone who has read all of it —
+and have it write a note, or do something in a connected account, right there in
+the conversation.
+
+## Notifications
+
+**You find out the moment it happens.**
+
+An agent finished, a service returned something new, a reminder came due. It
+lands in your inbox, and reaches you on Telegram, Discord or Slack when you're
+away.
+
+## Models
+
+**Your machine. Your model.**
+
+Use the coder tool you already have, or connect the provider you prefer —
+hosted, or running entirely on your own hardware. Nothing ties you to one
+vendor.
+
+## Secrets
+
+**Credentials that stay yours.**
+
+Encrypted where they sit, unlocked only into the thing that needs them, scoped
+to one workspace, and never handed to anyone else.
+
+## Scheduling
+
+**Every weekday at eight. And again at ten.**
+
+Say when in your own words — twice a day, the first Monday of the month, every
+twenty minutes during work hours, or only when you ask. Reminders work the same
+way: *remind me in 10 minutes to call the doctor.*
+
+## How it fits together
+
+<p align="center">
+  <img src="docs/assets/architecture.svg" alt="Chat platforms and a browser reach one binary on your machine, which holds isolated workspaces and reaches outward through the connector layer" width="100%">
+</p>
 
 ## Configuration
 
@@ -64,7 +204,8 @@ The image is slim: it ships no CLI coder binary and sets
 
 `ROOKERY_PUBLIC_URL` matters more than it looks: OAuth providers reject redirect
 URIs on non-public hostnames, so a `.lan` address fails Google's validation. Use
-a real hostname — `rookery.sh` is the documented example — or `http://localhost`.
+a real hostname — `rookery.cloud` is the documented example — or
+`http://localhost`.
 
 ## Platform support
 
@@ -82,7 +223,19 @@ a real hostname — `rookery.sh` is the documented example — or `http://localh
 
 `GET /healthz` is unauthenticated and reports version, commit, sandbox status
 including the Landlock ABI, coder mode and host-tool presence. A `python3`
-warning is not cosmetic — without it the agent-tool AST guardrail self-skips.
+warning is not cosmetic — without it the agent-tool AST guardrail self-skips, so
+generated tool scripts run unchecked.
+
+## Contributing
+
+Branch off `main`; `main` only ever advances through merged pull requests. Use
+[Conventional Commits](https://www.conventionalcommits.org/) — the PR title
+becomes the squashed commit and drives release versioning. Run the full gate
+locally before opening a PR:
+
+```bash
+make ci
+```
 
 ## License
 
