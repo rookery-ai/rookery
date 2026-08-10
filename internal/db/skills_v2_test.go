@@ -13,7 +13,7 @@ import (
 // and no skills.library_slug/library_version columns, and that the skill_drafts
 // table exists and round-trips (keyed by workspace_id).
 func TestSkillLibraryMigrationDropped(t *testing.T) {
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../../migrations")
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

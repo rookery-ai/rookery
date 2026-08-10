@@ -13,7 +13,7 @@ import (
 // agent_drafts) and returns it.
 func draftTestDB(t *testing.T) (*db.DB, string) {
 	t.Helper()
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../../migrations")
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

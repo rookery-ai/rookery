@@ -272,3 +272,38 @@ jobs:
 
           docker exec rookery-smoke /usr/bin/rookery healthcheck
           docker rm -f rookery-smoke
+
+  packages:
+    name: Package smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # goreleaser reads tags to compute the snapshot version
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: web/ui/package-lock.json
+
+      # A snapshot needs no tag and exercises the same builds/nfpm config the
+      # release uses. Signing and SBOMs are release-only concerns.
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --clean --snapshot --skip=sign,sbom
+
+      # Installs each artifact in a throwaway container and actually runs it.
+      # Nothing in CI had ever done this, which is why the deb, rpm and every
+      # archive shipped unable to open their own database.
+      - name: Smoke test the packages
+        env:
+          CONTAINER_ENGINE: docker
+        run: scripts/smoke-package.sh dist

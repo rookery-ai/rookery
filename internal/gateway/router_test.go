@@ -20,7 +20,7 @@ const testWorkspaceID = "ws-router-test"
 func newTestRouter(t *testing.T) (*gateway.Router, *db.DB, *agentdesigner.Flow, *skilldesigner.Flow) {
 	t.Helper()
 
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../../migrations")
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestDesignSessionsAreMutuallyExclusive(t *testing.T) {
 // TestSkillCommandWithoutFlow: an operator running without the skill flow wired
 // gets a message, not a panic — the same contract designFlow has.
 func TestSkillCommandWithoutFlow(t *testing.T) {
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../../migrations")
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

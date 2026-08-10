@@ -12,7 +12,7 @@ import (
 // inboxTestDB opens a fresh migrated DB with one workspace + one agent.
 func inboxTestDB(t *testing.T) (*db.DB, *db.Agent, string) {
 	t.Helper()
-	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../../migrations")
+	database, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

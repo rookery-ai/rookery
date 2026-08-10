@@ -24,7 +24,7 @@ func mkKey() []byte {
 // storeTestDB opens a fresh migrated DB with one workspace.
 func storeTestDB(t *testing.T) (*db.DB, string) {
 	t.Helper()
-	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"), "../../migrations")
+	d, err := db.Open(filepath.Join(t.TempDir(), "test.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

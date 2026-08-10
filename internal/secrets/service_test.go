@@ -2,7 +2,6 @@ package secrets_test
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -15,30 +14,10 @@ func newTestDB(t *testing.T) *db.DB {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
-	migrationsDir := findMigrations(t)
-	database, err := db.Open(dbPath, migrationsDir)
+	database, err := db.Open(dbPath)
 	require.NoError(t, err)
 	t.Cleanup(func() { database.Close() })
 	return database
-}
-
-func findMigrations(t *testing.T) string {
-	t.Helper()
-	// Walk up from test file to find migrations/ directory.
-	dir, _ := os.Getwd()
-	for {
-		candidate := filepath.Join(dir, "migrations")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	t.Fatal("migrations directory not found")
-	return ""
 }
 
 const (

@@ -12,37 +12,18 @@ import (
 	"github.com/ilijad1/rookery/internal/websearch"
 )
 
-// newWiringTestDB + findWiringMigrations mirror internal/secrets's own test
-// helper (secrets_test.go's newTestDB/findMigrations) — a real (temp-file)
-// SQLite DB migrated with the project's actual migrations, so the secret
-// really round-trips through storage+decryption, not a mock.
+// newWiringTestDB gives the test a real (temp-file) SQLite DB carrying the
+// project's actual schema, so the secret really round-trips through
+// storage+decryption rather than a mock.
 func newWiringTestDB(t *testing.T) *db.DB {
 	t.Helper()
 	dir := t.TempDir()
-	database, err := db.Open(filepath.Join(dir, "test.db"), findWiringMigrations(t))
+	database, err := db.Open(filepath.Join(dir, "test.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { database.Close() })
 	return database
-}
-
-func findWiringMigrations(t *testing.T) string {
-	t.Helper()
-	dir, _ := os.Getwd()
-	for {
-		candidate := filepath.Join(dir, "migrations")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	t.Fatal("migrations directory not found")
-	return ""
 }
 
 const wiringTestSalt = "aabbccddeeff00112233445566778899" // 32 hex chars = 16 bytes

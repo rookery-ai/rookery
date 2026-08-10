@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 	"github.com/ilijad1/rookery/internal/backup"
 	"github.com/ilijad1/rookery/internal/config"
 	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/ilijad1/rookery/migrations"
 )
 
 // readPassphrase reads the envelope passphrase from the terminal, or from
@@ -99,11 +101,12 @@ func openSnapshot(ctx context.Context, cmd *cli.Command, cfg *config.Config) (io
 }
 
 // binarySchemaVersion reports the newest migration this build ships, which is
-// what a snapshot's schema version is compared against.
+// what a snapshot's schema version is compared against. It reads the embedded
+// set, so it does not depend on the working directory or the install layout.
 func binarySchemaVersion() (string, error) {
-	entries, err := os.ReadDir(resolveDir("migrations"))
+	entries, err := fs.ReadDir(migrations.FS, ".")
 	if err != nil {
-		return "", fmt.Errorf("read migrations dir: %w", err)
+		return "", fmt.Errorf("read embedded migrations: %w", err)
 	}
 	newest := ""
 	for _, e := range entries {

@@ -117,8 +117,7 @@ func serveCmd() *cli.Command {
 			}
 			defer installLock.Release()
 
-			migrationsDir := resolveDir("migrations")
-			database, err := db.Open(cfg.Database.Path, migrationsDir)
+			database, err := db.Open(cfg.Database.Path)
 			if err != nil {
 				return fmt.Errorf("open db: %w", err)
 			}
@@ -778,8 +777,7 @@ func adminCmd() *cli.Command {
 						return fmt.Errorf("load config: %w", err)
 					}
 
-					migrationsDir := resolveDir("migrations")
-					database, err := db.Open(cfg.Database.Path, migrationsDir)
+					database, err := db.Open(cfg.Database.Path)
 					if err != nil {
 						return fmt.Errorf("open db: %w", err)
 					}
@@ -805,8 +803,7 @@ func adminCmd() *cli.Command {
 						return fmt.Errorf("load config: %w", err)
 					}
 
-					migrationsDir := resolveDir("migrations")
-					database, err := db.Open(cfg.Database.Path, migrationsDir)
+					database, err := db.Open(cfg.Database.Path)
 					if err != nil {
 						return fmt.Errorf("open db: %w", err)
 					}
@@ -847,19 +844,6 @@ func buildLLMTimeParserFn(coderSvc *coder.Coder) reminder.TimeParserFunc {
 		when, msg, err := reminder.ParseLLMReminderJSON(result.Text, now)
 		return when, msg, err
 	}
-}
-
-// resolveDir returns the given subdir relative to the binary's location,
-// falling back to the current working directory.
-func resolveDir(sub string) string {
-	exe, err := os.Executable()
-	if err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), sub)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
-		}
-	}
-	return sub
 }
 
 // versionCmd prints the build identity stamped in at link time. An installed
