@@ -82,12 +82,20 @@ status:
 test:
 	go test ./... -count=1 -timeout $(GOTEST_TIMEOUT)
 
+## docs-sync-check: assert the docs agree with the source (both repos)
+docs-sync-check:
+	python3 scripts/check-docs-sync.py
+
+## docs-sync-selftest: prove each docs-sync assertion can actually fail
+docs-sync-selftest:
+	python3 scripts/check-docs-sync.py --selftest
+
 ## clean: remove the built binary
 clean:
 	rm -f $(BIN)
 
 ## ci: run the same checks pr.yml runs, locally — catch it before you push
-ci: ci-fmt ci-vet ci-test ci-cross ci-ui
+ci: ci-fmt ci-vet ci-test ci-cross ci-ui ci-docs
 	@echo "all PR checks passed"
 
 ci-fmt:
@@ -113,6 +121,12 @@ ci-cross:
 
 ci-ui:
 	cd web/ui && npm ci && npx tsc -b && npm run lint && npx vitest run
+
+## ci-docs: assert documentation claims match the source. Website assertions
+## skip when rookery-web is absent, which is the normal case in CI.
+ci-docs:
+	python3 scripts/check-docs-sync.py --selftest
+	python3 scripts/check-docs-sync.py
 
 ## ci-package: build a goreleaser snapshot and smoke-test the deb, rpm and tar.gz
 ##

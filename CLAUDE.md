@@ -36,6 +36,9 @@ go test -v ./internal/agentdesigner/... -run TestFlow
 # Reset the owner password (single-owner model, no login required)
 ./bin/rookery owner reset-password -p <new-password>
 
+# Migrations are applied automatically when the database is opened —
+# there is no separate migration command.
+
 # Deploy / restart the server (build + run in background, logs to logs/server.log)
 make deploy    # stop existing server, rebuild, start in background
 make restart   # stop + start (no rebuild)
@@ -83,6 +86,28 @@ AST guardrail tests shell out to `python3`. If Python is not available, those te
   it's OK to `make deploy` from the feature branch locally before the PR merges —
   that's for testing, not production.
 
+## Documentation sync
+
+Four surfaces describe this project and each can be wrong without anything
+failing: `README.md`, `CLAUDE.md`, the documentation site and the landing page
+(both in `ilijad1/rookery-web`, checked out at `~/rookery-web`).
+
+**Before opening a pull request, use the `docs-sync` skill.** It holds the
+change-to-page trigger map and the cross-repository procedure. A change that
+alters a connector provider, a `ROOKERY_*` variable, a CLI subcommand, a core
+skill, a chat adapter, a backup destination, an `/api/v1` route or a packaging
+target has a documentation obligation in both repositories.
+
+`make docs-sync-check` mechanises the checkable half — counts, variable
+names, command names, provider names, logo coverage — against the source
+rather than against other prose, and runs inside `make ci` (`ci-docs`); it
+skips website assertions when `~/rookery-web` is absent. It does not check
+whether a paragraph describes a feature correctly.
+
+Verify every claim against source, never against another document. The
+provider count in `README.md` once drifted for months because it was copied
+forward instead of measured.
+
 ## CI/CD and release process
 
 **Every change ships through this path. There are no manual tags and no manual
@@ -124,8 +149,10 @@ image pushes.**
    PR title, not anything runnable locally), `Security scan`, `Container smoke
    test`, and `Package smoke test` — the last is available separately as
    `make ci-package`, kept out of `make ci` because a snapshot build takes
-   minutes. `make ci-fmt` / `ci-vet` / `ci-test` / `ci-cross` / `ci-ui` run the
-   covered pieces individually.
+   minutes. `make ci-fmt` / `ci-vet` / `ci-test` / `ci-cross` / `ci-ui` /
+   `ci-docs` run the covered pieces individually. The documentation check
+   (`ci-docs`) runs as a step inside the `Go build and test` job, not as a job
+   of its own, so the gate count stays at seven.
 6. **Squash-merge.** release-please then maintains a release PR on `main`.
 7. **Merging the release PR** tags the repo, which fires
    `.github/workflows/release.yml`: goreleaser publishes binaries, `.deb`/`.rpm`,
@@ -275,7 +302,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/iolimit` | `ReadCapped` + `ErrTooLarge` — the shared capped read every ingest door uses (KB upload, web-chat attachment, Telegram/Discord/Slack attachment, KB bridge, `save_to_kb` URL fetch), all enforcing one 25 MiB cap. Reads `cap+1` and REJECTS rather than truncating: a silently truncated import writes a note whose frontmatter states a byte count that is not the source's. `CappingWriter` is the write-side analogue — bounds a stream written into an `io.Writer` (Slack's `slack.Client.GetFile` insists on an `io.Writer` and has no size bound; there is no stdlib `io.LimitWriter`), rejecting at the same `cap+1` boundary. |
 | `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface: one struct per coder — Claude/OpenCode/Codex/Gemini/Cursor, plus a generic fallback). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host tools (`read_file`/`write_file`/`edit_file`/`list_dir` + read-only discovery `search_files`/`glob` + exec tools `run_script`/`bash`/`web_fetch`/`web_search`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible, plus ~27 further providers registered against the OpenAI schema — see `coder.APIProviders()`); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
-| `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **91 providers** (Google-family incl. Calendar/Tasks/AdSense/GA4/Search Console, YouTube, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing, `ProviderNames()` backing the connections page), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
+| `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **91 providers** (Google-family incl. Calendar/Tasks/AdSense/GA4/Search Console, YouTube, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing, `ProviderNames()` backing the connections page), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
 | `internal/buildphase` | Tiny package holding `ROOKERY_BUILD_PHASE`/`generation` marker (set during agent/skill builds; the connector `Execute` build-guard refuses mutating actions when present). Its own package so it outlives any one integration. |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal); `statefile.go` (`StateFilePath`/`ReadState`/`WriteState`/`RenderStateTemplate`) owns an agent's `state.md` format (see "Agent state" below); `migrate_files.go` (`MigrateAgentFilesToMarkdown`) is the idempotent startup migration off the old `state.json`/`agent.json` pair; `ParseRequiredSecrets` (`flow.go`) parses AGENT.md's `# Required secrets:` header — the only source of an agent's declared secrets now that `agent.json` is gone |
 | `internal/skilldesigner` | Conversational skill-creator wizard mirroring `agentdesigner.Flow` (FSM Idle→AwaitingResume→Describing→Designing→Verifying→Done, SSE progress, 7-day drafts, approval triggers); `SkillSaver` writes SKILL.md+scripts/ to vault + DB upsert; generation runs with the `skill-creator` core skill, vetting runs the `skill-vetter` core skill as a text-only audit; `vettingBlocksSave()` parses the verdict line. Wired to BOTH surfaces: the SPA (`/api/v1/skills/design`) and chat platforms (`/skill`). `Start` is the chat entry point (opens in `StateDescribing`, asks for a description, no coder call); `StartDesign` is the web one (its form collects the description up front). |
@@ -481,7 +508,7 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
   `connectors/<p>.yaml` (curated action manifest), both `go:embed`ed. `LoadBundled()` parses them.
   **91 providers (~471 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
   Search Console**), **YouTube**, GitHub, Slack, OpenAI, Notion, Outlook, Teams, Jira, HubSpot,
-  Dropbox, Zoom, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce,
+  Dropbox, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce,
   Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello.
   (AWS SigV4 + PostgreSQL were scoped but dropped.) Each action = name + JSON-schema params +
   `mutating` flag + a request template (method/URL/query + one body kind) + `response_extract`.
@@ -660,18 +687,18 @@ fields are now on the services DTO and rendered by the form.
 
 **Wave 4** added Open Library, OpenStreetMap (Nominatim), Open Food Facts, Nextcloud,
 Mealie, Vikunja, Gotify, Linkwarden, Portainer, Fitbit, Oura, Spotify and Trakt —
-taking `Health & Fitness` from one provider to three. **Withings was deliberately
-dropped**: its token exchange posts `action=requesttoken` rather than a standard grant,
-which the OAuth client cannot express, and shipping a provider that cannot authenticate
-is worse than omitting it.
+taking `Health & Fitness` from one provider to three (Fitbit was later removed; see
+above). **Withings was deliberately dropped**: its token exchange posts
+`action=requesttoken` rather than a standard grant, which the OAuth client cannot
+express, and shipping a provider that cannot authenticate is worse than omitting it.
 
 **Three more providers block or throttle anonymous clients**, so `static_headers` carries
 an identifying `User-Agent` for Nominatim, Open Library and Open Food Facts as well as
 Wikipedia. Nextcloud needs two mandatory headers of its own — `OCS-APIRequest: true`
 (the OCS API rejects requests without it) and `Accept: application/json` (it returns XML
-otherwise, which `extract` cannot read). Fitbit and Spotify both require HTTP Basic
-client auth on the token endpoint (`token_auth: basic`); body credentials fail with
-`invalid_client`.
+otherwise, which `extract` cannot read). Fitbit (before its later removal) and Spotify
+both require HTTP Basic client auth on the token endpoint (`token_auth: basic`); body
+credentials fail with `invalid_client`.
 
 **Wikimedia blocks the default Go user-agent** with a 403 citing its robot policy, so
 `wikipedia.yaml` sets a descriptive `User-Agent` in `static_headers`. Every Wikipedia
