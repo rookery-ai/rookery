@@ -819,12 +819,24 @@ git -C /tmp/rookery-web-sync commit -m "docs: cover every connector provider by 
 
 **Files:**
 - Modify: `Makefile:90` (the `ci` target's prerequisite list)
+- Modify: `.github/workflows/pr.yml` (the `go` job)
 
 Do this only after Tasks 2–6 are green. Wiring the gate while known drift exists turns the next unrelated pull request red for pre-existing errors, and the cheapest way out is to weaken the assertion.
 
+**`make ci` wiring alone gates nothing on GitHub.** `pr.yml` is the only thing
+that actually gates a pull request, and it never calls `make` — it runs
+`gofmt`/`go vet`/`go test` inline in its own `go` job. A `ci-docs` prerequisite
+added only to the `Makefile` is real for a contributor who happens to run
+`make ci` locally and invisible to CI itself. This was found during
+implementation (after `Makefile` wiring landed with nothing catching it) and
+fixed by adding the same two commands — `check-docs-sync.py --selftest` then
+`check-docs-sync.py` — as two more inline steps in the `go` job, right after
+`go test -race`, reusing the `python3` that job already verifies is present.
+Both changes below are required; the `Makefile` change alone repeats the gap.
+
 **Interfaces:**
 - Consumes: the `docs-sync-check` and `docs-sync-selftest` targets from Task 1.
-- Produces: `ci-docs` target.
+- Produces: `ci-docs` target, and two new steps in `pr.yml`'s `go` job.
 
 - [ ] **Step 1: Verify everything is green before wiring**
 
@@ -858,19 +870,62 @@ ci-docs:
 	python3 scripts/check-docs-sync.py
 ```
 
-- [ ] **Step 3: Verify the CI path works without the website repository**
+- [ ] **Step 3: Add the same two commands to `pr.yml`'s `go` job**
 
-```bash
-ROOKERY_WEB_DIR=/nonexistent HOME=/nonexistent make ci-docs
+`pr.yml` never calls `make`, so `ci-docs` alone reaches nobody on a real pull
+request. Add two inline steps to the existing `go` job, right after
+`go test -race`, reusing the `python3` that job already verifies is present:
+
+```yaml
+      - name: Docs sync selftest
+        run: python3 scripts/check-docs-sync.py --selftest
+
+      - name: Docs sync check
+        run: python3 scripts/check-docs-sync.py
 ```
 
-Expected: exit 0, printing `SKIP: rookery-web not found — website claims not checked`. This is the CI environment; if it fails, the skip semantics are broken and the gate will be removed within a week.
+- [ ] **Step 4: Verify the CI path works without the website repository**
 
-- [ ] **Step 4: Commit**
+`ROOKERY_WEB_DIR=/nonexistent HOME=/nonexistent make ci-docs` does **not**
+prove this: `web_root()` resolves its sibling candidate from git's own common
+dir (`git rev-parse --path-format=absolute --git-common-dir` →
+`.parent.parent / "rookery-web"`), which finds the real checkout's real
+sibling regardless of either variable. Neither env var is consulted for that
+candidate.
+
+What actually isolates it: copy the repository into a throwaway location whose
+parent has no `rookery-web`, `git init` it there so the common-dir lookup
+resolves inside the copy, and isolate `HOME` too (the fallback candidate is
+`~/rookery-web`, which exists on this machine). For example:
+
+```bash
+mkdir -p /tmp/docs-sync-isolation/isolated-home
+cp -r . /tmp/docs-sync-isolation/rookery-copy
+rm -rf /tmp/docs-sync-isolation/rookery-copy/.git
+git -C /tmp/docs-sync-isolation/rookery-copy init -q
+git -C /tmp/docs-sync-isolation/rookery-copy add -A
+git -C /tmp/docs-sync-isolation/rookery-copy -c user.email=t@t -c user.name=t commit -q -m throwaway
+# in a subshell/script, so HOME is not exported into this session:
+#   unset ROOKERY_WEB_DIR; export HOME=/tmp/docs-sync-isolation/isolated-home
+#   cd /tmp/docs-sync-isolation/rookery-copy && python3 scripts/check-docs-sync.py
+```
+
+Expected: exit 0, printing `SKIP: rookery-web not found — website claims not
+checked` followed by `docs-sync: 7 assertion(s) passed`. This is the CI
+environment; if it fails, the skip semantics are broken and the gate will be
+removed within a week. Remove the throwaway copy afterward.
+
+- [ ] **Step 5: Commit**
+
+Shipped as two commits, since the `pr.yml` gap was found after the `Makefile`
+change had already landed and been believed sufficient:
 
 ```bash
 git add Makefile
 git commit -m "ci: gate on documentation claims matching the source"
+# ...then, once the gap above was found:
+git add .github/workflows/pr.yml CLAUDE.md
+git commit -m "ci: run the docs-sync gate on every pull request"
 ```
 
 ---
@@ -1288,8 +1343,35 @@ git -C ~/rookery-web worktree remove /tmp/rookery-web-sync
 
 ## Self-review
 
-**Spec coverage.** Layer 1 (skill) → Task 8. Layer 2 (hook) → Task 9. Layer 3 (checker) → Tasks 1–7. Layer 4 (`CLAUDE.md` pointer) → Task 10. The six assertions → claims (2), inflated (3), env (4), CLI (5), provider names and logos (6). Trigger map → Task 8's skill body. Workflow → Task 8. Release sweep → Task 8's final section. `reference/api.md` → Task 11. Reconciliation → Tasks 2, 3, 5, 6, with the ordering constraint enforced by Task 7 Step 1. The logo difference needed no reconciliation and Task 6 asserts coverage in one direction only, as the spec requires.
+**Spec coverage.** Layer 1 (skill) → Task 8. Layer 2 (hook) → Task 9. Layer 3 (checker) → Tasks 1–7. Layer 4 (`CLAUDE.md` pointer) → Task 10. Seven assertions shipped: claims (2), inflated (3), env (4), CLI (5), provider names and logos (6), plus `check_readme_env_table` — added during implementation, not planned here (see "What actually shipped beyond this plan"). Trigger map → Task 8's skill body. Workflow → Task 8. Release sweep → Task 8's final section. `reference/api.md` → Task 11. Reconciliation → Tasks 2, 3, 5, 6, with the ordering constraint enforced by Task 7 Step 1. The logo difference needed no reconciliation and Task 6 asserts coverage in one direction only, as the spec requires.
 
 **Placeholder scan.** The one scaffolding comment, in Task 11 Step 2, is deliberate — the route list is machine-extracted in Step 1 and cannot be written before that runs — and Step 5 fails the task if it survives.
 
 **Type consistency.** `register`/`fail`/`skip`/`read`/`product_root`/`web_root` are defined in Task 1 and used unchanged thereafter. `providers()` returns a set of slugs and is consumed as such by `derived()`, `check_provider_names()` and `check_logos()`. `derived()` keys (`providers`, `actions`, `skills`) match every `CLAIMS` and `INFLATABLE` entry. Each assertion attaches its selftest as `fn.selftest`, which is what Task 1's `selftest()` looks for.
+
+---
+
+## What actually shipped beyond this plan
+
+Hardening found during code review, with no other in-repo record (only a
+gitignored ledger notes it):
+
+- **The CLI scan is restricted to code contexts.** `check_cli` only looks
+  inside backtick spans and fenced code blocks for `rookery <word>`, so prose
+  mentioning a command in passing can't false-fire the assertion.
+- **The removed-provider exemption is name-aware.** A sentence narrating one
+  provider's removal no longer exempts a stale mention of a *different*
+  removed provider elsewhere on the page — the earlier version matched on
+  "does this sentence narrate a removal" without checking which name.
+- **`_flex_ws` makes claim patterns whitespace-flexible**, so a prose re-wrap
+  (a claim's surrounding sentence reflowing onto a different line boundary)
+  doesn't break a `CLAIMS` regex that was written against one specific
+  wrapping.
+- **`check_logos` has its own selftest**, plus a guard that fails the build if
+  any assertion is registered without a selftest attached — closing the
+  defect class where an unpinned assertion silently never runs.
+- **`check_readme_env_table`** — a seventh assertion not present in this plan
+  at all, added after `README.md`'s configuration table shipped with 8 rows
+  where 9 were needed (missing `ROOKERY_CLAUDE_BIN`), which no count-based
+  check caught because it checks documented names against source, not a
+  specific table's completeness. See the design doc for the full description.
