@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 690" width="1200" height="690" role="img" aria-labelledby="t">
-  <title id="t">Rookery architecture: chat platforms and browser reach one binary on your machine, which holds isolated workspaces and reaches out through the connector layer</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 690" width="1200" height="690" role="img" aria-labelledby="arch-title">
+  <title id="arch-title">Rookery architecture: chat platforms and browser reach one binary on your machine, which holds isolated workspaces and reaches out through the connector layer</title>
   <rect width="1200" height="690" fill="#ece5db"/>
   <g font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
 
@@ -64,7 +64,7 @@
     <path d="M593 576l7 12 7-12z" fill="#a94c1c"/>
 
     <rect x="150" y="592" width="900" height="76" rx="20" fill="#f6e6dc" stroke="#a94c1c" stroke-opacity="0.25"/>
-    <text x="600" y="624" font-size="19" font-weight="600" fill="#211d1a" text-anchor="middle">91 connected services — direct OAuth, credentials you own</text>
-    <text x="600" y="650" font-size="14.5" fill="#6f6760" text-anchor="middle">Google · GitHub · Notion · Slack · Home Assistant · Spotify · Todoist · and 84 more</text>
+    <text x="600" y="624" font-size="19" font-weight="600" fill="#211d1a" text-anchor="middle">91 connected services — OAuth or API key, never a broker</text>
+    <text x="600" y="650" font-size="14.5" fill="#6f6760" text-anchor="middle">Google · GitHub · Notion · Slack · Home Assistant · Spotify · Todoist · and many more</text>
   </g>
 </svg>

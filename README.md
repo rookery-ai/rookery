@@ -5,7 +5,6 @@
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-a94c1c"></a>
   <a href="https://github.com/ilijad1/rookery/releases"><img alt="Release" src="https://img.shields.io/github/v/release/ilijad1/rookery?color=a94c1c"></a>
-  <a href="https://github.com/ilijad1/rookery/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/ilijad1/rookery/pr.yml?branch=main"></a>
   <a href="https://github.com/ilijad1/rookery/pkgs/container/rookery"><img alt="Container" src="https://img.shields.io/badge/ghcr.io-rookery-a94c1c"></a>
 </p>
 
@@ -104,6 +103,8 @@ Every workspace is its own tenant — its own knowledge, its own credentials, it
 own connected accounts, its own agents. You enter one with its password, and
 nothing crosses between them.
 
+[Read more →](https://rookery.cloud/docs/concepts/workspaces)
+
 ## Knowledge base
 
 **Everything you know, as plain markdown on your own disk.**
@@ -112,6 +113,8 @@ What you write, what your agents learn, and what your connected services bring
 in, all in one vault. Open it in Rookery or in any editor you like. Agents read
 the whole vault and write durable knowledge back into it across runs.
 
+[Read more →](https://rookery.cloud/docs/concepts/knowledge-base)
+
 ## Agents
 
 **Describe it. Don't configure it.**
@@ -119,6 +122,8 @@ the whole vault and write durable knowledge back into it across runs.
 Say what you want in your own words. Rookery asks a couple of questions,
 proposes a plan, builds it, tests it against the real services, and shows you
 what happened before anything is saved. Then it just runs.
+
+[Read more →](https://rookery.cloud/docs/concepts/agents)
 
 ## Skills
 
@@ -129,19 +134,22 @@ web research, browser automation, git, email triage — plus any you create the
 same conversational way.
 
 Every agent gets the same tools, whatever model is behind it. A small model on
-your own machine and a frontier one are given exactly the same reach. The model
+your own machine and a frontier one are given the same reach. The model
 decides how *well* a job is done — never whether it can be done at all.
+
+[Read more →](https://rookery.cloud/docs/concepts/skills)
 
 ## Connections
 
 **91 services. No middleman holding your keys.**
 
 Rookery talks to them directly, using credentials you own: 91 providers and 471
-curated actions, over self-managed OAuth. There is no third-party integration
-broker in the path.
+curated actions, over OAuth or an API key you paste — never a broker.
 
 Google, GitHub, Notion, Slack, Jira, Stripe, Shopify — and the self-hosted tier
 too: Home Assistant, Immich, Paperless-ngx, Nextcloud, Jellyfin.
+
+[Read more →](https://rookery.cloud/docs/concepts/connections)
 
 ## Chat
 
@@ -151,6 +159,8 @@ Talk to your knowledge the way you'd talk to someone who has read all of it —
 and have it write a note, or do something in a connected account, right there in
 the conversation.
 
+[Read more →](https://rookery.cloud/docs/concepts/chat)
+
 ## Notifications
 
 **You find out the moment it happens.**
@@ -158,6 +168,8 @@ the conversation.
 An agent finished, a service returned something new, a reminder came due. It
 lands in your inbox, and reaches you on Telegram, Discord or Slack when you're
 away.
+
+[Read more →](https://rookery.cloud/docs/concepts/notifications)
 
 ## Models
 
@@ -167,6 +179,8 @@ Use the coder tool you already have, or connect the provider you prefer —
 hosted, or running entirely on your own hardware. Nothing ties you to one
 vendor.
 
+[Read more →](https://rookery.cloud/docs/concepts/models)
+
 ## Secrets
 
 **Credentials that stay yours.**
@@ -174,13 +188,17 @@ vendor.
 Encrypted where they sit, unlocked only into the thing that needs them, scoped
 to one workspace, and never handed to anyone else.
 
+[Read more →](https://rookery.cloud/docs/concepts/secrets)
+
 ## Scheduling
 
 **Every weekday at eight. And again at ten.**
 
-Say when in your own words — twice a day, the first Monday of the month, every
-twenty minutes during work hours, or only when you ask. Reminders work the same
-way: *remind me in 10 minutes to call the doctor.*
+Say when in your own words — twice a day, every Monday at nine, every twenty
+minutes during work hours, or only when you ask. Reminders work the same way:
+*remind me in 10 minutes to call the doctor.*
+
+[Read more →](https://rookery.cloud/docs/concepts/scheduling)
 
 ## How it fits together
 
@@ -200,7 +218,7 @@ way: *remind me in 10 minutes to call the doctor.*
 | `ROOKERY_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks |
 | `ROOKERY_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |
 | `ROOKERY_CODER_MODE` | `full` | `slim` removes the local CLI coder kind |
-| `ROOKERY_CLAUDE_BIN` | detected | override the path to a coder binary |
+| `ROOKERY_CLAUDE_BIN` | `claude` | override the path to a coder binary |
 
 `ROOKERY_PUBLIC_URL` matters more than it looks: OAuth providers reject redirect
 URIs on non-public hostnames, so a `.lan` address fails Google's validation. Use
