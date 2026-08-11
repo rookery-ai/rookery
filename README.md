@@ -146,7 +146,7 @@ decides how *well* a job is done — never whether it can be done at all.
 
 **126 services. No middleman holding your keys.**
 
-Rookery talks to them directly, using credentials you own: 126 providers and 598
+Rookery talks to them directly, using credentials you own: 130 providers and 712
 curated actions, over OAuth or an API key you paste — never a broker.
 
 Google, GitHub, Notion, Slack, Jira, Stripe, Shopify — and the self-hosted tier

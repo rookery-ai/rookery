@@ -1,0 +1,163 @@
+provider: google_forms
+# The Forms API has a hard rule worth stating once: forms.create accepts ONLY
+# info.title. Setting a description or adding questions at creation time is rejected,
+# so a form is built in two steps — create, then batchUpdate. Every description below
+# reflects that rather than implying a one-shot create.
+actions:
+  - name: forms_create
+    description: "Create a new empty form and return its id and responder URL. Only the title can be set here — the API rejects anything else at creation. Add a description with forms_update_info and questions with forms_add_question."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/forms.body]
+    params:
+      type: object
+      properties:
+        title: {type: string}
+      required: [title]
+    request:
+      method: POST
+      url: "https://forms.googleapis.com/v1/forms"
+      body:
+        info: {title: "{{title}}"}
+    response_extract: "$"
+  - name: forms_get
+    description: "Get a form's full definition — its title, its responder URL, and every question with its item id. Read this before editing or interpreting responses. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/forms.body]
+    params:
+      type: object
+      properties:
+        form_id: {type: string}
+      required: [form_id]
+    request:
+      method: GET
+      url: "https://forms.googleapis.com/v1/forms/{{form_id}}"
+    response_extract: "$"
+  - name: forms_update_info
+    description: "Set a form's title or description after creation. Use this for the description, which forms_create cannot set."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/forms.body]
+    params:
+      type: object
+      properties:
+        form_id:     {type: string}
+        title:       {type: string}
+        description: {type: string}
+        fields:      {type: string, description: "which to apply: 'title', 'description', or 'title,description'"}
+      required: [form_id, fields]
+    request:
+      method: POST
+      url: "https://forms.googleapis.com/v1/forms/{{form_id}}:batchUpdate"
+      body:
+        requests:
+          - updateFormInfo:
+              info: {title: "{{title}}", description: "{{description}}"}
+              updateMask: "{{fields}}"
+    response_extract: "$.replies"
+  - name: forms_add_text_question
+    description: "Add a free-text question to a form. Set paragraph=true for a long-answer box. index is the 0-based position; omit to append."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/forms.body]
+    params:
+      type: object
+      properties:
+        form_id:   {type: string}
+        title:     {type: string, description: "the question text"}
+        required_question: {type: boolean, description: "must the respondent answer"}
+        paragraph: {type: boolean, description: "true for a multi-line answer box"}
+        index:     {type: integer, description: "0-based position; omit to append"}
+      required: [form_id, title]
+    request:
+      method: POST
+      url: "https://forms.googleapis.com/v1/forms/{{form_id}}:batchUpdate"
+      body:
+        requests:
+          - createItem:
+              item:
+                title: "{{title}}"
+                questionItem:
+                  question:
+                    required: "{{required_question}}"
+                    textQuestion: {paragraph: "{{paragraph}}"}
+              location: {index: "{{index}}"}
+    response_extract: "$.replies"
+  - name: forms_add_choice_question
+    description: "Add a multiple-choice, checkbox or dropdown question. type is RADIO, CHECKBOX or DROP_DOWN. options is a list of the answer strings."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/forms.body]
+    params:
+      type: object
+      properties:
+        form_id: {type: string}
+        title:   {type: string, description: "the question text"}
+        type:    {type: string, description: "RADIO | CHECKBOX | DROP_DOWN"}
+        options: {type: array, items: {type: object}, description: "answer choices, e.g. [{\"value\":\"Yes\"},{\"value\":\"No\"}]"}
+        required_question: {type: boolean}
+        index:   {type: integer, description: "0-based position; omit to append"}
+      required: [form_id, title, type, options]
+    request:
+      method: POST
+      url: "https://forms.googleapis.com/v1/forms/{{form_id}}:batchUpdate"
+      body:
+        requests:
+          - createItem:
+              item:
+                title: "{{title}}"
+                questionItem:
+                  question:
+                    required: "{{required_question}}"
+                    choiceQuestion: {type: "{{type}}", options: "{{options}}"}
+              location: {index: "{{index}}"}
+    response_extract: "$.replies"
+  - name: forms_delete_item
+    description: "Delete a question or other item from a form by its 0-based index. Read forms_get first — deleting shifts every later index."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/forms.body]
+    params:
+      type: object
+      properties:
+        form_id: {type: string}
+        index:   {type: integer, description: "0-based position of the item to delete"}
+      required: [form_id, index]
+    request:
+      method: POST
+      url: "https://forms.googleapis.com/v1/forms/{{form_id}}:batchUpdate"
+      body:
+        requests:
+          - deleteItem:
+              location: {index: "{{index}}"}
+    response_extract: "$.replies"
+  - name: forms_list_responses
+    description: "List the submitted responses to a form. Each answer is keyed by the QUESTION ID, not its text — read forms_get to map ids back to questions. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/forms.responses.readonly]
+    params:
+      type: object
+      properties:
+        form_id:    {type: string}
+        filter:     {type: string, description: "e.g. timestamp > 2026-08-01T00:00:00Z"}
+        max:        {type: integer, description: "max responses (default 25)"}
+        page_token: {type: string, description: "next_cursor from a previous call"}
+      required: [form_id]
+    request:
+      method: GET
+      url: "https://forms.googleapis.com/v1/forms/{{form_id}}/responses"
+      query:
+        filter: "{{filter}}"
+        pageSize: "{{max}}"
+        pageToken: "{{page_token}}"
+    response_extract: "$.responses"
+    response_cursor: "$.nextPageToken"
+  - name: forms_get_response
+    description: "Get one submitted form response in full by its id. Answers are keyed by question id — map them with forms_get. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/forms.responses.readonly]
+    params:
+      type: object
+      properties:
+        form_id:     {type: string}
+        response_id: {type: string}
+      required: [form_id, response_id]
+    request:
+      method: GET
+      url: "https://forms.googleapis.com/v1/forms/{{form_id}}/responses/{{response_id}}"
+    response_extract: "$"

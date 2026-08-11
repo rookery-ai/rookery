@@ -1,0 +1,10 @@
+{
+  "contactGroups": [
+    {
+      "resourceName": "contactGroups/family",
+      "name": "Family",
+      "memberCount": 4
+    }
+  ],
+  "totalItems": 1
+}

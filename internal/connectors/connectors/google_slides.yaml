@@ -1,0 +1,186 @@
+provider: google_slides
+# Slides has one write endpoint, presentations:batchUpdate, and each action below is
+# one curated request against it. Object ids are supplied by the CALLER rather than
+# generated: a request that creates a shape and one that fills it with text are two
+# separate calls here, so the second needs a name it can predict.
+actions:
+  - name: slides_create_presentation
+    description: "Create a new empty presentation and return its id. Only the title can be set at creation; add slides afterwards with slides_create_slide."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/presentations]
+    params:
+      type: object
+      properties:
+        title: {type: string}
+      required: [title]
+    request:
+      method: POST
+      url: "https://slides.googleapis.com/v1/presentations"
+      body:
+        title: "{{title}}"
+    response_extract: "$"
+  - name: slides_get_presentation
+    description: "Get a presentation's full structure — every slide, its page id, and the object ids of the shapes and text boxes on it. Read this before any positional edit. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/presentations]
+    params:
+      type: object
+      properties:
+        presentation_id: {type: string}
+      required: [presentation_id]
+    request:
+      method: GET
+      url: "https://slides.googleapis.com/v1/presentations/{{presentation_id}}"
+    response_extract: "$"
+  - name: slides_list_slides
+    description: "List just the slides of a presentation with their page ids, without the full object tree. Cheaper than slides_get_presentation when you only need slide ids. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/presentations]
+    params:
+      type: object
+      properties:
+        presentation_id: {type: string}
+      required: [presentation_id]
+    request:
+      method: GET
+      url: "https://slides.googleapis.com/v1/presentations/{{presentation_id}}"
+      query:
+        fields: "slides(objectId,slideProperties)"
+    response_extract: "$.slides"
+  - name: slides_create_slide
+    description: "Add a slide to a presentation. layout is a predefined layout name such as TITLE_AND_BODY, TITLE_ONLY or BLANK. slide_id is a name you choose so later calls can address it."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/presentations]
+    params:
+      type: object
+      properties:
+        presentation_id: {type: string}
+        slide_id:        {type: string, description: "id to give the new slide, e.g. 'slide_intro'"}
+        layout:          {type: string, description: "TITLE_AND_BODY | TITLE_ONLY | BLANK | SECTION_HEADER"}
+        index:           {type: integer, description: "0-based position; omit to append at the end"}
+      required: [presentation_id, slide_id, layout]
+    request:
+      method: POST
+      url: "https://slides.googleapis.com/v1/presentations/{{presentation_id}}:batchUpdate"
+      body:
+        requests:
+          - createSlide:
+              objectId: "{{slide_id}}"
+              insertionIndex: "{{index}}"
+              slideLayoutReference: {predefinedLayout: "{{layout}}"}
+    response_extract: "$.replies"
+  - name: slides_insert_text
+    description: "Insert text into a shape or placeholder on a slide. object_id is the shape's id from slides_get_presentation — a slide's own page id will not work."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/presentations]
+    params:
+      type: object
+      properties:
+        presentation_id: {type: string}
+        object_id:       {type: string, description: "id of the shape or text box, from slides_get_presentation"}
+        text:            {type: string}
+        index:           {type: integer, description: "character offset within the shape; default 0"}
+      required: [presentation_id, object_id, text]
+    request:
+      method: POST
+      url: "https://slides.googleapis.com/v1/presentations/{{presentation_id}}:batchUpdate"
+      body:
+        requests:
+          - insertText:
+              objectId: "{{object_id}}"
+              text: "{{text}}"
+              insertionIndex: "{{index}}"
+    response_extract: "$.replies"
+  - name: slides_replace_all_text
+    description: "Replace every occurrence of a string across the whole presentation. The standard way to fill a template deck — put {{name}}-style placeholders in the slides and swap them here."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/presentations]
+    params:
+      type: object
+      properties:
+        presentation_id: {type: string}
+        find:            {type: string, description: "text to find"}
+        replacement:     {type: string}
+        match_case:      {type: boolean}
+      required: [presentation_id, find, replacement]
+    request:
+      method: POST
+      url: "https://slides.googleapis.com/v1/presentations/{{presentation_id}}:batchUpdate"
+      body:
+        requests:
+          - replaceAllText:
+              containsText: {text: "{{find}}", matchCase: "{{match_case}}"}
+              replaceText: "{{replacement}}"
+    response_extract: "$.replies"
+  - name: slides_insert_image
+    description: "Place an image on a slide. The image must already be at a PUBLICLY reachable https URL — Google fetches it itself, so a local file or a private link fails."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/presentations]
+    params:
+      type: object
+      properties:
+        presentation_id: {type: string}
+        slide_id:        {type: string, description: "page id of the slide to place it on"}
+        image_url:       {type: string, description: "publicly reachable https URL"}
+        object_id:       {type: string, description: "id to give the new image"}
+      required: [presentation_id, slide_id, image_url]
+    request:
+      method: POST
+      url: "https://slides.googleapis.com/v1/presentations/{{presentation_id}}:batchUpdate"
+      body:
+        requests:
+          - createImage:
+              objectId: "{{object_id}}"
+              url: "{{image_url}}"
+              elementProperties: {pageObjectId: "{{slide_id}}"}
+    response_extract: "$.replies"
+  - name: slides_delete_object
+    description: "Delete a slide, shape or image from a presentation by its object id. Passing a slide's page id deletes the whole slide. Irreversible."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/presentations]
+    params:
+      type: object
+      properties:
+        presentation_id: {type: string}
+        object_id:       {type: string, description: "slide page id, or a shape/image id"}
+      required: [presentation_id, object_id]
+    request:
+      method: POST
+      url: "https://slides.googleapis.com/v1/presentations/{{presentation_id}}:batchUpdate"
+      body:
+        requests:
+          - deleteObject: {objectId: "{{object_id}}"}
+    response_extract: "$.replies"
+  - name: slides_duplicate_slide
+    description: "Duplicate a slide within the same presentation, e.g. to repeat a template layout for another data point. Safe write."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/presentations]
+    params:
+      type: object
+      properties:
+        presentation_id: {type: string}
+        slide_id:        {type: string, description: "page id of the slide to duplicate"}
+      required: [presentation_id, slide_id]
+    request:
+      method: POST
+      url: "https://slides.googleapis.com/v1/presentations/{{presentation_id}}:batchUpdate"
+      body:
+        requests:
+          - duplicateObject: {objectId: "{{slide_id}}"}
+    response_extract: "$.replies"
+  - name: slides_batch_update
+    description: "Send raw Slides batchUpdate requests for anything the curated actions do not cover, e.g. tables, charts or precise positioning. requests is the array from the Slides API reference."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/presentations]
+    params:
+      type: object
+      properties:
+        presentation_id: {type: string}
+        requests:        {type: array, items: {type: object}, description: "raw Slides API request objects"}
+      required: [presentation_id, requests]
+    request:
+      method: POST
+      url: "https://slides.googleapis.com/v1/presentations/{{presentation_id}}:batchUpdate"
+      body:
+        requests: "{{requests}}"
+    response_extract: "$.replies"

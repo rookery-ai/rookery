@@ -255,6 +255,12 @@ wikipedia:siWikipedia
 strava:siStrava
 google_health:siGoogle
 google_calendar:siGooglecalendar
+google_slides:siGoogleslides
+google_forms:siGoogleforms
+google_chat:siGooglechat
+# Google Contacts has no mark of its own in simple-icons, so it carries the generic
+# Google mark — the same choice already made for google_health.
+google_contacts:siGoogle
 google_tasks:siGoogletasks
 todoist:siTodoist
 home_assistant:siHomeassistant

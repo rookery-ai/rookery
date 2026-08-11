@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "id": "user:sam@example.com",
+      "role": "reader",
+      "scope": {
+        "type": "user",
+        "value": "sam@example.com"
+      }
+    }
+  ]
+}

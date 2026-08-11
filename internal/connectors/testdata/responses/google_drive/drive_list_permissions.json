@@ -1,0 +1,11 @@
+{
+  "permissions": [
+    {
+      "id": "12345",
+      "type": "user",
+      "role": "writer",
+      "emailAddress": "sam@example.com",
+      "displayName": "Sam"
+    }
+  ]
+}
