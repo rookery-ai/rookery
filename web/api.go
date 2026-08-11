@@ -152,6 +152,7 @@ func (s *Server) setupAPIRoutes() {
 	s.registerSearchKeysAPI(dash)
 	s.registerConnectorsAPI(dash)
 	s.registerServicesAPI(dash)
+	s.registerMCPAPI(dash)
 	s.registerHomeAPI(dash)
 	s.registerDashboardAPI(dash)
 	s.registerKBAPI(dash)

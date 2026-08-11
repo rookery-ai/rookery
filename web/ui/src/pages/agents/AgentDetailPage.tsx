@@ -22,7 +22,7 @@ import { StatusChip } from "./StatusChip";
 import { RunPanel } from "./RunPanel";
 import { AgentMDCard } from "./AgentMDCard";
 import { ScheduleCard } from "./ScheduleCard";
-import { SkillsCard, ConnectionsCard } from "./AttachmentCards";
+import { SkillsCard, ConnectionsCard, MCPServersCard } from "./AttachmentCards";
 
 function RunStatusChip({ status }: { status: AgentRun["status"] }) {
   if (status === "running") {
@@ -206,6 +206,7 @@ export default function AgentDetailPage() {
             attachedConnectionIds={attached_connection_ids}
             connections={workspace_connections}
           />
+          <MCPServersCard agentId={id} />
         </div>
       </div>
 

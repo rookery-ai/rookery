@@ -18,11 +18,12 @@ import "strings"
 // services, `kb` for the knowledge-base bridge (save_to_kb/search over
 // convert+import). Chat never gets arbitrary shell.
 //
-// connectorBin and kbBin are each the absolute path of the rookery
+// connectorBin, kbBin and mcpBin are each the absolute path of the rookery
 // binary, or "" when that bridge isn't wired for this chat. They are separate
-// parameters (rather than one shared bin) because either bridge can be
-// available independently of the other.
-func ChatAllowedTools(connectorBin, kbBin string) string {
+// parameters (rather than one shared bin) because each bridge can be
+// available independently of the others — a workspace may have connected services
+// but no MCP server, or the reverse.
+func ChatAllowedTools(connectorBin, kbBin, mcpBin string) string {
 	// WebFetch/WebSearch are safe here for the same reason they sit outside the
 	// API engine's exec gate: read-only, no secrets, and unable to reach private
 	// address space (see netguard.go).
@@ -32,6 +33,9 @@ func ChatAllowedTools(connectorBin, kbBin string) string {
 	}
 	if kbBin != "" {
 		grants = append(grants, "Bash("+kbBin+" kb:*)")
+	}
+	if mcpBin != "" {
+		grants = append(grants, "Bash("+mcpBin+" mcp exec:*)")
 	}
 	return strings.Join(grants, ",")
 }

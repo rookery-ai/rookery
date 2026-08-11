@@ -187,14 +187,72 @@ type WorkspaceSetting struct {
 	UpdatedAt   time.Time
 }
 
+// MCPServer is one Model Context Protocol server the owner added by URL.
+//
+// Nothing about an MCP server ships in the binary: unlike a connector, both the
+// server AND its action list come from outside. The owner supplies URL + credential;
+// the server itself supplies its tools (cached in mcp_tools). See internal/mcp.
 type MCPServer struct {
 	ID          string
 	WorkspaceID string
 	Name        string
-	URL         string
-	Enabled     bool
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// Slug is the tool-name namespace — exposed tools are mcp__<slug>__<tool>. It is
+	// ours rather than the server's serverInfo.name, which the MCP spec states is not
+	// guaranteed unique across servers.
+	Slug      string
+	URL       string
+	Transport string // "http"
+	AuthKind  string // none|bearer|header
+	// HeaderName is the header the credential is sent in when AuthKind is "header".
+	HeaderName string
+	// EncryptedToken is sealed with the SYSTEM key, not the workspace master password:
+	// the background refresh and cron runs must decrypt it headlessly.
+	EncryptedToken string
+	Enabled        bool
+	// Status is ACTIVE, NEEDS_AUTH or UNREACHABLE. Only a definitive 401 produces
+	// NEEDS_AUTH; transport and 5xx failures produce UNREACHABLE, which neither
+	// alerts nor removes the server from the retry path.
+	Status        string
+	LastError     string
+	ToolsSyncedAt string
+	// ToolsTTLMs is the server-declared catalog lifetime from tools/list, or 0 when
+	// the server did not supply one (then the fixed default interval applies).
+	ToolsTTLMs int
+	ServerInfo string // JSON: serverInfo + negotiated protocol version
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// MCPTool is one tool discovered from a server's tools/list.
+//
+// It is a cache of a remote response, but not a disposable one: ReadOnly,
+// ApprovalMode and Enabled are authored by the owner and must survive a re-sync,
+// which is why reconcile upserts on (server_id, name) instead of replacing the set.
+type MCPTool struct {
+	ID       string
+	ServerID string
+	// Name is the server's own tool name, verbatim — what tools/call is invoked with.
+	// MCP permits dots and up to 128 characters here; an LLM tool name permits
+	// neither, hence ToolName.
+	Name string
+	// ToolName is the slugged, truncated, uniqueness-suffixed name exposed to the
+	// model. Stored rather than recomputed so an upstream rename cannot silently
+	// re-point a name the model already learned mid-run.
+	ToolName    string
+	Title       string
+	Description string
+	InputSchema string
+	// ReadOnly is seeded from the server's readOnlyHint annotation and then owned by
+	// the owner. The MCP spec requires clients to treat annotations as untrusted, so
+	// the hint is only a default; Execute's build-phase guard reads this field.
+	ReadOnly     bool
+	ApprovalMode string // auto|approve
+	Enabled      bool
+	// Missing marks a tool that vanished upstream. It is marked rather than deleted
+	// so the owner's overrides survive a server restart.
+	Missing   bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type AuditLog struct {
@@ -219,6 +277,10 @@ type AgentDraft struct {
 	PendingAgentMD             string
 	PendingToolsJSON           string
 	PendingUsedConnectionsJSON string
-	UpdatedAt                  time.Time
-	ExpiresAt                  time.Time
+	// PendingUsedMCPServersJSON is the sibling of PendingUsedConnectionsJSON for MCP
+	// auto-bind: the server ids a build actually called, so the binding survives a
+	// restart or a resumed keep-as-is draft.
+	PendingUsedMCPServersJSON string
+	UpdatedAt                 time.Time
+	ExpiresAt                 time.Time
 }

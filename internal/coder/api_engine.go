@@ -127,6 +127,8 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 			res.ScriptOutput = tools.verifiedOutput()
 			res.ScriptRan = tools.authoredScriptRan()
 			res.UsedConnectionIDs = tools.usedConnectionIDs()
+			res.UsedMCPServerIDs = tools.usedMCPServerIDList()
+			res.UsedMCPServerIDs = tools.usedMCPServerIDList()
 			return res, nil
 		}
 
@@ -158,6 +160,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 		res.ScriptOutput = tools.verifiedOutput()
 		res.ScriptRan = tools.authoredScriptRan()
 		res.UsedConnectionIDs = tools.usedConnectionIDs()
+		res.UsedMCPServerIDs = tools.usedMCPServerIDList()
 	}
 	return res, err
 }
@@ -413,7 +416,12 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 		boundConns: c.boundConns,
 		connParker: c.connParker,
 
-		usedConnIDs: map[string]bool{},
+		mcpCaller: c.mcpCaller,
+		mcpParker: c.mcpParker,
+		boundMCP:  c.boundMCP,
+
+		usedConnIDs:      map[string]bool{},
+		usedMCPServerIDs: map[string]bool{},
 	}
 }
 

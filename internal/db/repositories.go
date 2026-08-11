@@ -1543,39 +1543,18 @@ func (d *DB) ListExpiredSkillDrafts() ([]*SkillDraft, error) {
 	return drafts, rows.Err()
 }
 
-// ── MCP servers ────────────────────────────────────────────────────────────
-
-func (d *DB) ListMCPServers(workspaceID string) ([]*MCPServer, error) {
-	rows, err := d.Query(`SELECT id,workspace_id,name,url,enabled,created_at,updated_at FROM mcp_servers WHERE workspace_id=? ORDER BY name`, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var servers []*MCPServer
-	for rows.Next() {
-		var s MCPServer
-		var enabled int
-		var createdAt, updatedAt string
-		if err := rows.Scan(&s.ID, &s.WorkspaceID, &s.Name, &s.URL, &enabled, &createdAt, &updatedAt); err != nil {
-			return nil, err
-		}
-		s.Enabled = enabled == 1
-		s.CreatedAt = scanTime(createdAt)
-		s.UpdatedAt = scanTime(updatedAt)
-		servers = append(servers, &s)
-	}
-	return servers, rows.Err()
-}
+// MCP server + tool helpers live in internal/db/mcp.go.
 
 // ── Agent drafts ──────────────────────────────────────────────────────────────
 
 // UpsertAgentDraft saves or overwrites the user's single in-progress design draft.
 func (d *DB) UpsertAgentDraft(dr *AgentDraft) error {
 	_, err := d.Exec(`INSERT OR REPLACE INTO agent_drafts
-		(workspace_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, pending_used_connections, updated_at, expires_at)
-		VALUES (?,?,?,?,?,?,?,?,?,datetime('now'),?)`,
+		(workspace_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, pending_used_connections, pending_used_mcp_servers, updated_at, expires_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,datetime('now'),?)`,
 		dr.WorkspaceID, dr.AgentID, dr.AgentName, boolToInt(dr.IsEdit), dr.State,
 		dr.HistoryJSON, dr.PendingAgentMD, dr.PendingToolsJSON, dr.PendingUsedConnectionsJSON,
+		dr.PendingUsedMCPServersJSON,
 		dr.ExpiresAt.UTC().Format("2006-01-02 15:04:05"))
 	return err
 }
@@ -1586,10 +1565,11 @@ func (d *DB) GetAgentDraft(workspaceID string) (*AgentDraft, error) {
 	var dr AgentDraft
 	var isEdit int
 	var updatedAt, expiresAt string
-	err := d.QueryRow(`SELECT workspace_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, pending_used_connections, updated_at, expires_at
+	err := d.QueryRow(`SELECT workspace_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, pending_used_connections, pending_used_mcp_servers, updated_at, expires_at
 		FROM agent_drafts WHERE workspace_id=? AND expires_at > datetime('now')`, workspaceID).
 		Scan(&dr.WorkspaceID, &dr.AgentID, &dr.AgentName, &isEdit, &dr.State, &dr.HistoryJSON,
-			&dr.PendingAgentMD, &dr.PendingToolsJSON, &dr.PendingUsedConnectionsJSON, &updatedAt, &expiresAt)
+			&dr.PendingAgentMD, &dr.PendingToolsJSON, &dr.PendingUsedConnectionsJSON,
+			&dr.PendingUsedMCPServersJSON, &updatedAt, &expiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -1610,7 +1590,7 @@ func (d *DB) DeleteAgentDraft(workspaceID string) error {
 
 // ListExpiredAgentDrafts returns all drafts past their expiry (for the nightly GC).
 func (d *DB) ListExpiredAgentDrafts() ([]*AgentDraft, error) {
-	rows, err := d.Query(`SELECT workspace_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, pending_used_connections, updated_at, expires_at
+	rows, err := d.Query(`SELECT workspace_id, agent_id, agent_name, is_edit, state, history_json, pending_agent_md, pending_tools_json, pending_used_connections, pending_used_mcp_servers, updated_at, expires_at
 		FROM agent_drafts WHERE expires_at <= datetime('now')`)
 	if err != nil {
 		return nil, err
@@ -1622,7 +1602,8 @@ func (d *DB) ListExpiredAgentDrafts() ([]*AgentDraft, error) {
 		var isEdit int
 		var updatedAt, expiresAt string
 		if err := rows.Scan(&dr.WorkspaceID, &dr.AgentID, &dr.AgentName, &isEdit, &dr.State, &dr.HistoryJSON,
-			&dr.PendingAgentMD, &dr.PendingToolsJSON, &dr.PendingUsedConnectionsJSON, &updatedAt, &expiresAt); err != nil {
+			&dr.PendingAgentMD, &dr.PendingToolsJSON, &dr.PendingUsedConnectionsJSON,
+			&dr.PendingUsedMCPServersJSON, &updatedAt, &expiresAt); err != nil {
 			return nil, err
 		}
 		dr.IsEdit = isEdit == 1

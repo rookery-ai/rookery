@@ -28,6 +28,7 @@ import (
 	"github.com/ilijad1/rookery/internal/db"
 	"github.com/ilijad1/rookery/internal/gateway"
 	"github.com/ilijad1/rookery/internal/health"
+	"github.com/ilijad1/rookery/internal/mcp"
 	"github.com/ilijad1/rookery/internal/memory"
 	"github.com/ilijad1/rookery/internal/profile"
 	"github.com/ilijad1/rookery/internal/prompts"
@@ -62,6 +63,7 @@ func main() {
 			adminCmd(),
 			sandboxExecCmd(),
 			connectorCmd(),
+			mcpCmd(),
 			kbCmd(),
 			backupCommand(),
 			versionCmd(),
@@ -308,6 +310,19 @@ func serveCmd() *cli.Command {
 				return fmt.Errorf("start connector bridge: %w", err)
 			}
 
+			// MCP: one client (pooling a session per server) plus its own loopback bridge
+			// so CLI coders reach the SAME mcp.Execute path the API engine calls in-process.
+			//
+			// It is a sibling of the connector bridge rather than a route on it because
+			// internal/connectors must not import internal/mcp to serve it; the CLI reads
+			// its own ROOKERY_MCP_URL / ROOKERY_MCP_TOKEN pair, so the two never couple.
+			mcpClient := mcp.NewClient(nil)
+			defer mcpClient.Close()
+			mcpBridge := mcp.NewBridge(mcpClient)
+			if _, err := mcpBridge.Start(ctx); err != nil {
+				return fmt.Errorf("start MCP bridge: %w", err)
+			}
+
 			// Loopback KB bridge so CLI coders reach conversion + search in-process
 			// (the same vault.ImportFile / Searcher code the API engine calls directly).
 			// Approval gate for irreversible public writes (posts, uploads). Off unless
@@ -324,6 +339,18 @@ func serveCmd() *cli.Command {
 				WithDB(database).
 				WithMemory(memStore).
 				WithConnectors(connReg, connStore).
+				WithMCPStore(database).
+				WithMCPBuild(mcpClient, func(ctx context.Context, workspaceID string) []mcp.BoundServer {
+					// A build sees every ENABLED server: it has not declared its
+					// bindings yet, and auto-bind infers them from what it actually
+					// uses. The build-time guard still refuses any tool the owner has
+					// not marked read-only.
+					bound, err := mcp.ActiveBoundServers(ctx, database, sysKey, workspaceID)
+					if err != nil {
+						return nil
+					}
+					return bound
+				}).
 				WithSecretsLoader(func(ctx context.Context, workspaceID string) (map[string]string, error) {
 					user, err := database.GetWorkspaceByID(workspaceID)
 					if err != nil || user.EncryptedMasterPassword == "" {
@@ -345,6 +372,7 @@ func serveCmd() *cli.Command {
 				WithConnectors(connReg, connStore, connBridge).
 				WithApprovalGate(approvalSvc.ParkerFor).
 				WithKBBridge(kbBridge).
+				WithMCP(mcpClient, mcpBridge).
 				WithCoderFactory(func(workspaceID string) *coder.Coder {
 					w, err := database.GetWorkspaceByID(workspaceID)
 					if err != nil || w == nil {
@@ -398,6 +426,9 @@ func serveCmd() *cli.Command {
 				var connRefs []prompts.ConnectionRef
 				var connTools []string
 				var connBin string
+				var mcpRefs []prompts.MCPServerRef
+				var mcpTools []string
+				var mcpBin string
 				if cd.IsAPI() {
 					if rows, err := database.ListServiceConnections(ctx, workspaceID); err == nil {
 						bound := connectors.ActiveBoundConns(rows)
@@ -409,6 +440,18 @@ func serveCmd() *cli.Command {
 							for _, d := range connReg.ToolDefs(bound) {
 								connTools = append(connTools, d.Name)
 							}
+						}
+					}
+					// MCP servers attach the same way, and for the same reason connections do:
+					// chat is not an agent, so there is no binding to narrow by — every
+					// ENABLED server is offered.
+					if bound, err := mcp.ActiveBoundServers(ctx, database, sysKey, workspaceID); err == nil && len(bound) > 0 {
+						cd = cd.WithMCP(mcpClient, bound)
+						for _, b := range bound {
+							mcpRefs = append(mcpRefs, prompts.MCPServerRef{Name: b.Name})
+						}
+						for _, d := range mcp.ToolDefs(bound) {
+							mcpTools = append(mcpTools, d.Name)
 						}
 					}
 					if len(searchEnv) > 0 {
@@ -456,15 +499,34 @@ func serveCmd() *cli.Command {
 							}
 						}
 					}
+					if mcpBridge != nil && mcpBridge.Addr() != "" {
+						if bound, err := mcp.ActiveBoundServers(ctx, database, sysKey, workspaceID); err == nil && len(bound) > 0 {
+							tok := mcpBridge.Register(workspaceID, bound, false)
+							defer mcpBridge.Unregister(tok)
+							extraEnv["ROOKERY_MCP_URL"] = mcpBridge.Addr()
+							extraEnv["ROOKERY_MCP_TOKEN"] = tok
+							for _, b := range bound {
+								mcpRefs = append(mcpRefs, prompts.MCPServerRef{Name: b.Name})
+							}
+							for _, d := range mcp.ToolDefs(bound) {
+								mcpTools = append(mcpTools, d.Name)
+							}
+							if p, err := os.Executable(); err == nil {
+								mcpBin = p
+							}
+						}
+					}
 					if len(extraEnv) > 0 {
 						cd = cd.WithExtraEnv(extraEnv)
 					}
 					// CLI coders reach connectors/kb by running `<bin> connector exec …` /
 					// `<bin> kb …` as shell commands; grant narrowly-scoped Bash permissions
 					// for only those commands (chat stays file-only otherwise).
-					cd = cd.WithAllowedTools(coder.ChatAllowedTools(connBin, kbBin))
+					cd = cd.WithAllowedTools(coder.ChatAllowedTools(connBin, kbBin, mcpBin))
 				}
-				sysCtx := prompts.BuildChatSystemPrompt(root, cd.BackendType(), connRefs, connTools, connBin) + chat.BuildUserContext(database, memStore, workspaceID)
+				sysCtx := prompts.BuildChatSystemPrompt(root, cd.BackendType(), connRefs, connTools, connBin) +
+					prompts.MCPToolsBlock(mcpRefs, mcpTools, cd.BackendType(), mcpBin) +
+					chat.BuildUserContext(database, memStore, workspaceID)
 				result, err := cd.Chat(ctx, workspaceID, history, sysCtx, text)
 				if err != nil {
 					send("Sorry, I ran into an error: " + err.Error())
@@ -619,7 +681,7 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
-			srv = srv.WithBridge(connBridge).WithKBBridge(kbBridge).WithTitleGenerator(titleGen).WithApproval(approvalSvc).WithBackupScheduler(backupSched)
+			srv = srv.WithBridge(connBridge).WithKBBridge(kbBridge).WithMCP(mcpClient, mcpBridge).WithTitleGenerator(titleGen).WithApproval(approvalSvc).WithBackupScheduler(backupSched)
 
 			addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 			slog.Info("listening", "addr", addr)
@@ -688,6 +750,60 @@ func connectorCmd() *cli.Command {
 					resp, err := http.DefaultClient.Do(req)
 					if err != nil {
 						return fmt.Errorf("connector bridge unreachable: %w", err)
+					}
+					defer resp.Body.Close()
+					out, _ := io.ReadAll(resp.Body)
+					fmt.Print(string(out))
+					return nil
+				},
+			},
+		},
+	}
+}
+
+// mcpCmd is how a CLI coder calls a tool on a connected MCP server: it POSTs to the
+// loopback MCP bridge in the host process, which runs the SAME mcp.Execute path the
+// API engine uses in-process, so the build guard and the approval gate apply to both
+// coder kinds identically.
+//
+// The server credential never reaches this subprocess — only a run-scoped bearer
+// token, which the host resolves. That is the property native --mcp-config
+// passthrough would have given up.
+//
+// Usage: rookery mcp exec <tool> --args '<json>'
+func mcpCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "mcp",
+		Usage: "Call a tool on a connected MCP server (used by CLI coders)",
+		Commands: []*cli.Command{
+			{
+				Name:      "exec",
+				Usage:     "Run an MCP tool: mcp exec <tool> --args '<json-object>'",
+				ArgsUsage: "<tool>",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "args", Usage: "JSON object of arguments", Value: "{}"},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					tool := cmd.Args().First()
+					if tool == "" {
+						return fmt.Errorf("usage: mcp exec <tool> --args '<json>'")
+					}
+					base := os.Getenv("ROOKERY_MCP_URL")
+					token := os.Getenv("ROOKERY_MCP_TOKEN")
+					if base == "" || token == "" {
+						return fmt.Errorf("no MCP bridge available in this run")
+					}
+					var args map[string]any
+					if err := json.Unmarshal([]byte(cmd.String("args")), &args); err != nil {
+						return fmt.Errorf("--args must be a JSON object: %w", err)
+					}
+					body, _ := json.Marshal(map[string]any{"tool": tool, "args": args})
+					req, _ := http.NewRequestWithContext(ctx, "POST", base+"/mcp/exec", bytes.NewReader(body))
+					req.Header.Set("Authorization", "Bearer "+token)
+					req.Header.Set("Content-Type", "application/json")
+					resp, err := http.DefaultClient.Do(req)
+					if err != nil {
+						return fmt.Errorf("MCP bridge unreachable: %w", err)
 					}
 					defer resp.Body.Close()
 					out, _ := io.ReadAll(resp.Body)
