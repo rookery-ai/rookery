@@ -188,6 +188,8 @@ var providersRequiringFixtures = []string{
 	"google", "google_drive", "google_calendar", "google_sheets", "google_docs",
 	"google_tasks", "youtube", "google_contacts", "google_chat", "google_slides",
 	"google_forms",
+	"outlook", "teams", "outlook_calendar", "outlook_contacts", "onedrive",
+	"excel", "onenote", "microsoft_todo",
 }
 
 func TestFixtureCoverageOfExpandedProviders(t *testing.T) {

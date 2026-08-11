@@ -1,0 +1,13 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection",
+  "value": [
+    {
+      "id": "MCMjMSMj",
+      "displayName": "Sam Rivera",
+      "email": "sam@example.com",
+      "roles": [
+        "owner"
+      ]
+    }
+  ]
+}

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html"
 	"net/url"
 	"regexp"
 	"strings"
@@ -129,6 +130,7 @@ var bodyBuilders = map[string]bodyBuilder{
 	"notion_page":      notionPage,
 	"msgraph_sendmail": msgraphSendMail,
 	"msgraph_draft":    msgraphDraft,
+	"onenote_page":     onenotePage,
 	"jira_issue":       jiraIssue,
 	"jira_comment":     jiraComment,
 	"drive_folder":     driveFolder,
@@ -255,6 +257,25 @@ func msgraphSendMail(args map[string]any) ([]byte, string, error) {
 func msgraphDraft(args map[string]any) ([]byte, string, error) {
 	b, err := json.Marshal(msgraphMessage(args))
 	return b, "application/json", err
+}
+
+// onenotePage builds a OneNote page, which is an HTML DOCUMENT rather than JSON — the
+// one place in this layer where a request body is not JSON at all. Graph reads the
+// <title> element as the page title (there is no title field to send), so a page
+// created without the wrapper arrives untitled no matter what the caller passed.
+//
+// The body is escaped as TEXT only when it contains no markup: the argument is
+// documented as HTML so an agent can write a list or a table, but a plain sentence
+// containing an ampersand must not produce a malformed document. Args: title, content.
+func onenotePage(args map[string]any) ([]byte, string, error) {
+	title := asString(args["title"])
+	content := asString(args["content"])
+	if !strings.Contains(content, "<") {
+		content = "<p>" + html.EscapeString(content) + "</p>"
+	}
+	doc := "<!DOCTYPE html><html><head><title>" + html.EscapeString(title) +
+		"</title></head><body>" + content + "</body></html>"
+	return []byte(doc), "text/html", nil
 }
 
 // notionPage builds a minimal valid Notion "create page" payload under a page parent:

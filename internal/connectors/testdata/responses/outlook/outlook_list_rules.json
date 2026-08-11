@@ -1,0 +1,20 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection",
+  "value": [
+    {
+      "id": "AQAAAJ2",
+      "displayName": "File vendor mail",
+      "sequence": 1,
+      "isEnabled": true,
+      "conditions": {
+        "senderContains": [
+          "vendor.com"
+        ]
+      },
+      "actions": {
+        "moveToFolder": "AQMkADAwAT",
+        "markAsRead": true
+      }
+    }
+  ]
+}

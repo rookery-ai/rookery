@@ -1,0 +1,19 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection",
+  "value": [
+    {
+      "id": "1723382400000",
+      "createdDateTime": "2026-08-11T10:00:00Z",
+      "body": {
+        "contentType": "html",
+        "content": "<p>Deploy is green</p>"
+      },
+      "from": {
+        "user": {
+          "id": "8a7b",
+          "displayName": "Sam"
+        }
+      }
+    }
+  ]
+}

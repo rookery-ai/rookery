@@ -95,3 +95,121 @@ actions:
       method: GET
       url: "https://graph.microsoft.com/v1.0/teams/{{team_id}}/members"
     response_extract: "$.value"
+  - name: teams_get_team
+    description: "Get one team's details — its name, description and visibility. Read-only."
+    mutating: false
+    scopes: [Team.ReadBasic.All]
+    params:
+      type: object
+      properties:
+        team_id: {type: string}
+      required: [team_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/teams/{{team_id}}"
+    response_extract: "$"
+  - name: teams_create_channel
+    description: "Create a channel in a team. membership_type is standard (everyone in the team) or private. Everyone in the team sees a new standard channel appear."
+    mutating: true
+    public_write: true
+    scopes: [Channel.ReadBasic.All]
+    params:
+      type: object
+      properties:
+        team_id:         {type: string}
+        name:            {type: string, description: "channel display name"}
+        description:     {type: string}
+        membership_type: {type: string, description: "standard | private"}
+      required: [team_id, name]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/teams/{{team_id}}/channels"
+      body:
+        displayName: "{{name}}"
+        description: "{{description}}"
+        membershipType: "{{membership_type}}"
+    response_extract: "$"
+  - name: teams_list_message_replies
+    description: "List the replies to one channel message, so a thread can be read in full before answering. Read-only."
+    mutating: false
+    scopes: [ChannelMessage.Read.All]
+    params:
+      type: object
+      properties:
+        team_id:    {type: string}
+        channel_id: {type: string}
+        message_id: {type: string, description: "id of the parent message"}
+        top:        {type: integer, description: "max replies (default 25)"}
+      required: [team_id, channel_id, message_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/teams/{{team_id}}/channels/{{channel_id}}/messages/{{message_id}}/replies"
+      query:
+        $top: "{{top}}"
+    response_extract: "$.value"
+  - name: teams_list_channel_members
+    description: "List who is in a specific channel, as opposed to the whole team. Read-only."
+    mutating: false
+    scopes: [Channel.ReadBasic.All]
+    params:
+      type: object
+      properties:
+        team_id:    {type: string}
+        channel_id: {type: string}
+      required: [team_id, channel_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/teams/{{team_id}}/channels/{{channel_id}}/members"
+    response_extract: "$.value"
+
+  # ---- one-to-one and group chats (not channels) --------------------------
+  - name: teams_list_my_chats
+    description: "List the connected account's one-to-one and group CHATS, which are separate from team channels. Resolve a chat id here before sending a direct message. Read-only."
+    mutating: false
+    scopes: [Chat.ReadWrite]
+    params:
+      type: object
+      properties:
+        top: {type: integer, description: "max chats (default 25)"}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/chats"
+      query:
+        $top: "{{top}}"
+    response_extract: "$.value"
+  - name: teams_list_chat_messages
+    description: "List the messages in one chat, newest first. Use teams_list_my_chats to find the chat id. Read-only."
+    mutating: false
+    scopes: [Chat.ReadWrite]
+    params:
+      type: object
+      properties:
+        chat_id: {type: string}
+        top:     {type: integer, description: "max messages (default 25)"}
+      required: [chat_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/chats/{{chat_id}}/messages"
+      query:
+        $top: "{{top}}"
+    response_extract: "$.value"
+  - name: teams_send_chat_message
+    description: "Send a direct message into an existing chat as the connected account. It reaches a real person immediately and cannot be unsent silently. Set content_type='html' for formatting."
+    mutating: true
+    public_write: true
+    scopes: [Chat.ReadWrite]
+    params:
+      type: object
+      properties:
+        chat_id:      {type: string}
+        text:         {type: string, description: "message content"}
+        content_type: {type: string, description: "text (default) or html"}
+      required: [chat_id, text]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/chats/{{chat_id}}/messages"
+      body:
+        body:
+          content: "{{text}}"
+          contentType: "{{content_type}}"
+    response_extract: "$"

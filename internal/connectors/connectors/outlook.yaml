@@ -72,3 +72,298 @@ actions:
       url: "https://graph.microsoft.com/v1.0/me/sendMail"
       body_builder: msgraph_sendmail
     response_extract: "$"
+  # ---- folders -------------------------------------------------------------
+  # Graph paging is deliberately NOT exposed as a cursor here. Its next page is an
+  # @odata.nextLink holding a complete URL, which an action with a fixed url template
+  # cannot consume — handing that to the model as a "next_cursor" would invite it to
+  # feed a URL into a query parameter. $top plus $skip is the honest mechanism, so
+  # every list below takes both and says so.
+  - name: outlook_list_folders
+    description: "List the mailbox's folders with their ids and unread counts. Resolve a folder NAME to its id here before outlook_move_message or outlook_list_folder_messages. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Mail.Read]
+    params:
+      type: object
+      properties:
+        top:  {type: integer, description: "max folders (default 25)"}
+        skip: {type: integer, description: "how many to skip — raise it to page"}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/mailFolders"
+      query:
+        $top: "{{top}}"
+        $skip: "{{skip}}"
+    response_extract: "$.value"
+  - name: outlook_create_folder
+    description: "Create a mail folder, optionally nested inside another. Safe write — it starts empty."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Mail.ReadWrite]
+    params:
+      type: object
+      properties:
+        name:      {type: string, description: "folder name"}
+        parent_id: {type: string, description: "optional parent folder id; omit for a top-level folder"}
+      required: [name]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/mailFolders/{{parent_id}}/childFolders"
+      body:
+        displayName: "{{name}}"
+    response_extract: "$"
+  - name: outlook_list_folder_messages
+    description: "List messages inside one mail folder, newest first. Use outlook_list_folders to resolve the folder id. Pass a larger skip to page through. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Mail.Read]
+    params:
+      type: object
+      properties:
+        folder_id: {type: string, description: "folder id, or a well-known name like inbox, drafts, sentitems, archive"}
+        top:       {type: integer, description: "max messages (default 25)"}
+        skip:      {type: integer, description: "how many to skip — raise it to page"}
+        select:    {type: string, description: "comma-separated fields, e.g. 'subject,from,receivedDateTime,isRead'"}
+        filter:    {type: string, description: "OData filter, e.g. isRead eq false"}
+      required: [folder_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/mailFolders/{{folder_id}}/messages"
+      query:
+        $top: "{{top}}"
+        $skip: "{{skip}}"
+        $select: "{{select}}"
+        $filter: "{{filter}}"
+        $orderby: "receivedDateTime desc"
+    response_extract: "$.value"
+
+  # ---- replying and forwarding --------------------------------------------
+  - name: outlook_reply_to_message
+    description: "Reply to a message, to the sender only. Delivers real mail that cannot be recalled. comment is the reply text; the original is quoted automatically."
+    mutating: true
+    public_write: true
+    scopes: [https://graph.microsoft.com/Mail.Send]
+    params:
+      type: object
+      properties:
+        id:      {type: string, description: "message id"}
+        comment: {type: string, description: "the reply text"}
+      required: [id, comment]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/messages/{{id}}/reply"
+      body:
+        comment: "{{comment}}"
+    response_extract: "$"
+  - name: outlook_reply_all
+    description: "Reply to EVERY recipient of a message, not just the sender. Delivers real mail to several people at once — confirm that is what the user wants."
+    mutating: true
+    public_write: true
+    scopes: [https://graph.microsoft.com/Mail.Send]
+    params:
+      type: object
+      properties:
+        id:      {type: string, description: "message id"}
+        comment: {type: string, description: "the reply text"}
+      required: [id, comment]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/messages/{{id}}/replyAll"
+      body:
+        comment: "{{comment}}"
+    response_extract: "$"
+  - name: outlook_forward_message
+    description: "Forward a message to other people, including its attachments. Delivers real mail that cannot be recalled. to is a list like [{\"emailAddress\":{\"address\":\"a@b.com\"}}]."
+    mutating: true
+    public_write: true
+    scopes: [https://graph.microsoft.com/Mail.Send]
+    params:
+      type: object
+      properties:
+        id:      {type: string, description: "message id"}
+        to:      {type: array, items: {type: object}, description: "[{\"emailAddress\":{\"address\":\"a@b.com\"}}]"}
+        comment: {type: string, description: "note to add above the forwarded message"}
+      required: [id, to]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/messages/{{id}}/forward"
+      body:
+        toRecipients: "{{to}}"
+        comment: "{{comment}}"
+    response_extract: "$"
+
+  # ---- organising the mailbox ---------------------------------------------
+  - name: outlook_move_message
+    description: "Move a message to another folder — the way to archive or file mail. Resolve the destination with outlook_list_folders, or use a well-known name like archive or deleteditems."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Mail.ReadWrite]
+    params:
+      type: object
+      properties:
+        id:             {type: string, description: "message id"}
+        destination_id: {type: string, description: "folder id, or a well-known name like archive"}
+      required: [id, destination_id]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/messages/{{id}}/move"
+      body:
+        destinationId: "{{destination_id}}"
+    response_extract: "$"
+  - name: outlook_mark_read
+    description: "Mark a message read or unread. Pass is_read=false to mark it back to unread. A write to the user's own mailbox; not a send."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Mail.ReadWrite]
+    params:
+      type: object
+      properties:
+        id:      {type: string, description: "message id"}
+        is_read: {type: boolean, description: "true to mark read, false for unread"}
+      required: [id, is_read]
+    request:
+      method: PATCH
+      url: "https://graph.microsoft.com/v1.0/me/messages/{{id}}"
+      body:
+        isRead: "{{is_read}}"
+    response_extract: "$"
+  - name: outlook_flag_message
+    description: "Flag a message for follow-up, or clear its flag. status is flagged, complete or notFlagged. A write to the user's own mailbox."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Mail.ReadWrite]
+    params:
+      type: object
+      properties:
+        id:     {type: string, description: "message id"}
+        status: {type: string, description: "flagged | complete | notFlagged"}
+      required: [id, status]
+    request:
+      method: PATCH
+      url: "https://graph.microsoft.com/v1.0/me/messages/{{id}}"
+      body:
+        flag: {flagStatus: "{{status}}"}
+    response_extract: "$"
+  - name: outlook_categorize_message
+    description: "Apply Outlook categories (coloured labels) to a message. This REPLACES the message's category list. Resolve valid names with outlook_list_categories first — an unknown name is stored but shows no colour."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Mail.ReadWrite]
+    params:
+      type: object
+      properties:
+        id:         {type: string, description: "message id"}
+        categories: {type: array, items: {type: string}, description: "category names; replaces the existing list"}
+      required: [id, categories]
+    request:
+      method: PATCH
+      url: "https://graph.microsoft.com/v1.0/me/messages/{{id}}"
+      body:
+        categories: "{{categories}}"
+    response_extract: "$"
+  - name: outlook_delete_message
+    description: "Move a message to Deleted Items. Recoverable from that folder until it is emptied. Mutating."
+    mutating: true
+    scopes: [https://graph.microsoft.com/Mail.ReadWrite]
+    params:
+      type: object
+      properties:
+        id: {type: string, description: "message id"}
+      required: [id]
+    request:
+      method: DELETE
+      url: "https://graph.microsoft.com/v1.0/me/messages/{{id}}"
+    response_extract: "$"
+  - name: outlook_list_attachments
+    description: "List a message's attachments — their names, types and sizes, but NOT their contents. Downloading attachment bytes is not offered: the connector layer carries JSON only. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Mail.Read]
+    params:
+      type: object
+      properties:
+        id: {type: string, description: "message id"}
+      required: [id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/messages/{{id}}/attachments"
+      query:
+        # Without this the response embeds every attachment's base64 CONTENT, which
+        # blows the 8 KiB result cap on a single PDF.
+        $select: "id,name,contentType,size,isInline"
+    response_extract: "$.value"
+
+  # ---- drafts --------------------------------------------------------------
+  - name: outlook_update_draft
+    description: "Change a saved draft's subject or body before sending. Nothing is delivered — use outlook_send_draft to send it."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Mail.ReadWrite]
+    params:
+      type: object
+      properties:
+        id:      {type: string, description: "draft message id"}
+        subject: {type: string}
+        body:    {type: string, description: "message body text"}
+      required: [id]
+    request:
+      method: PATCH
+      url: "https://graph.microsoft.com/v1.0/me/messages/{{id}}"
+      body:
+        subject: "{{subject}}"
+        body: {contentType: "Text", content: "{{body}}"}
+    response_extract: "$"
+  - name: outlook_send_draft
+    description: "Send an already-saved draft by its message id. Delivers real mail that cannot be recalled — review it with outlook_get_message first."
+    mutating: true
+    public_write: true
+    scopes: [https://graph.microsoft.com/Mail.Send]
+    params:
+      type: object
+      properties:
+        id: {type: string, description: "draft message id"}
+      required: [id]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/messages/{{id}}/send"
+    response_extract: "$"
+
+  # ---- mailbox settings ----------------------------------------------------
+  - name: outlook_list_categories
+    description: "List the mailbox's defined categories (coloured labels) and their colours. Use before outlook_categorize_message. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/MailboxSettings.ReadWrite]
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/outlook/masterCategories"
+    response_extract: "$.value"
+  - name: outlook_list_rules
+    description: "List the inbox rules that automatically move, flag or delete incoming mail. Use to explain why mail is being filed somewhere. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/MailboxSettings.ReadWrite]
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messageRules"
+    response_extract: "$.value"
+  - name: outlook_get_mailbox_settings
+    description: "Read the mailbox's time zone, working hours and automatic-reply state. Useful before scheduling on the user's behalf. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/MailboxSettings.ReadWrite]
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/mailboxSettings"
+    response_extract: "$"
+  - name: outlook_set_automatic_replies
+    description: "Turn the out-of-office automatic reply on or off and set its text. While enabled this sends automatic replies to real people, so confirm the wording first. status is disabled, alwaysEnabled or scheduled."
+    mutating: true
+    scopes: [https://graph.microsoft.com/MailboxSettings.ReadWrite]
+    params:
+      type: object
+      properties:
+        status:          {type: string, description: "disabled | alwaysEnabled | scheduled"}
+        internal_message: {type: string, description: "reply sent to people inside the organisation"}
+        external_message: {type: string, description: "reply sent to everyone else"}
+      required: [status]
+    request:
+      method: PATCH
+      url: "https://graph.microsoft.com/v1.0/me/mailboxSettings"
+      body:
+        automaticRepliesSetting:
+          status: "{{status}}"
+          internalReplyMessage: "{{internal_message}}"
+          externalReplyMessage: "{{external_message}}"
+    response_extract: "$"

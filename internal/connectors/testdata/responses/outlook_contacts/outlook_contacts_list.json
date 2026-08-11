@@ -1,0 +1,18 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection",
+  "value": [
+    {
+      "id": "AAMkAGI2Con",
+      "displayName": "Sam Rivera",
+      "givenName": "Sam",
+      "surname": "Rivera",
+      "emailAddresses": [
+        {
+          "name": "Sam Rivera",
+          "address": "sam@example.com"
+        }
+      ],
+      "mobilePhone": "+38970000000"
+    }
+  ]
+}
