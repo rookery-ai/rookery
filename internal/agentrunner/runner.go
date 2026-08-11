@@ -20,6 +20,7 @@ import (
 	"github.com/ilijad1/rookery/internal/coder"
 	"github.com/ilijad1/rookery/internal/connectors"
 	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/mcp"
 	"github.com/ilijad1/rookery/internal/profile"
 	"github.com/ilijad1/rookery/internal/prompts"
 	"github.com/ilijad1/rookery/internal/secrets"
@@ -86,6 +87,33 @@ type Runner struct {
 	// vault.ImportFile / Searcher code the API engine's save_to_kb/search_files
 	// tools call in-process). nil for tests that don't wire one.
 	kbBridge *vault.Bridge
+
+	// MCP: when set, an agent's BOUND servers (agent_mcp_servers) are exposed to
+	// both coder types — the API engine calls mcpClient in-process, a CLI coder
+	// reaches the same mcp.Execute via mcpBridge (`rookery mcp exec`).
+	mcpClient    *mcp.Client
+	mcpBridge    *mcp.Bridge
+	mcpParkerFor MCPParkerFactory
+}
+
+// MCPParkerFactory returns the approval gate for one agent's MCP calls, or nil when
+// that agent has no gated binding. Separate from ParkerFactory because the two layers
+// identify a call differently — (connection, action) versus (server, tool) — while
+// meaning exactly the same thing to the owner.
+type MCPParkerFactory func(ctx context.Context, workspaceID, agentID, agentName string) mcp.Parker
+
+// WithMCP wires the MCP client + loopback bridge so an agent's bound MCP servers are
+// usable by every coder type, exactly as WithConnectors does for service connections.
+func (r *Runner) WithMCP(c *mcp.Client, bridge *mcp.Bridge) *Runner {
+	r.mcpClient = c
+	r.mcpBridge = bridge
+	return r
+}
+
+// WithMCPApprovalGate installs the per-agent MCP approval gate.
+func (r *Runner) WithMCPApprovalGate(f MCPParkerFactory) *Runner {
+	r.mcpParkerFor = f
+	return r
 }
 
 // WithConnectors wires the self-managed-OAuth connector registry + token store + loopback
@@ -363,6 +391,20 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 		ConnectorBin:    connectorBinPath(),
 	})
 
+	// MCP tools are described in their own block rather than folded into the
+	// connector one: a connector action is a curated call against a known API, while
+	// an MCP tool is whatever a server the owner added chose to advertise, and the
+	// model needs that distinction to choose between two tools that sound alike.
+	if r.mcpClient != nil {
+		if boundMCP, err := mcp.BoundServersForAgent(ctx, r.db, r.systemKey, agent.ID); err == nil && len(boundMCP) > 0 {
+			var refs []prompts.MCPServerRef
+			for _, b := range boundMCP {
+				refs = append(refs, prompts.MCPServerRef{Name: b.Name})
+			}
+			prompt += "\n" + prompts.MCPToolsBlock(refs, mcp.ToolNames(boundMCP), backendTypeOf(baseCoder), connectorBinPath())
+		}
+	}
+
 	if baseCoder == nil {
 		return fmt.Errorf("no coder service configured")
 	}
@@ -406,6 +448,24 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 			defer r.connBridge.Unregister(token)
 			extraEnv["ROOKERY_CONNECTOR_URL"] = r.connBridge.Addr()
 			extraEnv["ROOKERY_CONNECTOR_TOKEN"] = token
+		}
+	}
+	// Expose the agent's BOUND MCP servers to both coder types. Only bound ones:
+	// a build sees every enabled server, a run sees what the agent declared —
+	// the same narrowing agent_connections applies.
+	if r.mcpClient != nil {
+		if boundMCP, err := mcp.BoundServersForAgent(ctx, r.db, r.systemKey, agent.ID); err == nil && len(boundMCP) > 0 {
+			var mcpParker mcp.Parker
+			if r.mcpParkerFor != nil {
+				mcpParker = r.mcpParkerFor(ctx, input.WorkspaceID, agent.ID, agent.Name)
+			}
+			coderSvc = coderSvc.WithMCP(r.mcpClient, boundMCP).WithMCPParker(mcpParker)
+			if r.mcpBridge != nil && r.mcpBridge.Addr() != "" {
+				token := r.mcpBridge.RegisterGated(input.WorkspaceID, boundMCP, false, mcpParker)
+				defer r.mcpBridge.Unregister(token)
+				extraEnv["ROOKERY_MCP_URL"] = r.mcpBridge.Addr()
+				extraEnv["ROOKERY_MCP_TOKEN"] = token
+			}
 		}
 	}
 	// CLI coders: register a run-scoped KB bridge token so `rookery kb

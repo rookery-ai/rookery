@@ -23,6 +23,7 @@ import (
 	"github.com/ilijad1/rookery/internal/convert"
 	"github.com/ilijad1/rookery/internal/iolimit"
 	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/ilijad1/rookery/internal/mcp"
 	"github.com/ilijad1/rookery/internal/sandbox"
 	"github.com/ilijad1/rookery/internal/vault"
 	"github.com/ilijad1/rookery/internal/websearch"
@@ -138,6 +139,19 @@ type hostToolSet struct {
 
 	// usedConnIDs records connection IDs whose connector tools were invoked (for build auto-bind).
 	usedConnIDs map[string]bool
+
+	// MCP server tools. An MCP server's tools are DISCOVERED from that server and
+	// cached, rather than vendored like a connector's actions — but from here down
+	// they are treated identically: named once in internal/mcp, dispatched through
+	// mcp.Execute, gated by the same build guard and parker. Empty when the
+	// workspace has no MCP servers. See mcptools.go.
+	mcpCaller mcp.Caller
+	mcpParker mcp.Parker
+	boundMCP  []mcp.BoundServer
+
+	// usedMCPServerIDs records servers whose tools were invoked (for build auto-bind),
+	// the sibling of usedConnIDs.
+	usedMCPServerIDs map[string]bool
 }
 
 // failedCall identifies one failing tool invocation by name+args for the oscillation guard.
@@ -219,6 +233,7 @@ func (h *hostToolSet) tools() []llm.Tool {
 		)
 	}
 	tools = append(tools, h.connectorTools()...)
+	tools = append(tools, h.mcpTools()...)
 	return tools
 }
 
@@ -378,6 +393,21 @@ func (h *hostToolSet) usedConnectionIDs() []string {
 	}
 	out := make([]string, 0, len(h.usedConnIDs))
 	for id := range h.usedConnIDs {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// usedMCPServerIDs returns the sorted, deduped MCP server IDs whose tools were invoked.
+// Sibling of usedConnectionIDs, feeding the designer's auto-bind so a weak model that
+// omits the "# MCP:" header still ends up with the servers its build actually used.
+func (h *hostToolSet) usedMCPServerIDList() []string {
+	if len(h.usedMCPServerIDs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(h.usedMCPServerIDs))
+	for id := range h.usedMCPServerIDs {
 		out = append(out, id)
 	}
 	sort.Strings(out)
@@ -583,6 +613,11 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 			var cargs map[string]any
 			_ = json.Unmarshal(call.Args, &cargs)
 			return h.executeConnectorTool(ctx, call.Name, cargs)
+		}
+		if _, _, ok := h.resolveMCPTool(call.Name); ok {
+			var margs map[string]any
+			_ = json.Unmarshal(call.Args, &margs)
+			return h.executeMCPTool(ctx, call.Name, margs)
 		}
 		return "error: unknown tool " + call.Name
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/ilijad1/rookery/internal/connectors"
 	"github.com/ilijad1/rookery/internal/db"
 	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/ilijad1/rookery/internal/mcp"
 	"github.com/ilijad1/rookery/internal/sandbox"
 	"github.com/ilijad1/rookery/internal/vault"
 )
@@ -58,6 +59,10 @@ type Result struct {
 	// omitted the `# Connections:` header. Set only by the API engine; zero for CLI/runs’ callers
 	// that don’t consume it.
 	UsedConnectionIDs []string
+
+	// UsedMCPServerIDs lists the MCP server IDs whose tools the API engine invoked during
+	// this call, the sibling of UsedConnectionIDs and consumed by the same auto-bind path.
+	UsedMCPServerIDs []string
 }
 
 // Usage is a best-effort token accounting for API coders (zero for CLI coders).
@@ -101,6 +106,10 @@ type Coder struct {
 
 	// Self-managed OAuth connectors: when an agent is bound to service connections,
 	// the API engine offers each connection's curated actions as native typed tools.
+	mcpCaller mcp.Caller
+	mcpParker mcp.Parker
+	boundMCP  []mcp.BoundServer
+
 	connReg    *connectors.Registry
 	connStore  connectors.TokenStore
 	boundConns []connectors.BoundConn
@@ -127,6 +136,32 @@ func (c *Coder) withDisabled(err error) *Coder {
 func (c *Coder) WithConnectors(reg *connectors.Registry, store connectors.TokenStore, bound []connectors.BoundConn) *Coder {
 	c2 := *c
 	c2.connReg, c2.connStore, c2.boundConns = reg, store, bound
+	return &c2
+}
+
+// WithMCP returns a shallow copy of the Coder that offers the given bound MCP
+// servers' tools as native typed tools in the API engine.
+//
+// caller performs the actual tools/call (an *mcp.Client in production, a fake in
+// tests). Passing no servers leaves the coder exactly as it was, so a workspace with
+// no MCP servers pays nothing.
+func (c *Coder) WithMCP(caller mcp.Caller, bound []mcp.BoundServer) *Coder {
+	c2 := *c
+	c2.mcpCaller, c2.boundMCP = caller, bound
+	return &c2
+}
+
+// WithMCPParker attaches the approval gate for MCP tools marked for approval. Nil
+// (the default) means no gate.
+//
+// It is separate from WithParker because the two layers have different Parker
+// interfaces — a connector call is identified by (connection, action) and an MCP call
+// by (server, tool) — but the semantics are identical, and both must be wired for the
+// same agent or changing which layer a capability comes from would change whether the
+// owner's approval requirement applies.
+func (c *Coder) WithMCPParker(p mcp.Parker) *Coder {
+	c2 := *c
+	c2.mcpParker = p
 	return &c2
 }
 

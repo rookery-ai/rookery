@@ -137,16 +137,14 @@ func BuildUserContext(database *db.DB, memStore ContextStore, workspaceID string
 		}
 	}
 
-	if mcpServers, err := database.ListMCPServers(workspaceID); err == nil && len(mcpServers) > 0 {
-		sb.WriteString("[User's MCP tools]\n")
-		for _, s := range mcpServers {
-			if s.Enabled {
-				sb.WriteString("- ")
-				sb.WriteString(s.Name)
-				sb.WriteByte('\n')
-			}
-		}
-	}
+	// MCP servers are deliberately NOT listed here.
+	//
+	// This block used to name each enabled server as prose, which told the model that
+	// tools existed while giving it no way to call them — the rows were never
+	// executed against. Now that they are real, they arrive as actual tool
+	// definitions (API engine) or a `rookery mcp exec` grant (CLI), described by
+	// prompts.MCPToolsBlock. Naming them here as well would duplicate that in a
+	// second, less accurate voice.
 
 	return sb.String()
 }
