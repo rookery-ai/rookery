@@ -241,6 +241,13 @@ matrix:siMatrix
 proxmox:siProxmox
 tailscale:siTailscale
 plex:siPlex
+# Wave 6 developer connectors. All six have marks.
+gitlab:siGitlab
+bitbucket:siBitbucket
+linear:siLinear
+sentry:siSentry
+npm:siNpm
+pypi:siPypi
 adguard:siAdguard
 firefly_iii:siFireflyiii
 tmdb:siThemoviedatabase

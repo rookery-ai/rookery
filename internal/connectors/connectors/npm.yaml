@@ -1,0 +1,59 @@
+provider: npm
+actions:
+  - name: npm_get_package
+    description: "Read a package's registry record — every version, dist-tags, maintainers, repository and license. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        package: {type: string, description: "e.g. react, or @scope/name"}
+      required: [package]
+    request:
+      method: GET
+      # Scoped names contain a slash, so the argument is escaped.
+      url: "https://registry.npmjs.org/{{package|escape}}"
+    response_extract: "$"
+
+  - name: npm_get_latest_version
+    description: "Read just the latest published version of a package, with its dependencies. Much smaller than the full record. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        package: {type: string}
+      required: [package]
+    request:
+      method: GET
+      url: "https://registry.npmjs.org/{{package|escape}}/latest"
+    response_extract: "$"
+
+  - name: npm_search
+    description: "Search the registry for packages by keyword. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        text: {type: string, description: "Search terms."}
+        size: {type: integer, description: "How many to return."}
+      required: [text]
+    request:
+      method: GET
+      url: "https://registry.npmjs.org/-/v1/search"
+      query:
+        text: "{{text}}"
+        size: "{{size}}"
+    response_extract: "$.objects"
+
+  - name: npm_get_downloads
+    description: "Download counts for a package over a period — a rough proxy for whether a dependency is still alive. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        package: {type: string}
+        period:  {type: string, description: "last-day, last-week or last-month."}
+      required: [package, period]
+    request:
+      method: GET
+      url: "https://api.npmjs.org/downloads/point/{{period}}/{{package|escape}}"
+    response_extract: "$"

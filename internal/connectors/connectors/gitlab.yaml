@@ -1,0 +1,95 @@
+provider: gitlab
+# Project ids are URL-ENCODED paths ("group%2Fproject"), which is why every
+# action taking one uses the |escape filter — without it the slash is read as a
+# path separator and the request 404s.
+actions:
+  - name: gitlab_list_projects
+    description: "List projects this token can see, newest first. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        search:     {type: string, description: "Filter by name."}
+        membership: {type: boolean, description: "Only projects you belong to."}
+        per_page:   {type: integer}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v4/projects"
+      query:
+        search:     "{{search}}"
+        membership: "{{membership}}"
+        per_page:   "{{per_page}}"
+        order_by:   "last_activity_at"
+    response_extract: "$"
+
+  - name: gitlab_list_issues
+    description: "List a project's issues. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        project_id: {type: string, description: "Numeric id, or the full path e.g. group/project."}
+        state:      {type: string, description: "opened, closed or all."}
+        labels:     {type: string, description: "Comma-separated label names."}
+      required: [project_id]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v4/projects/{{project_id|escape}}/issues"
+      query:
+        state:  "{{state}}"
+        labels: "{{labels}}"
+    response_extract: "$"
+
+  - name: gitlab_create_issue
+    description: "Open an issue on a project. Mutating: it notifies everyone watching that project."
+    mutating: true
+    params:
+      type: object
+      properties:
+        project_id:  {type: string}
+        title:       {type: string}
+        description: {type: string}
+        labels:      {type: string, description: "Comma-separated."}
+      required: [project_id, title]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/api/v4/projects/{{project_id|escape}}/issues"
+      body:
+        title:       "{{title}}"
+        description: "{{description}}"
+        labels:      "{{labels}}"
+    response_extract: "$"
+
+  - name: gitlab_list_pipelines
+    description: "List a project's CI pipelines, newest first, with their status — the usual way to find out whether the last run passed. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        project_id: {type: string}
+        status:     {type: string, description: "e.g. success, failed, running."}
+        ref:        {type: string, description: "Branch or tag."}
+      required: [project_id]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v4/projects/{{project_id|escape}}/pipelines"
+      query:
+        status: "{{status}}"
+        ref:    "{{ref}}"
+    response_extract: "$"
+
+  - name: gitlab_list_merge_requests
+    description: "List a project's merge requests. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        project_id: {type: string}
+        state:      {type: string, description: "opened, merged, closed or all."}
+      required: [project_id]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v4/projects/{{project_id|escape}}/merge_requests"
+      query:
+        state: "{{state}}"
+    response_extract: "$"

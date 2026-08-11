@@ -1,0 +1,62 @@
+provider: bitbucket
+actions:
+  - name: bitbucket_list_repositories
+    description: "List the repositories in the connected workspace. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        q:    {type: string, description: "Bitbucket query filter, e.g. name~\"api\""}
+        sort: {type: string, description: "e.g. -updated_on"}
+    request:
+      method: GET
+      url: "https://api.bitbucket.org/2.0/repositories/{{conn.workspace}}"
+      query:
+        q:    "{{q}}"
+        sort: "{{sort}}"
+    response_extract: "$.values"
+
+  - name: bitbucket_list_pull_requests
+    description: "List a repository's pull requests. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        repo_slug: {type: string, description: "From list_repositories."}
+        state:     {type: string, description: "OPEN, MERGED, DECLINED or SUPERSEDED."}
+      required: [repo_slug]
+    request:
+      method: GET
+      url: "https://api.bitbucket.org/2.0/repositories/{{conn.workspace}}/{{repo_slug}}/pullrequests"
+      query:
+        state: "{{state}}"
+    response_extract: "$.values"
+
+  - name: bitbucket_list_commits
+    description: "List a repository's commits, newest first. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        repo_slug: {type: string}
+      required: [repo_slug]
+    request:
+      method: GET
+      url: "https://api.bitbucket.org/2.0/repositories/{{conn.workspace}}/{{repo_slug}}/commits"
+    response_extract: "$.values"
+
+  - name: bitbucket_list_issues
+    description: "List a repository's issues. Only works if the repository has its issue tracker enabled. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        repo_slug: {type: string}
+        q:         {type: string, description: "Query filter, e.g. state=\"new\""}
+      required: [repo_slug]
+    request:
+      method: GET
+      url: "https://api.bitbucket.org/2.0/repositories/{{conn.workspace}}/{{repo_slug}}/issues"
+      query:
+        q: "{{q}}"
+    response_extract: "$.values"

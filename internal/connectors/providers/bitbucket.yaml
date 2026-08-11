@@ -1,0 +1,26 @@
+name: bitbucket
+label: Bitbucket
+category: Developer
+unverified: true
+auth:
+  kind: api_key
+  placement: basic
+  # Bitbucket wants the USERNAME as the Basic user and an app password as the
+  # password — the same shape as Zendesk, resolved from the connection.
+  basic_user_template: "{{conn.username}}"
+  key_label: "Bitbucket app password"
+  key_hint: "created under Personal settings → App passwords — NOT your account password"
+  setup_url: https://bitbucket.org/account/settings/app-passwords/
+connect_inputs:
+  - key: username
+    label: "Bitbucket username"
+    hint: "your username, not your email address"
+    required: true
+  - key: workspace
+    label: "Workspace"
+    hint: "the workspace slug from your Bitbucket URLs"
+    required: true
+setup_steps:
+  - "Open Personal settings → App passwords on Bitbucket and create one."
+  - "Grant Repositories: Read, and Issues: Read if you want the issue action. Use an APP PASSWORD — your account password will not work."
+  - "Paste it below with your username and workspace slug."
