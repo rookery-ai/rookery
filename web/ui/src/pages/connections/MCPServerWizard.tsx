@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -137,6 +138,11 @@ export function MCPServerWizard({
                 type="password"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
+                // Not "off": Chrome ignores that on password fields and pairs
+                // them with a nearby text input it fills as the username.
+                // "new-password" opts out of the pairing. This is a THIRD-PARTY
+                // secret, so it should not be autofill-eligible at all.
+                autoComplete="new-password"
                 placeholder={
                   editing && server?.has_token
                     ? "Leave blank to keep the stored token"
@@ -165,6 +171,7 @@ export function MCPServerWizard({
             Cancel
           </Button>
           <Button onClick={save} disabled={busy || !name || !url}>
+            <RefreshCw className={busy ? "animate-spin" : undefined} aria-hidden="true" />
             {busy ? "Checking the server…" : editing ? "Save & re-sync" : "Test & save"}
           </Button>
         </DialogFooter>
