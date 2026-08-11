@@ -19,3 +19,5 @@ ROOKERY_CONNECTOR_URL    # loopback connector bridge address, per run
 ROOKERY_CONNECTOR_TOKEN  # per-run bearer token for the connector bridge
 ROOKERY_KB_URL           # loopback knowledge-base bridge address, per run
 ROOKERY_KB_TOKEN         # per-run bearer token for the knowledge-base bridge
+ROOKERY_MCP_URL          # loopback MCP bridge address, per run
+ROOKERY_MCP_TOKEN        # per-run bearer token for the MCP bridge

@@ -32,6 +32,20 @@ func TestAPIParityInventory(t *testing.T) {
 		"PUT /api/v1/agents/:id/schedule", "DELETE /api/v1/agents/:id/schedule",
 		"PUT /api/v1/agents/:id/agent-md", "PUT /api/v1/agents/:id/skills",
 		"PUT /api/v1/agents/:id/connections",
+		"GET /api/v1/agents/:id/mcp",
+		"PUT /api/v1/agents/:id/mcp",
+
+		// MCP servers. Workspace-scoped like service connections: an MCP server is a
+		// tenant's own integration, not an install-level setting.
+		"GET /api/v1/mcp/servers",
+		"POST /api/v1/mcp/servers",
+		"GET /api/v1/mcp/servers/:id",
+		"PUT /api/v1/mcp/servers/:id",
+		"DELETE /api/v1/mcp/servers/:id",
+		"POST /api/v1/mcp/servers/:id/test",
+		"POST /api/v1/mcp/servers/:id/sync",
+		"GET /api/v1/mcp/servers/:id/tools",
+		"PUT /api/v1/mcp/servers/:id/tools/:toolID",
 		"POST /api/v1/agents/design", "POST /api/v1/agents/design/cancel",
 		"POST /api/v1/agents/design/resume", "POST /api/v1/agents/design/dismiss",
 		"GET /api/v1/agents/design/progress", "GET /api/v1/agents/design/state",

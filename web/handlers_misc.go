@@ -18,6 +18,7 @@ import (
 	codersvc "github.com/ilijad1/rookery/internal/coder"
 	"github.com/ilijad1/rookery/internal/connectors"
 	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/mcp"
 	"github.com/ilijad1/rookery/internal/prompts"
 	"github.com/ilijad1/rookery/internal/reminder"
 	"github.com/ilijad1/rookery/internal/secrets"
@@ -81,6 +82,9 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 	var connRefs []prompts.ConnectionRef
 	var connTools []string
 	var connBin string
+	var mcpRefs []prompts.MCPServerRef
+	var mcpTools []string
+	var mcpBin string
 	if coder.IsAPI() {
 		if s.connStore != nil {
 			if rows, err := s.db.ListServiceConnections(c.Request().Context(), u.ID); err == nil {
@@ -94,6 +98,17 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 						connTools = append(connTools, d.Name)
 					}
 				}
+			}
+		}
+		// Chat has no binding to narrow by, so every ENABLED server is offered —
+		// the same rule connectors.ActiveBoundConns applies just above.
+		if bound, err := mcp.ActiveBoundServers(c.Request().Context(), s.db, s.systemKey, u.ID); err == nil && len(bound) > 0 {
+			coder = coder.WithMCP(s.mcpClient, bound)
+			for _, b := range bound {
+				mcpRefs = append(mcpRefs, prompts.MCPServerRef{Name: b.Name})
+			}
+			for _, d := range mcp.ToolDefs(bound) {
+				mcpTools = append(mcpTools, d.Name)
 			}
 		}
 		if len(searchEnv) > 0 {
@@ -144,15 +159,34 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 				}
 			}
 		}
+		if s.mcpBridge != nil && s.mcpBridge.Addr() != "" {
+			if bound, err := mcp.ActiveBoundServers(c.Request().Context(), s.db, s.systemKey, u.ID); err == nil && len(bound) > 0 {
+				tok := s.mcpBridge.Register(u.ID, bound, false)
+				defer s.mcpBridge.Unregister(tok)
+				extraEnv["ROOKERY_MCP_URL"] = s.mcpBridge.Addr()
+				extraEnv["ROOKERY_MCP_TOKEN"] = tok
+				for _, b := range bound {
+					mcpRefs = append(mcpRefs, prompts.MCPServerRef{Name: b.Name})
+				}
+				for _, d := range mcp.ToolDefs(bound) {
+					mcpTools = append(mcpTools, d.Name)
+				}
+				if p, err := os.Executable(); err == nil {
+					mcpBin = p
+				}
+			}
+		}
 		if len(extraEnv) > 0 {
 			coder = coder.WithExtraEnv(extraEnv)
 		}
 		// A CLI coder reaches connectors/kb by running `<bin> connector exec …` /
 		// `<bin> kb …` as shell commands, so grant NARROWLY-SCOPED Bash permissions
 		// for only those commands — chat stays file-only (no arbitrary shell) otherwise.
-		coder = coder.WithAllowedTools(codersvc.ChatAllowedTools(connBin, kbBin))
+		coder = coder.WithAllowedTools(codersvc.ChatAllowedTools(connBin, kbBin, mcpBin))
 	}
-	sysCtx := prompts.BuildChatSystemPrompt(root, coder.BackendType(), connRefs, connTools, connBin) + chat.BuildUserContext(s.db, s.memory, u.ID)
+	sysCtx := prompts.BuildChatSystemPrompt(root, coder.BackendType(), connRefs, connTools, connBin) +
+		prompts.MCPToolsBlock(mcpRefs, mcpTools, coder.BackendType(), mcpBin) +
+		chat.BuildUserContext(s.db, s.memory, u.ID)
 
 	// Re-activate the chat if it had been stopped, so history keeps flowing.
 	if !ch.Active {

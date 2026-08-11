@@ -154,6 +154,21 @@ too: Home Assistant, Immich, Paperless-ngx, Nextcloud, Jellyfin.
 
 [Read more →](https://rookery.cloud/docs/concepts/connections)
 
+## MCP servers
+
+**Not on the list? Add it yourself.**
+
+Point Rookery at any Model Context Protocol server by URL — including one running
+on your own network — and its tools become available to your agents and to chat.
+Nothing about the server ships with Rookery: you supply the URL, it supplies its
+own tool list. That is the one thing a curated connection cannot do, because it
+does not wait for a release.
+
+You decide which of its tools are switched on, which may run while an agent is
+being built, and which need your approval first.
+
+[Read more →](https://rookery.cloud/docs/concepts/mcp-servers)
+
 ## Chat
 
 **Ask what you know. Then have it act.**

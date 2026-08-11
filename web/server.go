@@ -20,6 +20,7 @@ import (
 	"github.com/ilijad1/rookery/internal/connectors"
 	"github.com/ilijad1/rookery/internal/db"
 	"github.com/ilijad1/rookery/internal/gateway"
+	"github.com/ilijad1/rookery/internal/mcp"
 	"github.com/ilijad1/rookery/internal/memory"
 	"github.com/ilijad1/rookery/internal/secrets"
 	"github.com/ilijad1/rookery/internal/skilldesigner"
@@ -58,6 +59,8 @@ type Server struct {
 	connStore  connectors.TokenStore // token store for connector execution (chat + services UI)
 	connBridge *connectors.Bridge    // loopback bridge so CLI chat coders can reach connectors
 	kbBridge   *vault.Bridge         // loopback bridge so CLI chat coders can reach KB convert/search
+	mcpBridge  *mcp.Bridge           // loopback bridge so CLI chat coders can reach MCP tools
+	mcpClient  *mcp.Client           // pooled MCP sessions, shared with the bridge
 	titleGen   chat.TitleGenerator   // optional; auto-titles a chat from its first exchange
 
 	// searchKeyVerify proves a search API key against the live provider before
@@ -183,6 +186,16 @@ func (s *Server) WithBridge(b *connectors.Bridge) *Server { s.connBridge = b; re
 // WithKBBridge attaches the loopback KB bridge so CLI chat coders can reach
 // save_to_kb-equivalent conversion + search (`rookery kb convert|search`).
 func (s *Server) WithKBBridge(b *vault.Bridge) *Server { s.kbBridge = b; return s }
+
+// WithMCP attaches the MCP client and its loopback bridge.
+//
+// Both are needed rather than one: the API engine calls the client directly
+// in-process, while a CLI coder reaches the same mcp.Execute through the bridge. A
+// server given neither simply offers no MCP tools.
+func (s *Server) WithMCP(c *mcp.Client, b *mcp.Bridge) *Server {
+	s.mcpClient, s.mcpBridge = c, b
+	return s
+}
 
 // WithTitleGenerator enables one-time content-based auto-titling of chats.
 func (s *Server) WithTitleGenerator(g chat.TitleGenerator) *Server {
