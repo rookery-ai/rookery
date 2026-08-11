@@ -22,6 +22,19 @@ function errMsg(err: unknown) {
 
 type Engine = "local" | "api";
 
+// The same field means different things per coder, so the placeholder shows a
+// real example for the selected one. Illustrative only — never validated, since
+// the valid model set is the coder's business and changes constantly.
+function localModelPlaceholder(bin: string): string {
+  const b = bin.toLowerCase();
+  if (b.includes("opencode")) return "ollama-cloud/glm-5.2";
+  if (b.includes("codex")) return "gpt-5.5-codex";
+  if (b.includes("gemini")) return "gemini-2.5-pro";
+  if (b.includes("cursor")) return "sonnet-4.5";
+  if (b.includes("claude")) return "inherits your login";
+  return "model name";
+}
+
 function summarize(coder: CoderConfig | undefined): string {
   if (!coder) return "Not configured";
   if (coder.kind === "api") {
@@ -147,7 +160,9 @@ export function CoderSection({
         bin: engine === "local" ? bin : "",
         timeout_s: timeoutS,
         provider: engine === "api" ? provider : "",
-        model: engine === "api" ? model : "",
+        // Sent for BOTH engines: a local CLI coder takes a model too, and
+        // blanking it here is half of why OpenCode could not be configured.
+        model: model,
         base_url: engine === "api" ? effectiveBase : "",
         api_key: showApiKeyInput && engine === "api" ? apiKey.trim() : "",
       });
@@ -232,6 +247,23 @@ export function CoderSection({
                 ))}
               </select>
             )}
+            <div className="space-y-1.5 pt-2">
+              <Label htmlFor="coder_local_model">Model (optional)</Label>
+              <Input
+                id="coder_local_model"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder={localModelPlaceholder(bin)}
+              />
+              {/* Stated as help, not enforced as validation: a user relying on a
+                  host-level default should not be blocked, and a hard rule here
+                  would be wrong the moment OpenCode ships a default of its own. */}
+              <p className="text-xs text-muted-2">
+                {bin.includes("opencode")
+                  ? "OpenCode has no default model — without one it fails with a 401 that looks like broken authentication."
+                  : "Leave blank to use the coder's own default."}
+              </p>
+            </div>
           </div>
         ) : (
           <>

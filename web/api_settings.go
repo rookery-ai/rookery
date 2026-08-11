@@ -704,7 +704,10 @@ func (s *Server) apiSetupCoder(c echo.Context, w *db.Workspace, req apiSetupRequ
 	} else {
 		bin := req.CoderBin
 		backend := coder.BackendForBin(bin)
-		if err := s.db.UpdateWorkspaceCoder(w.ID, "local", bin, timeoutS, backend, "", "", "", ""); err != nil {
+		// The wizard is a separate write path into the same column, so it needs
+		// the model too — see the note in saveWorkspaceCoderCore. Passing "" here
+		// is what made a freshly onboarded workspace unable to run OpenCode.
+		if err := s.db.UpdateWorkspaceCoder(w.ID, "local", bin, timeoutS, backend, "", strings.TrimSpace(req.CoderModel), "", ""); err != nil {
 			return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
 		}
 	}

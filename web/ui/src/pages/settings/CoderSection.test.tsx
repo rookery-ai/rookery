@@ -108,6 +108,39 @@ test("Local engine save posts kind/bin/timeout_s with empty provider/model/base_
   });
 });
 
+// The local engine had no Model field at all, and the save payload hardcoded
+// model: "" — so OpenCode, which has no default model of its own, could not be
+// configured through the UI and 401'd against its hardcoded OpenRouter default.
+test("Local engine: a typed model is sent with the save payload", async () => {
+  const calls = mockFetch();
+  wrap(LOCAL_CODER);
+
+  const user = userEvent.setup();
+  await user.type(screen.getByLabelText(/model \(optional\)/i), "ollama-cloud/glm-5.2");
+  await user.click(screen.getByRole("button", { name: /save coder/i }));
+
+  await waitFor(() => {
+    expect(calls.find((c) => c.url === "/api/v1/settings/coder" && c.method === "PUT")).toBeDefined();
+  });
+  const putCall = calls.find((c) => c.url === "/api/v1/settings/coder" && c.method === "PUT")!;
+  expect(putCall.body).toMatchObject({ kind: "local", model: "ollama-cloud/glm-5.2" });
+});
+
+// OpenCode's requirement is surfaced as help text, never as a blocking
+// validation: a user relying on a host-level default must not be locked out.
+test("Local engine: selecting OpenCode explains why a model is needed, without blocking save", async () => {
+  const calls = mockFetch();
+  wrap({ ...LOCAL_CODER, bin: "opencode" });
+
+  expect(screen.getByText(/OpenCode has no default model/i)).toBeInTheDocument();
+
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: /save coder/i }));
+  await waitFor(() => {
+    expect(calls.find((c) => c.url === "/api/v1/settings/coder" && c.method === "PUT")).toBeDefined();
+  });
+});
+
 test("API engine: providers missing a key are disabled in the select", async () => {
   mockFetch();
   wrap({ ...LOCAL_CODER, kind: "api", provider: "", model: "" });
