@@ -832,6 +832,25 @@ Secrets stored encrypted in `secrets` table. Three sources of `MasterPw` at runt
 
 **Critical:** `--setting-sources ""` + no `--allowedTools` = subprocess hangs indefinitely (CLI engine only).
 
+**Coder detection off Linux.** `DetectInstalled` takes a `detectHost` (GOOS, home,
+`LookPath`, `Stat`, `Getenv`) rather than calling the OS directly, because there is
+no macOS or Windows runner here and every bug it had was platform-specific.
+`exec.LookPath` already honours `PATHEXT` on Windows, so a coder **on PATH** always
+resolved; the fallback search is what was broken, in three separate ways. It looked
+only in `~/.local/bin` — missing Homebrew's `/opt/homebrew/bin` (Apple silicon) and
+`/usr/local/bin` (Intel), which matters because **a launchd-started process inherits
+a minimal PATH containing neither**, so detection could fail for someone whose
+terminal finds the binary without any trouble. It missed `%APPDATA%\npm` and
+`%LOCALAPPDATA%\Programs` on Windows. And it gated every candidate on
+`fi.Mode()&0o111 != 0`, a bit **Go never sets on Windows** (mode is synthesized from
+file attributes), so the fallback there could not match anything at all — compounded
+by statting the bare name when npm installs these coders as `claude.cmd` shims.
+`coderSearchDirs` supplies the per-platform list and `binCandidates` expands
+PATHEXT-shaped names on Windows only. The executable-bit test still applies on POSIX,
+where it is real. `detect_platform_test.go` describes all three platforms against a
+fake filesystem; the claim is that the logic is right and pinned, **not** that it was
+run on a Mac.
+
 **OpenCode requires an explicit model (multi-provider, no built-in default).** Unlike Claude (whose default model is tied to its login), OpenCode talks to many providers and has NO default model of its own. When none is specified it targets a hardcoded default provider (**OpenRouter**) and returns `coder error: User not found. (status 401)` if that provider isn't authed — the failure looks like broken auth but is really a missing model. The model comes from the workspace's `CoderModel` field, passed as `opencode run … -m <provider/model>` (e.g. `ollama-cloud/glm-5.2`); `opencodeBackend.buildArgs` adds `-m` only when `CoderModel` is set. **The per-workspace sandbox redirects `XDG_CONFIG_HOME` to an empty dir, so OpenCode does NOT inherit the operator's `~/.config/opencode/opencode.json`** (its default model, `plugin` list, and `mcp` servers such as `oh-my-openagent` / `codebase-memory-mcp`) — only the seeded `~/.local/share/opencode/auth.json`. Consequences: (a) setting a default model in the host `opencode.json` does NOT reach workspaces — the model must come from `CoderModel`; (b) host plugins/MCP intentionally do not run inside the sandbox. Re-authing a provider (`opencode auth login`) does not change the default-model selection, so it alone never fixes the 401.
 
 ### API coder engine (`coder_kind == "api"`)
@@ -1223,8 +1242,10 @@ Each workspace inlines its own coder config on the `workspaces` row (`coder_kind
 `coder_bin`, `coder_timeout_s`, `coder_backend_type`, and for `api`:
 `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`). `coder.ForWorkspace(w, …)`
 builds a `*coder.Coder` from it — a **local** CLI coder or the **api** engine — falling back to the
-system defaults when unset; `coder.DetectInstalled()` probes PATH + `~/.local/bin` for supported
-binaries (claude/claude-code, opencode, codex, cursor) and `coder.APIProviders()` returns a curated catalog of ~31 named providers in two
+system defaults when unset; `coder.DetectInstalled()` probes PATH **and the
+platform's usual install directories** for supported binaries (claude/claude-code,
+opencode, codex, gemini, cursor) — see "Coder detection off Linux" below — and
+`coder.APIProviders()` returns a curated catalog of ~31 named providers in two
 tiers. **Hosted** covers the frontier labs (OpenAI, Anthropic, Gemini, xAI,
 Mistral, DeepSeek, Moonshot, Z.AI), the routers (OpenRouter, OpenCode Zen/Go,
 Perplexity), the enterprise clouds (**AWS Bedrock**, **Alibaba Cloud/Qwen**) and

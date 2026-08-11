@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -103,20 +104,122 @@ var knownCoders = []struct {
 	{"Cursor", []string{"cursor-agent", "cursor"}, "cursor"},
 }
 
-// DetectInstalled probes PATH and ~/.local/bin for supported coder binaries and
-// returns the ones found, de-duplicated by resolved path.
-func DetectInstalled() []Installed {
+// detectHost is everything DetectInstalled needs to know about the machine it
+// is probing. It is a parameter rather than a set of direct calls so that a host
+// we are not running on can be described in a test — there is no macOS or
+// Windows runner here, and the bugs this replaced were all platform-specific.
+type detectHost struct {
+	GOOS string
+	Home string
+	// LookPath resolves a name against PATH. On Windows the real
+	// exec.LookPath consults PATHEXT, so `claude` finds `claude.cmd`.
+	LookPath func(string) (string, error)
+	// Stat reports a candidate file in one of the fallback directories.
+	Stat func(string) (os.FileInfo, error)
+	// Getenv reads an environment variable (APPDATA and LOCALAPPDATA on Windows).
+	Getenv func(string) string
+}
+
+func currentHost() detectHost {
 	home, _ := os.UserHomeDir()
-	extraDirs := []string{}
-	if home != "" {
-		extraDirs = append(extraDirs, filepath.Join(home, ".local", "bin"))
+	return detectHost{
+		GOOS:     runtime.GOOS,
+		Home:     home,
+		LookPath: exec.LookPath,
+		Stat:     os.Stat,
+		Getenv:   os.Getenv,
 	}
+}
+
+// coderSearchDirs returns the directories probed after PATH, in order.
+//
+// PATH alone is not enough on any of the three platforms, for a different reason
+// on each:
+//
+//   - Linux: a pip/npm --user install lands in ~/.local/bin, which plenty of
+//     shells do not add to PATH.
+//   - macOS: Homebrew installs to /opt/homebrew/bin on Apple silicon and
+//     /usr/local/bin on Intel, and a process started by launchd inherits a
+//     minimal PATH containing neither. Detection could therefore fail for
+//     someone whose terminal finds the binary without any trouble — the report
+//     would be "Rookery cannot see my coder" with a working `which` right there.
+//   - Windows: npm's global shims live in %APPDATA%\npm, and installers
+//     commonly drop binaries under %LOCALAPPDATA%\Programs.
+func coderSearchDirs(h detectHost) []string {
+	getenv := h.Getenv
+	if getenv == nil {
+		getenv = func(string) string { return "" }
+	}
+
+	var dirs []string
+	add := func(parts ...string) {
+		for _, p := range parts {
+			if p != "" {
+				dirs = append(dirs, p)
+			}
+		}
+	}
+
+	switch h.GOOS {
+	case "windows":
+		if v := getenv("APPDATA"); v != "" {
+			add(filepath.Join(v, "npm"))
+		}
+		if v := getenv("LOCALAPPDATA"); v != "" {
+			add(filepath.Join(v, "Programs"))
+		}
+		if h.Home != "" {
+			add(filepath.Join(h.Home, ".local", "bin"))
+		}
+	case "darwin":
+		if h.Home != "" {
+			add(
+				filepath.Join(h.Home, ".local", "bin"),
+				filepath.Join(h.Home, ".npm-global", "bin"),
+				filepath.Join(h.Home, "bin"),
+			)
+		}
+		add("/opt/homebrew/bin", "/usr/local/bin")
+	default:
+		if h.Home != "" {
+			add(
+				filepath.Join(h.Home, ".local", "bin"),
+				filepath.Join(h.Home, ".npm-global", "bin"),
+				filepath.Join(h.Home, "bin"),
+			)
+		}
+		add("/usr/local/bin")
+	}
+	return dirs
+}
+
+// binCandidates expands a bare binary name into the file names to look for in a
+// fallback directory.
+//
+// exec.LookPath already applies PATHEXT when searching PATH, but a direct Stat
+// does not — and a coder installed by npm on Windows is a `claude.cmd` shim, not
+// a `claude`. Statting the bare name would find nothing and report the coder as
+// absent.
+func binCandidates(goos, bin string) []string {
+	if goos != "windows" {
+		return []string{bin}
+	}
+	return []string{bin + ".exe", bin + ".cmd", bin + ".bat", bin + ".ps1", bin}
+}
+
+// DetectInstalled probes PATH and the platform's usual install directories for
+// supported coder binaries, returning the ones found, de-duplicated by resolved
+// path.
+func DetectInstalled() []Installed { return detectInstalled(currentHost()) }
+
+func detectInstalled(h detectHost) []Installed {
+	dirs := coderSearchDirs(h)
 
 	var out []Installed
 	seen := map[string]bool{}
 	for _, kc := range knownCoders {
 		for _, bin := range kc.Bins {
-			path := resolveCoderBin(bin, extraDirs)
+			path := resolveCoderBin(h, bin, dirs)
 			if path == "" || seen[path] {
 				continue
 			}
@@ -128,18 +231,35 @@ func DetectInstalled() []Installed {
 	return out
 }
 
-// resolveCoderBin returns the absolute path to bin, checking PATH first and then
-// the given extra directories. Returns "" if not found or not executable.
-func resolveCoderBin(bin string, extraDirs []string) string {
-	if p, err := exec.LookPath(bin); err == nil {
-		if abs, err := filepath.Abs(p); err == nil {
-			return abs
+// resolveCoderBin returns the path to bin, checking PATH first and then the
+// given directories. Returns "" if not found.
+func resolveCoderBin(h detectHost, bin string, dirs []string) string {
+	if h.LookPath != nil {
+		if p, err := h.LookPath(bin); err == nil {
+			if abs, err := filepath.Abs(p); err == nil {
+				return abs
+			}
+			return p
 		}
-		return p
 	}
-	for _, dir := range extraDirs {
-		cand := filepath.Join(dir, bin)
-		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0 {
+	if h.Stat == nil {
+		return ""
+	}
+	for _, dir := range dirs {
+		for _, name := range binCandidates(h.GOOS, bin) {
+			cand := filepath.Join(dir, name)
+			fi, err := h.Stat(cand)
+			if err != nil || fi.IsDir() {
+				continue
+			}
+			// The executable bit is a POSIX concept. Go synthesizes mode bits on
+			// Windows from file attributes and never sets 0111, so requiring it
+			// there rejects every candidate — which is why the fallback path
+			// could not find anything on Windows at all. Existence plus a
+			// PATHEXT-shaped name is the right test on that platform.
+			if h.GOOS != "windows" && fi.Mode()&0o111 == 0 {
+				continue
+			}
 			return cand
 		}
 	}
