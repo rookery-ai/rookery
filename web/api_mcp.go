@@ -318,23 +318,16 @@ func (s *Server) apiSyncMCPServer(c echo.Context) error {
 		return c.JSON(http.StatusServiceUnavailable, echo.Map{"error": "MCP is not available on this server"})
 	}
 
-	bound, err := mcp.BoundServersFor(ctx, s.db, s.systemKey, []*db.MCPServer{{
-		// Sync must work on a server with no enabled tools yet — the very first sync
-		// is exactly that case — so the BoundServer is built here rather than through
-		// the run-time path, which deliberately drops servers offering nothing.
-		ID: m.ID, WorkspaceID: m.WorkspaceID, Name: m.Name, Slug: m.Slug, URL: m.URL,
-		AuthKind: m.AuthKind, HeaderName: m.HeaderName, EncryptedToken: m.EncryptedToken,
-		Enabled: true,
-	}})
+	// The BoundServer is assembled here rather than through mcp.BoundServersFor,
+	// which deliberately drops a server with no enabled tools — and on a FIRST sync
+	// that is every server, since the tools it would filter on do not exist yet.
 	srv := mcp.BoundServer{
 		ID: m.ID, WorkspaceID: m.WorkspaceID, Name: m.Name, Slug: m.Slug, URL: m.URL,
 		AuthKind: m.AuthKind, HeaderName: m.HeaderName,
 	}
-	if err == nil && len(bound) > 0 {
-		srv = bound[0]
-	} else if m.EncryptedToken != "" {
-		tok, derr := secrets.DecryptWithSystemKey(m.EncryptedToken, s.systemKey)
-		if derr != nil {
+	if m.EncryptedToken != "" {
+		tok, err := secrets.DecryptWithSystemKey(m.EncryptedToken, s.systemKey)
+		if err != nil {
 			return c.JSON(http.StatusInternalServerError, echo.Map{"error": "stored credential could not be read"})
 		}
 		srv.Token = tok
