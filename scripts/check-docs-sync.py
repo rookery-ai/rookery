@@ -131,6 +131,14 @@ CLAIMS = [
     ("product", "README.md", r"\*\*(\d+) services\. No middleman", "providers"),
     ("product", "README.md", r"(\d+) built in and ready to attach", "skills"),
     ("web", "src/pages/index.astro", r"(\d+)\+? services", "providers"),
+    # The landing page states the provider count TWICE, in different words:
+    # the section heading ("N services") and the line under the logo wall
+    # ("A selection of the N supported"). Only the first was pinned, so the
+    # second sat at 91 through five connector waves while the heading above it
+    # read 126 — two contradictory numbers on one screen. check_inflated does
+    # not cover it either: that check is scoped to INFLATED "N+" claims and
+    # deliberately leaves exact ones to this table.
+    ("web", "src/pages/index.astro", r"selection of the (\d+) supported", "providers"),
     ("web", "src/content/docs/docs/concepts/skills.md", r"— (\d+) built in", "skills"),
     # CLAUDE.md is the surface an agent reads first, and where the original
     # errors (a stale Zoom listing, a nonexistent `db migrate` command) were
@@ -191,6 +199,7 @@ def _claims_selftest() -> None:
         (r"\*\*(\d+) services\. No middleman", "**91\nservices. No middleman", "91"),
         (r"(\d+) built in and ready to attach", "22 built\nin and ready to attach", "22"),
         (r"(\d+)\+? services", "91\nservices", "91"),
+        (r"selection of the (\d+) supported", "A selection of\nthe 91 supported.", "91"),
         (r"— (\d+) built in", "—\n22 built\nin", "22"),
         (r"for \*\*(\d+) providers\*\* \(Google-family", "for **91\nproviders** (Google-family", "91"),
         (r"\*\*(\d+) providers \(~\d+ actions\)", "**91 providers\n(~471 actions)", "91"),
