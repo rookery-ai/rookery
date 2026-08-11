@@ -189,7 +189,17 @@ func (c *Client) session(ctx context.Context, srv BoundServer) (*sdk.ClientSessi
 	if err != nil {
 		return nil, err
 	}
+	// The lock is released across connect() so a slow handshake cannot block every
+	// other server, which means two concurrent first-calls can both dial. Whoever
+	// arrives second must CLOSE its own session rather than drop it on the floor —
+	// the web server and the runner share one Client, so a leaked connection per race
+	// is reachable in normal use.
 	c.mu.Lock()
+	if existing, ok := c.sessions[srv.ID]; ok && existing.fingerprint == fp {
+		c.mu.Unlock()
+		_ = sess.Close()
+		return existing.sess, nil
+	}
 	c.sessions[srv.ID] = &pooled{sess: sess, lastUsed: time.Now(), fingerprint: fp}
 	c.mu.Unlock()
 	return sess, nil

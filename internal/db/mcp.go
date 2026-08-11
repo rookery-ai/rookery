@@ -93,6 +93,20 @@ func (d *DB) UpdateMCPServer(ctx context.Context, s *MCPServer) error {
 	return err
 }
 
+// UpdateMCPServerClearToken saves the server AND wipes its stored credential.
+//
+// It is a separate method from UpdateMCPServer precisely because that one treats an
+// empty token as "keep what is stored" — the behaviour that lets an owner edit a URL
+// without retyping a secret they cannot read back. Clearing therefore has to be an
+// explicit act, not the absence of one.
+func (d *DB) UpdateMCPServerClearToken(ctx context.Context, s *MCPServer) error {
+	_, err := d.ExecContext(ctx, `UPDATE mcp_servers SET name=?,url=?,auth_kind=?,
+		header_name='',encrypted_token='',enabled=?,updated_at=datetime('now')
+		WHERE id=? AND workspace_id=?`,
+		s.Name, s.URL, s.AuthKind, boolToInt(s.Enabled), s.ID, s.WorkspaceID)
+	return err
+}
+
 func (d *DB) DeleteMCPServer(ctx context.Context, workspaceID, id string) error {
 	_, err := d.ExecContext(ctx, `DELETE FROM mcp_servers WHERE id=? AND workspace_id=?`, id, workspaceID)
 	return err

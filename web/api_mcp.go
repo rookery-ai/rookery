@@ -272,6 +272,19 @@ func (s *Server) apiUpdateMCPServer(c echo.Context) error {
 	if in.Enabled != nil {
 		m.Enabled = *in.Enabled
 	}
+	// Switching to no authentication DISCARDS the stored credential. It is never sent
+	// once auth_kind is "none" (applyAuth returns early), but keeping ciphertext at
+	// rest for an auth mode that cannot use it is a credential the owner believes they
+	// removed.
+	if in.AuthKind == "none" {
+		m.EncryptedToken = ""
+		m.HeaderName = ""
+		if err := s.db.UpdateMCPServerClearToken(ctx, m); err != nil {
+			return c.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
+		}
+		s.audit.Log(w.ID, "update_mcp_server", "mcp:"+m.ID, "", c.RealIP())
+		return s.apiGetMCPServer(c)
+	}
 	// An empty token means "leave the stored one alone", so editing a server's URL
 	// does not force the owner to retype a credential they cannot read back.
 	if in.Token != "" {
