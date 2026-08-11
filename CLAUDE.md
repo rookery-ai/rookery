@@ -338,6 +338,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface: one struct per coder — Claude/OpenCode/Codex/Gemini/Cursor, plus a generic fallback). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host tools (`read_file`/`write_file`/`edit_file`/`list_dir` + read-only discovery `search_files`/`glob` + exec tools `run_script`/`bash`/`web_fetch`/`web_search`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible, plus ~35 further providers registered against the OpenAI schema — see `coder.APIProviders()`); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
 | `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **91 providers** (Google-family incl. Calendar/Tasks/AdSense/GA4/Search Console, YouTube, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing, `ProviderNames()` backing the connections page), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
+| `internal/mcp` | Model Context Protocol client layer — a deliberate **peer of `internal/connectors`**, mirroring it shape-for-shape so both coder kinds, the per-agent binding and the approval gate treat an MCP tool and a connector action identically. `Client` (SDK-backed, one pooled session per server + one reconnect-and-retry, since a self-hosted server that slept has dropped its session and the first call after must not read as a failure), `Catalog`/`Sync` (DB-cached `tools/list`, reconciled by upsert so the owner's read_only/approval/enabled columns survive a re-sync; a vanished tool is MARKED missing, never deleted), `ToolDefs`/`ResolveTool` (naming defined once for both paths), `Execute` (+ `Policy{BuildPhase, Parker}`, the single typed choke point), `Bridge` (loopback HTTP so CLI coders reach the same `Execute` via `rookery mcp exec`). **The structural difference from connectors: nothing about an MCP server ships in the binary** — the owner pastes a URL and the server itself supplies the action list. Tokens are `secrets.EncryptWithSystemKey`-encrypted. |
 | `internal/buildphase` | Tiny package holding `ROOKERY_BUILD_PHASE`/`generation` marker (set during agent/skill builds; the connector `Execute` build-guard refuses mutating actions when present). Its own package so it outlives any one integration. |
 | `internal/connalert` | Delivers the "this connection needs reconnecting" alert to the inbox AND chat when `DBTokenStore` flips a connection to `NEEDS_REAUTH`. Its own package because the alert needs the DB and the gateway and `internal/connectors` deliberately knows about neither — the same shape as `internal/approval`, and it takes the same narrow `SendToUser` interface so tests need no gateway. See "Connection re-auth alerting" below. |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal); `statefile.go` (`StateFilePath`/`ReadState`/`WriteState`/`RenderStateTemplate`) owns an agent's `state.md` format (see "Agent state" below); `migrate_files.go` (`MigrateAgentFilesToMarkdown`) is the idempotent startup migration off the old `state.json`/`agent.json` pair; `ParseRequiredSecrets` (`flow.go`) parses AGENT.md's `# Required secrets:` header — the only source of an agent's declared secrets now that `agent.json` is gone |
@@ -853,6 +854,92 @@ rather than a link — following our own callback with no `state` only errors);
 wording. The hard block is **UI-only by design**: the policy predicts a third
 party's rules rather than expressing an invariant we own, so a server-side gate
 would turn a stale YAML entry into a lockout with no override.
+
+### MCP servers (wave 1: HTTP transport, static token, tools only)
+
+`internal/mcp` is the **escape hatch beside connectors, never their replacement** — a
+distinction worth keeping, or the next contributor starts converting connectors to MCP.
+A connector's ~5 curated actions are vendored YAML, testable against golden fixtures and
+controllable; an MCP server advertises whatever it likes. What MCP buys is the one thing
+the connector model structurally cannot have: **a user adds an integration without
+waiting for a Rookery release.** Its value concentrates in capability servers with no
+HTTP API to wrap, services Rookery has not vendored, and the user's own servers.
+
+**Where servers and tools come from — two different things.** *Which servers exist:* the
+owner pastes a URL; nothing is compiled into the binary and no directory is consulted.
+*What tools a server has:* discovered from **that server**, via `tools/list` after
+`initialize`, cached in `mcp_tools`.
+
+Load-bearing details:
+
+- **Slugging is mandatory, not defensive.** Exposed names are `mcp__<server-slug>__<tool>`.
+  MCP tool names legally contain dots (`admin.tools.list`) and run to 128 characters,
+  while a provider enforces `^[a-zA-Z0-9_-]{1,64}$` and rejects the **whole tool list**
+  when one name violates it — so a single spec-compliant MCP name would otherwise take
+  out every connector action the agent has. Truncation carries a hash suffix over the
+  unslugged identity, and the result is persisted in `mcp_tools.tool_name` so a re-sync
+  cannot rename a tool the model has already been taught mid-conversation. The namespace
+  is Rookery's own slug, never `serverInfo.name` — the spec states outright that it is
+  not unique across servers.
+- **The build guard reads the owner's `read_only` column, never the server's
+  `readOnlyHint`.** The MCP spec *requires* clients to treat annotations as untrusted;
+  the hint only seeds the column at first sync, and the owner's correction is what
+  `Execute` honours.
+- **Sync's enable policy is asymmetric, and that asymmetry IS the control.** On the
+  first sync tools arrive **enabled** (the owner is adding this server and reading its
+  tool list right then; thirty tick-boxes would be friction with no security payoff). On
+  every later sync a newly appeared tool arrives **disabled** — a server cannot grow a
+  live tool between runs. Enabled tools are capped per server
+  (`MaxEnabledToolsPerServer`) because tool-list size is a shared budget: one server
+  advertising 80 tools degrades the model's selection across every *other* tool,
+  connector actions included. Over the cap the UI states how many were held back —
+  never a silent truncation.
+- **Two error channels map opposite ways.** A tool *execution* error (`isError: true` —
+  "date must be in the future") is returned as plain text **without** the `error:`
+  prefix, because the spec says to hand it to the model for self-correction and that
+  prefix is what the API engine's oscillation guard counts as a failing call. A protocol
+  or transport failure gets the prefix. Reversing them either kills legitimate
+  retry-with-fixed-args or lets a dead server spin out the turn budget.
+- **The status flip is gated**, applying the `DBTokenStore.refresh` lesson on day one:
+  only a definitive 401 produces `NEEDS_AUTH`; 5xx, 429 and transport failures produce
+  `UNREACHABLE`, which neither alerts nor leaves the retry path. A down server's tools
+  stay offered from cache with a definitive error — withholding them would make the
+  agent silently lose capability, and the run would read as though it chose not to act.
+- **Rookery advertises neither sampling nor elicitation.** The SDK infers capabilities
+  from which handlers are set, so leaving them nil is the mechanism. A third-party
+  server therefore cannot spend the owner's tokens or block a 03:00 run waiting for a
+  human. Do not add those handlers casually.
+- **`internal/mcp` deliberately does NOT use the `nethttp` private-address dial guard**,
+  mirroring connectors and for the same recorded reason: the URL is owner-typed and
+  self-hosted servers live at RFC1918/Tailscale addresses.
+  `mcp.TestExecuteReachesPrivateAddresses` pins it.
+
+**Both coder kinds converge on `mcp.Execute`.** The API engine offers native typed tools
+(`coder/mcptools.go`); a CLI coder runs `rookery mcp exec <tool> --args '<json>'` against
+a loopback bridge (`ROOKERY_MCP_URL`/`ROOKERY_MCP_TOKEN`, plus a scoped
+`Bash(<bin> mcp exec:*)` grant since chat is otherwise file-only). **Native
+`--mcp-config` passthrough was rejected**: it bypasses the build guard, the parker and
+the 8 KiB cap, makes coder kind silently change the security posture, and — decisively —
+requires writing the server credential to a file the sandboxed subprocess reads, when
+today tokens never leave the host process. The MCP bridge is a *sibling* of the connector
+bridge rather than a route on it, because `internal/connectors` must not import
+`internal/mcp` to serve it.
+
+**Binding** mirrors connections exactly: a `# MCP:` header in AGENT.md, auto-bind from
+the servers a build actually called (`coder.Result.UsedMCPServerIDs` →
+`agent_drafts.pending_used_mcp_servers`), and the agent page's card. `parseMCPLine`
+returns nil ONLY when the header is absent (fall back to the build) and a non-nil empty
+slice for an explicit `none` (honour it) — that nil-vs-empty distinction is load-bearing.
+Builds see every enabled server; runs see only bound ones; chat sees every enabled server
+(it is not an agent, so there is nothing to narrow by).
+
+**UI:** `/connections` gains an **MCP servers** section — structurally where *Chat apps*
+sits, not among the service categories, because those are derived from the vendored
+registry while MCP servers are rows the owner created. **Test & sync is a hard gate**,
+running a real `initialize` + `tools/list`: the returned tool list *is* the review step
+where the owner reads the (untrusted, server-authored) descriptions before anything is
+enabled. That matters because the real risk here is not our code but third-party server
+conformance.
 
 ### Skill system (core + user skills)
 
@@ -1535,7 +1622,23 @@ cannot be pruned.
 - **Codex, Gemini CLI and Cursor are authored-but-unverified.** All five CLI coders are detected (`knownCoders`) and all five now receive a model, but only `claude` and `opencode` have been exercised end-to-end on a real host. The other three backends were authored from their published flags and have never completed a `Coder.Smoke` round trip; closing this needs a host with the binaries installed and accounts behind them. (The *previous* gap here — no Model field for a local coder, which made `CoderModel` unsettable through the UI and actively wiped it on every save, blocking OpenCode out of the box — was fixed in 2026-08: `#coder_local` has a Model input, both save paths persist it, and `selectBackend` passes it to codex and gemini as well as opencode and cursor.)
 - **Discord adapter** — implemented (DM-only); live WS round-trip is operator-verified. **Slack adapter** — implemented (DM-only, Socket Mode); live loop operator-verified. Note: Slack's Socket Mode inbound loop does not auto-restart after a *fatal* reconnect failure (reconnect exhaustion) — outbound still works, but inbound DMs stop until the connector is re-saved or the server restarts; a per-adapter supervisor is a future framework enhancement. Mattermost/Matrix adapters — not yet implemented (framework ready: adapter registry + `CredSpec` + render subsystem all support a new platform via `init()` registration alone; Mattermost should be a hand-rolled thin REST+WS client, NOT the heavy official SDK; Matrix E2EE needs `-tags goolm` to stay CGo-free). The connectors UI (SPA `/connections` → Chat apps tab, backed by `/api/v1/connectors`) is `CredSpec`-driven — a new platform's connect card is data, not hand-written markup. **Design stance:** all adapters use an **outbound** connection (bot dials out; zero inbound port) — a deliberate security property for self-hosted/home installs (works behind NAT, home firewall can drop-by-default, no forgeable public endpoint). **Webhook-based platforms** (WhatsApp/Viber/LINE/Teams/Messenger/Google Chat) are deferred OUT of the home-install core; if built, they must be tunnel/relay-first (outbound), never a raw open port. Future outbound-only candidates: Zulip (event-queue long-poll), XMPP. See `docs/superpowers/specs/2026-07-15-multi-platform-chat-adapters-design.md`.
 - **Skill editing + import via chat** — `/skill` covers list/create/cancel, but there is no `/skill edit` (the skill designer has no edit mode at all, unlike `agentdesigner.StartEdit`) and no skill import (ZIP / pasted SKILL.md) over chat, which needs per-adapter file-upload handling. The remaining half of the skill parity gap.
-- **MCP servers** — `mcp_servers` table exists; MCP tool execution not implemented.
+- **MCP servers** — wave 1 shipped: HTTP transport, static bearer/header auth, tools
+  only. Deliberately deferred, each for a reason recorded in
+  `docs/superpowers/specs/2026-08-11-mcp-server-integration-design.md`: **stdio**
+  (spawned by the host process, which holds the DB and system key and is unsandboxed —
+  strictly more privileged than the coder's own Landlock-confined `bash`, so it needs
+  its own sandboxing story rather than a transport switch); **MCP OAuth** (RFC 9728
+  protected-resource-metadata discovery, RFC 8414/OIDC auth-server discovery, client
+  registration, PKCE, RFC 8707 resource indicators, RFC 9207 `iss` validation — it
+  shares nothing with the connector OAuth path, which assumes a hand-registered
+  per-provider app; until then a server requiring OAuth gets a named error rather than
+  an opaque 401); **resources and prompts** primitives; the **public registry**
+  browse picker (`registry.modelcontextprotocol.io` — additive, but a browsable list
+  changes the trust story the gating rests on); and `notifications/tools/list_changed`
+  push (needs a held subscription stream; TTL-aware polling plus manual sync covers
+  this wave). No live third-party server has been exercised end-to-end in CI — the
+  tests drive a real in-process MCP server, which proves the protocol path but not any
+  particular vendor's conformance.
 - **Custom workspace image upload** — the 36 presets are inline SVG on purpose (no endpoint, no
   storage, no MIME validation, crisp at any size). Uploading a custom image is the one requested UI
   item deliberately deferred: it needs a multipart endpoint, a 25 MiB `iolimit` cap, MIME sniffing
