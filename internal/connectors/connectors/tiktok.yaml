@@ -44,3 +44,42 @@ actions:
           source: "PULL_FROM_URL"
           video_url: "{{video_url}}"
     response_extract: "$.data"
+  - name: tiktok_creator_info
+    description: "Query the connected creator's posting limits BEFORE staging a video — max duration, allowed privacy levels, and whether commenting or stitching is disabled. TikTok requires this call first for a direct post."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: POST
+      url: "https://open.tiktokapis.com/v2/post/publish/creator_info/query/"
+    response_extract: "$.data"
+  - name: tiktok_publish_status
+    description: "Check how a staged TikTok upload is progressing. publish_id comes from tiktok_upload_draft. Status is PROCESSING_UPLOAD, PUBLISH_COMPLETE or FAILED — an upload is not finished when the upload call returns."
+    mutating: false
+    params:
+      type: object
+      properties:
+        publish_id: {type: string, description: "publish id from tiktok_upload_draft"}
+      required: [publish_id]
+    request:
+      method: POST
+      url: "https://open.tiktokapis.com/v2/post/publish/status/fetch/"
+      body:
+        publish_id: "{{publish_id}}"
+    response_extract: "$.data"
+  - name: tiktok_video_details
+    description: "Fetch details and metrics for specific TikTok videos by id — title, cover, view/like/comment/share counts. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        video_ids: {type: array, items: {type: string}, description: "video ids from tiktok_list_videos"}
+      required: [video_ids]
+    request:
+      method: POST
+      url: "https://open.tiktokapis.com/v2/video/query/"
+      query:
+        fields: "id,title,cover_image_url,share_url,view_count,like_count,comment_count,share_count"
+      body:
+        filters:
+          video_ids: "{{video_ids}}"
+    response_extract: "$.data.videos"

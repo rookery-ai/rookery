@@ -66,3 +66,157 @@ actions:
           text: "{{text}}"
           createdAt: "{{created_at}}"
     response_extract: "$"
+  - name: bluesky_timeline
+    description: "Read the connected account's Bluesky home timeline — posts from the people it follows. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit:  {type: integer, description: "max posts (default 25)"}
+        cursor: {type: string, description: "next_cursor from a previous call"}
+    request:
+      method: GET
+      url: "https://bsky.social/xrpc/app.bsky.feed.getTimeline"
+      query:
+        limit: "{{limit}}"
+        cursor: "{{cursor}}"
+    response_extract: "$.feed"
+    response_cursor: "$.cursor"
+  - name: bluesky_notifications
+    description: "List the connected account's Bluesky notifications — replies, mentions, likes, reposts and follows. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit:  {type: integer, description: "max notifications (default 25)"}
+        cursor: {type: string, description: "next_cursor from a previous call"}
+    request:
+      method: GET
+      url: "https://bsky.social/xrpc/app.bsky.notification.listNotifications"
+      query:
+        limit: "{{limit}}"
+        cursor: "{{cursor}}"
+    response_extract: "$.notifications"
+    response_cursor: "$.cursor"
+  - name: bluesky_get_thread
+    description: "Read a Bluesky post together with its replies, so a conversation can be followed before answering. uri is the post's at:// URI. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        uri: {type: string, description: "the post's at:// URI"}
+      required: [uri]
+    request:
+      method: GET
+      url: "https://bsky.social/xrpc/app.bsky.feed.getPostThread"
+      query:
+        uri: "{{uri}}"
+    response_extract: "$.thread"
+  - name: bluesky_reply_to_post
+    description: "Publish a REPLY to a Bluesky post. Real, public and irreversible. root_uri/root_cid identify the thread's first post and parent_uri/parent_cid the post being replied to — bluesky_get_thread returns all four."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        text:        {type: string, description: "reply body, max 300 characters"}
+        created_at:  {type: string, description: "ISO-8601 UTC timestamp"}
+        root_uri:    {type: string}
+        root_cid:    {type: string}
+        parent_uri:  {type: string}
+        parent_cid:  {type: string}
+      required: [text, created_at, root_uri, root_cid, parent_uri, parent_cid]
+    request:
+      method: POST
+      url: "https://bsky.social/xrpc/com.atproto.repo.createRecord"
+      body:
+        repo: "{{conn.handle}}"
+        collection: "app.bsky.feed.post"
+        record:
+          $type: "app.bsky.feed.post"
+          text: "{{text}}"
+          createdAt: "{{created_at}}"
+          reply:
+            root: {uri: "{{root_uri}}", cid: "{{root_cid}}"}
+            parent: {uri: "{{parent_uri}}", cid: "{{parent_cid}}"}
+    response_extract: "$"
+  - name: bluesky_like_post
+    description: "Like a Bluesky post. Publicly visible. uri and cid come from any feed or thread response."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        uri:        {type: string, description: "the post's at:// URI"}
+        cid:        {type: string, description: "the post's CID"}
+        created_at: {type: string, description: "ISO-8601 UTC timestamp"}
+      required: [uri, cid, created_at]
+    request:
+      method: POST
+      url: "https://bsky.social/xrpc/com.atproto.repo.createRecord"
+      body:
+        repo: "{{conn.handle}}"
+        collection: "app.bsky.feed.like"
+        record:
+          $type: "app.bsky.feed.like"
+          createdAt: "{{created_at}}"
+          subject: {uri: "{{uri}}", cid: "{{cid}}"}
+    response_extract: "$"
+  - name: bluesky_repost
+    description: "Repost a Bluesky post to the connected account's followers. Publicly visible."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        uri:        {type: string, description: "the post's at:// URI"}
+        cid:        {type: string, description: "the post's CID"}
+        created_at: {type: string, description: "ISO-8601 UTC timestamp"}
+      required: [uri, cid, created_at]
+    request:
+      method: POST
+      url: "https://bsky.social/xrpc/com.atproto.repo.createRecord"
+      body:
+        repo: "{{conn.handle}}"
+        collection: "app.bsky.feed.repost"
+        record:
+          $type: "app.bsky.feed.repost"
+          createdAt: "{{created_at}}"
+          subject: {uri: "{{uri}}", cid: "{{cid}}"}
+    response_extract: "$"
+  - name: bluesky_delete_post
+    description: "Delete a Bluesky post the connected account published. rkey is the last path segment of the post's at:// URI. Irreversible."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        rkey: {type: string, description: "the record key — last segment of the at:// URI"}
+      required: [rkey]
+    request:
+      method: POST
+      url: "https://bsky.social/xrpc/com.atproto.repo.deleteRecord"
+      body:
+        repo: "{{conn.handle}}"
+        collection: "app.bsky.feed.post"
+        rkey: "{{rkey}}"
+    response_extract: "$"
+  - name: bluesky_get_followers
+    description: "List the accounts following a Bluesky user. actor is a handle or DID. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        actor:  {type: string, description: "handle or DID, e.g. someone.bsky.social"}
+        limit:  {type: integer, description: "max followers (default 25)"}
+        cursor: {type: string, description: "next_cursor from a previous call"}
+      required: [actor]
+    request:
+      method: GET
+      url: "https://bsky.social/xrpc/app.bsky.graph.getFollowers"
+      query:
+        actor: "{{actor}}"
+        limit: "{{limit}}"
+        cursor: "{{cursor}}"
+    response_extract: "$.followers"
+    response_cursor: "$.cursor"

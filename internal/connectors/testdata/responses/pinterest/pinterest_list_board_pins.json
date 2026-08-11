@@ -1,0 +1,19 @@
+{
+  "items": [
+    {
+      "id": "813744226420795884",
+      "title": "Workspace setup",
+      "description": "Desk tour",
+      "link": "https://example.com/desk",
+      "board_id": "549755885175",
+      "media": {
+        "images": {
+          "600x": {
+            "url": "https://i.pinimg.com/600x/ab.jpg"
+          }
+        }
+      }
+    }
+  ],
+  "bookmark": "Y2JVSGx6TVRJNE1EZ3c"
+}

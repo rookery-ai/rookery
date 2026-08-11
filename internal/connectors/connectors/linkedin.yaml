@@ -34,3 +34,44 @@ actions:
         lifecycleState: "PUBLISHED"
         isReshareDisabledByAuthor: false
     response_extract: "$"
+  - name: linkedin_delete_post
+    description: "Delete a LinkedIn post the connected member published. post_urn is the full URN returned by linkedin_create_post, e.g. urn:li:share:12345. Irreversible."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        post_urn: {type: string, description: "full URN, e.g. urn:li:share:12345"}
+      required: [post_urn]
+    request:
+      method: DELETE
+      url: "https://api.linkedin.com/rest/posts/{{post_urn|escape}}"
+    response_extract: "$"
+  - name: linkedin_create_article_post
+    description: "Share a LINK on LinkedIn with a comment, rendering as an article card rather than plain text. Real and public, posted as the member. Company-page posting needs the Marketing Developer Platform, which this connector does not have."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        author_urn: {type: string, description: "urn:li:person:xxx, from linkedin_me's sub field"}
+        text:       {type: string, description: "the commentary shown above the link"}
+        url:        {type: string, description: "the link to share"}
+        title:      {type: string, description: "headline shown on the card"}
+        visibility: {type: string, description: "PUBLIC or CONNECTIONS"}
+      required: [author_urn, text, url]
+    request:
+      method: POST
+      url: "https://api.linkedin.com/rest/posts"
+      body:
+        author: "{{author_urn}}"
+        commentary: "{{text}}"
+        visibility: "{{visibility}}"
+        distribution:
+          feedDistribution: "MAIN_FEED"
+        content:
+          article:
+            source: "{{url}}"
+            title: "{{title}}"
+        lifecycleState: "PUBLISHED"
+    response_extract: "$"

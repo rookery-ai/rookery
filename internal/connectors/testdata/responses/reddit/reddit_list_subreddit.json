@@ -1,0 +1,23 @@
+{
+  "kind": "Listing",
+  "data": {
+    "after": "t3_1abcdef",
+    "dist": 1,
+    "children": [
+      {
+        "kind": "t3",
+        "data": {
+          "id": "1abcdef",
+          "name": "t3_1abcdef",
+          "title": "Self-hosting my own agent platform",
+          "subreddit": "selfhosted",
+          "author": "someone",
+          "score": 214,
+          "num_comments": 37,
+          "permalink": "/r/selfhosted/comments/1abcdef/",
+          "created_utc": 1786521600
+        }
+      }
+    ]
+  }
+}

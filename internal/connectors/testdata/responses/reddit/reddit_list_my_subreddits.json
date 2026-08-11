@@ -1,0 +1,17 @@
+{
+  "kind": "Listing",
+  "data": {
+    "after": "t3_1abcdef",
+    "dist": 1,
+    "children": [
+      {
+        "kind": "t3",
+        "data": {
+          "display_name": "selfhosted",
+          "subscribers": 412000,
+          "public_description": "Self-hosting everything"
+        }
+      }
+    ]
+  }
+}
