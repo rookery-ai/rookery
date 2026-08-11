@@ -2,11 +2,51 @@ package connectors
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 )
+
+// TestTokenRequestClassifiesByStatus pins that the token endpoint's HTTP status
+// survives as a distinguishable Kind. Every status >= 400 used to collapse onto
+// KindAuth, which made a provider outage indistinguishable from invalid_grant —
+// and DBTokenStore.refresh acts on exactly that difference.
+func TestTokenRequestClassifiesByStatus(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		want   Kind
+	}{
+		{"rate limited", 429, KindRateLimit},
+		{"server error", 500, KindServer},
+		{"bad gateway", 502, KindServer},
+		{"invalid grant", 400, KindAuth},
+		{"unauthorized", 401, KindAuth},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				w.Write([]byte(`{"error":"nope"}`))
+			}))
+			defer srv.Close()
+
+			c := OAuthClient{HTTP: srv.Client()}
+			p := Provider{Name: "p", TokenURL: srv.URL + "/token"}
+			_, err := c.Refresh(context.Background(), p, "cid", "csec", "RT")
+
+			var ce *ConnectorError
+			if !errors.As(err, &ce) {
+				t.Fatalf("want *ConnectorError, got %T (%v)", err, err)
+			}
+			if ce.Kind != tc.want {
+				t.Fatalf("status %d: got kind %v, want %v", tc.status, ce.Kind, tc.want)
+			}
+		})
+	}
+}
 
 func TestExchangeAndIdentity(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
