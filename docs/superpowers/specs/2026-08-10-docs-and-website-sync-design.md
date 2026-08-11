@@ -1,7 +1,7 @@
 # Documentation and website sync
 
 **Date:** 2026-08-10
-**Status:** approved, not implemented
+**Status:** implemented, merged
 **Repositories:** `ilijad1/rookery` (product), `ilijad1/rookery-web` (website)
 
 ## The problem
@@ -90,14 +90,16 @@ A blanket `Stop` hook was rejected. It would fire on every Go edit in the
 repository, become noise within a week, and be disabled — which is worse than
 not having it, because the disabling is invisible.
 
-### 3. `scripts/check-docs-sync.sh`
+### 3. `scripts/check-docs-sync.py`
 
 Tracked in the product repository, exposed as `make docs-sync-check` and wired
 into `make ci`. This is the only layer that cannot be forgotten, and it is
 deliberately the one that lives in version control: it is a documentation
-accuracy check, not agent tooling.
+accuracy check, not agent tooling. It shipped as Python rather than the
+originally-planned Bash: set arithmetic and frontmatter handling are where a
+checker like this dies in Bash.
 
-It asserts six things.
+It asserts seven things.
 
 **Claims table.** An explicit list of `(file, regex with one capture group,
 derived value)`. Each entry pins one number in prose to the source it describes.
@@ -122,9 +124,15 @@ scan would silently match nothing and pass.
 **Provider name coverage.** `reference/connected-services.md` states no count —
 it enumerates services by name in prose sections, which is a better page for it.
 So the assertion there is coverage, not arithmetic: every provider in
-`internal/connectors/providers/` is named somewhere on the page, and no name on
-the page lacks a provider. The second half catches removal, which is how Zoom
-survived in `CLAUDE.md` after its YAML was deleted.
+`internal/connectors/providers/` is named somewhere on the page. What shipped
+for the removal half is narrower than "no name on the page lacks a provider":
+a hand-maintained `REMOVED_PROVIDERS` set (`{"Zoom", "Fitbit"}`) is checked
+against prose in `CLAUDE.md`, `README.md`, and the services page, with an
+exemption for a sentence that itself narrates the removal (so stating "Zoom
+was removed" doesn't trip the same check it satisfies). This is how Zoom
+survived in `CLAUDE.md` after its YAML was deleted. The cost is real: the set
+is hand-maintained, so the next provider removal is uncovered unless someone
+remembers to add its name to it.
 
 **Inflated approximations.** Any claim of the form `N+` where `N` exceeds the
 real count fails. "100+ services" against 91 is false in the direction that
@@ -142,6 +150,13 @@ subprocesses and are not set by an operator. A naive diff would report five
 false positives on its first run and be switched off. The allowlist is a file
 with a one-line reason per entry, so adding a genuinely user-facing variable
 cannot be waved through by appending to it thoughtlessly.
+
+**README environment table.** `check_readme_env_table` asserts `README.md`'s
+own configuration table lists every public `ROOKERY_*` variable. It was added
+after the table shipped with 8 rows where 9 were needed, omitting
+`ROOKERY_CLAUDE_BIN` — a missing row, which the count-based assertions above
+cannot catch because they check documented names against source, not a
+specific table's completeness.
 
 **CLI commands.** Every subcommand registered in `cmd/rookery` has a heading in
 the website's `reference/cli.md`.

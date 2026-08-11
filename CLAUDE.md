@@ -46,7 +46,7 @@ make stop      # stop the running server
 make logs      # tail -f logs/server.log
 make status    # show running server process
 make test      # run the unit tests
-make ci        # run the full PR gate locally (fmt, vet, -race, cross-compile, UI)
+make ci        # run the full PR gate locally (fmt, vet, -race, cross-compile, UI, docs-sync)
 make docker-build / docker-run   # slim container image (podman or docker)
 
 # Frontend (web/ui): build the SPA into the binary
@@ -101,7 +101,10 @@ target has a documentation obligation in both repositories.
 `make docs-sync-check` mechanises the checkable half — counts, variable
 names, command names, provider names, logo coverage — against the source
 rather than against other prose, and runs inside `make ci` (`ci-docs`); it
-skips website assertions when `~/rookery-web` is absent. It does not check
+resolves the website checkout via `ROOKERY_WEB_DIR`, then a sibling of the
+main checkout derived from git's common dir, then `~/rookery-web`, and skips
+website assertions when none of those exist — set `ROOKERY_WEB_DIR` to point
+it at an unmerged website branch from inside a worktree. It does not check
 whether a paragraph describes a feature correctly.
 
 Verify every claim against source, never against another document. The
