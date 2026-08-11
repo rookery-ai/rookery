@@ -85,6 +85,28 @@ var apiProviders = []APIProvider{
 	{"localai", "LocalAI (Local)", "openai", "qwen2.5-coder-7b", "https://localai.io/features/openai-functions/", false, false, "local"},
 	{"jan", "Jan (Local)", "openai", "qwen2.5-coder-7b", "https://jan.ai/docs/desktop/api-server", false, false, "local"},
 
+	// ── Wave 2 (2026-08): hosted tier ──
+	// Base URLs live in llm.DefaultBaseURL and were each confirmed against the
+	// provider's own current documentation. AI21 was scoped and DROPPED: its
+	// /studio/v1/chat/completions endpoint exists, but nothing in AI21's own
+	// docs states OpenAI schema compatibility, and an unverified provider that
+	// authenticates and then fails on tool-calling is worse than its absence.
+	{"cohere", "Cohere", "openai", "command-a-03-2025", "https://dashboard.cohere.com/api-keys", true, false, "hosted"},
+	{"nvidia", "NVIDIA NIM", "openai", "deepseek-ai/deepseek-v3.1", "https://build.nvidia.com", true, false, "hosted"},
+	{"vercel_ai", "Vercel AI Gateway", "openai", "anthropic/claude-opus-5", "https://vercel.com/docs/ai-gateway", true, false, "hosted"},
+	{"minimax", "MiniMax", "openai", "MiniMax-M2", "https://platform.minimax.io", true, false, "hosted"},
+	{"baseten", "Baseten", "openai", "deepseek-ai/DeepSeek-V3.1", "https://app.baseten.co/settings/api_keys", true, false, "hosted"},
+	{"novita", "Novita AI", "openai", "deepseek/deepseek-v3", "https://novita.ai/settings/key-management", true, false, "hosted"},
+	{"hyperbolic", "Hyperbolic", "openai", "deepseek-ai/DeepSeek-V3", "https://app.hyperbolic.xyz/settings", true, false, "hosted"},
+	{"venice", "Venice AI", "openai", "qwen3-235b", "https://venice.ai/settings/api", true, false, "hosted"},
+
+	// Chutes and a LiteLLM-proxy local entry were scoped for this wave and
+	// DROPPED at the last step: neither has a mark in lobehub or simple-icons,
+	// and the project's rule is to vendor the real published logo or show a
+	// letter — never approximate someone else's brand. Adding them would have
+	// meant growing allowNoLogo purely to make a count. Both are worth adding
+	// once an UPSTREAM_SVG entry points at each publisher's own asset.
+
 	{"generic", "Custom (OpenAI-compatible)", "openai", "", "", true, true, "hosted"},
 }
 

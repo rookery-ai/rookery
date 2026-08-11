@@ -85,6 +85,20 @@ huggingface:huggingface-color
 github_models:github
 lmstudio:lmstudio
 vllm:vllm-color
+# Wave 2 coder providers (2026-08). Each -color variant was screened for the
+# white-on-transparent hazard that made Kimi render as an empty square: all six
+# carry real brand colours. baseten and vercel publish only a monochrome mark,
+# which is their published form and themes via currentColor.
+# Chutes and LiteLLM have NO mark in lobehub or simple-icons, so neither
+# provider ships in this wave — see the note in internal/coder/detect.go.
+cohere:cohere-color
+nvidia:nvidia-color
+vercel_ai:vercel
+minimax:minimax-color
+baseten:baseten
+novita:novita-color
+hyperbolic:hyperbolic-color
+venice:venice-color
 "
 
 # our-slug:worldvectorlogo-slug
