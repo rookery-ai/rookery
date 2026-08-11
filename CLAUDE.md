@@ -231,7 +231,7 @@ longer reach a user.
 | `ROOKERY_HOST` | `0.0.0.0` | bind address; `127.0.0.1` for loopback-only |
 | `ROOKERY_PORT` | `8080` | listen port |
 | `ROOKERY_DATA_DIR` | `~/.rookery` | data root; also relocates the DB |
-| `ROOKERY_SESSION_KEY` | generated | hex 32-byte session key |
+| `ROOKERY_SESSION_KEY` | generated, then pinned to `<data_dir>/session.key` | hex 32-byte session key |
 | `ROOKERY_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks; validated at use (`internal/publicurl.Normalize`) and overridden by the instance URL in owner settings |
 | `ROOKERY_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |
 | `ROOKERY_CODER_MODE` | `full` | `slim` removes the local CLI coder kind entirely |
@@ -1311,6 +1311,18 @@ consequences, all load-bearing:
   together with the database and vaults**, and writes the new key only after that
   succeeds. Leaving it behind would make the rollback copy undecryptable the
   instant a restore landed. Only the newest `.pre-restore-*` is kept.
+
+**`session.key` is the system key's sibling, and is deliberately NOT in the
+snapshot.** `secrets.SessionKey(dataDir, configured)` resolves the cookie-signing
+key by the same order — configured value → `<data_dir>/session.key` → generate and
+persist at 0600 — because the fallback it replaced was the literal
+`"change-me-in-production-32bytes!!"` compiled into a published binary, so every
+install that never set `ROOKERY_SESSION_KEY` signed its sessions with a key anyone
+could read out of the repository. Unlike the system key it encrypts nothing at
+rest, so losing it costs one sign-in rather than the whole install; leaving it out
+of the `.rkb` means a restore onto new hardware does not also transplant live
+session cookies. An empty `data_dir` (tests) yields an ephemeral key rather than a
+shared constant.
 
 **Restore only ever runs against a dead install.** `serve` calls
 `ApplyPendingRestore` at the very top — *before* the database is opened or

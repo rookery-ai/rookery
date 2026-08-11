@@ -213,7 +213,7 @@ minutes during work hours, or only when you ask. Reminders work the same way:
 | `ROOKERY_HOST` | `0.0.0.0` | bind address; `127.0.0.1` for loopback-only |
 | `ROOKERY_PORT` | `8080` | listen port |
 | `ROOKERY_DATA_DIR` | `~/.rookery` | data root; also relocates the database |
-| `ROOKERY_SESSION_KEY` | generated | hex 32-byte session key |
+| `ROOKERY_SESSION_KEY` | generated, then pinned to `<data_dir>/session.key` | hex 32-byte session key |
 | `ROOKERY_SYSTEM_KEY` | generated | hex key encrypting stored credentials |
 | `ROOKERY_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks |
 | `ROOKERY_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |

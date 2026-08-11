@@ -81,10 +81,14 @@ type Server struct {
 // NewServer wires up all routes and middleware.
 // gatewayManager, runner and memStore may be nil (e.g. in tests).
 func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.GatewayManager, runner *agentrunner.Runner, designer *agentdesigner.AgentDesigner, homesDir string, skillStore *skillstore.Store, designFlow *agentdesigner.Flow, skillFlow *skilldesigner.Flow, memStore *memory.Store) (*Server, error) {
-	sessionKey := []byte(cfg.Server.SessionKey)
-	if len(sessionKey) == 0 {
-		// Use a fixed dev key if not configured; production MUST set ROOKERY_SESSION_KEY.
-		sessionKey = []byte("change-me-in-production-32bytes!!")
+	// Resolve the cookie-signing key the same way the system key is resolved:
+	// configured value wins, else the pinned <data_dir>/session.key, else a
+	// freshly generated key persisted there. The fallback this replaces was a
+	// literal string in this file, so every install that had not set
+	// ROOKERY_SESSION_KEY was signing its sessions with a published key.
+	sessionKey, err := secrets.SessionKey(cfg.Data.Dir, cfg.Server.SessionKey)
+	if err != nil {
+		return nil, fmt.Errorf("resolve session key: %w", err)
 	}
 
 	store := sessions.NewCookieStore(sessionKey)
