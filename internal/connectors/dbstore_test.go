@@ -284,6 +284,55 @@ func TestRefreshKeepsConnectionActiveOnTransientFailure(t *testing.T) {
 	}
 }
 
+type recordingNotifier struct {
+	calls [][4]string
+}
+
+func (r *recordingNotifier) ConnectionNeedsReauth(workspaceID, connectionID, providerLabel, accountLabel string) {
+	r.calls = append(r.calls, [4]string{workspaceID, connectionID, providerLabel, accountLabel})
+}
+
+func TestRefreshNotifiesOnceOnDefinitiveRejection(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"invalid_grant"}`))
+	}))
+	defer srv.Close()
+	_, store, _ := refreshFixture(t, srv)
+	n := &recordingNotifier{}
+	store.WithNotifier(n)
+
+	store.AccessToken(context.Background(), ConnRef{ID: "c1", Provider: "google"})
+	if len(n.calls) != 1 {
+		t.Fatalf("got %d notifications, want 1", len(n.calls))
+	}
+	if n.calls[0][1] != "c1" || n.calls[0][3] != "work" {
+		t.Fatalf("unexpected notification payload: %v", n.calls[0])
+	}
+
+	// The row is NEEDS_REAUTH now, so AccessToken short-circuits before refresh
+	// and must not notify again. This is what makes fire-once free.
+	store.AccessToken(context.Background(), ConnRef{ID: "c1", Provider: "google"})
+	if len(n.calls) != 1 {
+		t.Fatalf("got %d notifications after a second call, want still 1", len(n.calls))
+	}
+}
+
+func TestRefreshDoesNotNotifyOnTransientFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(503)
+	}))
+	defer srv.Close()
+	_, store, _ := refreshFixture(t, srv)
+	n := &recordingNotifier{}
+	store.WithNotifier(n)
+
+	store.AccessToken(context.Background(), ConnRef{ID: "c1", Provider: "google"})
+	if len(n.calls) != 0 {
+		t.Fatalf("got %d notifications for a 503, want 0", len(n.calls))
+	}
+}
+
 func TestRefreshMarksNeedsReauthOnDefinitiveRejection(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)

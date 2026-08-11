@@ -19,6 +19,15 @@ import (
 // never races a token that lapses mid-request.
 const expirySkew = 2 * time.Minute
 
+// ReauthNotifier is told when a connection has been definitively rejected by its
+// provider and needs a human to reconnect it. Implemented by internal/connalert.
+//
+// It returns nothing: the caller is a background token refresh, and a failed
+// notification must not fail the refresh that triggered it.
+type ReauthNotifier interface {
+	ConnectionNeedsReauth(workspaceID, connectionID, providerLabel, accountLabel string)
+}
+
 // DBTokenStore implements TokenStore against the service_connections table. It reads
 // the stored (encrypted) access token, refreshes + re-encrypts + persists when near
 // expiry, and flips status to NEEDS_REAUTH on unrecoverable refresh failure — all
@@ -31,6 +40,9 @@ type DBTokenStore struct {
 	Now       func() time.Time // injectable for tests; nil → time.Now
 	HTTP      *http.Client     // injectable for tests; nil → a 30s client
 
+	// notifier is optional; nil means no alerting (tests, the livecheck harness).
+	notifier ReauthNotifier
+
 	// sessions caches session_exchange bearer tokens (Bluesky) per connection id.
 	sessMu   sync.Mutex
 	sessions map[string]sessionCacheEntry
@@ -41,6 +53,28 @@ func (s *DBTokenStore) now() time.Time {
 		return s.Now()
 	}
 	return time.Now()
+}
+
+// WithNotifier attaches the alert sink. Set after construction rather than in a
+// literal because the notifier needs the chat gateway, which is built later in
+// serve's wiring than the token store is — the same ordering constraint
+// approvalSvc.WithNotifier solves.
+func (s *DBTokenStore) WithNotifier(n ReauthNotifier) *DBTokenStore {
+	s.notifier = n
+	return s
+}
+
+// notifyReauth is the one place an alert is raised, so the two definitive-failure
+// branches in refresh cannot drift apart.
+func (s *DBTokenStore) notifyReauth(row *db.ServiceConnection) {
+	if s.notifier == nil {
+		return
+	}
+	label := row.Provider
+	if p, ok := s.Reg.ProviderByName(row.Provider); ok && p.Label != "" {
+		label = p.Label
+	}
+	s.notifier.ConnectionNeedsReauth(row.WorkspaceID, row.ID, label, row.AccountLabel)
 }
 
 // AccessToken returns a currently-valid bearer token for conn, refreshing if needed.
@@ -121,6 +155,7 @@ func (s *DBTokenStore) refresh(ctx context.Context, row *db.ServiceConnection) (
 	refreshTok, err := secrets.DecryptWithSystemKey(row.EncryptedRefreshToken, s.SystemKey)
 	if err != nil || refreshTok == "" {
 		s.DB.UpdateConnectionStatus(ctx, row.ID, "NEEDS_REAUTH")
+		s.notifyReauth(row)
 		return "", &ConnectorError{KindNeedsReauth, "no refresh token — reconnect " + row.AccountLabel}
 	}
 	ts, err := s.OAuth.Refresh(ctx, prov, cid, csec, refreshTok)
@@ -134,6 +169,7 @@ func (s *DBTokenStore) refresh(ctx context.Context, row *db.ServiceConnection) (
 			return "", err
 		}
 		s.DB.UpdateConnectionStatus(ctx, row.ID, "NEEDS_REAUTH")
+		s.notifyReauth(row)
 		return "", &ConnectorError{KindNeedsReauth, "token refresh failed for " + row.AccountLabel + "; reconnect it (" + err.Error() + ")"}
 	}
 	encNew, err := secrets.EncryptWithSystemKey(ts.AccessToken, s.SystemKey)
