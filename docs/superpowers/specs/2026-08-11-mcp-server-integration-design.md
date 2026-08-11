@@ -5,7 +5,7 @@
 
 ## Why
 
-Rookery ships 91 vendored connectors covering the SaaS surface. MCP does not replace
+Rookery ships 99 vendored connectors covering the SaaS surface. MCP does not replace
 them and must not be positioned as though it does. Its marginal value concentrates in
 three places a YAML connector cannot reach:
 

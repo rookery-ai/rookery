@@ -11,7 +11,13 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/ilijad1/rookery/internal/awssig"
 )
+
+// emptyPayloadSHA256 is re-exported from awssig for the read-only verbs below;
+// the signer owns the constant.
+const emptyPayloadSHA256 = awssig.EmptyPayloadSHA256
 
 // S3Destination stores snapshots in any S3-compatible bucket: AWS S3,
 // Backblaze B2, Cloudflare R2, MinIO, Wasabi. One implementation covers them
@@ -79,7 +85,9 @@ func (d *S3Destination) do(ctx context.Context, method string, u *url.URL, body 
 	if size >= 0 {
 		req.ContentLength = size
 	}
-	if err := signV4(req, d.cfg.AccessKey, d.secretKey, d.cfg.Region, "s3", payloadHash, time.Now()); err != nil {
+	if err := awssig.Sign(req,
+		awssig.Credentials{AccessKey: d.cfg.AccessKey, SecretKey: d.secretKey},
+		d.cfg.Region, "s3", payloadHash, time.Now()); err != nil {
 		return nil, err
 	}
 

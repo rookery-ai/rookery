@@ -90,7 +90,7 @@ func TestB4_TwilioBasicUserAndSMS(t *testing.T) {
 	}
 	// Basic username = account_sid from connExtra; credential = auth token (password)
 	req, _ := http.NewRequest("POST", "https://api.twilio.com/x", nil)
-	applyAuth(req, p, "AUTHTOKEN", map[string]string{"account_sid": "AC123"})
+	applyAuth(req, p, "AUTHTOKEN", map[string]string{"account_sid": "AC123"}, nil)
 	u, pw, ok := req.BasicAuth()
 	if !ok || u != "AC123" || pw != "AUTHTOKEN" {
 		t.Fatalf("twilio basic auth: u=%q pw=%q", u, pw)
@@ -126,7 +126,7 @@ func TestB4_TrelloKeyAndTokenInQuery(t *testing.T) {
 	}
 	// token is added by applyAuth (query placement)
 	req, _ := http.NewRequest("GET", u, nil)
-	applyAuth(req, p, "TOKEN456", nil)
+	applyAuth(req, p, "TOKEN456", nil, nil)
 	if req.URL.Query().Get("token") != "TOKEN456" {
 		t.Fatalf("trello token not added by applyAuth: %s", req.URL.String())
 	}

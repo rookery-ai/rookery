@@ -1,0 +1,16 @@
+name: perplexity
+label: Perplexity
+category: AI
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Perplexity API key"
+  key_hint: "pplx-..."
+  setup_url: https://www.perplexity.ai/settings/api
+setup_steps:
+  - "Sign in at https://www.perplexity.ai and open Settings → API."
+  - "Add a payment method, then generate an API key and copy it."
+  - "Paste it below. Perplexity answers are grounded in a live web search and cite their sources, which is the reason to use it over a plain model."

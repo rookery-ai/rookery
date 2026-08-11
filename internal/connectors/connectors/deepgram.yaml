@@ -1,0 +1,36 @@
+provider: deepgram
+actions:
+  - name: deepgram_transcribe_url
+    description: "Transcribe audio that is reachable at a URL and return the text with timings. Use for a podcast, a recorded call, or any audio already hosted somewhere."
+    mutating: false
+    params:
+      type: object
+      properties:
+        url:        {type: string, description: "Direct link to the audio file."}
+        model:      {type: string, description: "e.g. nova-3"}
+        language:   {type: string, description: "e.g. en. Omit to let Deepgram detect it."}
+        punctuate:  {type: boolean, description: "Add punctuation and capitalisation."}
+        diarize:    {type: boolean, description: "Label who is speaking."}
+      required: [url]
+    request:
+      method: POST
+      url: "https://api.deepgram.com/v1/listen"
+      query:
+        model:     "{{model}}"
+        language:  "{{language}}"
+        punctuate: "{{punctuate}}"
+        diarize:   "{{diarize}}"
+      body:
+        url: "{{url}}"
+    response_extract: "$.results"
+
+  - name: deepgram_get_projects
+    description: "List the Deepgram projects this key can see, with their ids. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.deepgram.com/v1/projects"
+    response_extract: "$.projects"

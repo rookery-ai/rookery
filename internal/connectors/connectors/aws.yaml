@@ -1,0 +1,102 @@
+provider: aws
+# WHY THESE SERVICES AND NOT S3/EC2/CLOUDWATCH-METRICS.
+#
+# The connector layer speaks JSON: `extract` returns the body UNCHANGED when it
+# does not parse as JSON, and Result.Data is a json.RawMessage — so an XML body
+# is not merely unextractable, it corrupts the envelope it is placed into. S3,
+# EC2 and the CloudWatch metrics API are all Query/REST-XML protocols with no
+# JSON option, so they cannot be expressed here at all until the layer can parse
+# XML. That is a real gap, recorded rather than papered over: the obvious
+# "missing S3" fix is to write the YAML, which would ship actions returning a
+# broken envelope.
+#
+# What IS expressible is the JSON half of AWS: Lambda's REST-JSON API, and the
+# JSON-RPC services that dispatch on an X-Amz-Target header. Those latter ones
+# also exercise the header-signing defect this work fixed — X-Amz-Target must
+# appear in SignedHeaders, which the pre-extraction signer could not do.
+#
+# The `service` connect-input must match the service each action targets, since
+# it is the signing scope. One connection is one service.
+actions:
+  - name: aws_lambda_list_functions
+    description: "List the Lambda functions in the connected account and region. Requires a connection whose service is 'lambda'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        max_items: {type: integer, description: "How many to return (1-50)."}
+    request:
+      method: GET
+      url: "https://lambda.{{conn.region}}.amazonaws.com/2015-03-31/functions/"
+      query:
+        MaxItems: "{{max_items}}"
+    response_extract: "$.Functions"
+
+  - name: aws_lambda_get_function_configuration
+    description: "Read one Lambda function's configuration — runtime, handler, memory, timeout, environment. Requires service 'lambda'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        function_name: {type: string, description: "Function name or ARN."}
+      required: [function_name]
+    request:
+      method: GET
+      url: "https://lambda.{{conn.region}}.amazonaws.com/2015-03-31/functions/{{function_name}}/configuration"
+    response_extract: "$"
+
+  - name: aws_lambda_invoke
+    description: "Invoke a Lambda function synchronously and return its response. Mutating: the function may write to other systems."
+    mutating: true
+    params:
+      type: object
+      properties:
+        function_name: {type: string, description: "Function name or ARN."}
+        payload:       {type: object, description: "The JSON event passed to the function."}
+      required: [function_name]
+    request:
+      method: POST
+      url: "https://lambda.{{conn.region}}.amazonaws.com/2015-03-31/functions/{{function_name}}/invocations"
+      body_arg: payload
+    response_extract: "$"
+
+  - name: aws_logs_describe_log_groups
+    description: "List CloudWatch log groups. Requires a connection whose service is 'logs'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        prefix: {type: string, description: "Only groups whose name starts with this."}
+        limit:  {type: integer, description: "How many to return (1-50)."}
+    request:
+      method: POST
+      url: "https://logs.{{conn.region}}.amazonaws.com/"
+      headers:
+        X-Amz-Target: "Logs_20140328.DescribeLogGroups"
+        Content-Type: "application/x-amz-json-1.1"
+      body:
+        logGroupNamePrefix: "{{prefix}}"
+        limit: "{{limit}}"
+    response_extract: "$.logGroups"
+
+  - name: aws_logs_filter_events
+    description: "Search a CloudWatch log group for matching events — the usual way to find out why something failed. Requires service 'logs'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        log_group_name: {type: string, description: "e.g. /aws/lambda/my-function"}
+        filter_pattern: {type: string, description: "CloudWatch filter syntax, e.g. ERROR"}
+        limit:          {type: integer, description: "How many events to return."}
+      required: [log_group_name]
+    request:
+      method: POST
+      url: "https://logs.{{conn.region}}.amazonaws.com/"
+      headers:
+        X-Amz-Target: "Logs_20140328.FilterLogEvents"
+        Content-Type: "application/x-amz-json-1.1"
+      body:
+        logGroupName:  "{{log_group_name}}"
+        filterPattern: "{{filter_pattern}}"
+        limit:         "{{limit}}"
+    response_extract: "$.events"

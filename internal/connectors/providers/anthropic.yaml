@@ -1,0 +1,22 @@
+name: anthropic
+label: Anthropic
+category: AI
+# Not confirmed against the live API — no key was available at authoring time.
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  # NOT Authorization: Bearer. Anthropic uses its own header, and a Bearer token
+  # is rejected outright.
+  header_name: x-api-key
+  value_prefix: ""
+  key_label: "Anthropic API key"
+  key_hint: "sk-ant-..."
+  setup_url: https://console.anthropic.com/settings/keys
+static_headers:
+  # Required on EVERY request; the API returns an error without it.
+  anthropic-version: "2023-06-01"
+setup_steps:
+  - "Sign in at https://console.anthropic.com and open Settings → API keys."
+  - "Create a key and copy it — the console shows the full value only once."
+  - "Paste it below. Anthropic bills per token, so give an agent a key with a spend limit you are comfortable with."
