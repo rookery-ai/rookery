@@ -9,6 +9,7 @@ import {
   Puzzle,
   Save,
   Search,
+  Server,
   Settings,
   Trash2,
 } from "lucide-react";
@@ -30,6 +31,8 @@ import { ApiError } from "@/lib/api";
 import { ProviderLogo } from "@/components/brand/ProviderLogo";
 import { ChatAppWizard } from "./ChatAppWizard";
 import { ServiceWizard } from "./ServiceWizard";
+import { MCPSection } from "./MCPSection";
+import { useMCPServers } from "@/lib/mcp";
 import {
   useConnectors,
   useServices,
@@ -478,6 +481,8 @@ export default function ConnectionsPage() {
 
   const connectorsQuery = useConnectors();
   const servicesQuery = useServices();
+  // Only for the nav row's count — MCPSection owns its own data.
+  const mcpServers = useMCPServers().data ?? [];
   const searchKeysQuery = useSearchKeys();
 
   const platforms = connectorsQuery.data?.platforms ?? [];
@@ -539,6 +544,7 @@ export default function ConnectionsPage() {
 
   const chatAppsRef = useRef<HTMLDivElement>(null);
   const servicesRef = useRef<HTMLDivElement>(null);
+  const mcpRef = useRef<HTMLDivElement>(null);
   const webSearchRef = useRef<HTMLDivElement>(null);
 
   function scrollTo(ref: React.RefObject<HTMLDivElement | null>) {
@@ -600,6 +606,17 @@ export default function ConnectionsPage() {
                 <span className="text-muted-2">
                   {connectedServicesCount} of {services.length}
                 </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollTo(mcpRef)}
+                className="flex items-center justify-between rounded-md px-2.5 py-1.5 text-sm font-medium hover:bg-chrome"
+              >
+                <span className="flex items-center gap-2">
+                  <Server className="size-4 text-muted-2" aria-hidden="true" />
+                  MCP servers
+                </span>
+                <span className="text-muted-2">{mcpServers.length}</span>
               </button>
               <button
                 type="button"
@@ -773,6 +790,10 @@ export default function ConnectionsPage() {
                 ))}
               </div>
             )}
+        </section>
+
+        <section ref={mcpRef} className="mt-10 scroll-mt-4">
+          <MCPSection />
         </section>
 
         <section ref={webSearchRef} className="mt-10 scroll-mt-4">

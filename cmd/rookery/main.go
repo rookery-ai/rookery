@@ -339,6 +339,7 @@ func serveCmd() *cli.Command {
 				WithDB(database).
 				WithMemory(memStore).
 				WithConnectors(connReg, connStore).
+				WithMCPStore(database).
 				WithSecretsLoader(func(ctx context.Context, workspaceID string) (map[string]string, error) {
 					user, err := database.GetWorkspaceByID(workspaceID)
 					if err != nil || user.EncryptedMasterPassword == "" {

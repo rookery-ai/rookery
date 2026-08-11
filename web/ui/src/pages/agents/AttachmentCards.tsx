@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { AlertTriangle, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
+import { useAgentMCPServers, useSaveAgentMCPServers } from "@/lib/mcp";
 import {
   useAgentActions,
   // Aliased per Task 8's contract note: lib/agents exports the generic type
@@ -234,6 +235,97 @@ export function ConnectionsCard({
               />
               <span className="capitalize">{c.provider}</span>
               <span className="text-muted-2">— {c.account_label}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// MCPServersCard binds an agent to MCP servers, mirroring ConnectionsCard.
+//
+// It is the RELIABLE path of the three. The designer also parses a "# MCP:" header
+// and auto-binds the servers a build actually called, but a weak model can omit both
+// — and an agent silently bound to nothing looks identical to one whose server is
+// down. This card is where that gets fixed by hand.
+export function MCPServersCard({ agentId }: { agentId: string }) {
+  const query = useAgentMCPServers(agentId);
+  const save = useSaveAgentMCPServers(agentId);
+  const servers = query.data?.servers ?? [];
+  const attached = query.data?.attached ?? [];
+  const attachedKey = attached.join(",");
+
+  const [checked, setChecked] = useState<Set<string>>(new Set(attached));
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setChecked(new Set(attachedKey ? attachedKey.split(",") : []));
+    // Keyed on the joined ids rather than the array: `attached` is a fresh array on
+    // every background refetch, which would otherwise wipe in-progress ticks.
+  }, [attachedKey]);
+
+  const dirty =
+    checked.size !== attached.length || attached.some((id) => !checked.has(id));
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-border bg-background p-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold">MCP servers ({checked.size})</h2>
+        {servers.length > 0 && (
+          <Button
+            size="sm"
+            aria-label="Save MCP servers"
+            onClick={async () => {
+              setError(null);
+              try {
+                await save.mutateAsync(Array.from(checked));
+              } catch (err) {
+                setError(errMessage(err));
+              }
+            }}
+            disabled={!dirty || save.isPending}
+          >
+            <Save />
+            Save
+          </Button>
+        )}
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-2 rounded-md bg-danger-soft px-3 py-2 text-xs text-danger">
+          <AlertTriangle className="size-3.5 shrink-0" />
+          {error}
+        </div>
+      )}
+
+      {servers.length === 0 ? (
+        <p className="text-xs text-muted-2">
+          No MCP servers yet.{" "}
+          <Link to="/connections" className="text-accent underline">
+            Add one first
+          </Link>
+          .
+        </p>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {servers.map((s) => (
+            <label key={s.id} className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={checked.has(s.id)}
+                onChange={() =>
+                  setChecked((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(s.id)) next.delete(s.id);
+                    else next.add(s.id);
+                    return next;
+                  })
+                }
+                className="size-3.5 rounded border-border"
+              />
+              <span>{s.name}</span>
+              <span className="text-muted-2">— {s.active_tools} tools</span>
             </label>
           ))}
         </div>

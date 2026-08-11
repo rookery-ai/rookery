@@ -92,6 +92,10 @@ type DesignSession struct {
 	// "# Connections:" header and the agent has no bindings yet.
 	PendingUsedConnections []string
 
+	// PendingUsedMCPServers is the MCP sibling of PendingUsedConnections: the servers
+	// the build actually called, used for auto-bind when the model omits the header.
+	PendingUsedMCPServers []string
+
 	// GenerationFailed is true when the last generation attempt soft-failed (a blocker
 	// with no presentable build on disk, or a not-presentable/guardrail outcome) and the
 	// session stayed in StateDesigning. While set, a forgiving retry phrase ("try again",
@@ -157,6 +161,22 @@ type dbDesignStore interface {
 	SetAgentConnections(ctx context.Context, agentID string, connIDs []string) error
 }
 
+// mcpStore is the MCP slice of the database, kept as its own interface so the many
+// existing fakes implementing designerDB do not all have to grow three methods they
+// will never use. A Flow with no mcpDB simply never binds MCP servers.
+type mcpStore interface {
+	ListMCPServers(workspaceID string) ([]*db.MCPServer, error)
+	ListAgentMCPServerIDs(ctx context.Context, agentID string) ([]string, error)
+	SetAgentMCPServers(ctx context.Context, agentID string, serverIDs []string) error
+}
+
+// WithMCPStore enables MCP auto-binding on saves. Optional: a Flow without it behaves
+// exactly as before.
+func (f *Flow) WithMCPStore(s mcpStore) *Flow {
+	f.mcpDB = s
+	return f
+}
+
 // loadConnectionRefs lists the workspace's service connections as prompts.ConnectionRef
 // so the designer can be told which accounts it may bind (via the # Connections: header).
 func (f *Flow) loadConnectionRefs(ctx context.Context, workspaceID string) []prompts.ConnectionRef {
@@ -201,6 +221,42 @@ func (f *Flow) persistConnections(ctx context.Context, workspaceID, agentID, age
 	}
 	if err := f.db.SetAgentConnections(ctx, agentID, ids); err != nil {
 		slog.Warn("agentdesigner: set agent connections", "agent_id", agentID, "err", err)
+	}
+}
+
+// persistMCPServers is the MCP half of persistConnections, with identical semantics:
+// an explicit "# MCP:" header wins (including "none"), an agent that already has
+// bindings is left alone, and only a genuinely unbound agent falls back to the
+// servers the build actually called.
+//
+// It is a separate method rather than a branch inside persistConnections because the
+// two read different tables and a failed lookup in one must not suppress the other —
+// an agent should not lose its connector bindings because an MCP query failed.
+func (f *Flow) persistMCPServers(ctx context.Context, workspaceID, agentID, agentMD string, usedFromBuild []string) {
+	if f.mcpDB == nil {
+		return
+	}
+	available, err := f.mcpDB.ListMCPServers(workspaceID)
+	if err != nil {
+		slog.Warn("agentdesigner: list mcp servers", "workspace_id", workspaceID, "err", err)
+		return
+	}
+	if len(available) == 0 {
+		return
+	}
+	existing, err := f.mcpDB.ListAgentMCPServerIDs(ctx, agentID)
+	if err != nil {
+		// Don't guess: a failed lookup that looks like "no bindings" would cause a
+		// replace-all and clobber an edited agent's real servers.
+		slog.Warn("agentdesigner: list agent mcp servers", "agent_id", agentID, "err", err)
+		return
+	}
+	ids, apply := AutoBindMCPTargets(agentMD, available, existing, usedFromBuild)
+	if !apply {
+		return
+	}
+	if err := f.mcpDB.SetAgentMCPServers(ctx, agentID, ids); err != nil {
+		slog.Warn("agentdesigner: set agent mcp servers", "agent_id", agentID, "err", err)
 	}
 }
 
@@ -260,6 +316,7 @@ type Flow struct {
 	coderFor      func(workspaceID string) *coder.Coder
 	designer      *AgentDesigner
 	db            dbDesignStore
+	mcpDB         mcpStore
 	memStore      memoryStore  // optional; nil = no memory injected
 	vlt           *vault.Vault // optional; nil = no KB context injected
 	secretsLoader func(ctx context.Context, workspaceID string) (map[string]string, error)
@@ -1037,6 +1094,7 @@ func (f *Flow) stepDesigning(ctx context.Context, workspaceID, input string) (st
 				// Content recovered from disk carries no known connector usage — clear any
 				// stale value from an earlier attempt so auto-bind can't bind wrong connections.
 				sess.PendingUsedConnections = nil
+				sess.PendingUsedMCPServers = nil
 			}
 			f.mu.Unlock()
 			return f.finalizeAgent(ctx, workspaceID)
@@ -1477,11 +1535,13 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	scriptVerified := false
 	scriptOutput := ""
 	usedConns := []string(nil)
+	usedMCPIDs := []string(nil)
 	if result != nil {
 		resultText = result.Text
 		scriptVerified = result.ScriptVerified
 		scriptOutput = result.ScriptOutput
 		usedConns = result.UsedConnectionIDs
+		usedMCPIDs = result.UsedMCPServerIDs
 	}
 	decision := decideBuildOutcome(workDir, resultText, backendType, scriptVerified, scriptOutput)
 
@@ -1595,6 +1655,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		sess.PendingAgentMD = decision.agentMD
 		sess.PendingTools = decision.tools
 		sess.PendingUsedConnections = usedConns
+		sess.PendingUsedMCPServers = usedMCPIDs
 		// Record the review prompt in History so a page-load restore (or a draft
 		// resumed after a server restart) replays it. Previously this message only
 		// ever lived in the POST return value, so anyone who navigated away mid-build
@@ -2115,6 +2176,7 @@ func (f *Flow) finalizeAgent(ctx context.Context, workspaceID string) (string, b
 	tools := sess.PendingTools
 	isEdit := sess.IsEdit
 	usedConns := sess.PendingUsedConnections
+	usedMCP := sess.PendingUsedMCPServers
 	// The build is being saved, so any earlier soft-failure is resolved. Clear the flag
 	// (and its one-attempt TIER-1 override) here as well as on the chat path: saving via
 	// "keep it as-is" reaches finalize straight from the failed state, and leaving the flag
@@ -2128,9 +2190,9 @@ func (f *Flow) finalizeAgent(ctx context.Context, workspaceID string) (string, b
 	var agentID string
 	var err error
 	if isEdit {
-		resp, done, agentID, err = f.updateAndFinish(ctx, workspaceID, agentMD, tools, usedConns)
+		resp, done, agentID, err = f.updateAndFinish(ctx, workspaceID, agentMD, tools, usedConns, usedMCP)
 	} else {
-		resp, done, agentID, err = f.saveAndFinish(ctx, workspaceID, agentMD, tools, usedConns)
+		resp, done, agentID, err = f.saveAndFinish(ctx, workspaceID, agentMD, tools, usedConns, usedMCP)
 	}
 	// On a successful save the agent is persisted — drop the draft so the resume
 	// prompt never reappears for an already-created/updated agent.
@@ -2141,7 +2203,7 @@ func (f *Flow) finalizeAgent(ctx context.Context, workspaceID string) (string, b
 }
 
 // saveAndFinish writes a brand-new agent to disk/DB and terminates the session.
-func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, tools map[string]string, usedConns []string) (string, bool, string, error) {
+func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, tools map[string]string, usedConns, usedMCP []string) (string, bool, string, error) {
 	f.mu.Lock()
 	sess := f.sessions[workspaceID]
 	agentIDSnap := sess.AgentID
@@ -2176,6 +2238,7 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 
 	// Bind declared service connections (agent_connections), mirroring skills.
 	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD, usedConns)
+	f.persistMCPServers(ctx, workspaceID, agentIDSnap, agentMD, usedMCP)
 
 	// Remove test artifacts (downloaded files, scratch probes, run outputs) from the live
 	// agent dir now that the agent is saved. Artifacts persist through StateVerifying so
@@ -2220,7 +2283,7 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 // schedule row's ID — never minting a new one, since agent_id has no unique
 // constraint and a fresh ID would create a duplicate, double-firing schedule), and
 // "none"/invalid where a schedule previously existed removes it.
-func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string, tools map[string]string, usedConns []string) (string, bool, string, error) {
+func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string, tools map[string]string, usedConns, usedMCP []string) (string, bool, string, error) {
 	f.mu.Lock()
 	sess := f.sessions[workspaceID]
 	agentIDSnap := sess.AgentID
@@ -2242,6 +2305,7 @@ func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string,
 
 	// Bind declared service connections (agent_connections), mirroring skills.
 	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD, usedConns)
+	f.persistMCPServers(ctx, workspaceID, agentIDSnap, agentMD, usedMCP)
 
 	// Remove any test artifacts left in the live agent dir post-save. For edits the
 	// staging dir is already gone; this cleans root-level scratch from the live dir.
