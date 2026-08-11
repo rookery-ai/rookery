@@ -99,6 +99,12 @@ baseten:baseten
 novita:novita-color
 hyperbolic:hyperbolic-color
 venice:venice-color
+# The AWS CONNECTOR (category Cloud), distinct from the bedrock coder provider
+# above, which is a single AWS service. aws-color is the orange cube on a
+# transparent field, which reads correctly on ProviderLogo's white tile.
+# NOTE: no backticks anywhere in this block — it is inside a double-quoted shell
+# string, so a backtick runs a command instead of being a comment.
+aws:aws-color
 "
 
 # our-slug:worldvectorlogo-slug

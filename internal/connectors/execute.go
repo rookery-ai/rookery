@@ -177,7 +177,6 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 		if e != nil {
 			return Result{}, &ConnectorError{KindOther, e.Error()}
 		}
-		applyAuth(req, prov, token, conn.Extra)
 		if contentType != "" {
 			req.Header.Set("Content-Type", contentType)
 		}
@@ -194,6 +193,24 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 				continue
 			}
 			req.Header.Set(hk, v)
+		}
+		// Per-action headers, applied after the provider-wide ones so an action
+		// can override its provider. Same templating and same drop-if-empty rule.
+		for hk, hv := range a.Request.Headers {
+			v := subst(hv, args, conn.Extra)
+			if v == "" {
+				continue
+			}
+			req.Header.Set(hk, v)
+		}
+		// Auth goes on LAST, after Content-Type and every static header. It used
+		// to run first, which is fine for a scheme that only adds a header or a
+		// query parameter — but SigV4 signs the request it is given, and a
+		// Content-Type or x-amz-* header added afterwards would be either
+		// unsigned or signed-but-absent. No provider sets Authorization through
+		// static_headers, so nothing is clobbered by the reorder.
+		if err := applyAuth(req, prov, token, conn.Extra, body); err != nil {
+			return Result{}, err
 		}
 		resp, e := client.Do(req)
 		if e != nil {
