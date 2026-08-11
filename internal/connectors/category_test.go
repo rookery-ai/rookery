@@ -21,6 +21,10 @@ var validCategories = map[string]bool{
 	// unrelated headings.
 	"Self-hosted": true, "Health & Fitness": true, "Finance": true,
 	"Data & Reference": true,
+	// "Cloud" is infrastructure the user rents rather than runs — the AWS
+	// connector and, in time, the cloud-adjacent hosts. Distinct from
+	// "Self-hosted", which is the box under their desk.
+	"Cloud": true,
 }
 
 // Every bundled provider must declare a category, or it silently lands in

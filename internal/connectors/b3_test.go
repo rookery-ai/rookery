@@ -113,7 +113,7 @@ func TestB3_ZendeskBasicTemplatedUser(t *testing.T) {
 		t.Fatal("zendesk must load as api_key")
 	}
 	req, _ := http.NewRequest("GET", "https://acme.zendesk.com/api/v2/tickets.json", nil)
-	applyAuth(req, p, "APITOKEN", map[string]string{"email": "me@acme.com"})
+	applyAuth(req, p, "APITOKEN", map[string]string{"email": "me@acme.com"}, nil)
 	u, pw, ok := req.BasicAuth()
 	if !ok || u != "me@acme.com/token" || pw != "APITOKEN" {
 		t.Fatalf("zendesk basic auth wrong: u=%q pw=%q ok=%v", u, pw, ok)

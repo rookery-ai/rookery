@@ -337,7 +337,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/iolimit` | `ReadCapped` + `ErrTooLarge` — the shared capped read every ingest door uses (KB upload, web-chat attachment, Telegram/Discord/Slack attachment, KB bridge, `save_to_kb` URL fetch), all enforcing one 25 MiB cap. Reads `cap+1` and REJECTS rather than truncating: a silently truncated import writes a note whose frontmatter states a byte count that is not the source's. `CappingWriter` is the write-side analogue — bounds a stream written into an `io.Writer` (Slack's `slack.Client.GetFile` insists on an `io.Writer` and has no size bound; there is no stdlib `io.LimitWriter`), rejecting at the same `cap+1` boundary. |
 | `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface: one struct per coder — Claude/OpenCode/Codex/Gemini/Cursor, plus a generic fallback). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host tools (`read_file`/`write_file`/`edit_file`/`list_dir` + read-only discovery `search_files`/`glob` + exec tools `run_script`/`bash`/`web_fetch`/`web_search`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible, plus ~35 further providers registered against the OpenAI schema — see `coder.APIProviders()`); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
-| `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **91 providers** (Google-family incl. Calendar/Tasks/AdSense/GA4/Search Console, YouTube, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing, `ProviderNames()` backing the connections page), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
+| `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **92 providers** (Google-family incl. Calendar/Tasks/AdSense/GA4/Search Console, YouTube, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing, `ProviderNames()` backing the connections page), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username + AWS SigV4 request signing), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
 | `internal/buildphase` | Tiny package holding `ROOKERY_BUILD_PHASE`/`generation` marker (set during agent/skill builds; the connector `Execute` build-guard refuses mutating actions when present). Its own package so it outlives any one integration. |
 | `internal/connalert` | Delivers the "this connection needs reconnecting" alert to the inbox AND chat when `DBTokenStore` flips a connection to `NEEDS_REAUTH`. Its own package because the alert needs the DB and the gateway and `internal/connectors` deliberately knows about neither — the same shape as `internal/approval`, and it takes the same narrow `SendToUser` interface so tests need no gateway. See "Connection re-auth alerting" below. |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal); `statefile.go` (`StateFilePath`/`ReadState`/`WriteState`/`RenderStateTemplate`) owns an agent's `state.md` format (see "Agent state" below); `migrate_files.go` (`MigrateAgentFilesToMarkdown`) is the idempotent startup migration off the old `state.json`/`agent.json` pair; `ParseRequiredSecrets` (`flow.go`) parses AGENT.md's `# Required secrets:` header — the only source of an agent's declared secrets now that `agent.json` is gone |
@@ -566,7 +566,7 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
 
 - **Data files, not code.** Adding a service = a `providers/<p>.yaml` (auth config) + a
   `connectors/<p>.yaml` (curated action manifest), both `go:embed`ed. `LoadBundled()` parses them.
-  **91 providers (~471 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
+  **92 providers (~476 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
   Search Console**), **YouTube**, GitHub, Slack, OpenAI, Notion, Outlook, Teams, Jira, HubSpot,
   Dropbox, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce,
   Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello.
@@ -697,6 +697,42 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
   ones. The build/impl AND runtime prompts inject `connectedToolsBlock` (backend-aware: native tools
   vs the `connector exec` command) so the coder knows the tools exist and is told there is **no
   Composio/SDK/service keys** in the env.
+
+**`auth.kind: sigv4` — AWS, and the one scheme that signs rather than carries.** Every other
+kind puts a credential somewhere in the request; SigV4 signs the request itself, which is why
+it forced two changes to `applyAuth`. It now takes the rendered **body** (AWS signs a payload
+hash) and **returns an error** (a connection missing its region or service cannot be signed at
+all). It is also applied **LAST** in `Execute`, after `Content-Type` and every static and
+per-action header — running first is fine for a scheme that only adds a header, but a signature
+must cover the headers actually sent. No provider sets `Authorization` through `static_headers`,
+so the reorder clobbers nothing.
+
+The signer is `internal/awssig`, extracted from `internal/backup` (which is now a caller) and
+verified against **AWS's own published SigV4 test vectors** — the only independent check
+available offline. Extracting it exposed two defects that could not bite the backup code that
+carried them: the canonical query used `url.Values.Encode`, which escapes a space as `+` where
+SigV4 requires `%20` (backup's only query values are snapshot names, which have no spaces), and
+only three headers were ever signed, so a service demanding `X-Amz-Target` or a signed
+`Content-Type` could not be reached. `X-Amz-Content-Sha256` is now set for **s3 only**: it is
+required there and merely harmless elsewhere, but setting it unconditionally changes
+`SignedHeaders`, which is precisely why the published vectors could never be run against the
+original.
+
+**Credential placement is the part that is easy to get wrong.** `service_connections.extra` is
+**plaintext JSON** by design — the Meta page-token hook exists to move a credential *out* of it.
+So the **secret access key** is the credential and is encrypted like every other; the **access
+key id** and the **region** are ordinary `connect_inputs`, since the key id travels in the
+`Authorization` header of every signed request and is not a secret. Service and region are
+per-CONNECTION, not per-provider: one AWS connection reaches many services and every region is a
+separate signing scope, so one connection means one service.
+
+**`aws.yaml` ships Lambda and CloudWatch Logs and NOT S3, EC2 or CloudWatch metrics.** Those are
+Query/REST-XML protocols with no JSON option, and `extract` returns a body that does not parse as
+JSON **unchanged** into a `json.RawMessage` — so an XML response does not merely fail to extract,
+it corrupts the envelope it lands in. This is recorded in the YAML itself because the obvious fix
+for "S3 is missing" is to write the actions. Reaching the JSON-RPC services (which dispatch on
+`X-Amz-Target`) is what motivated **per-action `headers:`** on `RequestTemplate`, distinct from
+provider-wide `static_headers`: the target names the operation, so it varies per action.
 
 **Connection re-auth alerting, and why the status flip is gated.** `DBTokenStore.refresh` used
 to set `NEEDS_REAUTH` on **any** refresh error. Because `ConnectionsNearExpiry` selects

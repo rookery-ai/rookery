@@ -31,6 +31,20 @@ type AuthConfig struct {
 	KeyHint     string `yaml:"key_hint"`     // UI placeholder: "sk-..."
 	SetupURL    string `yaml:"setup_url"`    // UI: where to get the key
 
+	// The three below are for kind=="sigv4" (AWS Signature Version 4), and each
+	// names the connect_input holding that value. AWS is the only scheme here
+	// that signs the request rather than carrying a credential in it, so unlike
+	// every other kind it needs the region and the service — one connection
+	// reaches many services, and every region is a separate signing scope.
+	//
+	// The SECRET access key is the credential and travels encrypted like all the
+	// others. The access key id is NOT secret (it is in the Authorization header
+	// of every signed request) and lives in the connection's plaintext `extra`,
+	// alongside the region. Defaults: access_key_id, region, service.
+	AccessKeyArg string `yaml:"access_key_arg"`
+	RegionArg    string `yaml:"region_arg"`
+	ServiceArg   string `yaml:"service_arg"`
+
 	// SessionURL, for kind=="session_exchange", is the endpoint that swaps stored
 	// credentials for a short-lived bearer token (Bluesky's createSession).
 	SessionURL string `yaml:"session_url"`
@@ -210,9 +224,17 @@ func (p Provider) IsKeyless() bool { return p.Auth.Kind == "none" }
 // value verbatim) nor OAuth (no authorization-code flow, no refresh token).
 func (p Provider) UsesSessionExchange() bool { return p.Auth.Kind == "session_exchange" }
 
+// UsesSigV4 reports whether requests are SIGNED with AWS Signature Version 4
+// rather than carrying a credential in a header. The stored credential is the
+// secret access key; the key id and region ride in the connection's `extra`.
+func (p Provider) UsesSigV4() bool { return p.Auth.Kind == "sigv4" }
+
 // PastesCredential reports whether the connect UI should show the paste-a-credential
-// form rather than an OAuth app setup. Both api_key and session_exchange do.
-func (p Provider) PastesCredential() bool { return p.IsAPIKey() || p.UsesSessionExchange() }
+// form rather than an OAuth app setup. api_key, session_exchange and sigv4 all do —
+// none of them runs a consent flow, so none has a redirect URI to register.
+func (p Provider) PastesCredential() bool {
+	return p.IsAPIKey() || p.UsesSessionExchange() || p.UsesSigV4()
+}
 
 // NonExpiring reports whether this provider's access tokens never expire.
 func (p Provider) NonExpiring() bool { return p.TokenExpiry == "never" }
@@ -257,6 +279,13 @@ type RequestTemplate struct {
 	// (e.g. Stripe/Twilio writes). Keys are used literally, so bracket notation like
 	// "metadata[source]" is preserved. Rendered by renderForm.
 	Form map[string]string `yaml:"form"`
+	// Headers are per-ACTION headers, as opposed to the provider-wide
+	// static_headers. AWS's JSON-RPC services are why this exists: they dispatch
+	// entirely on X-Amz-Target, whose value names the operation and so differs
+	// per action rather than per provider. Values are {{arg}}/{{conn.key}}
+	// templates like everywhere else, and an empty result is dropped rather than
+	// sent blank. Set BEFORE auth is applied, so a signing scheme covers them.
+	Headers map[string]string `yaml:"headers"`
 }
 
 // ResponseFilter narrows a JSON ARRAY response client-side, for APIs that offer no

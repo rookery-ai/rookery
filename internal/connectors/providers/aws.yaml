@@ -1,0 +1,37 @@
+name: aws
+label: AWS
+category: Cloud
+# Not confirmed against the live API: no AWS account was available at authoring
+# time. The SIGNING is verified against AWS's own published SigV4 test vectors
+# (internal/awssig), so what remains unproven is the request shapes below, not
+# the authentication. Remove this once a real call succeeds.
+unverified: true
+auth:
+  kind: sigv4
+  # The SECRET access key is the credential and is encrypted like every other.
+  # The access key id and the region are collected as connect_inputs: the key id
+  # travels in the Authorization header of every signed request, so it is not a
+  # secret, and `extra` is plaintext JSON by design.
+  key_label: "AWS secret access key"
+  key_hint: "the 40-character secret, not the AKIA... key id"
+  setup_url: https://console.aws.amazon.com/iam/home#/security_credentials
+connect_inputs:
+  - key: access_key_id
+    label: "Access key ID"
+    hint: "starts with AKIA"
+    required: true
+  - key: region
+    label: "Region"
+    hint: "e.g. us-east-1 — every region is a separate signing scope"
+    required: true
+  - key: service
+    label: "Service"
+    hint: "s3, ec2, lambda or monitoring (CloudWatch)"
+    required: true
+setup_steps:
+  - "Create an IAM user for Rookery rather than using your root account — sign in to the AWS console, open IAM → Users → Create user."
+  - "Attach only the permissions you want an agent to have. ReadOnlyAccess is a sensible starting point; the actions here are reads apart from lambda_invoke."
+  - "Open the new user → Security credentials → Create access key, choosing 'Application running outside AWS'."
+  - "Copy the access key ID and the secret access key. AWS shows the secret exactly once."
+  - "Enter the key id, your region and the service you want to reach below, with the secret in the key field."
+  - "One connection covers ONE service and region. Connect again for another — each has its own signing scope."

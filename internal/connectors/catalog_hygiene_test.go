@@ -120,6 +120,15 @@ func TestConnectInputsAreReferenced(t *testing.T) {
 			continue
 		}
 		blob := p.AuthorizeURL + p.TokenURL + p.UserinfoURL + p.Auth.BasicUserTemplate
+		// sigv4 consumes three of its connect inputs in the SIGNER rather than
+		// through {{conn.x}} templating — the access key id, region and service
+		// are signature material, not request content. They are referenced, just
+		// not textually, so name them here or the check reports a false gap.
+		if p.UsesSigV4() {
+			blob += " {{conn." + argOr(p.Auth.AccessKeyArg, "access_key_id") + "}}" +
+				" {{conn." + argOr(p.Auth.RegionArg, "region") + "}}" +
+				" {{conn." + argOr(p.Auth.ServiceArg, "service") + "}}"
+		}
 		for _, v := range p.StaticHeaders {
 			blob += " " + v
 		}
