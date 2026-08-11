@@ -177,6 +177,14 @@ request, not just how they are formatted.
 
 ## Per-provider checklist
 
+**Every auth mechanism named in this document is confirmed against the provider's own
+current documentation during implementation, not carried forward from this table.**
+Deepgram's `Token ` prefix, Proxmox's `PVEAPIToken=` form, CoinGecko's header name, Alpha
+Vantage's query parameter and the rest were written from recall. A wrong header name
+produces a provider that appears in the connections list, accepts a credential, and fails
+every action — the same failure mode the Wikipedia `User-Agent` had, which no test would
+have caught.
+
 Every provider in every wave needs all of:
 
 - `providers/<name>.yaml` with `category:`, and `key_label`/`key_hint` naming the actual

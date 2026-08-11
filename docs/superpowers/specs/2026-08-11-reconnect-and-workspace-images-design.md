@@ -81,6 +81,57 @@ button that jumps to the connect flow") and is rewritten. New cases:
 
 ## 2. "Action required" when a connection needs re-authentication
 
+### Precondition: the status flip is currently unconditional, and must not stay that way
+
+This was found while designing the alert, and the alert cannot be correct until it is
+fixed. `DBTokenStore.refresh` flips a connection to `NEEDS_REAUTH` on **any** refresh
+error whatsoever:
+
+```go
+// internal/connectors/dbstore.go:113-116
+ts, err := s.OAuth.Refresh(ctx, prov, cid, csec, refreshTok)
+if err != nil {
+    s.DB.UpdateConnectionStatus(ctx, row.ID, "NEEDS_REAUTH")
+    return "", &ConnectorError{KindNeedsReauth, "token refresh failed for " + row.AccountLabel + ...}
+}
+```
+
+A network blip, a DNS failure, a provider 500 or a 429 all mark the connection dead. And
+because `ConnectionsNearExpiry` selects `WHERE status='ACTIVE'`, the row then **leaves the
+refresh loop permanently** — the background renewal that would have fixed it on the next
+tick never runs again. A transient provider outage therefore bricks a healthy connection
+until a human reconnects it by hand.
+
+This is a pre-existing bug, but the alert is what makes it user-visible: without the fix,
+every provider hiccup sends "Action required!" for a connection that was fine. Shipping
+the notification on top of the current behaviour would make a silent bug into a loud one.
+
+**The fix is to classify, then gate.** The information is already there and is being
+discarded — `tokenRequest` maps every status `>= 400` onto a single kind:
+
+```go
+// internal/connectors/oauth.go:99-100
+if resp.StatusCode >= 400 {
+    return TokenSet{}, &ConnectorError{KindAuth, fmt.Sprintf("token endpoint %d: %s", ...)}
+}
+```
+
+Two changes, using kinds that already exist in `execute.go`:
+
+1. **`tokenRequest` classifies by status.** `429` → `KindRateLimit`; `5xx` → `KindServer`;
+   other `4xx` → `KindAuth`. Transport failures already return `KindNetwork` correctly.
+2. **`refresh` flips only on `KindAuth`** — a definitive rejection by the provider, which
+   is what OAuth's `invalid_grant` means. `KindNetwork`, `KindServer` and `KindRateLimit`
+   return the error *without* flipping, leaving the row `ACTIVE` so the loop retries on
+   the next tick.
+
+This is the same reasoning used below to reject flipping status inside
+`session_exchange`: a transient failure must not permanently mark a healthy connection
+broken. It applies at least as strongly to the path that is actually hooked.
+
+Tests: a 500 from the token endpoint leaves the row `ACTIVE` and sends nothing; a 400
+flips it and sends once; a network error leaves it `ACTIVE`.
+
 ### Trigger
 
 One hook at the single place a connection transitions to `NEEDS_REAUTH`: in
@@ -106,6 +157,26 @@ a workspace with no chat platform connected must not be stuck:
 A chat send failure must not prevent the inbox write. Write the inbox row first, then
 attempt the chat send and log a failure without returning it.
 
+**The inbox row needs a third `source` value.** `db.InboxMessage.Source` is documented as
+`"agent_run" | "reminder"`; connection alerts are neither. Add `"connection"`, with
+`Status: "error"`, `RefID` set to the connection id, and `AgentID` left empty — which
+`CreateInboxMessage` already inserts as SQL NULL specifically so a non-agent row does not
+trip the foreign key.
+
+The card renderer degrades safely but reads wrong, and both lines need updating
+(`HomePage.tsx:123-124`):
+
+```ts
+const Icon = msg.source === "reminder" ? Bell : Bot;
+const name = msg.agent_name || (msg.source === "reminder" ? "Reminder" : "Notification");
+```
+
+An unknown source falls through to the robot icon and the label "Notification". Give
+`"connection"` its own icon and the label "Connection", both from `lib/entityIcons.tsx` —
+lucide only, `currentColor`, never a bare import. The "View agent" link at line 160 is
+already guarded by `msg.agent_id &&`, so it correctly renders nothing; add a
+"Reconnect" link to `/connections` in its place for this source.
+
 Message text names the account and the remedy:
 
 > ⚠️ **Action required** — your **Gmail (work)** connection needs reconnecting.
@@ -118,8 +189,12 @@ Stated here so they are recorded limits rather than gaps discovered later:
 
 - **Providers that never refresh are not covered.** `token_expiry: never` (GitHub, Notion)
   and `auth.kind: none` connections never enter the refresh loop, so a server-side
-  revocation stays invisible until an agent run gets a 401. Covering them needs a
-  liveness probe, which is a different feature.
+  revocation stays invisible until an agent run gets a 401. Covering them properly needs a
+  liveness probe, which is a different feature. Note that the user is *not* silent in that
+  case: `Execute` returns `KindNeedsReauth` and `agentrunner.FriendlyRunError` already
+  sends a run-failure message naming the cause. Hooking this notifier there as well was
+  considered and rejected for now — it would deliver two messages about one event. If a
+  future spec adds it, the two paths must be de-duplicated rather than both left to fire.
 - **There is no advance warning for refresh-token providers.** The loop renews them
   indefinitely and failure is unpredictable — a revoked grant, a changed password, a
   rotated app secret. The failure *is* the first available signal. The alert fires at
