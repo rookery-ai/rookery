@@ -1,0 +1,40 @@
+provider: openrouter
+actions:
+  - name: openrouter_chat_completion
+    description: "Send a chat completion to any model OpenRouter routes to, using the user's own credits. Use to reach a model the workspace coder cannot."
+    mutating: false
+    params:
+      type: object
+      properties:
+        model:    {type: string, description: "e.g. anthropic/claude-sonnet-5 or deepseek/deepseek-chat"}
+        messages: {type: array, items: {type: object}, description: "[{role, content}]"}
+      required: [model, messages]
+    request:
+      method: POST
+      url: "https://openrouter.ai/api/v1/chat/completions"
+      body:
+        model:    "{{model}}"
+        messages: "{{messages}}"
+    response_extract: "$"
+
+  - name: openrouter_get_credits
+    description: "Check how much prepaid credit is left. Worth running on a schedule: an OpenRouter account that runs dry fails every agent that depends on it."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://openrouter.ai/api/v1/credits"
+    response_extract: "$.data"
+
+  - name: openrouter_list_models
+    description: "List the models OpenRouter offers, with pricing and context length. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://openrouter.ai/api/v1/models"
+    response_extract: "$.data"

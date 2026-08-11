@@ -1,0 +1,16 @@
+name: replicate
+label: Replicate
+category: AI
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Replicate API token"
+  key_hint: "r8_..."
+  setup_url: https://replicate.com/account/api-tokens
+setup_steps:
+  - "Sign in at https://replicate.com and open Account → API tokens."
+  - "Copy your token."
+  - "Paste it below. Replicate returns image and audio results as URLs rather than as file bytes, which is what makes it usable here — a connector answers in JSON."

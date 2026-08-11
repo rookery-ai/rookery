@@ -337,7 +337,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/iolimit` | `ReadCapped` + `ErrTooLarge` — the shared capped read every ingest door uses (KB upload, web-chat attachment, Telegram/Discord/Slack attachment, KB bridge, `save_to_kb` URL fetch), all enforcing one 25 MiB cap. Reads `cap+1` and REJECTS rather than truncating: a silently truncated import writes a note whose frontmatter states a byte count that is not the source's. `CappingWriter` is the write-side analogue — bounds a stream written into an `io.Writer` (Slack's `slack.Client.GetFile` insists on an `io.Writer` and has no size bound; there is no stdlib `io.LimitWriter`), rejecting at the same `cap+1` boundary. |
 | `internal/coder` | `Coder`: two engines behind one API. **CLI engine** — runs a coder CLI subprocess with full per-workspace isolation (`CoderBackend` interface: one struct per coder — Claude/OpenCode/Codex/Gemini/Cursor, plus a generic fallback). **API engine** (`api_engine.go`+`hosttools.go`, `coder_kind=="api"`) — an in-process LLM tool-calling loop (via `internal/llm`) that offers the model host tools (`read_file`/`write_file`/`edit_file`/`list_dir` + read-only discovery `search_files`/`glob` + exec tools `run_script`/`bash`/`web_fetch`/`web_search`) scoped+sandboxed to the vault, no subprocess. `WithNoTools()` text-only; `WithExtraEnv()` secret injection; `WithAPIConfig`/`WithSecretsLookup`/`WithVault`/`WithProgress`/`IsAPI()` for the API engine; `ForWorkspace(w, …)` builds a coder (local or api) from the workspace's inlined config |
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible, plus ~35 further providers registered against the OpenAI schema — see `coder.APIProviders()`); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
-| `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **92 providers** (Google-family incl. Calendar/Tasks/AdSense/GA4/Search Console, YouTube, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing, `ProviderNames()` backing the connections page), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username + AWS SigV4 request signing), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
+| `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **99 providers** (Google-family incl. Calendar/Tasks/AdSense/GA4/Search Console, YouTube, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing, `ProviderNames()` backing the connections page), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username + AWS SigV4 request signing), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
 | `internal/buildphase` | Tiny package holding `ROOKERY_BUILD_PHASE`/`generation` marker (set during agent/skill builds; the connector `Execute` build-guard refuses mutating actions when present). Its own package so it outlives any one integration. |
 | `internal/connalert` | Delivers the "this connection needs reconnecting" alert to the inbox AND chat when `DBTokenStore` flips a connection to `NEEDS_REAUTH`. Its own package because the alert needs the DB and the gateway and `internal/connectors` deliberately knows about neither — the same shape as `internal/approval`, and it takes the same narrow `SendToUser` interface so tests need no gateway. See "Connection re-auth alerting" below. |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal); `statefile.go` (`StateFilePath`/`ReadState`/`WriteState`/`RenderStateTemplate`) owns an agent's `state.md` format (see "Agent state" below); `migrate_files.go` (`MigrateAgentFilesToMarkdown`) is the idempotent startup migration off the old `state.json`/`agent.json` pair; `ParseRequiredSecrets` (`flow.go`) parses AGENT.md's `# Required secrets:` header — the only source of an agent's declared secrets now that `agent.json` is gone |
@@ -566,7 +566,7 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
 
 - **Data files, not code.** Adding a service = a `providers/<p>.yaml` (auth config) + a
   `connectors/<p>.yaml` (curated action manifest), both `go:embed`ed. `LoadBundled()` parses them.
-  **92 providers (~476 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
+  **99 providers (~492 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
   Search Console**), **YouTube**, GitHub, Slack, OpenAI, Notion, Outlook, Teams, Jira, HubSpot,
   Dropbox, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce,
   Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello.
@@ -697,6 +697,26 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
   ones. The build/impl AND runtime prompts inject `connectedToolsBlock` (backend-aware: native tools
   vs the `connector exec` command) so the coder knows the tools exist and is told there is **no
   Composio/SDK/service keys** in the env.
+
+**The AI connector tier (2026-08) — and why a connector cannot carry media.** Anthropic,
+OpenRouter, Perplexity, Replicate, Deepgram, AssemblyAI and Hugging Face join OpenAI under a new
+`AI` category (OpenAI moved there from `Developer`; splitting one group across two headings was
+the alternative). These are services an agent calls with the **user's own key**, deliberately
+distinct from `coder.APIProviders()`, which is how the workspace's own agent thinks.
+
+Three auth shapes here are worth knowing because guessing them wrong yields a provider that
+accepts a key and fails every call: **Anthropic** uses `x-api-key`, not `Authorization: Bearer`,
+plus a mandatory `anthropic-version` static header; **Deepgram** uses `Authorization: Token …`;
+and **AssemblyAI** sends the raw key with no scheme at all. All three were confirmed against the
+providers' own documentation.
+
+**ElevenLabs and Stability were scoped and dropped**, for the same reason `aws.yaml` omits S3:
+`Result.Data` is a `json.RawMessage` and `extract` returns a non-JSON body unchanged, so a
+response of audio or image BYTES corrupts the envelope rather than merely failing to narrow it.
+Base64 is not a way out — the bridge caps a result at 8 KiB. Replicate is in precisely because a
+prediction answers with **URLs** to its outputs. Hugging Face is metadata-only for the same
+reason. This is now the second instance of one rule: a connector answers in JSON, so a service
+whose payload is binary or XML needs framework support that does not exist yet.
 
 **`auth.kind: sigv4` — AWS, and the one scheme that signs rather than carries.** Every other
 kind puts a credential somewhere in the request; SigV4 signs the request itself, which is why

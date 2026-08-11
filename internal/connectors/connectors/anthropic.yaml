@@ -1,0 +1,33 @@
+provider: anthropic
+actions:
+  - name: anthropic_create_message
+    description: "Ask a Claude model a question and get its reply. Use when the workspace's own coder is not Claude, or when a second opinion from a different model is wanted."
+    mutating: false
+    params:
+      type: object
+      properties:
+        model:      {type: string, description: "e.g. claude-sonnet-5"}
+        messages:   {type: array, items: {type: object}, description: "[{role, content}] — role is user or assistant"}
+        max_tokens: {type: integer, description: "Required by this API. 1024 is a sensible default."}
+        system:     {type: string, description: "Optional system prompt."}
+      required: [model, messages, max_tokens]
+    request:
+      method: POST
+      url: "https://api.anthropic.com/v1/messages"
+      body:
+        model:      "{{model}}"
+        messages:   "{{messages}}"
+        max_tokens: "{{max_tokens}}"
+        system:     "{{system}}"
+    response_extract: "$"
+
+  - name: anthropic_list_models
+    description: "List the Claude models this key can use, with their ids. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.anthropic.com/v1/models"
+    response_extract: "$.data"

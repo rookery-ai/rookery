@@ -1,0 +1,16 @@
+name: huggingface
+label: Hugging Face
+category: AI
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Hugging Face access token"
+  key_hint: "hf_..."
+  setup_url: https://huggingface.co/settings/tokens
+setup_steps:
+  - "Sign in at https://huggingface.co and open Settings → Access Tokens."
+  - "Create a token with read scope — the actions here only read model and dataset metadata."
+  - "Paste it below."

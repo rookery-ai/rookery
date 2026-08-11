@@ -1,0 +1,18 @@
+name: assemblyai
+label: AssemblyAI
+category: AI
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  # The RAW key, with no scheme at all — not "Bearer ", not "Token ".
+  # Confirmed against AssemblyAI's own authentication docs.
+  value_prefix: ""
+  key_label: "AssemblyAI API key"
+  key_hint: "found on your AssemblyAI dashboard"
+  setup_url: https://www.assemblyai.com/app/account
+setup_steps:
+  - "Sign in at https://www.assemblyai.com and open your account page."
+  - "Copy the API key shown there."
+  - "Paste it below. Transcription is asynchronous: submitting returns an id, and you read the result back with the get action once its status is 'completed'."

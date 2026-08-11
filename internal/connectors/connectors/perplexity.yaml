@@ -1,0 +1,18 @@
+provider: perplexity
+actions:
+  - name: perplexity_search_answer
+    description: "Ask a question and get an answer grounded in a live web search, with the sources it used. Prefer this over a plain model when the answer depends on current information."
+    mutating: false
+    params:
+      type: object
+      properties:
+        model:    {type: string, description: "e.g. sonar or sonar-pro"}
+        messages: {type: array, items: {type: object}, description: "[{role, content}]"}
+      required: [model, messages]
+    request:
+      method: POST
+      url: "https://api.perplexity.ai/chat/completions"
+      body:
+        model:    "{{model}}"
+        messages: "{{messages}}"
+    response_extract: "$"

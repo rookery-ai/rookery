@@ -1,0 +1,16 @@
+name: openrouter
+label: OpenRouter
+category: AI
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "OpenRouter API key"
+  key_hint: "sk-or-v1-..."
+  setup_url: https://openrouter.ai/keys
+setup_steps:
+  - "Sign in at https://openrouter.ai and open Keys."
+  - "Create a key and copy it."
+  - "Paste it below. OpenRouter is prepaid, so the credits action here is worth having on an agent that runs unattended."
