@@ -1,0 +1,39 @@
+provider: tailscale
+actions:
+  - name: tailscale_list_devices
+    description: "List the devices on the tailnet, with their addresses, OS, last-seen time and key expiry. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        fields: {type: string, description: "'default' or 'all' for the fuller record."}
+    request:
+      method: GET
+      url: "https://api.tailscale.com/api/v2/tailnet/{{conn.tailnet}}/devices"
+      query:
+        fields: "{{fields}}"
+    response_extract: "$.devices"
+
+  - name: tailscale_get_device
+    description: "Read one device by id — its addresses, tags and whether its key has expired. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        device_id: {type: string, description: "From list_devices."}
+      required: [device_id]
+    request:
+      method: GET
+      url: "https://api.tailscale.com/api/v2/device/{{device_id}}"
+    response_extract: "$"
+
+  - name: tailscale_list_keys
+    description: "List the tailnet's auth keys and API access tokens, with expiry. Worth checking on a schedule — a Tailscale API token expires after 90 days by default and takes its agent down with it. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.tailscale.com/api/v2/tailnet/{{conn.tailnet}}/keys"
+    response_extract: "$.keys"

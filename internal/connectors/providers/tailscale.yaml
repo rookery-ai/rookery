@@ -1,0 +1,21 @@
+name: tailscale
+label: Tailscale
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Tailscale API access token"
+  key_hint: "tskey-api-..."
+  setup_url: https://login.tailscale.com/admin/settings/keys
+connect_inputs:
+  - key: tailnet
+    label: "Tailnet name"
+    hint: "e.g. example.com or your-org.github — or the literal '-' for the token's default tailnet"
+    required: true
+setup_steps:
+  - "Sign in at https://login.tailscale.com and open Settings → Keys."
+  - "Generate an API access token. These expire after 90 days by default, so an agent relying on it will need it rotated."
+  - "Paste it below with your tailnet name. If you are unsure, the literal '-' means the token's own default tailnet."

@@ -1,0 +1,70 @@
+provider: proxmox
+# Read-mostly. Proxmox can destroy virtual machines; nothing here does more than
+# start, stop or reboot one, and each of those is marked mutating.
+actions:
+  - name: proxmox_list_nodes
+    description: "List the nodes in the cluster, with CPU, memory and uptime. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api2/json/nodes"
+    response_extract: "$.data"
+
+  - name: proxmox_cluster_resources
+    description: "List every VM, container and storage pool across the cluster in one call, with status and usage. The best single overview. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        type: {type: string, description: "Filter, e.g. vm, storage or node."}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api2/json/cluster/resources"
+      query:
+        type: "{{type}}"
+    response_extract: "$.data"
+
+  - name: proxmox_get_vm_status
+    description: "Read one QEMU virtual machine's current status on a node. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        node:   {type: string, description: "Node name, from list_nodes."}
+        vmid:   {type: integer, description: "The VM id."}
+      required: [node, vmid]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api2/json/nodes/{{node}}/qemu/{{vmid}}/status/current"
+    response_extract: "$.data"
+
+  - name: proxmox_start_vm
+    description: "Start a virtual machine. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        node: {type: string}
+        vmid: {type: integer}
+      required: [node, vmid]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/api2/json/nodes/{{node}}/qemu/{{vmid}}/status/start"
+    response_extract: "$.data"
+
+  - name: proxmox_shutdown_vm
+    description: "Shut a virtual machine down gracefully. Mutating: it interrupts whatever that machine is serving."
+    mutating: true
+    params:
+      type: object
+      properties:
+        node: {type: string}
+        vmid: {type: integer}
+      required: [node, vmid]
+    request:
+      method: POST
+      url: "{{conn.base_url}}/api2/json/nodes/{{node}}/qemu/{{vmid}}/status/shutdown"
+    response_extract: "$.data"
