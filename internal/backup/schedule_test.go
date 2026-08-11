@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -71,14 +72,12 @@ func TestSchedulerRunOnceWritesSnapshotAndPrunes(t *testing.T) {
 	database, _ := newTestDB(t, dataDir)
 	writeFile(t, filepath.Join(dataDir, "vaults", "ws1", "notes", "a.md"), "note")
 
-	destDir := t.TempDir()
 	key := testKey()
 	store := newMemStore()
 
 	c := DefaultConfig()
 	c.Enabled = true
 	c.Destination = DestLocal
-	c.Local = LocalConfig{Dir: destDir}
 	c.Retention = 1
 	if err := c.SetPassphrase(key, "pw"); err != nil {
 		t.Fatal(err)
@@ -113,7 +112,7 @@ func TestSchedulerRunOnceWritesSnapshotAndPrunes(t *testing.T) {
 	if _, err := s.RunOnce(context.Background()); err != nil {
 		t.Fatalf("second RunOnce: %v", err)
 	}
-	entries, _ := NewLocalDestination(destDir).List(context.Background())
+	entries, _ := NewLocalDestination(DefaultLocalDir(dataDir)).List(context.Background())
 	if len(entries) != 1 {
 		t.Fatalf("retention=1 left %d snapshots, want 1", len(entries))
 	}
@@ -125,10 +124,16 @@ func TestSchedulerRunOnceRecordsFailure(t *testing.T) {
 	key := testKey()
 	store := newMemStore()
 
+	// The destination is derived from the data dir now, so the way to make the
+	// write fail is to occupy the path: MkdirAll refuses to create a directory
+	// where a regular file already sits.
+	if err := os.WriteFile(DefaultLocalDir(dataDir), []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	c := DefaultConfig()
 	c.Enabled = true
 	c.Destination = DestLocal
-	c.Local = LocalConfig{Dir: "/proc/nonexistent-cannot-create"}
 	if err := c.SetPassphrase(key, "pw"); err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +158,6 @@ func TestSchedulerRefusesWithoutPassphrase(t *testing.T) {
 	c := DefaultConfig()
 	c.Enabled = true
 	c.Destination = DestLocal
-	c.Local = LocalConfig{Dir: t.TempDir()}
 	SaveConfig(store, key, c)
 
 	if _, err := NewScheduler(store, database, dataDir, key).RunOnce(context.Background()); err == nil {

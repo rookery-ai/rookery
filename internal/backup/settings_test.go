@@ -2,6 +2,7 @@ package backup
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -87,12 +88,11 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 
 func TestConfigValidateRejectsBadValues(t *testing.T) {
 	cases := map[string]*Config{
-		"enabled with no passphrase": {Enabled: true, Destination: DestLocal, Schedule: ScheduleDaily, Retention: 7, Local: LocalConfig{Dir: "/tmp/b"}},
-		"local with no dir":          {Enabled: true, Destination: DestLocal, Schedule: ScheduleDaily, Retention: 7, EncryptedPassphrase: "x"},
+		"enabled with no passphrase": {Enabled: true, Destination: DestLocal, Schedule: ScheduleDaily, Retention: 7},
 		"s3 with no bucket":          {Enabled: true, Destination: DestS3, Schedule: ScheduleDaily, Retention: 7, EncryptedPassphrase: "x"},
-		"hour out of range":          {Enabled: true, Destination: DestLocal, Schedule: ScheduleDaily, Hour: 24, Retention: 7, EncryptedPassphrase: "x", Local: LocalConfig{Dir: "/tmp/b"}},
-		"retention below one":        {Enabled: true, Destination: DestLocal, Schedule: ScheduleDaily, Retention: 0, EncryptedPassphrase: "x", Local: LocalConfig{Dir: "/tmp/b"}},
-		"unknown schedule":           {Enabled: true, Destination: DestLocal, Schedule: "hourly", Retention: 7, EncryptedPassphrase: "x", Local: LocalConfig{Dir: "/tmp/b"}},
+		"hour out of range":          {Enabled: true, Destination: DestLocal, Schedule: ScheduleDaily, Hour: 24, Retention: 7, EncryptedPassphrase: "x"},
+		"retention below one":        {Enabled: true, Destination: DestLocal, Schedule: ScheduleDaily, Retention: 0, EncryptedPassphrase: "x"},
+		"unknown schedule":           {Enabled: true, Destination: DestLocal, Schedule: "hourly", Retention: 7, EncryptedPassphrase: "x"},
 	}
 	for name, c := range cases {
 		if err := c.Validate(); err == nil {
@@ -109,20 +109,65 @@ func TestConfigValidateAcceptsDisabledIncomplete(t *testing.T) {
 	}
 }
 
-func TestBuildDestinationLocal(t *testing.T) {
-	c := &Config{Destination: DestLocal, Local: LocalConfig{Dir: t.TempDir()}}
-	d, err := c.BuildDestination(testKey())
+func TestBuildDestinationLocalUsesTheDataDir(t *testing.T) {
+	dataDir := t.TempDir()
+	c := &Config{Destination: DestLocal}
+	d, err := c.BuildDestination(dataDir, testKey())
 	if err != nil {
 		t.Fatalf("BuildDestination: %v", err)
 	}
-	if !strings.HasPrefix(d.Name(), "local:") {
-		t.Fatalf("got %q, want a local destination", d.Name())
+	want := "local:" + filepath.Join(dataDir, "backups")
+	if d.Name() != want {
+		t.Fatalf("got %q, want %q", d.Name(), want)
+	}
+}
+
+// A local destination needs no configuration at all now, so an otherwise
+// complete config must validate without one.
+func TestConfigValidateAcceptsLocalWithNoDirectory(t *testing.T) {
+	c := &Config{
+		Enabled: true, Destination: DestLocal, Schedule: ScheduleDaily,
+		Hour: 3, Retention: 7, EncryptedPassphrase: "x",
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("a local destination needs no directory: %v", err)
+	}
+}
+
+// An install configured before the folder field was removed still has
+// {"local":{"dir":"/mnt/backups"}} in its stored config. It must parse, and the
+// value must not come back to life. encoding/json ignores unknown keys, so this
+// costs no migration code — but it is exactly the kind of thing someone
+// "restores" by re-adding the field, so it is pinned.
+func TestLoadConfigIgnoresALegacyLocalDirectory(t *testing.T) {
+	store := newMemStore()
+	raw := `{"enabled":true,"destination":"local","schedule":"daily","hour":3,` +
+		`"retention":7,"encrypted_passphrase":"x","local":{"dir":"/mnt/backups"}}`
+	if err := store.SetSystemSetting(SettingsKey, raw); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := LoadConfig(store, testKey())
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if c.Retention != 7 || c.Destination != DestLocal {
+		t.Fatalf("the rest of the config must survive: %+v", c)
+	}
+
+	dataDir := t.TempDir()
+	d, err := c.BuildDestination(dataDir, testKey())
+	if err != nil {
+		t.Fatalf("BuildDestination: %v", err)
+	}
+	if strings.Contains(d.Name(), "/mnt/backups") {
+		t.Fatalf("the legacy directory must not be honoured: %q", d.Name())
 	}
 }
 
 func TestBuildDestinationS3NeedsSecret(t *testing.T) {
 	c := &Config{Destination: DestS3, S3: S3Config{Bucket: "b", Region: "r", AccessKey: "AK"}}
-	if _, err := c.BuildDestination(testKey()); err == nil {
+	if _, err := c.BuildDestination(t.TempDir(), testKey()); err == nil {
 		t.Fatal("an S3 destination without a stored secret key must fail loudly")
 	}
 }
