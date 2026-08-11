@@ -1,0 +1,23 @@
+name: matrix
+label: Matrix
+category: Communication
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Matrix access token"
+  key_hint: "from your client: Settings → Help & About → Access Token"
+  setup_url: https://matrix.org/docs/guides/
+connect_inputs:
+  - key: base_url
+    label: "Homeserver URL"
+    hint: "e.g. https://matrix.org, or your own server — a LAN or Tailscale address is fine"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In Element, open Settings → Help & About and reveal your access token. Treat it as a password: it is your whole account."
+  - "A dedicated account for the agent is a better idea than your own — the token cannot be scoped."
+  - "Paste it below with your homeserver URL."
+  - "This is a CONNECTOR, not a chat platform: an agent can post to a room, but Matrix is not yet somewhere Rookery talks back to you."

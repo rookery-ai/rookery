@@ -1,0 +1,40 @@
+provider: pushover
+actions:
+  - name: pushover_send_message
+    description: "Send a push notification to the connected user's devices. Mutating: it reaches a human's phone, so an agent should have a reason."
+    mutating: true
+    params:
+      type: object
+      properties:
+        message:  {type: string, description: "The notification body."}
+        title:    {type: string, description: "Optional title; defaults to the application name."}
+        priority: {type: integer, description: "-2 silent, -1 quiet, 0 normal, 1 high. Do not use 2 (emergency) unprompted — it retries until acknowledged."}
+        url:      {type: string, description: "Optional link to include."}
+        url_title: {type: string, description: "Label for that link."}
+        sound:    {type: string, description: "Optional sound name."}
+      required: [message]
+    request:
+      method: POST
+      url: "https://api.pushover.net/1/messages.json"
+      query:
+        user:      "{{conn.user_key}}"
+        message:   "{{message}}"
+        title:     "{{title}}"
+        priority:  "{{priority}}"
+        url:       "{{url}}"
+        url_title: "{{url_title}}"
+        sound:     "{{sound}}"
+    response_extract: "$"
+
+  - name: pushover_validate
+    description: "Check that the token and user key are still good, without sending anything. Worth running before relying on this connection."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: POST
+      url: "https://api.pushover.net/1/users/validate.json"
+      query:
+        user: "{{conn.user_key}}"
+    response_extract: "$"

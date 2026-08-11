@@ -1,0 +1,51 @@
+provider: resend
+actions:
+  - name: resend_send_email
+    description: "Send an email. PUBLIC WRITE: it leaves the user's own domain and lands in someone else's inbox, which cannot be taken back."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        from:    {type: string, description: "e.g. Agent <agent@yourdomain.com> — the domain must be verified in Resend."}
+        to:      {type: array, items: {type: string}, description: "Recipient addresses."}
+        subject: {type: string}
+        text:    {type: string, description: "Plain-text body."}
+        html:    {type: string, description: "Optional HTML body."}
+        reply_to: {type: string}
+      required: [from, to, subject]
+    request:
+      method: POST
+      url: "https://api.resend.com/emails"
+      body:
+        from:     "{{from}}"
+        to:       "{{to}}"
+        subject:  "{{subject}}"
+        text:     "{{text}}"
+        html:     "{{html}}"
+        reply_to: "{{reply_to}}"
+    response_extract: "$"
+
+  - name: resend_get_email
+    description: "Read back a sent email by id — its status and delivery details. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        email_id: {type: string}
+      required: [email_id]
+    request:
+      method: GET
+      url: "https://api.resend.com/emails/{{email_id}}"
+    response_extract: "$"
+
+  - name: resend_list_domains
+    description: "List the sending domains on the account and whether each is verified. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.resend.com/domains"
+    response_extract: "$.data"

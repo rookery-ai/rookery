@@ -229,6 +229,12 @@ hetzner:siHetzner
 # Wave 3 money connectors. CoinGecko and Alpha Vantage are in none of the three
 # sets and take the upstream path below instead.
 wise:siWise
+# Wave 4 notification and email connectors. Pushover has no mark in any set and
+# takes the upstream path.
+pushbullet:siPushbullet
+resend:siResend
+mailgun:siMailgun
+matrix:siMatrix
 adguard:siAdguard
 firefly_iii:siFireflyiii
 tmdb:siThemoviedatabase
