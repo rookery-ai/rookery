@@ -1,0 +1,18 @@
+name: coingecko
+label: CoinGecko
+category: Finance
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  # The DEMO plan header. A paid plan uses x-cg-pro-api-key against
+  # pro-api.coingecko.com instead, which is a different connection.
+  header_name: x-cg-demo-api-key
+  value_prefix: ""
+  key_label: "CoinGecko Demo API key"
+  key_hint: "CG-..."
+  setup_url: https://www.coingecko.com/en/developers/dashboard
+setup_steps:
+  - "Sign in at https://www.coingecko.com and open the Developers dashboard."
+  - "Create a Demo API key — the free tier is generous for occasional price checks."
+  - "Paste it below."

@@ -1,0 +1,54 @@
+provider: coingecko
+actions:
+  - name: coingecko_simple_price
+    description: "Look up the current price of one or more coins in one or more currencies. The cheapest call for 'what is bitcoin worth'."
+    mutating: false
+    params:
+      type: object
+      properties:
+        ids:           {type: string, description: "Comma-separated coin ids, e.g. bitcoin,ethereum"}
+        vs_currencies: {type: string, description: "Comma-separated fiat codes, e.g. usd,eur"}
+        include_24hr_change: {type: boolean}
+      required: [ids, vs_currencies]
+    request:
+      method: GET
+      url: "https://api.coingecko.com/api/v3/simple/price"
+      query:
+        ids:                 "{{ids}}"
+        vs_currencies:       "{{vs_currencies}}"
+        include_24hr_change: "{{include_24hr_change}}"
+    response_extract: "$"
+
+  - name: coingecko_coins_markets
+    description: "Market data for the top coins — price, market cap, volume and 24h change, ranked. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        vs_currency: {type: string, description: "e.g. usd"}
+        ids:         {type: string, description: "Optional comma-separated coin ids."}
+        per_page:    {type: integer, description: "How many to return."}
+      required: [vs_currency]
+    request:
+      method: GET
+      url: "https://api.coingecko.com/api/v3/coins/markets"
+      query:
+        vs_currency: "{{vs_currency}}"
+        ids:         "{{ids}}"
+        per_page:    "{{per_page}}"
+    response_extract: "$"
+
+  - name: coingecko_search
+    description: "Search for a coin by name to find its id — which every other action needs. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string}
+      required: [query]
+    request:
+      method: GET
+      url: "https://api.coingecko.com/api/v3/search"
+      query:
+        query: "{{query}}"
+    response_extract: "$.coins"
