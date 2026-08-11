@@ -1,0 +1,53 @@
+provider: bazarr
+# Bazarr's API lives under /api/ rather than the /api/v1/ the other *arr apps
+# use, which is the sort of difference that makes a copied YAML 404 everywhere.
+actions:
+  - name: bazarr_system_status
+    description: "Read Bazarr's version and health. The cheapest way to check the connection works. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/system/status"
+    response_extract: "$"
+
+  - name: bazarr_list_wanted_series
+    description: "List episodes Bazarr is still missing subtitles for. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        length: {type: integer, description: "How many to return."}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/episodes/wanted"
+      query:
+        length: "{{length}}"
+    response_extract: "$.data"
+
+  - name: bazarr_list_wanted_movies
+    description: "List movies Bazarr is still missing subtitles for. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        length: {type: integer}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/movies/wanted"
+      query:
+        length: "{{length}}"
+    response_extract: "$.data"
+
+  - name: bazarr_list_tasks
+    description: "List Bazarr's scheduled tasks and when each last ran — useful for checking a search job is still firing. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/system/tasks"
+    response_extract: "$"

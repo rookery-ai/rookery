@@ -1,0 +1,66 @@
+provider: plex
+# Read-only throughout. Plex answers XML unless asked for JSON, which the
+# provider's static Accept header handles — without it every action here would
+# return a body the connector layer cannot narrow.
+actions:
+  - name: plex_server_identity
+    description: "Read the server's name, version and machine identifier. The cheapest way to check the connection works. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/identity"
+    response_extract: "$"
+
+  - name: plex_list_libraries
+    description: "List the libraries on the server, with their section keys — which the other actions need. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/library/sections"
+    response_extract: "$.MediaContainer"
+
+  - name: plex_recently_added
+    description: "What was added to the server most recently. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        section_key: {type: string, description: "Optional: one library, from list_libraries. Omit for everything."}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/library/recentlyAdded"
+      query:
+        sectionID: "{{section_key}}"
+    response_extract: "$.MediaContainer"
+
+  - name: plex_search
+    description: "Search the server's libraries by title. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string}
+      required: [query]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/search"
+      query:
+        query: "{{query}}"
+    response_extract: "$.MediaContainer"
+
+  - name: plex_active_sessions
+    description: "Who is watching what right now, and on which device. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/status/sessions"
+    response_extract: "$.MediaContainer"
