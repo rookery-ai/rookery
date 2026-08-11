@@ -563,6 +563,9 @@ DISPLAY_NAMES = {
     # demand the prose say "Huggingface", which is not the name.
     "huggingface": "Hugging Face",
     "assemblyai": "AssemblyAI",
+    "flyio": "Fly.io",
+    "digitalocean": "DigitalOcean",
+    "hetzner": "Hetzner Cloud",
     "open_meteo": "Open-Meteo",
     "openfoodfacts": "Open Food Facts",
     "openlibrary": "Open Library",

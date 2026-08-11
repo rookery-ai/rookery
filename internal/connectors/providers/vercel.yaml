@@ -1,0 +1,23 @@
+name: vercel
+label: Vercel
+category: Cloud
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Vercel access token"
+  key_hint: "created under Account Settings → Tokens"
+  setup_url: https://vercel.com/account/tokens
+connect_inputs:
+  # Optional: a personal-account token needs no team id, and sending an empty
+  # one is dropped by the query renderer rather than sent blank.
+  - key: team_id
+    label: "Team ID"
+    hint: "leave blank for a personal account; find it under Team Settings"
+    required: false
+setup_steps:
+  - "Sign in at https://vercel.com and open Account Settings → Tokens."
+  - "Create a token, choosing the scope — a specific team, or your personal account."
+  - "If the token is scoped to a TEAM, paste that team's ID below as well; a personal token needs no team id."

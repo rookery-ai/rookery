@@ -1,0 +1,43 @@
+provider: netlify
+actions:
+  - name: netlify_list_sites
+    description: "List the sites on the account, with their URLs and repository. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        filter: {type: string, description: "e.g. all, owner, guest"}
+        name:   {type: string, description: "Filter by site name."}
+    request:
+      method: GET
+      url: "https://api.netlify.com/api/v1/sites"
+      query:
+        filter: "{{filter}}"
+        name:   "{{name}}"
+    response_extract: "$"
+
+  - name: netlify_list_deploys
+    description: "List a site's deploys, newest first, with their state. The usual way to check whether the last publish succeeded. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        site_id: {type: string, description: "From list_sites."}
+      required: [site_id]
+    request:
+      method: GET
+      url: "https://api.netlify.com/api/v1/sites/{{site_id}}/deploys"
+    response_extract: "$"
+
+  - name: netlify_get_site
+    description: "Read one site by id — its URL, build settings and publish state. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        site_id: {type: string}
+      required: [site_id]
+    request:
+      method: GET
+      url: "https://api.netlify.com/api/v1/sites/{{site_id}}"
+    response_extract: "$"

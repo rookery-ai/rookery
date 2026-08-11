@@ -1,0 +1,16 @@
+name: netlify
+label: Netlify
+category: Cloud
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Netlify personal access token"
+  key_hint: "created under User settings → Applications"
+  setup_url: https://app.netlify.com/user/applications
+setup_steps:
+  - "Sign in at https://app.netlify.com and open User settings → Applications → Personal access tokens."
+  - "Create a token and copy it — Netlify shows it once."
+  - "Paste it below."

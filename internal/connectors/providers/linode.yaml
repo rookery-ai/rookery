@@ -1,0 +1,16 @@
+name: linode
+label: Linode
+category: Cloud
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Linode personal access token"
+  key_hint: "created under My Profile → API Tokens"
+  setup_url: https://cloud.linode.com/profile/tokens
+setup_steps:
+  - "Sign in at https://cloud.linode.com and open My Profile → API Tokens."
+  - "Create a personal access token. Read Only on Linodes and Account covers everything here except the power actions."
+  - "Copy it — Linode shows it once — and paste it below."

@@ -1,0 +1,56 @@
+provider: hetzner
+actions:
+  - name: hetzner_list_servers
+    description: "List the servers in the connected project, with their status and IP addresses. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        status: {type: string, description: "Filter, e.g. running or off."}
+        name:   {type: string, description: "Filter by server name."}
+    request:
+      method: GET
+      url: "https://api.hetzner.cloud/v1/servers"
+      query:
+        status: "{{status}}"
+        name:   "{{name}}"
+    response_extract: "$.servers"
+
+  - name: hetzner_get_server
+    description: "Read one server by id — status, type, datacentre and addresses. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        server_id: {type: integer}
+      required: [server_id]
+    request:
+      method: GET
+      url: "https://api.hetzner.cloud/v1/servers/{{server_id}}"
+    response_extract: "$.server"
+
+  - name: hetzner_power_on_server
+    description: "Power a server on. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        server_id: {type: integer}
+      required: [server_id]
+    request:
+      method: POST
+      url: "https://api.hetzner.cloud/v1/servers/{{server_id}}/actions/poweron"
+    response_extract: "$.action"
+
+  - name: hetzner_reboot_server
+    description: "Reboot a server gracefully. Mutating: it interrupts whatever the server is serving."
+    mutating: true
+    params:
+      type: object
+      properties:
+        server_id: {type: integer}
+      required: [server_id]
+    request:
+      method: POST
+      url: "https://api.hetzner.cloud/v1/servers/{{server_id}}/actions/reboot"
+    response_extract: "$.action"

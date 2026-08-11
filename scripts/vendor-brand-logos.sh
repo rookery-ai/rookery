@@ -113,6 +113,13 @@ aws:aws-color
 # tile. deepgram has no lobehub mark and comes from simple-icons below.
 replicate:replicate
 assemblyai:assemblyai-color
+# Wave 2 CLOUD-ADJACENT connectors (2026-08). vercel reuses the same mark as the
+# vercel_ai coder provider above — one brand, two integrations. cloudflare-color
+# is orange and reads on the white tile. DigitalOcean, Netlify, Fly.io and
+# Hetzner come from simple-icons below; Linode from worldvectorlogo, the only
+# one of the seven that neither AI-oriented set carries.
+cloudflare:cloudflare-color
+vercel:vercel
 "
 
 # our-slug:worldvectorlogo-slug
@@ -156,6 +163,9 @@ google_ads:google-ads-2
 tiktok:tiktok-icon-2
 reddit:reddit-4
 mastodon:mastodon-2
+# Linode (wave 2) — the only cloud-adjacent brand carried by neither lobehub nor
+# simple-icons.
+linode:linode
 "
 
 # our-slug:simple-icons-export
@@ -210,6 +220,12 @@ jellyfin:siJellyfin
 # Deepgram (wave 1 AI connectors) — the one brand in that wave with no lobehub
 # mark. simple-icons carries it.
 deepgram:siDeepgram
+# Wave 2 cloud-adjacent connectors. Note the export name for Fly.io is
+# siFlydotio, not siFly — siFly is a different brand entirely.
+digitalocean:siDigitalocean
+netlify:siNetlify
+flyio:siFlydotio
+hetzner:siHetzner
 adguard:siAdguard
 firefly_iii:siFireflyiii
 tmdb:siThemoviedatabase

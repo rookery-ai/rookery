@@ -1,0 +1,16 @@
+name: digitalocean
+label: DigitalOcean
+category: Cloud
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "DigitalOcean personal access token"
+  key_hint: "dop_v1_..."
+  setup_url: https://cloud.digitalocean.com/account/api/tokens
+setup_steps:
+  - "Sign in at https://cloud.digitalocean.com and open API → Tokens."
+  - "Generate a new token. Read scope is enough for the actions here except the droplet power ones."
+  - "Copy it — DigitalOcean shows the value once — and paste it below."
