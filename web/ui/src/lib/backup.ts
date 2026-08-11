@@ -23,6 +23,8 @@ export type BackupConfig = {
   weekday: number;
   retention: number;
   passphrase_set: boolean;
+  // Resolved by the server, never sent back up: local snapshots always go to
+  // <data_dir>/backups.
   local_dir: string;
   s3: BackupS3;
   last_run_at: string;
@@ -43,7 +45,6 @@ export type SaveBackupConfig = {
   weekday: number;
   retention: number;
   passphrase?: string;
-  local: { dir: string };
   s3: {
     endpoint: string;
     region: string;

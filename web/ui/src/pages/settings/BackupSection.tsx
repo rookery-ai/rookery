@@ -52,7 +52,6 @@ type FormState = {
   weekday: number;
   retention: number;
   passphrase: string;
-  localDir: string;
   s3Endpoint: string;
   s3Region: string;
   s3Bucket: string;
@@ -96,7 +95,6 @@ export function BackupSection() {
       weekday: data.weekday ?? 0,
       retention: data.retention ?? 7,
       passphrase: "",
-      localDir: data.local_dir ?? "",
       s3Endpoint: s3.endpoint ?? "",
       s3Region: s3.region ?? "",
       s3Bucket: s3.bucket ?? "",
@@ -119,7 +117,6 @@ export function BackupSection() {
       hour: form.hour,
       weekday: form.weekday,
       retention: form.retention,
-      local: { dir: form.localDir },
       s3: {
         endpoint: form.s3Endpoint,
         region: form.s3Region,
@@ -333,16 +330,21 @@ export function BackupSection() {
           </label>
         </div>
 
+        {/* Not an input. The packaged unit runs ProtectSystem=strict with
+            ReadWritePaths=<data_dir> and the container mounts one volume, so a
+            folder anywhere else would not fail when it was typed — it would
+            fail at 03:00 with a permission error nobody is watching. */}
         {form.destination === "local" ? (
-          <label className="block text-sm">
-            <span className="block text-muted-2">Backup folder</span>
-            <Input
-              className="mt-1"
-              placeholder="/mnt/backups"
-              value={form.localDir}
-              onChange={(e) => set("localDir", e.target.value)}
-            />
-          </label>
+          <div className="rounded-md bg-chrome px-3 py-2 text-sm">
+            <span className="block text-muted-2">Snapshots are written to</span>
+            <code className="mt-0.5 block break-all font-mono">
+              {data?.local_dir}
+            </code>
+            <p className="mt-2 text-muted-2">
+              A backup on the same disk as the install is not a backup. Download
+              each one and keep it somewhere else.
+            </p>
+          </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-sm">
@@ -485,6 +487,10 @@ export function BackupSection() {
       {configured && (
         <div className="mt-5">
           <h4 className="text-xs font-bold tracking-wide text-muted-2 uppercase">Snapshots</h4>
+          <p className="mt-1 text-sm text-muted-2">
+            Download a snapshot and store it off this machine — a backup that
+            dies with the machine it protects is not one.
+          </p>
           {snapshots.isError && (
             <div className="mt-2">
               <ErrorNote message={errMsg(snapshots.error)} />
