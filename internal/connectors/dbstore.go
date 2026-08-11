@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -83,6 +84,18 @@ func (s *DBTokenStore) AccessToken(ctx context.Context, conn ConnRef) (string, e
 	return s.refresh(ctx, row)
 }
 
+// definitiveRejection reports whether err means the provider has rejected the
+// credential itself, as opposed to being temporarily unable to answer.
+func definitiveRejection(err error) bool {
+	var ce *ConnectorError
+	if !errors.As(err, &ce) {
+		// An unclassified error is not proof of rejection. Failing open here
+		// costs one more retry; failing closed costs the connection.
+		return false
+	}
+	return ce.Kind == KindAuth
+}
+
 func (s *DBTokenStore) expired(expiresAt string) bool {
 	if expiresAt == "" {
 		return true
@@ -112,6 +125,14 @@ func (s *DBTokenStore) refresh(ctx context.Context, row *db.ServiceConnection) (
 	}
 	ts, err := s.OAuth.Refresh(ctx, prov, cid, csec, refreshTok)
 	if err != nil {
+		// Only a definitive rejection marks the connection dead. A row set to
+		// NEEDS_REAUTH leaves ConnectionsNearExpiry's status='ACTIVE' filter and
+		// is never renewed again, so treating a 500 or a network blip as fatal
+		// permanently bricks a healthy connection that would have recovered on
+		// the next tick.
+		if !definitiveRejection(err) {
+			return "", err
+		}
 		s.DB.UpdateConnectionStatus(ctx, row.ID, "NEEDS_REAUTH")
 		return "", &ConnectorError{KindNeedsReauth, "token refresh failed for " + row.AccountLabel + "; reconnect it (" + err.Error() + ")"}
 	}

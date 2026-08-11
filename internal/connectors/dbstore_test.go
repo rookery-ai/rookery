@@ -234,3 +234,69 @@ func TestRefreshDueSkipsKeylessConnections(t *testing.T) {
 		t.Errorf("refreshDue refreshed %d keyless connections, want 0", n)
 	}
 }
+
+// refreshFixture wires one google connection whose token expired a minute ago,
+// pointed at srv as its token endpoint.
+func refreshFixture(t *testing.T, srv *httptest.Server) (*db.DB, *DBTokenStore, []byte) {
+	t.Helper()
+	d, ws := storeTestDB(t)
+	key := mkKey()
+	ctx := context.Background()
+	encID, _ := secrets.EncryptWithSystemKey("cid", key)
+	encSec, _ := secrets.EncryptWithSystemKey("csec", key)
+	d.UpsertServiceProviderConfig(ctx, db.ServiceProviderConfig{
+		ID: "pc1", WorkspaceID: ws, Provider: "google",
+		EncryptedClientID: encID, EncryptedClientSecret: encSec})
+	encRefresh, _ := secrets.EncryptWithSystemKey("RT", key)
+	encOld, _ := secrets.EncryptWithSystemKey("OLD", key)
+	past := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	d.InsertServiceConnection(ctx, db.ServiceConnection{
+		ID: "c1", WorkspaceID: ws, Provider: "google", AccountLabel: "work",
+		EncryptedAccessToken: encOld, EncryptedRefreshToken: encRefresh,
+		ExpiresAt: past, Status: "ACTIVE"})
+
+	reg := testRegistry(t)
+	reg.providers["google"] = Provider{Name: "google", TokenURL: srv.URL + "/token"}
+	return d, &DBTokenStore{DB: d, SystemKey: key, Reg: reg, OAuth: OAuthClient{HTTP: srv.Client()}}, key
+}
+
+// A transient failure must not cost the user the connection. Once a row is
+// NEEDS_REAUTH it drops out of ConnectionsNearExpiry's status='ACTIVE' filter
+// and the background loop never renews it again, so treating a 500 as fatal
+// turns a momentary outage into a permanent breakage.
+func TestRefreshKeepsConnectionActiveOnTransientFailure(t *testing.T) {
+	for _, status := range []int{429, 500, 503} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+			}))
+			defer srv.Close()
+			d, store, _ := refreshFixture(t, srv)
+
+			if _, err := store.AccessToken(context.Background(), ConnRef{ID: "c1", Provider: "google"}); err == nil {
+				t.Fatal("want an error from a failing token endpoint")
+			}
+			got, _ := d.GetServiceConnection(context.Background(), "c1")
+			if got.Status != "ACTIVE" {
+				t.Fatalf("status %d must not brick the connection: got %q, want ACTIVE", status, got.Status)
+			}
+		})
+	}
+}
+
+func TestRefreshMarksNeedsReauthOnDefinitiveRejection(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"invalid_grant"}`))
+	}))
+	defer srv.Close()
+	d, store, _ := refreshFixture(t, srv)
+
+	if _, err := store.AccessToken(context.Background(), ConnRef{ID: "c1", Provider: "google"}); err == nil {
+		t.Fatal("want an error from a rejected refresh token")
+	}
+	got, _ := d.GetServiceConnection(context.Background(), "c1")
+	if got.Status != "NEEDS_REAUTH" {
+		t.Fatalf("got %q, want NEEDS_REAUTH", got.Status)
+	}
+}
