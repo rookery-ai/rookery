@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Loader2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -135,6 +136,12 @@ export function MCPServerWizard({
               </span>
               <Input
                 type="password"
+                // A THIRD-PARTY secret, so it opts out of autofill: Chrome
+                // ignores autocomplete="off" on a password field and pairs it
+                // with a nearby text input it fills as the username — here that
+                // would be the server name or URL. Pinned by
+                // search-input.test.tsx for the connections surfaces.
+                autoComplete="new-password"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
                 placeholder={
@@ -164,7 +171,12 @@ export function MCPServerWizard({
           <Button variant="outline" onClick={onClose} disabled={busy}>
             Cancel
           </Button>
+          {/* An ACTION button, so it carries a leading icon — the footer-pair
+              carve-out covers the dismissing half (Cancel), not this one. The
+              spinner doubles as that icon while the server is being probed,
+              which is the one moment the wait is worth showing. */}
           <Button onClick={save} disabled={busy || !name || !url}>
+            {busy ? <Loader2 className="animate-spin" /> : <Save />}
             {busy ? "Checking the server…" : editing ? "Save & re-sync" : "Test & save"}
           </Button>
         </DialogFooter>
