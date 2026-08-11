@@ -1,0 +1,21 @@
+name: sentry
+label: Sentry
+category: Developer
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Sentry auth token"
+  key_hint: "sntrys_... — an organization or user auth token"
+  setup_url: https://sentry.io/settings/account/api/auth-tokens/
+connect_inputs:
+  - key: org_slug
+    label: "Organization slug"
+    hint: "from your Sentry URL: sentry.io/organizations/<slug>/"
+    required: true
+setup_steps:
+  - "Open Settings → Auth Tokens in Sentry and create a token."
+  - "Grant project:read, event:read and org:read — everything here reads."
+  - "Copy it and paste it below with your organization slug."

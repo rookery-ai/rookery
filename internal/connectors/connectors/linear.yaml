@@ -1,0 +1,75 @@
+provider: linear
+# Linear is GraphQL: ONE endpoint, and the action is expressed in the query
+# document rather than the URL. Each query below is fixed, with only its
+# variables substituted — a connector cannot let the model write GraphQL, and
+# should not.
+actions:
+  - name: linear_list_issues
+    description: "List issues assigned to you or matching a filter, with state and team. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        first: {type: integer, description: "How many to return."}
+      required: []
+    request:
+      method: POST
+      url: "https://api.linear.app/graphql"
+      body:
+        query: "query($first: Int) { issues(first: $first, orderBy: updatedAt) { nodes { id identifier title state { name } assignee { name } team { key } url updatedAt } } }"
+        variables:
+          first: "{{first}}"
+    response_extract: "$.data"
+
+  - name: linear_search_issues
+    description: "Search issues by text. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        term:  {type: string, description: "What to search for."}
+        first: {type: integer}
+      required: [term]
+    request:
+      method: POST
+      url: "https://api.linear.app/graphql"
+      body:
+        query: "query($term: String!, $first: Int) { searchIssues(term: $term, first: $first) { nodes { id identifier title state { name } url } } }"
+        variables:
+          term:  "{{term}}"
+          first: "{{first}}"
+    response_extract: "$.data"
+
+  - name: linear_create_issue
+    description: "Create an issue on a team. Mutating: it appears in that team's board and notifies its members."
+    mutating: true
+    params:
+      type: object
+      properties:
+        team_id:     {type: string, description: "The team's UUID, from list_teams."}
+        title:       {type: string}
+        description: {type: string, description: "Markdown body."}
+      required: [team_id, title]
+    request:
+      method: POST
+      url: "https://api.linear.app/graphql"
+      body:
+        query: "mutation($teamId: String!, $title: String!, $description: String) { issueCreate(input: {teamId: $teamId, title: $title, description: $description}) { success issue { id identifier url } } }"
+        variables:
+          teamId:      "{{team_id}}"
+          title:       "{{title}}"
+          description: "{{description}}"
+    response_extract: "$.data"
+
+  - name: linear_list_teams
+    description: "List the teams in the workspace with their ids — which create_issue needs. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: POST
+      url: "https://api.linear.app/graphql"
+      body:
+        query: "query { teams { nodes { id key name } } }"
+    response_extract: "$.data"

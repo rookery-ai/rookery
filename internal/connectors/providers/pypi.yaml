@@ -1,0 +1,10 @@
+name: pypi
+label: PyPI
+category: Developer
+# Public JSON API, no credential — the keyless shape.
+unverified: true
+auth:
+  kind: none
+setup_steps:
+  - "Nothing to set up — PyPI's JSON API is public. Press Connect."
+  - "These actions read published package metadata: versions, requirements, project URLs and yank status."

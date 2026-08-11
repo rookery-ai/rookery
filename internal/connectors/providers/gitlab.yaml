@@ -1,0 +1,25 @@
+name: gitlab
+label: GitLab
+category: Developer
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "GitLab personal access token"
+  key_hint: "glpat-..."
+  setup_url: https://gitlab.com/-/user_settings/personal_access_tokens
+connect_inputs:
+  # Self-managed GitLab is at least as common as gitlab.com in the audience this
+  # product is built for, so the host is part of the connection rather than
+  # hardcoded.
+  - key: base_url
+    label: "GitLab URL"
+    hint: "https://gitlab.com, or your own instance"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "Open User settings → Access tokens on your GitLab instance."
+  - "Create a token with the read_api scope — every action here reads. Add api only if you want an agent to open issues."
+  - "Copy it — GitLab shows it once — and paste it below with your GitLab URL."

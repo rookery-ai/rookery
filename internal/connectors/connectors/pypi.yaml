@@ -1,0 +1,44 @@
+provider: pypi
+# PyPI has no search API any more — the /search endpoint was withdrawn and
+# returns HTML to a browser, not JSON. Only lookups by exact name are offered,
+# rather than an action that would appear to search and could not.
+actions:
+  - name: pypi_get_package
+    description: "Read a package's metadata — latest version, summary, requirements, project URLs and license. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        package: {type: string, description: "The exact project name, e.g. requests"}
+      required: [package]
+    request:
+      method: GET
+      url: "https://pypi.org/pypi/{{package}}/json"
+    response_extract: "$.info"
+
+  - name: pypi_get_version
+    description: "Read the metadata for ONE specific version of a package. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        package: {type: string}
+        version: {type: string, description: "e.g. 2.31.0"}
+      required: [package, version]
+    request:
+      method: GET
+      url: "https://pypi.org/pypi/{{package}}/{{version}}/json"
+    response_extract: "$.info"
+
+  - name: pypi_list_releases
+    description: "List every published version of a package, so an agent can tell how far behind a pinned one is. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        package: {type: string}
+      required: [package]
+    request:
+      method: GET
+      url: "https://pypi.org/pypi/{{package}}/json"
+    response_extract: "$.releases"

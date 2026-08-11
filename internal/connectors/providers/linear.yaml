@@ -1,0 +1,17 @@
+name: linear
+label: Linear
+category: Developer
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  # A personal API key goes in Authorization RAW, with no Bearer prefix. An
+  # OAuth token would use Bearer; this connector uses the personal key.
+  value_prefix: ""
+  key_label: "Linear API key"
+  key_hint: "lin_api_..."
+  setup_url: https://linear.app/settings/api
+setup_steps:
+  - "In Linear open Settings → API → Personal API keys and create one."
+  - "Copy it — Linear shows it once — and paste it below."
