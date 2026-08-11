@@ -339,6 +339,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible, plus ~27 further providers registered against the OpenAI schema — see `coder.APIProviders()`); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
 | `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **91 providers** (Google-family incl. Calendar/Tasks/AdSense/GA4/Search Console, YouTube, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing, `ProviderNames()` backing the connections page), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
 | `internal/buildphase` | Tiny package holding `ROOKERY_BUILD_PHASE`/`generation` marker (set during agent/skill builds; the connector `Execute` build-guard refuses mutating actions when present). Its own package so it outlives any one integration. |
+| `internal/connalert` | Delivers the "this connection needs reconnecting" alert to the inbox AND chat when `DBTokenStore` flips a connection to `NEEDS_REAUTH`. Its own package because the alert needs the DB and the gateway and `internal/connectors` deliberately knows about neither — the same shape as `internal/approval`, and it takes the same narrow `SendToUser` interface so tests need no gateway. See "Connection re-auth alerting" below. |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal); `statefile.go` (`StateFilePath`/`ReadState`/`WriteState`/`RenderStateTemplate`) owns an agent's `state.md` format (see "Agent state" below); `migrate_files.go` (`MigrateAgentFilesToMarkdown`) is the idempotent startup migration off the old `state.json`/`agent.json` pair; `ParseRequiredSecrets` (`flow.go`) parses AGENT.md's `# Required secrets:` header — the only source of an agent's declared secrets now that `agent.json` is gone |
 | `internal/skilldesigner` | Conversational skill-creator wizard mirroring `agentdesigner.Flow` (FSM Idle→AwaitingResume→Describing→Designing→Verifying→Done, SSE progress, 7-day drafts, approval triggers); `SkillSaver` writes SKILL.md+scripts/ to vault + DB upsert; generation runs with the `skill-creator` core skill, vetting runs the `skill-vetter` core skill as a text-only audit; `vettingBlocksSave()` parses the verdict line. Wired to BOTH surfaces: the SPA (`/api/v1/skills/design`) and chat platforms (`/skill`). `Start` is the chat entry point (opens in `StateDescribing`, asks for a description, no coder call); `StartDesign` is the web one (its form collects the description up front). |
 | `internal/skilllibrary` | Embedded core skill catalog (`go:embed skills/*/SKILL.md`) — always-on for every user, no DB rows, no admin gate. `LoadBundled()`, `CoreSkillContent(slug)`, `IsCoreSkill()`, `ParseMeta()` (Anthropic+openclaw YAML frontmatter: requires.bins/anyBins/env, install specs). Supersedes the admin-catalog approach dropped in migration 009. |
@@ -696,6 +697,37 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
   ones. The build/impl AND runtime prompts inject `connectedToolsBlock` (backend-aware: native tools
   vs the `connector exec` command) so the coder knows the tools exist and is told there is **no
   Composio/SDK/service keys** in the env.
+
+**Connection re-auth alerting, and why the status flip is gated.** `DBTokenStore.refresh` used
+to set `NEEDS_REAUTH` on **any** refresh error. Because `ConnectionsNearExpiry` selects
+`WHERE status='ACTIVE'`, a flipped row leaves the refresh loop permanently — so a 500, a 429 or a
+DNS blip silently cost the user a working connection until they reconnected it by hand. The
+information needed to tell the cases apart was being discarded one layer down, where
+`tokenRequest` mapped every status `>= 400` onto `KindAuth`. It now classifies (429 →
+`KindRateLimit`, 5xx → `KindServer`, other 4xx → `KindAuth`) and `refresh` flips only on
+`KindAuth` — the provider's own rejection of the credential. `definitiveRejection` fails OPEN on
+an unclassified error: one more retry is cheap, a lost connection is not.
+
+Only on that gated transition does `notifyReauth` fire, sending an **"⚠️ Action required"** notice
+to BOTH the inbox (`source: "connection"`, a third value beside `agent_run` and `reminder`) and
+chat, mirroring the approval gate's dual surface so a workspace with no chat platform is not
+stuck. **Fire-once costs no schema change**: the row leaves the `status='ACTIVE'` query on the
+flip, so it does not re-fire on every tick. This holds per repair cycle in PRACTICE, not
+absolutely — there are two `DBTokenStore` instances carrying notifiers (`main.go` and
+`web/server.go`) and the flip is check-then-write with no lock, so a background refresh racing a
+web-path `AccessToken` on the same expired row can duplicate the alert. Two inbox rows, no data
+loss; the same check-then-write shape recorded for the `state.md` 409 guard. Note also that
+`ConnectionsNearExpiry` filters `expires_at <> '' AND encrypted_refresh_token <> ''`, so a row
+without either never reaches the loop at all — its alert fires from `AccessToken` DURING an agent
+run, concurrent with the failure rather than ahead of it. The inbox row is written FIRST and independently of the
+chat send — a workspace with no chat platform errors on *every* send, and the inbox is precisely
+that user's only surface. Not covered, deliberately: `token_expiry: never` providers (GitHub,
+Notion) and `auth.kind: none` never enter the refresh loop, so a revocation there surfaces only
+when a run 401s (where `agentrunner.FriendlyRunError` already reports it — hooking this notifier
+there too would send two messages for one event); and `session_exchange` returns `KindNeedsReauth`
+without flipping status, so a revoked Bluesky app password does not alert. Flipping it there needs
+a consecutive-failure threshold, since a transient 4xx would otherwise permanently mark a healthy
+connection broken.
 
 **The everyday tier** (waves 1–4, 2026-08) opened a second axis alongside the business/SaaS
 providers: services people use in their own lives. Three shapes, all data-only —

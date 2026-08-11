@@ -16,6 +16,7 @@ import (
 	"github.com/ilijad1/rookery/internal/chat"
 	"github.com/ilijad1/rookery/internal/coder"
 	"github.com/ilijad1/rookery/internal/config"
+	"github.com/ilijad1/rookery/internal/connalert"
 	"github.com/ilijad1/rookery/internal/connectors"
 	"github.com/ilijad1/rookery/internal/db"
 	"github.com/ilijad1/rookery/internal/gateway"
@@ -138,7 +139,8 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 		return nil, fmt.Errorf("load connectors: %w", err)
 	}
 	s.connectors = connReg
-	s.connStore = &connectors.DBTokenStore{DB: s.db, SystemKey: s.systemKey, Reg: s.connectors, OAuth: connectors.OAuthClient{}}
+	s.connStore = (&connectors.DBTokenStore{DB: s.db, SystemKey: s.systemKey, Reg: s.connectors, OAuth: connectors.OAuthClient{}}).
+		WithNotifier(connalert.New(s.db, s.gatewaySender()))
 
 	s.echo.HideBanner = true
 	s.echo.HidePort = true
@@ -154,6 +156,17 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 	}
 
 	return s, nil
+}
+
+// gatewaySender returns the chat sender, or nil when no gateway is wired (tests).
+// Returning s.gateway directly would produce a NON-nil interface holding a nil
+// pointer, which passes connalert's `sender == nil` guard and then panics on the
+// first send.
+func (s *Server) gatewaySender() connalert.Sender {
+	if s.gateway == nil {
+		return nil
+	}
+	return s.gateway
 }
 
 func (s *Server) Start(addr string) error {

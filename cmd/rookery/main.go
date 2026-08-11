@@ -23,6 +23,7 @@ import (
 	"github.com/ilijad1/rookery/internal/chat"
 	"github.com/ilijad1/rookery/internal/coder"
 	"github.com/ilijad1/rookery/internal/config"
+	"github.com/ilijad1/rookery/internal/connalert"
 	"github.com/ilijad1/rookery/internal/connectors"
 	"github.com/ilijad1/rookery/internal/db"
 	"github.com/ilijad1/rookery/internal/gateway"
@@ -502,6 +503,12 @@ func serveCmd() *cli.Command {
 			// because the notifier IS the manager — the approval service is built
 			// earlier so the runner can reference it.
 			approvalSvc.WithNotifier(gwManager)
+
+			// Connection re-auth alerts. Attached here rather than at connStore's
+			// construction for the same reason approvalSvc is: the notifier needs
+			// the gateway, which does not exist until the line above. Set before
+			// RunRefreshLoop starts further down.
+			connStore.WithNotifier(connalert.New(database, gwManager))
 
 			// Deliver a DETACHED build's result to chat.
 			//

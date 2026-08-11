@@ -266,3 +266,26 @@ test("mark all read is absent when the inbox is empty", async () => {
   await screen.findByText(/no notifications yet/i);
   expect(screen.queryByRole("button", { name: /mark all read/i })).toBeNull();
 });
+
+// A connection alert is neither an agent run nor a reminder. Without its own
+// branch it fell through to the robot icon and the label "Notification", so it
+// read as an agent that had lost its name — and offered no way to act on it.
+test("a connection alert reads as a connection, not as an agent", async () => {
+  messages = [
+    msg({
+      id: "m1",
+      source: "connection",
+      status: "error",
+      body: "⚠️ Action required — your Gmail connection (work) needs reconnecting.",
+    }),
+  ];
+  mockFetch();
+  wrap();
+
+  expect(await screen.findByText("Connection")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByText(/Action required/));
+  // No agent to view; the actionable link is the connections page.
+  expect(screen.queryByRole("link", { name: /view agent/i })).toBeNull();
+  expect(screen.getByRole("link", { name: /reconnect/i })).toHaveAttribute("href", "/connections");
+});

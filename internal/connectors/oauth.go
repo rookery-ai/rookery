@@ -97,7 +97,20 @@ func (c OAuthClient) tokenRequest(ctx context.Context, p Provider, form url.Valu
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode >= 400 {
-		return TokenSet{}, &ConnectorError{KindAuth, fmt.Sprintf("token endpoint %d: %s", resp.StatusCode, string(b))}
+		// Classify rather than collapsing everything onto KindAuth. The caller
+		// (DBTokenStore.refresh) uses this to decide whether to mark the
+		// connection dead: only a definitive rejection by the provider should,
+		// because a row marked NEEDS_REAUTH leaves ConnectionsNearExpiry's
+		// status='ACTIVE' filter and is never renewed again. A 500 must not
+		// permanently brick a healthy connection.
+		kind := KindAuth
+		switch {
+		case resp.StatusCode == http.StatusTooManyRequests:
+			kind = KindRateLimit
+		case resp.StatusCode >= 500:
+			kind = KindServer
+		}
+		return TokenSet{}, &ConnectorError{kind, fmt.Sprintf("token endpoint %d: %s", resp.StatusCode, string(b))}
 	}
 	return parseTokenResponse(b, p)
 }

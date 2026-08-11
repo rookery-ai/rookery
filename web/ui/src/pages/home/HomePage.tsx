@@ -8,6 +8,7 @@ import {
   AgentsAtAGlanceCard, QuickActions, RecentActivityCard, RecentNotesCard,
 } from "./cards";
 import { AlertTriangle, Bell, Bot, Check, CheckCheck, Clock, Loader2, Plus, Trash2 } from "lucide-react";
+import { ENTITY_ICONS } from "@/lib/entityIcons";
 import { ContextPane } from "@/components/shell/AppShell";
 import { ContextPaneHeader, ContextSection } from "@/components/shell/ContextPaneParts";
 import { useToast } from "@/components/shell/Toast";
@@ -120,8 +121,22 @@ function InboxCard({
   onActivate: () => void;
   onDelete: () => void;
 }) {
-  const Icon = msg.source === "reminder" ? Bell : Bot;
-  const name = msg.agent_name || (msg.source === "reminder" ? "Reminder" : "Notification");
+  // A connection alert is neither an agent run nor a reminder. Without its own
+  // branch it fell through to the robot icon and the generic label
+  // "Notification", which reads as an agent that has no name.
+  const Icon =
+    msg.source === "reminder"
+      ? Bell
+      : msg.source === "connection"
+        ? ENTITY_ICONS.connections
+        : Bot;
+  const name =
+    msg.agent_name ||
+    (msg.source === "reminder"
+      ? "Reminder"
+      : msg.source === "connection"
+        ? "Connection"
+        : "Notification");
 
   return (
     <div
@@ -160,6 +175,11 @@ function InboxCard({
             {msg.agent_id && (
               <Button variant="ghost" size="xs" asChild>
                 <Link to={`/agents/${msg.agent_id}`}>View agent</Link>
+              </Button>
+            )}
+            {msg.source === "connection" && (
+              <Button variant="ghost" size="xs" asChild>
+                <Link to="/connections">Reconnect</Link>
               </Button>
             )}
             <Button variant="ghost" size="xs" className="text-danger" onClick={onDelete}>

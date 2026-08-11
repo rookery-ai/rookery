@@ -2,9 +2,11 @@ package connectors
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -232,5 +234,142 @@ func TestRefreshDueSkipsKeylessConnections(t *testing.T) {
 
 	if n := refreshDue(ctx, s); n != 0 {
 		t.Errorf("refreshDue refreshed %d keyless connections, want 0", n)
+	}
+}
+
+// refreshFixture wires one google connection whose token expired a minute ago,
+// pointed at srv as its token endpoint.
+func refreshFixture(t *testing.T, srv *httptest.Server) (*db.DB, *DBTokenStore, []byte) {
+	t.Helper()
+	d, ws := storeTestDB(t)
+	key := mkKey()
+	ctx := context.Background()
+	encID, _ := secrets.EncryptWithSystemKey("cid", key)
+	encSec, _ := secrets.EncryptWithSystemKey("csec", key)
+	d.UpsertServiceProviderConfig(ctx, db.ServiceProviderConfig{
+		ID: "pc1", WorkspaceID: ws, Provider: "google",
+		EncryptedClientID: encID, EncryptedClientSecret: encSec})
+	encRefresh, _ := secrets.EncryptWithSystemKey("RT", key)
+	encOld, _ := secrets.EncryptWithSystemKey("OLD", key)
+	past := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	d.InsertServiceConnection(ctx, db.ServiceConnection{
+		ID: "c1", WorkspaceID: ws, Provider: "google", AccountLabel: "work",
+		EncryptedAccessToken: encOld, EncryptedRefreshToken: encRefresh,
+		ExpiresAt: past, Status: "ACTIVE"})
+
+	reg := testRegistry(t)
+	reg.providers["google"] = Provider{Name: "google", TokenURL: srv.URL + "/token"}
+	return d, &DBTokenStore{DB: d, SystemKey: key, Reg: reg, OAuth: OAuthClient{HTTP: srv.Client()}}, key
+}
+
+// A transient failure must not cost the user the connection. Once a row is
+// NEEDS_REAUTH it drops out of ConnectionsNearExpiry's status='ACTIVE' filter
+// and the background loop never renews it again, so treating a 500 as fatal
+// turns a momentary outage into a permanent breakage.
+func TestRefreshKeepsConnectionActiveOnTransientFailure(t *testing.T) {
+	for _, status := range []int{429, 500, 503} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+			}))
+			defer srv.Close()
+			d, store, _ := refreshFixture(t, srv)
+
+			if _, err := store.AccessToken(context.Background(), ConnRef{ID: "c1", Provider: "google"}); err == nil {
+				t.Fatal("want an error from a failing token endpoint")
+			}
+			got, _ := d.GetServiceConnection(context.Background(), "c1")
+			if got.Status != "ACTIVE" {
+				t.Fatalf("status %d must not brick the connection: got %q, want ACTIVE", status, got.Status)
+			}
+		})
+	}
+}
+
+// The transient path must still say WHICH connection failed, and must keep the
+// classified kind so callers can tell a retryable failure from a rejection.
+func TestTransientRefreshErrorNamesTheAccountAndKeepsItsKind(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(503)
+	}))
+	defer srv.Close()
+	_, store, _ := refreshFixture(t, srv)
+
+	_, err := store.AccessToken(context.Background(), ConnRef{ID: "c1", Provider: "google"})
+	var ce *ConnectorError
+	if !errors.As(err, &ce) {
+		t.Fatalf("want *ConnectorError, got %T (%v)", err, err)
+	}
+	if ce.Kind != KindServer {
+		t.Fatalf("kind = %v, want KindServer (a 503 is not a rejection)", ce.Kind)
+	}
+	if !strings.Contains(ce.Msg, "work") {
+		t.Fatalf("message %q does not name the account", ce.Msg)
+	}
+}
+
+type recordingNotifier struct {
+	calls [][4]string
+}
+
+func (r *recordingNotifier) ConnectionNeedsReauth(workspaceID, connectionID, providerLabel, accountLabel string) {
+	r.calls = append(r.calls, [4]string{workspaceID, connectionID, providerLabel, accountLabel})
+}
+
+func TestRefreshNotifiesOnceOnDefinitiveRejection(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"invalid_grant"}`))
+	}))
+	defer srv.Close()
+	_, store, _ := refreshFixture(t, srv)
+	n := &recordingNotifier{}
+	store.WithNotifier(n)
+
+	store.AccessToken(context.Background(), ConnRef{ID: "c1", Provider: "google"})
+	if len(n.calls) != 1 {
+		t.Fatalf("got %d notifications, want 1", len(n.calls))
+	}
+	if n.calls[0][1] != "c1" || n.calls[0][3] != "work" {
+		t.Fatalf("unexpected notification payload: %v", n.calls[0])
+	}
+
+	// The row is NEEDS_REAUTH now, so AccessToken short-circuits before refresh
+	// and must not notify again. This is what makes fire-once free.
+	store.AccessToken(context.Background(), ConnRef{ID: "c1", Provider: "google"})
+	if len(n.calls) != 1 {
+		t.Fatalf("got %d notifications after a second call, want still 1", len(n.calls))
+	}
+}
+
+func TestRefreshDoesNotNotifyOnTransientFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(503)
+	}))
+	defer srv.Close()
+	_, store, _ := refreshFixture(t, srv)
+	n := &recordingNotifier{}
+	store.WithNotifier(n)
+
+	store.AccessToken(context.Background(), ConnRef{ID: "c1", Provider: "google"})
+	if len(n.calls) != 0 {
+		t.Fatalf("got %d notifications for a 503, want 0", len(n.calls))
+	}
+}
+
+func TestRefreshMarksNeedsReauthOnDefinitiveRejection(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(400)
+		w.Write([]byte(`{"error":"invalid_grant"}`))
+	}))
+	defer srv.Close()
+	d, store, _ := refreshFixture(t, srv)
+
+	if _, err := store.AccessToken(context.Background(), ConnRef{ID: "c1", Provider: "google"}); err == nil {
+		t.Fatal("want an error from a rejected refresh token")
+	}
+	got, _ := d.GetServiceConnection(context.Background(), "c1")
+	if got.Status != "NEEDS_REAUTH" {
+		t.Fatalf("got %q, want NEEDS_REAUTH", got.Status)
 	}
 }

@@ -7,6 +7,7 @@ import { timeAgo } from "@/lib/utils";
 import { ApiError } from "@/lib/api";
 import { entityIcon } from "@/lib/entityIcons";
 import { useSession } from "@/lib/session";
+import { WorkspaceAvatar } from "@/lib/workspaceIcons";
 import { CreateWorkspaceDialog, EnterWorkspaceDialog } from "@/pages/Workspaces";
 import { BackupWarningBanner } from "./BackupWarningBanner";
 import {
@@ -66,18 +67,29 @@ function WorkspaceCard({
   return (
     <div className="rounded-lg border border-border bg-background p-4">
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="truncate font-semibold">
-            {ws.name}
-            {isActive && (
-              <span className="ml-2 text-xs font-normal text-muted-2">
-                (active)
-              </span>
+        <div className="flex min-w-0 items-start gap-2.5">
+          {/* WorkspaceAvatar already distinguishes unset (the Rookery mark) from
+              an UNKNOWN slug (the initial) — an unknown value means a workspace
+              configured by a NEWER build, where rendering the default would
+              present that build's choice as the user's own. */}
+          <WorkspaceAvatar
+            name={ws.name}
+            icon={ws.icon}
+            className="mt-0.5 size-8 shrink-0"
+          />
+          <div className="min-w-0">
+            <div className="truncate font-semibold">
+              {ws.name}
+              {isActive && (
+                <span className="ml-2 text-xs font-normal text-muted-2">
+                  (active)
+                </span>
+              )}
+            </div>
+            {ws.about && (
+              <div className="truncate text-sm text-muted-2">{ws.about}</div>
             )}
           </div>
-          {ws.about && (
-            <div className="truncate text-sm text-muted-2">{ws.about}</div>
-          )}
         </div>
       </div>
 

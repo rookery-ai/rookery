@@ -392,3 +392,20 @@ test("OwnerGate is transparent when already verified", async () => {
   expect(await screen.findByText("owner body")).toBeInTheDocument();
   expect(screen.queryByLabelText(/owner password/i)).not.toBeInTheDocument();
 });
+
+// This page listed workspaces as names and buttons while every other surface
+// showed their chosen artwork. The fixture's workspaces set no icon, which is
+// the unset case WorkspaceAvatar renders as the Rookery mark.
+test("each workspace card shows its image, not just its name", async () => {
+  mockFetch();
+  wrap();
+
+  await waitFor(() => expect(workspaceCardNames().length).toBeGreaterThan(0));
+
+  const nameEl = document.querySelector(".truncate.font-semibold");
+  const card = nameEl?.closest("div.rounded-lg");
+  // Assert on WorkspaceAvatar's own gradient id, not on "some svg": the card's
+  // Enter and Delete buttons carry lucide icons, so a bare querySelector("svg")
+  // passes with no avatar present at all.
+  expect(card?.querySelector('linearGradient[id^="wsicon-"]')).toBeTruthy();
+});
