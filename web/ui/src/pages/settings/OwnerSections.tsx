@@ -8,6 +8,7 @@ import { ApiError } from "@/lib/api";
 import { entityIcon } from "@/lib/entityIcons";
 import { useSession } from "@/lib/session";
 import { CreateWorkspaceDialog, EnterWorkspaceDialog } from "@/pages/Workspaces";
+import { BackupWarningBanner } from "./BackupWarningBanner";
 import {
   useAdminSettings,
   useAuditLog,
@@ -150,6 +151,7 @@ export function WorkspacesSection() {
 
   return (
     <div>
+      <BackupWarningBanner />
       <div className="flex items-center gap-2.5">
         <OwnerIcon slug="owner-workspaces" />
         <h2 className="text-lg font-bold">Workspaces</h2>
