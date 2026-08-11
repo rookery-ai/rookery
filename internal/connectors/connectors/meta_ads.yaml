@@ -64,22 +64,40 @@ actions:
       form:
         status: "{{status}}"
     response_extract: "$"
+  # Narrowing to one campaign is its own action rather than a `filtering` parameter:
+  # Meta's filtering takes a JSON ARRAY of filter objects, so passing a bare campaign
+  # id there is silently ignored — the call succeeds and returns the whole account.
+  # The campaign's own /adsets edge is both correct and simpler for the model.
   - name: meta_ads_list_adsets
-    description: "List the ad sets in an ad account or one campaign, with their status, budget and targeting summary. Read-only."
+    description: "List every ad set in an ad account, with status, budget and optimisation goal. Use meta_ads_list_campaign_adsets to narrow to one campaign. Read-only."
     mutating: false
     params:
       type: object
       properties:
-        account_id:  {type: string, description: "act_XXXX from meta_ads_list_accounts"}
-        campaign_id: {type: string, description: "optional: only ad sets in this campaign"}
-        limit:       {type: integer, description: "max ad sets (default 25)"}
+        account_id: {type: string, description: "act_XXXX from meta_ads_list_accounts"}
+        limit:      {type: integer, description: "max ad sets (default 25)"}
       required: [account_id]
     request:
       method: GET
       url: "https://graph.facebook.com/v21.0/{{account_id}}/adsets"
       query:
         fields: "id,name,status,daily_budget,lifetime_budget,optimization_goal,campaign_id"
-        filtering: "{{campaign_id}}"
+        limit: "{{limit}}"
+    response_extract: "$.data"
+  - name: meta_ads_list_campaign_adsets
+    description: "List the ad sets belonging to ONE campaign, with status, budget and optimisation goal. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        campaign_id: {type: string, description: "campaign id from meta_ads_list_campaigns"}
+        limit:       {type: integer, description: "max ad sets (default 25)"}
+      required: [campaign_id]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{campaign_id}}/adsets"
+      query:
+        fields: "id,name,status,daily_budget,lifetime_budget,optimization_goal,campaign_id"
         limit: "{{limit}}"
     response_extract: "$.data"
   - name: meta_ads_list_ads

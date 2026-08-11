@@ -94,16 +94,35 @@ actions:
         $top: "{{top}}"
         $skip: "{{skip}}"
     response_extract: "$.value"
+  # Two actions rather than one with an optional parent, because the difference is
+  # the URL PATH, not a value in it: an absent {{parent_id}} would render
+  # ".../mailFolders//childFolders" and 404. Same reason calendar splits timed from
+  # all-day events.
   - name: outlook_create_folder
-    description: "Create a mail folder, optionally nested inside another. Safe write — it starts empty."
+    description: "Create a TOP-LEVEL mail folder. Use outlook_create_subfolder to nest one inside another. Safe write — it starts empty."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Mail.ReadWrite]
+    params:
+      type: object
+      properties:
+        name: {type: string, description: "folder name"}
+      required: [name]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/mailFolders"
+      body:
+        displayName: "{{name}}"
+    response_extract: "$"
+  - name: outlook_create_subfolder
+    description: "Create a mail folder NESTED inside an existing one. Resolve the parent id with outlook_list_folders first. Safe write — it starts empty."
     mutating: false
     scopes: [https://graph.microsoft.com/Mail.ReadWrite]
     params:
       type: object
       properties:
         name:      {type: string, description: "folder name"}
-        parent_id: {type: string, description: "optional parent folder id; omit for a top-level folder"}
-      required: [name]
+        parent_id: {type: string, description: "parent folder id, or a well-known name like inbox"}
+      required: [name, parent_id]
     request:
       method: POST
       url: "https://graph.microsoft.com/v1.0/me/mailFolders/{{parent_id}}/childFolders"
