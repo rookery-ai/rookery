@@ -166,6 +166,10 @@ Operations); the `data-icon: backup` attribute travels with it.
 | `docs/installation/windows.md` | 69 |
 | `docs/reference/api.md` | 62 |
 
+`reference/api.md` lists the backup routes as a path table only — it does not
+document the config payload, so `local_dir`'s change of meaning needs no entry
+there. The link on line 62 is the whole edit.
+
 **Rewrite as a runbook**, keeping the existing "why a plain file copy is not
 enough" explainer intact — it is the reason the whole feature exists:
 
@@ -184,11 +188,45 @@ enough" explainer intact — it is the reason the whole feature exists:
    settings and store it somewhere that is not this disk. A backup that dies
    with the machine it protects is not a backup. This is the section the whole
    page exists for.
-5. **Restore onto a new machine** — the full CLI sequence: install Rookery,
-   make sure the server is stopped, `rookery backup restore <file>`, start the
-   server. Restore stages and applies on the next boot through the same code
-   path the server uses, and the offline CLI refuses to run while the server
-   holds its lock.
+5. **Restore onto a new machine** — the full CLI sequence, written against what
+   `cmd/rookery/backup_cmd.go`'s `restore` action actually does:
+
+   ```bash
+   # 1. Install Rookery. Same version as the snapshot, or newer — a snapshot
+   #    from a newer build is refused, naming the version to upgrade to.
+   # 2. Do not start the server. There is no owner to bootstrap and no
+   #    database to create: the snapshot brings both.
+   rookery backup restore ~/Downloads/rookery-2026-08-11T03-00-00.rkb
+   # Passphrase:  (prompted, echo off; --passphrase-stdin to script it)
+   # restore complete; the previous data is in .pre-restore-* under the data dir
+   # 3. Start the server and sign in with the owner password from the old install.
+   ```
+
+   Four points the page must get right, each verified against the code rather
+   than inferred:
+
+   - **The CLI restore applies immediately.** It calls `StageRestore` and then
+     `ApplyPendingRestore` in the same command. Starting the server afterwards
+     is how you *use* the restored install, not how the restore happens. This
+     differs from the UI restore (`POST /api/v1/backup/restore`), which stages,
+     writes a `.restore-pending` marker and shuts the server down so the swap
+     happens on the next boot — the page should say which is which, or someone
+     who used the button will think it failed.
+   - **No prior install state is required.** The restore action never opens the
+     database and never calls `systemKeyFor`, so a fresh data directory with no
+     `owner bootstrap` is exactly the expected starting point.
+   - **The argument may be a file path or a snapshot name.** `openSnapshot`
+     tries `os.Open(arg)` first and falls back to looking the name up in the
+     local backup directory — so a snapshot downloaded from the UI restores by
+     path with no copying into place.
+   - **The server must be stopped.** `AcquireLock` takes the same flock the
+     running server holds for its lifetime, and the command refuses rather than
+     racing it.
+
+   Worth a note on the page: if `ROOKERY_SYSTEM_KEY` is set to a value other
+   than the one inside the snapshot, the restore is refused with an explanatory
+   error — `docs/operations/configuration.md` already documents this, so the
+   two pages should agree.
 6. **The passphrase is the one thing you cannot lose** — it is what the system
    key travels inside.
 
@@ -222,7 +260,14 @@ today and needs none.
   remount — including when the config subsequently reports backups disabled.
 
 **Website** — `npm run build` in `~/rookery-web`, and a check that no `src/`
-reference to the old slug survives.
+reference to the old slug survives. Starlight fails the build on a stale
+`slug:` in the sidebar, so the file move half-checks itself.
+
+**Implementation note:** this work happens in a git worktree, so
+`make docs-sync-check` must be run with `ROOKERY_WEB_DIR` pointing at the
+website checkout. Without it the resolver falls through to a sibling of the
+worktree, finds nothing, and **skips the website assertions silently** — which
+reads as a pass.
 
 ## Rejected alternatives
 
