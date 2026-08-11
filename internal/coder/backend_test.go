@@ -183,6 +183,56 @@ func TestCodexArgs(t *testing.T) {
 	}
 }
 
+// A workspace CoderModel used to be a no-op for codex and gemini — the field
+// existed, the UI could not set it, and even when set nothing passed it on.
+// Both accept -m, and both omit the flag entirely when no model is configured.
+func TestCodexArgsCarryTheModelWhenSet(t *testing.T) {
+	b := &codexBackend{model: "gpt-5.5-codex"}
+	args := b.buildArgs("do it", false, "")
+	want := []string{"exec", "do it", "--json", "-m", "gpt-5.5-codex"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+}
+
+func TestGeminiArgsCarryTheModelWhenSet(t *testing.T) {
+	b := &geminiBackend{model: "gemini-2.5-pro"}
+	args := b.buildArgs("summarize", false, "")
+	want := []string{"-p", "summarize", "--output-format", "json", "--yolo", "-m", "gemini-2.5-pro"}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+}
+
+// selectBackend is where the plumbing was actually missing: the backends could
+// have grown a model field and still received nothing.
+func TestSelectBackendPassesCLIModelToEveryBackendThatTakesOne(t *testing.T) {
+	for _, tc := range []struct {
+		backend string
+		model   string
+		want    string
+	}{
+		{"opencode", "ollama-cloud/glm-5.2", "ollama-cloud/glm-5.2"},
+		{"codex", "gpt-5.5-codex", "gpt-5.5-codex"},
+		{"gemini", "gemini-2.5-pro", "gemini-2.5-pro"},
+		{"cursor", "sonnet-4.5", "sonnet-4.5"},
+	} {
+		t.Run(tc.backend, func(t *testing.T) {
+			c := &Coder{backendType: tc.backend, cliModel: tc.model}
+			args := c.selectBackend().buildArgs("x", false, "")
+			var got string
+			for i, a := range args {
+				if (a == "-m" || a == "--model") && i+1 < len(args) {
+					got = args[i+1]
+				}
+			}
+			if got != tc.want {
+				t.Fatalf("%s: model flag = %q, want %q (args %v)", tc.backend, got, tc.want, args)
+			}
+		})
+	}
+}
+
 func TestCodexConfigEnv(t *testing.T) {
 	b := &codexBackend{}
 	home := "/homes/ws1"

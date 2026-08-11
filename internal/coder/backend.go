@@ -222,10 +222,16 @@ func opencodeAuthPath(home string) string {
 // docs: `codex exec <prompt> --json`; exec mode auto-downgrades approval to
 // `never` (no TTY), so it will not hang. Isolation via CODEX_HOME. Must pass
 // Coder.Smoke on a host with `codex` before being relied upon.
-type codexBackend struct{}
+type codexBackend struct {
+	model string // from workspace CoderModel; passed as -m when set
+}
 
 func (b *codexBackend) buildArgs(prompt string, _ bool, _ string) []string {
-	return []string{"exec", prompt, "--json"}
+	args := []string{"exec", prompt, "--json"}
+	if b.model != "" {
+		args = append(args, "-m", b.model)
+	}
+	return args
 }
 
 func (b *codexBackend) parseOutput(stdout []byte) (string, bool, error) {
@@ -264,10 +270,16 @@ func (b *codexBackend) looksLikeLimit(stdout, stderr string) bool {
 // tool calls so it does not block). Gemini keys off the home dir (~/.gemini) with
 // no dedicated config-dir env var, so isolation overrides HOME + USERPROFILE.
 // Must pass Coder.Smoke on a host with `gemini` before being relied upon.
-type geminiBackend struct{}
+type geminiBackend struct {
+	model string // from workspace CoderModel; passed as -m when set
+}
 
 func (b *geminiBackend) buildArgs(prompt string, _ bool, _ string) []string {
-	return []string{"-p", prompt, "--output-format", "json", "--yolo"}
+	args := []string{"-p", prompt, "--output-format", "json", "--yolo"}
+	if b.model != "" {
+		args = append(args, "-m", b.model)
+	}
+	return args
 }
 
 func (b *geminiBackend) parseOutput(stdout []byte) (string, bool, error) {

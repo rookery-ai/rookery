@@ -322,6 +322,12 @@ func (s *Server) saveWorkspaceCoderCore(w *db.Workspace, f coderForm) (string, e
 		kind = "local"
 		bin = f.Bin
 		backendType = coder.BackendForBin(bin) // derive from the chosen binary; empty bin => "" (auto-detect)
+		// A local coder takes a model too, and it is not optional for all of
+		// them: OpenCode has no default of its own, so with none it targets a
+		// hardcoded OpenRouter default and 401s in a way that reads like broken
+		// auth. Not validated — the valid set is the coder's business and
+		// changes weekly, so an unknown string must not be rejected here.
+		model = strings.TrimSpace(f.Model)
 	}
 
 	if err := s.db.UpdateWorkspaceCoder(w.ID, kind, bin, timeoutS, backendType, provider, model, apiKeySecret, baseURL); err != nil {

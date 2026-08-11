@@ -164,6 +164,23 @@ var (
 		"vllm":     "http://localhost:8000/v1",
 		"localai":  "http://localhost:8080/v1",
 		"jan":      "http://localhost:1337/v1",
+
+		// ── Wave 2 (2026-08) hosted tier ──
+		// Each confirmed against the provider's own current documentation, not
+		// carried forward from memory: a wrong base URL yields a provider that
+		// appears in the picker, accepts a key, and cannot answer.
+		// Cohere serves its OpenAI-shaped API on a /compatibility prefix rather
+		// than /v1, and MiniMax splits by region — api.minimax.io is the
+		// INTERNATIONAL host; mainland China accounts use api.minimaxi.com and
+		// go through the per-workspace base-URL override.
+		"cohere":     "https://api.cohere.ai/compatibility/v1",
+		"nvidia":     "https://integrate.api.nvidia.com/v1",
+		"vercel_ai":  "https://ai-gateway.vercel.sh/v1",
+		"minimax":    "https://api.minimax.io/v1",
+		"baseten":    "https://inference.baseten.co/v1",
+		"novita":     "https://api.novita.ai/openai/v1",
+		"hyperbolic": "https://api.hyperbolic.xyz/v1",
+		"venice":     "https://api.venice.ai/api/v1",
 	}
 )
 

@@ -671,3 +671,68 @@ func TestWorkspaceIconSlugsMatchTheSPA(t *testing.T) {
 		}
 	}
 }
+
+// A LOCAL coder's model was not merely unsettable through the UI — the save
+// path passed "" for it unconditionally, so any value that reached the column
+// by another route was wiped on the next save. OpenCode is the case that
+// matters: with no model it targets a hardcoded OpenRouter default and fails
+// with a 401 that reads like broken auth.
+func TestAPISettingsLocalCoderPersistsItsModel(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	rec := doJSON(t, s, http.MethodPut, "/api/v1/settings/coder", map[string]any{
+		"kind":  "local",
+		"bin":   "opencode",
+		"model": "ollama-cloud/glm-5.2",
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("put coder: %d %s", rec.Code, rec.Body.String())
+	}
+
+	w, err := s.db.GetWorkspaceByID(wsID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if w.CoderModel != "ollama-cloud/glm-5.2" {
+		t.Fatalf("CoderModel = %q, want ollama-cloud/glm-5.2", w.CoderModel)
+	}
+	if w.CoderKind != "local" || w.CoderBin != "opencode" {
+		t.Fatalf("kind/bin = %q/%q, want local/opencode", w.CoderKind, w.CoderBin)
+	}
+}
+
+// The setup wizard is a SEPARATE write path into the same column and had the
+// same hardcoded "" — fixing only the settings page would leave a freshly
+// onboarded workspace unable to run OpenCode.
+func TestAPISetupLocalCoderPersistsItsModel(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapAndLogin(t, s)
+	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
+
+	// createAndEnterWorkspace clears needs_setup so the ordinary guarded routes
+	// work. Put it back: the wizard is exactly the not-yet-set-up state, and it
+	// is a genuinely separate write path into the same column.
+	if _, err := s.db.Exec(`UPDATE workspaces SET needs_setup=1 WHERE id=?`, wsID); err != nil {
+		t.Fatalf("reset needs_setup: %v", err)
+	}
+
+	rec := doJSON(t, s, http.MethodPost, "/api/v1/setup", map[string]any{
+		"step":        3,
+		"coder_kind":  "local",
+		"coder_bin":   "opencode",
+		"coder_model": "ollama-cloud/glm-5.2",
+	}, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("setup coder: %d %s", rec.Code, rec.Body.String())
+	}
+
+	w, err := s.db.GetWorkspaceByID(wsID)
+	if err != nil {
+		t.Fatalf("get workspace: %v", err)
+	}
+	if w.CoderModel != "ollama-cloud/glm-5.2" {
+		t.Fatalf("CoderModel = %q, want ollama-cloud/glm-5.2", w.CoderModel)
+	}
+}

@@ -230,6 +230,9 @@ func init() {
 		"nebius", "deepinfra", "huggingface", "github_models",
 		// Wave 1 (2026-08) — local tier (self-hosted OpenAI-compatible servers).
 		"lmstudio", "llamacpp", "vllm", "localai", "jan",
+		// Wave 2 (2026-08) — hosted tier.
+		"cohere", "nvidia", "vercel_ai", "minimax", "baseten",
+		"novita", "hyperbolic", "venice",
 	} {
 		RegisterProvider(name, factory)
 	}
