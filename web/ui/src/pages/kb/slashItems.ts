@@ -68,9 +68,12 @@ export const slashItems: SlashItem[] = [
   },
   {
     title: "Table",
-    keywords: "table grid rows columns 3x3",
-    run: (editor) =>
-      editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run(),
+    keywords: "table grid rows columns size",
+    // Opening the size picker is a React concern, so signal NoteEditor via a
+    // window event — the same way Image and File attachment do. It used to
+    // insert a fixed 3x3 with no way to say otherwise and no way to change it
+    // afterwards.
+    run: () => window.dispatchEvent(new CustomEvent("kb:insertTable")),
   },
   {
     title: "Image",

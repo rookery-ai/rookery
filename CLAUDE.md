@@ -456,6 +456,30 @@ degrades each one differently depending on whether it's raw HTML on the wire or 
 
 See `marks/colors.ts`'s top comment for the toggle/colour-mark case specifically.
 
+**KB table editing is a control surface, not a capability.** TipTap already implements
+`addRowAfter`/`deleteColumn`/etc.; nothing reached them, so a table was inserted at a fixed 3x3 and
+never changed again. The slash item now dispatches `kb:insertTable` (the same window-event pattern
+Image and File attachment use, since a React dialog cannot open from an editor command) and
+`TableSizePicker` offers a hover grid up to 8x8; `TableControls` renders hover handles carrying
+insert-before/insert-after/delete. Four things are load-bearing:
+- **Every action goes through an editor command, never a DOM edit** — the commands produce the
+  canonical document, and a subtly different one makes `checkFidelity` open the note READ-ONLY on
+  the next load while the table still looks correct on screen. `tableEditing.test.ts` round-trips
+  every operation, every picker size 1x1–8x8, and a pipe-bearing cell (the `pipeSafeTable` case).
+- **Hovering sets the caret** into the cell, because TipTap's commands are selection-relative.
+  Without it the buttons operate on whichever cell was clicked LAST — the worst failure available,
+  since it looks like it worked and edits the wrong row.
+- **`tableGeometry.ts` is pure** for the same reason `placeMenu` is: jsdom reports zeroes for every
+  rect, so a test driving the real editor proves a handle MOUNTS but never where it lands.
+  `clampToViewport` pushes a handle back inside the edge rather than hiding it — an overlapping
+  handle is usable, an invisible one is not. `cellCoords` honours `colSpan`, or a merged cell
+  inserts the column in the wrong place on exactly the tables hardest to repair by hand.
+- **The header-row checkbox states its own caveat**: markdown has no way to express a table WITHOUT
+  a header row (the delimiter line is mandatory), so a headerless table has its first row promoted
+  on the next save.
+Merged cells are deliberately not offered — `pipeSafeTable` already drops a `colspan`/`rowspan` note
+to the HTML/placeholder path, so a merge button would be a button that makes the note read-only.
+
 **Chat knowledge-base access (on-demand retrieval + editing).** The one-off chat coder runs with `WithDir(vaultRoot).WithAllowedTools("Read,Write,Edit,Glob,Grep")` and a system instruction (`prompts.BuildChatSystemPrompt`) naming the vault root. The LLM retrieves and edits the user's notes **on demand** — only on turns that touch the KB — instead of having the vault injected every prompt. `chat.BuildUserContext` now returns identity-only context (profile/memory/agents/MCP); the old always-on `[Related knowledge base]` keyword-snippet block was removed. The tool set is file-only (no `Bash`/`WebFetch`): the chat can create/edit/read notes but cannot delete, rename, or run shell commands. The same applies to agents (RW over the vault via the sandbox). The detective `Guard` is no longer wired into agent runs — it would revert the KB edits that are now intentional — so agent/chat KB edits persist.
 
 **Chat connector access.** One-off chat (both web `handleChatMessage` and Telegram) also exposes the workspace's **ACTIVE** service connections to the chat coder (`connectors.ActiveBoundConns` — all of them; chat isn't an agent so there's no per-agent binding), wired identically to how the API/CLI split works elsewhere: the **API engine** gets them as native function tools (`coder.WithConnectors`), a **CLI coder** reaches them via the loopback bridge (`bridge.Register` → `ROOKERY_CONNECTOR_URL`/`ROOKERY_CONNECTOR_TOKEN` env → `rookery connector exec`, plus a scoped `Bash(<bin> connector exec:*)` grant since chat is otherwise file-only). Both paths hit the same `connectors.Execute` (mutating allowed — chat is like a run, `buildPhase=false`). `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` appends `connectedToolsBlock` so the model knows the tools exist; with no active connections / no bridge, chat behaves exactly as the file-only default.

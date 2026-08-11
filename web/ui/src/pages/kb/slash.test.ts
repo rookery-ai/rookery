@@ -43,19 +43,23 @@ describe("slashItems run() against a headless editor", () => {
     expect(slashItems).toHaveLength(18);
   });
 
-  test("Image and File attachment items dispatch their window events", () => {
+  test("Image, File attachment and Table dispatch their window events", () => {
     const editor = headlessEditor();
     const events: string[] = [];
     const onImg = () => events.push("kb:insertImage");
     const onAtt = () => events.push("kb:insertAttachment");
+    const onTable = () => events.push("kb:insertTable");
     window.addEventListener("kb:insertImage", onImg);
     window.addEventListener("kb:insertAttachment", onAtt);
+    window.addEventListener("kb:insertTable", onTable);
     findItem("Image").run(editor);
     findItem("File attachment").run(editor);
+    findItem("Table").run(editor);
     window.removeEventListener("kb:insertImage", onImg);
     window.removeEventListener("kb:insertAttachment", onAtt);
+    window.removeEventListener("kb:insertTable", onTable);
     editor.destroy();
-    expect(events).toEqual(["kb:insertImage", "kb:insertAttachment"]);
+    expect(events).toEqual(["kb:insertImage", "kb:insertAttachment", "kb:insertTable"]);
   });
 
   test("Heading 1 sets an active level-1 heading", () => {
@@ -145,38 +149,10 @@ describe("slashItems run() against a headless editor", () => {
     editor.destroy();
   });
 
-  test("Table inserts a 3x3 table node with a header row", () => {
-    const editor = headlessEditor();
-    findItem("Table").run(editor);
-    // editor.getJSON()'s real return type is a recursive NodeType/TextType
-    // union keyed off the editor's exact registered schema, which TS can't
-    // narrow through plain `.content` chaining below. This is a doc-shape
-    // assertion, not a schema-typed consumer, so a loose structural view is
-    // the right tool here.
-    type SimpleNode = { type?: string; content?: SimpleNode[] };
-    const json = editor.getJSON() as unknown as SimpleNode;
-    expect(JSON.stringify(json)).toContain('"type":"table"');
-
-    const table = json.content?.[0];
-    expect(table?.type).toBe("table");
-    const rows = table?.content ?? [];
-    // 3 rows
-    expect(rows).toHaveLength(3);
-    // each row has exactly 3 cells (column count)
-    for (const row of rows) {
-      expect(row.content ?? []).toHaveLength(3);
-    }
-    // header row present: first row's cells are tableHeader, the rest tableCell
-    for (const cell of rows[0].content ?? []) {
-      expect(cell.type).toBe("tableHeader");
-    }
-    for (const row of rows.slice(1)) {
-      for (const cell of row.content ?? []) {
-        expect(cell.type).toBe("tableCell");
-      }
-    }
-    editor.destroy();
-  });
+  // Table used to insert a fixed 3x3 here. It now opens the size picker (see
+  // the window-event test above), and the shape it produces is covered by
+  // tableEditing.test.ts, which additionally proves every size the picker can
+  // offer round-trips through the markdown serializer.
 });
 
 test("every slash item has an icon", () => {
