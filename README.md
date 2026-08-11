@@ -14,7 +14,7 @@
 
 Rookery is a single binary. It keeps your knowledge as plain markdown on your
 own disk, builds agents from a conversation rather than a config file, reaches
-91 external services with credentials you own, and talks to you on Telegram,
+92 external services with credentials you own, and talks to you on Telegram,
 Discord or Slack. The database is SQLite, secrets are encrypted at rest, and
 coder subprocesses are confined with Landlock on Linux.
 
@@ -144,9 +144,9 @@ decides how *well* a job is done — never whether it can be done at all.
 
 ## Connections
 
-**91 services. No middleman holding your keys.**
+**92 services. No middleman holding your keys.**
 
-Rookery talks to them directly, using credentials you own: 91 providers and 471
+Rookery talks to them directly, using credentials you own: 92 providers and 476
 curated actions, over OAuth or an API key you paste — never a broker.
 
 Google, GitHub, Notion, Slack, Jira, Stripe, Shopify — and the self-hosted tier
