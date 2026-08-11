@@ -55,3 +55,126 @@ actions:
       method: GET
       url: "https://analyticsdata.googleapis.com/v1beta/{{property}}/metadata"
     response_extract: "$"
+  - name: ga4_top_pages
+    description: "The most-viewed pages on a GA4 property between two dates, with views, users and average engagement time. Dates are YYYY-MM-DD or relative like '28daysAgo'. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        property:   {type: string, description: "properties/123456 from ga4_list_properties"}
+        start_date: {type: string, description: "YYYY-MM-DD or e.g. 28daysAgo"}
+        end_date:   {type: string, description: "YYYY-MM-DD or 'today'"}
+        limit:      {type: integer, description: "max rows (default 20)"}
+      required: [property, start_date, end_date]
+    request:
+      method: POST
+      url: "https://analyticsdata.googleapis.com/v1beta/{{property}}:runReport"
+      body:
+        dateRanges: [{startDate: "{{start_date}}", endDate: "{{end_date}}"}]
+        dimensions: [{name: "pagePath"}, {name: "pageTitle"}]
+        metrics: [{name: "screenPageViews"}, {name: "activeUsers"}, {name: "userEngagementDuration"}]
+        orderBys: [{metric: {metricName: "screenPageViews"}, desc: true}]
+        limit: "{{limit}}"
+    response_extract: "$.rows"
+  - name: ga4_traffic_sources
+    description: "Where a GA4 property's traffic came from between two dates — session source, medium and campaign, with sessions and conversions. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        property:   {type: string, description: "properties/123456"}
+        start_date: {type: string, description: "YYYY-MM-DD or e.g. 28daysAgo"}
+        end_date:   {type: string, description: "YYYY-MM-DD or 'today'"}
+        limit:      {type: integer, description: "max rows (default 20)"}
+      required: [property, start_date, end_date]
+    request:
+      method: POST
+      url: "https://analyticsdata.googleapis.com/v1beta/{{property}}:runReport"
+      body:
+        dateRanges: [{startDate: "{{start_date}}", endDate: "{{end_date}}"}]
+        dimensions: [{name: "sessionSource"}, {name: "sessionMedium"}, {name: "sessionCampaignName"}]
+        metrics: [{name: "sessions"}, {name: "activeUsers"}, {name: "conversions"}]
+        orderBys: [{metric: {metricName: "sessions"}, desc: true}]
+        limit: "{{limit}}"
+    response_extract: "$.rows"
+  - name: ga4_daily_users
+    description: "Active users, sessions and conversions per DAY between two dates — the trend line for a GA4 property. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        property:   {type: string, description: "properties/123456"}
+        start_date: {type: string, description: "YYYY-MM-DD or e.g. 28daysAgo"}
+        end_date:   {type: string, description: "YYYY-MM-DD or 'today'"}
+      required: [property, start_date, end_date]
+    request:
+      method: POST
+      url: "https://analyticsdata.googleapis.com/v1beta/{{property}}:runReport"
+      body:
+        dateRanges: [{startDate: "{{start_date}}", endDate: "{{end_date}}"}]
+        dimensions: [{name: "date"}]
+        metrics: [{name: "activeUsers"}, {name: "sessions"}, {name: "conversions"}]
+        orderBys: [{dimension: {dimensionName: "date"}}]
+        limit: 400
+    response_extract: "$.rows"
+  - name: ga4_country_breakdown
+    description: "A GA4 property's users and sessions by country between two dates. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        property:   {type: string, description: "properties/123456"}
+        start_date: {type: string, description: "YYYY-MM-DD or e.g. 28daysAgo"}
+        end_date:   {type: string, description: "YYYY-MM-DD or 'today'"}
+        limit:      {type: integer, description: "max rows (default 20)"}
+      required: [property, start_date, end_date]
+    request:
+      method: POST
+      url: "https://analyticsdata.googleapis.com/v1beta/{{property}}:runReport"
+      body:
+        dateRanges: [{startDate: "{{start_date}}", endDate: "{{end_date}}"}]
+        dimensions: [{name: "country"}]
+        metrics: [{name: "activeUsers"}, {name: "sessions"}]
+        orderBys: [{metric: {metricName: "activeUsers"}, desc: true}]
+        limit: "{{limit}}"
+    response_extract: "$.rows"
+  - name: ga4_device_breakdown
+    description: "A GA4 property's users and sessions by device category (desktop, mobile, tablet). Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        property:   {type: string, description: "properties/123456"}
+        start_date: {type: string, description: "YYYY-MM-DD or e.g. 28daysAgo"}
+        end_date:   {type: string, description: "YYYY-MM-DD or 'today'"}
+      required: [property, start_date, end_date]
+    request:
+      method: POST
+      url: "https://analyticsdata.googleapis.com/v1beta/{{property}}:runReport"
+      body:
+        dateRanges: [{startDate: "{{start_date}}", endDate: "{{end_date}}"}]
+        dimensions: [{name: "deviceCategory"}]
+        metrics: [{name: "activeUsers"}, {name: "sessions"}, {name: "bounceRate"}]
+        limit: 20
+    response_extract: "$.rows"
+  - name: ga4_events_summary
+    description: "The most frequent events on a GA4 property between two dates, with their counts and how many users triggered them. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        property:   {type: string, description: "properties/123456"}
+        start_date: {type: string, description: "YYYY-MM-DD or e.g. 28daysAgo"}
+        end_date:   {type: string, description: "YYYY-MM-DD or 'today'"}
+        limit:      {type: integer, description: "max rows (default 25)"}
+      required: [property, start_date, end_date]
+    request:
+      method: POST
+      url: "https://analyticsdata.googleapis.com/v1beta/{{property}}:runReport"
+      body:
+        dateRanges: [{startDate: "{{start_date}}", endDate: "{{end_date}}"}]
+        dimensions: [{name: "eventName"}]
+        metrics: [{name: "eventCount"}, {name: "totalUsers"}]
+        orderBys: [{metric: {metricName: "eventCount"}, desc: true}]
+        limit: "{{limit}}"
+    response_extract: "$.rows"

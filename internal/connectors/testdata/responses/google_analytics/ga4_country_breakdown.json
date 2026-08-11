@@ -1,0 +1,35 @@
+{
+  "dimensionHeaders": [
+    {
+      "name": "country"
+    }
+  ],
+  "metricHeaders": [
+    {
+      "name": "activeUsers",
+      "type": "TYPE_INTEGER"
+    },
+    {
+      "name": "sessions",
+      "type": "TYPE_INTEGER"
+    }
+  ],
+  "rows": [
+    {
+      "dimensionValues": [
+        {
+          "value": "North Macedonia"
+        }
+      ],
+      "metricValues": [
+        {
+          "value": "221"
+        },
+        {
+          "value": "310"
+        }
+      ]
+    }
+  ],
+  "rowCount": 1
+}

@@ -1,0 +1,14 @@
+{
+  "elements": [
+    {
+      "id": "urn:li:sponsoredCreative:801234",
+      "intendedStatus": "ACTIVE",
+      "campaign": "urn:li:sponsoredCampaign:701234"
+    }
+  ],
+  "paging": {
+    "count": 10,
+    "start": 0,
+    "total": 1
+  }
+}

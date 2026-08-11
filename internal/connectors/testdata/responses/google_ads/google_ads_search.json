@@ -1,0 +1,20 @@
+{
+  "results": [
+    {
+      "campaign": {
+        "resourceName": "customers/1234567890/campaigns/222",
+        "id": "222",
+        "name": "Brand \u2014 Search",
+        "status": "ENABLED"
+      },
+      "metrics": {
+        "impressions": "18422",
+        "clicks": "912",
+        "costMicros": "4210000",
+        "conversions": 31.0
+      }
+    }
+  ],
+  "fieldMask": "campaign.id,metrics.clicks",
+  "nextPageToken": "AbC123"
+}

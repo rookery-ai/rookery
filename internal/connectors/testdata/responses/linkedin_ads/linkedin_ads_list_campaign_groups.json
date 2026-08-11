@@ -1,0 +1,19 @@
+{
+  "elements": [
+    {
+      "id": 601234,
+      "name": "Q3 demand gen",
+      "status": "ACTIVE",
+      "account": "urn:li:sponsoredAccount:512345",
+      "totalBudget": {
+        "amount": "5000",
+        "currencyCode": "EUR"
+      }
+    }
+  ],
+  "paging": {
+    "count": 10,
+    "start": 0,
+    "total": 1
+  }
+}

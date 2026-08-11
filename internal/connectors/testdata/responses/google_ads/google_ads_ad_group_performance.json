@@ -1,0 +1,23 @@
+{
+  "results": [
+    {
+      "campaign": {
+        "name": "Brand \u2014 Search"
+      },
+      "adGroup": {
+        "resourceName": "customers/1234567890/adGroups/333",
+        "id": "333",
+        "name": "Exact",
+        "status": "ENABLED"
+      },
+      "metrics": {
+        "impressions": "9001",
+        "clicks": "410",
+        "costMicros": "1800000",
+        "conversions": 12.0
+      }
+    }
+  ],
+  "fieldMask": "campaign.id,metrics.clicks",
+  "nextPageToken": "AbC123"
+}

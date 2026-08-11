@@ -1,0 +1,33 @@
+{
+  "results": [
+    {
+      "campaign": {
+        "name": "Brand \u2014 Search"
+      },
+      "adGroup": {
+        "name": "Exact"
+      },
+      "adGroupAd": {
+        "ad": {
+          "id": "444",
+          "responsiveSearchAd": {
+            "headlines": [
+              {
+                "text": "Own your agents"
+              }
+            ]
+          }
+        },
+        "status": "ENABLED"
+      },
+      "metrics": {
+        "impressions": "5100",
+        "clicks": "260",
+        "costMicros": "980000",
+        "conversions": 9.0
+      }
+    }
+  ],
+  "fieldMask": "campaign.id,metrics.clicks",
+  "nextPageToken": "AbC123"
+}

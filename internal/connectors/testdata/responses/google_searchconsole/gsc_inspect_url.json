@@ -1,0 +1,15 @@
+{
+  "inspectionResult": {
+    "indexStatusResult": {
+      "verdict": "PASS",
+      "coverageState": "Submitted and indexed",
+      "lastCrawlTime": "2026-08-09T04:12:00Z",
+      "robotsTxtState": "ALLOWED",
+      "indexingState": "INDEXING_ALLOWED"
+    },
+    "mobileUsabilityResult": {
+      "verdict": "PASS"
+    },
+    "inspectionResultLink": "https://search.google.com/search-console/inspect?..."
+  }
+}
