@@ -57,6 +57,7 @@ func main() {
 		},
 		Commands: []*cli.Command{
 			serveCmd(),
+			onboardCmd(),
 			adminCmd(),
 			sandboxExecCmd(),
 			connectorCmd(),

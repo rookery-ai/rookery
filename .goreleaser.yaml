@@ -57,11 +57,25 @@ nfpms:
         dst: /usr/share/doc/rookery/README.md
     # These make the difference between a working install and a mystifying one.
     # python3 in particular: without it the agent-tool AST guardrail self-skips.
+    #
+    # The names differ between distributions and MUST be declared per format.
+    # A single list here shipped the Debian spelling to both, and Fedora has no
+    # package called tesseract-ocr — its package is tesseract. dnf drops a weak
+    # dependency it cannot resolve without saying anything, so an rpm install
+    # produced rookery and ripgrep, no OCR, and no error to explain it.
+    # scripts/smoke-package.sh asserts the resolved names per format.
     recommends:
       - python3
       - ripgrep
       - poppler-utils
       - tesseract-ocr
+    overrides:
+      rpm:
+        recommends:
+          - python3
+          - ripgrep
+          - poppler-utils
+          - tesseract
 
 checksum:
   name_template: checksums.txt
