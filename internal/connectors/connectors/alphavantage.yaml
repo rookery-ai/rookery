@@ -1,0 +1,71 @@
+provider: alphavantage
+# Every endpoint is the SAME url with a different `function` parameter, which is
+# why each action below looks near-identical apart from that one value.
+actions:
+  - name: alphavantage_quote
+    description: "Current quote for one stock symbol — price, change, volume. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        symbol: {type: string, description: "e.g. AAPL"}
+      required: [symbol]
+    request:
+      method: GET
+      url: "https://www.alphavantage.co/query"
+      query:
+        function: "GLOBAL_QUOTE"
+        symbol:   "{{symbol}}"
+    response_extract: "$"
+
+  - name: alphavantage_daily_series
+    description: "Daily open/high/low/close/volume history for a symbol. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        symbol:    {type: string, description: "e.g. MSFT"}
+        outputsize: {type: string, description: "compact (100 points) or full"}
+      required: [symbol]
+    request:
+      method: GET
+      url: "https://www.alphavantage.co/query"
+      query:
+        function:   "TIME_SERIES_DAILY"
+        symbol:     "{{symbol}}"
+        outputsize: "{{outputsize}}"
+    response_extract: "$"
+
+  - name: alphavantage_symbol_search
+    description: "Search for a ticker symbol by company name. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        keywords: {type: string, description: "e.g. microsoft"}
+      required: [keywords]
+    request:
+      method: GET
+      url: "https://www.alphavantage.co/query"
+      query:
+        function: "SYMBOL_SEARCH"
+        keywords: "{{keywords}}"
+    response_extract: "$.bestMatches"
+
+  - name: alphavantage_fx_rate
+    description: "Current exchange rate between two currencies, including crypto. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        from_currency: {type: string, description: "e.g. USD or BTC"}
+        to_currency:   {type: string, description: "e.g. EUR"}
+      required: [from_currency, to_currency]
+    request:
+      method: GET
+      url: "https://www.alphavantage.co/query"
+      query:
+        function:      "CURRENCY_EXCHANGE_RATE"
+        from_currency: "{{from_currency}}"
+        to_currency:   "{{to_currency}}"
+    response_extract: "$"

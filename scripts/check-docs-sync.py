@@ -564,6 +564,8 @@ DISPLAY_NAMES = {
     "huggingface": "Hugging Face",
     "assemblyai": "AssemblyAI",
     "flyio": "Fly.io",
+    "coingecko": "CoinGecko",
+    "alphavantage": "Alpha Vantage",
     "digitalocean": "DigitalOcean",
     "hetzner": "Hetzner Cloud",
     "open_meteo": "Open-Meteo",

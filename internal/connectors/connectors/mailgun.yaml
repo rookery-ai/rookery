@@ -1,0 +1,55 @@
+provider: mailgun
+actions:
+  - name: mailgun_send_email
+    description: "Send an email through the connected domain. PUBLIC WRITE: it lands in someone else's inbox and cannot be recalled."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        from:    {type: string, description: "e.g. Agent <agent@mg.yourdomain.com>"}
+        to:      {type: string, description: "Recipient address. Comma-separate for several."}
+        subject: {type: string}
+        text:    {type: string, description: "Plain-text body."}
+        html:    {type: string, description: "Optional HTML body."}
+      required: [from, to, subject, text]
+    request:
+      method: POST
+      url: "https://api.mailgun.net/v3/{{conn.domain}}/messages"
+      # form, not JSON: Mailgun's send endpoint takes multipart/form-encoded.
+      form:
+        from:    "{{from}}"
+        to:      "{{to}}"
+        subject: "{{subject}}"
+        text:    "{{text}}"
+        html:    "{{html}}"
+    response_extract: "$"
+
+  - name: mailgun_list_events
+    description: "List recent delivery events for the connected domain — accepted, delivered, failed, opened. The way to find out whether a message actually arrived. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        event:     {type: string, description: "Filter, e.g. delivered or failed."}
+        recipient: {type: string, description: "Filter by recipient address."}
+        limit:     {type: integer}
+    request:
+      method: GET
+      url: "https://api.mailgun.net/v3/{{conn.domain}}/events"
+      query:
+        event:     "{{event}}"
+        recipient: "{{recipient}}"
+        limit:     "{{limit}}"
+    response_extract: "$.items"
+
+  - name: mailgun_get_domain
+    description: "Read the connected domain's state and DNS verification status. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.mailgun.net/v3/domains/{{conn.domain}}"
+    response_extract: "$"

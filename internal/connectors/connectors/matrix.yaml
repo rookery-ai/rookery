@@ -1,0 +1,57 @@
+provider: matrix
+# Sending uses PUT with a transaction id, which is Matrix's idempotency
+# mechanism: repeating a PUT with the same txn_id will not post twice. The model
+# must supply it, so the description says what it is for.
+actions:
+  - name: matrix_send_message
+    description: "Post a message to a room. Mutating: other people in that room see it. Reuse the same txn_id to retry safely — Matrix will not post it twice."
+    mutating: true
+    params:
+      type: object
+      properties:
+        room_id: {type: string, description: "e.g. !abc123:matrix.org — the internal id, not the alias."}
+        body:    {type: string, description: "The message text."}
+        txn_id:  {type: string, description: "Any unique string for this send. Reusing it on a retry prevents a duplicate."}
+      required: [room_id, body, txn_id]
+    request:
+      method: PUT
+      url: "{{conn.base_url}}/_matrix/client/v3/rooms/{{room_id}}/send/m.room.message/{{txn_id}}"
+      body:
+        msgtype: "m.text"
+        body:    "{{body}}"
+    response_extract: "$"
+
+  - name: matrix_list_joined_rooms
+    description: "List the rooms this account has joined, by id — which is what send_message needs. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/_matrix/client/v3/joined_rooms"
+    response_extract: "$.joined_rooms"
+
+  - name: matrix_resolve_room_alias
+    description: "Turn a human-readable alias such as #room:server into the internal room id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        room_alias: {type: string, description: "e.g. #myroom:matrix.org"}
+      required: [room_alias]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/_matrix/client/v3/directory/room/{{room_alias|escape}}"
+    response_extract: "$"
+
+  - name: matrix_whoami
+    description: "Check the token is still valid and see which account it belongs to. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/_matrix/client/v3/account/whoami"
+    response_extract: "$"

@@ -1,0 +1,17 @@
+name: alphavantage
+label: Alpha Vantage
+category: Finance
+unverified: true
+auth:
+  kind: api_key
+  # In the QUERY string, not a header — Alpha Vantage takes apikey as an
+  # ordinary parameter alongside the function name.
+  placement: query
+  param_name: apikey
+  key_label: "Alpha Vantage API key"
+  key_hint: "the free key emailed to you on sign-up"
+  setup_url: https://www.alphavantage.co/support/#api-key
+setup_steps:
+  - "Claim a free key at https://www.alphavantage.co/support/#api-key — it arrives instantly, no account needed."
+  - "Paste it below."
+  - "The free tier is rate-limited to a handful of calls per minute, so an agent polling it on a tight schedule will be throttled."

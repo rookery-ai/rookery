@@ -1,0 +1,17 @@
+name: resend
+label: Resend
+category: Communication
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Resend API key"
+  key_hint: "re_..."
+  setup_url: https://resend.com/api-keys
+setup_steps:
+  - "Sign in at https://resend.com and open API Keys."
+  - "Create a key with Sending access and copy it."
+  - "Verify a sending domain first, or you can only send from onboarding@resend.dev to your own address."
+  - "Paste the key below."

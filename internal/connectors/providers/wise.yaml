@@ -1,0 +1,21 @@
+name: wise
+label: Wise
+category: Finance
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Wise API token"
+  key_hint: "created under Settings → API tokens"
+  setup_url: https://wise.com/settings/
+connect_inputs:
+  - key: profile_id
+    label: "Profile ID"
+    hint: "your personal or business profile id — the list-profiles action can find it"
+    required: true
+setup_steps:
+  - "Sign in at https://wise.com and open Settings → API tokens."
+  - "Create a READ-ONLY token unless you intend an agent to move money. The actions here are all reads."
+  - "Copy the token and paste it below with your profile ID. If you do not know the id, connect with any value, run the list-profiles action, then reconnect with the right one."

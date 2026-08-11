@@ -1,0 +1,46 @@
+provider: wise
+# READ-ONLY by design. Wise can move money, and an agent with a transfer action
+# is a different risk class from one that reads a balance — if that is ever
+# added it belongs behind public_write, not merely mutating.
+actions:
+  - name: wise_list_profiles
+    description: "List the profiles on the account, with their ids. Use it to find the Profile ID the connection needs. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.transferwise.com/v2/profiles"
+    response_extract: "$"
+
+  - name: wise_list_balances
+    description: "List the connected profile's balances, one per currency. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        types: {type: string, description: "e.g. STANDARD or SAVINGS"}
+    request:
+      method: GET
+      url: "https://api.transferwise.com/v4/profiles/{{conn.profile_id}}/balances"
+      query:
+        types: "{{types}}"
+    response_extract: "$"
+
+  - name: wise_get_exchange_rate
+    description: "Look up the exchange rate between two currencies. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        source: {type: string, description: "e.g. EUR"}
+        target: {type: string, description: "e.g. MKD"}
+      required: [source, target]
+    request:
+      method: GET
+      url: "https://api.transferwise.com/v1/rates"
+      query:
+        source: "{{source}}"
+        target: "{{target}}"
+    response_extract: "$"

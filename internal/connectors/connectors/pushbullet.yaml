@@ -1,0 +1,52 @@
+provider: pushbullet
+actions:
+  - name: pushbullet_push_note
+    description: "Send a note to the account's devices. Mutating: it reaches a human's devices."
+    mutating: true
+    params:
+      type: object
+      properties:
+        title:  {type: string}
+        body:   {type: string}
+        device_iden: {type: string, description: "Optional: one device. Omit to reach all of them."}
+      required: [body]
+    request:
+      method: POST
+      url: "https://api.pushbullet.com/v2/pushes"
+      body:
+        type:        "note"
+        title:       "{{title}}"
+        body:        "{{body}}"
+        device_iden: "{{device_iden}}"
+    response_extract: "$"
+
+  - name: pushbullet_push_link
+    description: "Send a link to the account's devices. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        title: {type: string}
+        body:  {type: string}
+        url:   {type: string}
+      required: [url]
+    request:
+      method: POST
+      url: "https://api.pushbullet.com/v2/pushes"
+      body:
+        type:  "link"
+        title: "{{title}}"
+        body:  "{{body}}"
+        url:   "{{url}}"
+    response_extract: "$"
+
+  - name: pushbullet_list_devices
+    description: "List the devices this account can push to, with their identifiers. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.pushbullet.com/v2/devices"
+    response_extract: "$.devices"

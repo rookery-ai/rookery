@@ -226,6 +226,15 @@ digitalocean:siDigitalocean
 netlify:siNetlify
 flyio:siFlydotio
 hetzner:siHetzner
+# Wave 3 money connectors. CoinGecko and Alpha Vantage are in none of the three
+# sets and take the upstream path below instead.
+wise:siWise
+# Wave 4 notification and email connectors. Pushover has no mark in any set and
+# takes the upstream path.
+pushbullet:siPushbullet
+resend:siResend
+mailgun:siMailgun
+matrix:siMatrix
 adguard:siAdguard
 firefly_iii:siFireflyiii
 tmdb:siThemoviedatabase
@@ -434,6 +443,10 @@ openfoodfacts|https://world.openfoodfacts.org/images/favicon/off/apple-touch-ico
 # they redeploy — a re-vendor run then fails loudly while the committed SVG keeps
 # rendering, which is the right way round.
 readwise|https://d34adp677peecb.cloudfront.net/static/images/favicons/apple-touch-icon.8284936de99b.png
+# Wave 3 money connectors. Neither brand is in lobehub, simple-icons or
+# worldvectorlogo, so both take their own published raster.
+coingecko|https://www.coingecko.com/favicon-96x96.png
+pushover|https://pushover.net/apple-touch-icon.png
 "
 
 echo "→ upstream (svg)"
@@ -505,6 +518,8 @@ UPSTREAM_ICO="
 miniflux|https://reader.miniflux.app/favicon.ico
 # Jan publishes no svg or png we can reach — only this favicon.
 jan|https://jan.ai/favicon.ico
+# Alpha Vantage (wave 3) publishes nothing else either.
+alphavantage|https://www.alphavantage.co/static/img/favicon.ico
 "
 
 echo "→ upstream (ico → inlined svg)"

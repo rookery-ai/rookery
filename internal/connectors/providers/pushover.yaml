@@ -1,0 +1,28 @@
+name: pushover
+label: Pushover
+category: Communication
+# The AUTH SHAPE is verified: a live call with a bogus token in the query string
+# came back "application token is invalid" rather than "missing", which proves
+# Pushover parses credentials from the query. The actions themselves are not
+# verified — that needed a real token.
+unverified: true
+auth:
+  kind: api_key
+  # Pushover's docs show form-encoded POST bodies, and the connector layer has
+  # no way to place a credential in a body — only header, query or Basic. Query
+  # placement was tested against the live API before this provider was written.
+  placement: query
+  param_name: token
+  key_label: "Pushover application token"
+  key_hint: "created at pushover.net/apps/build — NOT your user key"
+  setup_url: https://pushover.net/apps/build
+connect_inputs:
+  - key: user_key
+    label: "Your user key"
+    hint: "shown on your Pushover dashboard — 30 characters"
+    required: true
+setup_steps:
+  - "Sign in at https://pushover.net. Your USER KEY is on the dashboard — copy it."
+  - "Create an application at https://pushover.net/apps/build to get an APPLICATION TOKEN. The two are different, and the token is the one that goes in the key field."
+  - "Paste the application token as the key below, and your user key in the field beside it."
+  - "Pushover is a one-off purchase per platform after a trial, so check you are licensed before an agent starts sending."
