@@ -50,10 +50,14 @@ export function BackupWarningBanner() {
         <AlertTriangle className="size-4 shrink-0" />
         Backups are not enabled
       </div>
+      {/* Deliberately says "not scheduled", not "has no snapshot". The banner
+          also fires when a passphrase is set but the schedule is off — a state
+          BackupSection treats as legitimate, since "Back up now" still works
+          and those snapshots are listed right below. Claiming there are none
+          would be contradicted by the page it sits above. */}
       <p className="mt-1">
-        This install has no snapshot of its database or knowledge bases. Copying
-        the data folder is not a substitute — it leaves the encryption key
-        behind.
+        No backup is scheduled for this install. Copying the data folder is not
+        a substitute — it leaves the encryption key behind.
       </p>
       <div className="mt-2 flex gap-2">
         <Button size="sm" onClick={goToBackup}>
