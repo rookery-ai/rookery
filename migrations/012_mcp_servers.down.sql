@@ -1,0 +1,15 @@
+ALTER TABLE agent_drafts DROP COLUMN pending_used_mcp_servers;
+DROP TABLE IF EXISTS agent_mcp_servers;
+DROP INDEX IF EXISTS idx_mcp_tools_server;
+DROP TABLE IF EXISTS mcp_tools;
+DROP INDEX IF EXISTS idx_mcp_servers_ws_slug;
+ALTER TABLE mcp_servers DROP COLUMN server_info;
+ALTER TABLE mcp_servers DROP COLUMN tools_ttl_ms;
+ALTER TABLE mcp_servers DROP COLUMN tools_synced_at;
+ALTER TABLE mcp_servers DROP COLUMN last_error;
+ALTER TABLE mcp_servers DROP COLUMN status;
+ALTER TABLE mcp_servers DROP COLUMN encrypted_token;
+ALTER TABLE mcp_servers DROP COLUMN header_name;
+ALTER TABLE mcp_servers DROP COLUMN auth_kind;
+ALTER TABLE mcp_servers DROP COLUMN transport;
+ALTER TABLE mcp_servers DROP COLUMN slug;
