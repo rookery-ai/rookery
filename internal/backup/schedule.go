@@ -115,7 +115,7 @@ func (s *Scheduler) run(ctx context.Context, c *Config) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("backup: %w", err)
 	}
-	dest, err := c.BuildDestination(s.systemKey)
+	dest, err := c.BuildDestination(s.dataDir, s.systemKey)
 	if err != nil {
 		return "", err
 	}

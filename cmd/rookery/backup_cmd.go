@@ -10,7 +10,6 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -74,7 +73,7 @@ func disableEcho() func() {
 func localDestFor(cmd *cli.Command, cfg *config.Config) backup.Destination {
 	dir := cmd.String("dir")
 	if dir == "" {
-		dir = filepath.Join(cfg.Data.Dir, "backups")
+		dir = backup.DefaultLocalDir(cfg.Data.Dir)
 	}
 	return backup.NewLocalDestination(dir)
 }

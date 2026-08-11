@@ -131,6 +131,31 @@ describe("BackupSection", () => {
     await waitFor(() => expect(confirmBtn).toBeEnabled());
   });
 
+  it("states where snapshots go and offers no folder field", async () => {
+    mountWith(mockConfig({ local_dir: "/home/rookie/.rookery/backups" }));
+    expect(
+      await screen.findByText("/home/rookie/.rookery/backups"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/backup folder/i)).not.toBeInTheDocument();
+  });
+
+  it("does not send a local directory when saving", async () => {
+    mountWith(mockConfig({ enabled: true, passphrase_set: true }));
+    await screen.findByText(/passphrase is set/i);
+
+    await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => {
+      const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+      const put = calls.find(
+        (c) => (c[1] as RequestInit | undefined)?.method === "PUT",
+      );
+      expect(put).toBeTruthy();
+      const body = JSON.parse((put![1] as RequestInit).body as string);
+      expect(body.local).toBeUndefined();
+    });
+  });
+
   it("disables Back up now until a passphrase exists", async () => {
     mountWith(mockConfig({ passphrase_set: false }));
     const btn = await screen.findByRole("button", { name: /back up now/i });

@@ -55,7 +55,10 @@ func toBackupDTO(c *backup.Config, dataDir string) backupConfigDTO {
 		Enabled: c.Enabled, Destination: c.Destination, Schedule: c.Schedule,
 		Hour: c.Hour, Weekday: c.Weekday, Retention: c.Retention,
 		PassphraseSet: c.EncryptedPassphrase != "",
-		LocalDir:      c.Local.Dir,
+		// Resolved, not configured: the local directory is derived from the data
+		// dir, and this field exists so the settings page can say where snapshots
+		// land rather than ask.
+		LocalDir: backup.DefaultLocalDir(dataDir),
 		S3: s3DTO{
 			Endpoint: c.S3.Endpoint, Region: c.S3.Region, Bucket: c.S3.Bucket,
 			Prefix: c.S3.Prefix, AccessKey: c.S3.AccessKey,
@@ -86,10 +89,7 @@ type backupConfigReq struct {
 	Weekday     int    `json:"weekday"`
 	Retention   int    `json:"retention"`
 	Passphrase  string `json:"passphrase"`
-	Local       struct {
-		Dir string `json:"dir"`
-	} `json:"local"`
-	S3 struct {
+	S3          struct {
 		Endpoint  string `json:"endpoint"`
 		Region    string `json:"region"`
 		Bucket    string `json:"bucket"`
@@ -116,7 +116,6 @@ func (s *Server) handleSaveBackupConfig(c echo.Context) error {
 	cfg.Hour = req.Hour
 	cfg.Weekday = req.Weekday
 	cfg.Retention = req.Retention
-	cfg.Local.Dir = req.Local.Dir
 	cfg.S3.Endpoint = req.S3.Endpoint
 	cfg.S3.Region = req.S3.Region
 	cfg.S3.Bucket = req.S3.Bucket
@@ -165,7 +164,7 @@ func (s *Server) backupDestination() (backup.Destination, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cfg.BuildDestination(s.systemKey)
+	return cfg.BuildDestination(s.cfg.Data.Dir, s.systemKey)
 }
 
 func (s *Server) handleListSnapshots(c echo.Context) error {

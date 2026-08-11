@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/ilijad1/rookery/internal/secrets"
@@ -31,9 +32,13 @@ type SettingStore interface {
 	SetSystemSetting(key, value string) error
 }
 
-// LocalConfig configures the filesystem destination.
-type LocalConfig struct {
-	Dir string `json:"dir"`
+// DefaultLocalDir is where local snapshots go: <data_dir>/backups, and nowhere
+// else. The directory is deliberately not configurable. The packaged unit runs
+// with ProtectSystem=strict and ReadWritePaths=<data_dir>, and the container
+// mounts one volume at /data, so any other path fails at 03:00 with a
+// permission error rather than at save time with an explanation.
+func DefaultLocalDir(dataDir string) string {
+	return filepath.Join(dataDir, "backups")
 }
 
 // S3Config configures any S3-compatible destination: AWS, Backblaze B2,
@@ -53,15 +58,14 @@ type S3Config struct {
 // and for the same reason: the scheduler runs headless and must decrypt without
 // anyone typing anything.
 type Config struct {
-	Enabled             bool        `json:"enabled"`
-	Destination         string      `json:"destination"`
-	Schedule            string      `json:"schedule"`
-	Hour                int         `json:"hour"`
-	Weekday             int         `json:"weekday"` // 0=Sunday, weekly only
-	Retention           int         `json:"retention"`
-	EncryptedPassphrase string      `json:"encrypted_passphrase"`
-	Local               LocalConfig `json:"local"`
-	S3                  S3Config    `json:"s3"`
+	Enabled             bool     `json:"enabled"`
+	Destination         string   `json:"destination"`
+	Schedule            string   `json:"schedule"`
+	Hour                int      `json:"hour"`
+	Weekday             int      `json:"weekday"` // 0=Sunday, weekly only
+	Retention           int      `json:"retention"`
+	EncryptedPassphrase string   `json:"encrypted_passphrase"`
+	S3                  S3Config `json:"s3"`
 
 	LastRunAt  time.Time `json:"last_run_at"`
 	LastStatus string    `json:"last_status"` // "ok" | "error" | ""
@@ -164,9 +168,7 @@ func (c *Config) Validate() error {
 	}
 	switch c.Destination {
 	case DestLocal:
-		if c.Local.Dir == "" {
-			return errors.New("a backup directory is required")
-		}
+		// Nothing to validate: the destination is always <data_dir>/backups.
 	case DestS3:
 		if c.S3.Bucket == "" {
 			return errors.New("an S3 bucket is required")
@@ -183,14 +185,12 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// BuildDestination constructs the configured Destination.
-func (c *Config) BuildDestination(systemKey []byte) (Destination, error) {
+// BuildDestination constructs the configured Destination. dataDir is required
+// for the local kind, whose directory is derived rather than stored.
+func (c *Config) BuildDestination(dataDir string, systemKey []byte) (Destination, error) {
 	switch c.Destination {
 	case DestLocal:
-		if c.Local.Dir == "" {
-			return nil, errors.New("backup: no backup directory configured")
-		}
-		return NewLocalDestination(c.Local.Dir), nil
+		return NewLocalDestination(DefaultLocalDir(dataDir)), nil
 	case DestS3:
 		secret, err := c.S3SecretKey(systemKey)
 		if err != nil {

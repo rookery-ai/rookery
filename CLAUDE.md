@@ -351,7 +351,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/memory` | Per-user structured context store. Memory lives as named `.md` files in `memory/` (`USER.md`, `SOUL.md`, `GENERAL.md`, etc.) — editable via the KB browser. `ContextString()` reads all files, skips placeholder-only ones, and returns sectioned markdown for LLM injection. `Append/List/Delete` target GENERAL.md bullet lines (used by Telegram `/memory` command). `MigrateToStructuredFiles()` consolidates legacy UUID-keyed entries at startup. |
 | `internal/vault` | Per-user Obsidian-style knowledge base: `Vault` (paths + `Resolve` safety + file IO), `Reflector` (chats→markdown+sidecar), `LinkIndex` ([[wikilinks]]), `Searcher` (ripgrep), `Guard` (post-run write-scope enforcement), `MigrateLegacyLayout`, `MigrateSessionsToChats`. |
 | `internal/audit` | Structured audit event writer → `audit_logs` table |
-| `internal/backup` | Owner-level snapshot/restore of the WHOLE install (database + every workspace vault) into one passphrase-encrypted `.rkb` file. `Snapshot` (`VACUUM INTO` → tar+gzip → chunked AES-256-GCM, staged to a temp file then uploaded), `StageRestore`/`ApplyPendingRestore`/`CancelRestore`/`Verify`, `Destination` interface + `LocalDestination`/`S3Destination` (hand-rolled `signV4`, no AWS SDK), `Config` in `system_settings` (`backup.config`; passphrase + S3 secret encrypted under the system key), `Scheduler` (own ticker; daily/weekly, missed runs collapse), `Prune` (keep-last-N), `AcquireLock` (flock). See "Backup and restore" below. |
+| `internal/backup` | Owner-level snapshot/restore of the WHOLE install (database + every workspace vault) into one passphrase-encrypted `.rkb` file. `Snapshot` (`VACUUM INTO` → tar+gzip → chunked AES-256-GCM, staged to a temp file then uploaded), `StageRestore`/`ApplyPendingRestore`/`CancelRestore`/`Verify`, `Destination` interface + `LocalDestination`/`S3Destination` (hand-rolled `signV4`, no AWS SDK), `DefaultLocalDir(dataDir)` (the one definition of `<data_dir>/backups` — the local folder is not configurable), `Config` in `system_settings` (`backup.config`; passphrase + S3 secret encrypted under the system key), `Scheduler` (own ticker; daily/weekly, missed runs collapse), `Prune` (keep-last-N), `AcquireLock` (flock). See "Backup and restore" below. |
 | `internal/profile` | Per-user personalization (name, email, location, timezone, tone, language, notes); stored in the generic `settings` table; `Load()`/`Save()`/`ContextString()` for LLM injection; `LoadLocation()` for timezone-aware reminder parsing |
 | `internal/skillstore` | `SkillStore`: install/load/delete SKILL.md based skills per workspace. `SkillDir(base, workspaceID, name)` is the path helper shared with the skill designer (staging dirs use the `.staging-<name>` convention). |
 | `web/` | Echo v4 web server: the `/api/v1` JSON API + the embedded React SPA (`web/ui`, served at `/`). The old server-rendered template UI was deleted — the SPA is the only front end. Handler files now hold API handlers + shared cores (e.g. `saveConnector`, `loadAgentDetail`, `saveWorkspaceCoderCore`, `handleOAuthCallback`) reused by the JSON layer. |
@@ -1433,8 +1433,30 @@ migrated — then holds an exclusive `flock` on `<data_dir>/rookery.pid` for
 its whole lifetime. The offline CLI takes the same lock and refuses when the
 server holds it. The settings button does not swap anything itself: it stages,
 writes a `.restore-pending` marker, and shuts the server down, so the swap
-happens on the next boot through the identical code path. `rookery backup
-cancel-restore` abandons a staged restore that would otherwise fire weeks later.
+happens on the next boot through the identical code path. **The CLI does not
+defer** — `cmd/rookery`'s `restore` action calls `StageRestore` *and*
+`ApplyPendingRestore` in the same command and prints `restore complete`, so
+starting the server afterwards is how you use the restored install, not how the
+restore happens. Conflating the two is how someone concludes a finished restore
+failed, which is why the documentation now states both paths side by side.
+`rookery backup cancel-restore` abandons a staged restore that would otherwise
+fire weeks later.
+
+**The local destination is not configurable, and the removal is the fix rather
+than a simplification.** Snapshots go to `backup.DefaultLocalDir(dataDir)` =
+`<data_dir>/backups`, computed in one place and used by the CLI, the scheduler
+and the web API alike. Owner settings used to offer a free-text folder, but the
+packaged unit runs with `ProtectSystem=strict` and `ReadWritePaths=<data_dir>`
+and the container mounts one volume, so every other path failed at 03:00 with a
+permission error rather than at save time with an explanation. `Config`
+therefore has no `Local` field: an install that stored one drops it silently,
+because `encoding/json` ignores unknown keys — that is the entire migration, and
+`TestLoadConfigIgnoresALegacyLocalDirectory` pins it, because the obvious future
+"fix" for a dropped field is to add it back. `local_dir` survives on the API as
+an **output**, the resolved path the settings page displays. The CLI keeps
+`--dir`, since it runs as the operator rather than as the confined unit, and
+`restore` must accept a path to a downloaded snapshot (`openSnapshot` tries
+`os.Open` before falling back to a name lookup).
 
 **Snapshot contents.** `db/rookery.db` (via `VACUUM INTO` — copying the
 live file is torn, the WAL is multi-megabyte) plus `vaults/**`. Excluded:

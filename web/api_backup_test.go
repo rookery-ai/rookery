@@ -3,7 +3,6 @@ package web
 import (
 	"encoding/json"
 	"net/http"
-	"path/filepath"
 	"testing"
 
 	"github.com/ilijad1/rookery/internal/backup"
@@ -61,7 +60,6 @@ func TestBackupSaveConfigStoresPassphraseAndDoesNotEchoIt(t *testing.T) {
 		"enabled": true, "destination": "local", "schedule": "weekly",
 		"hour": 4, "weekday": 1, "retention": 5,
 		"passphrase": "hunter2",
-		"local":      map[string]string{"dir": filepath.Join(t.TempDir(), "backups")},
 	}
 	rec := doJSON(t, s, http.MethodPut, "/api/v1/backup/config", payload, cookies)
 	if rec.Code != http.StatusOK {
@@ -85,16 +83,43 @@ func TestBackupSaveConfigStoresPassphraseAndDoesNotEchoIt(t *testing.T) {
 	}
 }
 
+// local_dir is an output now, not an input: it reports where snapshots actually
+// go so the settings page can state it. A client that still posts a directory
+// must not be able to move the destination.
+func TestBackupConfigReportsResolvedLocalDirAndIgnoresAPostedOne(t *testing.T) {
+	s, _ := newAPITestServer(t)
+	cookies := bootstrapLoginAndVerify(t, s)
+
+	payload := map[string]any{
+		"enabled": true, "destination": "local", "schedule": "daily",
+		"hour": 3, "weekday": 0, "retention": 7,
+		"passphrase": "hunter2",
+		"local":      map[string]string{"dir": "/mnt/somewhere-else"},
+	}
+	rec := doJSON(t, s, http.MethodPut, "/api/v1/backup/config", payload, cookies)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+
+	rec = doJSON(t, s, http.MethodGet, "/api/v1/backup/config", nil, cookies)
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	want := backup.DefaultLocalDir(s.cfg.Data.Dir)
+	if body["local_dir"] != want {
+		t.Fatalf("local_dir = %v, want %v", body["local_dir"], want)
+	}
+}
+
 // Saving an unrelated field must not wipe the stored credential.
 func TestBackupSaveConfigKeepsExistingPassphrase(t *testing.T) {
 	s, _ := newAPITestServer(t)
 	cookies := bootstrapLoginAndVerify(t, s)
-	dir := filepath.Join(t.TempDir(), "backups")
 
 	first := map[string]any{
 		"enabled": true, "destination": "local", "schedule": "daily",
 		"hour": 3, "retention": 7, "passphrase": "hunter2",
-		"local": map[string]string{"dir": dir},
 	}
 	if rec := doJSON(t, s, http.MethodPut, "/api/v1/backup/config", first, cookies); rec.Code != http.StatusOK {
 		t.Fatalf("first save: %d %s", rec.Code, rec.Body.String())
@@ -103,7 +128,6 @@ func TestBackupSaveConfigKeepsExistingPassphrase(t *testing.T) {
 	second := map[string]any{
 		"enabled": true, "destination": "local", "schedule": "daily",
 		"hour": 5, "retention": 9, // no passphrase field
-		"local": map[string]string{"dir": dir},
 	}
 	rec := doJSON(t, s, http.MethodPut, "/api/v1/backup/config", second, cookies)
 	if rec.Code != http.StatusOK {
@@ -123,7 +147,6 @@ func TestBackupSaveConfigRejectsEnabledWithoutPassphrase(t *testing.T) {
 	payload := map[string]any{
 		"enabled": true, "destination": "local", "schedule": "daily",
 		"hour": 3, "retention": 7,
-		"local": map[string]string{"dir": filepath.Join(t.TempDir(), "backups")},
 	}
 	rec := doJSON(t, s, http.MethodPut, "/api/v1/backup/config", payload, cookies)
 	if rec.Code != http.StatusBadRequest {
@@ -173,11 +196,9 @@ func TestBackupRunListAndVerifyRoundTrip(t *testing.T) {
 	cookies := bootstrapLoginAndVerify(t, s)
 	s.WithBackupScheduler(newTestBackupScheduler(t, s, database))
 
-	dir := filepath.Join(t.TempDir(), "backups")
 	payload := map[string]any{
 		"enabled": true, "destination": "local", "schedule": "daily",
 		"hour": 3, "retention": 7, "passphrase": "backup-pass",
-		"local": map[string]string{"dir": dir},
 	}
 	if rec := doJSON(t, s, http.MethodPut, "/api/v1/backup/config", payload, cookies); rec.Code != http.StatusOK {
 		t.Fatalf("save config: %d %s", rec.Code, rec.Body.String())
