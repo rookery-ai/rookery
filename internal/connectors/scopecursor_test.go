@@ -124,6 +124,58 @@ func TestPaginatedResultShapeIsStable(t *testing.T) {
 	}
 }
 
+// Every delete action in the catalog answers 204 with no body. The API engine
+// special-cased that and the bridge did not — and marshaling an empty
+// json.RawMessage fails, so a CLI coder received a broken body for a call that
+// succeeded. The normalization has to happen where both kinds share it.
+func TestExecuteNormalizesAnEmptySuccessBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	reg := testRegistry(t)
+	a, _ := reg.Action("google_calendar", "calendar_delete_event")
+	a.Request.URL = srv.URL + "/events/e1"
+	reg.actions["google_calendar"] = []Action{a}
+
+	res, err := Execute(context.Background(), reg, fakeStore{tok: "AT"}, srv.Client(),
+		ConnRef{ID: "c1", Provider: "google_calendar"}, "calendar_delete_event",
+		map[string]any{"calendar_id": "primary", "event_id": "e1"}, Policy{})
+	if err != nil {
+		t.Fatalf("a 204 is a success, got: %v", err)
+	}
+	if string(res.Data) != `{"ok":true}` {
+		t.Fatalf("Data = %q, want {\"ok\":true}", res.Data)
+	}
+	// The actual regression: this is what the bridge does with the result.
+	if _, err := json.Marshal(map[string]any{"data": res.Data}); err != nil {
+		t.Fatalf("bridge cannot marshal the result: %v", err)
+	}
+}
+
+func TestExecuteRejectsANonJSONBodyWithAnActionableMessage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`<?xml version="1.0"?><Error><Code>NoSuchKey</Code></Error>`))
+	}))
+	defer srv.Close()
+
+	reg := testRegistry(t)
+	a, _ := reg.Action("google", "gmail_search")
+	a.Request.URL = srv.URL + "/messages"
+	reg.actions["google"] = []Action{a}
+
+	_, err := Execute(context.Background(), reg, fakeStore{tok: "AT"}, srv.Client(),
+		ConnRef{ID: "c1", Provider: "google"}, "gmail_search", map[string]any{"query": "hi"}, Policy{})
+	ce, ok := err.(*ConnectorError)
+	if !ok {
+		t.Fatalf("expected a ConnectorError, got %v", err)
+	}
+	if !strings.Contains(ce.Msg, "non-JSON") {
+		t.Fatalf("message should name the cause, got %q", ce.Msg)
+	}
+}
+
 // The helper tests above prove the logic; these prove it is WIRED. A correct
 // missingGrantedScopes that Execute never calls is exactly as useless as no check.
 

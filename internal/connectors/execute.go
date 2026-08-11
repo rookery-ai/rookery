@@ -242,6 +242,26 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 	if status >= 400 {
 		return Result{}, mapHTTPError(status, raw)
 	}
+	// A 204 (or any empty 200) is a SUCCESS with no body, and every delete action in
+	// the catalog produces one. It has to be normalized here rather than left to the
+	// callers, because the two coder kinds disagreed about it: the API engine special-
+	// cases an empty Result.Data, while the bridge wraps it as map[string]any{"data":
+	// data} — and marshaling an EMPTY json.RawMessage fails outright ("unexpected end
+	// of JSON input"), so a CLI coder got a broken response body for a call that
+	// actually worked. Coder kind must not change whether an action functions.
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return Result{Data: json.RawMessage(`{"ok":true}`)}, nil
+	}
+	// A non-JSON body corrupts the envelope rather than merely failing to narrow:
+	// Result.Data is a json.RawMessage and extract returns an unrecognized body
+	// UNCHANGED. This is the recorded "a connector answers in JSON" rule (XML from S3
+	// and Plex, binary from the media providers) turned from a silent corruption into
+	// a sentence naming the cause.
+	if !json.Valid(raw) {
+		return Result{}, &ConnectorError{KindOther, fmt.Sprintf(
+			"%s returned a non-JSON response, which this connector layer cannot carry: %s",
+			conn.Provider, truncate(strings.TrimSpace(string(raw)), 200))}
+	}
 	data := extract(a.ResponseExtract, raw)
 	if a.ResponseFilter.Field != "" {
 		data = applyResponseFilter(data, a.ResponseFilter, asString(args[a.ResponseFilter.PrefixArg]))
