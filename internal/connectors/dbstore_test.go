@@ -2,9 +2,11 @@ package connectors
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -281,6 +283,28 @@ func TestRefreshKeepsConnectionActiveOnTransientFailure(t *testing.T) {
 				t.Fatalf("status %d must not brick the connection: got %q, want ACTIVE", status, got.Status)
 			}
 		})
+	}
+}
+
+// The transient path must still say WHICH connection failed, and must keep the
+// classified kind so callers can tell a retryable failure from a rejection.
+func TestTransientRefreshErrorNamesTheAccountAndKeepsItsKind(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(503)
+	}))
+	defer srv.Close()
+	_, store, _ := refreshFixture(t, srv)
+
+	_, err := store.AccessToken(context.Background(), ConnRef{ID: "c1", Provider: "google"})
+	var ce *ConnectorError
+	if !errors.As(err, &ce) {
+		t.Fatalf("want *ConnectorError, got %T (%v)", err, err)
+	}
+	if ce.Kind != KindServer {
+		t.Fatalf("kind = %v, want KindServer (a 503 is not a rejection)", ce.Kind)
+	}
+	if !strings.Contains(ce.Msg, "work") {
+		t.Fatalf("message %q does not name the account", ce.Msg)
 	}
 }
 

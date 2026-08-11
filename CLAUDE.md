@@ -712,7 +712,14 @@ Only on that gated transition does `notifyReauth` fire, sending an **"⚠️ Act
 to BOTH the inbox (`source: "connection"`, a third value beside `agent_run` and `reminder`) and
 chat, mirroring the approval gate's dual surface so a workspace with no chat platform is not
 stuck. **Fire-once costs no schema change**: the row leaves the `status='ACTIVE'` query on the
-flip, so the transition cannot repeat. The inbox row is written FIRST and independently of the
+flip, so it does not re-fire on every tick. This holds per repair cycle in PRACTICE, not
+absolutely — there are two `DBTokenStore` instances carrying notifiers (`main.go` and
+`web/server.go`) and the flip is check-then-write with no lock, so a background refresh racing a
+web-path `AccessToken` on the same expired row can duplicate the alert. Two inbox rows, no data
+loss; the same check-then-write shape recorded for the `state.md` 409 guard. Note also that
+`ConnectionsNearExpiry` filters `expires_at <> '' AND encrypted_refresh_token <> ''`, so a row
+without either never reaches the loop at all — its alert fires from `AccessToken` DURING an agent
+run, concurrent with the failure rather than ahead of it. The inbox row is written FIRST and independently of the
 chat send — a workspace with no chat platform errors on *every* send, and the inbox is precisely
 that user's only surface. Not covered, deliberately: `token_expiry: never` providers (GitHub,
 Notion) and `auth.kind: none` never enter the refresh loop, so a revocation there surfaces only

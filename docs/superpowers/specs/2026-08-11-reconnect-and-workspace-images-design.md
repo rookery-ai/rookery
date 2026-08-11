@@ -140,9 +140,20 @@ refresh loop, not at read time — at the transition.
 
 **Fire-once needs no schema change.** `db.ConnectionsNearExpiry` selects
 `WHERE status='ACTIVE' AND ...`, so the row leaves the refresh loop's query the instant it
-flips. The transition can happen at most once per repair cycle. No `notified_at` column,
-no periodic sweep, no de-duplication logic, and no possibility of the loop re-sending
-the alert on every tick.
+flips. No `notified_at` column, no periodic sweep, no de-duplication logic, and no
+possibility of the loop re-sending the alert on every tick.
+
+Two limits on that claim, worth stating rather than discovering later:
+
+- **It is fire-once per repair cycle in practice, not absolutely.** Two `DBTokenStore`
+  instances carry notifiers (`main.go` and `web/server.go`) and the flip is
+  check-then-write with no lock, so a background refresh racing a web-path `AccessToken`
+  on the same expired row can write two inbox rows. No data loss, and the same
+  check-then-write shape already recorded for the `state.md` 409 guard.
+- **"Before the agents fail" holds only for the background-loop path.**
+  `ConnectionsNearExpiry` also filters `expires_at <> '' AND encrypted_refresh_token <> ''`,
+  so a row lacking either never reaches the loop. Its alert fires from `AccessToken`
+  *during* an agent run — concurrent with the failure rather than ahead of it.
 
 ### Delivery
 

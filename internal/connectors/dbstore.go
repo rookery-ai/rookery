@@ -166,6 +166,15 @@ func (s *DBTokenStore) refresh(ctx context.Context, row *db.ServiceConnection) (
 		// permanently bricks a healthy connection that would have recovered on
 		// the next tick.
 		if !definitiveRejection(err) {
+			// Keep the KIND (so classification and retry semantics survive) but
+			// name the account. The raw error reads "token endpoint 503: <body>"
+			// and never says WHICH connection could not be refreshed — the old
+			// message said that much, and only its "reconnect it" advice was
+			// wrong for a transient failure.
+			var ce *ConnectorError
+			if errors.As(err, &ce) {
+				return "", &ConnectorError{ce.Kind, "could not refresh " + row.AccountLabel + " right now: " + ce.Msg}
+			}
 			return "", err
 		}
 		s.DB.UpdateConnectionStatus(ctx, row.ID, "NEEDS_REAUTH")
