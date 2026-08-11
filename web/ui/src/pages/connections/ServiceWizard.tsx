@@ -218,9 +218,23 @@ export function ServiceWizard({
   const connectServiceMutation = useConnectService();
   const connectAPIKeyMutation = useConnectAPIKey();
 
-  function jumpToConnect(seedLabel: string) {
+  // Reconnect must actually re-authenticate. It used to only switch the view and
+  // seed the label, so the button labelled Reconnect filled in a text field and
+  // stopped.
+  //
+  // Only an OAuth provider has a consent URL to send the user to. An api_key
+  // provider has nothing to redirect to, and an OAuth provider with required
+  // connect_inputs needs values we must not guess — Google Ads collects a
+  // developer token, which is a secret we should not echo back into a form the
+  // user did not ask for. Both land on the form, which is correct and is what
+  // the old code already did for every case.
+  function reconnect(seedLabel: string) {
     setView("connect");
     setLabel(seedLabel);
+    const needsInput = provider.connect_inputs.some((i) => i.required);
+    if (provider.kind === "oauth" && !needsInput) {
+      void handleConnect(seedLabel);
+    }
   }
 
   async function handleSaveCreds() {
@@ -237,12 +251,18 @@ export function ServiceWizard({
     }
   }
 
-  async function handleConnect() {
+  // The label is a parameter, not read from state: reconnect() calls this
+  // immediately after setLabel(), and setLabel is async — reading state here
+  // would send the PREVIOUS label. That matters beyond cosmetics, because the
+  // label is the upsert key: InsertServiceConnection conflicts on
+  // (workspace_id, provider, account_label), so a wrong one creates a SECOND
+  // connection and leaves the broken one still bound to the user's agents.
+  async function handleConnect(labelOverride?: string) {
     setConnectError(null);
     try {
       const res = await connectServiceMutation.mutateAsync({
         provider: provider.name,
-        label,
+        label: labelOverride ?? label,
         inputs,
       });
       window.location.assign(res.redirect_url);
@@ -304,7 +324,7 @@ export function ServiceWizard({
             <AccountRow
               key={c.id}
               connection={c}
-              onReconnect={() => jumpToConnect(c.label)}
+              onReconnect={() => reconnect(c.label)}
             />
           ))}
         </div>

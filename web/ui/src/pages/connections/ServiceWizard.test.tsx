@@ -305,18 +305,71 @@ test("api_key provider posts {key, inputs} and closes the panel on success", asy
   expect(screen.queryByLabelText(/openai api key/i)).not.toBeInTheDocument();
 });
 
-test("a needs-reconnect account shows a Reconnect button that jumps to the connect flow", async () => {
-  mockFetch();
+// An OAuth provider that cannot be reconnected in one click: the developer
+// token is a secret we must not guess or echo back, so the user supplies it.
+const OAUTH_NEEDS_REAUTH_WITH_INPUTS: ServiceProvider = {
+  ...OAUTH_NEEDS_REAUTH,
+  name: "google_ads",
+  label: "Google Ads",
+  connect_inputs: [
+    { key: "developer_token", label: "Developer token", hint: "From your Google Ads API centre", required: true },
+  ],
+};
+
+test("reconnecting an oauth account goes straight to the provider, reusing its label", async () => {
+  let captured: { label: string } | null = null;
+  mockFetch({
+    connect: (_provider, body) => {
+      captured = body;
+      return jsonResponse({ redirect_url: "https://provider.example/oauth/authorize?x=1" });
+    },
+  });
+  const assignSpy = vi.fn();
+  vi.spyOn(window, "location", "get").mockReturnValue({ assign: assignSpy } as unknown as Location);
   const user = userEvent.setup();
   wrap(OAUTH_NEEDS_REAUTH);
 
   await user.click(screen.getByText("open wizard"));
-
   expect(await screen.findByText("needs reconnect")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: /reconnect/i }));
 
-  expect(await screen.findByRole("button", { name: /connect jira/i })).toBeInTheDocument();
+  // One click, no second Connect press.
+  await vi.waitFor(() =>
+    expect(assignSpy).toHaveBeenCalledWith("https://provider.example/oauth/authorize?x=1"),
+  );
+  // The SAME label, so InsertServiceConnection upserts the existing row and its
+  // agent bindings survive rather than a duplicate connection being created.
+  expect(captured).toEqual({ label: "team", inputs: {} });
+});
+
+test("an oauth provider with required inputs lands on the form instead of redirecting", async () => {
+  const assignSpy = vi.fn();
+  vi.spyOn(window, "location", "get").mockReturnValue({ assign: assignSpy } as unknown as Location);
+  const user = userEvent.setup();
+  wrapLive(OAUTH_NEEDS_REAUTH_WITH_INPUTS);
+
+  await user.click(screen.getByText("open wizard"));
+  await user.click(await screen.findByRole("button", { name: /reconnect/i }));
+
+  expect(await screen.findByLabelText(/developer token/i)).toBeInTheDocument();
   expect(screen.getByLabelText(/label/i)).toHaveValue("team");
+  expect(assignSpy).not.toHaveBeenCalled();
+});
+
+test("reconnecting an api_key account lands on the paste form, never redirecting", async () => {
+  const assignSpy = vi.fn();
+  vi.spyOn(window, "location", "get").mockReturnValue({ assign: assignSpy } as unknown as Location);
+  const user = userEvent.setup();
+  wrapLive({
+    ...API_KEY_PROVIDER,
+    connections: [{ id: "c9", label: "personal", identity: "", status: "NEEDS_REAUTH" }],
+  });
+
+  await user.click(screen.getByText("open wizard"));
+  await user.click(await screen.findByRole("button", { name: /reconnect/i }));
+
+  expect(await screen.findByLabelText(/openai api key/i)).toBeInTheDocument();
+  expect(assignSpy).not.toHaveBeenCalled();
 });
 
 test("disconnect asks for confirmation, then DELETEs the connection", async () => {
