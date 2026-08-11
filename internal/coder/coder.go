@@ -546,15 +546,9 @@ func (c *Coder) selectBackend() CoderBackend {
 	case "opencode":
 		return &opencodeBackend{model: c.apiModelForCLI()}
 	case "codex":
-		// NOTE: cliModel is not yet plumbed to codex (codex supports -m/--config
-		// model=); a workspace CoderModel is currently a no-op for this backend.
-		// Wire it when codex is verified on a real host.
-		return &codexBackend{}
+		return &codexBackend{model: c.apiModelForCLI()}
 	case "gemini":
-		// NOTE: cliModel is not yet plumbed to gemini (gemini supports -m); a
-		// workspace CoderModel is currently a no-op for this backend. Wire it
-		// when gemini is verified on a real host.
-		return &geminiBackend{}
+		return &geminiBackend{model: c.apiModelForCLI()}
 	case "cursor":
 		return &cursorBackend{model: c.cliModel}
 	}
