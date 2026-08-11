@@ -567,7 +567,7 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
 
 - **Data files, not code.** Adding a service = a `providers/<p>.yaml` (auth config) + a
   `connectors/<p>.yaml` (curated action manifest), both `go:embed`ed. `LoadBundled()` parses them.
-  **136 providers (~895 actions):** the Google family (Gmail/Drive/Sheets/Docs/Calendar/Tasks
+  **136 providers (~931 actions):** the Google family (Gmail/Drive/Sheets/Docs/Calendar/Tasks
   **+ Slides/Forms/Chat/Contacts**, and AdSense/GA4/Search Console), **YouTube**,
   the Microsoft 365 family (Outlook mail **+ Outlook Calendar/Contacts, OneDrive,
   Excel, OneNote, Microsoft To Do**, Teams),
