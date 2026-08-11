@@ -1,0 +1,21 @@
+name: flyio
+label: Fly.io
+category: Cloud
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Fly.io API token"
+  key_hint: "created with: fly tokens create org"
+  setup_url: https://fly.io/docs/security/tokens/
+connect_inputs:
+  - key: org_slug
+    label: "Organization slug"
+    hint: "personal, unless you use a named org"
+    required: true
+setup_steps:
+  - "Install flyctl and sign in, then create a token with: fly tokens create org"
+  - "A DEPLOY token (fly tokens create deploy -a APP) is scoped to one app and cannot list the others — use an org token if you want the app list to work."
+  - "Copy the token and paste it below, with your organization slug (usually 'personal')."

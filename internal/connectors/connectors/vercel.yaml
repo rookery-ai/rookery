@@ -1,0 +1,67 @@
+provider: vercel
+# Every action carries teamId. It is dropped when blank (the query renderer
+# omits empty values), so a personal-account token works unchanged.
+actions:
+  - name: vercel_list_projects
+    description: "List the Vercel projects this token can see. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "How many to return."}
+    request:
+      method: GET
+      url: "https://api.vercel.com/v9/projects"
+      query:
+        teamId: "{{conn.team_id}}"
+        limit:  "{{limit}}"
+    response_extract: "$.projects"
+
+  - name: vercel_list_deployments
+    description: "List recent deployments, newest first, with their state. The usual way to find out whether the last deploy succeeded. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        app:   {type: string, description: "Filter to one project by name."}
+        state: {type: string, description: "e.g. READY, ERROR, BUILDING"}
+        limit: {type: integer}
+    request:
+      method: GET
+      url: "https://api.vercel.com/v6/deployments"
+      query:
+        teamId: "{{conn.team_id}}"
+        app:    "{{app}}"
+        state:  "{{state}}"
+        limit:  "{{limit}}"
+    response_extract: "$.deployments"
+
+  - name: vercel_get_deployment
+    description: "Read one deployment by id or url — its state, the commit it built, and why it failed if it did. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        deployment_id: {type: string, description: "The deployment id or its URL."}
+      required: [deployment_id]
+    request:
+      method: GET
+      url: "https://api.vercel.com/v13/deployments/{{deployment_id}}"
+      query:
+        teamId: "{{conn.team_id}}"
+    response_extract: "$"
+
+  - name: vercel_list_domains
+    description: "List the domains on the account or team, with their verification state. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer}
+    request:
+      method: GET
+      url: "https://api.vercel.com/v5/domains"
+      query:
+        teamId: "{{conn.team_id}}"
+        limit:  "{{limit}}"
+    response_extract: "$.domains"

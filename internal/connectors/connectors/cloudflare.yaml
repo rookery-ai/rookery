@@ -1,0 +1,94 @@
+provider: cloudflare
+actions:
+  - name: cloudflare_list_dns_records
+    description: "List the DNS records in the connected zone. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        type: {type: string, description: "Filter by record type, e.g. A or CNAME."}
+        name: {type: string, description: "Filter by record name."}
+    request:
+      method: GET
+      url: "https://api.cloudflare.com/client/v4/zones/{{conn.zone_id}}/dns_records"
+      query:
+        type: "{{type}}"
+        name: "{{name}}"
+    response_extract: "$.result"
+
+  - name: cloudflare_create_dns_record
+    description: "Create a DNS record in the connected zone. Mutating: this changes what the domain resolves to."
+    mutating: true
+    params:
+      type: object
+      properties:
+        type:    {type: string, description: "e.g. A, AAAA, CNAME, TXT"}
+        name:    {type: string, description: "The record name, e.g. www"}
+        content: {type: string, description: "The value, e.g. an IP address"}
+        ttl:     {type: integer, description: "Seconds. 1 means automatic."}
+        proxied: {type: boolean, description: "Route through Cloudflare's proxy."}
+      required: [type, name, content]
+    request:
+      method: POST
+      url: "https://api.cloudflare.com/client/v4/zones/{{conn.zone_id}}/dns_records"
+      body:
+        type:    "{{type}}"
+        name:    "{{name}}"
+        content: "{{content}}"
+        ttl:     "{{ttl}}"
+        proxied: "{{proxied}}"
+    response_extract: "$.result"
+
+  - name: cloudflare_update_dns_record
+    description: "Change an existing DNS record in the connected zone. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        record_id: {type: string, description: "From list_dns_records."}
+        type:      {type: string}
+        name:      {type: string}
+        content:   {type: string}
+        ttl:       {type: integer}
+        proxied:   {type: boolean}
+      required: [record_id, type, name, content]
+    request:
+      method: PATCH
+      url: "https://api.cloudflare.com/client/v4/zones/{{conn.zone_id}}/dns_records/{{record_id}}"
+      body:
+        type:    "{{type}}"
+        name:    "{{name}}"
+        content: "{{content}}"
+        ttl:     "{{ttl}}"
+        proxied: "{{proxied}}"
+    response_extract: "$.result"
+
+  - name: cloudflare_delete_dns_record
+    description: "Delete a DNS record from the connected zone. Mutating and not reversible — the record is gone."
+    mutating: true
+    params:
+      type: object
+      properties:
+        record_id: {type: string, description: "From list_dns_records."}
+      required: [record_id]
+    request:
+      method: DELETE
+      url: "https://api.cloudflare.com/client/v4/zones/{{conn.zone_id}}/dns_records/{{record_id}}"
+    response_extract: "$.result"
+
+  - name: cloudflare_list_zones
+    description: "List the zones (domains) on the connected account, with their ids. Use it to find a Zone ID other than the connected one — those need their own connection. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        name: {type: string, description: "Filter by domain name."}
+    request:
+      method: GET
+      url: "https://api.cloudflare.com/client/v4/zones"
+      query:
+        # Scoped to the connection's account rather than every zone the token
+        # can see. account.id is Cloudflare's own filter parameter.
+        "account.id": "{{conn.account_id}}"
+        name: "{{name}}"
+    response_extract: "$.result"

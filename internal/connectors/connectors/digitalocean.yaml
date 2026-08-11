@@ -1,0 +1,68 @@
+provider: digitalocean
+actions:
+  - name: digitalocean_list_droplets
+    description: "List the droplets on the account, with their status, region and IP addresses. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        tag_name: {type: string, description: "Only droplets carrying this tag."}
+        per_page: {type: integer, description: "How many to return."}
+    request:
+      method: GET
+      url: "https://api.digitalocean.com/v2/droplets"
+      query:
+        tag_name: "{{tag_name}}"
+        per_page: "{{per_page}}"
+    response_extract: "$.droplets"
+
+  - name: digitalocean_get_droplet
+    description: "Read one droplet by id — status, size, region, addresses. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        droplet_id: {type: integer}
+      required: [droplet_id]
+    request:
+      method: GET
+      url: "https://api.digitalocean.com/v2/droplets/{{droplet_id}}"
+    response_extract: "$.droplet"
+
+  - name: digitalocean_droplet_action
+    description: "Power a droplet on or off, or reboot it. Mutating: powering off a running droplet interrupts whatever it is serving."
+    mutating: true
+    params:
+      type: object
+      properties:
+        droplet_id: {type: integer}
+        type:       {type: string, description: "power_on, power_off, reboot, shutdown"}
+      required: [droplet_id, type]
+    request:
+      method: POST
+      url: "https://api.digitalocean.com/v2/droplets/{{droplet_id}}/actions"
+      body:
+        type: "{{type}}"
+    response_extract: "$.action"
+
+  - name: digitalocean_get_account
+    description: "Read the account — email, droplet limit, and status. Useful for a health check. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.digitalocean.com/v2/account"
+    response_extract: "$.account"
+
+  - name: digitalocean_get_balance
+    description: "Read the current account balance and month-to-date usage. Worth a scheduled check on an account that runs unattended."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.digitalocean.com/v2/customers/my/balance"
+    response_extract: "$"

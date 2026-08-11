@@ -1,0 +1,67 @@
+provider: linode
+actions:
+  - name: linode_list_instances
+    description: "List the Linode instances on the account, with their status, region and IP addresses. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        page:      {type: integer}
+        page_size: {type: integer}
+    request:
+      method: GET
+      url: "https://api.linode.com/v4/linode/instances"
+      query:
+        page:      "{{page}}"
+        page_size: "{{page_size}}"
+    response_extract: "$.data"
+
+  - name: linode_get_instance
+    description: "Read one instance by id — status, type, region and addresses. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        linode_id: {type: integer}
+      required: [linode_id]
+    request:
+      method: GET
+      url: "https://api.linode.com/v4/linode/instances/{{linode_id}}"
+    response_extract: "$"
+
+  - name: linode_boot_instance
+    description: "Boot an instance. Mutating."
+    mutating: true
+    params:
+      type: object
+      properties:
+        linode_id: {type: integer}
+      required: [linode_id]
+    request:
+      method: POST
+      url: "https://api.linode.com/v4/linode/instances/{{linode_id}}/boot"
+    response_extract: "$"
+
+  - name: linode_reboot_instance
+    description: "Reboot an instance. Mutating: it interrupts whatever the instance is serving."
+    mutating: true
+    params:
+      type: object
+      properties:
+        linode_id: {type: integer}
+      required: [linode_id]
+    request:
+      method: POST
+      url: "https://api.linode.com/v4/linode/instances/{{linode_id}}/reboot"
+    response_extract: "$"
+
+  - name: linode_get_account
+    description: "Read the account, including its balance — worth a scheduled check on an account that runs unattended. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.linode.com/v4/account"
+    response_extract: "$"

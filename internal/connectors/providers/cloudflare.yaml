@@ -1,0 +1,28 @@
+name: cloudflare
+label: Cloudflare
+category: Cloud
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Cloudflare API token"
+  key_hint: "a scoped API TOKEN, not the legacy Global API Key"
+  setup_url: https://dash.cloudflare.com/profile/api-tokens
+connect_inputs:
+  # Both identifiers appear in URL paths rather than as action arguments: they
+  # belong to the CONNECTION (this account, this zone), not to a call.
+  - key: account_id
+    label: "Account ID"
+    hint: "on the right of your Cloudflare dashboard overview"
+    required: true
+  - key: zone_id
+    label: "Zone ID"
+    hint: "on the overview page of the domain you want to manage"
+    required: true
+setup_steps:
+  - "Sign in at https://dash.cloudflare.com and open My Profile → API Tokens → Create Token."
+  - "Use a scoped token, not the Global API Key: give it Zone → DNS → Edit for the domain you want, and Account → Account Analytics → Read if you want the analytics action."
+  - "Copy the token — Cloudflare shows it once."
+  - "Find your Account ID on the dashboard overview, and the Zone ID on that domain's overview page. Paste all three below."

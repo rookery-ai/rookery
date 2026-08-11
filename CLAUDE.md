@@ -567,7 +567,7 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
 
 - **Data files, not code.** Adding a service = a `providers/<p>.yaml` (auth config) + a
   `connectors/<p>.yaml` (curated action manifest), both `go:embed`ed. `LoadBundled()` parses them.
-  **99 providers (~492 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
+  **106 providers (~522 actions):** the Google family (Gmail/Drive/Sheets/Docs **+ AdSense/GA4/
   Search Console**), **YouTube**, GitHub, Slack, OpenAI, Notion, Outlook, Teams, Jira, HubSpot,
   Dropbox, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce,
   Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello.
@@ -718,6 +718,21 @@ Base64 is not a way out — the bridge caps a result at 8 KiB. Replicate is in p
 prediction answers with **URLs** to its outputs. Hugging Face is metadata-only for the same
 reason. This is now the second instance of one rule: a connector answers in JSON, so a service
 whose payload is binary or XML needs framework support that does not exist yet.
+
+**The cloud-adjacent tier (2026-08).** Cloudflare, DigitalOcean, Vercel, Netlify, Fly.io, Hetzner
+Cloud and Linode join AWS under `Cloud` — infrastructure the user RENTS, as distinct from
+`Self-hosted`, which is the box under their desk. All seven are plain Bearer tokens, so all seven
+are pure YAML.
+
+The one thing worth knowing is where per-account identifiers go. `TestConnectInputsAreReferenced`
+requires every declared `connect_input` to appear as `{{conn.x}}` in a template, which forces the
+right design rather than merely checking it: Cloudflare's `account_id`/`zone_id`, Vercel's
+`team_id` and Fly.io's `org_slug` belong to the CONNECTION (this account, this zone) and so live
+in the action URLs and query strings, not as action arguments the model must supply on every call.
+Vercel's `team_id` is deliberately optional — the query renderer drops an empty value, so a
+personal-account token works unchanged. An earlier draft of `cloudflare_list_zones` reached for a
+`/accounts/{{conn.account_id}}/../../zones` path purely to satisfy the guard; the real fix was
+Cloudflare's own `account.id` query filter, which scopes the result properly as well.
 
 **`auth.kind: sigv4` — AWS, and the one scheme that signs rather than carries.** Every other
 kind puts a credential somewhere in the request; SigV4 signs the request itself, which is why

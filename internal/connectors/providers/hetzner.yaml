@@ -1,0 +1,17 @@
+name: hetzner
+label: Hetzner Cloud
+category: Cloud
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  value_prefix: "Bearer "
+  key_label: "Hetzner Cloud API token"
+  key_hint: "created per PROJECT in the Hetzner Cloud console"
+  setup_url: https://console.hetzner.cloud
+setup_steps:
+  - "Sign in at https://console.hetzner.cloud and open the project you want to manage."
+  - "Go to Security → API tokens → Generate API token. Read is enough unless you want the power actions."
+  - "Copy it — the console shows it once — and paste it below."
+  - "A token belongs to ONE project. Connect again for another project."

@@ -1,0 +1,56 @@
+provider: flyio
+# The Machines API (api.machines.dev/v1), not the GraphQL endpoint: it is
+# REST-JSON and needs no query documents.
+actions:
+  - name: flyio_list_apps
+    description: "List the apps in the connected organization, with their status. Read-only. Needs an ORG token — a deploy token is scoped to one app and will see nothing here."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://api.machines.dev/v1/apps"
+      query:
+        org_slug: "{{conn.org_slug}}"
+    response_extract: "$.apps"
+
+  - name: flyio_get_app
+    description: "Read one app by name — its status and organization. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        app_name: {type: string}
+      required: [app_name]
+    request:
+      method: GET
+      url: "https://api.machines.dev/v1/apps/{{app_name}}"
+    response_extract: "$"
+
+  - name: flyio_list_machines
+    description: "List an app's machines, with their state and region — the usual way to see whether anything is actually running. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        app_name: {type: string}
+      required: [app_name]
+    request:
+      method: GET
+      url: "https://api.machines.dev/v1/apps/{{app_name}}/machines"
+    response_extract: "$"
+
+  - name: flyio_restart_machine
+    description: "Restart one machine. Mutating: it interrupts whatever that machine is serving."
+    mutating: true
+    params:
+      type: object
+      properties:
+        app_name:   {type: string}
+        machine_id: {type: string, description: "From list_machines."}
+      required: [app_name, machine_id]
+    request:
+      method: POST
+      url: "https://api.machines.dev/v1/apps/{{app_name}}/machines/{{machine_id}}/restart"
+    response_extract: "$"
