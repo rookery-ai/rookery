@@ -2,6 +2,7 @@ package web
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -401,6 +402,24 @@ func (s *Server) apiUpdateMCPTool(c echo.Context) error {
 	enabled, readOnly, mode := tool.Enabled, tool.ReadOnly, tool.ApprovalMode
 	if in.Enabled != nil {
 		enabled = *in.Enabled
+	}
+	// Enforce the per-server cap here too, not only at first sync. The cap protects a
+	// shared budget — every tool an agent is offered competes for its attention, so
+	// one server's eightieth tool degrades its use of every OTHER tool, connector
+	// actions included. A cap that only applied to sync would be trivially exceeded by
+	// ticking boxes, which is exactly how the documented limit would become a lie.
+	if enabled && !tool.Enabled {
+		n, err := s.db.CountEnabledMCPTools(ctx, m.ID)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
+		}
+		if n >= mcp.MaxEnabledToolsPerServer {
+			return c.JSON(http.StatusBadRequest, echo.Map{
+				"error": fmt.Sprintf(
+					"%s already has the maximum of %d tools switched on. Turn one off before enabling another.",
+					m.Name, mcp.MaxEnabledToolsPerServer),
+			})
+		}
 	}
 	if in.ReadOnly != nil {
 		readOnly = *in.ReadOnly

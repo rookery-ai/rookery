@@ -63,3 +63,26 @@ func MCPToolsBlock(servers []MCPServerRef, toolNames []string, backendType, mcpB
 	sb.WriteString("</mcp_server_tools>\n")
 	return sb.String()
 }
+
+// MCPBuildBlock is MCPToolsBlock plus the instruction to declare which servers the
+// agent needs, for use during a BUILD.
+//
+// The header requirement has to be injected wherever the model is asked to produce
+// AGENT.md — not only in the design conversation. This project already learned that
+// the expensive way with `# Skills:`, which for a long time was requested only during
+// design and left `agent_skills` empty across the whole install.
+func MCPBuildBlock(servers []MCPServerRef, toolNames []string, backendType, mcpBin string) string {
+	block := MCPToolsBlock(servers, toolNames, backendType, mcpBin)
+	if block == "" {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(block)
+	sb.WriteString("\n<mcp_declaration>\n")
+	sb.WriteString("In AGENT.md you MUST include a line declaring exactly which of these servers this agent needs, alongside the schedule line:\n")
+	sb.WriteString("  # MCP: <server name>, <server name>\n")
+	sb.WriteString("Declare ONLY the servers the agent actually uses — never all of them. ")
+	sb.WriteString("If it needs none, write `# MCP: none`. Do not omit the line.\n")
+	sb.WriteString("</mcp_declaration>\n")
+	return sb.String()
+}

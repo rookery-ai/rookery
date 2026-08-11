@@ -18,6 +18,7 @@ import (
 	"github.com/ilijad1/rookery/internal/coder"
 	"github.com/ilijad1/rookery/internal/connectors"
 	"github.com/ilijad1/rookery/internal/db"
+	"github.com/ilijad1/rookery/internal/mcp"
 	"github.com/ilijad1/rookery/internal/profile"
 	"github.com/ilijad1/rookery/internal/prompts"
 	"github.com/ilijad1/rookery/internal/skilllibrary"
@@ -177,6 +178,30 @@ func (f *Flow) WithMCPStore(s mcpStore) *Flow {
 	return f
 }
 
+// WithMCPBuild exposes the workspace's MCP servers to a BUILD.
+//
+// caller performs the tool calls; boundFor resolves the workspace's enabled servers
+// with their credentials decrypted (a closure rather than a store method, because
+// that resolution needs the system key, which this package has no business holding).
+//
+// Without this, two of the three binding paths are dead: the model is never shown
+// MCP tools, so it is never asked for a "# MCP:" header, and auto-bind has no
+// used-server list because nothing was called.
+func (f *Flow) WithMCPBuild(caller mcp.Caller, boundFor func(ctx context.Context, workspaceID string) []mcp.BoundServer) *Flow {
+	f.mcpCaller = caller
+	f.mcpBoundFor = boundFor
+	return f
+}
+
+// buildBoundMCP returns every ENABLED server for a build. A build has not declared
+// its bindings yet, which is exactly what auto-bind will infer from what it uses.
+func (f *Flow) buildBoundMCP(ctx context.Context, workspaceID string) []mcp.BoundServer {
+	if f.mcpCaller == nil || f.mcpBoundFor == nil {
+		return nil
+	}
+	return f.mcpBoundFor(ctx, workspaceID)
+}
+
 // loadConnectionRefs lists the workspace's service connections as prompts.ConnectionRef
 // so the designer can be told which accounts it may bind (via the # Connections: header).
 func (f *Flow) loadConnectionRefs(ctx context.Context, workspaceID string) []prompts.ConnectionRef {
@@ -317,6 +342,8 @@ type Flow struct {
 	designer      *AgentDesigner
 	db            dbDesignStore
 	mcpDB         mcpStore
+	mcpCaller     mcp.Caller
+	mcpBoundFor   func(ctx context.Context, workspaceID string) []mcp.BoundServer
 	memStore      memoryStore  // optional; nil = no memory injected
 	vlt           *vault.Vault // optional; nil = no KB context injected
 	secretsLoader func(ctx context.Context, workspaceID string) (map[string]string, error)
@@ -788,6 +815,7 @@ func (f *Flow) saveDraft(sess *DesignSession) {
 	histJSON, _ := json.Marshal(sess.History)
 	toolsJSON, _ := json.Marshal(sess.PendingTools)
 	usedConnsJSON, _ := json.Marshal(sess.PendingUsedConnections)
+	usedMCPJSON, _ := json.Marshal(sess.PendingUsedMCPServers)
 	state := "designing"
 	if sess.State == StateVerifying {
 		state = "verifying"
@@ -802,6 +830,7 @@ func (f *Flow) saveDraft(sess *DesignSession) {
 		PendingAgentMD:             sess.PendingAgentMD,
 		PendingToolsJSON:           string(toolsJSON),
 		PendingUsedConnectionsJSON: string(usedConnsJSON),
+		PendingUsedMCPServersJSON:  string(usedMCPJSON),
 		ExpiresAt:                  time.Now().Add(draftTTL),
 	})
 }
@@ -886,6 +915,9 @@ func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string) (string, err
 	}
 	if draft.PendingUsedConnectionsJSON != "" {
 		_ = json.Unmarshal([]byte(draft.PendingUsedConnectionsJSON), &sess.PendingUsedConnections)
+	}
+	if draft.PendingUsedMCPServersJSON != "" {
+		_ = json.Unmarshal([]byte(draft.PendingUsedMCPServersJSON), &sess.PendingUsedMCPServers)
 	}
 
 	if draft.IsEdit {
@@ -1516,6 +1548,20 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// mutating actions like send). Parity with the run path (agentrunner.WithConnectors).
 	if bound := f.buildBoundConns(genCtx, workspaceID); len(bound) > 0 {
 		generationCoder = generationCoder.WithConnectors(f.connReg, f.connStore, bound)
+	}
+	// The same for MCP servers, and for the same reason: without it a build has no MCP
+	// tools at all, which silently disables TWO of the three binding paths — the model
+	// is never told to emit a "# MCP:" header, and auto-bind has no used-server list to
+	// work from because nothing was ever called. The build-time guard still refuses any
+	// tool the owner has not marked read-only.
+	if boundMCP := f.buildBoundMCP(genCtx, workspaceID); len(boundMCP) > 0 {
+		generationCoder = generationCoder.WithMCP(f.mcpCaller, boundMCP)
+		var refs []prompts.MCPServerRef
+		for _, b := range boundMCP {
+			refs = append(refs, prompts.MCPServerRef{Name: b.Name})
+		}
+		prompt += "\n" + prompts.MCPBuildBlock(refs, mcp.ToolNames(boundMCP),
+			prompts.MapCoderBackend(backendType), "")
 	}
 	result, err := generationCoder.Generate(genCtx, workspaceID, prompt)
 

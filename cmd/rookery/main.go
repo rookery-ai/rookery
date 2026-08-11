@@ -340,6 +340,17 @@ func serveCmd() *cli.Command {
 				WithMemory(memStore).
 				WithConnectors(connReg, connStore).
 				WithMCPStore(database).
+				WithMCPBuild(mcpClient, func(ctx context.Context, workspaceID string) []mcp.BoundServer {
+					// A build sees every ENABLED server: it has not declared its
+					// bindings yet, and auto-bind infers them from what it actually
+					// uses. The build-time guard still refuses any tool the owner has
+					// not marked read-only.
+					bound, err := mcp.ActiveBoundServers(ctx, database, sysKey, workspaceID)
+					if err != nil {
+						return nil
+					}
+					return bound
+				}).
 				WithSecretsLoader(func(ctx context.Context, workspaceID string) (map[string]string, error) {
 					user, err := database.GetWorkspaceByID(workspaceID)
 					if err != nil || user.EncryptedMasterPassword == "" {
