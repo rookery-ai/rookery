@@ -1,0 +1,49 @@
+provider: replicate
+# Replicate fits here where most generative-media services do not: a prediction
+# answers with URLs to its outputs rather than the file bytes, and a connector
+# result must be JSON. See the note in wave 1's spec about why ElevenLabs and
+# Stability were left out.
+actions:
+  - name: replicate_create_prediction
+    description: "Run a Replicate model and return the prediction. Mutating: it spends the user's Replicate credit. Outputs come back as URLs, and may still be processing — read them back with the get action."
+    mutating: true
+    params:
+      type: object
+      properties:
+        version: {type: string, description: "The model VERSION hash to run."}
+        input:   {type: object, description: "The model's own input object, e.g. {\"prompt\": \"a heron\"}."}
+      required: [version, input]
+    request:
+      method: POST
+      url: "https://api.replicate.com/v1/predictions"
+      body:
+        version: "{{version}}"
+        input:   "{{input}}"
+    response_extract: "$"
+
+  - name: replicate_get_prediction
+    description: "Read a prediction by id — its status and, once succeeded, the output URLs. Poll this after creating one."
+    mutating: false
+    params:
+      type: object
+      properties:
+        prediction_id: {type: string}
+      required: [prediction_id]
+    request:
+      method: GET
+      url: "https://api.replicate.com/v1/predictions/{{prediction_id}}"
+    response_extract: "$"
+
+  - name: replicate_get_model
+    description: "Look up a model by owner and name, including its latest version hash — which is what create_prediction needs. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        owner: {type: string, description: "e.g. black-forest-labs"}
+        name:  {type: string, description: "e.g. flux-schnell"}
+      required: [owner, name]
+    request:
+      method: GET
+      url: "https://api.replicate.com/v1/models/{{owner}}/{{name}}"
+    response_extract: "$"

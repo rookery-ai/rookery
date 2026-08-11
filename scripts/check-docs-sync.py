@@ -559,6 +559,10 @@ DISPLAY_NAMES = {
     "google_sheets": "Sheets",
     "google_tasks": "Tasks",
     "lastfm": "Last.fm",
+    # Two words in the brand, one in the slug — the default .title() would
+    # demand the prose say "Huggingface", which is not the name.
+    "huggingface": "Hugging Face",
+    "assemblyai": "AssemblyAI",
     "open_meteo": "Open-Meteo",
     "openfoodfacts": "Open Food Facts",
     "openlibrary": "Open Library",

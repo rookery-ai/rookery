@@ -172,6 +172,7 @@ export const CATEGORY_ORDER = [
   "Advertising",
   "Productivity",
   "Communication",
+  "AI",
   "Self-hosted",
   "Cloud",
   "Health & Fitness",

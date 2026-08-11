@@ -1,0 +1,36 @@
+provider: assemblyai
+# Transcription here is ASYNCHRONOUS by design: submit returns an id
+# immediately, and the text is read back once status is "completed". An agent
+# should submit, do something else, and check later rather than spin.
+actions:
+  - name: assemblyai_submit_transcript
+    description: "Submit audio at a URL for transcription. Returns an id and a status — the text is NOT ready yet. Read it back with get_transcript."
+    mutating: true
+    params:
+      type: object
+      properties:
+        audio_url:      {type: string, description: "Direct link to the audio file."}
+        speaker_labels: {type: boolean, description: "Label who is speaking."}
+        language_code:  {type: string, description: "e.g. en_us. Omit to auto-detect."}
+      required: [audio_url]
+    request:
+      method: POST
+      url: "https://api.assemblyai.com/v2/transcript"
+      body:
+        audio_url:      "{{audio_url}}"
+        speaker_labels: "{{speaker_labels}}"
+        language_code:  "{{language_code}}"
+    response_extract: "$"
+
+  - name: assemblyai_get_transcript
+    description: "Read a transcript by id. Check the status field — 'queued' or 'processing' means come back later; 'completed' has the text."
+    mutating: false
+    params:
+      type: object
+      properties:
+        transcript_id: {type: string}
+      required: [transcript_id]
+    request:
+      method: GET
+      url: "https://api.assemblyai.com/v2/transcript/{{transcript_id}}"
+    response_extract: "$"

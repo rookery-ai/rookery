@@ -1,0 +1,18 @@
+name: deepgram
+label: Deepgram
+category: AI
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  # "Token ", not "Bearer " — Deepgram's own scheme name. Confirmed against
+  # developers.deepgram.com/reference/authentication.
+  value_prefix: "Token "
+  key_label: "Deepgram API key"
+  key_hint: "created under a project in the Deepgram console"
+  setup_url: https://console.deepgram.com
+setup_steps:
+  - "Sign in at https://console.deepgram.com and open your project's API Keys page."
+  - "Create a key and copy it — the console shows it once."
+  - "Paste it below. Transcription here works from a URL you give it, not an uploaded file, so the audio must be somewhere Deepgram can fetch."

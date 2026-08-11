@@ -105,6 +105,14 @@ venice:venice-color
 # NOTE: no backticks anywhere in this block — it is inside a double-quoted shell
 # string, so a backtick runs a command instead of being a comment.
 aws:aws-color
+# Wave 1 AI CONNECTORS (2026-08), which are a different thing from the coder
+# providers above: these are services an agent calls with the user's own key.
+# anthropic, openrouter, perplexity and huggingface are already vendored above
+# and reuse the same slug, so only these two are new. replicate takes the mono
+# mark, its published form; assemblyai-color is blue and reads on the white
+# tile. deepgram has no lobehub mark and comes from simple-icons below.
+replicate:replicate
+assemblyai:assemblyai-color
 "
 
 # our-slug:worldvectorlogo-slug
@@ -199,6 +207,9 @@ wakatime:siWakatime
 ntfy:siNtfy
 toggl:siToggl
 jellyfin:siJellyfin
+# Deepgram (wave 1 AI connectors) — the one brand in that wave with no lobehub
+# mark. simple-icons carries it.
+deepgram:siDeepgram
 adguard:siAdguard
 firefly_iii:siFireflyiii
 tmdb:siThemoviedatabase

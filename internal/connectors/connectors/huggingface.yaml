@@ -1,0 +1,54 @@
+provider: huggingface
+# Metadata only. Running inference through Hugging Face returns whatever the
+# model returns — often image or audio BYTES — and a connector result must be
+# JSON, so inference is deliberately not offered here. The coder catalog already
+# reaches Hugging Face's router for text.
+actions:
+  - name: huggingface_search_models
+    description: "Search the Hub for models by name, task or library. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        search:   {type: string, description: "Free-text query, e.g. whisper"}
+        task:     {type: string, description: "Filter by pipeline tag, e.g. automatic-speech-recognition"}
+        sort:     {type: string, description: "e.g. downloads or likes"}
+        limit:    {type: integer, description: "How many to return."}
+    request:
+      method: GET
+      url: "https://huggingface.co/api/models"
+      query:
+        search: "{{search}}"
+        filter: "{{task}}"
+        sort:   "{{sort}}"
+        limit:  "{{limit}}"
+    response_extract: "$"
+
+  - name: huggingface_get_model
+    description: "Read one model's card metadata — downloads, likes, tags, library and license. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        model_id: {type: string, description: "e.g. openai/whisper-large-v3"}
+      required: [model_id]
+    request:
+      method: GET
+      url: "https://huggingface.co/api/models/{{model_id}}"
+    response_extract: "$"
+
+  - name: huggingface_search_datasets
+    description: "Search the Hub for datasets. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        search: {type: string}
+        limit:  {type: integer}
+    request:
+      method: GET
+      url: "https://huggingface.co/api/datasets"
+      query:
+        search: "{{search}}"
+        limit:  "{{limit}}"
+    response_extract: "$"
