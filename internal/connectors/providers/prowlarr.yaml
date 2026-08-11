@@ -1,0 +1,22 @@
+name: prowlarr
+label: Prowlarr
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: X-Api-Key
+  value_prefix: ""
+  key_label: "Prowlarr API key"
+  key_hint: "from Settings → General → Security"
+  setup_url: https://wiki.servarr.com/prowlarr
+connect_inputs:
+  - key: base_url
+    label: "Prowlarr URL"
+    hint: "e.g. http://prowlarr.local:9696 — a LAN address is fine"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In Prowlarr open Settings → General and scroll to the Security section."
+  - "Copy the API Key shown there."
+  - "Paste it below with your Prowlarr URL. A private address such as http://192.168.1.10:9696 works: connectors reach your own network on purpose."

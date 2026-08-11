@@ -1,0 +1,11 @@
+name: npm
+label: npm registry
+category: Developer
+# The public registry needs no credential at all — the same keyless shape as
+# Open-Meteo. Publishing would need a token; nothing here writes.
+unverified: true
+auth:
+  kind: none
+setup_steps:
+  - "Nothing to set up — the public npm registry needs no account or key. Press Connect."
+  - "These actions read published package metadata: versions, dependencies, maintainers and download counts."

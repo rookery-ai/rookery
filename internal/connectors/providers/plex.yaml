@@ -1,0 +1,25 @@
+name: plex
+label: Plex
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: X-Plex-Token
+  value_prefix: ""
+  key_label: "Plex token"
+  key_hint: "the X-Plex-Token from any request your browser makes to the server"
+  setup_url: https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/
+static_headers:
+  # Without this Plex answers XML, which the connector layer cannot read.
+  Accept: application/json
+connect_inputs:
+  - key: base_url
+    label: "Plex server URL"
+    hint: "e.g. http://plex.local:32400 — a LAN address is fine"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "Follow https://support.plex.tv/articles/204059436 to find your X-Plex-Token — the quickest way is to view XML for any library item and copy the token from the address bar."
+  - "Paste it below with your Plex server URL."
+  - "This token grants your whole Plex account, so treat it as a password."

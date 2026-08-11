@@ -1,0 +1,26 @@
+name: proxmox
+label: Proxmox VE
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  header_name: Authorization
+  # Proxmox's own scheme. The credential is the WHOLE token string
+  # "user@realm!tokenid=uuid", so the prefix carries only the scheme name.
+  value_prefix: "PVEAPIToken="
+  key_label: "Proxmox API token"
+  key_hint: "the full string: root@pam!rookery=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  setup_url: https://pve.proxmox.com/wiki/User_Management
+connect_inputs:
+  - key: base_url
+    label: "Proxmox URL"
+    hint: "e.g. https://proxmox.local:8006 — a LAN address is fine"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In the Proxmox web UI open Datacenter → Permissions → API Tokens and add one."
+  - "Untick 'Privilege Separation' only if you want the token to inherit the user's full rights; otherwise grant it a role explicitly under Permissions."
+  - "Copy the token id AND the secret. Proxmox shows the secret once."
+  - "Paste the WHOLE token as user@realm!tokenid=secret — for example root@pam!rookery=1234abcd-… — with your Proxmox URL."
+  - "Proxmox usually serves a self-signed certificate. If yours does, the connection will fail TLS verification until you install a trusted certificate."

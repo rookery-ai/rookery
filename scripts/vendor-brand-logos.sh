@@ -235,6 +235,19 @@ pushbullet:siPushbullet
 resend:siResend
 mailgun:siMailgun
 matrix:siMatrix
+# Wave 5 homelab connectors. Prowlarr, Lidarr and Bazarr are in none of the
+# three sets — unlike Sonarr and Radarr, which simple-icons does carry — so they
+# take their own repositories' published PNGs below.
+proxmox:siProxmox
+tailscale:siTailscale
+plex:siPlex
+# Wave 6 developer connectors. All six have marks.
+gitlab:siGitlab
+bitbucket:siBitbucket
+linear:siLinear
+sentry:siSentry
+npm:siNpm
+pypi:siPypi
 adguard:siAdguard
 firefly_iii:siFireflyiii
 tmdb:siThemoviedatabase
@@ -447,6 +460,12 @@ readwise|https://d34adp677peecb.cloudfront.net/static/images/favicons/apple-touc
 # worldvectorlogo, so both take their own published raster.
 coingecko|https://www.coingecko.com/favicon-96x96.png
 pushover|https://pushover.net/apple-touch-icon.png
+# Wave 5 homelab connectors. Sonarr and Radarr come from simple-icons, but
+# Prowlarr, Lidarr and Bazarr are in none of the three sets — each publishes a
+# square PNG in its own repository.
+prowlarr|https://raw.githubusercontent.com/Prowlarr/Prowlarr/develop/Logo/128.png
+lidarr|https://raw.githubusercontent.com/Lidarr/Lidarr/develop/Logo/128.png
+bazarr|https://raw.githubusercontent.com/morpheus65535/bazarr/master/frontend/public/images/logo128.png
 "
 
 echo "→ upstream (svg)"

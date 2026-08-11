@@ -1,0 +1,25 @@
+name: bazarr
+label: Bazarr
+category: Self-hosted
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  # NOTE the spelling: Bazarr uses X-API-KEY, where Sonarr, Radarr, Prowlarr and
+  # Lidarr all use X-Api-Key. Header names are case-insensitive per RFC 9110, so
+  # this is cosmetic — but it is written as Bazarr documents it.
+  header_name: X-API-KEY
+  value_prefix: ""
+  key_label: "Bazarr API key"
+  key_hint: "from Settings → General → Security"
+  setup_url: https://wiki.bazarr.media
+connect_inputs:
+  - key: base_url
+    label: "Bazarr URL"
+    hint: "e.g. http://bazarr.local:6767 — a LAN address is fine"
+    required: true
+    normalize: base_url
+setup_steps:
+  - "In Bazarr open Settings → General and find the Security section."
+  - "Copy the API Key shown there."
+  - "Paste it below with your Bazarr URL. A private address such as http://192.168.1.10:6767 works: connectors reach your own network on purpose."

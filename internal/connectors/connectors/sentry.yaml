@@ -1,0 +1,56 @@
+provider: sentry
+actions:
+  - name: sentry_list_projects
+    description: "List the organization's projects, with their slugs and platforms. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "https://sentry.io/api/0/organizations/{{conn.org_slug}}/projects/"
+    response_extract: "$"
+
+  - name: sentry_list_issues
+    description: "List a project's unresolved issues, most frequent first — what is actually breaking. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        project_slug: {type: string, description: "From list_projects."}
+        query:        {type: string, description: "Sentry search, e.g. is:unresolved. Defaults to unresolved."}
+        stats_period: {type: string, description: "e.g. 24h or 14d."}
+      required: [project_slug]
+    request:
+      method: GET
+      url: "https://sentry.io/api/0/projects/{{conn.org_slug}}/{{project_slug}}/issues/"
+      query:
+        query:       "{{query}}"
+        statsPeriod: "{{stats_period}}"
+    response_extract: "$"
+
+  - name: sentry_get_issue
+    description: "Read one issue by id — its title, culprit, count and first/last seen. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        issue_id: {type: string}
+      required: [issue_id]
+    request:
+      method: GET
+      url: "https://sentry.io/api/0/issues/{{issue_id}}/"
+    response_extract: "$"
+
+  - name: sentry_get_latest_event
+    description: "Read the most recent event for an issue, including its stack trace — the detail you need to actually diagnose it. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        issue_id: {type: string}
+      required: [issue_id]
+    request:
+      method: GET
+      url: "https://sentry.io/api/0/issues/{{issue_id}}/events/latest/"
+    response_extract: "$"

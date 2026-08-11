@@ -1,0 +1,65 @@
+provider: prowlarr
+actions:
+  - name: prowlarr_system_status
+    description: "Read Prowlarr's version and health. The cheapest way to check the connection works. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/system/status"
+    response_extract: "$"
+
+  - name: prowlarr_list_queue
+    description: "List what Prowlarr is currently downloading, with progress and status. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        page_size: {type: integer, description: "How many to return."}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/queue"
+      query:
+        pageSize: "{{page_size}}"
+    response_extract: "$.records"
+
+  - name: prowlarr_list_health
+    description: "List Prowlarr's active health warnings — the things its own UI shows in red. Worth a scheduled check. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/health"
+    response_extract: "$"
+
+  - name: prowlarr_list_indexers
+    description: "List the configured indexers and whether each is enabled. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties: {}
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/indexer"
+    response_extract: "$"
+
+  - name: prowlarr_search
+    description: "Search the configured indexers for a release. Read-only — it queries, it does not grab anything."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "What to search for."}
+        limit: {type: integer}
+      required: [query]
+    request:
+      method: GET
+      url: "{{conn.base_url}}/api/v1/search"
+      query:
+        query: "{{query}}"
+        limit: "{{limit}}"
+    response_extract: "$"
