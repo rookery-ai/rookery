@@ -314,10 +314,39 @@ type Action struct {
 	// A PublicWrite action is always Mutating too; RunGuardrails-style consistency is
 	// enforced by TestPublicWriteImpliesMutating rather than by the loader, so a data
 	// file with the pair wrong fails the build rather than silently skipping a guard.
-	PublicWrite     bool            `yaml:"public_write"`
+	PublicWrite bool `yaml:"public_write"`
+
+	// Scopes names the OAuth scopes this action needs. It is OPTIONAL: an action
+	// that declares none is unconstrained, which is what keeps every pre-existing
+	// action valid and makes adoption incremental.
+	//
+	// It buys two things. TestActionScopesAreDeclaredByTheProvider asserts the list
+	// is a subset of the provider's own default_scopes, so an action authored
+	// against a scope nobody added to the provider fails the build rather than
+	// 403-ing at 03:00 inside a scheduled run. And Execute pre-checks it against
+	// what the connection was actually GRANTED (see missingGrantedScopes), turning
+	// an opaque provider 403 into a sentence naming the account to reconnect.
+	//
+	// Scopes belong to the CHILD provider, not the auth parent: buildConsentURL
+	// sends the child's own scopes to the parent's authorize endpoint, so
+	// google_drive's grant is the google_drive scope list.
+	Scopes []string `yaml:"scopes"`
+
 	ParamsRaw       map[string]any  `yaml:"params"`
 	Request         RequestTemplate `yaml:"request"`
 	ResponseExtract string          `yaml:"response_extract"`
+	// ResponseCursor is a dotted path to the provider's next-page token. It exists
+	// because response_extract DESTROYS pagination: "$.files" discards
+	// nextPageToken, so the narrowing that keeps a response under the bridge's 8 KiB
+	// cap also throws away the only means of getting page two — and the model has no
+	// way to know it was truncated.
+	//
+	// When the path resolves to a non-empty value the result is wrapped as
+	// {"items": <extracted>, "next_cursor": "..."}; when it does not, the extracted
+	// value is returned bare exactly as before. So the envelope appears ONLY when
+	// there is genuinely a next page, which keeps every existing action
+	// byte-identical and shows the model a cursor precisely when one is actionable.
+	ResponseCursor string `yaml:"response_cursor"`
 	// ResponseFilter optionally narrows an array response after ResponseExtract runs.
 	ResponseFilter ResponseFilter  `yaml:"response_filter"`
 	Params         json.RawMessage `yaml:"-"` // compiled JSON schema from ParamsRaw

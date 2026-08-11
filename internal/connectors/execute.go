@@ -145,6 +145,15 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 			return Result{Data: payload}, nil
 		}
 	}
+	// The scope pre-check sits before the token fetch: a grant that cannot cover this
+	// action will not be fixed by refreshing it, and the answer is already on the
+	// connection. It fails OPEN — see missingGrantedScopes.
+	if miss := missingGrantedScopes(a.Scopes, conn.Extra); len(miss) > 0 {
+		return Result{}, &ConnectorError{KindNeedsReauth, fmt.Sprintf(
+			"%q needs the %s scope, which this %s connection was never granted. "+
+				"Reconnect the account on the connections page to grant it; retrying will not help.",
+			actionName, strings.Join(miss, ", "), conn.Provider)}
+	}
 	token, err := store.AccessToken(ctx, conn)
 	if err != nil {
 		return Result{}, err // TokenStore returns a typed ConnectorError
@@ -237,7 +246,108 @@ func Execute(ctx context.Context, reg *Registry, store TokenStore, client *http.
 	if a.ResponseFilter.Field != "" {
 		data = applyResponseFilter(data, a.ResponseFilter, asString(args[a.ResponseFilter.PrefixArg]))
 	}
+	// Pagination is read off the RAW body, not the extracted value: the cursor lives
+	// beside the array response_extract narrowed to, so extracting first is exactly
+	// what loses it.
+	if cur := cursorValue(a.ResponseCursor, raw); cur != "" {
+		wrapped, err := json.Marshal(paginatedResult{Items: data, NextCursor: cur})
+		if err != nil {
+			return Result{Data: data}, nil // never lose a good page over an envelope
+		}
+		return Result{Data: wrapped}, nil
+	}
 	return Result{Data: data}, nil
+}
+
+// paginatedResult is the envelope an action carrying a live next-page cursor returns.
+// The field names are for the MODEL to read, so they say what they are rather than
+// mirroring whichever of nextPageToken/after/cursor/offset the provider happened to use.
+type paginatedResult struct {
+	Items      json.RawMessage `json:"items"`
+	NextCursor string          `json:"next_cursor"`
+}
+
+// cursorValue resolves an action's response_cursor path against the raw body and
+// returns the token as a string, or "" when there is no next page.
+//
+// "No next page" has several spellings across providers — the key absent entirely,
+// present as null, or present as an empty string — and all three must read as absent,
+// or every terminal page would carry an envelope inviting the model to fetch a page
+// that does not exist. A non-string scalar (an offset-based API's integer) is passed
+// through as its JSON text, since it is going straight back as a query parameter.
+func cursorValue(path string, raw []byte) string {
+	if strings.TrimSpace(path) == "" {
+		return ""
+	}
+	v, ok := extractOK(path, raw)
+	if !ok {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(v, &s) == nil {
+		return s
+	}
+	t := strings.TrimSpace(string(v))
+	if t == "null" || t == "{}" || t == "[]" {
+		return ""
+	}
+	return t
+}
+
+// missingGrantedScopes reports which of an action's declared scopes the connection was
+// not granted.
+//
+// It FAILS OPEN in two cases, both deliberate. An action declaring no scopes is
+// unconstrained, so adoption can be incremental. And a connection with no recorded
+// grant returns nothing missing — every connection that predates scope capture has an
+// empty `scope` in its extra, and treating that as "granted nothing" would break every
+// working connection on upgrade. Same reasoning as definitiveRejection and ParkerFor:
+// a false negative costs one confusing 403, a false positive costs a working install.
+func missingGrantedScopes(declared []string, extra map[string]string) []string {
+	if len(declared) == 0 {
+		return nil
+	}
+	granted := parseScopeString(extra["scope"])
+	if len(granted) == 0 {
+		return nil
+	}
+	var miss []string
+	for _, s := range declared {
+		if s == "" || granted[s] {
+			continue
+		}
+		// Google returns the fully-qualified URL form and Microsoft returns both the
+		// short and qualified forms depending on endpoint, so compare on the last
+		// path segment too rather than reporting a scope the user demonstrably has.
+		if granted[scopeTail(s)] {
+			continue
+		}
+		miss = append(miss, s)
+	}
+	return miss
+}
+
+// parseScopeString splits the granted-scope string captured from the token response.
+// RFC 6749 specifies space delimiting, but enough providers use commas that accepting
+// both is cheaper than discovering which ones do not.
+func parseScopeString(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, f := range strings.FieldsFunc(s, func(r rune) bool { return r == ' ' || r == ',' || r == '\t' }) {
+		if f = strings.TrimSpace(f); f != "" {
+			out[f] = true
+			out[scopeTail(f)] = true
+		}
+	}
+	return out
+}
+
+// scopeTail reduces a qualified scope to its final segment
+// ("https://graph.microsoft.com/Mail.Read" → "Mail.Read").
+func scopeTail(s string) string {
+	if i := strings.LastIndex(s, "/"); i >= 0 && i+1 < len(s) {
+		return s[i+1:]
+	}
+	return s
 }
 
 func mapHTTPError(status int, raw []byte) *ConnectorError {
@@ -256,29 +366,43 @@ func mapHTTPError(status int, raw []byte) *ConnectorError {
 
 // extract applies a tiny subset of JSONPath: "$" (whole body) or "$.field" (top-level key).
 func extract(path string, raw []byte) json.RawMessage {
+	v, _ := extractOK(path, raw)
+	return v
+}
+
+// extractOK is extract plus whether the path actually RESOLVED.
+//
+// The distinction is the whole point. extract degrading to the whole body is correct
+// at run time — a third-party payload that changed shape should return something
+// rather than error — but it makes a typo'd response_extract completely invisible:
+// the YAML reads fine, every test passes, and the only symptom is a truncated blob
+// against the bridge's 8 KiB cap. That has already shipped twice ($.data.children,
+// $.data.user), found by accident both times. TestResponseExtractResolvesAgainstItsFixture
+// uses this second return value to catch the next one at build time instead.
+func extractOK(path string, raw []byte) (json.RawMessage, bool) {
 	path = strings.TrimSpace(path)
 	if path == "" || path == "$" {
-		return raw
+		return raw, true
 	}
 	if !strings.HasPrefix(path, "$.") {
-		return raw
+		return raw, false
 	}
 	cur := json.RawMessage(raw)
 	for _, seg := range strings.Split(strings.TrimPrefix(path, "$."), ".") {
 		if seg == "" {
-			return raw
+			return raw, false
 		}
 		var m map[string]json.RawMessage
 		if err := json.Unmarshal(cur, &m); err != nil {
-			return raw
+			return raw, false
 		}
 		v, ok := m[seg]
 		if !ok {
-			return raw
+			return raw, false
 		}
 		cur = v
 	}
-	return cur
+	return cur, true
 }
 
 // applyResponseFilter keeps only the elements of a JSON array whose f.Field value
