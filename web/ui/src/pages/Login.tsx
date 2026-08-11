@@ -6,6 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RookeryTile } from "@/components/brand/RookeryMark";
 
 export default function Login() {
   const [username, setUsername] = useState("");
@@ -41,8 +42,14 @@ export default function Login() {
         onSubmit={submit}
         className="bg-background border border-border rounded-xl p-8 w-full max-w-sm shadow-sm"
       >
-        <h1 className="text-xl font-bold mb-1">Rookery</h1>
-        <p className="text-muted-2 text-sm mb-6">Sign in to your server</p>
+        {/* The mark carries the identity, so the heading below it drops to the
+            role the page actually plays. Two "Rookery"s stacked would be one
+            more than the screen needs. */}
+        <div className="mb-6 flex flex-col items-center text-center">
+          <RookeryTile className="size-12 rounded-xl" id="login-mark" />
+          <h1 className="mt-3 text-xl font-bold">Rookery</h1>
+          <p className="text-muted-2 text-sm">Sign in to your server</p>
+        </div>
         <div className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="username">Username</Label>

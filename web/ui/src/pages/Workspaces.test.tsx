@@ -241,8 +241,9 @@ test("each workspace row shows its icon", async () => {
 });
 
 // A workspace with no icon set still needs something on the left, or rows with
-// and without one would not line up.
-test("a workspace with no icon falls back to a monogram", async () => {
+// and without one would not line up. That used to be a monogram; it is now the
+// Rookery mark, so an install looks like the product before anyone picks a tile.
+test("a workspace with no icon falls back to the Rookery mark", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue(
@@ -260,6 +261,10 @@ test("a workspace with no icon falls back to a monogram", async () => {
   wrap();
 
   expect(await screen.findByText("personal")).toBeInTheDocument();
-  // WorkspaceAvatar's no-preset branch renders the first letter.
-  expect(screen.getByText("P")).toBeInTheDocument();
+  // WorkspaceAvatar's unset branch now renders the default preset. The row's
+  // own <li> is checked rather than the document, because this screen carries
+  // the brand mark in its header too.
+  const row = screen.getByText("personal").closest("li")!;
+  expect(row.querySelector("svg")).not.toBeNull();
+  expect(row.textContent).not.toContain("P ");
 });

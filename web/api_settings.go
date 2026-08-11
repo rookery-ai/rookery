@@ -295,6 +295,13 @@ func (s *Server) apiPutSettingsWorkspace(c echo.Context) error {
 // render time — a setting that appears to save but never shows is worse than
 // an error. Keep in sync with web/ui/src/lib/workspaceIcons.tsx.
 var workspaceIcons = map[string]bool{
+	// The Rookery mark in the brand's hues. "rookery" is also what a workspace
+	// with no icon set renders, so it must be storable as an explicit choice too
+	// — otherwise picking the tile a workspace already shows would 400.
+	"rookery": true, "rookery-gold": true, "rookery-rose": true,
+	"rookery-violet": true, "rookery-blue": true, "rookery-teal": true,
+	"rookery-green": true, "rookery-slate": true,
+
 	"aurora": true, "orbit": true, "prism": true, "meadow": true,
 	"ember": true, "tide": true, "dusk": true, "grove": true,
 	"signal": true, "quartz": true, "bloom": true, "slate": true,

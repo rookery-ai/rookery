@@ -1092,13 +1092,36 @@ runtime dep with its own styling to theme is a poor trade for data. The generate
 **committed** so the release build never runs the generator, and `emojiData.test.ts` re-runs it and
 compares, so a stale commit fails CI instead of shipping an old set.
 
-**Workspace presets are 28 inline SVGs** (`lib/workspaceIcons.tsx`) — gradient + one simple motif,
-legible at the 20px the rail actually renders. `web/api_settings.go`'s `workspaceIcons` validator
-must list the same slugs, and `TestWorkspaceIconSlugsMatchTheSPA` parses the TSX to assert it: a
-preset added only to the SPA 400s on save, one added only to Go has no artwork, and neither failure
-is visible in either file alone. **Custom upload is deliberately not built** — it is the one item
-needing a multipart endpoint, an `iolimit` cap, MIME sniffing (SVG is an XSS vector), vault storage
-and a two-shape icon field.
+**Workspace presets are 36 inline SVGs** (`lib/workspaceIcons.tsx`) — eight renderings of the
+Rookery mark in the brand's hues, then 28 gradient-plus-motif tiles, all legible at the 20px the
+rail actually renders. `web/api_settings.go`'s `workspaceIcons` validator must list the same slugs,
+and `TestWorkspaceIconSlugsMatchTheSPA` parses the TSX to assert it: a preset added only to the SPA
+400s on save, one added only to Go has no artwork, and neither failure is visible in either file
+alone. **Custom upload is deliberately not built** — it is the one item needing a multipart
+endpoint, an `iolimit` cap, MIME sniffing (SVG is an XSS vector), vault storage and a two-shape icon
+field.
+
+`DEFAULT_WORKSPACE_ICON` (`"rookery"`) is what an **unset** icon renders — it used to be the
+workspace name's initial on a solid square. An **unknown** slug still falls back to that monogram,
+and the distinction is deliberate: an unknown value means a workspace configured by a NEWER build,
+where rendering the default would silently present it as the user's choice. The 28 motif slugs and
+motifs are frozen (a rename orphans every workspace that stored it); the 2026-08 palette pass
+re-derived only their gradients onto one ember-compatible recipe, and kept hue SEPARATION on purpose
+— telling workspaces apart at 20px is the only job these have, so pulling them all toward orange
+would defeat it.
+
+**The Rookery mark lives in `components/brand/RookeryMark.tsx`, drawn inline.** `RookeryMark` strokes
+in `currentColor`; `RookeryTile` is the tile form, whose glyph is painted the explicit brand cream
+because a tile supplies its own background and an inherited foreground would vanish into the fill
+(its gradient `id` is a prop for the same reason `WorkspaceAvatar` derives one — two on screen with
+the same id make the second reference the first's gradient); `RookeryLogo` is the mark-plus-wordmark
+lockup, whose tight gap is load-bearing, since mark and word read as one logo only while they sit
+closer to each other than to anything else. It is a component and not an `<img>` because **an image
+cannot inherit `currentColor`** — that is exactly how the documentation site's mark ended up painting
+black and disappearing on the dark theme. `public/favicon.svg` stays a separate file (a browser tab
+needs a real one) and is the one copy that cannot be generated from the component. Sign-in and
+workspace selection carry the mark because they are the only two screens outside the app shell,
+where the rail's branding is absent.
 
 **Shell primitives** (`web/ui/src/components/shell/`): every page renders inside `AppShell` —
 an icon rail + list panel + a `ContextPane` slot. The context pane is user-resizable —
@@ -1400,7 +1423,7 @@ cannot be pruned.
 - **Discord adapter** — implemented (DM-only); live WS round-trip is operator-verified. **Slack adapter** — implemented (DM-only, Socket Mode); live loop operator-verified. Note: Slack's Socket Mode inbound loop does not auto-restart after a *fatal* reconnect failure (reconnect exhaustion) — outbound still works, but inbound DMs stop until the connector is re-saved or the server restarts; a per-adapter supervisor is a future framework enhancement. Mattermost/Matrix adapters — not yet implemented (framework ready: adapter registry + `CredSpec` + render subsystem all support a new platform via `init()` registration alone; Mattermost should be a hand-rolled thin REST+WS client, NOT the heavy official SDK; Matrix E2EE needs `-tags goolm` to stay CGo-free). The connectors UI (SPA `/connections` → Chat apps tab, backed by `/api/v1/connectors`) is `CredSpec`-driven — a new platform's connect card is data, not hand-written markup. **Design stance:** all adapters use an **outbound** connection (bot dials out; zero inbound port) — a deliberate security property for self-hosted/home installs (works behind NAT, home firewall can drop-by-default, no forgeable public endpoint). **Webhook-based platforms** (WhatsApp/Viber/LINE/Teams/Messenger/Google Chat) are deferred OUT of the home-install core; if built, they must be tunnel/relay-first (outbound), never a raw open port. Future outbound-only candidates: Zulip (event-queue long-poll), XMPP. See `docs/superpowers/specs/2026-07-15-multi-platform-chat-adapters-design.md`.
 - **Skill editing + import via chat** — `/skill` covers list/create/cancel, but there is no `/skill edit` (the skill designer has no edit mode at all, unlike `agentdesigner.StartEdit`) and no skill import (ZIP / pasted SKILL.md) over chat, which needs per-adapter file-upload handling. The remaining half of the skill parity gap.
 - **MCP servers** — `mcp_servers` table exists; MCP tool execution not implemented.
-- **Custom workspace image upload** — the 28 presets are inline SVG on purpose (no endpoint, no
+- **Custom workspace image upload** — the 36 presets are inline SVG on purpose (no endpoint, no
   storage, no MIME validation, crisp at any size). Uploading a custom image is the one requested UI
   item deliberately deferred: it needs a multipart endpoint, a 25 MiB `iolimit` cap, MIME sniffing
   (SVG is an XSS vector needing sanitising or rasterising), a vault storage location with backup

@@ -11,6 +11,7 @@ import { SignOutButton } from "@/components/shell/SignOutButton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RookeryTile } from "@/components/brand/RookeryMark";
 import {
   Dialog,
   DialogContent,
@@ -268,6 +269,16 @@ export default function Workspaces() {
           makes one button on this screen reach the whole app. */}
       <SignOutButton />
       <div className="bg-background border border-border rounded-xl p-8 w-full max-w-md shadow-sm">
+        {/* This screen and the sign-in screen are the two the owner sees
+            outside the app shell, where the rail's branding is absent. Marking
+            both is what keeps the product recognisable before there is any
+            product on screen. */}
+        <div className="mb-4 flex items-center gap-2 border-b border-border pb-4">
+          <RookeryTile className="size-7 rounded-md" id="workspaces-mark" />
+          <span className="text-lg font-semibold tracking-tight lowercase">
+            rookery
+          </span>
+        </div>
         <div className="mb-1">
           <PageTitle icon="owner-workspaces" title="Workspaces" />
         </div>

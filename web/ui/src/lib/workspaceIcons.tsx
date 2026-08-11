@@ -138,35 +138,81 @@ const compass = (
   </>
 );
 
+// The Rookery mark, at this file's 24x24 motif scale (the favicon's 32-grid
+// geometry multiplied by 0.75). It is drawn here rather than imported from
+// components/brand/RookeryMark so it composes with the motif pipeline like every
+// other preset — the shared `<g fill=… color=…>` wrapper supplies the colour,
+// and a mark that brought its own would be the one tile that ignored it.
+const rookeryMark = (
+  <path
+    d="M9 7.5h6M6.9 10.8h10.2M5.1 14.1C5.1 18 8.1 19.8 12 19.8S18.9 18 18.9 14.1"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2.1"
+    strokeLinecap="round"
+  />
+);
+
+/**
+ * The preset a workspace shows when it has chosen none.
+ *
+ * Before this, an unset icon rendered the workspace name's first letter on a
+ * solid square. The mark is the better default for a first-run install — the
+ * product should look like itself out of the box — at the cost that two
+ * un-customised workspaces are no longer told apart by their avatar alone. The
+ * rail's tooltip and the switcher both carry the name, so the information is not
+ * lost, only moved.
+ */
+export const DEFAULT_WORKSPACE_ICON = "rookery";
+
 export const WORKSPACE_ICONS: WorkspaceIcon[] = [
-  { slug: "aurora", label: "Aurora", colors: ["#6366f1", "#22d3ee"], motif: arc },
-  { slug: "orbit", label: "Orbit", colors: ["#0f172a", "#475569"], motif: ring },
-  { slug: "prism", label: "Prism", colors: ["#7c3aed", "#ec4899"], motif: triangle },
-  { slug: "meadow", label: "Meadow", colors: ["#15803d", "#84cc16"], motif: leaf },
-  { slug: "ember", label: "Ember", colors: ["#b91c1c", "#f59e0b"], motif: dot },
-  { slug: "tide", label: "Tide", colors: ["#0e7490", "#38bdf8"], motif: wave },
-  { slug: "dusk", label: "Dusk", colors: ["#312e81", "#a855f7"], motif: diamond },
-  { slug: "grove", label: "Grove", colors: ["#065f46", "#10b981"], motif: hex },
-  { slug: "signal", label: "Signal", colors: ["#1d4ed8", "#60a5fa"], motif: bars },
-  { slug: "quartz", label: "Quartz", colors: ["#be185d", "#fb7185"], motif: cross },
-  { slug: "bloom", label: "Bloom", colors: ["#c2410c", "#fbbf24"], motif: petals },
-  { slug: "slate", label: "Slate", colors: ["#334155", "#94a3b8"], motif: slab },
-  { slug: "cascade", label: "Cascade", colors: ["#0369a1", "#67e8f9"], motif: chevrons },
-  { slug: "lattice", label: "Lattice", colors: ["#4338ca", "#818cf8"], motif: grid },
-  { slug: "forum", label: "Forum", colors: ["#78350f", "#d97706"], motif: pillars },
-  { slug: "spring", label: "Spring", colors: ["#0891b2", "#a5f3fc"], motif: droplet },
-  { slug: "nova", label: "Nova", colors: ["#a21caf", "#f0abfc"], motif: star },
-  { slug: "eclipse", label: "Eclipse", colors: ["#1e1b4b", "#6366f1"], motif: crescent },
-  { slug: "surge", label: "Surge", colors: ["#ca8a04", "#fde047"], motif: bolt },
-  { slug: "venn", label: "Venn", colors: ["#047857", "#5eead4"], motif: rings },
-  { slug: "summit", label: "Summit", colors: ["#374151", "#9ca3af"], motif: chevronUp },
-  { slug: "monolith", label: "Monolith", colors: ["#7c2d12", "#fb923c"], motif: square },
-  { slug: "waning", label: "Waning", colors: ["#581c87", "#c084fc"], motif: halfMoon },
-  { slug: "clinic", label: "Clinic", colors: ["#b91c1c", "#fca5a5"], motif: plusRing },
-  { slug: "strata", label: "Strata", colors: ["#155e75", "#7dd3fc"], motif: stack },
-  { slug: "beacon", label: "Beacon", colors: ["#1e40af", "#93c5fd"], motif: eye },
-  { slug: "sprout", label: "Sprout", colors: ["#3f6212", "#a3e635"], motif: seed },
-  { slug: "voyage", label: "Voyage", colors: ["#0f766e", "#2dd4bf"], motif: compass },
+  // ── The mark, in the brand's hues ────────────────────────────────────────
+  // `rookery` first and amber, because it is the default and the picker's first
+  // tile should be the one a workspace already has.
+  { slug: "rookery", label: "Rookery", colors: ["#a94c1c", "#e0a052"], motif: rookeryMark },
+  { slug: "rookery-gold", label: "Rookery gold", colors: ["#9c7a1e", "#e6cf5e"], motif: rookeryMark },
+  { slug: "rookery-rose", label: "Rookery rose", colors: ["#a33f63", "#e19aa8"], motif: rookeryMark },
+  { slug: "rookery-violet", label: "Rookery violet", colors: ["#5a3a80", "#b394d6"], motif: rookeryMark },
+  { slug: "rookery-blue", label: "Rookery blue", colors: ["#2a4d94", "#90b6e2"], motif: rookeryMark },
+  { slug: "rookery-teal", label: "Rookery teal", colors: ["#2d7a63", "#7fd4bb"], motif: rookeryMark },
+  { slug: "rookery-green", label: "Rookery green", colors: ["#4e6b25", "#b0cc63"], motif: rookeryMark },
+  { slug: "rookery-slate", label: "Rookery slate", colors: ["#414a58", "#97a1ae"], motif: rookeryMark },
+
+  // ── Motif presets ────────────────────────────────────────────────────────
+  // Slugs and motifs are unchanged — a stored `workspaces.icon` must keep
+  // resolving — but every gradient was re-derived to sit with ember: one
+  // lightness recipe (a deep stop against a light one), saturation pulled back
+  // off the default Tailwind ramps, and each hue nudged warm. Hue SEPARATION is
+  // preserved on purpose: these exist to tell workspaces apart at 20px, so
+  // pulling them all toward orange would defeat the only job they have.
+  { slug: "aurora", label: "Aurora", colors: ["#4c5aa8", "#6fc9d4"], motif: arc },
+  { slug: "orbit", label: "Orbit", colors: ["#2b3140", "#6a7386"], motif: ring },
+  { slug: "prism", label: "Prism", colors: ["#7a4a9c", "#d47ba6"], motif: triangle },
+  { slug: "meadow", label: "Meadow", colors: ["#3f7a3a", "#9ec46a"], motif: leaf },
+  { slug: "ember", label: "Ember", colors: ["#a03418", "#e8a33f"], motif: dot },
+  { slug: "tide", label: "Tide", colors: ["#2a6f86", "#7ec8de"], motif: wave },
+  { slug: "dusk", label: "Dusk", colors: ["#3b3670", "#9b7ad1"], motif: diamond },
+  { slug: "grove", label: "Grove", colors: ["#2c6b57", "#6fbf9b"], motif: hex },
+  { slug: "signal", label: "Signal", colors: ["#2f5aa8", "#86b3e8"], motif: bars },
+  { slug: "quartz", label: "Quartz", colors: ["#a33f63", "#e19aa8"], motif: cross },
+  { slug: "bloom", label: "Bloom", colors: ["#b0521f", "#eeb457"], motif: petals },
+  { slug: "slate", label: "Slate", colors: ["#414a58", "#97a1ae"], motif: slab },
+  { slug: "cascade", label: "Cascade", colors: ["#2d6a94", "#8fd3e6"], motif: chevrons },
+  { slug: "lattice", label: "Lattice", colors: ["#464a94", "#9096d8"], motif: grid },
+  { slug: "forum", label: "Forum", colors: ["#6f4423", "#d09244"], motif: pillars },
+  { slug: "spring", label: "Spring", colors: ["#2f7f92", "#a8e2ea"], motif: droplet },
+  { slug: "nova", label: "Nova", colors: ["#94408e", "#dfa2dc"], motif: star },
+  { slug: "eclipse", label: "Eclipse", colors: ["#262353", "#5f5da8"], motif: crescent },
+  { slug: "surge", label: "Surge", colors: ["#9c7a1e", "#e6cf5e"], motif: bolt },
+  { slug: "venn", label: "Venn", colors: ["#2d7a63", "#7fd4bb"], motif: rings },
+  { slug: "summit", label: "Summit", colors: ["#3b4149", "#949aa3"], motif: chevronUp },
+  { slug: "monolith", label: "Monolith", colors: ["#7a3418", "#d98a4f"], motif: square },
+  { slug: "waning", label: "Waning", colors: ["#5a3a80", "#b394d6"], motif: halfMoon },
+  { slug: "clinic", label: "Clinic", colors: ["#a33832", "#e0a09a"], motif: plusRing },
+  { slug: "strata", label: "Strata", colors: ["#275e70", "#8ec9dd"], motif: stack },
+  { slug: "beacon", label: "Beacon", colors: ["#2a4d94", "#90b6e2"], motif: eye },
+  { slug: "sprout", label: "Sprout", colors: ["#4e6b25", "#b0cc63"], motif: seed },
+  { slug: "voyage", label: "Voyage", colors: ["#2b6f68", "#79cbbd"], motif: compass },
 ];
 
 export function findWorkspaceIcon(slug: string | undefined): WorkspaceIcon | undefined {
@@ -194,7 +240,13 @@ export function WorkspaceAvatar({
   icon?: string;
   className?: string;
 }) {
-  const preset = findWorkspaceIcon(icon);
+  // An unset icon falls back to the Rookery mark. An UNKNOWN one — a workspace
+  // configured by a newer build than this one — falls back to the initial, which
+  // is honest about not recognising the value rather than silently rendering the
+  // default as though it were the choice.
+  const preset = icon
+    ? findWorkspaceIcon(icon)
+    : findWorkspaceIcon(DEFAULT_WORKSPACE_ICON);
   if (!preset) {
     return (
       <span
