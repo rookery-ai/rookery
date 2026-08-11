@@ -1,0 +1,17 @@
+name: pushbullet
+label: Pushbullet
+category: Communication
+unverified: true
+auth:
+  kind: api_key
+  placement: header
+  # Its own header, not Authorization.
+  header_name: Access-Token
+  value_prefix: ""
+  key_label: "Pushbullet access token"
+  key_hint: "o.xxxxxxxx"
+  setup_url: https://www.pushbullet.com/#settings/account
+setup_steps:
+  - "Sign in at https://www.pushbullet.com and open Settings → Account."
+  - "Create an Access Token and copy it."
+  - "Paste it below."

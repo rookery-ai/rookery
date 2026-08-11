@@ -1,0 +1,23 @@
+name: mailgun
+label: Mailgun
+category: Communication
+unverified: true
+auth:
+  kind: api_key
+  placement: basic
+  # HTTP Basic with the LITERAL username "api" and the key as the password.
+  # basic_user_template needs no substitution to be useful here — a fixed string
+  # is a valid template.
+  basic_user_template: "api"
+  key_label: "Mailgun private API key"
+  key_hint: "the Private API key, not a public validation key"
+  setup_url: https://app.mailgun.com/settings/api_security
+connect_inputs:
+  - key: domain
+    label: "Sending domain"
+    hint: "e.g. mg.yourdomain.com — the domain you verified in Mailgun"
+    required: true
+setup_steps:
+  - "Sign in at https://app.mailgun.com and add and verify a sending domain."
+  - "Open Settings → API Keys and copy your PRIVATE API key."
+  - "Paste the key below with your sending domain. Mailgun's EU region uses a different host; this connector targets the US one."
