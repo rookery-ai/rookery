@@ -5,16 +5,18 @@
 **Target owner:** `rookery-ai` (GitHub organization, already created, currently 0 public repos)
 
 Move both repositories from a personal account to the `rookery-ai` organization and
-publish them, without a window in which unreviewed content is world-readable and
-without silently breaking release signing, container pulls, or the install scripts.
+publish them, having first destroyed every shippable artifact produced under the
+personal account, so that versioning restarts cleanly under the organization.
 
 ## Scope
 
-Three phases, gated. Phase A is content preparation while both repositories are
-still private; Phase B is the transfer, the `ilijad1` → `rookery-ai` rename, and
-organization setup, still private; Phase C flips visibility to public. The gate
-between B and C is a human review, because publication is the one step that cannot
-be undone — a clone or fork can happen within minutes of the flip.
+Three phases, gated. Phase A is content preparation and the teardown of existing
+artifacts, while both repositories are still private. Phase B is the transfer, the
+`ilijad1` → `rookery-ai` rename, and organization setup, still private. Phase C
+flips visibility to public and cuts the first release under the new owner.
+
+The gate between B and C is a human review, because publication is the one step
+that cannot be undone — a clone or fork can happen within minutes of the flip.
 
 The rename sits in Phase B rather than Phase A on purpose: it can only be verified
 against a repository that actually lives at the new path. Everything in Phase A is
@@ -22,96 +24,180 @@ true regardless of who owns the repository.
 
 Out of scope: deploying the website. `rookery.cloud` does not currently resolve,
 so no host is linked to `rookery-web` and no deployment breaks on transfer.
-Deployment is separate work.
+Deployment is separate work, and is the reason `rookery-web` is versioned (below).
 
 ## Decisions
 
-Four questions were settled before this document was written.
+**Nothing shippable is transferred.** All six GitHub releases (v0.1.0 through
+v0.4.0) and their assets, all six git tags, and the GHCR container package are
+deleted before the transfer. `CHANGELOG.md` is deleted and
+`.release-please-manifest.json` is reset, so the first release under the
+organization is **v0.1.0**, cut fresh. Nothing built under the personal account
+survives — which also removes every `.deb` and `.rpm` carrying
+`ilija.dimitrovski@kroute.ai` as its package maintainer.
 
 **The Go module path is renamed** to `github.com/rookery-ai/rookery`. GitHub's
 transfer redirect would keep the old path resolving, so the rename is not
-technically required — but the project is pre-1.0 with `bump-minor-pre-major`,
-nothing has ever imported it (the repository has always been private), and the
-cost never gets lower than it is today. 425 occurrences across 188 files.
+technically required — but the project is pre-1.0, nothing has ever imported it
+(the repository has always been private), and the cost never gets lower than it is
+today. 425 occurrences across 188 files.
 
-**Committed binaries are deleted at HEAD, not purged from history.** `simple-agents`
-(32 MB) and `livecheck` (16 MB) remain clonable from the pack forever. They are
-compiled Go containing no credentials, so the only cost is clone size. Rewriting
-history would invalidate every commit SHA, breaking all of `CHANGELOG.md`'s commit
-links, the six existing tags, and the association between released artifacts and
-their cosign signatures. Not worth it for bloat.
+**Committed binaries are deleted at HEAD; history is not rewritten.** This was
+re-examined once the artifact teardown removed the original objections (broken
+tags, changelog links, and cosign associations), and the answer held for a
+different and stronger reason — see *A purge would not purge* below. The binaries
+contain no credentials; the only sensitive string in them is a
+`/home/rookie/go/pkg/mod/...` build path.
+
+**PR history is preserved.** All 153 closed pull requests transfer with the
+repository, so their descriptions are cleaned rather than discarded.
 
 **`docs/superpowers/` stays public**, scrubbed of local-environment references.
 It is the most complete documentation the project has and `CLAUDE.md` already
 treats it as reference material.
 
 **The maintainer and security contact is `Rookery <security@rookery.cloud>`,**
-replacing a personal work address that is currently baked into every `.deb` and
-`.rpm`. This requires the mailbox to exist before the domain goes live;
-`SECURITY.md` names GitHub's private vulnerability reporting first, so the
-address is a fallback rather than the only channel.
+replacing a personal work address currently baked into every `.deb` and `.rpm`.
+`SECURITY.md` names GitHub's private vulnerability reporting first, so the address
+is a fallback rather than the only channel; the mailbox must exist before the
+domain goes live.
+
+**`rookery-web` gets full release-please**, matching the product: conventional
+commits, semver tags, a changelog, and versioned GitHub releases. The rationale is
+deployment — deploy scripts will target a released version, not a branch, so the
+website needs a version to name.
+
+**Conventional Commits are enforced mechanically on three surfaces:** PR titles
+(which become the squashed commit on `main`), branch names, and local commit
+messages.
 
 ## Findings that shape the plan
 
 **No credentials exist anywhere.** All 153 `rookery` PR bodies, all 12
-`rookery-web` PR bodies, and every commit message across both repositories'
-full history were scanned for credential patterns, provider key formats, and
-local-environment markers. Commit messages are clean — zero hits. Seven PR
-bodies carry local-environment noise only: `/home/rookie/rookery-web-sync`,
+`rookery-web` PR bodies, and every commit message across both repositories' full
+history were scanned for credential patterns, provider key formats, and
+local-environment markers. Commit messages are clean — zero hits. Seven PR bodies
+carry local-environment noise only: `/home/rookie/rookery-web-sync`,
 `agents.rookie.lan`, and a curl example using a token literally spelled
 `INVALIDTESTTOKEN` to demonstrate an error response.
 
 Editing those PR bodies is **tidying, not a security control** — GitHub retains
-and displays edit history. That is acceptable here precisely because nothing
-found is a credential. Should the full-history scan surface a real one, the
-response is rotation, not redaction.
+and displays edit history. That is acceptable here precisely because nothing found
+is a credential. Should a real one ever surface, the response is rotation, not
+redaction.
+
+**`kroute.ai` is not in the committed binaries.** Both were checked directly: zero
+occurrences in either. The address reaches users through `.goreleaser.yaml:44`'s
+`maintainer:` field, which is compiled into every `.deb` and `.rpm` on the
+releases page. Deleting the releases is what removes it; deleting the binaries
+does not.
+
+**A purge would not purge.** GitHub permanently retains a `refs/pull/N/head` ref
+for every pull request ever opened. All 153 are present on the remote — verified
+with `git ls-remote`, and confirmed by fetching `refs/pull/16/head`, whose tree
+still contains `simple-agents` and `.server.pid` at the root. Those refs point at
+the original commits and are untouched by a force-push, so `git filter-repo`
+would rewrite `main` while leaving every purged blob fetchable by anyone running
+`git fetch origin 'refs/pull/*/head'`. A true purge therefore requires either
+abandoning the pull request history or a GitHub Support intervention on an
+uncontrolled timeline. Since the binaries hold nothing sensitive, neither price is
+worth paying — but the rewrite must not be sold as a purge, because it is not one.
 
 **Branch protection has never been enforced.** `main` cannot be protected today:
-free plan, private repository. The seven required checks documented in
-`CLAUDE.md` have therefore been convention, not a merge gate. Publication
-unlocks branch protection, making this a net gain of the migration.
+free plan, private repository. The seven required checks documented in `CLAUDE.md`
+have therefore been convention, not a merge gate. Publication unlocks branch
+protection, making this a net gain of the migration.
 
 **GitHub's push protection does not read commit messages or pull request
-descriptions.** It scans file content only. Preventing credentials in those two
-surfaces requires mechanisms GitHub does not provide, designed in Phase A.
+descriptions.** It scans file content only. Covering those two surfaces requires
+mechanisms GitHub does not provide (A7).
 
 **Actions secrets do not survive a repository transfer.** `RELEASE_PLEASE_TOKEN`
-is the pipeline's only secret and is re-added as part of Phase B.
+must be re-added in Phase B — and now in `rookery-web` as well, which needs its
+own copy for release-please.
 
-## Phase A — preparation, while private
+**Deleting all releases means `curl | sh` has nothing to download** until v0.1.0
+is cut under the organization. This reorders Phase C: publish, release, *then*
+test the installers.
 
-Every change lands as a pull request into `main`, per the project's standing rule
-that `main` only advances through merged PRs. Work is grouped so each PR is
-reviewable on its own terms.
+## Phase A — teardown and preparation, while private
 
-### A1. Remove development artifacts
+Every file change lands as a pull request into `main`, per the project's standing
+rule that `main` only advances through merged PRs.
+
+### A1. Destroy the existing artifacts
+
+- **Close PR #114.** release-please cut v0.4.0 at 07:29:56 and opened this
+  redundant release PR six seconds later. It is stale and its subject is about to
+  be deleted.
+- **Delete all six GitHub releases** and their attached assets: v0.1.0, v0.2.0,
+  v0.3.0, v0.3.1, v0.3.2, v0.4.0. This is what removes the `.deb`/`.rpm` artifacts
+  carrying the `kroute.ai` maintainer address, the checksums, the cosign
+  signatures and the SBOMs.
+- **Delete all six git tags**, local and remote.
+- **Delete the GHCR container package** — see A2, this one is an owner action.
+
+### A2. Requires the owner — package deletion
+
+The authenticated token holds `repo`, `workflow`, `read:org`, `gist` and
+`admin:public_key`. It has **no `read:packages` or `delete:packages`**, so
+`GET /user/packages` returns 403 and the container package can be neither
+enumerated nor deleted from here.
+
+Two ways forward; either is fine:
+
+- `gh auth refresh -h github.com -s read:packages,delete:packages`, after which
+  the deletion is scripted with the rest of A1, or
+- delete it in the web UI at `github.com/users/ilijad1/packages`.
+
+The package must be gone before the transfer, or a stale `ghcr.io/ilijad1/rookery`
+remains published under the personal account with no repository behind it.
+
+### A3. Reset the version line
+
+- Delete `CHANGELOG.md`. It documents releases that will no longer exist and every
+  entry links to `github.com/ilijad1`. release-please regenerates it from the
+  first conventional commit after the reset.
+- Reset `.release-please-manifest.json` from `{".": "0.4.0"}` to `{".": "0.0.0"}`,
+  so the first `feat:` cuts **v0.1.0**.
+- `bump-minor-pre-major` stays on, so a breaking change bumps the minor while
+  pre-1.0. Reaching 1.0.0 remains the deliberate act `CLAUDE.md` already describes.
+
+This lands **after** A1, so release-please never sees a manifest that disagrees
+with the tags present.
+
+### A4. Remove development artifacts
 
 | Path | Action | Reason |
 |---|---|---|
-| `simple-agents` | delete | 32 MB ELF, pre-rename build artifact, no source in tree |
-| `livecheck` | delete | 16 MB ELF, build output of `cmd/livecheck` |
+| `simple-agents` | delete at HEAD | 32 MB ELF, pre-rename build artifact, no source in tree |
+| `livecheck` | delete at HEAD | 16 MB ELF, build output of `cmd/livecheck` |
 | `cmd/livecheck/` | **keep** | live dev harness; referenced by 8 provider YAMLs, `registry.go`, and three `//go:build livecheck` tests, invoked as `go run ./cmd/livecheck` |
 | `.server.pid` | delete | runtime artifact |
-| `CHANGES.md` | delete | stale pre-rename changelog superseded by release-please's `CHANGELOG.md`; still references `bin/simple-agents` |
-| `AGENT_DESIGNER_TEST_PROMPTS.md` | delete | development scratch; carries a personal email address |
+| `CHANGES.md` | delete | stale pre-rename changelog; still references `bin/simple-agents` |
+| `AGENT_DESIGNER_TEST_PROMPTS.md` | delete | development scratch; carries the `kroute.ai` address |
 | `plans/` (2 files) | delete | reference `cmd/simple-agents/main.go`, a path that stopped existing at the rename; superseded by `docs/superpowers/plans/` |
 
 `.gitignore` gains `/livecheck`, `/simple-agents`, and `*.pid`. `.dockerignore`
-gains the same three, since 48 MB of binaries currently enter the build context
-on every image build.
+gains the same three, since 48 MB of binaries currently enter the build context on
+every image build.
 
-### A2. Community health files
+Deleting them at HEAD is worth doing on its own merits even though history keeps
+them: it removes them from every fresh checkout, from the Docker build context,
+and from the tree a reader browses.
 
-New in `rookery`: `CONTRIBUTING.md` (branch, Conventional Commits, PR, `make ci`
-— derived from the existing `CLAUDE.md` rules rather than invented),
-`SECURITY.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1),
-`.github/PULL_REQUEST_TEMPLATE.md`, and `.github/ISSUE_TEMPLATE/` with bug and
-feature forms. `LICENSE` (Apache-2.0) already exists.
+### A5. Community health files
+
+New in `rookery`: `CONTRIBUTING.md` (branching, Conventional Commits, the branch
+naming rule, `make ci`, `make hooks` — derived from existing `CLAUDE.md` rules
+rather than invented), `SECURITY.md`, `CODE_OF_CONDUCT.md` (Contributor Covenant
+2.1), `.github/PULL_REQUEST_TEMPLATE.md`, and `.github/ISSUE_TEMPLATE/` with bug
+and feature forms. `LICENSE` (Apache-2.0) already exists.
 
 `rookery-web` gains `LICENSE` (Apache-2.0, matching the product),
 `CONTRIBUTING.md`, `SECURITY.md`, and `CODE_OF_CONDUCT.md`.
 
-### A3. Scrub local-environment references
+### A6. Scrub local-environment references
 
 Four real identifiers appear in tracked files:
 
@@ -125,78 +211,100 @@ Four real identifiers appear in tracked files:
 Generic RFC1918 examples such as `http://192.168.1.10:8123` in the self-hosted
 connector YAMLs **stay** — they are correct documentation of a supported
 deployment, not leakage. The distinction is whether the value is *this
-developer's* address or *an* address.
+developer's* address or *an* address. Whoever executes this must not flatten it
+into "remove all private IPs."
 
 `internal/coder/smoke_test.go:16,43` hardcodes `/home/rookie/.opencode/bin/opencode`.
 That test can only pass on one machine, so scrubbing it means fixing it to resolve
-the binary via `exec.LookPath` with a skip when absent.
+the binary via `exec.LookPath` and skip when absent.
 
-Twenty-eight files under `docs/superpowers/` carry the same four identifiers and
-receive the same treatment.
+Twenty-eight files under `docs/superpowers/` carry the same identifiers and get
+the same treatment.
 
-### A4. Clean the seven PR descriptions
+### A7. Clean the seven PR descriptions
 
-PRs #16, #20, #21, #56, #92, #117, and #137 in `rookery`. PR review comments and
+PRs #16, #20, #21, #56, #92, #117 and #137 in `rookery`. PR review comments and
 issue comments across both repositories are swept in the same pass — they are
 equally public and were not covered by the body scan.
 
-### A5. Prevention
+### A8. Enforcement: credentials and Conventional Commits
 
-Three separate mechanisms, because the three surfaces have three different
-enforcement points.
+**Five checks across three surfaces.** All apply to both repositories.
 
-**File content** — enable GitHub secret scanning and push protection as an
-organization default for new repositories and directly on both repositories. The
-existing `gitleaks` job in `pr.yml` remains as the second layer.
+*Credential and local-environment leakage:*
 
-**Commit messages** — a `commit-msg` hook. Git does not share hooks, so this is a
-committed `.githooks/` directory, a `make hooks` target setting `core.hooksPath`,
-and a line in `CONTRIBUTING.md`. It rejects credential patterns and
-local-environment patterns (`/home/`, `.lan` hostnames, RFC1918 literals) with a
-message naming the offending line.
+1. **File content** — GitHub secret scanning and push protection, enabled as an
+   organization default (done, B4) and directly on both repositories after
+   transfer. The existing `gitleaks` job in `pr.yml` stays as the second layer.
+2. **Commit messages** — a `commit-msg` hook rejecting credential patterns and
+   local-environment patterns (`/home/`, `.lan` hostnames, RFC1918 literals),
+   naming the offending line.
+3. **PR descriptions** — a `pr.yml` job reading `github.event.pull_request.body`,
+   triggered on `types: [opened, edited, reopened, synchronize]`. The `edited`
+   trigger is load-bearing: a clean description can be edited dirty afterwards.
+
+*Conventional Commits:*
+
+4. **PR titles** — already enforced in `rookery`; added to `rookery-web`. This is
+   the important one, because merges are squashes, so the title becomes the commit
+   release-please reads.
+5. **Branch names** — a new job in both repositories:
+
+   ```
+   ^(feat|fix|docs|refactor|test|chore|perf|build|ci)/[a-z0-9._-]+$
+   ```
+
+   **Bot branches are exempt, and the exemption is mandatory rather than a
+   preference:** neither release-please nor Dependabot lets you name its branches,
+   so without it every bot PR fails CI permanently. Exempt
+   `release-please--*` and `dependabot/*`.
+
+The `commit-msg` hook also validates the Conventional Commits shape locally,
+matching the rule `CLAUDE.md` already states for every commit.
 
 **The hook is pure POSIX `grep -E`, with no gitleaks dependency.** This is a
 deliberate constraint, not a shortcut: gitleaks is not installed on the
-development host and would not be on a contributor's either, so a hook that
-shells out to it silently succeeds on every machine that lacks the binary. That
-is the same failure shape `CLAUDE.md` already records for the gitleaks
-`[[allowlists]]` syntax — a check that loads, does nothing, and reports success.
-A hook that cannot run must fail loudly or not exist.
+development host and would not be on a contributor's either, so a hook that shells
+out to it silently succeeds wherever the binary is absent. That is the same
+failure shape `CLAUDE.md` records for the gitleaks `[[allowlists]]` syntax — a
+check that loads, does nothing, and reports success. A check that cannot run must
+fail loudly or not exist.
 
-**Pull request descriptions** — a job in `pr.yml` reading
-`github.event.pull_request.body`, triggered on
-`types: [opened, edited, reopened, synchronize]`. The `edited` trigger is the
-load-bearing one: a clean description can be edited dirty after the first run.
+Git does not share hooks, so distribution is a committed `.githooks/` directory, a
+`make hooks` target setting `core.hooksPath`, and a line in `CONTRIBUTING.md`.
+Patterns live in one committed file, `.githooks/patterns.txt`, which the hook
+feeds to `grep -Ef` and the workflow reads directly, so local and CI enforcement
+cannot drift apart.
 
-The scanning patterns live in one committed file — `.githooks/patterns.txt` — that
-the hook feeds to `grep -Ef` and the workflow reads directly, so local and CI
-enforcement cannot drift apart.
+**One-time full-history gitleaks scan** of both repositories before Phase C, run
+in a container since gitleaks is not installed on the host.
 
-**One-time full-history scan** — gitleaks against the complete history of both
-repositories before Phase C. Gitleaks is not installed on the development host; it
-runs via a container so nothing is installed.
+### A9. `rookery-web` CI and versioning
 
-### A6. `rookery-web` CI
+The repository has no CI at all today, so nothing prevents a broken build from
+merging. It gains:
 
-A workflow running `astro check` and `astro build`. The repository currently has
-no CI at all, so nothing prevents a broken build from merging.
+- a PR workflow running `astro check` and `astro build`
+- the conventional-commit title and branch-name checks from A8
+- `release-please-config.json` + `.release-please-manifest.json` seeded at
+  `0.0.0`, and a `release-please.yml`
+- a `release.yml` that builds the site and attaches the built `dist` as a release
+  asset, so a deploy script can fetch a *version* rather than checking out a branch
 
-### A7. Documentation sync
+### A10. Documentation sync
 
-The `docs-sync` skill runs before each of these PRs opens, as the project's
-rules require: this work touches `README.md`, `CLAUDE.md`, the landing page, and
-the documentation site simultaneously. It runs again on the Phase B rename PR,
-which changes install commands and image names across all four surfaces at once.
-It also corrects `CLAUDE.md:1751`, which describes `cmd/livecheck` as
-"uncommitted" when it is tracked.
+The `docs-sync` skill runs before each of these PRs opens, as the project's rules
+require: this work touches `README.md`, `CLAUDE.md`, the landing page and the
+documentation site simultaneously. It runs again on the Phase B rename PR, which
+changes install commands and image names across all four surfaces at once.
+
+It also corrects two `CLAUDE.md` claims this work invalidates: line 1751 describes
+`cmd/livecheck` as "uncommitted" when it is tracked, and the CI/CD section
+describes a release history that will no longer exist.
 
 ## Phase B — transfer, rename, and organization setup
 
 ### B1. Clear in-flight work
-
-Close PR #114 — release-please cut v0.4.0 at 07:29:56 and opened this redundant
-release PR six seconds later; the manifest already reads `0.4.0`. It regenerates
-from the commits since the tag on the next push to `main`.
 
 Dependabot PRs #149–#152: merge those whose checks pass, close the rest.
 Dependabot re-raises closed ones against the organization repository.
@@ -208,44 +316,42 @@ Local remotes in both checkouts are updated afterwards.
 
 ### B3. Rename `ilijad1` to `rookery-ai`
 
-Deliberately **after** the transfer, not before. Renaming while the repository
-still lives under `ilijad1` means every verification runs against a module path
-whose canonical location does not yet exist — the build passes, but the module
-proxy behaviour and the cosign identity are both being checked against a fiction.
-Transferring first makes each check real. The cost is one extra PR.
+Deliberately **after** the transfer. Renaming while the repository still lives
+under `ilijad1` means every verification runs against a module path whose
+canonical location does not yet exist — the build passes, but the module proxy
+behaviour and the cosign identity are checked against a fiction. The cost is one
+extra PR.
 
 The mechanical half is `go mod edit -module github.com/rookery-ai/rookery`
 followed by a sweep across 188 Go files, verified by `make ci`.
 
-Five sites are not mechanical and each breaks something specific if missed:
+Four sites are not mechanical:
 
 1. **`.goreleaser.yaml:121`** — `--certificate-identity-regexp
    'https://github\.com/ilijad1/rookery/.*'`. The OIDC identity changes on
-   transfer, so cosign verification of *new* releases fails unless this changes
-   with it.
+   transfer, so cosign verification of releases fails unless this changes with it.
+   Because every prior release is deleted, there is no old-identity artifact left
+   to verify and **no identity split to document** — one regexp now covers
+   everything that exists.
 2. **`src/content/docs/docs/installation/binary.md:61`** in `rookery-web` — the
    same regexp, in the copy users actually run.
-3. **Releases v0.1.0 through v0.4.0 were signed under the old identity** and
-   verify only against the old regexp. This is documented rather than papered
-   over; one regexp cannot cover both.
-4. **`README.md:8` and `README.md:64`** hardcode `ghcr.io/ilijad1/rookery`. The
+3. **`README.md:8` and `README.md:64`** hardcode `ghcr.io/ilijad1/rookery`. The
    workflow's own `ghcr.io/${{ github.repository }}` resolves to the new path on
-   its next run — which is not the same thing as the already-published package
-   moving. See Risks.
-5. **`public/_redirects:19-20`** in `rookery-web` points `/install.sh` and
+   its next run, which publishes a genuinely new package — the old one having been
+   deleted in A1/A2.
+4. **`public/_redirects:19-20`** in `rookery-web` points `/install.sh` and
    `/install.ps1` at `raw.githubusercontent.com/ilijad1/rookery/main/...`.
 
-Also updated: `.goreleaser.yaml:43` (`homepage:`), `Makefile`, `Dockerfile`,
-`install.sh`, `install.ps1`, `docs/ci-setup.md`, `cmd/rookery/*.go` user-facing
-strings, and in `rookery-web` `astro.config.mjs:32`, `src/pages/index.astro:142`,
-`src/components/InstallBlock.tsx:44,54`, `README.md`, `FONTS.md`, and
+Also updated: `.goreleaser.yaml:43` (`homepage:`) and `:44` (`maintainer:`),
+`Makefile`, `Dockerfile`, `install.sh`, `install.ps1`, `docs/ci-setup.md`,
+`cmd/rookery/*.go` user-facing strings, and in `rookery-web`
+`astro.config.mjs:32`, `src/pages/index.astro:142`,
+`src/components/InstallBlock.tsx:44,54`, `README.md`, `FONTS.md` and
 `docs/website-design-spec.md`.
 
-**Deliberately not rewritten:** `CHANGELOG.md`'s historical links, which
-release-please generated and GitHub redirects, and dated historical records under
+**Deliberately not rewritten:** dated historical records under
 `docs/superpowers/plans/`. New prose gets the new URL; the historical record keeps
-its own. Rewriting them is churn that also makes the changelog disagree with what
-release-please will generate next.
+its own. (`CHANGELOG.md`, previously the main exception here, no longer exists.)
 
 ### B4. Organization identity
 
@@ -253,8 +359,7 @@ release-please will generate next.
 
 - Display name: `rookeryai` becomes `Rookery`
 - Description: `Self-hosted AI agents that live on your knowledge base and act
-  through your connected services` — the product tagline verbatim, so the
-  organization and the repository carry one message
+  through your connected services` — the product tagline verbatim
 - Blog: `https://rookery.cloud/` (already set)
 
 **Security defaults — verified writable, and already applied.** All five were
@@ -263,15 +368,15 @@ release-please will generate next.
 `secret_scanning_push_protection_enabled_for_new_repositories`,
 `dependabot_alerts_enabled_for_new_repositories`,
 `dependabot_security_updates_enabled_for_new_repositories`,
-`dependency_graph_enabled_for_new_repositories`. These are organization defaults
-for *new* repositories, so they must also be enabled directly on both
-repositories after transfer — an inherited default does not retroactively apply.
+`dependency_graph_enabled_for_new_repositories`. These are defaults for *new*
+repositories, so they must also be enabled directly on both repositories after
+transfer — an inherited default does not apply retroactively.
 
 `advanced_security_enabled_for_new_repositories` stays `false`: GitHub Advanced
 Security is not available on the free plan.
 
-A `rookery-ai/.github` repository holds organization-wide default community
-health files and the profile README.
+A `rookery-ai/.github` repository holds organization-wide default community health
+files and the profile README.
 
 ### B5. Requires the owner
 
@@ -282,71 +387,82 @@ health files and the profile README.
 - **Require 2FA for the organization.** Verified *not* settable via API, and the
   failure mode is a trap: `PATCH` with `two_factor_requirement_enabled=true`
   returns **200 with a full org body**, and the field reads back `false`. It is
-  silently ignored, so a script that checks only the HTTP status will report
-  success. Must be done in the web UI, and it fails there if any member lacks 2FA.
-- **`RELEASE_PLEASE_TOKEN`.** Actions secrets do not survive a transfer. The
-  secret value can be *set* via API, but only the owner can mint the PAT.
+  silently ignored, so a script checking only the HTTP status reports a success
+  that never happened. Web UI only, and it fails there if any member lacks 2FA.
+- **`RELEASE_PLEASE_TOKEN` in both repositories.** Actions secrets do not survive
+  a transfer, and `rookery-web` now needs its own. The value can be *set* via API;
+  only the owner can mint the PAT.
+- **`delete:packages` scope or the web UI**, for A2.
 
 ### B6. Post-transfer verification
 
-Before handing back for review: all four workflows registered; `go build` green
-against the new module path; `make ci` green; `make docs-sync-check` green; local
-remotes updated in both checkouts; security settings confirmed enabled on the
-repositories themselves, not merely as org defaults.
+All workflows registered in both repositories; `go build` green against the new
+module path; `make ci` green; `make docs-sync-check` green; local remotes updated;
+security settings confirmed on the repositories themselves, not merely as org
+defaults; zero releases, zero tags and zero packages present.
 
 Two checks are weaker than they look and are recorded as such:
 
 - **`gh secret list` proves a secret exists, not that it works.** A classic PAT
   scoped to `ilijad1/rookery` may not authorize `rookery-ai/rookery` even if the
   value transferred intact. The only real verification is a release-please run,
-  which does not happen until the next push to `main`. A green `gh secret list`
-  must not be read as done.
-- **The GHCR package is verified by an anonymous pull, not by its presence in the
-  API listing.** See Risks.
+  which does not happen until the next push to `main`.
+- **The container image is verified by an anonymous pull after Phase C**, not by
+  its presence in an authenticated API listing.
 
-## Phase C — publication
+## Phase C — publication and first release
 
-Gated on human review of the prepared repositories.
+Gated on human review of the prepared repositories. The order matters: with every
+release deleted, the installers have nothing to fetch until v0.1.0 exists.
 
 1. `gh repo edit rookery-ai/<repo> --visibility public` for both
-2. Branch protection on `main` in both — required status checks matching the seven
+2. Branch protection on `main` in both — required status checks matching the
    documented PR gates, required PR review, no force push
-3. Enable private vulnerability reporting
-4. **Run `install.sh` end to end.** Publication is precisely what activates
-   `curl | sh`: release assets on a private repository require an authenticated
-   request, so an anonymous download returns 404. Both installers name that case
-   first in their failure text. This is the one path that cannot be tested before
-   the flip, and the first thing a new user runs.
-5. Verify `docker pull ghcr.io/rookery-ai/rookery:latest` anonymously
-6. Verify cosign against a new release built under the new identity
+3. Enable private vulnerability reporting on both
+4. **Cut v0.1.0**: merge the release-please PR, which tags the repo and fires
+   `release.yml` — goreleaser publishes the archives, `.deb`/`.rpm`, checksums,
+   cosign signatures and SBOMs, and buildx pushes the image to
+   `ghcr.io/rookery-ai/rookery`
+5. **Run `install.sh` and `install.ps1` end to end.** Publication is what
+   activates `curl | sh` — release assets on a private repository require an
+   authenticated request, so an anonymous download returns 404, which is why both
+   installers name that case first in their failure text. This is the one path
+   that cannot be tested before the flip, and the first thing a new user runs.
+6. Verify `docker pull ghcr.io/rookery-ai/rookery:v0.1.0` anonymously
+7. Verify cosign against the v0.1.0 artifacts using the new identity regexp
+8. Cut `rookery-web` v0.1.0 the same way
 
 ## Risks
 
-**Cosign identity split.** Releases signed before the transfer verify only against
-the old regexp. Documented in the installation guide rather than hidden; there is
-no way to re-sign a released artifact under a new identity.
+**The binaries remain in history and in PR refs.** Accepted deliberately: they
+hold no credentials, only a `/home/rookie/go/pkg/mod/...` build path, and no
+available mitigation actually removes them without discarding the pull request
+history. Recorded here so nobody later reads "deleted the binaries" as "purged the
+binaries."
 
-**GHCR package transfer.** Container packages are owned by the account, not the
-repository, and do not always follow a transfer cleanly. If the package does not
-move, the fix is a fresh push under the new owner — which the release workflow
-does on the next tag anyway. Verified in B6 by an **anonymous pull** of
-`ghcr.io/rookery-ai/rookery:latest` after Phase C, rather than by the package
-appearing in an authenticated API listing, which proves ownership but not
-pullability.
+**A window with no downloadable release.** Between Phase C step 1 and step 4 the
+repository is public with zero releases, so the documented install commands 404.
+Minutes, not days, and nobody is watching yet — but the steps must not be
+reordered.
 
-**Redirect dependence during the gap.** Between Phase B and Phase C the old URLs
-serve via redirect. Nothing external depends on them today, since the repositories
-have always been private.
+**release-please starting from a reset manifest.** The manifest says `0.0.0` while
+the repository has no tags. This is the supported cold-start path, but it is worth
+confirming the first release PR proposes `0.1.0` and not something else before
+merging it.
+
+**`RELEASE_PLEASE_TOKEN` scope after transfer.** See B6 — unverifiable until a
+real run.
 
 **The website is unbuilt and undeployed.** `rookery.cloud` does not resolve, so
-`/install.sh` and `/install.ps1` redirects are inert until deployment. This is
+the `/install.sh` and `/install.ps1` redirects are inert until deployment. This is
 pre-existing, not caused by the migration, and is noted so it is not mistaken for
 migration breakage.
 
 ## Not doing
 
-- Rewriting git history (see Decisions)
+- Rewriting git history (see *A purge would not purge*)
 - Deploying the website
 - Moving `docs/superpowers/` to a private repository
 - Renaming either repository
-- Any change to the release process itself beyond the identity strings
+- Preserving any release, tag, package or changelog entry created under the
+  personal account
