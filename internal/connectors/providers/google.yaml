@@ -14,6 +14,12 @@ authorize_url: https://accounts.google.com/o/oauth2/v2/auth
 token_url: https://oauth2.googleapis.com/token
 userinfo_url: https://www.googleapis.com/oauth2/v2/userinfo
 identity_path: email
+# Capture the scope string the token endpoint returns, so Execute can tell an
+# action's declared scopes apart from what this connection was actually GRANTED and
+# say "reconnect to grant X" instead of surfacing an opaque 403. Costs no new
+# machinery — token_extra already lands in service_connections.extra, and refresh
+# never clears it. Declared on the PARENT so every auth_parent child inherits it.
+token_extra: [scope]
 authorize_extra:
   access_type: offline
   # "select_account consent" — prompt is a space-delimited list (OpenID Connect

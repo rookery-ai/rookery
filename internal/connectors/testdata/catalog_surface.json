@@ -1,0 +1,5304 @@
+{
+  "adguard": {
+    "adguard_list_filters": {
+      "params": [],
+      "required": []
+    },
+    "adguard_query_log": {
+      "params": [
+        "limit",
+        "response_status",
+        "search"
+      ],
+      "required": [
+        "limit"
+      ]
+    },
+    "adguard_set_protection": {
+      "params": [
+        "duration",
+        "enabled"
+      ],
+      "required": [
+        "enabled"
+      ],
+      "mutating": true
+    },
+    "adguard_stats": {
+      "params": [],
+      "required": []
+    },
+    "adguard_status": {
+      "params": [],
+      "required": []
+    }
+  },
+  "airtable": {
+    "airtable_create_record": {
+      "params": [
+        "base_id",
+        "fields",
+        "table_id"
+      ],
+      "required": [
+        "base_id",
+        "fields",
+        "table_id"
+      ],
+      "mutating": true
+    },
+    "airtable_delete_record": {
+      "params": [
+        "base_id",
+        "record_id",
+        "table_id"
+      ],
+      "required": [
+        "base_id",
+        "record_id",
+        "table_id"
+      ],
+      "mutating": true
+    },
+    "airtable_get_base_schema": {
+      "params": [
+        "base_id"
+      ],
+      "required": [
+        "base_id"
+      ]
+    },
+    "airtable_get_record": {
+      "params": [
+        "base_id",
+        "record_id",
+        "table_id"
+      ],
+      "required": [
+        "base_id",
+        "record_id",
+        "table_id"
+      ]
+    },
+    "airtable_list_bases": {
+      "params": [],
+      "required": []
+    },
+    "airtable_list_records": {
+      "params": [
+        "base_id",
+        "max",
+        "table_id"
+      ],
+      "required": [
+        "base_id",
+        "table_id"
+      ]
+    },
+    "airtable_update_record": {
+      "params": [
+        "base_id",
+        "fields",
+        "record_id",
+        "table_id"
+      ],
+      "required": [
+        "base_id",
+        "fields",
+        "record_id",
+        "table_id"
+      ],
+      "mutating": true
+    }
+  },
+  "alphavantage": {
+    "alphavantage_daily_series": {
+      "params": [
+        "outputsize",
+        "symbol"
+      ],
+      "required": [
+        "symbol"
+      ]
+    },
+    "alphavantage_fx_rate": {
+      "params": [
+        "from_currency",
+        "to_currency"
+      ],
+      "required": [
+        "from_currency",
+        "to_currency"
+      ]
+    },
+    "alphavantage_quote": {
+      "params": [
+        "symbol"
+      ],
+      "required": [
+        "symbol"
+      ]
+    },
+    "alphavantage_symbol_search": {
+      "params": [
+        "keywords"
+      ],
+      "required": [
+        "keywords"
+      ]
+    }
+  },
+  "anthropic": {
+    "anthropic_create_message": {
+      "params": [
+        "max_tokens",
+        "messages",
+        "model",
+        "system"
+      ],
+      "required": [
+        "max_tokens",
+        "messages",
+        "model"
+      ]
+    },
+    "anthropic_list_models": {
+      "params": [],
+      "required": []
+    }
+  },
+  "asana": {
+    "asana_add_comment": {
+      "params": [
+        "task_gid",
+        "text"
+      ],
+      "required": [
+        "task_gid",
+        "text"
+      ],
+      "mutating": true
+    },
+    "asana_complete_task": {
+      "params": [
+        "task_gid"
+      ],
+      "required": [
+        "task_gid"
+      ],
+      "mutating": true
+    },
+    "asana_create_task": {
+      "params": [
+        "name",
+        "notes",
+        "projects",
+        "workspace"
+      ],
+      "required": [
+        "name"
+      ],
+      "mutating": true
+    },
+    "asana_delete_task": {
+      "params": [
+        "task_gid"
+      ],
+      "required": [
+        "task_gid"
+      ],
+      "mutating": true
+    },
+    "asana_get_task": {
+      "params": [
+        "task_gid"
+      ],
+      "required": [
+        "task_gid"
+      ]
+    },
+    "asana_list_projects": {
+      "params": [
+        "workspace"
+      ],
+      "required": [
+        "workspace"
+      ]
+    },
+    "asana_list_tasks": {
+      "params": [
+        "project"
+      ],
+      "required": [
+        "project"
+      ]
+    },
+    "asana_list_workspaces": {
+      "params": [],
+      "required": []
+    },
+    "asana_update_task": {
+      "params": [
+        "fields",
+        "task_gid"
+      ],
+      "required": [
+        "fields",
+        "task_gid"
+      ],
+      "mutating": true
+    }
+  },
+  "assemblyai": {
+    "assemblyai_get_transcript": {
+      "params": [
+        "transcript_id"
+      ],
+      "required": [
+        "transcript_id"
+      ]
+    },
+    "assemblyai_submit_transcript": {
+      "params": [
+        "audio_url",
+        "language_code",
+        "speaker_labels"
+      ],
+      "required": [
+        "audio_url"
+      ],
+      "mutating": true
+    }
+  },
+  "audiobookshelf": {
+    "abs_get_item": {
+      "params": [
+        "item_id"
+      ],
+      "required": [
+        "item_id"
+      ]
+    },
+    "abs_list_libraries": {
+      "params": [],
+      "required": []
+    },
+    "abs_listening_progress": {
+      "params": [],
+      "required": []
+    },
+    "abs_search_library": {
+      "params": [
+        "library_id",
+        "limit",
+        "query"
+      ],
+      "required": [
+        "library_id",
+        "query"
+      ]
+    }
+  },
+  "aws": {
+    "aws_lambda_get_function_configuration": {
+      "params": [
+        "function_name"
+      ],
+      "required": [
+        "function_name"
+      ]
+    },
+    "aws_lambda_invoke": {
+      "params": [
+        "function_name",
+        "payload"
+      ],
+      "required": [
+        "function_name"
+      ],
+      "mutating": true
+    },
+    "aws_lambda_list_functions": {
+      "params": [
+        "max_items"
+      ],
+      "required": []
+    },
+    "aws_logs_describe_log_groups": {
+      "params": [
+        "limit",
+        "prefix"
+      ],
+      "required": []
+    },
+    "aws_logs_filter_events": {
+      "params": [
+        "filter_pattern",
+        "limit",
+        "log_group_name"
+      ],
+      "required": [
+        "log_group_name"
+      ]
+    }
+  },
+  "bazarr": {
+    "bazarr_list_tasks": {
+      "params": [],
+      "required": []
+    },
+    "bazarr_list_wanted_movies": {
+      "params": [
+        "length"
+      ],
+      "required": []
+    },
+    "bazarr_list_wanted_series": {
+      "params": [
+        "length"
+      ],
+      "required": []
+    },
+    "bazarr_system_status": {
+      "params": [],
+      "required": []
+    }
+  },
+  "bitbucket": {
+    "bitbucket_list_commits": {
+      "params": [
+        "repo_slug"
+      ],
+      "required": [
+        "repo_slug"
+      ]
+    },
+    "bitbucket_list_issues": {
+      "params": [
+        "q",
+        "repo_slug"
+      ],
+      "required": [
+        "repo_slug"
+      ]
+    },
+    "bitbucket_list_pull_requests": {
+      "params": [
+        "repo_slug",
+        "state"
+      ],
+      "required": [
+        "repo_slug"
+      ]
+    },
+    "bitbucket_list_repositories": {
+      "params": [
+        "q",
+        "sort"
+      ],
+      "required": []
+    }
+  },
+  "bluesky": {
+    "bluesky_create_post": {
+      "params": [
+        "created_at",
+        "text"
+      ],
+      "required": [
+        "created_at",
+        "text"
+      ],
+      "mutating": true
+    },
+    "bluesky_list_posts": {
+      "params": [
+        "actor",
+        "limit"
+      ],
+      "required": [
+        "actor",
+        "limit"
+      ]
+    },
+    "bluesky_me": {
+      "params": [],
+      "required": []
+    },
+    "bluesky_search_posts": {
+      "params": [
+        "limit",
+        "query"
+      ],
+      "required": [
+        "limit",
+        "query"
+      ]
+    }
+  },
+  "calendly": {
+    "calendly_cancel_event": {
+      "params": [
+        "reason",
+        "uuid"
+      ],
+      "required": [
+        "uuid"
+      ],
+      "mutating": true
+    },
+    "calendly_get_current_user": {
+      "params": [],
+      "required": []
+    },
+    "calendly_get_event": {
+      "params": [
+        "uuid"
+      ],
+      "required": [
+        "uuid"
+      ]
+    },
+    "calendly_list_event_types": {
+      "params": [
+        "user"
+      ],
+      "required": [
+        "user"
+      ]
+    },
+    "calendly_list_invitees": {
+      "params": [
+        "uuid"
+      ],
+      "required": [
+        "uuid"
+      ]
+    },
+    "calendly_list_scheduled_events": {
+      "params": [
+        "count",
+        "user"
+      ],
+      "required": [
+        "user"
+      ]
+    }
+  },
+  "changedetection": {
+    "cd_create_watch": {
+      "params": [
+        "tag",
+        "title",
+        "url"
+      ],
+      "required": [
+        "url"
+      ],
+      "mutating": true
+    },
+    "cd_get_latest_snapshot": {
+      "params": [
+        "uuid"
+      ],
+      "required": [
+        "uuid"
+      ]
+    },
+    "cd_get_watch": {
+      "params": [
+        "uuid"
+      ],
+      "required": [
+        "uuid"
+      ]
+    },
+    "cd_list_watches": {
+      "params": [
+        "recheck"
+      ],
+      "required": []
+    }
+  },
+  "clickup": {
+    "clickup_add_comment": {
+      "params": [
+        "comment_text",
+        "task_id"
+      ],
+      "required": [
+        "comment_text",
+        "task_id"
+      ],
+      "mutating": true
+    },
+    "clickup_create_task": {
+      "params": [
+        "description",
+        "list_id",
+        "name"
+      ],
+      "required": [
+        "list_id",
+        "name"
+      ],
+      "mutating": true
+    },
+    "clickup_delete_task": {
+      "params": [
+        "task_id"
+      ],
+      "required": [
+        "task_id"
+      ],
+      "mutating": true
+    },
+    "clickup_get_task": {
+      "params": [
+        "task_id"
+      ],
+      "required": [
+        "task_id"
+      ]
+    },
+    "clickup_list_folders": {
+      "params": [
+        "space_id"
+      ],
+      "required": [
+        "space_id"
+      ]
+    },
+    "clickup_list_lists": {
+      "params": [
+        "folder_id"
+      ],
+      "required": [
+        "folder_id"
+      ]
+    },
+    "clickup_list_spaces": {
+      "params": [
+        "team_id"
+      ],
+      "required": [
+        "team_id"
+      ]
+    },
+    "clickup_list_tasks": {
+      "params": [
+        "list_id"
+      ],
+      "required": [
+        "list_id"
+      ]
+    },
+    "clickup_update_task": {
+      "params": [
+        "description",
+        "name",
+        "status",
+        "task_id"
+      ],
+      "required": [
+        "task_id"
+      ],
+      "mutating": true
+    }
+  },
+  "clockify": {
+    "clockify_list_projects": {
+      "params": [
+        "workspace_id"
+      ],
+      "required": [
+        "workspace_id"
+      ]
+    },
+    "clockify_list_time_entries": {
+      "params": [
+        "end",
+        "page_size",
+        "start",
+        "user_id",
+        "workspace_id"
+      ],
+      "required": [
+        "end",
+        "start",
+        "user_id",
+        "workspace_id"
+      ]
+    },
+    "clockify_me": {
+      "params": [],
+      "required": []
+    },
+    "clockify_start_timer": {
+      "params": [
+        "description",
+        "project_id",
+        "start",
+        "workspace_id"
+      ],
+      "required": [
+        "description",
+        "start",
+        "workspace_id"
+      ],
+      "mutating": true
+    },
+    "clockify_stop_timer": {
+      "params": [
+        "end",
+        "user_id",
+        "workspace_id"
+      ],
+      "required": [
+        "end",
+        "user_id",
+        "workspace_id"
+      ],
+      "mutating": true
+    }
+  },
+  "cloudflare": {
+    "cloudflare_create_dns_record": {
+      "params": [
+        "content",
+        "name",
+        "proxied",
+        "ttl",
+        "type"
+      ],
+      "required": [
+        "content",
+        "name",
+        "type"
+      ],
+      "mutating": true
+    },
+    "cloudflare_delete_dns_record": {
+      "params": [
+        "record_id"
+      ],
+      "required": [
+        "record_id"
+      ],
+      "mutating": true
+    },
+    "cloudflare_list_dns_records": {
+      "params": [
+        "name",
+        "type"
+      ],
+      "required": []
+    },
+    "cloudflare_list_zones": {
+      "params": [
+        "name"
+      ],
+      "required": []
+    },
+    "cloudflare_update_dns_record": {
+      "params": [
+        "content",
+        "name",
+        "proxied",
+        "record_id",
+        "ttl",
+        "type"
+      ],
+      "required": [
+        "content",
+        "name",
+        "record_id",
+        "type"
+      ],
+      "mutating": true
+    }
+  },
+  "coingecko": {
+    "coingecko_coins_markets": {
+      "params": [
+        "ids",
+        "per_page",
+        "vs_currency"
+      ],
+      "required": [
+        "vs_currency"
+      ]
+    },
+    "coingecko_search": {
+      "params": [
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "coingecko_simple_price": {
+      "params": [
+        "ids",
+        "include_24hr_change",
+        "vs_currencies"
+      ],
+      "required": [
+        "ids",
+        "vs_currencies"
+      ]
+    }
+  },
+  "deepgram": {
+    "deepgram_get_projects": {
+      "params": [],
+      "required": []
+    },
+    "deepgram_transcribe_url": {
+      "params": [
+        "diarize",
+        "language",
+        "model",
+        "punctuate",
+        "url"
+      ],
+      "required": [
+        "url"
+      ]
+    }
+  },
+  "digitalocean": {
+    "digitalocean_droplet_action": {
+      "params": [
+        "droplet_id",
+        "type"
+      ],
+      "required": [
+        "droplet_id",
+        "type"
+      ],
+      "mutating": true
+    },
+    "digitalocean_get_account": {
+      "params": [],
+      "required": []
+    },
+    "digitalocean_get_balance": {
+      "params": [],
+      "required": []
+    },
+    "digitalocean_get_droplet": {
+      "params": [
+        "droplet_id"
+      ],
+      "required": [
+        "droplet_id"
+      ]
+    },
+    "digitalocean_list_droplets": {
+      "params": [
+        "per_page",
+        "tag_name"
+      ],
+      "required": []
+    }
+  },
+  "dropbox": {
+    "dropbox_copy": {
+      "params": [
+        "from_path",
+        "to_path"
+      ],
+      "required": [
+        "from_path",
+        "to_path"
+      ],
+      "mutating": true
+    },
+    "dropbox_create_folder": {
+      "params": [
+        "path"
+      ],
+      "required": [
+        "path"
+      ],
+      "mutating": true
+    },
+    "dropbox_create_shared_link": {
+      "params": [
+        "path"
+      ],
+      "required": [
+        "path"
+      ],
+      "mutating": true
+    },
+    "dropbox_delete": {
+      "params": [
+        "path"
+      ],
+      "required": [
+        "path"
+      ],
+      "mutating": true
+    },
+    "dropbox_get_metadata": {
+      "params": [
+        "path"
+      ],
+      "required": [
+        "path"
+      ]
+    },
+    "dropbox_list_folder": {
+      "params": [
+        "path"
+      ],
+      "required": [
+        "path"
+      ]
+    },
+    "dropbox_move": {
+      "params": [
+        "from_path",
+        "to_path"
+      ],
+      "required": [
+        "from_path",
+        "to_path"
+      ],
+      "mutating": true
+    },
+    "dropbox_search": {
+      "params": [
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    }
+  },
+  "facebook": {
+    "facebook_create_post": {
+      "params": [
+        "link",
+        "message"
+      ],
+      "required": [
+        "message"
+      ],
+      "mutating": true
+    },
+    "facebook_list_posts": {
+      "params": [
+        "limit"
+      ],
+      "required": [
+        "limit"
+      ]
+    },
+    "facebook_page_info": {
+      "params": [],
+      "required": []
+    }
+  },
+  "firefly_iii": {
+    "firefly_create_transaction": {
+      "params": [
+        "amount",
+        "category_name",
+        "date",
+        "description",
+        "destination_name",
+        "source_name",
+        "type"
+      ],
+      "required": [
+        "amount",
+        "date",
+        "description",
+        "type"
+      ],
+      "mutating": true
+    },
+    "firefly_list_accounts": {
+      "params": [
+        "type"
+      ],
+      "required": []
+    },
+    "firefly_list_budgets": {
+      "params": [],
+      "required": []
+    },
+    "firefly_list_transactions": {
+      "params": [
+        "end",
+        "limit",
+        "start",
+        "type"
+      ],
+      "required": [
+        "end",
+        "start"
+      ]
+    },
+    "firefly_summary": {
+      "params": [
+        "end",
+        "start"
+      ],
+      "required": [
+        "end",
+        "start"
+      ]
+    }
+  },
+  "flyio": {
+    "flyio_get_app": {
+      "params": [
+        "app_name"
+      ],
+      "required": [
+        "app_name"
+      ]
+    },
+    "flyio_list_apps": {
+      "params": [],
+      "required": []
+    },
+    "flyio_list_machines": {
+      "params": [
+        "app_name"
+      ],
+      "required": [
+        "app_name"
+      ]
+    },
+    "flyio_restart_machine": {
+      "params": [
+        "app_name",
+        "machine_id"
+      ],
+      "required": [
+        "app_name",
+        "machine_id"
+      ],
+      "mutating": true
+    }
+  },
+  "frankfurter": {
+    "fx_currencies": {
+      "params": [],
+      "required": []
+    },
+    "fx_historical": {
+      "params": [
+        "base",
+        "date",
+        "symbols"
+      ],
+      "required": [
+        "base",
+        "date"
+      ]
+    },
+    "fx_latest": {
+      "params": [
+        "base",
+        "symbols"
+      ],
+      "required": [
+        "base"
+      ]
+    }
+  },
+  "gitea": {
+    "gitea_create_issue": {
+      "params": [
+        "body",
+        "owner",
+        "repo",
+        "title"
+      ],
+      "required": [
+        "owner",
+        "repo",
+        "title"
+      ],
+      "mutating": true
+    },
+    "gitea_list_commits": {
+      "params": [
+        "limit",
+        "owner",
+        "repo",
+        "sha"
+      ],
+      "required": [
+        "owner",
+        "repo"
+      ]
+    },
+    "gitea_list_issues": {
+      "params": [
+        "limit",
+        "owner",
+        "repo",
+        "state"
+      ],
+      "required": [
+        "owner",
+        "repo"
+      ]
+    },
+    "gitea_list_repos": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "gitea_version": {
+      "params": [],
+      "required": []
+    }
+  },
+  "github": {
+    "github_create_comment": {
+      "params": [
+        "body",
+        "number",
+        "owner",
+        "repo"
+      ],
+      "required": [
+        "body",
+        "number",
+        "owner",
+        "repo"
+      ],
+      "mutating": true
+    },
+    "github_create_issue": {
+      "params": [
+        "body",
+        "owner",
+        "repo",
+        "title"
+      ],
+      "required": [
+        "owner",
+        "repo",
+        "title"
+      ],
+      "mutating": true
+    },
+    "github_get_issue": {
+      "params": [
+        "number",
+        "owner",
+        "repo"
+      ],
+      "required": [
+        "number",
+        "owner",
+        "repo"
+      ]
+    },
+    "github_list_repo_issues": {
+      "params": [
+        "owner",
+        "repo"
+      ],
+      "required": [
+        "owner",
+        "repo"
+      ]
+    },
+    "github_search_issues": {
+      "params": [
+        "max",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    }
+  },
+  "gitlab": {
+    "gitlab_create_issue": {
+      "params": [
+        "description",
+        "labels",
+        "project_id",
+        "title"
+      ],
+      "required": [
+        "project_id",
+        "title"
+      ],
+      "mutating": true
+    },
+    "gitlab_list_issues": {
+      "params": [
+        "labels",
+        "project_id",
+        "state"
+      ],
+      "required": [
+        "project_id"
+      ]
+    },
+    "gitlab_list_merge_requests": {
+      "params": [
+        "project_id",
+        "state"
+      ],
+      "required": [
+        "project_id"
+      ]
+    },
+    "gitlab_list_pipelines": {
+      "params": [
+        "project_id",
+        "ref",
+        "status"
+      ],
+      "required": [
+        "project_id"
+      ]
+    },
+    "gitlab_list_projects": {
+      "params": [
+        "membership",
+        "per_page",
+        "search"
+      ],
+      "required": []
+    }
+  },
+  "google": {
+    "gmail_create_draft": {
+      "params": [
+        "body",
+        "subject",
+        "to"
+      ],
+      "required": [
+        "body",
+        "to"
+      ]
+    },
+    "gmail_create_label": {
+      "params": [
+        "name"
+      ],
+      "required": [
+        "name"
+      ]
+    },
+    "gmail_get_message": {
+      "params": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "gmail_list_labels": {
+      "params": [],
+      "required": []
+    },
+    "gmail_list_threads": {
+      "params": [
+        "max",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "gmail_modify_labels": {
+      "params": [
+        "add",
+        "id",
+        "remove"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "gmail_move_to_trash": {
+      "params": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ],
+      "mutating": true
+    },
+    "gmail_reply_to_thread": {
+      "params": [
+        "body",
+        "subject",
+        "thread_id",
+        "to"
+      ],
+      "required": [
+        "body",
+        "thread_id",
+        "to"
+      ],
+      "mutating": true
+    },
+    "gmail_search": {
+      "params": [
+        "max",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "gmail_send_email": {
+      "params": [
+        "body",
+        "subject",
+        "to"
+      ],
+      "required": [
+        "body",
+        "to"
+      ],
+      "mutating": true
+    }
+  },
+  "google_ads": {
+    "google_ads_list_accounts": {
+      "params": [],
+      "required": []
+    },
+    "google_ads_search": {
+      "params": [
+        "page_size",
+        "query"
+      ],
+      "required": [
+        "page_size",
+        "query"
+      ]
+    }
+  },
+  "google_adsense": {
+    "adsense_list_accounts": {
+      "params": [],
+      "required": []
+    },
+    "adsense_list_adclients": {
+      "params": [
+        "account"
+      ],
+      "required": [
+        "account"
+      ]
+    },
+    "adsense_report": {
+      "params": [
+        "account",
+        "date_range",
+        "dimensions",
+        "limit",
+        "metrics"
+      ],
+      "required": [
+        "account",
+        "date_range",
+        "limit",
+        "metrics"
+      ]
+    }
+  },
+  "google_analytics": {
+    "ga4_list_properties": {
+      "params": [],
+      "required": []
+    },
+    "ga4_metadata": {
+      "params": [
+        "property"
+      ],
+      "required": [
+        "property"
+      ]
+    },
+    "ga4_run_realtime_report": {
+      "params": [
+        "dimensions",
+        "metrics",
+        "property"
+      ],
+      "required": [
+        "metrics",
+        "property"
+      ]
+    },
+    "ga4_run_report": {
+      "params": [
+        "dimensions",
+        "end_date",
+        "limit",
+        "metrics",
+        "property",
+        "start_date"
+      ],
+      "required": [
+        "end_date",
+        "limit",
+        "metrics",
+        "property",
+        "start_date"
+      ]
+    }
+  },
+  "google_calendar": {
+    "calendar_create_event": {
+      "params": [
+        "calendar_id",
+        "description",
+        "end",
+        "location",
+        "start",
+        "summary"
+      ],
+      "required": [
+        "calendar_id",
+        "end",
+        "start",
+        "summary"
+      ],
+      "mutating": true
+    },
+    "calendar_delete_event": {
+      "params": [
+        "calendar_id",
+        "event_id"
+      ],
+      "required": [
+        "calendar_id",
+        "event_id"
+      ],
+      "mutating": true
+    },
+    "calendar_freebusy": {
+      "params": [
+        "calendar_id",
+        "time_max",
+        "time_min"
+      ],
+      "required": [
+        "calendar_id",
+        "time_max",
+        "time_min"
+      ]
+    },
+    "calendar_get_event": {
+      "params": [
+        "calendar_id",
+        "event_id"
+      ],
+      "required": [
+        "calendar_id",
+        "event_id"
+      ]
+    },
+    "calendar_list_calendars": {
+      "params": [],
+      "required": []
+    },
+    "calendar_list_events": {
+      "params": [
+        "calendar_id",
+        "max_results",
+        "query",
+        "time_max",
+        "time_min"
+      ],
+      "required": [
+        "calendar_id",
+        "time_max",
+        "time_min"
+      ]
+    },
+    "calendar_update_event": {
+      "params": [
+        "calendar_id",
+        "description",
+        "end",
+        "event_id",
+        "location",
+        "start",
+        "summary"
+      ],
+      "required": [
+        "calendar_id",
+        "event_id"
+      ],
+      "mutating": true
+    }
+  },
+  "google_docs": {
+    "docs_append_text": {
+      "params": [
+        "document_id",
+        "end_index",
+        "text"
+      ],
+      "required": [
+        "document_id",
+        "end_index",
+        "text"
+      ],
+      "mutating": true
+    },
+    "docs_batch_update": {
+      "params": [
+        "document_id",
+        "requests"
+      ],
+      "required": [
+        "document_id",
+        "requests"
+      ],
+      "mutating": true
+    },
+    "docs_create_document": {
+      "params": [
+        "title"
+      ],
+      "required": [
+        "title"
+      ]
+    },
+    "docs_get_document": {
+      "params": [
+        "document_id"
+      ],
+      "required": [
+        "document_id"
+      ]
+    },
+    "docs_insert_text": {
+      "params": [
+        "document_id",
+        "index",
+        "text"
+      ],
+      "required": [
+        "document_id",
+        "index",
+        "text"
+      ],
+      "mutating": true
+    },
+    "docs_replace_text": {
+      "params": [
+        "document_id",
+        "find",
+        "replace"
+      ],
+      "required": [
+        "document_id",
+        "find",
+        "replace"
+      ],
+      "mutating": true
+    }
+  },
+  "google_drive": {
+    "drive_copy_file": {
+      "params": [
+        "file_id",
+        "name"
+      ],
+      "required": [
+        "file_id"
+      ]
+    },
+    "drive_create_folder": {
+      "params": [
+        "name",
+        "parent_id"
+      ],
+      "required": [
+        "name"
+      ]
+    },
+    "drive_delete_file": {
+      "params": [
+        "file_id"
+      ],
+      "required": [
+        "file_id"
+      ],
+      "mutating": true
+    },
+    "drive_get_file": {
+      "params": [
+        "file_id"
+      ],
+      "required": [
+        "file_id"
+      ]
+    },
+    "drive_list_files": {
+      "params": [
+        "max"
+      ],
+      "required": []
+    },
+    "drive_move_file": {
+      "params": [
+        "add_parent",
+        "file_id",
+        "remove_parent"
+      ],
+      "required": [
+        "add_parent",
+        "file_id"
+      ]
+    },
+    "drive_rename_file": {
+      "params": [
+        "file_id",
+        "name"
+      ],
+      "required": [
+        "file_id",
+        "name"
+      ]
+    },
+    "drive_search_files": {
+      "params": [
+        "max",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "drive_share_file": {
+      "params": [
+        "email",
+        "file_id",
+        "role",
+        "type"
+      ],
+      "required": [
+        "file_id",
+        "role",
+        "type"
+      ],
+      "mutating": true
+    }
+  },
+  "google_health": {
+    "health_daily_totals": {
+      "params": [
+        "data_type",
+        "end_date",
+        "start_date"
+      ],
+      "required": [
+        "data_type",
+        "end_date",
+        "start_date"
+      ]
+    },
+    "health_identity": {
+      "params": [],
+      "required": []
+    },
+    "health_list_data_points": {
+      "params": [
+        "data_type",
+        "filter",
+        "page_size"
+      ],
+      "required": [
+        "data_type",
+        "page_size"
+      ]
+    },
+    "health_paired_devices": {
+      "params": [],
+      "required": []
+    }
+  },
+  "google_searchconsole": {
+    "gsc_list_sitemaps": {
+      "params": [
+        "site_url"
+      ],
+      "required": [
+        "site_url"
+      ]
+    },
+    "gsc_list_sites": {
+      "params": [],
+      "required": []
+    },
+    "gsc_search_analytics": {
+      "params": [
+        "dimensions",
+        "end_date",
+        "row_limit",
+        "site_url",
+        "start_date"
+      ],
+      "required": [
+        "end_date",
+        "row_limit",
+        "site_url",
+        "start_date"
+      ]
+    }
+  },
+  "google_sheets": {
+    "sheets_add_sheet": {
+      "params": [
+        "spreadsheet_id",
+        "title"
+      ],
+      "required": [
+        "spreadsheet_id",
+        "title"
+      ]
+    },
+    "sheets_append_values": {
+      "params": [
+        "range",
+        "spreadsheet_id",
+        "values"
+      ],
+      "required": [
+        "range",
+        "spreadsheet_id",
+        "values"
+      ]
+    },
+    "sheets_batch_update": {
+      "params": [
+        "requests",
+        "spreadsheet_id"
+      ],
+      "required": [
+        "requests",
+        "spreadsheet_id"
+      ],
+      "mutating": true
+    },
+    "sheets_clear_values": {
+      "params": [
+        "range",
+        "spreadsheet_id"
+      ],
+      "required": [
+        "range",
+        "spreadsheet_id"
+      ],
+      "mutating": true
+    },
+    "sheets_create_spreadsheet": {
+      "params": [
+        "title"
+      ],
+      "required": [
+        "title"
+      ]
+    },
+    "sheets_get_metadata": {
+      "params": [
+        "spreadsheet_id"
+      ],
+      "required": [
+        "spreadsheet_id"
+      ]
+    },
+    "sheets_get_values": {
+      "params": [
+        "range",
+        "spreadsheet_id"
+      ],
+      "required": [
+        "range",
+        "spreadsheet_id"
+      ]
+    },
+    "sheets_update_values": {
+      "params": [
+        "range",
+        "spreadsheet_id",
+        "values"
+      ],
+      "required": [
+        "range",
+        "spreadsheet_id",
+        "values"
+      ],
+      "mutating": true
+    }
+  },
+  "google_tasks": {
+    "tasks_complete_task": {
+      "params": [
+        "task_id",
+        "tasklist_id"
+      ],
+      "required": [
+        "task_id",
+        "tasklist_id"
+      ],
+      "mutating": true
+    },
+    "tasks_create_task": {
+      "params": [
+        "due",
+        "notes",
+        "tasklist_id",
+        "title"
+      ],
+      "required": [
+        "tasklist_id",
+        "title"
+      ],
+      "mutating": true
+    },
+    "tasks_delete_task": {
+      "params": [
+        "task_id",
+        "tasklist_id"
+      ],
+      "required": [
+        "task_id",
+        "tasklist_id"
+      ],
+      "mutating": true
+    },
+    "tasks_list_tasklists": {
+      "params": [],
+      "required": []
+    },
+    "tasks_list_tasks": {
+      "params": [
+        "due_max",
+        "due_min",
+        "max_results",
+        "show_completed",
+        "tasklist_id"
+      ],
+      "required": [
+        "tasklist_id"
+      ]
+    }
+  },
+  "gotify": {
+    "gotify_push": {
+      "params": [
+        "message",
+        "priority",
+        "title"
+      ],
+      "required": [
+        "message"
+      ],
+      "mutating": true
+    }
+  },
+  "grafana": {
+    "grafana_health": {
+      "params": [],
+      "required": []
+    },
+    "grafana_list_alerts": {
+      "params": [],
+      "required": []
+    },
+    "grafana_list_datasources": {
+      "params": [],
+      "required": []
+    },
+    "grafana_search_dashboards": {
+      "params": [
+        "limit",
+        "query"
+      ],
+      "required": []
+    }
+  },
+  "hackernews": {
+    "hn_get_item": {
+      "params": [
+        "item_id"
+      ],
+      "required": [
+        "item_id"
+      ]
+    },
+    "hn_get_user": {
+      "params": [
+        "username"
+      ],
+      "required": [
+        "username"
+      ]
+    },
+    "hn_new_stories": {
+      "params": [],
+      "required": []
+    },
+    "hn_top_stories": {
+      "params": [],
+      "required": []
+    }
+  },
+  "hetzner": {
+    "hetzner_get_server": {
+      "params": [
+        "server_id"
+      ],
+      "required": [
+        "server_id"
+      ]
+    },
+    "hetzner_list_servers": {
+      "params": [
+        "name",
+        "status"
+      ],
+      "required": []
+    },
+    "hetzner_power_on_server": {
+      "params": [
+        "server_id"
+      ],
+      "required": [
+        "server_id"
+      ],
+      "mutating": true
+    },
+    "hetzner_reboot_server": {
+      "params": [
+        "server_id"
+      ],
+      "required": [
+        "server_id"
+      ],
+      "mutating": true
+    }
+  },
+  "home_assistant": {
+    "ha_call_service": {
+      "params": [
+        "domain",
+        "entity_id",
+        "service"
+      ],
+      "required": [
+        "domain",
+        "entity_id",
+        "service"
+      ],
+      "mutating": true
+    },
+    "ha_fire_event": {
+      "params": [
+        "data",
+        "event_type"
+      ],
+      "required": [
+        "event_type"
+      ],
+      "mutating": true
+    },
+    "ha_get_history": {
+      "params": [
+        "end_time",
+        "entity_id",
+        "start_time"
+      ],
+      "required": [
+        "entity_id",
+        "start_time"
+      ]
+    },
+    "ha_get_state": {
+      "params": [
+        "entity_id"
+      ],
+      "required": [
+        "entity_id"
+      ]
+    },
+    "ha_list_services": {
+      "params": [],
+      "required": []
+    },
+    "ha_list_states": {
+      "params": [
+        "entity_prefix"
+      ],
+      "required": [
+        "entity_prefix"
+      ]
+    }
+  },
+  "hubspot": {
+    "hubspot_create_company": {
+      "params": [
+        "properties"
+      ],
+      "required": [
+        "properties"
+      ],
+      "mutating": true
+    },
+    "hubspot_create_contact": {
+      "params": [
+        "properties"
+      ],
+      "required": [
+        "properties"
+      ],
+      "mutating": true
+    },
+    "hubspot_create_deal": {
+      "params": [
+        "properties"
+      ],
+      "required": [
+        "properties"
+      ],
+      "mutating": true
+    },
+    "hubspot_get_contact": {
+      "params": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "hubspot_list_companies": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "hubspot_list_contacts": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "hubspot_list_deals": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "hubspot_search_contacts": {
+      "params": [
+        "limit",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "hubspot_update_contact": {
+      "params": [
+        "id",
+        "properties"
+      ],
+      "required": [
+        "id",
+        "properties"
+      ],
+      "mutating": true
+    }
+  },
+  "huggingface": {
+    "huggingface_get_model": {
+      "params": [
+        "model_id"
+      ],
+      "required": [
+        "model_id"
+      ]
+    },
+    "huggingface_search_datasets": {
+      "params": [
+        "limit",
+        "search"
+      ],
+      "required": []
+    },
+    "huggingface_search_models": {
+      "params": [
+        "limit",
+        "search",
+        "sort",
+        "task"
+      ],
+      "required": []
+    }
+  },
+  "immich": {
+    "immich_create_album": {
+      "params": [
+        "album_name",
+        "asset_ids",
+        "description"
+      ],
+      "required": [
+        "album_name"
+      ],
+      "mutating": true
+    },
+    "immich_get_album": {
+      "params": [
+        "album_id"
+      ],
+      "required": [
+        "album_id"
+      ]
+    },
+    "immich_get_asset": {
+      "params": [
+        "asset_id"
+      ],
+      "required": [
+        "asset_id"
+      ]
+    },
+    "immich_list_albums": {
+      "params": [],
+      "required": []
+    },
+    "immich_search_assets": {
+      "params": [
+        "query",
+        "size"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "immich_server_statistics": {
+      "params": [],
+      "required": []
+    }
+  },
+  "instagram": {
+    "instagram_account_info": {
+      "params": [],
+      "required": []
+    },
+    "instagram_create_media": {
+      "params": [
+        "caption",
+        "image_url"
+      ],
+      "required": [
+        "image_url"
+      ]
+    },
+    "instagram_list_media": {
+      "params": [
+        "limit"
+      ],
+      "required": [
+        "limit"
+      ]
+    },
+    "instagram_publish_media": {
+      "params": [
+        "creation_id"
+      ],
+      "required": [
+        "creation_id"
+      ],
+      "mutating": true
+    }
+  },
+  "intercom": {
+    "intercom_create_contact": {
+      "params": [
+        "email",
+        "name",
+        "role"
+      ],
+      "required": [
+        "email"
+      ],
+      "mutating": true
+    },
+    "intercom_create_note": {
+      "params": [
+        "admin_id",
+        "body",
+        "id"
+      ],
+      "required": [
+        "body",
+        "id"
+      ],
+      "mutating": true
+    },
+    "intercom_get_contact": {
+      "params": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "intercom_get_conversation": {
+      "params": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "intercom_list_contacts": {
+      "params": [],
+      "required": []
+    },
+    "intercom_list_conversations": {
+      "params": [],
+      "required": []
+    },
+    "intercom_reply_conversation": {
+      "params": [
+        "admin_id",
+        "body",
+        "id"
+      ],
+      "required": [
+        "admin_id",
+        "body",
+        "id"
+      ],
+      "mutating": true
+    },
+    "intercom_update_contact": {
+      "params": [
+        "email",
+        "id",
+        "name",
+        "phone"
+      ],
+      "required": [
+        "id"
+      ],
+      "mutating": true
+    }
+  },
+  "jellyfin": {
+    "jellyfin_active_sessions": {
+      "params": [],
+      "required": []
+    },
+    "jellyfin_get_item": {
+      "params": [
+        "item_id"
+      ],
+      "required": [
+        "item_id"
+      ]
+    },
+    "jellyfin_list_libraries": {
+      "params": [],
+      "required": []
+    },
+    "jellyfin_recently_added": {
+      "params": [
+        "include_types",
+        "limit"
+      ],
+      "required": []
+    },
+    "jellyfin_search": {
+      "params": [
+        "include_types",
+        "limit",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    }
+  },
+  "jira": {
+    "jira_add_comment": {
+      "params": [
+        "body",
+        "key"
+      ],
+      "required": [
+        "body",
+        "key"
+      ],
+      "mutating": true
+    },
+    "jira_create_issue": {
+      "params": [
+        "description",
+        "issue_type",
+        "project_key",
+        "summary"
+      ],
+      "required": [
+        "project_key",
+        "summary"
+      ],
+      "mutating": true
+    },
+    "jira_get_issue": {
+      "params": [
+        "key"
+      ],
+      "required": [
+        "key"
+      ]
+    },
+    "jira_search_issues": {
+      "params": [
+        "jql",
+        "max"
+      ],
+      "required": [
+        "jql"
+      ]
+    }
+  },
+  "karakeep": {
+    "karakeep_create_bookmark": {
+      "params": [
+        "note",
+        "title",
+        "url"
+      ],
+      "required": [
+        "url"
+      ],
+      "mutating": true
+    },
+    "karakeep_list_bookmarks": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "karakeep_list_lists": {
+      "params": [],
+      "required": []
+    },
+    "karakeep_search_bookmarks": {
+      "params": [
+        "limit",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    }
+  },
+  "lastfm": {
+    "lastfm_recent_tracks": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "lastfm_top_artists": {
+      "params": [
+        "limit",
+        "period"
+      ],
+      "required": [
+        "period"
+      ]
+    },
+    "lastfm_top_tracks": {
+      "params": [
+        "limit",
+        "period"
+      ],
+      "required": [
+        "period"
+      ]
+    },
+    "lastfm_user_info": {
+      "params": [],
+      "required": []
+    }
+  },
+  "lidarr": {
+    "lidarr_list_artists": {
+      "params": [],
+      "required": []
+    },
+    "lidarr_list_health": {
+      "params": [],
+      "required": []
+    },
+    "lidarr_list_queue": {
+      "params": [
+        "page_size"
+      ],
+      "required": []
+    },
+    "lidarr_list_wanted_missing": {
+      "params": [
+        "page_size"
+      ],
+      "required": []
+    },
+    "lidarr_system_status": {
+      "params": [],
+      "required": []
+    }
+  },
+  "linear": {
+    "linear_create_issue": {
+      "params": [
+        "description",
+        "team_id",
+        "title"
+      ],
+      "required": [
+        "team_id",
+        "title"
+      ],
+      "mutating": true
+    },
+    "linear_list_issues": {
+      "params": [
+        "first"
+      ],
+      "required": []
+    },
+    "linear_list_teams": {
+      "params": [],
+      "required": []
+    },
+    "linear_search_issues": {
+      "params": [
+        "first",
+        "term"
+      ],
+      "required": [
+        "term"
+      ]
+    }
+  },
+  "linkedin": {
+    "linkedin_create_post": {
+      "params": [
+        "person_id",
+        "text"
+      ],
+      "required": [
+        "person_id",
+        "text"
+      ],
+      "mutating": true
+    },
+    "linkedin_me": {
+      "params": [],
+      "required": []
+    }
+  },
+  "linkedin_ads": {
+    "linkedin_ads_list_accounts": {
+      "params": [],
+      "required": []
+    },
+    "linkedin_ads_report": {
+      "params": [
+        "account_id",
+        "start_day",
+        "start_month",
+        "start_year"
+      ],
+      "required": [
+        "account_id",
+        "start_day",
+        "start_month",
+        "start_year"
+      ]
+    }
+  },
+  "linkwarden": {
+    "linkwarden_create_link": {
+      "params": [
+        "description",
+        "name",
+        "url"
+      ],
+      "required": [
+        "url"
+      ],
+      "mutating": true
+    },
+    "linkwarden_list_collections": {
+      "params": [],
+      "required": []
+    },
+    "linkwarden_list_links": {
+      "params": [
+        "collection_id"
+      ],
+      "required": []
+    },
+    "linkwarden_search_links": {
+      "params": [
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    }
+  },
+  "linode": {
+    "linode_boot_instance": {
+      "params": [
+        "linode_id"
+      ],
+      "required": [
+        "linode_id"
+      ],
+      "mutating": true
+    },
+    "linode_get_account": {
+      "params": [],
+      "required": []
+    },
+    "linode_get_instance": {
+      "params": [
+        "linode_id"
+      ],
+      "required": [
+        "linode_id"
+      ]
+    },
+    "linode_list_instances": {
+      "params": [
+        "page",
+        "page_size"
+      ],
+      "required": []
+    },
+    "linode_reboot_instance": {
+      "params": [
+        "linode_id"
+      ],
+      "required": [
+        "linode_id"
+      ],
+      "mutating": true
+    }
+  },
+  "mailchimp": {
+    "mailchimp_add_member": {
+      "params": [
+        "email",
+        "list_id",
+        "status"
+      ],
+      "required": [
+        "email",
+        "list_id",
+        "status"
+      ],
+      "mutating": true
+    },
+    "mailchimp_create_campaign": {
+      "params": [
+        "list_id",
+        "settings",
+        "type"
+      ],
+      "required": [
+        "list_id",
+        "settings",
+        "type"
+      ],
+      "mutating": true
+    },
+    "mailchimp_get_audience": {
+      "params": [
+        "list_id"
+      ],
+      "required": [
+        "list_id"
+      ]
+    },
+    "mailchimp_get_member": {
+      "params": [
+        "list_id",
+        "subscriber_hash"
+      ],
+      "required": [
+        "list_id",
+        "subscriber_hash"
+      ]
+    },
+    "mailchimp_list_audiences": {
+      "params": [],
+      "required": []
+    },
+    "mailchimp_list_campaigns": {
+      "params": [],
+      "required": []
+    },
+    "mailchimp_list_members": {
+      "params": [
+        "count",
+        "list_id"
+      ],
+      "required": [
+        "list_id"
+      ]
+    },
+    "mailchimp_send_campaign": {
+      "params": [
+        "campaign_id"
+      ],
+      "required": [
+        "campaign_id"
+      ],
+      "mutating": true
+    }
+  },
+  "mailgun": {
+    "mailgun_get_domain": {
+      "params": [],
+      "required": []
+    },
+    "mailgun_list_events": {
+      "params": [
+        "event",
+        "limit",
+        "recipient"
+      ],
+      "required": []
+    },
+    "mailgun_send_email": {
+      "params": [
+        "from",
+        "html",
+        "subject",
+        "text",
+        "to"
+      ],
+      "required": [
+        "from",
+        "subject",
+        "text",
+        "to"
+      ],
+      "mutating": true
+    }
+  },
+  "mastodon": {
+    "mastodon_create_post": {
+      "params": [
+        "status",
+        "visibility"
+      ],
+      "required": [
+        "status"
+      ],
+      "mutating": true
+    },
+    "mastodon_me": {
+      "params": [],
+      "required": []
+    },
+    "mastodon_search": {
+      "params": [
+        "limit",
+        "query"
+      ],
+      "required": [
+        "limit",
+        "query"
+      ]
+    },
+    "mastodon_timeline": {
+      "params": [
+        "limit"
+      ],
+      "required": [
+        "limit"
+      ]
+    }
+  },
+  "matrix": {
+    "matrix_list_joined_rooms": {
+      "params": [],
+      "required": []
+    },
+    "matrix_resolve_room_alias": {
+      "params": [
+        "room_alias"
+      ],
+      "required": [
+        "room_alias"
+      ]
+    },
+    "matrix_send_message": {
+      "params": [
+        "body",
+        "room_id",
+        "txn_id"
+      ],
+      "required": [
+        "body",
+        "room_id",
+        "txn_id"
+      ],
+      "mutating": true
+    },
+    "matrix_whoami": {
+      "params": [],
+      "required": []
+    }
+  },
+  "mealie": {
+    "mealie_add_shopping_item": {
+      "params": [
+        "note",
+        "quantity",
+        "shopping_list_id"
+      ],
+      "required": [
+        "note",
+        "shopping_list_id"
+      ],
+      "mutating": true
+    },
+    "mealie_get_recipe": {
+      "params": [
+        "slug"
+      ],
+      "required": [
+        "slug"
+      ]
+    },
+    "mealie_list_meal_plan": {
+      "params": [
+        "end_date",
+        "start_date"
+      ],
+      "required": [
+        "end_date",
+        "start_date"
+      ]
+    },
+    "mealie_list_shopping_lists": {
+      "params": [],
+      "required": []
+    },
+    "mealie_search_recipes": {
+      "params": [
+        "per_page",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    }
+  },
+  "meta_ads": {
+    "meta_ads_insights": {
+      "params": [
+        "account_id",
+        "date_preset",
+        "fields",
+        "level",
+        "limit"
+      ],
+      "required": [
+        "account_id",
+        "date_preset",
+        "fields",
+        "limit"
+      ]
+    },
+    "meta_ads_list_accounts": {
+      "params": [],
+      "required": []
+    },
+    "meta_ads_list_campaigns": {
+      "params": [
+        "account_id",
+        "limit"
+      ],
+      "required": [
+        "account_id",
+        "limit"
+      ]
+    },
+    "meta_ads_set_campaign_status": {
+      "params": [
+        "campaign_id",
+        "status"
+      ],
+      "required": [
+        "campaign_id",
+        "status"
+      ],
+      "mutating": true
+    }
+  },
+  "miniflux": {
+    "miniflux_get_entry": {
+      "params": [
+        "entry_id"
+      ],
+      "required": [
+        "entry_id"
+      ]
+    },
+    "miniflux_list_entries": {
+      "params": [
+        "direction",
+        "feed_id",
+        "limit",
+        "status"
+      ],
+      "required": [
+        "limit",
+        "status"
+      ]
+    },
+    "miniflux_list_feeds": {
+      "params": [],
+      "required": []
+    },
+    "miniflux_mark_entries": {
+      "params": [
+        "entry_ids",
+        "status"
+      ],
+      "required": [
+        "entry_ids",
+        "status"
+      ],
+      "mutating": true
+    },
+    "miniflux_toggle_bookmark": {
+      "params": [
+        "entry_id"
+      ],
+      "required": [
+        "entry_id"
+      ],
+      "mutating": true
+    }
+  },
+  "monday": {
+    "monday_archive_item": {
+      "params": [
+        "item_id"
+      ],
+      "required": [
+        "item_id"
+      ],
+      "mutating": true
+    },
+    "monday_create_item": {
+      "params": [
+        "board_id",
+        "group_id",
+        "item_name"
+      ],
+      "required": [
+        "board_id",
+        "item_name"
+      ],
+      "mutating": true
+    },
+    "monday_create_update": {
+      "params": [
+        "body",
+        "item_id"
+      ],
+      "required": [
+        "body",
+        "item_id"
+      ],
+      "mutating": true
+    },
+    "monday_list_board_items": {
+      "params": [
+        "board_id"
+      ],
+      "required": [
+        "board_id"
+      ]
+    },
+    "monday_list_boards": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "monday_list_groups": {
+      "params": [
+        "board_id"
+      ],
+      "required": [
+        "board_id"
+      ]
+    },
+    "monday_list_users": {
+      "params": [],
+      "required": []
+    },
+    "monday_update_column_values": {
+      "params": [
+        "board_id",
+        "item_id",
+        "values"
+      ],
+      "required": [
+        "board_id",
+        "item_id",
+        "values"
+      ],
+      "mutating": true
+    }
+  },
+  "n8n": {
+    "n8n_activate_workflow": {
+      "params": [
+        "workflow_id"
+      ],
+      "required": [
+        "workflow_id"
+      ],
+      "mutating": true
+    },
+    "n8n_deactivate_workflow": {
+      "params": [
+        "workflow_id"
+      ],
+      "required": [
+        "workflow_id"
+      ],
+      "mutating": true
+    },
+    "n8n_get_execution": {
+      "params": [
+        "execution_id"
+      ],
+      "required": [
+        "execution_id"
+      ]
+    },
+    "n8n_list_executions": {
+      "params": [
+        "limit",
+        "status",
+        "workflow_id"
+      ],
+      "required": [
+        "limit"
+      ]
+    },
+    "n8n_list_workflows": {
+      "params": [
+        "active",
+        "limit"
+      ],
+      "required": []
+    }
+  },
+  "netlify": {
+    "netlify_get_site": {
+      "params": [
+        "site_id"
+      ],
+      "required": [
+        "site_id"
+      ]
+    },
+    "netlify_list_deploys": {
+      "params": [
+        "site_id"
+      ],
+      "required": [
+        "site_id"
+      ]
+    },
+    "netlify_list_sites": {
+      "params": [
+        "filter",
+        "name"
+      ],
+      "required": []
+    }
+  },
+  "nextcloud": {
+    "nextcloud_create_share": {
+      "params": [
+        "path",
+        "permissions",
+        "share_type"
+      ],
+      "required": [
+        "path",
+        "share_type"
+      ],
+      "mutating": true
+    },
+    "nextcloud_list_notifications": {
+      "params": [],
+      "required": []
+    },
+    "nextcloud_list_shares": {
+      "params": [],
+      "required": []
+    },
+    "nextcloud_user_info": {
+      "params": [],
+      "required": []
+    }
+  },
+  "notion": {
+    "notion_create_page": {
+      "params": [
+        "content",
+        "parent_id",
+        "title"
+      ],
+      "required": [
+        "parent_id",
+        "title"
+      ],
+      "mutating": true
+    },
+    "notion_get_block_children": {
+      "params": [
+        "block_id"
+      ],
+      "required": [
+        "block_id"
+      ]
+    },
+    "notion_get_page": {
+      "params": [
+        "page_id"
+      ],
+      "required": [
+        "page_id"
+      ]
+    },
+    "notion_search": {
+      "params": [
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    }
+  },
+  "npm": {
+    "npm_get_downloads": {
+      "params": [
+        "package",
+        "period"
+      ],
+      "required": [
+        "package",
+        "period"
+      ]
+    },
+    "npm_get_latest_version": {
+      "params": [
+        "package"
+      ],
+      "required": [
+        "package"
+      ]
+    },
+    "npm_get_package": {
+      "params": [
+        "package"
+      ],
+      "required": [
+        "package"
+      ]
+    },
+    "npm_search": {
+      "params": [
+        "size",
+        "text"
+      ],
+      "required": [
+        "text"
+      ]
+    }
+  },
+  "ntfy": {
+    "ntfy_publish": {
+      "params": [
+        "click",
+        "message",
+        "priority",
+        "tags",
+        "title"
+      ],
+      "required": [
+        "message"
+      ],
+      "mutating": true
+    }
+  },
+  "open_meteo": {
+    "weather_air_quality": {
+      "params": [
+        "latitude",
+        "longitude",
+        "timezone"
+      ],
+      "required": [
+        "latitude",
+        "longitude"
+      ]
+    },
+    "weather_current": {
+      "params": [
+        "latitude",
+        "longitude",
+        "timezone"
+      ],
+      "required": [
+        "latitude",
+        "longitude"
+      ]
+    },
+    "weather_forecast": {
+      "params": [
+        "forecast_days",
+        "latitude",
+        "longitude",
+        "timezone"
+      ],
+      "required": [
+        "latitude",
+        "longitude"
+      ]
+    },
+    "weather_geocode": {
+      "params": [
+        "count",
+        "name"
+      ],
+      "required": [
+        "name"
+      ]
+    }
+  },
+  "openai": {
+    "openai_chat_completion": {
+      "params": [
+        "messages",
+        "model"
+      ],
+      "required": [
+        "messages",
+        "model"
+      ]
+    },
+    "openai_create_assistant": {
+      "params": [
+        "instructions",
+        "model",
+        "name"
+      ],
+      "required": [
+        "model"
+      ],
+      "mutating": true
+    },
+    "openai_create_embedding": {
+      "params": [
+        "input",
+        "model"
+      ],
+      "required": [
+        "input",
+        "model"
+      ]
+    },
+    "openai_create_image": {
+      "params": [
+        "model",
+        "prompt",
+        "size"
+      ],
+      "required": [
+        "prompt"
+      ]
+    },
+    "openai_delete_file": {
+      "params": [
+        "file_id"
+      ],
+      "required": [
+        "file_id"
+      ],
+      "mutating": true
+    },
+    "openai_list_files": {
+      "params": [],
+      "required": []
+    },
+    "openai_list_models": {
+      "params": [],
+      "required": []
+    },
+    "openai_moderation": {
+      "params": [
+        "input"
+      ],
+      "required": [
+        "input"
+      ]
+    },
+    "openai_retrieve_model": {
+      "params": [
+        "model"
+      ],
+      "required": [
+        "model"
+      ]
+    }
+  },
+  "openfoodfacts": {
+    "off_get_product": {
+      "params": [
+        "barcode"
+      ],
+      "required": [
+        "barcode"
+      ]
+    },
+    "off_search_products": {
+      "params": [
+        "page_size",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    }
+  },
+  "openlibrary": {
+    "openlibrary_author_works": {
+      "params": [
+        "author_key",
+        "limit"
+      ],
+      "required": [
+        "author_key"
+      ]
+    },
+    "openlibrary_get_by_isbn": {
+      "params": [
+        "isbn"
+      ],
+      "required": [
+        "isbn"
+      ]
+    },
+    "openlibrary_get_work": {
+      "params": [
+        "work_key"
+      ],
+      "required": [
+        "work_key"
+      ]
+    },
+    "openlibrary_search": {
+      "params": [
+        "author",
+        "limit",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    }
+  },
+  "openrouter": {
+    "openrouter_chat_completion": {
+      "params": [
+        "messages",
+        "model"
+      ],
+      "required": [
+        "messages",
+        "model"
+      ]
+    },
+    "openrouter_get_credits": {
+      "params": [],
+      "required": []
+    },
+    "openrouter_list_models": {
+      "params": [],
+      "required": []
+    }
+  },
+  "openstreetmap": {
+    "osm_geocode": {
+      "params": [
+        "country_code",
+        "limit",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "osm_reverse_geocode": {
+      "params": [
+        "latitude",
+        "longitude",
+        "zoom"
+      ],
+      "required": [
+        "latitude",
+        "longitude"
+      ]
+    }
+  },
+  "oura": {
+    "oura_daily_activity": {
+      "params": [
+        "end_date",
+        "start_date"
+      ],
+      "required": [
+        "end_date",
+        "start_date"
+      ]
+    },
+    "oura_daily_readiness": {
+      "params": [
+        "end_date",
+        "start_date"
+      ],
+      "required": [
+        "end_date",
+        "start_date"
+      ]
+    },
+    "oura_daily_sleep": {
+      "params": [
+        "end_date",
+        "start_date"
+      ],
+      "required": [
+        "end_date",
+        "start_date"
+      ]
+    },
+    "oura_personal_info": {
+      "params": [],
+      "required": []
+    }
+  },
+  "outlook": {
+    "outlook_create_draft": {
+      "params": [
+        "body",
+        "subject",
+        "to"
+      ],
+      "required": [
+        "body",
+        "to"
+      ]
+    },
+    "outlook_get_message": {
+      "params": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "outlook_list_messages": {
+      "params": [
+        "max"
+      ],
+      "required": []
+    },
+    "outlook_search_messages": {
+      "params": [
+        "max",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "outlook_send_mail": {
+      "params": [
+        "body",
+        "subject",
+        "to"
+      ],
+      "required": [
+        "body",
+        "to"
+      ],
+      "mutating": true
+    }
+  },
+  "paperless": {
+    "paperless_get_document": {
+      "params": [
+        "document_id"
+      ],
+      "required": [
+        "document_id"
+      ]
+    },
+    "paperless_get_document_text": {
+      "params": [
+        "document_id"
+      ],
+      "required": [
+        "document_id"
+      ]
+    },
+    "paperless_list_correspondents": {
+      "params": [
+        "page_size"
+      ],
+      "required": []
+    },
+    "paperless_list_tags": {
+      "params": [
+        "page_size"
+      ],
+      "required": []
+    },
+    "paperless_search_documents": {
+      "params": [
+        "page",
+        "page_size",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "paperless_update_document_tags": {
+      "params": [
+        "document_id",
+        "tag_ids"
+      ],
+      "required": [
+        "document_id",
+        "tag_ids"
+      ],
+      "mutating": true
+    }
+  },
+  "perplexity": {
+    "perplexity_search_answer": {
+      "params": [
+        "messages",
+        "model"
+      ],
+      "required": [
+        "messages",
+        "model"
+      ]
+    }
+  },
+  "pinterest": {
+    "pinterest_create_pin": {
+      "params": [
+        "board_id",
+        "description",
+        "image_url",
+        "link",
+        "title"
+      ],
+      "required": [
+        "board_id",
+        "image_url"
+      ],
+      "mutating": true
+    },
+    "pinterest_list_boards": {
+      "params": [
+        "limit"
+      ],
+      "required": [
+        "limit"
+      ]
+    },
+    "pinterest_me": {
+      "params": [],
+      "required": []
+    }
+  },
+  "plex": {
+    "plex_active_sessions": {
+      "params": [],
+      "required": []
+    },
+    "plex_list_libraries": {
+      "params": [],
+      "required": []
+    },
+    "plex_recently_added": {
+      "params": [
+        "section_key"
+      ],
+      "required": []
+    },
+    "plex_search": {
+      "params": [
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "plex_server_identity": {
+      "params": [],
+      "required": []
+    }
+  },
+  "portainer": {
+    "portainer_container_logs": {
+      "params": [
+        "container_id",
+        "endpoint_id",
+        "tail"
+      ],
+      "required": [
+        "container_id",
+        "endpoint_id",
+        "tail"
+      ]
+    },
+    "portainer_list_containers": {
+      "params": [
+        "all",
+        "endpoint_id"
+      ],
+      "required": [
+        "endpoint_id"
+      ]
+    },
+    "portainer_list_endpoints": {
+      "params": [],
+      "required": []
+    },
+    "portainer_restart_container": {
+      "params": [
+        "container_id",
+        "endpoint_id"
+      ],
+      "required": [
+        "container_id",
+        "endpoint_id"
+      ],
+      "mutating": true
+    }
+  },
+  "prowlarr": {
+    "prowlarr_list_health": {
+      "params": [],
+      "required": []
+    },
+    "prowlarr_list_indexers": {
+      "params": [],
+      "required": []
+    },
+    "prowlarr_list_queue": {
+      "params": [
+        "page_size"
+      ],
+      "required": []
+    },
+    "prowlarr_search": {
+      "params": [
+        "limit",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "prowlarr_system_status": {
+      "params": [],
+      "required": []
+    }
+  },
+  "proxmox": {
+    "proxmox_cluster_resources": {
+      "params": [
+        "type"
+      ],
+      "required": []
+    },
+    "proxmox_get_vm_status": {
+      "params": [
+        "node",
+        "vmid"
+      ],
+      "required": [
+        "node",
+        "vmid"
+      ]
+    },
+    "proxmox_list_nodes": {
+      "params": [],
+      "required": []
+    },
+    "proxmox_shutdown_vm": {
+      "params": [
+        "node",
+        "vmid"
+      ],
+      "required": [
+        "node",
+        "vmid"
+      ],
+      "mutating": true
+    },
+    "proxmox_start_vm": {
+      "params": [
+        "node",
+        "vmid"
+      ],
+      "required": [
+        "node",
+        "vmid"
+      ],
+      "mutating": true
+    }
+  },
+  "pushbullet": {
+    "pushbullet_list_devices": {
+      "params": [],
+      "required": []
+    },
+    "pushbullet_push_link": {
+      "params": [
+        "body",
+        "title",
+        "url"
+      ],
+      "required": [
+        "url"
+      ],
+      "mutating": true
+    },
+    "pushbullet_push_note": {
+      "params": [
+        "body",
+        "device_iden",
+        "title"
+      ],
+      "required": [
+        "body"
+      ],
+      "mutating": true
+    }
+  },
+  "pushover": {
+    "pushover_send_message": {
+      "params": [
+        "message",
+        "priority",
+        "sound",
+        "title",
+        "url",
+        "url_title"
+      ],
+      "required": [
+        "message"
+      ],
+      "mutating": true
+    },
+    "pushover_validate": {
+      "params": [],
+      "required": []
+    }
+  },
+  "pypi": {
+    "pypi_get_package": {
+      "params": [
+        "package"
+      ],
+      "required": [
+        "package"
+      ]
+    },
+    "pypi_get_version": {
+      "params": [
+        "package",
+        "version"
+      ],
+      "required": [
+        "package",
+        "version"
+      ]
+    },
+    "pypi_list_releases": {
+      "params": [
+        "package"
+      ],
+      "required": [
+        "package"
+      ]
+    }
+  },
+  "radarr": {
+    "radarr_calendar": {
+      "params": [
+        "end",
+        "start"
+      ],
+      "required": [
+        "end",
+        "start"
+      ]
+    },
+    "radarr_list_movie": {
+      "params": [],
+      "required": []
+    },
+    "radarr_queue": {
+      "params": [
+        "page_size"
+      ],
+      "required": []
+    },
+    "radarr_search_movie": {
+      "params": [
+        "term"
+      ],
+      "required": [
+        "term"
+      ]
+    },
+    "radarr_system_status": {
+      "params": [],
+      "required": []
+    },
+    "radarr_wanted_missing": {
+      "params": [
+        "page_size"
+      ],
+      "required": []
+    }
+  },
+  "raindrop": {
+    "raindrop_create_bookmark": {
+      "params": [
+        "excerpt",
+        "link",
+        "tags",
+        "title"
+      ],
+      "required": [
+        "link"
+      ],
+      "mutating": true
+    },
+    "raindrop_list_bookmarks": {
+      "params": [
+        "collection_id",
+        "page",
+        "perpage"
+      ],
+      "required": [
+        "collection_id"
+      ]
+    },
+    "raindrop_list_collections": {
+      "params": [],
+      "required": []
+    },
+    "raindrop_search": {
+      "params": [
+        "page",
+        "perpage",
+        "search"
+      ],
+      "required": [
+        "search"
+      ]
+    },
+    "raindrop_update_bookmark": {
+      "params": [
+        "excerpt",
+        "raindrop_id",
+        "tags",
+        "title"
+      ],
+      "required": [
+        "raindrop_id"
+      ],
+      "mutating": true
+    }
+  },
+  "readwise": {
+    "readwise_create_highlight": {
+      "params": [
+        "author",
+        "note",
+        "source_url",
+        "text",
+        "title"
+      ],
+      "required": [
+        "text"
+      ],
+      "mutating": true
+    },
+    "readwise_list_books": {
+      "params": [
+        "category",
+        "page_size"
+      ],
+      "required": []
+    },
+    "readwise_list_documents": {
+      "params": [
+        "category",
+        "location",
+        "updated_after"
+      ],
+      "required": []
+    },
+    "readwise_list_highlights": {
+      "params": [
+        "book_id",
+        "page_size",
+        "updated_after"
+      ],
+      "required": []
+    },
+    "readwise_save_document": {
+      "params": [
+        "location",
+        "tags",
+        "url"
+      ],
+      "required": [
+        "url"
+      ],
+      "mutating": true
+    }
+  },
+  "reddit": {
+    "reddit_list_subreddit": {
+      "params": [
+        "limit",
+        "subreddit"
+      ],
+      "required": [
+        "limit",
+        "subreddit"
+      ]
+    },
+    "reddit_me": {
+      "params": [],
+      "required": []
+    },
+    "reddit_search": {
+      "params": [
+        "limit",
+        "query"
+      ],
+      "required": [
+        "limit",
+        "query"
+      ]
+    },
+    "reddit_submit_post": {
+      "params": [
+        "subreddit",
+        "text",
+        "title"
+      ],
+      "required": [
+        "subreddit",
+        "title"
+      ],
+      "mutating": true
+    }
+  },
+  "replicate": {
+    "replicate_create_prediction": {
+      "params": [
+        "input",
+        "version"
+      ],
+      "required": [
+        "input",
+        "version"
+      ],
+      "mutating": true
+    },
+    "replicate_get_model": {
+      "params": [
+        "name",
+        "owner"
+      ],
+      "required": [
+        "name",
+        "owner"
+      ]
+    },
+    "replicate_get_prediction": {
+      "params": [
+        "prediction_id"
+      ],
+      "required": [
+        "prediction_id"
+      ]
+    }
+  },
+  "resend": {
+    "resend_get_email": {
+      "params": [
+        "email_id"
+      ],
+      "required": [
+        "email_id"
+      ]
+    },
+    "resend_list_domains": {
+      "params": [],
+      "required": []
+    },
+    "resend_send_email": {
+      "params": [
+        "from",
+        "html",
+        "reply_to",
+        "subject",
+        "text",
+        "to"
+      ],
+      "required": [
+        "from",
+        "subject",
+        "to"
+      ],
+      "mutating": true
+    }
+  },
+  "salesforce": {
+    "salesforce_create_sobject": {
+      "params": [
+        "fields",
+        "type"
+      ],
+      "required": [
+        "fields",
+        "type"
+      ],
+      "mutating": true
+    },
+    "salesforce_delete_sobject": {
+      "params": [
+        "id",
+        "type"
+      ],
+      "required": [
+        "id",
+        "type"
+      ],
+      "mutating": true
+    },
+    "salesforce_describe_sobject": {
+      "params": [
+        "type"
+      ],
+      "required": [
+        "type"
+      ]
+    },
+    "salesforce_get_sobject": {
+      "params": [
+        "id",
+        "type"
+      ],
+      "required": [
+        "id",
+        "type"
+      ]
+    },
+    "salesforce_list_sobjects": {
+      "params": [],
+      "required": []
+    },
+    "salesforce_search": {
+      "params": [
+        "sosl"
+      ],
+      "required": [
+        "sosl"
+      ]
+    },
+    "salesforce_soql_query": {
+      "params": [
+        "soql"
+      ],
+      "required": [
+        "soql"
+      ]
+    },
+    "salesforce_update_sobject": {
+      "params": [
+        "fields",
+        "id",
+        "type"
+      ],
+      "required": [
+        "fields",
+        "id",
+        "type"
+      ],
+      "mutating": true
+    }
+  },
+  "sendgrid": {
+    "sendgrid_add_contact": {
+      "params": [
+        "email"
+      ],
+      "required": [
+        "email"
+      ],
+      "mutating": true
+    },
+    "sendgrid_get_template": {
+      "params": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "sendgrid_list_bounces": {
+      "params": [],
+      "required": []
+    },
+    "sendgrid_list_lists": {
+      "params": [],
+      "required": []
+    },
+    "sendgrid_list_templates": {
+      "params": [],
+      "required": []
+    },
+    "sendgrid_list_verified_senders": {
+      "params": [],
+      "required": []
+    },
+    "sendgrid_send_mail": {
+      "params": [
+        "body",
+        "from",
+        "subject",
+        "to"
+      ],
+      "required": [
+        "body",
+        "from",
+        "subject",
+        "to"
+      ],
+      "mutating": true
+    }
+  },
+  "sentry": {
+    "sentry_get_issue": {
+      "params": [
+        "issue_id"
+      ],
+      "required": [
+        "issue_id"
+      ]
+    },
+    "sentry_get_latest_event": {
+      "params": [
+        "issue_id"
+      ],
+      "required": [
+        "issue_id"
+      ]
+    },
+    "sentry_list_issues": {
+      "params": [
+        "project_slug",
+        "query",
+        "stats_period"
+      ],
+      "required": [
+        "project_slug"
+      ]
+    },
+    "sentry_list_projects": {
+      "params": [],
+      "required": []
+    }
+  },
+  "shopify": {
+    "shopify_create_draft_order": {
+      "params": [
+        "draft_order"
+      ],
+      "required": [
+        "draft_order"
+      ],
+      "mutating": true
+    },
+    "shopify_create_product": {
+      "params": [
+        "product"
+      ],
+      "required": [
+        "product"
+      ],
+      "mutating": true
+    },
+    "shopify_get_order": {
+      "params": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "shopify_get_product": {
+      "params": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "shopify_list_customers": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "shopify_list_orders": {
+      "params": [
+        "limit",
+        "status"
+      ],
+      "required": []
+    },
+    "shopify_list_products": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "shopify_update_product": {
+      "params": [
+        "id",
+        "product"
+      ],
+      "required": [
+        "id",
+        "product"
+      ],
+      "mutating": true
+    }
+  },
+  "slack": {
+    "slack_add_reaction": {
+      "params": [
+        "channel",
+        "name",
+        "ts"
+      ],
+      "required": [
+        "channel",
+        "name",
+        "ts"
+      ],
+      "mutating": true
+    },
+    "slack_create_channel": {
+      "params": [
+        "is_private",
+        "name"
+      ],
+      "required": [
+        "name"
+      ],
+      "mutating": true
+    },
+    "slack_fetch_conversation_history": {
+      "params": [
+        "channel",
+        "limit"
+      ],
+      "required": [
+        "channel"
+      ]
+    },
+    "slack_fetch_message_thread": {
+      "params": [
+        "channel",
+        "ts"
+      ],
+      "required": [
+        "channel",
+        "ts"
+      ]
+    },
+    "slack_find_channels": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "slack_find_user_by_email": {
+      "params": [
+        "email"
+      ],
+      "required": [
+        "email"
+      ]
+    },
+    "slack_invite_to_channel": {
+      "params": [
+        "channel",
+        "users"
+      ],
+      "required": [
+        "channel",
+        "users"
+      ],
+      "mutating": true
+    },
+    "slack_list_channels": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "slack_list_users": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "slack_send_message": {
+      "params": [
+        "channel",
+        "text"
+      ],
+      "required": [
+        "channel",
+        "text"
+      ],
+      "mutating": true
+    }
+  },
+  "sonarr": {
+    "sonarr_calendar": {
+      "params": [
+        "end",
+        "start"
+      ],
+      "required": [
+        "end",
+        "start"
+      ]
+    },
+    "sonarr_list_series": {
+      "params": [],
+      "required": []
+    },
+    "sonarr_queue": {
+      "params": [
+        "page_size"
+      ],
+      "required": []
+    },
+    "sonarr_search_series": {
+      "params": [
+        "term"
+      ],
+      "required": [
+        "term"
+      ]
+    },
+    "sonarr_system_status": {
+      "params": [],
+      "required": []
+    },
+    "sonarr_wanted_missing": {
+      "params": [
+        "page_size"
+      ],
+      "required": []
+    }
+  },
+  "spotify": {
+    "spotify_list_playlists": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "spotify_recently_played": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "spotify_saved_tracks": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "spotify_search": {
+      "params": [
+        "item_type",
+        "limit",
+        "query"
+      ],
+      "required": [
+        "item_type",
+        "query"
+      ]
+    },
+    "spotify_top_items": {
+      "params": [
+        "item_type",
+        "limit",
+        "time_range"
+      ],
+      "required": [
+        "item_type",
+        "time_range"
+      ]
+    }
+  },
+  "steam": {
+    "steam_game_achievements": {
+      "params": [
+        "appid"
+      ],
+      "required": [
+        "appid"
+      ]
+    },
+    "steam_owned_games": {
+      "params": [],
+      "required": []
+    },
+    "steam_player_summary": {
+      "params": [],
+      "required": []
+    },
+    "steam_recently_played": {
+      "params": [
+        "count"
+      ],
+      "required": []
+    }
+  },
+  "strava": {
+    "strava_athlete": {
+      "params": [],
+      "required": []
+    },
+    "strava_athlete_stats": {
+      "params": [
+        "athlete_id"
+      ],
+      "required": [
+        "athlete_id"
+      ]
+    },
+    "strava_get_activity": {
+      "params": [
+        "activity_id"
+      ],
+      "required": [
+        "activity_id"
+      ]
+    },
+    "strava_list_activities": {
+      "params": [
+        "after",
+        "before",
+        "per_page"
+      ],
+      "required": [
+        "per_page"
+      ]
+    }
+  },
+  "stripe": {
+    "stripe_create_customer": {
+      "params": [
+        "description",
+        "email",
+        "name"
+      ],
+      "required": [],
+      "mutating": true
+    },
+    "stripe_create_payment_intent": {
+      "params": [
+        "amount",
+        "currency",
+        "customer",
+        "description"
+      ],
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "mutating": true
+    },
+    "stripe_create_refund": {
+      "params": [
+        "amount",
+        "charge",
+        "payment_intent"
+      ],
+      "required": [],
+      "mutating": true
+    },
+    "stripe_get_balance": {
+      "params": [],
+      "required": []
+    },
+    "stripe_get_charge": {
+      "params": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "stripe_get_customer": {
+      "params": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "stripe_list_charges": {
+      "params": [
+        "customer",
+        "limit"
+      ],
+      "required": []
+    },
+    "stripe_list_customers": {
+      "params": [
+        "email",
+        "limit"
+      ],
+      "required": []
+    },
+    "stripe_list_payment_intents": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    }
+  },
+  "syncthing": {
+    "syncthing_connections": {
+      "params": [],
+      "required": []
+    },
+    "syncthing_errors": {
+      "params": [],
+      "required": []
+    },
+    "syncthing_folder_status": {
+      "params": [
+        "folder_id"
+      ],
+      "required": [
+        "folder_id"
+      ]
+    },
+    "syncthing_status": {
+      "params": [],
+      "required": []
+    }
+  },
+  "tailscale": {
+    "tailscale_get_device": {
+      "params": [
+        "device_id"
+      ],
+      "required": [
+        "device_id"
+      ]
+    },
+    "tailscale_list_devices": {
+      "params": [
+        "fields"
+      ],
+      "required": []
+    },
+    "tailscale_list_keys": {
+      "params": [],
+      "required": []
+    }
+  },
+  "teams": {
+    "teams_get_channel": {
+      "params": [
+        "channel_id",
+        "team_id"
+      ],
+      "required": [
+        "channel_id",
+        "team_id"
+      ]
+    },
+    "teams_list_channel_messages": {
+      "params": [
+        "channel_id",
+        "max",
+        "team_id"
+      ],
+      "required": [
+        "channel_id",
+        "team_id"
+      ]
+    },
+    "teams_list_channels": {
+      "params": [
+        "team_id"
+      ],
+      "required": [
+        "team_id"
+      ]
+    },
+    "teams_list_joined_teams": {
+      "params": [],
+      "required": []
+    },
+    "teams_list_members": {
+      "params": [
+        "team_id"
+      ],
+      "required": [
+        "team_id"
+      ]
+    },
+    "teams_reply_to_message": {
+      "params": [
+        "channel_id",
+        "content",
+        "message_id",
+        "team_id"
+      ],
+      "required": [
+        "channel_id",
+        "content",
+        "message_id",
+        "team_id"
+      ],
+      "mutating": true
+    },
+    "teams_send_channel_message": {
+      "params": [
+        "channel_id",
+        "content",
+        "team_id"
+      ],
+      "required": [
+        "channel_id",
+        "content",
+        "team_id"
+      ],
+      "mutating": true
+    }
+  },
+  "threads": {
+    "threads_create_post": {
+      "params": [
+        "text",
+        "user_id"
+      ],
+      "required": [
+        "text",
+        "user_id"
+      ]
+    },
+    "threads_list_posts": {
+      "params": [
+        "limit",
+        "user_id"
+      ],
+      "required": [
+        "limit",
+        "user_id"
+      ]
+    },
+    "threads_me": {
+      "params": [],
+      "required": []
+    },
+    "threads_publish_post": {
+      "params": [
+        "creation_id",
+        "user_id"
+      ],
+      "required": [
+        "creation_id",
+        "user_id"
+      ],
+      "mutating": true
+    }
+  },
+  "tiktok": {
+    "tiktok_list_videos": {
+      "params": [
+        "max"
+      ],
+      "required": [
+        "max"
+      ]
+    },
+    "tiktok_me": {
+      "params": [],
+      "required": []
+    },
+    "tiktok_upload_draft": {
+      "params": [
+        "video_url"
+      ],
+      "required": [
+        "video_url"
+      ],
+      "mutating": true
+    }
+  },
+  "tmdb": {
+    "tmdb_movie_details": {
+      "params": [
+        "movie_id"
+      ],
+      "required": [
+        "movie_id"
+      ]
+    },
+    "tmdb_search": {
+      "params": [
+        "query",
+        "year"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "tmdb_trending": {
+      "params": [
+        "media_type",
+        "window"
+      ],
+      "required": [
+        "media_type",
+        "window"
+      ]
+    },
+    "tmdb_tv_details": {
+      "params": [
+        "tv_id"
+      ],
+      "required": [
+        "tv_id"
+      ]
+    }
+  },
+  "todoist": {
+    "todoist_add_comment": {
+      "params": [
+        "content",
+        "task_id"
+      ],
+      "required": [
+        "content",
+        "task_id"
+      ],
+      "mutating": true
+    },
+    "todoist_close_task": {
+      "params": [
+        "task_id"
+      ],
+      "required": [
+        "task_id"
+      ],
+      "mutating": true
+    },
+    "todoist_create_task": {
+      "params": [
+        "content",
+        "description",
+        "due_string",
+        "priority",
+        "project_id"
+      ],
+      "required": [
+        "content"
+      ],
+      "mutating": true
+    },
+    "todoist_list_projects": {
+      "params": [],
+      "required": []
+    },
+    "todoist_list_tasks": {
+      "params": [
+        "filter",
+        "limit",
+        "project_id"
+      ],
+      "required": []
+    },
+    "todoist_update_task": {
+      "params": [
+        "content",
+        "description",
+        "due_string",
+        "priority",
+        "task_id"
+      ],
+      "required": [
+        "task_id"
+      ],
+      "mutating": true
+    }
+  },
+  "toggl": {
+    "toggl_current_entry": {
+      "params": [],
+      "required": []
+    },
+    "toggl_list_entries": {
+      "params": [
+        "end_date",
+        "start_date"
+      ],
+      "required": [
+        "end_date",
+        "start_date"
+      ]
+    },
+    "toggl_list_projects": {
+      "params": [
+        "workspace_id"
+      ],
+      "required": [
+        "workspace_id"
+      ]
+    },
+    "toggl_me": {
+      "params": [],
+      "required": []
+    },
+    "toggl_start_timer": {
+      "params": [
+        "description",
+        "project_id",
+        "start",
+        "workspace_id"
+      ],
+      "required": [
+        "description",
+        "start",
+        "workspace_id"
+      ],
+      "mutating": true
+    },
+    "toggl_stop_timer": {
+      "params": [
+        "time_entry_id",
+        "workspace_id"
+      ],
+      "required": [
+        "time_entry_id",
+        "workspace_id"
+      ],
+      "mutating": true
+    }
+  },
+  "trakt": {
+    "trakt_search": {
+      "params": [
+        "item_type",
+        "limit",
+        "query"
+      ],
+      "required": [
+        "item_type",
+        "query"
+      ]
+    },
+    "trakt_show_summary": {
+      "params": [
+        "show_id"
+      ],
+      "required": [
+        "show_id"
+      ]
+    },
+    "trakt_trending_movies": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "trakt_trending_shows": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    }
+  },
+  "trello": {
+    "trello_add_comment": {
+      "params": [
+        "id",
+        "text"
+      ],
+      "required": [
+        "id",
+        "text"
+      ],
+      "mutating": true
+    },
+    "trello_create_card": {
+      "params": [
+        "desc",
+        "list_id",
+        "name"
+      ],
+      "required": [
+        "list_id",
+        "name"
+      ],
+      "mutating": true
+    },
+    "trello_create_list": {
+      "params": [
+        "board_id",
+        "name"
+      ],
+      "required": [
+        "board_id",
+        "name"
+      ],
+      "mutating": true
+    },
+    "trello_get_board": {
+      "params": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "trello_get_member": {
+      "params": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "trello_list_boards": {
+      "params": [],
+      "required": []
+    },
+    "trello_list_cards": {
+      "params": [
+        "list_id"
+      ],
+      "required": [
+        "list_id"
+      ]
+    },
+    "trello_list_lists": {
+      "params": [
+        "board_id"
+      ],
+      "required": [
+        "board_id"
+      ]
+    },
+    "trello_update_card": {
+      "params": [
+        "desc",
+        "id",
+        "list_id",
+        "name"
+      ],
+      "required": [
+        "id"
+      ],
+      "mutating": true
+    }
+  },
+  "twilio": {
+    "twilio_get_account": {
+      "params": [],
+      "required": []
+    },
+    "twilio_get_message": {
+      "params": [
+        "sid"
+      ],
+      "required": [
+        "sid"
+      ]
+    },
+    "twilio_list_calls": {
+      "params": [
+        "PageSize"
+      ],
+      "required": []
+    },
+    "twilio_list_incoming_phone_numbers": {
+      "params": [],
+      "required": []
+    },
+    "twilio_list_messages": {
+      "params": [
+        "PageSize"
+      ],
+      "required": []
+    },
+    "twilio_make_call": {
+      "params": [
+        "From",
+        "To",
+        "Url"
+      ],
+      "required": [
+        "From",
+        "To",
+        "Url"
+      ],
+      "mutating": true
+    },
+    "twilio_send_sms": {
+      "params": [
+        "Body",
+        "From",
+        "To"
+      ],
+      "required": [
+        "Body",
+        "From",
+        "To"
+      ],
+      "mutating": true
+    }
+  },
+  "vercel": {
+    "vercel_get_deployment": {
+      "params": [
+        "deployment_id"
+      ],
+      "required": [
+        "deployment_id"
+      ]
+    },
+    "vercel_list_deployments": {
+      "params": [
+        "app",
+        "limit",
+        "state"
+      ],
+      "required": []
+    },
+    "vercel_list_domains": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    },
+    "vercel_list_projects": {
+      "params": [
+        "limit"
+      ],
+      "required": []
+    }
+  },
+  "vikunja": {
+    "vikunja_complete_task": {
+      "params": [
+        "task_id"
+      ],
+      "required": [
+        "task_id"
+      ],
+      "mutating": true
+    },
+    "vikunja_create_task": {
+      "params": [
+        "description",
+        "due_date",
+        "priority",
+        "project_id",
+        "title"
+      ],
+      "required": [
+        "project_id",
+        "title"
+      ],
+      "mutating": true
+    },
+    "vikunja_list_projects": {
+      "params": [],
+      "required": []
+    },
+    "vikunja_list_tasks": {
+      "params": [
+        "page",
+        "per_page"
+      ],
+      "required": [
+        "per_page"
+      ]
+    }
+  },
+  "wakatime": {
+    "wakatime_projects": {
+      "params": [],
+      "required": []
+    },
+    "wakatime_stats": {
+      "params": [
+        "range"
+      ],
+      "required": [
+        "range"
+      ]
+    },
+    "wakatime_status_bar": {
+      "params": [],
+      "required": []
+    },
+    "wakatime_summaries": {
+      "params": [
+        "end",
+        "start"
+      ],
+      "required": [
+        "end",
+        "start"
+      ]
+    }
+  },
+  "wikipedia": {
+    "wikipedia_article": {
+      "params": [
+        "title"
+      ],
+      "required": [
+        "title"
+      ]
+    },
+    "wikipedia_search": {
+      "params": [
+        "limit",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "wikipedia_summary": {
+      "params": [
+        "title"
+      ],
+      "required": [
+        "title"
+      ]
+    }
+  },
+  "wise": {
+    "wise_get_exchange_rate": {
+      "params": [
+        "source",
+        "target"
+      ],
+      "required": [
+        "source",
+        "target"
+      ]
+    },
+    "wise_list_balances": {
+      "params": [
+        "types"
+      ],
+      "required": []
+    },
+    "wise_list_profiles": {
+      "params": [],
+      "required": []
+    }
+  },
+  "x": {
+    "x_create_post": {
+      "params": [
+        "text"
+      ],
+      "required": [
+        "text"
+      ],
+      "mutating": true
+    },
+    "x_list_posts": {
+      "params": [
+        "max",
+        "user_id"
+      ],
+      "required": [
+        "max",
+        "user_id"
+      ]
+    },
+    "x_me": {
+      "params": [],
+      "required": []
+    }
+  },
+  "ynab": {
+    "ynab_create_transaction": {
+      "params": [
+        "account_id",
+        "amount",
+        "budget_id",
+        "category_id",
+        "date",
+        "memo",
+        "payee_name"
+      ],
+      "required": [
+        "account_id",
+        "amount",
+        "budget_id",
+        "date"
+      ],
+      "mutating": true
+    },
+    "ynab_get_month_summary": {
+      "params": [
+        "budget_id",
+        "month"
+      ],
+      "required": [
+        "budget_id",
+        "month"
+      ]
+    },
+    "ynab_list_accounts": {
+      "params": [
+        "budget_id"
+      ],
+      "required": [
+        "budget_id"
+      ]
+    },
+    "ynab_list_budgets": {
+      "params": [],
+      "required": []
+    },
+    "ynab_list_categories": {
+      "params": [
+        "budget_id"
+      ],
+      "required": [
+        "budget_id"
+      ]
+    },
+    "ynab_list_transactions": {
+      "params": [
+        "budget_id",
+        "since_date",
+        "type"
+      ],
+      "required": [
+        "budget_id",
+        "since_date"
+      ]
+    }
+  },
+  "youtube": {
+    "youtube_analytics_report": {
+      "params": [
+        "dimensions",
+        "end_date",
+        "metrics",
+        "start_date"
+      ],
+      "required": [
+        "end_date",
+        "metrics",
+        "start_date"
+      ]
+    },
+    "youtube_list_comments": {
+      "params": [
+        "max",
+        "video_id"
+      ],
+      "required": [
+        "video_id"
+      ]
+    },
+    "youtube_list_videos": {
+      "params": [
+        "max",
+        "playlist_id"
+      ],
+      "required": [
+        "playlist_id"
+      ]
+    },
+    "youtube_my_channel": {
+      "params": [],
+      "required": []
+    },
+    "youtube_post_comment": {
+      "params": [
+        "text",
+        "video_id"
+      ],
+      "required": [
+        "text",
+        "video_id"
+      ],
+      "mutating": true
+    },
+    "youtube_video_stats": {
+      "params": [
+        "video_ids"
+      ],
+      "required": [
+        "video_ids"
+      ]
+    }
+  },
+  "zendesk": {
+    "zendesk_add_comment": {
+      "params": [
+        "body",
+        "id"
+      ],
+      "required": [
+        "body",
+        "id"
+      ],
+      "mutating": true
+    },
+    "zendesk_create_ticket": {
+      "params": [
+        "ticket"
+      ],
+      "required": [
+        "ticket"
+      ],
+      "mutating": true
+    },
+    "zendesk_create_user": {
+      "params": [
+        "user"
+      ],
+      "required": [
+        "user"
+      ],
+      "mutating": true
+    },
+    "zendesk_get_ticket": {
+      "params": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "zendesk_get_user": {
+      "params": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "zendesk_list_tickets": {
+      "params": [],
+      "required": []
+    },
+    "zendesk_list_users": {
+      "params": [],
+      "required": []
+    },
+    "zendesk_search": {
+      "params": [
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "zendesk_update_ticket": {
+      "params": [
+        "id",
+        "ticket"
+      ],
+      "required": [
+        "id",
+        "ticket"
+      ],
+      "mutating": true
+    }
+  }
+}

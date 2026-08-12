@@ -77,6 +77,19 @@ func renderBody(node any, args map[string]any, connVars map[string]string) (any,
 				out[k] = rv
 			}
 		}
+		// A container that had children in the template and none after rendering is
+		// OMITTED, not sent empty. Leaving it in is how calendar_update_event became
+		// unable to do a partial update: its body carries start: {dateTime: "{{start}}"},
+		// so omitting the optional start argument still sent "start": {} — and Google
+		// rejects an event whose start is present but has no time. The empty container
+		// asserted "this field is being set, to nothing", which is never what an absent
+		// optional argument means.
+		//
+		// A container written EMPTY in the template is intentional and kept, so an
+		// action that must send a literal {} still can.
+		if len(out) == 0 && len(n) > 0 {
+			return nil, false
+		}
 		return out, true
 	case []any:
 		out := make([]any, 0, len(n))
@@ -84,6 +97,9 @@ func renderBody(node any, args map[string]any, connVars map[string]string) (any,
 			if rv, ok := renderBody(e, args, connVars); ok {
 				out = append(out, rv)
 			}
+		}
+		if len(out) == 0 && len(n) > 0 {
+			return nil, false
 		}
 		return out, true
 	case string:
