@@ -3,18 +3,46 @@
 These steps cannot be automated from within the repository. **The pipeline is
 not fully functional until they are done.**
 
-## 1. `RELEASE_PLEASE_TOKEN` secret
+## 1. The release GitHub App
 
-release-please needs a token that is NOT `GITHUB_TOKEN`. Pull requests opened
-with `GITHUB_TOKEN` do not trigger other workflows, so merging the release PR
-would tag the repository without ever running `release.yml` — producing a tag
-with no artifacts attached to it.
+release-please authenticates as an **organization-owned GitHub App**. Two
+constraints force this shape, and both are easy to "simplify" away:
 
-1. Create a fine-grained PAT scoped to `ilijad1/rookery`.
-2. Grant it **Contents: read and write** and **Pull requests: read and write**.
-3. Add it as the repository secret `RELEASE_PLEASE_TOKEN`.
+- **It cannot be `GITHUB_TOKEN`.** A pull request opened with `GITHUB_TOKEN`
+  does not trigger other workflows, so merging the release PR would tag the
+  repository without ever running `release.yml` — producing a **tag with no
+  artifacts attached and no error explaining why**.
+- **It cannot be an org-owned PAT, because no such thing exists.** Every PAT
+  belongs to a user account. A fine-grained PAT merely *scopes* to an
+  organization while still being that person's, expiring on a calendar and
+  dying if they leave. An App is owned by the organization outright, mints a
+  short-lived installation token per run, and authors its pull requests as a
+  bot rather than as a person.
 
-**This is the only secret the pipeline needs.** GHCR authenticates with the
+**Creating it is a web-UI action — GitHub exposes no API for creating Apps.**
+
+1. Go to `https://github.com/organizations/rookery-ai/settings/apps/new`.
+2. Owner `rookery-ai`; homepage `https://rookery.cloud`.
+3. **Uncheck "Active" under Webhook** — the App is never called, it only issues
+   tokens.
+4. Repository permissions: **Contents: read and write** (create the tag, commit
+   the changelog) and **Pull requests: read and write** (open and update the
+   release PR). Nothing else.
+5. Set "Where can this GitHub App be installed" to **Only on this account**.
+6. **Install it on BOTH `rookery` and `rookery-web`.** An App created but never
+   installed on one of them fails the token mint with a permissions error that
+   reads like a bad private key — check the installation before regenerating.
+7. Generate a private key (a `.pem`, shown once) and note the numeric App ID.
+8. Store both as **organization** secrets with selected-repository access to
+   both repos: `ROOKERY_APP_ID` and `ROOKERY_APP_PRIVATE_KEY` (the entire
+   `.pem`, including the `-----BEGIN`/`-----END` lines).
+
+`gh secret list` showing the two names proves only that they exist — not that
+the App is installed, that its permissions are right, or that the key matches.
+**The only real verification is a release-please run**, which happens on the
+next push to `main`.
+
+**These are the only secrets the pipeline needs.** GHCR authenticates with the
 built-in `GITHUB_TOKEN`; cosign signs keylessly through GitHub's OIDC provider;
 govulncheck, Trivy, gitleaks and CodeQL need no credentials. Do not add secrets
 that have no consumer.

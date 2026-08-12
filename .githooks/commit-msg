@@ -21,7 +21,9 @@
 #     against /home/runner paths — blocking those messages trains people to
 #     disable the hook, which then protects nothing.
 #
-# Install with: make hooks
+# Install with `make hooks` here, or `npm run hooks` in the website repository.
+# This file is copied verbatim between the two, so keep the wording generic —
+# a repo-specific command here silently becomes wrong in the other copy.
 set -eu
 
 msg_file="$1"
