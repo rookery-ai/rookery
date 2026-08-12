@@ -170,11 +170,25 @@ Versioning starts at **v0.1.0** with `bump-minor-pre-major`, so a breaking
 change bumps the minor while the project is pre-1.0. Reaching 1.0.0 is a
 deliberate act at public release.
 
-**Secrets:** the pipeline needs exactly one, `RELEASE_PLEASE_TOKEN` — see
-`docs/ci-setup.md` for that plus the required branch-protection settings. GHCR
-authenticates with the built-in `GITHUB_TOKEN`, cosign signs keylessly via OIDC,
-and the scanners need no credentials. **Do not add secrets that have no
-consumer.**
+**Versioning restarted at v0.1.0 when the project moved to the `rookery-ai`
+organization.** Every release, tag and container image built under the previous
+personal account was **deleted rather than transferred**, so nothing shippable
+predates the organization — and `.release-please-manifest.json` was reset to
+`0.0.0` so release-please computes from an empty history rather than from tags
+that no longer exist.
+
+**Secrets:** release-please authenticates as an **organization-owned GitHub App**
+(`ROOKERY_APP_ID` + `ROOKERY_APP_PRIVATE_KEY`, stored once as org secrets and
+shared with both repositories), not as a personal access token — GitHub has no
+org-owned PAT, and a fine-grained one merely *scopes* to an org while still
+belonging to a user, expiring on a calendar and dying if they leave. The workflow
+mints a short-lived installation token per run via `actions/create-github-app-token`.
+
+It still cannot be `GITHUB_TOKEN`: a pull request opened with it does not trigger
+other workflows, so merging the release PR would create a **tag with no artifacts
+attached and no error explaining why**. See `docs/ci-setup.md`. GHCR authenticates
+with the built-in `GITHUB_TOKEN`, cosign signs keylessly via OIDC, and the
+scanners need no credentials. **Do not add secrets that have no consumer.**
 
 ## Distribution
 
@@ -1748,7 +1762,7 @@ cannot be pruned.
   implications, and relaxing `web/api_settings.go`'s slug validator into a two-shape field
   (`preset:<slug>` vs `upload:<id>`). Bundling it into a visual-polish change would have put a
   security review on that change's critical path.
-- **Connector provider configs (non-Google) unverified against live APIs** — google/github/notion verified end-to-end against real accounts; outlook/jira were hand-authored (rendering unit-tested only). Verify each against live docs before relying on it. A dev harness for this lives at `cmd/livecheck` (uncommitted; runs `connectors.Execute` against real stored tokens).
+- **Connector provider configs (non-Google) unverified against live APIs** — google/github/notion verified end-to-end against real accounts; outlook/jira were hand-authored (rendering unit-tested only). Verify each against live docs before relying on it. A dev harness for this lives at `cmd/livecheck` (tracked; run `go run ./cmd/livecheck <provider> <action> '<json-args>'` against real stored tokens).
 - **Connector native tools for CLI coders** — CLI coders reach connector actions via the `rookery connector exec` command (loopback bridge), not as native function tools in their own loop; true native parity for MCP-capable coders (claude-code) would be an MCP transport over the same `connectors.Execute` (not built).
 - **Build-time connector testing exposes ALL workspace connections** (the agent hasn't declared bindings yet); a real run exposes only the agent's bound connections (`agent_connections`).
 - **CLI-chat connector permission is a scoped Bash grant** — a CLI chat coder is otherwise file-only; when connectors are wired it gets `Bash(<bin> connector exec:*)` (only that command). Relies on the coder CLI honoring command-scoped Bash permissions (claude-code does); a coder that doesn't would need a wider grant.
