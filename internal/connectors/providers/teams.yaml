@@ -7,6 +7,9 @@ default_scopes:
   - Channel.ReadBasic.All
   - ChannelMessage.Read.All
   - ChannelMessage.Send
+  # One-to-one and group chats are a different resource from team channels and need
+  # their own permission.
+  - Chat.ReadWrite
 setup_url: https://portal.azure.com
 setup_steps:
   - "Teams reuses your Microsoft (Outlook) OAuth app. Set up Outlook first on its card above."

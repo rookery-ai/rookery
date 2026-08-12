@@ -1,0 +1,165 @@
+provider: excel
+# The Excel REST API hangs off a driveItem: every action needs the WORKBOOK'S OneDrive
+# item id, which onedrive_search or onedrive_list_children returns. It only works on
+# .xlsx files stored in OneDrive or SharePoint — not on a local file, and not on a
+# Google Sheet.
+actions:
+  - name: excel_list_worksheets
+    description: "List the worksheets (tabs) in an Excel workbook with their names and ids. Call first — every other Excel action needs a sheet name. Find the workbook's item_id with onedrive_search. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id: {type: string, description: "the workbook's OneDrive item id"}
+      required: [item_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/workbook/worksheets"
+    response_extract: "$.value"
+  - name: excel_get_used_range
+    description: "Read every cell that actually holds data on a worksheet, without needing to know its extent. The fastest way to read a whole sheet — but it can be large, so prefer excel_get_range when the area is known. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id: {type: string, description: "the workbook's OneDrive item id"}
+        sheet:   {type: string, description: "worksheet name"}
+      required: [item_id, sheet]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/workbook/worksheets/{{sheet}}/usedRange"
+      query:
+        $select: "address,values,rowCount,columnCount"
+    response_extract: "$"
+  - name: excel_get_range
+    description: "Read a specific cell range from a worksheet, e.g. address='A1:D20'. Returns the values as rows. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id: {type: string, description: "the workbook's OneDrive item id"}
+        sheet:   {type: string, description: "worksheet name"}
+        address: {type: string, description: "A1-style range, e.g. A1:D20"}
+      required: [item_id, sheet, address]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/workbook/worksheets/{{sheet}}/range(address='{{address}}')"
+      query:
+        $select: "address,values,text"
+    response_extract: "$"
+  - name: excel_update_range
+    description: "Write values into a cell range. values is an array of ROWS, e.g. [[\"a\",1],[\"b\",2]], and its shape must match the address exactly or Excel rejects it. Overwrites whatever is there."
+    mutating: true
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id: {type: string, description: "the workbook's OneDrive item id"}
+        sheet:   {type: string, description: "worksheet name"}
+        address: {type: string, description: "A1-style range whose size matches values"}
+        values:  {type: array, items: {type: array}, description: "array of rows"}
+      required: [item_id, sheet, address, values]
+    request:
+      method: PATCH
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/workbook/worksheets/{{sheet}}/range(address='{{address}}')"
+      body:
+        values: "{{values}}"
+    response_extract: "$"
+  - name: excel_clear_range
+    description: "Clear a cell range. apply_to is Contents (values only, keeping formatting), Formats, or All. Mutating — there is no undo through the API."
+    mutating: true
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id:  {type: string, description: "the workbook's OneDrive item id"}
+        sheet:    {type: string, description: "worksheet name"}
+        address:  {type: string, description: "A1-style range"}
+        apply_to: {type: string, description: "Contents | Formats | All"}
+      required: [item_id, sheet, address]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/workbook/worksheets/{{sheet}}/range(address='{{address}}')/clear"
+      body:
+        applyTo: "{{apply_to}}"
+    response_extract: "$"
+  - name: excel_add_worksheet
+    description: "Add a new worksheet (tab) to a workbook. Safe write — it starts empty."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id: {type: string, description: "the workbook's OneDrive item id"}
+        name:    {type: string, description: "name for the new sheet"}
+      required: [item_id]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/workbook/worksheets/add"
+      body:
+        name: "{{name}}"
+    response_extract: "$"
+  - name: excel_delete_worksheet
+    description: "Delete a worksheet and everything on it. Irreversible — confirm which tab with excel_list_worksheets first."
+    mutating: true
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id: {type: string, description: "the workbook's OneDrive item id"}
+        sheet:   {type: string, description: "worksheet name"}
+      required: [item_id, sheet]
+    request:
+      method: DELETE
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/workbook/worksheets/{{sheet}}"
+    response_extract: "$"
+  - name: excel_list_tables
+    description: "List the named tables defined in a workbook. A table is what makes excel_add_table_row possible — appending to one keeps its formatting and formulas. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id: {type: string, description: "the workbook's OneDrive item id"}
+      required: [item_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/workbook/tables"
+    response_extract: "$.value"
+  - name: excel_list_table_rows
+    description: "Read the data rows of a named table, without needing to know which cells it occupies. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id: {type: string, description: "the workbook's OneDrive item id"}
+        table:   {type: string, description: "table name or id"}
+        top:     {type: integer, description: "max rows (default 25)"}
+      required: [item_id, table]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/workbook/tables/{{table}}/rows"
+      query:
+        $top: "{{top}}"
+    response_extract: "$.value"
+  - name: excel_add_table_row
+    description: "Append one or more rows to a named table, inheriting its formatting and formulas. values is an array of ROWS. Preferred over excel_update_range for adding data, since it needs no address arithmetic."
+    mutating: true
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id: {type: string, description: "the workbook's OneDrive item id"}
+        table:   {type: string, description: "table name or id"}
+        values:  {type: array, items: {type: array}, description: "array of rows to append"}
+      required: [item_id, table, values]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/workbook/tables/{{table}}/rows/add"
+      body:
+        values: "{{values}}"
+    response_extract: "$"

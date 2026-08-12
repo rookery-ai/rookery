@@ -1,0 +1,16 @@
+name: google_chat
+label: Google Chat
+category: Google
+unverified: true
+auth_parent: google
+default_scopes:
+  - https://www.googleapis.com/auth/chat.spaces.readonly
+  - https://www.googleapis.com/auth/chat.messages
+  - https://www.googleapis.com/auth/chat.memberships.readonly
+setup_url: https://console.cloud.google.com/apis/credentials
+setup_steps:
+  - "IMPORTANT: the Google Chat API only works on a Google WORKSPACE account. A personal @gmail.com account has no Chat API access at all, and every call will fail."
+  - "Google Chat reuses your Google (Gmail) OAuth app. Set up Google first on its card above."
+  - "In Google Cloud Console → APIs & Services → Library, also enable the Google Chat API."
+  - "In the Chat API's Configuration tab, give the app a name and avatar — user-credential calls still require the app to be configured."
+  - "Then click Connect here to authorize Chat access on the same Google account."

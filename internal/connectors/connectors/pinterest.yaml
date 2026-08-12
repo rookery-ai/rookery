@@ -49,3 +49,117 @@ actions:
           source_type: "image_url"
           url: "{{image_url}}"
     response_extract: "$"
+  - name: pinterest_create_board
+    description: "Create a board on the connected Pinterest account. privacy is PUBLIC, PROTECTED or SECRET. Safe write — a board starts empty."
+    mutating: false
+    params:
+      type: object
+      properties:
+        name:        {type: string}
+        description: {type: string}
+        privacy:     {type: string, description: "PUBLIC | PROTECTED | SECRET"}
+      required: [name]
+    request:
+      method: POST
+      url: "https://api.pinterest.com/v5/boards"
+      body:
+        name: "{{name}}"
+        description: "{{description}}"
+        privacy: "{{privacy}}"
+    response_extract: "$"
+  - name: pinterest_list_pins
+    description: "List the connected account's pins with their ids, titles and links. Read-only. Pass page_token from a previous next_cursor to page through."
+    mutating: false
+    params:
+      type: object
+      properties:
+        page_size:  {type: integer, description: "max pins (default 25)"}
+        page_token: {type: string, description: "next_cursor from a previous call"}
+    request:
+      method: GET
+      url: "https://api.pinterest.com/v5/pins"
+      query:
+        page_size: "{{page_size}}"
+        bookmark: "{{page_token}}"
+    response_extract: "$.items"
+    response_cursor: "$.bookmark"
+  - name: pinterest_list_board_pins
+    description: "List the pins on one board. Use pinterest_list_boards to resolve the board id first. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        board_id:   {type: string}
+        page_size:  {type: integer, description: "max pins (default 25)"}
+        page_token: {type: string, description: "next_cursor from a previous call"}
+      required: [board_id]
+    request:
+      method: GET
+      url: "https://api.pinterest.com/v5/boards/{{board_id}}/pins"
+      query:
+        page_size: "{{page_size}}"
+        bookmark: "{{page_token}}"
+    response_extract: "$.items"
+    response_cursor: "$.bookmark"
+  - name: pinterest_get_pin
+    description: "Get one pin's title, description, link and board by id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        pin_id: {type: string}
+      required: [pin_id]
+    request:
+      method: GET
+      url: "https://api.pinterest.com/v5/pins/{{pin_id}}"
+    response_extract: "$"
+  - name: pinterest_delete_pin
+    description: "Delete a pin from the connected account. Irreversible."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        pin_id: {type: string}
+      required: [pin_id]
+    request:
+      method: DELETE
+      url: "https://api.pinterest.com/v5/pins/{{pin_id}}"
+    response_extract: "$"
+  - name: pinterest_account_analytics
+    description: "Read account-level Pinterest metrics (impressions, saves, clicks) between two dates. metric_types is comma-separated; dates are YYYY-MM-DD. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start_date:   {type: string, description: "YYYY-MM-DD"}
+        end_date:     {type: string, description: "YYYY-MM-DD"}
+        metric_types: {type: string, description: "comma-separated, e.g. IMPRESSION,SAVE,PIN_CLICK"}
+      required: [start_date, end_date]
+    request:
+      method: GET
+      url: "https://api.pinterest.com/v5/user_account/analytics"
+      query:
+        start_date: "{{start_date}}"
+        end_date: "{{end_date}}"
+        metric_types: "{{metric_types}}"
+    response_extract: "$"
+  - name: pinterest_pin_analytics
+    description: "Read metrics for ONE pin between two dates — impressions, saves and outbound clicks. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        pin_id:       {type: string}
+        start_date:   {type: string, description: "YYYY-MM-DD"}
+        end_date:     {type: string, description: "YYYY-MM-DD"}
+        metric_types: {type: string, description: "comma-separated, e.g. IMPRESSION,SAVE"}
+      required: [pin_id, start_date, end_date]
+    request:
+      method: GET
+      url: "https://api.pinterest.com/v5/pins/{{pin_id}}/analytics"
+      query:
+        start_date: "{{start_date}}"
+        end_date: "{{end_date}}"
+        metric_types: "{{metric_types}}"
+    response_extract: "$"

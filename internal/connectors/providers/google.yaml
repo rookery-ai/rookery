@@ -35,6 +35,10 @@ default_scopes:
   - https://www.googleapis.com/auth/gmail.compose
   - https://www.googleapis.com/auth/gmail.send
   - https://www.googleapis.com/auth/gmail.modify
+  # Filters, the vacation responder and the send-as alias list. An existing
+  # connection does not hold this: Execute's scope pre-check names it and tells the
+  # user to reconnect, rather than letting Google answer 403 with nothing in it.
+  - https://www.googleapis.com/auth/gmail.settings.basic
   - https://www.googleapis.com/auth/userinfo.email
 
 # Verified 2026-07-29 against

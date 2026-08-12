@@ -1,0 +1,14 @@
+{
+  "results": [
+    {
+      "person": {
+        "resourceName": "people/c12345",
+        "names": [
+          {
+            "displayName": "Sam Rivera"
+          }
+        ]
+      }
+    }
+  ]
+}

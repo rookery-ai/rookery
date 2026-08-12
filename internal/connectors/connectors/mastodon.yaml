@@ -57,3 +57,117 @@ actions:
         status:     "{{status}}"
         visibility: "{{visibility}}"
     response_extract: "$"
+  - name: mastodon_get_status
+    description: "Get one Mastodon post by id, with its boost and favourite counts. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        status_id: {type: string}
+      required: [status_id]
+    request:
+      method: GET
+      url: "{{conn.instance}}/api/v1/statuses/{{status_id}}"
+    response_extract: "$"
+  - name: mastodon_reply_to_post
+    description: "Reply to a Mastodon post. A REAL public post from the connected account unless visibility is set to direct or private."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        status:      {type: string, description: "reply text"}
+        reply_to_id: {type: string, description: "id of the post being replied to"}
+        visibility:  {type: string, description: "public | unlisted | private | direct"}
+      required: [status, reply_to_id]
+    request:
+      method: POST
+      url: "{{conn.instance}}/api/v1/statuses"
+      form:
+        status: "{{status}}"
+        in_reply_to_id: "{{reply_to_id}}"
+        visibility: "{{visibility}}"
+    response_extract: "$"
+  - name: mastodon_delete_post
+    description: "Delete a Mastodon post the connected account published. Irreversible."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        status_id: {type: string}
+      required: [status_id]
+    request:
+      method: DELETE
+      url: "{{conn.instance}}/api/v1/statuses/{{status_id}}"
+    response_extract: "$"
+  - name: mastodon_boost_post
+    description: "Boost (reblog) a Mastodon post to the connected account's followers. Publicly visible."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        status_id: {type: string}
+      required: [status_id]
+    request:
+      method: POST
+      url: "{{conn.instance}}/api/v1/statuses/{{status_id}}/reblog"
+    response_extract: "$"
+  - name: mastodon_favourite_post
+    description: "Favourite a Mastodon post. Publicly visible on most instances."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        status_id: {type: string}
+      required: [status_id]
+    request:
+      method: POST
+      url: "{{conn.instance}}/api/v1/statuses/{{status_id}}/favourite"
+    response_extract: "$"
+  - name: mastodon_list_notifications
+    description: "List the connected account's Mastodon notifications — mentions, boosts, favourites and follows. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max notifications (default 20)"}
+        types: {type: string, description: "filter, e.g. mention"}
+    request:
+      method: GET
+      url: "{{conn.instance}}/api/v1/notifications"
+      query:
+        limit: "{{limit}}"
+        types: "{{types}}"
+    response_extract: "$"
+  - name: mastodon_list_bookmarks
+    description: "List the posts the connected account has bookmarked. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max bookmarks (default 20)"}
+    request:
+      method: GET
+      url: "{{conn.instance}}/api/v1/bookmarks"
+      query:
+        limit: "{{limit}}"
+    response_extract: "$"
+  - name: mastodon_public_timeline
+    description: "Read the instance's public or federated timeline. Set local=true for posts from this instance only. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max posts (default 20)"}
+        local: {type: boolean, description: "true for this instance only"}
+      required: []
+    request:
+      method: GET
+      url: "{{conn.instance}}/api/v1/timelines/public"
+      query:
+        limit: "{{limit}}"
+        local: "{{local}}"
+    response_extract: "$"

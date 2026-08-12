@@ -1,0 +1,54 @@
+{
+  "dimensionHeaders": [
+    {
+      "name": "sessionSource"
+    },
+    {
+      "name": "sessionMedium"
+    },
+    {
+      "name": "sessionCampaignName"
+    }
+  ],
+  "metricHeaders": [
+    {
+      "name": "sessions",
+      "type": "TYPE_INTEGER"
+    },
+    {
+      "name": "activeUsers",
+      "type": "TYPE_INTEGER"
+    },
+    {
+      "name": "conversions",
+      "type": "TYPE_INTEGER"
+    }
+  ],
+  "rows": [
+    {
+      "dimensionValues": [
+        {
+          "value": "google"
+        },
+        {
+          "value": "organic"
+        },
+        {
+          "value": "(not set)"
+        }
+      ],
+      "metricValues": [
+        {
+          "value": "2201"
+        },
+        {
+          "value": "1840"
+        },
+        {
+          "value": "44"
+        }
+      ]
+    }
+  ],
+  "rowCount": 1
+}

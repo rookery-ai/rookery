@@ -1,0 +1,19 @@
+{
+  "emptySuggestionsReason": "",
+  "meetingTimeSuggestions": [
+    {
+      "confidence": 100.0,
+      "organizerAvailability": "free",
+      "meetingTimeSlot": {
+        "start": {
+          "dateTime": "2026-08-12T09:00:00",
+          "timeZone": "UTC"
+        },
+        "end": {
+          "dateTime": "2026-08-12T10:00:00",
+          "timeZone": "UTC"
+        }
+      }
+    }
+  ]
+}

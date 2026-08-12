@@ -1,0 +1,14 @@
+{
+  "data": [
+    {
+      "name": "impressions",
+      "period": "day",
+      "values": [
+        {
+          "value": 3120,
+          "end_time": "2026-08-10T07:00:00+0000"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+provider: outlook_contacts
+actions:
+  - name: outlook_contacts_list
+    description: "List the Microsoft account's saved contacts with their names, emails and phone numbers. Raise skip to page through. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Contacts.ReadWrite]
+    params:
+      type: object
+      properties:
+        top:    {type: integer, description: "max contacts (default 25)"}
+        skip:   {type: integer, description: "how many to skip — raise it to page"}
+        filter: {type: string, description: "OData filter, e.g. startswith(displayName,'A')"}
+        select: {type: string, description: "comma-separated fields to return"}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/contacts"
+      query:
+        $top: "{{top}}"
+        $skip: "{{skip}}"
+        $filter: "{{filter}}"
+        $select: "{{select}}"
+    response_extract: "$.value"
+  - name: outlook_contacts_get
+    description: "Get one contact's full details by id. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Contacts.ReadWrite]
+    params:
+      type: object
+      properties:
+        contact_id: {type: string}
+      required: [contact_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/contacts/{{contact_id}}"
+    response_extract: "$"
+  - name: outlook_contacts_create
+    description: "Add a contact to the Microsoft account's address book. emails is a list like [{\"address\":\"a@b.com\",\"name\":\"Sam\"}]. Safe write — it only adds to the user's own contacts."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Contacts.ReadWrite]
+    params:
+      type: object
+      properties:
+        given_name:   {type: string, description: "first name"}
+        surname:      {type: string, description: "last name"}
+        emails:       {type: array, items: {type: object}, description: "[{\"address\":\"a@b.com\",\"name\":\"Sam\"}]"}
+        mobile_phone: {type: string}
+        company:      {type: string}
+        job_title:    {type: string}
+      required: [given_name]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/contacts"
+      body:
+        givenName: "{{given_name}}"
+        surname: "{{surname}}"
+        emailAddresses: "{{emails}}"
+        mobilePhone: "{{mobile_phone}}"
+        companyName: "{{company}}"
+        jobTitle: "{{job_title}}"
+    response_extract: "$"
+  - name: outlook_contacts_update
+    description: "Change a contact's fields (PATCH = partial: omitted fields are left alone). Supplying emails REPLACES the whole list."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Contacts.ReadWrite]
+    params:
+      type: object
+      properties:
+        contact_id:   {type: string}
+        given_name:   {type: string}
+        surname:      {type: string}
+        emails:       {type: array, items: {type: object}, description: "REPLACES the list"}
+        mobile_phone: {type: string}
+        company:      {type: string}
+        job_title:    {type: string}
+      required: [contact_id]
+    request:
+      method: PATCH
+      url: "https://graph.microsoft.com/v1.0/me/contacts/{{contact_id}}"
+      body:
+        givenName: "{{given_name}}"
+        surname: "{{surname}}"
+        emailAddresses: "{{emails}}"
+        mobilePhone: "{{mobile_phone}}"
+        companyName: "{{company}}"
+        jobTitle: "{{job_title}}"
+    response_extract: "$"
+  - name: outlook_contacts_delete
+    description: "Delete a contact from the Microsoft account's address book. Irreversible."
+    mutating: true
+    scopes: [https://graph.microsoft.com/Contacts.ReadWrite]
+    params:
+      type: object
+      properties:
+        contact_id: {type: string}
+      required: [contact_id]
+    request:
+      method: DELETE
+      url: "https://graph.microsoft.com/v1.0/me/contacts/{{contact_id}}"
+    response_extract: "$"
+  - name: outlook_contacts_list_folders
+    description: "List the account's contact folders, for mailboxes that group contacts into more than the default folder. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Contacts.ReadWrite]
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/contactFolders"
+    response_extract: "$.value"

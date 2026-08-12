@@ -121,3 +121,233 @@ actions:
       body:
         requests: "{{requests}}"
     response_extract: "$"
+  # ---- structure: sheets within a spreadsheet ------------------------------
+  # These all go through spreadsheets:batchUpdate, whose request objects are the
+  # Sheets API's real vocabulary. Each action below is one curated request, so the
+  # model never has to hand-assemble the JSON that sheets_batch_update takes raw.
+  - name: sheets_copy_sheet
+    description: "Copy one sheet (tab) into another spreadsheet, or back into the same one. sheet_id is the numeric sheetId from sheets_get_metadata, not the tab name."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/spreadsheets]
+    params:
+      type: object
+      properties:
+        spreadsheet_id:  {type: string, description: "source spreadsheet id"}
+        sheet_id:        {type: integer, description: "numeric sheetId of the tab to copy"}
+        destination_id:  {type: string, description: "spreadsheet id to copy into"}
+      required: [spreadsheet_id, sheet_id, destination_id]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}/sheets/{{sheet_id}}:copyTo"
+      body:
+        destinationSpreadsheetId: "{{destination_id}}"
+    response_extract: "$"
+  - name: sheets_rename_sheet
+    description: "Rename one sheet (tab) inside a spreadsheet. Resolve the numeric sheet_id with sheets_get_metadata first."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/spreadsheets]
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        sheet_id:       {type: integer, description: "numeric sheetId"}
+        title:          {type: string, description: "new tab name"}
+      required: [spreadsheet_id, sheet_id, title]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}:batchUpdate"
+      body:
+        requests:
+          - updateSheetProperties:
+              properties: {sheetId: "{{sheet_id}}", title: "{{title}}"}
+              fields: "title"
+    response_extract: "$.replies"
+  - name: sheets_duplicate_sheet
+    description: "Duplicate a sheet (tab) within the same spreadsheet, e.g. to snapshot a month before editing. Safe write."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/spreadsheets]
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        sheet_id:       {type: integer, description: "numeric sheetId to duplicate"}
+        new_title:      {type: string, description: "name for the duplicate"}
+      required: [spreadsheet_id, sheet_id]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}:batchUpdate"
+      body:
+        requests:
+          - duplicateSheet:
+              sourceSheetId: "{{sheet_id}}"
+              newSheetName: "{{new_title}}"
+    response_extract: "$.replies"
+  - name: sheets_delete_sheet
+    description: "Delete an entire sheet (tab) and all its data from a spreadsheet. Irreversible — confirm which tab first with sheets_get_metadata."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/spreadsheets]
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        sheet_id:       {type: integer, description: "numeric sheetId to delete"}
+      required: [spreadsheet_id, sheet_id]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}:batchUpdate"
+      body:
+        requests:
+          - deleteSheet: {sheetId: "{{sheet_id}}"}
+    response_extract: "$.replies"
+
+  # ---- rows and columns ----------------------------------------------------
+  # Indexes are 0-based and end is EXCLUSIVE, matching the API. Stated on every
+  # action because an off-by-one here deletes the wrong row of real data.
+  - name: sheets_insert_rows
+    description: "Insert blank rows into a sheet. start_index is 0-based and end_index is EXCLUSIVE, so start 2 / end 4 inserts two rows above row 3."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/spreadsheets]
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        sheet_id:       {type: integer, description: "numeric sheetId"}
+        start_index:    {type: integer, description: "0-based row to insert at"}
+        end_index:      {type: integer, description: "exclusive end; end-start = how many rows"}
+      required: [spreadsheet_id, sheet_id, start_index, end_index]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}:batchUpdate"
+      body:
+        requests:
+          - insertDimension:
+              range: {sheetId: "{{sheet_id}}", dimension: "ROWS", startIndex: "{{start_index}}", endIndex: "{{end_index}}"}
+              inheritFromBefore: false
+    response_extract: "$.replies"
+  - name: sheets_delete_rows
+    description: "Delete rows from a sheet, shifting everything below upward. start_index is 0-based and end_index is EXCLUSIVE. Irreversible — read the range first."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/spreadsheets]
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        sheet_id:       {type: integer, description: "numeric sheetId"}
+        start_index:    {type: integer, description: "0-based first row to delete"}
+        end_index:      {type: integer, description: "exclusive end"}
+      required: [spreadsheet_id, sheet_id, start_index, end_index]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}:batchUpdate"
+      body:
+        requests:
+          - deleteDimension:
+              range: {sheetId: "{{sheet_id}}", dimension: "ROWS", startIndex: "{{start_index}}", endIndex: "{{end_index}}"}
+    response_extract: "$.replies"
+  - name: sheets_insert_columns
+    description: "Insert blank columns into a sheet. start_index is 0-based (column A is 0) and end_index is EXCLUSIVE."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/spreadsheets]
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        sheet_id:       {type: integer, description: "numeric sheetId"}
+        start_index:    {type: integer, description: "0-based column to insert at (A=0)"}
+        end_index:      {type: integer, description: "exclusive end"}
+      required: [spreadsheet_id, sheet_id, start_index, end_index]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}:batchUpdate"
+      body:
+        requests:
+          - insertDimension:
+              range: {sheetId: "{{sheet_id}}", dimension: "COLUMNS", startIndex: "{{start_index}}", endIndex: "{{end_index}}"}
+              inheritFromBefore: false
+    response_extract: "$.replies"
+  - name: sheets_delete_columns
+    description: "Delete columns from a sheet, shifting everything right of them leftward. start_index is 0-based (A=0), end_index EXCLUSIVE. Irreversible."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/spreadsheets]
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        sheet_id:       {type: integer, description: "numeric sheetId"}
+        start_index:    {type: integer, description: "0-based first column (A=0)"}
+        end_index:      {type: integer, description: "exclusive end"}
+      required: [spreadsheet_id, sheet_id, start_index, end_index]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}:batchUpdate"
+      body:
+        requests:
+          - deleteDimension:
+              range: {sheetId: "{{sheet_id}}", dimension: "COLUMNS", startIndex: "{{start_index}}", endIndex: "{{end_index}}"}
+    response_extract: "$.replies"
+  - name: sheets_freeze_rows
+    description: "Freeze the top N rows of a sheet so they stay visible while scrolling — the usual way to pin a header row. Pass 0 to unfreeze."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/spreadsheets]
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        sheet_id:       {type: integer, description: "numeric sheetId"}
+        rows:           {type: integer, description: "how many rows to freeze (0 = none)"}
+      required: [spreadsheet_id, sheet_id, rows]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}:batchUpdate"
+      body:
+        requests:
+          - updateSheetProperties:
+              properties:
+                sheetId: "{{sheet_id}}"
+                gridProperties: {frozenRowCount: "{{rows}}"}
+              fields: "gridProperties.frozenRowCount"
+    response_extract: "$.replies"
+  - name: sheets_find_replace
+    description: "Find and replace text across a whole sheet, or across every sheet in the spreadsheet. Returns how many cells changed. Mutating — there is no undo."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/spreadsheets]
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        sheet_id:       {type: integer, description: "numeric sheetId to limit to; omit to search every sheet"}
+        find:           {type: string, description: "text to find"}
+        replacement:    {type: string, description: "text to replace it with"}
+        match_case:     {type: boolean, description: "case-sensitive match"}
+      required: [spreadsheet_id, find, replacement]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}:batchUpdate"
+      body:
+        requests:
+          - findReplace:
+              find: "{{find}}"
+              replacement: "{{replacement}}"
+              matchCase: "{{match_case}}"
+              sheetId: "{{sheet_id}}"
+    response_extract: "$.replies"
+  - name: sheets_auto_resize_columns
+    description: "Resize columns to fit their contents, so a generated sheet is readable without manual widening. start_index is 0-based (A=0), end_index EXCLUSIVE."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/spreadsheets]
+    params:
+      type: object
+      properties:
+        spreadsheet_id: {type: string}
+        sheet_id:       {type: integer, description: "numeric sheetId"}
+        start_index:    {type: integer, description: "0-based first column (A=0)"}
+        end_index:      {type: integer, description: "exclusive end"}
+      required: [spreadsheet_id, sheet_id, start_index, end_index]
+    request:
+      method: POST
+      url: "https://sheets.googleapis.com/v4/spreadsheets/{{spreadsheet_id}}:batchUpdate"
+      body:
+        requests:
+          - autoResizeDimensions:
+              dimensions: {sheetId: "{{sheet_id}}", dimension: "COLUMNS", startIndex: "{{start_index}}", endIndex: "{{end_index}}"}
+    response_extract: "$.replies"

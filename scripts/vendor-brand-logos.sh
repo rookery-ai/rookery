@@ -139,6 +139,16 @@ jira:jira-1
 mailchimp:mailchimp-freddie-icon
 monday:monday-1
 outlook:microsoft-office-outlook
+# Microsoft's product marks were REMOVED from simple-icons, so these come from
+# worldvectorlogo. Outlook Calendar and Outlook Contacts deliberately reuse the
+# Outlook mark, because that is what they are. Microsoft To Do has no mark in
+# either source and is exempted in web/logo_coverage_test.go rather than
+# approximated.
+onedrive:onedrive-1
+excel:microsoft-excel-2013
+onenote:onenote-2
+outlook_calendar:microsoft-office-outlook
+outlook_contacts:microsoft-office-outlook
 salesforce:salesforce-2
 sendgrid:sendgrid-1
 shopify:shopify
@@ -255,6 +265,12 @@ wikipedia:siWikipedia
 strava:siStrava
 google_health:siGoogle
 google_calendar:siGooglecalendar
+google_slides:siGoogleslides
+google_forms:siGoogleforms
+google_chat:siGooglechat
+# Google Contacts has no mark of its own in simple-icons, so it carries the generic
+# Google mark — the same choice already made for google_health.
+google_contacts:siGoogle
 google_tasks:siGoogletasks
 todoist:siTodoist
 home_assistant:siHomeassistant

@@ -1,0 +1,120 @@
+provider: onenote
+# OneNote pages ARE HTML documents. Listing and creating them is fine — the metadata
+# is JSON and creation takes an HTML body, assembled by the onenote_page builder. But
+# READING a page's content returns text/html, which Result.Data (a json.RawMessage)
+# cannot carry, so there is no get-page-content action. onenote_list_pages returns
+# each page's links so the user can open it.
+actions:
+  - name: onenote_list_notebooks
+    description: "List the account's OneNote notebooks with their ids. Start here, then descend into sections and pages. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Notes.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        top: {type: integer, description: "max notebooks (default 25)"}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/onenote/notebooks"
+      query:
+        $top: "{{top}}"
+    response_extract: "$.value"
+  - name: onenote_list_sections
+    description: "List the sections inside one OneNote notebook. A page must be created in a SECTION, so resolve one here first. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Notes.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        notebook_id: {type: string}
+        top:         {type: integer, description: "max sections (default 25)"}
+      required: [notebook_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/onenote/notebooks/{{notebook_id}}/sections"
+      query:
+        $top: "{{top}}"
+    response_extract: "$.value"
+  # Two actions rather than one with an optional section, because the difference is
+  # the URL PATH: an absent {{section_id}} would render ".../sections//pages" and
+  # 404, so "omit for every page" could never have worked.
+  - name: onenote_list_pages
+    description: "List pages across the WHOLE account, newest first. Returns each page's title and links, NOT its content. Use onenote_list_section_pages to narrow to one section. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Notes.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        top:    {type: integer, description: "max pages (default 25)"}
+        search: {type: string, description: "OData filter, e.g. contains(title,'budget')"}
+      required: []
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/onenote/pages"
+      query:
+        $top: "{{top}}"
+        $filter: "{{search}}"
+        $orderby: "lastModifiedDateTime desc"
+    response_extract: "$.value"
+  - name: onenote_list_section_pages
+    description: "List the pages inside ONE OneNote section, newest first. Resolve the section id with onenote_list_sections. Returns titles and links, not page content. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Notes.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        section_id: {type: string}
+        top:        {type: integer, description: "max pages (default 25)"}
+      required: [section_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/onenote/sections/{{section_id}}/pages"
+      query:
+        $top: "{{top}}"
+        $orderby: "lastModifiedDateTime desc"
+    response_extract: "$.value"
+  - name: onenote_create_page
+    description: "Create a OneNote page in a section. content is HTML — use plain paragraphs and lists; a full document wrapper is added automatically. Safe write."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Notes.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        section_id: {type: string, description: "section to create the page in"}
+        title:      {type: string, description: "page title"}
+        content:    {type: string, description: "page body as HTML, e.g. '<p>Notes</p>'"}
+      required: [section_id, title]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/onenote/sections/{{section_id}}/pages"
+      body_builder: onenote_page
+    response_extract: "$"
+  - name: onenote_create_section
+    description: "Create a new section inside a OneNote notebook. Safe write — it starts empty."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Notes.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        notebook_id: {type: string}
+        name:        {type: string, description: "section name"}
+      required: [notebook_id, name]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/onenote/notebooks/{{notebook_id}}/sections"
+      body:
+        displayName: "{{name}}"
+    response_extract: "$"
+  - name: onenote_delete_page
+    description: "Delete a OneNote page. Irreversible."
+    mutating: true
+    scopes: [https://graph.microsoft.com/Notes.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        page_id: {type: string}
+      required: [page_id]
+    request:
+      method: DELETE
+      url: "https://graph.microsoft.com/v1.0/me/onenote/pages/{{page_id}}"
+    response_extract: "$"

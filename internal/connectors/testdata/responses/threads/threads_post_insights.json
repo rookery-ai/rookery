@@ -1,0 +1,13 @@
+{
+  "data": [
+    {
+      "name": "views",
+      "period": "lifetime",
+      "values": [
+        {
+          "value": 512
+        }
+      ]
+    }
+  ]
+}

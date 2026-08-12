@@ -1,0 +1,14 @@
+{
+  "messages": [
+    {
+      "name": "spaces/AAAA1/messages/BBBB1",
+      "text": "Deploy is green",
+      "sender": {
+        "name": "users/1234",
+        "displayName": "Sam"
+      },
+      "createTime": "2026-08-11T07:12:00Z"
+    }
+  ],
+  "nextPageToken": "CAoQAA"
+}

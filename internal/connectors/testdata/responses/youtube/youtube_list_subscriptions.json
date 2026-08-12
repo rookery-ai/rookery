@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "id": "SUB1",
+      "snippet": {
+        "title": "Some Channel",
+        "resourceId": {
+          "channelId": "UC_y2"
+        }
+      }
+    }
+  ],
+  "nextPageToken": "CAoQAA"
+}

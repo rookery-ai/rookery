@@ -1,0 +1,20 @@
+{
+  "data": [
+    {
+      "spend": "412.55",
+      "impressions": "88213",
+      "clicks": "1902",
+      "cpc": "0.216",
+      "ctr": "2.157",
+      "reach": "51203",
+      "actions": [
+        {
+          "action_type": "offsite_conversion.fb_pixel_purchase",
+          "value": "31"
+        }
+      ],
+      "date_start": "2026-08-10",
+      "date_stop": "2026-08-10"
+    }
+  ]
+}

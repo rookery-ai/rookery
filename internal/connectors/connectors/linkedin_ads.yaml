@@ -36,3 +36,45 @@ actions:
         dateRange.start.year: "{{start_year}}"
         fields: "impressions,clicks,costInLocalCurrency,externalWebsiteConversions"
     response_extract: "$.elements"
+  - name: linkedin_ads_list_campaign_groups
+    description: "List the campaign GROUPS in a LinkedIn ad account, with their status and budgets. Requires the Marketing Developer Platform, which is a partner application — a self-serve app gets 403. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        account_id: {type: string, description: "ad account id from linkedin_ads_list_accounts"}
+      required: [account_id]
+    request:
+      method: GET
+      url: "https://api.linkedin.com/rest/adAccounts/{{account_id}}/adCampaignGroups"
+      query:
+        q: "search"
+    response_extract: "$.elements"
+  - name: linkedin_ads_list_campaigns
+    description: "List the campaigns in a LinkedIn ad account, with status, objective and budget. Requires the Marketing Developer Platform — a self-serve app gets 403. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        account_id: {type: string, description: "ad account id from linkedin_ads_list_accounts"}
+      required: [account_id]
+    request:
+      method: GET
+      url: "https://api.linkedin.com/rest/adAccounts/{{account_id}}/adCampaigns"
+      query:
+        q: "search"
+    response_extract: "$.elements"
+  - name: linkedin_ads_list_creatives
+    description: "List the creatives in a LinkedIn ad account, so ad copy can be compared. Requires the Marketing Developer Platform — a self-serve app gets 403. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        account_id: {type: string, description: "ad account id from linkedin_ads_list_accounts"}
+      required: [account_id]
+    request:
+      method: GET
+      url: "https://api.linkedin.com/rest/adAccounts/{{account_id}}/creatives"
+      query:
+        q: "criteria"
+    response_extract: "$.elements"

@@ -1,0 +1,42 @@
+{
+  "dimensionHeaders": [
+    {
+      "name": "date"
+    }
+  ],
+  "metricHeaders": [
+    {
+      "name": "activeUsers",
+      "type": "TYPE_INTEGER"
+    },
+    {
+      "name": "sessions",
+      "type": "TYPE_INTEGER"
+    },
+    {
+      "name": "conversions",
+      "type": "TYPE_INTEGER"
+    }
+  ],
+  "rows": [
+    {
+      "dimensionValues": [
+        {
+          "value": "20260810"
+        }
+      ],
+      "metricValues": [
+        {
+          "value": "412"
+        },
+        {
+          "value": "521"
+        },
+        {
+          "value": "12"
+        }
+      ]
+    }
+  ],
+  "rowCount": 1
+}

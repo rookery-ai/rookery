@@ -1,0 +1,13 @@
+{
+  "payments": [
+    {
+      "name": "accounts/pub-1/payments/unpaid",
+      "date": {
+        "year": 2026,
+        "month": 8,
+        "day": 21
+      },
+      "amount": "\u20ac128.44"
+    }
+  ]
+}

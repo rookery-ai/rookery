@@ -43,3 +43,112 @@ actions:
       body:
         text: "{{text}}"
     response_extract: "$.data"
+  - name: x_get_post
+    description: "Get one post by id, with its public metrics (likes, reposts, replies, impressions). Read-only. Note: X bills per read."
+    mutating: false
+    params:
+      type: object
+      properties:
+        post_id: {type: string}
+      required: [post_id]
+    request:
+      method: GET
+      url: "https://api.twitter.com/2/tweets/{{post_id}}"
+      query:
+        tweet.fields: "created_at,public_metrics,conversation_id,author_id"
+    response_extract: "$.data"
+  - name: x_reply_to_post
+    description: "Reply to a post. This is a REAL, PUBLIC post from the connected account and cannot be unsaid. Note: X bills per post created."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        text:      {type: string, description: "reply text, max 280 characters on a free account"}
+        reply_to:  {type: string, description: "id of the post being replied to"}
+      required: [text, reply_to]
+    request:
+      method: POST
+      url: "https://api.twitter.com/2/tweets"
+      body:
+        text: "{{text}}"
+        reply: {in_reply_to_tweet_id: "{{reply_to}}"}
+    response_extract: "$.data"
+  - name: x_delete_post
+    description: "Delete a post the connected account published. Irreversible."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        post_id: {type: string}
+      required: [post_id]
+    request:
+      method: DELETE
+      url: "https://api.twitter.com/2/tweets/{{post_id}}"
+    response_extract: "$.data"
+  - name: x_search_posts
+    description: "Search posts from the last 7 days. query uses X's search syntax, e.g. 'from:someone -is:retweet'. Requires a paid API tier — a free-tier app gets 403 here. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query:       {type: string, description: "X search query"}
+        max_results: {type: integer, description: "10-100"}
+      required: [query]
+    request:
+      method: GET
+      url: "https://api.twitter.com/2/tweets/search/recent"
+      query:
+        query: "{{query}}"
+        max_results: "{{max_results}}"
+        tweet.fields: "created_at,public_metrics,author_id"
+    response_extract: "$.data"
+  - name: x_list_mentions
+    description: "List posts mentioning a user, newest first. Pass the connected account's own id (from x_me) to see who is talking to it. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        user_id:     {type: string, description: "user id from x_me"}
+        max_results: {type: integer, description: "5-100"}
+      required: [user_id]
+    request:
+      method: GET
+      url: "https://api.twitter.com/2/users/{{user_id}}/mentions"
+      query:
+        max_results: "{{max_results}}"
+        tweet.fields: "created_at,public_metrics,author_id"
+    response_extract: "$.data"
+  - name: x_like_post
+    description: "Like a post as the connected account. Publicly visible on the account's likes."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        user_id: {type: string, description: "the connected account's user id from x_me"}
+        post_id: {type: string, description: "post to like"}
+      required: [user_id, post_id]
+    request:
+      method: POST
+      url: "https://api.twitter.com/2/users/{{user_id}}/likes"
+      body:
+        tweet_id: "{{post_id}}"
+    response_extract: "$.data"
+  - name: x_repost
+    description: "Repost (retweet) a post as the connected account. Publicly visible on its timeline."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        user_id: {type: string, description: "the connected account's user id from x_me"}
+        post_id: {type: string, description: "post to repost"}
+      required: [user_id, post_id]
+    request:
+      method: POST
+      url: "https://api.twitter.com/2/users/{{user_id}}/retweets"
+      body:
+        tweet_id: "{{post_id}}"
+    response_extract: "$.data"

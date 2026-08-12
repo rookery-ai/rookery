@@ -1,0 +1,17 @@
+{
+  "data": [
+    {
+      "id": "act_123456",
+      "account_id": "123456",
+      "name": "Rookery Ads",
+      "currency": "EUR",
+      "account_status": 1
+    }
+  ],
+  "paging": {
+    "cursors": {
+      "before": "MAZDZD",
+      "after": "NjQZD"
+    }
+  }
+}

@@ -58,3 +58,139 @@ actions:
       form:
         creation_id: "{{creation_id}}"
     response_extract: "$"
+  - name: instagram_create_reel
+    description: "Stage a REEL (video) for Instagram from a PUBLICLY reachable video URL. This only CREATES the container — call instagram_publish_media with the returned id to post it. Video processing can take a minute; check with instagram_media_status."
+    mutating: false
+    params:
+      type: object
+      properties:
+        video_url: {type: string, description: "publicly reachable https URL of the video"}
+        caption:   {type: string}
+        cover_url: {type: string, description: "optional thumbnail image URL"}
+      required: [video_url]
+    request:
+      method: POST
+      url: "https://graph.facebook.com/v21.0/{{conn.ig_user_id}}/media"
+      form:
+        media_type: "REELS"
+        video_url: "{{video_url}}"
+        caption: "{{caption}}"
+        cover_url: "{{cover_url}}"
+    response_extract: "$"
+  - name: instagram_media_status
+    description: "Check whether a staged media container has finished processing and is ready to publish. Returns FINISHED, IN_PROGRESS or ERROR. Poll this after instagram_create_reel before publishing. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        creation_id: {type: string, description: "container id from instagram_create_media or instagram_create_reel"}
+      required: [creation_id]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{creation_id}}"
+      query:
+        fields: "status_code,status"
+    response_extract: "$"
+  - name: instagram_get_media
+    description: "Get one Instagram post's caption, media type, permalink and engagement counts by media id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        media_id: {type: string}
+      required: [media_id]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{media_id}}"
+      query:
+        fields: "id,caption,media_type,media_url,permalink,timestamp,like_count,comments_count"
+    response_extract: "$"
+  - name: instagram_list_comments
+    description: "List the comments on one Instagram post, with their ids so they can be replied to or hidden. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        media_id: {type: string}
+        limit:    {type: integer, description: "max comments (default 25)"}
+      required: [media_id]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{media_id}}/comments"
+      query:
+        limit: "{{limit}}"
+        fields: "id,text,username,timestamp,like_count"
+    response_extract: "$.data"
+  - name: instagram_reply_to_comment
+    description: "Reply publicly to a comment on an Instagram post, as the connected account. Visible to everyone."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        comment_id: {type: string}
+        message:    {type: string}
+      required: [comment_id, message]
+    request:
+      method: POST
+      url: "https://graph.facebook.com/v21.0/{{comment_id}}/replies"
+      form:
+        message: "{{message}}"
+    response_extract: "$"
+  - name: instagram_hide_comment
+    description: "Hide or unhide a comment on an Instagram post — the usual way to deal with spam without deleting it."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        comment_id: {type: string}
+        hide:       {type: boolean, description: "true to hide, false to unhide"}
+      required: [comment_id, hide]
+    request:
+      method: POST
+      url: "https://graph.facebook.com/v21.0/{{comment_id}}"
+      form:
+        hide: "{{hide}}"
+    response_extract: "$"
+  - name: instagram_account_insights
+    description: "Read account-level Instagram metrics such as impressions, reach or profile_views over a period. metric is comma-separated; period is day, week or days_28. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        metric: {type: string, description: "comma-separated, e.g. impressions,reach,profile_views"}
+        period: {type: string, description: "day | week | days_28"}
+      required: [metric, period]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{conn.ig_user_id}}/insights"
+      query:
+        metric: "{{metric}}"
+        period: "{{period}}"
+    response_extract: "$.data"
+  - name: instagram_media_insights
+    description: "Read engagement metrics for ONE Instagram post, e.g. impressions, reach, saved. Available metrics differ by media type. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        media_id: {type: string}
+        metric:   {type: string, description: "comma-separated, e.g. impressions,reach,saved"}
+      required: [media_id, metric]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{media_id}}/insights"
+      query:
+        metric: "{{metric}}"
+    response_extract: "$.data"
+  - name: instagram_list_stories
+    description: "List the account's Instagram stories that are still live (stories expire after 24 hours). Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{conn.ig_user_id}}/stories"
+      query:
+        fields: "id,media_type,media_url,permalink,timestamp"
+    response_extract: "$.data"

@@ -1,0 +1,10 @@
+{
+  "threads": [
+    {
+      "id": "18c8f0a1b2c3d4e5",
+      "snippet": "Invoice attached",
+      "historyId": "10321"
+    }
+  ],
+  "nextPageToken": "09876543210"
+}

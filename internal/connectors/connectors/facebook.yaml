@@ -44,3 +44,166 @@ actions:
         message: "{{message}}"
         link:    "{{link}}"
     response_extract: "$"
+  - name: facebook_get_post
+    description: "Get one Page post's message, timestamps and engagement counts by post id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        post_id: {type: string, description: "post id from facebook_list_posts"}
+      required: [post_id]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{post_id}}"
+      query:
+        fields: "id,message,created_time,permalink_url,shares,likes.summary(true),comments.summary(true)"
+    response_extract: "$"
+  - name: facebook_schedule_post
+    description: "Schedule a Page post for a future time instead of publishing now. publish_time is a Unix timestamp and must be 10 minutes to 6 months ahead. It WILL go public at that time — there is no draft state."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        message:      {type: string, description: "post text"}
+        link:         {type: string, description: "optional URL to attach"}
+        publish_time: {type: integer, description: "Unix timestamp, 10 min to 6 months ahead"}
+      required: [message, publish_time]
+    request:
+      method: POST
+      url: "https://graph.facebook.com/v21.0/{{conn.page_id}}/feed"
+      form:
+        message: "{{message}}"
+        link: "{{link}}"
+        published: "false"
+        scheduled_publish_time: "{{publish_time}}"
+    response_extract: "$"
+  - name: facebook_post_photo
+    description: "Publish a photo to the Page from a PUBLICLY reachable image URL — the API cannot upload a local file. Real and public."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        image_url: {type: string, description: "publicly reachable https URL of the image"}
+        caption:   {type: string, description: "photo caption"}
+      required: [image_url]
+    request:
+      method: POST
+      url: "https://graph.facebook.com/v21.0/{{conn.page_id}}/photos"
+      form:
+        url: "{{image_url}}"
+        caption: "{{caption}}"
+    response_extract: "$"
+  - name: facebook_update_post
+    description: "Edit the text of an existing Page post. The edit is public immediately and Facebook shows an edit history."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        post_id: {type: string}
+        message: {type: string, description: "replacement text"}
+      required: [post_id, message]
+    request:
+      method: POST
+      url: "https://graph.facebook.com/v21.0/{{post_id}}"
+      form:
+        message: "{{message}}"
+    response_extract: "$"
+  - name: facebook_delete_post
+    description: "Permanently delete a Page post. Irreversible — confirm the post id with facebook_get_post first."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        post_id: {type: string}
+      required: [post_id]
+    request:
+      method: DELETE
+      url: "https://graph.facebook.com/v21.0/{{post_id}}"
+    response_extract: "$"
+  - name: facebook_list_comments
+    description: "List the comments on a Page post, with their authors and ids. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        post_id: {type: string}
+        limit:   {type: integer, description: "max comments (default 25)"}
+      required: [post_id]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{post_id}}/comments"
+      query:
+        limit: "{{limit}}"
+        fields: "id,message,created_time,from,like_count"
+    response_extract: "$.data"
+  - name: facebook_reply_to_comment
+    description: "Reply publicly to a comment on a Page post, as the Page. Visible to everyone and cannot be unsaid."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        comment_id: {type: string, description: "comment id from facebook_list_comments"}
+        message:    {type: string}
+      required: [comment_id, message]
+    request:
+      method: POST
+      url: "https://graph.facebook.com/v21.0/{{comment_id}}/comments"
+      form:
+        message: "{{message}}"
+    response_extract: "$"
+  - name: facebook_hide_comment
+    description: "Hide or unhide a comment on a Page post. A hidden comment stays visible to its author and their friends, which is the usual way to handle spam without deleting."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        comment_id: {type: string}
+        hide:       {type: boolean, description: "true to hide, false to unhide"}
+      required: [comment_id, hide]
+    request:
+      method: POST
+      url: "https://graph.facebook.com/v21.0/{{comment_id}}"
+      form:
+        is_hidden: "{{hide}}"
+    response_extract: "$"
+  - name: facebook_page_insights
+    description: "Read Page-level metrics such as page_impressions or page_fans over a period. metric is a comma-separated list; period is day, week or days_28. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        metric: {type: string, description: "comma-separated, e.g. page_impressions,page_fans"}
+        period: {type: string, description: "day | week | days_28"}
+        since:  {type: string, description: "start date YYYY-MM-DD"}
+        until:  {type: string, description: "end date YYYY-MM-DD"}
+      required: [metric]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{conn.page_id}}/insights"
+      query:
+        metric: "{{metric}}"
+        period: "{{period}}"
+        since: "{{since}}"
+        until: "{{until}}"
+    response_extract: "$.data"
+  - name: facebook_post_insights
+    description: "Read engagement metrics for ONE Page post, e.g. post_impressions or post_engaged_users. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        post_id: {type: string}
+        metric:  {type: string, description: "comma-separated, e.g. post_impressions,post_engaged_users"}
+      required: [post_id, metric]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{post_id}}/insights"
+      query:
+        metric: "{{metric}}"
+    response_extract: "$.data"

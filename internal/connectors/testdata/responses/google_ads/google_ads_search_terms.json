@@ -1,0 +1,23 @@
+{
+  "results": [
+    {
+      "searchTermView": {
+        "searchTerm": "self hosted agent platform"
+      },
+      "campaign": {
+        "name": "Brand \u2014 Search"
+      },
+      "adGroup": {
+        "name": "Exact"
+      },
+      "metrics": {
+        "impressions": "820",
+        "clicks": "44",
+        "costMicros": "190000",
+        "conversions": 2.0
+      }
+    }
+  ],
+  "fieldMask": "campaign.id,metrics.clicks",
+  "nextPageToken": "AbC123"
+}

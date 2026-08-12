@@ -1,0 +1,10 @@
+{
+  "adClients": [
+    {
+      "name": "accounts/pub-1/adclients/ca-pub-1234567890123456",
+      "reportingDimensionId": "ca-pub-1234567890123456",
+      "productCode": "AFC",
+      "state": "READY"
+    }
+  ]
+}
