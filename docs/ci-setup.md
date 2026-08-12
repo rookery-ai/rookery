@@ -175,9 +175,33 @@ so runs are fast and each changelog contains only that release's work. No
 `.goreleaser.yaml` sets `changelog: disable: true`, so the manual tag published
 artifacts without a duplicate commit dump in the GitHub Release body.
 
+### The organization migration recreated this exact condition — read before releasing
+
+Moving to `rookery-ai` **deleted every tag** (nothing built under the personal
+account was transferred) and **reset the manifest to `0.0.0`**. That is precisely
+the state described above, and worse: there are now **1035 commits**, against the
+529 that first triggered it.
+
+So the first release under the organization must be **tagged by hand again**, for
+the same reason and with the same effect:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+That fires `release.yml` directly. release-please then anchors on the real tag and
+scans only what follows.
+
+**Do not wait for release-please to propose `v0.1.0`.** With no tag to anchor on
+it walks all 1035 commits through the GraphQL API on every run — the failure mode
+is an intermittent `We couldn't respond to your request in time`, and when it does
+succeed, a changelog covering the entire history. Neither `bootstrap-sha` nor
+`last-release-sha` fixes it; both were tried (#58, #59) and both failed, for the
+reasons recorded above.
+
 ### Releasing from here
 
-Normal release-please flow, no manual steps:
+Normal release-please flow, no manual steps — **once the anchor tag above exists**:
 
 1. Merge a feature PR (Conventional Commit title).
 2. release-please opens/updates a release PR computing the next version.
