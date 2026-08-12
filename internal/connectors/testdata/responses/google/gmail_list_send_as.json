@@ -1,0 +1,10 @@
+{
+  "sendAs": [
+    {
+      "sendAsEmail": "me@example.com",
+      "displayName": "Me",
+      "isPrimary": true,
+      "isDefault": true
+    }
+  ]
+}

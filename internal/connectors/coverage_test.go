@@ -184,7 +184,11 @@ func TestResponseCursorResolvesWhenTheFixtureHasOne(t *testing.T) {
 //
 // A provider joins the list when its actions are authored or revised. Removing a name to
 // make the test pass re-opens the gap it was added to close.
-var providersRequiringFixtures = []string{}
+var providersRequiringFixtures = []string{
+	"google", "google_drive", "google_calendar", "google_sheets", "google_docs",
+	"google_tasks", "youtube", "google_contacts", "google_chat", "google_slides",
+	"google_forms",
+}
 
 func TestFixtureCoverageOfExpandedProviders(t *testing.T) {
 	r := loadRegistry(t)
@@ -196,6 +200,14 @@ func TestFixtureCoverageOfExpandedProviders(t *testing.T) {
 		}
 		var missing []string
 		for _, a := range actions {
+			// An action extracting "$" returns the whole body and cannot silently
+			// fail to narrow, so a fixture would prove nothing. The requirement
+			// tracks the actual risk: a dotted path, or a pagination cursor.
+			if narrowing := strings.TrimSpace(a.ResponseExtract); narrowing == "" || narrowing == "$" {
+				if a.ResponseCursor == "" {
+					continue
+				}
+			}
 			if _, ok := readFixture(t, name, a.Name); !ok {
 				missing = append(missing, a.Name)
 			}

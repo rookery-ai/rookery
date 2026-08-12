@@ -1,0 +1,20 @@
+{
+  "connections": [
+    {
+      "resourceName": "people/c12345",
+      "etag": "%EgU",
+      "names": [
+        {
+          "displayName": "Sam Rivera"
+        }
+      ],
+      "emailAddresses": [
+        {
+          "value": "sam@example.com"
+        }
+      ]
+    }
+  ],
+  "nextPageToken": "CAoQAA",
+  "totalItems": 231
+}

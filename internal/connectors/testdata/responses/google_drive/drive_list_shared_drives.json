@@ -1,0 +1,10 @@
+{
+  "drives": [
+    {
+      "id": "0AJ_x",
+      "name": "Marketing",
+      "kind": "drive#drive"
+    }
+  ],
+  "nextPageToken": "CAoQAA"
+}

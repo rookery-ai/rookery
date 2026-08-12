@@ -1,0 +1,132 @@
+provider: google_chat
+# Google Chat requires a Google WORKSPACE account — a personal gmail.com account has
+# no Chat API at all. Every description says so, because the model reads the action
+# description and never reads the provider's setup steps.
+#
+# Space and message names are full resource paths ("spaces/AAAA", "spaces/AAAA/
+# messages/BBBB") that carry REAL slashes, so they are substituted unescaped.
+actions:
+  - name: chat_list_spaces
+    description: "List the Chat spaces and direct messages the account belongs to, with their resource names. Call first — every other Chat action needs a space name. Requires a Google Workspace account."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/chat.spaces.readonly]
+    params:
+      type: object
+      properties:
+        max:        {type: integer, description: "max spaces (default 50)"}
+        filter:     {type: string, description: "e.g. spaceType = \"SPACE\" to exclude DMs"}
+        page_token: {type: string, description: "next_cursor from a previous call"}
+    request:
+      method: GET
+      url: "https://chat.googleapis.com/v1/spaces"
+      query:
+        pageSize: "{{max}}"
+        filter: "{{filter}}"
+        pageToken: "{{page_token}}"
+    response_extract: "$.spaces"
+    response_cursor: "$.nextPageToken"
+  - name: chat_get_space
+    description: "Get one Chat space's details — its display name, type and description. space_name looks like 'spaces/AAAAAAA'. Requires a Google Workspace account."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/chat.spaces.readonly]
+    params:
+      type: object
+      properties:
+        space_name: {type: string, description: "e.g. spaces/AAAAAAA"}
+      required: [space_name]
+    request:
+      method: GET
+      url: "https://chat.googleapis.com/v1/{{space_name}}"
+    response_extract: "$"
+  - name: chat_list_messages
+    description: "List messages in a Chat space, newest first by default. Use to catch up on a channel. Requires a Google Workspace account. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/chat.messages]
+    params:
+      type: object
+      properties:
+        space_name: {type: string, description: "e.g. spaces/AAAAAAA"}
+        max:        {type: integer, description: "max messages (default 25)"}
+        filter:     {type: string, description: "e.g. createTime > \"2026-08-01T00:00:00Z\""}
+        page_token: {type: string, description: "next_cursor from a previous call"}
+      required: [space_name]
+    request:
+      method: GET
+      url: "https://chat.googleapis.com/v1/{{space_name}}/messages"
+      query:
+        pageSize: "{{max}}"
+        filter: "{{filter}}"
+        pageToken: "{{page_token}}"
+    response_extract: "$.messages"
+    response_cursor: "$.nextPageToken"
+  - name: chat_send_message
+    description: "Post a message to a Chat space as the connected account. Everyone in the space sees it and it cannot be unsent silently. Set thread_key to keep replies together. Requires a Google Workspace account."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/chat.messages]
+    params:
+      type: object
+      properties:
+        space_name: {type: string, description: "e.g. spaces/AAAAAAA"}
+        text:       {type: string, description: "message text; supports Chat's basic formatting"}
+        thread_key: {type: string, description: "optional arbitrary key that groups messages into one thread"}
+      required: [space_name, text]
+    request:
+      method: POST
+      url: "https://chat.googleapis.com/v1/{{space_name}}/messages"
+      query:
+        threadKey: "{{thread_key}}"
+      body:
+        text: "{{text}}"
+    response_extract: "$"
+  - name: chat_update_message
+    description: "Edit a message the connected account previously sent. message_name is the full resource name from chat_send_message, e.g. 'spaces/AAA/messages/BBB'. Requires a Google Workspace account."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/chat.messages]
+    params:
+      type: object
+      properties:
+        message_name: {type: string, description: "e.g. spaces/AAA/messages/BBB"}
+        text:         {type: string, description: "replacement text"}
+      required: [message_name, text]
+    request:
+      method: PATCH
+      url: "https://chat.googleapis.com/v1/{{message_name}}"
+      query:
+        updateMask: "text"
+      body:
+        text: "{{text}}"
+    response_extract: "$"
+  - name: chat_delete_message
+    description: "Delete a message the connected account sent in a Chat space. Irreversible. Requires a Google Workspace account."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/chat.messages]
+    params:
+      type: object
+      properties:
+        message_name: {type: string, description: "e.g. spaces/AAA/messages/BBB"}
+      required: [message_name]
+    request:
+      method: DELETE
+      url: "https://chat.googleapis.com/v1/{{message_name}}"
+    response_extract: "$"
+  - name: chat_list_members
+    description: "List who is in a Chat space, so a message can address the right people. Requires a Google Workspace account. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/chat.memberships.readonly]
+    params:
+      type: object
+      properties:
+        space_name: {type: string, description: "e.g. spaces/AAAAAAA"}
+        max:        {type: integer, description: "max members (default 50)"}
+        page_token: {type: string, description: "next_cursor from a previous call"}
+      required: [space_name]
+    request:
+      method: GET
+      url: "https://chat.googleapis.com/v1/{{space_name}}/members"
+      query:
+        pageSize: "{{max}}"
+        pageToken: "{{page_token}}"
+    response_extract: "$.memberships"
+    response_cursor: "$.nextPageToken"

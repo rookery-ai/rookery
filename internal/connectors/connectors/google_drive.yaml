@@ -1,48 +1,111 @@
 provider: google_drive
+# Drive v3. Two things shape this manifest.
+#
+# Every list action takes an explicit `fields` mask. Drive returns very wide file
+# resources and the bridge caps a result at 8 KiB, so an unmasked listing of a real
+# Drive is truncated mid-object — the model then reasons over a fragment without
+# knowing it. The default masks here are deliberately narrow.
+#
+# There is NO download or export action. Drive returns file CONTENT as raw bytes
+# (alt=media) or as an exported format, and Result.Data is a json.RawMessage — a
+# non-JSON body cannot be carried, only corrupted. Reading a Google Doc's text goes
+# through the Docs connector instead.
 actions:
+  # ---- finding files -------------------------------------------------------
   - name: drive_list_files
-    description: "List files in the connected Google Drive (id, name, mimeType). Read-only."
+    description: "List files in the connected Google Drive (id, name, mimeType). Read-only. Pass page_token from a previous next_cursor to page through."
     mutating: false
+    scopes: [https://www.googleapis.com/auth/drive]
     params:
       type: object
       properties:
-        max: {type: integer, description: "max files (default 20)"}
+        max:        {type: integer, description: "max files (default 20)"}
+        order_by:   {type: string, description: "e.g. 'modifiedTime desc', 'name', 'folder'"}
+        page_token: {type: string, description: "next_cursor from a previous call"}
       required: []
     request:
       method: GET
       url: "https://www.googleapis.com/drive/v3/files"
-      query: {pageSize: "{{max}}", fields: "files(id,name,mimeType,modifiedTime,webViewLink)"}
+      query:
+        pageSize: "{{max}}"
+        orderBy: "{{order_by}}"
+        pageToken: "{{page_token}}"
+        fields: "nextPageToken,files(id,name,mimeType,modifiedTime,webViewLink)"
     response_extract: "$.files"
+    response_cursor: "$.nextPageToken"
   - name: drive_search_files
-    description: "Search Drive files with a Drive query string (e.g. name contains 'report'). Read-only."
+    description: "Search Drive files with a Drive query string (e.g. name contains 'report', or \"'FOLDER_ID' in parents\"). Read-only. Pass page_token to page through."
     mutating: false
+    scopes: [https://www.googleapis.com/auth/drive]
     params:
       type: object
       properties:
-        query: {type: string, description: "Drive q query, e.g. \"name contains 'notes'\""}
-        max:   {type: integer}
+        query:      {type: string, description: "Drive q query, e.g. \"name contains 'notes'\""}
+        max:        {type: integer}
+        order_by:   {type: string, description: "e.g. 'modifiedTime desc'"}
+        page_token: {type: string, description: "next_cursor from a previous call"}
       required: [query]
     request:
       method: GET
       url: "https://www.googleapis.com/drive/v3/files"
-      query: {q: "{{query}}", pageSize: "{{max}}", fields: "files(id,name,mimeType,webViewLink)"}
+      query:
+        q: "{{query}}"
+        pageSize: "{{max}}"
+        orderBy: "{{order_by}}"
+        pageToken: "{{page_token}}"
+        fields: "nextPageToken,files(id,name,mimeType,modifiedTime,webViewLink)"
     response_extract: "$.files"
+    response_cursor: "$.nextPageToken"
   - name: drive_get_file
-    description: "Get a Drive file's metadata (name, mimeType, links) by id. Read-only."
+    description: "Get a Drive file's metadata (name, mimeType, links, owners, size) by id. Read-only. Does NOT return file contents."
     mutating: false
+    scopes: [https://www.googleapis.com/auth/drive]
     params:
       type: object
       properties:
         file_id: {type: string}
+        fields:  {type: string, description: "optional Drive field mask; defaults to the common metadata fields"}
       required: [file_id]
     request:
       method: GET
       url: "https://www.googleapis.com/drive/v3/files/{{file_id}}"
-      query: {fields: "id,name,mimeType,modifiedTime,webViewLink,parents"}
+      query:
+        fields: "{{fields}}"
     response_extract: "$"
+  - name: drive_get_storage_quota
+    description: "Report the account's Drive storage quota and how much of it is used, plus the signed-in user's name. Use for 'am I running out of Drive space'. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/drive]
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://www.googleapis.com/drive/v3/about"
+      query:
+        fields: "storageQuota,user"
+    response_extract: "$"
+  - name: drive_list_shared_drives
+    description: "List the shared drives (formerly Team Drives) this account can reach, with their ids. Use to scope a search to an organisation's shared drive. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/drive]
+    params:
+      type: object
+      properties:
+        max:        {type: integer, description: "max drives (default 20)"}
+        page_token: {type: string, description: "next_cursor from a previous call"}
+    request:
+      method: GET
+      url: "https://www.googleapis.com/drive/v3/drives"
+      query:
+        pageSize: "{{max}}"
+        pageToken: "{{page_token}}"
+    response_extract: "$.drives"
+    response_cursor: "$.nextPageToken"
+
+  # ---- creating and organising --------------------------------------------
   - name: drive_create_folder
     description: "Create a folder in Drive. A write, safe (creates a folder)."
     mutating: false
+    scopes: [https://www.googleapis.com/auth/drive]
     params:
       type: object
       properties:
@@ -55,23 +118,27 @@ actions:
       body_builder: drive_folder
     response_extract: "$"
   - name: drive_copy_file
-    description: "Copy an existing Drive file. Safe write."
+    description: "Copy an existing Drive file, optionally into another folder. Safe write."
     mutating: false
+    scopes: [https://www.googleapis.com/auth/drive]
     params:
       type: object
       properties:
         file_id: {type: string}
         name:    {type: string, description: "name for the copy"}
+        parent_id: {type: string, description: "optional destination folder id"}
       required: [file_id]
     request:
       method: POST
       url: "https://www.googleapis.com/drive/v3/files/{{file_id}}/copy"
       body:
         name: "{{name}}"
+        parents: ["{{parent_id}}"]
     response_extract: "$"
   - name: drive_rename_file
     description: "Rename a Drive file. Safe write."
     mutating: false
+    scopes: [https://www.googleapis.com/auth/drive]
     params:
       type: object
       properties:
@@ -84,9 +151,28 @@ actions:
       body:
         name: "{{name}}"
     response_extract: "$"
+  - name: drive_update_file_metadata
+    description: "Update a Drive file's description, starred flag, or MIME type. Use drive_rename_file for the name and drive_move_file for the folder. Safe write."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/drive]
+    params:
+      type: object
+      properties:
+        file_id:     {type: string}
+        description: {type: string, description: "free-text description shown in Drive"}
+        starred:     {type: boolean, description: "true to star the file"}
+      required: [file_id]
+    request:
+      method: PATCH
+      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}"
+      body:
+        description: "{{description}}"
+        starred: "{{starred}}"
+    response_extract: "$"
   - name: drive_move_file
     description: "Move a Drive file to a new parent folder. Safe write."
     mutating: false
+    scopes: [https://www.googleapis.com/auth/drive]
     params:
       type: object
       properties:
@@ -99,28 +185,63 @@ actions:
       url: "https://www.googleapis.com/drive/v3/files/{{file_id}}"
       query: {addParents: "{{add_parent}}", removeParents: "{{remove_parent}}"}
     response_extract: "$"
-  - name: drive_share_file
-    description: "Grant a person access to a Drive file (creates a permission). Mutating (shares data)."
+  - name: drive_create_shortcut
+    description: "Create a shortcut in Drive pointing at an existing file, so one file can appear in several folders without being copied. Safe write."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/drive]
+    params:
+      type: object
+      properties:
+        name:      {type: string, description: "shortcut name"}
+        target_id: {type: string, description: "id of the file the shortcut points at"}
+        parent_id: {type: string, description: "optional folder to create it in"}
+      required: [name, target_id]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/drive/v3/files"
+      body:
+        name: "{{name}}"
+        mimeType: "application/vnd.google-apps.shortcut"
+        parents: ["{{parent_id}}"]
+        shortcutDetails:
+          targetId: "{{target_id}}"
+    response_extract: "$"
+
+  # ---- deleting ------------------------------------------------------------
+  - name: drive_trash_file
+    description: "Move a Drive file to the trash, where it is recoverable for 30 days. Prefer this over drive_delete_file unless the user explicitly wants it gone now."
     mutating: true
+    scopes: [https://www.googleapis.com/auth/drive]
     params:
       type: object
       properties:
         file_id: {type: string}
-        role:    {type: string, description: "reader | writer | commenter"}
-        type:    {type: string, description: "user | group | domain | anyone"}
-        email:   {type: string, description: "email for user/group"}
-      required: [file_id, role, type]
+      required: [file_id]
     request:
-      method: POST
-      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}/permissions"
+      method: PATCH
+      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}"
       body:
-        role: "{{role}}"
-        type: "{{type}}"
-        emailAddress: "{{email}}"
+        trashed: true
+    response_extract: "$"
+  - name: drive_restore_file
+    description: "Restore a Drive file from the trash back to its folder. The inverse of drive_trash_file."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/drive]
+    params:
+      type: object
+      properties:
+        file_id: {type: string}
+      required: [file_id]
+    request:
+      method: PATCH
+      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}"
+      body:
+        trashed: false
     response_extract: "$"
   - name: drive_delete_file
-    description: "Permanently delete a Drive file by id. Mutating and irreversible."
+    description: "Permanently delete a Drive file by id, bypassing the trash. Mutating and irreversible — prefer drive_trash_file."
     mutating: true
+    scopes: [https://www.googleapis.com/auth/drive]
     params:
       type: object
       properties:
@@ -129,4 +250,123 @@ actions:
     request:
       method: DELETE
       url: "https://www.googleapis.com/drive/v3/files/{{file_id}}"
+    response_extract: "$"
+  - name: drive_empty_trash
+    description: "Permanently delete EVERYTHING in the Drive trash. Irreversible and affects many files at once — confirm with the user before calling."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/drive]
+    params: {type: object, properties: {}}
+    request:
+      method: DELETE
+      url: "https://www.googleapis.com/drive/v3/files/trash"
+    response_extract: "$"
+
+  # ---- sharing -------------------------------------------------------------
+  - name: drive_share_file
+    description: "Grant a person access to a Drive file (creates a permission). Mutating — this exposes the file's contents to someone else, so confirm the address first."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/drive]
+    params:
+      type: object
+      properties:
+        file_id: {type: string}
+        role:    {type: string, description: "reader | writer | commenter"}
+        type:    {type: string, description: "user | group | domain | anyone"}
+        email:   {type: string, description: "email for user/group"}
+        notify:  {type: boolean, description: "send Google's notification email (default true)"}
+      required: [file_id, role, type]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}/permissions"
+      query:
+        sendNotificationEmail: "{{notify}}"
+      body:
+        role: "{{role}}"
+        type: "{{type}}"
+        emailAddress: "{{email}}"
+    response_extract: "$"
+  - name: drive_list_permissions
+    description: "List who currently has access to a Drive file and with what role. Use before sharing or unsharing, and to audit exposure. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/drive]
+    params:
+      type: object
+      properties:
+        file_id: {type: string}
+      required: [file_id]
+    request:
+      method: GET
+      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}/permissions"
+      query:
+        fields: "permissions(id,type,role,emailAddress,displayName)"
+    response_extract: "$.permissions"
+  - name: drive_revoke_permission
+    description: "Remove someone's access to a Drive file. Resolve the permission id with drive_list_permissions first. Mutating."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/drive]
+    params:
+      type: object
+      properties:
+        file_id:       {type: string}
+        permission_id: {type: string, description: "from drive_list_permissions"}
+      required: [file_id, permission_id]
+    request:
+      method: DELETE
+      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}/permissions/{{permission_id}}"
+    response_extract: "$"
+
+  # ---- history and discussion ---------------------------------------------
+  - name: drive_list_revisions
+    description: "List a Drive file's saved revisions with who modified it and when. Use for 'who changed this and when'. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/drive]
+    params:
+      type: object
+      properties:
+        file_id: {type: string}
+      required: [file_id]
+    request:
+      method: GET
+      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}/revisions"
+      query:
+        fields: "revisions(id,modifiedTime,lastModifyingUser/displayName,size)"
+    response_extract: "$.revisions"
+  - name: drive_list_comments
+    description: "List the comments left on a Drive file, with their authors, replies and resolved state. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/drive]
+    params:
+      type: object
+      properties:
+        file_id: {type: string}
+        max:     {type: integer, description: "max comments (default 20)"}
+      required: [file_id]
+    request:
+      method: GET
+      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}/comments"
+      query:
+        pageSize: "{{max}}"
+        # The Drive comments endpoint REQUIRES an explicit fields mask and returns
+        # 400 without one, unlike every other list in this manifest.
+        fields: "comments(id,content,resolved,createdTime,author/displayName,replies(content,author/displayName))"
+    response_extract: "$.comments"
+  - name: drive_create_comment
+    description: "Add a comment to a Drive file. Other people with access will see it and may be notified, so treat it as publishing rather than a private note."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/drive]
+    params:
+      type: object
+      properties:
+        file_id: {type: string}
+        content: {type: string, description: "comment text"}
+      required: [file_id, content]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/drive/v3/files/{{file_id}}/comments"
+      query:
+        fields: "id,content,createdTime"
+      body:
+        content: "{{content}}"
     response_extract: "$"

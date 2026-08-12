@@ -1,0 +1,12 @@
+name: google_slides
+label: Google Slides
+category: Google
+unverified: true
+auth_parent: google
+default_scopes:
+  - https://www.googleapis.com/auth/presentations
+setup_url: https://console.cloud.google.com/apis/credentials
+setup_steps:
+  - "Google Slides reuses your Google (Gmail) OAuth app. Set up Google first on its card above."
+  - "In Google Cloud Console → APIs & Services → Library, also enable the Google Slides API."
+  - "Then click Connect here to authorize Slides access on the same Google account."

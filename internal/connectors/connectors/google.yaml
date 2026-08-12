@@ -1,13 +1,21 @@
 provider: google
+# Gmail. Scopes are declared per action so Execute can tell "this account never
+# granted that" apart from a real failure and name the fix, rather than letting an
+# opaque 403 reach the model. The settings.* actions are the reason it matters here:
+# they need gmail.settings.basic, which connections made before this file gained them
+# do not hold.
 actions:
+  # ---- reading -------------------------------------------------------------
   - name: gmail_search
-    description: "Search the connected Gmail account and return matching message ids + snippets. Use for 'find/search my email', 'do I have mail about X'. Read-only."
+    description: "Search the connected Gmail account and return matching message ids + snippets. Use for 'find/search my email', 'do I have mail about X'. Read-only. Pass page_token from a previous next_cursor to page through."
     mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.readonly]
     params:
       type: object
       properties:
-        query: {type: string, description: "Gmail search query, e.g. 'from:boss newer_than:7d'"}
-        max:   {type: integer, description: "max messages (default 10)"}
+        query:      {type: string, description: "Gmail search query, e.g. 'from:boss newer_than:7d'"}
+        max:        {type: integer, description: "max messages (default 10, cap 500)"}
+        page_token: {type: string, description: "next_cursor from a previous call"}
       required: [query]
     request:
       method: GET
@@ -15,22 +23,117 @@ actions:
       query:
         q: "{{query}}"
         maxResults: "{{max}}"
+        pageToken: "{{page_token}}"
     response_extract: "$.messages"
+    response_cursor: "$.nextPageToken"
   - name: gmail_get_message
-    description: "Fetch one Gmail message's headers + body by id (from gmail_search). Read-only."
+    description: "Fetch one Gmail message's headers + body by id (from gmail_search). Use format=metadata to get headers only when the body is not needed. Read-only."
     mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.readonly]
     params:
       type: object
       properties:
-        id: {type: string, description: "message id"}
+        id:     {type: string, description: "message id"}
+        format: {type: string, description: "full (default), metadata (headers only), or minimal"}
       required: [id]
     request:
       method: GET
       url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/{{id}}"
+      query:
+        format: "{{format}}"
     response_extract: "$"
+  - name: gmail_list_threads
+    description: "List Gmail threads matching a query (ids + snippets). A thread groups a conversation; use gmail_get_thread for its messages. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.readonly]
+    params:
+      type: object
+      properties:
+        query:      {type: string, description: "Gmail search query"}
+        max:        {type: integer, description: "max threads (default 10)"}
+        page_token: {type: string, description: "next_cursor from a previous call"}
+      required: [query]
+    request:
+      method: GET
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/threads"
+      query:
+        q: "{{query}}"
+        maxResults: "{{max}}"
+        pageToken: "{{page_token}}"
+    response_extract: "$.threads"
+    response_cursor: "$.nextPageToken"
+  - name: gmail_get_thread
+    description: "Fetch every message in one Gmail thread by thread id. Use this to read a whole conversation before replying. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.readonly]
+    params:
+      type: object
+      properties:
+        thread_id: {type: string, description: "thread id from gmail_list_threads or a message's threadId"}
+        format:    {type: string, description: "full (default), metadata, or minimal"}
+      required: [thread_id]
+    request:
+      method: GET
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/threads/{{thread_id}}"
+      query:
+        format: "{{format}}"
+    response_extract: "$.messages"
+  - name: gmail_get_profile
+    description: "Get the connected mailbox's own email address plus its total message and thread counts. Use to confirm WHICH account is connected. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.readonly]
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/profile"
+    response_extract: "$"
+  - name: gmail_list_labels
+    description: "List all Gmail labels (system + user-created) with their ids. Use to resolve a label NAME to its id before gmail_modify_labels. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.readonly]
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/labels"
+    response_extract: "$.labels"
+  - name: gmail_list_drafts
+    description: "List saved Gmail drafts (ids + their message ids). Use before gmail_send_draft or gmail_update_draft. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.readonly]
+    params:
+      type: object
+      properties:
+        query:      {type: string, description: "optional Gmail search query to narrow drafts"}
+        max:        {type: integer, description: "max drafts (default 10)"}
+        page_token: {type: string, description: "next_cursor from a previous call"}
+    request:
+      method: GET
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/drafts"
+      query:
+        q: "{{query}}"
+        maxResults: "{{max}}"
+        pageToken: "{{page_token}}"
+    response_extract: "$.drafts"
+    response_cursor: "$.nextPageToken"
+  - name: gmail_get_draft
+    description: "Fetch one saved Gmail draft's full content by draft id, to review before sending. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.readonly]
+    params:
+      type: object
+      properties:
+        id: {type: string, description: "draft id from gmail_list_drafts"}
+      required: [id]
+    request:
+      method: GET
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/drafts/{{id}}"
+    response_extract: "$"
+
+  # ---- composing (writes that deliver nothing) -----------------------------
   - name: gmail_create_draft
     description: "Create a Gmail DRAFT (not sent) in the connected account. Use for 'draft/prepare an email for review'. A write, but safe — nothing is delivered."
     mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.compose]
     params:
       type: object
       properties:
@@ -43,9 +146,43 @@ actions:
       url: "https://gmail.googleapis.com/gmail/v1/users/me/drafts"
       body_builder: gmail_draft
     response_extract: "$.id"
-  - name: gmail_send_email
-    description: "SEND an email from the connected Gmail account. Use only when the user wants to actually send (not draft). Delivers real mail."
+  - name: gmail_update_draft
+    description: "Replace the contents of an existing Gmail draft. Nothing is delivered — use gmail_send_draft to actually send it."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.compose]
+    params:
+      type: object
+      properties:
+        id:      {type: string, description: "draft id to overwrite"}
+        to:      {type: string}
+        subject: {type: string}
+        body:    {type: string}
+      required: [id, to, body]
+    request:
+      method: PUT
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/drafts/{{id}}"
+      body_builder: gmail_draft
+    response_extract: "$.id"
+  - name: gmail_delete_draft
+    description: "Permanently delete a saved Gmail draft. The draft is not recoverable, but nothing was ever delivered."
     mutating: true
+    scopes: [https://www.googleapis.com/auth/gmail.compose]
+    params:
+      type: object
+      properties:
+        id: {type: string, description: "draft id"}
+      required: [id]
+    request:
+      method: DELETE
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/drafts/{{id}}"
+    response_extract: "$"
+
+  # ---- sending (irreversible, lands in someone else's inbox) ---------------
+  - name: gmail_send_email
+    description: "SEND an email from the connected Gmail account. Use only when the user wants to actually send (not draft). Delivers real mail that cannot be recalled."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/gmail.send]
     params:
       type: object
       properties:
@@ -58,31 +195,46 @@ actions:
       url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
       body_builder: gmail_rfc822
     response_extract: "$.id"
-  - name: gmail_list_labels
-    description: "List all Gmail labels (system + user-created) with their ids. Use to resolve a label NAME to its id before gmail_modify_labels. Read-only."
-    mutating: false
-    params: {type: object, properties: {}}
-    request:
-      method: GET
-      url: "https://gmail.googleapis.com/gmail/v1/users/me/labels"
-    response_extract: "$.labels"
-  - name: gmail_list_threads
-    description: "List Gmail threads matching a query (ids + snippets). Read-only."
-    mutating: false
+  - name: gmail_reply_to_thread
+    description: "Send a reply within an existing Gmail thread (keeps it in-thread). Delivers real mail that cannot be recalled. Args: thread_id, to, subject, body."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/gmail.send]
     params:
       type: object
       properties:
-        query: {type: string, description: "Gmail search query"}
-        max:   {type: integer, description: "max threads (default 10)"}
-      required: [query]
+        thread_id: {type: string}
+        to:        {type: string}
+        subject:   {type: string}
+        body:      {type: string}
+      required: [thread_id, to, body]
     request:
-      method: GET
-      url: "https://gmail.googleapis.com/gmail/v1/users/me/threads"
-      query: {q: "{{query}}", maxResults: "{{max}}"}
-    response_extract: "$.threads"
+      method: POST
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+      body_builder: gmail_reply
+    response_extract: "$.id"
+  - name: gmail_send_draft
+    description: "Send an already-saved Gmail draft by its draft id. Delivers real mail that cannot be recalled. Review with gmail_get_draft first."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/gmail.send]
+    params:
+      type: object
+      properties:
+        id: {type: string, description: "draft id from gmail_list_drafts"}
+      required: [id]
+    request:
+      method: POST
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/drafts/send"
+      body:
+        id: "{{id}}"
+    response_extract: "$.id"
+
+  # ---- organising the mailbox ---------------------------------------------
   - name: gmail_create_label
     description: "Create a new Gmail label. A write (creates a label), safe — nothing is sent."
     mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.modify]
     params:
       type: object
       properties:
@@ -96,9 +248,39 @@ actions:
         labelListVisibility: "labelShow"
         messageListVisibility: "show"
     response_extract: "$"
-  - name: gmail_modify_labels
-    description: "Add and/or remove label ids on a Gmail message. Resolve names to ids with gmail_list_labels first. A write to the user's own mailbox; not a send."
+  - name: gmail_update_label
+    description: "Rename an existing Gmail label. Resolve the label id with gmail_list_labels first. Safe — nothing is sent."
     mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.modify]
+    params:
+      type: object
+      properties:
+        id:   {type: string, description: "label id"}
+        name: {type: string, description: "new label name"}
+      required: [id, name]
+    request:
+      method: PATCH
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/labels/{{id}}"
+      body:
+        name: "{{name}}"
+    response_extract: "$"
+  - name: gmail_delete_label
+    description: "Delete a Gmail label and remove it from every message that carried it. The messages themselves are kept. Mutating and irreversible."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/gmail.modify]
+    params:
+      type: object
+      properties:
+        id: {type: string, description: "label id from gmail_list_labels"}
+      required: [id]
+    request:
+      method: DELETE
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/labels/{{id}}"
+    response_extract: "$"
+  - name: gmail_modify_labels
+    description: "Add and/or remove label ids on ONE Gmail message. Resolve names to ids with gmail_list_labels. Removing UNREAD marks it read; removing INBOX archives it. A write to the user's own mailbox; not a send."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.modify]
     params:
       type: object
       properties:
@@ -113,9 +295,47 @@ actions:
         addLabelIds:    "{{add}}"
         removeLabelIds: "{{remove}}"
     response_extract: "$"
+  - name: gmail_batch_modify_labels
+    description: "Add and/or remove label ids on MANY Gmail messages in one call (up to 1000 ids). Far cheaper than looping gmail_modify_labels — use this to bulk-archive or bulk-mark-read."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.modify]
+    params:
+      type: object
+      properties:
+        ids:    {type: array, items: {type: string}, description: "message ids"}
+        add:    {type: array, items: {type: string}, description: "label ids to add"}
+        remove: {type: array, items: {type: string}, description: "label ids to remove"}
+      required: [ids]
+    request:
+      method: POST
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/batchModify"
+      body:
+        ids:            "{{ids}}"
+        addLabelIds:    "{{add}}"
+        removeLabelIds: "{{remove}}"
+    response_extract: "$"
+  - name: gmail_modify_thread_labels
+    description: "Add and/or remove label ids on every message of a Gmail THREAD at once. Use to archive or label a whole conversation. A write to the user's own mailbox; not a send."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.modify]
+    params:
+      type: object
+      properties:
+        thread_id: {type: string, description: "thread id"}
+        add:       {type: array, items: {type: string}, description: "label ids to add"}
+        remove:    {type: array, items: {type: string}, description: "label ids to remove"}
+      required: [thread_id]
+    request:
+      method: POST
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/threads/{{thread_id}}/modify"
+      body:
+        addLabelIds:    "{{add}}"
+        removeLabelIds: "{{remove}}"
+    response_extract: "$"
   - name: gmail_move_to_trash
-    description: "Move a Gmail message to Trash (recoverable). Use for 'delete/archive this email'. Mutating."
+    description: "Move a Gmail message to Trash (recoverable for 30 days). Use for 'delete this email'. Mutating."
     mutating: true
+    scopes: [https://www.googleapis.com/auth/gmail.modify]
     params:
       type: object
       properties:
@@ -125,19 +345,135 @@ actions:
       method: POST
       url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/{{id}}/trash"
     response_extract: "$"
-  - name: gmail_reply_to_thread
-    description: "Send a reply within an existing Gmail thread (keeps it in-thread). Delivers real mail. Args: thread_id, to, subject, body."
+  - name: gmail_untrash_message
+    description: "Restore a Gmail message from Trash back to the mailbox. The inverse of gmail_move_to_trash."
     mutating: true
+    scopes: [https://www.googleapis.com/auth/gmail.modify]
     params:
       type: object
       properties:
-        thread_id: {type: string}
-        to:        {type: string}
-        subject:   {type: string}
-        body:      {type: string}
-      required: [thread_id, to, body]
+        id: {type: string, description: "message id"}
+      required: [id]
     request:
       method: POST
-      url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
-      body_builder: gmail_reply
-    response_extract: "$.id"
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/{{id}}/untrash"
+    response_extract: "$"
+  - name: gmail_trash_thread
+    description: "Move an entire Gmail thread to Trash (recoverable for 30 days). Use for 'delete this whole conversation'. Mutating."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/gmail.modify]
+    params:
+      type: object
+      properties:
+        thread_id: {type: string, description: "thread id"}
+      required: [thread_id]
+    request:
+      method: POST
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/threads/{{thread_id}}/trash"
+    response_extract: "$"
+  - name: gmail_delete_message_permanently
+    description: "PERMANENTLY delete one Gmail message, bypassing Trash. It cannot be recovered by anyone. Prefer gmail_move_to_trash unless the user explicitly asked for permanent deletion."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/gmail.modify]
+    params:
+      type: object
+      properties:
+        id: {type: string, description: "message id"}
+      required: [id]
+    request:
+      method: DELETE
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/{{id}}"
+    response_extract: "$"
+
+  # ---- mailbox settings ----------------------------------------------------
+  # These need gmail.settings.basic. A connection made before that scope was added
+  # holds no grant for it; Execute's scope pre-check says so by name rather than
+  # letting Google answer 403 with nothing actionable in it.
+  - name: gmail_list_filters
+    description: "List the mailbox's automatic filters (criteria + the actions they apply). Use to explain or audit why mail is being labelled or archived. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.settings.basic]
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/settings/filters"
+    response_extract: "$.filter"
+  - name: gmail_create_filter
+    description: "Create a Gmail filter that automatically labels, archives or trashes matching future mail. Resolve label ids with gmail_list_labels first. Applies only to mail arriving after it is created."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.settings.basic]
+    params:
+      type: object
+      properties:
+        from:       {type: string, description: "match sender address"}
+        to:         {type: string, description: "match recipient address"}
+        subject:    {type: string, description: "match subject text"}
+        query:      {type: string, description: "match a full Gmail search query"}
+        add_label:  {type: string, description: "label id to apply (from gmail_list_labels)"}
+        remove_label: {type: string, description: "label id to remove, e.g. INBOX to auto-archive"}
+      required: [add_label]
+    request:
+      method: POST
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/settings/filters"
+      body:
+        criteria:
+          from:    "{{from}}"
+          to:      "{{to}}"
+          subject: "{{subject}}"
+          query:   "{{query}}"
+        action:
+          addLabelIds:    ["{{add_label}}"]
+          removeLabelIds: ["{{remove_label}}"]
+    response_extract: "$"
+  - name: gmail_delete_filter
+    description: "Delete one Gmail filter by id (from gmail_list_filters). Mail already processed by it is unaffected."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/gmail.settings.basic]
+    params:
+      type: object
+      properties:
+        id: {type: string, description: "filter id"}
+      required: [id]
+    request:
+      method: DELETE
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/settings/filters/{{id}}"
+    response_extract: "$"
+  - name: gmail_get_vacation
+    description: "Read the mailbox's vacation auto-responder settings — whether it is on, its subject and message, and its date range. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.settings.basic]
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/settings/vacation"
+    response_extract: "$"
+  - name: gmail_set_vacation
+    description: "Turn the vacation auto-responder on or off and set its subject/message. While enabled this sends automatic replies to real people, so confirm the wording with the user first."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/gmail.settings.basic]
+    params:
+      type: object
+      properties:
+        enabled: {type: boolean, description: "true to turn the auto-responder on"}
+        subject: {type: string, description: "auto-reply subject"}
+        body:    {type: string, description: "auto-reply body (plain text)"}
+        restrict_to_contacts: {type: boolean, description: "only reply to people in Contacts"}
+      required: [enabled]
+    request:
+      method: PUT
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/settings/vacation"
+      body:
+        enableAutoReply:    "{{enabled}}"
+        responseSubject:    "{{subject}}"
+        responseBodyPlainText: "{{body}}"
+        restrictToContacts: "{{restrict_to_contacts}}"
+    response_extract: "$"
+  - name: gmail_list_send_as
+    description: "List the addresses this mailbox can send as (the primary address plus any verified aliases), with their display names and signatures. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/gmail.settings.basic]
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs"
+    response_extract: "$.sendAs"

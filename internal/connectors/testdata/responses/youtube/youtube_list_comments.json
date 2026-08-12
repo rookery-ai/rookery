@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "id": "Ugx1",
+      "snippet": {
+        "topLevelComment": {
+          "snippet": {
+            "textDisplay": "Great video",
+            "authorDisplayName": "Sam"
+          }
+        }
+      }
+    }
+  ],
+  "nextPageToken": "CAoQAA"
+}
