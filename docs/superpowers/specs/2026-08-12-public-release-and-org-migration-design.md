@@ -71,6 +71,17 @@ website needs a version to name.
 (which become the squashed commit on `main`), branch names, and local commit
 messages.
 
+**release-please authenticates as an organization-owned GitHub App**, not as a
+personal access token. GitHub has no org-owned PAT — every PAT belongs to a user
+account, and a fine-grained one merely *scopes* to an organization while still
+being the user's, expiring on a calendar and dying if they leave. An App is owned
+by the organization outright: it holds the permissions, the workflow mints a
+short-lived installation token per run via `actions/create-github-app-token`, and
+no long-lived credential is stored anywhere. Release PRs are authored by the bot
+identity rather than by a person, which is also the correct look on a public
+repository. The App ID and private key are stored **once as organization
+secrets**, shared with both repositories, so rotation happens in one place.
+
 ## Findings that shape the plan
 
 **No credentials exist anywhere.** All 153 `rookery` PR bodies, all 12
@@ -110,11 +121,19 @@ protection, making this a net gain of the migration.
 
 **GitHub's push protection does not read commit messages or pull request
 descriptions.** It scans file content only. Covering those two surfaces requires
-mechanisms GitHub does not provide (A7).
+mechanisms GitHub does not provide (A8).
 
-**Actions secrets do not survive a repository transfer.** `RELEASE_PLEASE_TOKEN`
-must be re-added in Phase B — and now in `rookery-web` as well, which needs its
-own copy for release-please.
+**Actions secrets do not survive a repository transfer**, and the existing one is
+being replaced regardless. `ilijad1/rookery` currently holds a single secret,
+`RELEASE_PLEASE_TOKEN`, created 2026-07-28; `ilijad1/rookery-web` holds none. Both
+are superseded by the organization-owned App above, so the migration does not
+carry the old token forward — it is deleted, not re-added.
+
+The reason release-please cannot simply use the built-in `GITHUB_TOKEN` still
+holds and is worth restating, since it is the sort of thing that gets "simplified"
+later: a pull request opened with `GITHUB_TOKEN` does not trigger other workflows,
+so merging the release PR would create a tag that `release.yml` never sees,
+producing a **tag with no artifacts attached and no error explaining why**.
 
 **Deleting all releases means `curl | sh` has nothing to download** until v0.1.0
 is cut under the organization. This reorders Phase C: publish, release, *then*
@@ -287,11 +306,38 @@ merging. It gains:
 - a PR workflow running `astro check` and `astro build`
 - the conventional-commit title and branch-name checks from A8
 - `release-please-config.json` + `.release-please-manifest.json` seeded at
-  `0.0.0`, and a `release-please.yml`
+  `0.0.0`, and a `release-please.yml` authenticating as the org App
 - a `release.yml` that builds the site and attaches the built `dist` as a release
   asset, so a deploy script can fetch a *version* rather than checking out a branch
 
-### A10. Documentation sync
+### A10. Switch release-please to the org App
+
+Both `release-please.yml` workflows mint an installation token instead of reading
+a stored PAT:
+
+```yaml
+- uses: actions/create-github-app-token@v2
+  id: app-token
+  with:
+    app-id: ${{ secrets.ROOKERY_APP_ID }}
+    private-key: ${{ secrets.ROOKERY_APP_PRIVATE_KEY }}
+- uses: googleapis/release-please-action@v4
+  with:
+    token: ${{ steps.app-token.outputs.token }}
+    config-file: release-please-config.json
+    manifest-file: .release-please-manifest.json
+```
+
+The inline comment explaining why this is not `GITHUB_TOKEN` stays — the reasoning
+survives the change of mechanism, and `docs/ci-setup.md` is rewritten to describe
+the App rather than the PAT.
+
+The old `RELEASE_PLEASE_TOKEN` secret is deleted from `rookery` after the first
+successful App-authenticated run, not before: deleting it while it is still the
+only working credential would leave no path to cut a release if the App setup
+needs a second attempt.
+
+### A11. Documentation sync
 
 The `docs-sync` skill runs before each of these PRs opens, as the project's rules
 require: this work touches `README.md`, `CLAUDE.md`, the landing page and the
@@ -389,9 +435,27 @@ files and the profile README.
   returns **200 with a full org body**, and the field reads back `false`. It is
   silently ignored, so a script checking only the HTTP status reports a success
   that never happened. Web UI only, and it fails there if any member lacks 2FA.
-- **`RELEASE_PLEASE_TOKEN` in both repositories.** Actions secrets do not survive
-  a transfer, and `rookery-web` now needs its own. The value can be *set* via API;
-  only the owner can mint the PAT.
+- **Create the release GitHub App**, owned by `rookery-ai`. GitHub Apps cannot be
+  created through the API at all — it is the web UI or the app-manifest browser
+  flow. Settings, so the step is mechanical:
+
+  | Field | Value |
+  |---|---|
+  | Owner | `rookery-ai` |
+  | Name | e.g. `Rookery Release` (must be globally unique) |
+  | Homepage URL | `https://rookery.cloud` |
+  | Webhook | **uncheck Active** — the App is never called, it only issues tokens |
+  | Repository permission: Contents | Read and write (create the tag, commit the changelog) |
+  | Repository permission: Pull requests | Read and write (open and update the release PR) |
+  | Where can this be installed | Only on this account |
+
+  Then install it on `rookery` and `rookery-web`, generate a private key, and
+  store `ROOKERY_APP_ID` and `ROOKERY_APP_PRIVATE_KEY` as **organization**
+  secrets with selected-repository access to both.
+
+  The private key is a `.pem` downloaded once and never shown again; paste it
+  directly into GitHub rather than routing it through any other tool. The App ID
+  is not secret, but lives beside the key for symmetry.
 - **`delete:packages` scope or the web UI**, for A2.
 
 ### B6. Post-transfer verification
@@ -403,10 +467,13 @@ defaults; zero releases, zero tags and zero packages present.
 
 Two checks are weaker than they look and are recorded as such:
 
-- **`gh secret list` proves a secret exists, not that it works.** A classic PAT
-  scoped to `ilijad1/rookery` may not authorize `rookery-ai/rookery` even if the
-  value transferred intact. The only real verification is a release-please run,
-  which does not happen until the next push to `main`.
+- **A present secret is not a working credential.** `gh secret list` shows
+  `ROOKERY_APP_ID` and `ROOKERY_APP_PRIVATE_KEY` exist; it cannot show that the
+  App is installed on the repository, that its permissions are right, or that the
+  key matches. The only real verification is a release-please run, which does not
+  happen until the next push to `main`. A common failure here is an App created
+  but never *installed* on one of the two repositories — the token mint then fails
+  with a permissions error that reads like a bad key.
 - **The container image is verified by an anonymous pull after Phase C**, not by
   its presence in an authenticated API listing.
 
@@ -450,8 +517,9 @@ the repository has no tags. This is the supported cold-start path, but it is wor
 confirming the first release PR proposes `0.1.0` and not something else before
 merging it.
 
-**`RELEASE_PLEASE_TOKEN` scope after transfer.** See B6 — unverifiable until a
-real run.
+**The App is unverifiable until a real run.** See B6. The old
+`RELEASE_PLEASE_TOKEN` is deliberately retained until the App is proven, so there
+is always one working path to cut a release.
 
 **The website is unbuilt and undeployed.** `rookery.cloud` does not resolve, so
 the `/install.sh` and `/install.ps1` redirects are inert until deployment. This is
