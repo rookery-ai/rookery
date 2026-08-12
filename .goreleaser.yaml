@@ -39,9 +39,9 @@ archives:
 nfpms:
   - id: packages
     package_name: rookery
-    vendor: Ilija Dimitrovski
-    homepage: https://github.com/ilijad1/rookery
-    maintainer: Ilija Dimitrovski <ilija.dimitrovski@kroute.ai>
+    vendor: Rookery
+    homepage: https://github.com/rookery-ai/rookery
+    maintainer: Rookery <security@rookery.cloud>
     description: |
       Multi-workspace AI agents control plane with a built-in knowledge base,
       connector layer and scheduler.
