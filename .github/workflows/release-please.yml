@@ -19,12 +19,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      # RELEASE_PLEASE_TOKEN rather than GITHUB_TOKEN: a pull request opened
-      # with GITHUB_TOKEN does not trigger other workflows, so merging the
-      # release PR would create a tag that release.yml never sees and no
-      # artifacts would be produced. See docs/ci-setup.md.
+      # An organization-owned GitHub App, for two separate reasons — both easy
+      # to "simplify" away, and each breaks something different:
+      #
+      #   NOT GITHUB_TOKEN: a pull request opened with it does not trigger other
+      #   workflows, so merging the release PR would create a tag that
+      #   release.yml never sees — a tag with no artifacts attached and no error
+      #   explaining why.
+      #
+      #   NOT a PAT: GitHub has no org-owned PAT. Every PAT belongs to a user
+      #   account; a fine-grained one merely SCOPES to an org while still being
+      #   that person's, expiring on a calendar and dying if they leave. The App
+      #   is owned by the org and mints a short-lived installation token per run.
+      #
+      # See docs/ci-setup.md §1.
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.ROOKERY_APP_ID }}
+          private-key: ${{ secrets.ROOKERY_APP_PRIVATE_KEY }}
       - uses: googleapis/release-please-action@v4
         with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
