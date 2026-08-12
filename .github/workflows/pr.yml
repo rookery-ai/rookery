@@ -72,19 +72,28 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
-      # The same patterns.txt the local commit-msg hook uses, so the two cannot
-      # drift. GitHub's push protection scans file content only and never reads
-      # a PR description.
+      # The same patterns-block.txt/patterns-warn.txt the local commit-msg hook
+      # uses, so the two cannot drift. GitHub's push protection scans file
+      # content only and never reads a PR description. See .githooks/README.md
+      # for why the two files carry different severities.
       - name: Scan the PR description
         env:
           BODY: ${{ github.event.pull_request.body }}
         run: |
           printf '%s\n' "$BODY" > /tmp/pr-body.txt
-          if grep -nEf .githooks/patterns.txt /tmp/pr-body.txt; then
-            echo "::error::The PR description contains what looks like a credential or a local-environment path."
+
+          if grep -nEf .githooks/patterns-block.txt /tmp/pr-body.txt; then
+            echo "::error::The PR description contains what looks like a credential."
             echo "Edit the description. Note that GitHub retains and displays edit history, so a real credential must be ROTATED, not merely removed."
             exit 1
           fi
+
+          warn_hits=$(grep -nEf .githooks/patterns-warn.txt /tmp/pr-body.txt || true)
+          if [ -n "$warn_hits" ]; then
+            echo "::warning::The PR description contains what looks like a local-environment path or internal address (advisory only, not blocking):"
+            printf '%s\n' "$warn_hits"
+          fi
+
           echo "ok"
 
   go:
