@@ -30,8 +30,32 @@ anywhere, including in these same files, is still reported.
 
 regexTarget is omitted deliberately — it defaults to the extracted secret,
 which is exactly what these patterns match.
+
+The remaining three entries were found by a FULL-HISTORY scan (998 commits)
+run before the repository went public, which reported 15 findings — all of
+them these three literals, repeated across commits. Each is matched exactly,
+never by path, so a real credential in the same file is still reported:
+
+  * `sk_live_supersecret` is a deliberately fake value in
+    web/ui/src/pages/secrets/secrets.test.tsx. The test's whole purpose is to
+    assert that an entered secret NEVER reaches the DOM, so the literal has to
+    look like a Stripe key — gitleaks' stripe-access-token rule matches the
+    `sk_live_` prefix. Renaming it to dodge the scanner would weaken the test's
+    intent; allowlisting the exact string does not.
+
+  * `b26v89c19zqg8o3fpds` is an X (Twitter) API PAGINATION CURSOR in vendored
+    response fixtures under internal/connectors/testdata/responses/x/. A cursor
+    is an opaque page marker, not a credential — it grants nothing and expires.
+    generic-api-key fires on its entropy inside a `next_token` field.
+
+  * `abcd1234efgh5678` appears in docs/superpowers/plans/ as the sample input
+    for a commit-msg hook test that PROVES the hook rejects credential-shaped
+    strings. The scanner catching it is the demonstration working.
 """
 regexes = [
   '''^c\.S3\.EncryptedSecretKey$''',
   '''^cfg\.S3\.EncryptedSecretKey$''',
+  '''^sk_live_supersecret$''',
+  '''^b26v89c19zqg8o3fpds$''',
+  '''^abcd1234efgh5678$''',
 ]
