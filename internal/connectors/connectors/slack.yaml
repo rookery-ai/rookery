@@ -146,3 +146,91 @@ actions:
         channel: "{{channel}}"
         users: "{{users}}"
     response_extract: "$.channel"
+  - name: slack_update_message
+    description: "Edit a message the connected app previously posted. channel and ts identify it — ts is the message timestamp returned by slack_send_message. Everyone in the channel sees the edit."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        channel: {type: string, description: "channel id"}
+        ts:      {type: string, description: "message timestamp from slack_send_message"}
+        text:    {type: string, description: "replacement text"}
+      required: [channel, ts, text]
+    request:
+      method: POST
+      url: "https://slack.com/api/chat.update"
+      body:
+        channel: "{{channel}}"
+        ts: "{{ts}}"
+        text: "{{text}}"
+    response_extract: "$"
+  - name: slack_delete_message
+    description: "Delete a message the connected app posted. Irreversible and visible — the message vanishes for everyone."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        channel: {type: string, description: "channel id"}
+        ts:      {type: string, description: "message timestamp"}
+      required: [channel, ts]
+    request:
+      method: POST
+      url: "https://slack.com/api/chat.delete"
+      body:
+        channel: "{{channel}}"
+        ts: "{{ts}}"
+    response_extract: "$"
+  - name: slack_schedule_message
+    description: "Schedule a message to post later. post_at is a Unix timestamp up to 120 days ahead. It WILL post publicly at that time — there is no draft state."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        channel: {type: string, description: "channel id"}
+        text:    {type: string}
+        post_at: {type: integer, description: "Unix timestamp, up to 120 days ahead"}
+      required: [channel, text, post_at]
+    request:
+      method: POST
+      url: "https://slack.com/api/chat.scheduleMessage"
+      body:
+        channel: "{{channel}}"
+        text: "{{text}}"
+        post_at: "{{post_at}}"
+    response_extract: "$"
+  - name: slack_set_channel_topic
+    description: "Set a channel's topic. Visible to everyone in the channel and recorded in its history."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        channel: {type: string, description: "channel id"}
+        topic:   {type: string}
+      required: [channel, topic]
+    request:
+      method: POST
+      url: "https://slack.com/api/conversations.setTopic"
+      body:
+        channel: "{{channel}}"
+        topic: "{{topic}}"
+    response_extract: "$"
+  - name: slack_get_permalink
+    description: "Get a shareable permalink to one Slack message, so it can be quoted elsewhere. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        channel:    {type: string, description: "channel id"}
+        message_ts: {type: string, description: "message timestamp"}
+      required: [channel, message_ts]
+    request:
+      method: GET
+      url: "https://slack.com/api/chat.getPermalink"
+      query:
+        channel: "{{channel}}"
+        message_ts: "{{message_ts}}"
+    response_extract: "$"

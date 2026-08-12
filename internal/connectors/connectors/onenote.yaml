@@ -35,23 +35,42 @@ actions:
       query:
         $top: "{{top}}"
     response_extract: "$.value"
+  # Two actions rather than one with an optional section, because the difference is
+  # the URL PATH: an absent {{section_id}} would render ".../sections//pages" and
+  # 404, so "omit for every page" could never have worked.
   - name: onenote_list_pages
-    description: "List pages, newest first — across the whole account, or within one section if section_id is given. Returns each page's title and links, NOT its content. Read-only."
+    description: "List pages across the WHOLE account, newest first. Returns each page's title and links, NOT its content. Use onenote_list_section_pages to narrow to one section. Read-only."
     mutating: false
     scopes: [https://graph.microsoft.com/Notes.ReadWrite.All]
     params:
       type: object
       properties:
-        section_id: {type: string, description: "limit to one section; omit for every page"}
-        top:        {type: integer, description: "max pages (default 25)"}
-        search:     {type: string, description: "OData filter, e.g. contains(title,'budget')"}
+        top:    {type: integer, description: "max pages (default 25)"}
+        search: {type: string, description: "OData filter, e.g. contains(title,'budget')"}
       required: []
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/onenote/pages"
+      query:
+        $top: "{{top}}"
+        $filter: "{{search}}"
+        $orderby: "lastModifiedDateTime desc"
+    response_extract: "$.value"
+  - name: onenote_list_section_pages
+    description: "List the pages inside ONE OneNote section, newest first. Resolve the section id with onenote_list_sections. Returns titles and links, not page content. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Notes.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        section_id: {type: string}
+        top:        {type: integer, description: "max pages (default 25)"}
+      required: [section_id]
     request:
       method: GET
       url: "https://graph.microsoft.com/v1.0/me/onenote/sections/{{section_id}}/pages"
       query:
         $top: "{{top}}"
-        $filter: "{{search}}"
         $orderby: "lastModifiedDateTime desc"
     response_extract: "$.value"
   - name: onenote_create_page

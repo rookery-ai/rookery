@@ -1,0 +1,18 @@
+{
+  "object": "list",
+  "results": [
+    {
+      "object": "block",
+      "id": "9f8e7d6c-1111",
+      "type": "paragraph",
+      "paragraph": {
+        "rich_text": [
+          {
+            "plain_text": "Shipping today"
+          }
+        ]
+      }
+    }
+  ],
+  "has_more": false
+}

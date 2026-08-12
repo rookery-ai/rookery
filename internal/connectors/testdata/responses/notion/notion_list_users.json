@@ -1,0 +1,15 @@
+{
+  "object": "list",
+  "results": [
+    {
+      "object": "user",
+      "id": "u-1111",
+      "name": "Ilija",
+      "type": "person",
+      "person": {
+        "email": "ilija@example.com"
+      }
+    }
+  ],
+  "has_more": false
+}

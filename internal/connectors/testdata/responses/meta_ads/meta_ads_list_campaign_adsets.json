@@ -1,0 +1,18 @@
+{
+  "data": [
+    {
+      "id": "23851",
+      "name": "Retargeting — EU",
+      "status": "ACTIVE",
+      "daily_budget": "2500",
+      "optimization_goal": "OFFSITE_CONVERSIONS",
+      "campaign_id": "23850"
+    }
+  ],
+  "paging": {
+    "cursors": {
+      "before": "MAZDZD",
+      "after": "NjQZD"
+    }
+  }
+}

@@ -78,3 +78,254 @@ actions:
       body_json:
         body: "{{body}}"
     response_extract: "$.html_url"
+  - name: github_list_repos
+    description: "List the repositories the connected account can access, most recently pushed first. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        per_page: {type: integer, description: "max repos (default 30)"}
+        page:     {type: integer, description: "1-based page number"}
+        sort:     {type: string, description: "pushed | created | updated | full_name"}
+    request:
+      method: GET
+      url: "https://api.github.com/user/repos"
+      query:
+        per_page: "{{per_page}}"
+        page: "{{page}}"
+        sort: "{{sort}}"
+    response_extract: "$"
+  - name: github_get_repo
+    description: "Get one repository's description, default branch, star count, open issue count and topics. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        owner: {type: string}
+        repo:  {type: string}
+      required: [owner, repo]
+    request:
+      method: GET
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}"
+    response_extract: "$"
+  - name: github_list_pull_requests
+    description: "List a repository's pull requests. state is open (default), closed or all. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        owner:    {type: string}
+        repo:     {type: string}
+        state:    {type: string, description: "open | closed | all"}
+        per_page: {type: integer, description: "max PRs (default 30)"}
+        page:     {type: integer, description: "1-based page number"}
+      required: [owner, repo]
+    request:
+      method: GET
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}/pulls"
+      query:
+        state: "{{state}}"
+        per_page: "{{per_page}}"
+        page: "{{page}}"
+    response_extract: "$"
+  - name: github_get_pull_request
+    description: "Get one pull request's title, body, branches, mergeable state and review status by number. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        owner:  {type: string}
+        repo:   {type: string}
+        number: {type: integer, description: "PR number"}
+      required: [owner, repo, number]
+    request:
+      method: GET
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}/pulls/{{number}}"
+    response_extract: "$"
+  - name: github_list_pr_files
+    description: "List the files a pull request changes, with per-file additions, deletions and patch text. Use to review a PR without cloning. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        owner:    {type: string}
+        repo:     {type: string}
+        number:   {type: integer, description: "PR number"}
+        per_page: {type: integer, description: "max files (default 30) — patches are large, keep this small"}
+      required: [owner, repo, number]
+    request:
+      method: GET
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}/pulls/{{number}}/files"
+      query:
+        per_page: "{{per_page}}"
+    response_extract: "$"
+  - name: github_create_pull_request
+    description: "Open a pull request from head into base. Set draft=true to open it as a draft. This is visible to everyone with repository access."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        owner: {type: string}
+        repo:  {type: string}
+        title: {type: string}
+        head:  {type: string, description: "the branch with the changes"}
+        base:  {type: string, description: "the branch to merge into, e.g. main"}
+        body:  {type: string, description: "PR description, markdown"}
+        draft: {type: boolean, description: "open as a draft"}
+      required: [owner, repo, title, head, base]
+    request:
+      method: POST
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}/pulls"
+      body:
+        title: "{{title}}"
+        head: "{{head}}"
+        base: "{{base}}"
+        body: "{{body}}"
+        draft: "{{draft}}"
+    response_extract: "$"
+  - name: github_list_commits
+    description: "List a repository's commits, newest first, optionally on one branch or path. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        owner:    {type: string}
+        repo:     {type: string}
+        sha:      {type: string, description: "branch name or commit sha to start from"}
+        path:     {type: string, description: "only commits touching this path"}
+        per_page: {type: integer, description: "max commits (default 30)"}
+      required: [owner, repo]
+    request:
+      method: GET
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}/commits"
+      query:
+        sha: "{{sha}}"
+        path: "{{path}}"
+        per_page: "{{per_page}}"
+    response_extract: "$"
+  - name: github_list_branches
+    description: "List a repository's branches and whether each is protected. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        owner:    {type: string}
+        repo:     {type: string}
+        per_page: {type: integer, description: "max branches (default 30)"}
+      required: [owner, repo]
+    request:
+      method: GET
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}/branches"
+      query:
+        per_page: "{{per_page}}"
+    response_extract: "$"
+  - name: github_update_issue
+    description: "Change an issue's title, body or state. Set state='closed' to close it and 'open' to reopen. Visible to everyone with repository access."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        owner:  {type: string}
+        repo:   {type: string}
+        number: {type: integer, description: "issue number"}
+        title:  {type: string}
+        body:   {type: string}
+        state:  {type: string, description: "open | closed"}
+      required: [owner, repo, number]
+    request:
+      method: PATCH
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}/issues/{{number}}"
+      body:
+        title: "{{title}}"
+        body: "{{body}}"
+        state: "{{state}}"
+    response_extract: "$"
+  - name: github_add_labels
+    description: "Add labels to an issue or pull request. Labels that do not exist on the repository are created automatically, so check the spelling."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        owner:  {type: string}
+        repo:   {type: string}
+        number: {type: integer, description: "issue or PR number"}
+        labels: {type: array, items: {type: string}}
+      required: [owner, repo, number, labels]
+    request:
+      method: POST
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}/issues/{{number}}/labels"
+      body:
+        labels: "{{labels}}"
+    response_extract: "$"
+  - name: github_list_issue_comments
+    description: "List the comments on one issue or pull request, oldest first. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        owner:    {type: string}
+        repo:     {type: string}
+        number:   {type: integer, description: "issue or PR number"}
+        per_page: {type: integer, description: "max comments (default 30)"}
+      required: [owner, repo, number]
+    request:
+      method: GET
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}/issues/{{number}}/comments"
+      query:
+        per_page: "{{per_page}}"
+    response_extract: "$"
+  - name: github_list_workflow_runs
+    description: "List a repository's GitHub Actions runs with their status and conclusion. The action for 'is CI green'. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        owner:    {type: string}
+        repo:     {type: string}
+        branch:   {type: string, description: "only runs on this branch"}
+        status:   {type: string, description: "queued | in_progress | completed | failure | success"}
+        per_page: {type: integer, description: "max runs (default 20)"}
+      required: [owner, repo]
+    request:
+      method: GET
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}/actions/runs"
+      query:
+        branch: "{{branch}}"
+        status: "{{status}}"
+        per_page: "{{per_page}}"
+    response_extract: "$.workflow_runs"
+  - name: github_list_releases
+    description: "List a repository's releases with their tags, names and publication dates. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        owner:    {type: string}
+        repo:     {type: string}
+        per_page: {type: integer, description: "max releases (default 10)"}
+      required: [owner, repo]
+    request:
+      method: GET
+      url: "https://api.github.com/repos/{{owner}}/{{repo}}/releases"
+      query:
+        per_page: "{{per_page}}"
+    response_extract: "$"
+  - name: github_search_code
+    description: "Search code across GitHub using its code-search syntax, e.g. 'repo:owner/name addClass'. Read-only. This endpoint is rate-limited far more tightly than the rest of the API."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query:    {type: string, description: "GitHub code search query"}
+        per_page: {type: integer, description: "max results (default 20)"}
+      required: [query]
+    request:
+      method: GET
+      url: "https://api.github.com/search/code"
+      query:
+        q: "{{query}}"
+        per_page: "{{per_page}}"
+    response_extract: "$.items"

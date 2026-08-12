@@ -194,6 +194,7 @@ var providersRequiringFixtures = []string{
 	"bluesky", "linkedin", "tiktok",
 	"google_ads", "meta_ads", "google_analytics", "google_searchconsole",
 	"google_adsense", "linkedin_ads",
+	"github", "notion", "todoist", "trello", "slack",
 }
 
 func TestFixtureCoverageOfExpandedProviders(t *testing.T) {

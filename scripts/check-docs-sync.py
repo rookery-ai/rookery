@@ -772,12 +772,26 @@ def check_provider_names() -> None:
             fail("providers", f"{label}:{line_no} names '{gone}', which is no longer a provider")
 
 
+# Providers with no vendored mark anywhere, exempted on purpose. This mirrors
+# allowNoLogo in web/logo_coverage_test.go — the two checkers guard the same
+# rendering on two surfaces, so a policy expressed in only one of them is a
+# policy that will drift.
+#
+# The policy is unchanged: vendor the real published logo or show a letter,
+# never approximate someone else's brand. Microsoft's product marks were
+# REMOVED from simple-icons; worldvectorlogo carries OneDrive, Excel and
+# OneNote but not To Do. Reusing the Outlook mark would label it as a different
+# product, and Wunderlist — its retired predecessor — is a different brand
+# again.
+ALLOW_NO_LOGO = {"microsoft_todo"}
+
+
 def _missing_logos(provider_slugs: set[str], logo_stems: set[str]) -> set[str]:
     """Providers with no logo. Deliberately ONE-DIRECTIONAL: a logo with no
     matching provider (claude.svg, cursor.svg — coder marks shown on the
     landing page, not connector providers) must never be reported. Set
     equality is NOT the contract here."""
-    return provider_slugs - logo_stems
+    return provider_slugs - logo_stems - ALLOW_NO_LOGO
 
 
 @register

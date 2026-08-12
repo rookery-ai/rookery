@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "messages": [
+    {
+      "type": "message",
+      "user": "U024BE7LH",
+      "text": "Deploy is green",
+      "ts": "1786521600.000200"
+    }
+  ],
+  "has_more": false
+}
