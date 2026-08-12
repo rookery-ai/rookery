@@ -3,6 +3,9 @@ name: PR
 on:
   pull_request:
     branches: [main]
+    # `edited` is load-bearing: without it a description that passed on open can
+    # be edited to add a credential afterwards and never be scanned again.
+    types: [opened, edited, reopened, synchronize]
 
 # A force-push should not leave the previous run burning minutes.
 concurrency:
@@ -38,6 +41,51 @@ jobs:
             build
             ci
           requireScope: false
+
+  branch-name:
+    name: Branch name
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Bot branches are exempt because neither release-please nor Dependabot
+      # lets you name its branches — without the exemption every bot PR fails
+      # permanently.
+      - name: Check branch name
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          case "$BRANCH" in
+            release-please--*|dependabot/*)
+              echo "bot branch '$BRANCH' — exempt"; exit 0 ;;
+          esac
+          if printf '%s' "$BRANCH" | grep -qE '^(feat|fix|docs|refactor|test|chore|perf|build|ci)/[a-z0-9._-]+$'; then
+            echo "ok: $BRANCH"
+          else
+            echo "::error::Branch '$BRANCH' does not match ^(feat|fix|docs|refactor|test|chore|perf|build|ci)/[a-z0-9._-]+$"
+            echo "Examples: feat/oauth-redirect-pinning, fix/slack-socket-reconnect, docs/install-notes"
+            exit 1
+          fi
+
+  pr-description:
+    name: PR description scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      # The same patterns.txt the local commit-msg hook uses, so the two cannot
+      # drift. GitHub's push protection scans file content only and never reads
+      # a PR description.
+      - name: Scan the PR description
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          printf '%s\n' "$BODY" > /tmp/pr-body.txt
+          if grep -nEf .githooks/patterns.txt /tmp/pr-body.txt; then
+            echo "::error::The PR description contains what looks like a credential or a local-environment path."
+            echo "Edit the description. Note that GitHub retains and displays edit history, so a real credential must be ROTATED, not merely removed."
+            exit 1
+          fi
+          echo "ok"
 
   go:
     name: Go build and test
