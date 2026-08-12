@@ -119,22 +119,22 @@ test("add secret: submits name+value, clears the form, shows a transient Saved c
   expect(valueInput).toHaveAttribute("type", "password");
 
   await user.type(nameInput, "STRIPE_SECRET_KEY");
-  await user.type(valueInput, "sk_live_supersecret");
+  await user.type(valueInput, "never-render-this-value");
   await user.click(screen.getByRole("button", { name: /^Add$/ }));
 
   await waitFor(() =>
     expect(calls.some((c) => c.url === "/api/v1/secrets" && c.method === "POST")).toBe(true),
   );
   const postCall = calls.find((c) => c.url === "/api/v1/secrets" && c.method === "POST")!;
-  expect(postCall.body).toEqual({ name: "STRIPE_SECRET_KEY", value: "sk_live_supersecret" });
+  expect(postCall.body).toEqual({ name: "STRIPE_SECRET_KEY", value: "never-render-this-value" });
 
   await waitFor(() => expect(nameInput.value).toBe(""));
   expect(valueInput.value).toBe("");
   expect(await screen.findByText("Saved ✓")).toBeInTheDocument();
 
   // The just-added secret's value must never appear anywhere in the DOM.
-  expect(screen.queryByText("sk_live_supersecret")).not.toBeInTheDocument();
-  expect(document.body.textContent).not.toContain("sk_live_supersecret");
+  expect(screen.queryByText("never-render-this-value")).not.toBeInTheDocument();
+  expect(document.body.textContent).not.toContain("never-render-this-value");
 
   // The new secret shows up in the list (name only).
   expect(await screen.findByText("STRIPE_SECRET_KEY")).toBeInTheDocument();
