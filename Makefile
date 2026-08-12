@@ -32,7 +32,7 @@ CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || command -v docker 2
 GOTEST_TIMEOUT ?= 900s
 
 .PHONY: ui build-go build stop start deploy restart logs status clean test \
-        ci ci-fmt ci-vet ci-test ci-cross ci-ui ci-package docker-build docker-run
+        ci ci-fmt ci-vet ci-test ci-cross ci-ui ci-package docker-build docker-run hooks
 
 ## ui: build the SPA (web/ui/dist) — requires node; run before `build`
 ui:
@@ -81,6 +81,11 @@ status:
 ## test: run the unit tests (no -race; see ci-test for the gate's version)
 test:
 	go test ./... -count=1 -timeout $(GOTEST_TIMEOUT)
+
+## hooks: install the committed git hooks (commit-msg credential + conventional-commit guard)
+hooks:
+	git config core.hooksPath .githooks
+	@echo "core.hooksPath -> .githooks"
 
 ## docs-sync-check: assert the docs agree with the source (both repos)
 docs-sync-check:

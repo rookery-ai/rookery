@@ -1,0 +1,10 @@
+[Aa][Pp][Ii][_-]?[Kk][Ee][Yy][[:space:]]*[:=][[:space:]]*[^[:space:]<{$]
+[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd][[:space:]]*[:=][[:space:]]*[^[:space:]<{$]
+[Ss][Ee][Cc][Rr][Ee][Tt][[:space:]]*[:=][[:space:]]*[^[:space:]<{$]
+sk-[A-Za-z0-9_-]{16,}
+gh[pousr]_[A-Za-z0-9]{20,}
+xox[baprs]-[A-Za-z0-9-]{10,}
+AKIA[0-9A-Z]{16}
+AIza[0-9A-Za-z_-]{20,}
+-----BEGIN [A-Z ]*PRIVATE KEY-----
+[0-9]{8,10}:[A-Za-z0-9_-]{30,}
