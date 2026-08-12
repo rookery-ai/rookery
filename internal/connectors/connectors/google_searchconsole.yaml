@@ -43,3 +43,92 @@ actions:
       method: GET
       url: "https://www.googleapis.com/webmasters/v3/sites/{{site_url|escape}}/sitemaps"
     response_extract: "$.sitemap"
+  - name: gsc_top_queries
+    description: "The search queries bringing the most clicks to a site between two dates, with impressions, CTR and average position. The report for 'what are people searching to find us'. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        site_url:   {type: string, description: "site URL from gsc_list_sites"}
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+        limit:      {type: integer, description: "max rows (default 25)"}
+      required: [site_url, start_date, end_date]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/webmasters/v3/sites/{{site_url|escape}}/searchAnalytics/query"
+      body:
+        startDate: "{{start_date}}"
+        endDate: "{{end_date}}"
+        dimensions: ["query"]
+        rowLimit: "{{limit}}"
+    response_extract: "$.rows"
+  - name: gsc_top_pages
+    description: "The pages of a site getting the most search clicks between two dates, with impressions, CTR and average position. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        site_url:   {type: string, description: "site URL from gsc_list_sites"}
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+        limit:      {type: integer, description: "max rows (default 25)"}
+      required: [site_url, start_date, end_date]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/webmasters/v3/sites/{{site_url|escape}}/searchAnalytics/query"
+      body:
+        startDate: "{{start_date}}"
+        endDate: "{{end_date}}"
+        dimensions: ["page"]
+        rowLimit: "{{limit}}"
+    response_extract: "$.rows"
+  - name: gsc_daily_clicks
+    description: "Clicks, impressions, CTR and average position per DAY for a site — the search trend line. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        site_url:   {type: string, description: "site URL from gsc_list_sites"}
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+      required: [site_url, start_date, end_date]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/webmasters/v3/sites/{{site_url|escape}}/searchAnalytics/query"
+      body:
+        startDate: "{{start_date}}"
+        endDate: "{{end_date}}"
+        dimensions: ["date"]
+        rowLimit: 400
+    response_extract: "$.rows"
+  - name: gsc_inspect_url
+    description: "Ask Google whether one URL is indexed, when it was last crawled, and whether it has mobile-usability or rich-result problems. The action for 'why isn't this page showing up'. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        site_url:     {type: string, description: "the property, from gsc_list_sites"}
+        inspect_url:  {type: string, description: "the full URL to inspect; must be inside the property"}
+      required: [site_url, inspect_url]
+    request:
+      method: POST
+      url: "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect"
+      body:
+        siteUrl: "{{site_url}}"
+        inspectionUrl: "{{inspect_url}}"
+    response_extract: "$.inspectionResult"
+  - name: gsc_submit_sitemap
+    description: "Submit or resubmit a sitemap for a site, so Google re-reads it. sitemap_url must be the sitemap's full URL. Mutating, but harmless — it only asks Google to crawl."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        site_url:    {type: string, description: "site URL from gsc_list_sites"}
+        sitemap_url: {type: string, description: "full sitemap URL, e.g. https://example.com/sitemap.xml"}
+      required: [site_url, sitemap_url]
+    request:
+      method: PUT
+      url: "https://www.googleapis.com/webmasters/v3/sites/{{site_url|escape}}/sitemaps/{{sitemap_url|escape}}"
+    response_extract: "$"

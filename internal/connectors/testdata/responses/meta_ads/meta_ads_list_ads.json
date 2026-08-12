@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "id": "23852",
+      "name": "Carousel A",
+      "status": "ACTIVE",
+      "adset_id": "23851",
+      "campaign_id": "23850",
+      "creative": {
+        "id": "23853",
+        "title": "Own your agents",
+        "body": "Self-hosted, no middleman"
+      }
+    }
+  ],
+  "paging": {
+    "cursors": {
+      "before": "MAZDZD",
+      "after": "NjQZD"
+    }
+  }
+}

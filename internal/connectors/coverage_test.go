@@ -192,6 +192,8 @@ var providersRequiringFixtures = []string{
 	"excel", "onenote", "microsoft_todo",
 	"facebook", "instagram", "threads", "x", "pinterest", "reddit", "mastodon",
 	"bluesky", "linkedin", "tiktok",
+	"google_ads", "meta_ads", "google_analytics", "google_searchconsole",
+	"google_adsense", "linkedin_ads",
 }
 
 func TestFixtureCoverageOfExpandedProviders(t *testing.T) {

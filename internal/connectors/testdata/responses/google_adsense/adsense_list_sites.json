@@ -1,0 +1,10 @@
+{
+  "sites": [
+    {
+      "name": "accounts/pub-1/sites/example.com",
+      "domain": "example.com",
+      "state": "READY",
+      "autoAdsEnabled": true
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "dimensionHeaders": [
+    {
+      "name": "country"
+    }
+  ],
+  "metricHeaders": [
+    {
+      "name": "activeUsers",
+      "type": "TYPE_INTEGER"
+    }
+  ],
+  "rows": [
+    {
+      "dimensionValues": [
+        {
+          "value": "North Macedonia"
+        }
+      ],
+      "metricValues": [
+        {
+          "value": "7"
+        }
+      ]
+    }
+  ],
+  "rowCount": 1
+}

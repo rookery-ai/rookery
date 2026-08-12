@@ -1,0 +1,20 @@
+{
+  "elements": [
+    {
+      "id": 701234,
+      "name": "Retargeting \u2014 DACH",
+      "status": "ACTIVE",
+      "type": "SPONSORED_UPDATES",
+      "campaignGroup": "urn:li:sponsoredCampaignGroup:601234",
+      "dailyBudget": {
+        "amount": "80",
+        "currencyCode": "EUR"
+      }
+    }
+  ],
+  "paging": {
+    "count": 10,
+    "start": 0,
+    "total": 1
+  }
+}

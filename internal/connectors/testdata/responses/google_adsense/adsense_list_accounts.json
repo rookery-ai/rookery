@@ -1,0 +1,12 @@
+{
+  "accounts": [
+    {
+      "name": "accounts/pub-1234567890123456",
+      "displayName": "ilija@example.com",
+      "timeZone": {
+        "id": "Europe/Skopje"
+      },
+      "currencyCode": "EUR"
+    }
+  ]
+}

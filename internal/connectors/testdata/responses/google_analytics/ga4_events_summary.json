@@ -1,0 +1,35 @@
+{
+  "dimensionHeaders": [
+    {
+      "name": "eventName"
+    }
+  ],
+  "metricHeaders": [
+    {
+      "name": "eventCount",
+      "type": "TYPE_INTEGER"
+    },
+    {
+      "name": "totalUsers",
+      "type": "TYPE_INTEGER"
+    }
+  ],
+  "rows": [
+    {
+      "dimensionValues": [
+        {
+          "value": "page_view"
+        }
+      ],
+      "metricValues": [
+        {
+          "value": "8821"
+        },
+        {
+          "value": "2104"
+        }
+      ]
+    }
+  ],
+  "rowCount": 1
+}
