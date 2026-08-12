@@ -16,7 +16,7 @@ still name the old domain, and five of them are not documentation — they are
 live outbound identifiers sent to third parties on every request.
 
 **The README no longer represents the product.** The website
-(`/home/rookie/rookery-web`) went through a full design pass and reads well: a
+(`/home/user/rookery-web`) went through a full design pass and reads well: a
 hero, a replayed designer transcript, and ten feature sections in a considered
 voice. The README is a thin bullet list written before any of that existed. The
 two describe the same product and share no structure, no ordering and no

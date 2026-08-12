@@ -37,7 +37,7 @@
 - [ ] **Step 1: Create the branch**
 
 ```bash
-cd /home/rookie/simple-agents-v2 && git checkout -b ui-redesign
+cd /home/user/simple-agents-v2 && git checkout -b ui-redesign
 ```
 
 - [ ] **Step 2: Write failing middleware tests** — `web/api_middleware_test.go`:
@@ -992,7 +992,7 @@ Register on the dash group. (Verify `db.ServiceConnection` field names — `Acco
 
 ### Task 14: Parity inventory test + docs
 
-**Files:** Create `web/api_parity_test.go`; Modify `/home/rookie/simple-agents-v2/CLAUDE.md` (routes section).
+**Files:** Create `web/api_parity_test.go`; Modify `/home/user/simple-agents-v2/CLAUDE.md` (routes section).
 
 **Interfaces:** none new — this is the merge gate from spec §12.
 

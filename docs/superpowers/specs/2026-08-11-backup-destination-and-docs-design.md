@@ -106,7 +106,7 @@ elsewhere:
 ```
 Local folder
   Snapshots are written to
-    /home/rookie/.rookery/backups
+    /home/user/.rookery/backups
   A backup on the same disk as the install is not a backup.
   Download each one and keep it somewhere else.
 ```

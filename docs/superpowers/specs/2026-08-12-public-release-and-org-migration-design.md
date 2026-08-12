@@ -47,7 +47,7 @@ re-examined once the artifact teardown removed the original objections (broken
 tags, changelog links, and cosign associations), and the answer held for a
 different and stronger reason — see *A purge would not purge* below. The binaries
 contain no credentials; the only sensitive string in them is a
-`/home/rookie/go/pkg/mod/...` build path.
+`/home/user/go/pkg/mod/...` build path.
 
 **PR history is preserved.** All 153 closed pull requests transfer with the
 repository, so their descriptions are cleaned rather than discarded.
@@ -88,9 +88,9 @@ secrets**, shared with both repositories, so rotation happens in one place.
 `rookery-web` PR bodies, and every commit message across both repositories' full
 history were scanned for credential patterns, provider key formats, and
 local-environment markers. Commit messages are clean — zero hits. Seven PR bodies
-carry local-environment noise only: `/home/rookie/rookery-web-sync`,
-`agents.rookie.lan`, and a curl example using a token literally spelled
-`INVALIDTESTTOKEN` to demonstrate an error response.
+carry local-environment noise only: a path under the developer's home directory,
+the developer's own `.lan` hostname, and a curl example using a token literally
+spelled `INVALIDTESTTOKEN` to demonstrate an error response.
 
 Editing those PR bodies is **tidying, not a security control** — GitHub retains
 and displays edit history. That is acceptable here precisely because nothing found
@@ -220,12 +220,16 @@ and feature forms. `LICENSE` (Apache-2.0) already exists.
 
 Four real identifiers appear in tracked files:
 
+Four real identifiers appear in tracked files. They are described here rather
+than quoted, because this document is itself tracked and quoting them would
+reintroduce exactly what the task removes:
+
 | Identifier | Where | Replacement |
 |---|---|---|
-| `agents.rookie.lan` | `providers/github.yaml:8` (**user-facing setup text**), `packaging/README.md`, `internal/publicurl/policy_test.go` | `rookery.example.com` |
-| `192.168.1.194` | tests, `packaging/README.md` | `192.168.1.50`, already the generic example elsewhere in the docs |
-| `/home/rookie/...` | 8 test and comment sites | `/home/user` |
-| `1843540314` (Telegram ID) | `internal/gateway/router_test.go`, `web/api_connectors_test.go` | an obviously-synthetic id |
+| The developer's own internal hostname, a `.lan` name | `providers/github.yaml:8` (**user-facing setup text**), `packaging/README.md`, `internal/publicurl/policy_test.go` | `rookery.example.com`, and a generic `agents.example.lan` wherever a reserved suffix must still be exercised |
+| The developer's LAN address, an RFC1918 `192.168.1.x` | tests, `packaging/README.md` | `192.168.1.50`, already the generic example elsewhere in the docs |
+| The developer's home directory path | 8 test and comment sites | `/home/user` |
+| The developer's real Telegram user id | `internal/gateway/router_test.go`, `web/api_connectors_test.go` | `100000001`, an obviously-synthetic id |
 
 Generic RFC1918 examples such as `http://192.168.1.10:8123` in the self-hosted
 connector YAMLs **stay** — they are correct documentation of a supported
@@ -233,7 +237,7 @@ deployment, not leakage. The distinction is whether the value is *this
 developer's* address or *an* address. Whoever executes this must not flatten it
 into "remove all private IPs."
 
-`internal/coder/smoke_test.go:16,43` hardcodes `/home/rookie/.opencode/bin/opencode`.
+`internal/coder/smoke_test.go:16,43` hardcodes `/home/user/.opencode/bin/opencode`.
 That test can only pass on one machine, so scrubbing it means fixing it to resolve
 the binary via `exec.LookPath` and skip when absent.
 
@@ -502,7 +506,7 @@ release deleted, the installers have nothing to fetch until v0.1.0 exists.
 ## Risks
 
 **The binaries remain in history and in PR refs.** Accepted deliberately: they
-hold no credentials, only a `/home/rookie/go/pkg/mod/...` build path, and no
+hold no credentials, only a `/home/user/go/pkg/mod/...` build path, and no
 available mitigation actually removes them without discarding the pull request
 history. Recorded here so nobody later reads "deleted the binaries" as "purged the
 binaries."

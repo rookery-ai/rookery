@@ -123,7 +123,7 @@ func TestDetectOOXMLByExtension(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /home/rookie/simple-agents-v2 && go test ./internal/convert/ -run TestDetect -v`
+Run: `cd /home/user/simple-agents-v2 && go test ./internal/convert/ -run TestDetect -v`
 Expected: FAIL — `no required module provides package .../internal/convert` (package does not exist yet).
 
 - [ ] **Step 3: Write the types**
@@ -1736,7 +1736,7 @@ import (
 func TestIsBlockedIP(t *testing.T) {
 	blocked := []string{
 		"127.0.0.1", "127.53.0.1", "::1",
-		"10.0.0.5", "172.16.4.1", "192.168.1.194",
+		"10.0.0.5", "172.16.4.1", "192.168.1.50",
 		"169.254.169.254", // cloud metadata
 		"fd00::1",         // unique local
 		"fe80::1",         // link-local

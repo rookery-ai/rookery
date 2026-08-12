@@ -15,7 +15,7 @@
 - No DB migration — `workspaces.coder_backend_type` already exists and carries new values.
 - Seed operator **auth/credentials only** — never seed session DBs, history, or logs (each workspace starts fresh).
 - Backend type values (local): `claude`, `opencode`, `codex`, `gemini`, `cursor`, `generic` (fallback).
-- OpenCode is the only non-Claude coder installed on this host (`/home/rookie/.opencode/bin/opencode`); Codex/Gemini/Cursor adapters are authored-unverified and MUST be labeled as such in code comments.
+- OpenCode is the only non-Claude coder installed on this host (`/home/user/.opencode/bin/opencode`); Codex/Gemini/Cursor adapters are authored-unverified and MUST be labeled as such in code comments.
 - Prefer explicit config-dir env vars over POSIX `HOME` for cross-platform (Windows) isolation.
 - Existing tests MUST stay green: `go test ./internal/coder/... ./internal/prompts/... ./web/... -count=1`.
 - Build check: `go build -o bin/simple-agents ./cmd/simple-agents`.
@@ -591,7 +591,7 @@ cat > /tmp/oc_smoke.go <<'EOF'
 package main
 import ("context";"fmt";"time";"github.com/ilijad1/simple-agents/internal/coder")
 func main(){
- c:=coder.New("/home/rookie/.opencode/bin/opencode",60*time.Second,"/tmp/oc-homes","/tmp/oc-data").WithBackendType("opencode")
+ c:=coder.New("/home/user/.opencode/bin/opencode",60*time.Second,"/tmp/oc-homes","/tmp/oc-data").WithBackendType("opencode")
  ctx,cancel:=context.WithTimeout(context.Background(),60*time.Second);defer cancel()
  r,err:=c.Generate(ctx,"wsSmoke","Reply with exactly the word PONG and nothing else")
  fmt.Printf("err=%v\ntext=%q\n",err,func()string{if r!=nil{return r.Text};return ""}())
@@ -1004,7 +1004,7 @@ missing form field. Fix the latent bug where local coders saved an empty backend
 
 **Interfaces:**
 - Produces: `func BackendForBin(bin string) string` — returns the backend type for a bin (e.g.
-  `/home/rookie/.opencode/bin/opencode` → `"opencode"`; unknown → `""`).
+  `/home/user/.opencode/bin/opencode` → `"opencode"`; unknown → `""`).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1019,7 +1019,7 @@ func TestBackendForBin(t *testing.T) {
 	cases := map[string]string{
 		"claude":                              "claude",
 		"/usr/bin/claude-code":                "claude",
-		"/home/rookie/.opencode/bin/opencode": "opencode",
+		"/home/user/.opencode/bin/opencode": "opencode",
 		"codex":                               "codex",
 		"gemini":                              "gemini",
 		"cursor-agent":                        "cursor",
@@ -1112,7 +1112,7 @@ import (
 // reaches the coder and returns a reply OR a descriptive error (never a silent
 // empty success).
 func TestSmokeOpencodeHostGated(t *testing.T) {
-	bin := "/home/rookie/.opencode/bin/opencode"
+	bin := "/home/user/.opencode/bin/opencode"
 	if _, err := os.Stat(bin); err != nil {
 		t.Skip("opencode not installed; skipping host-gated smoke")
 	}

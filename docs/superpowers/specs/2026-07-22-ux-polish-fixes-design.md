@@ -11,7 +11,7 @@ no state and can be implemented and reviewed in any order.
 **Symptom**
 
 ```
-🔧 bash({"command": "cd /home/rookie/.simple-agents-v2/vaults/fd11c4…)
+🔧 bash({"command": "cd /home/user/.simple-agents-v2/vaults/fd11c4…)
 ```
 
 **Cause** — `toolMilestone` (`internal/coder/api_engine.go`) extracts a detail

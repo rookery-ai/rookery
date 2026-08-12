@@ -103,7 +103,7 @@
 
 ### Task 8: Cutover phase 2 — template deletion
 
-**Files:** Delete `web/templates/` + `web/static/` + template-only handler code; Modify `web/server.go`, remaining handlers files, `/home/rookie/simple-agents-v2/CLAUDE.md`.
+**Files:** Delete `web/templates/` + `web/static/` + template-only handler code; Modify `web/server.go`, remaining handlers files, `/home/user/simple-agents-v2/CLAUDE.md`.
 
 - Remove from server.go: template route registrations (`showLogin`…`showAuditLog` blocks), `setupTemplates`/`parseTemplates`/`TemplateRenderer`, static route, template middlewares' redirect variants IF now unused (requireOwner/requireActiveWorkspace/requireSetupComplete — the API variants stay; grep usage). **KEEP**: the OAuth callback registration (move `GET /dashboard/connectors/services/callback/:provider` → registered standalone with a comment "registered redirect URI in external OAuth apps — path frozen"), all shared cores (saveConnector, testConnectorIdentity, buildConsentURL, connectAPIKeyCore, saveWorkspaceCoderCore, changeMasterPasswordCore, resubmitPasswordOverExistingSecrets, loadAgentDetail data assembly, enrichKBDisplayNames, renderMarkdown if the API uses it — verify each by callers).
 - Delete per-handler render wrappers + pageData/`page()` + template-shape structs whose only consumers die; delete template smoke tests (template_smoke_test.go, kb_template_test.go) and any test referencing templates dir.

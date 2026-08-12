@@ -836,7 +836,7 @@ Expected: PASS.
 
 - [ ] **Step 2: Update CLAUDE.md**
 
-In `/home/rookie/simple-agents-v2/CLAUDE.md`, update the `coder.APIProviders()` mention (under "Per-workspace coder") to note the catalog is now 16 named providers + Custom, base URLs single-sourced in `internal/llm.DefaultBaseURL`, and that the coder form accepts an inline API key stored as `CODER_KEY_<PROVIDER>`. One or two sentences.
+In `/home/user/simple-agents-v2/CLAUDE.md`, update the `coder.APIProviders()` mention (under "Per-workspace coder") to note the catalog is now 16 named providers + Custom, base URLs single-sourced in `internal/llm.DefaultBaseURL`, and that the coder form accepts an inline API key stored as `CODER_KEY_<PROVIDER>`. One or two sentences.
 
 - [ ] **Step 3: Commit**
 

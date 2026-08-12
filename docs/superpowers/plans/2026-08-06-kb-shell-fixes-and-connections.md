@@ -12,7 +12,7 @@ This is plan **A of two** derived from `docs/superpowers/specs/2026-08-06-kb-edi
 
 ## Global Constraints
 
-- **Branch, never commit to `main`.** Work happens on `worktree-kb-editor-brainstorm` in the worktree `/home/rookie/rookery/.claude/worktrees/kb-editor-brainstorm`. Run every command from that directory.
+- **Branch, never commit to `main`.** Work happens on `worktree-kb-editor-brainstorm` in the worktree `/home/user/rookery/.claude/worktrees/kb-editor-brainstorm`. Run every command from that directory.
 - **Conventional Commits.** `type(scope): summary` — types `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `build`, `ci`.
 - **No new npm or Go dependencies.** Every change uses what is already installed.
 - **Frontend commands run from `web/ui/`:** `npm run test`, `npx tsc -b`, `npx oxlint`.
@@ -778,7 +778,7 @@ Task 4's behaviour depends on `preflight` being populated on the list payload fo
 // re-enables a tile whose OAuth flow provably cannot complete.
 func TestOAuthProviderCarriesHardPreflightOnNonPublicURL(t *testing.T) {
 	s, cookies := newServicesTestServer(t)
-	setInstanceURL(t, s, "http://192.168.1.194:8080") // raw private IP → SeverityHard
+	setInstanceURL(t, s, "http://192.168.1.50:8080") // raw private IP → SeverityHard
 
 	rec := doJSON(t, s, http.MethodGet, "/api/v1/services", nil, cookies)
 	if rec.Code != http.StatusOK {

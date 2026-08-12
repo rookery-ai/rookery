@@ -13,8 +13,8 @@
 - **Conventional Commits** on every commit: `type(scope): summary`. Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`, `build`, `ci`.
 - **Never commit to `main`.** All work is on the current branch `worktree-backup-destination-and-docs`; it merges via PR.
 - **No new dependencies.** Not in Go, not in the SPA, not on the website.
-- **The product repo is a git worktree** at `/home/rookie/rookery/.claude/worktrees/backup-destination-and-docs`. The website repo is a separate checkout at `/home/rookie/rookery-web` on its own branch.
-- **`make docs-sync-check` must be run with `ROOKERY_WEB_DIR=/home/rookie/rookery-web`.** From a worktree the resolver otherwise finds no website checkout and **skips every website assertion silently**, which reads as a pass.
+- **The product repo is a git worktree** at `/home/user/rookery/.claude/worktrees/backup-destination-and-docs`. The website repo is a separate checkout at `/home/user/rookery-web` on its own branch.
+- **`make docs-sync-check` must be run with `ROOKERY_WEB_DIR=/home/user/rookery-web`.** From a worktree the resolver otherwise finds no website checkout and **skips every website assertion silently**, which reads as a pass.
 - **Tailwind: never a hardcoded pixel font size** (`text-[13px]` fails `density.test.ts`). Use the `text-*` tokens.
 - **Every action button carries a leading lucide icon**, `currentColor` only. Dialog footer pairs and `link`-variant buttons are the two carve-outs.
 - **The local backup directory is `<data_dir>/backups` everywhere.** Exactly one function computes it: `backup.DefaultLocalDir`.
@@ -391,8 +391,8 @@ Add to `web/ui/src/pages/settings/BackupSection.test.tsx`, inside the existing `
 
 ```tsx
   it("states where snapshots go and offers no folder field", async () => {
-    mountWith(mockConfig({ local_dir: "/home/rookie/.rookery/backups" }));
-    expect(await screen.findByText("/home/rookie/.rookery/backups")).toBeInTheDocument();
+    mountWith(mockConfig({ local_dir: "/home/user/.rookery/backups" }));
+    expect(await screen.findByText("/home/user/.rookery/backups")).toBeInTheDocument();
     expect(screen.queryByLabelText(/backup folder/i)).not.toBeInTheDocument();
   });
 
@@ -701,7 +701,7 @@ git commit -m "feat(web/settings): warn once when backups are not configured"
 
 ### Task 5: Website — move the page to Operations and rewrite it as a runbook
 
-**Files (all in `/home/rookie/rookery-web`):**
+**Files (all in `/home/user/rookery-web`):**
 - Move: `src/content/docs/docs/concepts/backup-and-restore.md` → `src/content/docs/docs/operations/backup-and-restore.md`
 - Modify: `astro.config.mjs` (sidebar entry + redirect)
 - Modify: `src/content/docs/docs/concepts/knowledge-base.md:121`, `src/content/docs/docs/reference/cli.md:94`, `src/content/docs/docs/installation/windows.md:69`, `src/content/docs/docs/reference/api.md:62` (link targets)
@@ -714,7 +714,7 @@ git commit -m "feat(web/settings): warn once when backups are not configured"
 - [ ] **Step 1: Create the branch and move the file**
 
 ```bash
-cd /home/rookie/rookery-web
+cd /home/user/rookery-web
 git checkout -b docs/backup-runbook
 git mv src/content/docs/docs/concepts/backup-and-restore.md src/content/docs/docs/operations/backup-and-restore.md
 ```
@@ -748,7 +748,7 @@ The old URL is public. Add a top-level `redirects` key to the `defineConfig({...
 - [ ] **Step 4: Update the four inbound links**
 
 ```bash
-cd /home/rookie/rookery-web
+cd /home/user/rookery-web
 grep -rl "docs/concepts/backup-and-restore" src/ | xargs sed -i 's|/docs/concepts/backup-and-restore|/docs/operations/backup-and-restore|g'
 grep -rn "concepts/backup-and-restore" src/ astro.config.mjs
 ```
@@ -946,14 +946,14 @@ destinations. Restore is all-or-nothing today.
 - [ ] **Step 7: Build the site**
 
 ```bash
-cd /home/rookie/rookery-web && npm run build
+cd /home/user/rookery-web && npm run build
 ```
 Expected: a successful build. Starlight fails loudly on a sidebar `slug:` that does not resolve, so a missed rename surfaces here.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /home/rookie/rookery-web
+cd /home/user/rookery-web
 git add -A
 git commit -m "docs: move backup to Operations and rewrite it as a runbook"
 ```
@@ -999,7 +999,7 @@ Invoke the `docs-sync` skill. It holds the change-to-page trigger map; this chan
 - [ ] **Step 3: Run the mechanised documentation check**
 
 ```bash
-ROOKERY_WEB_DIR=/home/rookie/rookery-web make docs-sync-check
+ROOKERY_WEB_DIR=/home/user/rookery-web make docs-sync-check
 ```
 Expected: PASS **with website assertions actually running**. Without the variable it silently skips them from a worktree.
 
@@ -1017,7 +1017,7 @@ git add CLAUDE.md
 git commit -m "docs: record why the backup folder setting is gone"
 git push -u origin worktree-backup-destination-and-docs
 
-cd /home/rookie/rookery-web && git push -u origin docs/backup-runbook
+cd /home/user/rookery-web && git push -u origin docs/backup-runbook
 ```
 
 - [ ] **Step 6: Open the pull requests**

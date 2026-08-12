@@ -79,8 +79,8 @@ func TestCheckGooglePolicy(t *testing.T) {
 		{"ipv6 loopback is exempt", "http://[::1]:8080", "", 0},
 		{"public https domain is clean", "https://agents.example.com", "", 0},
 		{"multi-label suffix is clean", "https://agents.example.co.uk", "", 0},
-		{"lan ip rejected", "http://192.168.1.194:8080", "raw_ip", SeverityHard},
-		{"reserved tld rejected", "https://agents.rookie.lan", "non_public_host", SeverityHard},
+		{"lan ip rejected", "http://192.168.1.50:8080", "raw_ip", SeverityHard},
+		{"reserved tld rejected", "https://rookery.example.com", "non_public_host", SeverityHard},
 		{"dot-local rejected", "https://box.local", "non_public_host", SeverityHard},
 		{"dotless host rejected", "https://rookie", "non_public_host", SeverityHard},
 		{"plain http public domain rejected", "http://agents.example.com", "scheme_not_https", SeverityHard},
@@ -125,7 +125,7 @@ func TestCheckPrivateSuffixIsNotHardBlocked(t *testing.T) {
 func TestCheckUnverifiedPolicyOnlyWarns(t *testing.T) {
 	unverified := googlePolicy
 	unverified.Verified = false
-	got := Check("http://192.168.1.194:8080", unverified)
+	got := Check("http://192.168.1.50:8080", unverified)
 	p := hasCode(got, "raw_ip")
 	if p == nil {
 		t.Fatalf("want raw_ip problem, got %v", codes(got))
@@ -148,7 +148,7 @@ func TestCheckMalformedIsAlwaysHard(t *testing.T) {
 
 // The zero Policy is fully permissive: an absent YAML block must never block anyone.
 func TestCheckZeroPolicyIsPermissive(t *testing.T) {
-	for _, base := range []string{"http://192.168.1.194:8080", "https://agents.rookie.lan", "http://box"} {
+	for _, base := range []string{"http://192.168.1.50:8080", "https://rookery.example.com", "http://box"} {
 		if got := Check(base, Policy{}); len(got) != 0 {
 			t.Fatalf("%q: zero policy must be permissive, got %v", base, codes(got))
 		}
@@ -1637,7 +1637,7 @@ it("disables Connect and explains when preflight finds a hard problem", async ()
   renderWizard({
     ...oauthProvider,
     has_creds: true,
-    redirect_uri: "http://192.168.1.194:8080/dashboard/connectors/services/callback/google",
+    redirect_uri: "http://192.168.1.50:8080/dashboard/connectors/services/callback/google",
     preflight: [{
       severity: "hard",
       code: "raw_ip",
@@ -2060,8 +2060,8 @@ gets validated is the **redirect URI string**, when you register it.
 | How you reach the app | Redirect URI | Outcome |
 |---|---|---|
 | `http://localhost:8080` | `http://localhost:8080/…` | Google, GitHub, Notion work. Slack-class providers need HTTPS. |
-| LAN server, plain HTTP on an IP | `http://192.168.1.194:8080/…` | Google rejects raw IP addresses. GitHub works. |
-| LAN server, internal CA, `.lan` name | `https://agents.rookie.lan/…` | HTTPS satisfies Slack-class providers; Google rejects the reserved `.lan` suffix. |
+| LAN server, plain HTTP on an IP | `http://192.168.1.50:8080/…` | Google rejects raw IP addresses. GitHub works. |
+| LAN server, internal CA, `.lan` name | `https://rookery.example.com/…` | HTTPS satisfies Slack-class providers; Google rejects the reserved `.lan` suffix. |
 | **Real domain, DNS-01 certificate, resolved on your LAN** | `https://agents.example.com/…` | **All providers work, with no inbound exposure.** |
 
 The last row is the recommended setup for a self-hosted install: register a real

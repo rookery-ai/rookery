@@ -49,7 +49,7 @@ instructions must describe it accurately.
 platform_connections   telegram  active  2026-07-30 06:58:26
                        discord   active  2026-08-03 12:19:37
 
-platform_identities    telegram  1843540314  2026-07-30 06:58:52
+platform_identities    telegram  100000001  2026-07-30 06:58:52
                        (no discord row)
 ```
 
