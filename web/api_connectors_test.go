@@ -175,14 +175,14 @@ func TestAPIConnectors_GET_ReportsLinkState(t *testing.T) {
 	}
 
 	if err := database.UpsertPlatformIdentity(&db.PlatformIdentity{
-		ID: "id1", WorkspaceID: wsID, Platform: "telegram", PlatformUserID: "1843540314",
+		ID: "id1", WorkspaceID: wsID, Platform: "telegram", PlatformUserID: "100000001",
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	list = decodeConnectorList(t, doJSON(t, s, http.MethodGet, "/api/v1/connectors", nil, cookies))
 	tg := findPlatform(t, list, "telegram")
-	if !tg.Linked || tg.LinkedIdentity != "1843540314" {
+	if !tg.Linked || tg.LinkedIdentity != "100000001" {
 		t.Fatalf("telegram: linked=%v identity=%q", tg.Linked, tg.LinkedIdentity)
 	}
 	// The sole linked platform is the implicit primary.

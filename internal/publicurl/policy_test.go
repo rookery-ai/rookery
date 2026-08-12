@@ -39,8 +39,8 @@ func TestCheckGooglePolicy(t *testing.T) {
 		{"ipv6 loopback is exempt", "http://[::1]:8080", "", 0},
 		{"public https domain is clean", "https://agents.example.com", "", 0},
 		{"multi-label suffix is clean", "https://agents.example.co.uk", "", 0},
-		{"lan ip rejected", "http://192.168.1.194:8080", "raw_ip", SeverityHard},
-		{"reserved tld rejected", "https://agents.rookie.lan", "non_public_host", SeverityHard},
+		{"lan ip rejected", "http://192.168.1.50:8080", "raw_ip", SeverityHard},
+		{"reserved tld rejected", "https://agents.example.lan", "non_public_host", SeverityHard},
 		{"dot-local rejected", "https://box.local", "non_public_host", SeverityHard},
 		{"dotless host rejected", "https://rookie", "non_public_host", SeverityHard},
 		{"plain http public domain rejected", "http://agents.example.com", "scheme_not_https", SeverityHard},
@@ -85,7 +85,7 @@ func TestCheckPrivateSuffixIsNotHardBlocked(t *testing.T) {
 func TestCheckUnverifiedPolicyOnlyWarns(t *testing.T) {
 	unverified := googlePolicy
 	unverified.Verified = false
-	got := Check("http://192.168.1.194:8080", unverified)
+	got := Check("http://192.168.1.50:8080", unverified)
 	p := hasCode(got, "raw_ip")
 	if p == nil {
 		t.Fatalf("want raw_ip problem, got %v", codes(got))
@@ -108,7 +108,7 @@ func TestCheckMalformedIsAlwaysHard(t *testing.T) {
 
 // The zero Policy is fully permissive: an absent YAML block must never block anyone.
 func TestCheckZeroPolicyIsPermissive(t *testing.T) {
-	for _, base := range []string{"http://192.168.1.194:8080", "https://agents.rookie.lan", "http://box"} {
+	for _, base := range []string{"http://192.168.1.50:8080", "https://agents.example.lan", "http://box"} {
 		if got := Check(base, Policy{}); len(got) != 0 {
 			t.Fatalf("%q: zero policy must be permissive, got %v", base, codes(got))
 		}

@@ -495,7 +495,7 @@ test("disables Connect and explains when preflight finds a hard problem", async 
   const user = userEvent.setup();
   wrapLive({
     ...OAUTH_WITH_CREDS,
-    redirect_uri: "http://192.168.1.194:8080/dashboard/connectors/services/callback/github",
+    redirect_uri: "http://192.168.1.50:8080/dashboard/connectors/services/callback/github",
     preflight: [
       {
         severity: "hard",
