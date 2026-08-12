@@ -71,6 +71,14 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
 
+      # Computed here rather than taken from the metadata action: it exposes no
+      # build-time output, and its `version` follows the first tag pattern
+      # (`v{{version}}`), so it would carry the leading `v` this strips.
+      - id: buildmeta
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - id: build
         uses: docker/build-push-action@v7
         with:
@@ -79,9 +87,20 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # VERSION strips the tag's leading `v` so the image agrees with the
+          # binaries: goreleaser stamps `0.1.0`, and passing github.ref_name
+          # raw made the same release report `0.1.0` from the archive and
+          # `v0.1.0` from the container.
+          #
+          # BUILD_DATE must be passed explicitly. The Dockerfile defaults it to
+          # the literal `unknown`, so omitting it does not fail the build — it
+          # ships an image that cannot say when it was built, which /healthz
+          # then reports to an operator trying to identify what they are
+          # running. Verified against v0.1.0, which shipped `built unknown`.
           build-args: |
-            VERSION=${{ github.ref_name }}
+            VERSION=${{ steps.buildmeta.outputs.version }}
             COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.buildmeta.outputs.date }}
           sbom: true
           provenance: mode=max
           cache-from: type=gha
