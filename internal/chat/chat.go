@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/profile"
-	"github.com/ilijad1/rookery/internal/vault"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/profile"
+	"github.com/rookery-ai/rookery/internal/vault"
 )
 
 const (

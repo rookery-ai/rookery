@@ -40,9 +40,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build -trimpath \
       -ldflags "-s -w \
-        -X github.com/ilijad1/rookery/internal/buildinfo.Version=${VERSION} \
-        -X github.com/ilijad1/rookery/internal/buildinfo.Commit=${COMMIT} \
-        -X github.com/ilijad1/rookery/internal/buildinfo.Date=${BUILD_DATE}" \
+        -X github.com/rookery-ai/rookery/internal/buildinfo.Version=${VERSION} \
+        -X github.com/rookery-ai/rookery/internal/buildinfo.Commit=${COMMIT} \
+        -X github.com/rookery-ai/rookery/internal/buildinfo.Date=${BUILD_DATE}" \
       -o /out/rookery ./cmd/rookery
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
@@ -101,7 +101,7 @@ ARG VERSION=0.0.0-dev
 ARG COMMIT=none
 LABEL org.opencontainers.image.title="rookery" \
       org.opencontainers.image.description="Multi-workspace AI agents control plane" \
-      org.opencontainers.image.source="https://github.com/ilijad1/rookery" \
+      org.opencontainers.image.source="https://github.com/rookery-ai/rookery" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${COMMIT}"

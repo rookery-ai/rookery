@@ -3,9 +3,9 @@ package web
 import (
 	"net/http"
 
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/profile"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/profile"
 )
 
 // handleInboxPoll returns the unread count plus the few newest messages so the

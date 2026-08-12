@@ -3,7 +3,7 @@ package coder
 import (
 	"context"
 
-	"github.com/ilijad1/rookery/internal/vault"
+	"github.com/rookery-ai/rookery/internal/vault"
 )
 
 // SecretsLookup resolves a single secret value by name for a workspace, at run

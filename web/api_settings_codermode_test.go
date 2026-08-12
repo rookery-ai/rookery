@@ -3,7 +3,7 @@ package web
 import (
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/config"
+	"github.com/rookery-ai/rookery/internal/config"
 )
 
 func slimServer() *Server {

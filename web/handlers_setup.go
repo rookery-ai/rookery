@@ -1,8 +1,8 @@
 package web
 
 import (
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/profile"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/profile"
 )
 
 // setupStep determines which onboarding wizard step a workspace is on based on its

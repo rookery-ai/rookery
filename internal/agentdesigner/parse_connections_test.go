@@ -3,7 +3,7 @@ package agentdesigner
 import (
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 func avail() []db.ServiceConnection {

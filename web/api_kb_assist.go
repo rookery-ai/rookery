@@ -5,11 +5,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ilijad1/rookery/internal/agentrunner"
-	"github.com/ilijad1/rookery/internal/coder"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/prompts"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/agentrunner"
+	"github.com/rookery-ai/rookery/internal/coder"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/prompts"
 )
 
 // maxAssistSelectionBytes caps the passage sent to the model. Deliberately NOT

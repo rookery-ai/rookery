@@ -8,9 +8,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/vault"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/vault"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 )

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/rookery-ai/rookery/internal/llm"
 )
 
 func TestAPIProviders_CatalogIntegrity(t *testing.T) {

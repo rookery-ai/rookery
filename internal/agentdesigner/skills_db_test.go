@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/rookery/internal/prompts"
-	"github.com/ilijad1/rookery/internal/skilllibrary"
+	"github.com/rookery-ai/rookery/internal/prompts"
+	"github.com/rookery-ai/rookery/internal/skilllibrary"
 	"github.com/stretchr/testify/require"
 )
 

@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ilijad1/rookery/migrations"
+	"github.com/rookery-ai/rookery/migrations"
 )
 
 // The embedded set must equal what is on disk. A migration added to the

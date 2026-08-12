@@ -22,9 +22,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X github.com/ilijad1/rookery/internal/buildinfo.Version={{.Version}}
-      - -X github.com/ilijad1/rookery/internal/buildinfo.Commit={{.ShortCommit}}
-      - -X github.com/ilijad1/rookery/internal/buildinfo.Date={{.Date}}
+      - -X github.com/rookery-ai/rookery/internal/buildinfo.Version={{.Version}}
+      - -X github.com/rookery-ai/rookery/internal/buildinfo.Commit={{.ShortCommit}}
+      - -X github.com/rookery-ai/rookery/internal/buildinfo.Date={{.Date}}
 
 archives:
   - id: default
@@ -118,7 +118,7 @@ release:
     ```bash
     cosign verify-blob checksums.txt \
       --bundle checksums.txt.bundle \
-      --certificate-identity-regexp 'https://github\.com/ilijad1/rookery/.*' \
+      --certificate-identity-regexp 'https://github\.com/rookery-ai/rookery/.*' \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com
     ```
 

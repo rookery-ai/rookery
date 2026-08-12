@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ilijad1/rookery/internal/skilllibrary"
+	"github.com/rookery-ai/rookery/internal/skilllibrary"
 )
 
 // validCategories is the closed set a skill may be filed under, matching what

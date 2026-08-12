@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/connectors"
-	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/rookery-ai/rookery/internal/connectors"
+	"github.com/rookery-ai/rookery/internal/llm"
 )
 
 type fakeTokenStore struct{ tok string }

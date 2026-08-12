@@ -10,10 +10,10 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/rookery/internal/config"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/skillstore"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/config"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/skillstore"
 )
 
 // newAPITestServerWithSkills is like newAPITestServer but wires a real

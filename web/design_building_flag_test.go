@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/agentdesigner"
+	"github.com/rookery-ai/rookery/internal/agentdesigner"
 )
 
 // Generation is detached on BOTH surfaces now, so the turn that starts a build

@@ -7,11 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/skilldesigner"
-	"github.com/ilijad1/rookery/internal/skilllibrary"
-	"github.com/ilijad1/rookery/internal/skillstore"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/skilldesigner"
+	"github.com/rookery-ai/rookery/internal/skilllibrary"
+	"github.com/rookery-ai/rookery/internal/skillstore"
 )
 
 // registerSkillsAPI registers the JSON CRUD endpoints plus the skill-designer

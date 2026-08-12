@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 func TestForWorkspaceUsesInlinedConfig(t *testing.T) {

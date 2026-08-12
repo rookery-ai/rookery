@@ -19,14 +19,14 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/ilijad1/rookery/internal/connectors"
-	"github.com/ilijad1/rookery/internal/convert"
-	"github.com/ilijad1/rookery/internal/iolimit"
-	"github.com/ilijad1/rookery/internal/llm"
-	"github.com/ilijad1/rookery/internal/mcp"
-	"github.com/ilijad1/rookery/internal/sandbox"
-	"github.com/ilijad1/rookery/internal/vault"
-	"github.com/ilijad1/rookery/internal/websearch"
+	"github.com/rookery-ai/rookery/internal/connectors"
+	"github.com/rookery-ai/rookery/internal/convert"
+	"github.com/rookery-ai/rookery/internal/iolimit"
+	"github.com/rookery-ai/rookery/internal/llm"
+	"github.com/rookery-ai/rookery/internal/mcp"
+	"github.com/rookery-ai/rookery/internal/sandbox"
+	"github.com/rookery-ai/rookery/internal/vault"
+	"github.com/rookery-ai/rookery/internal/websearch"
 )
 
 // maxToolResult is the per-result byte cap injected back into the model context.

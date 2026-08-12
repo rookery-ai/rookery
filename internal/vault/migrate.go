@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ilijad1/rookery/internal/memory"
+	"github.com/rookery-ai/rookery/internal/memory"
 )
 
 // MigrateLegacyLayout moves any pre-vault on-disk data into per-user vaults. It

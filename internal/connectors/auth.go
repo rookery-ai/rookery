@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/awssig"
+	"github.com/rookery-ai/rookery/internal/awssig"
 )
 
 // applyAuth injects the connection credential into req per the provider's auth block.

@@ -9,9 +9,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/mcp"
-	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/mcp"
+	"github.com/rookery-ai/rookery/internal/secrets"
 )
 
 // registerMCPAPI registers the MCP server endpoints on the workspace-scoped group

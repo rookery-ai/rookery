@@ -11,8 +11,8 @@ import (
 	"os/exec"
 	"runtime"
 
-	"github.com/ilijad1/rookery/internal/buildinfo"
-	"github.com/ilijad1/rookery/internal/sandbox"
+	"github.com/rookery-ai/rookery/internal/buildinfo"
+	"github.com/rookery-ai/rookery/internal/sandbox"
 )
 
 // Tools reports presence only — never paths, never versions. /healthz is

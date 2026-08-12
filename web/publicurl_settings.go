@@ -11,8 +11,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/publicurl"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/publicurl"
 )
 
 // echoNonce is one outstanding self-test challenge. Bounded by the 30s TTL and

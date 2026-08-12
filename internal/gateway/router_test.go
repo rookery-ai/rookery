@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/agentdesigner"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/gateway"
-	"github.com/ilijad1/rookery/internal/skilldesigner"
+	"github.com/rookery-ai/rookery/internal/agentdesigner"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/gateway"
+	"github.com/rookery-ai/rookery/internal/skilldesigner"
 )
 
 const testWorkspaceID = "ws-router-test"

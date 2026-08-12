@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 func pendingFixture(t *testing.T) (*db.DB, context.Context, string, string) {

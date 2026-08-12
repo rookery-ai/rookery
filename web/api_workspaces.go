@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/auth"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/health"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/auth"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/health"
 )
 
 // registerWorkspacesAPI registers the owner-gated workspace + admin endpoints on

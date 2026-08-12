@@ -1,4 +1,4 @@
-module github.com/ilijad1/rookery
+module github.com/rookery-ai/rookery
 
 go 1.26.5
 

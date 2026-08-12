@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/gateway/render"
-	"github.com/ilijad1/rookery/internal/iolimit"
+	"github.com/rookery-ai/rookery/internal/gateway/render"
+	"github.com/rookery-ai/rookery/internal/iolimit"
 	telebot "gopkg.in/telebot.v4"
 )
 

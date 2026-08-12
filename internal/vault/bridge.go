@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/convert"
-	"github.com/ilijad1/rookery/internal/iolimit"
+	"github.com/rookery-ai/rookery/internal/convert"
+	"github.com/rookery-ai/rookery/internal/iolimit"
 )
 
 const (

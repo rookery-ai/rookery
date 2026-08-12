@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/convert"
-	"github.com/ilijad1/rookery/internal/vault"
+	"github.com/rookery-ai/rookery/internal/convert"
+	"github.com/rookery-ai/rookery/internal/vault"
 )
 
 // uploadRequest builds a multipart POST to /api/v1/kb/upload with the given

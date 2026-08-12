@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/buildphase"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/llm"
-	"github.com/ilijad1/rookery/internal/vault"
+	"github.com/rookery-ai/rookery/internal/buildphase"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/llm"
+	"github.com/rookery-ai/rookery/internal/vault"
 )
 
 // fakeProvider is an in-process llm.Provider used to drive the API engine in

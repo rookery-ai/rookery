@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 type stubResolver struct {

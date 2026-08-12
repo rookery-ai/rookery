@@ -3,7 +3,7 @@ package agentdesigner
 import (
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/prompts"
+	"github.com/rookery-ai/rookery/internal/prompts"
 	"github.com/stretchr/testify/require"
 )
 

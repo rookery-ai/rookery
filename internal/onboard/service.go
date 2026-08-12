@@ -92,7 +92,7 @@ func FindPackagedUnit() (string, bool) {
 func UnitFileFor(binary, dataDir string) string {
 	return fmt.Sprintf(`[Unit]
 Description=Rookery control plane
-Documentation=https://github.com/ilijad1/rookery
+Documentation=https://github.com/rookery-ai/rookery
 After=network-online.target
 Wants=network-online.target
 

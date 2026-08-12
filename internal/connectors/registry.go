@@ -11,7 +11,7 @@ import (
 	"path"
 	"sort"
 
-	"github.com/ilijad1/rookery/internal/publicurl"
+	"github.com/rookery-ai/rookery/internal/publicurl"
 	"gopkg.in/yaml.v3"
 )
 

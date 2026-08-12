@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/skilllibrary"
+	"github.com/rookery-ai/rookery/internal/skilllibrary"
 )
 
 const metaFixture = `---

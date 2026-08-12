@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/coder"
-	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/rookery-ai/rookery/internal/coder"
+	"github.com/rookery-ai/rookery/internal/llm"
 )
 
 // TestFriendlyDesignErrorAlwaysSaysTheSessionSurvived is the property that

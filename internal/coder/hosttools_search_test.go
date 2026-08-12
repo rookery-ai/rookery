@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/llm"
-	"github.com/ilijad1/rookery/internal/vault"
+	"github.com/rookery-ai/rookery/internal/llm"
+	"github.com/rookery-ai/rookery/internal/vault"
 )
 
 // newSearchToolSet builds a hostToolSet wired against a real (temp) vault so the

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/prompts"
+	"github.com/rookery-ai/rookery/internal/prompts"
 )
 
 // TestGenerationWiresMCPTools is a SOURCE-level guard, and it is deliberate.

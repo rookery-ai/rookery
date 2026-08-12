@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/ilijad1/rookery/migrations"
+	"github.com/rookery-ai/rookery/migrations"
 	_ "modernc.org/sqlite"
 )
 

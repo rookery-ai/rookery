@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ilijad1/rookery/internal/db"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 // apiErrBody is the uniform error envelope: {"error":{"code","message"}}.

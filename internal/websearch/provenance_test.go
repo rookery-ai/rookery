@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/nethttp"
+	"github.com/rookery-ai/rookery/internal/nethttp"
 )
 
 // stubProvider is a Provider whose behaviour each test dictates outright, so

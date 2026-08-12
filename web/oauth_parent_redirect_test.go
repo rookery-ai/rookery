@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/connectors"
+	"github.com/rookery-ai/rookery/internal/connectors"
 )
 
 // newRegistryServer builds a Server carrying only the bundled connector registry.

@@ -8,7 +8,7 @@ import (
 	"math/big"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/db"
 	"golang.org/x/crypto/bcrypt"
 )
 

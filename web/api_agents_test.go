@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/rookery/internal/agentdesigner"
-	"github.com/ilijad1/rookery/internal/agentrunner"
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/agentdesigner"
+	"github.com/rookery-ai/rookery/internal/agentrunner"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 func seedAgent(t *testing.T, s *Server, wsID string) *db.Agent {

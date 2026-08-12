@@ -7,7 +7,7 @@ import (
 	"html"
 	"strings"
 
-	"github.com/ilijad1/rookery/internal/fonts"
+	"github.com/rookery-ai/rookery/internal/fonts"
 )
 
 // fontFaceCSS inlines the UI font as a data: URI.

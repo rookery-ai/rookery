@@ -3,7 +3,7 @@ package web
 import (
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/connectors"
+	"github.com/rookery-ai/rookery/internal/connectors"
 )
 
 // The connections page must show every provider the registry can actually execute.

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/vault"
+	"github.com/rookery-ai/rookery/internal/vault"
 )
 
 func TestRouterImportsAttachment(t *testing.T) {

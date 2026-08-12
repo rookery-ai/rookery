@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/prompts"
+	"github.com/rookery-ai/rookery/internal/prompts"
 )
 
 // TestReconcileBlockedOutcome covers the A9/D1 headline fix: a [BLOCKED] marker must not

@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ilijad1/rookery/web/ui"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/web/ui"
 )
 
 // setupSPARoutes mounts the embedded SPA at the site root. The catch-all

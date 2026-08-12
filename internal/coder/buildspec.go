@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ilijad1/rookery/internal/prompts"
+	"github.com/rookery-ai/rookery/internal/prompts"
 )
 
 // BuildSpec describes what the current BUILD must produce, so the API engine's
