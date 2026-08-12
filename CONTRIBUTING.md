@@ -45,18 +45,32 @@ release-please reads to compute the next version.
 ## Hooks
 
 `make hooks` points `core.hooksPath` at the committed `.githooks/` directory,
-installing a `commit-msg` hook that rejects two things:
+installing a `commit-msg` hook that checks three things, at two severities:
 
-1. **Credentials and local-environment leakage** — home directory paths, `.lan`
-   hostnames, RFC1918 literals, and provider key formats. GitHub's push
-   protection scans file *content* only; it never reads a commit message or a PR
-   description, so this hook and its CI counterpart cover what GitHub does not.
-2. **Non-conventional commit messages.**
+1. **Credentials** — provider key formats (`sk-…`, `gh[pousr]_…`,
+   `xox[baprs]-…`, `AKIA…`, `AIza…`), a PEM private-key header, a Telegram
+   bot-token shape, and `API_KEY=`/`PASSWORD=`/`SECRET=` assignments.
+   **Blocking** — the commit is rejected. GitHub's push protection scans file
+   *content* only; it never reads a commit message or a PR description, so
+   this hook and its CI counterpart cover what GitHub does not.
+2. **Local-environment leakage** — home directory paths, `.lan` hostnames, and
+   RFC1918/CGNAT address literals. **Advisory only** — printed, but the commit
+   proceeds.
+3. **Non-conventional commit messages.** Blocking.
+
+The two severities are deliberate: a credential in a commit message is a
+permanent, public security incident that requires rotating the secret,
+whereas a home directory path or an internal hostname is untidiness — this
+repository's own history routinely and legitimately describes self-hosted
+testing against RFC1918 addresses and `.lan` hosts, so blocking those
+messages outright would just train contributors to disable the hook, and a
+disabled hook protects nothing.
 
 The hook is pure `grep -E` with no external dependency, deliberately: a hook that
 shells out to a tool the contributor does not have installed silently succeeds,
-which is worse than no hook. Patterns live in `.githooks/patterns.txt` and are
-read by both the hook and the CI job, so local and CI enforcement cannot drift.
+which is worse than no hook. Patterns live in `.githooks/patterns-block.txt`
+(credentials) and `.githooks/patterns-warn.txt` (local-environment leakage),
+both read by the hook and the CI job, so local and CI enforcement cannot drift.
 
 ## Tests
 
