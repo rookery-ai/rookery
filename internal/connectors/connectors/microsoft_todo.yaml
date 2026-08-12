@@ -1,0 +1,127 @@
+provider: microsoft_todo
+actions:
+  - name: mstodo_list_lists
+    description: "List the account's Microsoft To Do task lists with their ids. Call first — every task action needs a list id. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Tasks.ReadWrite]
+    params:
+      type: object
+      properties:
+        top: {type: integer, description: "max lists (default 25)"}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/todo/lists"
+      query:
+        $top: "{{top}}"
+    response_extract: "$.value"
+  - name: mstodo_create_list
+    description: "Create a Microsoft To Do task list, e.g. one per project. Safe write — it starts empty."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Tasks.ReadWrite]
+    params:
+      type: object
+      properties:
+        name: {type: string, description: "list name"}
+      required: [name]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/todo/lists"
+      body:
+        displayName: "{{name}}"
+    response_extract: "$"
+  - name: mstodo_list_tasks
+    description: "List the tasks in one Microsoft To Do list. By default this includes completed ones — pass filter=\"status ne 'completed'\" for outstanding work only. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Tasks.ReadWrite]
+    params:
+      type: object
+      properties:
+        list_id: {type: string}
+        top:     {type: integer, description: "max tasks (default 25)"}
+        filter:  {type: string, description: "OData filter, e.g. status ne 'completed'"}
+      required: [list_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/todo/lists/{{list_id}}/tasks"
+      query:
+        $top: "{{top}}"
+        $filter: "{{filter}}"
+    response_extract: "$.value"
+  - name: mstodo_create_task
+    description: "Add a task to a Microsoft To Do list. due_date is a LOCAL ISO8601 time without a zone suffix and needs time_zone alongside it. importance is low, normal or high."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Tasks.ReadWrite]
+    params:
+      type: object
+      properties:
+        list_id:    {type: string}
+        title:      {type: string}
+        notes:      {type: string, description: "task body text"}
+        due_date:   {type: string, description: "local ISO8601 without zone, e.g. 2026-08-15T17:00:00"}
+        time_zone:  {type: string, description: "zone for due_date, e.g. Europe/Skopje"}
+        importance: {type: string, description: "low | normal | high"}
+      required: [list_id, title]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/todo/lists/{{list_id}}/tasks"
+      body:
+        title: "{{title}}"
+        body: {contentType: "text", content: "{{notes}}"}
+        dueDateTime: {dateTime: "{{due_date}}", timeZone: "{{time_zone}}"}
+        importance: "{{importance}}"
+    response_extract: "$"
+  - name: mstodo_update_task
+    description: "Change a task's title, notes, due date or importance (PATCH = partial: omitted fields are left alone). Use mstodo_complete_task to tick it off."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Tasks.ReadWrite]
+    params:
+      type: object
+      properties:
+        list_id:    {type: string}
+        task_id:    {type: string}
+        title:      {type: string}
+        notes:      {type: string}
+        due_date:   {type: string, description: "local ISO8601 without zone"}
+        time_zone:  {type: string, description: "required whenever due_date is given"}
+        importance: {type: string, description: "low | normal | high"}
+      required: [list_id, task_id]
+    request:
+      method: PATCH
+      url: "https://graph.microsoft.com/v1.0/me/todo/lists/{{list_id}}/tasks/{{task_id}}"
+      body:
+        title: "{{title}}"
+        body: {contentType: "text", content: "{{notes}}"}
+        dueDateTime: {dateTime: "{{due_date}}", timeZone: "{{time_zone}}"}
+        importance: "{{importance}}"
+    response_extract: "$"
+  - name: mstodo_complete_task
+    description: "Mark a Microsoft To Do task completed. Pass completed=false to reopen it."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Tasks.ReadWrite]
+    params:
+      type: object
+      properties:
+        list_id:   {type: string}
+        task_id:   {type: string}
+        status:    {type: string, description: "completed or notStarted"}
+      required: [list_id, task_id, status]
+    request:
+      method: PATCH
+      url: "https://graph.microsoft.com/v1.0/me/todo/lists/{{list_id}}/tasks/{{task_id}}"
+      body:
+        status: "{{status}}"
+    response_extract: "$"
+  - name: mstodo_delete_task
+    description: "Delete a task from a Microsoft To Do list. Irreversible."
+    mutating: true
+    scopes: [https://graph.microsoft.com/Tasks.ReadWrite]
+    params:
+      type: object
+      properties:
+        list_id: {type: string}
+        task_id: {type: string}
+      required: [list_id, task_id]
+    request:
+      method: DELETE
+      url: "https://graph.microsoft.com/v1.0/me/todo/lists/{{list_id}}/tasks/{{task_id}}"
+    response_extract: "$"

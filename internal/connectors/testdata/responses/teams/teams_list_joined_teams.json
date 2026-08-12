@@ -1,0 +1,10 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection",
+  "value": [
+    {
+      "id": "02bd9fd6",
+      "displayName": "Engineering",
+      "description": "Core team"
+    }
+  ]
+}

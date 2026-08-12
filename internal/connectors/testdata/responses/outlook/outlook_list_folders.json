@@ -1,0 +1,11 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection",
+  "value": [
+    {
+      "id": "AQMkADAwAT",
+      "displayName": "Inbox",
+      "unreadItemCount": 12,
+      "totalItemCount": 431
+    }
+  ]
+}

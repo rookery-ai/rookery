@@ -1,0 +1,18 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection",
+  "value": [
+    {
+      "id": "AAMkAGI2T",
+      "subject": "Q3 invoice",
+      "isRead": false,
+      "receivedDateTime": "2026-08-10T14:22:03Z",
+      "from": {
+        "emailAddress": {
+          "name": "Billing",
+          "address": "billing@vendor.com"
+        }
+      },
+      "bodyPreview": "Please find attached"
+    }
+  ]
+}

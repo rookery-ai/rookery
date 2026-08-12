@@ -1,0 +1,12 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection",
+  "value": [
+    {
+      "id": "AAMkAGI2TAtt",
+      "name": "invoice.pdf",
+      "contentType": "application/pdf",
+      "size": 40204,
+      "isInline": false
+    }
+  ]
+}

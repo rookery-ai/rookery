@@ -1,0 +1,13 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection",
+  "value": [
+    {
+      "id": "AAMkAGI2Cal",
+      "name": "Calendar",
+      "canEdit": true,
+      "owner": {
+        "address": "me@example.com"
+      }
+    }
+  ]
+}

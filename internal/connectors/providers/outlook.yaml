@@ -33,4 +33,9 @@ default_scopes:
   - https://graph.microsoft.com/Mail.Read
   - https://graph.microsoft.com/Mail.Send
   - https://graph.microsoft.com/Mail.ReadWrite
+  # Categories, inbox rules and the out-of-office responder are mailbox SETTINGS,
+  # which Mail.ReadWrite does not reach. A connection made before this was added
+  # holds no grant for it; Execute's scope pre-check names it rather than letting
+  # Graph answer 403 with nothing actionable in it.
+  - https://graph.microsoft.com/MailboxSettings.ReadWrite
   - https://graph.microsoft.com/User.Read

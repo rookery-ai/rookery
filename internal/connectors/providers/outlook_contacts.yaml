@@ -1,0 +1,12 @@
+name: outlook_contacts
+label: Outlook Contacts
+category: Productivity
+unverified: true
+auth_parent: outlook
+default_scopes:
+  - https://graph.microsoft.com/Contacts.ReadWrite
+setup_url: https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade
+setup_steps:
+  - "Outlook Contacts reuses your Microsoft (Outlook) OAuth app. Set up Outlook first on its card above."
+  - "In the Entra app registration → API permissions, add the Microsoft Graph DELEGATED permissions listed for this connector."
+  - "Then click Connect here to authorize access on the same Microsoft account."

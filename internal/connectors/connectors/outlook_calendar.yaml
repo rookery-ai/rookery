@@ -1,0 +1,194 @@
+provider: outlook_calendar
+# Microsoft Graph calendar. Two shapes matter here.
+#
+# calendarView is the action to reach for, not /events: it EXPANDS recurring series
+# into their individual occurrences within a window, which is what "what's on my
+# calendar next week" actually means. /events returns the series master instead, so a
+# weekly standup shows once.
+#
+# Every Graph dateTime is a naive local time plus a separate timeZone field. Sending a
+# Z-suffixed timestamp without the timeZone silently books in UTC, which is why
+# time_zone is on every write.
+actions:
+  - name: outlook_list_calendars
+    description: "List the calendars on the Microsoft account with their ids and names. Resolve a calendar NAME to its id here first. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Calendars.ReadWrite]
+    params:
+      type: object
+      properties:
+        top: {type: integer, description: "max calendars (default 25)"}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/calendars"
+      query:
+        $top: "{{top}}"
+    response_extract: "$.value"
+  - name: outlook_list_events
+    description: "List events in a time window, with recurring series EXPANDED into their individual occurrences. This is the right action for 'what is on my calendar' — raise skip to page. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Calendars.ReadWrite]
+    params:
+      type: object
+      properties:
+        start:  {type: string, description: "ISO8601 window start, e.g. 2026-08-11T00:00:00"}
+        end:    {type: string, description: "ISO8601 window end"}
+        top:    {type: integer, description: "max events (default 25)"}
+        skip:   {type: integer, description: "how many to skip — raise it to page"}
+        select: {type: string, description: "comma-separated fields, e.g. 'subject,start,end,organizer'"}
+      required: [start, end]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/calendarView"
+      query:
+        startDateTime: "{{start}}"
+        endDateTime: "{{end}}"
+        $top: "{{top}}"
+        $skip: "{{skip}}"
+        $select: "{{select}}"
+        $orderby: "start/dateTime"
+    response_extract: "$.value"
+  - name: outlook_get_event
+    description: "Get one calendar event's full details by id, including attendees and their responses. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Calendars.ReadWrite]
+    params:
+      type: object
+      properties:
+        event_id: {type: string}
+      required: [event_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/events/{{event_id}}"
+    response_extract: "$"
+  - name: outlook_create_event
+    description: "Create a calendar event. start/end are LOCAL times without a zone suffix (e.g. 2026-08-11T09:00:00) plus a separate time_zone. Adding attendees sends real invitation emails. Set online_meeting=true for a Teams link."
+    mutating: true
+    public_write: true
+    scopes: [https://graph.microsoft.com/Calendars.ReadWrite]
+    params:
+      type: object
+      properties:
+        subject:        {type: string, description: "event title"}
+        body:           {type: string, description: "description text"}
+        start:          {type: string, description: "local ISO8601 without zone, e.g. 2026-08-11T09:00:00"}
+        end:            {type: string, description: "local ISO8601 without zone"}
+        time_zone:      {type: string, description: "Windows or IANA zone, e.g. Europe/Skopje"}
+        location:       {type: string, description: "location display name"}
+        attendees:      {type: array, items: {type: object}, description: "[{\"emailAddress\":{\"address\":\"a@b.com\"},\"type\":\"required\"}]"}
+        online_meeting: {type: boolean, description: "true to attach a Teams meeting link"}
+      required: [subject, start, end, time_zone]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/events"
+      body:
+        subject: "{{subject}}"
+        body: {contentType: "Text", content: "{{body}}"}
+        start: {dateTime: "{{start}}", timeZone: "{{time_zone}}"}
+        end: {dateTime: "{{end}}", timeZone: "{{time_zone}}"}
+        location: {displayName: "{{location}}"}
+        attendees: "{{attendees}}"
+        isOnlineMeeting: "{{online_meeting}}"
+    response_extract: "$"
+  - name: outlook_update_event
+    description: "Change an event's fields (PATCH = partial: omitted fields are left alone). Supplying attendees REPLACES the whole list, so read the event first. Attendees are notified of the change."
+    mutating: true
+    public_write: true
+    scopes: [https://graph.microsoft.com/Calendars.ReadWrite]
+    params:
+      type: object
+      properties:
+        event_id:  {type: string}
+        subject:   {type: string}
+        body:      {type: string}
+        start:     {type: string, description: "local ISO8601 without zone"}
+        end:       {type: string, description: "local ISO8601 without zone"}
+        time_zone: {type: string, description: "required whenever start or end is given"}
+        location:  {type: string}
+        attendees: {type: array, items: {type: object}, description: "REPLACES the list"}
+      required: [event_id]
+    request:
+      method: PATCH
+      url: "https://graph.microsoft.com/v1.0/me/events/{{event_id}}"
+      body:
+        subject: "{{subject}}"
+        body: {contentType: "Text", content: "{{body}}"}
+        start: {dateTime: "{{start}}", timeZone: "{{time_zone}}"}
+        end: {dateTime: "{{end}}", timeZone: "{{time_zone}}"}
+        location: {displayName: "{{location}}"}
+        attendees: "{{attendees}}"
+    response_extract: "$"
+  - name: outlook_delete_event
+    description: "Delete a calendar event. If it has attendees they receive a cancellation. Mutating and irreversible."
+    mutating: true
+    scopes: [https://graph.microsoft.com/Calendars.ReadWrite]
+    params:
+      type: object
+      properties:
+        event_id: {type: string}
+      required: [event_id]
+    request:
+      method: DELETE
+      url: "https://graph.microsoft.com/v1.0/me/events/{{event_id}}"
+    response_extract: "$"
+  - name: outlook_respond_to_event
+    description: "RSVP to a meeting invitation. response is accept, decline or tentativelyAccept. The organiser is notified unless send_response=false."
+    mutating: true
+    public_write: true
+    scopes: [https://graph.microsoft.com/Calendars.ReadWrite]
+    params:
+      type: object
+      properties:
+        event_id:      {type: string}
+        response:      {type: string, description: "accept | decline | tentativelyAccept"}
+        comment:       {type: string, description: "optional note to the organiser"}
+        send_response: {type: boolean, description: "notify the organiser (default true)"}
+      required: [event_id, response]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/events/{{event_id}}/{{response}}"
+      body:
+        comment: "{{comment}}"
+        sendResponse: "{{send_response}}"
+    response_extract: "$"
+  - name: outlook_get_schedule
+    description: "Read the free/busy blocks of one or more people over a window, to find a slot everyone can make. schedules is a list of email addresses. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Calendars.ReadWrite]
+    params:
+      type: object
+      properties:
+        schedules: {type: array, items: {type: string}, description: "email addresses to check"}
+        start:     {type: string, description: "local ISO8601 without zone"}
+        end:       {type: string, description: "local ISO8601 without zone"}
+        time_zone: {type: string, description: "zone for start/end"}
+        interval:  {type: integer, description: "granularity in minutes (default 30)"}
+      required: [schedules, start, end, time_zone]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/calendar/getSchedule"
+      body:
+        schedules: "{{schedules}}"
+        startTime: {dateTime: "{{start}}", timeZone: "{{time_zone}}"}
+        endTime: {dateTime: "{{end}}", timeZone: "{{time_zone}}"}
+        availabilityViewInterval: "{{interval}}"
+    response_extract: "$.value"
+  - name: outlook_find_meeting_times
+    description: "Ask Microsoft to SUGGEST meeting times that work for the attendees, rather than reading raw free/busy yourself. Returns ranked suggestions with a confidence score. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Calendars.ReadWrite]
+    params:
+      type: object
+      properties:
+        attendees: {type: array, items: {type: object}, description: "[{\"emailAddress\":{\"address\":\"a@b.com\"}}]"}
+        duration:  {type: string, description: "ISO8601 duration, e.g. PT1H for one hour"}
+        max_candidates: {type: integer, description: "how many suggestions to return"}
+      required: [attendees, duration]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/findMeetingTimes"
+      body:
+        attendees: "{{attendees}}"
+        meetingDuration: "{{duration}}"
+        maxCandidates: "{{max_candidates}}"
+    response_extract: "$.meetingTimeSuggestions"
