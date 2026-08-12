@@ -60,3 +60,92 @@ actions:
       form:
         creation_id: "{{creation_id}}"
     response_extract: "$"
+  - name: threads_get_post
+    description: "Get one Threads post's text, timestamp and permalink by id. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        post_id: {type: string}
+      required: [post_id]
+    request:
+      method: GET
+      url: "https://graph.threads.net/v1.0/{{post_id}}"
+      query:
+        fields: "id,text,timestamp,permalink,media_type"
+    response_extract: "$"
+  - name: threads_create_reply
+    description: "Stage a REPLY to an existing Threads post. This only creates the container — call threads_publish_post with the returned id to actually post it. Public and irreversible once published."
+    mutating: false
+    params:
+      type: object
+      properties:
+        user_id:      {type: string, description: "the connected account's Threads user id, or 'me'"}
+        text:         {type: string, description: "reply text"}
+        reply_to_id:  {type: string, description: "id of the post being replied to"}
+      required: [user_id, text, reply_to_id]
+    request:
+      method: POST
+      url: "https://graph.threads.net/v1.0/{{user_id}}/threads"
+      form:
+        media_type: "TEXT"
+        text: "{{text}}"
+        reply_to_id: "{{reply_to_id}}"
+    response_extract: "$"
+  - name: threads_list_replies
+    description: "List the replies to one Threads post, so a conversation can be read before answering. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        post_id: {type: string}
+      required: [post_id]
+    request:
+      method: GET
+      url: "https://graph.threads.net/v1.0/{{post_id}}/replies"
+      query:
+        fields: "id,text,username,timestamp"
+    response_extract: "$.data"
+  - name: threads_post_insights
+    description: "Read engagement metrics for ONE Threads post — views, likes, replies, reposts, quotes. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        post_id: {type: string}
+        metric:  {type: string, description: "comma-separated, e.g. views,likes,replies"}
+      required: [post_id, metric]
+    request:
+      method: GET
+      url: "https://graph.threads.net/v1.0/{{post_id}}/insights"
+      query:
+        metric: "{{metric}}"
+    response_extract: "$.data"
+  - name: threads_account_insights
+    description: "Read account-level Threads metrics such as views, likes and followers_count. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        user_id: {type: string, description: "the connected account's Threads user id, or 'me'"}
+        metric:  {type: string, description: "comma-separated, e.g. views,likes,followers_count"}
+      required: [user_id, metric]
+    request:
+      method: GET
+      url: "https://graph.threads.net/v1.0/{{user_id}}/threads_insights"
+      query:
+        metric: "{{metric}}"
+    response_extract: "$.data"
+  - name: threads_delete_post
+    description: "Delete a Threads post the connected account published. Irreversible."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        post_id: {type: string}
+      required: [post_id]
+    request:
+      method: DELETE
+      url: "https://graph.threads.net/v1.0/{{post_id}}"
+    response_extract: "$"

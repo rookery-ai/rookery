@@ -1,0 +1,19 @@
+{
+  "data": [
+    {
+      "id": "17895695668004550",
+      "caption": "Behind the scenes",
+      "media_type": "IMAGE",
+      "permalink": "https://instagram.com/p/abc",
+      "timestamp": "2026-08-10T12:00:00+0000",
+      "like_count": 42,
+      "comments_count": 5
+    }
+  ],
+  "paging": {
+    "cursors": {
+      "before": "MAZDZD",
+      "after": "QVFIUl9"
+    }
+  }
+}
