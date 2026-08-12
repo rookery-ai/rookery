@@ -1,0 +1,47 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `rookery version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is it installed
+      options: [native binary, container, .deb, .rpm, built from source]
+    validations:
+      required: true
+  - type: textarea
+    id: healthz
+    attributes:
+      label: /healthz output
+      description: >
+        `curl -s localhost:8080/healthz`. Reports sandbox status, coder mode and
+        host-tool presence — booleans only, never paths. Redact anything you are
+        unsure about.
+      render: json
+  - type: checkboxes
+    id: no-secrets
+    attributes:
+      label: Confirmation
+      options:
+        - label: This report contains no API keys, tokens, passwords or private URLs
+          required: true
