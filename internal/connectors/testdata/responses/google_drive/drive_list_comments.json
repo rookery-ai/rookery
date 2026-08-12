@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "id": "AAAA1",
+      "content": "Can we update the Q3 figure?",
+      "resolved": false,
+      "createdTime": "2026-08-04T11:02:31.000Z",
+      "author": {
+        "displayName": "Sam"
+      },
+      "replies": [
+        {
+          "content": "Done.",
+          "author": {
+            "displayName": "Alex"
+          }
+        }
+      ]
+    }
+  ]
+}

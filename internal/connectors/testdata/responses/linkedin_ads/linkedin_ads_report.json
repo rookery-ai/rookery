@@ -1,0 +1,22 @@
+{
+  "elements": [
+    {
+      "impressions": 88213,
+      "clicks": 1902,
+      "costInLocalCurrency": "412.55",
+      "externalWebsiteConversions": 31,
+      "dateRange": {
+        "start": {
+          "day": 4,
+          "month": 8,
+          "year": 2026
+        }
+      }
+    }
+  ],
+  "paging": {
+    "count": 10,
+    "start": 0,
+    "total": 1
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "id": "timezone",
+      "value": "Europe/Skopje"
+    },
+    {
+      "id": "weekStart",
+      "value": "1"
+    }
+  ]
+}

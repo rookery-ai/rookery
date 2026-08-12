@@ -26,3 +26,191 @@ actions:
         query:    "{{query}}"
         pageSize: "{{page_size}}"
     response_extract: "$.results"
+  - name: google_ads_list_campaigns
+    description: "List the account's campaigns with their status, channel type and budget. Read-only. Use before pausing or reporting on one."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: POST
+      url: "https://googleads.googleapis.com/v21/customers/{{conn.customer_id}}/googleAds:search"
+      body:
+        query: "SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign_budget.amount_micros FROM campaign ORDER BY campaign.name"
+        pageSize: 200
+    response_extract: "$.results"
+  - name: google_ads_campaign_performance
+    description: "Campaign-level performance between two dates: impressions, clicks, cost, conversions and CTR. Dates are YYYY-MM-DD. Costs come back in MICROS — divide cost_micros by 1,000,000 for the currency amount."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+      required: [start_date, end_date]
+    request:
+      method: POST
+      url: "https://googleads.googleapis.com/v21/customers/{{conn.customer_id}}/googleAds:search"
+      body:
+        query: "SELECT campaign.id, campaign.name, campaign.status, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions, metrics.ctr, metrics.average_cpc FROM campaign WHERE segments.date BETWEEN '{{start_date}}' AND '{{end_date}}' ORDER BY metrics.cost_micros DESC"
+        pageSize: 200
+    response_extract: "$.results"
+  - name: google_ads_ad_group_performance
+    description: "Ad-group performance between two dates, with the campaign each belongs to. Use to find which ad groups inside a campaign are spending. Costs come back in MICROS — divide cost_micros by 1,000,000 for the currency amount."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+      required: [start_date, end_date]
+    request:
+      method: POST
+      url: "https://googleads.googleapis.com/v21/customers/{{conn.customer_id}}/googleAds:search"
+      body:
+        query: "SELECT campaign.name, ad_group.id, ad_group.name, ad_group.status, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM ad_group WHERE segments.date BETWEEN '{{start_date}}' AND '{{end_date}}' ORDER BY metrics.cost_micros DESC"
+        pageSize: 200
+    response_extract: "$.results"
+  - name: google_ads_keyword_performance
+    description: "Keyword performance between two dates — text, match type, cost, conversions and quality score. The report to use for 'which keywords are wasting money'. Costs come back in MICROS — divide cost_micros by 1,000,000 for the currency amount."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+      required: [start_date, end_date]
+    request:
+      method: POST
+      url: "https://googleads.googleapis.com/v21/customers/{{conn.customer_id}}/googleAds:search"
+      body:
+        query: "SELECT campaign.name, ad_group.name, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM keyword_view WHERE segments.date BETWEEN '{{start_date}}' AND '{{end_date}}' ORDER BY metrics.cost_micros DESC"
+        pageSize: 200
+    response_extract: "$.results"
+  - name: google_ads_search_terms
+    description: "The actual SEARCH QUERIES people typed that triggered ads, with their cost and conversions — as opposed to the keywords bid on. This is where negative keywords come from. Costs come back in MICROS — divide cost_micros by 1,000,000 for the currency amount."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+      required: [start_date, end_date]
+    request:
+      method: POST
+      url: "https://googleads.googleapis.com/v21/customers/{{conn.customer_id}}/googleAds:search"
+      body:
+        query: "SELECT search_term_view.search_term, campaign.name, ad_group.name, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM search_term_view WHERE segments.date BETWEEN '{{start_date}}' AND '{{end_date}}' ORDER BY metrics.cost_micros DESC"
+        pageSize: 200
+    response_extract: "$.results"
+  - name: google_ads_ad_performance
+    description: "Performance of individual ads between two dates, with their headlines. Use to compare creative rather than targeting. Costs come back in MICROS — divide cost_micros by 1,000,000 for the currency amount."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+      required: [start_date, end_date]
+    request:
+      method: POST
+      url: "https://googleads.googleapis.com/v21/customers/{{conn.customer_id}}/googleAds:search"
+      body:
+        query: "SELECT campaign.name, ad_group.name, ad_group_ad.ad.id, ad_group_ad.status, ad_group_ad.ad.responsive_search_ad.headlines, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM ad_group_ad WHERE segments.date BETWEEN '{{start_date}}' AND '{{end_date}}' ORDER BY metrics.impressions DESC"
+        pageSize: 100
+    response_extract: "$.results"
+  - name: google_ads_geo_performance
+    description: "Performance broken down by the user's geographic location between two dates. Use to find which regions convert. Costs come back in MICROS — divide cost_micros by 1,000,000 for the currency amount."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+      required: [start_date, end_date]
+    request:
+      method: POST
+      url: "https://googleads.googleapis.com/v21/customers/{{conn.customer_id}}/googleAds:search"
+      body:
+        query: "SELECT campaign.name, geographic_view.country_criterion_id, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM geographic_view WHERE segments.date BETWEEN '{{start_date}}' AND '{{end_date}}' ORDER BY metrics.cost_micros DESC"
+        pageSize: 200
+    response_extract: "$.results"
+  - name: google_ads_device_performance
+    description: "Performance split by device (mobile, desktop, tablet) between two dates. Read-only. Costs come back in MICROS — divide cost_micros by 1,000,000 for the currency amount."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+      required: [start_date, end_date]
+    request:
+      method: POST
+      url: "https://googleads.googleapis.com/v21/customers/{{conn.customer_id}}/googleAds:search"
+      body:
+        query: "SELECT campaign.name, segments.device, metrics.impressions, metrics.clicks, metrics.cost_micros, metrics.conversions FROM campaign WHERE segments.date BETWEEN '{{start_date}}' AND '{{end_date}}' ORDER BY metrics.cost_micros DESC"
+        pageSize: 200
+    response_extract: "$.results"
+  - name: google_ads_daily_spend
+    description: "Total spend, clicks and conversions per DAY across the account between two dates. The report for 'how much did we spend last week'. Costs come back in MICROS — divide cost_micros by 1,000,000 for the currency amount."
+    mutating: false
+    params:
+      type: object
+      properties:
+        start_date: {type: string, description: "YYYY-MM-DD"}
+        end_date:   {type: string, description: "YYYY-MM-DD"}
+      required: [start_date, end_date]
+    request:
+      method: POST
+      url: "https://googleads.googleapis.com/v21/customers/{{conn.customer_id}}/googleAds:search"
+      body:
+        query: "SELECT segments.date, metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.conversions FROM customer WHERE segments.date BETWEEN '{{start_date}}' AND '{{end_date}}' ORDER BY segments.date"
+        pageSize: 400
+    response_extract: "$.results"
+  - name: google_ads_list_budgets
+    description: "List the account's campaign budgets with their daily amounts and delivery method. Read-only. Resolve a budget resource name here before changing it. Costs come back in MICROS — divide cost_micros by 1,000,000 for the currency amount."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: POST
+      url: "https://googleads.googleapis.com/v21/customers/{{conn.customer_id}}/googleAds:search"
+      body:
+        query: "SELECT campaign_budget.id, campaign_budget.name, campaign_budget.resource_name, campaign_budget.amount_micros, campaign_budget.delivery_method FROM campaign_budget"
+        pageSize: 200
+    response_extract: "$.results"
+  - name: google_ads_set_campaign_status
+    description: "Pause, enable or remove a campaign. resource_name is the full 'customers/X/campaigns/Y' string from google_ads_list_campaigns. Status REMOVED is irreversible. This SPENDS or STOPS SPENDING real money."
+    mutating: true
+    params:
+      type: object
+      properties:
+        resource_name: {type: string, description: "customers/X/campaigns/Y"}
+        status:        {type: string, description: "ENABLED | PAUSED | REMOVED"}
+      required: [resource_name, status]
+    request:
+      method: POST
+      url: "https://googleads.googleapis.com/v21/customers/{{conn.customer_id}}/campaigns:mutate"
+      body:
+        operations:
+          - updateMask: "status"
+            update:
+              resourceName: "{{resource_name}}"
+              status: "{{status}}"
+    response_extract: "$.results"
+  - name: google_ads_update_budget
+    description: "Change a campaign budget's DAILY amount. amount_micros is the currency amount times 1,000,000 — 25 EUR per day is 25000000. This changes real spending; confirm the figure with the user first."
+    mutating: true
+    params:
+      type: object
+      properties:
+        resource_name: {type: string, description: "customers/X/campaignBudgets/Y from google_ads_list_budgets"}
+        amount_micros: {type: integer, description: "daily amount x 1,000,000"}
+      required: [resource_name, amount_micros]
+    request:
+      method: POST
+      url: "https://googleads.googleapis.com/v21/customers/{{conn.customer_id}}/campaignBudgets:mutate"
+      body:
+        operations:
+          - updateMask: "amount_micros"
+            update:
+              resourceName: "{{resource_name}}"
+              amountMicros: "{{amount_micros}}"
+    response_extract: "$.results"

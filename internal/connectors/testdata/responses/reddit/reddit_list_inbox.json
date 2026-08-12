@@ -1,0 +1,20 @@
+{
+  "kind": "Listing",
+  "data": {
+    "after": "t3_1abcdef",
+    "dist": 1,
+    "children": [
+      {
+        "kind": "t3",
+        "data": {
+          "id": "abc1",
+          "name": "t1_abc1",
+          "author": "someone",
+          "subject": "comment reply",
+          "body": "Thanks for sharing",
+          "was_comment": true
+        }
+      }
+    ]
+  }
+}

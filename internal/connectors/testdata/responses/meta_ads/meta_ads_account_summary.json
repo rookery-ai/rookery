@@ -1,0 +1,10 @@
+{
+  "id": "act_123456",
+  "name": "Rookery Ads",
+  "currency": "EUR",
+  "timezone_name": "Europe/Skopje",
+  "account_status": 1,
+  "amount_spent": "121455",
+  "spend_cap": "0",
+  "balance": "0"
+}

@@ -63,3 +63,111 @@ actions:
         kind:  "self"
         api_type: "json"
     response_extract: "$"
+  - name: reddit_list_my_posts
+    description: "List posts the connected account has submitted, newest first. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        username: {type: string, description: "the connected account's username, from reddit_me"}
+        limit:    {type: integer, description: "max posts (default 25)"}
+      required: [username]
+    request:
+      method: GET
+      url: "https://oauth.reddit.com/user/{{username}}/submitted"
+      query:
+        limit: "{{limit}}"
+    response_extract: "$.data.children"
+  - name: reddit_list_my_subreddits
+    description: "List the subreddits the connected account subscribes to. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max subreddits (default 25)"}
+    request:
+      method: GET
+      url: "https://oauth.reddit.com/subreddits/mine/subscriber"
+      query:
+        limit: "{{limit}}"
+    response_extract: "$.data.children"
+  - name: reddit_get_post_comments
+    description: "Read the comment tree of one Reddit post. article is the post's id WITHOUT the t3_ prefix. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        article: {type: string, description: "post id without the t3_ prefix"}
+        limit:   {type: integer, description: "max comments (default 25)"}
+        sort:    {type: string, description: "confidence | top | new | controversial"}
+      required: [article]
+    request:
+      method: GET
+      url: "https://oauth.reddit.com/comments/{{article}}"
+      query:
+        limit: "{{limit}}"
+        sort: "{{sort}}"
+    response_extract: "$"
+  - name: reddit_submit_comment
+    description: "Post a public comment or reply on Reddit. parent is a FULLNAME — t3_xxx for a post, t1_xxx for a comment. Real, public and attached to the account's karma."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        parent: {type: string, description: "fullname: t3_xxx for a post, t1_xxx for a comment"}
+        text:   {type: string, description: "comment body, markdown"}
+      required: [parent, text]
+    request:
+      method: POST
+      url: "https://oauth.reddit.com/api/comment"
+      form:
+        api_type: "json"
+        thing_id: "{{parent}}"
+        text: "{{text}}"
+    response_extract: "$.json"
+  - name: reddit_vote
+    description: "Upvote, downvote or clear a vote on a post or comment. direction is 1, -1 or 0. id is a FULLNAME (t3_xxx or t1_xxx). Reddit forbids automated voting on content the user has not read — use sparingly."
+    mutating: true
+    public_write: true
+    params:
+      type: object
+      properties:
+        id:        {type: string, description: "fullname: t3_xxx or t1_xxx"}
+        direction: {type: integer, description: "1 upvote, -1 downvote, 0 clear"}
+      required: [id, direction]
+    request:
+      method: POST
+      url: "https://oauth.reddit.com/api/vote"
+      form:
+        id: "{{id}}"
+        dir: "{{direction}}"
+    response_extract: "$"
+  - name: reddit_list_inbox
+    description: "List the connected account's Reddit inbox — replies and private messages, newest first. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        limit: {type: integer, description: "max messages (default 25)"}
+    request:
+      method: GET
+      url: "https://oauth.reddit.com/message/inbox"
+      query:
+        limit: "{{limit}}"
+    response_extract: "$.data.children"
+  - name: reddit_list_saved
+    description: "List the posts and comments the connected account has saved. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        username: {type: string, description: "the connected account's username, from reddit_me"}
+        limit:    {type: integer, description: "max items (default 25)"}
+      required: [username]
+    request:
+      method: GET
+      url: "https://oauth.reddit.com/user/{{username}}/saved"
+      query:
+        limit: "{{limit}}"
+    response_extract: "$.data.children"

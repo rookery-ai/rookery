@@ -1,0 +1,21 @@
+{
+  "responses": [
+    {
+      "responseId": "ACYDBNj",
+      "createTime": "2026-08-10T18:03:11Z",
+      "answers": {
+        "4d5e": {
+          "questionId": "4d5e",
+          "textAnswers": {
+            "answers": [
+              {
+                "value": "Yes"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "nextPageToken": "CAoQAA"
+}

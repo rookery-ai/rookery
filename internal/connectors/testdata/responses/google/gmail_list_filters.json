@@ -1,0 +1,18 @@
+{
+  "filter": [
+    {
+      "id": "ANe1Bmi",
+      "criteria": {
+        "from": "billing@vendor.com"
+      },
+      "action": {
+        "addLabelIds": [
+          "Label_12"
+        ],
+        "removeLabelIds": [
+          "INBOX"
+        ]
+      }
+    }
+  ]
+}

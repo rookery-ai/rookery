@@ -54,3 +54,83 @@ actions:
     params: {type: object, properties: {id: {type: string}}, required: [id]}
     request: {method: GET, url: "https://api.trello.com/1/members/{{id}}", query: {key: "{{conn.trello_key}}"}}
     response_extract: "$"
+  - name: trello_move_card
+    description: "Move a card to a different list, and optionally to a position within it. Resolve the destination list id with trello_list_lists first."
+    mutating: true
+    params:
+      type: object
+      properties:
+        card_id:  {type: string}
+        list_id:  {type: string, description: "destination list id"}
+        position: {type: string, description: "top, bottom, or a number"}
+      required: [card_id, list_id]
+    request:
+      method: PUT
+      url: "https://api.trello.com/1/cards/{{card_id}}"
+      query:
+        idList: "{{list_id}}"
+        pos: "{{position}}"
+    response_extract: "$"
+  - name: trello_archive_card
+    description: "Archive a Trello card, removing it from the board without deleting it. Pass closed=false to restore it."
+    mutating: true
+    params:
+      type: object
+      properties:
+        card_id: {type: string}
+        closed:  {type: boolean, description: "true to archive, false to restore"}
+      required: [card_id, closed]
+    request:
+      method: PUT
+      url: "https://api.trello.com/1/cards/{{card_id}}"
+      query:
+        closed: "{{closed}}"
+    response_extract: "$"
+  - name: trello_add_card_member
+    description: "Assign a board member to a card. Resolve the member id with trello_get_member or the board's member list."
+    mutating: true
+    params:
+      type: object
+      properties:
+        card_id:   {type: string}
+        member_id: {type: string}
+      required: [card_id, member_id]
+    request:
+      method: POST
+      url: "https://api.trello.com/1/cards/{{card_id}}/idMembers"
+      query:
+        value: "{{member_id}}"
+    response_extract: "$"
+  - name: trello_set_card_due
+    description: "Set or clear a card's due date. due is an ISO-8601 timestamp; pass due_complete=true to mark the due date done."
+    mutating: true
+    params:
+      type: object
+      properties:
+        card_id:       {type: string}
+        due:           {type: string, description: "ISO-8601 timestamp"}
+        due_complete:  {type: boolean, description: "mark the due date as done"}
+      required: [card_id]
+    request:
+      method: PUT
+      url: "https://api.trello.com/1/cards/{{card_id}}"
+      query:
+        due: "{{due}}"
+        dueComplete: "{{due_complete}}"
+    response_extract: "$"
+  - name: trello_search
+    description: "Search across the connected Trello account's boards, cards and members. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        query:      {type: string, description: "search text"}
+        model_types: {type: string, description: "comma-separated: cards,boards,members"}
+      required: [query]
+    request:
+      method: GET
+      url: "https://api.trello.com/1/search"
+      query:
+        query: "{{query}}"
+        modelTypes: "{{model_types}}"
+    response_extract: "$"

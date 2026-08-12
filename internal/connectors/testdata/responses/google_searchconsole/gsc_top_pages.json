@@ -1,0 +1,14 @@
+{
+  "rows": [
+    {
+      "keys": [
+        "https://rookery.cloud/docs"
+      ],
+      "clicks": 180.0,
+      "impressions": 3210.0,
+      "ctr": 0.056,
+      "position": 6.1
+    }
+  ],
+  "responseAggregationType": "byPage"
+}

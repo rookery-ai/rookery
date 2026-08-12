@@ -1,0 +1,42 @@
+{
+  "dimensionHeaders": [
+    {
+      "name": "deviceCategory"
+    }
+  ],
+  "metricHeaders": [
+    {
+      "name": "activeUsers",
+      "type": "TYPE_INTEGER"
+    },
+    {
+      "name": "sessions",
+      "type": "TYPE_INTEGER"
+    },
+    {
+      "name": "bounceRate",
+      "type": "TYPE_INTEGER"
+    }
+  ],
+  "rows": [
+    {
+      "dimensionValues": [
+        {
+          "value": "mobile"
+        }
+      ],
+      "metricValues": [
+        {
+          "value": "901"
+        },
+        {
+          "value": "1210"
+        },
+        {
+          "value": "0.42"
+        }
+      ]
+    }
+  ],
+  "rowCount": 1
+}

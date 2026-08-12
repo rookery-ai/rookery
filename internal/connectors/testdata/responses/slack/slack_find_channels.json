@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "channels": [
+    {
+      "id": "C024BE91L",
+      "name": "general",
+      "is_channel": true,
+      "num_members": 12,
+      "topic": {
+        "value": "Company-wide announcements"
+      }
+    }
+  ]
+}

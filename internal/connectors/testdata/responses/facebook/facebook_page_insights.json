@@ -1,0 +1,15 @@
+{
+  "data": [
+    {
+      "name": "page_impressions",
+      "period": "day",
+      "title": "Daily Total Impressions",
+      "values": [
+        {
+          "value": 1204,
+          "end_time": "2026-08-10T07:00:00+0000"
+        }
+      ]
+    }
+  ]
+}

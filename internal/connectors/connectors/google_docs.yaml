@@ -102,3 +102,160 @@ actions:
       body:
         requests: "{{requests}}"
     response_extract: "$"
+  # ---- structure and formatting -------------------------------------------
+  # Docs has one write endpoint, documents:batchUpdate, and everything below is one
+  # curated request against it. Indexes are character offsets in the document body,
+  # which docs_get_document reports — inserting shifts every later index, so read
+  # the document again between two positional edits rather than guessing.
+  - name: docs_delete_range
+    description: "Delete a range of content from a document by character index. start_index is inclusive, end_index EXCLUSIVE. Read docs_get_document first — indexes shift after every edit."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/documents]
+    params:
+      type: object
+      properties:
+        document_id: {type: string}
+        start_index: {type: integer, description: "inclusive start offset"}
+        end_index:   {type: integer, description: "exclusive end offset"}
+      required: [document_id, start_index, end_index]
+    request:
+      method: POST
+      url: "https://docs.googleapis.com/v1/documents/{{document_id}}:batchUpdate"
+      body:
+        requests:
+          - deleteContentRange:
+              range: {startIndex: "{{start_index}}", endIndex: "{{end_index}}"}
+    response_extract: "$.replies"
+  - name: docs_insert_table
+    description: "Insert an empty table with the given number of rows and columns at a character index. Fill the cells afterwards with docs_insert_text at the new indexes from docs_get_document."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/documents]
+    params:
+      type: object
+      properties:
+        document_id: {type: string}
+        index:       {type: integer, description: "character offset to insert at"}
+        rows:        {type: integer}
+        columns:     {type: integer}
+      required: [document_id, index, rows, columns]
+    request:
+      method: POST
+      url: "https://docs.googleapis.com/v1/documents/{{document_id}}:batchUpdate"
+      body:
+        requests:
+          - insertTable:
+              location: {index: "{{index}}"}
+              rows: "{{rows}}"
+              columns: "{{columns}}"
+    response_extract: "$.replies"
+  - name: docs_insert_page_break
+    description: "Insert a page break at a character index, to start the next section on a fresh page. Mutating."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/documents]
+    params:
+      type: object
+      properties:
+        document_id: {type: string}
+        index:       {type: integer, description: "character offset to break at"}
+      required: [document_id, index]
+    request:
+      method: POST
+      url: "https://docs.googleapis.com/v1/documents/{{document_id}}:batchUpdate"
+      body:
+        requests:
+          - insertPageBreak:
+              location: {index: "{{index}}"}
+    response_extract: "$.replies"
+  - name: docs_insert_image
+    description: "Insert an image at a character index. The image must already be at a PUBLICLY reachable https URL — Google fetches it itself, so a local file or a private link will fail."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/documents]
+    params:
+      type: object
+      properties:
+        document_id: {type: string}
+        index:       {type: integer, description: "character offset to insert at"}
+        image_url:   {type: string, description: "publicly reachable https URL of the image"}
+      required: [document_id, index, image_url]
+    request:
+      method: POST
+      url: "https://docs.googleapis.com/v1/documents/{{document_id}}:batchUpdate"
+      body:
+        requests:
+          - insertInlineImage:
+              location: {index: "{{index}}"}
+              uri: "{{image_url}}"
+    response_extract: "$.replies"
+  - name: docs_set_heading_style
+    description: "Turn a range of text into a heading (or back to body text). style is a named style: TITLE, SUBTITLE, HEADING_1 … HEADING_6, or NORMAL_TEXT. Use after inserting text to structure a document."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/documents]
+    params:
+      type: object
+      properties:
+        document_id: {type: string}
+        start_index: {type: integer, description: "inclusive start offset"}
+        end_index:   {type: integer, description: "exclusive end offset"}
+        style:       {type: string, description: "TITLE | SUBTITLE | HEADING_1..HEADING_6 | NORMAL_TEXT"}
+      required: [document_id, start_index, end_index, style]
+    request:
+      method: POST
+      url: "https://docs.googleapis.com/v1/documents/{{document_id}}:batchUpdate"
+      body:
+        requests:
+          - updateParagraphStyle:
+              range: {startIndex: "{{start_index}}", endIndex: "{{end_index}}"}
+              paragraphStyle: {namedStyleType: "{{style}}"}
+              fields: "namedStyleType"
+    response_extract: "$.replies"
+  - name: docs_create_bullets
+    description: "Turn the paragraphs in a range into a bulleted or numbered list. preset is e.g. BULLET_DISC_CIRCLE_SQUARE or NUMBERED_DECIMAL_ALPHA_ROMAN."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/documents]
+    params:
+      type: object
+      properties:
+        document_id: {type: string}
+        start_index: {type: integer, description: "inclusive start offset"}
+        end_index:   {type: integer, description: "exclusive end offset"}
+        preset:      {type: string, description: "BULLET_DISC_CIRCLE_SQUARE | NUMBERED_DECIMAL_ALPHA_ROMAN"}
+      required: [document_id, start_index, end_index, preset]
+    request:
+      method: POST
+      url: "https://docs.googleapis.com/v1/documents/{{document_id}}:batchUpdate"
+      body:
+        requests:
+          - createParagraphBullets:
+              range: {startIndex: "{{start_index}}", endIndex: "{{end_index}}"}
+              bulletPreset: "{{preset}}"
+    response_extract: "$.replies"
+  - name: docs_set_text_style
+    description: "Apply bold, italic, underline or a link to a range of text. Omitted flags are left alone. Use link_url to turn the range into a hyperlink."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/documents]
+    params:
+      type: object
+      properties:
+        document_id: {type: string}
+        start_index: {type: integer, description: "inclusive start offset"}
+        end_index:   {type: integer, description: "exclusive end offset"}
+        bold:        {type: boolean}
+        italic:      {type: boolean}
+        underline:   {type: boolean}
+        link_url:    {type: string, description: "make the range link to this URL"}
+        fields:      {type: string, description: "comma-separated fields to apply, e.g. 'bold,italic' or 'link'. Required by the API so it knows which styles you meant to set."}
+      required: [document_id, start_index, end_index, fields]
+    request:
+      method: POST
+      url: "https://docs.googleapis.com/v1/documents/{{document_id}}:batchUpdate"
+      body:
+        requests:
+          - updateTextStyle:
+              range: {startIndex: "{{start_index}}", endIndex: "{{end_index}}"}
+              textStyle:
+                bold: "{{bold}}"
+                italic: "{{italic}}"
+                underline: "{{underline}}"
+                link: {url: "{{link_url}}"}
+              fields: "{{fields}}"
+    response_extract: "$.replies"

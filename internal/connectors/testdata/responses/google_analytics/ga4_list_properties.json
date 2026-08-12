@@ -1,0 +1,16 @@
+{
+  "accountSummaries": [
+    {
+      "name": "accountSummaries/123",
+      "account": "accounts/123",
+      "displayName": "Rookery",
+      "propertySummaries": [
+        {
+          "property": "properties/456789",
+          "displayName": "rookery.cloud",
+          "propertyType": "PROPERTY_TYPE_ORDINARY"
+        }
+      ]
+    }
+  ]
+}

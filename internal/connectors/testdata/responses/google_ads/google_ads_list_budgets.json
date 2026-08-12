@@ -1,0 +1,15 @@
+{
+  "results": [
+    {
+      "campaignBudget": {
+        "resourceName": "customers/1234567890/campaignBudgets/555",
+        "id": "555",
+        "name": "Brand daily",
+        "amountMicros": "25000000",
+        "deliveryMethod": "STANDARD"
+      }
+    }
+  ],
+  "fieldMask": "campaign.id,metrics.clicks",
+  "nextPageToken": "AbC123"
+}

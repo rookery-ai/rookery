@@ -1,0 +1,20 @@
+{
+  "data": {
+    "videos": [
+      {
+        "id": "7300000000000000000",
+        "title": "Desk tour",
+        "view_count": 10422,
+        "like_count": 812,
+        "comment_count": 44,
+        "share_count": 12,
+        "share_url": "https://www.tiktok.com/@me/video/7300"
+      }
+    ],
+    "cursor": 1786521600,
+    "has_more": true
+  },
+  "error": {
+    "code": "ok"
+  }
+}

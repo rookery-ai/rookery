@@ -80,3 +80,115 @@ actions:
       method: DELETE
       url: "https://tasks.googleapis.com/tasks/v1/lists/{{tasklist_id}}/tasks/{{task_id}}"
     response_extract: "$"
+  - name: tasks_get_task
+    description: "Get one task's full details by id — its title, notes, due date and completion status. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/tasks]
+    params:
+      type: object
+      properties:
+        tasklist_id: {type: string}
+        task_id:     {type: string}
+      required: [tasklist_id, task_id]
+    request:
+      method: GET
+      url: "https://tasks.googleapis.com/tasks/v1/lists/{{tasklist_id}}/tasks/{{task_id}}"
+    response_extract: "$"
+  - name: tasks_update_task
+    description: "Change a task's title, notes or due date (PATCH = partial: omitted fields are left alone). Use tasks_complete_task to tick it off instead."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/tasks]
+    params:
+      type: object
+      properties:
+        tasklist_id: {type: string}
+        task_id:     {type: string}
+        title:       {type: string}
+        notes:       {type: string}
+        due:         {type: string, description: "RFC3339 timestamp; Google stores the DATE only"}
+      required: [tasklist_id, task_id]
+    request:
+      method: PATCH
+      url: "https://tasks.googleapis.com/tasks/v1/lists/{{tasklist_id}}/tasks/{{task_id}}"
+      body:
+        title: "{{title}}"
+        notes: "{{notes}}"
+        due: "{{due}}"
+    response_extract: "$"
+  - name: tasks_uncomplete_task
+    description: "Reopen a completed task by setting it back to needsAction. The inverse of tasks_complete_task."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/tasks]
+    params:
+      type: object
+      properties:
+        tasklist_id: {type: string}
+        task_id:     {type: string}
+      required: [tasklist_id, task_id]
+    request:
+      method: PATCH
+      url: "https://tasks.googleapis.com/tasks/v1/lists/{{tasklist_id}}/tasks/{{task_id}}"
+      body:
+        status: "needsAction"
+        completed: null
+    response_extract: "$"
+  - name: tasks_move_task
+    description: "Reorder a task, or nest it under another task as a subtask. parent makes it a subtask; previous places it after that task at the same level."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/tasks]
+    params:
+      type: object
+      properties:
+        tasklist_id: {type: string}
+        task_id:     {type: string}
+        parent:      {type: string, description: "task id to nest under (omit for top level)"}
+        previous:    {type: string, description: "task id to place this one after"}
+      required: [tasklist_id, task_id]
+    request:
+      method: POST
+      url: "https://tasks.googleapis.com/tasks/v1/lists/{{tasklist_id}}/tasks/{{task_id}}/move"
+      query:
+        parent: "{{parent}}"
+        previous: "{{previous}}"
+    response_extract: "$"
+  - name: tasks_create_tasklist
+    description: "Create a new task list, e.g. one per project. Safe write — it starts empty."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/tasks]
+    params:
+      type: object
+      properties:
+        title: {type: string, description: "task list name"}
+      required: [title]
+    request:
+      method: POST
+      url: "https://tasks.googleapis.com/tasks/v1/users/@me/lists"
+      body:
+        title: "{{title}}"
+    response_extract: "$"
+  - name: tasks_delete_tasklist
+    description: "Delete an entire task list and every task on it. Irreversible — confirm with the user first."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/tasks]
+    params:
+      type: object
+      properties:
+        tasklist_id: {type: string}
+      required: [tasklist_id]
+    request:
+      method: DELETE
+      url: "https://tasks.googleapis.com/tasks/v1/users/@me/lists/{{tasklist_id}}"
+    response_extract: "$"
+  - name: tasks_clear_completed
+    description: "Remove every completed task from a list, clearing it out in one call. The tasks are hidden permanently; incomplete tasks are untouched."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/tasks]
+    params:
+      type: object
+      properties:
+        tasklist_id: {type: string}
+      required: [tasklist_id]
+    request:
+      method: POST
+      url: "https://tasks.googleapis.com/tasks/v1/lists/{{tasklist_id}}/clear"
+    response_extract: "$"

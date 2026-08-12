@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "user": {
+    "id": "U024BE7LH",
+    "name": "sam",
+    "real_name": "Sam Rivera",
+    "profile": {
+      "email": "sam@example.com",
+      "title": "Engineer"
+    }
+  }
+}

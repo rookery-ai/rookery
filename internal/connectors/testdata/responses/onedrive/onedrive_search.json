@@ -1,0 +1,15 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection",
+  "value": [
+    {
+      "id": "01BYE5RZ6",
+      "name": "Q3 report.docx",
+      "size": 40204,
+      "lastModifiedDateTime": "2026-08-04T11:02:31Z",
+      "webUrl": "https://onedrive.live.com/redir?resid=01BYE5RZ6",
+      "file": {
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      }
+    }
+  ]
+}

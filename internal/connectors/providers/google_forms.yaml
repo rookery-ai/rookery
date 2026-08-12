@@ -1,0 +1,14 @@
+name: google_forms
+label: Google Forms
+category: Google
+unverified: true
+auth_parent: google
+default_scopes:
+  - https://www.googleapis.com/auth/forms.body
+  - https://www.googleapis.com/auth/forms.responses.readonly
+setup_url: https://console.cloud.google.com/apis/credentials
+setup_steps:
+  - "Google Forms reuses your Google (Gmail) OAuth app. Set up Google first on its card above."
+  - "In Google Cloud Console → APIs & Services → Library, also enable the Google Forms API."
+  - "Then click Connect here to authorize Forms access on the same Google account."
+  - "Note: the API can only reach forms this account owns or that are shared with it — it cannot list every form in a domain."

@@ -108,3 +108,264 @@ actions:
             snippet:
               textOriginal: "{{text}}"
     response_extract: "$"
+  # ---- discovery -----------------------------------------------------------
+  - name: youtube_search
+    description: "Search YouTube for videos, channels or playlists by keyword. Set channel_id to search within one channel only. Read-only. Note: search costs 100 quota units per call against a default daily budget of 10,000, so use it sparingly."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/youtube.readonly]
+    params:
+      type: object
+      properties:
+        query:      {type: string, description: "search terms"}
+        type:       {type: string, description: "video | channel | playlist (default video)"}
+        channel_id: {type: string, description: "restrict to one channel"}
+        order:      {type: string, description: "relevance | date | viewCount | rating"}
+        max:        {type: integer, description: "max results (default 10, cap 50)"}
+        page_token: {type: string, description: "next_cursor from a previous call"}
+      required: [query]
+    request:
+      method: GET
+      url: "https://youtube.googleapis.com/youtube/v3/search"
+      query:
+        part: "snippet"
+        q: "{{query}}"
+        type: "{{type}}"
+        channelId: "{{channel_id}}"
+        order: "{{order}}"
+        maxResults: "{{max}}"
+        pageToken: "{{page_token}}"
+    response_extract: "$.items"
+    response_cursor: "$.nextPageToken"
+  - name: youtube_channel_stats
+    description: "Get subscriber, view and video counts for any channel by id. Use youtube_my_channel for the connected account's own channel. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/youtube.readonly]
+    params:
+      type: object
+      properties:
+        channel_id: {type: string, description: "channel id, e.g. UC..."}
+      required: [channel_id]
+    request:
+      method: GET
+      url: "https://youtube.googleapis.com/youtube/v3/channels"
+      query:
+        part: "snippet,statistics"
+        id: "{{channel_id}}"
+    response_extract: "$.items"
+
+  # ---- playlists -----------------------------------------------------------
+  - name: youtube_list_playlists
+    description: "List the connected account's own playlists with their ids and titles. Resolve a playlist NAME to its id here before youtube_list_videos. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/youtube.readonly]
+    params:
+      type: object
+      properties:
+        max:        {type: integer, description: "max playlists (default 25)"}
+        page_token: {type: string, description: "next_cursor from a previous call"}
+    request:
+      method: GET
+      url: "https://youtube.googleapis.com/youtube/v3/playlists"
+      query:
+        part: "snippet,contentDetails"
+        mine: "true"
+        maxResults: "{{max}}"
+        pageToken: "{{page_token}}"
+    response_extract: "$.items"
+    response_cursor: "$.nextPageToken"
+  - name: youtube_create_playlist
+    description: "Create a playlist on the connected channel. privacy is private (default), unlisted or public — a public playlist is visible to everyone, so default to private unless asked."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/youtube.force-ssl]
+    params:
+      type: object
+      properties:
+        title:       {type: string}
+        description: {type: string}
+        privacy:     {type: string, description: "private | unlisted | public"}
+      required: [title]
+    request:
+      method: POST
+      url: "https://youtube.googleapis.com/youtube/v3/playlists"
+      query:
+        part: "snippet,status"
+      body:
+        snippet: {title: "{{title}}", description: "{{description}}"}
+        status: {privacyStatus: "{{privacy}}"}
+    response_extract: "$"
+  - name: youtube_add_video_to_playlist
+    description: "Add a video to one of the connected account's playlists. Returns the playlist ITEM id, which is what youtube_remove_playlist_item needs — it is not the video id."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/youtube.force-ssl]
+    params:
+      type: object
+      properties:
+        playlist_id: {type: string}
+        video_id:    {type: string}
+      required: [playlist_id, video_id]
+    request:
+      method: POST
+      url: "https://youtube.googleapis.com/youtube/v3/playlistItems"
+      query:
+        part: "snippet"
+      body:
+        snippet:
+          playlistId: "{{playlist_id}}"
+          resourceId: {kind: "youtube#video", videoId: "{{video_id}}"}
+    response_extract: "$"
+  - name: youtube_remove_playlist_item
+    description: "Remove an entry from a playlist. item_id is the playlistItem id returned by youtube_add_video_to_playlist or youtube_list_videos — NOT the video id."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/youtube.force-ssl]
+    params:
+      type: object
+      properties:
+        item_id: {type: string, description: "playlistItem id, not the video id"}
+      required: [item_id]
+    request:
+      method: DELETE
+      url: "https://youtube.googleapis.com/youtube/v3/playlistItems"
+      query:
+        id: "{{item_id}}"
+    response_extract: "$"
+
+  # ---- the channel's own videos -------------------------------------------
+  - name: youtube_update_video
+    description: "Update a video's title, description or tags. The API REPLACES the whole snippet, so title and category_id must both be supplied even when only the description changes — read the current values with youtube_video_stats first. Public metadata, visible immediately."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/youtube.force-ssl]
+    params:
+      type: object
+      properties:
+        video_id:    {type: string}
+        title:       {type: string, description: "required by the API even if unchanged"}
+        category_id: {type: string, description: "required by the API even if unchanged, e.g. '22'"}
+        description: {type: string}
+        tags:        {type: array, items: {type: string}}
+      required: [video_id, title, category_id]
+    request:
+      method: PUT
+      url: "https://youtube.googleapis.com/youtube/v3/videos"
+      query:
+        part: "snippet"
+      body:
+        id: "{{video_id}}"
+        snippet:
+          title: "{{title}}"
+          categoryId: "{{category_id}}"
+          description: "{{description}}"
+          tags: "{{tags}}"
+    response_extract: "$"
+  - name: youtube_rate_video
+    description: "Like, dislike, or clear the connected account's rating on a video. rating is like, dislike or none. Public — the like count changes."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/youtube.force-ssl]
+    params:
+      type: object
+      properties:
+        video_id: {type: string}
+        rating:   {type: string, description: "like | dislike | none"}
+      required: [video_id, rating]
+    request:
+      method: POST
+      url: "https://youtube.googleapis.com/youtube/v3/videos/rate"
+      query:
+        id: "{{video_id}}"
+        rating: "{{rating}}"
+    response_extract: "$"
+  - name: youtube_list_captions
+    description: "List the caption tracks available on a video, with their languages and ids. Read-only. Downloading the caption TEXT is not offered — it returns a subtitle file rather than JSON."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/youtube.force-ssl]
+    params:
+      type: object
+      properties:
+        video_id: {type: string}
+      required: [video_id]
+    request:
+      method: GET
+      url: "https://youtube.googleapis.com/youtube/v3/captions"
+      query:
+        part: "snippet"
+        videoId: "{{video_id}}"
+    response_extract: "$.items"
+
+  # ---- community -----------------------------------------------------------
+  - name: youtube_reply_to_comment
+    description: "Reply to an existing comment thread on a video. The reply is PUBLIC and posted as the connected account. parent_id is the comment thread id from youtube_list_comments."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/youtube.force-ssl]
+    params:
+      type: object
+      properties:
+        parent_id: {type: string, description: "comment thread id from youtube_list_comments"}
+        text:      {type: string}
+      required: [parent_id, text]
+    request:
+      method: POST
+      url: "https://youtube.googleapis.com/youtube/v3/comments"
+      query:
+        part: "snippet"
+      body:
+        snippet: {parentId: "{{parent_id}}", textOriginal: "{{text}}"}
+    response_extract: "$"
+  - name: youtube_delete_comment
+    description: "Delete a comment the connected account posted, or one on its own videos. Irreversible."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/youtube.force-ssl]
+    params:
+      type: object
+      properties:
+        comment_id: {type: string}
+      required: [comment_id]
+    request:
+      method: DELETE
+      url: "https://youtube.googleapis.com/youtube/v3/comments"
+      query:
+        id: "{{comment_id}}"
+    response_extract: "$"
+  - name: youtube_list_subscriptions
+    description: "List the channels the connected account subscribes to. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/youtube.readonly]
+    params:
+      type: object
+      properties:
+        max:        {type: integer, description: "max subscriptions (default 25)"}
+        page_token: {type: string, description: "next_cursor from a previous call"}
+    request:
+      method: GET
+      url: "https://youtube.googleapis.com/youtube/v3/subscriptions"
+      query:
+        part: "snippet"
+        mine: "true"
+        maxResults: "{{max}}"
+        pageToken: "{{page_token}}"
+    response_extract: "$.items"
+    response_cursor: "$.nextPageToken"
+  - name: youtube_subscribe_to_channel
+    description: "Subscribe the connected account to a channel. Publicly visible on the account's subscription list unless the user keeps subscriptions private."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/youtube.force-ssl]
+    params:
+      type: object
+      properties:
+        channel_id: {type: string, description: "channel id to subscribe to, e.g. UC..."}
+      required: [channel_id]
+    request:
+      method: POST
+      url: "https://youtube.googleapis.com/youtube/v3/subscriptions"
+      query:
+        part: "snippet"
+      body:
+        snippet:
+          resourceId: {kind: "youtube#channel", channelId: "{{channel_id}}"}
+    response_extract: "$"

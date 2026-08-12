@@ -1,0 +1,106 @@
+provider: google_contacts
+# The People API. Every read takes a personFields mask and every update takes an
+# updatePersonFields mask — the API rejects a call without one rather than choosing a
+# default, so both are exposed as parameters with sensible defaults in the description.
+actions:
+  - name: contacts_list
+    description: "List the account's saved contacts with their names, emails and phone numbers. Read-only. Pass page_token from a previous next_cursor to page through."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/contacts]
+    params:
+      type: object
+      properties:
+        fields:     {type: string, description: "personFields mask, default 'names,emailAddresses,phoneNumbers,organizations'"}
+        max:        {type: integer, description: "max contacts per page (default 50, cap 1000)"}
+        page_token: {type: string, description: "next_cursor from a previous call"}
+    request:
+      method: GET
+      url: "https://people.googleapis.com/v1/people/me/connections"
+      query:
+        personFields: "{{fields}}"
+        pageSize: "{{max}}"
+        pageToken: "{{page_token}}"
+    response_extract: "$.connections"
+    response_cursor: "$.nextPageToken"
+  - name: contacts_search
+    description: "Search the account's contacts by name, email or phone. Returns matches wrapped in a 'person' object each. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/contacts]
+    params:
+      type: object
+      properties:
+        query:  {type: string, description: "search text"}
+        fields: {type: string, description: "readMask, default 'names,emailAddresses,phoneNumbers'"}
+      required: [query]
+    request:
+      method: GET
+      url: "https://people.googleapis.com/v1/people:searchContacts"
+      query:
+        query: "{{query}}"
+        readMask: "{{fields}}"
+    response_extract: "$.results"
+  - name: contacts_get
+    description: "Get one contact's full details. resource_name looks like 'people/c12345' and comes from contacts_list or contacts_search. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/contacts]
+    params:
+      type: object
+      properties:
+        resource_name: {type: string, description: "e.g. people/c12345"}
+        fields:        {type: string, description: "personFields mask"}
+      required: [resource_name]
+    request:
+      method: GET
+      url: "https://people.googleapis.com/v1/{{resource_name}}"
+      query:
+        personFields: "{{fields}}"
+    response_extract: "$"
+  - name: contacts_create
+    description: "Create a new contact. Supply the name parts and optionally an email and phone. Safe write — it only adds to the user's own address book."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/contacts]
+    params:
+      type: object
+      properties:
+        given_name:  {type: string, description: "first name"}
+        family_name: {type: string, description: "last name"}
+        email:       {type: string}
+        phone:       {type: string}
+        organization: {type: string, description: "company name"}
+      required: [given_name]
+    request:
+      method: POST
+      url: "https://people.googleapis.com/v1/people:createContact"
+      body:
+        names: [{givenName: "{{given_name}}", familyName: "{{family_name}}"}]
+        emailAddresses: [{value: "{{email}}"}]
+        phoneNumbers: [{value: "{{phone}}"}]
+        organizations: [{name: "{{organization}}"}]
+    response_extract: "$"
+  - name: contacts_delete
+    description: "Delete a contact from the account's address book. resource_name looks like 'people/c12345'. Irreversible."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/contacts]
+    params:
+      type: object
+      properties:
+        resource_name: {type: string, description: "e.g. people/c12345"}
+      required: [resource_name]
+    request:
+      method: DELETE
+      url: "https://people.googleapis.com/v1/{{resource_name}}:deleteContact"
+    response_extract: "$"
+  - name: contacts_list_groups
+    description: "List the account's contact groups (labels), such as Family or Work, with their member counts. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/contacts]
+    params:
+      type: object
+      properties:
+        max: {type: integer, description: "max groups (default 50)"}
+    request:
+      method: GET
+      url: "https://people.googleapis.com/v1/contactGroups"
+      query:
+        pageSize: "{{max}}"
+    response_extract: "$.contactGroups"

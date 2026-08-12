@@ -45,3 +45,60 @@ actions:
     # Whole envelope on purpose: the report rows are meaningless without the
     # sibling "headers" block that names each column.
     response_extract: "$"
+  - name: adsense_list_adunits
+    description: "List the ad units under an ad client, with their names and states. ad_client is the 'accounts/pub-X/adclients/ca-pub-X' name from adsense_list_adclients. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        ad_client: {type: string, description: "accounts/pub-X/adclients/ca-pub-X"}
+      required: [ad_client]
+    request:
+      method: GET
+      url: "https://adsense.googleapis.com/v2/{{ad_client}}/adunits"
+    response_extract: "$.adUnits"
+  - name: adsense_earnings_by_day
+    description: "AdSense earnings, page views, impressions and clicks broken down by DAY over a preset range. The report for 'how much did the site earn last week'. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        account:    {type: string, description: "accounts/pub-XXXX from adsense_list_accounts"}
+        date_range: {type: string, description: "TODAY, YESTERDAY, MONTH_TO_DATE, YEAR_TO_DATE, LAST_7_DAYS or LAST_30_DAYS"}
+        limit:      {type: integer, description: "max rows — use 40 for a month of daily data"}
+      required: [account, date_range, limit]
+    request:
+      method: GET
+      url: "https://adsense.googleapis.com/v2/{{account}}/reports:generate"
+      query:
+        dateRange:  "{{date_range}}"
+        dimensions: "DATE"
+        metrics:    "ESTIMATED_EARNINGS,PAGE_VIEWS,IMPRESSIONS,CLICKS"
+        limit:      "{{limit}}"
+    # Whole envelope on purpose, matching adsense_report: the rows are meaningless
+    # without the sibling "headers" block naming each column.
+    response_extract: "$"
+  - name: adsense_list_payments
+    description: "List the AdSense account's payments — what has been paid out and what is still unpaid. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        account: {type: string, description: "accounts/pub-XXXX"}
+      required: [account]
+    request:
+      method: GET
+      url: "https://adsense.googleapis.com/v2/{{account}}/payments"
+    response_extract: "$.payments"
+  - name: adsense_list_sites
+    description: "List the sites attached to an AdSense account and whether Google has approved each for ads. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        account: {type: string, description: "accounts/pub-XXXX"}
+      required: [account]
+    request:
+      method: GET
+      url: "https://adsense.googleapis.com/v2/{{account}}/sites"
+    response_extract: "$.sites"

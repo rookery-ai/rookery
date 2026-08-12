@@ -1,0 +1,15 @@
+{
+  "replies": [
+    {
+      "createItem": {
+        "itemId": "7f8g",
+        "questionId": [
+          "9h0i"
+        ]
+      }
+    }
+  ],
+  "writeControl": {
+    "requiredRevisionId": "00000001"
+  }
+}

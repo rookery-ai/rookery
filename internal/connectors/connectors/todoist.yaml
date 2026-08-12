@@ -102,3 +102,65 @@ actions:
         task_id: "{{task_id}}"
         content: "{{content}}"
     response_extract: "$"
+  - name: todoist_get_task
+    description: "Get one Todoist task's full details by id — content, due date, priority, labels and project. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        task_id: {type: string}
+      required: [task_id]
+    request:
+      method: GET
+      url: "https://api.todoist.com/api/v1/tasks/{{task_id}}"
+    response_extract: "$"
+  - name: todoist_reopen_task
+    description: "Reopen a completed Todoist task. The inverse of todoist_close_task."
+    mutating: true
+    params:
+      type: object
+      properties:
+        task_id: {type: string}
+      required: [task_id]
+    request:
+      method: POST
+      url: "https://api.todoist.com/api/v1/tasks/{{task_id}}/reopen"
+    response_extract: "$"
+  - name: todoist_delete_task
+    description: "Permanently delete a Todoist task. Irreversible — prefer todoist_close_task for finished work."
+    mutating: true
+    params:
+      type: object
+      properties:
+        task_id: {type: string}
+      required: [task_id]
+    request:
+      method: DELETE
+      url: "https://api.todoist.com/api/v1/tasks/{{task_id}}"
+    response_extract: "$"
+  - name: todoist_create_project
+    description: "Create a Todoist project. Safe write — it starts empty."
+    mutating: false
+    params:
+      type: object
+      properties:
+        name:      {type: string}
+        parent_id: {type: string, description: "optional parent project id"}
+        color:     {type: string, description: "colour name, e.g. berry_red"}
+      required: [name]
+    request:
+      method: POST
+      url: "https://api.todoist.com/api/v1/projects"
+      body:
+        name: "{{name}}"
+        parent_id: "{{parent_id}}"
+        color: "{{color}}"
+    response_extract: "$"
+  - name: todoist_list_labels
+    description: "List the account's Todoist labels with their ids and colours. Resolve a label NAME before filtering tasks by it. Read-only."
+    mutating: false
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://api.todoist.com/api/v1/labels"
+    response_extract: "$"

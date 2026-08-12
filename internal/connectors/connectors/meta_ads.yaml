@@ -64,3 +64,184 @@ actions:
       form:
         status: "{{status}}"
     response_extract: "$"
+  # Narrowing to one campaign is its own action rather than a `filtering` parameter:
+  # Meta's filtering takes a JSON ARRAY of filter objects, so passing a bare campaign
+  # id there is silently ignored — the call succeeds and returns the whole account.
+  # The campaign's own /adsets edge is both correct and simpler for the model.
+  - name: meta_ads_list_adsets
+    description: "List every ad set in an ad account, with status, budget and optimisation goal. Use meta_ads_list_campaign_adsets to narrow to one campaign. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        account_id: {type: string, description: "act_XXXX from meta_ads_list_accounts"}
+        limit:      {type: integer, description: "max ad sets (default 25)"}
+      required: [account_id]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{account_id}}/adsets"
+      query:
+        fields: "id,name,status,daily_budget,lifetime_budget,optimization_goal,campaign_id"
+        limit: "{{limit}}"
+    response_extract: "$.data"
+  - name: meta_ads_list_campaign_adsets
+    description: "List the ad sets belonging to ONE campaign, with status, budget and optimisation goal. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        campaign_id: {type: string, description: "campaign id from meta_ads_list_campaigns"}
+        limit:       {type: integer, description: "max ad sets (default 25)"}
+      required: [campaign_id]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{campaign_id}}/adsets"
+      query:
+        fields: "id,name,status,daily_budget,lifetime_budget,optimization_goal,campaign_id"
+        limit: "{{limit}}"
+    response_extract: "$.data"
+  - name: meta_ads_list_ads
+    description: "List the individual ads in an ad account with their status and the ad set they belong to. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        account_id: {type: string, description: "act_XXXX"}
+        limit:      {type: integer, description: "max ads (default 25)"}
+      required: [account_id]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{account_id}}/ads"
+      query:
+        fields: "id,name,status,adset_id,campaign_id,creative{id,title,body}"
+        limit: "{{limit}}"
+    response_extract: "$.data"
+  - name: meta_ads_campaign_insights
+    description: "Performance for ONE campaign over a date preset or explicit range — spend, impressions, clicks, CPC, CTR and actions. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        campaign_id:  {type: string}
+        date_preset:  {type: string, description: "today | yesterday | last_7d | last_30d | this_month"}
+        breakdowns:   {type: string, description: "optional, e.g. age,gender or device_platform"}
+      required: [campaign_id]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{campaign_id}}/insights"
+      query:
+        fields: "campaign_name,spend,impressions,clicks,cpc,ctr,reach,actions"
+        date_preset: "{{date_preset}}"
+        breakdowns: "{{breakdowns}}"
+    response_extract: "$.data"
+  - name: meta_ads_adset_insights
+    description: "Performance for ONE ad set — spend, impressions, clicks and actions. Use to compare targeting within a campaign. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        adset_id:    {type: string}
+        date_preset: {type: string, description: "today | yesterday | last_7d | last_30d"}
+        breakdowns:  {type: string, description: "optional, e.g. age,gender"}
+      required: [adset_id]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{adset_id}}/insights"
+      query:
+        fields: "adset_name,spend,impressions,clicks,cpc,ctr,reach,actions"
+        date_preset: "{{date_preset}}"
+        breakdowns: "{{breakdowns}}"
+    response_extract: "$.data"
+  - name: meta_ads_ad_insights
+    description: "Performance for ONE ad, so creative can be compared rather than targeting. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        ad_id:       {type: string}
+        date_preset: {type: string, description: "today | yesterday | last_7d | last_30d"}
+      required: [ad_id]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{ad_id}}/insights"
+      query:
+        fields: "ad_name,spend,impressions,clicks,cpc,ctr,reach,actions"
+        date_preset: "{{date_preset}}"
+    response_extract: "$.data"
+  - name: meta_ads_daily_insights
+    description: "Account performance broken down by DAY over a range, for a spend trend. time_increment=1 is what makes it per-day rather than one total. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        account_id: {type: string, description: "act_XXXX"}
+        since:      {type: string, description: "YYYY-MM-DD"}
+        until:      {type: string, description: "YYYY-MM-DD"}
+      required: [account_id, since, until]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{account_id}}/insights"
+      query:
+        fields: "spend,impressions,clicks,cpc,ctr,reach"
+        time_range: "{\"since\":\"{{since}}\",\"until\":\"{{until}}\"}"
+        time_increment: "1"
+    response_extract: "$.data"
+  - name: meta_ads_set_adset_status
+    description: "Pause or activate an ad set. This starts or stops real spending on that targeting — confirm with the user first."
+    mutating: true
+    params:
+      type: object
+      properties:
+        adset_id: {type: string}
+        status:   {type: string, description: "ACTIVE | PAUSED"}
+      required: [adset_id, status]
+    request:
+      method: POST
+      url: "https://graph.facebook.com/v21.0/{{adset_id}}"
+      form:
+        status: "{{status}}"
+    response_extract: "$"
+  - name: meta_ads_set_ad_status
+    description: "Pause or activate a single ad, leaving the rest of its ad set running. Affects real spending."
+    mutating: true
+    params:
+      type: object
+      properties:
+        ad_id:  {type: string}
+        status: {type: string, description: "ACTIVE | PAUSED"}
+      required: [ad_id, status]
+    request:
+      method: POST
+      url: "https://graph.facebook.com/v21.0/{{ad_id}}"
+      form:
+        status: "{{status}}"
+    response_extract: "$"
+  - name: meta_ads_update_adset_budget
+    description: "Change an ad set's DAILY budget. daily_budget is in the account's currency MINOR units — 25.00 EUR is 2500. This changes real spending; confirm the figure first."
+    mutating: true
+    params:
+      type: object
+      properties:
+        adset_id:     {type: string}
+        daily_budget: {type: integer, description: "minor units, e.g. 2500 for 25.00"}
+      required: [adset_id, daily_budget]
+    request:
+      method: POST
+      url: "https://graph.facebook.com/v21.0/{{adset_id}}"
+      form:
+        daily_budget: "{{daily_budget}}"
+    response_extract: "$"
+  - name: meta_ads_account_summary
+    description: "Get an ad account's name, currency, timezone, spend cap and amount spent to date. Read the CURRENCY here before interpreting any budget or spend figure. Read-only."
+    mutating: false
+    params:
+      type: object
+      properties:
+        account_id: {type: string, description: "act_XXXX"}
+      required: [account_id]
+    request:
+      method: GET
+      url: "https://graph.facebook.com/v21.0/{{account_id}}"
+      query:
+        fields: "id,name,currency,timezone_name,account_status,amount_spent,spend_cap,balance"
+    response_extract: "$"

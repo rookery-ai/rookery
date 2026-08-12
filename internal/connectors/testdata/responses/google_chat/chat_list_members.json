@@ -1,0 +1,14 @@
+{
+  "memberships": [
+    {
+      "name": "spaces/AAAA1/members/CCCC1",
+      "state": "JOINED",
+      "member": {
+        "name": "users/1234",
+        "displayName": "Sam",
+        "type": "HUMAN"
+      }
+    }
+  ],
+  "nextPageToken": "CAoQAA"
+}

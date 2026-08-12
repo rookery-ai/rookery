@@ -1,0 +1,16 @@
+{
+  "elements": [
+    {
+      "id": 512345,
+      "name": "Rookery",
+      "status": "ACTIVE",
+      "type": "BUSINESS",
+      "currency": "EUR"
+    }
+  ],
+  "paging": {
+    "count": 10,
+    "start": 0,
+    "total": 1
+  }
+}

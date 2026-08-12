@@ -1,0 +1,17 @@
+{
+  "data": [
+    {
+      "id": "23850",
+      "name": "Prospecting",
+      "status": "ACTIVE",
+      "objective": "OUTCOME_SALES",
+      "daily_budget": "5000"
+    }
+  ],
+  "paging": {
+    "cursors": {
+      "before": "MAZDZD",
+      "after": "NjQZD"
+    }
+  }
+}

@@ -1,25 +1,104 @@
 provider: google_calendar
+# Calendar v3. Two shapes are split into separate actions rather than switched by a
+# flag, because the request BODY differs rather than a value in it: a timed event uses
+# start.dateTime while an all-day event uses start.date, and a Meet link needs both a
+# conferenceData block and the conferenceDataVersion=1 query parameter. A boolean
+# argument cannot choose between JSON keys, so pretending otherwise would ship an
+# action that silently produced the wrong kind of event.
 actions:
+  # ---- calendars -----------------------------------------------------------
   - name: calendar_list_calendars
-    description: "List the calendars on this account, with their ids. Call this first — every other action needs a calendar_id, and 'primary' is the default one. Read-only."
+    description: "List the calendars on the connected account with their ids, names and time zones. Resolve a calendar NAME to its id here before any event call. Read-only."
     mutating: false
-    params: {type: object, properties: {}}
+    scopes: [https://www.googleapis.com/auth/calendar.readonly]
+    params:
+      type: object
+      properties:
+        page_token: {type: string, description: "next_cursor from a previous call"}
     request:
       method: GET
       url: "https://www.googleapis.com/calendar/v3/users/me/calendarList"
+      query:
+        pageToken: "{{page_token}}"
     response_extract: "$.items"
-
-  - name: calendar_list_events
-    description: "List events in a time window. time_min/time_max are RFC3339 timestamps, e.g. 2026-08-03T00:00:00Z. Always pass a window — a calendar can hold years of events. Read-only."
+    response_cursor: "$.nextPageToken"
+  - name: calendar_get_calendar
+    description: "Get one calendar's metadata — its name, description and TIME ZONE. Read the time zone before creating events, so times land where the user expects. Read-only."
     mutating: false
+    scopes: [https://www.googleapis.com/auth/calendar.readonly]
     params:
       type: object
       properties:
         calendar_id: {type: string, description: "calendar id, or 'primary'"}
-        time_min:    {type: string, description: "RFC3339 lower bound, inclusive"}
-        time_max:    {type: string, description: "RFC3339 upper bound, exclusive"}
-        max_results: {type: integer, description: "cap on returned events, default 25"}
-        query:       {type: string, description: "free-text search over event fields"}
+      required: [calendar_id]
+    request:
+      method: GET
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}"
+    response_extract: "$"
+  - name: calendar_create_calendar
+    description: "Create a new secondary calendar on the account, e.g. a separate one for a project. Safe write — it starts empty."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/calendar]
+    params:
+      type: object
+      properties:
+        summary:   {type: string, description: "calendar name"}
+        time_zone: {type: string, description: "IANA zone, e.g. Europe/Skopje"}
+        description: {type: string}
+      required: [summary]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/calendar/v3/calendars"
+      body:
+        summary: "{{summary}}"
+        timeZone: "{{time_zone}}"
+        description: "{{description}}"
+    response_extract: "$"
+  - name: calendar_delete_calendar
+    description: "Permanently delete a secondary calendar AND every event on it. Irreversible, and cannot be used on the primary calendar. Confirm with the user first."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/calendar]
+    params:
+      type: object
+      properties:
+        calendar_id: {type: string, description: "id of a secondary calendar — never 'primary'"}
+      required: [calendar_id]
+    request:
+      method: DELETE
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}"
+    response_extract: "$"
+  - name: calendar_subscribe_to_calendar
+    description: "Add an existing calendar (by id, e.g. a shared team calendar or a holiday calendar) to this account's calendar list so its events appear. Safe write."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/calendar]
+    params:
+      type: object
+      properties:
+        calendar_id: {type: string, description: "id of the calendar to subscribe to"}
+      required: [calendar_id]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/calendar/v3/users/me/calendarList"
+      body:
+        id: "{{calendar_id}}"
+    response_extract: "$"
+
+  # ---- events: reading -----------------------------------------------------
+  - name: calendar_list_events
+    description: "List events on a calendar between two RFC3339 timestamps, optionally filtered by free text. Set single_events=true to expand recurring events into individual occurrences. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/calendar.readonly]
+    params:
+      type: object
+      properties:
+        calendar_id:   {type: string, description: "calendar id, or 'primary'"}
+        time_min:      {type: string, description: "RFC3339 lower bound"}
+        time_max:      {type: string, description: "RFC3339 upper bound"}
+        query:         {type: string, description: "free-text search over event fields"}
+        max_results:   {type: integer, description: "max events (default 25)"}
+        single_events: {type: boolean, description: "expand recurring events into occurrences"}
+        order_by:      {type: string, description: "startTime (needs single_events) or updated"}
+        page_token:    {type: string, description: "next_cursor from a previous call"}
       required: [calendar_id, time_min, time_max]
     request:
       method: GET
@@ -27,15 +106,17 @@ actions:
       query:
         timeMin: "{{time_min}}"
         timeMax: "{{time_max}}"
-        maxResults: "{{max_results}}"
         q: "{{query}}"
-        singleEvents: "true"
-        orderBy: "startTime"
+        maxResults: "{{max_results}}"
+        singleEvents: "{{single_events}}"
+        orderBy: "{{order_by}}"
+        pageToken: "{{page_token}}"
     response_extract: "$.items"
-
+    response_cursor: "$.nextPageToken"
   - name: calendar_get_event
-    description: "Get one event by id. Read-only."
+    description: "Get one event's full details by id, including its attendees and their RSVP status. Read-only."
     mutating: false
+    scopes: [https://www.googleapis.com/auth/calendar.readonly]
     params:
       type: object
       properties:
@@ -46,79 +127,40 @@ actions:
       method: GET
       url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events/{{event_id}}"
     response_extract: "$"
-
-  - name: calendar_create_event
-    description: "Create an event. start/end are RFC3339 timestamps. Mutating."
-    mutating: true
-    params:
-      type: object
-      properties:
-        calendar_id: {type: string}
-        summary:     {type: string, description: "event title"}
-        description: {type: string}
-        location:    {type: string}
-        start:       {type: string, description: "RFC3339 start"}
-        end:         {type: string, description: "RFC3339 end"}
-      required: [calendar_id, summary, start, end]
-    request:
-      method: POST
-      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events"
-      body:
-        summary: "{{summary}}"
-        description: "{{description}}"
-        location: "{{location}}"
-        start: {dateTime: "{{start}}"}
-        end: {dateTime: "{{end}}"}
-    response_extract: "$"
-
-  - name: calendar_update_event
-    description: "Update an event's fields by id (PATCH = partial: omitted fields are left alone). Mutating."
-    mutating: true
-    params:
-      type: object
-      properties:
-        calendar_id: {type: string}
-        event_id:    {type: string}
-        summary:     {type: string}
-        description: {type: string}
-        location:    {type: string}
-        start:       {type: string, description: "RFC3339 start"}
-        end:         {type: string, description: "RFC3339 end"}
-      required: [calendar_id, event_id]
-    request:
-      method: PATCH
-      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events/{{event_id}}"
-      body:
-        summary: "{{summary}}"
-        description: "{{description}}"
-        location: "{{location}}"
-        start: {dateTime: "{{start}}"}
-        end: {dateTime: "{{end}}"}
-    response_extract: "$"
-
-  - name: calendar_delete_event
-    description: "Delete an event by id. Mutating and irreversible."
-    mutating: true
-    params:
-      type: object
-      properties:
-        calendar_id: {type: string}
-        event_id:    {type: string}
-      required: [calendar_id, event_id]
-    request:
-      method: DELETE
-      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events/{{event_id}}"
-    response_extract: "$"
-
-  - name: calendar_freebusy
-    description: "Query busy periods on one calendar in a window — use this to find a free slot rather than listing every event. Read-only."
+  - name: calendar_list_event_instances
+    description: "List the individual occurrences of a RECURRING event, each with its own id. Use this to change or cancel one occurrence rather than the whole series. Read-only."
     mutating: false
+    scopes: [https://www.googleapis.com/auth/calendar.readonly]
     params:
       type: object
       properties:
-        calendar_id: {type: string, description: "calendar id, or 'primary'"}
+        calendar_id: {type: string}
+        event_id:    {type: string, description: "id of the recurring event"}
         time_min:    {type: string, description: "RFC3339 lower bound"}
         time_max:    {type: string, description: "RFC3339 upper bound"}
+        max_results: {type: integer, description: "max occurrences (default 25)"}
+        page_token:  {type: string, description: "next_cursor from a previous call"}
+      required: [calendar_id, event_id]
+    request:
+      method: GET
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events/{{event_id}}/instances"
+      query:
+        timeMin: "{{time_min}}"
+        timeMax: "{{time_max}}"
+        maxResults: "{{max_results}}"
+        pageToken: "{{page_token}}"
+    response_extract: "$.items"
+    response_cursor: "$.nextPageToken"
+  - name: calendar_freebusy
+    description: "Query busy blocks across one or more calendars in a time range, to find when someone is free. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/calendar.readonly]
+    params:
+      type: object
+      properties:
+        calendar_id: {type: string, description: "calendar id to check"}
+        time_min:    {type: string, description: "RFC3339 start"}
+        time_max:    {type: string, description: "RFC3339 end"}
       required: [calendar_id, time_min, time_max]
     request:
       method: POST
@@ -128,3 +170,245 @@ actions:
         timeMax: "{{time_max}}"
         items: [{id: "{{calendar_id}}"}]
     response_extract: "$.calendars"
+
+  # ---- events: writing -----------------------------------------------------
+  # Inviting someone emails them, so any action carrying attendees is public_write.
+  - name: calendar_create_event
+    description: "Create a timed event. start/end are RFC3339 timestamps. Adding attendees sends them a real invitation email. Use send_updates='none' to add people quietly."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/calendar.events]
+    params:
+      type: object
+      properties:
+        calendar_id:  {type: string}
+        summary:      {type: string, description: "event title"}
+        description:  {type: string}
+        location:     {type: string}
+        start:        {type: string, description: "RFC3339 start"}
+        end:          {type: string, description: "RFC3339 end"}
+        time_zone:    {type: string, description: "IANA zone, e.g. Europe/Skopje"}
+        attendees:    {type: array, items: {type: object}, description: "e.g. [{\"email\":\"a@b.com\"}]"}
+        recurrence:   {type: array, items: {type: string}, description: "RRULE strings, e.g. [\"RRULE:FREQ=WEEKLY;COUNT=8\"]"}
+        send_updates: {type: string, description: "all | externalOnly | none"}
+      required: [calendar_id, summary, start, end]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events"
+      query:
+        sendUpdates: "{{send_updates}}"
+      body:
+        summary: "{{summary}}"
+        description: "{{description}}"
+        location: "{{location}}"
+        start: {dateTime: "{{start}}", timeZone: "{{time_zone}}"}
+        end: {dateTime: "{{end}}", timeZone: "{{time_zone}}"}
+        attendees: "{{attendees}}"
+        recurrence: "{{recurrence}}"
+    response_extract: "$"
+  - name: calendar_create_all_day_event
+    description: "Create an ALL-DAY event. start/end are plain dates (YYYY-MM-DD) and end is EXCLUSIVE — a one-day event on the 5th ends on the 6th. Use calendar_create_event for timed events."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/calendar.events]
+    params:
+      type: object
+      properties:
+        calendar_id:  {type: string}
+        summary:      {type: string, description: "event title"}
+        description:  {type: string}
+        start:        {type: string, description: "YYYY-MM-DD first day"}
+        end:          {type: string, description: "YYYY-MM-DD day AFTER the last day"}
+        attendees:    {type: array, items: {type: object}, description: "e.g. [{\"email\":\"a@b.com\"}]"}
+        send_updates: {type: string, description: "all | externalOnly | none"}
+      required: [calendar_id, summary, start, end]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events"
+      query:
+        sendUpdates: "{{send_updates}}"
+      body:
+        summary: "{{summary}}"
+        description: "{{description}}"
+        start: {date: "{{start}}"}
+        end: {date: "{{end}}"}
+        attendees: "{{attendees}}"
+    response_extract: "$"
+  - name: calendar_create_event_with_meet
+    description: "Create a timed event WITH a Google Meet video link attached. request_id must be a fresh unique string per call — reusing one returns the previous conference instead of making a new one. The Meet URL comes back in conferenceData."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/calendar.events]
+    params:
+      type: object
+      properties:
+        calendar_id:  {type: string}
+        summary:      {type: string, description: "event title"}
+        description:  {type: string}
+        start:        {type: string, description: "RFC3339 start"}
+        end:          {type: string, description: "RFC3339 end"}
+        time_zone:    {type: string, description: "IANA zone"}
+        attendees:    {type: array, items: {type: object}, description: "e.g. [{\"email\":\"a@b.com\"}]"}
+        request_id:   {type: string, description: "unique per call, e.g. a random string"}
+        send_updates: {type: string, description: "all | externalOnly | none"}
+      required: [calendar_id, summary, start, end, request_id]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events"
+      query:
+        # Without conferenceDataVersion=1 the API silently DROPS conferenceData and
+        # returns a perfectly ordinary event with no Meet link.
+        conferenceDataVersion: "1"
+        sendUpdates: "{{send_updates}}"
+      body:
+        summary: "{{summary}}"
+        description: "{{description}}"
+        start: {dateTime: "{{start}}", timeZone: "{{time_zone}}"}
+        end: {dateTime: "{{end}}", timeZone: "{{time_zone}}"}
+        attendees: "{{attendees}}"
+        conferenceData:
+          createRequest:
+            requestId: "{{request_id}}"
+            conferenceSolutionKey: {type: "hangoutsMeet"}
+    response_extract: "$"
+  - name: calendar_quick_add_event
+    description: "Create an event from a plain-English phrase, e.g. 'Dinner with Sam 7pm Thursday'. Google parses the time itself. Quickest path when the user speaks a date rather than giving timestamps."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/calendar.events]
+    params:
+      type: object
+      properties:
+        calendar_id: {type: string}
+        text:        {type: string, description: "plain-English event description including its time"}
+      required: [calendar_id, text]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events/quickAdd"
+      query:
+        text: "{{text}}"
+    response_extract: "$"
+  - name: calendar_update_event
+    description: "Update an event's fields by id (PATCH = partial: omitted fields are left alone). Supplying attendees REPLACES the whole attendee list, so read the event first with calendar_get_event."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/calendar.events]
+    params:
+      type: object
+      properties:
+        calendar_id:  {type: string}
+        event_id:     {type: string}
+        summary:      {type: string}
+        description:  {type: string}
+        location:     {type: string}
+        start:        {type: string, description: "RFC3339 start"}
+        end:          {type: string, description: "RFC3339 end"}
+        time_zone:    {type: string, description: "IANA zone"}
+        attendees:    {type: array, items: {type: object}, description: "REPLACES the list; e.g. [{\"email\":\"a@b.com\"}]"}
+        send_updates: {type: string, description: "all | externalOnly | none"}
+      required: [calendar_id, event_id]
+    request:
+      method: PATCH
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events/{{event_id}}"
+      query:
+        sendUpdates: "{{send_updates}}"
+      body:
+        summary: "{{summary}}"
+        description: "{{description}}"
+        location: "{{location}}"
+        start: {dateTime: "{{start}}", timeZone: "{{time_zone}}"}
+        end: {dateTime: "{{end}}", timeZone: "{{time_zone}}"}
+        attendees: "{{attendees}}"
+    response_extract: "$"
+  - name: calendar_move_event
+    description: "Move an event to a different calendar on the same account, keeping its id. Use when an event was created on the wrong calendar."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/calendar.events]
+    params:
+      type: object
+      properties:
+        calendar_id:  {type: string, description: "calendar the event is on now"}
+        event_id:     {type: string}
+        destination:  {type: string, description: "calendar id to move it to"}
+        send_updates: {type: string, description: "all | externalOnly | none"}
+      required: [calendar_id, event_id, destination]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events/{{event_id}}/move"
+      query:
+        destination: "{{destination}}"
+        sendUpdates: "{{send_updates}}"
+    response_extract: "$"
+  - name: calendar_delete_event
+    description: "Delete an event by id. Attendees are notified of the cancellation unless send_updates='none'. Mutating and irreversible."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/calendar.events]
+    params:
+      type: object
+      properties:
+        calendar_id:  {type: string}
+        event_id:     {type: string}
+        send_updates: {type: string, description: "all | externalOnly | none"}
+      required: [calendar_id, event_id]
+    request:
+      method: DELETE
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/events/{{event_id}}"
+      query:
+        sendUpdates: "{{send_updates}}"
+    response_extract: "$"
+
+  # ---- sharing and preferences --------------------------------------------
+  - name: calendar_list_acl
+    description: "List who has access to a calendar and with what role (reader, writer, owner). Use to audit who can see the user's schedule. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/calendar]
+    params:
+      type: object
+      properties:
+        calendar_id: {type: string}
+      required: [calendar_id]
+    request:
+      method: GET
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/acl"
+    response_extract: "$.items"
+  - name: calendar_share_calendar
+    description: "Give a person access to a calendar. This exposes the user's schedule to someone else, so confirm the address and the role first."
+    mutating: true
+    public_write: true
+    scopes: [https://www.googleapis.com/auth/calendar]
+    params:
+      type: object
+      properties:
+        calendar_id: {type: string}
+        email:       {type: string, description: "person to share with"}
+        role:        {type: string, description: "reader | writer | owner | freeBusyReader"}
+      required: [calendar_id, email, role]
+    request:
+      method: POST
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/acl"
+      body:
+        role: "{{role}}"
+        scope: {type: "user", value: "{{email}}"}
+    response_extract: "$"
+  - name: calendar_remove_acl
+    description: "Revoke someone's access to a calendar. Resolve the rule id with calendar_list_acl first. Mutating."
+    mutating: true
+    scopes: [https://www.googleapis.com/auth/calendar]
+    params:
+      type: object
+      properties:
+        calendar_id: {type: string}
+        rule_id:     {type: string, description: "acl rule id from calendar_list_acl"}
+      required: [calendar_id, rule_id]
+    request:
+      method: DELETE
+      url: "https://www.googleapis.com/calendar/v3/calendars/{{calendar_id|escape}}/acl/{{rule_id}}"
+    response_extract: "$"
+  - name: calendar_list_settings
+    description: "Read the account's calendar preferences, including its default time zone and week start day. Useful before scheduling on the user's behalf. Read-only."
+    mutating: false
+    scopes: [https://www.googleapis.com/auth/calendar.readonly]
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://www.googleapis.com/calendar/v3/users/me/settings"
+    response_extract: "$.items"

@@ -1,0 +1,16 @@
+{
+  "data": [
+    {
+      "id": "1234_5678",
+      "message": "New release is out",
+      "created_time": "2026-08-10T12:00:00+0000",
+      "permalink_url": "https://facebook.com/1234/posts/5678"
+    }
+  ],
+  "paging": {
+    "cursors": {
+      "before": "MAZDZD",
+      "after": "QVFIUl9"
+    }
+  }
+}

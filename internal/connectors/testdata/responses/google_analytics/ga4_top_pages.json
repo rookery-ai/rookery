@@ -1,0 +1,48 @@
+{
+  "dimensionHeaders": [
+    {
+      "name": "pagePath"
+    },
+    {
+      "name": "pageTitle"
+    }
+  ],
+  "metricHeaders": [
+    {
+      "name": "screenPageViews",
+      "type": "TYPE_INTEGER"
+    },
+    {
+      "name": "activeUsers",
+      "type": "TYPE_INTEGER"
+    },
+    {
+      "name": "userEngagementDuration",
+      "type": "TYPE_INTEGER"
+    }
+  ],
+  "rows": [
+    {
+      "dimensionValues": [
+        {
+          "value": "/pricing"
+        },
+        {
+          "value": "Pricing"
+        }
+      ],
+      "metricValues": [
+        {
+          "value": "1204"
+        },
+        {
+          "value": "812"
+        },
+        {
+          "value": "40221"
+        }
+      ]
+    }
+  ],
+  "rowCount": 1
+}

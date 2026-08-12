@@ -1,0 +1,211 @@
+provider: onedrive
+# OneDrive through Microsoft Graph driveItems.
+#
+# There is NO download action: Graph returns file CONTENT as raw bytes, and
+# Result.Data is a json.RawMessage — a non-JSON body cannot be carried, only
+# corrupted. onedrive_get_item returns a @microsoft.graph.downloadUrl the user can
+# open instead.
+actions:
+  - name: onedrive_list_root
+    description: "List the files and folders at the top level of the account's OneDrive. Start here, then use onedrive_list_children to descend. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        top:    {type: integer, description: "max items (default 25)"}
+        select: {type: string, description: "comma-separated fields, e.g. 'id,name,size,lastModifiedDateTime'"}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/drive/root/children"
+      query:
+        $top: "{{top}}"
+        $select: "{{select}}"
+    response_extract: "$.value"
+  - name: onedrive_list_children
+    description: "List what is inside one OneDrive folder, by the folder's item id. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id: {type: string, description: "folder item id"}
+        top:     {type: integer, description: "max items (default 25)"}
+        select:  {type: string, description: "comma-separated fields"}
+      required: [item_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/children"
+      query:
+        $top: "{{top}}"
+        $select: "{{select}}"
+    response_extract: "$.value"
+  - name: onedrive_search
+    description: "Search the whole OneDrive by file name and content. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        query: {type: string, description: "search text"}
+        top:   {type: integer, description: "max results (default 25)"}
+      required: [query]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/drive/root/search(q='{{query}}')"
+      query:
+        $top: "{{top}}"
+    response_extract: "$.value"
+  - name: onedrive_get_item
+    description: "Get a OneDrive file or folder's metadata by id, including a temporary download URL the user can open in a browser. The connector cannot fetch the bytes itself. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id: {type: string}
+      required: [item_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}"
+    response_extract: "$"
+  - name: onedrive_create_folder
+    description: "Create a folder inside another folder. Pass parent_id='root' for the top level. Safe write."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        parent_id: {type: string, description: "parent folder item id, or 'root'"}
+        name:      {type: string, description: "folder name"}
+      required: [parent_id, name]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{parent_id}}/children"
+      body:
+        name: "{{name}}"
+        # An empty object is what MARKS this driveItem as a folder — Graph reads the
+        # facet's presence, not its contents.
+        folder: {}
+        "@microsoft.graph.conflictBehavior": "rename"
+    response_extract: "$"
+  - name: onedrive_rename_item
+    description: "Rename a OneDrive file or folder, and/or move it into a different folder by setting parent_id. Safe write."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id:   {type: string}
+        name:      {type: string, description: "new name"}
+        parent_id: {type: string, description: "destination folder id, to move it as well"}
+      required: [item_id]
+    request:
+      method: PATCH
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}"
+      body:
+        name: "{{name}}"
+        parentReference: {id: "{{parent_id}}"}
+    response_extract: "$"
+  - name: onedrive_copy_item
+    description: "Copy a OneDrive file or folder into another folder. Graph runs this ASYNCHRONOUSLY and returns no body, so confirm with onedrive_list_children rather than assuming the copy is already there."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id:   {type: string}
+        parent_id: {type: string, description: "destination folder id"}
+        name:      {type: string, description: "name for the copy"}
+      required: [item_id, parent_id]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/copy"
+      body:
+        parentReference: {id: "{{parent_id}}"}
+        name: "{{name}}"
+    response_extract: "$"
+  - name: onedrive_delete_item
+    description: "Move a OneDrive file or folder to the recycle bin, where it is recoverable. Mutating."
+    mutating: true
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id: {type: string}
+      required: [item_id]
+    request:
+      method: DELETE
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}"
+    response_extract: "$"
+  - name: onedrive_create_share_link
+    description: "Create a sharing link for a file or folder. scope='anonymous' makes it reachable by ANYONE with the link — prefer 'organization' unless the user asked for a public link. type is view or edit."
+    mutating: true
+    public_write: true
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id: {type: string}
+        type:    {type: string, description: "view | edit"}
+        scope:   {type: string, description: "organization | anonymous"}
+      required: [item_id, type]
+    request:
+      method: POST
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/createLink"
+      body:
+        type: "{{type}}"
+        scope: "{{scope}}"
+    response_extract: "$"
+  - name: onedrive_list_permissions
+    description: "List who currently has access to a OneDrive item and through which links. Use to audit exposure before or after sharing. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        item_id: {type: string}
+      required: [item_id]
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/drive/items/{{item_id}}/permissions"
+    response_extract: "$.value"
+  - name: onedrive_list_recent
+    description: "List the files the user opened or edited most recently, across their OneDrive. The quickest way to find 'the document I was just working on'. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        top: {type: integer, description: "max items (default 25)"}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/drive/recent"
+      query:
+        $top: "{{top}}"
+    response_extract: "$.value"
+  - name: onedrive_list_shared_with_me
+    description: "List files other people have shared with this account. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params:
+      type: object
+      properties:
+        top: {type: integer, description: "max items (default 25)"}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/drive/sharedWithMe"
+      query:
+        $top: "{{top}}"
+    response_extract: "$.value"
+  - name: onedrive_get_quota
+    description: "Report how much OneDrive storage is used and how much remains. Use for 'am I running out of space'. Read-only."
+    mutating: false
+    scopes: [https://graph.microsoft.com/Files.ReadWrite.All]
+    params: {type: object, properties: {}}
+    request:
+      method: GET
+      url: "https://graph.microsoft.com/v1.0/me/drive"
+      query:
+        $select: "quota,owner,driveType"
+    response_extract: "$"

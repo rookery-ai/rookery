@@ -1,0 +1,26 @@
+{
+  "results": [
+    {
+      "campaign": {
+        "name": "Brand \u2014 Search"
+      },
+      "adGroup": {
+        "name": "Exact"
+      },
+      "adGroupCriterion": {
+        "keyword": {
+          "text": "rookery self hosted",
+          "matchType": "EXACT"
+        }
+      },
+      "metrics": {
+        "impressions": "3200",
+        "clicks": "180",
+        "costMicros": "700000",
+        "conversions": 6.0
+      }
+    }
+  ],
+  "fieldMask": "campaign.id,metrics.clicks",
+  "nextPageToken": "AbC123"
+}

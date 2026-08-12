@@ -1,0 +1,11 @@
+{
+  "items": [
+    {
+      "id": "primary",
+      "summary": "ilija@example.com",
+      "timeZone": "Europe/Skopje",
+      "primary": true
+    }
+  ],
+  "nextPageToken": "CAoQAA"
+}

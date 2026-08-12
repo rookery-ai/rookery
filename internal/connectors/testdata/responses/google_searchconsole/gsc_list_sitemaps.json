@@ -1,0 +1,17 @@
+{
+  "sitemap": [
+    {
+      "path": "https://rookery.cloud/sitemap.xml",
+      "lastSubmitted": "2026-07-30T09:00:00.000Z",
+      "isPending": false,
+      "type": "sitemap",
+      "contents": [
+        {
+          "type": "web",
+          "submitted": "120",
+          "indexed": "118"
+        }
+      ]
+    }
+  ]
+}

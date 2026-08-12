@@ -1,0 +1,17 @@
+{
+  "results": [
+    {
+      "segments": {
+        "date": "2026-08-10"
+      },
+      "metrics": {
+        "costMicros": "620000",
+        "impressions": "2400",
+        "clicks": "121",
+        "conversions": 4.0
+      }
+    }
+  ],
+  "fieldMask": "campaign.id,metrics.clicks",
+  "nextPageToken": "AbC123"
+}

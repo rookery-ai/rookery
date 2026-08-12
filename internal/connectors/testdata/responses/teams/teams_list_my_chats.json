@@ -1,0 +1,11 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection",
+  "value": [
+    {
+      "id": "19:8a7b_9c8d@unq.gbl.spaces",
+      "topic": null,
+      "chatType": "oneOnOne",
+      "lastUpdatedDateTime": "2026-08-11T09:41:00Z"
+    }
+  ]
+}

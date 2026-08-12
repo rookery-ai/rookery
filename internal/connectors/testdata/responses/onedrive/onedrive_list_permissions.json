@@ -1,0 +1,22 @@
+{
+  "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection",
+  "value": [
+    {
+      "id": "1a2b",
+      "roles": [
+        "read"
+      ],
+      "grantedToV2": {
+        "user": {
+          "displayName": "Sam Rivera",
+          "email": "sam@example.com"
+        }
+      },
+      "link": {
+        "scope": "organization",
+        "type": "view",
+        "webUrl": "https://1drv.ms/x/s!abc"
+      }
+    }
+  ]
+}

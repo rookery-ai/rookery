@@ -1,0 +1,10 @@
+{
+  "followers": [
+    {
+      "did": "did:plc:xyz",
+      "handle": "sam.bsky.social",
+      "displayName": "Sam"
+    }
+  ],
+  "cursor": "25"
+}

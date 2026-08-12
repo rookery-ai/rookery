@@ -1,0 +1,14 @@
+{
+  "rows": [
+    {
+      "keys": [
+        "self hosted agent platform"
+      ],
+      "clicks": 214.0,
+      "impressions": 4102.0,
+      "ctr": 0.0521,
+      "position": 4.8
+    }
+  ],
+  "responseAggregationType": "byPage"
+}

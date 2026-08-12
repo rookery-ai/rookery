@@ -40,8 +40,16 @@ func TestBrandLogoCoverage(t *testing.T) {
 	// here is unchanged and still applies to the next brand without a mark:
 	// vendor the real published logo or show a letter — never approximate
 	// someone else's brand.
+	//
+	// microsoft_todo joins them for the same reason and under the same policy:
+	// Microsoft's product marks were REMOVED from simple-icons, and
+	// worldvectorlogo carries OneDrive, Excel and OneNote but not To Do. The
+	// alternatives were both worse than a letter — reusing the Outlook mark
+	// would label it as a different product, and drawing something
+	// To-Do-shaped would be approximating a brand we do not own.
 	allowNoLogo := map[string]bool{
-		"generic": true,
+		"generic":        true,
+		"microsoft_todo": true,
 	}
 
 	var slugs []string

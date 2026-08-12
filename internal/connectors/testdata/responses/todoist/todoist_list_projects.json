@@ -1,0 +1,11 @@
+{
+  "results": [
+    {
+      "id": "220474322",
+      "name": "Inbox",
+      "is_inbox_project": true,
+      "color": "grey"
+    }
+  ],
+  "next_cursor": null
+}

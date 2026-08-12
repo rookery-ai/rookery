@@ -11,9 +11,12 @@ func TestLoadBundledGoogle(t *testing.T) {
 	if !ok || p.TokenURL == "" || len(p.DefaultScopes) == 0 {
 		t.Fatalf("google provider not loaded: %+v", p)
 	}
-	acts := r.Actions("google")
-	if len(acts) != 10 {
-		t.Fatalf("want 10 gmail actions, got %d", len(acts))
+	// Deliberately not an exact count: this test is about the manifest LOADING, and
+	// pinning a number here only means every catalog change edits an assertion that
+	// was never checking the catalog. The action-count budget is enforced once, for
+	// every provider, by TestProviderActionCountStaysWithinBudget.
+	if len(r.Actions("google")) == 0 {
+		t.Fatal("no gmail actions loaded")
 	}
 	send, ok := r.Action("google", "gmail_send_email")
 	if !ok || !send.Mutating {
