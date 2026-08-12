@@ -248,16 +248,56 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
 
-      # Config comes from .gitleaks.toml at the repo root, which gitleaks
-      # auto-discovers from --source. There is deliberately no GITLEAKS_CONFIG
-      # here: this action builds its own argv (`detect --redact -v
-      # --exit-code=2 …`) and passes no --config, and it never reads that
-      # variable — setting it looks like it configures something and does not.
-      # See src/gitleaks.js in gitleaks/gitleaks-action.
+      # The gitleaks BINARY is MIT-licensed and free. `gitleaks-action` is not:
+      # it refuses to run for organization-owned repositories without a paid
+      # GITLEAKS_LICENSE secret ("[org] is an organization. License key is
+      # required."). That is a property of the OWNER, not the code, so moving
+      # this repository into an organization broke the job with no change to
+      # what it scans.
+      #
+      # Running the binary directly keeps the check, drops the licence
+      # requirement, and removes a wrapper that was already awkward: it built
+      # its own argv and silently ignored GITLEAKS_CONFIG, so the config could
+      # only ever be picked up by auto-discovery.
+      #
+      # --no-git scans the WORKING TREE, not history, and that is deliberate.
+      #
+      # A PR gate should answer "does this change introduce a secret", not
+      # re-litigate every commit ever made. Scanning history here would fail
+      # permanently on pre-existing commits that no PR can fix without a
+      # rewrite — and the only way to silence them is an allowlist entry, which
+      # has to QUOTE the offending literal, which Trivy's secret scanner then
+      # reports in .gitleaks.toml itself. That loop is how a scanner ends up
+      # disabled.
+      #
+      # History was audited once, in full (1017 commits), before this
+      # repository went public. Re-run that by hand after a rewrite or an
+      # import, not on every pull request.
+      #
+      # The scan runs against a `git archive` export, NOT the checkout, and that
+      # is the whole trick. `--no-git` scans every file in the directory it is
+      # given — including `.git/objects/pack/*.pack`, which is the entire
+      # history as raw bytes. Pointed at a checkout it read 1.24 GB and
+      # reported 54 findings, every one of them a historical commit no pull
+      # request can fix.
+      #
+      # That failure is invisible in a git WORKTREE, where `.git` is a file
+      # rather than a directory, so a local run of the identical command
+      # scans 13 MB and passes. Export first and the two agree.
+      #
+      # `git archive HEAD` is exactly the tracked tree: no history, no
+      # node_modules, no untracked scratch.
+      #
+      # --redact so a real finding is never echoed into a now-public log, and
+      # an explicit --config rather than relying on auto-discovery.
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/gitleaks-scan
+          git archive --format=tar HEAD | tar -x -C /tmp/gitleaks-scan
+          cp .gitleaks.toml /tmp/gitleaks-scan/
+          docker run --rm -v /tmp/gitleaks-scan:/repo:ro ghcr.io/gitleaks/gitleaks:latest \
+            detect --source=/repo --config=/repo/.gitleaks.toml \
+            --no-git --redact --no-banner --exit-code 1
 
   container:
     name: Container smoke test
