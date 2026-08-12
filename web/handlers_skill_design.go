@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/db"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 // handleSkillDesignChat drives the conversational skill-creator via JSON API.

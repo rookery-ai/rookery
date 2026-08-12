@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 // fakeRunningGW is a minimal Gateway whose Start blocks until its context is

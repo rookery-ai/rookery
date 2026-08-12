@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/backup"
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/backup"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 func TestBackupConfigRequiresOwner(t *testing.T) {

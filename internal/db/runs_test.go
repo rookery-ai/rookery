@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 // runsTestDB opens a fresh migrated DB with one user + one agent (FK targets) and

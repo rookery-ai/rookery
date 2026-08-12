@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/ilijad1/rookery/internal/coder"
-	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/rookery-ai/rookery/internal/coder"
+	"github.com/rookery-ai/rookery/internal/llm"
 )
 
 // friendlyDesignError turns a design-session failure into something a user can

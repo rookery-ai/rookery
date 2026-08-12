@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 // testDB opens a fresh migrated SQLite DB in a temp dir and registers a single

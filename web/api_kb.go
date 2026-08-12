@@ -19,12 +19,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/ilijad1/rookery/internal/convert"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/export"
-	"github.com/ilijad1/rookery/internal/iolimit"
-	"github.com/ilijad1/rookery/internal/vault"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/convert"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/export"
+	"github.com/rookery-ai/rookery/internal/iolimit"
+	"github.com/rookery-ai/rookery/internal/vault"
 )
 
 // maxUploadBytes caps a KB file upload. Conversion (internal/convert) allocates

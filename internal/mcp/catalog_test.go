@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 // memStore is an in-memory Store. Sync's contract is about WHICH columns survive a

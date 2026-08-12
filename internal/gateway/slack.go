@@ -16,8 +16,8 @@ import (
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
 
-	"github.com/ilijad1/rookery/internal/gateway/render"
-	"github.com/ilijad1/rookery/internal/iolimit"
+	"github.com/rookery-ai/rookery/internal/gateway/render"
+	"github.com/rookery-ai/rookery/internal/iolimit"
 )
 
 // slackAPINew builds a *slack.Client; indirected for tests.

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/rookery-ai/rookery/internal/llm"
 )
 
 // TestReadFileSlicePaging exercises the byte-range paging contract of readFileSlice:

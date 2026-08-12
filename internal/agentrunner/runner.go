@@ -16,17 +16,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/rookery/internal/agentdesigner"
-	"github.com/ilijad1/rookery/internal/coder"
-	"github.com/ilijad1/rookery/internal/connectors"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/mcp"
-	"github.com/ilijad1/rookery/internal/profile"
-	"github.com/ilijad1/rookery/internal/prompts"
-	"github.com/ilijad1/rookery/internal/secrets"
-	"github.com/ilijad1/rookery/internal/skilllibrary"
-	"github.com/ilijad1/rookery/internal/skillstore"
-	"github.com/ilijad1/rookery/internal/vault"
+	"github.com/rookery-ai/rookery/internal/agentdesigner"
+	"github.com/rookery-ai/rookery/internal/coder"
+	"github.com/rookery-ai/rookery/internal/connectors"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/mcp"
+	"github.com/rookery-ai/rookery/internal/profile"
+	"github.com/rookery-ai/rookery/internal/prompts"
+	"github.com/rookery-ai/rookery/internal/secrets"
+	"github.com/rookery-ai/rookery/internal/skilllibrary"
+	"github.com/rookery-ai/rookery/internal/skillstore"
+	"github.com/rookery-ai/rookery/internal/vault"
 )
 
 const (

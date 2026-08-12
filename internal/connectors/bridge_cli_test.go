@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/sandbox"
+	"github.com/rookery-ai/rookery/internal/sandbox"
 )
 
 // TestConnectorExecSubcommandEndToEnd exercises the REAL `rookery connector exec`

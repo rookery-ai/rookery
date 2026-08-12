@@ -14,10 +14,10 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/ilijad1/rookery/internal/backup"
-	"github.com/ilijad1/rookery/internal/config"
-	"github.com/ilijad1/rookery/internal/secrets"
-	"github.com/ilijad1/rookery/migrations"
+	"github.com/rookery-ai/rookery/internal/backup"
+	"github.com/rookery-ai/rookery/internal/config"
+	"github.com/rookery-ai/rookery/internal/secrets"
+	"github.com/rookery-ai/rookery/migrations"
 )
 
 // readPassphrase reads the envelope passphrase from the terminal, or from

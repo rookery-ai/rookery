@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/nethttp"
+	"github.com/rookery-ai/rookery/internal/nethttp"
 )
 
 // Outcome is the result of one cascade run. Provider names the engine that

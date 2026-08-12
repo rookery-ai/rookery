@@ -3,9 +3,9 @@ package web
 import (
 	"log/slog"
 
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/memory"
-	"github.com/ilijad1/rookery/internal/profile"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/memory"
+	"github.com/rookery-ai/rookery/internal/profile"
 )
 
 // identityFor assembles the memory.Identity for a workspace from the two stores

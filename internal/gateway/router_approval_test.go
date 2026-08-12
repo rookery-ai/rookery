@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 type fakeApproval struct {

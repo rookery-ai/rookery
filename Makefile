@@ -20,9 +20,9 @@ SHELL := /bin/bash
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0-dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
-LDFLAGS := -X github.com/ilijad1/rookery/internal/buildinfo.Version=$(VERSION) \
-           -X github.com/ilijad1/rookery/internal/buildinfo.Commit=$(COMMIT) \
-           -X github.com/ilijad1/rookery/internal/buildinfo.Date=$(DATE)
+LDFLAGS := -X github.com/rookery-ai/rookery/internal/buildinfo.Version=$(VERSION) \
+           -X github.com/rookery-ai/rookery/internal/buildinfo.Commit=$(COMMIT) \
+           -X github.com/rookery-ai/rookery/internal/buildinfo.Date=$(DATE)
 
 # Prefer podman, fall back to docker. Overridable: CONTAINER_ENGINE=docker make …
 CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null || echo podman)

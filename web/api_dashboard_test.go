@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 // TestAPIDashboardEmpty proves a brand-new workspace with no agents, runs,

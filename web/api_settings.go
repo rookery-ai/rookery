@@ -7,15 +7,15 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ilijad1/rookery/internal/auth"
-	"github.com/ilijad1/rookery/internal/coder"
-	"github.com/ilijad1/rookery/internal/config"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/gateway"
-	"github.com/ilijad1/rookery/internal/llm"
-	"github.com/ilijad1/rookery/internal/profile"
-	"github.com/ilijad1/rookery/internal/secrets"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/auth"
+	"github.com/rookery-ai/rookery/internal/coder"
+	"github.com/rookery-ai/rookery/internal/config"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/gateway"
+	"github.com/rookery-ai/rookery/internal/llm"
+	"github.com/rookery-ai/rookery/internal/profile"
+	"github.com/rookery-ai/rookery/internal/secrets"
 )
 
 // detectedCoders returns the installed CLI coders, or an empty slice in slim

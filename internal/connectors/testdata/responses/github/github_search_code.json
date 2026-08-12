@@ -5,9 +5,9 @@
     {
       "name": "execute.go",
       "path": "internal/connectors/execute.go",
-      "html_url": "https://github.com/ilijad1/rookery/blob/main/internal/connectors/execute.go",
+      "html_url": "https://github.com/rookery-ai/rookery/blob/main/internal/connectors/execute.go",
       "repository": {
-        "full_name": "ilijad1/rookery"
+        "full_name": "rookery-ai/rookery"
       }
     }
   ]

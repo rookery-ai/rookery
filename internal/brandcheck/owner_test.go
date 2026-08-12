@@ -26,11 +26,6 @@ var ownerAllowedPrefixes = []string{
 }
 
 func TestNoPersonalAccountReferences(t *testing.T) {
-	// TODO(task-18): remove this skip in the module-rename commit, which is what
-	// makes this test pass. It is committed ahead of that change deliberately, so
-	// the rename has a test that fails first.
-	t.Skip("unskipped by the rookery-ai module rename — see Task 18")
-
 	root := repoRoot(t)
 
 	var offenders []string

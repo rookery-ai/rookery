@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/auth"
-	"github.com/ilijad1/rookery/internal/config"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/memory"
-	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/rookery-ai/rookery/internal/auth"
+	"github.com/rookery-ai/rookery/internal/config"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/memory"
+	"github.com/rookery-ai/rookery/internal/secrets"
 )
 
 // newIdentityTestServer is newAPITestServer with a real memory store attached —

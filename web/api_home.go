@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/profile"
-	"github.com/ilijad1/rookery/internal/reminder"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/profile"
+	"github.com/rookery-ai/rookery/internal/reminder"
 )
 
 // registerHomeAPI registers the JSON reminders + inbox endpoints on the given

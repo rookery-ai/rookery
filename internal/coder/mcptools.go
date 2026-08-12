@@ -3,8 +3,8 @@ package coder
 import (
 	"context"
 
-	"github.com/ilijad1/rookery/internal/llm"
-	"github.com/ilijad1/rookery/internal/mcp"
+	"github.com/rookery-ai/rookery/internal/llm"
+	"github.com/rookery-ai/rookery/internal/mcp"
 )
 
 // mcpTools returns the native typed tools for every bound MCP server's enabled tools.

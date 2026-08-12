@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/buildphase"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/llm"
-	"github.com/ilijad1/rookery/internal/prompts"
+	"github.com/rookery-ai/rookery/internal/buildphase"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/llm"
+	"github.com/rookery-ai/rookery/internal/prompts"
 )
 
 // maxAPITurns bounds the tool-calling loop so a misbehaving model can't loop

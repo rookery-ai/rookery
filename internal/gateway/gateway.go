@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 // Message is a normalised inbound message from any platform.

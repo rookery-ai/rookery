@@ -12,7 +12,7 @@ import (
 	"log/slog"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 // Sender delivers an unprompted message to a workspace's primary chat app. It is

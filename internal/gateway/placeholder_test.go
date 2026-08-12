@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 // fakeTypingGateway records what a platform actually received, so the

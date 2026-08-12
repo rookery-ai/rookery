@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/nethttp"
+	"github.com/rookery-ai/rookery/internal/nethttp"
 )
 
 // ErrInvalidKey means the provider rejected the credential itself (401/403).

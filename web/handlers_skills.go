@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/ilijad1/rookery/internal/prompts"
-	"github.com/ilijad1/rookery/internal/skillstore"
+	"github.com/rookery-ai/rookery/internal/prompts"
+	"github.com/rookery-ai/rookery/internal/skillstore"
 )
 
 // inferSkillMeta calls the coder to extract name and description from SKILL.md content.

@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/rookery-ai/rookery/internal/secrets"
 )
 
 // TestAPISettingsGetNeverLeaksSecretValues seeds a secret then checks the

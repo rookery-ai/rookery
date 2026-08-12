@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/secrets"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/secrets"
 )
 
 // registerSecretsAPI registers the JSON secrets endpoints on the given group

@@ -10,7 +10,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/ilijad1/rookery/internal/backup"
+	"github.com/rookery-ai/rookery/internal/backup"
 )
 
 // maxSnapshotUpload bounds a restore upload. It is deliberately far above the

@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/auth"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/profile"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/auth"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/profile"
 )
 
 type apiWorkspace struct {

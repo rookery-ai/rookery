@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/nethttp"
-	"github.com/ilijad1/rookery/internal/websearch"
+	"github.com/rookery-ai/rookery/internal/nethttp"
+	"github.com/rookery-ai/rookery/internal/websearch"
 )
 
 // TestSearchKeyRejectedWhenProviderRefusesIt: a key the provider rejects is not

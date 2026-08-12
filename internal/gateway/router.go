@@ -11,17 +11,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/rookery/internal/agentdesigner"
-	"github.com/ilijad1/rookery/internal/chat"
-	"github.com/ilijad1/rookery/internal/convert"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/memory"
-	"github.com/ilijad1/rookery/internal/profile"
-	"github.com/ilijad1/rookery/internal/reminder"
-	"github.com/ilijad1/rookery/internal/secrets"
-	"github.com/ilijad1/rookery/internal/skilldesigner"
-	"github.com/ilijad1/rookery/internal/skilllibrary"
-	"github.com/ilijad1/rookery/internal/vault"
+	"github.com/rookery-ai/rookery/internal/agentdesigner"
+	"github.com/rookery-ai/rookery/internal/chat"
+	"github.com/rookery-ai/rookery/internal/convert"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/memory"
+	"github.com/rookery-ai/rookery/internal/profile"
+	"github.com/rookery-ai/rookery/internal/reminder"
+	"github.com/rookery-ai/rookery/internal/secrets"
+	"github.com/rookery-ai/rookery/internal/skilldesigner"
+	"github.com/rookery-ai/rookery/internal/skilllibrary"
+	"github.com/rookery-ai/rookery/internal/vault"
 )
 
 // maxAttachmentBytes caps a chat attachment. Chat platforms already cap uploads

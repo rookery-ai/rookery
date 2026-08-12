@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/rookery/internal/coder"
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/coder"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 // newFakeCoder builds a Coder that shells out to a tiny python "binary" running

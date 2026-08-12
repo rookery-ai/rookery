@@ -3,7 +3,7 @@ package agentdesigner_test
 import (
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/agentdesigner"
+	"github.com/rookery-ai/rookery/internal/agentdesigner"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

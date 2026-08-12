@@ -33,7 +33,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$Repo = 'ilijad1/rookery'
+$Repo = 'rookery-ai/rookery'
 $script:ToolsPrompted = $false
 
 function Write-Step { param([string]$Message) Write-Host "==> " -ForegroundColor Cyan -NoNewline; Write-Host $Message }

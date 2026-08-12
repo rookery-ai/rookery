@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 // actionsOf returns a provider's actions keyed by name, failing the test if the

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/llm"
+	"github.com/rookery-ai/rookery/internal/llm"
 )
 
 // newBashToolSet builds a hostToolSet wired for bash tests: exec tools on, sandbox off

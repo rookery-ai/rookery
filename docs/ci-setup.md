@@ -107,7 +107,7 @@ If you *do* want CodeQL while private, buy GHAS and enable
 
 ## 4. GHCR package visibility
 
-The package `ghcr.io/ilijad1/rookery` is **private**. A host pulling it
+The package `ghcr.io/rookery-ai/rookery` is **private**. A host pulling it
 needs a one-time login:
 
 ```bash

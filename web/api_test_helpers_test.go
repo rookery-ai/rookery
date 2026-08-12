@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/auth"
-	"github.com/ilijad1/rookery/internal/config"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/secrets"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/auth"
+	"github.com/rookery-ai/rookery/internal/config"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/secrets"
 )
 
 func contains(haystack, needle string) bool { return strings.Contains(haystack, needle) }

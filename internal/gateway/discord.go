@@ -14,9 +14,9 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
-	"github.com/ilijad1/rookery/internal/gateway/render"
-	"github.com/ilijad1/rookery/internal/iolimit"
-	"github.com/ilijad1/rookery/internal/nethttp"
+	"github.com/rookery-ai/rookery/internal/gateway/render"
+	"github.com/rookery-ai/rookery/internal/iolimit"
+	"github.com/rookery-ai/rookery/internal/nethttp"
 )
 
 // discordAPIBase is the Discord REST base; overridable in tests.

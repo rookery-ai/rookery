@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/agentdesigner"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/skilllibrary"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/agentdesigner"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/skilllibrary"
 )
 
 // agentDetailData is the agent-detail view model, assembled by loadAgentDetail and

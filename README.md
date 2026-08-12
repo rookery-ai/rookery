@@ -4,8 +4,8 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-a94c1c"></a>
-  <a href="https://github.com/ilijad1/rookery/releases"><img alt="Release" src="https://img.shields.io/github/v/release/ilijad1/rookery?color=a94c1c"></a>
-  <a href="https://github.com/ilijad1/rookery/pkgs/container/rookery"><img alt="Container" src="https://img.shields.io/badge/ghcr.io-rookery-a94c1c"></a>
+  <a href="https://github.com/rookery-ai/rookery/releases"><img alt="Release" src="https://img.shields.io/github/v/release/rookery-ai/rookery?color=a94c1c"></a>
+  <a href="https://github.com/rookery-ai/rookery/pkgs/container/rookery"><img alt="Container" src="https://img.shields.io/badge/ghcr.io-rookery-a94c1c"></a>
 </p>
 
 # Rookery
@@ -61,7 +61,7 @@ make build
 
 ```bash
 podman run -d --name rookery -p 8080:8080 \
-  -v rookery-data:/data ghcr.io/ilijad1/rookery:latest
+  -v rookery-data:/data ghcr.io/rookery-ai/rookery:latest
 ```
 
 The image is slim: it ships no CLI coder binary and sets

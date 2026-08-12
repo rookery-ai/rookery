@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/vault"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/vault"
 )
 
 // TestLoadKBManifest_NoVaultIsEmpty confirms loadKBManifest is safe to call

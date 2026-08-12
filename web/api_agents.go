@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/rookery/internal/agentdesigner"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/secrets"
-	"github.com/ilijad1/rookery/internal/skilllibrary"
 	"github.com/labstack/echo/v4"
 	"github.com/robfig/cron/v3"
+	"github.com/rookery-ai/rookery/internal/agentdesigner"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/secrets"
+	"github.com/rookery-ai/rookery/internal/skilllibrary"
 )
 
 // registerAgentsAPI registers the JSON CRUD/run/schedule endpoints plus the

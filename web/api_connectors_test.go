@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/gateway"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/gateway"
 )
 
 func TestAPIConnectors_GET_Unauthenticated(t *testing.T) {

@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/agentrunner"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/gateway"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/agentrunner"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/gateway"
 )
 
 // agentRunState tracks one in-flight manual ("Run Now") agent run. The run executes

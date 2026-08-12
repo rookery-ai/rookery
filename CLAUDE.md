@@ -94,7 +94,7 @@ AST guardrail tests shell out to `python3`. If Python is not available, those te
 
 Four surfaces describe this project and each can be wrong without anything
 failing: `README.md`, `CLAUDE.md`, the documentation site and the landing page
-(both in `ilijad1/rookery-web`, checked out at `~/rookery-web`).
+(both in `rookery-ai/rookery-web`, checked out at `~/rookery-web`).
 
 **Before opening a pull request, use the `docs-sync` skill.** It holds the
 change-to-page trigger map and the cross-repository procedure. A change that
@@ -192,7 +192,7 @@ scanners need no credentials. **Do not add secrets that have no consumer.**
 
 ## Distribution
 
-The project is **Rookery** (`github.com/ilijad1/rookery`); the binary, module and
+The project is **Rookery** (`github.com/rookery-ai/rookery`); the binary, module and
 package are all lowercase `rookery`, and every environment variable is prefixed
 `ROOKERY_`. The project domain is **rookery.cloud** — it is the documented
 `ROOKERY_PUBLIC_URL` example because OAuth providers reject redirect URIs on
@@ -254,7 +254,7 @@ make docker-build           # honours podman or docker, whichever is installed
 make docker-run             # port 8080, data in the rookery-data volume
 
 podman run -d --name rookery -p 8080:8080 \
-  -v rookery-data:/data ghcr.io/ilijad1/rookery:latest
+  -v rookery-data:/data ghcr.io/rookery-ai/rookery:latest
 ```
 
 The image is **slim**: it contains no CLI coder binary and sets

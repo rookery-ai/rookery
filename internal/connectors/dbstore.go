@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/secrets"
 )
 
 // expirySkew treats a token as expired this far ahead of its real expiry, so a call

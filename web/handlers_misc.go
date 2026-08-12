@@ -11,19 +11,19 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/chat"
-	"github.com/ilijad1/rookery/internal/coder"
+	"github.com/rookery-ai/rookery/internal/chat"
+	"github.com/rookery-ai/rookery/internal/coder"
 	// Aliased because this file has a local variable named `coder` that shadows
 	// the package inside the chat handler.
-	codersvc "github.com/ilijad1/rookery/internal/coder"
-	"github.com/ilijad1/rookery/internal/connectors"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/mcp"
-	"github.com/ilijad1/rookery/internal/prompts"
-	"github.com/ilijad1/rookery/internal/reminder"
-	"github.com/ilijad1/rookery/internal/secrets"
-	"github.com/ilijad1/rookery/internal/websearch"
 	"github.com/labstack/echo/v4"
+	codersvc "github.com/rookery-ai/rookery/internal/coder"
+	"github.com/rookery-ai/rookery/internal/connectors"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/mcp"
+	"github.com/rookery-ai/rookery/internal/prompts"
+	"github.com/rookery-ai/rookery/internal/reminder"
+	"github.com/rookery-ai/rookery/internal/secrets"
+	"github.com/rookery-ai/rookery/internal/websearch"
 )
 
 // ── Chats ───────────────────────────────────────────────────────────────────

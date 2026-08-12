@@ -19,7 +19,7 @@
 
 set -eu
 
-REPO="ilijad1/rookery"
+REPO="rookery-ai/rookery"
 TOOLS_PROMPTED=0
 
 # ── output ───────────────────────────────────────────────────────────────────

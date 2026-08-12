@@ -3,7 +3,7 @@ package web
 import (
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/coder"
+	"github.com/rookery-ai/rookery/internal/coder"
 )
 
 // TestCoderCatalogSliceCarriesLabelAndGroup guards the wiring between the coder

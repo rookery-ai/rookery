@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/secrets"
-	"github.com/ilijad1/rookery/internal/vault"
-	"github.com/ilijad1/rookery/internal/websearch"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/secrets"
+	"github.com/rookery-ai/rookery/internal/vault"
+	"github.com/rookery-ai/rookery/internal/websearch"
 )
 
 // newWiringTestDB gives the test a real (temp-file) SQLite DB carrying the

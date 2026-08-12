@@ -3,8 +3,8 @@ package web
 import (
 	"net/http"
 
-	"github.com/ilijad1/rookery/internal/health"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/health"
 )
 
 // apiHealthz serves the unauthenticated capability report. It sits outside

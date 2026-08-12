@@ -1,9 +1,9 @@
 package web
 
 import (
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/sandbox"
-	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/sandbox"
+	"github.com/rookery-ai/rookery/internal/secrets"
 )
 
 // verifyWorkspaceMasterPassword decrypts the stored (system-key encrypted) master

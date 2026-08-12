@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/ilijad1/rookery/internal/db"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/db"
 )
 
 type searchItem struct {

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/awssig"
+	"github.com/rookery-ai/rookery/internal/awssig"
 )
 
 // emptyPayloadSHA256 is re-exported from awssig for the read-only verbs below;

@@ -10,8 +10,8 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/gateway"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/gateway"
 )
 
 // ErrBotAlreadyConnected is returned when the credentials name a bot that

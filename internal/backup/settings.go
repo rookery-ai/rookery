@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/secrets"
+	"github.com/rookery-ai/rookery/internal/secrets"
 )
 
 // SettingsKey is the system_settings row holding the owner's backup config.

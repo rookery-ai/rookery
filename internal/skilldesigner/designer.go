@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ilijad1/rookery/internal/agentdesigner"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/skilllibrary"
-	"github.com/ilijad1/rookery/internal/skillstore"
+	"github.com/rookery-ai/rookery/internal/agentdesigner"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/skilllibrary"
+	"github.com/rookery-ai/rookery/internal/skillstore"
 )
 
 // SkillSaver handles file I/O and DB writes for a completed skill. It mirrors

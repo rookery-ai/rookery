@@ -8,11 +8,11 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/ilijad1/rookery/internal/agentrunner"
-	"github.com/ilijad1/rookery/internal/db"
-	"github.com/ilijad1/rookery/internal/gateway"
-	"github.com/ilijad1/rookery/internal/secrets"
 	"github.com/robfig/cron/v3"
+	"github.com/rookery-ai/rookery/internal/agentrunner"
+	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/gateway"
+	"github.com/rookery-ai/rookery/internal/secrets"
 )
 
 const pollInterval = 60 * time.Second

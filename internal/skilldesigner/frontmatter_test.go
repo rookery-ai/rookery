@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ilijad1/rookery/internal/skilllibrary"
+	"github.com/rookery-ai/rookery/internal/skilllibrary"
 )
 
 // A weak model omitting a cosmetic field must not destroy a completed design
