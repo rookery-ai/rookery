@@ -538,7 +538,7 @@ func truncateRunes(s string, n int) string {
 // vault-relative form the user actually recognises, so the live stream stops
 // reading as a tour of the server's filesystem:
 //
-//	cd /home/rookie/.rookery/vaults/fd11c47e-…/notes  →  cd notes
+//	cd /home/user/.rookery/vaults/fd11c47e-…/notes  →  cd notes
 //
 // This operates on the whole detail string by substring replacement rather than
 // on path-shaped arguments only, because the worst offender is a bash command

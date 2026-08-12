@@ -45,7 +45,7 @@ func testMsg(text string) gateway.Message {
 	return gateway.Message{
 		WorkspaceID:    testWorkspaceID,
 		Platform:       "telegram",
-		PlatformUserID: "1843540314",
+		PlatformUserID: "100000001",
 		Text:           text,
 	}
 }

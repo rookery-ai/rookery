@@ -297,7 +297,7 @@ func TestToolMilestoneShowsQueryPatternURL(t *testing.T) {
 // TestToolMilestoneShowsBashCommand covers the tool that was WORST served by the
 // old renderer. bash's only argument is `command`, which matched none of the
 // extracted fields, so every shell step an agent took reached the user as a
-// truncated raw-JSON blob: `🔧 bash({"command": "cd /home/rookie/…`.
+// truncated raw-JSON blob: `🔧 bash({"command": "cd /home/user/…`.
 func TestToolMilestoneShowsBashCommand(t *testing.T) {
 	got := toolMilestone(toolCall("bash", `{"command":"date -u +%Y-%m-%d"}`), "", "")
 	if want := "🔧 bash(date -u +%Y-%m-%d)"; got != want {
@@ -324,8 +324,8 @@ func TestToolMilestoneShowsBashCommand(t *testing.T) {
 // becomes "~".
 func TestToolMilestoneStripsHostPaths(t *testing.T) {
 	const (
-		vaultRoot = "/home/rookie/.rookery/vaults/fd11c47e-646e-48e0-9ef8-fc54a2f184ac"
-		homeDir   = "/home/rookie/.rookery/claude-homes/fd11c47e-646e-48e0-9ef8-fc54a2f184ac"
+		vaultRoot = "/home/user/.rookery/vaults/fd11c47e-646e-48e0-9ef8-fc54a2f184ac"
+		homeDir   = "/home/user/.rookery/claude-homes/fd11c47e-646e-48e0-9ef8-fc54a2f184ac"
 	)
 	cases := []struct{ name, args, want string }{
 		{"bash", `{"command":"cd ` + vaultRoot + `/notes && ls"}`, "🔧 bash(cd notes && ls)"},
@@ -372,7 +372,7 @@ func TestShortenHostPathsLeavesSiblingDirs(t *testing.T) {
 // itself — either would match essentially every path in a command line and
 // shred it.
 func TestShortenHostPathsIgnoresDegenerateRoots(t *testing.T) {
-	const cmd = "cd /home/rookie/notes && ls ."
+	const cmd = "cd /home/user/notes && ls ."
 	for _, root := range []string{"", ".", "/", "   "} {
 		if got := shortenHostPaths(cmd, root, root); got != cmd {
 			t.Errorf("shortenHostPaths with degenerate root %q rewrote the command: %q", root, got)
@@ -384,7 +384,7 @@ func TestShortenHostPathsIgnoresDegenerateRoots(t *testing.T) {
 // before stripping the host path would spend the whole character budget on the
 // absolute prefix and cut away the part that says what the command does.
 func TestToolMilestoneTruncatesAfterShortening(t *testing.T) {
-	const vaultRoot = "/home/rookie/.rookery/vaults/fd11c47e-646e-48e0-9ef8-fc54a2f184ac"
+	const vaultRoot = "/home/user/.rookery/vaults/fd11c47e-646e-48e0-9ef8-fc54a2f184ac"
 	got := toolMilestone(toolCall("bash", `{"command":"cd `+vaultRoot+`/notes && grep -r todo ."}`), vaultRoot, "")
 	if want := "🔧 bash(cd notes && grep -r todo .)"; got != want {
 		t.Errorf("got %q, want %q", got, want)

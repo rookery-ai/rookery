@@ -156,7 +156,7 @@ func TestOAuthProviderCarriesHardPreflightOnNonPublicURL(t *testing.T) {
 	t.Setenv("ROOKERY_PUBLIC_URL", "")
 
 	rec := doJSON(t, s, http.MethodPut, "/api/v1/admin/public-url",
-		map[string]string{"url": "http://192.168.1.194:8080"}, cookies)
+		map[string]string{"url": "http://192.168.1.50:8080"}, cookies)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("save: %d %s", rec.Code, rec.Body.String())
 	}

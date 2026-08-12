@@ -67,8 +67,8 @@ gets validated is the **redirect URI string**, when you register it.
 | How you reach the app | Redirect URI | Outcome |
 |---|---|---|
 | `http://localhost:8080` | `http://localhost:8080/…` | Google, GitHub, Notion work. Slack-class providers need HTTPS. |
-| LAN server, plain HTTP on an IP | `http://192.168.1.194:8080/…` | Google rejects raw IP addresses. GitHub works. |
-| LAN server, internal CA, `.lan` name | `https://agents.rookie.lan/…` | HTTPS satisfies Slack-class providers; Google rejects the reserved `.lan` suffix. |
+| LAN server, plain HTTP on an IP | `http://192.168.1.50:8080/…` | Google rejects raw IP addresses. GitHub works. |
+| LAN server, internal CA, `.lan` name | `https://agents.example.lan/…` | HTTPS satisfies Slack-class providers; Google rejects the reserved `.lan` suffix. |
 | **Real domain, DNS-01 certificate, resolved on your LAN** | `https://agents.example.com/…` | **All providers work, with no inbound exposure.** |
 
 The last row is the recommended setup for a self-hosted install: register a real

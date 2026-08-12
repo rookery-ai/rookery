@@ -132,9 +132,9 @@ describe("BackupSection", () => {
   });
 
   it("states where snapshots go and offers no folder field", async () => {
-    mountWith(mockConfig({ local_dir: "/home/rookie/.rookery/backups" }));
+    mountWith(mockConfig({ local_dir: "/home/user/.rookery/backups" }));
     expect(
-      await screen.findByText("/home/rookie/.rookery/backups"),
+      await screen.findByText("/home/user/.rookery/backups"),
     ).toBeInTheDocument();
     expect(screen.queryByText(/backup folder/i)).not.toBeInTheDocument();
   });
