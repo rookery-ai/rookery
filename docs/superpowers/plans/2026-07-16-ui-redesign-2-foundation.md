@@ -34,7 +34,7 @@
 - [ ] **Step 1: Scaffold**
 
 ```bash
-cd /home/rookie/simple-agents-v2/web && npm create vite@latest ui -- --template react-ts
+cd /home/user/simple-agents-v2/web && npm create vite@latest ui -- --template react-ts
 cd ui && npm install
 npm install -D vitest @testing-library/react @testing-library/jest-dom @testing-library/user-event jsdom @types/node
 npm install tailwindcss @tailwindcss/vite @tanstack/react-query react-router lucide-react
@@ -88,7 +88,7 @@ Add `"test": "vitest run", "test:watch": "vitest"` to `package.json` scripts.
 Replace `src/index.css` content with just `@import "tailwindcss";` for now (Task 3 replaces this with the token sheet). Then:
 
 ```bash
-cd /home/rookie/simple-agents-v2/web/ui
+cd /home/user/simple-agents-v2/web/ui
 npx shadcn@latest init   # style: new-york, base color: neutral, CSS variables: yes
 npx shadcn@latest add button input label dialog dropdown-menu sheet avatar tooltip separator
 ```
@@ -131,7 +131,7 @@ web/ui/dist/*
 
 ```bash
 mkdir -p web/ui/dist && touch web/ui/dist/.gitkeep
-cd /home/rookie/simple-agents-v2 && git add -A && git commit -m "feat(ui): Vite+React+TS scaffold — Tailwind v4, shadcn/ui, Vitest, base /app/"
+cd /home/user/simple-agents-v2 && git add -A && git commit -m "feat(ui): Vite+React+TS scaffold — Tailwind v4, shadcn/ui, Vitest, base /app/"
 ```
 
 ---
@@ -325,7 +325,7 @@ Update `.PHONY` to include `ui build-go`. `start` already depends on `build` —
 - [ ] **Step 6: End-to-end check + commit**
 
 ```bash
-cd /home/rookie/simple-agents-v2 && make build && ./bin/simple-agents serve & sleep 2
+cd /home/user/simple-agents-v2 && make build && ./bin/simple-agents serve & sleep 2
 curl -s http://127.0.0.1:8080/app | grep -q "Simple Agents" && echo SPA-OK
 kill %1
 git add -A && git commit -m "feat(web): embed SPA at /app — go:embed dist, SPA fallback, 503 when unbuilt, make ui"
@@ -1434,7 +1434,7 @@ In `IconRail.tsx`: replace `WorkspaceButton` with `<WorkspaceMenu />` (delete th
 - [ ] **Step 5: Run + commit** — `npm test` → PASS (all suites); `npm run build` clean; `go test ./... -count=1 -timeout 120s` still green (no Go changes, sanity only). Then the end-to-end check against the real server:
 
 ```bash
-cd /home/rookie/simple-agents-v2 && make build && SA_PORT=8090 ./bin/simple-agents serve & sleep 2
+cd /home/user/simple-agents-v2 && make build && SA_PORT=8090 ./bin/simple-agents serve & sleep 2
 curl -s http://127.0.0.1:8090/app/login | grep -qi 'html' && echo LOGIN-SHELL-OK
 kill %1
 git add -A && git commit -m "feat(ui): workspace flows — picker, master-password enter, create, switch, leave"
@@ -1445,7 +1445,7 @@ git add -A && git commit -m "feat(ui): workspace flows — picker, master-passwo
 ### Task 8: Docs + ledger close-out
 
 **Files:**
-- Modify: `/home/rookie/simple-agents-v2/CLAUDE.md` (Commands + routes sections)
+- Modify: `/home/user/simple-agents-v2/CLAUDE.md` (Commands + routes sections)
 
 - [ ] **Step 1:** In CLAUDE.md's Commands block add after the Go build lines:
 

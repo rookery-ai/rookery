@@ -160,7 +160,7 @@ export default function KBPage() {
 - [ ] **Step 1: Install**
 
 ```bash
-cd /home/rookie/simple-agents-v2/web/ui
+cd /home/user/simple-agents-v2/web/ui
 npm install @tiptap/react @tiptap/pm @tiptap/starter-kit tiptap-markdown \
   @tiptap/extension-link @tiptap/extension-placeholder \
   @tiptap/extension-task-list @tiptap/extension-task-item \
@@ -329,7 +329,7 @@ export function checkFidelity(md: string): boolean {
 
 **Files:**
 - Create: `web/ui/src/pages/kb/corpus.test.ts`
-- Modify: `/home/rookie/simple-agents-v2/CLAUDE.md` (one line), ledger close-out by controller.
+- Modify: `/home/user/simple-agents-v2/CLAUDE.md` (one line), ledger close-out by controller.
 
 - [ ] **Step 1: Corpus test** — `corpus.test.ts` runs `checkFidelity` over a table of real-world snippets: the two memory-scaffold files' exact content (expected LOSSY → raw mode, per Task 3 — or clean if Task 3 flipped it; assert consistency with `editor.test.ts`), nested lists 3 deep, mixed task/bullet lists, tables with alignment, code fences with language + inner backticks, reference-style links, images `![alt](url)`, hard breaks, `# Skills: csv, pdf` header lines, `[[wikilinks]]` inline everywhere, em-dashes/unicode. For each: either fidelity=true, OR the test documents it as expected-lossy (a named `EXPECTED_LOSSY` list) — no silent failures. The point: the raw-mode fallback boundary is pinned by tests, so an editor-library upgrade that changes serialization gets caught.
 - [ ] **Step 2: Manual e2e smoke** (report evidence, no automation): `make build && SA_PORT=8090 ./bin/simple-agents serve &`; with a browser-less check via curl confirm /app serves; then the REAL smoke is operator-driven — note in the report that the interactive editor smoke (type, slash menu, wikilink click, rename, search) is for Ilija on http://100.116.224.96:8090/app or after deploy. Kill the server you started.

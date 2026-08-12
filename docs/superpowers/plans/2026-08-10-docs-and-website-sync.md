@@ -166,7 +166,7 @@ print('web root:', m.web_root())
 "
 ```
 
-Expected: prints `/home/rookie/rookery-web`. If it prints `None`, the git common-dir resolution is broken — fix before continuing, because every website assertion depends on it.
+Expected: prints `/home/user/rookery-web`. If it prints `None`, the git common-dir resolution is broken — fix before continuing, because every website assertion depends on it.
 
 - [ ] **Step 4: Add the Makefile target**
 
@@ -1148,7 +1148,7 @@ exit 0
 - [ ] **Step 4: Test the trigger path fires**
 
 ```bash
-echo '{"tool_name":"Edit","tool_input":{"file_path":"/home/rookie/rookery/internal/connectors/providers/gmail.yaml"}}' \
+echo '{"tool_name":"Edit","tool_input":{"file_path":"/home/user/rookery/internal/connectors/providers/gmail.yaml"}}' \
   | ~/.claude/hooks/rookery-docs-sync-gate
 ```
 
@@ -1157,7 +1157,7 @@ Expected: JSON containing `connected-services.md`.
 - [ ] **Step 5: Test that a non-trigger path stays silent**
 
 ```bash
-echo '{"tool_name":"Edit","tool_input":{"file_path":"/home/rookie/rookery/internal/db/models.go"}}' \
+echo '{"tool_name":"Edit","tool_input":{"file_path":"/home/user/rookery/internal/db/models.go"}}' \
   | ~/.claude/hooks/rookery-docs-sync-gate; echo "exit=$?"
 ```
 

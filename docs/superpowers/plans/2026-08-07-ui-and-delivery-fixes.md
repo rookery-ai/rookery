@@ -19,7 +19,7 @@
 - **Icons are lucide only, `currentColor`.** No emoji in button labels.
 - **Neutral CommonMark** on the chat path — never platform-specific markup; adapters render on send.
 - **Do not re-glue `<details><summary>`.** Separate lines is the canonical serialized form (a prior attempt was reverted).
-- Working dir: `/home/rookie/rookery/.claude/worktrees/ui-fixes-batch`.
+- Working dir: `/home/user/rookery/.claude/worktrees/ui-fixes-batch`.
 
 ---
 

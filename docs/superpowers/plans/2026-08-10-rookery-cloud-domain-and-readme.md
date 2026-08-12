@@ -21,7 +21,7 @@
 
 ## File Structure
 
-**Product repository** (`/home/rookie/rookery`)
+**Product repository** (`/home/user/rookery`)
 
 | Path | Responsibility | PR |
 |---|---|---|
@@ -34,7 +34,7 @@
 | `README.md` | Full restructure onto site section order | 2 |
 | `scripts/check-docs-sync.py` | `CLAIMS` re-pinned to the new wording | 2 |
 
-**Website repository** (`/home/rookie/rookery-web`)
+**Website repository** (`/home/user/rookery-web`)
 
 | Path | Responsibility | PR |
 |---|---|---|
@@ -221,7 +221,7 @@ The title must itself be a valid Conventional Commit — merges are squashes and
 
 # PR 1b — Website repository rename
 
-Branch: `fix/rookery-cloud-domain` in `/home/rookie/rookery-web`. Independent of PR 1a.
+Branch: `fix/rookery-cloud-domain` in `/home/user/rookery-web`. Independent of PR 1a.
 
 **Coordination note.** A parallel session owns `src/pages/index.astro` lines 380 and 395, `src/content/docs/docs/reference/connected-services.md`, a new `reference/api.md`, and a sidebar entry in `astro.config.mjs`. It has agreed to take the `astro.config.mjs` conflict on its side, since this PR lands first. Do not touch its files.
 
@@ -277,7 +277,7 @@ Leave the `docker` and `binary` tabs untouched — they carry no domain.
 - [ ] **Step 3: Build the site**
 
 ```bash
-cd /home/rookie/rookery-web && npm run build
+cd /home/user/rookery-web && npm run build
 ```
 
 Expected: build succeeds.
@@ -397,8 +397,8 @@ Title: `fix: point the site and its documentation at rookery.cloud`
 **Precondition check before Task 5:**
 
 ```bash
-git -C /home/rookie/rookery fetch origin && git -C /home/rookie/rookery log origin/main --oneline -5
-ls /home/rookie/rookery/scripts/check-docs-sync.py
+git -C /home/user/rookery fetch origin && git -C /home/user/rookery log origin/main --oneline -5
+ls /home/user/rookery/scripts/check-docs-sync.py
 ```
 
 Proceed only when `check-docs-sync.py` is present on `origin/main`. Then branch: `docs/readme-restructure`.
@@ -986,11 +986,11 @@ because the README was previously wrong by half."
 - [ ] **Step 1: Assert the domain bar across both repositories**
 
 ```bash
-grep -rn 'rookery\.sh' /home/rookie/rookery --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=bin --exclude-dir=worktrees \
+grep -rn 'rookery\.sh' /home/user/rookery --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=bin --exclude-dir=worktrees \
   --exclude=2026-08-10-rookery-cloud-domain-and-readme.md \
   --exclude=2026-08-10-rookery-cloud-domain-and-readme-design.md
-grep -rn 'rookery\.sh' /home/rookie/rookery-web --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.astro
-grep -rn '\.sh\b' /home/rookie/rookery/docs /home/rookie/rookery-web/docs | grep -v -E '(install|deploy|setup|build|run|ci)\.sh\b'
+grep -rn 'rookery\.sh' /home/user/rookery-web --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.astro
+grep -rn '\.sh\b' /home/user/rookery/docs /home/user/rookery-web/docs | grep -v -E '(install|deploy|setup|build|run|ci)\.sh\b'
 ```
 
 Expected: no output from the first two commands. The third may surface genuine

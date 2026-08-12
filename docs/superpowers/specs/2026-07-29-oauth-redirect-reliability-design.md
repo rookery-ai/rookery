@@ -126,7 +126,7 @@ alone cannot carry the decision. Verified behaviour:
 
 ```
 agents.example.com   suffix=com         icann=true    → public
-agents.rookie.lan    suffix=lan         icann=false   → PSL fallback, NOT a real suffix
+rookery.example.com    suffix=lan         icann=false   → PSL fallback, NOT a real suffix
 agents.github.io     suffix=github.io   icann=false   → a real PSL *private* entry
 ```
 
@@ -252,7 +252,7 @@ precisely the failure the `verified` flag exists to prevent. The provider itself
 the real enforcement point, and it is authoritative.
 
 The preflight also names the **remedy tier** rather than only the local problem — e.g.
-"`agents.rookie.lan` works for 4 of your 18 providers; a public domain unlocks the rest" —
+"`rookery.example.com` works for 4 of your 18 providers; a public domain unlocks the rest" —
 so the trade-off is visible while the user is choosing a URL, not discovered provider by
 provider.
 
@@ -297,8 +297,8 @@ the deployment matrix:
 | Deployment | Redirect URI | Outcome |
 |---|---|---|
 | Local, browsed at `localhost:8080` | `http://localhost:8080/…` | Google/GitHub/Notion work; Slack-class need HTTPS |
-| LAN server, plain HTTP on an IP | `http://192.168.1.194:8080/…` | Google rejects raw IPs; GitHub works |
-| LAN server, internal CA, `.lan` name | `https://agents.rookie.lan/…` | HTTPS satisfies Slack-class; Google rejects the reserved TLD |
+| LAN server, plain HTTP on an IP | `http://192.168.1.50:8080/…` | Google rejects raw IPs; GitHub works |
+| LAN server, internal CA, `.lan` name | `https://rookery.example.com/…` | HTTPS satisfies Slack-class; Google rejects the reserved TLD |
 | **Real domain, DNS-01 cert, LAN-resolved** | `https://agents.example.com/…` | **All providers work; no inbound exposure** |
 
 The last row is the recommended target for self-hosted installs: the provider never dials

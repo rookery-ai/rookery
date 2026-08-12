@@ -221,7 +221,7 @@ Behavior (drives everything):
 ### Task 9: Close-out — docs, smoke evidence
 
 **Files:**
-- Modify: `/home/rookie/simple-agents-v2/CLAUDE.md` (routes note only if anything changed — likely nothing; verify), ledger by controller.
+- Modify: `/home/user/simple-agents-v2/CLAUDE.md` (routes note only if anything changed — likely nothing; verify), ledger by controller.
 
 - [ ] **Step 1:** Full suites: `go test ./... -count=1 -timeout 120s`; `cd web/ui && npm test -- --run && npm run build`.
 - [ ] **Step 2:** e2e smoke evidence: `make build && SA_PORT=8090 ./bin/simple-agents serve &` → `/app` 200 → kill own PID. Note in report: interactive smoke (chat send, designer round with a real coder, run with SSE) is operator-driven post-deploy.

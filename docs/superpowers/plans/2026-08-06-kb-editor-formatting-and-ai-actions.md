@@ -12,7 +12,7 @@ This is plan **B of two** derived from `docs/superpowers/specs/2026-08-06-kb-edi
 
 ## Global Constraints
 
-- **Branch, never commit to `main`.** Work happens on `worktree-kb-editor-brainstorm` in `/home/rookie/rookery/.claude/worktrees/kb-editor-brainstorm`. Run every command from there.
+- **Branch, never commit to `main`.** Work happens on `worktree-kb-editor-brainstorm` in `/home/user/rookery/.claude/worktrees/kb-editor-brainstorm`. Run every command from there.
 - **Conventional Commits.** `type(scope): summary`.
 - **No new npm or Go dependencies.** Everything needed is installed: `@tiptap/extension-underline` ships inside StarterKit, and colour/callout/toggle are hand-written marks and nodes.
 - **Every new construct ships with a fidelity round-trip test in `editor.test.ts`, and does not ship without one.** `checkFidelity()` compares `markdown → doc → markdown`; a construct that fails it forces every note containing it into a read-only rich view. This is the single most important constraint in this plan.

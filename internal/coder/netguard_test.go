@@ -18,7 +18,7 @@ var errBlockedForTest = errors.New("blocked-for-test")
 func TestIsBlockedIP(t *testing.T) {
 	blocked := []string{
 		"127.0.0.1", "127.53.0.1", "::1",
-		"10.0.0.5", "172.16.4.1", "192.168.1.194",
+		"10.0.0.5", "172.16.4.1", "192.168.1.50",
 		"169.254.169.254", // cloud metadata
 		"fd00::1",         // unique local
 		"fe80::1",         // link-local

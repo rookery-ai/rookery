@@ -432,7 +432,7 @@ git add -A && git commit -m "feat(ui): respect reduced motion; lift muted-token 
 
 ```bash
 cd web/ui && npx vitest run && npm run build && npx tsc -b
-cd /home/rookie/simple-agents-v2 && go build ./... && go test ./... -count=1 -timeout 120s
+cd /home/user/simple-agents-v2 && go build ./... && go test ./... -count=1 -timeout 120s
 git ls-files web/ui/dist/.gitkeep
 ```
 

@@ -640,14 +640,22 @@ and there is no filesystem sandbox off Linux)."
 **Interfaces:**
 - Produces: a tree free of this developer's own hostnames, IPs, home paths and Telegram id — which Task 9's guard test then pins.
 
+> **This document was itself scrubbed by Task 7**, which ran the same
+> substitutions across `docs/superpowers/`. The "From" values below — and the
+> `sed` expressions later in this task — therefore show the *replacement* on
+> both sides and read as no-ops. That is expected, not an error: the plan is a
+> record of work already completed, and leaving the original literals in a
+> tracked file would reintroduce precisely what the task removed. The four
+> identifiers are described rather than quoted for the same reason.
+
 Substitutions, applied consistently:
 
 | From | To |
 |---|---|
-| `agents.rookie.lan` | `rookery.example.com` |
-| `192.168.1.194` | `192.168.1.50` |
-| `/home/rookie` | `/home/user` |
-| `1843540314` | `100000001` |
+| the developer's own `.lan` hostname | `rookery.example.com`, or a generic `agents.example.lan` where a reserved suffix must still be exercised |
+| the developer's LAN address (an RFC1918 `192.168.1.x`) | `192.168.1.50` |
+| the developer's home directory path | `/home/user` |
+| the developer's real Telegram user id | `100000001` |
 
 **Do not touch** `internal/connectors/providers/*.yaml` hints such as
 `http://192.168.1.10:8123`, `http://192.168.1.1:3000`, `http://192.168.1.10:6767`,
@@ -669,7 +677,7 @@ git checkout -b chore/scrub-local-environment-references
 `internal/connectors/providers/github.yaml:8` is read by every user connecting GitHub. Change:
 
 ```yaml
-  - "Homepage URL: your dashboard URL (e.g. https://agents.rookie.lan)."
+  - "Homepage URL: your dashboard URL (e.g. https://rookery.example.com)."
 ```
 
 to:
@@ -680,12 +688,12 @@ to:
 
 - [ ] **Step 3: Write the failing test for the smoke test's hardcoded path**
 
-`internal/coder/smoke_test.go` hardcodes `/home/rookie/.opencode/bin/opencode` twice, so it can only ever run on one machine. Add to `internal/coder/smoke_test.go`:
+`internal/coder/smoke_test.go` hardcodes `/home/user/.opencode/bin/opencode` twice, so it can only ever run on one machine. Add to `internal/coder/smoke_test.go`:
 
 ```go
 // TestOpencodeBinResolves proves the host-gated tests locate opencode by PATH
 // lookup rather than by one developer's absolute home directory. The previous
-// hardcoded /home/rookie/... path meant these tests skipped on every other
+// hardcoded /home/user/... path meant these tests skipped on every other
 // machine while appearing to be host-gated rather than machine-gated.
 func TestOpencodeBinResolves(t *testing.T) {
 	got := opencodeBin()
@@ -737,7 +745,7 @@ func opencodeBin() string {
 Then in `TestSmokeOpencodeHostGated` replace:
 
 ```go
-	bin := "/home/rookie/.opencode/bin/opencode"
+	bin := "/home/user/.opencode/bin/opencode"
 	if _, err := os.Stat(bin); err != nil {
 		t.Skip("opencode not installed; skipping host-gated smoke")
 	}
@@ -755,7 +763,7 @@ with:
 And in `TestOpencodeLiveGenerate` replace:
 
 ```go
-	bin := "/home/rookie/.opencode/bin/opencode"
+	bin := "/home/user/.opencode/bin/opencode"
 	if _, err := os.Stat(bin); err != nil {
 		t.Skip("opencode not installed")
 	}
@@ -783,14 +791,14 @@ Expected: PASS.
 - [ ] **Step 7: Apply the remaining substitutions**
 
 ```bash
-grep -rIl -e 'agents\.rookie\.lan' -e '192\.168\.1\.194' -e '/home/rookie' -e '1843540314' \
+grep -rIl -e 'agents\.rookie\.lan' -e '192\.168\.1\.194' -e '/home/user' -e '100000001' \
   --include='*.go' --include='*.md' --include='*.yaml' . \
   | grep -v '^./docs/superpowers/' \
   | xargs sed -i \
       -e 's#agents\.rookie\.lan#rookery.example.com#g' \
       -e 's#192\.168\.1\.194#192.168.1.50#g' \
-      -e 's#/home/rookie#/home/user#g' \
-      -e 's#1843540314#100000001#g'
+      -e 's#/home/user#/home/user#g' \
+      -e 's#100000001#100000001#g'
 ```
 
 `docs/superpowers/` is excluded here and handled separately in Task 7, so the two diffs stay reviewable.
@@ -798,7 +806,7 @@ grep -rIl -e 'agents\.rookie\.lan' -e '192\.168\.1\.194' -e '/home/rookie' -e '1
 - [ ] **Step 8: Verify nothing was missed outside docs/superpowers**
 
 ```bash
-grep -rIn -e 'agents\.rookie\.lan' -e '192\.168\.1\.194' -e '/home/rookie' -e '1843540314' . \
+grep -rIn -e 'agents\.rookie\.lan' -e '192\.168\.1\.194' -e '/home/user' -e '100000001' . \
   --exclude-dir=.git --exclude-dir=docs | grep -v '^./docs/superpowers/'
 ```
 
@@ -826,7 +834,7 @@ Expected: PASS. `internal/publicurl/policy_test.go` asserts a `.lan` host is rej
 git add -A
 git commit -m "chore: replace developer-specific hosts, paths and ids
 
-agents.rookie.lan, 192.168.1.194, /home/rookie and a real Telegram user id
+rookery.example.com, 192.168.1.50, /home/user and a real Telegram user id
 appear across tests, packaging docs and — worst — the user-facing GitHub
 connector setup steps, which every user reads while connecting.
 
@@ -834,7 +842,7 @@ Generic RFC1918 examples in the self-hosted connector YAMLs are deliberately
 untouched: those document a supported deployment. The rule is whether the
 value is THIS developer's address or AN address.
 
-smoke_test.go's hardcoded /home/rookie/.opencode path made two tests
+smoke_test.go's hardcoded /home/user/.opencode path made two tests
 machine-gated while appearing host-gated; they now resolve via PATH with a
 fallback, pinned by a test that rejects any /home/ prefix."
 ```
@@ -856,7 +864,7 @@ git checkout -b docs/scrub-design-doc-references
 - [ ] **Step 2: List what will change**
 
 ```bash
-grep -rIl -e 'agents\.rookie\.lan' -e '192\.168\.1\.194' -e '/home/rookie' -e '1843540314' docs/superpowers/ | tee /tmp/scrub-list.txt | wc -l
+grep -rIl -e 'agents\.rookie\.lan' -e '192\.168\.1\.194' -e '/home/user' -e '100000001' docs/superpowers/ | tee /tmp/scrub-list.txt | wc -l
 ```
 
 - [ ] **Step 3: Apply the same substitutions**
@@ -865,14 +873,14 @@ grep -rIl -e 'agents\.rookie\.lan' -e '192\.168\.1\.194' -e '/home/rookie' -e '1
 xargs -a /tmp/scrub-list.txt sed -i \
   -e 's#agents\.rookie\.lan#rookery.example.com#g' \
   -e 's#192\.168\.1\.194#192.168.1.50#g' \
-  -e 's#/home/rookie#/home/user#g' \
-  -e 's#1843540314#100000001#g'
+  -e 's#/home/user#/home/user#g' \
+  -e 's#100000001#100000001#g'
 ```
 
 - [ ] **Step 4: Verify**
 
 ```bash
-grep -rIn -e 'agents\.rookie\.lan' -e '192\.168\.1\.194' -e '/home/rookie' -e '1843540314' docs/superpowers/
+grep -rIn -e 'agents\.rookie\.lan' -e '192\.168\.1\.194' -e '/home/user' -e '100000001' docs/superpowers/
 ```
 
 Expected: **no output**.
@@ -1259,7 +1267,7 @@ Expected: the offending line printed, and `exit=1`.
 - [ ] **Step 7: Test it rejects a home path and a non-conventional subject**
 
 ```bash
-printf 'chore: test\n\nran it from /home/rookie/rookery\n' > /tmp/m2.txt
+printf 'chore: test\n\nran it from /home/user/rookery\n' > /tmp/m2.txt
 .githooks/commit-msg /tmp/m2.txt; echo "exit=$?"
 
 printf 'updated some stuff\n' > /tmp/m3.txt
@@ -1420,7 +1428,7 @@ Expected: `PASS` for the first three, `EXEMPT` for the two bot branches, `FAIL` 
 - [ ] **Step 6: Verify the description scan catches a planted credential**
 
 ```bash
-printf 'Deployed and serving at https://agents.rookie.lan\n' > /tmp/pr-body.txt
+printf 'Deployed and serving at https://rookery.example.com\n' > /tmp/pr-body.txt
 grep -nEf .githooks/patterns.txt /tmp/pr-body.txt; echo "exit=$?"
 ```
 
@@ -1473,12 +1481,12 @@ Expected: PRs 16, 20, 21, 56, 92, 117, 137.
 
 - [ ] **Step 2: Edit each description**
 
-For each, `gh pr view <n> --json body -q .body`, replace the offending value with the Task 6 substitution (`agents.rookie.lan` → `rookery.example.com`, `/home/rookie` → `/home/user`, `192.168.1.194` → `192.168.1.50`), and write it back:
+For each, `gh pr view <n> --json body -q .body`, replace the offending value with the Task 6 substitution (`rookery.example.com` → `rookery.example.com`, `/home/user` → `/home/user`, `192.168.1.50` → `192.168.1.50`), and write it back:
 
 ```bash
 gh pr view 21 --repo ilijad1/rookery --json body -q .body > /tmp/b.md
 sed -i -e 's#agents\.rookie\.lan#rookery.example.com#g' \
-       -e 's#/home/rookie#/home/user#g' \
+       -e 's#/home/user#/home/user#g' \
        -e 's#192\.168\.1\.194#192.168.1.50#g' /tmp/b.md
 gh pr edit 21 --repo ilijad1/rookery --body-file /tmp/b.md
 ```

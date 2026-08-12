@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-28-connector-actions-browser-design.md`
 
-**Worktree:** `/home/rookie/simple-agents-v2/.claude/worktrees/connector-actions-panel`, branch `worktree-connector-actions-panel`. Run every command from the worktree root.
+**Worktree:** `/home/user/simple-agents-v2/.claude/worktrees/connector-actions-panel`, branch `worktree-connector-actions-panel`. Run every command from the worktree root.
 
 ## Global Constraints
 

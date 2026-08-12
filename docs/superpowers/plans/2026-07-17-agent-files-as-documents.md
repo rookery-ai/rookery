@@ -504,7 +504,7 @@ func TestAPISaveKBNoteBlockedWhileAgentRunning(t *testing.T) {
 
 ### Task 8: Docs and close-out
 
-**Files:** Modify `/home/rookie/simple-agents-v2/CLAUDE.md`.
+**Files:** Modify `/home/user/simple-agents-v2/CLAUDE.md`.
 
 - [ ] **Step 1:** Update the vault-layout diagram (`agents/<agentID>/` block: `AGENT.md  state.md` — drop `agent.json`/`state.json`), the agent-output-protocol section (`[STATE]` merges into `state.md`'s json fence), and the "Skill attachments source of truth" note (the one-time `ReconcileSkillAttachmentsToDB` is now folded into `MigrateAgentFilesToMarkdown`). Add one line to the KB section that non-markdown files open read-only.
 - [ ] **Step 2:** Full suites: `go test ./... -count=1 -timeout 120s`; `cd web/ui && npm test -- --run`; `npm run build`.

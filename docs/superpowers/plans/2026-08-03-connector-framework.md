@@ -1355,13 +1355,13 @@ git commit -m "feat(web/brand): add upstream logo source and the coverage test l
 - Consumes: `connectors.Execute`, `connectors.DBTokenStore`, `connectors.LoadBundled`.
 - Produces: a runnable harness — `go run ./cmd/livecheck <provider> <action> '<json-args>'` — that executes a connector action against real stored tokens. Plan 2's verification step depends on it.
 
-**Why this task exists:** `cmd/livecheck` is **uncommitted**. It lives in the primary working tree at `/home/rookie/rookery/cmd/livecheck/main.go` but is on no branch, so a worktree-isolated implementation does not have it. The spec's verification bar — "live-verify tier A" — is unenforceable without the harness that enforces it.
+**Why this task exists:** `cmd/livecheck` is **uncommitted**. It lives in the primary working tree at `/home/user/rookery/cmd/livecheck/main.go` but is on no branch, so a worktree-isolated implementation does not have it. The spec's verification bar — "live-verify tier A" — is unenforceable without the harness that enforces it.
 
 - [ ] **Step 1: Copy the file across and read it**
 
 ```bash
 mkdir -p cmd/livecheck
-cp /home/rookie/rookery/cmd/livecheck/main.go cmd/livecheck/main.go
+cp /home/user/rookery/cmd/livecheck/main.go cmd/livecheck/main.go
 ```
 
 Then read it in full. It is a dev harness that was never reviewed; check specifically that its `connectors.Execute` call still matches the current signature (`Execute(ctx, reg, store, client, conn, action, args, pol Policy)`) — an older copy may pass a bare `buildPhase bool` where `Policy{}` now goes.
