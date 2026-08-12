@@ -14,3 +14,7 @@ plans/
 !README.md
 rookery
 .server.pid
+
+# compiled dev harnesses — keep them out of the build context
+/livecheck
+*.pid

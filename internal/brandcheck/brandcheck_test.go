@@ -32,11 +32,14 @@ var legacyTokens = []string{
 // records and release-please-managed history: they describe what was true when
 // they were written, and rewriting them would falsify the archive. brandcheck
 // itself is exempt because it necessarily contains every token it bans.
+//
+// CHANGELOG.md, CHANGES.md and plans/ were removed in the rookery-ai migration:
+// the changelog was regenerated from a reset manifest and the other two were
+// stale pre-rename artifacts. release-please recreates CHANGELOG.md at the first
+// release, so its exemption is restored then, not now — an exemption for a file
+// that does not exist is a blind spot waiting for a future file to land in it.
 var allowedPrefixes = []string{
-	"CHANGELOG.md",
-	"CHANGES.md",
 	"docs/superpowers/",
-	"plans/", // the pre-superpowers plan archive, same class as docs/superpowers
 	"internal/brandcheck/",
 }
 
@@ -46,6 +49,7 @@ var allowedPrefixes = []string{
 var skipNames = map[string]bool{
 	".git":         true,
 	".claude":      true,
+	".superpowers": true, // gitignored local agent tooling, same class as .claude
 	"node_modules": true,
 	"dist":         true,
 	"bin":          true,
@@ -135,5 +139,20 @@ func TestNoLegacyBrandStrings(t *testing.T) {
 	if len(offenders) > 0 {
 		t.Fatalf("legacy brand strings survive in %d place(s):\n  %s",
 			len(offenders), strings.Join(offenders, "\n  "))
+	}
+}
+
+// TestAllowedPrefixesExist fails when the exemption list names a path that is no
+// longer in the tree. A stale exemption is worse than a missing one: it silently
+// widens the scan's blind spot if a future file lands at that path.
+func TestAllowedPrefixesExist(t *testing.T) {
+	root := repoRoot(t)
+	for _, p := range allowedPrefixes {
+		if p == "internal/brandcheck/" {
+			continue // always present; it is this package
+		}
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(p))); err != nil {
+			t.Errorf("allowedPrefixes names %q, which does not exist: %v", p, err)
+		}
 	}
 }

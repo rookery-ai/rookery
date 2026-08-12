@@ -16,3 +16,7 @@ web/ui/dist/*
 
 # goreleaser output
 dist/
+
+# compiled dev harnesses — never commit
+/livecheck
+*.pid
