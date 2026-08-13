@@ -503,16 +503,17 @@ def architecture(p: Palette) -> str:
     o.append(arrow(W / 2, py + pill_h + 6, 168, p.ember))
 
     # -- the binary --------------------------------------------------------
-    bx, by, bw, bh = 70, 168, 1060, 286
+    bx, by, bw, bh = 70, 168, 1060, 352
     o.append(f'<rect x="{bx}" y="{by}" width="{bw}" height="{bh}" rx="24" '
              f'fill="{p.surface}" stroke="{p.line}" stroke-width="1.5"/>')
     o.append(text("YOUR MACHINE — ONE BINARY", bx + 30, by + 38, 14, p.ember,
                   weight=600, spacing=1.6))
 
     # Reading order follows how the thing is used: what you have, asking it,
-    # sending it out, what powers that, what it authenticates with.
+    # sending it out, what it already knows how to do, what it authenticates
+    # with. The coder is deliberately NOT among these — see the bar below.
     tiles = [("book-text", "Knowledge base"), ("messages-square", "Chat"),
-             ("bot", "Agents"), ("cpu", "Coder"), ("key-round", "Secrets")]
+             ("bot", "Agents"), ("puzzle", "Skills"), ("key-round", "Secrets")]
     tgap, tx0, tw_total = 20, bx + 30, bw - 60
     tw = (tw_total - (len(tiles) - 1) * tgap) / len(tiles)
     ty, th = by + 58, 186
@@ -526,8 +527,24 @@ def architecture(p: Palette) -> str:
         o.append(icon(ic, cx - 15, ty + 55, 30, p.ember))
         o.append(text(label, cx, ty + 138, 19, p.ink, weight=600, anchor="middle"))
 
+    # The coder is a SUBSTRATE, not a sibling. As one tile among five it read
+    # as a feature you use alongside the others, when in fact every one of them
+    # runs on it. One bar spanning the full width says that with geometry
+    # instead of a caption, and its ember fill separates it from the tiles it
+    # carries. Left-aligned icon + two lines mirrors the MCP box, so the
+    # diagram has one way of drawing "thing, with a sentence about it".
+    cy0, chh = ty + th + 18, 66
+    o.append(f'<rect x="{tx0}" y="{r(cy0)}" width="{r(tw_total)}" height="{chh}" '
+             f'rx="16" fill="{p.ember_soft}" stroke="{p.ember}" stroke-opacity="0.28"/>')
+    o.append(icon("cpu", tx0 + 26, cy0 + 19, 28, p.ember))
+    o.append(text("CODER", tx0 + 70, cy0 + 29, 16, p.ember, weight=600, spacing=1.6))
+    o.append(text(
+        "The model behind all of it — a CLI tool you already run, a hosted "
+        "provider, or one on your own hardware.",
+        tx0 + 70, cy0 + 52, 14.5, p.muted))
+
     # -- outward -----------------------------------------------------------
-    oy, oh = 512, 132
+    oy, oh = 578, 132
     lw = 748
     rx0, rw = bx + lw + 22, W - (bx + lw + 22) - bx
 
@@ -566,8 +583,9 @@ def architecture(p: Palette) -> str:
         # provider_approx, not provider_count: this is what a screen reader is
         # told, so it must say the same thing the band says.
         "Rookery architecture: Telegram, Discord, Slack and a browser talk to one "
-        "binary on your machine, which holds the knowledge base, chat, agents, "
-        f"coder and secrets, and both reads and writes {provider_approx()} "
+        "binary on your machine, holding the knowledge base, chat, agents, skills "
+        "and secrets, all of them running on the coder — a CLI tool, a hosted "
+        f"provider or a local model — and both reading and writing {provider_approx()} "
         "connections and any MCP server",
         "".join(o),
     )
