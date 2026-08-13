@@ -85,10 +85,21 @@ func TestBuildErrClass(t *testing.T) {
 }
 
 // The class must never carry the underlying message, which is the entire point.
+//
+// The canary is deliberately NOT shaped like a real credential. An earlier draft
+// used a provider-style live-key literal, which reads better and fails the
+// build: gitleaks scans the repository for that shape and cannot tell a test
+// fixture from the real thing. The assertion holds for ANY string, so the
+// credential shape was decorative — if the message were echoed into the class,
+// this marker would appear in it just the same.
+//
+// Per .gitleaks.toml, the fix is to change the fixture, never to allowlist it:
+// an exception has to be spelled out in a file that other scanners also read,
+// which is how a previous allowlist entry made Trivy flag the allowlist itself.
 func TestBuildErrClassNeverEchoesTheMessage(t *testing.T) {
-	secret := "sk-live-abcdef0123456789"
-	got := buildErrClass(fmt.Errorf("provider rejected key %s", secret))
-	if strings.Contains(got, secret) || got != "other" {
+	canary := "CANARY-must-not-appear-in-the-class"
+	got := buildErrClass(fmt.Errorf("provider rejected credential %s", canary))
+	if strings.Contains(got, canary) || got != "other" {
 		t.Errorf("buildErrClass leaked the message: %q", got)
 	}
 }
