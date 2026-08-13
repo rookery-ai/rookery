@@ -740,6 +740,46 @@ func (f *Flow) MarkGeneratingForTest(workspaceID string) {
 	}
 }
 
+// PushProgressForTest emits one milestone on the session's progress channel.
+//
+// The sibling of MarkGeneratingForTest, and exported for the same reason: the
+// SSE handler lives in package web and cannot reach this package's unexported
+// channel. Non-blocking, matching notify()'s own send.
+//
+// Not used by any production path.
+func (f *Flow) PushProgressForTest(workspaceID, msg string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sess, ok := f.sessions[workspaceID]
+	if !ok || sess.progressCh == nil {
+		return
+	}
+	select {
+	case sess.progressCh <- msg:
+	default:
+	}
+}
+
+// FinishGeneratingForTest ends a fake build: it closes the progress channel and
+// clears it, exactly as runGeneration's closeProgress does.
+//
+// Exported alongside MarkGeneratingForTest so package web can drive the SSE
+// handler's completion path — the `event: done` frame is only emitted when the
+// channel closes, and nothing outside this package can close it.
+//
+// Not used by any production path.
+func (f *Flow) FinishGeneratingForTest(workspaceID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sess, ok := f.sessions[workspaceID]
+	if !ok || sess.progressCh == nil {
+		return
+	}
+	ch := sess.progressCh
+	sess.progressCh = nil
+	close(ch)
+}
+
 // DesignSnapshot is a race-free copy of a live session's user-facing state,
 // returned by Snapshot for the web state endpoint. History is a defensive copy
 // so the caller can read it without the mutex while the detached build goroutine
