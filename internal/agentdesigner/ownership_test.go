@@ -1,7 +1,9 @@
 package agentdesigner
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -141,6 +143,55 @@ func TestBuildCompleteCarriesTheSessionOrigin(t *testing.T) {
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("build never completed")
+	}
+}
+
+// A build must be traceable end to end from the logs alone. The incident that
+// motivated this change produced ZERO designer log lines across a whole build,
+// which is why the diagnosis had to come from the database instead.
+func TestBuildEmitsCorrelatedLifecycleLogs(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	flow, workspaceID, _ := newGenFlow(t, newFakeCoder(t, slowCoderScript))
+	flow.mu.Lock()
+	flow.sessions[workspaceID] = &DesignSession{
+		AgentName: "price-tracker", State: StateDesigning, Origin: OriginWeb,
+	}
+	flow.mu.Unlock()
+
+	done := make(chan struct{})
+	flow.OnBuildComplete(func(string, Origin, string, bool, string, error) { close(done) })
+	if _, _, _, err := flow.startGeneration(workspaceID); err != nil {
+		t.Fatalf("startGeneration: %v", err)
+	}
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("build never completed")
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		"build start", "build coder returned", "build decision",
+		"build outcome", "build finished", "build_id=", "origin=web",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("logs missing %q:\n%s", want, out)
+		}
+	}
+
+	// One build, one id: the whole point is that a single grep reconstructs it.
+	ids := map[string]bool{}
+	for _, field := range strings.Fields(out) {
+		if strings.HasPrefix(field, "build_id=") {
+			ids[field] = true
+		}
+	}
+	if len(ids) != 1 {
+		t.Errorf("build_id values = %v, want exactly one across the lifecycle", ids)
 	}
 }
 

@@ -141,6 +141,11 @@ type DesignSession struct {
 	cancelGenerate context.CancelFunc // cancels the in-flight coder.Generate() call
 	progressFunc   func(string)       // Telegram: edits the placeholder message mid-run
 	progressCh     chan string        // Web SSE: buffered milestone channel
+	// buildID correlates every log line of one build. Minted in startGeneration
+	// so a single `grep build_id=<id>` reconstructs the whole lifecycle — the
+	// incident that motivated session ownership produced no designer log lines
+	// at all, so its diagnosis had to be reconstructed from the database.
+	buildID string
 	lastProgress   string             // most recent milestone string, so a page that
 	// reconnects mid-build can show the CURRENT action immediately instead of the
 	// generic placeholder (the channel doesn't replay already-consumed milestones).
@@ -1428,18 +1433,32 @@ func (f *Flow) startGeneration(workspaceID string) (string, bool, string, error)
 		return buildingMessage, false, "", nil
 	}
 	sess.progressCh = make(chan string, 8)
+	sess.buildID = uuid.New().String()[:8]
 	done := f.onBuildComplete
-	// Snapshot the origin under the SAME lock that snapshots the hook. Reading it
-	// inside the goroutine would race a Cancel() that deletes the session.
+	// Snapshot everything the goroutine and the logs need under the SAME lock
+	// that snapshots the hook. Reading these inside the goroutine would race a
+	// Cancel() that deletes the session.
 	origin := sess.Origin
+	buildID := sess.buildID
+	agentName := sess.AgentName
+	isEdit := sess.IsEdit
 	f.mu.Unlock()
+
+	slog.Info("agentdesigner: build start",
+		"build_id", buildID, "workspace_id", workspaceID,
+		"origin", origin.String(), "agent", agentName, "edit", isEdit)
 
 	go func() {
 		// context.Background(), not the caller's: the build is deliberately
 		// detached so a finished HTTP request or chat turn cannot kill it.
 		// runGeneration applies the coder's own timeout internally, so this stays
 		// bounded, and Cancel() still stops it via the stored cancelGenerate.
+		started := time.Now()
 		resp, isDone, agentID, err := f.runGeneration(context.Background(), workspaceID)
+		slog.Info("agentdesigner: build finished",
+			"build_id", buildID, "workspace_id", workspaceID,
+			"origin", origin.String(), "dur_s", int(time.Since(started).Seconds()),
+			"done", isDone, "err", err)
 		if done != nil {
 			done(workspaceID, origin, resp, isDone, agentID, err)
 		}
@@ -1507,6 +1526,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	}
 	progressCh := sess.progressCh
 	progressFunc := sess.progressFunc
+	buildID := sess.buildID
 
 	// Detach the generation context from the caller's request context so that
 	// navigating away from (or reloading) the web page does NOT kill the build.
@@ -1736,6 +1756,10 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		slog.Warn("agentdesigner: salvaging finished build after transient coder error", "workspace_id", workspaceID, "agent_id", agentIDSnap, "err", err)
 	}
 
+	slog.Info("agentdesigner: build coder returned",
+		"build_id", buildID, "workspace_id", workspaceID,
+		"backend", backendType, "result_bytes", len(resultText))
+
 	notify("🔍 Validating agent safety checks…")
 
 	// Record whether "keep it as-is" is a real option for this build (a saveable AGENT.md +
@@ -1761,6 +1785,11 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	blocked := parseBlockedOutput(resultText)
 	outcome := reconcileBlockedOutcome(decision, blocked, backendType)
 
+	slog.Info("agentdesigner: build decision",
+		"build_id", buildID, "workspace_id", workspaceID,
+		"advance", outcome.advance, "saveable", decision.saveable,
+		"script_verified", decision.scriptVerified, "blocked", blocked != "")
+
 	if !outcome.advance {
 		// KEEP the generated files on disk (do NOT cleanupOnFail): a blocked/soft-failed
 		// build is recoverable — the user requests a change and the next generation
@@ -1780,8 +1809,11 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 			if result != nil {
 				scriptRan = result.ScriptRan
 			}
-			slog.Warn("agentdesigner: build not presentable", "workspace_id", workspaceID, "agent_id", agentIDSnap, "reason", decision.logReason, "script_ran", scriptRan, "backend", backendType)
+			slog.Warn("agentdesigner: build not presentable", "build_id", buildID, "workspace_id", workspaceID, "agent_id", agentIDSnap, "reason", decision.logReason, "script_ran", scriptRan, "backend", backendType)
 		}
+		slog.Info("agentdesigner: build outcome",
+			"build_id", buildID, "workspace_id", workspaceID,
+			"state", "designing", "msg_bytes", len(outcome.message))
 		// Record the failure so a forgiving retry re-runs generation WITH context of what
 		// went wrong, instead of the user being trapped in an approve-loop (C1/C2). This
 		// also appends a note to History + saves the draft, so a page that reconnected to
@@ -1819,6 +1851,10 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		f.saveDraft(sess)
 	}
 	f.mu.Unlock()
+
+	slog.Info("agentdesigner: build outcome",
+		"build_id", buildID, "workspace_id", workspaceID,
+		"state", "verifying", "msg_bytes", len(outcome.message))
 
 	// Close the SSE channel only AFTER the state + History are committed, so a page
 	// that reconnected to the live build sees the SSE end, re-fetches /design/state,
