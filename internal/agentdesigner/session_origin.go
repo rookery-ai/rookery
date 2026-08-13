@@ -1,0 +1,57 @@
+package agentdesigner
+
+// Session ownership.
+//
+// A design session is a per-workspace singleton that BOTH the web UI and a chat
+// adapter can reach. Before this type existed, neither the session nor the
+// build-completion hook knew which of them the user was actually using — so a
+// build started in the browser announced its dry-run result in Telegram and left
+// the web surface blank, and a browser tab that merely ADOPTED a running chat
+// session could cancel it.
+//
+// Origin is fixed when the session is created and never moves: the owning
+// surface drives, the other one may read. Ownership is deliberately not
+// persisted to the draft (that would need a column, and this change adds no
+// migration), so a draft resumed after a restart is owned by whoever resumed it.
+// That is correct rather than a compromise — after a restart there is no
+// in-flight build and no surface holds a live view.
+
+// Origin identifies the surface that owns a design session.
+type Origin string
+
+const (
+	// OriginWeb is a session created from the SPA.
+	OriginWeb Origin = "web"
+	// OriginChat is a session created from a chat adapter (Telegram, Discord, Slack).
+	OriginChat Origin = "chat"
+)
+
+// String is the wire form sent on /design/state and compared by the SPA.
+func (o Origin) String() string { return string(o) }
+
+// Label names the surface in a user-facing refusal.
+//
+// Deliberately generic for chat: a workspace may have several adapters linked
+// and Origin does not record which one the message came from, so naming the
+// wrong app would be worse than naming none.
+func (o Origin) Label() string {
+	switch o {
+	case OriginWeb:
+		return "the web app"
+	case OriginChat:
+		return "your chat app"
+	default:
+		return "another surface"
+	}
+}
+
+// Owns reports whether a session with this origin may be driven from `from`.
+//
+// A zero origin on EITHER side fails open. A session built by a test, or one
+// created by a build predating this field, would otherwise be drivable from
+// nowhere — bricking it rather than merely leaving it unprotected. The cost of
+// failing open is that such a session keeps today's behaviour; the cost of
+// failing closed is a user who cannot touch their own session from any surface.
+func (o Origin) Owns(from Origin) bool {
+	return o == "" || from == "" || o == from
+}
