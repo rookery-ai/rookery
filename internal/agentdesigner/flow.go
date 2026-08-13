@@ -69,6 +69,11 @@ type DesignSession struct {
 	UserMemory         string             // bullet list of saved memory entries, loaded once on session start
 	CreatedAt          time.Time
 
+	// Origin is the surface that created this session. Fixed at creation and
+	// never reassigned: the owner drives, the other surface may read. See
+	// session_origin.go for why exclusive ownership rather than last-writer-wins.
+	Origin Origin
+
 	// IsEdit distinguishes an edit-of-existing-agent session from a fresh create.
 	// AgentID is the *existing* agent's ID (not a freshly minted one) when true.
 	IsEdit bool
@@ -421,7 +426,7 @@ func (f *Flow) WithSecretsLoader(fn func(ctx context.Context, workspaceID string
 
 // Start creates a new Telegram design session for workspaceID.
 // Returns the opening prompt asking for a description.
-func (f *Flow) Start(workspaceID, agentName string) (string, error) {
+func (f *Flow) Start(workspaceID, agentName string, origin Origin) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -443,6 +448,7 @@ func (f *Flow) Start(workspaceID, agentName string) (string, error) {
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
 		CreatedAt:          time.Now(),
+		Origin:             origin,
 	}
 
 	return fmt.Sprintf(
@@ -453,7 +459,7 @@ func (f *Flow) Start(workspaceID, agentName string) (string, error) {
 
 // StartDesign is the web path: creates a session already in StateDesigning
 // with the user's first message and returns the coder's first response.
-func (f *Flow) StartDesign(ctx context.Context, workspaceID, agentName, firstMessage string) (string, error) {
+func (f *Flow) StartDesign(ctx context.Context, workspaceID, agentName, firstMessage string, origin Origin) (string, error) {
 	f.mu.Lock()
 
 	if _, exists := f.sessions[workspaceID]; exists {
@@ -475,6 +481,7 @@ func (f *Flow) StartDesign(ctx context.Context, workspaceID, agentName, firstMes
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
 		CreatedAt:          time.Now(),
+		Origin:             origin,
 	}
 	f.sessions[workspaceID] = sess
 	f.mu.Unlock()
@@ -486,7 +493,7 @@ func (f *Flow) StartDesign(ctx context.Context, workspaceID, agentName, firstMes
 // Ownership of agentID is assumed pre-checked by the caller (same pattern as the
 // other agent handlers, e.g. the Telegram /agent and web delete/run endpoints).
 // Returns the opening prompt summarizing current behavior and asking what to change.
-func (f *Flow) StartEdit(workspaceID, agentID string) (string, error) {
+func (f *Flow) StartEdit(workspaceID, agentID string, origin Origin) (string, error) {
 	f.mu.Lock()
 	if _, exists := f.sessions[workspaceID]; exists {
 		f.mu.Unlock()
@@ -514,6 +521,7 @@ func (f *Flow) StartEdit(workspaceID, agentID string) (string, error) {
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
 		CreatedAt:          time.Now(),
+		Origin:             origin,
 		IsEdit:             true,
 		ExistingAgentMD:    reconciledMD,
 		ExistingTools:      tools,
@@ -529,7 +537,7 @@ func (f *Flow) StartEdit(workspaceID, agentID string) (string, error) {
 // StartEditDesign is the web path for editing: creates a session already in
 // StateDesigning with the user's first change request and returns the coder's
 // first response. Mirrors StartDesign.
-func (f *Flow) StartEditDesign(ctx context.Context, workspaceID, agentID, firstMessage string) (string, error) {
+func (f *Flow) StartEditDesign(ctx context.Context, workspaceID, agentID, firstMessage string, origin Origin) (string, error) {
 	f.mu.Lock()
 	if _, exists := f.sessions[workspaceID]; exists {
 		f.mu.Unlock()
@@ -557,6 +565,7 @@ func (f *Flow) StartEditDesign(ctx context.Context, workspaceID, agentID, firstM
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
 		CreatedAt:          time.Now(),
+		Origin:             origin,
 		IsEdit:             true,
 		ExistingAgentMD:    reconciledMD,
 		ExistingTools:      tools,
@@ -615,7 +624,7 @@ func (f *Flow) loadAgentForEdit(workspaceID, agentID string) (agentName, reconci
 // Step processes one message and advances the FSM.
 // Returns (response, isDone, agentID, err).
 // agentID is non-empty only when isDone=true.
-func (f *Flow) Step(ctx context.Context, workspaceID, input string) (string, bool, string, error) {
+func (f *Flow) Step(ctx context.Context, workspaceID, input string, from Origin) (string, bool, string, error) {
 	f.mu.Lock()
 	sess, ok := f.sessions[workspaceID]
 	if !ok {
@@ -731,6 +740,7 @@ type DesignSnapshot struct {
 	AgentName        string
 	AgentID          string
 	IsEdit           bool
+	Origin           Origin // surface that owns the session; drives the SPA's read-only mirror
 	History          []db.ChatMessage
 	LastProgress     string // most recent build milestone (for reconnect display)
 	GenerationFailed bool   // last build blocked/soft-failed → offer keep-going/keep-as-is
@@ -773,6 +783,7 @@ func (f *Flow) Snapshot(workspaceID string) DesignSnapshot {
 		AgentName:        sess.AgentName,
 		AgentID:          sess.AgentID,
 		IsEdit:           sess.IsEdit,
+		Origin:           sess.Origin,
 		History:          hist,
 		LastProgress:     sess.lastProgress,
 		GenerationFailed: sess.GenerationFailed,
@@ -888,7 +899,7 @@ func (f *Flow) DismissDraft(workspaceID string) error {
 //
 // The coder is never re-run on resume — generation only happens when the user
 // next says "approve".
-func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string) (string, error) {
+func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string, origin Origin) (string, error) {
 	if f.db == nil {
 		return "", fmt.Errorf("no database configured")
 	}
@@ -908,6 +919,10 @@ func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string) (string, err
 		UserProfile:        f.loadRuntimeContext(workspaceID),
 		UserMemory:         f.loadUserMemory(workspaceID),
 		CreatedAt:          time.Now(),
+		// Ownership is not persisted in the draft, so a resumed session is owned
+		// by whoever resumed it. After a restart there is no in-flight build and
+		// no surface holds a live view, so there is nothing to inherit.
+		Origin: origin,
 	}
 	_ = json.Unmarshal([]byte(draft.HistoryJSON), &sess.History)
 	if draft.PendingToolsJSON != "" {
@@ -1017,7 +1032,7 @@ func (f *Flow) recoverBuiltAgentFromDisk(workspaceID, agentName string) (string,
 // prompt to send the user. pendingAgentName is stored so the "new" branch of
 // stepAwaitingResume can start a fresh create session with the name the user
 // originally typed.
-func (f *Flow) OfferDraftResume(workspaceID, pendingAgentName string, draft *db.AgentDraft) (string, error) {
+func (f *Flow) OfferDraftResume(workspaceID, pendingAgentName string, draft *db.AgentDraft, origin Origin) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sessions[workspaceID] = &DesignSession{
@@ -1028,6 +1043,7 @@ func (f *Flow) OfferDraftResume(workspaceID, pendingAgentName string, draft *db.
 		IsEdit:      draft.IsEdit,
 		pendingName: pendingAgentName,
 		CreatedAt:   time.Now(),
+		Origin:      origin,
 	}
 	return fmt.Sprintf(
 		"Found an unfinished draft for \"%s\". Reply 'resume' to continue it, or 'new' to start fresh.",
@@ -1046,14 +1062,16 @@ func (f *Flow) stepAwaitingResume(ctx context.Context, workspaceID, msg string) 
 	f.mu.Lock()
 	sess := f.sessions[workspaceID]
 	pendingName := ""
+	origin := Origin("")
 	if sess != nil {
 		pendingName = sess.pendingName
+		origin = sess.Origin
 	}
 	f.mu.Unlock()
 
 	lower := strings.TrimSpace(strings.ToLower(msg))
 	if lower == "resume" {
-		resp, err := f.ResumeDraft(ctx, workspaceID)
+		resp, err := f.ResumeDraft(ctx, workspaceID, origin)
 		if err != nil {
 			return "", false, "", err
 		}
@@ -1068,7 +1086,7 @@ func (f *Flow) stepAwaitingResume(ctx context.Context, workspaceID, msg string) 
 	if pendingName == "" {
 		pendingName = "agent"
 	}
-	resp, err := f.Start(workspaceID, pendingName)
+	resp, err := f.Start(workspaceID, pendingName, origin)
 	if err != nil {
 		return "", false, "", err
 	}

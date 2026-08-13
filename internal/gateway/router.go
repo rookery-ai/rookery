@@ -348,7 +348,7 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 		// If the user has a resumable draft, offer to continue it instead of
 		// starting fresh. Subsequent text routes through Step → stepAwaitingResume.
 		if draft := r.designFlow.HasDraft(msg.WorkspaceID); draft != nil {
-			response, err := r.designFlow.OfferDraftResume(msg.WorkspaceID, name, draft)
+			response, err := r.designFlow.OfferDraftResume(msg.WorkspaceID, name, draft, agentdesigner.OriginChat)
 			if err != nil {
 				send(err.Error())
 				return nil
@@ -356,7 +356,7 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 			send(response)
 			return nil
 		}
-		response, err := r.designFlow.Start(msg.WorkspaceID, name)
+		response, err := r.designFlow.Start(msg.WorkspaceID, name, agentdesigner.OriginChat)
 		if err != nil {
 			send(err.Error())
 			return nil
@@ -382,7 +382,7 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 			send("Agent `" + name + "` not found.")
 			return nil
 		}
-		response, err := r.designFlow.StartEdit(msg.WorkspaceID, agent.ID)
+		response, err := r.designFlow.StartEdit(msg.WorkspaceID, agent.ID, agentdesigner.OriginChat)
 		if err != nil {
 			send(err.Error())
 			return nil
@@ -1102,7 +1102,7 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 		if sess != nil && sess.State == agentdesigner.StateDesigning && sendProgress != nil {
 			r.designFlow.SetProgressHandler(msg.WorkspaceID, sendProgress)
 		}
-		response, _, _, err := r.designFlow.Step(ctx, msg.WorkspaceID, msg.Text)
+		response, _, _, err := r.designFlow.Step(ctx, msg.WorkspaceID, msg.Text, agentdesigner.OriginChat)
 		if err != nil {
 			send(friendlyDesignError("agent", err))
 			return nil

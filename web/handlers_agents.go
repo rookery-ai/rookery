@@ -100,7 +100,7 @@ func (s *Server) handleResumeDraft(c echo.Context) error {
 	if s.designFlow == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent designer not configured"})
 	}
-	resp, err := s.designFlow.ResumeDraft(c.Request().Context(), u.ID)
+	resp, err := s.designFlow.ResumeDraft(c.Request().Context(), u.ID, agentdesigner.OriginWeb)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
@@ -174,7 +174,7 @@ func (s *Server) handleDesignChat(c echo.Context) error {
 		if req.Name == "" {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "name is required to start a new session"})
 		}
-		response, err := s.designFlow.StartDesign(ctx, u.ID, req.Name, req.Message)
+		response, err := s.designFlow.StartDesign(ctx, u.ID, req.Name, req.Message, agentdesigner.OriginWeb)
 		if err != nil {
 			slog.Error("agentdesigner: start design failed", "workspace_id", u.ID, "name", req.Name, "err", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -192,7 +192,7 @@ func (s *Server) handleDesignChat(c echo.Context) error {
 		auditName = sess.AgentName
 	}
 
-	response, isDone, agentID, err := s.designFlow.Step(ctx, u.ID, req.Message)
+	response, isDone, agentID, err := s.designFlow.Step(ctx, u.ID, req.Message, agentdesigner.OriginWeb)
 	if err != nil {
 		slog.Error("agentdesigner: design step failed", "workspace_id", u.ID, "err", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -342,7 +342,7 @@ func (s *Server) handleStartEditDesign(c echo.Context) error {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent designer not configured"})
 	}
 
-	response, err := s.designFlow.StartEditDesign(c.Request().Context(), u.ID, id, req.Message)
+	response, err := s.designFlow.StartEditDesign(c.Request().Context(), u.ID, id, req.Message, agentdesigner.OriginWeb)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}

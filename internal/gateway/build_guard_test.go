@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/rookery-ai/rookery/internal/agentdesigner"
 )
 
 // The web surface has always rejected a design turn while a build runs
@@ -21,7 +23,7 @@ func TestGuardRejectsATurnWhileABuildIsRunning(t *testing.T) {
 	seedAgentDraft(t, database, "hackernews")
 
 	// Open a session, then mark it generating the way a real build does.
-	if _, err := agentFlow.Start(testWorkspaceID, "hackernews"); err != nil {
+	if _, err := agentFlow.Start(testWorkspaceID, "hackernews", agentdesigner.OriginChat); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	agentFlow.MarkGeneratingForTest(testWorkspaceID)
@@ -50,7 +52,7 @@ func TestGuardRejectsATurnWhileABuildIsRunning(t *testing.T) {
 func TestGuardLetsOrdinaryTurnsThrough(t *testing.T) {
 	r, _, agentFlow, _ := newTestRouter(t)
 
-	if _, err := agentFlow.Start(testWorkspaceID, "hackernews"); err != nil {
+	if _, err := agentFlow.Start(testWorkspaceID, "hackernews", agentdesigner.OriginChat); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
