@@ -98,9 +98,18 @@ DARK = Palette(
 # --------------------------------------------------------------------------
 # lucide icons
 # --------------------------------------------------------------------------
-# Path data lifted verbatim from lucide-static v1.30.0 (ISC), the same icon set
-# rookery-web's FeatureSection.tsx renders, so the README and the website show
-# the identical geometry rather than a lookalike. All are 24x24, stroked.
+# Path data lifted verbatim from lucide-static v1.30.0 (ISC).
+#
+# The eleven feature icons are exactly the ones rookery-web's landing page
+# imports (src/pages/index.astro imports them from lucide-react directly — NOT
+# via FeatureSection.tsx, whose own ICONS map covers only six of them). The
+# twelfth, shield-check, is ours: Landlock has no card on the website.
+#
+# The website is on lucide-react 1.29.0 while this is lucide-static 1.30.0, a
+# minor apart. Every one of these icons was compared child-shape by child-shape
+# across the two packages and is identical, so "the same icons" is a measured
+# claim rather than an assumed one — but it is worth re-measuring if either
+# package is bumped. All are 24x24, stroked.
 
 LUCIDE: dict[str, list[str]] = {
     "layers": [
