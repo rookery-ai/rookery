@@ -131,8 +131,11 @@ CLAIMS = [
     # exactly ONE prose home left — the line under docs/assets/features.svg.
     # The counts INSIDE that image are guarded by check_readme_assets instead:
     # SVG splits text across elements, so no grep over README.md can see them.
-    ("product", "README.md", r"\*\*(\d+) providers\*\* and", "providers"),
-    ("product", "README.md", r"and \*\*(\d+) curated actions\*\*", "actions"),
+    #
+    # Providers and actions are deliberately NOT pinned here any more: the
+    # README states them as "100+"/"900+", which is an approximate claim and
+    # therefore check_inflated's job, not this table's. Skills stays exact —
+    # 22 is a number a reader can act on, and it moves rarely.
     ("product", "README.md", r"\*\*(\d+) skills\*\* built in", "skills"),
     ("web", "src/pages/index.astro", r"(\d+)\+? services", "providers"),
     # The landing page states the provider count TWICE, in different words:
@@ -197,8 +200,6 @@ def _claims_selftest() -> None:
     # must be exercised against a deliberately re-wrapped copy of text it is
     # supposed to match, through _flex_ws, the same way check_claims calls it.
     rewrapped_cases = [
-        (r"\*\*(\d+) providers\*\* and", "**91\nproviders** and", "91"),
-        (r"and \*\*(\d+) curated actions\*\*", "and **471 curated\nactions**", "471"),
         (r"\*\*(\d+) skills\*\* built in", "**22 skills** built\nin", "22"),
         (r"(\d+)\+? services", "91\nservices", "91"),
         (r"selection of the (\d+) supported", "A selection of\nthe 91 supported.", "91"),
@@ -242,20 +243,39 @@ check_claims.selftest = _claims_selftest
 # real text in one of the INFLATABLE files needs the new noun, and say
 # which line justified it (grep first).
 INFLATED_NOUNS = r"(?:services|supported)"
+
+# (repo, relative path, regex capturing (number, noun), derived key)
+#
+# README.md joined this table when its connector line went from "136 providers"
+# to "100+ services": an approximate claim is this check's job, not CLAIMS'.
+# Its two entries carry their OWN nouns rather than reusing INFLATED_NOUNS,
+# because the shared list maps every noun onto `providers` — matching
+# "900+ curated actions" with that key would compare 900 against the provider
+# count and fail an honest sentence. Each entry must pair a noun with the count
+# that noun actually names.
 INFLATABLE = [
-    ("src/pages/index.astro", rf"(\d+)\+\s*({INFLATED_NOUNS})", "providers"),
-    ("src/content/docs/docs/reference/connected-services.md", rf"(\d+)\+\s*({INFLATED_NOUNS})", "providers"),
+    ("web", "src/pages/index.astro", rf"(\d+)\+\s*({INFLATED_NOUNS})", "providers"),
+    ("web", "src/content/docs/docs/reference/connected-services.md", rf"(\d+)\+\s*({INFLATED_NOUNS})", "providers"),
+    ("product", "README.md", r"(\d+)\+\s*(services)", "providers"),
+    ("product", "README.md", r"(\d+)\+\s*(curated actions)", "actions"),
 ]
 
 
 @register
 def check_inflated() -> None:
     web = web_root()
-    if web is None:
-        return
     values = derived()
-    for rel, pattern, key in INFLATABLE:
-        path = web / rel
+    for repo, rel, pattern, key in INFLATABLE:
+        if repo == "web":
+            # Website entries are skipped, not failed, when the second
+            # checkout is absent — same rule as check_claims. Product entries
+            # must still run, or README's claim would go unguarded in exactly
+            # the environment (make ci) where it matters most.
+            if web is None:
+                continue
+            path = web / rel
+        else:
+            path = product_root() / rel
         if not path.exists():
             continue
         text = read(path)
@@ -298,6 +318,35 @@ def _inflated_selftest() -> None:
     m3 = re.search(flexed, "100+\nservices")
     assert m3 and int(m3.group(1)) == 100, \
         "_flex_ws(pattern) must still catch an N+ claim that wraps before the noun"
+
+    # README.md's two entries must pair each noun with the count that noun
+    # names. This is the failure mode adding a product file introduced: the
+    # shared INFLATED_NOUNS list maps everything onto `providers`, so reusing
+    # it for "900+ curated actions" would measure 900 against the PROVIDER
+    # count and fail a true sentence — a gate that fires on honest prose.
+    readme = [(p, k) for repo, rel, p, k in INFLATABLE
+              if repo == "product" and rel == "README.md"]
+    assert len(readme) == 2, "README.md must contribute exactly two N+ entries"
+    by_key = {k: p for p, k in readme}
+    assert set(by_key) == {"providers", "actions"}, \
+        "README.md's N+ claims cover providers and actions"
+
+    line = "**100+ services** and **900+ curated actions**, over OAuth"
+    prov = re.search(_flex_ws(by_key["providers"]), line)
+    acts = re.search(_flex_ws(by_key["actions"]), line)
+    assert prov and int(prov.group(1)) == 100, "providers entry must read 100, not 900"
+    assert acts and int(acts.group(1)) == 900, "actions entry must read 900, not 100"
+
+    # And the providers pattern must NOT also swallow the actions clause —
+    # if it did, the 900 would be compared against the provider count.
+    assert len(re.findall(_flex_ws(by_key["providers"]), line)) == 1, \
+        "the providers pattern must match only the services clause"
+
+    # Red case: an inflated README claim is caught, in both directions.
+    bad = "**900+ services** and **900+ curated actions**"
+    m4 = re.search(_flex_ws(by_key["providers"]), bad)
+    assert m4 and int(m4.group(1)) == 900 > 136, \
+        "a README services claim above the real provider count must be catchable"
 
 
 check_inflated.selftest = _inflated_selftest

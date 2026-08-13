@@ -41,6 +41,25 @@ def provider_count() -> int:
     return len(list((ROOT / "internal" / "connectors" / "providers").glob("*.yaml")))
 
 
+def provider_approx() -> str:
+    """The provider count rounded DOWN to a hundred, as "100+".
+
+    An exact count goes stale between releases — connector waves land often
+    enough that the number on a picture is wrong more days than it is right.
+    Rounding down keeps it true by construction and still auto-advances: at 210
+    providers this says "200+" without anyone editing a file.
+
+    Down, never nearest, is the whole point — "100+" against a real 136 is
+    honest, "200+" against it is a lie, and scripts/check-docs-sync.py's
+    check_inflated fails the build on exactly that direction. Below 100 there
+    is no honest round number left, so it degrades to the exact count rather
+    than claiming "0+".
+    """
+    n = provider_count()
+    floor = n // 100 * 100
+    return f"{floor}+" if floor >= 100 else str(n)
+
+
 def skill_count() -> int:
     return sum(
         1 for p in (ROOT / "internal" / "skilllibrary" / "skills").iterdir() if p.is_dir()
@@ -365,14 +384,16 @@ def hero(p: Palette) -> str:
 # grep-based check the repo has — which is exactly how README's provider number
 # drifted for months before scripts/check-docs-sync.py existed. So both are
 # measured from source here rather than typed, and `--check` fails CI when the
-# committed file no longer matches a fresh render.
+# committed file no longer matches a fresh render. The provider count is
+# additionally rounded down (see provider_approx) because connector waves land
+# faster than the images get looked at.
 def feature_cards() -> list[tuple[str, str, str]]:
     return [
         ("layers",          "Workspaces",     "Sealed, separate tenants."),
         ("book-text",       "Knowledge base", "Plain markdown on your disk."),
         ("bot",             "Agents",         "Describe it. It gets built."),
         ("puzzle",          "Skills",         f"{skill_count()} built in, ready to attach."),
-        ("plug",            "Connections",    f"{provider_count()} services. Your credentials."),
+        ("plug",            "Connections",    f"{provider_approx()} services. Your credentials."),
         ("terminal",        "MCP servers",    "Any server URL. Tools join in."),
         ("messages-square", "Chat",           "Ask what you know. Then act."),
         ("bell",            "Notifications",  "Inbox, Telegram, Discord, Slack."),
@@ -494,7 +515,7 @@ def architecture(p: Palette) -> str:
     lw = 748
     o.append(f'<rect x="{bx}" y="{oy}" width="{lw}" height="{oh}" rx="20" '
              f'fill="{p.surface}" stroke="{p.line}"/>')
-    o.append(text(f"{provider_count()} CONNECTIONS", bx + 26, oy + 34, 13, p.muted,
+    o.append(text(f"{provider_approx()} CONNECTIONS", bx + 26, oy + 34, 13, p.muted,
                   weight=600, spacing=1.8))
     per_row = 6
     cell = (lw - 52) / per_row

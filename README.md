@@ -65,7 +65,7 @@ make build
   <img src="docs/assets/features.svg" alt="Workspaces, knowledge base, agents, skills, connections, MCP servers, chat, notifications, models, secrets, scheduling and sandboxing" width="100%">
 </picture>
 
-**136 providers** and **934 curated actions**, over OAuth or an API key you
+**100+ services** and **900+ curated actions**, over OAuth or an API key you
 paste — never a broker. **22 skills** built in, plus any you create the same
 conversational way.
 
