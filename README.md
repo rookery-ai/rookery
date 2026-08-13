@@ -11,9 +11,9 @@
   <a href="https://github.com/rookery-ai/rookery/pkgs/container/rookery"><img alt="Container" src="https://img.shields.io/badge/ghcr.io-rookery-a94c1c"></a>
 </p>
 
-A single binary. Your knowledge stays as plain markdown on your own disk, agents
-are built from a conversation rather than a config file, and every credential
-stays yours.
+Everything you know in one markdown knowledge base — what you write, and what
+your connected services bring in. Ask it anything, send an agent out for what
+isn't there yet, or hand over the whole job and let it run on a schedule you set.
 
 Full documentation lives at **[rookery.cloud/docs](https://rookery.cloud/docs)**.
 
@@ -38,7 +38,7 @@ irm https://rookery.cloud/install.ps1 | iex
 <summary>Container</summary>
 
 ```bash
-podman run -d --name rookery -p 8080:8080 \
+docker run -d --name rookery -p 8080:8080 \
   -v rookery-data:/data ghcr.io/rookery-ai/rookery:latest
 ```
 
