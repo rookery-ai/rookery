@@ -125,11 +125,15 @@ def _flex_ws(pattern: str) -> str:
 # skills claim lives in the `description:` field of concepts/skills.md, not in
 # its prose, and a body-only scan would match nothing and pass silently.
 CLAIMS = [
-    ("product", "README.md", r"reaches (\d+) external services", "providers"),
-    ("product", "README.md", r"credentials you own: (\d+) providers", "providers"),
-    ("product", "README.md", r"providers and (\d+) curated actions", "actions"),
-    ("product", "README.md", r"\*\*(\d+) services\. No middleman", "providers"),
-    ("product", "README.md", r"(\d+) built in and ready to attach", "skills"),
+    # README.md used to state the provider count in three separate sentences and
+    # the skill count in a fourth, because it carried a prose section per
+    # feature. Those sections are now one generated image, so each number has
+    # exactly ONE prose home left — the line under docs/assets/features.svg.
+    # The counts INSIDE that image are guarded by check_readme_assets instead:
+    # SVG splits text across elements, so no grep over README.md can see them.
+    ("product", "README.md", r"\*\*(\d+) providers\*\* and", "providers"),
+    ("product", "README.md", r"and \*\*(\d+) curated actions\*\*", "actions"),
+    ("product", "README.md", r"\*\*(\d+) skills\*\* built in", "skills"),
     ("web", "src/pages/index.astro", r"(\d+)\+? services", "providers"),
     # The landing page states the provider count TWICE, in different words:
     # the section heading ("N services") and the line under the logo wall
@@ -193,11 +197,9 @@ def _claims_selftest() -> None:
     # must be exercised against a deliberately re-wrapped copy of text it is
     # supposed to match, through _flex_ws, the same way check_claims calls it.
     rewrapped_cases = [
-        (r"reaches (\d+) external services", "it reaches\n91 external services today", "91"),
-        (r"credentials you own: (\d+) providers", "credentials you\nown: 91 providers", "91"),
-        (r"providers and (\d+) curated actions", "91 providers and 471\ncurated actions", "471"),
-        (r"\*\*(\d+) services\. No middleman", "**91\nservices. No middleman", "91"),
-        (r"(\d+) built in and ready to attach", "22 built\nin and ready to attach", "22"),
+        (r"\*\*(\d+) providers\*\* and", "**91\nproviders** and", "91"),
+        (r"and \*\*(\d+) curated actions\*\*", "and **471 curated\nactions**", "471"),
+        (r"\*\*(\d+) skills\*\* built in", "**22 skills** built\nin", "22"),
         (r"(\d+)\+? services", "91\nservices", "91"),
         (r"selection of the (\d+) supported", "A selection of\nthe 91 supported.", "91"),
         (r"— (\d+) built in", "—\n22 built\nin", "22"),
@@ -445,6 +447,82 @@ def _readme_env_table_selftest() -> None:
 
 
 check_readme_env_table.selftest = _readme_env_table_selftest
+
+
+GEN_ASSETS = "scripts/gen-readme-assets.py"
+
+
+@register
+def check_readme_assets() -> None:
+    """The README's three images are generated; a stale commit must fail here.
+
+    Two of the twelve feature cards and the architecture diagram's outward band
+    state a COUNT. check_claims cannot reach them: a number in an SVG is split
+    across elements and attributes, and lives outside README.md entirely, so
+    every grep-shaped guard the repo has is blind to it. The durable answer is
+    to re-render from source and compare bytes — the same shape as the SPA's
+    emojiData test, where the generator is the source and the committed file is
+    a build artifact CI proves current.
+
+    This matters more than it looks: the provider count in README.md drifted for
+    months precisely because it was copied forward rather than measured, and
+    moving it into an image would have recreated that hiding place.
+    """
+    script = product_root() / GEN_ASSETS
+    if not script.exists():
+        fail("readme-assets", f"{GEN_ASSETS} is missing — the images have no source")
+        return
+    proc = subprocess.run(
+        [sys.executable, str(script), "--check"],
+        capture_output=True, text=True, cwd=product_root(),
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip() or "generator exited non-zero"
+        fail("readme-assets", detail.replace("\n", " "))
+
+
+def _readme_assets_selftest() -> None:
+    # Red case: the generator must actually FAIL on a stale file, not merely
+    # succeed on a fresh one. Proven against a real render rather than a
+    # fixture, because the thing being asserted IS "the committed bytes equal a
+    # fresh render" — a mock of that is a mock of the whole assertion. The
+    # tampered copy is written to a scratch tree so the real docs/assets is
+    # never touched, even if this raises part-way through.
+    import shutil
+    import tempfile
+
+    root = product_root()
+    src = root / "docs" / "assets" / "features.svg"
+    assert src.exists(), "docs/assets/features.svg must exist for this selftest"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        backup = Path(tmp) / "features.svg"
+        shutil.copy2(src, backup)
+        original = src.read_bytes()
+        try:
+            src.write_bytes(original.replace(b"Workspaces", b"Workspacez"))
+            proc = subprocess.run(
+                [sys.executable, str(root / GEN_ASSETS), "--check"],
+                capture_output=True, text=True, cwd=root,
+            )
+            assert proc.returncode != 0, \
+                "a tampered docs/assets file must make --check exit non-zero"
+            assert "features.svg" in (proc.stderr + proc.stdout), \
+                "--check must name the file that went stale"
+        finally:
+            shutil.copy2(backup, src)
+
+    # Green case: restored, the same command is silent again. Without this the
+    # red case could pass simply because --check is broken and always fails.
+    proc = subprocess.run(
+        [sys.executable, str(root / GEN_ASSETS), "--check"],
+        capture_output=True, text=True, cwd=root,
+    )
+    assert proc.returncode == 0, \
+        f"--check must pass against the committed assets, got: {proc.stderr.strip()}"
+
+
+check_readme_assets.selftest = _readme_assets_selftest
 
 
 def declared_cli_names() -> set[str]:
