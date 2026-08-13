@@ -47,23 +47,24 @@ built-in `GITHUB_TOKEN`; cosign signs keylessly through GitHub's OIDC provider;
 govulncheck, Trivy, gitleaks and CodeQL need no credentials. Do not add secrets
 that have no consumer.
 
-## 2. Branch protection on `main` — NOT AVAILABLE ON THIS PLAN
+## 2. Branch protection on `main` — ENABLED
 
-**Verified 2026-07-28:** the API returns
-`403 — Upgrade to GitHub Pro or make this repository public`. Branch protection
-requires GitHub Pro (or an org plan) for a **private** repository; it is free on
-public ones. Nothing to configure today.
+**Enabled 2026-08-12, when the repository went public.** It had never been
+possible before: the API returned `403 — Upgrade to GitHub Pro or make this
+repository public` for the whole of the repository's private life, so the seven
+documented gates were a discipline rather than a guarantee. Protection is free
+on public repositories.
 
-The checks still **run** on every PR — they are simply not **enforced**, so a
-red PR *can* be merged. Until one of the following is true, the gate is a
-discipline, not a guarantee:
+`main` now requires the status checks listed below, and blocks force-pushes and
+deletion. `required_pull_request_reviews` is deliberately **null** and
+`enforce_admins` **false**: a solo maintainer cannot approve their own pull
+request, so requiring a review would block every merge.
 
-- go public at launch (protection becomes free, and CodeQL starts working too —
-  see §3), or
-- subscribe to GitHub Pro, or
-- accept the gap and just don't merge red PRs.
+If the repository is ever made private again, protection disappears with it
+unless the organization is on a paid plan — the alternatives then are GitHub
+Pro, or accepting the gap and not merging red PRs.
 
-When protection does become available, require these checks:
+The required checks:
 
 - `Conventional commit title`
 - `Go build and test`
@@ -85,39 +86,69 @@ Also enable:
   validates and what release-please reads to compute the version; allowing merge
   commits would let unlinted commit messages reach `main`.
 
-**Squash-merge can be set today** — it is a plain repository setting, not branch
-protection: *Settings → General → Pull Requests* → allow only "Squash merging".
-Worth doing now, because it is what keeps `main`'s history readable by
-release-please regardless of whether protection exists.
+**Squash-merge is a plain repository setting, not branch protection**:
+*Settings → General → Pull Requests* → allow only "Squash merging". It is what
+keeps `main`'s history readable by release-please regardless of whether
+protection exists, so it is worth pinning even though protection is now on.
 
-## 3. CodeQL is dormant until the repo is public
+## 3. CodeQL — ACTIVE
 
-`codeql.yml` is committed and correct, but its job is gated on
-`github.event.repository.private == false`, so it **skips** today. Code scanning
-on a *private* repository requires GitHub Advanced Security (a paid
-per-committer add-on); on a *public* repository CodeQL is free.
+`codeql.yml`'s job is gated on `github.event.repository.private == false`, so it
+**skipped on every run** for the repository's entire private life. Going public
+activated it by itself, and `Analyze go` / `Analyze javascript-typescript` now
+run on each pull request. Code scanning is free on public repositories; on
+private ones it needs GitHub Advanced Security.
 
-Nothing to do now — it activates by itself when the repo goes public. At that
-point, restore the weekly `schedule:` trigger that was removed (a schedule event
-does not reliably populate the repository payload, so the visibility guard
-cannot be trusted there).
-
-If you *do* want CodeQL while private, buy GHAS and enable
-**Settings → Code security → Code scanning**, then delete the `if:` line.
+**Still outstanding:** restore the weekly `schedule:` trigger that was removed.
+A schedule event does not reliably populate the repository payload, so the
+visibility guard cannot be trusted there — the `if:` condition needs rethinking
+before the schedule comes back, not just re-adding.
 
 ## 4. GHCR package visibility
 
-The package `ghcr.io/rookery-ai/rookery` is **private**. A host pulling it
-needs a one-time login:
+**Done — `ghcr.io/rookery-ai/rookery` is public as of v0.1.0**, verified by an
+anonymous pull. This section is kept because the sequence is not discoverable
+and applies to any future package.
+
+While a package is private, a host pulling it needs a one-time login:
 
 ```bash
 podman login ghcr.io -u <github-username>
 # password: a PAT with read:packages
 ```
 
-Making it public at launch is a visibility toggle in the package settings — no
-pipeline change is required. Cosign signatures, SBOMs and provenance
-attestations are produced either way.
+**Making it public takes TWO steps, not one, and the first is not obvious.**
+A GHCR package is a separate object from its repository and keeps its own
+visibility — publishing the repository does **not** publish the package.
+
+1. **Allow public packages at the ORGANIZATION level** —
+   `https://github.com/organizations/rookery-ai/settings/packages` → *Package
+   creation* → tick **Public**. A new organization ships with this **off**, and
+   until it is on, the package's own visibility control is greyed out with
+   "Setting is disabled by organization administrators." Nothing indicates
+   which setting is responsible.
+2. **Then change the package** —
+   `https://github.com/orgs/rookery-ai/packages/container/package/rookery` →
+   *Package settings* → *Danger Zone* → *Change visibility* → **Public**.
+
+**Neither step has a REST API.** `PATCH /orgs/{org}/packages/container/{name}`
+with a `visibility` field returns 404, and no package-policy field appears on
+the organization object. Both are web-UI only.
+
+**Verify with an ANONYMOUS pull**, because an authenticated one succeeds either
+way and proves nothing:
+
+```bash
+podman logout ghcr.io
+podman pull ghcr.io/rookery-ai/rookery:latest
+```
+
+This matters because `README.md` and the documentation site both advertise a
+`docker run ghcr.io/rookery-ai/rookery:latest` command that fails with
+`unauthorized` for everyone until it is done — while the repository looks fully
+published.
+
+Cosign signatures, SBOMs and provenance attestations are produced either way.
 
 ## 5. Expected timings
 
