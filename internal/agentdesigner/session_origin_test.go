@@ -1,6 +1,14 @@
 package agentdesigner
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/rookery-ai/rookery/internal/coder"
+)
 
 func TestOriginLabels(t *testing.T) {
 	cases := []struct {
@@ -45,6 +53,43 @@ func TestDeliverToChat(t *testing.T) {
 		if got := DeliverToChat(c.origin); got != c.want {
 			t.Errorf("DeliverToChat(%q) = %v, want %v", c.origin, got, c.want)
 		}
+	}
+}
+
+// The lifecycle log records a CLASS, never the error text — a provider error can
+// echo back the request that produced it, and CodeQL traced that to the
+// workspace's API-key secret. The class must still discriminate the cases an
+// operator actually triages on, or the redaction has cost the log its value.
+func TestBuildErrClass(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{nil, ""},
+		{context.Canceled, "canceled"},
+		{context.DeadlineExceeded, "canceled"},
+		{coder.ErrUsageLimit, "usage_limit"},
+		{coder.ErrRateLimited, "rate_limited"},
+		{coder.ErrAPIAuth, "auth"},
+		{coder.ErrMaxTurns, "max_turns"},
+		{coder.ErrLocalCoderDisabled, "local_coder_disabled"},
+		{errors.New("something else"), "other"},
+		// Wrapped sentinels must still classify — the coder wraps on the way out.
+		{fmt.Errorf("generate: %w", coder.ErrUsageLimit), "usage_limit"},
+	}
+	for _, c := range cases {
+		if got := buildErrClass(c.err); got != c.want {
+			t.Errorf("buildErrClass(%v) = %q, want %q", c.err, got, c.want)
+		}
+	}
+}
+
+// The class must never carry the underlying message, which is the entire point.
+func TestBuildErrClassNeverEchoesTheMessage(t *testing.T) {
+	secret := "sk-live-abcdef0123456789"
+	got := buildErrClass(fmt.Errorf("provider rejected key %s", secret))
+	if strings.Contains(got, secret) || got != "other" {
+		t.Errorf("buildErrClass leaked the message: %q", got)
 	}
 }
 

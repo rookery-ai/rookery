@@ -1,6 +1,12 @@
 package agentdesigner
 
-import "fmt"
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/rookery-ai/rookery/internal/coder"
+)
 
 // Session ownership.
 //
@@ -56,6 +62,37 @@ func (o Origin) Label() string {
 // failing closed is a user who cannot touch their own session from any surface.
 func (o Origin) Owns(from Origin) bool {
 	return o == "" || from == "" || o == from
+}
+
+// buildErrClass reduces a build error to a stable, greppable classification.
+//
+// The lifecycle log deliberately records this INSTEAD of the error text.
+// CodeQL flagged the raw `err` as clear-text logging of sensitive information
+// (go/clear-text-logging, high): a provider error can carry the request that
+// produced it, and the dataflow reaches the workspace's API-key secret. A
+// detached build's error reaches no other server-side log, so dropping it
+// entirely would cost real diagnostic value — a class keeps the useful half
+// without the half that can carry a credential. The user still receives the
+// specific failure through agentrunner.FriendlyRunError.
+func buildErrClass(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return "canceled"
+	case errors.Is(err, coder.ErrUsageLimit):
+		return "usage_limit"
+	case errors.Is(err, coder.ErrRateLimited):
+		return "rate_limited"
+	case errors.Is(err, coder.ErrAPIAuth):
+		return "auth"
+	case errors.Is(err, coder.ErrMaxTurns):
+		return "max_turns"
+	case errors.Is(err, coder.ErrLocalCoderDisabled):
+		return "local_coder_disabled"
+	default:
+		return "other"
+	}
 }
 
 // DeliverToChat reports whether a finished build's result should be pushed to

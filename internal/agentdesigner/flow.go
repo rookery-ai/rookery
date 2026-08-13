@@ -1455,10 +1455,15 @@ func (f *Flow) startGeneration(workspaceID string) (string, bool, string, error)
 		// bounded, and Cancel() still stops it via the stored cancelGenerate.
 		started := time.Now()
 		resp, isDone, agentID, err := f.runGeneration(context.Background(), workspaceID)
+		// err_class, never the error text: a provider error can echo back the
+		// request that produced it, and CodeQL traced that dataflow to the
+		// workspace's API-key secret (go/clear-text-logging, high). See
+		// buildErrClass for why the class is kept rather than dropping this
+		// field entirely.
 		slog.Info("agentdesigner: build finished",
 			"build_id", buildID, "workspace_id", workspaceID,
 			"origin", origin.String(), "dur_s", int(time.Since(started).Seconds()),
-			"done", isDone, "err", err)
+			"done", isDone, "failed", err != nil, "err_class", buildErrClass(err))
 		if done != nil {
 			done(workspaceID, origin, resp, isDone, agentID, err)
 		}
