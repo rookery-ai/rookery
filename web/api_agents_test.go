@@ -237,7 +237,7 @@ func TestAPIDesignStateExposesPendingBuild(t *testing.T) {
 	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
 
 	s.designFlow = agentdesigner.NewFlow(nil, nil).WithDB(s.db)
-	if _, err := s.designFlow.Start(wsID, "TestAgent"); err != nil {
+	if _, err := s.designFlow.Start(wsID, "TestAgent", agentdesigner.OriginWeb); err != nil {
 		t.Fatalf("start design session: %v", err)
 	}
 
@@ -267,7 +267,7 @@ func TestAPIDesignStateExposesPopulatedPendingBuild(t *testing.T) {
 	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
 
 	s.designFlow = agentdesigner.NewFlow(nil, nil).WithDB(s.db)
-	if _, err := s.designFlow.Start(wsID, "TestAgent"); err != nil {
+	if _, err := s.designFlow.Start(wsID, "TestAgent", agentdesigner.OriginWeb); err != nil {
 		t.Fatalf("start design session: %v", err)
 	}
 	sess := s.designFlow.GetSession(wsID)
@@ -302,7 +302,7 @@ func TestAPIDesignStateHistoryCarriesTimestamps(t *testing.T) {
 	cookies, wsID := createAndEnterWorkspace(t, s, cookies)
 
 	s.designFlow = agentdesigner.NewFlow(nil, nil).WithDB(s.db)
-	if _, err := s.designFlow.Start(wsID, "TestAgent"); err != nil {
+	if _, err := s.designFlow.Start(wsID, "TestAgent", agentdesigner.OriginWeb); err != nil {
 		t.Fatalf("start design session: %v", err)
 	}
 	sess := s.designFlow.GetSession(wsID)

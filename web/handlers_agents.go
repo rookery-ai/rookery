@@ -52,9 +52,16 @@ type designHistEntry struct {
 
 // designHistoryDTO maps session history to the wire shape. Shared by the agent
 // resume/state handlers and the skill resume handler so the three cannot drift.
+//
+// roleNote turns are dropped: they are the coder's steering context, not the
+// user's transcript. Rendering them is what showed a generic "it did not
+// succeed" in the browser while the real explanation went to chat.
 func designHistoryDTO(hist []db.ChatMessage) []designHistEntry {
 	out := make([]designHistEntry, 0, len(hist))
 	for _, m := range hist {
+		if m.Role == agentdesigner.RoleNote {
+			continue
+		}
 		e := designHistEntry{Role: m.Role, Content: m.Content}
 		if !m.CreatedAt.IsZero() {
 			e.CreatedAt = m.CreatedAt.Format(time.RFC3339Nano)
@@ -100,7 +107,7 @@ func (s *Server) handleResumeDraft(c echo.Context) error {
 	if s.designFlow == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent designer not configured"})
 	}
-	resp, err := s.designFlow.ResumeDraft(c.Request().Context(), u.ID)
+	resp, err := s.designFlow.ResumeDraft(c.Request().Context(), u.ID, agentdesigner.OriginWeb)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
@@ -160,11 +167,14 @@ func (s *Server) handleDesignChat(c echo.Context) error {
 	// same session. The live result surfaces via the SSE progress stream and the
 	// /design/state endpoint, not this POST.
 	if s.designFlow.IsGenerating(u.ID) {
-		return c.JSON(http.StatusOK, map[string]interface{}{
-			"response": "⏳ Still building your agent — I'll show the result here as soon as it's done.",
-			"done":     false,
-			"building": true,
-		})
+		// designTurnResponse, not a hand-rolled literal: the old body omitted
+		// state/generation_failed/can_keep_as_is, and the SPA coerces a missing
+		// field to false — so a message sent mid-build silently cleared the
+		// failure banner and reset the stepper.
+		return c.JSON(http.StatusOK, designTurnResponse(
+			"⏳ Still building your agent — I'll show the result here as soon as it's done.",
+			s.designFlow.Snapshot(u.ID),
+		))
 	}
 
 	ctx := c.Request().Context()
@@ -172,9 +182,16 @@ func (s *Server) handleDesignChat(c echo.Context) error {
 	// If no active session and a name is provided, start a new design session.
 	if s.designFlow.GetSession(u.ID) == nil {
 		if req.Name == "" {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "name is required to start a new session"})
+			// This is what a user hits after their session was completed or
+			// cancelled from the other surface. "name is required to start a new
+			// session" described an internal precondition and told them neither
+			// what had happened nor what to do about it.
+			return c.JSON(http.StatusConflict, map[string]string{
+				"code":  "session_ended",
+				"error": "This design session has ended — it may have been completed or cancelled from another surface. Start a new one to continue.",
+			})
 		}
-		response, err := s.designFlow.StartDesign(ctx, u.ID, req.Name, req.Message)
+		response, err := s.designFlow.StartDesign(ctx, u.ID, req.Name, req.Message, agentdesigner.OriginWeb)
 		if err != nil {
 			slog.Error("agentdesigner: start design failed", "workspace_id", u.ID, "name", req.Name, "err", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -192,7 +209,7 @@ func (s *Server) handleDesignChat(c echo.Context) error {
 		auditName = sess.AgentName
 	}
 
-	response, isDone, agentID, err := s.designFlow.Step(ctx, u.ID, req.Message)
+	response, isDone, agentID, err := s.designFlow.Step(ctx, u.ID, req.Message, agentdesigner.OriginWeb)
 	if err != nil {
 		slog.Error("agentdesigner: design step failed", "workspace_id", u.ID, "err", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -231,13 +248,16 @@ func (s *Server) handleDesignState(c echo.Context) error {
 	}
 	hist := designHistoryDTO(snap.History)
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"active":            true,
-		"generating":        snap.Generating,
-		"state":             snap.State,
-		"history":           hist,
-		"name":              snap.AgentName,
-		"agent_id":          snap.AgentID,
-		"is_edit":           snap.IsEdit,
+		"active":     true,
+		"generating": snap.Generating,
+		"state":      snap.State,
+		"history":    hist,
+		"name":       snap.AgentName,
+		"agent_id":   snap.AgentID,
+		"is_edit":    snap.IsEdit,
+		// The SPA compares this against its own surface to decide whether it is
+		// the driver or a read-only mirror.
+		"origin":            snap.Origin.String(),
 		"last_progress":     snap.LastProgress,
 		"generation_failed": snap.GenerationFailed,
 		"can_keep_as_is":    snap.CanKeepAsIs,
@@ -251,9 +271,22 @@ func (s *Server) handleDesignState(c echo.Context) error {
 // POST /dashboard/agents/design/cancel
 func (s *Server) handleCancelDesign(c echo.Context) error {
 	u := c.Get("workspace").(*db.Workspace)
-	if s.designFlow != nil {
-		s.designFlow.Cancel(u.ID)
+	if s.designFlow == nil {
+		return c.JSON(http.StatusOK, map[string]string{"status": "cancelled"})
 	}
+	// Ownership-gated. The design session is a per-workspace singleton and the
+	// SPA adopts whatever session exists on mount, so without this check opening
+	// the agent page during a Telegram build and clicking Cancel killed that
+	// build. Chat's /agent cancel is deliberately NOT gated — it is the escape
+	// hatch for a web-owned session whose browser is gone.
+	snap := s.designFlow.Snapshot(u.ID)
+	if snap.Active && !snap.Origin.Owns(agentdesigner.OriginWeb) {
+		return c.JSON(http.StatusOK, map[string]string{
+			"status": "not_owner",
+			"error":  "this session is running in " + snap.Origin.Label(),
+		})
+	}
+	s.designFlow.Cancel(u.ID)
 	return c.JSON(http.StatusOK, map[string]string{"status": "cancelled"})
 }
 
@@ -304,6 +337,14 @@ func (s *Server) handleDesignProgress(c echo.Context) error {
 			return nil
 		case msg, ok := <-ch:
 			if !ok {
+				// Named terminal event, matching run_tracker.go. Without it the
+				// browser can only infer completion from EventSource's transparent
+				// reconnect hitting a 404 — which costs the 30s poll above, and on
+				// a clean close leaves readyState CONNECTING so onDone never fires
+				// at that point at all. openSSE already listens for this event
+				// unconditionally, so emitting it here is the whole fix.
+				fmt.Fprint(w, "event: done\ndata: 1\n\n")
+				w.Flush()
 				return nil
 			}
 			fmt.Fprintf(w, "data: %s\n\n", msg)
@@ -342,7 +383,7 @@ func (s *Server) handleStartEditDesign(c echo.Context) error {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "agent designer not configured"})
 	}
 
-	response, err := s.designFlow.StartEditDesign(c.Request().Context(), u.ID, id, req.Message)
+	response, err := s.designFlow.StartEditDesign(c.Request().Context(), u.ID, id, req.Message, agentdesigner.OriginWeb)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}

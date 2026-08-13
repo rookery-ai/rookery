@@ -141,6 +141,10 @@ type StateSnapshot = {
   name?: string;
   agent_id?: string;
   is_edit?: boolean;
+  // The surface that OWNS this session. Absent on the inactive-session branch
+  // and on a server predating ownership; both read as "we own it", which keeps
+  // the surface usable rather than locking it read-only on a stale response.
+  origin?: string;
   last_progress?: string;
   generation_failed?: boolean;
   can_keep_as_is?: boolean;
@@ -198,6 +202,12 @@ export function DesignerSurface({
   const [error, setError] = useState<string | null>(null);
   const [generationFailed, setGenerationFailed] = useState(false);
   const [canKeepAsIs, setCanKeepAsIs] = useState(false);
+  // Which surface owns the live session. "" means unowned, or ours. Anything
+  // else means another surface is driving and this one is a read-only mirror:
+  // the session is a per-workspace singleton, so a mirror that thinks it drives
+  // can cancel someone else's in-flight build.
+  const [ownerSurface, setOwnerSurface] = useState("");
+  const readOnly = ownerSurface !== "" && ownerSurface !== "web";
   const [resumeBanner, setResumeBanner] = useState<{ name?: string } | null>(
     null,
   );
@@ -305,6 +315,15 @@ export function DesignerSurface({
         setSse((s) => (s ? { ...s, status: "error" } : s));
         sseHandleRef.current = null;
         setGenerating(false);
+        // A dropped or never-opened stream used to end here, stranding a build
+        // whose result was already committed to History server-side — the dead
+        // spinner with no result. This is the second of three independent
+        // completion signals; the others are the server's `done` event and the
+        // poll below.
+        if (!doneRef.current && endpoints.state) {
+          awaitingBuildResultRef.current = false;
+          void refetchState();
+        }
       },
     });
     sseHandleRef.current = handle;
@@ -344,6 +363,7 @@ export function DesignerSurface({
       if (accepted) {
         sessionTouchedRef.current = true;
         sessionOpenedRef.current = true;
+        setOwnerSurface(snap.origin ?? "");
         setResumeBanner(null);
         setMessages(snap.history ?? []);
         setFsmState((snap.state as FsmState) ?? null);
@@ -360,6 +380,7 @@ export function DesignerSurface({
         if (snap.generating)
           ensureSSE("recovery", snap.last_progress || undefined);
       } else {
+        setOwnerSurface("");
         setGenerating(false);
         if (!dismissedRef.current && draft) {
           if (autoResume && !autoResumeTriedRef.current) {
@@ -387,6 +408,37 @@ export function DesignerSurface({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Third completion signal: a slow poll for as long as a build is running.
+  // The `done` event and the error refetch both depend on the SSE stream
+  // existing at all; a proxy that swallows it entirely leaves neither, and the
+  // surface sits on a spinner while the result waits in History. Five seconds
+  // is invisible against a multi-minute build and bounds how stuck it can look.
+  useEffect(() => {
+    if (!generating || !endpoints.state) return;
+    const url = endpoints.state;
+    const id = setInterval(() => {
+      if (doneRef.current || unmountedRef.current) return;
+      void (async () => {
+        try {
+          const snap = await api.get<StateSnapshot>(url);
+          if (doneRef.current || unmountedRef.current) return;
+          // Adopt the server transcript ONLY once the build is over. Mid-build
+          // the server History has nothing new — the outcome is written at the
+          // end — while the local transcript holds the approve turn and the
+          // "Building…" placeholder, neither of which startGeneration records.
+          // Applying a mid-build snapshot would erase both and leave the user
+          // watching their own message disappear.
+          if (!snap.generating) void refetchState();
+        } catch {
+          // A failed poll is not worth surfacing — the next tick retries, and
+          // the SSE stream and its error refetch are still in play.
+        }
+      })();
+    }, 5000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generating, endpoints.state]);
 
   // Auto-send the initial description as the first message (AgentNewPage's
   // "Continue" flow). Fires exactly once, only for a genuinely fresh session:
@@ -449,7 +501,12 @@ export function DesignerSurface({
     // Nothing was ever started here, so there is nothing of ours to cancel — and
     // the session is a per-workspace singleton, so cancelling blindly could kill
     // someone else's in-flight build. See sessionTouchedRef.
-    if (sessionTouchedRef.current) {
+    // A read-only mirror has nothing of its own to cancel, and the session is a
+    // per-workspace singleton — POSTing here would kill the OTHER surface's live
+    // build. Mount recovery sets sessionTouchedRef when it ADOPTS a session, so
+    // that flag alone never guarded this case. (The server refuses it too; this
+    // keeps the UI honest rather than relying on the round trip.)
+    if (sessionTouchedRef.current && !readOnly) {
       try {
         await api.post(endpoints.cancel);
       } catch {
@@ -460,6 +517,9 @@ export function DesignerSurface({
   }
 
   async function handleSend(text: string) {
+    // Defence in depth: the composer and the action buttons are already hidden
+    // in a read-only mirror, and the server refuses a non-owner turn anyway.
+    if (readOnly) return;
     setError(null);
     setMessages((m) => [
       ...m,
@@ -595,9 +655,9 @@ export function DesignerSurface({
   const lastIsAssistant =
     messages.length > 0 && messages[messages.length - 1]!.role === "assistant";
   const showDesigningActions =
-    fsmState === "designing" && !generating && !busy && lastIsAssistant;
+    fsmState === "designing" && !generating && !busy && lastIsAssistant && !readOnly;
   const showVerifyingActions =
-    fsmState === "verifying" && !generating && !busy && lastIsAssistant;
+    fsmState === "verifying" && !generating && !busy && lastIsAssistant && !readOnly;
 
   if (resumeBanner) {
     return (
@@ -670,6 +730,13 @@ export function DesignerSurface({
           Cancel
         </Button>
       </div>
+
+      {readOnly && (
+        <div className="border-b border-border bg-chrome px-4 py-2 text-xs text-muted-2">
+          This design session is running in your chat app — follow along here,
+          and continue there to make changes.
+        </div>
+      )}
 
       {view === "spec" ? (
         <div className="flex min-h-0 flex-1 flex-col">
@@ -754,7 +821,7 @@ export function DesignerSurface({
             The last build didn&apos;t finish. Tell me what to change and
             I&apos;ll rebuild it.
           </span>
-          {canKeepAsIs && (
+          {canKeepAsIs && !readOnly && (
             <Button
               size="xs"
               variant="outline"
@@ -774,15 +841,24 @@ export function DesignerSurface({
         </div>
       )}
 
-      <Composer
-        onSend={(v) => void handleSend(v)}
-        busy={composerBusy}
-        focusSignal={focusSignal}
-        // When auto-sending, the text becomes the first message — don't ALSO
-        // seed it into the composer box (it would look like an unsent draft).
-        initialText={autoSendInitial ? undefined : initialText}
-        gutter
-      />
+      {readOnly ? (
+        // Not a disabled Composer: a greyed-out input still reads as "type here
+        // and it will send eventually". Replacing it states plainly that this
+        // surface cannot drive the session and where the driver is.
+        <div className="border-t border-border px-4 py-3 text-center text-xs text-muted-2">
+          Read-only — this session is being driven from your chat app.
+        </div>
+      ) : (
+        <Composer
+          onSend={(v) => void handleSend(v)}
+          busy={composerBusy}
+          focusSignal={focusSignal}
+          // When auto-sending, the text becomes the first message — don't ALSO
+          // seed it into the composer box (it would look like an unsent draft).
+          initialText={autoSendInitial ? undefined : initialText}
+          gutter
+        />
+      )}
     </div>
   );
 }

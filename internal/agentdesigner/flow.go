@@ -69,6 +69,11 @@ type DesignSession struct {
 	UserMemory         string             // bullet list of saved memory entries, loaded once on session start
 	CreatedAt          time.Time
 
+	// Origin is the surface that created this session. Fixed at creation and
+	// never reassigned: the owner drives, the other surface may read. See
+	// session_origin.go for why exclusive ownership rather than last-writer-wins.
+	Origin Origin
+
 	// IsEdit distinguishes an edit-of-existing-agent session from a fresh create.
 	// AgentID is the *existing* agent's ID (not a freshly minted one) when true.
 	IsEdit bool
@@ -136,7 +141,12 @@ type DesignSession struct {
 	cancelGenerate context.CancelFunc // cancels the in-flight coder.Generate() call
 	progressFunc   func(string)       // Telegram: edits the placeholder message mid-run
 	progressCh     chan string        // Web SSE: buffered milestone channel
-	lastProgress   string             // most recent milestone string, so a page that
+	// buildID correlates every log line of one build. Minted in startGeneration
+	// so a single `grep build_id=<id>` reconstructs the whole lifecycle — the
+	// incident that motivated session ownership produced no designer log lines
+	// at all, so its diagnosis had to be reconstructed from the database.
+	buildID      string
+	lastProgress string // most recent milestone string, so a page that
 	// reconnects mid-build can show the CURRENT action immediately instead of the
 	// generic placeholder (the channel doesn't replay already-consumed milestones).
 }
@@ -421,12 +431,12 @@ func (f *Flow) WithSecretsLoader(fn func(ctx context.Context, workspaceID string
 
 // Start creates a new Telegram design session for workspaceID.
 // Returns the opening prompt asking for a description.
-func (f *Flow) Start(workspaceID, agentName string) (string, error) {
+func (f *Flow) Start(workspaceID, agentName string, origin Origin) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if _, exists := f.sessions[workspaceID]; exists {
-		return "", fmt.Errorf("you already have an active design session; send /agent cancel to start over")
+	if existing, exists := f.sessions[workspaceID]; exists {
+		return "", errSessionActiveElsewhere(existing.Origin)
 	}
 
 	skills := f.loadSkillNames(workspaceID)
@@ -443,6 +453,7 @@ func (f *Flow) Start(workspaceID, agentName string) (string, error) {
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
 		CreatedAt:          time.Now(),
+		Origin:             origin,
 	}
 
 	return fmt.Sprintf(
@@ -453,12 +464,12 @@ func (f *Flow) Start(workspaceID, agentName string) (string, error) {
 
 // StartDesign is the web path: creates a session already in StateDesigning
 // with the user's first message and returns the coder's first response.
-func (f *Flow) StartDesign(ctx context.Context, workspaceID, agentName, firstMessage string) (string, error) {
+func (f *Flow) StartDesign(ctx context.Context, workspaceID, agentName, firstMessage string, origin Origin) (string, error) {
 	f.mu.Lock()
 
-	if _, exists := f.sessions[workspaceID]; exists {
+	if existing, exists := f.sessions[workspaceID]; exists {
 		f.mu.Unlock()
-		return "", fmt.Errorf("design session already active; cancel it first")
+		return "", errSessionActiveElsewhere(existing.Origin)
 	}
 
 	skills := f.loadSkillNames(workspaceID)
@@ -475,6 +486,7 @@ func (f *Flow) StartDesign(ctx context.Context, workspaceID, agentName, firstMes
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
 		CreatedAt:          time.Now(),
+		Origin:             origin,
 	}
 	f.sessions[workspaceID] = sess
 	f.mu.Unlock()
@@ -486,11 +498,11 @@ func (f *Flow) StartDesign(ctx context.Context, workspaceID, agentName, firstMes
 // Ownership of agentID is assumed pre-checked by the caller (same pattern as the
 // other agent handlers, e.g. the Telegram /agent and web delete/run endpoints).
 // Returns the opening prompt summarizing current behavior and asking what to change.
-func (f *Flow) StartEdit(workspaceID, agentID string) (string, error) {
+func (f *Flow) StartEdit(workspaceID, agentID string, origin Origin) (string, error) {
 	f.mu.Lock()
-	if _, exists := f.sessions[workspaceID]; exists {
+	if existing, exists := f.sessions[workspaceID]; exists {
 		f.mu.Unlock()
-		return "", fmt.Errorf("you already have an active design session; send /agent cancel to start over")
+		return "", errSessionActiveElsewhere(existing.Origin)
 	}
 	f.mu.Unlock()
 
@@ -514,6 +526,7 @@ func (f *Flow) StartEdit(workspaceID, agentID string) (string, error) {
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
 		CreatedAt:          time.Now(),
+		Origin:             origin,
 		IsEdit:             true,
 		ExistingAgentMD:    reconciledMD,
 		ExistingTools:      tools,
@@ -529,11 +542,11 @@ func (f *Flow) StartEdit(workspaceID, agentID string) (string, error) {
 // StartEditDesign is the web path for editing: creates a session already in
 // StateDesigning with the user's first change request and returns the coder's
 // first response. Mirrors StartDesign.
-func (f *Flow) StartEditDesign(ctx context.Context, workspaceID, agentID, firstMessage string) (string, error) {
+func (f *Flow) StartEditDesign(ctx context.Context, workspaceID, agentID, firstMessage string, origin Origin) (string, error) {
 	f.mu.Lock()
-	if _, exists := f.sessions[workspaceID]; exists {
+	if existing, exists := f.sessions[workspaceID]; exists {
 		f.mu.Unlock()
-		return "", fmt.Errorf("design session already active; cancel it first")
+		return "", errSessionActiveElsewhere(existing.Origin)
 	}
 	f.mu.Unlock()
 
@@ -557,6 +570,7 @@ func (f *Flow) StartEditDesign(ctx context.Context, workspaceID, agentID, firstM
 		UserProfile:        userProfile,
 		UserMemory:         userMemory,
 		CreatedAt:          time.Now(),
+		Origin:             origin,
 		IsEdit:             true,
 		ExistingAgentMD:    reconciledMD,
 		ExistingTools:      tools,
@@ -615,15 +629,26 @@ func (f *Flow) loadAgentForEdit(workspaceID, agentID string) (agentName, reconci
 // Step processes one message and advances the FSM.
 // Returns (response, isDone, agentID, err).
 // agentID is non-empty only when isDone=true.
-func (f *Flow) Step(ctx context.Context, workspaceID, input string) (string, bool, string, error) {
+func (f *Flow) Step(ctx context.Context, workspaceID, input string, from Origin) (string, bool, string, error) {
 	f.mu.Lock()
 	sess, ok := f.sessions[workspaceID]
 	if !ok {
 		f.mu.Unlock()
 		return "", false, "", fmt.Errorf("no active design session; use /agent create <name> to start one")
 	}
+	owner := sess.Origin
 	state := sess.State
 	f.mu.Unlock()
+
+	// Exclusive ownership: only the surface that created the session may drive
+	// it. Returning BEFORE the state dispatch is what makes this safe — a refused
+	// turn must not append history, advance the FSM, or (as the reported bug did)
+	// launch a build from the surface that does not own the session.
+	if !owner.Owns(from) {
+		slog.Info("agentdesigner: refused non-owner design turn",
+			"workspace_id", workspaceID, "owner", owner.String(), "from", from.String())
+		return nonOwnerRefusal(owner), false, "", nil
+	}
 
 	switch state {
 	case StateAwaitingResume:
@@ -720,6 +745,46 @@ func (f *Flow) MarkGeneratingForTest(workspaceID string) {
 	}
 }
 
+// PushProgressForTest emits one milestone on the session's progress channel.
+//
+// The sibling of MarkGeneratingForTest, and exported for the same reason: the
+// SSE handler lives in package web and cannot reach this package's unexported
+// channel. Non-blocking, matching notify()'s own send.
+//
+// Not used by any production path.
+func (f *Flow) PushProgressForTest(workspaceID, msg string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sess, ok := f.sessions[workspaceID]
+	if !ok || sess.progressCh == nil {
+		return
+	}
+	select {
+	case sess.progressCh <- msg:
+	default:
+	}
+}
+
+// FinishGeneratingForTest ends a fake build: it closes the progress channel and
+// clears it, exactly as runGeneration's closeProgress does.
+//
+// Exported alongside MarkGeneratingForTest so package web can drive the SSE
+// handler's completion path — the `event: done` frame is only emitted when the
+// channel closes, and nothing outside this package can close it.
+//
+// Not used by any production path.
+func (f *Flow) FinishGeneratingForTest(workspaceID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sess, ok := f.sessions[workspaceID]
+	if !ok || sess.progressCh == nil {
+		return
+	}
+	ch := sess.progressCh
+	sess.progressCh = nil
+	close(ch)
+}
+
 // DesignSnapshot is a race-free copy of a live session's user-facing state,
 // returned by Snapshot for the web state endpoint. History is a defensive copy
 // so the caller can read it without the mutex while the detached build goroutine
@@ -731,6 +796,7 @@ type DesignSnapshot struct {
 	AgentName        string
 	AgentID          string
 	IsEdit           bool
+	Origin           Origin // surface that owns the session; drives the SPA's read-only mirror
 	History          []db.ChatMessage
 	LastProgress     string // most recent build milestone (for reconnect display)
 	GenerationFailed bool   // last build blocked/soft-failed → offer keep-going/keep-as-is
@@ -773,6 +839,7 @@ func (f *Flow) Snapshot(workspaceID string) DesignSnapshot {
 		AgentName:        sess.AgentName,
 		AgentID:          sess.AgentID,
 		IsEdit:           sess.IsEdit,
+		Origin:           sess.Origin,
 		History:          hist,
 		LastProgress:     sess.lastProgress,
 		GenerationFailed: sess.GenerationFailed,
@@ -888,7 +955,7 @@ func (f *Flow) DismissDraft(workspaceID string) error {
 //
 // The coder is never re-run on resume — generation only happens when the user
 // next says "approve".
-func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string) (string, error) {
+func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string, origin Origin) (string, error) {
 	if f.db == nil {
 		return "", fmt.Errorf("no database configured")
 	}
@@ -908,6 +975,10 @@ func (f *Flow) ResumeDraft(ctx context.Context, workspaceID string) (string, err
 		UserProfile:        f.loadRuntimeContext(workspaceID),
 		UserMemory:         f.loadUserMemory(workspaceID),
 		CreatedAt:          time.Now(),
+		// Ownership is not persisted in the draft, so a resumed session is owned
+		// by whoever resumed it. After a restart there is no in-flight build and
+		// no surface holds a live view, so there is nothing to inherit.
+		Origin: origin,
 	}
 	_ = json.Unmarshal([]byte(draft.HistoryJSON), &sess.History)
 	if draft.PendingToolsJSON != "" {
@@ -1017,7 +1088,7 @@ func (f *Flow) recoverBuiltAgentFromDisk(workspaceID, agentName string) (string,
 // prompt to send the user. pendingAgentName is stored so the "new" branch of
 // stepAwaitingResume can start a fresh create session with the name the user
 // originally typed.
-func (f *Flow) OfferDraftResume(workspaceID, pendingAgentName string, draft *db.AgentDraft) (string, error) {
+func (f *Flow) OfferDraftResume(workspaceID, pendingAgentName string, draft *db.AgentDraft, origin Origin) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sessions[workspaceID] = &DesignSession{
@@ -1028,6 +1099,7 @@ func (f *Flow) OfferDraftResume(workspaceID, pendingAgentName string, draft *db.
 		IsEdit:      draft.IsEdit,
 		pendingName: pendingAgentName,
 		CreatedAt:   time.Now(),
+		Origin:      origin,
 	}
 	return fmt.Sprintf(
 		"Found an unfinished draft for \"%s\". Reply 'resume' to continue it, or 'new' to start fresh.",
@@ -1046,14 +1118,16 @@ func (f *Flow) stepAwaitingResume(ctx context.Context, workspaceID, msg string) 
 	f.mu.Lock()
 	sess := f.sessions[workspaceID]
 	pendingName := ""
+	origin := Origin("")
 	if sess != nil {
 		pendingName = sess.pendingName
+		origin = sess.Origin
 	}
 	f.mu.Unlock()
 
 	lower := strings.TrimSpace(strings.ToLower(msg))
 	if lower == "resume" {
-		resp, err := f.ResumeDraft(ctx, workspaceID)
+		resp, err := f.ResumeDraft(ctx, workspaceID, origin)
 		if err != nil {
 			return "", false, "", err
 		}
@@ -1068,7 +1142,7 @@ func (f *Flow) stepAwaitingResume(ctx context.Context, workspaceID, msg string) 
 	if pendingName == "" {
 		pendingName = "agent"
 	}
-	resp, err := f.Start(workspaceID, pendingName)
+	resp, err := f.Start(workspaceID, pendingName, origin)
 	if err != nil {
 		return "", false, "", err
 	}
@@ -1270,10 +1344,40 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 }
 
 // dbMessagesToPrompt converts db.ChatMessage slice to prompts.ChatMessage slice.
+// roleNote marks a History turn that exists for the CODER, not the user: the
+// technical steering note recorded after a failed build so the retry is not
+// context-blind.
+//
+// History does double duty — it is both the user's transcript and the coder's
+// conversation — and on the failure path those two purposes conflicted. The
+// steering note was what the browser rendered while the real explanation went
+// only to chat. This role keeps both without a second store: dbMessagesToPrompt
+// folds it into the coder's view, designHistoryDTO drops it from the user's.
+const roleNote = "note"
+
+// RoleNote is roleNote, exported for the web layer's history DTO filter.
+const RoleNote = roleNote
+
+// dbMessagesToPrompt converts stored history into coder-facing turns.
+//
+// roleNote turns become assistant turns and are COALESCED into an immediately
+// preceding assistant turn. Coalescing is not cosmetic: without it a failed
+// build emits two consecutive assistant messages where there used to be one,
+// and several providers reject or silently merge same-role runs. Folding them
+// here keeps the prompt shape identical to what the coder saw before the note
+// role existed.
 func dbMessagesToPrompt(msgs []db.ChatMessage) []prompts.ChatMessage {
-	out := make([]prompts.ChatMessage, len(msgs))
-	for i, m := range msgs {
-		out[i] = prompts.ChatMessage{Role: m.Role, Content: m.Content}
+	out := make([]prompts.ChatMessage, 0, len(msgs))
+	for _, m := range msgs {
+		role := m.Role
+		if role == roleNote {
+			role = "assistant"
+		}
+		if n := len(out); n > 0 && role == "assistant" && out[n-1].Role == "assistant" {
+			out[n-1].Content += "\n\n" + m.Content
+			continue
+		}
+		out = append(out, prompts.ChatMessage{Role: role, Content: m.Content})
 	}
 	return out
 }
@@ -1288,7 +1392,12 @@ func dbMessagesToPrompt(msgs []db.ChatMessage) []prompts.ChatMessage {
 // progress stream plus GET /design/state — but on chat the only delivery was the
 // send() closure of the message that triggered the build, so a build that
 // outlived its deadline had nowhere to report to and was simply lost.
-type BuildCompleteFunc func(workspaceID, response string, isDone bool, agentID string, err error)
+// origin is what makes delivery CORRECT rather than merely reliable. The hook is
+// registered once at wiring time, so it cannot see which surface the user is on;
+// without the origin it announced every finished build in chat, including builds
+// the user started and was watching in the browser. That is the defect this
+// parameter exists to close.
+type BuildCompleteFunc func(workspaceID string, origin Origin, response string, isDone bool, agentID string, err error)
 
 // OnBuildComplete registers the completion hook. Nil disables delivery, which is
 // the correct default for tests and for the web surface, which polls instead.
@@ -1324,17 +1433,39 @@ func (f *Flow) startGeneration(workspaceID string) (string, bool, string, error)
 		return buildingMessage, false, "", nil
 	}
 	sess.progressCh = make(chan string, 8)
+	sess.buildID = uuid.New().String()[:8]
 	done := f.onBuildComplete
+	// Snapshot everything the goroutine and the logs need under the SAME lock
+	// that snapshots the hook. Reading these inside the goroutine would race a
+	// Cancel() that deletes the session.
+	origin := sess.Origin
+	buildID := sess.buildID
+	agentName := sess.AgentName
+	isEdit := sess.IsEdit
 	f.mu.Unlock()
+
+	slog.Info("agentdesigner: build start",
+		"build_id", buildID, "workspace_id", workspaceID,
+		"origin", origin.String(), "agent", agentName, "edit", isEdit)
 
 	go func() {
 		// context.Background(), not the caller's: the build is deliberately
 		// detached so a finished HTTP request or chat turn cannot kill it.
 		// runGeneration applies the coder's own timeout internally, so this stays
 		// bounded, and Cancel() still stops it via the stored cancelGenerate.
+		started := time.Now()
 		resp, isDone, agentID, err := f.runGeneration(context.Background(), workspaceID)
+		// err_class, never the error text: a provider error can echo back the
+		// request that produced it, and CodeQL traced that dataflow to the
+		// workspace's API-key secret (go/clear-text-logging, high). See
+		// buildErrClass for why the class is kept rather than dropping this
+		// field entirely.
+		slog.Info("agentdesigner: build finished",
+			"build_id", buildID, "workspace_id", workspaceID,
+			"origin", origin.String(), "dur_s", int(time.Since(started).Seconds()),
+			"done", isDone, "failed", err != nil, "err_class", buildErrClass(err))
 		if done != nil {
-			done(workspaceID, resp, isDone, agentID, err)
+			done(workspaceID, origin, resp, isDone, agentID, err)
 		}
 	}()
 
@@ -1400,6 +1531,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	}
 	progressCh := sess.progressCh
 	progressFunc := sess.progressFunc
+	buildID := sess.buildID
 
 	// Detach the generation context from the caller's request context so that
 	// navigating away from (or reloading) the web page does NOT kill the build.
@@ -1629,6 +1761,10 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		slog.Warn("agentdesigner: salvaging finished build after transient coder error", "workspace_id", workspaceID, "agent_id", agentIDSnap, "err", err)
 	}
 
+	slog.Info("agentdesigner: build coder returned",
+		"build_id", buildID, "workspace_id", workspaceID,
+		"backend", backendType, "result_bytes", len(resultText))
+
 	notify("🔍 Validating agent safety checks…")
 
 	// Record whether "keep it as-is" is a real option for this build (a saveable AGENT.md +
@@ -1654,6 +1790,11 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	blocked := parseBlockedOutput(resultText)
 	outcome := reconcileBlockedOutcome(decision, blocked, backendType)
 
+	slog.Info("agentdesigner: build decision",
+		"build_id", buildID, "workspace_id", workspaceID,
+		"advance", outcome.advance, "saveable", decision.saveable,
+		"script_verified", decision.scriptVerified, "blocked", blocked != "")
+
 	if !outcome.advance {
 		// KEEP the generated files on disk (do NOT cleanupOnFail): a blocked/soft-failed
 		// build is recoverable — the user requests a change and the next generation
@@ -1673,13 +1814,16 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 			if result != nil {
 				scriptRan = result.ScriptRan
 			}
-			slog.Warn("agentdesigner: build not presentable", "workspace_id", workspaceID, "agent_id", agentIDSnap, "reason", decision.logReason, "script_ran", scriptRan, "backend", backendType)
+			slog.Warn("agentdesigner: build not presentable", "build_id", buildID, "workspace_id", workspaceID, "agent_id", agentIDSnap, "reason", decision.logReason, "script_ran", scriptRan, "backend", backendType)
 		}
+		slog.Info("agentdesigner: build outcome",
+			"build_id", buildID, "workspace_id", workspaceID,
+			"state", "designing", "msg_bytes", len(outcome.message))
 		// Record the failure so a forgiving retry re-runs generation WITH context of what
 		// went wrong, instead of the user being trapped in an approve-loop (C1/C2). This
 		// also appends a note to History + saves the draft, so a page that reconnected to
 		// the live build sees the outcome after the SSE closes below.
-		f.recordGenerationFailure(workspaceID, outcome.recordFailNote, outcome.forceTier1)
+		f.recordGenerationFailure(workspaceID, outcome.message, outcome.recordFailNote, outcome.forceTier1)
 		// Close the SSE channel only AFTER History/draft are committed (see the success
 		// path) so the reconnect re-fetch of /design/state finds the updated state.
 		closeProgress()
@@ -1712,6 +1856,10 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		f.saveDraft(sess)
 	}
 	f.mu.Unlock()
+
+	slog.Info("agentdesigner: build outcome",
+		"build_id", buildID, "workspace_id", workspaceID,
+		"state", "verifying", "msg_bytes", len(outcome.message))
 
 	// Close the SSE channel only AFTER the state + History are committed, so a page
 	// that reconnected to the live build sees the SSE end, re-fetches /design/state,
@@ -1825,7 +1973,7 @@ func reconcileBlockedOutcome(d buildDecision, blocked, backendType string) recon
 // forceTier1 additionally binds the next attempt to zero code files (see
 // DesignSession.ForceTier1) — the note below is advisory, and for the unverified-script
 // case advisory has already been shown not to work.
-func (f *Flow) recordGenerationFailure(workspaceID, detail string, forceTier1 bool) {
+func (f *Flow) recordGenerationFailure(workspaceID, userMessage, detail string, forceTier1 bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	sess := f.sessions[workspaceID]
@@ -1835,6 +1983,15 @@ func (f *Flow) recordGenerationFailure(workspaceID, detail string, forceTier1 bo
 	sess.GenerationFailed = true
 	if forceTier1 {
 		sess.ForceTier1 = true
+	}
+	// The user-facing explanation goes in as an ordinary assistant turn so EVERY
+	// surface renders it. Previously only the steering note below was recorded,
+	// so the browser showed a generic "it did not succeed" while the real reason
+	// went to chat alone — and, on a workspace with no chat platform, nowhere.
+	if msg := strings.TrimSpace(userMessage); msg != "" {
+		sess.History = append(sess.History, db.ChatMessage{
+			Role: "assistant", Content: msg, CreatedAt: time.Now().UTC(),
+		})
 	}
 	note := "I attempted to build the agent but it did not succeed."
 	if strings.TrimSpace(detail) != "" {
@@ -1846,7 +2003,10 @@ func (f *Flow) recordGenerationFailure(workspaceID, detail string, forceTier1 bo
 	// loop. The per-case detail above already says what to fix, so the suffix only needs to
 	// point at finishing the agent.
 	note += " On the next attempt I will address this and finish building the agent."
-	sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: note, CreatedAt: time.Now().UTC()})
+	// roleNote, not "assistant": this is the CODER's steering context. It reaches
+	// the next generation prompt (dbMessagesToPrompt) and is filtered out of the
+	// user's transcript (designHistoryDTO).
+	sess.History = append(sess.History, db.ChatMessage{Role: roleNote, Content: note, CreatedAt: time.Now().UTC()})
 	f.saveDraft(sess)
 }
 

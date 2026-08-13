@@ -50,7 +50,7 @@ func TestDraftSaveAndResume_Designing(t *testing.T) {
 	}
 
 	// Simulate session loss: no in-memory session exists.
-	resp, err := flow.ResumeDraft(context.Background(), workspaceID)
+	resp, err := flow.ResumeDraft(context.Background(), workspaceID, OriginWeb)
 	if err != nil {
 		t.Fatalf("ResumeDraft: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestDraftSaveAndResume_Verifying(t *testing.T) {
 	}
 	flow.saveDraft(sess)
 
-	resp, err := flow.ResumeDraft(context.Background(), workspaceID)
+	resp, err := flow.ResumeDraft(context.Background(), workspaceID, OriginWeb)
 	if err != nil {
 		t.Fatalf("ResumeDraft: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestDraftDismissedOnFinalize(t *testing.T) {
 		t.Fatal("draft should exist before finalize")
 	}
 
-	resp, done, gotID, err := flow.Step(context.Background(), workspaceID, "approve")
+	resp, done, gotID, err := flow.Step(context.Background(), workspaceID, "approve", OriginWeb)
 	if err != nil {
 		t.Fatalf("Step approve: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestResumeDraft_RecoversInterruptedBuildFromDisk(t *testing.T) {
 		History:     []db.ChatMessage{{Role: "user", Content: "port notion"}, {Role: "assistant", Content: "proposal…"}},
 	})
 
-	resp, err := flow.ResumeDraft(context.Background(), workspaceID)
+	resp, err := flow.ResumeDraft(context.Background(), workspaceID, OriginWeb)
 	if err != nil {
 		t.Fatalf("ResumeDraft: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestStepDesigning_KeepAsIsForceSaves(t *testing.T) {
 	}
 	flow.saveDraft(flow.sessions[workspaceID])
 
-	resp, done, gotID, err := flow.Step(context.Background(), workspaceID, "keep it as-is")
+	resp, done, gotID, err := flow.Step(context.Background(), workspaceID, "keep it as-is", OriginWeb)
 	if err != nil {
 		t.Fatalf("Step keep-as-is: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestResumeDraft_NoDiskFilesStaysDesigning(t *testing.T) {
 		State:       StateDesigning,
 		History:     []db.ChatMessage{{Role: "user", Content: "hi"}, {Role: "assistant", Content: "ok"}},
 	})
-	if _, err := flow.ResumeDraft(context.Background(), workspaceID); err != nil {
+	if _, err := flow.ResumeDraft(context.Background(), workspaceID, OriginWeb); err != nil {
 		t.Fatalf("ResumeDraft: %v", err)
 	}
 	if got := flow.GetSession(workspaceID); got == nil || got.State != StateDesigning {
@@ -371,7 +371,7 @@ func TestFinalize_RenamePreservesNonToolFiles(t *testing.T) {
 	flow.sessions[workspaceID] = sess
 	flow.saveDraft(sess)
 
-	_, done, _, err := flow.Step(context.Background(), workspaceID, "approve")
+	_, done, _, err := flow.Step(context.Background(), workspaceID, "approve", OriginWeb)
 	if err != nil || !done {
 		t.Fatalf("approve: done=%v err=%v", done, err)
 	}
@@ -418,7 +418,7 @@ func TestEditDraftResume_AgentDeleted(t *testing.T) {
 	}
 	_ = os.RemoveAll(filepath.Join(agentsDir, workspaceID, agentID))
 
-	if _, err := flow.ResumeDraft(context.Background(), workspaceID); err == nil {
+	if _, err := flow.ResumeDraft(context.Background(), workspaceID, OriginWeb); err == nil {
 		t.Fatal("ResumeDraft should error when the edited agent no longer exists")
 	}
 	if flow.HasDraft(workspaceID) != nil {
@@ -465,7 +465,7 @@ func TestAwaitingResume_NewBranch(t *testing.T) {
 		t.Fatal("draft should exist before 'new'")
 	}
 
-	resp, _, _, err := flow.Step(context.Background(), workspaceID, "new")
+	resp, _, _, err := flow.Step(context.Background(), workspaceID, "new", OriginWeb)
 	if err != nil {
 		t.Fatalf("Step new: %v", err)
 	}

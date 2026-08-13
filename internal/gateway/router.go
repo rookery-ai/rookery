@@ -348,7 +348,7 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 		// If the user has a resumable draft, offer to continue it instead of
 		// starting fresh. Subsequent text routes through Step → stepAwaitingResume.
 		if draft := r.designFlow.HasDraft(msg.WorkspaceID); draft != nil {
-			response, err := r.designFlow.OfferDraftResume(msg.WorkspaceID, name, draft)
+			response, err := r.designFlow.OfferDraftResume(msg.WorkspaceID, name, draft, agentdesigner.OriginChat)
 			if err != nil {
 				send(err.Error())
 				return nil
@@ -356,7 +356,7 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 			send(response)
 			return nil
 		}
-		response, err := r.designFlow.Start(msg.WorkspaceID, name)
+		response, err := r.designFlow.Start(msg.WorkspaceID, name, agentdesigner.OriginChat)
 		if err != nil {
 			send(err.Error())
 			return nil
@@ -382,7 +382,7 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 			send("Agent `" + name + "` not found.")
 			return nil
 		}
-		response, err := r.designFlow.StartEdit(msg.WorkspaceID, agent.ID)
+		response, err := r.designFlow.StartEdit(msg.WorkspaceID, agent.ID, agentdesigner.OriginChat)
 		if err != nil {
 			send(err.Error())
 			return nil
@@ -397,6 +397,12 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 		// Stop any in-flight generation / drop the active session now. The draft
 		// (auto-saved on every turn) is preserved either way — the question below
 		// is only whether to keep it or throw it away.
+		//
+		// Deliberately NOT ownership-gated, unlike the web cancel endpoint. This
+		// is the escape hatch: a WEB-owned session whose browser is gone would
+		// otherwise lock chat out until the 7-day draft TTL expired, and cancel is
+		// the only action a non-owner may take. The non-owner refusal names this
+		// command for exactly that reason (see agentdesigner.nonOwnerRefusal).
 		r.designFlow.Cancel(msg.WorkspaceID)
 
 		draft := r.designFlow.HasDraft(msg.WorkspaceID)
@@ -1102,7 +1108,7 @@ func (r *Router) handleText(ctx context.Context, msg Message, send func(string),
 		if sess != nil && sess.State == agentdesigner.StateDesigning && sendProgress != nil {
 			r.designFlow.SetProgressHandler(msg.WorkspaceID, sendProgress)
 		}
-		response, _, _, err := r.designFlow.Step(ctx, msg.WorkspaceID, msg.Text)
+		response, _, _, err := r.designFlow.Step(ctx, msg.WorkspaceID, msg.Text, agentdesigner.OriginChat)
 		if err != nil {
 			send(friendlyDesignError("agent", err))
 			return nil
