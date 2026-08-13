@@ -1317,7 +1317,12 @@ func dbMessagesToPrompt(msgs []db.ChatMessage) []prompts.ChatMessage {
 // progress stream plus GET /design/state — but on chat the only delivery was the
 // send() closure of the message that triggered the build, so a build that
 // outlived its deadline had nowhere to report to and was simply lost.
-type BuildCompleteFunc func(workspaceID, response string, isDone bool, agentID string, err error)
+// origin is what makes delivery CORRECT rather than merely reliable. The hook is
+// registered once at wiring time, so it cannot see which surface the user is on;
+// without the origin it announced every finished build in chat, including builds
+// the user started and was watching in the browser. That is the defect this
+// parameter exists to close.
+type BuildCompleteFunc func(workspaceID string, origin Origin, response string, isDone bool, agentID string, err error)
 
 // OnBuildComplete registers the completion hook. Nil disables delivery, which is
 // the correct default for tests and for the web surface, which polls instead.
@@ -1354,6 +1359,9 @@ func (f *Flow) startGeneration(workspaceID string) (string, bool, string, error)
 	}
 	sess.progressCh = make(chan string, 8)
 	done := f.onBuildComplete
+	// Snapshot the origin under the SAME lock that snapshots the hook. Reading it
+	// inside the goroutine would race a Cancel() that deletes the session.
+	origin := sess.Origin
 	f.mu.Unlock()
 
 	go func() {
@@ -1363,7 +1371,7 @@ func (f *Flow) startGeneration(workspaceID string) (string, bool, string, error)
 		// bounded, and Cancel() still stops it via the stored cancelGenerate.
 		resp, isDone, agentID, err := f.runGeneration(context.Background(), workspaceID)
 		if done != nil {
-			done(workspaceID, resp, isDone, agentID, err)
+			done(workspaceID, origin, resp, isDone, agentID, err)
 		}
 	}()
 

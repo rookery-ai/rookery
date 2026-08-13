@@ -43,7 +43,7 @@ func TestStartGenerationReturnsImmediately(t *testing.T) {
 	startedSession(t, flow, workspaceID)
 
 	done := make(chan struct{})
-	flow.OnBuildComplete(func(string, string, bool, string, error) { close(done) })
+	flow.OnBuildComplete(func(string, Origin, string, bool, string, error) { close(done) })
 
 	start := time.Now()
 	resp, isDone, agentID, err := flow.startGeneration(workspaceID)
@@ -81,7 +81,7 @@ func TestBuildCompletionHookFiresOnce(t *testing.T) {
 		calls []string
 	)
 	fired := make(chan struct{}, 4)
-	flow.OnBuildComplete(func(ws, response string, _ bool, _ string, _ error) {
+	flow.OnBuildComplete(func(ws string, _ Origin, response string, _ bool, _ string, _ error) {
 		mu.Lock()
 		calls = append(calls, ws+"|"+response)
 		mu.Unlock()
@@ -129,7 +129,7 @@ func TestIsGeneratingIsTrueBeforeStartGenerationReturns(t *testing.T) {
 	startedSession(t, flow, workspaceID)
 
 	done := make(chan struct{})
-	flow.OnBuildComplete(func(string, string, bool, string, error) { close(done) })
+	flow.OnBuildComplete(func(string, Origin, string, bool, string, error) { close(done) })
 
 	if flow.IsGenerating(workspaceID) {
 		t.Fatal("IsGenerating must be false before a build starts")
@@ -159,7 +159,7 @@ func TestStartGenerationRefusesASecondConcurrentBuild(t *testing.T) {
 	var count int
 	var mu sync.Mutex
 	done := make(chan struct{}, 4)
-	flow.OnBuildComplete(func(string, string, bool, string, error) {
+	flow.OnBuildComplete(func(string, Origin, string, bool, string, error) {
 		mu.Lock()
 		count++
 		mu.Unlock()

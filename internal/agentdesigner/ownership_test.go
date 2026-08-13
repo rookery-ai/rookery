@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rookery-ai/rookery/internal/db"
 )
@@ -107,6 +108,39 @@ func TestStartNamesTheOwningSurface(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "/agent cancel") {
 		t.Errorf("err = %q, want it to name the escape hatch", err)
+	}
+}
+
+// The bug this whole change exists for: a build started in the web must not be
+// announced in Telegram. The completion hook is registered once at wiring time
+// and cannot see which surface the user is on, so the origin has to travel WITH
+// the result.
+func TestBuildCompleteCarriesTheSessionOrigin(t *testing.T) {
+	flow, workspaceID, _ := newGenFlow(t, newFakeCoder(t, slowCoderScript))
+	flow.mu.Lock()
+	flow.sessions[workspaceID] = &DesignSession{
+		AgentName: "price-tracker",
+		State:     StateDesigning,
+		Origin:    OriginWeb,
+	}
+	flow.mu.Unlock()
+
+	got := make(chan Origin, 1)
+	flow.OnBuildComplete(func(_ string, origin Origin, _ string, _ bool, _ string, _ error) {
+		got <- origin
+	})
+
+	if _, _, _, err := flow.startGeneration(workspaceID); err != nil {
+		t.Fatalf("startGeneration: %v", err)
+	}
+
+	select {
+	case origin := <-got:
+		if origin != OriginWeb {
+			t.Errorf("origin = %q, want %q", origin, OriginWeb)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("build never completed")
 	}
 }
 

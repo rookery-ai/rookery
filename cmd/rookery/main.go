@@ -585,7 +585,7 @@ func serveCmd() *cli.Command {
 			// because the turn that started the build returned minutes earlier. A
 			// workspace with no linked chat platform errors here, which is expected
 			// and not worth surfacing: that user is on the web surface, which polls.
-			designFlow.OnBuildComplete(func(workspaceID, response string, _ bool, _ string, err error) {
+			designFlow.OnBuildComplete(func(workspaceID string, origin agentdesigner.Origin, response string, _ bool, _ string, err error) {
 				text := response
 				if err != nil {
 					text = gateway.FriendlyDesignError("agent", err)
@@ -593,10 +593,27 @@ func serveCmd() *cli.Command {
 				if strings.TrimSpace(text) == "" {
 					return
 				}
-				if sendErr := gwManager.SendToUser(workspaceID, text); sendErr != nil {
-					slog.Debug("agentdesigner: build result not delivered to chat",
-						"workspace_id", workspaceID, "err", sendErr)
+				// Deliver ONLY to the surface that owns the session. A web-owned
+				// build needs nothing pushed here: the SPA reads the outcome out
+				// of the session's History via /design/state. Announcing it in
+				// chat anyway is the reported defect — the dry-run landed in
+				// Telegram while the browser the user was watching stayed blank.
+				if origin != agentdesigner.OriginChat {
+					slog.Info("agentdesigner: build result withheld from chat",
+						"workspace_id", workspaceID, "origin", origin.String(), "chat_suppressed", true)
+					return
 				}
+				if sendErr := gwManager.SendToUser(workspaceID, text); sendErr != nil {
+					// Warn, not Debug. For a chat-owned build this message is the
+					// user's ONLY copy, so a failed send is the whole result going
+					// missing — precisely the silent failure this change ends. At
+					// Debug it was invisible under the default level.
+					slog.Warn("agentdesigner: chat delivery of build result failed",
+						"workspace_id", workspaceID, "err", sendErr)
+					return
+				}
+				slog.Info("agentdesigner: build result delivered",
+					"workspace_id", workspaceID, "target", "chat")
 			})
 
 			go func() {
