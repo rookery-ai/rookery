@@ -416,9 +416,25 @@ export function DesignerSurface({
   // is invisible against a multi-minute build and bounds how stuck it can look.
   useEffect(() => {
     if (!generating || !endpoints.state) return;
+    const url = endpoints.state;
     const id = setInterval(() => {
       if (doneRef.current || unmountedRef.current) return;
-      void refetchState();
+      void (async () => {
+        try {
+          const snap = await api.get<StateSnapshot>(url);
+          if (doneRef.current || unmountedRef.current) return;
+          // Adopt the server transcript ONLY once the build is over. Mid-build
+          // the server History has nothing new — the outcome is written at the
+          // end — while the local transcript holds the approve turn and the
+          // "Building…" placeholder, neither of which startGeneration records.
+          // Applying a mid-build snapshot would erase both and leave the user
+          // watching their own message disappear.
+          if (!snap.generating) void refetchState();
+        } catch {
+          // A failed poll is not worth surfacing — the next tick retries, and
+          // the SSE stream and its error refetch are still in play.
+        }
+      })();
     }, 5000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps

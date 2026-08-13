@@ -145,8 +145,8 @@ type DesignSession struct {
 	// so a single `grep build_id=<id>` reconstructs the whole lifecycle — the
 	// incident that motivated session ownership produced no designer log lines
 	// at all, so its diagnosis had to be reconstructed from the database.
-	buildID string
-	lastProgress   string             // most recent milestone string, so a page that
+	buildID      string
+	lastProgress string // most recent milestone string, so a page that
 	// reconnects mid-build can show the CURRENT action immediately instead of the
 	// generic placeholder (the channel doesn't replay already-consumed milestones).
 }

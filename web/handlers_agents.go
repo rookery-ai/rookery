@@ -248,17 +248,17 @@ func (s *Server) handleDesignState(c echo.Context) error {
 	}
 	hist := designHistoryDTO(snap.History)
 	return c.JSON(http.StatusOK, map[string]interface{}{
-		"active":            true,
-		"generating":        snap.Generating,
-		"state":             snap.State,
-		"history":           hist,
-		"name":              snap.AgentName,
-		"agent_id":          snap.AgentID,
-		"is_edit":           snap.IsEdit,
+		"active":     true,
+		"generating": snap.Generating,
+		"state":      snap.State,
+		"history":    hist,
+		"name":       snap.AgentName,
+		"agent_id":   snap.AgentID,
+		"is_edit":    snap.IsEdit,
 		// The SPA compares this against its own surface to decide whether it is
 		// the driver or a read-only mirror.
-		"origin":        snap.Origin.String(),
-		"last_progress": snap.LastProgress,
+		"origin":            snap.Origin.String(),
+		"last_progress":     snap.LastProgress,
 		"generation_failed": snap.GenerationFailed,
 		"can_keep_as_is":    snap.CanKeepAsIs,
 		"pending_agent_md":  snap.PendingAgentMD,

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { DesignerSurface, type DesignerEndpoints, type DesignerLabels } from "./DesignerSurface";
@@ -172,38 +172,71 @@ test("a progress-stream error refetches state", async () => {
   await waitFor(() => expect(stateCalls).toBeGreaterThan(before));
 });
 
-// Third completion signal: even if the stream is swallowed entirely by a proxy
-// and never errors, the poll surfaces the result.
-test("state is polled while a build is running and not after", async () => {
-  vi.useFakeTimers();
-  let generating = true;
-  let stateCalls = 0;
-  mockFetch({
-    "/x/state": () => {
-      stateCalls++;
-      return jsonResponse({
-        active: true,
-        generating,
-        state: "designing",
-        origin: "web",
-        history: [],
-      });
-    },
-  });
-  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />);
+// Third completion signal: even if the stream is swallowed entirely and never
+// errors, the poll surfaces the result. Three properties in one flow, because
+// each needs a real 5s interval to elapse.
+//
+// REAL timers, deliberately. Under this project's fake-timer setup an interval
+// armed by an ASYNC state update never fires — the microtask that sets
+// `generating` is not flushed inside an act() boundary, so the effect has not
+// armed by the time the clock is advanced. Verified with a standalone probe
+// reproducing it on a component of three lines; faking the clock here would
+// assert nothing and pass.
+test(
+  "the poll preserves the live transcript, then adopts the result and stops",
+  async () => {
+    let generating = true;
+    let history: Array<{ role: string; content: string }> = [];
+    let stateCalls = 0;
+    mockFetch({
+      "/x/state": () => {
+        stateCalls++;
+        return jsonResponse({
+          active: true,
+          generating,
+          state: "designing",
+          origin: "web",
+          history,
+        });
+      },
+      "/x/design": () =>
+        jsonResponse({ response: "🤖 Building…", done: false, building: true }),
+    });
+    wrap(
+      <DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />,
+    );
 
-  await vi.advanceTimersByTimeAsync(50);
-  const afterMount = stateCalls;
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeInTheDocument());
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "build it");
+    fireEvent.keyDown(box, { key: "Enter", code: "Enter" });
+    await screen.findByText("🤖 Building…");
 
-  await vi.advanceTimersByTimeAsync(5100);
-  expect(stateCalls).toBeGreaterThan(afterMount);
+    // 1. The poll runs while the build does.
+    const afterMount = stateCalls;
+    await waitFor(() => expect(stateCalls).toBeGreaterThan(afterMount), {
+      timeout: 9000,
+      interval: 250,
+    });
 
-  // The build ends; the next poll observes it and the interval tears down.
-  generating = false;
-  await vi.advanceTimersByTimeAsync(5100);
-  const afterStop = stateCalls;
-  await vi.advanceTimersByTimeAsync(20000);
-  expect(stateCalls).toBe(afterStop);
+    // 2. It has NOT adopted the (empty) mid-build server history. The approve
+    //    turn and the placeholder exist only locally — startGeneration never
+    //    records them — so adopting a mid-build snapshot would erase both and
+    //    the user would watch their own message vanish.
+    expect(screen.getByText("build it")).toBeInTheDocument();
+    expect(screen.getByText("🤖 Building…")).toBeInTheDocument();
 
-  vi.useRealTimers();
-});
+    // 3. Once the build ends, the next tick adopts the outcome.
+    history = [{ role: "assistant", content: "Here is your agent — approve?" }];
+    generating = false;
+    await screen.findByText("Here is your agent — approve?", undefined, {
+      timeout: 9000,
+    });
+
+    // …and the interval tears down, so nothing keeps polling afterwards.
+    const afterStop = stateCalls;
+    await new Promise((r) => setTimeout(r, 6000));
+    expect(stateCalls).toBe(afterStop);
+  },
+  40000,
+);
