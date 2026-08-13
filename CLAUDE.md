@@ -218,11 +218,18 @@ goreleaser archive for the detected platform, verify it against the release's
 off to `rookery onboard`. Configuration lives in Go, not in two shell dialects.
 A Homebrew tap and Windows service registration remain deferred.
 
-`curl | sh` still **cannot work until the repository is public**: release assets
-on a private repo require an authenticated request, so an anonymous download
-returns `404`, not `401`. Both installers name that case first in their download
-failure, because while it is true it is overwhelmingly the actual cause and a
-bare 404 gives the user nothing to work with.
+**`curl | sh` works — the repository is public and `v0.1.0` is released.** It
+could not before: release assets on a private repo require an authenticated
+request, so an anonymous download returned `404`, not `401`.
+
+**Both installers still lead their 404 message with that private-repo case**
+(`install.sh` and `install.ps1`, in the download-failure branch), which is now
+the one cause it cannot be. Left in place deliberately rather than overlooked:
+the wording is pinned by `packaging/scripts_test.go`, so correcting it is a
+change to the installers and their test, not a documentation edit. Until then a
+404 from the installer means a genuinely missing asset — a tag that never
+published, or a platform with no archive — and the message points at the wrong
+thing.
 
 `packaging/scripts_test.go` pins what breaks silently — that both files exist at
 all (the website advertised them for the repo's whole life while neither did),
