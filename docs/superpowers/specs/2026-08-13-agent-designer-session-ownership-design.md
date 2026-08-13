@@ -176,7 +176,9 @@ receive its own build result is a real signal, not a debug detail.
 | `internal/gateway/router.go` | Pass `OriginChat` on chat entry points; refuse non-owner design turns with a pointer to the web app; keep `/agent cancel` unconditional |
 | `web/handlers_agents.go` | Pass `OriginWeb`; `event: done`; `designTurnResponse` on the `IsGenerating` branch; `origin` in the `/design/state` payload; honest ended-session error |
 | `web/ui/src/components/designer/DesignerSurface.tsx` | Read-only mode when `origin !== "web"`; cancel gated on ownership; `onError` refetch; 5s poll while generating |
-| `web/ui/src/lib/sse.ts` | Honour the `done` event for the design stream (the handler already exists for runs) |
+`web/ui/src/lib/sse.ts` needs **no** change: `openSSE` registers its `done` listener
+unconditionally in `connect()`, so emitting the event server-side is enough for the
+design stream to pick it up.
 
 No schema change, no migration.
 
