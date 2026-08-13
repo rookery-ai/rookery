@@ -52,9 +52,16 @@ type designHistEntry struct {
 
 // designHistoryDTO maps session history to the wire shape. Shared by the agent
 // resume/state handlers and the skill resume handler so the three cannot drift.
+//
+// roleNote turns are dropped: they are the coder's steering context, not the
+// user's transcript. Rendering them is what showed a generic "it did not
+// succeed" in the browser while the real explanation went to chat.
 func designHistoryDTO(hist []db.ChatMessage) []designHistEntry {
 	out := make([]designHistEntry, 0, len(hist))
 	for _, m := range hist {
+		if m.Role == agentdesigner.RoleNote {
+			continue
+		}
 		e := designHistEntry{Role: m.Role, Content: m.Content}
 		if !m.CreatedAt.IsZero() {
 			e.CreatedAt = m.CreatedAt.Format(time.RFC3339Nano)

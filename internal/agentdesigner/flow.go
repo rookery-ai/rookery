@@ -1299,10 +1299,40 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 }
 
 // dbMessagesToPrompt converts db.ChatMessage slice to prompts.ChatMessage slice.
+// roleNote marks a History turn that exists for the CODER, not the user: the
+// technical steering note recorded after a failed build so the retry is not
+// context-blind.
+//
+// History does double duty — it is both the user's transcript and the coder's
+// conversation — and on the failure path those two purposes conflicted. The
+// steering note was what the browser rendered while the real explanation went
+// only to chat. This role keeps both without a second store: dbMessagesToPrompt
+// folds it into the coder's view, designHistoryDTO drops it from the user's.
+const roleNote = "note"
+
+// RoleNote is roleNote, exported for the web layer's history DTO filter.
+const RoleNote = roleNote
+
+// dbMessagesToPrompt converts stored history into coder-facing turns.
+//
+// roleNote turns become assistant turns and are COALESCED into an immediately
+// preceding assistant turn. Coalescing is not cosmetic: without it a failed
+// build emits two consecutive assistant messages where there used to be one,
+// and several providers reject or silently merge same-role runs. Folding them
+// here keeps the prompt shape identical to what the coder saw before the note
+// role existed.
 func dbMessagesToPrompt(msgs []db.ChatMessage) []prompts.ChatMessage {
-	out := make([]prompts.ChatMessage, len(msgs))
-	for i, m := range msgs {
-		out[i] = prompts.ChatMessage{Role: m.Role, Content: m.Content}
+	out := make([]prompts.ChatMessage, 0, len(msgs))
+	for _, m := range msgs {
+		role := m.Role
+		if role == roleNote {
+			role = "assistant"
+		}
+		if n := len(out); n > 0 && role == "assistant" && out[n-1].Role == "assistant" {
+			out[n-1].Content += "\n\n" + m.Content
+			continue
+		}
+		out = append(out, prompts.ChatMessage{Role: role, Content: m.Content})
 	}
 	return out
 }
@@ -1716,7 +1746,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		// went wrong, instead of the user being trapped in an approve-loop (C1/C2). This
 		// also appends a note to History + saves the draft, so a page that reconnected to
 		// the live build sees the outcome after the SSE closes below.
-		f.recordGenerationFailure(workspaceID, outcome.recordFailNote, outcome.forceTier1)
+		f.recordGenerationFailure(workspaceID, outcome.message, outcome.recordFailNote, outcome.forceTier1)
 		// Close the SSE channel only AFTER History/draft are committed (see the success
 		// path) so the reconnect re-fetch of /design/state finds the updated state.
 		closeProgress()
@@ -1862,7 +1892,7 @@ func reconcileBlockedOutcome(d buildDecision, blocked, backendType string) recon
 // forceTier1 additionally binds the next attempt to zero code files (see
 // DesignSession.ForceTier1) — the note below is advisory, and for the unverified-script
 // case advisory has already been shown not to work.
-func (f *Flow) recordGenerationFailure(workspaceID, detail string, forceTier1 bool) {
+func (f *Flow) recordGenerationFailure(workspaceID, userMessage, detail string, forceTier1 bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	sess := f.sessions[workspaceID]
@@ -1872,6 +1902,15 @@ func (f *Flow) recordGenerationFailure(workspaceID, detail string, forceTier1 bo
 	sess.GenerationFailed = true
 	if forceTier1 {
 		sess.ForceTier1 = true
+	}
+	// The user-facing explanation goes in as an ordinary assistant turn so EVERY
+	// surface renders it. Previously only the steering note below was recorded,
+	// so the browser showed a generic "it did not succeed" while the real reason
+	// went to chat alone — and, on a workspace with no chat platform, nowhere.
+	if msg := strings.TrimSpace(userMessage); msg != "" {
+		sess.History = append(sess.History, db.ChatMessage{
+			Role: "assistant", Content: msg, CreatedAt: time.Now().UTC(),
+		})
 	}
 	note := "I attempted to build the agent but it did not succeed."
 	if strings.TrimSpace(detail) != "" {
@@ -1883,7 +1922,10 @@ func (f *Flow) recordGenerationFailure(workspaceID, detail string, forceTier1 bo
 	// loop. The per-case detail above already says what to fix, so the suffix only needs to
 	// point at finishing the agent.
 	note += " On the next attempt I will address this and finish building the agent."
-	sess.History = append(sess.History, db.ChatMessage{Role: "assistant", Content: note, CreatedAt: time.Now().UTC()})
+	// roleNote, not "assistant": this is the CODER's steering context. It reaches
+	// the next generation prompt (dbMessagesToPrompt) and is filtered out of the
+	// user's transcript (designHistoryDTO).
+	sess.History = append(sess.History, db.ChatMessage{Role: roleNote, Content: note, CreatedAt: time.Now().UTC()})
 	f.saveDraft(sess)
 }
 
