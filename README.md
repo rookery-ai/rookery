@@ -65,7 +65,7 @@ make build
   <img src="docs/assets/features.svg" alt="Workspaces, knowledge base, agents, skills, connections, MCP servers, chat, notifications, models, secrets, scheduling and sandboxing" width="100%">
 </picture>
 
-**136 providers** and **934 curated actions**, over OAuth or an API key you
+**100+ services** and **900+ curated actions**, over OAuth or an API key you
 paste — never a broker. **22 skills** built in, plus any you create the same
 conversational way.
 
@@ -86,7 +86,7 @@ Read more —
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-dark.svg">
-  <img src="docs/assets/architecture.svg" alt="Telegram, Discord, Slack and a browser reach one binary on your machine, which holds the knowledge base, agents, coder and secrets, and reaches out to the connected services and to any MCP server" width="100%">
+  <img src="docs/assets/architecture.svg" alt="Telegram, Discord, Slack and a browser talk to one binary on your machine, holding the knowledge base, chat, agents, skills and secrets, all of them running on the coder — a CLI tool, a hosted provider or a local model — and both reading and writing the connected services and any MCP server" width="100%">
 </picture>
 
 ## Configuration

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/rookery-ai/rookery/compare/v0.1.2...v0.1.3) (2026-08-13)
+
+
+### Documentation
+
+* state the connector counts as 100+ rather than exactly ([#188](https://github.com/rookery-ai/rookery/issues/188)) ([7ae9cc4](https://github.com/rookery-ai/rookery/commit/7ae9cc4912075b442cdd0b36d95963c4dfd5b2dc))
+
 ## [0.1.2](https://github.com/rookery-ai/rookery/compare/v0.1.1...v0.1.2) (2026-08-13)
 
 
