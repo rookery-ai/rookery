@@ -26,6 +26,28 @@ func TestOriginStringIsTheWireForm(t *testing.T) {
 	}
 }
 
+// Both directions of the delivery decision, which is the whole bug. A chat-owned
+// build MUST reach chat; a web-owned build must NOT — pushing it anyway is what
+// put a dry-run in Telegram while the user watched a blank browser.
+//
+// An unset origin does not deliver: strict by design, licensed by
+// TestEveryCreationPathStampsOrigin proving no real path leaves it unset.
+func TestDeliverToChat(t *testing.T) {
+	cases := []struct {
+		origin Origin
+		want   bool
+	}{
+		{OriginChat, true},
+		{OriginWeb, false},
+		{Origin(""), false},
+	}
+	for _, c := range cases {
+		if got := DeliverToChat(c.origin); got != c.want {
+			t.Errorf("DeliverToChat(%q) = %v, want %v", c.origin, got, c.want)
+		}
+	}
+}
+
 // Owns is the ownership predicate the Step gate and the web cancel handler both
 // read. A zero origin on either side must fail OPEN: a session built by a test,
 // or one created before this field existed, has to stay drivable.

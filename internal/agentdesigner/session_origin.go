@@ -58,6 +58,22 @@ func (o Origin) Owns(from Origin) bool {
 	return o == "" || from == "" || o == from
 }
 
+// DeliverToChat reports whether a finished build's result should be pushed to
+// the workspace's chat platform.
+//
+// The single most important predicate in this package: getting it wrong in one
+// direction spams a browser user's phone (the reported bug), and in the other
+// silently loses a chat user's only copy of the result. It lives here, rather
+// than inline in main.go's completion hook, so both directions can be tested —
+// the hook itself is a closure inside the serve action and is not reachable
+// from any test.
+//
+// Strict equality, so an unset origin does NOT deliver. That is only safe
+// because every creation entry point stamps the field and
+// TestEveryCreationPathStampsOrigin proves it exhaustively; without that test
+// this should fail the other way.
+func DeliverToChat(origin Origin) bool { return origin == OriginChat }
+
 // errSessionActiveElsewhere is the refusal every creation entry point returns
 // when a session already exists. It names the owning surface AND the way out:
 // the old "you already have an active design session" told the user neither

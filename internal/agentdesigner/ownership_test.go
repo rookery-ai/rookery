@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/rookery-ai/rookery/internal/db"
 )
 
@@ -27,6 +30,89 @@ func TestStartStampsChatOrigin(t *testing.T) {
 	}
 	if sess.Origin != OriginChat {
 		t.Errorf("Origin = %q, want %q", sess.Origin, OriginChat)
+	}
+}
+
+// EVERY creation entry point must stamp the origin. This is the test that
+// licenses the strict `origin != OriginChat` delivery check in main.go: that
+// comparison fails CLOSED, so a path that forgot `Origin: origin` in its
+// session literal would silently withhold a chat-owned build's result from
+// chat — the inverse of the reported bug, and invisible to a test that only
+// checks the paths it remembered. Setting the field is six hand-written lines
+// in six literals; nothing but an exhaustive check catches a missed one.
+func TestEveryCreationPathStampsOrigin(t *testing.T) {
+	// AGENT.md on disk + the DB row, so the two edit paths can load an agent.
+	seedAgent := func(t *testing.T, flow *Flow, database *db.DB, workspaceID string) string {
+		t.Helper()
+		agentID := uuid.New().String()
+		if err := database.CreateAgent(&db.Agent{
+			ID: agentID, WorkspaceID: workspaceID, Name: "seeded", Description: "d", Active: true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		dir := AgentDir(flow.designer.agentsDir, workspaceID, agentID)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		md := "# Suggested schedule: none\n# Skills: none\nDo the thing.\n"
+		if err := os.WriteFile(filepath.Join(dir, "AGENT.md"), []byte(md), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return agentID
+	}
+
+	cases := []struct {
+		name   string
+		origin Origin
+		start  func(t *testing.T, flow *Flow, database *db.DB, workspaceID string) error
+	}{
+		{"Start", OriginChat, func(_ *testing.T, f *Flow, _ *db.DB, ws string) error {
+			_, err := f.Start(ws, "price-tracker", OriginChat)
+			return err
+		}},
+		{"StartDesign", OriginWeb, func(_ *testing.T, f *Flow, _ *db.DB, ws string) error {
+			_, err := f.StartDesign(context.Background(), ws, "price-tracker", "watch prices", OriginWeb)
+			return err
+		}},
+		{"StartEdit", OriginChat, func(t *testing.T, f *Flow, d *db.DB, ws string) error {
+			_, err := f.StartEdit(ws, seedAgent(t, f, d, ws), OriginChat)
+			return err
+		}},
+		{"StartEditDesign", OriginWeb, func(t *testing.T, f *Flow, d *db.DB, ws string) error {
+			_, err := f.StartEditDesign(context.Background(), ws, seedAgent(t, f, d, ws), "change it", OriginWeb)
+			return err
+		}},
+		{"ResumeDraft", OriginWeb, func(t *testing.T, f *Flow, d *db.DB, ws string) error {
+			if err := d.UpsertAgentDraft(&db.AgentDraft{
+				WorkspaceID: ws, AgentID: uuid.New().String(), AgentName: "drafted",
+				State: "designing", ExpiresAt: time.Now().Add(24 * time.Hour),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			_, err := f.ResumeDraft(context.Background(), ws, OriginWeb)
+			return err
+		}},
+		{"OfferDraftResume", OriginChat, func(_ *testing.T, f *Flow, _ *db.DB, ws string) error {
+			_, err := f.OfferDraftResume(ws, "price-tracker",
+				&db.AgentDraft{AgentID: "a1", AgentName: "drafted"}, OriginChat)
+			return err
+		}},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			flow, workspaceID, _ := newGenFlow(t, newFakeCoder(t, slowCoderScript))
+			if err := c.start(t, flow, flow.db.(*db.DB), workspaceID); err != nil {
+				t.Fatalf("%s: %v", c.name, err)
+			}
+			sess := flow.GetSession(workspaceID)
+			if sess == nil {
+				t.Fatalf("%s created no session", c.name)
+			}
+			if sess.Origin != c.origin {
+				t.Errorf("%s stamped Origin = %q, want %q", c.name, sess.Origin, c.origin)
+			}
+		})
 	}
 }
 

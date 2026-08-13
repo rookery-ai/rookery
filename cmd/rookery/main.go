@@ -598,7 +598,7 @@ func serveCmd() *cli.Command {
 				// of the session's History via /design/state. Announcing it in
 				// chat anyway is the reported defect — the dry-run landed in
 				// Telegram while the browser the user was watching stayed blank.
-				if origin != agentdesigner.OriginChat {
+				if !agentdesigner.DeliverToChat(origin) {
 					slog.Info("agentdesigner: build result withheld from chat",
 						"workspace_id", workspaceID, "origin", origin.String(), "chat_suppressed", true)
 					return
