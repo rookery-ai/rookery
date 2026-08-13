@@ -430,8 +430,8 @@ func (f *Flow) Start(workspaceID, agentName string, origin Origin) (string, erro
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	if _, exists := f.sessions[workspaceID]; exists {
-		return "", fmt.Errorf("you already have an active design session; send /agent cancel to start over")
+	if existing, exists := f.sessions[workspaceID]; exists {
+		return "", errSessionActiveElsewhere(existing.Origin)
 	}
 
 	skills := f.loadSkillNames(workspaceID)
@@ -462,9 +462,9 @@ func (f *Flow) Start(workspaceID, agentName string, origin Origin) (string, erro
 func (f *Flow) StartDesign(ctx context.Context, workspaceID, agentName, firstMessage string, origin Origin) (string, error) {
 	f.mu.Lock()
 
-	if _, exists := f.sessions[workspaceID]; exists {
+	if existing, exists := f.sessions[workspaceID]; exists {
 		f.mu.Unlock()
-		return "", fmt.Errorf("design session already active; cancel it first")
+		return "", errSessionActiveElsewhere(existing.Origin)
 	}
 
 	skills := f.loadSkillNames(workspaceID)
@@ -495,9 +495,9 @@ func (f *Flow) StartDesign(ctx context.Context, workspaceID, agentName, firstMes
 // Returns the opening prompt summarizing current behavior and asking what to change.
 func (f *Flow) StartEdit(workspaceID, agentID string, origin Origin) (string, error) {
 	f.mu.Lock()
-	if _, exists := f.sessions[workspaceID]; exists {
+	if existing, exists := f.sessions[workspaceID]; exists {
 		f.mu.Unlock()
-		return "", fmt.Errorf("you already have an active design session; send /agent cancel to start over")
+		return "", errSessionActiveElsewhere(existing.Origin)
 	}
 	f.mu.Unlock()
 
@@ -539,9 +539,9 @@ func (f *Flow) StartEdit(workspaceID, agentID string, origin Origin) (string, er
 // first response. Mirrors StartDesign.
 func (f *Flow) StartEditDesign(ctx context.Context, workspaceID, agentID, firstMessage string, origin Origin) (string, error) {
 	f.mu.Lock()
-	if _, exists := f.sessions[workspaceID]; exists {
+	if existing, exists := f.sessions[workspaceID]; exists {
 		f.mu.Unlock()
-		return "", fmt.Errorf("design session already active; cancel it first")
+		return "", errSessionActiveElsewhere(existing.Origin)
 	}
 	f.mu.Unlock()
 
@@ -631,8 +631,19 @@ func (f *Flow) Step(ctx context.Context, workspaceID, input string, from Origin)
 		f.mu.Unlock()
 		return "", false, "", fmt.Errorf("no active design session; use /agent create <name> to start one")
 	}
+	owner := sess.Origin
 	state := sess.State
 	f.mu.Unlock()
+
+	// Exclusive ownership: only the surface that created the session may drive
+	// it. Returning BEFORE the state dispatch is what makes this safe — a refused
+	// turn must not append history, advance the FSM, or (as the reported bug did)
+	// launch a build from the surface that does not own the session.
+	if !owner.Owns(from) {
+		slog.Info("agentdesigner: refused non-owner design turn",
+			"workspace_id", workspaceID, "owner", owner.String(), "from", from.String())
+		return nonOwnerRefusal(owner), false, "", nil
+	}
 
 	switch state {
 	case StateAwaitingResume:

@@ -1,6 +1,8 @@
 package agentdesigner
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/rookery-ai/rookery/internal/db"
@@ -34,6 +36,77 @@ func TestOfferDraftResumeStampsOrigin(t *testing.T) {
 	}
 	if got := flow.GetSession(workspaceID).Origin; got != OriginChat {
 		t.Errorf("Origin = %q, want %q", got, OriginChat)
+	}
+}
+
+// A chat message aimed at a web-owned session must be refused WITHOUT touching
+// the session: the whole point of exclusive ownership is that two surfaces
+// cannot drive one FSM.
+func TestStepRefusesNonOwnerAndLeavesSessionAlone(t *testing.T) {
+	flow, workspaceID, _ := newGenFlow(t, newFakeCoder(t, slowCoderScript))
+	flow.mu.Lock()
+	flow.sessions[workspaceID] = &DesignSession{
+		AgentName: "price-tracker",
+		State:     StateDesigning,
+		Origin:    OriginWeb,
+		History:   []db.ChatMessage{{Role: "assistant", Content: "hello"}},
+	}
+	flow.mu.Unlock()
+
+	resp, isDone, agentID, err := flow.Step(context.Background(), workspaceID, "approve", OriginChat)
+	if err != nil {
+		t.Fatalf("a refusal is a normal answer, not an error: %v", err)
+	}
+	if isDone || agentID != "" {
+		t.Errorf("refused turn must not finish anything: (%v, %q)", isDone, agentID)
+	}
+	if !strings.Contains(resp, "the web app") {
+		t.Errorf("refusal = %q, want it to name the owning surface", resp)
+	}
+	if !strings.Contains(resp, "/agent cancel") {
+		t.Errorf("refusal = %q, want it to name the escape hatch", resp)
+	}
+	sess := flow.GetSession(workspaceID)
+	if sess.State != StateDesigning {
+		t.Errorf("state = %v, want it untouched", sess.State)
+	}
+	if len(sess.History) != 1 {
+		t.Errorf("history len = %d, want the refused turn NOT recorded", len(sess.History))
+	}
+}
+
+// A session created by a test, or by a build predating the Origin field, must
+// stay drivable — Owns fails open and this pins that end to end.
+func TestStepAllowsZeroOrigin(t *testing.T) {
+	flow, workspaceID, _ := newGenFlow(t, newFakeCoder(t, slowCoderScript))
+	startedSession(t, flow, workspaceID) // no Origin set
+
+	resp, _, _, err := flow.Step(context.Background(), workspaceID, "tell me more", OriginChat)
+	if err != nil {
+		t.Fatalf("zero-origin session must stay drivable: %v", err)
+	}
+	if strings.Contains(resp, "please continue there") {
+		t.Errorf("zero-origin session was refused: %q", resp)
+	}
+}
+
+// Starting a second session must say WHERE the first one lives — "you already
+// have an active design session" told the user neither where to go nor how out.
+func TestStartNamesTheOwningSurface(t *testing.T) {
+	flow, workspaceID, _ := newGenFlow(t, newFakeCoder(t, slowCoderScript))
+	if _, err := flow.Start(workspaceID, "first", OriginWeb); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	_, err := flow.Start(workspaceID, "second", OriginChat)
+	if err == nil {
+		t.Fatal("want a refusal, got nil")
+	}
+	if !strings.Contains(err.Error(), "the web app") {
+		t.Errorf("err = %q, want it to name the web app", err)
+	}
+	if !strings.Contains(err.Error(), "/agent cancel") {
+		t.Errorf("err = %q, want it to name the escape hatch", err)
 	}
 }
 

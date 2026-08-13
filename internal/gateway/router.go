@@ -397,6 +397,12 @@ func (r *Router) handleAgent(ctx context.Context, msg Message, arg string, send 
 		// Stop any in-flight generation / drop the active session now. The draft
 		// (auto-saved on every turn) is preserved either way — the question below
 		// is only whether to keep it or throw it away.
+		//
+		// Deliberately NOT ownership-gated, unlike the web cancel endpoint. This
+		// is the escape hatch: a WEB-owned session whose browser is gone would
+		// otherwise lock chat out until the 7-day draft TTL expired, and cancel is
+		// the only action a non-owner may take. The non-owner refusal names this
+		// command for exactly that reason (see agentdesigner.nonOwnerRefusal).
 		r.designFlow.Cancel(msg.WorkspaceID)
 
 		draft := r.designFlow.HasDraft(msg.WorkspaceID)

@@ -1,5 +1,7 @@
 package agentdesigner
 
+import "fmt"
+
 // Session ownership.
 //
 // A design session is a per-workspace singleton that BOTH the web UI and a chat
@@ -54,4 +56,30 @@ func (o Origin) Label() string {
 // failing closed is a user who cannot touch their own session from any surface.
 func (o Origin) Owns(from Origin) bool {
 	return o == "" || from == "" || o == from
+}
+
+// errSessionActiveElsewhere is the refusal every creation entry point returns
+// when a session already exists. It names the owning surface AND the way out:
+// the old "you already have an active design session" told the user neither
+// where to continue nor how to escape.
+func errSessionActiveElsewhere(owner Origin) error {
+	return fmt.Errorf(
+		"you already have an active design session in %s; continue there, or send /agent cancel to discard it",
+		owner.Label(),
+	)
+}
+
+// nonOwnerRefusal is what a design turn from the wrong surface gets back.
+//
+// A plain response string, not an error: chat renders it verbatim, and an error
+// would be reported to the user as a failure when nothing failed. It names
+// /agent cancel because that is the ONLY action a non-owner may take — without
+// it, a web-owned session whose browser is gone would lock chat out until the
+// draft TTL expires a week later.
+func nonOwnerRefusal(owner Origin) string {
+	return fmt.Sprintf(
+		"This design session is active in %s — please continue there.\n\n"+
+			"If you'd rather start over here, send `/agent cancel` to discard it.",
+		owner.Label(),
+	)
 }
