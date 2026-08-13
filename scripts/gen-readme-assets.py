@@ -447,11 +447,27 @@ WALL = [
 ]
 
 
-def arrow(x: float, y0: float, y1: float, color: str) -> str:
-    return (
-        f'<path d="M{r(x)} {r(y0)}V{r(y1 - 9)}" stroke="{color}" stroke-width="2.5"/>'
-        f'<path d="M{r(x - 7)} {r(y1 - 11)}l7 11 7-11z" fill="{color}"/>'
-    )
+HEAD = 11  # arrowhead length
+
+
+def arrow(x: float, y0: float, y1: float, color: str, both: bool = True) -> str:
+    """A vertical arrow. Two-headed by default, because every edge here is.
+
+    Chat is a conversation and notifications come back out over the same
+    platforms; a connector is read AND write, and so is an MCP server. A
+    single downward head drew the whole system as one-way, which is the one
+    thing the picture must not say.
+    """
+    top = y0 + (HEAD if both else 0)
+    parts = [
+        f'<path d="M{r(x)} {r(top)}V{r(y1 - 9)}" stroke="{color}" stroke-width="2.5"/>',
+        f'<path d="M{r(x - 7)} {r(y1 - HEAD)}l7 {HEAD} 7 -{HEAD}z" fill="{color}"/>',
+    ]
+    if both:
+        parts.append(
+            f'<path d="M{r(x - 7)} {r(y0 + HEAD)}l7 -{HEAD} 7 {HEAD}z" fill="{color}"/>'
+        )
+    return "".join(parts)
 
 
 def architecture(p: Palette) -> str:
@@ -493,8 +509,10 @@ def architecture(p: Palette) -> str:
     o.append(text("YOUR MACHINE — ONE BINARY", bx + 30, by + 38, 14, p.ember,
                   weight=600, spacing=1.6))
 
-    tiles = [("book-text", "Knowledge base"), ("bot", "Agents"),
-             ("cpu", "Coder"), ("key-round", "Secrets")]
+    # Reading order follows how the thing is used: what you have, asking it,
+    # sending it out, what powers that, what it authenticates with.
+    tiles = [("book-text", "Knowledge base"), ("messages-square", "Chat"),
+             ("bot", "Agents"), ("cpu", "Coder"), ("key-round", "Secrets")]
     tgap, tx0, tw_total = 20, bx + 30, bw - 60
     tw = (tw_total - (len(tiles) - 1) * tgap) / len(tiles)
     ty, th = by + 58, 186
@@ -508,11 +526,17 @@ def architecture(p: Palette) -> str:
         o.append(icon(ic, cx - 15, ty + 55, 30, p.ember))
         o.append(text(label, cx, ty + 138, 19, p.ink, weight=600, anchor="middle"))
 
-    o.append(arrow(W / 2, by + bh + 6, 512, p.ember))
-
     # -- outward -----------------------------------------------------------
     oy, oh = 512, 132
     lw = 748
+    rx0, rw = bx + lw + 22, W - (bx + lw + 22) - bx
+
+    # One arrow per destination rather than a single stem landing between them:
+    # the old layout drew nothing at all into MCP, which read as though only
+    # connectors were reachable.
+    o.append(arrow(bx + lw / 2, by + bh + 6, oy, p.ember))
+    o.append(arrow(rx0 + rw / 2, by + bh + 6, oy, p.ember))
+
     o.append(f'<rect x="{bx}" y="{oy}" width="{lw}" height="{oh}" rx="20" '
              f'fill="{p.surface}" stroke="{p.line}"/>')
     o.append(text(f"{provider_approx()} CONNECTIONS", bx + 26, oy + 34, 13, p.muted,
@@ -526,7 +550,6 @@ def architecture(p: Palette) -> str:
                  f'stroke="{p.line}"/>')
         o.append(logo(slug, cx, cy, 21, "#211d1a"))
 
-    rx0, rw = bx + lw + 22, W - (bx + lw + 22) - bx
     o.append(f'<rect x="{r(rx0)}" y="{oy}" width="{r(rw)}" height="{oh}" rx="20" '
              f'fill="{p.surface}" stroke="{p.line}"/>')
     o.append(text("MCP SERVERS", rx0 + 26, oy + 34, 13, p.muted, weight=600,
@@ -540,9 +563,12 @@ def architecture(p: Palette) -> str:
     H = oy + oh + 34
     return document(
         W, H,
-        "Rookery architecture: Telegram, Discord, Slack and a browser reach one "
-        f"binary on your machine, which reaches out to {provider_count()} "
-        "connections and to any MCP server",
+        # provider_approx, not provider_count: this is what a screen reader is
+        # told, so it must say the same thing the band says.
+        "Rookery architecture: Telegram, Discord, Slack and a browser talk to one "
+        "binary on your machine, which holds the knowledge base, chat, agents, "
+        f"coder and secrets, and both reads and writes {provider_approx()} "
+        "connections and any MCP server",
         "".join(o),
     )
 

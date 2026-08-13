@@ -86,7 +86,7 @@ Read more —
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-dark.svg">
-  <img src="docs/assets/architecture.svg" alt="Telegram, Discord, Slack and a browser reach one binary on your machine, which holds the knowledge base, agents, coder and secrets, and reaches out to the connected services and to any MCP server" width="100%">
+  <img src="docs/assets/architecture.svg" alt="Telegram, Discord, Slack and a browser talk to one binary on your machine, which holds the knowledge base, chat, agents, coder and secrets, and both reads and writes the connected services and any MCP server" width="100%">
 </picture>
 
 ## Configuration
