@@ -279,7 +279,11 @@ test("Coder step: CoderSection's Save posts step:3 coder_* fields and advances t
 
   await waitFor(() => expect(posts).toHaveLength(1));
   expect(posts[0].body).toMatchObject({
-    step: 3, coder_kind: "local", coder_bin: "", coder_timeout_s: 120,
+    // 0 = follow the server default. The wizard no longer shows a timeout
+    // field at all: a brand-new owner has no basis to choose one, and the
+    // number they were shown was the coder form's hardcoded 120, which the
+    // wizard then wrote to the database for every workspace ever created.
+    step: 3, coder_kind: "local", coder_bin: "", coder_timeout_s: 0,
     coder_provider: "", coder_model: "", coder_base_url: "", coder_api_key: "",
   });
   expect(await screen.findByText(/workspace profile/i)).toBeInTheDocument();
@@ -325,7 +329,7 @@ test("Coder step (API engine, no keys saved yet): selecting a provider via the r
 
   await waitFor(() => expect(posts).toHaveLength(1));
   expect(posts[0].body).toEqual({
-    step: 3, coder_kind: "api", coder_bin: "", coder_timeout_s: 120,
+    step: 3, coder_kind: "api", coder_bin: "", coder_timeout_s: 0,
     coder_provider: "openrouter", coder_model: "glm-5.2", coder_base_url: "",
     coder_api_key: "sk-or-live-test",
   });
@@ -521,4 +525,19 @@ test("step chips show Basics through Chat app, and hide on the Done screen", asy
   expect(within(chips).getByText("Coder")).toBeInTheDocument();
   expect(within(chips).getByText("Profile")).toBeInTheDocument();
   expect(within(chips).getByText("Chat app")).toBeInTheDocument();
+});
+
+// The wizard must not offer a timeout at all. It is not merely noise for a new
+// owner: the field's value came from the coder form's hardcoded initial state,
+// so every workspace created through the wizard was written with a hard
+// two-minute cap that nobody chose and nothing surfaced again.
+test("Coder step: no timeout field is offered during setup", async () => {
+  const state = freshState();
+  state.basicsDone = true;
+  state.secretsSalt = true;
+  mockFetch(state, []);
+  wrap();
+
+  expect(await screen.findByText(/choose a coder/i)).toBeInTheDocument();
+  expect(screen.queryByLabelText(/timeout/i)).not.toBeInTheDocument();
 });

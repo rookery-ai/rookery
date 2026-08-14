@@ -554,6 +554,7 @@ export default function SettingsPage() {
                 coder={settings?.coder}
                 detectedCoders={settings?.detected_coders ?? []}
                 catalog={settings?.coder_catalog ?? []}
+                defaultTimeoutS={settings?.coder?.default_timeout_s}
                 coderMode={settings?.coder_mode}
               />
             )}

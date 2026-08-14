@@ -26,7 +26,10 @@ export type WorkspaceMetaUpdate = Pick<WorkspaceMeta, "name">;
 export type CoderConfig = {
   kind: string;
   bin: string;
+  /** This workspace's override. 0 means "follow default_timeout_s". */
   timeout_s: number;
+  /** The server's effective default, for the empty field's placeholder. */
+  default_timeout_s?: number;
   provider: string;
   model: string;
   base_url: string;

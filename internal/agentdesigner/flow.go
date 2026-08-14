@@ -1696,6 +1696,28 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 			prompts.MapCoderBackend(backendType), "")
 	}
 	result, err := generationCoder.Generate(genCtx, workspaceID, prompt)
+	// One automatic retry, and ONLY for a workspace carrying a small timeout.
+	//
+	// A build is the longest thing the coder does — write files, run them against
+	// live services, read the failures, fix them — so a two-minute deadline cuts
+	// it off mid-repair routinely, and the user sees a timeout instead of an
+	// agent. Retrying converts that into a success often enough to be worth one
+	// extra attempt. At the 30-minute default the same reasoning inverts: a
+	// timeout there means something is genuinely wrong, and a second 30 minutes
+	// would occupy the coder and delay the report for nothing — so the retry is
+	// deliberately not attempted.
+	//
+	// The retry is NOT gated on genCtx being alive: Cancel() cancels genCtx, and
+	// a cancelled build must stay cancelled rather than quietly starting again.
+	if errors.Is(err, coder.ErrTimeout) &&
+		generationCoder.Timeout() < coder.RetryTimeoutBelow &&
+		genCtx.Err() == nil {
+		slog.Info("agentdesigner: build timed out, retrying once",
+			"build_id", buildID, "workspace_id", workspaceID,
+			"timeout", generationCoder.Timeout().String())
+		notify("⏳ That took longer than the configured timeout — trying once more…")
+		result, err = generationCoder.Generate(genCtx, workspaceID, prompt)
+	}
 
 	// Ground-truth the build from disk BEFORE branching on the error. decideBuildOutcome is
 	// pure (reads AGENT.md + tools from workDir, no mutation/logging), so computing it up

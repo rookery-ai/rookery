@@ -90,7 +90,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 	}
 	for turn := 0; turn < turnBudget; turn++ {
 		if ctx.Err() != nil {
-			return nil, fmt.Errorf("coder timed out after %s", c.timeout)
+			return nil, fmt.Errorf("%w after %s", ErrTimeout, c.timeout)
 		}
 		resp, err := prov.Complete(ctx, req)
 		if err != nil {

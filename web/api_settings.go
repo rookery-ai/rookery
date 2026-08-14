@@ -158,13 +158,18 @@ type apiWorkspaceMetaDTO struct {
 }
 
 type apiCoderConfigDTO struct {
-	Kind         string `json:"kind"`
-	Bin          string `json:"bin"`
-	TimeoutS     int    `json:"timeout_s"`
-	Provider     string `json:"provider"`
-	Model        string `json:"model"`
-	BaseURL      string `json:"base_url"`
-	APIKeySecret string `json:"api_key_secret"`
+	Kind string `json:"kind"`
+	Bin  string `json:"bin"`
+	// TimeoutS is the workspace's OVERRIDE; 0 means "follow the server default".
+	// DefaultTimeoutS carries that default so the settings form can show what an
+	// empty field will actually do. Without it the SPA had to invent a number,
+	// and the one it invented (120) was then written back on every save.
+	TimeoutS        int    `json:"timeout_s"`
+	DefaultTimeoutS int    `json:"default_timeout_s"`
+	Provider        string `json:"provider"`
+	Model           string `json:"model"`
+	BaseURL         string `json:"base_url"`
+	APIKeySecret    string `json:"api_key_secret"`
 }
 
 type apiDetectedCoderDTO struct {
@@ -216,7 +221,8 @@ func (s *Server) apiGetSettings(c echo.Context) error {
 		"workspace": apiWorkspaceMetaDTO{Name: w.Name, About: w.About},
 		"coder": apiCoderConfigDTO{
 			Kind: w.CoderKind, Bin: w.CoderBin, TimeoutS: w.CoderTimeoutS,
-			Provider: w.CoderProvider, Model: w.CoderModel, BaseURL: w.CoderBaseURL,
+			DefaultTimeoutS: int(s.cfg.Coder.Timeout.Seconds()),
+			Provider:        w.CoderProvider, Model: w.CoderModel, BaseURL: w.CoderBaseURL,
 			APIKeySecret: w.CoderAPIKeySecret,
 		},
 		"detected_coders": detOut,

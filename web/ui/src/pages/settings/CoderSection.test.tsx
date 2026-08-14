@@ -268,7 +268,11 @@ test("showApiKeyInput: a provider with no saved key yet is still selectable, and
   });
   const putCall = calls.find((c) => c.url === "/api/v1/settings/coder" && c.method === "PUT")!;
   expect(putCall.body).toEqual({
-    kind: "api", bin: "", timeout_s: 120,
+    // 0, not 120: a workspace with no stored timeout follows the server
+    // default. This assertion used to read 120 — the component's own hardcoded
+    // initial value, which it posted on every save whether or not anyone had
+    // touched the field.
+    kind: "api", bin: "", timeout_s: 0,
     provider: "zai", model: "glm-4.7", base_url: "", api_key: "sk-zai-secret",
   });
 });
@@ -419,4 +423,96 @@ test("API engine: a saved override survives a provider switch", async () => {
   expect(screen.getByLabelText(/base url/i)).toHaveValue(
     "http://nas.lan:11434/v1",
   );
+});
+
+// ── Timeout field ────────────────────────────────────────────────────────────
+
+// The reported bug, and the reason this file gets a section of its own.
+//
+// coder_timeout_s = 0 means "follow the server default". The field used to be
+// `useState(120)`, loaded as `coder.timeout_s || 120`, and posted on every save
+// — so a workspace following the default rendered as 120 and was WRITTEN BACK
+// as 120 the moment anyone pressed Save. Opening the settings page and saving
+// an unrelated field silently converted the workspace to a hard two-minute cap,
+// which is short enough to cut an agent build off mid-repair and long enough to
+// look deliberate.
+test("a workspace following the default saves back as following the default", async () => {
+  const calls = mockFetch();
+  wrap({ ...LOCAL_CODER, timeout_s: 0 });
+
+  expect(screen.getByLabelText(/timeout/i)).toHaveValue(null);
+
+  await userEvent.click(screen.getByRole("button", { name: /save coder/i }));
+  await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
+
+  const body = calls.find((c) => c.method === "PUT")!.body as { timeout_s: number };
+  expect(body.timeout_s).toBe(0);
+});
+
+test("an explicit timeout round-trips unchanged", async () => {
+  const calls = mockFetch();
+  wrap({ ...LOCAL_CODER, timeout_s: 900 });
+
+  expect(screen.getByLabelText(/timeout/i)).toHaveValue(900);
+
+  await userEvent.click(screen.getByRole("button", { name: /save coder/i }));
+  await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
+
+  const body = calls.find((c) => c.method === "PUT")!.body as { timeout_s: number };
+  expect(body.timeout_s).toBe(900);
+});
+
+test("clearing the field returns the workspace to the default", async () => {
+  const calls = mockFetch();
+  wrap({ ...LOCAL_CODER, timeout_s: 900 });
+
+  await userEvent.clear(screen.getByLabelText(/timeout/i));
+  await userEvent.click(screen.getByRole("button", { name: /save coder/i }));
+  await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
+
+  const body = calls.find((c) => c.method === "PUT")!.body as { timeout_s: number };
+  expect(body.timeout_s).toBe(0);
+});
+
+// The empty field must state what it will do. Without this the placeholder is
+// blank and "empty" reads as unconfigured rather than as a real setting.
+test("the empty field shows the server's effective default as its placeholder", () => {
+  mockFetch();
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={qc}>
+      <CoderSection
+        coder={{ ...LOCAL_CODER, timeout_s: 0 }}
+        detectedCoders={DETECTED}
+        catalog={CATALOG}
+        defaultTimeoutS={1800}
+      />
+    </QueryClientProvider>,
+  );
+  expect(screen.getByLabelText(/timeout/i)).toHaveAttribute("placeholder", "1800");
+});
+
+// The setup wizard hides the field: a new owner has no basis to pick a number,
+// and the number they were shown was this component's own hardcoded 120.
+test("hideTimeout removes the field and saves 0", async () => {
+  const calls = mockFetch();
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={qc}>
+      <CoderSection
+        coder={undefined}
+        detectedCoders={DETECTED}
+        catalog={CATALOG}
+        hideTimeout
+      />
+    </QueryClientProvider>,
+  );
+
+  expect(screen.queryByLabelText(/timeout/i)).not.toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole("button", { name: /save coder/i }));
+  await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
+
+  const body = calls.find((c) => c.method === "PUT")!.body as { timeout_s: number };
+  expect(body.timeout_s).toBe(0);
 });

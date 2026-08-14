@@ -319,6 +319,7 @@ function CoderStep({
           saveOverride={mutation}
           hideTest
           showApiKeyInput
+          hideTimeout
         />
       )}
     </div>

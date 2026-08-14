@@ -6,7 +6,25 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+// The coder default is 30 minutes, and it is the number an agent BUILD gets.
+// It was 20, which cut real builds off while the coder was still repairing what
+// it had written — so the user saw a timeout rather than an agent. Pinned
+// against coder.DefaultTimeout by TestDefaultTimeoutIsThirtyMinutes on the
+// other side; the two fallbacks live in different packages and must agree.
+func TestCoderTimeoutDefaultsToThirtyMinutes(t *testing.T) {
+	os.Unsetenv("ROOKERY_DATA_DIR")
+	t.Setenv("HOME", t.TempDir())
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if want := 30 * time.Minute; cfg.Coder.Timeout != want {
+		t.Errorf("Coder.Timeout = %s, want %s", cfg.Coder.Timeout, want)
+	}
+}
 
 func TestCoderModeDefaultsToFull(t *testing.T) {
 	os.Unsetenv("ROOKERY_CODER_MODE")

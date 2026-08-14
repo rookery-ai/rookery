@@ -262,6 +262,35 @@ func (c *Coder) Name() string {
 	return filepath.Base(c.bin)
 }
 
+// DefaultTimeout is the fallback when neither the workspace nor the config
+// names one. It matches config.defaults() deliberately — two different
+// fallbacks would mean the effective timeout depended on which construction
+// path a caller happened to take.
+const DefaultTimeout = 30 * time.Minute
+
+// RetryTimeoutBelow is the ceiling under which a timed-out agent build is
+// retried once automatically.
+//
+// The point is not that retrying helps in general — at the 30-minute default a
+// timeout means something is genuinely wrong, and spending another 30 minutes
+// on it wastes the coder and delays the report. It is that a workspace can
+// still be carrying a small timeout, and at two minutes a build is cut off
+// mid-repair often enough that one retry converts a routine failure into a
+// success. So the retry is scoped to exactly the installs that need it and
+// costs nothing on the ones that do not.
+const RetryTimeoutBelow = 10 * time.Minute
+
+// ErrTimeout reports that the coder exceeded its deadline. Callers used to
+// detect this by matching "timed out" in the error text; the sentinel makes the
+// check exact, and the wrapped message is byte-identical so the older string
+// check keeps working wherever it survives.
+var ErrTimeout = errors.New("coder timed out")
+
+// Timeout returns the deadline this coder applies to one call. Exported for the
+// retry decision in the agent designer, which is scoped by how small the
+// configured timeout is.
+func (c *Coder) Timeout() time.Duration { return c.timeout }
+
 // New creates a Coder.
 // homesDir is the root directory for per-user isolated HOME directories
 // (typically cfg.Data.Dir + "/claude-homes" for historical reasons).
@@ -272,7 +301,7 @@ func New(bin string, timeout time.Duration, homesDir, dataDir string) *Coder {
 		bin = "claude"
 	}
 	if timeout == 0 {
-		timeout = 20 * time.Minute
+		timeout = DefaultTimeout
 	}
 	sysHome, _ := os.UserHomeDir()
 	selfExe, _ := os.Executable()
@@ -326,7 +355,7 @@ func (c *Coder) Generate(ctx context.Context, workspaceID, prompt string) (*Resu
 
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("coder timed out after %s", c.timeout)
+			return nil, fmt.Errorf("%w after %s", ErrTimeout, c.timeout)
 		}
 		if backend.looksLikeLimit(stdout.String(), stderr.String()) {
 			return nil, ErrUsageLimit
