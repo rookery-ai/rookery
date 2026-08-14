@@ -527,6 +527,46 @@ failures reuse `agentrunner.FriendlyRunError` (exported for this reason) so a wo
 quota gets the identical sentence here as it does from a scheduled agent run, returned as a 503
 `coder_unavailable` rather than a generic 500.
 
+**Block alignment is a `<div align>` WRAPPER, and the obvious spelling is a trap.**
+`nodes/align.ts` (`kbAlign`, `content: block+`) is how text and images centre or right-align.
+Markdown has no alignment, so persisting it means raw HTML — and
+`<p style="text-align:center">…</p>`, the shape `@tiptap/extension-text-align` produces, fails
+for a reason invisible until you try it: markdown-it treats a `<p …>` line as a CommonMark
+**type 6** raw HTML block and does **not** parse inline markdown inside it, so aligning a
+paragraph would turn its `**bold**` into literal asterisks (the toggle's `<summary>` hits exactly
+this and has to serialize its marks as HTML tags to survive). It would also walk into the
+`renderSpec`/`cssText` hazard `marks/colors.ts` documents. A `<div align="…">` wrapper with a
+**blank-line-separated body** avoids both: markdown-it closes the type-6 block at the blank line,
+so the body stays ordinary markdown — real paragraph, list, table and image nodes with real
+marks — and it is the standard README centring idiom, so pasted snippets and vault-writing agents
+already produce it. Same canonical-form rule as the toggle: the glued (`<div align="center">Hello</div>`)
+and `style=`-spelled forms still PARSE and normalise on the first save, opening read-only until
+then. That is a **strict improvement**, not a regression — measured before the work started,
+EVERY div spelling previously lost its wrapper entirely and had its alignment discarded on save.
+`parseHTML`'s `div[style]` rule carries a `getAttrs` guard so it claims only a div that is
+actually aligned; without it every styled div in the vault would be wrapped in an alignment
+nobody asked for. `setBlockAlign` tries `updateAttributes` BEFORE `wrapIn` (wrapping twice
+serializes as two nested divs that read as one) and deliberately does not gate on
+`editor.isActive`, which reports false for an AllSelection; `clearBlockAlign` falls back to a
+range scan for the same reason. Alignment lives in the fidelity corpus, not beside it.
+
+**In `@tiptap/react` v3, `editor.isActive()` read during render is FROZEN.**
+`useEditor`'s `shouldRerenderOnTransaction` now defaults to **false**, so a component computing
+`isActive` in its body evaluates it once and never again. `BubbleToolbar` did exactly that, so
+Bold, Italic, Underline, Strike, Code, both headings, Link, both lists and Quote all highlighted
+according to whatever the state was when the bubble menu appeared. Nothing failed — the commands
+worked, only the indicators lied, which is why it went unnoticed. It reads its flags through
+**`useEditorState`** now (the v3 idiom, which re-renders only this subtree) rather than
+`shouldRerenderOnTransaction: true`, which would re-render `WysiwygEditor` and everything it
+holds on every keystroke. The regression test toggles **Bold**, not an alignment button, because
+it is the row's oldest control: if this breaks again it breaks for all of them.
+
+**Alignment's export degradation is the mildest of the set** — `internal/export`'s goldmark
+(built without `WithUnsafe()`) replaces the two `<div>` lines with `<!-- raw HTML omitted -->`
+while the body, being ordinary markdown OUTSIDE the HTML block, survives with its formatting
+intact. Alignment is lost; content and marks are not. Compare the toggle, which loses its summary
+text along with its wrapper.
+
 **KB rich-text editor: five formatting/AI constructs.** The WYSIWYG editor (`web/ui/src/pages/kb/`)
 adds underline, two colour marks, callouts, toggle lists, resizable images, and the AI actions panel
 above, all as TipTap/ProseMirror extensions layered on `buildExtensions()` (`editor.ts`). Three

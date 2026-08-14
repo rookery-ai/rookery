@@ -225,3 +225,21 @@
    a read-only note must never show the drag affordance at all, matching the
    pointerdown bail in kbImage.ts. */
 .note-editor-content .tiptap[contenteditable="true"] .kb-image:hover .kb-image-handle { opacity: 1; }
+
+/* Block alignment (nodes/align.ts). `text-align` is set explicitly rather than
+   relying on the browser's legacy mapping of the HTML `align` attribute — that
+   mapping still works, but leaning on a deprecated UA rule for the whole
+   feature's visible behaviour is not a foundation. */
+.note-editor-content .tiptap .kb-align[align="center"] { text-align: center; }
+.note-editor-content .tiptap .kb-align[align="right"] { text-align: right; }
+.note-editor-content .tiptap .kb-align[align="left"] { text-align: left; }
+/* Without this a "centred" list renders its text centred and its bullets still
+   pinned to the left margin, which reads as a bug rather than a layout. Scoped
+   inside .kb-align, so ordinary lists are untouched. */
+.note-editor-content .tiptap .kb-align[align="center"] ul,
+.note-editor-content .tiptap .kb-align[align="center"] ol,
+.note-editor-content .tiptap .kb-align[align="right"] ul,
+.note-editor-content .tiptap .kb-align[align="right"] ol {
+  list-style-position: inside;
+  padding-left: 0;
+}

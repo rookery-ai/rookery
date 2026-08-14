@@ -103,6 +103,29 @@ The bubble menu's `shouldShow` is `!selection.empty`, and a `NodeSelection` on
 an image is non-empty, so **images get the same three buttons** with no separate
 surface. An image lives in a paragraph, and centring the paragraph centres it.
 
+### A pre-existing defect this design depends on
+
+Building the buttons surfaced one: **every pressed state in `BubbleToolbar` was
+frozen at mount.** `@tiptap/react` v3 changed `useEditor`'s
+`shouldRerenderOnTransaction` to default to **false**, so a component that calls
+`editor.isActive()` in its render body computes it once and never again. Bold,
+Italic, Underline, Strike, Code, both headings, Link, both lists and Quote all
+highlighted according to whatever the state was when the bubble menu appeared.
+Nothing failed — the commands worked; only the indicators lied, which is why it
+was never noticed.
+
+That matters here because the alignment controls were chosen as three direct
+buttons *precisely so the pressed state answers "how is this aligned?"*. Shipping
+them onto a frozen indicator would deliver the control and not the answer.
+
+`BubbleToolbar` now reads its flags through **`useEditorState`** — the v3 idiom,
+which subscribes to the transactions this component depends on and re-renders
+only this subtree, rather than `shouldRerenderOnTransaction: true`, which would
+re-render `WysiwygEditor` (and everything it holds) on every keystroke. The
+regression test toggles **Bold** rather than an alignment button on purpose: it
+is the oldest control in the row, so if this breaks again it breaks for all of
+them.
+
 ### CSS (`editor.css`)
 
 `.kb-align[align="center"]` etc. set `text-align` explicitly rather than relying
@@ -127,7 +150,7 @@ injecting a `<script>` into an export.
 |---|---|
 | `web/ui/src/pages/kb/nodes/align.ts` | new — the node, its serializer, its commands |
 | `web/ui/src/pages/kb/editor.ts` | register `KBAlign` |
-| `web/ui/src/pages/kb/BubbleToolbar.tsx` | three alignment buttons |
+| `web/ui/src/pages/kb/BubbleToolbar.tsx` | three alignment buttons; `useEditorState` for every pressed state |
 | `web/ui/src/pages/kb/editor.css` | `.kb-align` rules |
 | `web/ui/src/pages/kb/corpus.test.ts` | alignment entries in the fidelity corpus |
 
@@ -146,7 +169,10 @@ rather than beside them:
   **updates** the attribute instead of nesting; Left lifts; the round trip
   survives every operation; and a `<div class="x">` is **not** claimed.
 - A toolbar test: the three buttons render, Left is pressed on unaligned text,
-  and clicking Centre produces `align="center"` in the serialized markdown.
+  and clicking Centre produces `align="center"` in the serialized markdown and
+  flips the pressed states.
+- A regression test that toggling **Bold** after mount updates its own pressed
+  state — the frozen-indicator defect above, pinned on the row's oldest control.
 
 ## Not doing
 

@@ -14,6 +14,7 @@ import { KBImage } from "./kbImage";
 import { KBTextColor, KBBgColor } from "./marks/colors";
 import { Callout } from "./nodes/callout";
 import { Toggle, ToggleSummary } from "./nodes/toggle";
+import { KBAlign } from "./nodes/align";
 
 // tiptap-markdown ships types for its own extension but doesn't merge them
 // into @tiptap/core's Storage interface, so `editor.storage.markdown` is
@@ -70,6 +71,7 @@ export function buildExtensions(extra: AnyExtension[] = []): AnyExtension[] {
     Callout,
     ToggleSummary,
     Toggle,
+    KBAlign,
     KBTextColor,
     ...extra,
   ];
