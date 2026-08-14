@@ -1,6 +1,6 @@
 module github.com/rookery-ai/rookery
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/bwmarrin/discordgo v0.29.0
