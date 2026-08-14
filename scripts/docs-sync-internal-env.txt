@@ -7,7 +7,7 @@
 # name. Name-based intuition gets it backwards in both directions:
 #   - Read with os.Getenv(...) in internal/config -> operator-set, PUBLIC,
 #     belongs in README.md's table + the website's configuration.md.
-#     ROOKERY_CLAUDE_BIN sounds like internal infrastructure and is public.
+#     ROOKERY_CODER_BIN sounds like internal infrastructure and is public.
 #   - Assigned INTO extraEnv (or similar) for a subprocess to read -> internal,
 #     add it to this file instead. ROOKERY_KB_TOKEN sounds like configuration
 #     and is internal.
