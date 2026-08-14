@@ -526,7 +526,8 @@ func serveCmd() *cli.Command {
 					// for only those commands (chat stays file-only otherwise).
 					cd = cd.WithAllowedTools(coder.ChatAllowedTools(connBin, kbBin, mcpBin))
 				}
-				sysCtx := prompts.BuildChatSystemPrompt(root, cd.BackendType(), connRefs, connTools, connBin) +
+				sysCtx := prompts.BuildChatSystemPrompt(root, cd.BackendType(), connRefs, connTools, connBin,
+					chatAppsForWorkspace(database, workspaceID)) +
 					prompts.MCPToolsBlock(mcpRefs, mcpTools, cd.BackendType(), mcpBin) +
 					chat.BuildUserContext(database, memStore, workspaceID)
 				result, err := cd.Chat(ctx, workspaceID, history, sysCtx, text)
@@ -1028,4 +1029,21 @@ func healthcheckCmd() *cli.Command {
 			return nil
 		},
 	}
+}
+
+// chatAppsForWorkspace lists a workspace's connected chat platforms for the
+// chat system prompt's platform primer. Mirrors web.Server.chatAppsFor and
+// agentrunner's own resolution; a failure returns nil, because the chat apps
+// are context and a chat that opens without them beats one that refuses to
+// open.
+func chatAppsForWorkspace(database *db.DB, workspaceID string) []prompts.ChatAppInfo {
+	conns, err := database.ListWorkspacePlatformConnections(workspaceID)
+	if err != nil {
+		return nil
+	}
+	platforms := make([]string, 0, len(conns))
+	for _, c := range conns {
+		platforms = append(platforms, c.Platform)
+	}
+	return prompts.ChatAppsForPlatforms(platforms)
 }

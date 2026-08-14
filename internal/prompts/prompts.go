@@ -312,10 +312,15 @@ func productIdentityBlock(surface Surface) string {
 	return sb.String()
 }
 
-func platformContextBlock(chatApps []ChatAppInfo, vaultRoot string) string {
+// platformContextBlock is the platform primer. The SURFACE is a parameter, not
+// a constant, because chat needs this block too — onboarding hands a new owner
+// a chat and invites them to ask what the platform can do — and hardcoding
+// SurfaceAgent would open a chat prompt with "right now you are an AGENT run",
+// which is false and licenses the output-protocol markers.
+func platformContextBlock(surface Surface, chatApps []ChatAppInfo, vaultRoot string) string {
 	var sb strings.Builder
 	sb.WriteString("<platform_context>\n")
-	sb.WriteString(productIdentityBlock(SurfaceAgent))
+	sb.WriteString(productIdentityBlock(surface))
 	sb.WriteString("\nHere is everything you need to know about the platform and how it works.\n\n")
 
 	// ── Knowledge base ───────────────────────────────────────────────────────
@@ -865,7 +870,7 @@ Two things follow, and both shape what you may promise the user:
 	// Uses the shared platform primer so the designer and the implementation/runtime
 	// coder all see the same description of the platform (KB, secrets, chats, reminders,
 	// connected chat apps + commands, output protocol, schedule).
-	sb.WriteString(platformContextBlock(p.ChatApps, ""))
+	sb.WriteString(platformContextBlock(SurfaceAgent, p.ChatApps, ""))
 	if len(p.ConnectedPlatforms) > 0 {
 		sb.WriteString(fmt.Sprintf("<connected_platforms_summary>\nThe user has connected: %s.\n"+
 			"When the user says \"send to Telegram\", \"notify me\", \"post a message\", or similar — they mean: the system will route the agent's output to their connected platform automatically. No bot token, chat ID, or messaging setup is needed or should be mentioned.\n"+
@@ -1094,7 +1099,7 @@ type ImplementationParams struct {
 func (p ImplementationParams) capabilitySpec() string {
 	var sb strings.Builder
 	sb.WriteString(agentPhilosophyBlock(p.BackendType))
-	sb.WriteString(platformContextBlock(p.ChatApps, ""))
+	sb.WriteString(platformContextBlock(SurfaceAgent, p.ChatApps, ""))
 	sb.WriteString(coderCapabilitiesBlock(p.BackendType))
 	sb.WriteString(testingRulesBlock())
 	sb.WriteString(selfVerificationBlock())
@@ -1883,7 +1888,7 @@ func BuildCoderPrompt(p CoderPromptParams) string {
 	// Platform primer (with the concrete vault root at runtime) + how this coder can
 	// act on files (backend-aware). Keeps the prompt coder-agnostic — AGENT.md says
 	// WHAT to do; <coder_capabilities> says HOW.
-	sb.WriteString(platformContextBlock(p.ChatApps, p.VaultRoot))
+	sb.WriteString(platformContextBlock(SurfaceAgent, p.ChatApps, p.VaultRoot))
 	sb.WriteString(coderCapabilitiesBlock(p.BackendType))
 
 	sb.WriteString("<agent_instructions>\n")
@@ -2088,13 +2093,26 @@ User input: %s`, nowStr, timezone, input)
 // write_file/edit_file/list_dir/search_files/glob function calls executed by the host. The
 // tool set is intentionally file-only in both cases — the chat can read, create, and edit
 // notes, but cannot delete, rename, or run shell commands (no web_search/run_script here).
-func BuildChatSystemPrompt(vaultRoot, backendType string, conns []ConnectionRef, connToolNames []string, connectorBin string) string {
+func BuildChatSystemPrompt(vaultRoot, backendType string, conns []ConnectionRef, connToolNames []string, connectorBin string, chatApps []ChatAppInfo) string {
 	var sb strings.Builder
 	mappedBackend := MapCoderBackend(backendType)
 	// Chat used to open straight into "you are a helpful assistant" with no
 	// product context at all, so a model asked what platform it was inferred the
 	// name from the filesystem path and recited that path to the user.
-	sb.WriteString(productIdentityBlock(SurfaceChat))
+	//
+	// productIdentityBlock alone was not enough once onboarding started handing a
+	// new owner a chat and inviting them to ask what the platform can do: it names
+	// the knowledge base, agents, skills, reminders and connections, and says
+	// nothing about secrets, MCP servers, providers, coders or chat apps. The full
+	// platform primer is injected instead — the same block the designer and
+	// runtime prompts use, so chat inherits platform changes rather than growing a
+	// second description that drifts. It carries the CHAT surface, so it keeps
+	// this surface's own statement of what chat cannot do.
+	//
+	// In the system prompt rather than per-turn context: it is identical across
+	// turns and therefore cacheable, and chat is the highest-frequency coder
+	// surface there is.
+	sb.WriteString(platformContextBlock(SurfaceChat, chatApps, vaultRoot))
 	sb.WriteString("\n")
 	if mappedBackend == BackendToolCalling {
 		sb.WriteString(fmt.Sprintf(`Your working directory
@@ -2242,7 +2260,7 @@ NEVER do any of the following — no exceptions:
 </constraints>
 
 `)
-	sb.WriteString(platformContextBlock(p.ChatApps, ""))
+	sb.WriteString(platformContextBlock(SurfaceAgent, p.ChatApps, ""))
 
 	sb.WriteString(`<skill_format>
 A skill folder looks like:

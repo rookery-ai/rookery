@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn, formatShortDate, timeAgo } from "@/lib/utils";
 import { useChats, useCreateChat } from "@/lib/chats";
 import { ChatWindow } from "./ChatWindow";
+import { EXPLORE_INTRO } from "./introPrompt";
 
 function ChatsEmptyState() {
   return (
@@ -86,7 +87,16 @@ export default function ChatsPage() {
         // at a chat (clicking the list, a ⌘K search hit, a deep link) means the
         // user came to type. An earlier version withheld it while merely
         // browsing history; that distinction was dropped deliberately.
-        <ChatWindow chatId={selected} key={selected} autoFocus />
+        <ChatWindow
+          chatId={selected}
+          key={selected}
+          autoFocus
+          // ?intro=1 is how the setup wizard hands a brand-new owner a chat
+          // that starts itself. ChatWindow only sends when the chat has no
+          // history, so the parameter surviving in the URL is harmless.
+          initialText={params.get("intro") === "1" ? EXPLORE_INTRO : undefined}
+          autoSend={params.get("intro") === "1"}
+        />
       ) : (
         <ChatsEmptyState />
       )}
