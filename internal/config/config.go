@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,13 @@ const (
 	ModeSlim = "slim"
 )
 
+// dbFileName is the database's name inside the data dir. It lives in one place
+// because it used to live in two — defaults() and applyEnv() — which is how the
+// yaml path came to relocate everything except the database.
+const dbFileName = "rookery.db"
+
+func dbPathFor(dataDir string) string { return filepath.Join(dataDir, dbFileName) }
+
 type Config struct {
 	Server   ServerConfig   `yaml:"server"`
 	Database DatabaseConfig `yaml:"database"`
@@ -27,6 +35,15 @@ type Config struct {
 	Coder    CoderConfig    `yaml:"coder"`
 	Sandbox  SandboxConfig  `yaml:"sandbox"`
 	Chat     ChatConfig     `yaml:"chat"`
+
+	// Warnings are resolution problems worth telling the operator about that are
+	// not bad enough to refuse to start. `yaml:"-"` because this is an output of
+	// loading, never an input to it.
+	//
+	// Load emits these itself rather than leaving it to its callers: there are
+	// four load sites today and a fifth would silently not warn — which is the
+	// same drift between two copies that produced the bug this field reports.
+	Warnings []string `yaml:"-"`
 }
 
 type ServerConfig struct {
@@ -76,13 +93,83 @@ func Load(path string) (*Config, error) {
 			if err := yaml.Unmarshal(data, cfg); err != nil {
 				return nil, fmt.Errorf("parse config: %w", err)
 			}
+			// A relocated data dir must carry the database with it. Only
+			// applyEnv ever recomputed the path, so ROOKERY_DATA_DIR moved the
+			// database while the config field mirroring it did not — leaving the
+			// vaults, claude-homes, backups and both keys in the new location and
+			// the database in the old one. The new dir then generated its own
+			// system.key, so everything the old database holds under the previous
+			// key — master passwords, OAuth tokens, bot tokens — silently stopped
+			// decrypting, with a server that still booted and still reported ok.
+			//
+			// The file is parsed a SECOND time into a zero-valued Config to learn
+			// which keys it actually set. Comparing the merged result against the
+			// defaults cannot tell "unset" from "the user typed the default", and
+			// getting that backwards would override a database path someone chose
+			// deliberately.
+			var fileCfg Config
+			if err := yaml.Unmarshal(data, &fileCfg); err != nil {
+				return nil, fmt.Errorf("parse config: %w", err)
+			}
+			if fileCfg.Data.Dir != "" && fileCfg.Database.Path == "" {
+				cfg.Database.Path = dbPathFor(cfg.Data.Dir)
+			}
 		}
 	}
 
 	if err := applyEnv(cfg); err != nil {
 		return nil, err
 	}
+	cfg.Warnings = append(cfg.Warnings, strandedDatabaseWarning(cfg.Database.Path)...)
+	for _, w := range cfg.Warnings {
+		slog.Warn("config: " + w)
+	}
 	return cfg, nil
+}
+
+// strandedDatabaseWarning reports a database left behind at the default location
+// by a relocation.
+//
+// An install that relocated before this was fixed has its database at the old
+// default. Pointing at the new path silently would find nothing, SQLite would
+// create an empty database, and the data would look gone — the same boots-green-
+// but-empty failure the derivation above exists to remove, just moved.
+//
+// A warning rather than a refusal to start: a legitimate fresh install can have
+// an unrelated ~/.rookery, and dying on that would be worse than the case being
+// reported.
+//
+// The remediation wording is load-bearing and was wrong once. "Move the database
+// to the new path" and "set database.path back to the old one" both LOOK correct
+// and both reproduce the very failure this warns about, because
+// secrets.SystemKey reads <dataDir>/system.key and never follows Database.Path:
+// under the first the database arrives beside a different key, under the second
+// the data dir — and therefore the key — is still the new one. Only moving the
+// whole directory, or not relocating, keeps a database with its key.
+func strandedDatabaseWarning(resolved string) []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	legacy := dbPathFor(filepath.Join(home, ".rookery"))
+	if resolved == legacy {
+		return nil
+	}
+	if _, err := os.Stat(resolved); err == nil || !os.IsNotExist(err) {
+		return nil // in place, or unreadable for a reason worth its own error
+	}
+	if _, err := os.Stat(legacy); err != nil {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"database %s does not exist, but one is still at the default location %s — "+
+			"this install will start with an EMPTY database. Move the whole data "+
+			"directory (database, system.key, session.key, vaults/, claude-homes/, "+
+			"backups/) to the new location, or point data.dir back at the old one. "+
+			"Moving the database alone is NOT enough: the system key is resolved from "+
+			"the data dir (<data_dir>/system.key), so a database that arrives without "+
+			"its key can no longer decrypt any stored master password, OAuth token or "+
+			"bot token", resolved, legacy)}
 }
 
 func defaults() *Config {
@@ -94,7 +181,7 @@ func defaults() *Config {
 			Port: 8080,
 		},
 		Database: DatabaseConfig{
-			Path: filepath.Join(dataDir, "rookery.db"),
+			Path: dbPathFor(dataDir),
 		},
 		Data: DataConfig{
 			Dir: dataDir,
@@ -124,8 +211,11 @@ func applyEnv(cfg *Config) error {
 		fmt.Sscanf(v, "%d", &cfg.Server.Port)
 	}
 	if v := os.Getenv("ROOKERY_DATA_DIR"); v != "" {
+		// Deliberately overrides an explicit database.path from the file too:
+		// env-over-file is the ordinary precedence here and this variable is
+		// documented as relocating the database as well.
 		cfg.Data.Dir = v
-		cfg.Database.Path = filepath.Join(v, "rookery.db")
+		cfg.Database.Path = dbPathFor(v)
 	}
 	if v := os.Getenv("ROOKERY_SESSION_KEY"); v != "" {
 		cfg.Server.SessionKey = v
