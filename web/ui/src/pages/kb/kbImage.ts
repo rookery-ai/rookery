@@ -85,9 +85,18 @@ export const KBImage = Image.extend({
         // on the SAVE path, which checkFidelity's load-time gate can't catch.
         serialize(state: any, node: any) {
           const label = joinAltWidth(node.attrs.alt || "", node.attrs.width ?? null);
-          const src = String(node.attrs.src ?? "").replace(/[()]/g, "\\$&");
+          // The backslash MUST be in both character classes, and it must be
+          // there because it is the escape character itself — escaping `(` with
+          // a backslash while leaving literal backslashes alone makes the
+          // scheme non-injective. A src ending in one emitted `![pic](a\)`,
+          // where the `\)` reads as an escaped paren, the destination never
+          // terminates, and the image node was LOST on the next load. Same for
+          // a title: `"cap\"` never closes its quote. checkFidelity is a
+          // load-time gate and cannot catch this, because the damage is done by
+          // the save that precedes the load.
+          const src = String(node.attrs.src ?? "").replace(/[\\()]/g, "\\$&");
           const title = node.attrs.title
-            ? ` "${String(node.attrs.title).replace(/"/g, '\\"')}"`
+            ? ` "${String(node.attrs.title).replace(/[\\"]/g, "\\$&")}"`
             : "";
           state.write(`![${state.esc(label)}](${src}${title})`);
           // This node is BLOCK-level (@tiptap/extension-image's default
