@@ -1,0 +1,19 @@
+-- Release workspaces from the 120-second cap the settings form wrote for them.
+--
+-- coder_timeout_s = 0 means "follow the server default". The SPA's coder form
+-- initialised its field to a hardcoded 120, rendered a stored 0 as 120, and
+-- posted the field on every save — so merely opening coder settings and
+-- pressing Save silently converted a workspace from following the default to a
+-- hard two-minute cap. The same value went in through the setup wizard, which
+-- reused the form. 120 was therefore never a number the interface let anyone
+-- choose deliberately; it is the fingerprint of that bug.
+--
+-- Two minutes is long enough to look intentional and short enough to cut an
+-- agent build off mid-repair, which is exactly why it went unnoticed. Leaving
+-- these rows alone would keep every affected workspace capped forever, since
+-- the form no longer offers to rewrite the value.
+--
+-- Only the exact 120 is touched: any other number was typed by a person. A
+-- workspace that genuinely wants 120 can set it again — the field is still
+-- there on the settings page, now with the default as its placeholder.
+UPDATE workspaces SET coder_timeout_s = 0 WHERE coder_timeout_s = 120;

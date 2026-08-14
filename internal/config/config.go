@@ -188,8 +188,16 @@ func defaults() *Config {
 		},
 		Coder: CoderConfig{
 			ClaudeBin: "claude",
-			Timeout:   20 * time.Minute,
-			Mode:      ModeFull,
+			// An agent BUILD is the long pole, not a chat turn: the coder writes
+			// files, runs them against live services, reads the failures and
+			// fixes them, sometimes over dozens of tool calls. 20 minutes cut
+			// real builds off mid-repair, and the user saw a timeout rather than
+			// an agent. Nothing between the browser and here imposes an earlier
+			// deadline — the build is detached onto context.Background() and the
+			// server sets no write timeout — so this value is the one that
+			// decides.
+			Timeout: 30 * time.Minute,
+			Mode:    ModeFull,
 		},
 		Sandbox: SandboxConfig{
 			Enabled:         true,

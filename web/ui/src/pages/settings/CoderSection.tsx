@@ -50,6 +50,8 @@ export function CoderSection({
   saveOverride,
   hideTest = false,
   showApiKeyInput = false,
+  hideTimeout = false,
+  defaultTimeoutS = 1800,
   coderMode = "full",
 }: {
   coder: CoderConfig | undefined;
@@ -72,6 +74,13 @@ export function CoderSection({
   saveOverride?: UseMutationResult<any, any, SaveCoderInput>;
   hideTest?: boolean;
   showApiKeyInput?: boolean;
+  // Wizard-mode: hide the timeout field entirely. A new owner cannot judge the
+  // number, and showing it was worse than not — the value on screen was this
+  // component's own hardcoded 120, which every save then wrote to the database.
+  hideTimeout?: boolean;
+  // The server's effective default, shown as the placeholder so an empty field
+  // states what it will do rather than looking unset.
+  defaultTimeoutS?: number;
   // Build policy from /api/v1/settings: a "slim" build ships no CLI coder
   // binary at all, so the local engine is not an option the user can pick.
   // Distinct from detectedCoders being empty, which only means none is
@@ -82,7 +91,14 @@ export function CoderSection({
     coderMode === "slim" ? "api" : "local",
   );
   const [bin, setBin] = useState("");
-  const [timeoutS, setTimeoutS] = useState(120);
+  // A STRING, and empty means "follow the server default" — not a number with a
+  // hardcoded fallback. It was `useState(120)`, loaded as `coder.timeout_s || 120`
+  // and posted on every save, so a stored 0 (which is exactly how the column
+  // spells "use the default") rendered as 120 and saved back as 120. Merely
+  // opening this page and pressing Save converted a workspace from following the
+  // 30-minute default to a hard 2-minute cap — long enough to look deliberate,
+  // short enough to cut agent builds off mid-repair.
+  const [timeoutS, setTimeoutS] = useState("");
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
   const [baseURL, setBaseURL] = useState("");
@@ -104,7 +120,7 @@ export function CoderSection({
     if (!coder) return;
     setEngine(coder.kind === "api" || coderMode === "slim" ? "api" : "local");
     setBin(coder.bin);
-    setTimeoutS(coder.timeout_s || 120);
+    setTimeoutS(coder.timeout_s > 0 ? String(coder.timeout_s) : "");
     setProvider(coder.provider);
     setModel(coder.model);
     const entry = catalog.find((c) => c.name === coder.provider);
@@ -158,7 +174,9 @@ export function CoderSection({
       await save.mutateAsync({
         kind: engine,
         bin: engine === "local" ? bin : "",
-        timeout_s: timeoutS,
+        // 0 means "follow the server default" on the write path, so an empty
+        // field posts 0 rather than a number this component invented.
+        timeout_s: timeoutS.trim() === "" ? 0 : Number(timeoutS),
         provider: engine === "api" ? provider : "",
         // Sent for BOTH engines: a local CLI coder takes a model too, and
         // blanking it here is half of why OpenCode could not be configured.
@@ -392,15 +410,30 @@ export function CoderSection({
           </>
         )}
 
-        <div className="space-y-1.5">
-          <Label htmlFor="coder_timeout">Timeout (seconds)</Label>
-          <Input
-            id="coder_timeout"
-            type="number"
-            value={timeoutS}
-            onChange={(e) => setTimeoutS(Number(e.target.value))}
-          />
-        </div>
+        {/* Hidden during setup: a brand-new owner has no way to judge this
+            number, and the one they were shown (120) was actively harmful. The
+            field stays here on the settings page, where someone changing it has
+            context for why. */}
+        {!hideTimeout && (
+          <div className="space-y-1.5">
+            <Label htmlFor="coder_timeout">Timeout (seconds)</Label>
+            <Input
+              id="coder_timeout"
+              type="number"
+              min={1}
+              value={timeoutS}
+              placeholder={String(defaultTimeoutS)}
+              onChange={(e) => setTimeoutS(e.target.value)}
+            />
+            <p className="text-xs text-muted-2">
+              How long one coder call may run. Leave empty to follow the default
+              of {defaultTimeoutS} seconds. Building an agent is the longest
+              call — the coder writes files, runs them against live services and
+              fixes what fails — so a short timeout here shows up as a failed
+              build rather than a slow one.
+            </p>
+          </div>
+        )}
 
         <div className="flex items-center gap-3">
           <Button type="submit" disabled={save.isPending}>

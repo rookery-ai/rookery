@@ -1604,6 +1604,35 @@ guard mechanism moved to the JSON API now that the template routes are gone.
 
 ### Per-workspace coder
 
+**`coder_timeout_s = 0` means "follow the server default", and a form that cannot express
+zero will destroy that.** The default is **30 minutes** (`config.defaults()` and
+`coder.DefaultTimeout`, pinned equal by tests in both packages — two fallbacks reached by
+different construction paths must not disagree). The settings form used to initialise its
+field to a hardcoded `120`, render a stored `0` as `120`, and post the field on **every**
+save — so merely opening coder settings and pressing Save converted a workspace from
+following the default to a hard two-minute cap, and the setup wizard, which reuses the same
+component, wrote that cap into every workspace ever created. Two minutes is long enough to
+look deliberate and short enough to cut an agent build off mid-repair, which is why it went
+unnoticed: the symptom is a *failed build*, not a visibly wrong setting. The field is now a
+**string** whose empty value means unset, renders the effective default as its placeholder
+(`default_timeout_s`, served alongside `timeout_s` so the SPA never has to invent a number),
+and is **hidden entirely in the wizard** (`hideTimeout`). Migration 013 clears exactly
+`coder_timeout_s = 120` — the fingerprint of the bug, never a value the interface let anyone
+choose — and its down migration is deliberately empty.
+
+**A timed-out build is retried once, and only below `coder.RetryTimeoutBelow` (10 min).**
+A build is the longest thing the coder does, so under a small timeout it is cut off
+mid-repair often enough that one retry converts a routine failure into a success; at the
+30-minute default the reasoning inverts — a timeout there means something is genuinely
+wrong, and a second 30 minutes occupies the coder and delays the report for nothing. The
+retry lives in `agentdesigner.runGeneration`, branches on the typed `coder.ErrTimeout`
+(whose message is byte-identical to the old `fmt.Errorf` text, because other sites still
+substring-match `"timed out"`), and is **not** attempted when `genCtx` is already cancelled
+— `Cancel()` cancels that context, and a cancelled build must stay cancelled rather than
+quietly starting again. Nothing between the browser and the coder imposes an earlier
+deadline: the build is detached onto `context.Background()` and the server sets no write
+timeout, so the configured value is the one that decides.
+
 Each workspace inlines its own coder config on the `workspaces` row (`coder_kind` `local`/`api`,
 `coder_bin`, `coder_timeout_s`, `coder_backend_type`, and for `api`:
 `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`). `coder.ForWorkspace(w, …)`

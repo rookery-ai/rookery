@@ -1,0 +1,6 @@
+-- Deliberately empty.
+--
+-- The up migration cleared a value the interface wrote by accident; restoring
+-- it would mean re-capping every workspace at two minutes, and there is no way
+-- to tell a row this migration changed from one that was already 0. Reverting
+-- data loss is not possible here, and reverting the fix is not desirable.
