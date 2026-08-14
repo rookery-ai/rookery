@@ -586,7 +586,9 @@ function TreeRow({
     e.stopPropagation();
     const target = hintFor(e);
     setHint(null);
-    if (!dragged || !target) return;
+    // `dragged` is already known non-null here — the !dragged branch above
+    // returns — so only the target needs checking.
+    if (!target) return;
     e.preventDefault();
     if (target === "into") onMoveInto(dragged, node);
     else onReorder(dragged, node.name, target);
