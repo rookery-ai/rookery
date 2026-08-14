@@ -254,11 +254,28 @@ func writeAndHash(target string, r io.Reader) (string, int64, error) {
 	if err != nil {
 		return "", 0, fmt.Errorf("create %s: %w", target, err)
 	}
-	defer f.Close()
+	return writeHashClose(target, f, r)
+}
+
+// writeHashClose copies r into w, hashing as it goes, and CHECKS the close.
+//
+// The close check is the point of this being its own function. A deferred,
+// unchecked Close discards the only error a buffered or network-backed
+// filesystem has to report a write that never reached stable storage — and the
+// SHA-256 here is computed from the STREAM, never read back off disk, so a
+// truncated file still matches its manifest entry. The restore would then
+// verify clean and hand back a corrupt database. A write error still wins over
+// a close error: reporting "close" for a disk that filled mid-copy points
+// triage at the wrong thing.
+func writeHashClose(name string, w io.WriteCloser, r io.Reader) (string, int64, error) {
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h), r)
+	n, err := io.Copy(io.MultiWriter(w, h), r)
 	if err != nil {
-		return "", 0, fmt.Errorf("write %s: %w", target, err)
+		w.Close()
+		return "", 0, fmt.Errorf("write %s: %w", name, err)
+	}
+	if err := w.Close(); err != nil {
+		return "", 0, fmt.Errorf("close %s: %w", name, err)
 	}
 	return hex.EncodeToString(h.Sum(nil)), n, nil
 }
