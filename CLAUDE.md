@@ -291,6 +291,26 @@ longer reach a user.
 | `ROOKERY_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |
 | `ROOKERY_CODER_MODE` | `full` | `slim` removes the local CLI coder kind entirely |
 
+**Relocating the data dir must carry the database with it, and the config file
+used not to.** `defaults()` computes `Database.Path` from the data dir, but only
+`applyEnv` recomputed it — so `ROOKERY_DATA_DIR` moved everything while a
+`config.yaml` `data.dir` moved the vaults, claude-homes, backups and *both keys*
+and left the database at `~/.rookery/rookery.db`. The relocated dir then
+generated its own `system.key`, so every stored master password, OAuth token and
+bot token in that database — encrypted under the previous key — silently stopped
+decrypting, on a server that still booted and still reported `ok`. `Load` now
+derives the path after the yaml merge, deciding "did the file set this?" by
+parsing it a **second time into a zero-valued `Config`**: comparing the merged
+result against the defaults cannot tell *unset* from *the user typed the default*,
+and getting that backwards would override a `database.path` chosen deliberately.
+An explicit `database.path` still wins over `data.dir`; `ROOKERY_DATA_DIR` still
+wins over both, because env-over-file is the ordinary precedence and the variable
+is documented as relocating the database too. `Config.Warnings` reports a database
+left stranded at the old default (a warning, not a refusal — a fresh install may
+have an unrelated `~/.rookery`), and `Load` logs it itself rather than leaving it
+to its four call sites, since a fifth that forgot would be the same drift-between-
+two-copies that caused the bug.
+
 `ROOKERY_CODER_MODE` is **policy** ("this build has no CLI coder"), deliberately
 distinct from **detection** (`coder.DetectInstalled` — "none is on PATH right
 now"). Slim is enforced at four layers: config parsing (an unknown value is a
