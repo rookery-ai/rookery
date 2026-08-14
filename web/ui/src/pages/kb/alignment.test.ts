@@ -43,6 +43,29 @@ test("clearBlockAlign lifts the wrapper back out", () => {
   editor.destroy();
 });
 
+// The defect the columns work surfaced, fixed here too: commands.lift() lifts
+// the block range around the SELECTION, so a wrapper holding two paragraphs
+// would lose the first and keep the second aligned — a half-cleared block that
+// looks like a bug and is one.
+test("clearBlockAlign lifts EVERY block out, not just the caret's", () => {
+  const editor = makeEditor('<div align="center">\n\nOne\n\nTwo\n\n</div>');
+  editor.commands.selectAll();
+  editor.commands.clearBlockAlign();
+  expect(md(editor)).toBe("One\n\nTwo");
+  editor.destroy();
+});
+
+// A caret in the block with nothing selected is the ordinary way someone
+// reaches for "un-align this", and nodesBetween never visits the ancestor over
+// an empty selection.
+test("clearBlockAlign works from a bare caret inside the block", () => {
+  const editor = makeEditor('<div align="right">\n\nAlpha\n\nBeta\n\n</div>');
+  editor.commands.setTextSelection(3);
+  expect(editor.commands.clearBlockAlign()).toBe(true);
+  expect(md(editor)).toBe("Alpha\n\nBeta");
+  editor.destroy();
+});
+
 test("clearBlockAlign is a no-op on an unaligned block", () => {
   const editor = makeEditor("Hello");
   editor.commands.selectAll();

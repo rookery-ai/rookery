@@ -547,8 +547,9 @@ EVERY div spelling previously lost its wrapper entirely and had its alignment di
 actually aligned; without it every styled div in the vault would be wrapped in an alignment
 nobody asked for. `setBlockAlign` tries `updateAttributes` BEFORE `wrapIn` (wrapping twice
 serializes as two nested divs that read as one) and deliberately does not gate on
-`editor.isActive`, which reports false for an AllSelection; `clearBlockAlign` falls back to a
-range scan for the same reason. Alignment lives in the fidelity corpus, not beside it.
+`editor.isActive`, which reports false for an AllSelection; `clearBlockAlign` builds its lift range over the
+WHOLE node's content rather than calling `commands.lift(name)`, which lifts the range around the
+SELECTION and so takes the first block out of a two-block wrapper and leaves the second aligned. Alignment lives in the fidelity corpus, not beside it.
 
 **In `@tiptap/react` v3, `editor.isActive()` read during render is FROZEN.**
 `useEditor`'s `shouldRerenderOnTransaction` now defaults to **false**, so a component computing

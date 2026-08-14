@@ -91,7 +91,15 @@ KBAlign: { name: "kbAlign", group: "block", content: "block+", defining: true }
 
 `setBlockAlign(align)` wraps the current block, or — when already inside a
 wrapper — **updates the attribute** rather than nesting a second one, which
-would serialize as two divs and read as one. `clearBlockAlign()` lifts out.
+would serialize as two divs and read as one.
+
+`clearBlockAlign()` builds its lift range over the **whole node's content**
+rather than calling `commands.lift(name)`. That command lifts the range around
+the *selection*, so a wrapper holding two paragraphs would lose the first and
+keep the second aligned — a half-cleared block that looks like a bug and is one.
+It also walks the ancestor depths, because `nodesBetween` never visits the
+ancestor over an empty selection, and a bare caret in the block is the ordinary
+way someone reaches for "un-align this".
 
 Three buttons join `BubbleToolbar` in their own group after the lists: Left,
 Centre, Right. Direct buttons rather than a `ColorSwatches`-style sub-panel,

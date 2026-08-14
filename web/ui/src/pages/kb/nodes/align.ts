@@ -1,4 +1,5 @@
 import { Node, mergeAttributes } from "@tiptap/core";
+import { liftTarget } from "@tiptap/pm/transform";
 
 export const ALIGNMENTS = ["left", "center", "right"] as const;
 export type Alignment = (typeof ALIGNMENTS)[number];
@@ -113,28 +114,43 @@ export const KBAlign = Node.create({
           if (commands.updateAttributes(this.name, { align })) return true;
           return commands.wrapIn(this.name, { align });
         },
+      // Lifts EVERY block out of the wrapper, not just the one the caret is in.
+      //
+      // `commands.lift(name)` is the obvious implementation and is wrong: it
+      // lifts the block range around the SELECTION, so a wrapper holding two
+      // paragraphs loses the first and keeps the second aligned — a half-cleared
+      // block that looks like a bug and is one. The range is therefore built
+      // explicitly over the whole node's content.
+      //
+      // The ancestor walk covers a bare caret: `nodesBetween` never visits the
+      // ancestor over an empty selection, and a caret sitting in the block is
+      // the ordinary way someone reaches for "un-align this".
       clearBlockAlign:
         () =>
-        ({ state, commands, chain }) => {
-          // The ordinary case: a text selection sitting inside the wrapper.
-          // `lift` returns false WITHOUT dispatching when it does not apply, so
-          // trying it first costs nothing.
-          if (commands.lift(this.name)) return true;
-          // Ctrl+A produces an AllSelection whose $from sits at doc depth 0, so
-          // `lift` finds no ancestor to lift out of and select-all-then-left
-          // would silently do nothing. Scan the selected range instead and
-          // reposition into the wrapper first.
-          let pos: number | null = null;
-          state.doc.nodesBetween(state.selection.from, state.selection.to, (node, p) => {
-            if (pos === null && node.type.name === this.name) pos = p;
+        ({ state, tr, dispatch }) => {
+          const type = state.schema.nodes[this.name];
+          if (!type) return false;
+          let found: { pos: number; size: number } | null = null;
+          state.doc.nodesBetween(state.selection.from, state.selection.to, (node, pos) => {
+            if (!found && node.type === type) found = { pos, size: node.content.size };
           });
-          if (pos === null) return false;
-          // +2: past the wrapper's own opening token and into its first child's
-          // content, which is where a text selection would have been.
-          return chain()
-            .setTextSelection(pos + 2)
-            .lift(this.name)
-            .run();
+          if (!found) {
+            const $from = state.selection.$from;
+            for (let d = $from.depth; d > 0; d--) {
+              if ($from.node(d).type === type) {
+                found = { pos: $from.before(d), size: $from.node(d).content.size };
+                break;
+              }
+            }
+          }
+          if (!found) return false;
+          const { pos, size } = found;
+          const range = tr.doc.resolve(pos + 1).blockRange(tr.doc.resolve(pos + 1 + size));
+          if (!range) return false;
+          const target = liftTarget(range);
+          if (target == null) return false;
+          if (dispatch) tr.lift(range, target);
+          return true;
         },
     };
   },
