@@ -66,6 +66,8 @@ func main() {
 			mcpCmd(),
 			kbCmd(),
 			backupCommand(),
+			upgradeCmd(),
+			uninstallCmd(),
 			versionCmd(),
 			healthcheckCmd(),
 		},
@@ -143,7 +145,7 @@ func serveCmd() *cli.Command {
 			}
 
 			homesDir := filepath.Join(cfg.Data.Dir, "claude-homes")
-			coderSvc := coder.New(cfg.Coder.ClaudeBin, cfg.Coder.Timeout, homesDir, cfg.Data.Dir).
+			coderSvc := coder.New(cfg.Coder.Bin, cfg.Coder.Timeout, homesDir, cfg.Data.Dir).
 				WithSandbox(cfg.Sandbox.Enabled)
 			if cfg.Sandbox.Enabled && !sandbox.Supported() {
 				slog.Warn("sandbox enabled but kernel has no Landlock support; falling back to detective vault guard")
@@ -185,7 +187,7 @@ func serveCmd() *cli.Command {
 					return coderSvc
 				}
 				return coder.ForWorkspace(w, homesDir, cfg.Data.Dir, vlt,
-					cfg.Coder.ClaudeBin, cfg.Coder.Timeout, cfg.Sandbox.Enabled,
+					cfg.Coder.Bin, cfg.Coder.Timeout, cfg.Sandbox.Enabled,
 					cfg.Coder.Mode == config.ModeFull).
 					WithSecretsLookup(secretsLookup)
 			}
@@ -379,7 +381,7 @@ func serveCmd() *cli.Command {
 						return nil
 					}
 					return coder.ForWorkspace(w, homesDir, cfg.Data.Dir, vlt,
-						cfg.Coder.ClaudeBin, cfg.Coder.Timeout, cfg.Sandbox.Enabled,
+						cfg.Coder.Bin, cfg.Coder.Timeout, cfg.Sandbox.Enabled,
 						cfg.Coder.Mode == config.ModeFull).
 						WithSecretsLookup(secretsLookup)
 				})

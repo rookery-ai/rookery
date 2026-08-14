@@ -450,7 +450,7 @@ def _readme_env_table_selftest() -> None:
     # Red case #1 (this is the point of the change — pin the failing case,
     # not just the passing one): a public variable whose table row was
     # removed must be caught. This is literally what today's real README
-    # looked like before the ROOKERY_CLAUDE_BIN row was added — the exact
+    # looked like before the ROOKERY_CODER_BIN row was added — the exact
     # gap this assertion was written to close.
     text_row_removed = (
         "| Variable | Default | What it does |\n"
@@ -458,9 +458,9 @@ def _readme_env_table_selftest() -> None:
         "| `ROOKERY_HOST` | `0.0.0.0` | bind address |\n"
     )
     names = _readme_table_names_from_text(text_row_removed)
-    expected = {"ROOKERY_HOST", "ROOKERY_CLAUDE_BIN"}
+    expected = {"ROOKERY_HOST", "ROOKERY_CODER_BIN"}
     missing = expected - names
-    assert missing == {"ROOKERY_CLAUDE_BIN"}, \
+    assert missing == {"ROOKERY_CODER_BIN"}, \
         "a public variable missing its table row must be caught"
 
     # Red case #2, the reverse direction: a table row naming a variable the
@@ -481,7 +481,7 @@ def _readme_env_table_selftest() -> None:
         "| Variable | Default | What it does |\n"
         "|---|---|---|\n"
         "| `ROOKERY_HOST` | `0.0.0.0` | bind address |\n"
-        "| `ROOKERY_CLAUDE_BIN` | detected | override the path to a coder binary |\n"
+        "| `ROOKERY_CODER_BIN` | detected | override the path to a coder binary |\n"
     )
     names3 = _readme_table_names_from_text(text_complete)
     assert expected - names3 == set() and names3 - expected == set(), \
@@ -490,7 +490,7 @@ def _readme_env_table_selftest() -> None:
     # A ROOKERY_ mention outside the table (no leading `|`) must not count as
     # documentation — this is the whole reason check_env's whole-file scan
     # was not reused as-is for the README.
-    prose_only = "See `ROOKERY_CLAUDE_BIN` above for details on overriding the coder binary.\n"
+    prose_only = "See `ROOKERY_CODER_BIN` above for details on overriding the coder binary.\n"
     assert _readme_table_names_from_text(prose_only) == set(), \
         "a prose mention outside the table must not be treated as a documented row"
 

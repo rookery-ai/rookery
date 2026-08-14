@@ -218,6 +218,43 @@ goreleaser archive for the detected platform, verify it against the release's
 off to `rookery onboard`. Configuration lives in Go, not in two shell dialects.
 A Homebrew tap and Windows service registration remain deferred.
 
+**Everything after first install is a Go subcommand, not a third and fourth shell
+script.** `rookery upgrade` and `rookery uninstall` follow the rule above: the
+installers' job is identical in both dialects, but removal has to decide what a
+package manager owns, what a service manager owns, and what is unrecoverable user
+data — and `install.ps1` cannot even be syntax-checked on the development host, so
+two more PowerShell files would double a surface nothing verifies. Four things are
+load-bearing:
+
+- **`onboard.OwnerOf` gates both commands.** `rm /usr/bin/rookery` under a deb or
+  rpm leaves the package database claiming a file that is gone, repairable only by
+  a `reinstall` nobody thinks to run, because from the outside the uninstall looked
+  fine. So both commands ask `rpm -qf` / `dpkg -S` first and hand over the package
+  manager's own command instead. Its failure policy is deliberately the opposite of
+  the one that feels safe: **an inconclusive probe reports NOT managed**, because
+  assuming managed would make uninstall impossible for archive and `install.sh`
+  users — the majority, and the only ones with no package manager to fall back on.
+  `Runner` is injectable for the same reason `LookPath` is: the hosts this logic is
+  about are not the host it is developed on.
+- **`--purge` asks for the data directory typed back, not `y`.** The risk is
+  deleting a directory the user did not realise was live, and one keystroke cannot
+  distinguish "I read that path" from "I pressed y". The prompt names `system.key`
+  explicitly — the same fact the config data-dir warning must state, for the same
+  reason: it is the one thing here a backup of the database cannot recover.
+- **`upgrade` replaces the binary by rename into the same directory.** Rename is
+  atomic only within a filesystem, and `/tmp` is frequently a different one, so the
+  temporary file is created beside the target. That is also why no rollback copy is
+  kept: the failure this produces already *is* "the old binary is still there". It
+  then reports the version the binary on disk claims, rather than the one it meant
+  to install — an upgrade that silently left the old process serving is the failure
+  worth spending a check on.
+- **`extractBinary` selects the member BY NAME.** The archive arrives over the
+  network and its contents are about to run as the user, so "the first file" or
+  "the biggest one" would be a substitution primitive. `internal/release` is the
+  reference implementation of resolve/name/verify; the two shell installers cannot
+  import it, so `release_test.go` reads them and asserts all three build the same
+  archive name.
+
 **`curl | sh` works — the repository is public and `v0.1.0` is released.** It
 could not before: release assets on a private repo require an authenticated
 request, so an anonymous download returned `404`, not `401`.
@@ -290,6 +327,7 @@ longer reach a user.
 | `ROOKERY_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks; validated at use (`internal/publicurl.Normalize`) and overridden by the instance URL in owner settings |
 | `ROOKERY_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |
 | `ROOKERY_CODER_MODE` | `full` | `slim` removes the local CLI coder kind entirely |
+| `ROOKERY_CODER_BIN` | `claude` | default coder binary for workspaces that have not set `coder_bin` |
 
 **Relocating the data dir must carry the database with it, and the config file
 used not to.** `defaults()` computes `Database.Path` from the data dir, but only
@@ -321,6 +359,18 @@ under the second the data dir — and therefore the key — is still the relocat
 one. Only moving the directory intact, or not relocating, keeps a database with
 its key. `TestStrandedDatabaseWarningSaysToMoveTheWholeDataDir` pins it, because
 a plausible-sounding rewrite is exactly how this regresses.
+
+**`ROOKERY_CODER_BIN` was `ROOKERY_CLAUDE_BIN`** (and `coder.claude_bin` in `config.yaml`,
+`CoderConfig.ClaudeBin` in Go), from when Claude Code was the only supported CLI. It never
+selected Claude — it names the **default** binary a workspace gets when it has not set
+`coder_bin` of its own — and five CLIs are supported now, so the old name described the
+wrong thing. Both retired spellings still work and emit a deprecation through
+`Config.Warnings`; refusing to start would punish an install for following documentation
+that shipped. The yaml alias is resolved against the **second parse** of the file, not the
+merged result, because `defaults()` fills `Bin` — so "did the file set the current key?"
+cannot be asked of the merged value, and a config carrying both keys would otherwise let
+the retired one win. `LegacyClaudeBin` is cleared after `Load` so the binary never has a
+second apparent home.
 
 `ROOKERY_CODER_MODE` is **policy** ("this build has no CLI coder"), deliberately
 distinct from **detection** (`coder.DetectInstalled` — "none is on PATH right

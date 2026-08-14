@@ -26,6 +26,18 @@ const (
 // yaml path came to relocate everything except the database.
 const dbFileName = "rookery.db"
 
+// The retired spellings of the default-coder-binary setting, and what to say
+// about each. Deprecation is a warning rather than a hard error on purpose: the
+// variable is documented and released, so an install that sets it is doing what
+// it was told, and refusing to start would punish following the instructions.
+const (
+	legacyCoderBinEnv = "ROOKERY_CLAUDE_BIN is deprecated and will be removed — " +
+		"use ROOKERY_CODER_BIN. It names the default coder binary, and Rookery has " +
+		"supported five (claude, opencode, codex, gemini, cursor) since the name was chosen."
+	legacyCoderBinKey = "config.yaml: coder.claude_bin is deprecated and will be removed — " +
+		"rename it to coder.coder_bin."
+)
+
 func dbPathFor(dataDir string) string { return filepath.Join(dataDir, dbFileName) }
 
 type Config struct {
@@ -61,9 +73,18 @@ type DataConfig struct {
 }
 
 type CoderConfig struct {
-	ClaudeBin string        `yaml:"claude_bin"` // path to claude binary
-	Timeout   time.Duration `yaml:"timeout"`
-	Mode      string        `yaml:"mode"` // "full" (default) or "slim"; see ModeFull/ModeSlim
+	// Bin is the DEFAULT coder binary — the one a workspace gets when it has
+	// not set `coder_bin` of its own. It was `ClaudeBin`/`claude_bin`/
+	// `ROOKERY_CLAUDE_BIN`, from when Claude Code was the only supported CLI;
+	// five are supported now (claude, opencode, codex, gemini, cursor), so a
+	// name that hardcodes one of them describes the wrong thing.
+	Bin string `yaml:"coder_bin"`
+	// LegacyClaudeBin accepts the retired `claude_bin` key so an existing
+	// config.yaml keeps working. Read and cleared in Load; never used
+	// directly. See legacyCoderBinKey above.
+	LegacyClaudeBin string        `yaml:"claude_bin"`
+	Timeout         time.Duration `yaml:"timeout"`
+	Mode            string        `yaml:"mode"` // "full" (default) or "slim"; see ModeFull/ModeSlim
 }
 
 // SandboxConfig controls the Landlock filesystem confinement applied to every
@@ -114,6 +135,19 @@ func Load(path string) (*Config, error) {
 			if fileCfg.Data.Dir != "" && fileCfg.Database.Path == "" {
 				cfg.Database.Path = dbPathFor(cfg.Data.Dir)
 			}
+			// The retired `claude_bin` key still works. Handled here rather
+			// than in applyEnv because only the second parse can tell whether
+			// the file ALSO set the current key — without that, a config
+			// carrying both would let the legacy spelling win, which is the
+			// wrong way round for a name being migrated away from.
+			if fileCfg.Coder.LegacyClaudeBin != "" && fileCfg.Coder.Bin == "" {
+				cfg.Coder.Bin = fileCfg.Coder.LegacyClaudeBin
+				cfg.Warnings = append(cfg.Warnings, legacyCoderBinKey)
+			}
+			// Cleared unconditionally: the field is a parsing shim, and leaving
+			// it populated would give the binary a second apparent home that
+			// nothing reads.
+			cfg.Coder.LegacyClaudeBin = ""
 		}
 	}
 
@@ -187,7 +221,7 @@ func defaults() *Config {
 			Dir: dataDir,
 		},
 		Coder: CoderConfig{
-			ClaudeBin: "claude",
+			Bin: "claude",
 			// An agent BUILD is the long pole, not a chat turn: the coder writes
 			// files, runs them against live services, reads the failures and
 			// fixes them, sometimes over dozens of tool calls. 20 minutes cut
@@ -228,8 +262,15 @@ func applyEnv(cfg *Config) error {
 	if v := os.Getenv("ROOKERY_SESSION_KEY"); v != "" {
 		cfg.Server.SessionKey = v
 	}
+	// The retired variable still works and says so, rather than being ignored
+	// silently or failing outright. A host that sets both during a migration
+	// gets the new one — the one it is going to keep.
 	if v := os.Getenv("ROOKERY_CLAUDE_BIN"); v != "" {
-		cfg.Coder.ClaudeBin = v
+		cfg.Coder.Bin = v
+		cfg.Warnings = append(cfg.Warnings, legacyCoderBinEnv)
+	}
+	if v := os.Getenv("ROOKERY_CODER_BIN"); v != "" {
+		cfg.Coder.Bin = v
 	}
 	if v := os.Getenv("ROOKERY_SANDBOX"); v != "" {
 		cfg.Sandbox.Enabled = !(v == "0" || strings.EqualFold(v, "false") || strings.EqualFold(v, "off"))
