@@ -140,7 +140,7 @@ func (w *mdWriter) walk(n *html.Node) {
 			return
 		}
 		href := attr(n, "href")
-		if href == "" || strings.HasPrefix(href, "javascript:") {
+		if href == "" || blockedHref(href) {
 			w.emit(text, leading)
 			w.pendingSpace = trailing
 			return
@@ -155,7 +155,14 @@ func (w *mdWriter) walk(n *html.Node) {
 		return
 	case atom.Img:
 		if alt := strings.TrimSpace(attr(n, "alt")); alt != "" {
-			w.emit(fmt.Sprintf("![%s](%s)", alt, attr(n, "src")), false)
+			// A blocked source keeps the alt text as plain prose, matching how
+			// a blocked href keeps its link text: the destination is what is
+			// unsafe, not the words describing it.
+			if src := attr(n, "src"); src == "" || blockedImageSrc(src) {
+				w.emit(alt, false)
+			} else {
+				w.emit(fmt.Sprintf("![%s](%s)", alt, src), false)
+			}
 		}
 		return
 	}

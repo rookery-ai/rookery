@@ -196,14 +196,18 @@ func (s *Store) InstallFromZip(workspaceID, name, description string, data []byt
 		if f.FileInfo().IsDir() {
 			continue
 		}
-		rel := strings.TrimPrefix(filepath.ToSlash(f.Name), rootPrefix)
-		if rel == "" {
+		// A member that is only the root prefix carries no file of its own and
+		// is skipped; anything that would land outside the skill directory
+		// aborts the whole import. Dropping such a member silently would
+		// install a half-formed skill whose scripts reference files that never
+		// arrived.
+		destPath, err := skillEntryPath(skillDir, rootPrefix, f.Name)
+		if errors.Is(err, errEmptyEntryName) {
 			continue
 		}
-
-		clean := filepath.Clean(filepath.FromSlash(rel))
-		if strings.HasPrefix(clean, "..") {
-			continue
+		if err != nil {
+			_ = os.RemoveAll(skillDir)
+			return nil, err
 		}
 
 		totalSize += int64(f.UncompressedSize64)
@@ -212,7 +216,6 @@ func (s *Store) InstallFromZip(workspaceID, name, description string, data []byt
 			return nil, fmt.Errorf("zip exceeds 10 MB extracted size limit")
 		}
 
-		destPath := filepath.Join(skillDir, clean)
 		if err := os.MkdirAll(filepath.Dir(destPath), 0o750); err != nil {
 			_ = os.RemoveAll(skillDir)
 			return nil, fmt.Errorf("create dir: %w", err)
