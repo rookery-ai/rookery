@@ -327,6 +327,7 @@ longer reach a user.
 | `ROOKERY_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks; validated at use (`internal/publicurl.Normalize`) and overridden by the instance URL in owner settings |
 | `ROOKERY_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |
 | `ROOKERY_CODER_MODE` | `full` | `slim` removes the local CLI coder kind entirely |
+| `ROOKERY_CODER_BIN` | `claude` | default coder binary for workspaces that have not set `coder_bin` |
 
 **Relocating the data dir must carry the database with it, and the config file
 used not to.** `defaults()` computes `Database.Path` from the data dir, but only
@@ -358,6 +359,18 @@ under the second the data dir — and therefore the key — is still the relocat
 one. Only moving the directory intact, or not relocating, keeps a database with
 its key. `TestStrandedDatabaseWarningSaysToMoveTheWholeDataDir` pins it, because
 a plausible-sounding rewrite is exactly how this regresses.
+
+**`ROOKERY_CODER_BIN` was `ROOKERY_CLAUDE_BIN`** (and `coder.claude_bin` in `config.yaml`,
+`CoderConfig.ClaudeBin` in Go), from when Claude Code was the only supported CLI. It never
+selected Claude — it names the **default** binary a workspace gets when it has not set
+`coder_bin` of its own — and five CLIs are supported now, so the old name described the
+wrong thing. Both retired spellings still work and emit a deprecation through
+`Config.Warnings`; refusing to start would punish an install for following documentation
+that shipped. The yaml alias is resolved against the **second parse** of the file, not the
+merged result, because `defaults()` fills `Bin` — so "did the file set the current key?"
+cannot be asked of the merged value, and a config carrying both keys would otherwise let
+the retired one win. `LegacyClaudeBin` is cleared after `Load` so the binary never has a
+second apparent home.
 
 `ROOKERY_CODER_MODE` is **policy** ("this build has no CLI coder"), deliberately
 distinct from **detection** (`coder.DetectInstalled` — "none is on PATH right
