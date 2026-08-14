@@ -152,6 +152,28 @@ already recorded (the toggle loses its summary text entirely). Documented, not
 fixed: rendering it would mean enabling unsafe HTML, which is what stops a note
 injecting a `<script>` into an export.
 
+## Interaction with the columns block
+
+`nodes/columns.ts` (its own spec, `2026-08-14-kb-columns-design.md`) is a second
+`<div …>` wrapper built on the identical mechanism, so the two were measured
+together with both registered:
+
+- **Nesting round-trips cleanly in both directions** — an aligned block
+  containing a columns block, and a columns block whose cell is an aligned
+  block. This is also what the interface produces when you centre a columns
+  block: `setBlockAlign` finds no `kbAlign` to update and wraps, giving nested
+  wrappers rather than a combined attribute.
+- **A single div carrying BOTH `align` and `data-cols`** is the one collision.
+  ProseMirror tries parse rules in extension-registration order, so it would
+  otherwise be claimed by whichever node was imported first, with the other
+  attribute silently dropped — the same input parsing differently depending on
+  an import order nobody would think to look at. The `div[align]` rule therefore
+  **declines** when `data-cols` is present, making it deterministically a
+  columns block. The alignment is lost in that case, accepted rather than
+  solved: the form is unreachable from the interface, and `checkFidelity`
+  catches it, so the note opens read-only instead of a save discarding the
+  attribute. Pinned as `align-combined-with-data-cols`.
+
 ## Files
 
 | File | Change |

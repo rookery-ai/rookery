@@ -123,3 +123,26 @@ test("inline markdown inside an aligned block stays real markup", () => {
   expect(editor.getText()).not.toContain("**");
   editor.destroy();
 });
+
+// The columns node (nodes/columns.ts) owns `data-cols`. ProseMirror tries parse
+// rules in extension-registration ORDER, so without the guard on the div[align]
+// rule the same input would parse differently depending on which of the two
+// nodes was imported first — and the loser's attribute would vanish silently.
+//
+// Declining here makes a combined div deterministically a columns block. The
+// alignment is lost, which is accepted rather than solved: the form is
+// unreachable from the interface (centring a columns block produces NESTED
+// wrappers, which round-trip cleanly both ways) so it only arises from a hand
+// edit or an agent, and checkFidelity catches it — the note opens read-only
+// rather than a save discarding the attribute.
+test("a div carrying data-cols is left to the columns node", () => {
+  const editor = makeEditor('<div align="center" data-cols="2">\n\nA\n\nB\n\n</div>');
+  expect(editor.getJSON().content?.some((n) => n.type === "kbAlign")).toBeFalsy();
+  editor.destroy();
+});
+
+test("attribute order does not change that", () => {
+  const editor = makeEditor('<div data-cols="2" align="center">\n\nA\n\nB\n\n</div>');
+  expect(editor.getJSON().content?.some((n) => n.type === "kbAlign")).toBeFalsy();
+  editor.destroy();
+});

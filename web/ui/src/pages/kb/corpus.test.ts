@@ -83,6 +83,12 @@ const EXPECTED_LOSSY = new Set([
   // discarded on save — see the design doc's measured before/after table.
   "align-glued-tags",
   "align-style-attribute",
+  // A div carrying BOTH `align` and `data-cols`. The div[align] rule declines
+  // it so the columns node (nodes/columns.ts) can own it deterministically
+  // rather than the outcome depending on extension-registration order. Lossy
+  // either way — which is the point: checkFidelity opens the note read-only
+  // instead of letting a save discard an attribute silently.
+  "align-combined-with-data-cols",
 ]);
 
 interface CorpusEntry {
@@ -288,6 +294,11 @@ const CORPUS: CorpusEntry[] = [
   {
     name: "align-style-attribute",
     md: '<div style="text-align: center">\n\nHello\n\n</div>\n',
+    expectLossy: true,
+  },
+  {
+    name: "align-combined-with-data-cols",
+    md: '<div align="center" data-cols="2">\n\nA\n\nB\n\n</div>\n',
     expectLossy: true,
   },
   {

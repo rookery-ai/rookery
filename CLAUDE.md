@@ -545,7 +545,13 @@ then. That is a **strict improvement**, not a regression — measured before the
 EVERY div spelling previously lost its wrapper entirely and had its alignment discarded on save.
 `parseHTML`'s `div[style]` rule carries a `getAttrs` guard so it claims only a div that is
 actually aligned; without it every styled div in the vault would be wrapped in an alignment
-nobody asked for. `setBlockAlign` tries `updateAttributes` BEFORE `wrapIn` (wrapping twice
+nobody asked for. **The `div[align]` rule declines a div that also carries `data-cols`**, which
+the columns node owns: ProseMirror tries parse rules in extension-REGISTRATION order, so the same
+input would otherwise parse differently depending on which node was imported first, with the
+loser's attribute silently dropped. Nesting the two wrappers round-trips cleanly in both
+directions (measured) and is what the interface actually produces, so the combined-attribute form
+only arises from a hand edit — and `checkFidelity` catches it, opening the note read-only rather
+than letting a save discard the attribute. `setBlockAlign` tries `updateAttributes` BEFORE `wrapIn` (wrapping twice
 serializes as two nested divs that read as one) and deliberately does not gate on
 `editor.isActive`, which reports false for an AllSelection; `clearBlockAlign` builds its lift range over the
 WHOLE node's content rather than calling `commands.lift(name)`, which lifts the range around the

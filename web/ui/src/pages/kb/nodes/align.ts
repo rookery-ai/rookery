@@ -79,7 +79,26 @@ export const KBAlign = Node.create({
 
   parseHTML() {
     return [
-      { tag: "div[align]" },
+      {
+        tag: "div[align]",
+        // Decline a div that ALSO carries `data-cols`, which belongs to the
+        // columns node (nodes/columns.ts).
+        //
+        // ProseMirror tries parse rules in extension-registration order, so
+        // without this a `<div align="center" data-cols="2">` is claimed by
+        // whichever of the two nodes happens to be registered first and the
+        // other attribute is silently dropped — the same input parsing
+        // differently depending on an import order nobody would think to look
+        // at. Declining here makes it deterministically a columns block.
+        //
+        // The alignment IS lost in that case, and that is accepted rather than
+        // solved: the form is unreachable from the interface (centring a
+        // columns block produces NESTED wrappers, which round-trip cleanly in
+        // both directions — measured), so it only arises from a hand edit or an
+        // agent, and `checkFidelity` catches it, opening the note read-only
+        // instead of letting a save discard the attribute silently.
+        getAttrs: (el) => ((el as HTMLElement).hasAttribute("data-cols") ? false : null),
+      },
       {
         tag: "div[style]",
         // Only claim a styled div that is ACTUALLY aligned. Without this the
