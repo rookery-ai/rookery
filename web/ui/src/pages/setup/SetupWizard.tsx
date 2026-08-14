@@ -864,9 +864,23 @@ export default function SetupWizard() {
       const chat = await api.post<{ id: string }>("/api/v1/chats", {
         name: "Getting started",
       });
-      // Navigate BEFORE invalidating, for the reason finish() records below.
-      nav(`/chats?chat=${chat.id}&intro=1`);
-      void qc.invalidateQueries({ queryKey: ["session"] });
+      // A FULL page load, not nav() — the one place in the wizard that needs
+      // it, because /chats is the first destination behind RequireAuth.
+      //
+      // finish() can get away with client-side navigation plus a fire-and-
+      // forget invalidation; this cannot. RequireAuth redirects to /setup
+      // whenever the CACHED session still says needs_setup, and the cache is
+      // exactly that stale at the moment of navigation — so the owner would be
+      // bounced back into the wizard they just finished. Awaiting the refetch
+      // instead is the other horn: needs_setup flips while /setup is still
+      // matched, and RequireSetupWorkspace redirects to "/" — the failure
+      // finish()'s comment below records. A page load sidesteps both by
+      // refetching the session from scratch against the new URL.
+      //
+      // No test can see this: the wizard suite mounts a bare element for
+      // /chats with no guard above it. Verified by reading router.tsx's
+      // RequireAuth, which is where the redirect lives.
+      window.location.assign(`/chats?chat=${chat.id}&intro=1`);
     } catch (err) {
       setFinishError(errMsg(err));
     } finally {

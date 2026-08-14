@@ -530,6 +530,10 @@ test("Done: a workspace with a coder is offered the guided chat", async () => {
   state.coderReady = true;
   const posts: { url: string; body: unknown }[] = [];
   mockFetch(state, posts);
+  // jsdom's location.assign is not implemented and logs "Not implemented:
+  // navigation"; stubbing it also makes the handoff assertable.
+  const assign = vi.fn();
+  vi.stubGlobal("location", { ...window.location, assign });
   wrap();
 
   expect(await screen.findByText(/you're set up/i)).toBeInTheDocument();
@@ -543,7 +547,19 @@ test("Done: a workspace with a coder is offered the guided chat", async () => {
   // navigation, so the wizard never blocks on a coder call.
   await waitFor(() => expect(posts.some((p) => p.url === "/api/v1/chats")).toBe(true));
   expect(posts.some((p) => p.body && (p.body as { step?: number }).step === 7)).toBe(true);
-  expect(await screen.findByText("CHATS PAGE")).toBeInTheDocument();
+
+  // Asserted as a FULL page load, not as a rendered route.
+  //
+  // /chats is the first wizard destination behind RequireAuth, which redirects
+  // to /setup while the CACHED session still says needs_setup — which it does
+  // at the moment of handoff. A client-side nav() therefore bounces the owner
+  // back into the wizard they just finished. This test cannot see that
+  // directly: the MemoryRouter here mounts a bare element for /chats with no
+  // guard above it, which is exactly why the bug survived the first
+  // implementation. Pinning the page load is the part that IS observable.
+  await waitFor(() =>
+    expect(assign).toHaveBeenCalledWith(expect.stringContaining("/chats?chat=chat-1&intro=1")),
+  );
 });
 
 test("Back navigation: from Master password back to Basics re-shows the Basics form", async () => {
