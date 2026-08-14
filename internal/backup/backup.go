@@ -170,6 +170,9 @@ func buildEncrypted(path string, files []archiveFile, m Manifest, passphrase str
 	if err != nil {
 		return fmt.Errorf("backup: create staged snapshot: %w", err)
 	}
+	// Closed explicitly on the success path below so a close failure is
+	// reported rather than swallowed; this deferred close only covers the
+	// error returns, where a second Close is a harmless no-op error.
 	defer out.Close()
 
 	pr, pw := io.Pipe()
@@ -198,5 +201,15 @@ func buildEncrypted(path string, files []archiveFile, m Manifest, passphrase str
 	if encErr != nil {
 		return encErr
 	}
-	return out.Sync()
+	if err := out.Sync(); err != nil {
+		return fmt.Errorf("backup: flush staged snapshot: %w", err)
+	}
+	// Sync catches the local full-disk case, but close is where a
+	// network-backed filesystem reports a deferred write error — and a
+	// snapshot truncated at this point would still be uploaded, listed and
+	// counted as a good backup until the day someone tried to restore it.
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("backup: close staged snapshot: %w", err)
+	}
+	return nil
 }
