@@ -527,6 +527,53 @@ failures reuse `agentrunner.FriendlyRunError` (exported for this reason) so a wo
 quota gets the identical sentence here as it does from a scheduled agent run, returned as a 503
 `coder_unavailable` rather than a generic 500.
 
+**The API engine's kickoff message is chosen by whether tools are offered, and the reason is a bug
+that looked like a KB bug.** `runAPI` sends the caller's prompt as the SYSTEM message and a fixed
+USER message — and that message used to be `prompts.APIEngineKickoffMessage` unconditionally,
+which ends *"Emit your final result using the output protocol ([CHAT], [STATE], [SILENT])."* So
+every one-shot `Generate` was explicitly told to wrap its answer in `[CHAT]`, and a well-behaved
+model did. The reported symptom was a stray marker in the KB rewrite panel; the quieter half was
+that **`BuildSkillMetaPrompt` and `BuildReminderParsePrompt` both ask for a bare JSON object**,
+got a protocol-wrapped body, failed to parse and fell back **silently**. It is API-engine-only —
+a CLI coder's `Generate` never sees this message — so the same install exhibits it or not
+depending on `coder_kind`, which is how it read as flakiness. A `noTools` call now gets
+`APIEngineTextKickoffMessage` ("reply with the requested content only") instead. Keyed on
+`noTools` because the two coincide exactly today and every `WithNoTools` caller was audited; a
+future caller wanting protocol markers WITHOUT tools needs an explicit opt-in rather than
+inheriting one by accident, and a test pins both halves because deleting the protocol clause
+outright would look like a tidy-up and break every agent run. `prompts.StripProtocolMarkers` is
+defence in depth on the assist endpoint only: a prompt steers and does not guarantee, and that
+endpoint's result is prose the user pastes over their own writing.
+
+**The KB editor adopts a change made to the open note by something else — clean silently, dirty on
+request.** The chat coder holds Read/Write/Edit over the vault (that is what "Edit with AI" drives),
+but nothing invalidated the note query, and `NoteEditor`'s seeding effect latches on `initializedRef`
+and ignores every later `data` — so a rewrite the user had just asked for was invisible until they
+reloaded the page. `ChatWindow.sendTurn` — the single point at which any chat turn completes on any
+surface — now invalidates `["kb-note"]` and `["kb-tree"]`. The whole prefix, not one path: the
+browser has no idea which file the model touched, and React Query refetches only ACTIVE queries, so
+in practice it is one request for the open note. It hangs off the TURN, not off the panel closing,
+because the user watches the reply land and expects the note to follow.
+
+`NoteEditor` compares incoming content against **`lastSyncedRef`** — the exact bytes last loaded or
+last successfully PUT — and not against "any new data": `useSaveNote` invalidates `["kb-note", path]`
+on success, so **every autosave already causes a refetch**, and a naive comparison would fire on
+every keystroke pause and toast the user about their own typing. Clean ⇒ adopt silently (`editorKey`
+remounts `WysiwygEditor`, because TipTap's `useEditor` reads `content` only at creation; **the caret
+is lost**, accepted). Dirty ⇒ adopt nothing, toast with a Reload action. The clean/dirty split is not
+politeness — this file has a recorded data-loss history around `dirtyRef`, and an unconditional swap
+would discard unsaved work to apply a change the user may not have asked for yet. A file changed by
+something outside this browser (an agent run, another tab) is still only picked up on the next load.
+
+**"Edit with AI" auto-sends; "Chat about this file" still parks in the composer.** `ChatWindow`
+already had `autoSend` (built for the setup wizard's closing action, with its per-mount ref and
+empty-history guards); `GlobalChatPanel` simply did not forward it. The message had to change too:
+`selectionChatPrompt` ends in a blank line — a citation waiting for an instruction — so sending it
+alone asks the model nothing. `selectionEditPrompt` is its sent counterpart, and its closing
+*"apply the change to the file directly"* is load-bearing: without it the model proposes a rewrite
+in chat and writes nothing, so there is no external change to pick up and the feature reads as
+broken from the other end.
+
 **KB rich-text editor: five formatting/AI constructs.** The WYSIWYG editor (`web/ui/src/pages/kb/`)
 adds underline, two colour marks, callouts, toggle lists, resizable images, and the AI actions panel
 above, all as TipTap/ProseMirror extensions layered on `buildExtensions()` (`editor.ts`). Three

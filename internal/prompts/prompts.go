@@ -2025,6 +2025,63 @@ func BuildChildAgentFollowUpPrompt(childOutputs []string) string {
 // just tells the model to begin and to use the output protocol.
 const APIEngineKickoffMessage = "Proceed with your task now, following the system instructions above. Emit your final result using the output protocol ([CHAT], [STATE], [SILENT])."
 
+// APIEngineTextKickoffMessage is the kickoff for a TEXT-ONLY API call — one made
+// through WithNoTools, where the caller wants content and nothing else.
+//
+// The protocol kickoff above was sent on EVERY runAPI call, so a one-shot Generate
+// was being told to wrap its answer in [CHAT] whether the caller wanted that or
+// not. A well-behaved model complies, and the blast radius was wider than the
+// reported symptom (a [CHAT] marker in the knowledge base's rewrite panel): the
+// skill-metadata and reminder-parsing prompts both ask for a bare JSON object and
+// silently fell back when the wrapper made it unparseable. It is API-engine-only —
+// a CLI coder's Generate never sees this message — so the same install exhibits it
+// or not depending on coder_kind, which is exactly how a bug like this gets read
+// as flakiness.
+const APIEngineTextKickoffMessage = "Proceed with your task now, following the system instructions above. Reply with the requested content only — no protocol markers, no preamble and no code fence."
+
+// protocolMarkers are the agent output-protocol tokens that must never appear in
+// a text-only answer. Shared by StripProtocolMarkers below.
+var protocolMarkers = [][2]string{
+	{"[CHAT]", "[/CHAT]"},
+	{"[STATE]", "[/STATE]"},
+	{"[TEST_OUTPUT]", "[/TEST_OUTPUT]"},
+	{"[TECHNICAL SPEC]", "[/TECHNICAL SPEC]"},
+	{"[BLOCKED]", "[/BLOCKED]"},
+}
+
+// StripProtocolMarkers removes agent output-protocol markers from text that is
+// about to be shown to a user as ordinary prose, keeping whatever they wrapped.
+//
+// Defence in depth, not the fix: APIEngineTextKickoffMessage is what stops the
+// markers being requested. But a prompt steers, it does not guarantee, and a weak
+// model will re-emit a token it has seen a thousand times in this codebase's own
+// instructions. This is what makes the KB assist endpoint's contract — "the result
+// is a replacement passage" — actually true.
+//
+// Content between an open and close marker is KEPT: the marker is the wrapper, the
+// passage is the answer. An unpaired close tag (weak models emit stray [/CHAT])
+// and a bare [SILENT]/[CALL:] line are dropped outright, since neither wraps
+// anything.
+func StripProtocolMarkers(s string) string {
+	for _, pair := range protocolMarkers {
+		s = strings.ReplaceAll(s, pair[0], "")
+		s = strings.ReplaceAll(s, pair[1], "")
+	}
+	var kept []string
+	for _, line := range strings.Split(s, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "[SILENT]" || strings.HasPrefix(t, "[CALL:") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	out := strings.Join(kept, "\n")
+	for strings.Contains(out, "\n\n\n") {
+		out = strings.ReplaceAll(out, "\n\n\n", "\n\n")
+	}
+	return strings.TrimSpace(out)
+}
+
 // APIEnginePingMessage is the minimal completion request used to verify an API
 // coder's provider/model/key are reachable (internal/coder's pingAPI).
 const APIEnginePingMessage = "Reply with the single word: ok"

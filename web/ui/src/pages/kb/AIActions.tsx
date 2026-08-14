@@ -8,7 +8,7 @@ import { useToast } from "@/components/shell/Toast";
 import { GlobalChatPanel } from "@/components/chat/GlobalChatButton";
 import { useKBAssist, type KBAssistAction } from "@/lib/kbAssist";
 import { copyText } from "@/lib/copyText";
-import { selectionChatPrompt } from "./ChatAboutFileButton";
+import { selectionEditPrompt } from "./ChatAboutFileButton";
 
 const ACTIONS: { id: KBAssistAction; label: string; icon: typeof Sparkles }[] = [
   { id: "improve", label: "Improve", icon: Sparkles },
@@ -180,9 +180,18 @@ export function useAIActions(editor: Editor | null, path: string): AIActionsStat
 
   function openChat() {
     if (!editor) return;
-    open(<GlobalChatPanel forceNew initialText={selectionChatPrompt(path, selectionMarkdown(editor))} />, {
-      title: "Chat",
-    });
+    // autoSend, not a prefill. Selecting a passage and clicking "Edit with AI"
+    // IS the request; parking a quoted block in the composer made the user
+    // retype what they had already expressed by getting here. ChatWindow owns
+    // the once-per-mount / once-per-chat guards, so this cannot double-send.
+    open(
+      <GlobalChatPanel
+        forceNew
+        autoSend
+        initialText={selectionEditPrompt(path, selectionMarkdown(editor))}
+      />,
+      { title: "Chat" },
+    );
   }
 
   return { action, assist, run, reset, accept, openChat, copyStatus, copyResult };
