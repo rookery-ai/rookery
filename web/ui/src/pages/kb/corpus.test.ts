@@ -74,6 +74,16 @@ const EXPECTED_LOSSY = new Set([
   "hard-line-break",
   "setext-heading",
   "html-inline-tag",
+  // Columns (nodes/columns.ts). The canonical form is the blank-line-separated
+  // one, so the glued spelling normalises on the first save — the same
+  // read-only-until-first-save gap the toggle records.
+  "columns-glued-tags",
+  // NOT a defect in the columns node: `- a\n- b\n\n- c\n- d` is ONE loose
+  // list in CommonMark, so two adjacent lists cannot be two cells because they
+  // cannot be two blocks. Verified outside any wrapper (see
+  // "bare-adjacent-bullet-lists" below), where it fails identically.
+  "columns-two-adjacent-lists",
+  "bare-adjacent-bullet-lists",
 ]);
 
 interface CorpusEntry {
@@ -210,6 +220,63 @@ const CORPUS: CorpusEntry[] = [
   // RenderStateTemplate. Changing the Go template, or editing this literal so it
   // no longer matches, fails that Go test — do not hand-edit this string without
   // also running `go test ./internal/agentdesigner/...`.
+  // -- Columns (nodes/columns.ts) --------------------------------------------
+  {
+    name: "columns-two-images",
+    md: '<div data-cols="2">\n\n![before](assets/before.png)\n\n![after](assets/after.png)\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "columns-two-paragraphs",
+    md: '<div data-cols="2">\n\nLeft **bold**\n\nRight *italic*\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "columns-three-cells",
+    md: '<div data-cols="3">\n\nA\n\nB\n\nC\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "columns-two-headings",
+    md: '<div data-cols="2">\n\n## Left\n\n## Right\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "columns-wikilinks",
+    md: '<div data-cols="2">\n\nSee [[a]]\n\nSee [[b]]\n\n</div>\n',
+    expectLossy: false,
+  },
+  // A list works as a cell — it is only a list BESIDE ANOTHER LIST that cannot
+  // be expressed, which is the entry below.
+  {
+    name: "columns-list-beside-text",
+    md: '<div data-cols="2">\n\n- a\n- b\n\nRight side\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "columns-with-neighbours",
+    md: 'Before\n\n<div data-cols="2">\n\nA\n\nB\n\n</div>\n\nAfter\n',
+    expectLossy: false,
+  },
+  {
+    name: "columns-glued-tags",
+    md: '<div data-cols="2">A</div>\n',
+    expectLossy: true,
+  },
+  {
+    name: "columns-two-adjacent-lists",
+    md: '<div data-cols="2">\n\n- a\n- b\n\n- c\n- d\n\n</div>\n',
+    expectLossy: true,
+  },
+  // The control for the entry above: the same two lists with no wrapper at all
+  // fail identically, which is what proves the loss is CommonMark's and not the
+  // columns node's. Without this pair the next reader would reasonably try to
+  // "fix" the wrapper.
+  {
+    name: "bare-adjacent-bullet-lists",
+    md: "- a\n- b\n\n- c\n- d\n",
+    expectLossy: true,
+  },
   {
     name: "agent-state-md-template",
     md: '# State — Gmail Digest\n\n*Managed by Rookery. The block below is this agent\'s memory between runs — edit it if you need to fix something by hand.*\n\n```json\n{\n  "a": 1\n}\n```\n',

@@ -225,3 +225,28 @@
    a read-only note must never show the drag affordance at all, matching the
    pointerdown bail in kbImage.ts. */
 .note-editor-content .tiptap[contenteditable="true"] .kb-image:hover .kb-image-handle { opacity: 1; }
+
+/* Columns (nodes/columns.ts). Each DIRECT CHILD of the wrapper is one cell —
+   there is no cell node, which is what lets the construct round-trip through
+   markdown (see the file's top comment). `minmax(0, 1fr)` rather than a bare
+   `1fr`: a grid item's automatic minimum size is content-based, so one long
+   unbroken word or a wide image would stretch its track and push the others
+   off — the same CSS Grid §6.6 trap DialogContent's `grid-cols-1` fix records. */
+.note-editor-content .tiptap .kb-columns {
+  display: grid;
+  gap: 1rem;
+  align-items: start;
+}
+.note-editor-content .tiptap .kb-columns[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.note-editor-content .tiptap .kb-columns[data-cols="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.note-editor-content .tiptap .kb-columns[data-cols="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+/* A cell's own first/last block must not carry the vertical margin it would
+   have as a sibling in prose, or the columns visibly fail to line up at the
+   top. */
+.note-editor-content .tiptap .kb-columns > * { margin-top: 0; margin-bottom: 0; }
+.note-editor-content .tiptap .kb-columns img { max-width: 100%; height: auto; }
+/* Below the editor's own comfortable reading width the columns stop being a
+   layout and start being four unreadable slivers, so they stack. */
+@media (max-width: 720px) {
+  .note-editor-content .tiptap .kb-columns { grid-template-columns: minmax(0, 1fr); }
+}
