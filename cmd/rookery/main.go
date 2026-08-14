@@ -66,6 +66,8 @@ func main() {
 			mcpCmd(),
 			kbCmd(),
 			backupCommand(),
+			upgradeCmd(),
+			uninstallCmd(),
 			versionCmd(),
 			healthcheckCmd(),
 		},
