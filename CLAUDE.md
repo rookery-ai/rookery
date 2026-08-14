@@ -311,6 +311,17 @@ have an unrelated `~/.rookery`), and `Load` logs it itself rather than leaving i
 to its four call sites, since a fifth that forgot would be the same drift-between-
 two-copies that caused the bug.
 
+**That warning's remediation wording is load-bearing, and the obvious phrasings
+are wrong.** It must say to move the **whole data directory**. "Move the database
+to the new path" and "set `database.path` back to the old one" both sound correct
+and both reproduce the undecryptable-secrets failure, because
+`secrets.SystemKey` reads `<dataDir>/system.key` and never follows
+`Database.Path`: under the first the database arrives beside a *different* key,
+under the second the data dir — and therefore the key — is still the relocated
+one. Only moving the directory intact, or not relocating, keeps a database with
+its key. `TestStrandedDatabaseWarningSaysToMoveTheWholeDataDir` pins it, because
+a plausible-sounding rewrite is exactly how this regresses.
+
 `ROOKERY_CODER_MODE` is **policy** ("this build has no CLI coder"), deliberately
 distinct from **detection** (`coder.DetectInstalled` — "none is on PATH right
 now"). Slim is enforced at four layers: config parsing (an unknown value is a

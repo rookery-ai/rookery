@@ -138,6 +138,14 @@ func Load(path string) (*Config, error) {
 // A warning rather than a refusal to start: a legitimate fresh install can have
 // an unrelated ~/.rookery, and dying on that would be worse than the case being
 // reported.
+//
+// The remediation wording is load-bearing and was wrong once. "Move the database
+// to the new path" and "set database.path back to the old one" both LOOK correct
+// and both reproduce the very failure this warns about, because
+// secrets.SystemKey reads <dataDir>/system.key and never follows Database.Path:
+// under the first the database arrives beside a different key, under the second
+// the data dir — and therefore the key — is still the new one. Only moving the
+// whole directory, or not relocating, keeps a database with its key.
 func strandedDatabaseWarning(resolved string) []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -155,8 +163,13 @@ func strandedDatabaseWarning(resolved string) []string {
 	}
 	return []string{fmt.Sprintf(
 		"database %s does not exist, but one is still at the default location %s — "+
-			"move it to the new path or set database.path explicitly, or this install "+
-			"will start with an empty database", resolved, legacy)}
+			"this install will start with an EMPTY database. Move the whole data "+
+			"directory (database, system.key, session.key, vaults/, claude-homes/, "+
+			"backups/) to the new location, or point data.dir back at the old one. "+
+			"Moving the database alone is NOT enough: the system key is resolved from "+
+			"the data dir (<data_dir>/system.key), so a database that arrives without "+
+			"its key can no longer decrypt any stored master password, OAuth token or "+
+			"bot token", resolved, legacy)}
 }
 
 func defaults() *Config {

@@ -62,6 +62,7 @@ func writeConfig(t *testing.T, body string) string {
 // config field it mirrors was not.
 func TestYAMLDataDirCarriesTheDatabase(t *testing.T) {
 	os.Unsetenv("ROOKERY_DATA_DIR")
+	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	cfg, err := Load(writeConfig(t, "data:\n  dir: "+dir+"\n"))
 	if err != nil {
@@ -77,6 +78,7 @@ func TestYAMLDataDirCarriesTheDatabase(t *testing.T) {
 // there.
 func TestExplicitDatabasePathWinsOverTheDataDir(t *testing.T) {
 	os.Unsetenv("ROOKERY_DATA_DIR")
+	t.Setenv("HOME", t.TempDir())
 	dir, dbPath := t.TempDir(), filepath.Join(t.TempDir(), "elsewhere.db")
 	cfg, err := Load(writeConfig(t, "data:\n  dir: "+dir+"\ndatabase:\n  path: "+dbPath+"\n"))
 	if err != nil {
@@ -112,6 +114,7 @@ func TestDatabasePathAloneLeavesTheDataDirDefault(t *testing.T) {
 // documented as relocating the database too, and env-over-file is the ordinary
 // precedence — this bugfix does not change it.
 func TestDataDirEnvOverridesAnExplicitYAMLDatabasePath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	envDir := t.TempDir()
 	t.Setenv("ROOKERY_DATA_DIR", envDir)
 	yamlDir, dbPath := t.TempDir(), filepath.Join(t.TempDir(), "elsewhere.db")
@@ -130,6 +133,7 @@ func TestDataDirEnvOverridesAnExplicitYAMLDatabasePath(t *testing.T) {
 // No config file at all: both stay on the default dir, together.
 func TestDefaultsKeepTheDatabaseInsideTheDataDir(t *testing.T) {
 	os.Unsetenv("ROOKERY_DATA_DIR")
+	t.Setenv("HOME", t.TempDir())
 	cfg, err := Load("")
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -172,6 +176,44 @@ func TestLoadReportsADatabaseLeftAtTheOldDefault(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Errorf("warning must name %q, got:\n%s", want, joined)
 		}
+	}
+}
+
+// The remediation must say to move the WHOLE data directory.
+//
+// The first version of this message said "move it to the new path or set
+// database.path explicitly". Both readings look right and both reproduce the
+// undecryptable-secrets failure the warning exists to prevent, because
+// secrets.SystemKey resolves <dataDir>/system.key and never follows
+// Database.Path: moving only the database puts it beside a different key, and
+// pointing database.path back leaves the data dir — and the key — relocated.
+// Pinned as a test because the wording is the entire user-facing half of the fix
+// and a plausible-sounding rewrite is exactly how it would regress.
+func TestStrandedDatabaseWarningSaysToMoveTheWholeDataDir(t *testing.T) {
+	os.Unsetenv("ROOKERY_DATA_DIR")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	legacy := filepath.Join(home, ".rookery")
+	if err := os.MkdirAll(legacy, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, dbFileName), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(writeConfig(t, "data:\n  dir: "+t.TempDir()+"\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	joined := strings.Join(cfg.Warnings, "\n")
+	for _, want := range []string{"system.key", "whole data directory"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("warning must mention %q, got:\n%s", want, joined)
+		}
+	}
+	// The two remediations that silently break the install.
+	if strings.Contains(joined, "set database.path explicitly") {
+		t.Error("warning must not advise setting database.path — the data dir, and so the system key, stays relocated")
 	}
 }
 
