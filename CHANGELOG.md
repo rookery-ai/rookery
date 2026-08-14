@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.0](https://github.com/rookery-ai/rookery/compare/v0.1.4...v0.2.0) (2026-08-14)
+
+
+### Features
+
+* **cli:** add rookery upgrade and rookery uninstall ([#202](https://github.com/rookery-ai/rookery/issues/202)) ([2b0c799](https://github.com/rookery-ai/rookery/commit/2b0c799086b10d8b307f5ca6a3c513851f70c00b))
+* **setup:** end onboarding in one action, and teach chat the product ([#203](https://github.com/rookery-ai/rookery/issues/203)) ([e112d2f](https://github.com/rookery-ai/rookery/commit/e112d2f2e5c61c5f5cdc9754828a3e9dd5df4ffb))
+
+
+### Bug Fixes
+
+* **coder:** stop the settings form capping every workspace at two minutes ([#200](https://github.com/rookery-ai/rookery/issues/200)) ([4761f56](https://github.com/rookery-ai/rookery/commit/4761f56dcdc403d525d03f51a869ed05788b4aee))
+* **config:** derive the database path from a yaml-configured data dir ([#198](https://github.com/rookery-ai/rookery/issues/198)) ([bf66c98](https://github.com/rookery-ai/rookery/commit/bf66c98262c6e633186211495e949eeea828f8ab))
+
+
+### Refactoring
+
+* **config:** rename ROOKERY_CLAUDE_BIN to ROOKERY_CODER_BIN ([#201](https://github.com/rookery-ai/rookery/issues/201)) ([5d282b6](https://github.com/rookery-ai/rookery/commit/5d282b6462e2c84c69174b39ae5f565ecdbee00f))
+
 ## [0.1.4](https://github.com/rookery-ai/rookery/compare/v0.1.3...v0.1.4) (2026-08-14)
 
 
