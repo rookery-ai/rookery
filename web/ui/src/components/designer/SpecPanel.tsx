@@ -5,6 +5,11 @@ import remarkGfm from "remark-gfm";
 export type SpecPanelProps = {
   agentMD: string;
   tools: Record<string, string>;
+  // The [TECHNICAL SPEC] block the designer appends to its proposal, available
+  // BEFORE any build exists. Without it this panel had nothing to show until a
+  // build finished — which is exactly the moment a user most wants to re-read
+  // what they are about to approve.
+  spec?: string;
 };
 
 const WEEKDAYS = [
@@ -89,6 +94,52 @@ export function parseConnections(md: string): string[] {
   return parseHeaderList(md, "Connections");
 }
 
+// Mirrors internal/agentdesigner/parse_mcp.go's heading, which accepts both
+// "# MCP:" and "# MCP servers:". The panel listed skills and connections and
+// silently omitted MCP servers, so an agent bound to one showed no sign of it.
+export function parseMCP(md: string): string[] {
+  return parseHeaderList(md, "MCP(?: servers)?");
+}
+
+// TECHNICAL_SPEC_FIELDS is the closed set of labels the designer is asked to
+// emit (prompts.BuildDesignSystemPrompt). Anything else in the block is shown
+// verbatim in the raw fallback rather than guessed at — same policy as
+// parseSchedule: a plausible-but-wrong summary of what an agent is about to do
+// is worse than the raw text, because the user cannot tell it is wrong.
+const TECHNICAL_SPEC_FIELDS = [
+  "Tier",
+  "Change",
+  "Root cause",
+  "Tier change",
+  "Schedule",
+  "Notifies user",
+  "Knowledge base writes",
+  "Secrets",
+  "External services",
+] as const;
+
+export type SpecField = { label: string; value: string };
+
+// parseTechnicalSpec reads "Label: value" lines out of the block. It returns []
+// when it recognises nothing, which is the caller's signal to render the raw
+// block instead of an empty table.
+export function parseTechnicalSpec(spec: string): SpecField[] {
+  const out: SpecField[] = [];
+  for (const line of spec.split("\n")) {
+    const m = line.match(/^\s*([A-Za-z][A-Za-z ]*?)\s*:\s*(.*)$/);
+    if (!m) continue;
+    const label = m[1]!.trim();
+    const value = m[2]!.trim();
+    if (!value) continue;
+    const known = TECHNICAL_SPEC_FIELDS.find(
+      (f) => f.toLowerCase() === label.toLowerCase(),
+    );
+    if (!known) continue;
+    out.push({ label: known, value });
+  }
+  return out;
+}
+
 // The `# Suggested schedule:` / `# Skills:` / `# Connections:` lines are
 // designer-machine directives, not part of the brief written for the human —
 // they're surfaced separately as the meta badges above. Strip them from the
@@ -97,7 +148,10 @@ export function parseConnections(md: string): string[] {
 function stripHeaderLines(md: string): string {
   return md
     .split("\n")
-    .filter((line) => !/^#\s*(Suggested schedule|Skills|Connections):/i.test(line))
+    .filter(
+      (line) =>
+        !/^#\s*(Suggested schedule|Skills|Connections|MCP(?: servers)?):/i.test(line),
+    )
     .join("\n")
     .trim();
 }
@@ -123,10 +177,53 @@ const MARKDOWN_CLASSES = [
   "[&_h1]:mt-4 [&_h1]:text-lg [&_h1]:font-bold [&_h2]:mt-4 [&_h2]:text-base [&_h2]:font-bold",
 ].join(" ");
 
-export function SpecPanel({ agentMD, tools }: SpecPanelProps) {
+// Badge is the one pill style the meta row uses, so a new fact (MCP servers)
+// cannot arrive looking like a different kind of thing.
+function Badge({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="rounded-full border border-border bg-chrome px-2.5 py-1 text-muted-2">
+      {children}
+    </span>
+  );
+}
+
+// The pre-build view: the plan the user is about to approve, as an artifact
+// they can re-read. Rendered only when there is no build yet — once one exists
+// the generated AGENT.md is the more truthful description of what will run.
+function PlannedSpec({ spec }: { spec: string }) {
+  const fields = parseTechnicalSpec(spec);
+  return (
+    <div className="flex h-full flex-col overflow-y-auto p-6">
+      <h2 className="mb-1 text-sm font-semibold text-foreground">Proposed plan</h2>
+      <p className="mb-4 text-xs text-muted-2">
+        What will be built when you approve. Nothing has run yet.
+      </p>
+      {fields.length > 0 ? (
+        <dl className="grid grid-cols-[minmax(0,10rem)_1fr] gap-x-4 gap-y-2 text-sm">
+          {fields.map((f) => (
+            <div key={f.label} className="contents">
+              <dt className="text-muted-2">{f.label}</dt>
+              <dd className="break-words text-foreground">{f.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <pre className="overflow-x-auto whitespace-pre-wrap rounded-md bg-chrome p-3 font-mono text-xs text-foreground">
+          {spec}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+export function SpecPanel({ agentMD, tools, spec }: SpecPanelProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
   const hasContent = agentMD.trim().length > 0 || Object.keys(tools).length > 0;
+
+  if (!hasContent && spec && spec.trim()) {
+    return <PlannedSpec spec={spec.trim()} />;
+  }
 
   if (!hasContent) {
     return (
@@ -142,8 +239,10 @@ export function SpecPanel({ agentMD, tools }: SpecPanelProps) {
   const schedule = parseSchedule(agentMD);
   const skills = parseSkills(agentMD);
   const connections = parseConnections(agentMD);
+  const mcp = parseMCP(agentMD);
   const toolEntries = Object.entries(tools);
-  const hasMeta = !!schedule || skills.length > 0 || connections.length > 0;
+  const hasMeta =
+    !!schedule || skills.length > 0 || connections.length > 0 || mcp.length > 0;
   const brief = stripHeaderLines(agentMD);
 
   function toggle(path: string) {
@@ -154,21 +253,10 @@ export function SpecPanel({ agentMD, tools }: SpecPanelProps) {
     <div className="flex h-full flex-col overflow-y-auto p-6">
       {hasMeta && (
         <div className="mb-5 flex flex-wrap gap-2 text-xs">
-          {schedule && (
-            <span className="rounded-full border border-border bg-chrome px-2.5 py-1 text-muted-2">
-              Schedule: {schedule}
-            </span>
-          )}
-          {skills.length > 0 && (
-            <span className="rounded-full border border-border bg-chrome px-2.5 py-1 text-muted-2">
-              Skills: {skills.join(", ")}
-            </span>
-          )}
-          {connections.length > 0 && (
-            <span className="rounded-full border border-border bg-chrome px-2.5 py-1 text-muted-2">
-              Connections: {connections.join(", ")}
-            </span>
-          )}
+          {schedule && <Badge>Schedule: {schedule}</Badge>}
+          {skills.length > 0 && <Badge>Skills: {skills.join(", ")}</Badge>}
+          {connections.length > 0 && <Badge>Connections: {connections.join(", ")}</Badge>}
+          {mcp.length > 0 && <Badge>MCP servers: {mcp.join(", ")}</Badge>}
         </div>
       )}
 
