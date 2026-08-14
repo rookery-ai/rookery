@@ -26,6 +26,11 @@ rookery onboard
 
 Then open `http://localhost:8080`, log in, and create your first workspace.
 
+Later, `rookery upgrade` moves to the latest release (or `--version v0.1.4` to a
+named one), and `rookery uninstall` removes the service and binary — keeping your
+data unless you pass `--purge`. Both refuse to touch a `.deb`/`.rpm` install and
+name your package manager's command instead.
+
 <details>
 <summary>Windows</summary>
 
