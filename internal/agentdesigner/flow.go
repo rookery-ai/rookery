@@ -212,6 +212,23 @@ func (f *Flow) buildBoundMCP(ctx context.Context, workspaceID string) []mcp.Boun
 	return f.mcpBoundFor(ctx, workspaceID)
 }
 
+// mcpRefs names the workspace's enabled MCP servers for the design prompt, so the
+// designer can declare which ones a plan needs. Without it the designer had never
+// been shown a server name, which made the [TECHNICAL SPEC]'s "MCP servers:" line
+// an invitation to invent one. Reuses buildBoundMCP (every ENABLED server) because
+// a design session, like a build, has no bindings yet — that is what it is deciding.
+func (f *Flow) mcpRefs(ctx context.Context, workspaceID string) []prompts.MCPServerRef {
+	servers := f.buildBoundMCP(ctx, workspaceID)
+	if len(servers) == 0 {
+		return nil
+	}
+	out := make([]prompts.MCPServerRef, 0, len(servers))
+	for _, s := range servers {
+		out = append(out, prompts.MCPServerRef{Name: s.Name})
+	}
+	return out
+}
+
 // loadConnectionRefs lists the workspace's service connections as prompts.ConnectionRef
 // so the designer can be told which accounts it may bind (via the # Connections: header).
 func (f *Flow) loadConnectionRefs(ctx context.Context, workspaceID string) []prompts.ConnectionRef {
@@ -1328,6 +1345,7 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
 		Skills:             sess.Skills,
 		Connections:        f.loadConnectionRefs(ctx, workspaceID),
+		MCPServers:         f.mcpRefs(ctx, workspaceID),
 		UserProfile:        sess.UserProfile,
 		UserMemory:         sess.UserMemory,
 		KBManifest:         f.loadKBManifest(workspaceID, userMessage),

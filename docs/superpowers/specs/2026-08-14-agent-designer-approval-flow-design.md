@@ -142,8 +142,26 @@ The panel gains a second source and a third parser:
 
 - **Before the build** (`planReady && !pendingAgentMD`) it renders the
   `[TECHNICAL SPEC]` block from `pending_spec`, parsed into labelled rows —
-  tier, schedule, notifies, KB writes, secrets, external services — plus the
-  plain-English plan from the transcript's last assistant turn.
+  tier, schedule, notifies, KB writes, secrets, external services, **and the
+  bindings: connections, skills and MCP servers**.
+
+  The bindings are the part of an approved plan a reader most wants to check
+  ("which of my accounts is this about to touch?"), and they existed only in the
+  post-build view, parsed off `AGENT.md` — the one moment they have stopped
+  being a question. Three lines are therefore added to the `[TECHNICAL SPEC]`
+  block itself.
+
+  That exposed a gap: **the designer had never been shown an MCP server name.**
+  `DesignSystemParams` carried `Skills` and `Connections` but nothing for MCP, so
+  a "MCP servers:" line would have been an invitation to invent one.
+  `MCPServers []MCPServerRef` and an `<available_mcp_servers>` block close it,
+  fed by `Flow.mcpRefs` from the existing `buildBoundMCP` (every ENABLED server —
+  a design session, like a build, has no bindings yet; that is what it is
+  deciding). It is a sibling of `<available_connections>` rather than part of it,
+  for the reason `MCPToolsBlock` already gives: a connector action is a curated
+  call against a known API and an MCP tool is whatever a server chose to
+  advertise, and the model needs that distinction to choose between two that
+  sound alike.
 - **After the build** it renders what it renders today, plus MCP servers.
 - `parseMCP` joins `parseSkills`/`parseConnections`, matching
   `internal/agentdesigner/parse_mcp.go`'s `# MCP:` / `# MCP servers:` heading.

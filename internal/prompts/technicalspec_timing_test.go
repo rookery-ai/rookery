@@ -51,3 +51,42 @@ func TestDesignPromptNamesApprovalAndBuildTogether(t *testing.T) {
 		}
 	}
 }
+
+// The technical spec is what the pre-build Spec view renders, and the bindings
+// are the part a user re-reading an approved plan most wants to check. They used
+// to be visible only after a build, parsed off AGENT.md — the one moment they
+// have stopped being a question.
+func TestSpecBlockDeclaresTheBindings(t *testing.T) {
+	p := BuildDesignSystemPrompt(DesignSystemParams{AgentName: "watcher"})
+	for _, want := range []string{"Connections:", "Skills:", "MCP servers:"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("the [TECHNICAL SPEC] block no longer asks for %q", want)
+		}
+	}
+}
+
+// A model cannot name a server it has never been shown, and asking it to would
+// turn the spec line into an invitation to invent one.
+func TestMCPServersAreNamedToTheDesigner(t *testing.T) {
+	p := BuildDesignSystemPrompt(DesignSystemParams{
+		AgentName:  "watcher",
+		MCPServers: []MCPServerRef{{Name: "weather"}, {Name: "home-assistant"}},
+	})
+	if !strings.Contains(p, "The user has connected these MCP servers.") {
+		t.Fatal("no MCP server block in the design prompt")
+	}
+	for _, name := range []string{"weather", "home-assistant"} {
+		if !strings.Contains(p, name) {
+			t.Errorf("server %q is not named to the designer", name)
+		}
+	}
+	// A workspace with no servers must not get an empty block claiming it has
+	// them — the same shape as <available_connections>.
+	bare := BuildDesignSystemPrompt(DesignSystemParams{AgentName: "watcher"})
+	// Probed by the block's own sentence, not its tag: the tag also appears in
+	// the [TECHNICAL SPEC] line that tells the designer where to read server
+	// names from, which is emitted unconditionally.
+	if strings.Contains(bare, "The user has connected these MCP servers.") {
+		t.Error("an empty MCP block is emitted for a workspace with no servers")
+	}
+}

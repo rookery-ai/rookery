@@ -116,6 +116,13 @@ const TECHNICAL_SPEC_FIELDS = [
   "Knowledge base writes",
   "Secrets",
   "External services",
+  // The bindings. These are what a user re-reading an approved plan most wants
+  // to check — "which of my accounts is this about to touch?" — and they were
+  // visible only AFTER a build, parsed off AGENT.md, which is the one moment
+  // they are no longer a question.
+  "Connections",
+  "Skills",
+  "MCP servers",
 ] as const;
 
 export type SpecField = { label: string; value: string };

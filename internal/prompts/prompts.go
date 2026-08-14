@@ -90,6 +90,7 @@ type DesignSystemParams struct {
 	ChatApps           []ChatAppInfo // connected chat platforms + their commands (drives platform context)
 	Skills             []SkillRef
 	Connections        []ConnectionRef // connected service accounts (Gmail, etc.) available to bind
+	MCPServers         []MCPServerRef  // enabled MCP servers available to bind
 	UserProfile        string          // "[Current context]" block (date/time/timezone); identity lives in UserMemory
 	UserMemory         string
 	KBManifest         string // vault.BuildKBContext output: folder summary + relevant passages; "" if no vault attached
@@ -898,6 +899,24 @@ Two things follow, and both shape what you may promise the user:
 		sb.WriteString("</available_connections>\n\n")
 	}
 
+	// ── MCP servers ───────────────────────────────────────────────────────────
+	//
+	// The designer could not name an MCP server before this block existed, which
+	// made the [TECHNICAL SPEC]'s "MCP servers:" line an invitation to invent one.
+	// A sibling of <available_connections> rather than part of it, for the reason
+	// MCPToolsBlock gives: a connector action is a curated call against a known
+	// API, an MCP tool is whatever a server the owner added chose to advertise,
+	// and the model needs that distinction to choose between two that sound alike.
+	if len(p.MCPServers) > 0 {
+		sb.WriteString("<available_mcp_servers>\n")
+		sb.WriteString("The user has connected these MCP servers. Their tools are available to the agent at run time — no URLs, no credentials, nothing to set up:\n")
+		sb.WriteString("- You MUST add a `# MCP: name, ...` header line in the generated AGENT.md declaring EXACTLY the servers this agent uses (or `# MCP: none`).\n\n")
+		for _, m := range p.MCPServers {
+			sb.WriteString(fmt.Sprintf("- **%s**\n", m.Name))
+		}
+		sb.WriteString("</available_mcp_servers>\n\n")
+	}
+
 	// ── User context ──────────────────────────────────────────────────────────
 	if p.UserProfile != "" {
 		sb.WriteString(p.UserProfile)
@@ -1005,6 +1024,9 @@ Notifies user: yes ([CHAT] contains: <description>) | no (silent)
 Knowledge base writes: notes/<filename.md> | none
 Secrets: none | NAME: plain description
 External services: none | <service name and what for>
+Connections: none | <the provider/label accounts from <available_connections> this will use, comma-separated>
+Skills: none | <the skill names from <available_skills> this needs, comma-separated>
+MCP servers: none | <the server names from <available_mcp_servers> this will call, comma-separated>
 [/TECHNICAL SPEC]
 </your_job>
 

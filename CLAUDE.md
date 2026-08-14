@@ -710,6 +710,16 @@ own body with no such flag, and would otherwise lose its build button entirely.
 finished — exactly when a user most wants to re-read what they are about to approve) and the
 generated `AGENT.md` + tools after. Its meta row now parses `# MCP:` / `# MCP servers:` alongside
 `# Skills:` and `# Connections:`; an agent bound to an MCP server previously showed no sign of it.
+The `[TECHNICAL SPEC]` block gained **`Connections:`, `Skills:` and `MCP servers:`** lines so those
+appear in the PRE-build view too — they are the part of an approved plan a reader most wants to
+check, and they existed only after a build, parsed off AGENT.md, which is the one moment they have
+stopped being a question. That exposed a gap: **the designer had never been shown an MCP server
+name** (`DesignSystemParams` carried `Skills` and `Connections` and nothing for MCP), so the line
+would have invited it to invent one. `MCPServers []MCPServerRef` + an `<available_mcp_servers>`
+block close it, fed by `Flow.mcpRefs` from the existing `buildBoundMCP` — every ENABLED server,
+because a design session, like a build, has no bindings yet. A sibling of `<available_connections>`
+rather than part of it, for the reason `MCPToolsBlock` gives: a connector action is a curated call
+against a known API, an MCP tool is whatever a server chose to advertise.
 `parseTechnicalSpec` follows `parseSchedule`'s policy — render only the closed set of labels the
 prompt asks for, fall back to the raw block otherwise, because a plausible-but-wrong summary of what
 an agent is about to do is worse than raw text the user can judge. A **View spec** button sits

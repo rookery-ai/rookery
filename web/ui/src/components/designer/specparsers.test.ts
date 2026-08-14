@@ -54,3 +54,22 @@ test("parseTechnicalSpec ignores unrecognised labels and empty values", () => {
 test("parseTechnicalSpec is case-insensitive on the label but normalises it", () => {
   expect(parseTechnicalSpec("tier: 3")).toEqual([{ label: "Tier", value: "3" }]);
 });
+
+// The bindings are the part of an approved plan a user most wants to re-read —
+// "which of my accounts is this about to touch?" — and before this they were
+// visible only AFTER a build, parsed off AGENT.md, which is the one moment they
+// have stopped being a question.
+test("parseTechnicalSpec reads the bindings", () => {
+  const fields = parseTechnicalSpec(
+    [
+      "Tier: 1",
+      "Connections: google/personal, github/work",
+      "Skills: web-research, pdf",
+      "MCP servers: weather",
+    ].join("\n"),
+  );
+  const byLabel = Object.fromEntries(fields.map((f) => [f.label, f.value]));
+  expect(byLabel["Connections"]).toBe("google/personal, github/work");
+  expect(byLabel["Skills"]).toBe("web-research, pdf");
+  expect(byLabel["MCP servers"]).toBe("weather");
+});
