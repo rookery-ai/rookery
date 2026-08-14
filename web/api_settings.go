@@ -495,6 +495,13 @@ func (s *Server) apiGetSetup(c echo.Context) error {
 	case 5:
 		resp["platforms"] = s.connectorPlatformList(w)
 	case 7:
+		// Which closing action the Done screen offers depends on whether this
+		// workspace can actually hold a conversation. Computed here, not in the
+		// SPA: coderKindOrDefault fills coder_kind on every write, so the column
+		// is non-empty even for a workspace that configured nothing, and a
+		// frontend inferring "has a coder" from it would offer a chat that
+		// cannot answer.
+		resp["coder_ready"] = workspaceCoderReady(w)
 		// Was telegram_bot_username, which saveConnector writes ONLY for
 		// Telegram (web/handlers_connectors.go) — so a Discord install reached
 		// Done with an empty bot name, no linking instruction, and no mention

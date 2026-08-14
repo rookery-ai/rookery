@@ -566,6 +566,42 @@ insert-before/insert-after/delete. Four things are load-bearing:
 Merged cells are deliberately not offered — `pipeSafeTable` already drops a `colspan`/`rowspan` note
 to the HTML/placeholder path, so a merge button would be a button that makes the note read-only.
 
+**Onboarding ends in ONE action, and the chat had to learn the product first.**
+The wizard's Done screen used to offer two co-equal buttons — *Create your first agent* and
+*Explore the knowledge base* — asking a brand-new owner to choose between things they have no
+basis to compare, one of which led to a knowledge base that is empty at exactly that moment.
+It now offers exactly one, chosen by `web.workspaceCoderReady`: with a coder, **"Explore what
+you can do!"** opens a new chat with an opening question already sent; without one, **"Create
+your first agent"**. Four things are load-bearing:
+
+- **`workspaceCoderReady` is not `CoderKind != ""`.** `coderKindOrDefault` fills that column on
+  every write, so it is non-empty for a workspace that skipped the coder step entirely. The
+  predicate asks for the fields the engine needs (provider+model, or a binary) and is computed
+  server-side; it deliberately does **not** probe the filesystem, because detection ("is one on
+  PATH now") is a different question from configuration — the same split `ROOKERY_CODER_MODE`
+  draws. The SPA defaults it to false, so a missing flag offers the agent builder rather than a
+  chat with nothing behind it.
+- **The coder step gained a Skip, and that is what makes the second branch reachable at all.**
+  The server has always accepted `{step:3, skip:true}`; nothing rendered a control for it, so
+  no user could arrive at Done without a coder.
+- **`BuildChatSystemPrompt` now injects `platformContextBlock`, and the block takes the SURFACE
+  as a parameter.** Chat previously got `productIdentityBlock(SurfaceChat)` alone, which names
+  the knowledge base, agents, skills, reminders and connections and says nothing about secrets,
+  MCP servers, providers, coders or chat apps — so a button inviting the owner to ask what the
+  platform can do would have opened a conversation that could not answer. The block embeds
+  `productIdentityBlock`, so hardcoding `SurfaceAgent` (as it did) would tell a chat "right now
+  you are an AGENT run" and license the output-protocol markers at a human; a test pins that it
+  does not. It goes in the system prompt, not per-turn context: identical across turns,
+  therefore cacheable, and chat is the highest-frequency coder surface.
+- **The opening message is sent by `ChatWindow` AFTER navigation, never by the wizard before
+  it.** `handleChatMessage` is a blocking coder call, so sending first would freeze the wizard
+  on a dead button for as long as the model takes. Two guards make it once-only: a ref (per
+  mount) and an empty-history check (per chat), the latter because `?intro=1` survives in the
+  URL and a refresh would otherwise re-ask and spend another coder call. The text lives in
+  `pages/chats/introPrompt.ts` as **UI copy, not a prompt** — `internal/prompts` owns what the
+  model is told about itself, not a sentence attributed to the user and rendered in their own
+  bubble.
+
 **Chat knowledge-base access (on-demand retrieval + editing).** The one-off chat coder runs with `WithDir(vaultRoot).WithAllowedTools("Read,Write,Edit,Glob,Grep")` and a system instruction (`prompts.BuildChatSystemPrompt`) naming the vault root. The LLM retrieves and edits the user's notes **on demand** — only on turns that touch the KB — instead of having the vault injected every prompt. `chat.BuildUserContext` now returns identity-only context (profile/memory/agents/MCP); the old always-on `[Related knowledge base]` keyword-snippet block was removed. The tool set is file-only (no `Bash`/`WebFetch`): the chat can create/edit/read notes but cannot delete, rename, or run shell commands. The same applies to agents (RW over the vault via the sandbox). The detective `Guard` is no longer wired into agent runs — it would revert the KB edits that are now intentional — so agent/chat KB edits persist.
 
 **Chat connector access.** One-off chat (both web `handleChatMessage` and Telegram) also exposes the workspace's **ACTIVE** service connections to the chat coder (`connectors.ActiveBoundConns` — all of them; chat isn't an agent so there's no per-agent binding), wired identically to how the API/CLI split works elsewhere: the **API engine** gets them as native function tools (`coder.WithConnectors`), a **CLI coder** reaches them via the loopback bridge (`bridge.Register` → `ROOKERY_CONNECTOR_URL`/`ROOKERY_CONNECTOR_TOKEN` env → `rookery connector exec`, plus a scoped `Bash(<bin> connector exec:*)` grant since chat is otherwise file-only). Both paths hit the same `connectors.Execute` (mutating allowed — chat is like a run, `buildPhase=false`). `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` appends `connectedToolsBlock` so the model knows the tools exist; with no active connections / no bridge, chat behaves exactly as the file-only default.

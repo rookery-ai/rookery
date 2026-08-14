@@ -184,7 +184,7 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 		// for only those commands — chat stays file-only (no arbitrary shell) otherwise.
 		coder = coder.WithAllowedTools(codersvc.ChatAllowedTools(connBin, kbBin, mcpBin))
 	}
-	sysCtx := prompts.BuildChatSystemPrompt(root, coder.BackendType(), connRefs, connTools, connBin) +
+	sysCtx := prompts.BuildChatSystemPrompt(root, coder.BackendType(), connRefs, connTools, connBin, s.chatAppsFor(u.ID)) +
 		prompts.MCPToolsBlock(mcpRefs, mcpTools, coder.BackendType(), mcpBin) +
 		chat.BuildUserContext(s.db, s.memory, u.ID)
 
@@ -472,4 +472,22 @@ func (s *Server) resubmitPasswordOverExistingSecrets(w *db.Workspace, newPw stri
 		return "", nil
 	}
 	return s.changeMasterPasswordCore(w, oldPw, newPw)
+}
+
+// chatAppsFor lists the workspace's connected chat platforms for the chat
+// system prompt's platform primer.
+//
+// A failure returns nil rather than propagating: the chat apps are context, and
+// a chat that opens without knowing about Telegram is far better than a chat
+// that refuses to open. Mirrors agentrunner's own resolution.
+func (s *Server) chatAppsFor(workspaceID string) []prompts.ChatAppInfo {
+	conns, err := s.db.ListWorkspacePlatformConnections(workspaceID)
+	if err != nil {
+		return nil
+	}
+	platforms := make([]string, 0, len(conns))
+	for _, c := range conns {
+		platforms = append(platforms, c.Platform)
+	}
+	return prompts.ChatAppsForPlatforms(platforms)
 }

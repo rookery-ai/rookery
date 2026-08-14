@@ -206,7 +206,7 @@ func TestGateToolCallingHasDiscoveryTools(t *testing.T) {
 // cannot reach private addresses, so they are no longer exec-gated in chat. run_script and
 // bash remain exec-gated (they execute code) and must NOT appear.
 func TestChatToolCallingHasSearchAndGlob(t *testing.T) {
-	p := BuildChatSystemPrompt("/tmp/vault", BackendToolCalling, nil, nil, "")
+	p := BuildChatSystemPrompt("/tmp/vault", BackendToolCalling, nil, nil, "", nil)
 	for _, want := range []string{"search_files", "glob", "web_search", "web_fetch"} {
 		if !strings.Contains(p, want) {
 			t.Errorf("tool-calling chat prompt must offer %q", want)
@@ -224,7 +224,7 @@ func TestChatToolCallingHasSearchAndGlob(t *testing.T) {
 // CLI `connector exec` bridge instructions (which chat never wires up) instead of the
 // native-tools instructions.
 func TestChatSystemPromptConnectorsNativeTools(t *testing.T) {
-	p := BuildChatSystemPrompt("/tmp/vault", "api", []ConnectionRef{{Provider: "google", Label: "work", Identity: "a@b.com"}}, []string{"gmail_send_email"}, "")
+	p := BuildChatSystemPrompt("/tmp/vault", "api", []ConnectionRef{{Provider: "google", Label: "work", Identity: "a@b.com"}}, []string{"gmail_send_email"}, "", nil)
 	if !strings.Contains(p, "NATIVE tools") {
 		t.Errorf("chat prompt with connections on the API backend must advertise NATIVE tools, got:\n%s", p)
 	}
@@ -348,7 +348,7 @@ func TestNoStateJSONMentionsAnywhere(t *testing.T) {
 			VaultRoot: "/tmp/vault", AgentDir: "/tmp/vault/agents/1",
 		}),
 		"philosophy_full":   agentPhilosophyBlock(BackendFullCoder),
-		"platform_context":  platformContextBlock(nil, "/tmp/vault"),
+		"platform_context":  platformContextBlock(SurfaceAgent, nil, "/tmp/vault"),
 		"capabilities_tool": coderCapabilitiesBlock(BackendToolCalling),
 		"capabilities_full": coderCapabilitiesBlock(BackendFullCoder),
 	}
@@ -566,9 +566,9 @@ func TestForceTier1AbsentByDefault(t *testing.T) {
 func TestNoStaleOrForeignTermsInPrompts(t *testing.T) {
 	banned := []string{"Obsidian", "obsidian", "self-hosted", "USER.md", "SOUL.md", "reminders/", "vault"}
 	subjects := map[string]string{
-		"chat/tool-calling": BuildChatSystemPrompt("/kb", BackendToolCalling, nil, nil, ""),
-		"chat/cli":          BuildChatSystemPrompt("/kb", BackendFullCoder, nil, nil, ""),
-		"platform_context":  platformContextBlock(nil, "/kb"),
+		"chat/tool-calling": BuildChatSystemPrompt("/kb", BackendToolCalling, nil, nil, "", nil),
+		"chat/cli":          BuildChatSystemPrompt("/kb", BackendFullCoder, nil, nil, "", nil),
+		"platform_context":  platformContextBlock(SurfaceAgent, nil, "/kb"),
 	}
 	for name, text := range subjects {
 		for _, b := range banned {
@@ -580,7 +580,7 @@ func TestNoStaleOrForeignTermsInPrompts(t *testing.T) {
 }
 
 func TestChatPromptStatesIdentityAndLimits(t *testing.T) {
-	p := BuildChatSystemPrompt("/home/u/.rookery/vaults/abc", BackendToolCalling, nil, nil, "")
+	p := BuildChatSystemPrompt("/home/u/.rookery/vaults/abc", BackendToolCalling, nil, nil, "", nil)
 	for _, want := range []string{
 		"Rookery",        // it must know what it is
 		"knowledge base", // the term the owner sees
@@ -605,8 +605,8 @@ func TestChatPromptStatesIdentityAndLimits(t *testing.T) {
 func TestProductIdentitySharedByBothConsumers(t *testing.T) {
 	marker := "You are part of Rookery, a personal AI platform."
 	for name, text := range map[string]string{
-		"chat":  BuildChatSystemPrompt("/kb", BackendToolCalling, nil, nil, ""),
-		"agent": platformContextBlock(nil, "/kb"),
+		"chat":  BuildChatSystemPrompt("/kb", BackendToolCalling, nil, nil, "", nil),
+		"agent": platformContextBlock(SurfaceAgent, nil, "/kb"),
 	} {
 		if !strings.Contains(text, marker) {
 			t.Errorf("[%s] missing the shared product identity block", name)
@@ -615,7 +615,7 @@ func TestProductIdentitySharedByBothConsumers(t *testing.T) {
 }
 
 func TestPlatformContextNamesCurrentMemoryFiles(t *testing.T) {
-	out := platformContextBlock(nil, "/kb")
+	out := platformContextBlock(SurfaceAgent, nil, "/kb")
 	for _, want := range []string{"ABOUT.md", "STYLE.md"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("platform context missing %q", want)

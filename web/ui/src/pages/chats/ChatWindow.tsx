@@ -106,11 +106,16 @@ export function reconcilePending(
 export function ChatWindow({
   chatId,
   initialText,
+  autoSend,
   autoFocus,
   compact,
 }: {
   chatId: string;
   initialText?: string;
+  // autoSend: send initialText on open instead of parking it in the composer.
+  // Used by the setup wizard's closing action, where landing in a chat with an
+  // unsent question sitting in the box is a dead stop the owner has to decode.
+  autoSend?: boolean;
   autoFocus?: boolean;
   compact?: boolean;
 }) {
@@ -226,6 +231,23 @@ export function ChatWindow({
     const result = await sendTurn(text);
     if (!result.ok) setError(result.message);
   }
+
+  // Send the opening question once, for the setup wizard's closing action.
+  //
+  // Two guards, both load-bearing. The ref makes it once per mount. The
+  // empty-history check makes it once per CHAT: the ?intro=1 parameter stays in
+  // the URL, so a refresh — or the browser restoring the tab — would otherwise
+  // ask the same question again and spend another coder call on it.
+  const autoSentRef = useRef(false);
+  useEffect(() => {
+    if (!autoSend || !initialText || autoSentRef.current || !data) return;
+    autoSentRef.current = true;
+    if (data.messages.length > 0) return;
+    void handleSend(initialText);
+    // handleSend closes over state setters only; the refs above are the real
+    // guards, and depending on its identity would risk a second fire.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, autoSend, initialText]);
 
   function handleDelete() {
     setDeleteOpen(false);
@@ -452,7 +474,7 @@ export function ChatWindow({
       <Composer
         onSend={handleSend}
         busy={busy || attaching}
-        initialText={initialText}
+        initialText={autoSend ? undefined : initialText}
         autoFocus={autoFocus}
         leftSlot={attachControl}
         gutter={gutter}

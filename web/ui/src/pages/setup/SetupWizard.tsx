@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
-import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, Check, KeyRound, Link2, Plus, RotateCcw, Save } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, KeyRound, Link2, Plus, RotateCcw, Save, Sparkles } from "lucide-react";
 import { CuratedSelect } from "@/components/profile/CuratedSelect";
 import {
   timezoneOptions,
@@ -280,10 +280,12 @@ function CoderStep({
   data,
   onBack,
   onNext,
+  onSkip,
 }: {
   data: CoderStepData | null;
   onBack: () => void;
   onNext: (next: number) => void;
+  onSkip: () => void;
 }) {
   const mutation = useMutation({
     mutationFn: (input: SaveCoderInput) =>
@@ -322,6 +324,19 @@ function CoderStep({
           hideTimeout
         />
       )}
+      {/* The server has always accepted {step:3, skip:true}; nothing rendered a
+          control for it, so nobody could reach Done without a coder. That made
+          the entire coder-less half of onboarding unreachable — including the
+          "Create your first agent" ending, which is the right destination for
+          someone who has not set an engine up yet. */}
+      <Button
+        type="button"
+        variant="ghost"
+        className="w-full text-muted-2"
+        onClick={onSkip}
+      >
+        Skip for now — I'll set up a coder later
+      </Button>
     </div>
   );
 }
@@ -658,10 +673,14 @@ export type DoneChatApp = {
 
 function DoneScreen({
   chatApp,
+  coderReady,
   onFinish,
+  onExplore,
 }: {
   chatApp: DoneChatApp | null;
+  coderReady: boolean;
   onFinish: (target: string) => void;
+  onExplore: () => void;
 }) {
   return (
     <div className="space-y-4 py-4 text-center">
@@ -715,15 +734,30 @@ function DoneScreen({
           </div>
         </div>
       )}
+      {/* ONE closing action, never two.
+          Two co-equal buttons ask a brand-new owner to choose between things
+          they have no basis to compare, and one of them led to a knowledge base
+          that is empty at exactly this moment.
+
+          With a coder configured, the best introduction is the product
+          explaining itself: the chat can already read and write the knowledge
+          base and reach connected accounts, and its prompt now carries the full
+          platform primer, so it can answer what agents, skills, secrets,
+          connections, MCP servers and chat apps are. Without a coder there is
+          nothing to have a conversation with, so the useful ending is the agent
+          builder. */}
       <div className="flex flex-col gap-2 pt-2">
-        <Button onClick={() => onFinish("/agents/new")}>
-          <Plus />
-          Create your first agent
-        </Button>
-        <Button variant="outline" onClick={() => onFinish("/kb")}>
-            <BookOpen />
-          Explore the knowledge base
-        </Button>
+        {coderReady ? (
+          <Button onClick={onExplore}>
+            <Sparkles />
+            Explore what you can do!
+          </Button>
+        ) : (
+          <Button onClick={() => onFinish("/agents/new")}>
+            <Plus />
+            Create your first agent
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -747,8 +781,13 @@ export default function SetupWizard() {
   const [chatApp, setChatApp] = useState<DoneChatApp | null | false>(null);
   const [finishError, setFinishError] = useState("");
   const [finishing, setFinishing] = useState(false);
+  // Defaults to false so the Done screen offers "Create your first agent" if
+  // the flag never arrives. Failing the other way would invite the owner into a
+  // chat with nothing behind it.
+  const [coderReady, setCoderReady] = useState(false);
 
   function applyExtras(d: SetupResponse) {
+    if (d.step === 7) setCoderReady(d.coder_ready ?? false);
     if (d.step === 3 && !coderData) {
       setCoderData({
         detected: d.detected_coders ?? [],
@@ -810,6 +849,31 @@ export default function SetupWizard() {
     }
   }
 
+  // Creates a chat and lands in it with the opening question already sent.
+  //
+  // The chat is created here but the MESSAGE is sent by ChatWindow after the
+  // navigation, never before it. handleChatMessage is a blocking coder call, so
+  // sending first would freeze the wizard on a dead button for as long as the
+  // model takes; sending after means the owner watches their own question and a
+  // typing indicator — which is also the behaviour they need to learn.
+  async function explore() {
+    setFinishing(true);
+    setFinishError("");
+    try {
+      await api.post("/api/v1/setup", { step: 7 });
+      const chat = await api.post<{ id: string }>("/api/v1/chats", {
+        name: "Getting started",
+      });
+      // Navigate BEFORE invalidating, for the reason finish() records below.
+      nav(`/chats?chat=${chat.id}&intro=1`);
+      void qc.invalidateQueries({ queryKey: ["session"] });
+    } catch (err) {
+      setFinishError(errMsg(err));
+    } finally {
+      setFinishing(false);
+    }
+  }
+
   async function finish(target: string) {
     setFinishing(true);
     setFinishError("");
@@ -867,6 +931,15 @@ export default function SetupWizard() {
             data={coderData}
             onBack={() => setStep(2)}
             onNext={(n) => void advance(n)}
+            onSkip={() =>
+              void (async () => {
+                const res = await api.post<SetupStepResponse>("/api/v1/setup", {
+                  step: 3,
+                  skip: true,
+                });
+                void advance(res.next_step);
+              })()
+            }
           />
         )}
         {step === 4 && (
@@ -904,7 +977,9 @@ export default function SetupWizard() {
           <>
             <DoneScreen
               chatApp={chatApp === null || chatApp === false ? null : chatApp}
+              coderReady={coderReady}
               onFinish={(t) => void finish(t)}
+              onExplore={() => void explore()}
             />
             {finishError && <ErrorNote>{finishError}</ErrorNote>}
             {finishing && (

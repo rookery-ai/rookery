@@ -56,12 +56,16 @@ type BackendState = {
   // landed — the link step polls for exactly this transition.
   connPlatform: string;
   connLinked: boolean;
+  // Mirrors web.workspaceCoderReady: whether this workspace has a coder that
+  // can actually run, which decides the Done screen's single closing action.
+  coderReady: boolean;
 };
 
 function freshState(): BackendState {
   return {
     basicsDone: false, secretsSalt: false, coderDone: false, profileDone: false,
     connCount: 0, connSkipped: false, connPlatform: "", connLinked: false,
+    coderReady: false,
   };
 }
 
@@ -84,6 +88,9 @@ function setupGetBody(s: BackendState) {
   }
   if (step === 5) {
     body.platforms = PLATFORMS;
+  }
+  if (step === 7) {
+    body.coder_ready = s.coderReady;
   }
   if (step === 7 && s.connCount > 0) {
     // Mirrors apiGetSetup's step-7 branch: the platform-keyed summary that
@@ -149,6 +156,11 @@ function mockFetch(state: BackendState, posts: { url: string; body: unknown }[])
         return Promise.resolve(jsonResponse({ ok: true, identity: "@rookie_bot" }));
       }
 
+      if (url === "/api/v1/chats" && method === "POST") {
+        posts.push({ url, body });
+        return Promise.resolve(jsonResponse({ id: "chat-1", name: "Getting started" }, 201));
+      }
+
       if (url === "/api/v1/setup" && method === "POST") {
         posts.push({ url, body });
         const req = body as Record<string, unknown>;
@@ -204,6 +216,7 @@ function wrap() {
           <Route path="/setup" element={<SetupWizard />} />
           <Route path="/agents/new" element={<div>AGENTS NEW PAGE</div>} />
           <Route path="/kb" element={<div>KB PAGE</div>} />
+          <Route path="/chats" element={<div>CHATS PAGE</div>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -483,7 +496,12 @@ test("Done: primary CTA posts {step:7}, invalidates session, and navigates to /a
   expect(await screen.findByText("AGENTS NEW PAGE")).toBeInTheDocument();
 });
 
-test("Done: secondary CTA navigates to /kb", async () => {
+// ONE closing action, never two.
+//
+// Two co-equal buttons asked a brand-new owner to choose between things they
+// have no basis to compare, and the "Explore the knowledge base" half led to a
+// knowledge base that is empty at exactly that moment.
+test("Done: exactly one closing action is offered", async () => {
   const state = freshState();
   state.basicsDone = true;
   state.secretsSalt = true;
@@ -494,10 +512,38 @@ test("Done: secondary CTA navigates to /kb", async () => {
   wrap();
 
   expect(await screen.findByText(/you're set up/i)).toBeInTheDocument();
-  const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: /explore the knowledge base/i }));
+  expect(screen.queryByRole("button", { name: /explore the knowledge base/i })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /create your first agent/i })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /explore what you can do/i })).not.toBeInTheDocument();
+});
 
-  expect(await screen.findByText("KB PAGE")).toBeInTheDocument();
+// With a coder configured, the ending is a conversation: the chat can read and
+// write the knowledge base, reach connected accounts, and — since its prompt
+// carries the platform primer — actually answer what the platform is.
+test("Done: a workspace with a coder is offered the guided chat", async () => {
+  const state = freshState();
+  state.basicsDone = true;
+  state.secretsSalt = true;
+  state.coderDone = true;
+  state.profileDone = true;
+  state.connSkipped = true;
+  state.coderReady = true;
+  const posts: { url: string; body: unknown }[] = [];
+  mockFetch(state, posts);
+  wrap();
+
+  expect(await screen.findByText(/you're set up/i)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /create your first agent/i })).not.toBeInTheDocument();
+
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: /explore what you can do/i }));
+
+  // Setup is completed AND a chat is created, then the wizard hands off to it
+  // with ?intro=1 — the message itself is sent by the chat window after the
+  // navigation, so the wizard never blocks on a coder call.
+  await waitFor(() => expect(posts.some((p) => p.url === "/api/v1/chats")).toBe(true));
+  expect(posts.some((p) => p.body && (p.body as { step?: number }).step === 7)).toBe(true);
+  expect(await screen.findByText("CHATS PAGE")).toBeInTheDocument();
 });
 
 test("Back navigation: from Master password back to Basics re-shows the Basics form", async () => {

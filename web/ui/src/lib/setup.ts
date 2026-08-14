@@ -20,6 +20,11 @@ export type SetupResponse = {
   // "slim" builds ship no CLI coder binary; the wizard hides the local engine.
   coder_mode?: "full" | "slim";
   platforms?: ConnectorPlatform[];
+  // Step-7 only: does this workspace have a coder that can actually run?
+  // Computed server-side, because coder_kind is filled on every write and so
+  // says nothing about whether anything was configured. Decides which single
+  // closing action the Done screen offers.
+  coder_ready?: boolean;
   // Step-7 summary of the connected chat app. Replaces the old
   // `bot_username`, which read a Telegram-only setting key and therefore left
   // a Discord install with no bot name and no linking instruction at all.
