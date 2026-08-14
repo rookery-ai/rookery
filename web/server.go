@@ -421,7 +421,7 @@ func (s *Server) requireSetupComplete(next echo.HandlerFunc) echo.HandlerFunc {
 func (s *Server) coderForWorkspace(workspaceID string) *coder.Coder {
 	w, _ := s.db.GetWorkspaceByID(workspaceID)
 	return coder.ForWorkspace(w, s.homesDir, s.cfg.Data.Dir, s.vault,
-		s.cfg.Coder.ClaudeBin, s.cfg.Coder.Timeout, s.cfg.Sandbox.Enabled,
+		s.cfg.Coder.Bin, s.cfg.Coder.Timeout, s.cfg.Sandbox.Enabled,
 		s.coderMode() == config.ModeFull).
 		WithSecretsLookup(s.secretsLookup)
 }
