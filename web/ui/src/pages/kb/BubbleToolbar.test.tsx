@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider, ToastHost } from "@/components/shell/Toast";
 import BubbleToolbar from "./BubbleToolbar";
 import { useAIActions } from "./AIActions";
-import { buildExtensions } from "./editor";
+import { buildExtensions, toMarkdown } from "./editor";
 
 // Review finding: BubbleToolbar's shouldShow fully replaced TipTap's default
 // (which includes an `editor.isEditable` check), so the whole toolbar —
@@ -123,4 +123,85 @@ test("a non-empty selection on a non-editable (read-only) note shows neither Bol
   expect(screen.queryByRole("button", { name: "Bold" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Improve/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Edit with AI" })).not.toBeInTheDocument();
+});
+
+// The three alignment controls (nodes/align.ts). They live in the bubble
+// toolbar rather than on a surface of their own because an image selection is
+// a non-empty NodeSelection and therefore already shows this menu — so images
+// get alignment with no second control panel.
+test("the alignment controls render, and Left is pressed on unaligned text", async () => {
+  const { getEditor } = renderHarness(true);
+  const editor = getEditor()!;
+
+  act(() => {
+    editor.commands.setTextSelection({ from: 1, to: 5 });
+  });
+  await act(() => sleep(PAST_DEBOUNCE_MS));
+
+  for (const name of ["Align left", "Align centre", "Align right"]) {
+    expect(screen.getByRole("button", { name })).toBeInTheDocument();
+  }
+  // Unaligned IS left — the control reports the document's actual state rather
+  // than waiting for an explicit align="left" wrapper that adds nothing.
+  expect(screen.getByRole("button", { name: "Align left" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(screen.getByRole("button", { name: "Align centre" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+});
+
+test("clicking Align centre writes the canonical markdown and flips the pressed state", async () => {
+  const { getEditor } = renderHarness(true);
+  const editor = getEditor()!;
+
+  act(() => {
+    editor.commands.setTextSelection({ from: 1, to: 5 });
+  });
+  await act(() => sleep(PAST_DEBOUNCE_MS));
+
+  // Mousedown, not click: the toolbar's buttons deliberately act on mousedown
+  // so the selection survives (a click blurs the editor first).
+  act(() => {
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Align centre" }));
+  });
+  await act(() => sleep(PAST_DEBOUNCE_MS));
+
+  expect(toMarkdown(editor).trim()).toBe(
+    '<div align="center">\n\nthe pipeline runs on merge\n\n</div>',
+  );
+  expect(screen.getByRole("button", { name: "Align centre" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  expect(screen.getByRole("button", { name: "Align left" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+});
+
+// The pressed states are read through useEditorState rather than by calling
+// editor.isActive() during render. @tiptap/react v3 defaults
+// shouldRerenderOnTransaction to FALSE, so the isActive form computes once per
+// React render and never again — every indicator in this toolbar was frozen at
+// mount, silently, with the commands themselves working fine. Bold is asserted
+// here because it is the oldest control in the row: if this regresses, it
+// regresses for all of them.
+test("a mark toggled after the toolbar mounts updates its pressed state", async () => {
+  const { getEditor } = renderHarness(true);
+  const editor = getEditor()!;
+
+  act(() => {
+    editor.commands.setTextSelection({ from: 1, to: 5 });
+  });
+  await act(() => sleep(PAST_DEBOUNCE_MS));
+  expect(screen.getByRole("button", { name: "Bold" })).toHaveAttribute("aria-pressed", "false");
+
+  act(() => {
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Bold" }));
+  });
+  await act(() => sleep(PAST_DEBOUNCE_MS));
+  expect(screen.getByRole("button", { name: "Bold" })).toHaveAttribute("aria-pressed", "true");
 });

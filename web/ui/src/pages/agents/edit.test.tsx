@@ -25,9 +25,11 @@ class FakeEventSource {
 }
 
 let posts: string[];
+let planReadyOnStart = true;
 
 function mockFetch() {
   posts = [];
+  planReadyOnStart = true;
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -43,7 +45,15 @@ function mockFetch() {
       if (url === "/api/v1/agents/design/state") return Promise.resolve(jsonResponse({ active: false }));
       if (url === "/api/v1/agents/a1/edit/start") {
         return Promise.resolve(
-          jsonResponse({ response: "The schedule row says hourly.", done: false, state: "designing" }),
+          jsonResponse({
+            response: "The schedule row says hourly.",
+            done: false,
+            state: "designing",
+            // The diagnose-then-confirm prompt puts the proposed fix (and so the
+            // [TECHNICAL SPEC] block behind plan_ready) in the very first reply.
+            plan_ready: planReadyOnStart,
+            pending_spec: "Change: run it daily\nTier change: same",
+          }),
         );
       }
       return Promise.resolve(jsonResponse({}));
@@ -108,5 +118,21 @@ test("the Build button appears after the first reply", async () => {
   await userEvent.type(box, "run it once a day");
   fireEvent.keyDown(box, { key: "Enter", code: "Enter" });
 
-  expect(await screen.findByRole("button", { name: "Build it" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: /Approve & build/ })).toBeInTheDocument();
+});
+
+// The other half of the same contract: the edit designer must DIAGNOSE and
+// propose before it offers to rebuild. A reply that is still asking what went
+// wrong carries no settled plan, so there is nothing to approve yet.
+test("no Build button while the edit designer is still diagnosing", async () => {
+  planReadyOnStart = false;
+  wrap();
+  await screen.findByText("Diagnose");
+
+  const box = screen.getByRole("textbox");
+  await userEvent.type(box, "it keeps failing");
+  fireEvent.keyDown(box, { key: "Enter", code: "Enter" });
+
+  await screen.findByText("The schedule row says hourly.");
+  expect(screen.queryByRole("button", { name: /Approve & build/ })).not.toBeInTheDocument();
 });

@@ -115,6 +115,16 @@ collapses to one column — four unreadable slivers is not a layout.
   `<div>` with no `data-cols` is **not** claimed.
 - A slash-menu test that the three entries exist and filter on "columns" and on
   "grid".
+- **Cross-node entries against `nodes/align.ts`**: an aligned block wrapping a
+  columns block, a columns block with an aligned cell, and the two as siblings —
+  all pinned clean. These could not be written from either feature branch alone,
+  since each would have failed on the branch where the other node was not
+  registered; they land with whichever merges second. Nesting is the shape the
+  INTERFACE produces when you centre a columns block (`setBlockAlign` finds no
+  `kbAlign` to update, so it wraps), which is what makes that safe. The one
+  genuine collision — a single div carrying BOTH `align` and `data-cols` — is
+  handled in `align.ts`, whose `div[align]` rule declines when `data-cols` is
+  present so the outcome does not depend on extension-registration order.
 
 ## Not doing
 

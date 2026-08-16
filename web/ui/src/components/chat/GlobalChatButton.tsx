@@ -28,10 +28,15 @@ let createChatInFlight = false;
 // FRESH conversation, not whatever was last open. That is what "Chat about
 // this file" needs — dropping a question about a note into an unrelated
 // ongoing thread is worse than having no button at all.
+// `autoSend` forwards ChatWindow's own once-per-mount, once-per-chat send.
+// The KB editor's "Edit with AI" uses it: parking a quoted passage in the
+// composer and waiting made the user retype the request they had already
+// expressed by selecting the text and clicking the button.
 export function GlobalChatPanel({
   initialText,
   forceNew,
-}: { initialText?: string; forceNew?: boolean } = {}) {
+  autoSend,
+}: { initialText?: string; forceNew?: boolean; autoSend?: boolean } = {}) {
   const { close } = useSlideOver();
   const { data } = useChats();
   const createChat = useCreateChat();
@@ -93,6 +98,7 @@ export function GlobalChatPanel({
             key={shownId}
             chatId={shownId}
             initialText={initialText}
+            autoSend={autoSend}
             autoFocus={shownId === pinnedId}
             compact
           />

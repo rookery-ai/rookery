@@ -97,6 +97,12 @@ func (s *Server) apiKBAssist(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, apiKBAssistResponse{
 		Action: req.Action,
-		Result: strings.TrimSpace(result.Text),
+		// Defence in depth. prompts.APIEngineTextKickoffMessage is the actual fix
+		// for the stray [CHAT] the panel used to show — the API engine was telling
+		// every one-shot call to emit the agent output protocol — but a prompt
+		// steers and does not guarantee, and a weak model will re-emit a marker it
+		// has seen a thousand times. This is what makes this endpoint's contract
+		// ("the result is a replacement passage") true rather than merely intended.
+		Result: prompts.StripProtocolMarkers(result.Text),
 	})
 }
