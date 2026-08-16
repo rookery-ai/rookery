@@ -83,6 +83,10 @@ func extractBinary(data []byte, archiveName string) ([]byte, error) {
 // interrupted upgrade therefore leaves either the old binary or the new one on
 // PATH, never a half-written file — which is also why no rollback copy is kept:
 // the failure mode this produces already is "the old binary is still there".
+//
+// The final swap is delegated to swapBinary, which is per-platform: POSIX
+// renames straight over the target even while it is executing, and Windows
+// cannot (see swap_windows.go).
 func replaceBinary(target string, data []byte) error {
 	dir := filepath.Dir(target)
 	tmp, err := os.CreateTemp(dir, ".rookery-upgrade-*")
@@ -108,7 +112,7 @@ func replaceBinary(target string, data []byte) error {
 	if err := os.Chmod(tmpName, mode); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, target)
+	return swapBinary(tmpName, target)
 }
 
 // isDowngrade reports whether target is an older release than current.

@@ -271,6 +271,25 @@ load-bearing:
   then reports the version the binary on disk claims, rather than the one it meant
   to install — an upgrade that silently left the old process serving is the failure
   worth spending a check on.
+- **That rename is POSIX-only, and assuming otherwise made `upgrade` impossible
+  on Windows.** Windows holds a running executable with a share mode denying
+  delete, so renaming over it fails — and `upgrade` is *always* replacing the
+  image it is itself executing from, so this was never a matter of stopping the
+  server first: the upgrade process is the lock. `swapBinary` is therefore
+  per-platform (`swap_unix.go` renames straight over; `swap_windows.go` moves
+  the target aside to `<binary>.old`, installs, and restores on failure so the
+  outcome still can never be "neither binary"). The displaced file cannot be
+  deleted while this process runs it; the NEXT upgrade clears it. `removeSelf`
+  splits for the same reason and returns a **caveat string** the caller prints,
+  because on Windows `uninstall` moves the binary aside rather than deleting it
+  — reporting a clean removal while leaving a stray `.old` nobody was told about
+  is the quiet half-success this command exists to avoid. The old failure
+  message advised re-running "with the privileges that installed it", which on
+  Windows is the wrong diagnosis entirely. `upgrade`'s closing line also printed
+  `systemctl --user restart` on all three platforms; it now asks
+  `onboard.CurrentService()` and names the foreground command where there is no
+  service. None of the Windows half is exercised on a real host — the
+  cross-compile gate is what checks it.
 - **`extractBinary` selects the member BY NAME.** The archive arrives over the
   network and its contents are about to run as the user, so "the first file" or
   "the biggest one" would be a substitution primitive. `internal/release` is the

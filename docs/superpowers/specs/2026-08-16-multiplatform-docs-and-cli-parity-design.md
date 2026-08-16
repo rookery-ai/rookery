@@ -68,6 +68,22 @@ the installers *and* their test rather than as a prose edit.
 **D. `install.ps1`'s own docstring advertises `rookery.sh`.** The domain is
 `rookery.cloud`. The comment in `packaging/scripts_test.go` repeats it.
 
+**E. `rookery upgrade` cannot work on Windows at all.** Found while verifying
+the sentence "stop the server first" before publishing it. `replaceBinary`
+finishes with `os.Rename(tmp, target)`, which is correct on POSIX — the unlink
+drops the directory entry, not the open file — and impossible on Windows, where
+a running image is held with a share mode denying delete. Stopping the server
+does not help: `upgrade` replaces the binary it is *itself* executing, so the
+upgrade process is the lock. `uninstall` has the same defect in `os.Remove(self)`,
+and its failure message advises retrying "with the privileges that installed
+it", which is the wrong diagnosis there. Separately, `upgrade` closes by printing
+`systemctl --user restart rookery.service` on all three platforms, naming a
+command that does not exist on two of them.
+
+This is scope growth, taken deliberately: the documentation half of this change
+advertises both commands on Windows, and publishing that while they cannot work
+there would be the same defect class the rest of this change exists to remove.
+
 ## Approach
 
 Three principles decide most of the individual edits.
@@ -144,8 +160,18 @@ is a gate that gets deleted.
 
 **In:** the nine documentation pages named above; `install.ps1` and
 `install.sh`; `cmd/rookery/backup_cmd.go` split into `echo_unix.go` +
-`echo_windows.go`; `packaging/scripts_test.go`; `scripts/check-docs-sync.py`;
-the CLAUDE.md and README passages the above make wrong.
+`echo_windows.go`; the `swapBinary`/`removeSelf` split into `swap_unix.go` +
+`swap_windows.go` and `upgrade`'s service-restart line;
+`packaging/scripts_test.go`; `scripts/check-docs-sync.py`; the CLAUDE.md and
+README passages the above make wrong.
+
+**Deploy order is part of the change, not an afterthought.** Three pages now
+state that the passphrase prompt hides what you type, and two describe the
+`.old` move-aside — all of which describe code that does not exist in v0.2.0.
+The website deploys on merge to its own `main`, while the product needs
+merge → release PR → merge → tag. So the product must be **released** before the
+website PR merges, or rookery.cloud documents behaviour no released binary has,
+about the one credential a backup cannot recover.
 
 **Out:**
 
