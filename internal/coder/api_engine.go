@@ -63,10 +63,23 @@ func (c *Coder) runAPI(ctx context.Context, workspaceID, prompt string) (*Result
 	if tools.verifyBuild {
 		maxTokens = buildMaxTokens
 	}
+	// A text-only call (WithNoTools) must NOT be told to emit the output protocol.
+	// The protocol kickoff used to be sent unconditionally, so every one-shot
+	// Generate — the KB rewrite panel, skill-metadata extraction, reminder parsing,
+	// Ping — was instructed to wrap its answer in [CHAT], and a well-behaved model
+	// did. The two JSON callers then failed to parse and fell back silently, which
+	// is why it survived so long. Keyed on noTools because the two coincide exactly
+	// today and every WithNoTools caller was audited; a future caller wanting
+	// protocol markers WITHOUT tools needs an explicit opt-in rather than
+	// inheriting one by accident.
+	kickoff := prompts.APIEngineKickoffMessage
+	if c.noTools {
+		kickoff = prompts.APIEngineTextKickoffMessage
+	}
 	req := llm.Request{
 		Model:     c.api.model,
 		System:    prompt,
-		Messages:  []llm.Message{{Role: "user", Content: prompts.APIEngineKickoffMessage}},
+		Messages:  []llm.Message{{Role: "user", Content: kickoff}},
 		Tools:     offeredTools,
 		MaxTokens: maxTokens,
 	}

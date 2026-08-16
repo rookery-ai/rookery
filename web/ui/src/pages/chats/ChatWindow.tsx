@@ -204,6 +204,24 @@ export function ChatWindow({
       // Also refresh the session list so its updated_at/ordering doesn't go
       // stale after a send (list is a separate query keyed by ["chats"]).
       qc.invalidateQueries({ queryKey: ["chats"] });
+      // A chat turn is the one thing in this browser that can WRITE to the
+      // vault: the chat coder holds Read/Write/Edit over it, which is what
+      // makes "Edit with AI" work at all. Nothing used to tell the knowledge
+      // base, so a note open in the editor showed its old text until a manual
+      // reload.
+      //
+      // Invalidating the whole prefix rather than one path is deliberate — the
+      // browser has no idea which file the model touched. React Query refetches
+      // only ACTIVE queries, so in practice this is one request for the note
+      // currently open and nothing else. kb-tree is included because a turn can
+      // CREATE a note, and a tree that doesn't show it is the same bug one
+      // level up.
+      //
+      // This hangs off the turn, not off the panel closing: the user watches
+      // the reply land and expects the note to follow, without closing
+      // anything.
+      qc.invalidateQueries({ queryKey: ["kb-note"] });
+      qc.invalidateQueries({ queryKey: ["kb-tree"] });
       // Dedupe rather than blindly clear: reconcile against the freshly-
       // fetched history instead of setPending([]) unconditionally — closes
       // a transient window where a blind clear could drop a message that

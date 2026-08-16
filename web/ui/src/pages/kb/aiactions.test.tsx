@@ -6,7 +6,7 @@ import { Editor } from "@tiptap/core";
 import { ToastProvider, ToastHost } from "@/components/shell/Toast";
 import AIActions, { useAIActions } from "./AIActions";
 import { buildExtensions } from "./editor";
-import { selectionChatPrompt } from "./ChatAboutFileButton";
+import { selectionChatPrompt, selectionEditPrompt } from "./ChatAboutFileButton";
 
 // useAIActions calls useSlideOver — mocked so "Edit with AI" activations can
 // be pinned by call count without needing a real ShellCtx.Provider (and
@@ -231,6 +231,36 @@ test("the selection chat prompt names the file and quotes the passage", () => {
   const p = selectionChatPrompt("notes/ci.md", "the pipeline runs on merge");
   expect(p).toContain("notes/ci.md");
   expect(p).toContain("the pipeline runs on merge");
+});
+
+// The two prompts differ because one is SENT and the other is parked in the
+// composer. selectionChatPrompt ends in a blank line — a citation waiting for
+// an instruction — so auto-sending it would ask the model nothing.
+test("the selection EDIT prompt states the request and asks for a real file write", () => {
+  const p = selectionEditPrompt("notes/ci.md", "the pipeline runs on merge");
+  expect(p).toContain("notes/ci.md");
+  expect(p).toContain("the pipeline runs on merge");
+  expect(p).toContain("Help me edit it");
+  // Without this the model proposes a rewrite in chat and writes nothing, so
+  // there is no external change for the open editor to pick up and the feature
+  // reads as broken from the other end.
+  expect(p).toContain("apply the change to the file directly");
+  expect(p.trimEnd()).toBe(p.trim());
+});
+
+test("Edit with AI opens the chat already sending the edit request", async () => {
+  const user = userEvent.setup();
+  const editor = makeEditor();
+  editor.commands.selectAll();
+  renderPanel(editor);
+
+  await user.click(screen.getByRole("button", { name: "Edit with AI" }));
+
+  expect(mockOpen).toHaveBeenCalledTimes(1);
+  const panel = mockOpen.mock.calls[0]![0] as { props: Record<string, unknown> };
+  expect(panel.props.autoSend).toBe(true);
+  expect(panel.props.forceNew).toBe(true);
+  expect(String(panel.props.initialText)).toContain("apply the change to the file directly");
 });
 
 // --- Finding 2: every money-spending control fires exactly once per

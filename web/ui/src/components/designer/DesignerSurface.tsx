@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import {
   AlertTriangle,
   Check,
+  FileText,
   Hammer,
   MessageSquare,
   Pencil,
@@ -23,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Stepper } from "./Stepper";
 import { SpecPanel } from "./SpecPanel";
+import { ReviewCard } from "./ReviewCard";
 
 // ── Binding interfaces (Task 8 — the skill creator — reuses this component
 // via these exact shapes; see .superpowers/sdd/task-6-brief.md) ──────────────
@@ -105,6 +107,17 @@ export type DesignerSurfaceProps = {
     isEdit: boolean;
     agentId: string;
   }) => boolean;
+  // Withhold the build button until the server says the plan is settled
+  // (`plan_ready`). `fsmState === "designing"` covers the whole conversation —
+  // a clarifying question and a finished proposal are the same state — which is
+  // why the button used to offer itself under "Which page should I watch?".
+  //
+  // An explicit opt-in rather than "gate whenever the flag is absent": the
+  // SKILL designer shares this component, returns its own response body, and
+  // has no plan-ready signal of its own yet. Coercing its missing field to
+  // false would hide its build button entirely. Agent pages pass true; the
+  // skill page does not, and behaves exactly as before.
+  gateBuildOnPlanReady?: boolean;
 };
 
 type Role = "user" | "assistant";
@@ -131,6 +144,8 @@ type DesignResponse = {
   can_keep_as_is?: boolean;
   agent_id?: string;
   skill_id?: string; // forward-compatible: Task 8's completion id field
+  plan_ready?: boolean;
+  pending_spec?: string;
 };
 
 type StateSnapshot = {
@@ -154,6 +169,8 @@ type StateSnapshot = {
   // just because the response parsed.
   pending_agent_md?: string;
   pending_tools?: Record<string, string>;
+  plan_ready?: boolean;
+  pending_spec?: string;
 };
 
 type ResumeResponse = {
@@ -164,6 +181,8 @@ type ResumeResponse = {
   agent_name?: string;
   generation_failed?: boolean;
   can_keep_as_is?: boolean;
+  plan_ready?: boolean;
+  pending_spec?: string;
 };
 
 const STATE_INDEX: Record<string, number> = {
@@ -172,7 +191,11 @@ const STATE_INDEX: Record<string, number> = {
   verifying: 3,
 };
 
-const BUILD_PHRASE = "build it";
+// Both surfaces name the act the same way now, so the phrase the button SENDS
+// must be one the server's isApproval accepts. That test is exact-match, so a
+// label change alone would send a phrase that falls through to an ordinary
+// design turn and the button would silently do nothing.
+const BUILD_PHRASE = "approve and build it";
 const SAVE_PHRASE = "save";
 const KEEP_AS_IS_PHRASE = "keep it as-is";
 
@@ -193,6 +216,7 @@ export function DesignerSurface({
   intro,
   startEndpoint,
   acceptRecoveredSession,
+  gateBuildOnPlanReady,
 }: DesignerSurfaceProps) {
   const [messages, setMessages] = useState<HistEntry[]>([]);
   const [fsmState, setFsmState] = useState<FsmState>(null);
@@ -219,6 +243,11 @@ export function DesignerSurface({
   const [view, setView] = useState<"transcript" | "spec">("transcript");
   const [pendingAgentMD, setPendingAgentMD] = useState("");
   const [pendingTools, setPendingTools] = useState<Record<string, string>>({});
+  // Derived server-side from the [TECHNICAL SPEC] block the designer appends to
+  // its proposal turn (internal/agentdesigner/technicalspec.go). It RETRACTS: a
+  // follow-up question carries no block, so the button withdraws.
+  const [planReady, setPlanReady] = useState(false);
+  const [pendingSpec, setPendingSpec] = useState("");
   const navigate = useNavigate();
 
   const sseHandleRef = useRef<SSEHandle | null>(null);
@@ -377,11 +406,15 @@ export function DesignerSurface({
         // already shipped once.
         setPendingAgentMD(snap.pending_agent_md ?? "");
         setPendingTools(snap.pending_tools ?? {});
+        setPlanReady(!!snap.plan_ready);
+        setPendingSpec(snap.pending_spec ?? "");
         if (snap.generating)
           ensureSSE("recovery", snap.last_progress || undefined);
       } else {
         setOwnerSurface("");
         setGenerating(false);
+        setPlanReady(false);
+        setPendingSpec("");
         if (!dismissedRef.current && draft) {
           if (autoResume && !autoResumeTriedRef.current) {
             autoResumeTriedRef.current = true;
@@ -479,6 +512,8 @@ export function DesignerSurface({
       setFsmState((res.state as FsmState) ?? null);
       setGenerationFailed(!!res.generation_failed);
       setCanKeepAsIs(!!res.can_keep_as_is);
+      setPlanReady(!!res.plan_ready);
+      setPendingSpec(res.pending_spec ?? "");
     } catch (err) {
       setError(errMessage(err));
       setResumeBanner({ name: draft?.name });
@@ -575,6 +610,11 @@ export function DesignerSurface({
       if (res.state) setFsmState(res.state as FsmState);
       setGenerationFailed(!!res.generation_failed);
       setCanKeepAsIs(!!res.can_keep_as_is);
+      // Retracts as well as arms: a follow-up clarifying question carries no
+      // [TECHNICAL SPEC] block, so the server reports false and the build
+      // button withdraws until the plan settles again.
+      setPlanReady(!!res.plan_ready);
+      setPendingSpec(res.pending_spec ?? "");
       // building:true means the real outcome arrives via the SSE stream, so the
       // live onDone must refetch; a terminal state (verifying/designing) was
       // delivered right here, so it must NOT (see awaitingBuildResultRef).
@@ -627,6 +667,7 @@ export function DesignerSurface({
       if (snap.active) {
         setPendingAgentMD(snap.pending_agent_md ?? "");
         setPendingTools(snap.pending_tools ?? {});
+        setPendingSpec(snap.pending_spec ?? "");
       }
     } catch {
       // Best-effort — the panel just keeps showing whatever it last had.
@@ -654,10 +695,22 @@ export function DesignerSurface({
   const composerBusy = busy || recovering;
   const lastIsAssistant =
     messages.length > 0 && messages[messages.length - 1]!.role === "assistant";
+  // The reported bug: this used to be true for EVERY assistant turn in
+  // "designing", so the build button appeared under clarifying questions.
+  // planReady is the server's "the plan is settled" signal; the typed word
+  // "approve" is unaffected either way, so a model that forgets the marker
+  // costs discoverability, never the ability to build.
+  const buildOffered = !gateBuildOnPlanReady || planReady;
   const showDesigningActions =
-    fsmState === "designing" && !generating && !busy && lastIsAssistant && !readOnly;
+    fsmState === "designing" && buildOffered && !generating && !busy && lastIsAssistant && !readOnly;
   const showVerifyingActions =
     fsmState === "verifying" && !generating && !busy && lastIsAssistant && !readOnly;
+  // Which transcript turn is the dry run. Deliberately NOT gated on !readOnly:
+  // a mirror must still SEE the review, it just gets no action row.
+  const reviewTurnIndex =
+    fsmState === "verifying" && !generating && !busy && lastIsAssistant
+      ? messages.length - 1
+      : -1;
 
   if (resumeBanner) {
     return (
@@ -747,7 +800,7 @@ export function DesignerSurface({
             </div>
           )}
           <div className="min-h-0 flex-1">
-            <SpecPanel agentMD={pendingAgentMD} tools={pendingTools} />
+            <SpecPanel agentMD={pendingAgentMD} tools={pendingTools} spec={pendingSpec} />
           </div>
         </div>
       ) : (
@@ -760,14 +813,47 @@ export function DesignerSurface({
             <>{intro}</>
           )}
 
-          {messages.map((m, i) => (
-            <ChatMessageBubble
-              key={i}
-              role={m.role}
-              content={m.content}
-              createdAt={m.created_at}
-            />
-          ))}
+          {messages.map((m, i) =>
+            i === reviewTurnIndex ? null : (
+              <ChatMessageBubble
+                key={i}
+                role={m.role}
+                content={m.content}
+                createdAt={m.created_at}
+              />
+            ),
+          )}
+
+          {/* The dry run is promoted out of the bubble stream: it is the one
+              turn where action is required, and as an ordinary bubble it was
+              indistinguishable from the questions above it and scrolled past. */}
+          {reviewTurnIndex >= 0 && (
+            <ReviewCard
+              title="Dry run — review before saving"
+              subtitle={`Your ${labels.entityName} ran and produced this. Save it, or tell me what to change.`}
+              content={messages[reviewTurnIndex]!.content}
+              createdAt={messages[reviewTurnIndex]!.created_at}
+            >
+              {showVerifyingActions && (
+                <>
+                  <Button onClick={() => void handleSend(SAVE_PHRASE)}>
+                    <Save />
+                    {labels.saveButton}
+                  </Button>
+                  {endpoints.state && (
+                    <Button variant="outline" onClick={() => void openSpecView()}>
+                      <FileText />
+                      View spec
+                    </Button>
+                  )}
+                  <Button variant="outline" onClick={focusComposer}>
+                    <MessageSquare />
+                    Request changes
+                  </Button>
+                </>
+              )}
+            </ReviewCard>
+          )}
 
           {sse && (
             <div className="max-w-[78%] self-start">
@@ -784,27 +870,24 @@ export function DesignerSurface({
           {busy && <TypingIndicator />}
 
           {showDesigningActions && (
-            <div className="flex gap-2 pl-1">
+            <div className="flex flex-wrap gap-2 pl-1">
               <Button size="sm" onClick={handleBuildClick}>
                 <Hammer />
                 {labels.buildButton}
               </Button>
+              {/* The plan is a real artifact the moment it settles, and a user
+                  who has not noticed the header toggle is precisely the one who
+                  forgets what they approved. Gated on endpoints.state for the
+                  same reason the toggle is: the skill designer has none. */}
+              {endpoints.state && planReady && (
+                <Button size="sm" variant="outline" onClick={() => void openSpecView()}>
+                  <FileText />
+                  View spec
+                </Button>
+              )}
               <Button size="sm" variant="outline" onClick={focusComposer}>
                 <Pencil />
                 Make changes
-              </Button>
-            </div>
-          )}
-
-          {showVerifyingActions && (
-            <div className="flex gap-2 pl-1">
-              <Button size="sm" onClick={() => void handleSend(SAVE_PHRASE)}>
-                <Save />
-                {labels.saveButton}
-              </Button>
-              <Button size="sm" variant="outline" onClick={focusComposer}>
-                <MessageSquare />
-                Request changes
               </Button>
             </div>
           )}
