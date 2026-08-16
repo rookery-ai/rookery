@@ -115,6 +115,29 @@ Verify every claim against source, never against another document. The
 provider count in `README.md` once drifted for months because it was copied
 forward instead of measured.
 
+**Three of its assertions exist because a real command can be the wrong one.**
+`check_cli` only ever asked whether the documentation invokes something the
+source lacks, so `serve` — a genuine command — passed every gate for as long as
+every installation page told new users to run it instead of `rookery onboard`,
+and `upgrade`/`uninstall` shipped undocumented because adding a command broke
+nothing. So: `check_cli_coverage` asserts every top-level command in
+`cmd/rookery` has a `## ` section in `reference/cli.md` (read from main.go's
+root `Commands:` slice and each constructor's first literal `Name:` **after**
+its `return &cli.Command{` — a constructor may hoist a shared flag first, and
+`backupCommand` does, which is how an early draft reported a command called
+`dir`; a command named by a *constant* rather than a literal is exempt, which
+is exactly and only the `Hidden: true` sandbox helper).
+`check_install_pages_onboard` requires every installation page to name
+`rookery onboard`, stated positively rather than as a ban on `owner bootstrap`
+because that command is still legitimately documented as the scriptable
+alternative — `docker.md` is the one exemption, since `docker run -d` has no
+interactive terminal to onboard from. `check_windows_winget_ids` reads the
+winget ids out of `install.ps1`'s own host-tool table and requires the Windows
+page to show exactly those: the page had offered `Python.Python.3.12` against
+the installer's `3.13` and claimed Poppler had no winget package while the
+installer was installing `oschwartz10612.Poppler`. Comparing the page against a
+second list in the checker would only have proved the two lists agree.
+
 ## CI/CD and release process
 
 **Every change ships through this path. There are no manual tags and no manual
@@ -248,6 +271,25 @@ load-bearing:
   then reports the version the binary on disk claims, rather than the one it meant
   to install — an upgrade that silently left the old process serving is the failure
   worth spending a check on.
+- **That rename is POSIX-only, and assuming otherwise made `upgrade` impossible
+  on Windows.** Windows holds a running executable with a share mode denying
+  delete, so renaming over it fails — and `upgrade` is *always* replacing the
+  image it is itself executing from, so this was never a matter of stopping the
+  server first: the upgrade process is the lock. `swapBinary` is therefore
+  per-platform (`swap_unix.go` renames straight over; `swap_windows.go` moves
+  the target aside to `<binary>.old`, installs, and restores on failure so the
+  outcome still can never be "neither binary"). The displaced file cannot be
+  deleted while this process runs it; the NEXT upgrade clears it. `removeSelf`
+  splits for the same reason and returns a **caveat string** the caller prints,
+  because on Windows `uninstall` moves the binary aside rather than deleting it
+  — reporting a clean removal while leaving a stray `.old` nobody was told about
+  is the quiet half-success this command exists to avoid. The old failure
+  message advised re-running "with the privileges that installed it", which on
+  Windows is the wrong diagnosis entirely. `upgrade`'s closing line also printed
+  `systemctl --user restart` on all three platforms; it now asks
+  `onboard.CurrentService()` and names the foreground command where there is no
+  service. None of the Windows half is exercised on a real host — the
+  cross-compile gate is what checks it.
 - **`extractBinary` selects the member BY NAME.** The archive arrives over the
   network and its contents are about to run as the user, so "the first file" or
   "the biggest one" would be a substitution primitive. `internal/release` is the
@@ -259,14 +301,24 @@ load-bearing:
 could not before: release assets on a private repo require an authenticated
 request, so an anonymous download returned `404`, not `401`.
 
-**Both installers still lead their 404 message with that private-repo case**
-(`install.sh` and `install.ps1`, in the download-failure branch), which is now
-the one cause it cannot be. Left in place deliberately rather than overlooked:
-the wording is pinned by `packaging/scripts_test.go`, so correcting it is a
-change to the installers and their test, not a documentation edit. Until then a
-404 from the installer means a genuinely missing asset — a tag that never
-published, or a platform with no archive — and the message points at the wrong
-thing.
+**Both installers used to lead their 404 message with that private-repo case**,
+which had become the one cause it cannot be. Corrected in 2026-08: the message
+now leads with the platform case (the only one the script can name precisely,
+since it already knows the tag and the OS/arch it asked for), then the network
+and the draft-release cases.
+`TestInstallersDoNotBlameAPrivateRepositoryForA404` pins it — the wording is
+otherwise unreachable by any check, and it drifted once already.
+
+**`install.ps1`'s failure path throws; it must never `exit`.** The script is
+advertised as `irm … | iex`, which runs it in the CALLER's session rather than a
+child scope, so `exit` terminates the whole PowerShell session — closing the
+window and taking the error text with it, at exactly the moment the user needs
+to read it. A checksum mismatch was the worst case: the refusal worked and the
+explanation vanished. `TestWindowsInstallerDoesNotExitTheCallersSession` bans
+the pattern. Relatedly, `iex` cannot pass arguments at all, so `-Version` and
+`-BinDir` are unreachable through the advertised one-liner; the script block
+idiom (`& ([scriptblock]::Create((irm …))) -Version v0.2.0`) is documented in the
+file itself and pinned, because a parameter nobody can reach reads as supported.
 
 `packaging/scripts_test.go` pins what breaks silently — that both files exist at
 all (the website advertised them for the repo's whole life while neither did),
@@ -2045,7 +2097,22 @@ Details worth knowing before changing this code:
   `requireActiveWorkspace`: backup covers every workspace, so it must be
   configurable before one exists.
 - No new dependencies: SigV4 is stdlib HMAC/SHA-256, and the CLI suppresses
-  terminal echo with `stty` rather than pulling in `golang.org/x/term`.
+  terminal echo per-platform rather than pulling in `golang.org/x/term` —
+  `cmd/rookery/echo_unix.go` shells out to `stty`, `echo_windows.go` clears
+  `ENABLE_ECHO_INPUT` via `golang.org/x/sys/windows` (already a **direct**
+  requirement, so it costs nothing; `syscall` exports `GetConsoleMode` on
+  Windows but not its setter, which only the cross-compile step revealed).
+  **The Windows half is why the split exists**: there is no `stty` there, so
+  the old `LookPath` guard returned a no-op and every `rookery backup` prompt
+  printed the passphrase as it was typed — no error, no warning, just the
+  characters on screen, while `reference/cli.md` asserted the opposite.
+  `ENABLE_LINE_INPUT` is deliberately left set: clearing it too would switch the
+  console to character-at-a-time input and `readPassphrase`'s
+  `ReadString('\n')` would block forever. Every failure path returns the same
+  no-op restore the `stty` implementation returns, so the worst outcome is the
+  behaviour it replaces — a visible passphrase, never a lost one, which matters
+  because this is the one credential a backup cannot recover.
+  Untested on a real Windows host; the cross-compile gate is what checks it.
 
 **Not built** (deliberate): per-workspace restore, incremental/deduplicated
 backup, and the Google Drive / Dropbox / GitHub destinations — adding one is a
