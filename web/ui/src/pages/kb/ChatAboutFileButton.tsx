@@ -35,6 +35,23 @@ export function selectionChatPrompt(path: string, selection: string): string {
 `;
 }
 
+// selectionEditPrompt is selectionChatPrompt's SENT counterpart, for "Edit with
+// AI". They differ because auto-sending the other one would be worse than the
+// prefill it replaced: it ends in a blank line — a citation waiting for an
+// instruction — and sent alone it asks the model nothing.
+//
+// "apply the change to the file directly" is load-bearing. Without it the model
+// proposes a rewrite in the chat and writes nothing, so there is no external
+// change for the open editor to pick up and the feature reads as broken from
+// the other end.
+export function selectionEditPrompt(path: string, selection: string): string {
+  return `In my knowledge base file \`${path}\`, I've selected this passage:
+
+> ${selection.split("\n").join("\n> ")}
+
+Help me edit it. Ask me what I want changed if it isn't obvious, then apply the change to the file directly.`;
+}
+
 // A "Chat about this file" affordance for the knowledge base. Opens the SAME
 // slide-over the global chat button uses, but always on a FRESH chat
 // (forceNew) so a question about a note never lands mid-thread in an unrelated

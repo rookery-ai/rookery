@@ -282,8 +282,16 @@ export default function NoteEditor({
   // state and KBPage remounts a fresh NoteEditor instance either way.
   const [, setSearchParams] = useSearchParams();
 
+  const { toast: noteToast } = useToast();
+
   const [mode, setMode] = useState<"wysiwyg" | "raw" | null>(null);
   const [fidelityFailed, setFidelityFailed] = useState(false);
+  // Bumped whenever content is adopted from the server. TipTap's useEditor
+  // reads `content` only at creation, so remounting is the only way to load a
+  // rewrite the chat made on disk. The caret is lost — a real cost, accepted:
+  // setContent's position mapping across an arbitrary external rewrite is not
+  // meaningfully better, and the user was reading the chat, not typing.
+  const [editorKey, setEditorKey] = useState(0);
   const [overrideAccepted, setOverrideAccepted] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -309,6 +317,15 @@ export default function NoteEditor({
   const [vanishedContent, setVanishedContent] = useState<string | null>(null);
 
   const initializedRef = useRef(false);
+  // The exact bytes we last loaded from, or last successfully wrote to, the
+  // server. This — not "any new data" — is what distinguishes an EXTERNAL write
+  // from the editor's own echo: useSaveNote invalidates ["kb-note", path] on
+  // success, so every autosave already causes a refetch, and comparing against
+  // anything else would fire on every keystroke pause.
+  const lastSyncedRef = useRef<string | null>(null);
+  // The content of the last external change we told the user about, so a second
+  // refetch of the same bytes doesn't stack a second toast.
+  const notifiedExternalRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
   const pendingReflushRef = useRef(false);
@@ -381,6 +398,7 @@ export default function NoteEditor({
     getContentRef.current = () => rawTextRef.current;
     setSaveState("saved");
     onStateChange?.("saved");
+    lastSyncedRef.current = data.content;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
@@ -442,6 +460,55 @@ export default function NoteEditor({
     [],
   );
 
+  // adoptContent re-seeds every piece of loaded state from a server copy. The
+  // initial-load effect above does the same thing once; this is the path taken
+  // when the file changed underneath us.
+  const adoptContent = useCallback(
+    (content: string) => {
+      const { frontmatter: fm, body } = splitFrontmatter(content);
+      frontmatterRef.current = fm;
+      setFrontmatter(fm);
+      setEditorBody(body);
+      setFidelityFailed(!checkFidelity(body));
+      setRawText(content);
+      rawTextRef.current = content;
+      lastSyncedRef.current = content;
+      notifiedExternalRef.current = content;
+      dirtyRef.current = false;
+      setEditorKey((k) => k + 1);
+      report("saved");
+    },
+    [report],
+  );
+
+  // Pick up a change made to this note by something other than this editor —
+  // in practice the chat coder, which holds Read/Write/Edit over the vault and
+  // is what "Edit with AI" drives. ChatWindow.sendTurn invalidates ["kb-note"]
+  // after every turn, so the query refetches; before this effect existed the
+  // seeding effect above ignored the result (initializedRef had latched) and
+  // the user had to reload the page to see their own requested edit.
+  //
+  // The clean/dirty split is not politeness. This file has a recorded
+  // data-loss history around dirtyRef, and an unconditional swap would throw
+  // away unsaved work to apply a change the user may not have asked for yet.
+  useEffect(() => {
+    if (!data || !initializedRef.current || vanished) return;
+    const incoming = data.content;
+    if (lastSyncedRef.current === null || incoming === lastSyncedRef.current) return;
+    if (!dirtyRef.current && !savingRef.current) {
+      adoptContent(incoming);
+      return;
+    }
+    if (notifiedExternalRef.current === incoming) return;
+    notifiedExternalRef.current = incoming;
+    noteToast({
+      message: "This note was changed by chat. Your unsaved edits are still here.",
+      action: { label: "Reload", onClick: () => adoptContent(incoming) },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, vanished, adoptContent]);
+
+
   // Note on the dirty/saving contract (fixes a data-loss bug from an earlier
   // version that cleared dirtyRef unconditionally before the PUT resolved —
   // a failed save left the flag falsely clean, so Ctrl/Cmd+S became a silent
@@ -482,6 +549,9 @@ export default function NoteEditor({
       {
         onSuccess: () => {
           savingRef.current = false;
+          // This is what we just put on the server, so the refetch this save's
+          // own invalidation triggers must not read as an external change.
+          lastSyncedRef.current = content;
           if (getContentRef.current() === content) {
             dirtyRef.current = false;
             report(idleState());
@@ -894,6 +964,7 @@ export default function NoteEditor({
               onToggle={() => setMetaOpen((o) => !o)}
             />
             <WysiwygEditor
+              key={editorKey}
               content={editorBody}
               editable={editable}
               onDirty={markDirty}
