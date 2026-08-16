@@ -1,7 +1,7 @@
 #!/bin/sh
 # Rookery installer for Linux and macOS.
 #
-#   curl -fsSL https://rookery.sh/install.sh | sh
+#   curl -fsSL https://rookery.cloud/install.sh | sh
 #
 # This script has exactly one job: put a verified `rookery` binary on your PATH
 # and tell you what to run next. It does not bootstrap an owner, create a
@@ -48,7 +48,7 @@ detect_platform() {
 		Linux)  OS=linux ;;
 		Darwin) OS=darwin ;;
 		*)
-			die "unsupported OS '$os'. Windows: use install.ps1 (irm https://rookery.sh/install.ps1 | iex)"
+			die "unsupported OS '$os'. Windows: use install.ps1 (irm https://rookery.cloud/install.ps1 | iex)"
 			;;
 	esac
 
@@ -94,20 +94,20 @@ latest_version() {
 		| head -n 1
 }
 
-# A 404 here is overwhelmingly one specific thing while the repository is
-# private: release assets require an authenticated request, so an anonymous
-# download gets "Not Found" rather than "Unauthorized". Saying so is the
-# difference between a two-minute fix and an hour of guessing.
+# This message used to lead with the repository being private, which was the
+# overwhelming cause while it was. The repository is public now, so that is the
+# one thing a 404 can no longer mean — and leading with it pointed users away
+# from the causes that remain. The platform case is first because it is the
+# only one the script itself can already name precisely.
 download_failed() {
 	say ""
 	die "could not download $1
 
 This usually means one of:
-  • the repository is still private — release assets then need an authenticated
-    request, and an anonymous download returns 404. Install from a locally built
-    artifact, or wait for the public release.
   • the tag ${VERSION:-<latest>} has no release asset for ${OS}/${ARCH}.
+    Check the releases page below for which platforms that tag published.
   • the network or a proxy blocked the request.
+  • the tag does not exist, or its release is still a draft.
 
 Releases: https://github.com/$REPO/releases"
 }

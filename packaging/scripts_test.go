@@ -7,6 +7,7 @@ package packaging
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -25,8 +26,8 @@ func repoFile(t *testing.T, rel string) string {
 	return string(b)
 }
 
-// The website advertises `curl -fsSL https://rookery.sh/install.sh | sh` and
-// `irm https://rookery.sh/install.ps1 | iex` on the landing page and on three
+// The website advertises `curl -fsSL https://rookery.cloud/install.sh | sh` and
+// `irm https://rookery.cloud/install.ps1 | iex` on the landing page and on three
 // documentation pages. For the whole life of the repository neither file
 // existed. This is the test that would have noticed.
 func TestInstallScriptsExist(t *testing.T) {
@@ -148,5 +149,60 @@ func TestInstallersRefuseAChecksumMismatch(t *testing.T) {
 	}
 	if !strings.Contains(repoFile(t, "install.ps1"), "checksum mismatch") {
 		t.Error("install.ps1 does not fail on a checksum mismatch")
+	}
+}
+
+// install.ps1 is advertised as `irm ... | iex`, which runs it in the CALLER's
+// session rather than a child scope. `exit` there terminates the whole
+// PowerShell session — closing the window and taking the error message with
+// it, at exactly the moment the user most needs to read it. Nothing here can
+// execute PowerShell, so the shape of the failure path is pinned by reading it.
+func TestWindowsInstallerDoesNotExitTheCallersSession(t *testing.T) {
+	body := repoFile(t, "install.ps1")
+	if regexp.MustCompile(`(?m)^\s*exit\s+\d`).MatchString(body) {
+		t.Error("install.ps1 calls `exit`, which kills the session when run via `irm | iex` — use `throw`")
+	}
+	if !strings.Contains(body, "throw ") {
+		t.Error("install.ps1 never throws, so Stop-WithError cannot end the script at all")
+	}
+}
+
+// Both scripts advertise their own URL in their header, and the domain is
+// rookery.cloud. They carried rookery.sh — a domain this project does not use —
+// for long enough that it reached the published file people are told to read
+// before piping it to a shell.
+func TestInstallersNameTheRealDomain(t *testing.T) {
+	for _, name := range []string{"install.sh", "install.ps1"} {
+		body := repoFile(t, name)
+		if strings.Contains(body, "rookery.sh") {
+			t.Errorf("%s still advertises rookery.sh; the domain is rookery.cloud", name)
+		}
+		if !strings.Contains(body, "rookery.cloud") {
+			t.Errorf("%s never names rookery.cloud, so it does not say where it came from", name)
+		}
+	}
+}
+
+// The 404 message led with "the repository is still private" for the whole time
+// that was true. It is public now, so that is the one cause a 404 CANNOT have,
+// and leading with it sends users to fix something that is not broken. This
+// pins the correction, because the wording is otherwise unreachable by any
+// check and drifted once already.
+func TestInstallersDoNotBlameAPrivateRepositoryForA404(t *testing.T) {
+	for _, name := range []string{"install.sh", "install.ps1"} {
+		body := repoFile(t, name)
+		if strings.Contains(body, "still private") {
+			t.Errorf("%s still blames a private repository for a 404; the repository is public", name)
+		}
+	}
+}
+
+// `iex` cannot pass arguments to what it runs, so -Version and -BinDir are
+// unreachable through the advertised one-liner unless the script block idiom is
+// documented in the file itself. A parameter nobody can reach is worse than no
+// parameter: it reads as supported.
+func TestWindowsInstallerDocumentsHowToPassParameters(t *testing.T) {
+	if !strings.Contains(repoFile(t, "install.ps1"), "[scriptblock]::Create(") {
+		t.Error("install.ps1 declares parameters but never shows how to pass them through `irm | iex`")
 	}
 }
