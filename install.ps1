@@ -3,12 +3,18 @@
     Rookery installer for Windows.
 
 .DESCRIPTION
-    irm https://rookery.sh/install.ps1 | iex
+    irm https://rookery.cloud/install.ps1 | iex
 
     Puts a verified rookery.exe on your PATH and tells you what to run next. It
     does not bootstrap an owner, create a workspace or start a service —
     `rookery onboard` does all of that, in Go, where it is written once and
     tested rather than twice in shell and PowerShell.
+
+    `iex` cannot pass arguments to what it runs, so the parameters below are
+    unreachable through the advertised one-liner. To use one, build a script
+    block instead:
+
+        & ([scriptblock]::Create((irm https://rookery.cloud/install.ps1))) -Version v0.2.0
 
 .PARAMETER Version
     Install this tag instead of the latest release.
@@ -40,28 +46,38 @@ function Write-Step { param([string]$Message) Write-Host "==> " -ForegroundColor
 function Write-Warn { param([string]$Message) Write-Host " warn " -ForegroundColor Yellow -NoNewline; Write-Host $Message }
 function Write-Ok   { param([string]$Message) Write-Host "  $Message" -ForegroundColor Green }
 
+# `throw`, never `exit`. This script is advertised as `irm ... | iex`, which
+# runs it in the CALLER's session rather than a child scope — and `exit` there
+# terminates the whole PowerShell session, closing the window and taking the
+# error message with it. A checksum mismatch is precisely when the user needs
+# to read what happened, so the failure path must not be the one that hides it.
+# With $ErrorActionPreference = 'Stop' a throw ends the script and leaves the
+# session alive.
+# The detail is written out first and the thrown text is a one-line summary:
+# throwing the full message would print a multi-line here-string twice, once as
+# our own formatted output and again as the exception's.
 function Stop-WithError {
     param([string]$Message)
     Write-Host "error " -ForegroundColor Red -NoNewline
     Write-Host $Message
-    exit 1
+    throw "rookery install failed (see the message above)"
 }
 
-# A 404 here is overwhelmingly one specific thing while the repository is
-# private: release assets require an authenticated request, so an anonymous
-# download gets "Not Found" rather than "Unauthorized". Saying so is the
-# difference between a two-minute fix and an hour of guessing.
+# This message used to lead with the repository being private, which was the
+# overwhelming cause while it was. The repository is public now, so that is the
+# one thing a 404 can no longer mean — and leading with it pointed users away
+# from the causes that remain. The platform case is first because it is the
+# only one the script itself can already name precisely.
 function Stop-DownloadFailed {
     param([string]$What)
     Stop-WithError @"
 could not download $What
 
 This usually means one of:
-  - the repository is still private. Release assets then need an authenticated
-    request, and an anonymous download returns 404. Install from a locally built
-    artifact, or wait for the public release.
   - the requested tag has no release asset for windows/$Arch.
+    Check the releases page below for which platforms that tag published.
   - the network or a proxy blocked the request.
+  - the tag does not exist, or its release is still a draft.
 
 Releases: https://github.com/$Repo/releases
 "@

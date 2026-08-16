@@ -674,6 +674,256 @@ def _cli_selftest() -> None:
 check_cli.selftest = _cli_selftest
 
 
+# ── CLI coverage: the converse of check_cli ──────────────────────────────────
+#
+# check_cli asserts the documentation invokes nothing the source lacks. It says
+# nothing about the source growing a command the documentation never learns
+# about, which is exactly how `upgrade` and `uninstall` shipped in v0.2.0 with
+# no reference entry: adding a command broke no check.
+#
+# Top-level commands are read from the root `Commands:` slice in main.go — a
+# list of constructor calls — and each constructor's own first `Name:`. That is
+# reliable in a way that reconstructing the whole tree is not, because it never
+# has to decide whether a nested `Name:` is a subcommand or a flag.
+
+CONSTRUCTOR_RE = re.compile(r"\b(\w+)\(\)")
+
+
+def _root_command_constructors(main_go: str) -> list[str]:
+    """Constructor names from main.go's root `Commands: []*cli.Command{...}`."""
+    m = re.search(r"Commands:\s*\[\]\*cli\.Command\{(.*?)\n\t\t\},", main_go, re.S)
+    if not m:
+        return []
+    return CONSTRUCTOR_RE.findall(m.group(1))
+
+
+def _literal_name_of(blob: str, constructor: str) -> str | None:
+    """The string-literal `Name:` a constructor assigns, or None.
+
+    None is a deliberate, principled exemption rather than an oversight: the
+    only root command that names itself with a constant instead of a literal is
+    the sandbox helper, which is also `Hidden: true`. A command a user cannot
+    see is a command the reference must not be required to document — and
+    keying that off the source rather than off a hardcoded slug list means a
+    second hidden helper is exempt for the same reason, automatically.
+
+    The scan starts at `return &cli.Command{`, NOT at the function body: a
+    constructor may declare shared flags first (backupCommand hoists a
+    `&cli.StringFlag{Name: "dir"}` so its five subcommands can share one), and
+    reading the first `Name:` in the body picks up that flag and reports a
+    command called `dir` that no one can run.
+    """
+    m = re.search(rf"func {re.escape(constructor)}\(\) \*cli\.Command \{{", blob)
+    if not m:
+        return None
+    body = blob[m.end():m.end() + 4000]
+    ret = re.search(r"return &cli\.Command\{", body)
+    if not ret:
+        return None
+    name = re.search(r'Name:\s*"([^"]+)"', body[ret.end():])
+    return name.group(1) if name else None
+
+
+def top_level_commands() -> set[str]:
+    d = product_root() / "cmd" / "rookery"
+    blob = "\n".join(read(p) for p in sorted(d.glob("*.go")))
+    out = set()
+    for ctor in _root_command_constructors(read(d / "main.go")):
+        name = _literal_name_of(blob, ctor)
+        if name:
+            out.add(name)
+    return out
+
+
+def _documented_cli_sections(text: str) -> set[str]:
+    return set(re.findall(r"^## (\S+)", text, re.M))
+
+
+@register
+def check_cli_coverage() -> None:
+    web = web_root()
+    if web is None:
+        skip("cli-coverage: no rookery-web checkout")
+        return
+    documented = _documented_cli_sections(read(web / "src/content/docs/docs/reference/cli.md"))
+    for name in sorted(top_level_commands() - documented):
+        fail("cli-coverage",
+             f"`rookery {name}` is a top-level command that reference/cli.md never documents")
+
+
+def _cli_coverage_selftest() -> None:
+    main_go = (
+        "func main() {\n"
+        "\tapp := &cli.Command{\n"
+        '\t\tName:  "rookery",\n'
+        "\t\tCommands: []*cli.Command{\n"
+        "\t\t\tserveCmd(),\n"
+        "\t\t\tupgradeCmd(),\n"
+        "\t\t\tsandboxExecCmd(),\n"
+        "\t\t},\n"
+        "\t}\n"
+        "}\n"
+    )
+    assert _root_command_constructors(main_go) == ["serveCmd", "upgradeCmd", "sandboxExecCmd"], \
+        "must read the root Commands slice as a list of constructors"
+
+    blob = (
+        'func serveCmd() *cli.Command {\n\treturn &cli.Command{\n\t\tName:  "serve",\n\t}\n}\n'
+        'func upgradeCmd() *cli.Command {\n\treturn &cli.Command{\n\t\tName:  "upgrade",\n\t}\n}\n'
+        "func sandboxExecCmd() *cli.Command {\n\treturn &cli.Command{\n"
+        "\t\tName:   sandbox.HelperCommand,\n\t\tHidden: true,\n\t}\n}\n"
+    )
+    assert _literal_name_of(blob, "serveCmd") == "serve", "a literal Name must be read"
+    assert _literal_name_of(blob, "sandboxExecCmd") is None, \
+        "a command named by a constant (the hidden sandbox helper) must be exempt, not guessed at"
+
+    # The confirmed false positive: a constructor hoisting a shared flag before
+    # the command literal. Reading the first Name: in the body reports a
+    # command called "dir" — this is backupCommand's real shape.
+    hoisted = (
+        "func backupCommand() *cli.Command {\n"
+        '\tdirFlag := &cli.StringFlag{Name: "dir", Usage: "Local backup directory"}\n'
+        "\treturn &cli.Command{\n"
+        '\t\tName:  "backup",\n'
+        "\t}\n}\n"
+    )
+    assert _literal_name_of(hoisted, "backupCommand") == "backup", \
+        "a flag declared before the command literal must not be mistaken for the command name"
+
+    documented = _documented_cli_sections("## serve\n\ntext\n\n## owner\n")
+    names = {"serve", "upgrade"}
+    assert sorted(names - documented) == ["upgrade"], \
+        "a top-level command with no cli.md section must be flagged"
+    assert not ({"serve"} - documented), "a documented command must not be flagged"
+
+
+check_cli_coverage.selftest = _cli_coverage_selftest
+
+
+# ── installation pages must hand off to onboard ──────────────────────────────
+#
+# Every installation page told users to run `owner bootstrap` and then `serve`,
+# which `onboard` has superseded since it shipped. Nothing caught it because
+# both are real commands, so check_cli passed throughout.
+#
+# Stated as a positive requirement — the page must NAME `rookery onboard` —
+# rather than as a ban on `owner bootstrap`, which those pages still legitimately
+# document as the scriptable alternative to the interactive flow.
+
+# docker.md is the one exemption: the container's entrypoint is the server, and
+# there is no interactive terminal in `docker run -d` to onboard from.
+ONBOARD_EXEMPT_PAGES = {"docker.md"}
+
+
+def _pages_missing_onboard(pages: dict[str, str]) -> list[str]:
+    return sorted(
+        name for name, body in pages.items()
+        if name not in ONBOARD_EXEMPT_PAGES and "rookery onboard" not in body
+    )
+
+
+@register
+def check_install_pages_onboard() -> None:
+    web = web_root()
+    if web is None:
+        skip("onboard-handoff: no rookery-web checkout")
+        return
+    d = web / "src/content/docs/docs/installation"
+    pages = {p.name: read(p) for p in sorted(d.glob("*.md"))}
+    for name in _pages_missing_onboard(pages):
+        fail("onboard-handoff",
+             f"installation/{name} never names `rookery onboard`, so it teaches a setup "
+             f"that skips the keys, the host tools and the service")
+
+
+def _install_onboard_selftest() -> None:
+    pages = {
+        "linux-server.md": "Install it, then run `rookery onboard`.",
+        "windows.md": "rookery owner bootstrap -u me -p pw\nrookery serve\n",
+        "docker.md": "docker run ghcr.io/rookery-ai/rookery",
+    }
+    assert _pages_missing_onboard(pages) == ["windows.md"], \
+        "a page teaching bootstrap+serve instead of onboard must be flagged"
+    assert "docker.md" not in _pages_missing_onboard(pages), \
+        "docker has no interactive onboarding step and must stay exempt"
+    pages["windows.md"] += "\nrookery onboard\n"
+    assert _pages_missing_onboard(pages) == [], "once every page hands off, nothing is flagged"
+
+
+check_install_pages_onboard.selftest = _install_onboard_selftest
+
+
+# ── the Windows page's winget ids must be the installer's ────────────────────
+#
+# The page offered Python.Python.3.12 while install.ps1 offered 3.13, and said
+# Poppler had no winget package while install.ps1 was installing
+# oschwartz10612.Poppler. Both were plausible when written and neither is
+# checkable against prose, so the ids are read out of the installer itself —
+# a check that compared the page against a second list in this file would only
+# prove the two lists agree.
+
+WINGET_ID_RE = re.compile(r"\b([A-Za-z0-9][\w.-]*\.[A-Za-z0-9][\w.-]*)\b")
+
+
+def _installer_winget_ids(ps1: str) -> set[str]:
+    return set(re.findall(r"Winget\s*=\s*'([^']+)'", ps1))
+
+
+def _page_winget_ids(page: str) -> set[str]:
+    out = set()
+    for line in page.splitlines():
+        m = re.search(r"winget install\s+(.*)", line)
+        if m:
+            out |= {t for t in WINGET_ID_RE.findall(m.group(1)) if "." in t}
+    return out
+
+
+@register
+def check_windows_winget_ids() -> None:
+    web = web_root()
+    if web is None:
+        skip("winget-ids: no rookery-web checkout")
+        return
+    offered = _installer_winget_ids(read(product_root() / "install.ps1"))
+    page = read(web / "src/content/docs/docs/installation/windows.md")
+    shown = _page_winget_ids(page)
+    for wid in sorted(shown - offered):
+        fail("winget-ids", f"installation/windows.md installs '{wid}', which install.ps1 does not offer")
+    for wid in sorted(offered - shown):
+        fail("winget-ids", f"install.ps1 offers '{wid}', which installation/windows.md never shows")
+
+
+def _winget_ids_selftest() -> None:
+    ps1 = (
+        "@{ Command = 'python';    Winget = 'Python.Python.3.13' }\n"
+        "@{ Command = 'pdftotext'; Winget = 'oschwartz10612.Poppler' }\n"
+    )
+    assert _installer_winget_ids(ps1) == {"Python.Python.3.13", "oschwartz10612.Poppler"}, \
+        "ids must be read out of the installer's own host-tool table"
+
+    stale = "winget install -e --id Python.Python.3.12\n"
+    assert _page_winget_ids(stale) == {"Python.Python.3.12"}, "an id on the page must be read"
+    assert sorted(_page_winget_ids(stale) - _installer_winget_ids(ps1)) == ["Python.Python.3.12"], \
+        "a page id the installer does not offer must be flagged"
+    assert "oschwartz10612.Poppler" in _installer_winget_ids(ps1) - _page_winget_ids(stale), \
+        "an installer id the page never shows must be flagged — this is the Poppler case"
+
+    good = (
+        "winget install -e --id Python.Python.3.13\n"
+        "winget install -e --id oschwartz10612.Poppler\n"
+    )
+    assert _page_winget_ids(good) == _installer_winget_ids(ps1), "matching sets must not be flagged"
+
+    # Prose naming a tool must not be mistaken for an id: only `winget install`
+    # lines are read, and only tokens carrying a dot.
+    prose = "Poppler provides pdftotext. Install it with winget install -e --id oschwartz10612.Poppler\n"
+    assert _page_winget_ids(prose) == {"oschwartz10612.Poppler"}, \
+        "only the id on the install line counts, not the sentence around it"
+
+
+check_windows_winget_ids.selftest = _winget_ids_selftest
+
+
 # Provider slugs whose display name cannot be derived from the filename. Most
 # entries here exist because reference/connected-services.md groups the
 # Google family under one "## Google" heading and names each product without

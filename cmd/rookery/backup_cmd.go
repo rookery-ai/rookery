@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -24,10 +23,11 @@ import (
 // stdin when --passphrase-stdin is given. It is never a flag: flags land in
 // shell history and in ps output.
 //
-// Terminal echo is disabled with stty rather than golang.org/x/term, which is
-// only a module-graph entry here — pulling it in would add a dependency for one
-// call. If stty is unavailable the passphrase is still read, just visibly; that
-// degrades privacy on screen but never correctness.
+// Terminal echo is disabled per-platform (echo_unix.go, echo_windows.go)
+// rather than through golang.org/x/term, which is only a module-graph entry
+// here — pulling it in would add a dependency for one call. If echo cannot be
+// suppressed the passphrase is still read, just visibly; that degrades privacy
+// on screen but never correctness.
 func readPassphrase(stdinMode bool) (string, error) {
 	reader := bufio.NewReader(os.Stdin)
 	if stdinMode {
@@ -47,24 +47,6 @@ func readPassphrase(stdinMode bool) (string, error) {
 		return "", fmt.Errorf("read passphrase: %w", err)
 	}
 	return strings.TrimRight(line, "\r\n"), nil
-}
-
-// disableEcho turns terminal echo off and returns a function restoring it.
-// Both calls are best-effort: a non-tty simply keeps its default behaviour.
-func disableEcho() func() {
-	if _, err := exec.LookPath("stty"); err != nil {
-		return func() {}
-	}
-	off := exec.Command("stty", "-echo")
-	off.Stdin = os.Stdin
-	if err := off.Run(); err != nil {
-		return func() {}
-	}
-	return func() {
-		on := exec.Command("stty", "echo")
-		on.Stdin = os.Stdin
-		_ = on.Run()
-	}
 }
 
 // localDestFor resolves the destination used by the CLI. The CLI targets a

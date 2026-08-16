@@ -36,7 +36,14 @@ name your package manager's command instead.
 
 ```powershell
 irm https://rookery.cloud/install.ps1 | iex
+rookery onboard
 ```
+
+`iex` cannot pass arguments, so a specific version needs a script block:
+`& ([scriptblock]::Create((irm https://rookery.cloud/install.ps1))) -Version v0.2.0`.
+
+Windows has no filesystem confinement and no service registration yet — see
+[the Windows guide](https://rookery.cloud/docs/installation/windows).
 </details>
 
 <details>
