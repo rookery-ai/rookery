@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0](https://github.com/rookery-ai/rookery/compare/v0.2.0...v0.3.0) (2026-08-16)
+
+
+### Features
+
+* **designer:** offer the build button only when the plan is settled ([#204](https://github.com/rookery-ai/rookery/issues/204)) ([2cfdec0](https://github.com/rookery-ai/rookery/commit/2cfdec0c0d4c3c7557fa8a500726082be6d1e54d))
+* **kb:** align text and images, and unfreeze the toolbar's pressed states ([#206](https://github.com/rookery-ai/rookery/issues/206)) ([ef7a96c](https://github.com/rookery-ai/rookery/commit/ef7a96c31ce76bc4053a8ac929ee9fc74b4a8c4c))
+* **kb:** lay blocks out in columns ([#207](https://github.com/rookery-ai/rookery/issues/207)) ([f805932](https://github.com/rookery-ai/rookery/commit/f8059321d667b6b3273ea67a0ad159291f626e62))
+
+
+### Bug Fixes
+
+* **cli:** make backup, upgrade and uninstall behave correctly on Windows ([#210](https://github.com/rookery-ai/rookery/issues/210)) ([2c972ad](https://github.com/rookery-ai/rookery/commit/2c972adefbafcee019c8366d950171142b78724f))
+* **kb:** stop the protocol leaking into AI actions, and pick up chat's edits ([#205](https://github.com/rookery-ai/rookery/issues/205)) ([f6a847b](https://github.com/rookery-ai/rookery/commit/f6a847b94221dc752e1f184b92b5459465fb30ea))
+
 ## [0.2.0](https://github.com/rookery-ai/rookery/compare/v0.1.4...v0.2.0) (2026-08-14)
 
 
