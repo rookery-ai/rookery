@@ -1040,7 +1040,12 @@ func isApproval(input string) bool {
 	s := strings.ToLower(strings.TrimSpace(input))
 	s = strings.TrimRight(s, ".!?,;:)")
 	switch s {
-	case "approve", "go ahead", "build it", "create it", "/approve":
+	// "approve and build …" is what the shared DesignerSurface button sends now
+	// that both designers name the act the same way. This test is exact-match,
+	// so a phrase missing here falls through to an ordinary design turn and the
+	// button silently does nothing.
+	case "approve", "go ahead", "build it", "create it", "/approve",
+		"approve and build", "approve and build it", "approve & build", "approve & build it":
 		return true
 	}
 	return false
@@ -1064,6 +1069,7 @@ func isVerifyApproval(input string) bool {
 	}
 	switch s {
 	case "approve", "go ahead", "build it", "create it", "/approve",
+		"approve and build", "approve and build it", "approve & build", "approve & build it",
 		"yes", "save", "save it", "ok", "okay", "looks good", "looks good to me",
 		"confirm", "confirmed", "go", "do it", "ship it", "lgtm", "perfect", "great":
 		return true
