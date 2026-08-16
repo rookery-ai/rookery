@@ -212,6 +212,23 @@ func (f *Flow) buildBoundMCP(ctx context.Context, workspaceID string) []mcp.Boun
 	return f.mcpBoundFor(ctx, workspaceID)
 }
 
+// mcpRefs names the workspace's enabled MCP servers for the design prompt, so the
+// designer can declare which ones a plan needs. Without it the designer had never
+// been shown a server name, which made the [TECHNICAL SPEC]'s "MCP servers:" line
+// an invitation to invent one. Reuses buildBoundMCP (every ENABLED server) because
+// a design session, like a build, has no bindings yet — that is what it is deciding.
+func (f *Flow) mcpRefs(ctx context.Context, workspaceID string) []prompts.MCPServerRef {
+	servers := f.buildBoundMCP(ctx, workspaceID)
+	if len(servers) == 0 {
+		return nil
+	}
+	out := make([]prompts.MCPServerRef, 0, len(servers))
+	for _, s := range servers {
+		out = append(out, prompts.MCPServerRef{Name: s.Name})
+	}
+	return out
+}
+
 // loadConnectionRefs lists the workspace's service connections as prompts.ConnectionRef
 // so the designer can be told which accounts it may bind (via the # Connections: header).
 func (f *Flow) loadConnectionRefs(ctx context.Context, workspaceID string) []prompts.ConnectionRef {
@@ -809,6 +826,16 @@ type DesignSnapshot struct {
 	// `null` — the frontend maps over it.
 	PendingAgentMD string
 	PendingTools   map[string]string
+
+	// PendingSpec is the body of the [TECHNICAL SPEC] block the designer
+	// appended to its most recent proposal, and PlanReady reports whether one is
+	// present. Both are DERIVED from History rather than stored on the session:
+	// agent_drafts has fixed columns, so a stored flag would need a migration,
+	// while History is already persisted on every turn by saveDraft — so a
+	// resumed draft recovers plan-readiness for free and the flag can never
+	// drift from the artifact it describes. See planFromHistory.
+	PendingSpec string
+	PlanReady   bool
 }
 
 // Snapshot returns a race-free view of the user's live in-memory session so a
@@ -832,6 +859,7 @@ func (f *Flow) Snapshot(workspaceID string) DesignSnapshot {
 	for k, v := range sess.PendingTools {
 		tools[k] = v
 	}
+	spec, planReady := planFromHistory(hist)
 	return DesignSnapshot{
 		Active:           true,
 		Generating:       sess.progressCh != nil,
@@ -846,6 +874,8 @@ func (f *Flow) Snapshot(workspaceID string) DesignSnapshot {
 		CanKeepAsIs:      sess.HasSaveableBuild,
 		PendingAgentMD:   sess.PendingAgentMD,
 		PendingTools:     tools,
+		PendingSpec:      spec,
+		PlanReady:        planReady,
 	}
 }
 
@@ -1315,6 +1345,7 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
 		Skills:             sess.Skills,
 		Connections:        f.loadConnectionRefs(ctx, workspaceID),
+		MCPServers:         f.mcpRefs(ctx, workspaceID),
 		UserProfile:        sess.UserProfile,
 		UserMemory:         sess.UserMemory,
 		KBManifest:         f.loadKBManifest(workspaceID, userMessage),
@@ -1340,7 +1371,11 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 	f.saveDraft(sess)
 	f.mu.Unlock()
 
-	return result.Text, nil
+	// History keeps the RAW text (the [TECHNICAL SPEC] block is the code
+	// generator's brief and Snapshot's plan-ready signal — see technicalspec.go);
+	// the user sees it stripped. designHistoryDTO strips the same block on the
+	// replay path, so the live transcript and a resumed one cannot disagree.
+	return stripTechnicalSpec(result.Text), nil
 }
 
 // dbMessagesToPrompt converts db.ChatMessage slice to prompts.ChatMessage slice.
@@ -2662,7 +2697,15 @@ func extractDescription(agentMD, fallback string) string {
 func isApproval(input string) bool {
 	s := strings.ToLower(strings.TrimSpace(input))
 	s = strings.TrimRight(s, ".!?,;:)")
-	for _, trigger := range []string{"approve", "go ahead", "build it", "create it", "/approve"} {
+	// "approve and build"/"approve and build it" are what the web button sends
+	// (DesignerSurface's BUILD_PHRASE) now that both surfaces name the act the
+	// same way. They must be listed HERE, not merely rendered on the button:
+	// this test is exact-match, so a phrase missing from the list falls through
+	// to an ordinary design turn and the button silently does nothing.
+	for _, trigger := range []string{
+		"approve", "go ahead", "build it", "create it", "/approve",
+		"approve and build", "approve and build it", "approve & build", "approve & build it",
+	} {
 		if s == trigger {
 			return true
 		}
@@ -2688,6 +2731,7 @@ func isVerifyApproval(input string) bool {
 	}
 	for _, trigger := range []string{
 		"approve", "go ahead", "build it", "create it", "/approve",
+		"approve and build", "approve and build it", "approve & build", "approve & build it",
 		"yes", "save", "save it", "ok", "okay", "looks good", "looks good to me",
 		"confirm", "confirmed", "go", "do it", "ship it", "lgtm", "perfect", "great",
 	} {

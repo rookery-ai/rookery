@@ -18,7 +18,7 @@ const ENDPOINTS: DesignerEndpoints = {
 
 const LABELS: DesignerLabels = {
   steps: ["Describe", "Diagnose", "Build", "Review"],
-  buildButton: "Build it",
+  buildButton: "Approve & build",
   saveButton: "Save agent",
   entityName: "agent",
 };
@@ -74,6 +74,7 @@ export default function AgentEditPage() {
         }
         draft={matchingDraft ? { name: matchingDraft.agent_name } : null}
         cancelTo={`/agents/${id}`}
+        gateBuildOnPlanReady
         onDone={() => navigate(`/agents/${id}`)}
       />
     </div>

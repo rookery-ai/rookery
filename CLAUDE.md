@@ -664,9 +664,72 @@ Agent creation uses a single `agentdesigner.Flow` FSM shared between Telegram an
 
 **FSM states:** `StateDescribing` (Telegram only) → `StateDesigning` → `StateVerifying` → `StateDone`
 
+**`[TECHNICAL SPEC]` is emitted with the PROPOSAL, and that timing is load-bearing twice over.**
+The prompt used to say "after the user approves, append this block" — a turn that does not exist,
+because `stepDesigning` matches `isApproval` and calls `startGeneration` without another
+`callCoder`. So the block was never written, while `BuildImplementationPrompt` refers to it by name
+("the design's `[TECHNICAL SPEC]` proposed a Tier:") and had been reading a block nothing produced.
+The designer now appends it to the message that proposes the plan, which fixes that AND supplies
+the one signal the browser lacked: **whether the conversation has moved from questions to a settled
+plan.** `fsmState === "designing"` cannot say — a clarifying question and a finished proposal are
+the same state — which is why the Build button used to offer itself under "Which page should I
+watch?".
+
+Handling mirrors `roleNote` exactly (`internal/agentdesigner/technicalspec.go`): **History stores
+the raw text**, block included, so `dbMessagesToPrompt` still feeds it to the generator; the block
+is stripped at the two edges the USER reads from — `callCoder`'s return value and
+`web.designHistoryDTO`, both through the exported `StripTechnicalSpec`, so the live transcript and a
+resumed one cannot disagree. Strip-before-store is the tempting simplification and would silently
+re-break the implementation prompt in the same invisible way.
+
+`DesignSnapshot.PlanReady`/`PendingSpec` are **derived** by `planFromHistory`, not stored:
+`agent_drafts` has fixed columns so a flag would need a migration, while History is already
+persisted every turn by `saveDraft` — so a resumed draft recovers plan-readiness for free and the
+flag cannot drift from the artifact it describes. It reads the **last** assistant turn only, which
+is what makes the signal RETRACT: a follow-up question carries no block, so the button withdraws. A
+latch-once-true flag would be a worse defect than the one it replaces. `extractTechnicalSpec`
+requires a CLOSER (a response truncated by a token cap must not arm the button) while
+`stripTechnicalSpec` drops an unterminated opener to end-of-string (a half-written block is not
+prose either) — the asymmetry is deliberate.
+
+`plan_ready`/`pending_spec` ship on **every** path returning a design body (`designTurnResponse`,
+`handleDesignState`, `handleResumeDraft`), asserted on RAW response bytes, because the SPA coerces a
+missing field to false and this codebase has already shipped one bug of exactly that shape.
+**`isApproval` is deliberately NOT gated on `PlanReady`** — the button is the affordance, the typed
+word is the gate; a model that forgets the marker costs discoverability, never the ability to build.
+`DesignerSurface`'s `gateBuildOnPlanReady` is an explicit opt-in (agent pages only) rather than
+"gate whenever the flag is absent", because the **skill** designer shares the component, returns its
+own body with no such flag, and would otherwise lose its build button entirely.
+
 **Approval triggers** — two tests, deliberately different:
-- **`isApproval`** (used in `StateDesigning`, strict) — exact match on `"approve"`, `"go ahead"`, `"build it"`, `"create it"`, `"/approve"` (trailing punctuation trimmed). Casual `"ok"`/`"yes"` while answering design questions does NOT launch a full generation run.
+- **`isApproval`** (used in `StateDesigning`, strict) — exact match on `"approve"`, `"go ahead"`, `"build it"`, `"create it"`, `"/approve"`, plus `"approve and build"`/`"approve and build it"` (and their `&` spellings), which is what the web button SENDS (trailing punctuation trimmed). Casual `"ok"`/`"yes"` while answering design questions does NOT launch a full generation run. **The phrase the button sends is a separate question from the label it shows**: this test is exact-match, so renaming the button without adding its phrase here would send text that falls through to an ordinary design turn and the button would silently do nothing. `internal/skilldesigner` carries the same list for the same reason — the two designers share one `DesignerSurface` and therefore one `BUILD_PHRASE`.
 - **`isVerifyApproval`** (used in `StateVerifying`, forgiving) — also accepts `"yes"`, `"save"`, `"ok"`, `"looks good"`, `"confirm"`, `"go"`, `"do it"`, `"ship it"`, `"lgtm"`, `"perfect"`, `"great"`, …, and excludes negative cues (`"don't"`, `"not yet"`, `"change"`, `"wait"`, `"instead"`). A natural confirmation saves the build instead of being read as a change request.
+
+**The Spec view has two moments, and the dry run is not a chat bubble.** `SpecPanel` renders the
+`[TECHNICAL SPEC]` block **before** a build exists (it previously had nothing to show until one
+finished — exactly when a user most wants to re-read what they are about to approve) and the
+generated `AGENT.md` + tools after. Its meta row now parses `# MCP:` / `# MCP servers:` alongside
+`# Skills:` and `# Connections:`; an agent bound to an MCP server previously showed no sign of it.
+The `[TECHNICAL SPEC]` block gained **`Connections:`, `Skills:` and `MCP servers:`** lines so those
+appear in the PRE-build view too — they are the part of an approved plan a reader most wants to
+check, and they existed only after a build, parsed off AGENT.md, which is the one moment they have
+stopped being a question. That exposed a gap: **the designer had never been shown an MCP server
+name** (`DesignSystemParams` carried `Skills` and `Connections` and nothing for MCP), so the line
+would have invited it to invent one. `MCPServers []MCPServerRef` + an `<available_mcp_servers>`
+block close it, fed by `Flow.mcpRefs` from the existing `buildBoundMCP` — every ENABLED server,
+because a design session, like a build, has no bindings yet. A sibling of `<available_connections>`
+rather than part of it, for the reason `MCPToolsBlock` gives: a connector action is a curated call
+against a known API, an MCP tool is whatever a server chose to advertise.
+`parseTechnicalSpec` follows `parseSchedule`'s policy — render only the closed set of labels the
+prompt asks for, fall back to the raw block otherwise, because a plausible-but-wrong summary of what
+an agent is about to do is worse than raw text the user can judge. A **View spec** button sits
+beside *Approve & build* and beside *Save*, switching the existing header toggle rather than opening
+a second surface. In `StateVerifying` the last assistant turn is promoted out of the bubble stream
+into `ReviewCard` — the one turn where action is required used to be visually identical to every
+question above it and scrolled past. That card is presentation only (no FSM state, no endpoint, no
+response field), is deliberately not sticky (it would fight `ChatScroll`), keeps `MessageMeta` so
+promoting a turn does not silently cost its copy button, and renders without an action row for a
+read-only mirror.
 
 **Change requests no longer discard the build.** When the user replies in `StateVerifying` with something that isn't approval, the session returns to `StateDesigning` but **keeps** `PendingAgentMD`/`PendingTools` in memory — a misfire (e.g. `"yes"`, `"save"`, `"ok"`) no longer silently drops the generated agent. The next approve re-generates with the change context and overwrites.
 

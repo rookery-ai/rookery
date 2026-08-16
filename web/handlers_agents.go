@@ -62,7 +62,11 @@ func designHistoryDTO(hist []db.ChatMessage) []designHistEntry {
 		if m.Role == agentdesigner.RoleNote {
 			continue
 		}
-		e := designHistEntry{Role: m.Role, Content: m.Content}
+		// History stores the designer's raw text so the code generator's
+		// [TECHNICAL SPEC] brief survives (see agentdesigner/technicalspec.go).
+		// The user never sees it — callCoder strips it from a live turn, and
+		// this strips it from the replay, so the two can't disagree.
+		e := designHistEntry{Role: m.Role, Content: agentdesigner.StripTechnicalSpec(m.Content)}
 		if !m.CreatedAt.IsZero() {
 			e.CreatedAt = m.CreatedAt.Format(time.RFC3339Nano)
 		}
@@ -94,6 +98,14 @@ func designTurnResponse(response string, snap agentdesigner.DesignSnapshot) map[
 		"building":          snap.Generating,
 		"generation_failed": snap.GenerationFailed,
 		"can_keep_as_is":    snap.CanKeepAsIs,
+		// plan_ready is what decides whether the browser offers "Approve &
+		// build" at all — fsmState alone cannot, because a clarifying question
+		// and a finished proposal are both StateDesigning. It ships on EVERY
+		// path that returns a design body, including the IsGenerating branch
+		// and the edit-start handler: the SPA coerces a missing field to false,
+		// and this codebase has already shipped one bug of exactly that shape.
+		"plan_ready":   snap.PlanReady,
+		"pending_spec": snap.PendingSpec,
 	}
 }
 
@@ -121,6 +133,8 @@ func (s *Server) handleResumeDraft(c echo.Context) error {
 		"agent_name":        snap.AgentName,
 		"generation_failed": snap.GenerationFailed,
 		"can_keep_as_is":    snap.CanKeepAsIs,
+		"plan_ready":        snap.PlanReady,
+		"pending_spec":      snap.PendingSpec,
 	}
 	return c.JSON(http.StatusOK, out)
 }
@@ -263,6 +277,8 @@ func (s *Server) handleDesignState(c echo.Context) error {
 		"can_keep_as_is":    snap.CanKeepAsIs,
 		"pending_agent_md":  snap.PendingAgentMD,
 		"pending_tools":     snap.PendingTools,
+		"plan_ready":        snap.PlanReady,
+		"pending_spec":      snap.PendingSpec,
 	})
 }
 

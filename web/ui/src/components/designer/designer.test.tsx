@@ -125,7 +125,7 @@ test("startPayload is merged into the very first design POST only", async () => 
   expect(designCalls[1]!.body).toEqual({ message: "second" });
 });
 
-test("designing-state Build button posts the literal phrase 'build it' and attaches the SSE card before the POST resolves", async () => {
+test("designing-state Build button posts the literal approval phrase and attaches the SSE card before the POST resolves", async () => {
   let resolveBuild!: (r: Response) => void;
   const calls = mockFetch({
     "/x/design": (body: any) => {
@@ -152,7 +152,7 @@ test("designing-state Build button posts the literal phrase 'build it' and attac
 
   const designCalls = () => calls.filter((c) => c.url === "/x/design");
   await waitFor(() => expect(designCalls()).toHaveLength(2));
-  expect(designCalls()[1]!.body).toEqual({ message: "build it" });
+  expect(designCalls()[1]!.body).toEqual({ message: "approve and build it" });
 
   await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
   const es = FakeEventSource.instances[0]!;
@@ -172,7 +172,7 @@ test("SSE completing AFTER the build POST already resolved does not refetch or c
   // blocking design POST (bound to the very same generation) has already
   // resolved and updated the transcript. A round-1 fix that only guarded
   // "POST still pending" missed this ordering: onDone still refetched here,
-  // and a stale `{active:false}` snapshot silently wiped the "build it"
+  // and a stale `{active:false}` snapshot silently wiped the approval
   // bubble and the freshly-rendered "Built it!" response after the fact.
   let stateCalls = 0;
   const calls = mockFetch({
@@ -201,7 +201,7 @@ test("SSE completing AFTER the build POST already resolved does not refetch or c
 
   // The build POST resolves fully FIRST.
   expect(await screen.findByText("Built it!")).toBeInTheDocument();
-  expect(screen.getByText("build it")).toBeInTheDocument();
+  expect(screen.getByText("approve and build it")).toBeInTheDocument();
 
   // THEN the SSE stream closes.
   await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
@@ -215,12 +215,12 @@ test("SSE completing AFTER the build POST already resolved does not refetch or c
   await new Promise((r) => setTimeout(r, 0));
 
   // Transcript unchanged — no refetch fired at all past the initial mount GET.
-  expect(screen.getByText("build it")).toBeInTheDocument();
+  expect(screen.getByText("approve and build it")).toBeInTheDocument();
   expect(screen.getAllByText("Built it!")).toHaveLength(1);
   expect(stateCalls).toBe(1); // only the mount-recovery GET — none from SSE onDone
 
   const designCalls = calls.filter((c) => c.url === "/x/design");
-  expect(designCalls[1]!.body).toEqual({ message: "build it" });
+  expect(designCalls[1]!.body).toEqual({ message: "approve and build it" });
 });
 
 // When a design POST returns building:true, the build's real outcome (the

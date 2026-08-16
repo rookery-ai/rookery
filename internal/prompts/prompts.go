@@ -90,6 +90,7 @@ type DesignSystemParams struct {
 	ChatApps           []ChatAppInfo // connected chat platforms + their commands (drives platform context)
 	Skills             []SkillRef
 	Connections        []ConnectionRef // connected service accounts (Gmail, etc.) available to bind
+	MCPServers         []MCPServerRef  // enabled MCP servers available to bind
 	UserProfile        string          // "[Current context]" block (date/time/timezone); identity lives in UserMemory
 	UserMemory         string
 	KBManifest         string // vault.BuildKBContext output: folder summary + relevant passages; "" if no vault attached
@@ -898,6 +899,24 @@ Two things follow, and both shape what you may promise the user:
 		sb.WriteString("</available_connections>\n\n")
 	}
 
+	// ── MCP servers ───────────────────────────────────────────────────────────
+	//
+	// The designer could not name an MCP server before this block existed, which
+	// made the [TECHNICAL SPEC]'s "MCP servers:" line an invitation to invent one.
+	// A sibling of <available_connections> rather than part of it, for the reason
+	// MCPToolsBlock gives: a connector action is a curated call against a known
+	// API, an MCP tool is whatever a server the owner added chose to advertise,
+	// and the model needs that distinction to choose between two that sound alike.
+	if len(p.MCPServers) > 0 {
+		sb.WriteString("<available_mcp_servers>\n")
+		sb.WriteString("The user has connected these MCP servers. Their tools are available to the agent at run time — no URLs, no credentials, nothing to set up:\n")
+		sb.WriteString("- You MUST add a `# MCP: name, ...` header line in the generated AGENT.md declaring EXACTLY the servers this agent uses (or `# MCP: none`).\n\n")
+		for _, m := range p.MCPServers {
+			sb.WriteString(fmt.Sprintf("- **%s**\n", m.Name))
+		}
+		sb.WriteString("</available_mcp_servers>\n\n")
+	}
+
 	// ── User context ──────────────────────────────────────────────────────────
 	if p.UserProfile != "" {
 		sb.WriteString(p.UserProfile)
@@ -945,11 +964,11 @@ STEP 2 — CONFIRM THE FIX.
 Describe what you will change in plain English — no code, no file names, no jargon. Example:
 "I'll change the assistant so it writes the quote itself instead of running a script, and
 the notification will now always include the quote." Ask: "Does that sound right? Type
-approve to proceed."
+approve and I'll build it."
 
 STEP 3 — AWAIT APPROVAL.
-Tell the user to type "approve" when they are happy with the proposed fix. Do not revisit or
-reconfirm things they did not mention.
+Tell the user to type "approve" when they are happy with the proposed fix, and that you will
+build it as soon as they do. Do not revisit or reconfirm things they did not mention.
 
 RULES:
 - Never describe the fix using technical terms (script, AGENT.md, Python, vault).
@@ -957,8 +976,9 @@ RULES:
 - Be surgical: change only what caused the problem. Never propose to "rewrite the agent".
 - Ask at most one or two targeted questions if the diagnosis is unclear.
 
-After the user approves, append this block (for the code generator only — NOT shown to the
-user):
+In the SAME message as that proposed fix — not later, not after the user replies — append
+this block on its own lines at the very end (for the code generator only; it is stripped
+before the user sees your message, so never refer to it in your prose):
 [TECHNICAL SPEC]
 Change: <one sentence describing what changes technically>
 Root cause: <what was actually wrong, if a bug>
@@ -990,10 +1010,13 @@ terms) — bullet points, not paragraphs:
 - Where results are saved ("your notes under Daily Quotes")
 - Any accounts/services needed and exactly how to set them up, step by step
 
-Then tell the user to type "approve" when they are happy with the proposal.
+Then tell the user to type "approve" when they are happy with the proposal, and that you
+will build it as soon as they do.
 
-After the user approves, append this block (for the code generator only — NOT shown to the
-user):
+In the SAME message as that proposal — not later, not after the user replies — append this
+block on its own lines at the very end (for the code generator only; it is stripped before
+the user sees your message, so never refer to it in your prose). Emit it ONLY when you are
+proposing a complete plan: while you are still asking questions, do not emit it at all.
 [TECHNICAL SPEC]
 Tier: 1 / 2 / 3 — for 2 or 3, name the exact [BULK] task (which API paginates / which large data is parsed). Default to 1.
 Schedule: <5-part cron expression> | none
@@ -1001,6 +1024,9 @@ Notifies user: yes ([CHAT] contains: <description>) | no (silent)
 Knowledge base writes: notes/<filename.md> | none
 Secrets: none | NAME: plain description
 External services: none | <service name and what for>
+Connections: none | <the provider/label accounts from <available_connections> this will use, comma-separated>
+Skills: none | <the skill names from <available_skills> this needs, comma-separated>
+MCP servers: none | <the server names from <available_mcp_servers> this will call, comma-separated>
 [/TECHNICAL SPEC]
 </your_job>
 
