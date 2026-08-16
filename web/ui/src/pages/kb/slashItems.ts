@@ -1,5 +1,6 @@
 import type { Editor } from "@tiptap/core";
 import { CALLOUT_KINDS } from "./nodes/callout";
+import { MIN_COLUMNS, MAX_COLUMNS } from "./nodes/columns";
 
 export type SlashItem = {
   title: string;
@@ -56,6 +57,16 @@ export const slashItems: SlashItem[] = [
     keywords: "toggle collapsible details accordion expand fold",
     run: (editor) => editor.chain().focus().setToggle().run(),
   },
+  // Side-by-side blocks. One entry per column count rather than an inserted
+  // 2-column block the user then reconfigures: there is no control surface on
+  // the node itself, so the count has to be chosen here.
+  ...Array.from({ length: MAX_COLUMNS - MIN_COLUMNS + 1 }, (_, i) => MIN_COLUMNS + i).map(
+    (cols) => ({
+      title: `${cols} columns`,
+      keywords: `columns grid layout side by side ${cols} column`,
+      run: (editor: Editor) => editor.chain().focus().insertColumns(cols).run(),
+    }),
+  ),
   {
     title: "Code block",
     keywords: "code codeblock pre fenced snippet",

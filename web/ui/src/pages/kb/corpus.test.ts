@@ -89,6 +89,16 @@ const EXPECTED_LOSSY = new Set([
   // either way — which is the point: checkFidelity opens the note read-only
   // instead of letting a save discard an attribute silently.
   "align-combined-with-data-cols",
+  // Columns (nodes/columns.ts). The canonical form is the blank-line-separated
+  // one, so the glued spelling normalises on the first save — the same
+  // read-only-until-first-save gap the toggle records.
+  "columns-glued-tags",
+  // NOT a defect in the columns node: `- a\n- b\n\n- c\n- d` is ONE loose
+  // list in CommonMark, so two adjacent lists cannot be two cells because they
+  // cannot be two blocks. Verified outside any wrapper (see
+  // "bare-adjacent-bullet-lists" below), where it fails identically.
+  "columns-two-adjacent-lists",
+  "bare-adjacent-bullet-lists",
 ]);
 
 interface CorpusEntry {
@@ -300,6 +310,87 @@ const CORPUS: CorpusEntry[] = [
     name: "align-combined-with-data-cols",
     md: '<div align="center" data-cols="2">\n\nA\n\nB\n\n</div>\n',
     expectLossy: true,
+  },
+  // -- Columns (nodes/columns.ts) --------------------------------------------
+  {
+    name: "columns-two-images",
+    md: '<div data-cols="2">\n\n![before](assets/before.png)\n\n![after](assets/after.png)\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "columns-two-paragraphs",
+    md: '<div data-cols="2">\n\nLeft **bold**\n\nRight *italic*\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "columns-three-cells",
+    md: '<div data-cols="3">\n\nA\n\nB\n\nC\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "columns-two-headings",
+    md: '<div data-cols="2">\n\n## Left\n\n## Right\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "columns-wikilinks",
+    md: '<div data-cols="2">\n\nSee [[a]]\n\nSee [[b]]\n\n</div>\n',
+    expectLossy: false,
+  },
+  // A list works as a cell — it is only a list BESIDE ANOTHER LIST that cannot
+  // be expressed, which is the entry below.
+  {
+    name: "columns-list-beside-text",
+    md: '<div data-cols="2">\n\n- a\n- b\n\nRight side\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "columns-with-neighbours",
+    md: 'Before\n\n<div data-cols="2">\n\nA\n\nB\n\n</div>\n\nAfter\n',
+    expectLossy: false,
+  },
+  {
+    name: "columns-glued-tags",
+    md: '<div data-cols="2">A</div>\n',
+    expectLossy: true,
+  },
+  {
+    name: "columns-two-adjacent-lists",
+    md: '<div data-cols="2">\n\n- a\n- b\n\n- c\n- d\n\n</div>\n',
+    expectLossy: true,
+  },
+  // The control for the entry above: the same two lists with no wrapper at all
+  // fail identically, which is what proves the loss is CommonMark's and not the
+  // columns node's. Without this pair the next reader would reasonably try to
+  // "fix" the wrapper.
+  {
+    name: "bare-adjacent-bullet-lists",
+    md: "- a\n- b\n\n- c\n- d\n",
+    expectLossy: true,
+  },
+  // -- Alignment x columns -----------------------------------------------------
+  //
+  // These could not be pinned from either feature branch alone: each would have
+  // failed on the branch where the other node was not registered. They are the
+  // cases the two designs were cross-checked against before either merged.
+  //
+  // Nesting is the shape the INTERFACE produces when you centre a columns block:
+  // setBlockAlign finds no kbAlign to update, so it wraps. Both directions
+  // round-trip, which is what makes that safe.
+  {
+    name: "align-wrapping-columns",
+    md: '<div align="center">\n\n<div data-cols="2">\n\nA\n\nB\n\n</div>\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "columns-with-an-aligned-cell",
+    md: '<div data-cols="2">\n\n<div align="center">\n\nA\n\n</div>\n\nB\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "align-and-columns-as-siblings",
+    md: '<div align="center">\n\nCentred\n\n</div>\n\n<div data-cols="2">\n\nA\n\nB\n\n</div>\n',
+    expectLossy: false,
   },
   {
     name: "agent-state-md-template",

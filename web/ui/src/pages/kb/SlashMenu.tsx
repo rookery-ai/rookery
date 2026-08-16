@@ -25,6 +25,9 @@ import {
   OctagonAlert,
   StickyNote,
   ChevronRight,
+  Columns2,
+  Columns3,
+  Columns4,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -49,6 +52,9 @@ export const ICONS: Record<string, LucideIcon> = {
   Table: TableIcon,
   Image: ImageIcon,
   "File attachment": Paperclip,
+  "2 columns": Columns2,
+  "3 columns": Columns3,
+  "4 columns": Columns4,
 };
 
 // Deletes the "/query" range then runs the chosen item — the command every

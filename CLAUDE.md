@@ -672,6 +672,29 @@ it is the row's oldest control: if this breaks again it breaks for all of them.
 while the body, being ordinary markdown OUTSIDE the HTML block, survives with its formatting
 intact. Alignment is lost; content and marks are not. Compare the toggle, which loses its summary
 text along with its wrapper.
+**Columns: each DIRECT CHILD of the wrapper is one cell — there is no cell node.**
+`nodes/columns.ts` (`kbColumns`, `content: block+`, `data-cols` 2–4, slash-menu entries
+"2/3/4 columns") is how two images or two paragraphs sit side by side. The one-block-per-cell
+shape is what makes it round-trip: the obvious alternative — a wrapper div containing one div per
+cell — nests raw HTML blocks inside raw HTML blocks, while this reuses exactly the mechanism
+`nodes/align.ts` proves (one `<div …>` opening tag, blank line, ordinary markdown blocks, blank
+line, `</div>`), so markdown-it closes the type-6 block at the first blank line and every cell is
+parsed as real markdown with real marks. Three costs, all stated rather than designed around:
+**a cell is one block** (a heading AND a paragraph in one cell needs nesting, which this does not
+do); **two adjacent lists cannot be two cells**, because `- a\n- b\n\n- c\n- d` is ONE loose list
+in CommonMark — verified outside any wrapper, where it fails identically, and the corpus pins both
+so the next reader does not "fix" the wrapper; and **no div-based grid renders as a grid outside
+Rookery**, since GitHub's sanitiser strips `class`, `data-*` and `style` alike (only a `<table>`
+would, and a markdown table forces a header row this editor promotes on save) — so a columns block
+degrades elsewhere to its cells stacked in order with every image and mark intact, which is the
+right failure and why `class="kb-columns"` is added by `renderHTML` and never written to the file.
+`insertColumns` inserts N EMPTY cells rather than wrapping, because the slash menu runs on the
+empty paragraph left after the `/query` range is deleted and wrapping there yields a one-cell
+layout. **`clearColumns` builds its lift range over the whole node's content**, not
+`commands.lift(name)`: that lifts the range around the SELECTION, so on a two-cell block it takes
+the first cell out and leaves the second wrapped. The CSS uses `minmax(0, 1fr)`, never a bare
+`1fr` — a grid item's automatic minimum size is content-based (CSS Grid §6.6), the same trap
+`DialogContent`'s `grid-cols-1` fix records.
 
 **KB rich-text editor: five formatting/AI constructs.** The WYSIWYG editor (`web/ui/src/pages/kb/`)
 adds underline, two colour marks, callouts, toggle lists, resizable images, and the AI actions panel
