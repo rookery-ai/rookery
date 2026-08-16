@@ -74,6 +74,21 @@ const EXPECTED_LOSSY = new Set([
   "hard-line-break",
   "setext-heading",
   "html-inline-tag",
+  // Alignment (nodes/align.ts): the canonical form is the blank-line-separated
+  // one, which is what real-world markdown contains and what keeps the body
+  // parseable as markdown. A serializer can reproduce only ONE spelling, so
+  // these two normalise to it on the first save and the note opens read-only
+  // until then. That is a strict improvement on the previous behaviour, where
+  // EVERY div spelling lost its wrapper entirely and the alignment was
+  // discarded on save — see the design doc's measured before/after table.
+  "align-glued-tags",
+  "align-style-attribute",
+  // A div carrying BOTH `align` and `data-cols`. The div[align] rule declines
+  // it so the columns node (nodes/columns.ts) can own it deterministically
+  // rather than the outcome depending on extension-registration order. Lossy
+  // either way — which is the point: checkFidelity opens the note read-only
+  // instead of letting a save discard an attribute silently.
+  "align-combined-with-data-cols",
 ]);
 
 interface CorpusEntry {
@@ -210,6 +225,82 @@ const CORPUS: CorpusEntry[] = [
   // RenderStateTemplate. Changing the Go template, or editing this literal so it
   // no longer matches, fails that Go test — do not hand-edit this string without
   // also running `go test ./internal/agentdesigner/...`.
+  // -- Block alignment (nodes/align.ts) -------------------------------------
+  {
+    name: "align-center-paragraph",
+    md: '<div align="center">\n\nHello **world**\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "align-right-paragraph",
+    md: '<div align="right">\n\nSigned, me\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "align-left-paragraph",
+    md: '<div align="left">\n\nHard left\n\n</div>\n',
+    expectLossy: false,
+  },
+  // The image case is half the feature's point — a centred image is what most
+  // people reach for alignment to do at all.
+  {
+    name: "align-centered-image",
+    md: '<div align="center">\n\n![a diagram](assets/diagram.png)\n\n</div>\n',
+    expectLossy: false,
+  },
+  // The blank-line body is what keeps these parseable as MARKDOWN rather than
+  // as text inside a raw HTML block, which is the whole reason the wrapper is a
+  // <div> and not a styled <p>.
+  {
+    name: "align-centered-list",
+    md: '<div align="center">\n\n- one\n- two\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "align-centered-table",
+    md: '<div align="center">\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "align-centered-heading",
+    md: '<div align="center">\n\n# Title\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "align-multi-block-body",
+    md: '<div align="center">\n\nOne\n\nTwo\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "align-with-neighbours",
+    md: 'Before\n\n<div align="center">\n\nMiddle\n\n</div>\n\nAfter\n',
+    expectLossy: false,
+  },
+  {
+    name: "align-two-adjacent-blocks",
+    md: '<div align="center">\n\nA\n\n</div>\n\n<div align="right">\n\nB\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "align-wikilink-inside",
+    md: '<div align="center">\n\nSee [[notes/other]]\n\n</div>\n',
+    expectLossy: false,
+  },
+  {
+    name: "align-glued-tags",
+    md: '<div align="center">Hello</div>\n',
+    expectLossy: true,
+  },
+  {
+    name: "align-style-attribute",
+    md: '<div style="text-align: center">\n\nHello\n\n</div>\n',
+    expectLossy: true,
+  },
+  {
+    name: "align-combined-with-data-cols",
+    md: '<div align="center" data-cols="2">\n\nA\n\nB\n\n</div>\n',
+    expectLossy: true,
+  },
   {
     name: "agent-state-md-template",
     md: '# State — Gmail Digest\n\n*Managed by Rookery. The block below is this agent\'s memory between runs — edit it if you need to fix something by hand.*\n\n```json\n{\n  "a": 1\n}\n```\n',
