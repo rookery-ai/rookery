@@ -153,13 +153,20 @@ func runUninstall(ctx context.Context, cfg *config.Config, o uninstallOpts) erro
 	}
 
 	if !owner.Managed {
-		if err := os.Remove(self); err != nil {
-			// Removing a running executable is fine on Linux; a permission
-			// error means the binary is somewhere this user does not own.
+		note, err := removeSelf(self)
+		if err != nil {
+			// On POSIX, removing a running executable is ordinary, so a failure
+			// here means the binary lives somewhere this user does not own. On
+			// Windows the running image cannot be deleted at all, which is why
+			// removeSelf is per-platform — and why the advice below must not
+			// say "privileges", which is the wrong diagnosis there.
 			fmt.Fprintf(o.out, "  warn: could not remove %s: %v\n", self, err)
-			fmt.Fprintln(o.out, "  remove it by hand, or re-run with the privileges that installed it.")
+			fmt.Fprintf(o.out, "  %s\n", removeSelfHint(self))
 		} else {
 			fmt.Fprintf(o.out, "  removed %s\n", self)
+			if note != "" {
+				fmt.Fprintf(o.out, "  %s\n", note)
+			}
 		}
 	}
 
@@ -347,7 +354,14 @@ func runUpgrade(ctx context.Context, o upgradeOpts) error {
 	if out, err := exec.CommandContext(ctx, self, "version").Output(); err == nil {
 		fmt.Fprintf(o.out, "Now running: %s", out)
 	}
-	fmt.Fprintln(o.out, "\nRestart the service to pick it up:\n    systemctl --user restart rookery.service")
+	// Only Linux has a service to restart. Printing systemctl on macOS and
+	// Windows told people to run a command that does not exist, on the two
+	// platforms where the answer is "restart the one you are running".
+	if svc := onboard.CurrentService(); svc.Managed {
+		fmt.Fprintln(o.out, "\nRestart the service to pick it up:\n    systemctl --user restart rookery.service")
+	} else {
+		fmt.Fprintf(o.out, "\nRestart the server to pick it up (stop the running one, then `%s`).\n", svc.Foreground)
+	}
 	return nil
 }
 
