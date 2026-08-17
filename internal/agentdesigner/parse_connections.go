@@ -59,10 +59,42 @@ func parseConnectionsLine(agentMD string, available []db.ServiceConnection) []st
 		}
 	}
 
-	// 1. Robust contains-match: the account identity or "provider/label" appears verbatim
-	//    somewhere in the region (handles the bullet form deepseek writes).
+	// An identity may only be used for the loose contains-match below when it is an
+	// email AND belongs to exactly one connection. Both halves are load-bearing, and
+	// both were learned from a real over-grant.
+	//
+	// A binding hands an agent live credentials, so a wrong one is access, not
+	// untidiness. The old rule substring-matched EVERY identity against the whole
+	// header region, which broke twice over on an ordinary workspace:
+	//
+	//   - Short, generic identities are shared. "test" belonged to adguard, mailchimp
+	//     AND stripe, so the header "# Connections: adguard/test, google_sheets/…"
+	//     contained the substring "test" and granted a DNS watchdog the owner's
+	//     payment and mailing-list credentials.
+	//   - Family identities are shared by design. Every google_* child carries the
+	//     same address, so one email in a header bound Drive and Docs alongside the
+	//     Sheets account that was actually named.
+	//
+	// Requiring an "@" keeps the case this match exists for — the bullet form a weak
+	// model writes, "google account \"personal\" — me@x.com" — while refusing to treat
+	// a bare word like "test" or "personal" as an identifier. Requiring uniqueness
+	// refuses an address that cannot single anything out. Everything excluded here is
+	// still reachable through provider/label or exact-token matching below, so the
+	// cost is at worst under-binding, which the user fixes with a checkbox; the cost
+	// of the alternative is credentials granted to an agent that never asked for them.
+	identityCount := map[string]int{}
 	for _, c := range available {
-		if c.AccountIdentity != "" && strings.Contains(low, strings.ToLower(c.AccountIdentity)) {
+		if id := strings.ToLower(strings.TrimSpace(c.AccountIdentity)); id != "" {
+			identityCount[id]++
+		}
+	}
+
+	// 1. Robust contains-match: a distinctive account identity, or "provider/label",
+	//    appears verbatim somewhere in the region (handles the bullet form).
+	for _, c := range available {
+		ident := strings.ToLower(strings.TrimSpace(c.AccountIdentity))
+		distinctive := ident != "" && strings.Contains(ident, "@") && identityCount[ident] == 1
+		if distinctive && strings.Contains(low, ident) {
 			add(c.ID)
 		} else if strings.Contains(low, strings.ToLower(c.Provider+"/"+c.AccountLabel)) {
 			add(c.ID)

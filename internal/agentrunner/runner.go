@@ -494,11 +494,28 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	rctx := &coderRunContext{}
 	runErr := r.runCoderTurns(ctx, agent, input, agentDir, stateMap, stateReadOK, prompt, coderSvc, rctx)
 
+	// A coder that returned zero bytes did not run quietly — it did not run. Treat
+	// it as a failure so the run shows as failed, the message says what actually
+	// happened, and the next scheduled run is not preceded by a green tick.
+	producedNothing := runErr == nil && coderProducedNothing(rctx.chatLines, rctx.rawChunks, rctx.silentSignaled)
+
 	exitCode := 0
-	if runErr != nil {
+	if runErr != nil || producedNothing {
 		exitCode = -1
 	}
 	r.reflectRun(input, agent, runID, exitCode, startedAt, rctx)
+
+	// One line per finished run. Agent runs previously logged NOTHING on the happy
+	// path, so a run that produced no output at all left no trace anywhere except
+	// an empty "Raw output" section in its own log note — the designer has had
+	// build_id tracing for exactly this reason, and diagnosing a silent run
+	// without it meant reading the database. Cheap, once per run.
+	slog.Info("agentrunner: run finished",
+		"run_id", runID, "agent_id", input.AgentID, "agent", agent.Name,
+		"trigger", input.Trigger, "exit", exitCode,
+		"raw_chunks", len(rctx.rawChunks), "chat_lines", len(rctx.chatLines),
+		"silent", rctx.silentSignaled, "produced_nothing", producedNothing,
+		"warnings", len(rctx.warnings), "total_tokens", rctx.usage.TotalTokens)
 
 	if runErr != nil {
 		_ = r.db.FinishAgentRun(runID, -1, strings.Join(rctx.chatLines, "\n"), strings.Join(rctx.warnings, "\n")+"\n"+runErr.Error(), rctx.usage.PromptTokens, rctx.usage.CompletionTokens, rctx.usage.TotalTokens)
@@ -517,6 +534,24 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 		}
 		r.recordInbox(input, agent, runID, friendly, "error")
 		return errors.New(friendly)
+	}
+
+	if producedNothing {
+		// Deliberately NOT the "produced no notification" wording: that phrasing
+		// describes an agent that ran and chose not to speak, which is the one thing
+		// this is not. Naming the real event is what lets the owner tell a broken
+		// model apart from a working agent with nothing to report.
+		msg := "⚠️ Ran but the model returned no output at all — nothing was checked and no state was saved. See the run log."
+		_ = r.db.FinishAgentRun(runID, -1, "", strings.Join(append(rctx.warnings, "coder returned no output"), "\n"),
+			rctx.usage.PromptTokens, rctx.usage.CompletionTokens, rctx.usage.TotalTokens)
+		if input.SendOutput != nil {
+			input.SendOutput(msg)
+		}
+		r.recordInbox(input, agent, runID, msg, "error")
+		if input.OnProgress != nil {
+			input.OnProgress(msg)
+		}
+		return errors.New("coder returned no output")
 	}
 
 	// ── Reliable delivery ────────────────────────────────────────────────────
@@ -921,7 +956,7 @@ func parseCoderOutput(text string) parsedOutput {
 		// ── [SILENT] — run intentionally produces no user-facing message ────────
 		// Ends any open [CHAT] block and marks the run silent so the runner does
 		// not fall back to prose delivery.
-		if trimmed == "[SILENT]" {
+		if isSilentMarker(trimmed) {
 			flushChat()
 			out.silent = true
 			continue
@@ -954,6 +989,67 @@ func parseCoderOutput(text string) parsedOutput {
 // coder produced a user-facing message but forgot the [CHAT] marker: its prose
 // output is delivered instead of being silently lost.
 //
+// coderProducedNothing reports whether a run's coder returned no output at all —
+// as distinct from a run that ran fine and merely forgot the [CHAT] marker.
+//
+// The two used to be conflated and both reported as exit 0 with "⚠️ Ran but
+// produced no notification". They are not the same event. A forgotten marker
+// leaves prose behind to deliver and means the agent did its work; an EMPTY
+// response means nothing was fetched, nothing was decided, and no state was
+// written — the agent's whole job was skipped. Calling that a successful quiet
+// run is how a real agent sat at state.md = {} for two runs while telling its
+// owner, twice, that it had simply produced no notification.
+//
+// Judged on RAW output rather than the parsed result, because that is the only
+// place the difference survives: parsing an empty string and parsing a paragraph
+// with no markers both yield zero chat lines.
+//
+// A [SILENT] run is never "nothing": the marker is a decision the agent made and
+// stated, which is exactly the output we asked it for.
+func coderProducedNothing(chatLines, rawChunks []string, silent bool) bool {
+	if silent || len(chatLines) > 0 {
+		return false
+	}
+	for _, chunk := range rawChunks {
+		if strings.TrimSpace(chunk) != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// isSilentMarker reports whether a line IS the [SILENT] marker, allowing for the
+// ways a model decorates a token: **[SILENT]**, `[SILENT]`, [silent], [SILENT].,
+// [/SILENT], or a bare SILENT.
+//
+// Lenient about DECORATION, strict about CONTEXT, and the asymmetry is the whole
+// design. The two failures are not equally bad:
+//
+//   - A missed marker makes a correctly-behaving agent send "⚠️ Ran but produced
+//     no notification" every time it had nothing to say. Noisy, but the user can
+//     see something is wrong.
+//   - A marker matched inside a sentence ("I stayed [SILENT] last night") would
+//     suppress a real message the user was waiting for, and nothing would say so.
+//
+// So only a line that IS the marker once decoration is removed counts; a mention
+// inside prose never does. A bare "silent" line is accepted because models write
+// it, and the blast radius is bounded: `silent` only suppresses the prose
+// fallback and the empty-run warning, so a run that produced actual [CHAT]
+// content still delivers it.
+func isSilentMarker(line string) bool {
+	s := strings.TrimSpace(line)
+	// Peel decoration from both ends: emphasis, code ticks, quotes.
+	s = strings.Trim(s, "*_`\"' \t")
+	// Trailing sentence punctuation a model may append.
+	s = strings.TrimRight(s, ".!?,;:")
+	s = strings.TrimSpace(s)
+	switch strings.ToLower(s) {
+	case "[silent]", "[/silent]", "silent":
+		return true
+	}
+	return false
+}
+
 // Strips: [STATE] blocks (multi-line and inline), [CALL: …] lines, [SILENT],
 // standalone [CHAT]/[/CHAT] marker lines, and [BLOCKED]…[/BLOCKED] blocks. The
 // remaining lines are joined, edge-trimmed, and have runs of 3+ blank lines
@@ -999,7 +1095,10 @@ func extractProseMessage(text string) string {
 			continue
 		}
 		// Explicit silence / standalone chat markers (no content to keep).
-		if t == "[SILENT]" || t == "[CHAT]" || t == "[/CHAT]" {
+		// isSilentMarker rather than an equality check, so a decorated marker
+		// (**[SILENT]**) is stripped here too — otherwise a run that fell back to
+		// prose delivery would send the user the literal marker text.
+		if isSilentMarker(t) || t == "[CHAT]" || t == "[/CHAT]" {
 			continue
 		}
 		// A malformed [CHAT] line (e.g. "[CHAT]" with content after on the same
