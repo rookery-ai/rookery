@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/rookery-ai/rookery/compare/v0.3.3...v0.3.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **agentrunner:** obey [SILENT], fail loudly on empty runs, stop over-binding connections ([#218](https://github.com/rookery-ai/rookery/issues/218)) ([34b1c38](https://github.com/rookery-ai/rookery/commit/34b1c38a3ac2f80e0d34be677f34168518215110))
+
 ## [0.3.3](https://github.com/rookery-ai/rookery/compare/v0.3.2...v0.3.3) (2026-08-17)
 
 
