@@ -1071,7 +1071,16 @@ func isVerifyApproval(input string) bool {
 	case "approve", "go ahead", "build it", "create it", "/approve",
 		"approve and build", "approve and build it", "approve & build", "approve & build it",
 		"yes", "save", "save it", "ok", "okay", "looks good", "looks good to me",
-		"confirm", "confirmed", "go", "do it", "ship it", "lgtm", "perfect", "great":
+		"confirm", "confirmed", "go", "do it", "ship it", "lgtm", "perfect", "great",
+		// Kept deliberately in step with agentdesigner.isVerifyApproval — the two
+		// designers share ONE DesignerSurface, so a word that saves an agent and
+		// rebuilds a skill is the worse kind of inconsistency: invisible until it
+		// costs someone a build. A confirmation missing here falls to the
+		// change-request branch and the next "approve" starts a second build.
+		"approved", "accept", "accept it", "accepted",
+		"save skill", "save the skill", "save this", "keep it",
+		"yep", "yeah", "yup", "sure", "sounds good", "go for it",
+		"that's fine", "thats fine", "all good", "good", "fine", "done":
 		return true
 	}
 	return false
