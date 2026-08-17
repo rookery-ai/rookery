@@ -145,6 +145,13 @@ test("the build button appears once the plan is ready, and retracts on a follow-
   expect(await screen.findByRole("button", { name: /Approve & build/ })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /View spec/ })).toBeInTheDocument();
 
+  // A settled plan closes the message box: approving is a decision, and it goes
+  // through a button rather than a guess at which words the server accepts.
+  // "Make changes" is the way back to typing.
+  expect(screen.getByRole("textbox")).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: /Make changes/ }));
+  await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled());
+
   await sendViaComposer("actually make it hourly");
   await screen.findByText("Every hour on the hour, or every 60 minutes?");
   // A latch-once-true flag would leave the button armed under a question the

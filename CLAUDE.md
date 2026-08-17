@@ -901,14 +901,34 @@ own body with no such flag, and would otherwise lose its build button entirely.
   designers share one `DesignerSurface`, so a word that saves an agent and rebuilds a
   skill is the kind of inconsistency nobody finds until it costs them a build.
 
-**The review step locks the composer, and the lock is tied to the BUTTONS, not the state.**
-`showVerifyingActions` (Save / View spec / Request changes) and `composerLocked` are computed
-from one expression, so accepting a build goes through a button rather than a guess at which
-words the server takes — and if the actions are ever hidden the text box comes back. That
-coupling is the safety property: a blanket lock on `fsmState === "verifying"` would have
-turned the bug below into a dead end with no buttons *and* no way to type. `Request changes`
-sets `changesRequested`, which unlocks and focuses the composer; leaving the verifying state
-clears it, so each new build's review starts locked again.
+**A settled plan and a finished build both lock the composer, and the lock is tied to the
+buttons being VISIBLE — not to the FSM state, and not merely to the buttons existing.**
+Accepting goes through a button rather than a guess at which words the server takes.
+`Make changes` / `Request changes` set `changesRequested`, which unlocks and focuses the
+composer; the flag clears on every new transcript turn (keyed on turn COUNT, not `fsmState`,
+which now locks during design too and would re-lock the box under the user's cursor).
+
+Three conditions are load-bearing, and the third was learned the hard way:
+
+- **Design locks only at a SETTLED plan** (`planReady || planInvitesApproval`), never merely
+  because an action row is rendered. On a surface that does not gate on plan-readiness — the
+  skill designer passes no `gateBuildOnPlanReady`, so `buildOffered` is always true — a row
+  follows every assistant turn, and locking on that closes the box for the ordinary
+  back-and-forth of answering the designer's own questions.
+- **`planInvitesApproval` is the fallback for plan-readiness.** The server derives `plan_ready`
+  from a `[TECHNICAL SPEC]` marker a weak model frequently never emits, so the gate never
+  opened and the user was left with a finished plan and no buttons at all. A plan almost always
+  ends by inviting approval in so many words ("Type approve and I'll build it"), and that
+  sentence is the signal. Deliberately narrow — it must not match a clarifying question, which
+  is the case `gateBuildOnPlanReady` exists to protect.
+- **`view !== "spec"` — the invariant is that the actions are VISIBLE, not that they exist.**
+  Both action rows live inside the transcript; the Spec tab replaces that whole subtree while
+  the composer, which sits outside it, keeps rendering. Without this check a user who opened
+  Spec to read the generated `AGENT.md` — an entirely reasonable thing to do at the review
+  step — was left with no buttons (not rendered) and no message box (locked by actions they
+  could not see), while the finished build sat safely on the server. A real dead end, shipped,
+  and it is why `deadend.test.tsx` asserts "a button is visible OR the box is usable" directly
+  across every reachable state rather than trusting this expression to stay correct.
 
 **The dry run renders from the LAST ASSISTANT turn, not the last turn.** Gating it on the
 last transcript entry being an assistant turn meant anything landing after the dry run hid
