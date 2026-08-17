@@ -226,6 +226,11 @@ export function DesignerSurface({
   const [error, setError] = useState<string | null>(null);
   const [generationFailed, setGenerationFailed] = useState(false);
   const [canKeepAsIs, setCanKeepAsIs] = useState(false);
+  // Set by "Request changes", which is the only way to type during the review
+  // step. Cleared whenever a new review begins (see the effect below), so each
+  // finished build starts locked again rather than inheriting the last one's
+  // unlocked composer.
+  const [changesRequested, setChangesRequested] = useState(false);
   // Which surface owns the live session. "" means unowned, or ours. Anything
   // else means another surface is driving and this one is a read-only mirror:
   // the session is a per-workspace singleton, so a mirror that thinks it drives
@@ -441,6 +446,15 @@ export function DesignerSurface({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-lock the composer whenever the surface leaves the review step. Without
+  // this, one "Request changes" would leave every LATER build's review unlocked
+  // — the user is then back to typing approval words at a build that has two
+  // buttons sitting right above the box, which is the exact ambiguity the lock
+  // exists to remove.
+  useEffect(() => {
+    if (fsmState !== "verifying") setChangesRequested(false);
+  }, [fsmState]);
 
   // Third completion signal: a slow poll for as long as a build is running.
   // The `done` event and the error refetch both depend on the SSE stream
@@ -703,14 +717,34 @@ export function DesignerSurface({
   const buildOffered = !gateBuildOnPlanReady || planReady;
   const showDesigningActions =
     fsmState === "designing" && buildOffered && !generating && !busy && lastIsAssistant && !readOnly;
-  const showVerifyingActions =
-    fsmState === "verifying" && !generating && !busy && lastIsAssistant && !readOnly;
-  // Which transcript turn is the dry run. Deliberately NOT gated on !readOnly:
-  // a mirror must still SEE the review, it just gets no action row.
-  const reviewTurnIndex =
-    fsmState === "verifying" && !generating && !busy && lastIsAssistant
-      ? messages.length - 1
-      : -1;
+  // Which transcript turn is the dry run: the LAST ASSISTANT turn, not the last
+  // turn. Requiring the dry run to be last meant anything landing after it —
+  // most easily a turn that FAILED, which leaves the user's own message last and
+  // clears busy — hid the finished build completely: no output, no Save, no
+  // Request changes. The build was still on the server the whole time, so the
+  // only remaining move was to guess a word the server accepts, and guessing
+  // wrong drops the FSM back to designing and silently rebuilds the agent.
+  //
+  // Deliberately NOT gated on !readOnly: a mirror must still SEE the review, it
+  // just gets no action row.
+  const lastAssistantIndex = (() => {
+    if (fsmState !== "verifying" || generating || busy) return -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]!.role === "assistant") return i;
+    }
+    return -1;
+  })();
+  const reviewTurnIndex = lastAssistantIndex;
+  const showVerifyingActions = reviewTurnIndex >= 0 && !readOnly;
+  // The composer is locked while the review actions are on screen, so accepting a
+  // build goes through a button instead of a guess at which words the server
+  // treats as approval. "Request changes" is the key.
+  //
+  // Tied to showVerifyingActions rather than to the verifying STATE, and that is
+  // the whole safety property: if the actions are ever hidden the composer comes
+  // back, so there is never a moment with no buttons AND no text box. A blanket
+  // lock on the state would have turned the bug above into a dead end.
+  const composerLocked = showVerifyingActions && !changesRequested;
 
   if (resumeBanner) {
     return (
@@ -846,7 +880,13 @@ export function DesignerSurface({
                       View spec
                     </Button>
                   )}
-                  <Button variant="outline" onClick={focusComposer}>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setChangesRequested(true);
+                      focusComposer();
+                    }}
+                  >
                     <MessageSquare />
                     Request changes
                   </Button>
@@ -934,7 +974,12 @@ export function DesignerSurface({
       ) : (
         <Composer
           onSend={(v) => void handleSend(v)}
-          busy={composerBusy}
+          busy={composerBusy || composerLocked}
+          placeholder={
+            composerLocked
+              ? "Use the buttons above — or Request changes to type here"
+              : undefined
+          }
           focusSignal={focusSignal}
           // When auto-sending, the text becomes the first message — don't ALSO
           // seed it into the composer box (it would look like an unsent draft).

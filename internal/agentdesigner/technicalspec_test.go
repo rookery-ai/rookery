@@ -166,3 +166,47 @@ func TestApproveAndBuildIsAnApproval(t *testing.T) {
 		}
 	}
 }
+
+// TestVerifyApprovalAcceptsNaturalConfirmations pins the words a person actually
+// types at a finished build. This is not a nicety: a confirmation that misses the
+// list is routed to the CHANGE-REQUEST branch, which drops the FSM back to
+// designing — and the next "approve" then matches the DESIGNING predicate and
+// launches a whole second build. The user is never told; they just watch their
+// agent get rebuilt instead of saved.
+//
+// Observed in production: "Approved" cost a six-minute rebuild, because the list
+// had "approve" and "confirmed" but not "approved". Every entry below is one the
+// past-tense/synonym gap would otherwise swallow.
+func TestVerifyApprovalAcceptsNaturalConfirmations(t *testing.T) {
+	for _, s := range []string{
+		"Approved", "approved", "approved.", "Accept", "accepted", "accept it",
+		"save agent", "Save agent", "save the agent", "yep", "yeah", "sure",
+		"sounds good", "go for it", "that's fine", "all good",
+	} {
+		if !isVerifyApproval(s) {
+			t.Errorf("isVerifyApproval(%q) = false, want true — this silently rebuilds instead of saving", s)
+		}
+	}
+
+	// The negative-cue guard must survive: these are change requests wearing
+	// approval-shaped words, and treating one as a save would ship an agent the
+	// user had just asked to alter.
+	for _, s := range []string{
+		"approved, but change the time", "not yet", "don't save it",
+		"accepted apart from the schedule — change it to 9", "wait",
+		"looks good but use a different sheet instead",
+	} {
+		if isVerifyApproval(s) {
+			t.Errorf("isVerifyApproval(%q) = true, want false — a change request was read as approval", s)
+		}
+	}
+
+	// Approving must stay distinct from approving-and-building: the strict
+	// designing-state test must NOT grow these, or a casual "sure" mid-design
+	// launches a build.
+	for _, s := range []string{"approved", "accept", "save agent", "yep", "sounds good"} {
+		if isApproval(s) {
+			t.Errorf("isApproval(%q) = true, want false — designing-state strictness regressed", s)
+		}
+	}
+}

@@ -2737,6 +2737,19 @@ func isVerifyApproval(input string) bool {
 		"approve and build", "approve and build it", "approve & build", "approve & build it",
 		"yes", "save", "save it", "ok", "okay", "looks good", "looks good to me",
 		"confirm", "confirmed", "go", "do it", "ship it", "lgtm", "perfect", "great",
+		// Past-tense and synonym forms. Their absence was not a missing nicety:
+		// a confirmation that misses this list falls to the change-request branch,
+		// which drops the FSM back to designing — and the user's NEXT "approve"
+		// then matches the designing-state predicate and launches a second build.
+		// Nothing reports this; the user watches their finished agent get rebuilt.
+		// "Approved" cost a real user a six-minute rebuild, which is why the
+		// tense variants are enumerated rather than left to the reader's luck.
+		"approved", "accept", "accept it", "accepted",
+		// The web buttons send "save"; these are what people type when the button
+		// is not in front of them (chat has none) or they simply type instead.
+		"save agent", "save the agent", "save this", "keep it",
+		"yep", "yeah", "yup", "sure", "sounds good", "go for it",
+		"that's fine", "thats fine", "all good", "good", "fine", "done",
 	} {
 		if s == trigger {
 			return true

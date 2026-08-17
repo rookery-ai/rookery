@@ -888,7 +888,34 @@ own body with no such flag, and would otherwise lose its build button entirely.
 
 **Approval triggers** — two tests, deliberately different:
 - **`isApproval`** (used in `StateDesigning`, strict) — exact match on `"approve"`, `"go ahead"`, `"build it"`, `"create it"`, `"/approve"`, plus `"approve and build"`/`"approve and build it"` (and their `&` spellings), which is what the web button SENDS (trailing punctuation trimmed). Casual `"ok"`/`"yes"` while answering design questions does NOT launch a full generation run. **The phrase the button sends is a separate question from the label it shows**: this test is exact-match, so renaming the button without adding its phrase here would send text that falls through to an ordinary design turn and the button would silently do nothing. `internal/skilldesigner` carries the same list for the same reason — the two designers share one `DesignerSurface` and therefore one `BUILD_PHRASE`.
-- **`isVerifyApproval`** (used in `StateVerifying`, forgiving) — also accepts `"yes"`, `"save"`, `"ok"`, `"looks good"`, `"confirm"`, `"go"`, `"do it"`, `"ship it"`, `"lgtm"`, `"perfect"`, `"great"`, …, and excludes negative cues (`"don't"`, `"not yet"`, `"change"`, `"wait"`, `"instead"`). A natural confirmation saves the build instead of being read as a change request.
+- **`isVerifyApproval`** (used in `StateVerifying`, forgiving) — also accepts `"yes"`, `"save"`, `"ok"`, `"looks good"`, `"confirm"`, `"go"`, `"do it"`, `"ship it"`, `"lgtm"`, `"perfect"`, `"great"`, the past-tense/synonym forms `"approved"`/`"accept"`/`"accepted"`, `"save agent"`/`"save the skill"`, and casual `"yep"`/`"sure"`/`"sounds good"`/`"go for it"`/`"all good"`, …, and excludes negative cues (`"don't"`, `"not yet"`, `"change"`, `"wait"`, `"instead"`). A natural confirmation saves the build instead of being read as a change request.
+
+  **A word missing from this list does not merely fail to save — it rebuilds.** An
+  unmatched reply falls to `stepVerifying`'s change-request branch, which drops the FSM
+  back to `StateDesigning`; the user's *next* `approve` then matches the **designing**
+  predicate and launches a second full generation run. Nothing reports this, so from the
+  outside a finished agent silently starts rebuilding. `"Approved"` did exactly that in
+  production — the list had `"approve"` and `"confirmed"` but not the past tense — costing
+  a six-minute rebuild. Hence the tense and synonym variants are enumerated rather than
+  left to luck, and `internal/skilldesigner` carries the **same** additions: the two
+  designers share one `DesignerSurface`, so a word that saves an agent and rebuilds a
+  skill is the kind of inconsistency nobody finds until it costs them a build.
+
+**The review step locks the composer, and the lock is tied to the BUTTONS, not the state.**
+`showVerifyingActions` (Save / View spec / Request changes) and `composerLocked` are computed
+from one expression, so accepting a build goes through a button rather than a guess at which
+words the server takes — and if the actions are ever hidden the text box comes back. That
+coupling is the safety property: a blanket lock on `fsmState === "verifying"` would have
+turned the bug below into a dead end with no buttons *and* no way to type. `Request changes`
+sets `changesRequested`, which unlocks and focuses the composer; leaving the verifying state
+clears it, so each new build's review starts locked again.
+
+**The dry run renders from the LAST ASSISTANT turn, not the last turn.** Gating it on the
+last transcript entry being an assistant turn meant anything landing after the dry run hid
+the finished build completely — no output, no Save, no Request changes. The easiest way in
+is a turn that **fails**: it leaves the user's own message last and clears `busy`, while the
+build sits intact on the server. Combined with the trigger gap above, the only remaining move
+was to type a word and hope, and hoping wrong rebuilt the agent.
 
 **The Spec view has two moments, and the dry run is not a chat bubble.** `SpecPanel` renders the
 `[TECHNICAL SPEC]` block **before** a build exists (it previously had nothing to show until one
