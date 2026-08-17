@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/rookery-ai/rookery/compare/v0.3.2...v0.3.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* **agentdesigner:** stop a finished build silently rebuilding instead of saving ([#216](https://github.com/rookery-ai/rookery/issues/216)) ([fadfcdc](https://github.com/rookery-ai/rookery/commit/fadfcdc4989e9f6b2014f1416441698995c81970))
+
 ## [0.3.2](https://github.com/rookery-ai/rookery/compare/v0.3.1...v0.3.2) (2026-08-17)
 
 
