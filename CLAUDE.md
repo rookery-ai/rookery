@@ -1138,6 +1138,25 @@ both coder kinds converge on `connectors.Execute`. **There is no Composio anywhe
   vs the `connector exec` command) so the coder knows the tools exist and is told there is **no
   Composio/SDK/service keys** in the env.
 
+**A binding is a grant of live credentials, so `parseConnectionsLine` may only contains-match an
+identity that is an EMAIL and belongs to exactly ONE connection.** Its loose match previously ran
+`strings.Contains(header, identity)` over every connection's `AccountIdentity`, which broke twice
+on an ordinary workspace — a wrong binding there is access, not untidiness:
+
+- **Short identities are shared.** `test` belonged to adguard, mailchimp *and* stripe, so the header
+  `# Connections: adguard/test, google_sheets/ilija 133` contained the substring `test` and granted a
+  DNS-watchdog agent the owner's payment and mailing-list credentials. Stripe test-mode accounts named
+  "test" are ubiquitous, so this is the common case, not a contrived one.
+- **Family identities are shared by design.** Every `google_*` child carries the same address, so one
+  email in a header bound Drive and Docs alongside the Sheets account actually named.
+
+Requiring `@` keeps the case the match exists for (the bullet form a weak model writes —
+`google account "personal" — me@x.com`) while refusing to treat a bare word like `test` or `personal`
+as an identifier; requiring uniqueness refuses an address that cannot single anything out. Everything
+excluded stays reachable through provider/label or exact-token matching, so the cost is at worst
+under-binding, which a checkbox fixes. `overbind_test.go` pins both incidents by reproducing the real
+workspace's shape.
+
 **The AI connector tier (2026-08) — and why a connector cannot carry media.** Anthropic,
 OpenRouter, Perplexity, Replicate, Deepgram, AssemblyAI and Hugging Face join OpenAI under a new
 `AI` category (OpenAI moved there from `Developer`; splitting one group across two headings was
@@ -1523,8 +1542,13 @@ Delivery does **not** depend solely on the coder emitting `[CHAT]` — models (e
 2. **Prose fallback** — if no `[CHAT]` was parsed and `[SILENT]` was NOT emitted, the coder's prose output (protocol markers stripped) is delivered as the message, with a `no [CHAT] marker emitted; delivered prose as fallback` warning recorded.
 3. **`[SILENT]`** — when present, the prose fallback is suppressed so silent agents aren't noisified by stray prose.
 4. **Visible failure** — if a run succeeds but produces nothing deliverable and didn't signal `[SILENT]`, the user receives `⚠️ <agent> ran but produced no notification — see the run log.` instead of a silent success.
+5. **A coder that returned NOTHING is a failed run, not a quiet one** (`coderProducedNothing`). Zero bytes of raw output means nothing was fetched, nothing decided and no state written — the agent's whole job was skipped — so the run is recorded `exit -1` and the message names that instead of the "produced no notification" wording, which describes an agent that ran and chose not to speak. Judged on RAW output, the only place the difference survives: parsing an empty string and parsing a marker-less paragraph both yield zero chat lines. A `[SILENT]` run is never "nothing" — the marker is the decision we asked for.
 
-Delivery reaches both paths: `SendOutput` (durable — web → `gateway.SendToUser`, scheduler → chat platform) and `OnProgress` (live SSE). Parser behavior is covered by `runner_test.go`.
+**`isSilentMarker` is lenient about DECORATION and strict about CONTEXT, and the asymmetry is deliberate.** The check was `trimmed == "[SILENT]"`, an exact line compare, so every ordinary way a model decorates a token missed it — `**[SILENT]**`, `` `[SILENT]` ``, `[silent]`, `[SILENT].`, `[/SILENT]`, a bare `SILENT` — and a missed marker is not a no-op: rule 4 then fires, so a correctly-behaving agent with nothing to report notified its owner anyway, on every run, forever. (Observed in production: twice a day from an agent built precisely to stay quiet.) The two failure modes are not symmetric, which is why the match still refuses a marker mentioned inside a sentence: a missed marker is noise the user can see, while a marker matched inside prose silently swallows a real message and nothing says so. A bare `silent` line is accepted because models write it and the blast radius is bounded — `silent` only suppresses the fallback and the warning, so a run with real `[CHAT]` content still delivers. `extractProseMessage` strips through the same predicate, or a fallback delivery would post the literal marker text.
+
+**Runs log one `agentrunner: run finished` line.** Agent runs previously logged nothing on the happy path, so a run that produced no output left no trace anywhere but an empty "Raw output" section in its own note — the reason a real empty-run report had to be diagnosed out of the database. It carries `exit`, `raw_chunks`, `chat_lines`, `silent`, `produced_nothing`, `warnings` and `total_tokens`, mirroring the `build_id` tracing the designer already had.
+
+Delivery reaches both paths: `SendOutput` (durable — web → `gateway.SendToUser`, scheduler → chat platform) and `OnProgress` (live SSE). Parser behavior is covered by `runner_test.go`, `silent_test.go` and `emptyrun_test.go`.
 
 ### Secret injection
 
