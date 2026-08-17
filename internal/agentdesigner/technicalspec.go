@@ -66,7 +66,51 @@ func extractTechnicalSpec(s string) string {
 // the browser and must strip the same block callCoder strips from a live turn.
 // Two copies of this rule would be two chances for the transcript and the
 // resumed transcript to disagree about what the user was shown.
+//
+// Deprecated for new call sites: use UserFacingDesignText, which also refuses to
+// hand back an empty turn. Kept because stripping and "what the user sees" are
+// genuinely different questions and a caller may want only the former.
 func StripTechnicalSpec(s string) string { return stripTechnicalSpec(s) }
+
+// The two recovery messages below. Both are deliberately TRUE without knowing
+// anything about the conversation — neither summarises or invents a plan.
+const (
+	// specOnlyFallback covers a reply that was ENTIRELY the machine-facing block.
+	// The model did answer; it just wrote nothing for the human. A spec block
+	// exists, so PlanReady is true and the Spec view has something real to show —
+	// which is exactly what this points at.
+	specOnlyFallback = "The plan is ready — open **View spec** to see the details, then type approve and I'll build it."
+	// emptyReplyFallback covers a reply with no content at all. Nothing can be
+	// claimed about a plan here, so it asks rather than asserts.
+	emptyReplyFallback = "Sorry — I didn't manage to put that into words. Could you say that again?"
+)
+
+// UserFacingDesignText turns one raw designer reply into the text the user sees.
+//
+// It exists because stripping alone can empty a turn: when the model's whole
+// reply IS the [TECHNICAL SPEC] block — which happens when a small correction
+// lands on an already-settled plan and it re-emits just the updated block — the
+// strip leaves "" and the browser renders a BLANK BUBBLE. That is a reported
+// bug, and it was introduced by moving spec emission onto the proposal turn:
+// before that the block was never written at all, and a stray one would have
+// rendered as ugly text rather than as nothing.
+//
+// A blank turn is the worst available outcome. It reads as the assistant
+// ignoring you, gives no way forward, and (because History stores the raw text)
+// survives a reload. So an empty result is always replaced, distinguishing the
+// two causes because they need opposite responses: a spec-only reply means the
+// plan IS ready and should point at it, while a genuinely empty reply means
+// nothing was said and must ask again rather than claim progress.
+func UserFacingDesignText(raw string) string {
+	shown := stripTechnicalSpec(raw)
+	if shown != "" {
+		return shown
+	}
+	if extractTechnicalSpec(raw) != "" {
+		return specOnlyFallback
+	}
+	return emptyReplyFallback
+}
 
 func stripTechnicalSpec(s string) string {
 	out := stripBlock(s, specOpen, specClose)

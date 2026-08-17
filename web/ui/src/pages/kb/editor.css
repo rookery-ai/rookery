@@ -262,6 +262,35 @@
    have as a sibling in prose, or the columns visibly fail to line up at the
    top. */
 .note-editor-content .tiptap .kb-columns > * { margin-top: 0; margin-bottom: 0; }
+/* Where one cell ends and the next begins is otherwise invisible: with prose in
+   both cells a columns block is indistinguishable from a single wide paragraph
+   that happens to wrap, and there is no handle telling you the layout is there
+   at all.
+
+   The divider is drawn on every cell but the first, as a LEFT border that is
+   always present and merely transparent — colouring an existing border cannot
+   reflow the grid, whereas adding one on hover would shift every cell by a
+   pixel as the pointer arrives. It sits in the middle of the 1rem gap
+   (padding-left is half the gap) so it reads as a separator between cells
+   rather than as a rule attached to one of them.
+
+   Revealed on hover-or-caret only, so a note being READ is not covered in
+   chrome: :hover is the pointer, :focus-within is the keyboard, and the block
+   is quiet again the moment both leave. */
+.note-editor-content .tiptap .kb-columns > * + * {
+  border-left: 1px solid transparent;
+  padding-left: 0.5rem;
+  transition: border-color 120ms ease-in-out;
+}
+.note-editor-content .tiptap .kb-columns:hover > * + *,
+.note-editor-content .tiptap .kb-columns:focus-within > * + * {
+  border-left-color: color-mix(in srgb, var(--color-border) 60%, transparent);
+}
+/* A pointer that never moves cannot ask for the divider, and an abrupt appear
+   is the thing the transition above is smoothing. Honour the preference. */
+@media (prefers-reduced-motion: reduce) {
+  .note-editor-content .tiptap .kb-columns > * + * { transition: none; }
+}
 .note-editor-content .tiptap .kb-columns img { max-width: 100%; height: auto; }
 /* Below the editor's own comfortable reading width the columns stop being a
    layout and start being four unreadable slivers, so they stack. */

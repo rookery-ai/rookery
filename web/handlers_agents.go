@@ -64,9 +64,21 @@ func designHistoryDTO(hist []db.ChatMessage) []designHistEntry {
 		}
 		// History stores the designer's raw text so the code generator's
 		// [TECHNICAL SPEC] brief survives (see agentdesigner/technicalspec.go).
-		// The user never sees it — callCoder strips it from a live turn, and
-		// this strips it from the replay, so the two can't disagree.
-		e := designHistEntry{Role: m.Role, Content: agentdesigner.StripTechnicalSpec(m.Content)}
+		// The user never sees it — callCoder runs this same helper on a live
+		// turn, and this runs it on the replay, so the two can't disagree.
+		//
+		// UserFacingDesignText, not StripTechnicalSpec: a stored turn that was
+		// entirely the machine-facing block strips to "" and would replay as a
+		// blank bubble on every reload, not just once.
+		//
+		// ASSISTANT turns only. The helper substitutes a recovery sentence for an
+		// empty result, and putting words in the USER's mouth would be worse than
+		// the blank it replaces — their own messages are echoed verbatim.
+		content := m.Content
+		if m.Role == "assistant" {
+			content = agentdesigner.UserFacingDesignText(content)
+		}
+		e := designHistEntry{Role: m.Role, Content: content}
 		if !m.CreatedAt.IsZero() {
 			e.CreatedAt = m.CreatedAt.Format(time.RFC3339Nano)
 		}

@@ -1373,9 +1373,12 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 
 	// History keeps the RAW text (the [TECHNICAL SPEC] block is the code
 	// generator's brief and Snapshot's plan-ready signal — see technicalspec.go);
-	// the user sees it stripped. designHistoryDTO strips the same block on the
+	// the user sees it stripped. designHistoryDTO runs the same helper on the
 	// replay path, so the live transcript and a resumed one cannot disagree.
-	return stripTechnicalSpec(result.Text), nil
+	//
+	// UserFacingDesignText, not stripTechnicalSpec: a reply that is ENTIRELY the
+	// machine-facing block strips to "" and would render as a blank bubble.
+	return UserFacingDesignText(result.Text), nil
 }
 
 // dbMessagesToPrompt converts db.ChatMessage slice to prompts.ChatMessage slice.

@@ -692,7 +692,12 @@ right failure and why `class="kb-columns"` is added by `renderHTML` and never wr
 empty paragraph left after the `/query` range is deleted and wrapping there yields a one-cell
 layout. **`clearColumns` builds its lift range over the whole node's content**, not
 `commands.lift(name)`: that lifts the range around the SELECTION, so on a two-cell block it takes
-the first cell out and leaves the second wrapped. The CSS uses `minmax(0, 1fr)`, never a bare
+the first cell out and leaves the second wrapped. **Cell boundaries are drawn on hover only**
+(`editor.css`): with prose in both cells the block was indistinguishable from one wide wrapping
+paragraph, and there was no handle saying a layout was there at all. The divider is a
+`border-left` present on every cell but the first and merely TRANSPARENT until
+`:hover`/`:focus-within` — colouring an existing border cannot reflow the grid, whereas adding one
+on hover would shift every cell by a pixel as the pointer arrives. The CSS uses `minmax(0, 1fr)`, never a bare
 `1fr` — a grid item's automatic minimum size is content-based (CSS Grid §6.6), the same trap
 `DialogContent`'s `grid-cols-1` fix records.
 
@@ -861,6 +866,17 @@ requires a CLOSER (a response truncated by a token cap must not arm the button) 
 `stripTechnicalSpec` drops an unterminated opener to end-of-string (a half-written block is not
 prose either) — the asymmetry is deliberate.
 
+**A designer turn is never allowed to be empty, and moving the spec block is what made that
+possible.** When the model answers a small correction by re-emitting ONLY the `[TECHNICAL SPEC]`
+block — which it does once a plan is already settled — stripping it for display leaves `""`, and
+the browser rendered a **blank assistant bubble**: it reads as being ignored, offers no way
+forward, and (since History stores the raw text) came back on every reload. `UserFacingDesignText`
+is now the one edge both `callCoder` and `web.designHistoryDTO` go through, and it distinguishes
+the two causes because they need opposite answers — a spec-only reply means the plan IS ready and
+points at **View spec**, while a genuinely empty reply must ask again rather than claim progress
+that did not happen. The replay path applies it to **assistant turns only**: the fallback is a
+substituted sentence, and putting words in the USER's mouth would be worse than the blank.
+
 `plan_ready`/`pending_spec` ship on **every** path returning a design body (`designTurnResponse`,
 `handleDesignState`, `handleResumeDraft`), asserted on RAW response bytes, because the SPA coerces a
 missing field to false and this codebase has already shipped one bug of exactly that shape.
@@ -937,6 +953,18 @@ All prompts live in `internal/prompts` (single source). The designer produces **
 - **`coderCapabilitiesBlock(backendType)`** — three-way: `BackendFullCoder` (CLI) → direct tool access; `BackendToolCalling` (the `api` engine) → native function calls (`read_file`/`write_file`/`edit_file`/`list_dir`/`search_files`/`glob`/`web_search`/`web_fetch`/`run_script`) the host executes, final answer as protocol markers; `BackendBasicModel` → `[READ_FILE]`/`[WRITE_FILE]`/`[RUN_SCRIPT]` output markers. `MapCoderBackend()` maps the coder's backend type (`"api"` → tool-calling) to these. `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` is likewise backend-aware (tool-calling chat offers the file tools incl. `search_files`/`glob` but NOT the exec/network tools) and appends `connectedToolsBlock` when the workspace has active connections.
 - **`agentPhilosophyBlock()`** — three-tier taxonomy (TIER 1 reasoning-only / TIER 2 one script / TIER 3 multi-file) with NOT-TO-DO lists; forces the coder to pick the simplest tier that solves the task (prevents writing a script for trivial reasoning work).
 - **`agentArchitectureGateBlock()`** — mandatory TASK ANALYSIS → TIER DECISION → NOTIFICATION DECISION → SCHEDULE DECISION before any file is created. Supports no-notification (`[SILENT]`) and no-schedule (`none`) agents.
+- **The inbox is described in `platformContextBlock`, and the point is the CONSTRAINT, not the
+  feature.** Nothing in `internal/prompts` mentioned the inbox at all, so a user asking to be
+  notified "in the inbox, not on Telegram" met a model that had never heard of it — it proposed a
+  SILENT agent, close to the opposite of the request. The block states three facts: every
+  notification is recorded in the inbox **automatically** (an agent cannot write there and must not
+  look for a way); delivery is **all-or-nothing** — a `[CHAT]` block reaches the inbox *and* every
+  connected chat app, `[SILENT]` reaches neither, and picking one channel is **not supported**
+  (`internal/agentrunner` pairs `recordInbox` with `SendOutput` at all three delivery sites); and
+  "inbox" means THIS inbox, not Gmail or Outlook, which are connectors where the equivalent is
+  *sending an email*. With no chat app connected, notifying already reaches the inbox alone — often
+  the real answer to the request. `TestInboxBlockPromisesNoChannelSelection` guards the fix from
+  drifting into a capability claim the code does not back.
 - **`ChatAppsForPlatforms()`** — central platform→`ChatAppInfo` (name + commands) mapping; callers load via `db.ListUserPlatformConnections` (no GatewayManager method needed).
 - Design UX is non-technical: a jargon blocklist (FORBIDDEN: AGENT.md, Python, script, vault, cron, JSON, shell, Bash, webhook, endpoint); asks notification preference + schedule; emits a `[TECHNICAL SPEC]` for the code generator.
 

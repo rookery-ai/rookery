@@ -406,6 +406,37 @@ func platformContextBlock(surface Surface, chatApps []ChatAppInfo, vaultRoot str
 	sb.WriteString("One-time or recurring scheduled notifications. Created by the user through the web\n")
 	sb.WriteString("dashboard or by typing /remind in a connected chat app.\n\n")
 
+	// ── Inbox ────────────────────────────────────────────────────────────────
+	//
+	// Nothing in these prompts mentioned the inbox before, so a user asking for
+	// "notify me in the inbox, not on Telegram" was met with a model that had
+	// never heard of it — it could neither confirm the inbox exists nor explain
+	// that the two channels cannot be chosen between. It proposed a SILENT agent
+	// instead, which is close to the opposite of what was asked for.
+	//
+	// This block is knowledge, not capability. Splitting delivery per channel is
+	// genuinely not implemented: internal/agentrunner pairs recordInbox with
+	// SendOutput at all three delivery sites, so a notification goes to both, and
+	// [SILENT] goes to neither. Saying so plainly is the whole fix — a model that
+	// knows the constraint can offer the two real options instead of quietly
+	// picking one.
+	sb.WriteString("## Inbox\n")
+	sb.WriteString("Rookery has its own inbox on the dashboard's Home page. EVERY notification an agent\n")
+	sb.WriteString("sends is recorded there automatically — the agent does nothing to make that happen,\n")
+	sb.WriteString("and there is no way to write to the inbox directly.\n\n")
+	sb.WriteString("Delivery is all-or-nothing, and this is the part users most often ask to change:\n")
+	sb.WriteString("  - Notifying (a [CHAT] block) → the inbox AND every connected chat app.\n")
+	sb.WriteString("  - Silent ([SILENT])         → neither.\n")
+	sb.WriteString("Choosing ONE of those channels is NOT supported. If the user asks for \"inbox only,\n")
+	sb.WriteString("not Telegram\" (or the reverse), say so plainly rather than agreeing or going silent,\n")
+	sb.WriteString("and give them the real choice: notify (it lands in both) or stay silent (neither).\n")
+	sb.WriteString("Note that with NO chat app connected, notifying already reaches the inbox alone —\n")
+	sb.WriteString("so if that is what they want, the answer may be that they already have it.\n\n")
+	sb.WriteString("\"Inbox\" means THIS inbox. It is not Gmail, Outlook, or any other mail account —\n")
+	sb.WriteString("those are connected services, and putting a message in one means SENDING AN EMAIL\n")
+	sb.WriteString("through that connection, which is a different thing with different setup. If it is\n")
+	sb.WriteString("unclear which the user means, ask.\n\n")
+
 	// ── Connected chat apps and commands ─────────────────────────────────────
 	sb.WriteString("## Connected chat apps and commands\n")
 	if len(chatApps) == 0 {
