@@ -53,7 +53,25 @@ FROM debian:trixie-slim AS runtime
 # python3 is not optional: without it the agent-tool AST guardrail self-skips,
 # which /healthz reports as a warning. The rest prevent silent degradation of
 # KB search, PDF extraction and OCR.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+#
+# The `upgrade` is not decoration and is the reason this line exists in this
+# shape. `install` only touches the packages named after it, so everything the
+# base tag already carries — the util-linux family, login, mount, bsdutils —
+# stays frozen at whatever `debian:trixie-slim` shipped, however long ago that
+# was. When Debian publishes a security fix for one of those, the image keeps
+# the vulnerable version until the base TAG itself is rebuilt, which is not
+# under this repository's control and is not tied to our release cadence.
+#
+# That is exactly how CI broke with no code change: nine HIGH util-linux CVEs
+# (CVE-2026-53615 and siblings) were published upstream with a fix already
+# available, and the pinned base had not been rebuilt to include it, so the
+# Trivy gate started failing a build whose Dockerfile had not changed in weeks.
+#
+# The cost is honest: builds are less byte-reproducible, because what `upgrade`
+# pulls depends on when it runs. That was already true of the unpinned
+# `install` below, and a reproducible image carrying a known-fixed HIGH CVE is
+# the worse of the two outcomes for something published to GHCR.
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
       ca-certificates \
       python3 \
       ripgrep \
