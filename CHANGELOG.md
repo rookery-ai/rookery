@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/rookery-ai/rookery/compare/v0.3.0...v0.3.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **designer:** never show a blank turn, and teach the prompts the inbox ([#211](https://github.com/rookery-ai/rookery/issues/211)) ([e05e822](https://github.com/rookery-ai/rookery/commit/e05e82299cee8a5b5920b2b928f7a65eae21d7b0))
+* **docker:** apply base-image security updates in the runtime stage ([#212](https://github.com/rookery-ai/rookery/issues/212)) ([6bccbbc](https://github.com/rookery-ai/rookery/commit/6bccbbc85e948e24a41be2865562814b2f2c3afc))
+
 ## [0.3.0](https://github.com/rookery-ai/rookery/compare/v0.2.0...v0.3.0) (2026-08-16)
 
 
