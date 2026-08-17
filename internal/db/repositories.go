@@ -590,19 +590,73 @@ func (d *DB) GetUnfinishedAgentRun(agentID string) (*AgentRun, error) {
 	return &r, nil
 }
 
+// InterruptedRun identifies a scheduled run that was cut off mid-flight, so the
+// scheduler can retry it once on the next boot.
+type InterruptedRun struct {
+	RunID       string
+	AgentID     string
+	WorkspaceID string
+}
+
 // ReconcileStaleRuns marks every run still flagged in-progress (finished_at IS NULL)
 // as finished with exit code -1. Called once on server startup: a crash or shutdown
 // mid-run otherwise leaves the row open forever, showing a permanently stuck
-// "Running…" badge. Returns the number of rows reconciled.
-func (d *DB) ReconcileStaleRuns() (int64, error) {
-	res, err := d.Exec(`UPDATE agent_runs
+// "Running…" badge. Returns the number of rows reconciled, plus the subset that were
+// interrupted CRON runs — the ones the scheduler retries once (see scheduler.Recover).
+//
+// The SELECT has to happen HERE rather than in a second exported call, because
+// `finished_at IS NULL` is the only unambiguous signal that a run was interrupted and
+// this very UPDATE destroys it. `exit_code=-1` cannot stand in: FinishAgentRun writes
+// the same -1 for a run that failed honestly. Reading it afterwards would need a
+// caller to remember an ordering the compiler cannot enforce, so the two steps are one
+// transaction and one function.
+//
+// Only trigger='cron' is reported. A manual run has a human in front of it who can
+// press the button again; a chat run's requester is long gone; and 'cron-retry' is the
+// trigger the retry itself carries, which is precisely what stops an agent that kills
+// the server from being retried forever, once per boot.
+func (d *DB) ReconcileStaleRuns() (int64, []InterruptedRun, error) {
+	tx, err := d.Begin()
+	if err != nil {
+		return 0, nil, err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(`SELECT id,agent_id,workspace_id FROM agent_runs
+		WHERE finished_at IS NULL AND trigger='cron'`)
+	if err != nil {
+		return 0, nil, err
+	}
+	var interrupted []InterruptedRun
+	for rows.Next() {
+		var r InterruptedRun
+		if err := rows.Scan(&r.RunID, &r.AgentID, &r.WorkspaceID); err != nil {
+			rows.Close()
+			return 0, nil, err
+		}
+		interrupted = append(interrupted, r)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, nil, err
+	}
+	rows.Close()
+
+	res, err := tx.Exec(`UPDATE agent_runs
 		SET finished_at=datetime('now'), exit_code=-1,
 		    stderr=CASE WHEN stderr IS NULL OR stderr='' THEN 'run interrupted by server restart' ELSE stderr END
 		WHERE finished_at IS NULL`)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	return res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, nil, err
+	}
+	return n, interrupted, nil
 }
 
 // ── Agent schedules ────────────────────────────────────────────────────────

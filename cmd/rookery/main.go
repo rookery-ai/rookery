@@ -291,10 +291,14 @@ func serveCmd() *cli.Command {
 			// Any run still flagged in-progress is a leftover from a crash/shutdown
 			// mid-run — close it out so it can't show a permanently stuck "Running…"
 			// badge (runs now execute on a detached context that outlives the request).
-			if n, err := database.ReconcileStaleRuns(); err != nil {
+			// The cron runs among them are handed to the scheduler below, which retries
+			// each exactly once: their schedule slot was spent before they started, so
+			// nothing else will ever pick them up.
+			staleRuns, interruptedRuns, err := database.ReconcileStaleRuns()
+			if err != nil {
 				slog.Warn("reconcile stale runs", "err", err)
-			} else if n > 0 {
-				slog.Info("reconciled stale agent runs", "count", n)
+			} else if staleRuns > 0 {
+				slog.Info("reconciled stale agent runs", "count", staleRuns, "retryable_cron_runs", len(interruptedRuns))
 			}
 
 			// Self-managed OAuth connectors: the embedded registry + a DB-backed token
@@ -627,7 +631,7 @@ func serveCmd() *cli.Command {
 			defer gwManager.StopAll()
 
 			// Start scheduler and reminder service.
-			sched := scheduler.New(database, runner, sysKey).WithSender(gwManager)
+			sched := scheduler.New(database, runner, sysKey).WithSender(gwManager).WithRecovered(interruptedRuns)
 			go sched.Run(ctx)
 
 			reminderSvc := reminder.New(database, gwManager).WithSearcher(vaultSearcher)
