@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/rookery-ai/rookery/compare/v0.3.1...v0.3.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **scheduler:** recover interrupted runs, cap the boot catch-up, fix per-connection pragmas ([#214](https://github.com/rookery-ai/rookery/issues/214)) ([10926d1](https://github.com/rookery-ai/rookery/commit/10926d1c8b7c303add1af30296b5f45d9a821e8a))
+
 ## [0.3.1](https://github.com/rookery-ai/rookery/compare/v0.3.0...v0.3.1) (2026-08-17)
 
 
