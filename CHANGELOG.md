@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/rookery-ai/rookery/compare/v0.3.4...v0.3.5) (2026-08-17)
+
+
+### Bug Fixes
+
+* **designer:** never leave a locked composer with no visible buttons ([#220](https://github.com/rookery-ai/rookery/issues/220)) ([b98ebec](https://github.com/rookery-ai/rookery/commit/b98ebec003d627f20d9ebd990f34f3f4badf37ce))
+
 ## [0.3.4](https://github.com/rookery-ai/rookery/compare/v0.3.3...v0.3.4) (2026-08-17)
 
 
