@@ -447,14 +447,16 @@ export function DesignerSurface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Re-lock the composer whenever the surface leaves the review step. Without
-  // this, one "Request changes" would leave every LATER build's review unlocked
-  // — the user is then back to typing approval words at a build that has two
-  // buttons sitting right above the box, which is the exact ambiguity the lock
-  // exists to remove.
+  // Re-lock the composer whenever the transcript advances. Each new turn is a new
+  // decision point — a fresh plan or a fresh build — and should be met with the
+  // buttons again rather than inheriting the unlock from the previous one.
+  //
+  // Keyed on the turn COUNT, not on fsmState: the surface now locks during design
+  // as well as review, so a state-keyed reset would fire immediately on the very
+  // state the user just unlocked and re-lock the box under their cursor.
   useEffect(() => {
-    if (fsmState !== "verifying") setChangesRequested(false);
-  }, [fsmState]);
+    setChangesRequested(false);
+  }, [messages.length]);
 
   // Third completion signal: a slow poll for as long as a build is running.
   // The `done` event and the error refetch both depend on the SSE stream
@@ -714,7 +716,21 @@ export function DesignerSurface({
   // planReady is the server's "the plan is settled" signal; the typed word
   // "approve" is unaffected either way, so a model that forgets the marker
   // costs discoverability, never the ability to build.
-  const buildOffered = !gateBuildOnPlanReady || planReady;
+  // A settled plan almost always ends by inviting approval in so many words
+  // ("Type approve and I'll build it"). That sentence is the fallback signal for
+  // plan-readiness, and it exists because the server's flag is derived from a
+  // [TECHNICAL SPEC] marker a weak model frequently never emits at all — so the
+  // gate never opened, no action row was offered, and the user was left with a
+  // finished plan and nothing to press. Reported from a real session.
+  //
+  // Deliberately narrow: it matches an explicit invitation to approve or build,
+  // never a clarifying question ("Which page should I watch?"), which is the case
+  // gateBuildOnPlanReady was introduced to protect and which must keep working.
+  const lastAssistantText =
+    [...messages].reverse().find((m) => m.role === "assistant")?.content ?? "";
+  const planInvitesApproval =
+    /\btype\s+`?approve|\bapprove\b[^.]{0,40}\bbuild\b|\bready to build\b/i.test(lastAssistantText);
+  const buildOffered = !gateBuildOnPlanReady || planReady || planInvitesApproval;
   const showDesigningActions =
     fsmState === "designing" && buildOffered && !generating && !busy && lastIsAssistant && !readOnly;
   // Which transcript turn is the dry run: the LAST ASSISTANT turn, not the last
@@ -740,11 +756,32 @@ export function DesignerSurface({
   // build goes through a button instead of a guess at which words the server
   // treats as approval. "Request changes" is the key.
   //
-  // Tied to showVerifyingActions rather than to the verifying STATE, and that is
-  // the whole safety property: if the actions are ever hidden the composer comes
-  // back, so there is never a moment with no buttons AND no text box. A blanket
-  // lock on the state would have turned the bug above into a dead end.
-  const composerLocked = showVerifyingActions && !changesRequested;
+  // Tied to the action rows rather than to the FSM state, and that is the whole
+  // safety property: if the actions are ever hidden the composer comes back, so
+  // there is never a moment with no buttons AND no text box. A blanket lock on
+  // the state would have turned the bug above into a dead end — which is exactly
+  // what a user hit, and why deadend.test.tsx asserts the invariant directly
+  // across every state rather than trusting this expression to stay correct.
+  //
+  // During DESIGN the lock applies only at a settled plan — a real decision point
+  // — never merely because an action row is on screen. Those are not the same
+  // thing: on a surface that does not gate on plan-readiness (the skill designer
+  // passes no gateBuildOnPlanReady, so buildOffered is always true) an action row
+  // follows every assistant turn, and locking on that would close the box for the
+  // ordinary back-and-forth of answering the designer's questions.
+  //
+  // And it must account for WHICH VIEW is on screen. Both action rows live inside
+  // the transcript; the Spec tab replaces that whole subtree while the composer,
+  // which sits outside it, keeps rendering. Locking without this check produced a
+  // literal dead end for a real user: they opened Spec to read the generated
+  // AGENT.md, and were left with no buttons (not rendered) and no message box
+  // (locked by actions they could not see). The invariant is not "actions exist"
+  // but "actions are VISIBLE".
+  const planSettled = planReady || planInvitesApproval;
+  const composerLocked =
+    view !== "spec" &&
+    (showVerifyingActions || (showDesigningActions && planSettled)) &&
+    !changesRequested;
 
   if (resumeBanner) {
     return (
@@ -919,13 +956,20 @@ export function DesignerSurface({
                   who has not noticed the header toggle is precisely the one who
                   forgets what they approved. Gated on endpoints.state for the
                   same reason the toggle is: the skill designer has none. */}
-              {endpoints.state && planReady && (
+              {endpoints.state && (
                 <Button size="sm" variant="outline" onClick={() => void openSpecView()}>
                   <FileText />
                   View spec
                 </Button>
               )}
-              <Button size="sm" variant="outline" onClick={focusComposer}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setChangesRequested(true);
+                  focusComposer();
+                }}
+              >
                 <Pencil />
                 Make changes
               </Button>
