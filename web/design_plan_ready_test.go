@@ -85,3 +85,36 @@ func TestDesignHistoryDTOHidesTheTechnicalSpec(t *testing.T) {
 		t.Fatalf("stripping ate the plan prose:\n%s", out[1].Content)
 	}
 }
+
+// A stored turn that was ENTIRELY the machine-facing block strips to "" and
+// would replay as a blank bubble on every reload — worse than the live case,
+// which at least only happened once. The replay path runs the same helper.
+func TestDesignHistoryDTONeverReplaysABlankAssistantTurn(t *testing.T) {
+	hist := []db.ChatMessage{
+		{Role: "user", Content: "just make it silent", CreatedAt: time.Now()},
+		{Role: "assistant", Content: "[TECHNICAL SPEC]\nTier: 1\n[/TECHNICAL SPEC]", CreatedAt: time.Now()},
+	}
+	out := designHistoryDTO(hist)
+	if len(out) != 2 {
+		t.Fatalf("dto = %d entries, want 2", len(out))
+	}
+	if strings.TrimSpace(out[1].Content) == "" {
+		t.Fatal("replayed a blank assistant turn")
+	}
+	if strings.Contains(out[1].Content, "TECHNICAL SPEC") {
+		t.Fatalf("the machine-facing block leaked into the replay: %q", out[1].Content)
+	}
+}
+
+// The helper substitutes a recovery sentence when a turn empties out. Putting
+// those words in the USER's mouth would be worse than the blank it replaces, so
+// their own messages are echoed verbatim.
+func TestDesignHistoryDTOLeavesUserTurnsVerbatim(t *testing.T) {
+	hist := []db.ChatMessage{
+		{Role: "user", Content: "Important is anything work related", CreatedAt: time.Now()},
+	}
+	out := designHistoryDTO(hist)
+	if out[0].Content != "Important is anything work related" {
+		t.Errorf("user turn was rewritten: %q", out[0].Content)
+	}
+}
