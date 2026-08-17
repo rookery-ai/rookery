@@ -190,6 +190,12 @@ test("a failed turn after the dry run does not hide the finished build", async (
   // The error is reported...
   expect(await screen.findByText(/something went wrong/i)).toBeInTheDocument();
   // ...and the finished build is still on screen and still savable.
-  expect(screen.getByText("DRY RUN OUTPUT")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: LABELS.saveButton })).toBeInTheDocument();
+  //
+  // Awaited rather than asserted synchronously: the error banner and the cleared
+  // `busy` flag are two separate state updates, so the actions can return a render
+  // AFTER the error text appears. Reading them in the same tick passed locally and
+  // failed under the parallel full-suite run — a flaky merge gate, which is worse
+  // than no gate because it teaches people to re-run until green.
+  expect(await screen.findByText("DRY RUN OUTPUT")).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: LABELS.saveButton })).toBeInTheDocument();
 });
