@@ -921,14 +921,29 @@ Three conditions are load-bearing, and the third was learned the hard way:
   ends by inviting approval in so many words ("Type approve and I'll build it"), and that
   sentence is the signal. Deliberately narrow — it must not match a clarifying question, which
   is the case `gateBuildOnPlanReady` exists to protect.
-- **`view !== "spec"` — the invariant is that the actions are VISIBLE, not that they exist.**
-  Both action rows live inside the transcript; the Spec tab replaces that whole subtree while
-  the composer, which sits outside it, keeps rendering. Without this check a user who opened
-  Spec to read the generated `AGENT.md` — an entirely reasonable thing to do at the review
-  step — was left with no buttons (not rendered) and no message box (locked by actions they
-  could not see), while the finished build sat safely on the server. A real dead end, shipped,
-  and it is why `deadend.test.tsx` asserts "a button is visible OR the box is usable" directly
-  across every reachable state rather than trusting this expression to stay correct.
+- **The bar renders OUTSIDE `ChatScroll`, and that is the whole fix.** It is a sibling of the
+  composer, not a child of the transcript. Three reports of "the box is closed and there are
+  no buttons" were diagnosed twice as logic and patched twice as logic; it was **layout**.
+  `ChatScroll` is stick-to-bottom only while the reader is within `STICK_THRESHOLD` (80px) of
+  the bottom, and scrolling up during a five-minute build — to re-read the plan, or watch the
+  tool calls — clears that flag. The review card then rendered off-screen: the buttons were in
+  the DOM, below the fold, while the composer sat locked by actions the user could neither see
+  nor reach. Outside the scroll container that is structurally impossible, and it is also why
+  the bar survives the Spec tab (which replaces the transcript's subtree, not the bar) — which
+  in turn is what lets the composer stay closed there rather than needing a `view !== "spec"`
+  escape hatch, as an earlier attempt did.
+
+**`deadend.test.tsx` asserts the invariant directly** — a button is visible OR the box is
+usable, across every reachable state — plus the structural property that the bar is **not a
+descendant of the scrollable element**. jsdom has no layout engine, so nothing can prove a
+button is on screen; ancestry is the strongest available proxy and the one that would have
+caught this. `Cancel` counts as an action there: a running build deliberately has no bar
+(there is nothing to accept yet) and the header's Cancel is the genuine escape.
+
+**Showing the bar and closing the box are separate decisions.** Collapsing them removed the
+build button from the skill designer entirely, which passes no `gateBuildOnPlanReady` and has
+no plan-ready signal of its own. The bar follows the old row's rule so every surface keeps the
+button it had; only `decisionPending` (a settled plan, or a finished build) closes the box.
 
 **The dry run renders from the LAST ASSISTANT turn, not the last turn.** Gating it on the
 last transcript entry being an assistant turn meant anything landing after the dry run hid
