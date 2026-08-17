@@ -30,17 +30,28 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 
-	sqldb, err := sql.Open("sqlite", path)
+	// Pragmas are declared in the DSN, not executed after opening, because
+	// `database/sql` is a connection POOL and both of these are per-connection
+	// settings. An `Exec("PRAGMA …")` runs on whichever single connection the pool
+	// happened to hand out and every other connection in the pool never sees it —
+	// so this was never "the database has foreign keys on", it was "one connection
+	// does". Declared here, the driver applies them to each connection it opens.
+	// (journal_mode is the exception that hid the bug: WAL is persisted in the file
+	// itself, so it stuck regardless and the arrangement looked like it worked.)
+	//
+	// busy_timeout is not a tuning knob — without it a concurrent write does not
+	// wait, it FAILS. WAL permits many readers but exactly one writer, and SQLite's
+	// default for the second writer is to return SQLITE_BUSY immediately. Rookery
+	// writes from several goroutines by design (the scheduler firing overdue agents,
+	// a run recording its result, the connector refresh loop, the web API), and those
+	// call sites generally log the error and carry on. The scheduler's was the
+	// expensive one: a schedule whose times failed to save stayed due, so the next
+	// poll ran the same agent all over again. Waiting up to 5s costs an idle install
+	// nothing and makes those writes queue instead of collide.
+	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+	sqldb, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
-	}
-
-	// Enable WAL mode and foreign key enforcement immediately after opening.
-	for _, pragma := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON"} {
-		if _, err := sqldb.Exec(pragma); err != nil {
-			sqldb.Close()
-			return nil, fmt.Errorf("apply pragma %q: %w", pragma, err)
-		}
 	}
 
 	d := &DB{sqldb}

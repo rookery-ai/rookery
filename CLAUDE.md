@@ -478,7 +478,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | Package | Responsibility |
 |---|---|
 | `internal/config` | YAML config + env overrides |
-| `internal/db` | SQLite via `modernc.org/sqlite`; `DB`, models, per-table query helpers |
+| `internal/db` | SQLite via `modernc.org/sqlite`; `DB`, models, per-table query helpers. Pragmas (`busy_timeout`, `foreign_keys`, `journal_mode`) are declared in the **DSN**, never `Exec`'d after opening — see "SQLite pragmas belong in the DSN" below |
 | `internal/auth` | `BootstrapOwner`, `Authenticate` (owner login), `ChangePassword` (owner), `CreateWorkspace(name, about)`, `GenerateSecretsSalt`, bcrypt |
 | `internal/rbac` | `CanPerform(db, workspaceID, permission)` — reads `workspace_permissions` table |
 | `internal/secrets` | AES-256-GCM store; Argon2id key derivation; `GetAll()` decrypts all for env injection; `Proxy()` resolves `${NAME}` in-memory only |
@@ -500,7 +500,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/skilllibrary` | Embedded core skill catalog (`go:embed skills/*/SKILL.md`) — always-on for every user, no DB rows, no admin gate. `LoadBundled()`, `CoreSkillContent(slug)`, `IsCoreSkill()`, `ParseMeta()` (Anthropic+openclaw YAML frontmatter: requires.bins/anyBins/env, install specs). Supersedes the admin-catalog approach dropped in migration 009. |
 | `internal/agentrunner` | Load agent → decrypt secrets into env via `WithExtraEnv` → coder subprocess → capture `[CHAT]` lines → send via GatewayManager; timestamped run logs; `RunInput.OnProgress` per-turn hook for live SSE streaming. Skills pool = core skills (embedded) + user skills; the agent's DECLARED skills come from the `agent_skills` DB table (`db.ListAgentSkillNames`, the source of truth), never from AGENT.md; `resolveSkillBins` resolves declared tools' paths for the runtime `<skill_environment>` block; `loadDeclaredSkillContent` reads core skills from the embed. **Reliable delivery**: `parseCoderOutput` (blank lines don't end `[CHAT]`; empty `[CHAT]` dropped; a stray `[/CHAT]` close tag weak models sometimes emit is stripped and never delivered; `[SILENT]` detected; `[STATE]` merged and saved via `agentdesigner.WriteState` into `state.md`'s json fence) + `extractProseMessage` fallback when no `[CHAT]` emitted and not silent → visible warning when nothing deliverable. Covered by `runner_test.go`. |
 | `internal/sandbox` | Self-contained Landlock filesystem confinement for coder subprocesses (Linux). `Spec`, `Supported()`, `Wrap()` (re-exec via the hidden `__sandbox-exec` helper), `Exec()` (applies Landlock + rlimits, then `execve`). No external dependency. |
-| `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users |
+| `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users; `WithRecovered()`/`RecoverInterrupted()` retry runs the last shutdown killed mid-flight; runs are capped at `maxConcurrentRuns` — see "Missed runs and the laptop case" below |
 | `internal/reminder` | Creates/lists/fires reminders; background polling goroutine. Reminders live only in the DB and the reminders UI tab — they are NOT reflected to the vault. |
 | `internal/chat` | `Chat` create/list/stop/resume/delete; 30-min idle auto-stop; `BuildUserContext` (shared **identity-only** context builder for one-off chat — profile/memory/agents/MCP; the broader KB is retrieved on demand via tools, not injected here) |
 | `internal/prompts` | Central home for all LLM prompt construction: `BuildDesignSystemPrompt` (+ `<knowledge_base>` block + `KBManifest`), `BuildImplementationPrompt`, `BuildEditImplementationPrompt` (diagnose-before-fix), `BuildCoderPrompt` (+ `<skill_instructions>` + `<skill_environment>` blocks), `BuildChatSystemPrompt` (chat read+write KB instruction), `BuildChildAgentFollowUpPrompt`, `BuildSkillMetaPrompt`, `BuildReminderParsePrompt`, skill-creator prompts (`BuildSkillDesignSystemPrompt`, `BuildSkillImplementationPrompt`, `BuildSkillVettingPrompt`, `SkillEnvBlock`). `SkillRef`/`SkillBin` types. No inline prompt text exists outside this package. Shared single-source blocks: `agentPhilosophyBlock` (three-tier), `platformContextBlock`, `coderCapabilitiesBlock` (backend-aware), `agentArchitectureGateBlock`, `testingRulesBlock` (one bounded smoke test + dry run; real secrets at build time, no outbound sends), `shellSafetyBlock`, `scriptRobustnessBlock`, `connectedToolsBlock` (backend-aware native-tools vs `connector exec` guidance). `ChatAppsForPlatforms` + `MapCoderBackend` bridge callers to prompt params. |
@@ -2044,6 +2044,70 @@ provider/model/base-url/api-key-secret through `db.UpdateWorkspaceCoder`.
 ### Natural language reminders
 
 `internal/reminder/timeparser.go` — `ParseNaturalTime(text, now, loc)` parses expressions like `"in 10 minutes"`, `"tomorrow at 3pm"`, `"next Tuesday at noon"`. Both web UI and Telegram use `profile.LoadLocation(db, workspaceID)` so reminders fire in the workspace's timezone.
+
+### Missed runs and the laptop case
+
+Rookery is meant to run all day and is mostly installed on a laptop, so "the host
+was off" is the normal case, not the exception. Three guarantees, each with a
+distinct mechanism:
+
+- **Overdue work is caught up, once.** Both loops call `tick()` immediately on
+  start, and both due predicates are past-or-present (`next_run_at <= now`,
+  `remind_at <= now`), so a machine opened after three days delivers every unsent
+  reminder and runs every overdue agent within seconds. Missed slots **collapse**:
+  `fire` reschedules from `firedAt` via `cron.Next`, so an hourly agent that was
+  off for three days runs once, not 72 times. The same policy `internal/backup`
+  documents. This does **not** drift the cron phase — the parser is built
+  `Minute|Hour|Dom|Month|Dow` with no descriptor support, so every expression is an
+  absolute wall-clock grid and `Next(from)` lands on a real slot whatever `from` is.
+  A reminder more than 2h late relabels itself "⏰ Delayed reminder", which is the
+  clearest evidence the catch-up is intended rather than incidental.
+- **A run killed mid-flight is retried exactly once.** `fire` advances
+  `next_run_at` *before* the run executes (that ordering is what stops a queued
+  schedule double-firing, so it cannot simply be swapped), which means a run that
+  dies at 09:02 has already spent its slot and no later tick will ever pick it up —
+  the case a laptop hits most, since closing the lid mid-run is likelier than being
+  off across a whole slot. `db.ReconcileStaleRuns` therefore returns the interrupted
+  **cron** runs alongside the count it already reported, and the scheduler retries
+  them before its first poll. **`retryTrigger` ("cron-retry") IS the once-only
+  guard** — reconcile reports only `trigger='cron'`, so a retry that is itself
+  interrupted is never retried again. Collapsing that value back to `"cron"` looks
+  like a tidy-up and creates an agent that retries forever, once per boot, taking
+  the server down with it each time. The retry mirrors `ListDueSchedules`' `a.active
+  = 1` join: an agent paused or deleted in the meantime stays stopped.
+  `finished_at IS NULL` is the discriminator, captured inside reconcile's own
+  transaction, because `exit_code=-1` means both "interrupted" and "failed honestly"
+  and the UPDATE destroys the only signal that separates them.
+- **The catch-up is capped** at `maxConcurrentRuns` (3). Opening a laptop with five
+  overdue agents otherwise launches five coder subprocesses at once on the machine
+  the user has just opened. Capping delays the backlog, never drops it; the cap is
+  scheduler-local, since a manual or chat run is a human waiting and never arrives
+  in a herd. Cancellation is checked on **both** sides of the semaphore acquire: a
+  bare two-case `select` leaves both cases ready once the last in-flight run frees a
+  slot, and `select` then chooses uniformly at random, so roughly half a queued
+  backlog starts anyway during shutdown. Measured, not theorised.
+
+### SQLite pragmas belong in the DSN
+
+`busy_timeout` and `foreign_keys` are per-**connection** settings and
+`database/sql` is a connection **pool**, so an `Exec("PRAGMA …")` after `Open`
+configures whichever single connection the pool happened to hand out and leaves
+every other one at its defaults. This was never "the database has foreign keys
+on" — it was "one connection does". `journal_mode` is the exception that hid it:
+WAL is persisted in the file itself, so it stuck regardless and the arrangement
+looked like it worked.
+
+The cost was concrete. WAL permits many readers but exactly one writer, and
+SQLite's default for the second writer is to return `SQLITE_BUSY` **immediately**
+rather than wait. Rookery writes from several goroutines by design (the scheduler
+firing overdue agents, a run recording its result, the connector refresh loop, the
+web API) and those call sites generally log the error and carry on — so the
+scheduler's `UpdateScheduleRunTimes` could fail, the run would proceed anyway, and
+the schedule stayed due for the next poll to run the same agent a second time.
+`fire` now treats a failed claim as "skip this run, the next poll will retry":
+late beats twice. `TestPragmasApplyToEveryPooledConnection` pins the pool-wide
+property, because a pragma set on one connection is invisible in every way except
+the intermittent failure it causes.
 
 ---
 
