@@ -185,7 +185,11 @@ test("a progress-stream error refetches state", async () => {
 test(
   "the poll preserves the live transcript, then adopts the result and stops",
   async () => {
-    let generating = true;
+    // Starts NOT generating and flips when the build POST lands, which is the real
+    // order of events. Mounting straight into generating:true and then typing is
+    // not reachable in the product: the composer is closed during a build, so a
+    // build cannot be started from a surface that is already building.
+    let generating = false;
     let history: Array<{ role: string; content: string }> = [];
     let stateCalls = 0;
     mockFetch({
@@ -199,8 +203,10 @@ test(
           history,
         });
       },
-      "/x/design": () =>
-        jsonResponse({ response: "🤖 Building…", done: false, building: true }),
+      "/x/design": () => {
+        generating = true;
+        return jsonResponse({ response: "🤖 Building…", done: false, building: true });
+      },
     });
     wrap(
       <DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />,

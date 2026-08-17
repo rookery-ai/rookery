@@ -752,36 +752,49 @@ export function DesignerSurface({
   })();
   const reviewTurnIndex = lastAssistantIndex;
   const showVerifyingActions = reviewTurnIndex >= 0 && !readOnly;
-  // The composer is locked while the review actions are on screen, so accepting a
-  // build goes through a button instead of a guess at which words the server
-  // treats as approval. "Request changes" is the key.
+  // ── The action bar ───────────────────────────────────────────────────────────
+  // Accepting a plan or a build goes through a button rather than a guess at which
+  // words the server treats as approval, so the composer is closed while the bar is
+  // up. "Make changes" / "Request changes" is the key back to typing.
   //
-  // Tied to the action rows rather than to the FSM state, and that is the whole
-  // safety property: if the actions are ever hidden the composer comes back, so
-  // there is never a moment with no buttons AND no text box. A blanket lock on
-  // the state would have turned the bug above into a dead end — which is exactly
-  // what a user hit, and why deadend.test.tsx asserts the invariant directly
-  // across every state rather than trusting this expression to stay correct.
+  // THE BAR RENDERS OUTSIDE THE TRANSCRIPT, and that is not cosmetic — it is the
+  // fix for a defect that survived two attempts at patching conditions. The rows
+  // used to sit inside ChatScroll, which is stick-to-bottom only while the reader
+  // is already within 80px of the bottom (STICK_THRESHOLD). Scrolling up during a
+  // five-minute build — to re-read the plan, or watch the tool calls — clears that
+  // flag, so when the review card finally rendered the view never moved to it. The
+  // buttons existed, in the DOM, below the fold, while the composer sat locked by
+  // actions the user could not see and had no way to reach. Twice diagnosed as a
+  // logic problem; it was a layout problem all along.
   //
-  // During DESIGN the lock applies only at a settled plan — a real decision point
-  // — never merely because an action row is on screen. Those are not the same
-  // thing: on a surface that does not gate on plan-readiness (the skill designer
-  // passes no gateBuildOnPlanReady, so buildOffered is always true) an action row
-  // follows every assistant turn, and locking on that would close the box for the
-  // ordinary back-and-forth of answering the designer's questions.
+  // Outside the scroll container the bar cannot be scrolled away, which also makes
+  // it visible on the Spec tab (the transcript's subtree is replaced there, the bar
+  // is not) — so the composer can now be closed on that tab too, as asked, without
+  // reintroducing a dead end. `deadend.test.tsx` asserts the buttons are NOT
+  // descendants of the scrollable element, because that is the property that keeps
+  // this fixed; jsdom has no layout, so nothing else can catch a regression here.
   //
-  // And it must account for WHICH VIEW is on screen. Both action rows live inside
-  // the transcript; the Spec tab replaces that whole subtree while the composer,
-  // which sits outside it, keeps rendering. Locking without this check produced a
-  // literal dead end for a real user: they opened Spec to read the generated
-  // AGENT.md, and were left with no buttons (not rendered) and no message box
-  // (locked by actions they could not see). The invariant is not "actions exist"
-  // but "actions are VISIBLE".
+  // SHOWING the bar and CLOSING the box are separate decisions, and collapsing them
+  // is a mistake worth naming: gating the bar on a settled plan removed the build
+  // button from the skill designer entirely, since it passes no
+  // gateBuildOnPlanReady and has no plan-ready signal of its own.
+  //
+  //   - The bar follows the same rule the inline row always did, so every surface
+  //     keeps the button it had.
+  //   - The box closes only at a SETTLED plan (or a finished build), because a
+  //     surface without plan-readiness shows a bar on every assistant turn, and
+  //     closing on that would block the ordinary back-and-forth of answering the
+  //     designer's own questions.
   const planSettled = planReady || planInvitesApproval;
-  const composerLocked =
-    view !== "spec" &&
-    (showVerifyingActions || (showDesigningActions && planSettled)) &&
-    !changesRequested;
+  const showBuildBar = showDesigningActions;
+  const showSaveBar = showVerifyingActions;
+  const actionBarUp = showBuildBar || showSaveBar;
+  const decisionPending = showSaveBar || (showBuildBar && planSettled);
+  // `generating` closes the box too: during a build there is nothing useful to say
+  // to the designer, and leaving it open invited exactly the mid-build typing the
+  // user reported. That state has no action bar by design — the header's Cancel is
+  // the escape, which is why deadend.test.tsx counts Cancel as an action.
+  const composerLocked = (decisionPending && !changesRequested) || generating;
 
   if (resumeBanner) {
     return (
@@ -904,32 +917,7 @@ export function DesignerSurface({
               subtitle={`Your ${labels.entityName} ran and produced this. Save it, or tell me what to change.`}
               content={messages[reviewTurnIndex]!.content}
               createdAt={messages[reviewTurnIndex]!.created_at}
-            >
-              {showVerifyingActions && (
-                <>
-                  <Button onClick={() => void handleSend(SAVE_PHRASE)}>
-                    <Save />
-                    {labels.saveButton}
-                  </Button>
-                  {endpoints.state && (
-                    <Button variant="outline" onClick={() => void openSpecView()}>
-                      <FileText />
-                      View spec
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setChangesRequested(true);
-                      focusComposer();
-                    }}
-                  >
-                    <MessageSquare />
-                    Request changes
-                  </Button>
-                </>
-              )}
-            </ReviewCard>
+            />
           )}
 
           {sse && (
@@ -946,36 +934,51 @@ export function DesignerSurface({
 
           {busy && <TypingIndicator />}
 
-          {showDesigningActions && (
-            <div className="flex flex-wrap gap-2 pl-1">
-              <Button size="sm" onClick={handleBuildClick}>
-                <Hammer />
-                {labels.buildButton}
-              </Button>
-              {/* The plan is a real artifact the moment it settles, and a user
-                  who has not noticed the header toggle is precisely the one who
-                  forgets what they approved. Gated on endpoints.state for the
-                  same reason the toggle is: the skill designer has none. */}
-              {endpoints.state && (
-                <Button size="sm" variant="outline" onClick={() => void openSpecView()}>
-                  <FileText />
-                  View spec
-                </Button>
-              )}
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setChangesRequested(true);
-                  focusComposer();
-                }}
-              >
-                <Pencil />
-                Make changes
-              </Button>
-            </div>
-          )}
         </ChatScroll>
+      )}
+
+      {/* The action bar. OUTSIDE both views and outside ChatScroll, so it can
+          neither be scrolled past nor replaced by the Spec tab — see the comment
+          on showBuildBar for the defect that made this structural rather than a
+          matter of taste. */}
+      {actionBarUp && (
+        <div
+          data-testid="designer-actions"
+          className="flex flex-wrap items-center justify-center gap-2 border-t border-border px-4 py-2.5"
+        >
+          {showSaveBar ? (
+            <Button size="sm" onClick={() => void handleSend(SAVE_PHRASE)}>
+              <Save />
+              {labels.saveButton}
+            </Button>
+          ) : (
+            <Button size="sm" onClick={handleBuildClick}>
+              <Hammer />
+              {labels.buildButton}
+            </Button>
+          )}
+          {/* The plan and the built agent are both real artifacts worth re-reading,
+              and a user who has not noticed the header toggle is precisely the one
+              who forgets what they approved. Gated on endpoints.state for the same
+              reason the toggle is: the skill designer has none. */}
+          {endpoints.state && (
+            <Button size="sm" variant="outline" onClick={() => void openSpecView()}>
+              <FileText />
+              View spec
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              setChangesRequested(true);
+              focusComposer();
+            }}
+          >
+            {showSaveBar ? <MessageSquare /> : <Pencil />}
+            {showSaveBar ? "Request changes" : "Make changes"}
+          </Button>
+        </div>
       )}
 
       {generationFailed && (

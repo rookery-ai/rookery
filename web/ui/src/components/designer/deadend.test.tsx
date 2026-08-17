@@ -158,6 +158,63 @@ test("a clarifying question offers no build button and leaves the composer open"
   expect(screen.queryByRole("button", { name: LABELS.buildButton })).toBeNull();
 });
 
+test("the action bar is not inside the scrolling transcript", async () => {
+  // The property that actually keeps this fixed, and the one jsdom CAN check.
+  //
+  // The buttons used to live inside ChatScroll, which auto-scrolls only while the
+  // reader is within 80px of the bottom. Scrolling up during a five-minute build
+  // clears that flag, so the review card rendered off-screen: the buttons were in
+  // the DOM, below the fold, while the composer sat locked by actions the user
+  // could not see or reach. It was diagnosed twice as a logic bug and patched
+  // twice; it was layout.
+  //
+  // jsdom has no layout engine and no scrolling, so no test here can prove a
+  // button is visible on screen. What it CAN prove is that the bar is not a
+  // descendant of the scrollable element — which makes "scrolled out of view"
+  // structurally impossible rather than merely unlikely.
+  mockFetch({ "/x/state": () => jsonResponse(stateSnapshot()) });
+  const { container } = wrap(
+    <DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} gateBuildOnPlanReady />,
+  );
+
+  const bar = await screen.findByTestId("designer-actions");
+  const scroller = container.querySelector(".overflow-y-auto");
+  expect(scroller).not.toBeNull();
+  expect(scroller!.contains(bar)).toBe(false);
+  // And the button really is in the bar, not merely somewhere on the page.
+  expect(bar.contains(screen.getByRole("button", { name: LABELS.saveButton }))).toBe(true);
+});
+
+test("the Spec tab keeps the action bar and the closed box", async () => {
+  // Reading the generated AGENT.md is a reasonable thing to do before accepting,
+  // and it used to remove every button while leaving the box locked. Now the bar
+  // lives outside both views, so Spec keeps its actions — which is what lets the
+  // composer stay closed here at all.
+  mockFetch({ "/x/state": () => jsonResponse(stateSnapshot()) });
+  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} gateBuildOnPlanReady />);
+
+  await screen.findByRole("button", { name: LABELS.saveButton });
+  fireEvent.click(screen.getByRole("button", { name: /^Spec$/ }));
+
+  await waitFor(() => {
+    expect(screen.getByRole("button", { name: LABELS.saveButton })).toBeInTheDocument();
+  });
+  expect(screen.getByRole("textbox")).toBeDisabled();
+});
+
+test("the composer is closed while a build is running", async () => {
+  // Reported: the box stayed open after clicking build, inviting messages at a
+  // designer that is mid-generation and cannot read them. The header's Cancel is
+  // the escape during a build, which is why this state is allowed to have no
+  // action bar.
+  mockFetch({ "/x/state": () => jsonResponse(stateSnapshot({ generating: true })) });
+  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} gateBuildOnPlanReady />);
+
+  await waitFor(() => expect(screen.getByRole("textbox")).toBeDisabled());
+  expect(screen.queryByTestId("designer-actions")).toBeNull();
+  expect(screen.getByRole("button", { name: /cancel/i })).toBeInTheDocument();
+});
+
 test("switching to the Spec tab does not leave a locked box with no buttons", async () => {
   // The reported dead end, exactly. Both action rows are rendered INSIDE the
   // transcript; opening Spec replaces that subtree while the composer, which
@@ -174,14 +231,12 @@ test("switching to the Spec tab does not leave a locked box with no buttons", as
   expect(save).toBeInTheDocument();
   expect(screen.getByRole("textbox")).toBeDisabled();
 
-  // Open Spec — the transcript and its buttons go away.
+  // Open Spec. The bar lives outside both views, so the actions survive — which
+  // is the whole reason the box is allowed to stay closed here.
   fireEvent.click(screen.getByRole("button", { name: /^Spec$/ }));
   await waitFor(() => {
-    expect(screen.queryByRole("button", { name: LABELS.saveButton })).toBeNull();
+    expect(screen.getByRole("button", { name: LABELS.saveButton })).toBeInTheDocument();
   });
-
-  // …so the box must come back, or there is nothing at all the user can do.
-  await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled());
 });
 
 test("the composer is never disabled while no action button is offered", async () => {
@@ -201,8 +256,10 @@ test("the composer is never disabled while no action button is offered", async (
     await waitFor(() => {
       const box = screen.queryByRole("textbox");
       const buttons = screen.queryAllByRole("button");
+      // Cancel counts: during a build there is deliberately no action bar (there is
+      // nothing to accept yet), and Cancel in the header is the genuine escape.
       const actionable = buttons.some((b) =>
-        /save agent|approve & build|request changes|make changes|resume|discard/i.test(
+        /save agent|approve & build|request changes|make changes|resume|discard|cancel/i.test(
           b.textContent ?? "",
         ),
       );
