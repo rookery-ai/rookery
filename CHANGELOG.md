@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.6](https://github.com/rookery-ai/rookery/compare/v0.3.5...v0.3.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* **designer:** move the action bar out of the scrolling transcript ([#222](https://github.com/rookery-ai/rookery/issues/222)) ([7a4a95e](https://github.com/rookery-ai/rookery/commit/7a4a95e61201c80ef4106bc2ca8232d1677df1fa))
+
 ## [0.3.5](https://github.com/rookery-ai/rookery/compare/v0.3.4...v0.3.5) (2026-08-17)
 
 
