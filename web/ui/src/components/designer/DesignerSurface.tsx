@@ -944,7 +944,7 @@ export function DesignerSurface({
       {actionBarUp && (
         <div
           data-testid="designer-actions"
-          className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2.5"
+          className="flex flex-wrap items-center justify-center gap-2 border-t border-border px-4 py-2.5"
         >
           {showSaveBar ? (
             <Button size="sm" onClick={() => void handleSend(SAVE_PHRASE)}>
