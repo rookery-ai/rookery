@@ -1798,6 +1798,24 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	}
 	decision := decideBuildOutcome(workDir, resultText, backendType, scriptVerified, scriptOutput)
 
+	// A create build's review sample should be REAL output. decideBuildOutcome can only
+	// produce that when an authored script ran, so a TIER 1 agent (no script) fell back
+	// to the model's prose. Run the built agent once and use what it actually says.
+	//
+	// Create-only: an edit already has a live agent the user has seen work. Best-effort:
+	// a failed dry run leaves decision.message exactly as it was.
+	//
+	// genCtx, not ctx: ctx is the request context this build is deliberately detached
+	// from (see the WithCancel above), so passing it would let a page navigation kill the
+	// dry run while leaving Cancel() unable to stop it. It must also stay ABOVE
+	// reconcileBlockedOutcome, which derives outcome.message from decision.message.
+	if decision.presentable && !isEdit {
+		notify("🧪 Running it once to show you real output…")
+		if sample, ok := f.dryRun(genCtx, workspaceID, workDir, decision.agentMD); ok {
+			decision.message = reviewMessage(sample, true)
+		}
+	}
+
 	if err != nil && !decision.saveable {
 		closeProgress()
 		if errors.Is(err, context.Canceled) {
