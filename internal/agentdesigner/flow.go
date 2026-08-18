@@ -2244,20 +2244,10 @@ func decideBuildOutcome(workDir, resultText, backendType string, scriptVerified 
 		}
 	}
 
-	var message string
-	if thinProof {
-		// Be HONEST: passing safety checks is not the same as being verified to work.
-		// Do not imply it runs — invite the user to look it over before saving.
-		message = fmt.Sprintf(
-			"I built the assistant and it passed the safety checks, but I couldn't capture a clean test run — so I haven't confirmed it works end to end yet. Here's what it produced:\n\n---\n%s\n---\n\nPlease look it over. Type **approve** to save it, or tell me what to change.",
-			testOut,
-		)
-	} else {
-		message = fmt.Sprintf(
-			"Here's what a test run produces:\n\n---\n%s\n---\n\nDoes this look right? Type **approve** to save the agent, or tell me what to change.",
-			testOut,
-		)
-	}
+	// Be HONEST: passing safety checks is not the same as being verified to work.
+	// reviewMessage only claims a test run when the sample actually came from one
+	// (see its doc comment for the three possible origins and why thinProof matters).
+	message := reviewMessage(testOut, !thinProof)
 	return buildDecision{presentable: true, saveable: true, message: message, agentMD: agentMD, tools: tools, thinProof: thinProof, hasAuthoredScript: hasAuthoredScript, scriptVerified: scriptVerified}
 }
 
