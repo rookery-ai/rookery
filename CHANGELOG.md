@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.8](https://github.com/rookery-ai/rookery/compare/v0.3.7...v0.3.8) (2026-08-18)
+
+
+### Bug Fixes
+
+* **agentdesigner:** run the built agent so the review shows real output ([#227](https://github.com/rookery-ai/rookery/issues/227)) ([35d7f13](https://github.com/rookery-ai/rookery/commit/35d7f13c5a988d216911b171aaa975840ac9c271))
+
 ## [0.3.7](https://github.com/rookery-ai/rookery/compare/v0.3.6...v0.3.7) (2026-08-18)
 
 
