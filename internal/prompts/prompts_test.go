@@ -679,11 +679,15 @@ func TestRuntimeContextHasItsOwnBlock(t *testing.T) {
 // implementation prompts (BuildImplementationPrompt / BuildEditImplementationPrompt)
 // inject — not the conversational BuildDesignSystemPrompt, which never writes AGENT.md
 // itself. So both build-time prompts are checked here, since either can produce the
-// line the scheduler actually reads.
+// line the scheduler actually reads. BuildDesignSystemPrompt is checked too: its
+// [TECHNICAL SPEC] Schedule: line is what the user actually approves pre-build, and a
+// UTC-converted proposal there would silently diverge from the locally-correct AGENT.md
+// the build writes independently.
 func TestSchedulePromptForbidsUTCConversion(t *testing.T) {
 	for name, p := range map[string]string{
 		"create": BuildImplementationPrompt("x", nil, ImplementationParams{}),
 		"edit":   BuildEditImplementationPrompt("x", nil, ImplementationParams{}),
+		"design": BuildDesignSystemPrompt(DesignSystemParams{AgentName: "x"}),
 	} {
 		low := strings.ToLower(p)
 		for _, want := range []string{"local time", "do not convert", "utc"} {
