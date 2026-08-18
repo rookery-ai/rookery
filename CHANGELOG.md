@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.7](https://github.com/rookery-ai/rookery/compare/v0.3.6...v0.3.7) (2026-08-18)
+
+
+### Bug Fixes
+
+* **coder:** budget tool-loop turns on progress, and never deliver tool-call scaffolding ([#224](https://github.com/rookery-ai/rookery/issues/224)) ([e4b82b9](https://github.com/rookery-ai/rookery/commit/e4b82b9dd2b1c5f0617eef72206112670dacc48c))
+
 ## [0.3.6](https://github.com/rookery-ai/rookery/compare/v0.3.5...v0.3.6) (2026-08-17)
 
 
