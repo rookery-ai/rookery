@@ -180,7 +180,10 @@ export default function AgentNewPage() {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
         <p className="text-sm text-muted-2">{notice}</p>
-        <Button onClick={() => navigate("/agents/new?resume=1")}>Open it</Button>
+        <Button onClick={() => navigate("/agents/new?resume=1")}>
+          <ArrowRight />
+          Open it
+        </Button>
       </div>
     );
   }
