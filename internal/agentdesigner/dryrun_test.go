@@ -197,6 +197,32 @@ func TestDryRunLeavesABuildWrittenStateFileAlone(t *testing.T) {
 	}
 }
 
+// TestDryRunRestoresAStateFileTheRehearsalDeleted covers the third case: the rehearsal
+// holds Bash and can delete a state.md the BUILD wrote, not just rewrite it. The closure's
+// read of the current file then fails with a not-exist error, and that must still restore
+// the build's content rather than leaving the file gone.
+func TestDryRunRestoresAStateFileTheRehearsalDeleted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.md")
+	if err := os.WriteFile(path, []byte("built by the build\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	restore := restoreDryRunState(dir)
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	restore()
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("a build-written state.md deleted by the rehearsal must be restored; got %v", err)
+	}
+	if string(got) != "built by the build\n" {
+		t.Errorf("state.md = %q, want the build's own content restored", string(got))
+	}
+}
+
 // TestRunGeneration_EditBuildDoesNotDryRun pins the create-only gate: an edit already has
 // a live agent the user has seen work, and re-running it is a second full agent run's
 // worth of tokens for no new information.

@@ -142,8 +142,9 @@ func (f *Flow) dryRun(ctx context.Context, workspaceID, workDir, agentMD, backen
 
 // restoreDryRunState snapshots the agent's state.md and returns the function that puts it
 // back — removing it when the rehearsal created it, rewriting it when the rehearsal changed
-// one the BUILD had written. Any read error degrades to leaving the file alone: this is a
-// tidy-up, and a dry run must never be able to fail a build.
+// one the BUILD had written, and re-creating it when the rehearsal deleted one the BUILD had
+// written. Any other read error degrades to leaving the file alone: this is a tidy-up, and a
+// dry run must never be able to fail a build.
 func restoreDryRunState(workDir string) func() {
 	path := filepath.Join(workDir, "state.md")
 	before, err := os.ReadFile(path)
@@ -151,8 +152,11 @@ func restoreDryRunState(workDir string) func() {
 	return func() {
 		after, err := os.ReadFile(path)
 		switch {
+		case err != nil && !existed:
+			return // nothing there before, nothing there now — nothing to undo
 		case err != nil:
-			return // nothing there now, or unreadable — nothing to undo
+			// the rehearsal deleted a file the BUILD wrote — put it back
+			_ = os.WriteFile(path, before, 0o640)
 		case !existed:
 			_ = os.Remove(path)
 		case string(after) != string(before):
