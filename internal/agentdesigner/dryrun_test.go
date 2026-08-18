@@ -368,7 +368,7 @@ func TestRunGeneration_BlockedBuildDoesNotDryRun(t *testing.T) {
 // the user would lose a caveat they used to be given, in the name of honesty.
 func TestRunGeneration_DryRunKeepsTheBlockersCaveat(t *testing.T) {
 	fake := newFakeCoder(t, blockedBuildScript) // generic → BackendFullCoder → advances
-	flow, workspaceID, _ := newGenFlow(t, fake)
+	flow, workspaceID, agentsDir := newGenFlow(t, fake)
 
 	flow.sessions[workspaceID] = &DesignSession{
 		WorkspaceID: workspaceID,
@@ -390,5 +390,10 @@ func TestRunGeneration_DryRunKeepsTheBlockersCaveat(t *testing.T) {
 	}
 	if !strings.Contains(msg, "could not reach the service") {
 		t.Errorf("the dry run deleted the blocker the user was warned about; got %q", msg)
+	}
+	// Exactly one rehearsal, never two: the presented path is the only one that pays for a
+	// full agent run, and a second one would double that cost with nothing to show for it.
+	if n := coderInvocations(t, DraftAgentDir(agentsDir, workspaceID, "watcher")); n != 2 {
+		t.Errorf("the coder ran %d times, want 2 (one build + one rehearsal)", n)
 	}
 }

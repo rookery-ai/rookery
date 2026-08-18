@@ -1952,10 +1952,12 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// Its position is load-bearing in three directions:
 	//
 	//   - BELOW the !outcome.advance return above. A rehearsal is a full agent run (one
-	//     measured over 1.5M tokens) and a build that is not advancing throws its message
-	//     away — on the weak-backend blocked path reconcileBlockedOutcome REPLACES
-	//     decision.message wholesale — so from above the return it paid for a rehearsal
-	//     nobody ever saw, while still telling the user nothing had been confirmed to run.
+	//     measured over 1.5M tokens) and a build that is not advancing never shows what it
+	//     wrote into decision.message: on the PRESENTABLE-but-blocked weak-backend branch
+	//     reconcileBlockedOutcome discards it for a message of its own (the not-presentable
+	//     branches keep d.message, but the dry run cannot reach them — they are not
+	//     presentable). So from above the return, that build paid for a rehearsal nobody
+	//     ever saw and was then told nothing had been confirmed to run.
 	//   - ABOVE caveatTruncatedBuild, which PREPENDS. The dry run replaces, so running it
 	//     second would wipe the caveat off a build the engine cut short.
 	//   - genCtx, not ctx: ctx is the request context this build is deliberately detached
