@@ -404,23 +404,33 @@ func TestTruncateRunesDoesNotSplitRunes(t *testing.T) {
 	}
 }
 
-func TestAPIEngine_RunawayLoopHitsErrMaxTurns(t *testing.T) {
+// A model whose every turn SUCCEEDS never spends base budget and never breaks a
+// streak, so the hard ceiling is the only thing left holding the loop — this is the
+// one test that would notice it ceasing to bind. The run ends with the engine's own
+// account of what happened, not with a bare error the caller cannot present.
+func TestAPIEngine_RunawayLoopStopsAtTheHardCeiling(t *testing.T) {
 	dir := t.TempDir()
 	ws := "ws4"
 	c := newTestCoder(t, dir)
 	mustMkdir(t, filepath.Join(dir, "vaults", ws))
 
 	testFake.calls = 0
-	// Every turn requests another tool call → the engine exhausts maxAPITurns.
+	// Every turn requests another tool call, and every one of them succeeds.
 	testFake.script = func(int, llm.Request) (*llm.Response, error) {
 		return &llm.Response{ToolCalls: []llm.ToolCall{
 			toolCall("write_file", `{"path":"x.txt","content":"x"}`),
 		}}, nil
 	}
 
-	_, err := c.Generate(context.Background(), ws, "loop forever")
-	if !errors.Is(err, ErrMaxTurns) {
-		t.Fatalf("err = %v, want ErrMaxTurns", err)
+	res, err := c.Generate(context.Background(), ws, "loop forever")
+	if err != nil {
+		t.Fatalf("Generate: %v, want the hard ceiling to end the run gracefully", err)
+	}
+	if !strings.Contains(res.Text, "hard limit") {
+		t.Fatalf("result = %q, want the hard-ceiling exhaustion summary", res.Text)
+	}
+	if testFake.calls != maxHardTurns+1 {
+		t.Fatalf("provider calls = %d, want exactly %d (hard ceiling + one grace call)", testFake.calls, maxHardTurns+1)
 	}
 }
 
@@ -802,9 +812,15 @@ func TestAPIEngine_ConsecutiveFailuresEscalateNudge(t *testing.T) {
 }
 
 // TestAPIEngine_TurnBudgetExhaustionGracefullyEmitsBlocked proves that exhausting
-// maxAPITurns no longer fails opaquely: the loop gives the model one final, tools-off
-// turn to explain itself, and that text (expected to be a [BLOCKED] block per the nudge)
-// is returned as a normal successful Result instead of a bare ErrMaxTurns.
+// the turn budget no longer fails opaquely: the loop gives the model one final,
+// tools-off turn to explain itself, and that text (expected to be a [BLOCKED] block
+// per the nudge) is returned as a normal successful Result instead of a bare
+// ErrMaxTurns.
+//
+// The budget is burnt by REPEATING one failing call: the first executes and fails,
+// the rest are short-circuited as known repeats, so none of them counts as progress
+// and the unproductive streak — not the base budget — ends the loop. A succeeding
+// call would spend no budget at all, which is the whole point of the change.
 func TestAPIEngine_TurnBudgetExhaustionGracefullyEmitsBlocked(t *testing.T) {
 	dir := t.TempDir()
 	ws := "ws-gracebudget"
@@ -813,10 +829,10 @@ func TestAPIEngine_TurnBudgetExhaustionGracefullyEmitsBlocked(t *testing.T) {
 
 	testFake.calls = 0
 	testFake.script = func(call int, req llm.Request) (*llm.Response, error) {
-		if call < maxAPITurns {
-			// Never finishes on its own — burns the whole main-loop budget.
+		if call < maxUnproductiveStreak {
+			// Never finishes on its own, and never gets anywhere.
 			return &llm.Response{ToolCalls: []llm.ToolCall{
-				toolCall("list_dir", `{"path":"."}`),
+				toolCall("read_file", `{"path":"nope/missing.md"}`),
 			}}, nil
 		}
 		// The grace call: Tools must be stripped (forces a text-only reply).
@@ -833,16 +849,17 @@ func TestAPIEngine_TurnBudgetExhaustionGracefullyEmitsBlocked(t *testing.T) {
 	if !strings.Contains(res.Text, "[BLOCKED]") {
 		t.Fatalf("result = %q, want the grace-turn [BLOCKED] explanation", res.Text)
 	}
-	if testFake.calls != maxAPITurns+1 {
-		t.Fatalf("provider calls = %d, want exactly %d (main loop + one grace call)", testFake.calls, maxAPITurns+1)
+	if testFake.calls != maxUnproductiveStreak+1 {
+		t.Fatalf("provider calls = %d, want exactly %d (main loop + one grace call)", testFake.calls, maxUnproductiveStreak+1)
 	}
 }
 
-// TestAPIEngine_TurnBudgetExhaustionFallsBackToErrMaxTurns proves that if the grace call
-// ITSELF produces nothing usable (empty content, mirroring a model that ignores the
-// nudge), the engine still falls back to the original ErrMaxTurns rather than returning
-// an empty/useless success.
-func TestAPIEngine_TurnBudgetExhaustionFallsBackToErrMaxTurns(t *testing.T) {
+// TestAPIEngine_TurnBudgetExhaustionFallsBackToTheEngineSummary proves that if the
+// grace call ITSELF produces nothing usable (empty content, mirroring a model that
+// ignores the nudge), the run still ends with the engine's own account of what
+// happened — composed from facts it already holds — rather than an opaque error or
+// an empty success. The model is garnish here, not the source of truth.
+func TestAPIEngine_TurnBudgetExhaustionFallsBackToTheEngineSummary(t *testing.T) {
 	dir := t.TempDir()
 	ws := "ws-gracebudget-empty"
 	c := newTestCoder(t, dir)
@@ -850,20 +867,23 @@ func TestAPIEngine_TurnBudgetExhaustionFallsBackToErrMaxTurns(t *testing.T) {
 
 	testFake.calls = 0
 	testFake.script = func(call int, req llm.Request) (*llm.Response, error) {
-		if call < maxAPITurns {
+		if call < maxUnproductiveStreak {
 			return &llm.Response{ToolCalls: []llm.ToolCall{
-				toolCall("list_dir", `{"path":"."}`),
+				toolCall("read_file", `{"path":"nope/missing.md"}`),
 			}}, nil
 		}
 		return &llm.Response{Content: ""}, nil // ignores the nudge entirely
 	}
 
-	_, err := c.Generate(context.Background(), ws, "go")
-	if !errors.Is(err, ErrMaxTurns) {
-		t.Fatalf("err = %v, want ErrMaxTurns when the grace call also produces nothing", err)
+	res, err := c.Generate(context.Background(), ws, "go")
+	if err != nil {
+		t.Fatalf("Generate: %v, want the engine's exhaustion summary instead of an error", err)
 	}
-	if testFake.calls != maxAPITurns+1 {
-		t.Fatalf("provider calls = %d, want exactly %d (main loop + one grace call)", testFake.calls, maxAPITurns+1)
+	if !strings.Contains(res.Text, "achieved nothing") || !strings.Contains(res.Text, "See the run log") {
+		t.Fatalf("result = %q, want the unproductive-streak exhaustion summary", res.Text)
+	}
+	if testFake.calls != maxUnproductiveStreak+1 {
+		t.Fatalf("provider calls = %d, want exactly %d (main loop + one grace call)", testFake.calls, maxUnproductiveStreak+1)
 	}
 }
 
@@ -879,8 +899,8 @@ func TestAPIEngine_GraceNudge_NonBuildUsesPlainWrapUp(t *testing.T) {
 	var graceNudge string
 	testFake.calls = 0
 	testFake.script = func(call int, req llm.Request) (*llm.Response, error) {
-		if call < maxAPITurns {
-			return &llm.Response{ToolCalls: []llm.ToolCall{toolCall("list_dir", `{"path":"."}`)}}, nil
+		if call < maxUnproductiveStreak {
+			return &llm.Response{ToolCalls: []llm.ToolCall{toolCall("read_file", `{"path":"nope/missing.md"}`)}}, nil
 		}
 		graceNudge = lastUserMessage(req) // the grace call
 		return &llm.Response{Content: "wrapped up in plain language"}, nil
@@ -897,14 +917,19 @@ func TestAPIEngine_GraceNudge_NonBuildUsesPlainWrapUp(t *testing.T) {
 	if strings.Contains(graceNudge, "[BLOCKED]") {
 		t.Fatalf("non-build grace nudge must not mention [BLOCKED]: %q", graceNudge)
 	}
-	if testFake.calls != maxAPITurns+1 {
-		t.Fatalf("provider calls = %d, want %d", testFake.calls, maxAPITurns+1)
+	if testFake.calls != maxUnproductiveStreak+1 {
+		t.Fatalf("provider calls = %d, want %d", testFake.calls, maxUnproductiveStreak+1)
 	}
 }
 
-// TestAPIEngine_GraceNudge_BuildUsesBlockedAndLargerBudget guards N2 + H4: a BUILD keeps the
-// [BLOCKED] grace nudge (the designer parses it) and gets the larger turn budget.
-func TestAPIEngine_GraceNudge_BuildUsesBlockedAndLargerBudget(t *testing.T) {
+// TestAPIEngine_GraceNudge_BuildUsesBlocked guards N2: a BUILD keeps the [BLOCKED]
+// grace nudge, which the designer parses.
+//
+// It no longer also asserts the larger build budget through the provider call count:
+// the unproductive streak is not build-scoped, so a build and a run both stop after
+// the same six dead turns. TestTurnBudgetBuildBaseExceedsRunBase proves the base
+// ordering directly instead.
+func TestAPIEngine_GraceNudge_BuildUsesBlocked(t *testing.T) {
 	dir := t.TempDir()
 	ws := "ws-grace-build"
 	c := newTestCoder(t, dir).WithExtraEnv(map[string]string{
@@ -915,8 +940,8 @@ func TestAPIEngine_GraceNudge_BuildUsesBlockedAndLargerBudget(t *testing.T) {
 	var graceNudge string
 	testFake.calls = 0
 	testFake.script = func(call int, req llm.Request) (*llm.Response, error) {
-		if call < maxBuildAPITurns {
-			return &llm.Response{ToolCalls: []llm.ToolCall{toolCall("list_dir", `{"path":"."}`)}}, nil
+		if call < maxUnproductiveStreak {
+			return &llm.Response{ToolCalls: []llm.ToolCall{toolCall("read_file", `{"path":"nope/missing.md"}`)}}, nil
 		}
 		graceNudge = lastUserMessage(req)
 		return &llm.Response{Content: "[BLOCKED]\nWhat couldn't be done: ran out of time.\n[/BLOCKED]"}, nil
@@ -928,8 +953,71 @@ func TestAPIEngine_GraceNudge_BuildUsesBlockedAndLargerBudget(t *testing.T) {
 	if graceNudge != graceTurnBudgetNudge {
 		t.Fatalf("build grace nudge = %q, want the [BLOCKED] nudge", graceNudge)
 	}
-	if testFake.calls != maxBuildAPITurns+1 {
-		t.Fatalf("build provider calls = %d, want %d (larger build budget + grace)", testFake.calls, maxBuildAPITurns+1)
+	if testFake.calls != maxUnproductiveStreak+1 {
+		t.Fatalf("build provider calls = %d, want %d (main loop + grace)", testFake.calls, maxUnproductiveStreak+1)
+	}
+}
+
+// TestAPIEngine_BuildGetsTheLargerBaseBudget asserts the WIRING: runToolLoop must
+// pass tools.verifyBuild to newTurnBudget, so a build really does get
+// maxBuildAPITurns. TestTurnBudgetBuildBaseExceedsRunBase proves the constructor
+// orders its two bases correctly — it cannot prove the loop hands it the right
+// flag, and those are different bugs. So this drives the real loop rather than the
+// budget directly.
+//
+// The burn pattern is what makes a provider call count meaningful again now that a
+// succeeding turn spends no budget: five failing turns, then one succeeding turn,
+// repeated. The success resets the unproductive streak, so the streak can never
+// reach maxUnproductiveStreak and end the run — while every failing turn still
+// spends one unit of base budget. The loop therefore stops on reason "budget",
+// after `base` failing turns plus the successes interleaved between them, which is
+// the only stop reason (and the only exhaustionSummary branch) otherwise reached
+// solely by unit tests.
+func TestAPIEngine_BuildGetsTheLargerBaseBudget(t *testing.T) {
+	burn := func(t *testing.T, ws string, isBuild bool) (calls int, text string) {
+		t.Helper()
+		dir := t.TempDir()
+		c := newTestCoder(t, dir)
+		if isBuild {
+			c = c.WithExtraEnv(map[string]string{buildphase.EnvVar: buildphase.Generation})
+		}
+		mustMkdir(t, filepath.Join(dir, "vaults", ws))
+
+		testFake.calls = 0
+		testFake.script = func(call int, _ llm.Request) (*llm.Response, error) {
+			if call%6 == 5 {
+				// One success per six turns: breaks the streak, spends no budget.
+				return &llm.Response{ToolCalls: []llm.ToolCall{toolCall("list_dir", `{"path":"."}`)}}, nil
+			}
+			return &llm.Response{ToolCalls: []llm.ToolCall{toolCall("read_file", `{"path":"nope/missing.md"}`)}}, nil
+		}
+		res, err := c.Generate(context.Background(), ws, "go")
+		if err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		return testFake.calls, res.Text
+	}
+
+	// base failing turns, plus one success after every fifth of them — the final
+	// block is cut short by the stop, hence (base-1)/5 — plus the one grace call.
+	want := func(base int) int { return base + (base-1)/5 + 1 }
+
+	runCalls, runText := burn(t, "ws-budget-run", false)
+	buildCalls, buildText := burn(t, "ws-budget-build", true)
+
+	if runCalls != want(maxAPITurns) {
+		t.Errorf("run provider calls = %d, want %d (maxAPITurns of budget + interleaved successes + grace)", runCalls, want(maxAPITurns))
+	}
+	if buildCalls != want(maxBuildAPITurns) {
+		t.Errorf("build provider calls = %d, want %d (maxBuildAPITurns of budget + interleaved successes + grace)", buildCalls, want(maxBuildAPITurns))
+	}
+	if buildCalls <= runCalls {
+		t.Errorf("build ran %d turns and run ran %d — a build must get the larger base budget, so the loop is not passing tools.verifyBuild to newTurnBudget", buildCalls, runCalls)
+	}
+	for name, text := range map[string]string{"run": runText, "build": buildText} {
+		if !strings.Contains(text, "Ran out of steps before finishing") {
+			t.Errorf("%s result = %q, want the plain budget-exhaustion summary", name, text)
+		}
 	}
 }
 
