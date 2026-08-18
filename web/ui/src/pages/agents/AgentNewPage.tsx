@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ArrowRight } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   DesignerSurface,
@@ -10,6 +11,7 @@ import { DesignerIntro } from "@/components/designer/DesignerIntro";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { api } from "@/lib/api";
 import { useAgents } from "@/lib/agents";
 import { cn } from "@/lib/utils";
 import {
@@ -19,13 +21,18 @@ import {
 } from "./templates";
 import TemplateGallery from "./TemplateGallery";
 
+// Hoisted out of ENDPOINTS because DesignerEndpoints.state is OPTIONAL — the skill
+// designer has no such endpoint — so reading it back off the annotated object gives
+// `string | undefined` and will not typecheck as a query URL.
+const DESIGN_STATE_URL = "/api/v1/agents/design/state";
+
 const ENDPOINTS: DesignerEndpoints = {
   design: "/api/v1/agents/design",
   cancel: "/api/v1/agents/design/cancel",
   resume: "/api/v1/agents/design/resume",
   dismiss: "/api/v1/agents/design/dismiss",
   progress: "/api/v1/agents/design/progress",
-  state: "/api/v1/agents/design/state",
+  state: DESIGN_STATE_URL,
 };
 
 const LABELS: DesignerLabels = {
@@ -62,6 +69,30 @@ export default function AgentNewPage() {
   const resumeParam = params.get("resume") === "1";
   const { data, isLoading } = useAgents();
   const draft = data?.draft ?? null;
+
+  // The design session is a per-workspace SINGLETON: a build already running
+  // in another tab is the same session this page would otherwise adopt.
+  // DESIGN_STATE_URL is the exact response DesignerSurface itself polls once
+  // mounted, but that's too late here — a fresh /agents/new load (no
+  // ?resume=1, no local draft yet) reaches the name-gate form before
+  // DesignerSurface ever mounts, so this page queries it independently to
+  // decide whether to offer that form at all. `!resumeParam` lets an actual
+  // resume (the "Open it" link below, or a draft's own Resume action)
+  // through untouched — this notice exists only to stop a SECOND, unaware
+  // attempt to start something new.
+  const designState = useQuery({
+    queryKey: ["agent-design-state"],
+    queryFn: () => api.get<{ active: boolean; generating: boolean; name?: string }>(DESIGN_STATE_URL),
+    // Matches the 5s interval DesignerSurface itself polls at while a build
+    // is running (see the "Third completion signal" effect in
+    // DesignerSurface.tsx) — this page needs the same freshness for the same
+    // reason: without it, the notice below never clears once the other
+    // tab's build finishes (refetchOnWindowFocus is off app-wide), and the
+    // user is stuck reading stale state until they navigate away or reload.
+    refetchInterval: 5000,
+  });
+  const buildInProgress = !resumeParam && designState.data?.generating === true;
+  const buildingName = designState.data?.name;
 
   const [name, setName] = useState("");
   const [nameConfirmed, setNameConfirmed] = useState(false);
@@ -131,8 +162,30 @@ export default function AgentNewPage() {
     }
   }
 
-  if (waitingForDraft) {
+  // designState's FIRST fetch is folded in here too: without it, a fresh
+  // /agents/new load renders the name-gate form for one round trip before
+  // designState resolves and (if a build is running) swaps in the notice
+  // below — a flash of exactly the form this page exists to stop showing.
+  // isLoading is true only for that first fetch, never for the background
+  // refetchInterval ticks above, so the recurring poll doesn't re-blank the
+  // page.
+  if (waitingForDraft || designState.isLoading) {
     return <div className="p-8 text-muted-2">Loading…</div>;
+  }
+
+  if (buildInProgress) {
+    const notice = buildingName
+      ? `“${buildingName}” is already building in another tab. Only one can run at a time.`
+      : "An agent is already building in another tab. Only one can run at a time.";
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+        <p className="text-sm text-muted-2">{notice}</p>
+        <Button onClick={() => navigate("/agents/new?resume=1")}>
+          <ArrowRight />
+          Open it
+        </Button>
+      </div>
+    );
   }
 
   if (showNameGate) {

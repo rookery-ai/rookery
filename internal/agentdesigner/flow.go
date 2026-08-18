@@ -1510,6 +1510,40 @@ func (f *Flow) startGeneration(workspaceID string) (string, bool, string, error)
 	return buildingMessage, false, "", nil
 }
 
+// hardFailureMessage is the user-facing account of a build that died on an error none
+// of the branches above it recognised — in practice a provider dropping the connection.
+//
+// It diagnoses from buildErrClass and deliberately does NOT include err.Error(). A
+// provider error can echo back the request that produced it, and that dataflow was
+// traced to the workspace's API key (go/clear-text-logging), which is why buildErrClass
+// reports a class rather than the text. The same reasoning applies with more force to
+// something shown to a user.
+//
+// A class earns a case only when the REMEDY differs. The generic wording tells the user
+// to retry, which is right for a provider drop (the observed common case) and for any
+// transient blip, but actively wrong for a credential the provider rejected or a coder
+// kind this build cannot run — there, retrying can only fail again. It used to ignore its
+// argument entirely, so a rejected API key was reported as a dropped connection and the
+// user was pointed at a retry that could never succeed. The classes handled ABOVE this
+// call (usage_limit, rate_limited, max_turns, the coder's own timeout, an explicit cancel)
+// never reach here, so a case for them would be dead code.
+func hardFailureMessage(err error) string {
+	switch buildErrClass(err) {
+	case "auth":
+		return "⚠️ The build stopped — the coder's API key was rejected, so nothing was " +
+			"saved. Trying again won't help until the key is fixed in coder settings — " +
+			"once it is, type **approve** to try again."
+	case "local_coder_disabled":
+		return "⚠️ The build stopped — this server runs without a local coder, so the " +
+			"workspace's coder setting can't be used and nothing was saved. Switch the " +
+			"workspace to an API coder in coder settings, then type **approve** to try again."
+	default:
+		return "⚠️ The build stopped unexpectedly — the model provider dropped the " +
+			"connection. Nothing was saved. Type **approve** to try again, or tell me what " +
+			"to change first."
+	}
+}
+
 // runGeneration creates agent files by giving Claude Code full tool access to
 // write files, run them, fix errors, and verify output — all in one pass.
 // Only after the coder confirms things work does the user see the results.
@@ -1812,8 +1846,25 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		}
 		// Unknown hard error with nothing salvageable on disk — the workspace is likely
 		// broken; remove it.
+		//
+		// Record it like every other failure. This branch used to return a raw error
+		// having called neither recordGenerationFailure nor saveDraft, so an eight-minute
+		// provider drop left the user back on the plan with no explanation at all.
+		msg := hardFailureMessage(err)
+		// This branch records the failure and returns a nil error, so the deferred
+		// "build finished" log in startGeneration reports failed=false err_class="" for a
+		// genuine hard failure — and that is the ONLY log this path produces. err_class is
+		// the field the diagnosis of this exact failure mode was built from, so it is
+		// re-emitted here. The class, never the error: a provider error can echo back the
+		// request that produced it (see buildErrClass).
+		slog.Warn("agentdesigner: build failed on an unrecognised coder error",
+			"build_id", buildID, "workspace_id", workspaceID, "agent_id", agentIDSnap,
+			"err_class", buildErrClass(err), "backend", backendType)
+		f.recordGenerationFailure(workspaceID, msg,
+			"the build stopped on an unrecognised coder error (likely a provider drop). "+
+				"Next attempt: retry as-is; if it recurs, simplify the agent.", false)
 		cleanupOnFail()
-		return "", false, "", fmt.Errorf("coder: %w", err)
+		return msg, false, "", nil
 	}
 	if err != nil {
 		// decision.saveable == true: a complete build is on disk despite the coder error.
@@ -1890,6 +1941,51 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		// path) so the reconnect re-fetch of /design/state finds the updated state.
 		closeProgress()
 		return outcome.message, false, "", nil
+	}
+
+	// A create build's review sample should be REAL output. decideBuildOutcome can only
+	// produce that when an authored script ran, so a TIER 1 agent (no script) fell back
+	// to the model's prose. Run the built agent once and use what it actually says.
+	//
+	// Create-only: an edit already has a live agent the user has seen work. Best-effort:
+	// a failed dry run leaves the message exactly as it was.
+	//
+	// Its position is load-bearing in three directions:
+	//
+	//   - BELOW the !outcome.advance return above. A rehearsal is a full agent run (one
+	//     measured over 1.5M tokens) and a build that is not advancing never shows what it
+	//     wrote into decision.message: on the PRESENTABLE-but-blocked weak-backend branch
+	//     reconcileBlockedOutcome discards it for a message of its own (the not-presentable
+	//     branches keep d.message, but the dry run cannot reach them — they are not
+	//     presentable). So from above the return, that build paid for a rehearsal nobody
+	//     ever saw and was then told nothing had been confirmed to run.
+	//   - ABOVE caveatTruncatedBuild, which PREPENDS. The dry run replaces, so running it
+	//     second would wipe the caveat off a build the engine cut short.
+	//   - genCtx, not ctx: ctx is the request context this build is deliberately detached
+	//     from (see the WithCancel above), so passing it would let a page navigation kill
+	//     the dry run while leaving Cancel() unable to stop it.
+	//
+	// It swaps the review message OUT of outcome.message rather than overwriting the whole
+	// string: reconcileBlockedOutcome's advance-with-a-blocker branch prepends its own
+	// caveat to decision.message, and a wholesale assignment would delete the explanation
+	// the user was given for it. Replace(…, 1) leaves the message untouched when that tail
+	// is not found, which is the same best-effort contract the dry run itself keeps.
+	if decision.presentable && !isEdit && decision.message != "" {
+		notify("🧪 Running it once to show you real output…")
+		if sample, ok := f.dryRun(genCtx, workspaceID, workDir, decision.agentMD,
+			backendType, implParams.ChatApps, notify); ok {
+			swapped := strings.Replace(outcome.message, decision.message,
+				reviewMessage(sample, true), 1)
+			if swapped == outcome.message {
+				// Both advancing branches of reconcileBlockedOutcome embed decision.message
+				// verbatim today, so this cannot fire — but if one ever stops, the rehearsal
+				// is paid for and thrown away silently, which is the exact defect moving this
+				// call below the block gate removed. Say so rather than discovering it twice.
+				slog.Warn("agentdesigner: dry-run sample discarded — review message not found",
+					"build_id", buildID, "workspace_id", workspaceID)
+			}
+			outcome.message = swapped
+		}
 	}
 
 	// A build the engine cut short must not be PRESENTED as a finished one. The reason
@@ -2244,20 +2340,10 @@ func decideBuildOutcome(workDir, resultText, backendType string, scriptVerified 
 		}
 	}
 
-	var message string
-	if thinProof {
-		// Be HONEST: passing safety checks is not the same as being verified to work.
-		// Do not imply it runs — invite the user to look it over before saving.
-		message = fmt.Sprintf(
-			"I built the assistant and it passed the safety checks, but I couldn't capture a clean test run — so I haven't confirmed it works end to end yet. Here's what it produced:\n\n---\n%s\n---\n\nPlease look it over. Type **approve** to save it, or tell me what to change.",
-			testOut,
-		)
-	} else {
-		message = fmt.Sprintf(
-			"Here's what a test run produces:\n\n---\n%s\n---\n\nDoes this look right? Type **approve** to save the agent, or tell me what to change.",
-			testOut,
-		)
-	}
+	// Be HONEST: passing safety checks is not the same as being verified to work.
+	// reviewMessage only claims a test run when the sample actually came from one
+	// (see its doc comment for the three possible origins and why thinProof matters).
+	message := reviewMessage(testOut, !thinProof)
 	return buildDecision{presentable: true, saveable: true, message: message, agentMD: agentMD, tools: tools, thinProof: thinProof, hasAuthoredScript: hasAuthoredScript, scriptVerified: scriptVerified}
 }
 

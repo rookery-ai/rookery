@@ -679,6 +679,12 @@ NOTIFICATION DECISION:
 SCHEDULE DECISION:
   Does this agent run automatically on a schedule?
   YES → First line of AGENT.md: # Suggested schedule: <5-part cron expression>
+
+  The cron expression is evaluated in the user's OWN LOCAL TIME. Write the hour the
+  user said, exactly as they said it. Do NOT convert to UTC — you are told the user's
+  timezone elsewhere in this prompt, and converting with it is the single most common
+  way this goes wrong: "every morning at 8" for a user in Skopje is "0 8 * * *", never
+  "0 6 * * *".
   NO  → First line of AGENT.md: # Suggested schedule: none
 
   An agent is started in exactly THREE ways: the scheduler firing its cron expression,
@@ -1050,7 +1056,7 @@ the user sees your message, so never refer to it in your prose). Emit it ONLY wh
 proposing a complete plan: while you are still asking questions, do not emit it at all.
 [TECHNICAL SPEC]
 Tier: 1 / 2 / 3 — for 2 or 3, name the exact [BULK] task (which API paginates / which large data is parsed). Default to 1.
-Schedule: <5-part cron expression> | none
+Schedule: <5-part cron expression> | none — in the user's OWN LOCAL TIME; do NOT convert to UTC.
 Notifies user: yes ([CHAT] contains: <description>) | no (silent)
 Knowledge base writes: notes/<filename.md> | none
 Secrets: none | NAME: plain description

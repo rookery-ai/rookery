@@ -665,3 +665,35 @@ func TestRuntimeContextHasItsOwnBlock(t *testing.T) {
 		t.Errorf("runtime context leaked into <user_memory>:\n%s", memBlock)
 	}
 }
+
+// The scheduler evaluates cron against time.Now() in the SERVER's local zone
+// (internal/scheduler: cron.NewParser(Minute|Hour|Dom|Month|Dow), schedule.Next).
+// The prompt used to say nothing about this while the profile block handed the model
+// the user's timezone — so the model converted to UTC, and an agent asked for "Monday
+// at 8" was scheduled 0 6 * * 1 and fired two hours early. Twice, on two builds.
+//
+// This pins the instruction because the failure is silent: a wrong hour looks like a
+// working agent until someone notices the timing.
+//
+// The SCHEDULE DECISION block lives in agentArchitectureGateBlock, which only the
+// implementation prompts (BuildImplementationPrompt / BuildEditImplementationPrompt)
+// inject — not the conversational BuildDesignSystemPrompt, which never writes AGENT.md
+// itself. So both build-time prompts are checked here, since either can produce the
+// line the scheduler actually reads. BuildDesignSystemPrompt is checked too: its
+// [TECHNICAL SPEC] Schedule: line is what the user actually approves pre-build, and a
+// UTC-converted proposal there would silently diverge from the locally-correct AGENT.md
+// the build writes independently.
+func TestSchedulePromptForbidsUTCConversion(t *testing.T) {
+	for name, p := range map[string]string{
+		"create": BuildImplementationPrompt("x", nil, ImplementationParams{}),
+		"edit":   BuildEditImplementationPrompt("x", nil, ImplementationParams{}),
+		"design": BuildDesignSystemPrompt(DesignSystemParams{AgentName: "x"}),
+	} {
+		low := strings.ToLower(p)
+		for _, want := range []string{"local time", "do not convert", "utc"} {
+			if !strings.Contains(low, want) {
+				t.Errorf("%s: the schedule guidance does not mention %q — the model will convert to UTC", name, want)
+			}
+		}
+	}
+}
