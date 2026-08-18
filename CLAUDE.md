@@ -1578,6 +1578,23 @@ Delivery does **not** depend solely on the coder emitting `[CHAT]` — models (e
 3. **`[SILENT]`** — when present, the prose fallback is suppressed so silent agents aren't noisified by stray prose.
 4. **Visible failure** — if a run succeeds but produces nothing deliverable and didn't signal `[SILENT]`, the user receives `⚠️ <agent> ran but produced no notification — see the run log.` instead of a silent success.
 5. **A coder that returned NOTHING is a failed run, not a quiet one** (`coderProducedNothing`). Zero bytes of raw output means nothing was fetched, nothing decided and no state written — the agent's whole job was skipped — so the run is recorded `exit -1` and the message names that instead of the "produced no notification" wording, which describes an agent that ran and chose not to speak. Judged on RAW output, the only place the difference survives: parsing an empty string and parsing a marker-less paragraph both yield zero chat lines. A `[SILENT]` run is never "nothing" — the marker is the decision we asked for.
+6. **Tool-call scaffolding is never delivered** (`coder.LooksLikeToolScaffolding`,
+   `agentrunner.deliverableProse`). A model with no structured tool channel will
+   sometimes express a pending call as raw text, and the prose fallback — built to
+   rescue a forgotten `[CHAT]` — forwarded DeepSeek's `｜DSML｜` markup to a real
+   user's phone. The check is keyed on the tools the run OFFERED, never on a
+   provider dialect: our own tool name inside a markup construct is decisive, with
+   markup density as a backstop. The trigger was our own grace turn, which strips
+   `req.Tools` while the model still has work queued. That grace turn is now
+   best-effort — its reply is used only if it passes this same check — and
+   `exhaustionSummary` composes the real message from run facts instead.
+   One property is pinned by a test rather than left to luck
+   (`TestExhaustionSummaryIsNeverSuppressedAsScaffolding`): `exhaustionSummary`
+   lists the offered tool names, and `deliverableProse` runs the scaffolding check
+   over exactly that text. It passes only because rule 1 also demands a markup
+   token and the summary carries none — a coincidence in today's implementation,
+   not a guarantee. Were it to regress, the engine's own account of a failed run
+   would suppress itself and the user would get silence.
 
 **`isSilentMarker` is lenient about DECORATION and strict about CONTEXT, and the asymmetry is deliberate.** The check was `trimmed == "[SILENT]"`, an exact line compare, so every ordinary way a model decorates a token missed it — `**[SILENT]**`, `` `[SILENT]` ``, `[silent]`, `[SILENT].`, `[/SILENT]`, a bare `SILENT` — and a missed marker is not a no-op: rule 4 then fires, so a correctly-behaving agent with nothing to report notified its owner anyway, on every run, forever. (Observed in production: twice a day from an agent built precisely to stay quiet.) The two failure modes are not symmetric, which is why the match still refuses a marker mentioned inside a sentence: a missed marker is noise the user can see, while a marker matched inside prose silently swallows a real message and nothing says so. A bare `silent` line is accepted because models write it and the blast radius is bounded — `silent` only suppresses the fallback and the warning, so a run with real `[CHAT]` content still delivers. `extractProseMessage` strips through the same predicate, or a fallback delivery would post the literal marker text.
 
@@ -1633,7 +1650,36 @@ run on a Mac.
 A workspace can run its coder as a **direct LLM provider API** instead of a host CLI binary. `Coder.runAPI`/`runToolLoop` (`internal/coder/api_engine.go`) drive an in-process loop: `Complete → execute host tools against the vault → feed results back → Complete`, until the model emits a final answer (no tool calls), the turn budget is spent, or the deadline passes. The model's final text carries the same `[CHAT]`/`[STATE]`/`[SILENT]` protocol markers, so the runner's parser is unchanged.
 
 - **Host tools** (`hosttools.go`, `hostToolSet`): `read_file`/`write_file`/`edit_file`/`list_dir` are vault-path-safe (relative to workDir/vault root, escapes rejected). Two **always-on read-only discovery tools** (NOT exec-gated — safe in chat, closing the API-chat gap with the CLI chat's `Grep`/`Glob`): `search_files(query)` exposes the existing `vault.Searcher` (ripgrep + pure-Go fallback, case-insensitive fixed-string, 5 matches/file, skips `.kb`) so "find the note where I mentioned the dentist" is a TIER-1 lookup instead of a `read_file` walk; `glob(pattern)` finds files by name/pattern (`*`/`?`/`**`) across the vault via `compileGlob`→anchored regexp, skipping dotfiles + `.kb`; an **absolute-within-vault** path passed as the pattern is relativized first (mirror `resolveVault`) so a weak model that types the full vault path still matches, and an absolute path outside the vault is rejected. Both search the **whole vault root** (not workDir) and return a non-`error:` empty-result notice on no matches (so they never trip the oscillation guard). Three **exec tools** are gated behind `includeExecTools` (agent builds+runs only — workDir ≠ vault root; excluded from chat for CLI-parity): `run_script` (`python3`) and `bash` both run sandboxed via Landlock (`buildScriptCommand`) with the agent's secrets in env (provider key stripped), reporting stdout+stderr on failure; `web_fetch(url)` is an HTTP(S) client in the **host process** (no sandbox — it adds no capability agents lack via run_script/bash) that returns text (HTML reduced to readable text via a stdlib stripper), **retries transient 429/5xx/network internally** so a blip never trips the loop-guard, and **cannot carry secrets** (authenticated calls use run_script/bash); `web_search(query)` is the discovery complement — a keyless DuckDuckGo HTML scrape (`ddgHTMLEndpoint`, browser `User-Agent`) returning numbered title/url/snippet entries (real URL decoded from the `uddg` redirect param via `parseDDGResults`/`decodeDDGRedirect`, HTML stripped), with the same transient-retry contract as `web_fetch` and a 200-but-no-results page yielding `"(no search results)"` (non-error) so the model falls back to `web_fetch` without tripping the guard. `ddgBaseURL` (empty→production) lets tests point at an httptest server. All results are byte-capped and never empty (an empty tool result breaks strict serializers). This closes the CLI-vs-API capability gap: a simple public fetch/find is now TIER 1 via `web_fetch`/`web_search`/`search_files`/`glob` (see the network-split + file-discovery tier guidance in `prompts.agentArchitectureGateBlock`), matching a CLI coder. **Caveat:** an arbitrary `bash` string is sandboxed but NOT AST-scanned the way an authored `tools/*.py` is at build.
-- **Turn budgets**: `maxAPITurns` (25) for runs/chat; `maxBuildAPITurns` (40) + `buildMaxTokens` (8192) for builds. A budget-exhausted loop gets one grace turn to wrap up: `[BLOCKED]` for a build (parsed by the designer), plain language for a run/chat.
+- **Turn budgets are spent by UNPRODUCTIVE turns only** (`internal/coder/turnbudget.go`):
+  base `maxAPITurns` (30) for runs/chat, `maxBuildAPITurns` (50) for builds, a
+  `maxHardTurns` (150) ceiling never extended by anything, and a
+  `maxUnproductiveStreak` (6) that stops a stuck model far sooner than any base
+  budget would. A turn is productive when it executed at least one tool call that
+  succeeded and was not a short-circuited repeat. The fixed cap this replaced could
+  not tell a runaway loop from legitimately long work — they are identical by turn
+  count, and an agent that genuinely needed more turns hit the cap, had its tools
+  stripped by the grace turn, and emitted a pending tool call as raw text.
+  **The 150 ceiling is not reachable in practice today**: nothing trims
+  `req.Messages`, so a 128k-context model exceeds its window around turn 45-50 and
+  the provider errors first. History compaction is the prerequisite.
+  Budget exhaustion no longer produces `ErrMaxTurns`: `graceTurnOnBudgetExhausted`
+  always returns a `Result`, falling back to `exhaustionSummary` when the model's
+  wrap-up is empty or fails the scaffolding check. The five `errors.Is(err,
+  coder.ErrMaxTurns)` branches (agentdesigner ×2, agentrunner, gateway,
+  skilldesigner) are therefore vestigial — kept rather than removed because deleting
+  them spans five packages for no behavioural gain, and each site's replacement
+  behaviour was reviewed: the gateway branch was already unreachable, and an
+  exhausted run now records `exit 0` with the summary delivered as its message.
+
+  **A truncated build must not read as a finished one.** Because the grace turn now
+  always returns a non-nil `Result`, an exhausted BUILD whose script had already
+  verified gets `thinProof=false`, so the weak-backend gate never fires and
+  `parseBlockedOutput` finds no marker in the deterministic summary — leaving the
+  confident "Here's what a test run produces…" with no sign the build ran out of turns.
+  `Result.StopReason` ("", `budget`, `unproductive`, `hard-ceiling`) carries that fact
+  out of the engine, and the designer's caveat keys off it rather than off the model
+  remembering to emit `[BLOCKED]`. A caveat that depends on a failing model to announce
+  its own failure is the same defect this whole change set exists to remove.
 - **Build-time script verification** (weak-model hardening, build only): the engine refuses to "finish" a build while the model authored a helper script that never once returned real output — `verifyFinishNudge` drives it to run/inspect/fix (bounded by `maxVerifyNudges`), or report the failure in plain language. Plus a loop-guard (`recentFails` ring + `consecutiveFails`) that short-circuits repeated/oscillating failing calls.
 - **Script-verification bridge → `coder.Result`.** The engine tracks per authored `tools/*.py` whether it RAN with real stdout (`hostToolSet.producedOutput`) and captures that stdout (`lastVerifiedOutput`, secret-redacted via `redactSecrets`). `runToolLoop` surfaces this ground truth on `Result.ScriptVerified` / `Result.ScriptOutput` (+ `Result.ScriptRan` = an authored script was executed at least once, for observability). The agent designer's `decideBuildOutcome(workDir, resultText, backendType, scriptVerified, scriptOutput)` **trusts the engine** instead of re-deriving verification from a `[TEST_OUTPUT]` marker the weak model often forgets: an engine-confirmed run advances to review showing the real captured output as the sample, and the weak-backend gate (`BackendToolCalling && hasAuthoredScript && thinProof && !scriptVerified`) only fires when the engine did NOT confirm a run — fixing the false "I couldn't confirm the helper it wrote actually runs." When that gate DOES fire, the `agentdesigner: build not presentable` slog carries `script_ran` to discriminate "ran but produced nothing" (broken/outbound-blocked) from "never ran". Fields are zero for CLI coders and runs/chat. Covered by `build_outcome_test.go` + `api_engine_test.go`.
 - **Design conversations vs one-off chat** (`Chat` split by `noTools`): `chatAPI` (text-only single completion, real alternating user/assistant turns so the model doesn't re-ask its opening question) vs `chatToolsAPI` (adds the host file tools, minus the exec tools `run_script`/`bash`/`web_fetch`, for on-demand KB read/write — parity with the CLI chat's file-only set).
