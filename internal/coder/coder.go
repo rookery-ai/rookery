@@ -63,6 +63,18 @@ type Result struct {
 	// UsedMCPServerIDs lists the MCP server IDs whose tools the API engine invoked during
 	// this call, the sibling of UsedConnectionIDs and consumed by the same auto-bind path.
 	UsedMCPServerIDs []string
+
+	// OfferedTools names the tools this run offered the model. Empty for a CLI coder.
+	// The runner uses it to recognise the model's own tool-call machinery leaking into
+	// a message, without needing to know any provider's markup dialect.
+	OfferedTools []string
+
+	// StopReason is why the tool loop ended: "" for a normal finish, otherwise
+	// "budget", "unproductive" or "hard-ceiling". Non-empty means the run was cut
+	// short, which the agent designer uses to caveat a build rather than presenting
+	// it as complete. It does NOT depend on the model remembering to emit a marker —
+	// that dependency is what let a truncated build read as a finished one.
+	StopReason string
 }
 
 // Usage is a best-effort token accounting for API coders (zero for CLI coders).

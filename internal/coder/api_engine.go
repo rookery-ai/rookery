@@ -165,6 +165,11 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 			res.UsedConnectionIDs = tools.usedConnectionIDs()
 			res.UsedMCPServerIDs = tools.usedMCPServerIDList()
 			res.UsedMCPServerIDs = tools.usedMCPServerIDList()
+			res.OfferedTools = offered
+			// A model that finished of its own accord was not cut short. Stated
+			// explicitly rather than left to the zero value: it is the half of the
+			// contract a reader grepping for StopReason needs to find.
+			res.StopReason = ""
 			return res, nil
 		}
 
@@ -204,6 +209,11 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 		res.ScriptRan = tools.authoredScriptRan()
 		res.UsedConnectionIDs = tools.usedConnectionIDs()
 		res.UsedMCPServerIDs = tools.usedMCPServerIDList()
+		res.OfferedTools = offered
+		// Why the loop ended, reported by the engine rather than inferred from whatever
+		// the model said last. Callers use it to caveat a truncated build; the grace turn
+		// is not a reliable narrator of its own exhaustion (see exhaustionSummary).
+		res.StopReason = stopReason
 	}
 	return res, err
 }
