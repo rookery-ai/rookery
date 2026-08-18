@@ -2,6 +2,7 @@ package agentdesigner
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -199,6 +200,23 @@ sys.exit(1)
 	// later, the nightly GC sweeps expired ones) — so it survives even a hard error.
 	if _, err := os.Stat(DraftAgentDir(agentsDir, workspaceID, "greeter")); err != nil {
 		t.Errorf("draft dir is kept by the keep-files policy even on a hard error; stat err = %v", err)
+	}
+
+	// sess.GenerationFailed is only an in-memory proxy — the actual reported bug was
+	// a DATABASE row that never got written: the draft's updated_at was found eleven
+	// seconds OLDER than the build's own start. Assert the persisted row directly, or
+	// a future change that sets the flag without calling saveDraft would leave this
+	// test green while reintroducing the bug in a lesser form.
+	draft, err := flow.db.GetAgentDraft(workspaceID)
+	if err != nil {
+		t.Fatalf("GetAgentDraft after a hard failure: %v (the failure must be persisted, not just held in memory)", err)
+	}
+	var histAfter []db.ChatMessage
+	if err := json.Unmarshal([]byte(draft.HistoryJSON), &histAfter); err != nil {
+		t.Fatalf("unmarshal persisted draft history: %v", err)
+	}
+	if len(histAfter) <= 2 {
+		t.Fatalf("persisted draft history did not grow past the initial 2 turns (got %d) — the failure was not written down", len(histAfter))
 	}
 }
 
