@@ -21,13 +21,18 @@ import {
 } from "./templates";
 import TemplateGallery from "./TemplateGallery";
 
+// Hoisted out of ENDPOINTS because DesignerEndpoints.state is OPTIONAL — the skill
+// designer has no such endpoint — so reading it back off the annotated object gives
+// `string | undefined` and will not typecheck as a query URL.
+const DESIGN_STATE_URL = "/api/v1/agents/design/state";
+
 const ENDPOINTS: DesignerEndpoints = {
   design: "/api/v1/agents/design",
   cancel: "/api/v1/agents/design/cancel",
   resume: "/api/v1/agents/design/resume",
   dismiss: "/api/v1/agents/design/dismiss",
   progress: "/api/v1/agents/design/progress",
-  state: "/api/v1/agents/design/state",
+  state: DESIGN_STATE_URL,
 };
 
 const LABELS: DesignerLabels = {
@@ -67,7 +72,7 @@ export default function AgentNewPage() {
 
   // The design session is a per-workspace SINGLETON: a build already running
   // in another tab is the same session this page would otherwise adopt.
-  // ENDPOINTS.state is the exact response DesignerSurface itself polls once
+  // DESIGN_STATE_URL is the exact response DesignerSurface itself polls once
   // mounted, but that's too late here — a fresh /agents/new load (no
   // ?resume=1, no local draft yet) reaches the name-gate form before
   // DesignerSurface ever mounts, so this page queries it independently to
@@ -77,7 +82,7 @@ export default function AgentNewPage() {
   // attempt to start something new.
   const designState = useQuery({
     queryKey: ["agent-design-state"],
-    queryFn: () => api.get<{ active: boolean; generating: boolean; name?: string }>(ENDPOINTS.state),
+    queryFn: () => api.get<{ active: boolean; generating: boolean; name?: string }>(DESIGN_STATE_URL),
     // Matches the 5s interval DesignerSurface itself polls at while a build
     // is running (see the "Third completion signal" effect in
     // DesignerSurface.tsx) — this page needs the same freshness for the same
