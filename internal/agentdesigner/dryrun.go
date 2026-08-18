@@ -2,6 +2,7 @@ package agentdesigner
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -132,9 +133,24 @@ func (f *Flow) dryRun(ctx context.Context, workspaceID, workDir, agentMD, backen
 		run = run.WithMCP(f.mcpCaller, boundMCP)
 	}
 
+	// dryRunPrompt deliberately passes NO VaultRoot, and that omission is the only thing
+	// keeping a rehearsal out of the user's live knowledge base: BuildCoderPrompt gates its
+	// <agent_workspace> block on that field, so without it the agent is never told where the
+	// vault is or that it may write there. dryRunSendProhibition covers sending to external
+	// services and says nothing about vault writes. Passing VaultRoot here to "make the
+	// rehearsal match a real run" would silently convert rehearsals of an unapproved agent
+	// into real notes and real memory edits — do not add it without building the containment
+	// that would make it safe.
 	res, err := run.Generate(ctx, workspaceID,
 		dryRunPrompt(agentMD, backendType, f.loadRuntimeContext(workspaceID), chatApps))
 	if err != nil || res == nil {
+		// One line, and a CLASS rather than the error text: a provider error can echo back
+		// the request that produced it, and that dataflow reaches the workspace's API key
+		// (see buildErrClass). Without this a systematically failing dry run is invisible to
+		// an operator — the review simply never shows real output and nothing says why. A
+		// nil error with a nil result classes as "", which is itself the useful signal.
+		slog.Warn("agentdesigner: dry run produced no sample",
+			"workspace_id", workspaceID, "err_class", buildErrClass(err))
 		return "", false
 	}
 	return dryRunOutput(res.Text)
