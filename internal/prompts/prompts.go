@@ -679,6 +679,12 @@ NOTIFICATION DECISION:
 SCHEDULE DECISION:
   Does this agent run automatically on a schedule?
   YES → First line of AGENT.md: # Suggested schedule: <5-part cron expression>
+
+  The cron expression is evaluated in the user's OWN LOCAL TIME. Write the hour the
+  user said, exactly as they said it. Do NOT convert to UTC — you are told the user's
+  timezone elsewhere in this prompt, and converting with it is the single most common
+  way this goes wrong: "every morning at 8" for a user in Skopje is "0 8 * * *", never
+  "0 6 * * *".
   NO  → First line of AGENT.md: # Suggested schedule: none
 
   An agent is started in exactly THREE ways: the scheduler firing its cron expression,
