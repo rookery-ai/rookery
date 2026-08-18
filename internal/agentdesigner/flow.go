@@ -1811,7 +1811,8 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// reconcileBlockedOutcome, which derives outcome.message from decision.message.
 	if decision.presentable && !isEdit {
 		notify("🧪 Running it once to show you real output…")
-		if sample, ok := f.dryRun(genCtx, workspaceID, workDir, decision.agentMD); ok {
+		if sample, ok := f.dryRun(genCtx, workspaceID, workDir, decision.agentMD,
+			backendType, implParams.ChatApps, notify); ok {
 			decision.message = reviewMessage(sample, true)
 		}
 	}
