@@ -1584,7 +1584,9 @@ Delivery does **not** depend solely on the coder emitting `[CHAT]` — models (e
    rescue a forgotten `[CHAT]` — forwarded DeepSeek's `｜DSML｜` markup to a real
    user's phone. The check is keyed on the tools the run OFFERED, never on a
    provider dialect: our own tool name inside a markup construct is decisive, with
-   markup density as a backstop. The trigger was our own grace turn, which strips
+   markup density as a backstop. The name must match as a WHOLE TOKEN — every API
+   run offers a tool literally named `glob`, so a bare substring test suppressed any
+   real message containing "global" or "globe" beside a bracketed aside. The trigger was our own grace turn, which strips
    `req.Tools` while the model still has work queued. That grace turn is now
    best-effort — its reply is used only if it passes this same check — and
    `exhaustionSummary` composes the real message from run facts instead.
@@ -1677,8 +1679,10 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
   `parseBlockedOutput` finds no marker in the deterministic summary — leaving the
   confident "Here's what a test run produces…" with no sign the build ran out of turns.
   `Result.StopReason` ("", `budget`, `unproductive`, `hard-ceiling`) carries that fact
-  out of the engine, and the designer's caveat keys off it rather than off the model
-  remembering to emit `[BLOCKED]`. A caveat that depends on a failing model to announce
+  out of the engine, and BOTH designers caveat off it rather than off the model
+  remembering to emit `[BLOCKED]` (`agentdesigner.caveatTruncatedBuild`, and its
+  two-arg mirror in `skilldesigner` — a skill build sets `buildphase.Generation`, so
+  it shares the budget and had the identical defect). A caveat that depends on a failing model to announce
   its own failure is the same defect this whole change set exists to remove.
 - **Build-time script verification** (weak-model hardening, build only): the engine refuses to "finish" a build while the model authored a helper script that never once returned real output — `verifyFinishNudge` drives it to run/inspect/fix (bounded by `maxVerifyNudges`), or report the failure in plain language. Plus a loop-guard (`recentFails` ring + `consecutiveFails`) that short-circuits repeated/oscillating failing calls.
 - **Script-verification bridge → `coder.Result`.** The engine tracks per authored `tools/*.py` whether it RAN with real stdout (`hostToolSet.producedOutput`) and captures that stdout (`lastVerifiedOutput`, secret-redacted via `redactSecrets`). `runToolLoop` surfaces this ground truth on `Result.ScriptVerified` / `Result.ScriptOutput` (+ `Result.ScriptRan` = an authored script was executed at least once, for observability). The agent designer's `decideBuildOutcome(workDir, resultText, backendType, scriptVerified, scriptOutput)` **trusts the engine** instead of re-deriving verification from a `[TEST_OUTPUT]` marker the weak model often forgets: an engine-confirmed run advances to review showing the real captured output as the sample, and the weak-backend gate (`BackendToolCalling && hasAuthoredScript && thinProof && !scriptVerified`) only fires when the engine did NOT confirm a run — fixing the false "I couldn't confirm the helper it wrote actually runs." When that gate DOES fire, the `agentdesigner: build not presentable` slog carries `script_ran` to discriminate "ran but produced nothing" (broken/outbound-blocked) from "never ran". Fields are zero for CLI coders and runs/chat. Covered by `build_outcome_test.go` + `api_engine_test.go`.
@@ -1687,7 +1691,7 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
 
 ### Usage-limit / rate-limit detection
 
-`coder.ErrUsageLimit` — CLI: non-zero exit with empty stdout+stderr; API: provider 402 (credits/quota exhausted, `ErrQuotaExhausted`). `coder.ErrRateLimited` — API transient 429 that didn't clear within the retry budget (distinct so the message says "try again in a moment", not "out of quota"). `coder.ErrAPIAuth` (bad/missing key) and `coder.ErrMaxTurns` (budget exhausted) are config/run errors, not usage limits. `agentrunner.FriendlyRunError` converts each to a user-facing message sent via `input.SendOutput` on every run failure. Also handled softly during generation and design conversation turns. API token usage is accumulated across the loop (`coder.Usage`) and persisted per run.
+`coder.ErrUsageLimit` — CLI: non-zero exit with empty stdout+stderr; API: provider 402 (credits/quota exhausted, `ErrQuotaExhausted`). `coder.ErrRateLimited` — API transient 429 that didn't clear within the retry budget (distinct so the message says "try again in a moment", not "out of quota"). `coder.ErrAPIAuth` (bad/missing key) is a config error, not a usage limit; `coder.ErrMaxTurns` is now vestigial — budget exhaustion returns a `Result` carrying `exhaustionSummary` rather than an error (see the turn-budget bullet above). `agentrunner.FriendlyRunError` converts each to a user-facing message sent via `input.SendOutput` on every run failure. Also handled softly during generation and design conversation turns. API token usage is accumulated across the loop (`coder.Usage`) and persisted per run.
 
 ### Guardrails
 

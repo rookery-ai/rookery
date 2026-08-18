@@ -55,8 +55,12 @@ func LooksLikeToolScaffolding(text string, offeredTools []string) bool {
 	// tool name and an unrelated bracketed aside is suppressed. That is the
 	// direction the design chose: a withheld message leaves the user a warning they
 	// can act on, a forwarded one costs their trust in the channel.
+	//
+	// Matched as a WHOLE TOKEN, not as a bare substring. Every API run offers a tool
+	// literally named `glob`, so a substring test suppressed any genuine message
+	// containing "global" or "globe" that also happened to carry a bracketed aside.
 	for _, name := range offeredTools {
-		if name != "" && strings.Contains(s, name) {
+		if name != "" && containsWholeToken(s, name) {
 			return true
 		}
 	}
@@ -68,4 +72,40 @@ func LooksLikeToolScaffolding(text string, offeredTools []string) bool {
 		markupLen += len(t)
 	}
 	return markupLen*2 >= len(s)
+}
+
+// containsWholeToken reports whether name occurs in s delimited by non-word bytes on
+// both sides — i.e. as a token rather than as a fragment of a longer word.
+//
+// Scanned by hand rather than with a `\b…\b` regexp because this runs on the delivery
+// path, once per offered tool: a per-call compile (or a cache keyed on a slice) buys
+// nothing over a byte comparison.
+//
+// A multi-byte rune counts as a boundary, which is what we want: the full-width bars
+// some providers wrap their markup in (｜web_search｜) must delimit a name, not hide it.
+func containsWholeToken(s, name string) bool {
+	for i := 0; i+len(name) <= len(s); {
+		j := strings.Index(s[i:], name)
+		if j < 0 {
+			return false
+		}
+		j += i
+		end := j + len(name)
+		beforeOK := j == 0 || !isWordByte(s[j-1])
+		afterOK := end == len(s) || !isWordByte(s[end])
+		if beforeOK && afterOK {
+			return true
+		}
+		i = j + 1
+	}
+	return false
+}
+
+// isWordByte reports whether b is an ASCII word byte ([0-9A-Za-z_]). Underscore counts,
+// so `web_search` is one token and `my_web_search` does not contain it.
+func isWordByte(b byte) bool {
+	return b == '_' ||
+		(b >= '0' && b <= '9') ||
+		(b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z')
 }

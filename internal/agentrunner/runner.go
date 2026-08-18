@@ -569,8 +569,13 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 			rctx.warnings = append(rctx.warnings, "no [CHAT] marker emitted; delivered prose as fallback")
 			finalOutput = prose
 		} else if strings.TrimSpace(rctx.lastRaw) != "" {
+			// Both causes, because this fires on ANY empty prose: the reply may have been
+			// tool-call scaffolding we refused to forward, or it may have been nothing but
+			// protocol markers from a state-only agent that forgot [SILENT]. Naming only
+			// the first asserted scaffolding that was never there, during triage, which is
+			// the one moment anyone reads this line.
 			rctx.warnings = append(rctx.warnings,
-				"suppressed a non-prose reply (tool-call scaffolding) rather than delivering it")
+				"no deliverable prose (markers only, or tool-call scaffolding) — nothing sent")
 		}
 	}
 
@@ -1055,10 +1060,6 @@ func isSilentMarker(line string) bool {
 	return false
 }
 
-// Strips: [STATE] blocks (multi-line and inline), [CALL: …] lines, [SILENT],
-// standalone [CHAT]/[/CHAT] marker lines, and [BLOCKED]…[/BLOCKED] blocks. The
-// remaining lines are joined, edge-trimmed, and have runs of 3+ blank lines
-// collapsed. Returns "" when nothing usable remains (only markers/whitespace).
 // deliverableProse is the floor under the prose fallback: the message to deliver, or
 // "" when there is nothing safe to send.
 //
@@ -1077,6 +1078,10 @@ func deliverableProse(raw string, offeredTools []string) string {
 	return prose
 }
 
+// Strips: [STATE] blocks (multi-line and inline), [CALL: …] lines, [SILENT],
+// standalone [CHAT]/[/CHAT] marker lines, and [BLOCKED]…[/BLOCKED] blocks. The
+// remaining lines are joined, edge-trimmed, and have runs of 3+ blank lines
+// collapsed. Returns "" when nothing usable remains (only markers/whitespace).
 func extractProseMessage(text string) string {
 	lines := strings.Split(text, "\n")
 	var kept []string

@@ -434,6 +434,71 @@ func TestAPIEngine_RunawayLoopStopsAtTheHardCeiling(t *testing.T) {
 	}
 }
 
+// The grace turn is garnish, not the account of record. We strip the tools field while
+// the model still has work queued, so a reply expressing that work as raw markup is
+// close to expected — and forwarding it is the incident this whole change set exists to
+// remove. A reply that violates the contract is discarded in favour of the engine's own
+// summary; one that satisfies it is used verbatim. Either way the truncation signal
+// survives on StopReason, which is what lets a caller caveat the result.
+//
+// The hard-ceiling shape is reused because it fixes the grace call's index exactly:
+// maxHardTurns loop calls (0…maxHardTurns-1), then one grace call.
+func TestAPIEngine_GraceTurnReplyMustSatisfyTheDeliveryContract(t *testing.T) {
+	// Names a tool this run offers, wrapped in a provider's markup — the shape that
+	// reached a user's phone.
+	const scaffolding = "<｜DSML｜tool_calls>\n<｜DSML｜invoke name=\"write_file\">\n" +
+		"<｜DSML｜parameter name=\"path\">notes/a.md</｜DSML｜parameter>\n" +
+		"</｜DSML｜invoke>\n</｜DSML｜tool_calls>"
+	// No markup token and no offered tool name: an ordinary message to a person.
+	const prose = "I saved the overnight numbers, but ran out of steps before I could compare them to last week."
+
+	run := func(t *testing.T, ws, graceReply string) *Result {
+		t.Helper()
+		dir := t.TempDir()
+		c := newTestCoder(t, dir)
+		mustMkdir(t, filepath.Join(dir, "vaults", ws))
+
+		testFake.calls = 0
+		testFake.script = func(call int, _ llm.Request) (*llm.Response, error) {
+			if call < maxHardTurns {
+				// Always productive, so only the hard ceiling can end this.
+				return &llm.Response{ToolCalls: []llm.ToolCall{
+					toolCall("write_file", `{"path":"x.txt","content":"x"}`),
+				}}, nil
+			}
+			return &llm.Response{Content: graceReply}, nil
+		}
+		res, err := c.Generate(context.Background(), ws, "keep going")
+		if err != nil {
+			t.Fatalf("Generate: %v, want exhaustion to end the run gracefully", err)
+		}
+		if testFake.calls != maxHardTurns+1 {
+			t.Fatalf("provider calls = %d, want %d (ceiling + exactly one grace call)", testFake.calls, maxHardTurns+1)
+		}
+		if res.StopReason != "hard-ceiling" {
+			t.Errorf("StopReason = %q, want %q — the truncation signal a caller caveats on", res.StopReason, "hard-ceiling")
+		}
+		return res
+	}
+
+	t.Run("scaffolding is discarded for the engine's own summary", func(t *testing.T) {
+		res := run(t, "ws-grace-scaffold", scaffolding)
+		if strings.Contains(res.Text, "DSML") || strings.Contains(res.Text, "invoke") {
+			t.Fatalf("tool-call scaffolding was delivered as the result:\n%s", res.Text)
+		}
+		if !strings.Contains(res.Text, "hard limit") {
+			t.Errorf("result = %q, want the deterministic exhaustion summary", res.Text)
+		}
+	})
+
+	t.Run("ordinary prose is used verbatim", func(t *testing.T) {
+		res := run(t, "ws-grace-prose", prose)
+		if res.Text != prose {
+			t.Errorf("result = %q, want the model's own wrap-up %q", res.Text, prose)
+		}
+	})
+}
+
 func TestAPIEngine_VaultPathEscapeRejected(t *testing.T) {
 	dir := t.TempDir()
 	ws := "ws5"
