@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ArrowRight } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   DesignerSurface,
@@ -10,6 +11,7 @@ import { DesignerIntro } from "@/components/designer/DesignerIntro";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { api } from "@/lib/api";
 import { useAgents } from "@/lib/agents";
 import { cn } from "@/lib/utils";
 import {
@@ -62,6 +64,23 @@ export default function AgentNewPage() {
   const resumeParam = params.get("resume") === "1";
   const { data, isLoading } = useAgents();
   const draft = data?.draft ?? null;
+
+  // The design session is a per-workspace SINGLETON: a build already running
+  // in another tab is the same session this page would otherwise adopt.
+  // ENDPOINTS.state is the exact response DesignerSurface itself polls once
+  // mounted, but that's too late here — a fresh /agents/new load (no
+  // ?resume=1, no local draft yet) reaches the name-gate form before
+  // DesignerSurface ever mounts, so this page queries it independently to
+  // decide whether to offer that form at all. `!resumeParam` lets an actual
+  // resume (the "Open it" link below, or a draft's own Resume action)
+  // through untouched — this notice exists only to stop a SECOND, unaware
+  // attempt to start something new.
+  const designState = useQuery({
+    queryKey: ["agent-design-state"],
+    queryFn: () => api.get<{ active: boolean; generating: boolean; name?: string }>(ENDPOINTS.state),
+  });
+  const buildInProgress = !resumeParam && designState.data?.generating === true;
+  const buildingName = designState.data?.name;
 
   const [name, setName] = useState("");
   const [nameConfirmed, setNameConfirmed] = useState(false);
@@ -133,6 +152,18 @@ export default function AgentNewPage() {
 
   if (waitingForDraft) {
     return <div className="p-8 text-muted-2">Loading…</div>;
+  }
+
+  if (buildInProgress) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+        <p className="text-sm text-muted-2">
+          A build is already building{buildingName ? ` for “${buildingName}”` : ""}. Only one
+          can run at a time.
+        </p>
+        <Button onClick={() => navigate("/agents/new?resume=1")}>Open it</Button>
+      </div>
+    );
   }
 
   if (showNameGate) {
