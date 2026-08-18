@@ -78,6 +78,13 @@ export default function AgentNewPage() {
   const designState = useQuery({
     queryKey: ["agent-design-state"],
     queryFn: () => api.get<{ active: boolean; generating: boolean; name?: string }>(ENDPOINTS.state),
+    // Matches the 5s interval DesignerSurface itself polls at while a build
+    // is running (see the "Third completion signal" effect in
+    // DesignerSurface.tsx) — this page needs the same freshness for the same
+    // reason: without it, the notice below never clears once the other
+    // tab's build finishes (refetchOnWindowFocus is off app-wide), and the
+    // user is stuck reading stale state until they navigate away or reload.
+    refetchInterval: 5000,
   });
   const buildInProgress = !resumeParam && designState.data?.generating === true;
   const buildingName = designState.data?.name;
@@ -150,17 +157,24 @@ export default function AgentNewPage() {
     }
   }
 
-  if (waitingForDraft) {
+  // designState's FIRST fetch is folded in here too: without it, a fresh
+  // /agents/new load renders the name-gate form for one round trip before
+  // designState resolves and (if a build is running) swaps in the notice
+  // below — a flash of exactly the form this page exists to stop showing.
+  // isLoading is true only for that first fetch, never for the background
+  // refetchInterval ticks above, so the recurring poll doesn't re-blank the
+  // page.
+  if (waitingForDraft || designState.isLoading) {
     return <div className="p-8 text-muted-2">Loading…</div>;
   }
 
   if (buildInProgress) {
+    const notice = buildingName
+      ? `“${buildingName}” is already building in another tab. Only one can run at a time.`
+      : "An agent is already building in another tab. Only one can run at a time.";
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-        <p className="text-sm text-muted-2">
-          A build is already building{buildingName ? ` for “${buildingName}”` : ""}. Only one
-          can run at a time.
-        </p>
+        <p className="text-sm text-muted-2">{notice}</p>
         <Button onClick={() => navigate("/agents/new?resume=1")}>Open it</Button>
       </div>
     );
