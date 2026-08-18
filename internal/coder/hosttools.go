@@ -128,6 +128,15 @@ type hostToolSet struct {
 	recentFails      []failedCall
 	consecutiveFails int
 
+	// Per-run call statistics. productiveCalls drives the turn budget (turnbudget.go):
+	// a turn that produced no successful, non-repeated call did not advance the run
+	// and must spend budget. The rest feed the deterministic exhaustion summary,
+	// which never asks a failing model to narrate its own failure.
+	productiveCalls int
+	totalCalls      int
+	failedCalls     int
+	succeededTools  []string
+
 	// Self-managed OAuth connector tools. When an agent is bound to service
 	// connections (agent_connections), each connection's curated actions are offered
 	// as native typed tools (connectorTools) and dispatched through connectors.Execute.
@@ -262,6 +271,7 @@ func (h *hostToolSet) executeOrNudge(ctx context.Context, call llm.ToolCall) str
 	result := h.execute(ctx, call)
 	isErr := strings.HasPrefix(result, "error:")
 	h.trackScriptProgress(call, result, isErr)
+	h.noteCall(call.Name, isErr)
 	if isErr {
 		h.recordFailure(call.Name, argsKey)
 		h.consecutiveFails++
@@ -1623,4 +1633,39 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	return os.Rename(tmpName, path)
+}
+
+// callStats is a snapshot of what a run's tool calls actually did.
+type callStats struct {
+	Productive     int
+	Total          int
+	Failed         int
+	SucceededTools []string
+}
+
+// noteCall records one EXECUTED tool call. A repeat that executeOrNudge
+// short-circuits never reaches here on purpose: it ran no tool, so counting it as
+// either progress or a tool failure would misreport the run.
+func (h *hostToolSet) noteCall(name string, failed bool) {
+	h.totalCalls++
+	if failed {
+		h.failedCalls++
+		return
+	}
+	h.productiveCalls++
+	for _, seen := range h.succeededTools {
+		if seen == name {
+			return
+		}
+	}
+	h.succeededTools = append(h.succeededTools, name)
+}
+
+func (h *hostToolSet) callStats() callStats {
+	return callStats{
+		Productive:     h.productiveCalls,
+		Total:          h.totalCalls,
+		Failed:         h.failedCalls,
+		SucceededTools: h.succeededTools,
+	}
 }

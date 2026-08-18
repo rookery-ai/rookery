@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,17 +17,30 @@ import (
 	"github.com/rookery-ai/rookery/internal/prompts"
 )
 
-// maxAPITurns bounds the tool-calling loop so a misbehaving model can't loop
-// forever requesting tool executions. Surfaced as ErrMaxTurns (a normal run error,
-// not a usage limit). Agent runs and one-off chat use this.
-const maxAPITurns = 25
+// maxAPITurns is the BASE turn budget for agent runs and one-off chat. It is spent
+// only by turns that achieved nothing (see turnbudget.go) — a run making real
+// progress is not stopped by it. Exhausting it does NOT produce an error: the loop
+// ends with an engine-composed account of the run (see exhaustionSummary).
+const maxAPITurns = 30
 
-// maxBuildAPITurns is the (larger) bound during an agent BUILD. A build's budget is
-// shared between the actual work, up to maxVerifyNudges finish-verification nudges, and
-// the grace turn — 25 was routinely insufficient for a multi-action agent (work
-// ~11 + drift + up to 5 verify nudges), so a weak model exhausted the budget before
-// finishing. Builds get more headroom; runs/chat keep the tighter bound.
-const maxBuildAPITurns = 40
+// maxBuildAPITurns is the base budget during an agent BUILD, which shares its turns
+// between the actual work, up to maxVerifyNudges finish-verification nudges, and the
+// grace turn. It must stay larger than maxAPITurns for that reason.
+const maxBuildAPITurns = 50
+
+// maxHardTurns is runaway protection and is NEVER extended, however productive the
+// loop claims to be.
+//
+// It is not reachable in practice on most models today: nothing trims req.Messages,
+// so a 128k-context model exceeds its window somewhere around turn 45-50 and the
+// provider errors first. History compaction is the prerequisite for this ceiling to
+// mean what it says; see the design doc.
+const maxHardTurns = 150
+
+// maxUnproductiveStreak stops a model that is going nowhere long before the base
+// budget would. Six consecutive turns with no successful tool call is not a slow
+// run, it is a stuck one.
+const maxUnproductiveStreak = 6
 
 // buildMaxTokens raises the completion-token cap during a build so a large single
 // write_file (a full AGENT.md plus a script in one call) is not truncated
@@ -89,21 +104,29 @@ func (c *Coder) runAPI(ctx context.Context, workspaceID, prompt string) (*Result
 // runToolLoop drives the Complete → execute host tools → feed results back →
 // Complete loop shared by runAPI (single user kickoff) and chatToolsAPI (threaded
 // chat history). It terminates when the model emits a final answer with no tool
-// calls, when the turn budget is exhausted (ErrMaxTurns), or when the context
-// deadline passes. A model that rejects the tools field degrades to a single
-// no-tool reasoning turn rather than failing the call.
+// calls, when the turn budget is exhausted (base budget, unproductive streak or
+// hard ceiling — see turnbudget.go), or when the context deadline passes. An
+// exhausted budget is not an error: it degrades to a best-effort grace turn over
+// an engine-composed summary of what the run actually did. A model that rejects
+// the tools field degrades to a single no-tool reasoning turn rather than failing
+// the call.
 func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostToolSet, req llm.Request, start time.Time) (*Result, error) {
 	var total llm.Usage
 	toolsDisabled := false
-	// A build gets more headroom (work + verify nudges + grace); runs/chat keep the
-	// tighter bound.
-	turnBudget := maxAPITurns
-	if tools.verifyBuild {
-		turnBudget = maxBuildAPITurns
-	}
-	for turn := 0; turn < turnBudget; turn++ {
+	budget := newTurnBudget(tools.verifyBuild)
+	offered := toolNames(req.Tools)
+	var stopReason string
+	for {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("%w after %s", ErrTimeout, c.timeout)
+		}
+		// Counted at the top so paths that `continue` without running a tool still
+		// consume the hard ceiling — the loop is bounded by construction, not by the
+		// two `continue` sites happening to have counters of their own.
+		if stop, reason := budget.iterate(); stop {
+			stopReason = reason
+			slog.Info("coder: tool loop stopped", "reason", reason, "turns", budget.turns)
+			break
 		}
 		resp, err := prov.Complete(ctx, req)
 		if err != nil {
@@ -142,6 +165,11 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 			res.UsedConnectionIDs = tools.usedConnectionIDs()
 			res.UsedMCPServerIDs = tools.usedMCPServerIDList()
 			res.UsedMCPServerIDs = tools.usedMCPServerIDList()
+			res.OfferedTools = offered
+			// A model that finished of its own accord was not cut short. Stated
+			// explicitly rather than left to the zero value: it is the half of the
+			// contract a reader grepping for StopReason needs to find.
+			res.StopReason = ""
 			return res, nil
 		}
 
@@ -152,6 +180,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 			Content:   resp.Content,
 			ToolCalls: resp.ToolCalls,
 		})
+		productiveBefore := tools.callStats().Productive
 		for _, tc := range resp.ToolCalls {
 			if c.progress != nil {
 				c.progress(toolMilestone(tc, tools.vaultRootPath(), tools.homeDirPath()))
@@ -164,8 +193,14 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 				Content:    result,
 			})
 		}
+		// A turn counts as progress only if some tool actually succeeded on it.
+		if stop, reason := budget.next(tools.callStats().Productive > productiveBefore); stop {
+			stopReason = reason
+			slog.Info("coder: tool loop stopped", "reason", reason, "turns", budget.turns)
+			break
+		}
 	}
-	res, err := c.graceTurnOnBudgetExhausted(ctx, prov, req, total, start, tools.verifyBuild)
+	res, err := c.graceTurnOnBudgetExhausted(ctx, prov, req, total, start, tools.verifyBuild, tools.callStats(), offered, stopReason)
 	if res != nil {
 		// A build whose script the engine already ran must surface that ground truth even
 		// when it exhausted its turn budget — the review path uses it as the sample.
@@ -174,6 +209,11 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 		res.ScriptRan = tools.authoredScriptRan()
 		res.UsedConnectionIDs = tools.usedConnectionIDs()
 		res.UsedMCPServerIDs = tools.usedMCPServerIDList()
+		res.OfferedTools = offered
+		// Why the loop ended, reported by the engine rather than inferred from whatever
+		// the model said last. Callers use it to caveat a truncated build; the grace turn
+		// is not a reliable narrator of its own exhaustion (see exhaustionSummary).
+		res.StopReason = stopReason
 	}
 	return res, err
 }
@@ -199,6 +239,49 @@ const graceTurnWrapUpNudge = "You have used all available tool-call turns. " +
 	"finish, and suggest a next step if there is one. Do not emit any special markers or " +
 	"technical error text — just a normal, helpful message."
 
+// exhaustionSummary composes the user-facing account of a run that ran out of steps,
+// from facts the engine already holds.
+//
+// The alternative — asking the model to explain its own failure and trusting the
+// reply — is what delivered raw tool-call markup to a user. A model that has just
+// failed to finish is the last thing that should narrate the outcome, so the grace
+// turn became optional garnish and this became the source of truth.
+func exhaustionSummary(stats callStats, reason string) string {
+	var b strings.Builder
+	switch reason {
+	case "unproductive":
+		b.WriteString("⚠️ Stopped early: several tool calls in a row achieved nothing.")
+	case "hard-ceiling":
+		b.WriteString("⚠️ Stopped: the run hit its hard limit on tool calls.")
+	default:
+		b.WriteString("⚠️ Ran out of steps before finishing.")
+	}
+	if stats.Productive > 0 {
+		b.WriteString(" Completed: ")
+		b.WriteString(strconv.Itoa(stats.Productive))
+		b.WriteString(" successful tool calls (")
+		b.WriteString(strings.Join(stats.SucceededTools, ", "))
+		b.WriteString(").")
+	}
+	if stats.Failed > 0 {
+		b.WriteString(" ")
+		b.WriteString(strconv.Itoa(stats.Failed))
+		b.WriteString(" failed.")
+	}
+	b.WriteString(" See the run log for detail.")
+	return b.String()
+}
+
+// toolNames lists the tools offered on this run, for the scaffolding predicate. It
+// must be evaluated BEFORE graceTurnOnBudgetExhausted, which nils req.Tools.
+func toolNames(tools []llm.Tool) []string {
+	out := make([]string, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, t.Name)
+	}
+	return out
+}
+
 // graceTurnOnBudgetExhausted gives the model exactly one more turn to wrap up gracefully
 // instead of failing opaquely when runToolLoop exhausts maxAPITurns. It strips Tools from
 // the request (req.Tools = nil forces a text-only reply — the model literally cannot
@@ -207,10 +290,13 @@ const graceTurnWrapUpNudge = "You have used all available tool-call turns. " +
 // by agentdesigner.parseBlockedOutput); for a run/chat it uses graceTurnWrapUpNudge (plain
 // language, no [BLOCKED] marker) so the build-only convention never leaks into a chat/run
 // reply. Either way a turn-budget exhaustion degrades to a useful message instead of the
-// opaque bare ErrMaxTurns a caller previously had no way to present usefully. Falls
-// back to bare ErrMaxTurns only if this grace call itself fails or returns no text — it
-// must not be able to loop further itself (exactly one extra Complete call, ever).
-func (c *Coder) graceTurnOnBudgetExhausted(ctx context.Context, prov llm.Provider, req llm.Request, total llm.Usage, start time.Time, isBuild bool) (*Result, error) {
+// opaque bare ErrMaxTurns a caller previously had no way to present usefully. The reply is
+// now GARNISH, not the account of record: exhaustionSummary is composed from facts the
+// engine already holds, and is used whenever the grace call fails, returns nothing, or
+// returns tool scaffolding. It must not be able to loop further itself (exactly one extra
+// Complete call, ever).
+func (c *Coder) graceTurnOnBudgetExhausted(ctx context.Context, prov llm.Provider, req llm.Request, total llm.Usage, start time.Time, isBuild bool, stats callStats, offeredTools []string, reason string) (*Result, error) {
+	fallback := exhaustionSummary(stats, reason)
 	req.Tools = nil
 	nudge := graceTurnWrapUpNudge
 	if isBuild {
@@ -219,12 +305,15 @@ func (c *Coder) graceTurnOnBudgetExhausted(ctx context.Context, prov llm.Provide
 	req.Messages = append(req.Messages, llm.Message{Role: "user", Content: nudge})
 	resp, err := prov.Complete(ctx, req)
 	if err != nil {
-		return nil, ErrMaxTurns
+		return &Result{Text: fallback, Duration: time.Since(start), Usage: total}, nil
 	}
 	total = addUsage(total, resp.Usage)
 	text := strings.TrimSpace(resp.Content)
-	if text == "" {
-		return nil, ErrMaxTurns
+	// Best-effort garnish. We removed the model's structured tool channel a moment
+	// ago while it still had work queued, so a reply expressing that work as raw
+	// markup is close to expected — and must never be forwarded.
+	if text == "" || LooksLikeToolScaffolding(text, offeredTools) {
+		text = fallback
 	}
 	return &Result{Text: text, Duration: time.Since(start), Usage: total}, nil
 }

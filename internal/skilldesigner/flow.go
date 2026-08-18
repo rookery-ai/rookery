@@ -657,10 +657,37 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	f.saveDraft(sess)
 	f.mu.Unlock()
 
-	return fmt.Sprintf(
+	// A build the engine cut short must not be PRESENTED as a finished one — the same
+	// defect fixed for the agent designer (agentdesigner.caveatTruncatedBuild). A skill
+	// build sets buildphase.Generation, so it shares the turn budget; exhaustion no
+	// longer returns ErrMaxTurns, and the deterministic exhaustionSummary carries no
+	// [BLOCKED], so nothing below this point would notice. The reason comes from the
+	// engine (Result.StopReason), never from the model remembering to emit a marker.
+	return caveatTruncatedBuild(fmt.Sprintf(
 		"Here's the generated skill and how it tested:\n\n---\n%s\n---\n\n🔒 Vetting report:\n%s\n\nDoes this look right? Type **approve** to save the skill, or tell me what to change.",
 		testOut, report,
-	), false, "", nil
+	), result.StopReason), false, "", nil
+}
+
+// truncatedBuildCaveat prefixes a skill review message when the engine reports the tool
+// loop ran out of steps. Short and plain on purpose: the build still advances to review
+// (it may well be complete), the user is simply told not to read it as confirmed.
+// Deliberately mirrors agentdesigner's wording — the two designers present the same
+// event, and a user who sees both should not have to decide whether they differ.
+const truncatedBuildCaveat = "⚠️ Heads up — this build ran out of steps before finishing, so parts of it may be incomplete. Give it a look before saving.\n\n"
+
+// caveatTruncatedBuild returns the message to show for a skill build that is advancing to
+// review, caveated when the engine cut the tool loop short. An empty stopReason is a
+// normal finish and passes through untouched.
+//
+// Two args, not agentdesigner's three: a [BLOCKED] reply already returns early above
+// (parseBlockedOutput), so this is never reached with one and a `blocked` parameter would
+// be dead code here.
+func caveatTruncatedBuild(message, stopReason string) string {
+	if strings.TrimSpace(stopReason) == "" {
+		return message
+	}
+	return truncatedBuildCaveat + message
 }
 
 // runTests smoke-runs each checkable script (py_compile for .py, bash -n for .sh) and

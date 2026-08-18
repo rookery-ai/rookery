@@ -281,6 +281,7 @@ type coderRunContext struct {
 	warnings       []string
 	rawChunks      []string    // raw coder output per turn, joined into the run note
 	lastRaw        string      // raw text of the most recent turn (fallback prose source)
+	offeredTools   []string    // tools the most recent turn offered the model (API engine; empty for CLI)
 	silentSignaled bool        // any turn emitted [SILENT] — run is intentionally quiet
 	usage          coder.Usage // accumulated token usage (API coder); zero for CLI coders
 }
@@ -564,9 +565,17 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	streamedLive := finalOutput != "" // per-turn OnProgress already streamed [CHAT]
 
 	if finalOutput == "" && !rctx.silentSignaled {
-		if prose := extractProseMessage(rctx.lastRaw); prose != "" {
+		if prose := deliverableProse(rctx.lastRaw, rctx.offeredTools); prose != "" {
 			rctx.warnings = append(rctx.warnings, "no [CHAT] marker emitted; delivered prose as fallback")
 			finalOutput = prose
+		} else if strings.TrimSpace(rctx.lastRaw) != "" {
+			// Both causes, because this fires on ANY empty prose: the reply may have been
+			// tool-call scaffolding we refused to forward, or it may have been nothing but
+			// protocol markers from a state-only agent that forgot [SILENT]. Naming only
+			// the first asserted scaffolding that was never there, during triage, which is
+			// the one moment anyone reads this line.
+			rctx.warnings = append(rctx.warnings,
+				"no deliverable prose (markers only, or tool-call scaffolding) — nothing sent")
 		}
 	}
 
@@ -687,6 +696,7 @@ func (r *Runner) runCoderTurns(
 			rctx.silentSignaled = true
 		}
 		rctx.lastRaw = result.Text
+		rctx.offeredTools = result.OfferedTools
 
 		// Stream this turn's chat lines live (SSE) while the run is still going.
 		// Final durable delivery (Telegram/history) still happens once at the end.
@@ -1048,6 +1058,24 @@ func isSilentMarker(line string) bool {
 		return true
 	}
 	return false
+}
+
+// deliverableProse is the floor under the prose fallback: the message to deliver, or
+// "" when there is nothing safe to send.
+//
+// The fallback's job is to rescue a run whose model forgot the [CHAT] marker. It is
+// NOT to forward whatever the model happened to emit — a distinction that cost a real
+// user, who received DeepSeek's raw tool-call markup as a notification. Keyed on the
+// tools the run itself offered, so it needs no knowledge of any provider's dialect.
+func deliverableProse(raw string, offeredTools []string) string {
+	prose := extractProseMessage(raw)
+	if prose == "" {
+		return ""
+	}
+	if coder.LooksLikeToolScaffolding(prose, offeredTools) {
+		return ""
+	}
+	return prose
 }
 
 // Strips: [STATE] blocks (multi-line and inline), [CALL: …] lines, [SILENT],

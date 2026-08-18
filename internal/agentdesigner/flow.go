@@ -1772,12 +1772,14 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	resultText := ""
 	scriptVerified := false
 	scriptOutput := ""
+	stopReason := ""
 	usedConns := []string(nil)
 	usedMCPIDs := []string(nil)
 	if result != nil {
 		resultText = result.Text
 		scriptVerified = result.ScriptVerified
 		scriptOutput = result.ScriptOutput
+		stopReason = result.StopReason
 		usedConns = result.UsedConnectionIDs
 		usedMCPIDs = result.UsedMCPServerIDs
 	}
@@ -1890,6 +1892,15 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		return outcome.message, false, "", nil
 	}
 
+	// A build the engine cut short must not be PRESENTED as a finished one. The reason
+	// comes from the engine (Result.StopReason), never from the model remembering to
+	// emit a marker — that dependency is precisely what let a truncated build read as
+	// complete once the grace turn started always returning a Result instead of
+	// ErrMaxTurns. It is applied HERE, above the History append below, so the returned
+	// message and the durable transcript copy are the same string (a divergence of that
+	// exact shape is what the roleNote fix exists to prevent).
+	outcome.message = caveatTruncatedBuild(outcome.message, stopReason, blocked)
+
 	// Content is captured now — discard the workspace (staging dir for edits; create
 	// mode keeps its pending dir on disk until finalize/iterate).
 	cleanupOnSuccess()
@@ -1927,6 +1938,28 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	closeProgress()
 
 	return outcome.message, false, "", nil
+}
+
+// truncatedBuildCaveat prefixes a build review message when the engine reports the tool
+// loop ran out of steps. Short and plain on purpose: the build still advances to review
+// (it may well be complete), the user is simply told not to read it as confirmed.
+const truncatedBuildCaveat = "⚠️ Heads up — this build ran out of steps before finishing, so parts of it may be incomplete. Give it a look before saving.\n\n"
+
+// caveatTruncatedBuild returns the message to show for a build that is advancing to
+// review, caveated when the engine cut the tool loop short.
+//
+// Two pass-throughs, both deliberate: an empty stopReason is a normal finish, and a
+// non-empty [BLOCKED] reply already carries the model's own account of what it could
+// not do (reconcileBlockedOutcome prepends its own heads-up), so it passes through
+// untouched rather than collecting a second warning about the same event.
+func caveatTruncatedBuild(message, stopReason, blocked string) string {
+	if strings.TrimSpace(stopReason) == "" {
+		return message
+	}
+	if strings.TrimSpace(blocked) != "" {
+		return message
+	}
+	return truncatedBuildCaveat + message
 }
 
 // reconciledOutcome is the result of folding a [BLOCKED] marker into a buildDecision.
