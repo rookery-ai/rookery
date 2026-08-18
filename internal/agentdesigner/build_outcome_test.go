@@ -199,3 +199,32 @@ func TestDecideBuildOutcome(t *testing.T) {
 		}
 	})
 }
+
+// TestDecideBuildOutcomeNeverClaimsATestRunItNeverMade pins the honesty fix AT ITS CALL
+// SITE. buildoutcome_message_test.go pins reviewMessage itself, but nothing pinned the
+// ARGUMENT: flipping decideBuildOutcome's reviewMessage(testOut, !thinProof) to
+// reviewMessage(testOut, true) left the entire package green. That is the branch's headline
+// defect — the model's own prose presented as "here's what a test run produces" — with no
+// test that would catch it coming back.
+//
+// The assertion above ("thin proof advances to review") is CONDITIONAL on the message
+// carrying a particular phrase, which is exactly how the mutation slipped past it, so this
+// one is unconditional: given a build with no executed evidence, the message must say
+// nothing ran and must not claim a test run.
+func TestDecideBuildOutcomeNeverClaimsATestRunItNeverMade(t *testing.T) {
+	dir := writeBuild(t, "# Suggested schedule: none\n# Skills: none\nGreet the user each run.", nil)
+	// No [TEST_OUTPUT] marker and no verified script: the sample can only be the coder's
+	// own prose, which is the TIER 1 (no script) case and therefore the common one.
+	d := decideBuildOutcome(dir, "[CHAT] I will greet you every morning.", prompts.BackendFullCoder, false, "")
+
+	if !d.presentable || !d.thinProof {
+		t.Fatalf("this fixture must reach the thin-proof path; got presentable=%v thin=%v", d.presentable, d.thinProof)
+	}
+	if strings.Contains(d.message, "test run produces") {
+		t.Errorf("prose was presented as a test run — nothing executed; got %q", d.message)
+	}
+	lower := strings.ToLower(d.message)
+	if !strings.Contains(lower, "didn't run") && !strings.Contains(lower, "did not run") {
+		t.Errorf("a build with no executed evidence must say plainly that it did not run; got %q", d.message)
+	}
+}
