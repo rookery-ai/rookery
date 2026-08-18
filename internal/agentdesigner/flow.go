@@ -1531,7 +1531,8 @@ func hardFailureMessage(err error) string {
 	switch buildErrClass(err) {
 	case "auth":
 		return "⚠️ The build stopped — the coder's API key was rejected, so nothing was " +
-			"saved. Trying again won't help until the key is fixed in coder settings."
+			"saved. Trying again won't help until the key is fixed in coder settings — " +
+			"once it is, type **approve** to try again."
 	case "local_coder_disabled":
 		return "⚠️ The build stopped — this server runs without a local coder, so the " +
 			"workspace's coder setting can't be used and nothing was saved. Switch the " +
@@ -1973,8 +1974,17 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		notify("🧪 Running it once to show you real output…")
 		if sample, ok := f.dryRun(genCtx, workspaceID, workDir, decision.agentMD,
 			backendType, implParams.ChatApps, notify); ok {
-			outcome.message = strings.Replace(outcome.message, decision.message,
+			swapped := strings.Replace(outcome.message, decision.message,
 				reviewMessage(sample, true), 1)
+			if swapped == outcome.message {
+				// Both advancing branches of reconcileBlockedOutcome embed decision.message
+				// verbatim today, so this cannot fire — but if one ever stops, the rehearsal
+				// is paid for and thrown away silently, which is the exact defect moving this
+				// call below the block gate removed. Say so rather than discovering it twice.
+				slog.Warn("agentdesigner: dry-run sample discarded — review message not found",
+					"build_id", buildID, "workspace_id", workspaceID)
+			}
+			outcome.message = swapped
 		}
 	}
 

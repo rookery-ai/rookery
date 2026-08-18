@@ -86,3 +86,37 @@ func TestHardFailureMessageKeepsTheProviderDropWordingForAnUnknownError(t *testi
 		t.Errorf("the generic message must still offer the retry: %q", got)
 	}
 }
+
+// Every branch of hardFailureMessage must tell the user what to do next, not only the
+// default one. TestHardFailureMessageIsActionableAndLeaksNothing lands on the generic
+// case, so the two diagnosing branches - added later, in one commit - had nothing
+// asserting they were actionable at all. They were not equally so: the auth case
+// originally ended at "until the key is fixed in coder settings" and named no way to
+// resume, while its sibling written beside it ended "type approve to try again".
+func TestEveryHardFailureBranchNamesAWayForward(t *testing.T) {
+	secret := "sk-workspace-secret-key"
+	leak := "request={\"key\":\"" + secret + "\"}"
+
+	for _, c := range []struct {
+		name string
+		err  error
+	}{
+		{"auth", fmt.Errorf("coder api error: 401 %s: %w", leak, coder.ErrAPIAuth)},
+		{"local_coder_disabled", fmt.Errorf("coder: %s: %w", leak, coder.ErrLocalCoderDisabled)},
+		{"other", errors.New("coder api error: 502 " + leak)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			got := hardFailureMessage(c.err)
+
+			if strings.Contains(got, secret) {
+				t.Fatalf("the provider error text leaked into a user-facing message: %q", got)
+			}
+			// "approve" is the word the designer own approval trigger accepts, so a
+			// message that names a fix without naming it leaves the user with a repaired
+			// key and no idea how to resume.
+			if !strings.Contains(strings.ToLower(got), "approve") {
+				t.Errorf("%s: the message never tells the user how to resume: %q", c.name, got)
+			}
+		})
+	}
+}
