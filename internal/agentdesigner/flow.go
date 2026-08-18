@@ -1510,6 +1510,19 @@ func (f *Flow) startGeneration(workspaceID string) (string, bool, string, error)
 	return buildingMessage, false, "", nil
 }
 
+// hardFailureMessage is the user-facing account of a build that died on an
+// unrecognised error — in practice a provider dropping the connection.
+//
+// It deliberately does NOT include err.Error(). A provider error can echo back the
+// request that produced it, and that dataflow was traced to the workspace's API key
+// (go/clear-text-logging), which is why buildErrClass reports a class rather than the
+// text. The same reasoning applies with more force to something shown to a user.
+func hardFailureMessage(err error) string {
+	return "⚠️ The build stopped unexpectedly — the model provider dropped the " +
+		"connection. Nothing was saved. Type **approve** to try again, or tell me what " +
+		"to change first."
+}
+
 // runGeneration creates agent files by giving Claude Code full tool access to
 // write files, run them, fix errors, and verify output — all in one pass.
 // Only after the coder confirms things work does the user see the results.
@@ -1812,8 +1825,16 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		}
 		// Unknown hard error with nothing salvageable on disk — the workspace is likely
 		// broken; remove it.
+		//
+		// Record it like every other failure. This branch used to return a raw error
+		// having called neither recordGenerationFailure nor saveDraft, so an eight-minute
+		// provider drop left the user back on the plan with no explanation at all.
+		msg := hardFailureMessage(err)
+		f.recordGenerationFailure(workspaceID, msg,
+			"the build stopped on an unrecognised coder error (likely a provider drop). "+
+				"Next attempt: retry as-is; if it recurs, simplify the agent.", false)
 		cleanupOnFail()
-		return "", false, "", fmt.Errorf("coder: %w", err)
+		return msg, false, "", nil
 	}
 	if err != nil {
 		// decision.saveable == true: a complete build is on disk despite the coder error.

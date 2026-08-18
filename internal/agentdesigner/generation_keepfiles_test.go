@@ -156,8 +156,12 @@ sys.exit(1)
 
 // TestRunGeneration_CoderErrorNoBuildReturnsError locks in the other side of the
 // salvage gate: when the coder errors AND there is nothing saveable on disk (no
-// AGENT.md), the error is NOT swallowed — runGeneration returns it so the caller
-// surfaces a real failure instead of silently advancing on an empty build.
+// AGENT.md), the failure is NOT swallowed and does NOT advance the session — but
+// it is now a SOFT failure (nil error, a user-facing message), not a raw Go
+// error. A raw error here used to reach the user as nothing at all: this exact
+// branch called neither recordGenerationFailure nor saveDraft, so an eight-minute
+// provider drop left the draft untouched and the user with no explanation. See
+// hardFailureMessage / TestHardFailureMessageIsActionableAndLeaksNothing.
 func TestRunGeneration_CoderErrorNoBuildReturnsError(t *testing.T) {
 	// Errors immediately, writes nothing.
 	fake := newFakeCoder(t, `import sys
@@ -177,13 +181,19 @@ sys.exit(1)
 		},
 	}
 
-	_, _, _, err := flow.runGeneration(context.Background(), workspaceID)
-	if err == nil {
-		t.Fatal("a coder error with no build on disk must NOT be salvaged; expected a Go error")
+	msg, _, _, err := flow.runGeneration(context.Background(), workspaceID)
+	if err != nil {
+		t.Fatalf("a coder error with no build on disk must be a soft failure, not a Go error; got %v", err)
+	}
+	if msg == "" {
+		t.Fatal("an empty failed build must still produce a user-facing message — silence is the bug")
 	}
 	sess := flow.GetSession(workspaceID)
 	if sess == nil || sess.State != StateDesigning {
 		t.Fatalf("state = %+v, want StateDesigning (an empty failed build must not advance)", sess)
+	}
+	if !sess.GenerationFailed {
+		t.Error("GenerationFailed should be set so a forgiving retry re-runs generation")
 	}
 	// Create mode never wipes the draft dir (keep-files policy: the user finishes it
 	// later, the nightly GC sweeps expired ones) — so it survives even a hard error.
