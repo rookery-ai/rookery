@@ -1510,17 +1510,37 @@ func (f *Flow) startGeneration(workspaceID string) (string, bool, string, error)
 	return buildingMessage, false, "", nil
 }
 
-// hardFailureMessage is the user-facing account of a build that died on an
-// unrecognised error — in practice a provider dropping the connection.
+// hardFailureMessage is the user-facing account of a build that died on an error none
+// of the branches above it recognised — in practice a provider dropping the connection.
 //
-// It deliberately does NOT include err.Error(). A provider error can echo back the
-// request that produced it, and that dataflow was traced to the workspace's API key
-// (go/clear-text-logging), which is why buildErrClass reports a class rather than the
-// text. The same reasoning applies with more force to something shown to a user.
+// It diagnoses from buildErrClass and deliberately does NOT include err.Error(). A
+// provider error can echo back the request that produced it, and that dataflow was
+// traced to the workspace's API key (go/clear-text-logging), which is why buildErrClass
+// reports a class rather than the text. The same reasoning applies with more force to
+// something shown to a user.
+//
+// A class earns a case only when the REMEDY differs. The generic wording tells the user
+// to retry, which is right for a provider drop (the observed common case) and for any
+// transient blip, but actively wrong for a credential the provider rejected or a coder
+// kind this build cannot run — there, retrying can only fail again. It used to ignore its
+// argument entirely, so a rejected API key was reported as a dropped connection and the
+// user was pointed at a retry that could never succeed. The classes handled ABOVE this
+// call (usage_limit, rate_limited, max_turns, the coder's own timeout, an explicit cancel)
+// never reach here, so a case for them would be dead code.
 func hardFailureMessage(err error) string {
-	return "⚠️ The build stopped unexpectedly — the model provider dropped the " +
-		"connection. Nothing was saved. Type **approve** to try again, or tell me what " +
-		"to change first."
+	switch buildErrClass(err) {
+	case "auth":
+		return "⚠️ The build stopped — the coder's API key was rejected, so nothing was " +
+			"saved. Trying again won't help until the key is fixed in coder settings."
+	case "local_coder_disabled":
+		return "⚠️ The build stopped — this server runs without a local coder, so the " +
+			"workspace's coder setting can't be used and nothing was saved. Switch the " +
+			"workspace to an API coder in coder settings, then type **approve** to try again."
+	default:
+		return "⚠️ The build stopped unexpectedly — the model provider dropped the " +
+			"connection. Nothing was saved. Type **approve** to try again, or tell me what " +
+			"to change first."
+	}
 }
 
 // runGeneration creates agent files by giving Claude Code full tool access to
@@ -1849,6 +1869,15 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		// having called neither recordGenerationFailure nor saveDraft, so an eight-minute
 		// provider drop left the user back on the plan with no explanation at all.
 		msg := hardFailureMessage(err)
+		// This branch records the failure and returns a nil error, so the deferred
+		// "build finished" log in startGeneration reports failed=false err_class="" for a
+		// genuine hard failure — and that is the ONLY log this path produces. err_class is
+		// the field the diagnosis of this exact failure mode was built from, so it is
+		// re-emitted here. The class, never the error: a provider error can echo back the
+		// request that produced it (see buildErrClass).
+		slog.Warn("agentdesigner: build failed on an unrecognised coder error",
+			"build_id", buildID, "workspace_id", workspaceID, "agent_id", agentIDSnap,
+			"err_class", buildErrClass(err), "backend", backendType)
 		f.recordGenerationFailure(workspaceID, msg,
 			"the build stopped on an unrecognised coder error (likely a provider drop). "+
 				"Next attempt: retry as-is; if it recurs, simplify the agent.", false)
