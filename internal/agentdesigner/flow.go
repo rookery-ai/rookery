@@ -1818,25 +1818,6 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	}
 	decision := decideBuildOutcome(workDir, resultText, backendType, scriptVerified, scriptOutput)
 
-	// A create build's review sample should be REAL output. decideBuildOutcome can only
-	// produce that when an authored script ran, so a TIER 1 agent (no script) fell back
-	// to the model's prose. Run the built agent once and use what it actually says.
-	//
-	// Create-only: an edit already has a live agent the user has seen work. Best-effort:
-	// a failed dry run leaves decision.message exactly as it was.
-	//
-	// genCtx, not ctx: ctx is the request context this build is deliberately detached
-	// from (see the WithCancel above), so passing it would let a page navigation kill the
-	// dry run while leaving Cancel() unable to stop it. It must also stay ABOVE
-	// reconcileBlockedOutcome, which derives outcome.message from decision.message.
-	if decision.presentable && !isEdit {
-		notify("🧪 Running it once to show you real output…")
-		if sample, ok := f.dryRun(genCtx, workspaceID, workDir, decision.agentMD,
-			backendType, implParams.ChatApps, notify); ok {
-			decision.message = reviewMessage(sample, true)
-		}
-	}
-
 	if err != nil && !decision.saveable {
 		closeProgress()
 		if errors.Is(err, context.Canceled) {
@@ -1959,6 +1940,40 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		// path) so the reconnect re-fetch of /design/state finds the updated state.
 		closeProgress()
 		return outcome.message, false, "", nil
+	}
+
+	// A create build's review sample should be REAL output. decideBuildOutcome can only
+	// produce that when an authored script ran, so a TIER 1 agent (no script) fell back
+	// to the model's prose. Run the built agent once and use what it actually says.
+	//
+	// Create-only: an edit already has a live agent the user has seen work. Best-effort:
+	// a failed dry run leaves the message exactly as it was.
+	//
+	// Its position is load-bearing in three directions:
+	//
+	//   - BELOW the !outcome.advance return above. A rehearsal is a full agent run (one
+	//     measured over 1.5M tokens) and a build that is not advancing throws its message
+	//     away — on the weak-backend blocked path reconcileBlockedOutcome REPLACES
+	//     decision.message wholesale — so from above the return it paid for a rehearsal
+	//     nobody ever saw, while still telling the user nothing had been confirmed to run.
+	//   - ABOVE caveatTruncatedBuild, which PREPENDS. The dry run replaces, so running it
+	//     second would wipe the caveat off a build the engine cut short.
+	//   - genCtx, not ctx: ctx is the request context this build is deliberately detached
+	//     from (see the WithCancel above), so passing it would let a page navigation kill
+	//     the dry run while leaving Cancel() unable to stop it.
+	//
+	// It swaps the review message OUT of outcome.message rather than overwriting the whole
+	// string: reconcileBlockedOutcome's advance-with-a-blocker branch prepends its own
+	// caveat to decision.message, and a wholesale assignment would delete the explanation
+	// the user was given for it. Replace(…, 1) leaves the message untouched when that tail
+	// is not found, which is the same best-effort contract the dry run itself keeps.
+	if decision.presentable && !isEdit && decision.message != "" {
+		notify("🧪 Running it once to show you real output…")
+		if sample, ok := f.dryRun(genCtx, workspaceID, workDir, decision.agentMD,
+			backendType, implParams.ChatApps, notify); ok {
+			outcome.message = strings.Replace(outcome.message, decision.message,
+				reviewMessage(sample, true), 1)
+		}
 	}
 
 	// A build the engine cut short must not be PRESENTED as a finished one. The reason
