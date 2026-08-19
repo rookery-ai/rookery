@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.10](https://github.com/rookery-ai/rookery/compare/v0.3.9...v0.3.10) (2026-08-19)
+
+
+### Bug Fixes
+
+* **web/designer:** stop the notice hijacking its own build, unclip the dry run ([#234](https://github.com/rookery-ai/rookery/issues/234)) ([4a86899](https://github.com/rookery-ai/rookery/commit/4a8689952fead66bff027773e90d6757cff6a7ba))
+
+## [0.3.9](https://github.com/rookery-ai/rookery/compare/v0.3.8...v0.3.9) (2026-08-19)
+
+
+### Bug Fixes
+
+* **web/designer:** show the dry run when a build lands on the Spec tab ([#232](https://github.com/rookery-ai/rookery/issues/232)) ([11a07de](https://github.com/rookery-ai/rookery/commit/11a07de634c0802053f6ea85341d09b0f7685a82))
+
 ## [0.3.8](https://github.com/rookery-ai/rookery/compare/v0.3.7...v0.3.8) (2026-08-18)
 
 

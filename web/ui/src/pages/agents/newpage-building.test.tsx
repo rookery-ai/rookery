@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router";
@@ -115,4 +115,61 @@ test("clicking Open it navigates to /agents/new?resume=1", async () => {
   await waitFor(() => {
     expect(screen.getByTestId("location")).toHaveTextContent("/agents/new?resume=1");
   });
+});
+
+// THE TAB THAT STARTED THE BUILD MUST NEVER SEE THE NOTICE.
+//
+// `generating` is workspace-global and the server cannot identify a browser
+// tab, so keyed on it alone the notice fired on the page that had just started
+// the build: you clicked approve and were told your own build was running in
+// another tab, with the live designer unmounted underneath you. Confirming a
+// name is the point after which this tab is the driver, not a bystander.
+test("the tab that started the build is not told the build is elsewhere", async () => {
+  // The real sequence, which matters: there is NO build when the page loads,
+  // so the form is offered; the user names the agent and only THEN does their
+  // own build start. Stubbing generating:true from the start cannot reproduce
+  // it — the notice correctly replaces the form on a fresh tab, so there would
+  // be no name field to type into.
+  //
+  // The 5s poll must actually FIRE for this to test anything. An earlier draft
+  // flipped the flag and asserted immediately; the refetch had not happened, so
+  // the old (broken) predicate passed it too. Fake timers make the tick
+  // deterministic rather than a race against a real interval.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+  let generating = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/design/state"))
+        return Promise.resolve(
+          jsonResponse({ active: generating, generating, name: "watcher-checker" }),
+        );
+      return Promise.resolve(jsonResponse({}));
+    }),
+  );
+
+  try {
+    renderNewPage();
+
+    const nameField = await screen.findByLabelText(/name/i);
+    await user.type(nameField, "watcher-checker");
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    // This tab is now the driver. Its own build starts, and the poll sees it.
+    generating = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+
+    // The designer stays mounted (its composer exists) and nothing claims the
+    // build belongs somewhere else.
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
+    expect(screen.queryByText(/another tab/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/already building/i)).not.toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
 });

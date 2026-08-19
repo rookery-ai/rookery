@@ -32,7 +32,19 @@ export function ReviewCard({ title, subtitle, content, createdAt, children }: Re
   return (
     <div
       data-testid="review-card"
-      className="group w-full overflow-hidden rounded-xl border border-accent/40 border-l-4 border-l-accent bg-chrome"
+      // shrink-0 is load-bearing, not spacing. ChatScroll is `flex flex-col`,
+      // and a flex item's default flex-shrink is 1 — so a tall card is
+      // COMPRESSED below its content height instead of making the container
+      // scroll. Combined with the overflow-hidden below (which the rounded
+      // corners and the header's border need) that clipped the dry run to its
+      // first line, with nothing to scroll: the sample was rendered, sized to
+      // nothing, and hidden. Bubbles survive the same squeeze only because
+      // they have no overflow-hidden and simply spill.
+      //
+      // my-1 gives the card breathing room from the bubble above and from the
+      // action bar below, which lives outside the scroll container and would
+      // otherwise sit flush against it.
+      className="group my-1 w-full shrink-0 overflow-hidden rounded-xl border border-accent/40 border-l-4 border-l-accent bg-chrome"
     >
       <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
         <ClipboardCheck className="size-4 shrink-0 text-accent" />

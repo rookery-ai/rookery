@@ -215,3 +215,39 @@ test("the dry run is shown even when the build finishes on the Spec tab", async 
   });
   expect(screen.getByTestId("review-body")).toHaveTextContent(SAMPLE);
 });
+
+// jsdom has no layout engine, so nothing here can prove the dry run is VISIBLE
+// — only that the declaration which makes it so is present. Same reasoning the
+// KB pane records for overscroll-contain: the behavioural check needs a real
+// browser, and the class assertion is the strongest proxy available.
+//
+// ChatScroll is `flex flex-col`, where a flex item shrinks below its content
+// height by default. ReviewCard also sets overflow-hidden (its rounded corners
+// and header border need it), so without shrink-0 the card was squeezed to its
+// header and clipped the sample with nothing to scroll — the dry run rendered,
+// sized to nothing, and hidden. Bubbles escape the same squeeze only because
+// they have no overflow-hidden and simply spill.
+test("the dry run card cannot be squeezed to nothing by the scroll column", async () => {
+  let finished = false;
+  mockFetch({
+    "/x/state": () => jsonResponse(finished ? verifyingState() : { active: false }),
+    "/x/design": () => {
+      finished = true;
+      return jsonResponse({ response: "Building...", building: true, state: "designing" });
+    },
+  });
+
+  wrap(<DesignerSurface endpoints={ENDPOINTS} labels={LABELS} cancelTo="/agents" onDone={vi.fn()} />);
+
+  const box = await screen.findByRole("textbox");
+  await userEvent.type(box, "approve");
+  fireEvent.keyDown(box, { key: "Enter", code: "Enter" });
+
+  await waitFor(() => expect(FakeEventSource.instances.length).toBeGreaterThan(0));
+  FakeEventSource.instances.at(-1)!.emitDone();
+
+  const card = await screen.findByTestId("review-card");
+  expect(card.className).toMatch(/(^|\s)shrink-0(\s|$)/);
+  // The whole sample is in the DOM, not just the heading the user could see.
+  expect(screen.getByTestId("review-body")).toHaveTextContent(SAMPLE);
+});
