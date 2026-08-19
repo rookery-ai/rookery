@@ -703,6 +703,26 @@ export function DesignerSurface({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [generating]);
 
+  // A finished build must SHOW its dry run, and the Spec tab is why it often
+  // didn't. Spec REPLACES the transcript (see the `view === "spec"` branch
+  // below) while the action bar renders outside both — so a user who opened the
+  // spec to re-read the plan while the build ran came back to Save / Request
+  // changes and no output anywhere on screen. Nothing was broken server-side:
+  // the dry run was sitting in the transcript behind a tab they had no reason
+  // to think they needed to click. Reported three times as "the buttons
+  // appeared but no dry run".
+  //
+  // Fires on the TRANSITION into verifying, never on the state itself: once the
+  // review is on screen the user may deliberately open the spec to check it
+  // before saving, and re-asserting the transcript there would yank the tab out
+  // from under them on every later render.
+  const wasVerifyingRef = useRef(false);
+  useEffect(() => {
+    const isVerifying = fsmState === "verifying" && !generating;
+    if (isVerifying && !wasVerifyingRef.current) setView("transcript");
+    wasVerifyingRef.current = isVerifying;
+  }, [fsmState, generating]);
+
   const stepIndex = generating
     ? 2
     : fsmState
