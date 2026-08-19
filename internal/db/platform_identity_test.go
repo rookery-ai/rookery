@@ -36,6 +36,19 @@ func TestListPlatformIdentitiesIsDeterministic(t *testing.T) {
 		}
 	}
 
+	// Force the tie this test is ABOUT. UpsertPlatformIdentity hardcodes
+	// linked_at to datetime('now'), which has one-second granularity, so the
+	// three inserts tie only when they land inside the same second. On a loaded
+	// CI runner they straddled a boundary, discord got a later timestamp, and
+	// the order came back [slack telegram discord] — a correct result for the
+	// data, and a failure of the fixture rather than of the ordering.
+	//
+	// Pinning them equal makes `platform` the decisive tiebreaker every run,
+	// which is the property the assertion below actually exists to check.
+	if _, err := database.Exec(`UPDATE platform_identities SET linked_at = '2026-01-01 00:00:00'`); err != nil {
+		t.Fatalf("pin linked_at: %v", err)
+	}
+
 	var first []string
 	for i := 0; i < 5; i++ {
 		rows, err := database.ListPlatformIdentities("ws1", "")
