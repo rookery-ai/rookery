@@ -102,6 +102,7 @@ type Coder struct {
 	extraEnv     map[string]string // additional env vars merged into the subprocess environment
 	noTools      bool              // when true, passes --allowedTools "" to disable all tools
 	workDir      string            // when non-empty, overrides cmd.Dir (default: per-user home)
+	agentName    string            // name for the API engine's state.md tools (cosmetic; see WithAgentName)
 	allowedTools string            // when non-empty, passed as --allowedTools <value>
 	backendType  string            // '' = auto-detect by binary name, 'claude', 'generic', or 'api"
 	cliModel     string            // provider/model for CLI coders that accept -m/--model (opencode, cursor)
@@ -209,6 +210,17 @@ func (c *Coder) WithNoTools() *Coder {
 func (c *Coder) WithDir(dir string) *Coder {
 	c2 := *c
 	c2.workDir = dir
+	return &c2
+}
+
+// WithAgentName returns a shallow copy of the Coder that names the agent for the API
+// engine's get_state/set_state tools (statetools.go). Only cosmetic: it labels a
+// freshly-created state.md's heading (agentstate.RenderTemplate) — a run or build
+// always has an existing state.md written with the real name at build/edit time, so
+// an unset name never surfaces as wrong data.
+func (c *Coder) WithAgentName(name string) *Coder {
+	c2 := *c
+	c2.agentName = name
 	return &c2
 }
 
