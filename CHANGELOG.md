@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.11](https://github.com/rookery-ai/rookery/compare/v0.3.10...v0.3.11) (2026-08-19)
+
+
+### Bug Fixes
+
+* **agentstate:** give agent state one owner and recover memory written outside the fence ([#237](https://github.com/rookery-ai/rookery/issues/237)) ([f9af2f6](https://github.com/rookery-ai/rookery/commit/f9af2f620ce1b6839b5c2a74485d5e18cc403a70))
+
 ## [0.3.10](https://github.com/rookery-ai/rookery/compare/v0.3.9...v0.3.10) (2026-08-19)
 
 
