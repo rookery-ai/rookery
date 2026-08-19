@@ -91,6 +91,14 @@ type Runner struct {
 	// tools call in-process). nil for tests that don't wire one.
 	kbBridge *vault.Bridge
 
+	// stateBridge, when set, lets a CLI coder's agent run reach its own state.md
+	// via `rookery state get|set` — the same agentstate.Get/Apply the API engine's
+	// get_state/set_state tools call in-process. Without it a CLI coder's only way
+	// to record memory is hand-editing the file, which is exactly how two live
+	// agents stranded their state outside the json fence and went permanently
+	// silent. nil for tests that don't wire one.
+	stateBridge *agentstate.Bridge
+
 	// MCP: when set, an agent's BOUND servers (agent_mcp_servers) are exposed to
 	// both coder types — the API engine calls mcpClient in-process, a CLI coder
 	// reaches the same mcp.Execute via mcpBridge (`rookery mcp exec`).
@@ -185,6 +193,14 @@ func (r *Runner) WithMemory(m memoryStore) *Runner {
 // WithVault wires the knowledge base so runs are mirrored into the user's vault.
 func (r *Runner) WithVault(v *vault.Vault) *Runner {
 	r.reflector = v.Reflector()
+	return r
+}
+
+// WithStateBridge wires the loopback agent-state bridge so a CLI coder's run can
+// reach `rookery state get|set` — parity with the API engine's get_state/set_state
+// host tools, so changing coder kind cannot change what an agent can remember.
+func (r *Runner) WithStateBridge(b *agentstate.Bridge) *Runner {
+	r.stateBridge = b
 	return r
 }
 
@@ -439,6 +455,15 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 		defer r.kbBridge.Unregister(kbToken)
 		extraEnv["ROOKERY_KB_URL"] = r.kbBridge.URL()
 		extraEnv["ROOKERY_KB_TOKEN"] = kbToken
+	}
+	// Scoped to THIS agent's directory and name, not to the workspace: state.md is
+	// per-agent, so a token that reached the workspace would let one agent read and
+	// overwrite another's memory.
+	if r.stateBridge != nil && r.stateBridge.Addr() != "" {
+		stateToken := r.stateBridge.Register(agentDir, agent.Name)
+		defer r.stateBridge.Unregister(stateToken)
+		extraEnv["ROOKERY_STATE_URL"] = r.stateBridge.Addr()
+		extraEnv["ROOKERY_STATE_TOKEN"] = stateToken
 	}
 	if len(extraEnv) > 0 {
 		coderSvc = coderSvc.WithExtraEnv(extraEnv)

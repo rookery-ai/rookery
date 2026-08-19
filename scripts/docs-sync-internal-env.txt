@@ -21,3 +21,5 @@ ROOKERY_KB_URL           # loopback knowledge-base bridge address, per run
 ROOKERY_KB_TOKEN         # per-run bearer token for the knowledge-base bridge
 ROOKERY_MCP_URL          # loopback MCP bridge address, per run
 ROOKERY_MCP_TOKEN        # per-run bearer token for the MCP bridge
+ROOKERY_STATE_URL        # loopback agent-state bridge address, per run
+ROOKERY_STATE_TOKEN      # per-run bearer token for the agent-state bridge

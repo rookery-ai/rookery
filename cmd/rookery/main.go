@@ -16,6 +16,7 @@ import (
 
 	"github.com/rookery-ai/rookery/internal/agentdesigner"
 	"github.com/rookery-ai/rookery/internal/agentrunner"
+	"github.com/rookery-ai/rookery/internal/agentstate"
 	"github.com/rookery-ai/rookery/internal/approval"
 	"github.com/rookery-ai/rookery/internal/auth"
 	"github.com/rookery-ai/rookery/internal/backup"
@@ -330,6 +331,16 @@ func serveCmd() *cli.Command {
 				return fmt.Errorf("start MCP bridge: %w", err)
 			}
 
+			// Loopback agent-state bridge so a CLI coder reaches the same
+			// agentstate.Get/Apply the API engine's get_state/set_state tools call
+			// in-process. Parity matters here: without it a CLI coder's only way to
+			// record memory is hand-editing state.md, which is how two live agents
+			// stranded their state outside the json fence and went permanently silent.
+			stateBridge := agentstate.NewBridge()
+			if _, err := stateBridge.Start(ctx); err != nil {
+				return fmt.Errorf("start agent-state bridge: %w", err)
+			}
+
 			// Loopback KB bridge so CLI coders reach conversion + search in-process
 			// (the same vault.ImportFile / Searcher code the API engine calls directly).
 			// Approval gate for irreversible public writes (posts, uploads). Off unless
@@ -395,6 +406,7 @@ func serveCmd() *cli.Command {
 				WithConnectors(connReg, connStore, connBridge).
 				WithApprovalGate(approvalSvc.ParkerFor).
 				WithKBBridge(kbBridge).
+				WithStateBridge(stateBridge).
 				WithMCP(mcpClient, mcpBridge).
 				WithCoderFactory(func(workspaceID string) *coder.Coder {
 					w, err := database.GetWorkspaceByID(workspaceID)
