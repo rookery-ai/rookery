@@ -370,7 +370,12 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	// agents' files. Pre-approve the tools agents need so the subprocess never
 	// blocks on interactive permission prompts (--setting-sources "" suppresses
 	// all settings).
-	coderSvc := baseCoder.WithDir(agentDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").WithProgress(input.OnProgress)
+	// WithAgentName is what stops set_state creating a state.md headed "# State — "
+	// with a blank name. A brand-new agent genuinely has no state file (nothing seeds
+	// one — see agentdesigner/flow.go), so the first set_state call of its first run
+	// creates it from the template, and every later write only splices the fence. A
+	// blank heading written there is permanent.
+	coderSvc := baseCoder.WithDir(agentDir).WithAgentName(agent.Name).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").WithProgress(input.OnProgress)
 
 	// Assemble the subprocess env once (WithExtraEnv replaces rather than merges): user
 	// secrets + the connector-bridge vars. Injected for every coder type.

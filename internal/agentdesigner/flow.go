@@ -1735,7 +1735,10 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// Secrets are injected below so the real API calls the agent will make at run time are
 	// actually exercised here (the only exception is sending real outbound messages,
 	// enforced by the testing-rules prompt).
-	generationCoder := coderSvc.WithDir(workDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").
+	// WithAgentName so a build that exercises set_state creates state.md with the real
+	// heading. Nothing seeds a state file before this point, and a blank heading written
+	// here would be promoted verbatim into the saved agent by saveAndFinish.
+	generationCoder := coderSvc.WithDir(workDir).WithAgentName(agentNameSnap).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").
 		// Stream the API engine's per-tool-call milestones (🔧 web_search(...), 🔧
 		// run_script(...), 🔧 write_file(...)) to the build SSE + Telegram, the same
 		// way agent runs do (agentrunner wires WithProgress(OnProgress)). Without this,
