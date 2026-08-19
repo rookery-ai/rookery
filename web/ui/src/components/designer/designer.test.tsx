@@ -529,9 +529,23 @@ test("a build finishing while the Spec tab is already open refreshes it automati
   // refetches automatically, with no further click on the Spec button.
   resolveBuild(jsonResponse({ response: "Built it!", done: false, state: "verifying" }));
 
+  // The surface now returns to the TRANSCRIPT when a build lands, because the
+  // dry run is the turn that requires action and Spec replaces the transcript
+  // entirely — sitting on Spec is how a finished build came to show Save /
+  // Request changes with no output anywhere (see the transition effect in
+  // DesignerSurface). So the refreshed spec is no longer on screen here.
+  //
+  // What this test still guarantees, and the reason the refetch above must keep
+  // happening: the spec is not STALE when the user goes back to it. Without the
+  // refetch they would click Spec and see the pre-build placeholder.
+  await waitFor(() => {
+    expect(screen.queryByText(/build is in progress/i)).not.toBeInTheDocument();
+  });
+  expect(stateCalls).toBeGreaterThanOrEqual(3);
+
+  fireEvent.click(screen.getByRole("button", { name: "Spec" }));
   expect(await screen.findByRole("heading", { name: "Daily digest" })).toBeInTheDocument();
   expect(screen.queryByText(/build is in progress/i)).not.toBeInTheDocument();
-  expect(stateCalls).toBeGreaterThanOrEqual(3);
 });
 
 // A fresh session used to render an empty transcript with a chatbox under it —
