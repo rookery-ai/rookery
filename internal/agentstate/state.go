@@ -160,7 +160,18 @@ func read(path string) (readResult, error) {
 	skipStart, skipEnd := fenceByteRange(lines, loc)
 	st, objStart, objEnd, ok := scanFirstJSONObject(raw, skipStart, skipEnd)
 	if !ok {
-		return readResult{state: map[string]any{}, understood: true}, nil
+		// Nothing to adopt. Whether that means "fresh agent" or "damaged file"
+		// depends on WHY there was no usable fence, and the two must not look
+		// alike: the caller's no-update turn is a no-op on a file it could not
+		// understand, so calling a damaged file understood would let that turn
+		// overwrite hand-recoverable state with {}.
+		//
+		// An orphaned (unterminated) opener is damage by construction — someone
+		// wrote a fence and it did not survive — so an orphan we could not
+		// recover anything from reports understood=false. A file with NO fence
+		// at all, or a well-formed but empty one, is the ordinary shape of an
+		// agent that has not stored anything yet.
+		return readResult{state: map[string]any{}, understood: loc.OrphanOpen < 0}, nil
 	}
 	return readResult{
 		state:      st,
@@ -175,7 +186,17 @@ func read(path string) (readResult, error) {
 // bridge all land here, so the three doors cannot drift apart.
 //
 // A nil or empty patch still writes, which is what normalises a recovered file.
-// The exception is a file we could not understand — see Get.
+//
+// An explicit patch WINS, even over a file we could not parse — it replaces the
+// unreadable body outright. That is deliberate and long-standing: the runner's
+// applyAndSaveState has always held that "an explicit [STATE] emission always
+// wins, even over an unreadable prior file", and live agents emit patches
+// constantly, so this is the ordinary path rather than an edge case.
+//
+// The protection is narrower than it first reads, and worth stating exactly: it
+// is only a NO-OP Apply (nil or empty patch) that declines to touch a file it
+// could not understand. That is the case where writing back would replace
+// hand-recoverable bytes with {} while nobody had asked for a change.
 func Apply(path, agentName string, patch map[string]any) (map[string]any, error) {
 	r, err := read(path)
 	if err != nil {
@@ -203,6 +224,13 @@ func Apply(path, agentName string, patch map[string]any) (map[string]any, error)
 // existing state at all, so a key absent from `state` is a key deleted. It does
 // not run the recovery scan either — the caller is asserting the state, not
 // asking what the file currently believes.
+//
+// The caller owns the size cap. Replace deliberately does not enforce
+// MaxStateSize: the one-shot state.json migration must be able to carry a
+// legacy state larger than the limit, and refusing it would strand that agent
+// with no state.md at all — which reads as {} and re-baselines on every run,
+// the exact failure this package exists to remove. Every agent-facing write
+// path (Apply, and the runner's saveState) does enforce it.
 func Replace(path, agentName string, state map[string]any) (map[string]any, error) {
 	if state == nil {
 		state = map[string]any{}
@@ -304,8 +332,16 @@ func fenceByteRange(lines []string, loc fenceLoc) (int, int) {
 // keeps the state fence first and therefore the one the next read finds.
 func preservedProse(raw string, skipStart, skipEnd, objStart, objEnd int) string {
 	cut := func(s string, start, end int) string {
-		if start >= end || start < 0 || end > len(s) {
+		if start >= end || start < 0 {
 			return s
+		}
+		// Clamp rather than bail. fenceByteRange charges every line a trailing
+		// "\n", which the final line does not have when the file ends without
+		// one — so its end offset overruns by a byte. Returning s unchanged
+		// there silently left the old fence in the output; clamping cuts what
+		// was actually asked for.
+		if end > len(s) {
+			end = len(s)
 		}
 		return s[:start] + s[end:]
 	}
