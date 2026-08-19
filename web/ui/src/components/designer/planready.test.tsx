@@ -71,7 +71,14 @@ async function sendViaComposer(text: string) {
   // the composer until mount recovery resolves. Typing into a disabled textarea
   // silently does nothing, which is exactly what a whole failing suite looks
   // like when you forget this.
-  await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled());
+  // Explicit timeout: these wait on a real fetch settling, and the 1000ms
+  // default is not enough on a loaded CI runner — it failed there while passing
+  // locally six times over, which is the signature of a latency flake rather
+  // than a behavioural one. Raising the ceiling does not weaken the assertion;
+  // the composer still has to become enabled.
+  await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled(), {
+    timeout: 5000,
+  });
   const box = screen.getByRole("textbox");
   await userEvent.type(box, text);
   fireEvent.keyDown(box, { key: "Enter", code: "Enter" });
@@ -150,7 +157,14 @@ test("the build button appears once the plan is ready, and retracts on a follow-
   // "Make changes" is the way back to typing.
   expect(screen.getByRole("textbox")).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: /Make changes/ }));
-  await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled());
+  // Explicit timeout: these wait on a real fetch settling, and the 1000ms
+  // default is not enough on a loaded CI runner — it failed there while passing
+  // locally six times over, which is the signature of a latency flake rather
+  // than a behavioural one. Raising the ceiling does not weaken the assertion;
+  // the composer still has to become enabled.
+  await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled(), {
+    timeout: 5000,
+  });
 
   await sendViaComposer("actually make it hourly");
   await screen.findByText("Every hour on the hour, or every 60 minutes?");

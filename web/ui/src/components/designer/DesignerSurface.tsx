@@ -698,30 +698,44 @@ export function DesignerSurface({
   // above: it never touches attachSourceRef/doneRef/ensureSSE, and it only
   // fires when Spec is the active view, so the zero-extra-/state-calls
   // regression test (which never visits the Spec view) is unaffected.
-  useEffect(() => {
-    if (!generating && view === "spec" && endpoints.state) void openSpecView();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [generating]);
-
-  // A finished build must SHOW its dry run, and the Spec tab is why it often
-  // didn't. Spec REPLACES the transcript (see the `view === "spec"` branch
-  // below) while the action bar renders outside both — so a user who opened the
-  // spec to re-read the plan while the build ran came back to Save / Request
-  // changes and no output anywhere on screen. Nothing was broken server-side:
-  // the dry run was sitting in the transcript behind a tab they had no reason
-  // to think they needed to click. Reported three times as "the buttons
-  // appeared but no dry run".
+  // Both halves of "a build just ended" live in ONE effect, in a fixed order,
+  // because they touch the same `view` and split across two effects they raced:
+  // whichever ran second won, non-deterministically. Splitting them cost a CI
+  // run — the spec refresh was skipped because the view had already moved, which
+  // is precisely the staleness the refresh exists to prevent.
   //
-  // Fires on the TRANSITION into verifying, never on the state itself: once the
-  // review is on screen the user may deliberately open the spec to check it
-  // before saving, and re-asserting the transcript there would yank the tab out
-  // from under them on every later render.
+  // 1. Refresh the spec DATA if the user is sitting on it. Nothing else
+  //    refetches pendingAgentMD/pendingTools after the click that opened the
+  //    tab, so without this the "does this look right?" moment can show
+  //    pre-build content. (openSpecView also sets the view, which the next step
+  //    overrides in the same commit — that is why the order is fixed.)
+  //
+  // 2. Return to the transcript when a review lands. Spec REPLACES the
+  //    transcript while the action bar renders outside both, so a build
+  //    finishing on the Spec tab left the user looking at Save / Request
+  //    changes with no output anywhere — the dry run was in the transcript,
+  //    behind a tab they had no reason to click back to. Reported three times
+  //    as "the buttons appeared but no dry run".
+  //
+  // The switch fires on the TRANSITION into verifying, never on the state
+  // itself: once the review is up the user may deliberately open the spec to
+  // check it before saving, and re-asserting the transcript there would yank
+  // the tab out from under them on every later render.
   const wasVerifyingRef = useRef(false);
   useEffect(() => {
-    const isVerifying = fsmState === "verifying" && !generating;
+    if (generating) {
+      // A build in flight means the next verifying state is a NEW review and
+      // must move the user to it, even if they were already in verifying when
+      // they asked for changes and rebuilt.
+      wasVerifyingRef.current = false;
+      return;
+    }
+    if (view === "spec" && endpoints.state) void openSpecView();
+    const isVerifying = fsmState === "verifying";
     if (isVerifying && !wasVerifyingRef.current) setView("transcript");
     wasVerifyingRef.current = isVerifying;
-  }, [fsmState, generating]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generating, fsmState]);
 
   const stepIndex = generating
     ? 2
