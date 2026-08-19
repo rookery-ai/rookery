@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.10](https://github.com/rookery-ai/rookery/compare/v0.3.9...v0.3.10) (2026-08-19)
+
+
+### Bug Fixes
+
+* **web/designer:** stop the notice hijacking its own build, unclip the dry run ([#234](https://github.com/rookery-ai/rookery/issues/234)) ([4a86899](https://github.com/rookery-ai/rookery/commit/4a8689952fead66bff027773e90d6757cff6a7ba))
+
 ## [0.3.9](https://github.com/rookery-ai/rookery/compare/v0.3.8...v0.3.9) (2026-08-19)
 
 
