@@ -454,12 +454,22 @@ func writeFence(path, agentName, body, keep string, recovered bool) error {
 	lines := strings.Split(string(raw), "\n")
 	loc := findStateFence(lines)
 
+	// Deliberately built without a capacity hint. state.md is a few KB, so the
+	// hint bought nothing measurable, and both spellings computed the capacity
+	// from len(lines) — a length derived from a file whose `## Notes` section an
+	// agent may grow without limit. CodeQL reads that arithmetic as a potential
+	// allocation-size overflow (go/allocation-size-overflow) and it is right to:
+	// the value is not bounded by anything this package enforces. The invariants
+	// do hold today — findStateFence assigns Close inside a loop bound by
+	// i < len(lines), so Open < Close <= len(lines)-1 and neither the
+	// subtraction nor lines[Close+1:] can go out of range — but an unbounded
+	// input feeding an allocation size is not worth defending for an
+	// optimization this code does not need. Do not add the hint back.
 	var out []string
 	switch {
 	case loc.OK:
 		// Line splice: replace lines[Open..Close] inclusive. Everything
 		// before Open and after Close survives byte-for-byte.
-		out = make([]string, 0, len(lines)-(loc.Close-loc.Open+1)+len(fenceLines))
 		out = append(out, lines[:loc.Open]...)
 		out = append(out, fenceLines...)
 		out = append(out, lines[loc.Close+1:]...)
@@ -476,7 +486,6 @@ func writeFence(path, agentName, body, keep string, recovered bool) error {
 		// the loc.OK branch and splice over the Notes fence — destroying it.
 		// Writing in place keeps the new fence first and leaves everything
 		// after it byte-for-byte untouched.
-		out = make([]string, 0, len(lines)+len(fenceLines))
 		out = append(out, lines[:loc.OrphanOpen]...)
 		out = append(out, fenceLines...)
 		out = append(out, lines[loc.OrphanOpen+1:]...)

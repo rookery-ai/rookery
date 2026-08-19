@@ -937,8 +937,14 @@ func (f *Flow) saveDraft(sess *DesignSession) {
 		PendingUsedMCPServersJSON:  string(usedMCPJSON),
 		ExpiresAt:                  time.Now().Add(draftTTL),
 	}); err != nil {
-		slog.Warn("agentdesigner: draft save failed",
-			"workspace_id", sess.WorkspaceID, "agent_id", sess.AgentID)
+		// workspace_id alone, deliberately. agent_drafts holds one row per
+		// workspace, so this fully identifies the write that failed; agent_id
+		// added nothing for locating it and is a user-supplied path parameter
+		// on the edit route, which CodeQL flags as log injection
+		// (go/log-injection). Reducing rather than substituting, the same way
+		// buildErrClass reduces an error to a class — the create/edit
+		// discriminator is recoverable from the draft row itself.
+		slog.Warn("agentdesigner: draft save failed", "workspace_id", sess.WorkspaceID)
 	}
 }
 
