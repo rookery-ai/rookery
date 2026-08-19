@@ -91,7 +91,6 @@ export default function AgentNewPage() {
     // user is stuck reading stale state until they navigate away or reload.
     refetchInterval: 5000,
   });
-  const buildInProgress = !resumeParam && designState.data?.generating === true;
   const buildingName = designState.data?.name;
 
   const [name, setName] = useState("");
@@ -117,6 +116,24 @@ export default function AgentNewPage() {
   // own recovery banner handles that, so the name gate is skipped and it
   // takes over immediately. Likewise ?resume=1 goes straight there.
   const showNameGate = !resumeParam && !draft && !nameConfirmed;
+
+  // The notice replaces the form this page would OTHERWISE offer — so it is
+  // gated on exactly that, and not on `generating` alone.
+  //
+  // `generating` comes from GET /design/state and is WORKSPACE-global: the
+  // server has no notion of which browser tab owns a build (Origin separates
+  // web from chat, not tab from tab). Keyed on it alone, the notice fired on
+  // the tab that had just STARTED the build — you clicked approve and were
+  // told your own build was running somewhere else, with the live designer
+  // unmounted underneath you.
+  //
+  // showNameGate is false the moment this tab confirms a name, so the tab
+  // driving the build never sees it. It is also false when a draft exists,
+  // where DesignerSurface's own recovery attaches to the running build and
+  // shows its progress — strictly better than a notice. What remains is the
+  // case this was built for: a genuinely fresh /agents/new, in a second tab,
+  // about to offer a form that cannot start anything.
+  const buildInProgress = showNameGate && designState.data?.generating === true;
 
   // DesignerSurface's mount-recovery effect (refetchState) reads `draft` only
   // ONCE, when the request to endpoints.state resolves to "no live session" —
