@@ -191,18 +191,21 @@ func dryRunOutput(raw string) (string, bool) {
 	if s == "" {
 		return "", false
 	}
-	if isDryRunSilent(s) {
-		// A silent run is a CORRECT outcome for an agent built to stay quiet, and the
-		// review must say so — an empty box reads as a broken build.
-		return "(The agent ran and had nothing to report — it would stay silent.)", true
-	}
+	// Chat wins over a later [SILENT], and the order of these two checks is the
+	// whole reason why. agentrunner.parseCoderOutput treats [SILENT] as
+	// suppressing the PROSE FALLBACK, not as cancelling real [CHAT] content —
+	// so a run that reports news and then adds the marker still delivers the
+	// news. Testing the marker first made the dry run disagree with the run it
+	// is a rehearsal of: the review said "nothing to report" about the very
+	// thing the agent had just found.
+	silent := isDryRunSilent(s)
 	s = dryRunStateRE.ReplaceAllString(s, "")
 
 	var out []string
 	for _, line := range strings.Split(s, "\n") {
 		t := strings.TrimSpace(line)
 		switch {
-		case t == "", strings.HasPrefix(t, "[CALL:"):
+		case t == "", strings.HasPrefix(t, "[CALL:"), isSilentLine(t):
 			continue
 		case strings.HasPrefix(t, "[CHAT]"):
 			t = strings.TrimSpace(strings.TrimPrefix(t, "[CHAT]"))
@@ -213,21 +216,42 @@ func dryRunOutput(raw string) (string, bool) {
 		out = append(out, t)
 	}
 	joined := strings.TrimSpace(strings.Join(out, "\n"))
-	if joined == "" {
-		return "", false
+	if joined != "" {
+		return joined, true
 	}
-	return joined, true
+	if silent {
+		// Nothing deliverable AND the marker: a silent run is a CORRECT outcome
+		// for an agent built to stay quiet, and the review must say so — an
+		// empty box reads as a broken build.
+		return "(The agent ran and had nothing to report — it would stay silent.)", true
+	}
+	return "", false
 }
 
 // isDryRunSilent recognises the [SILENT] marker with the decoration models add.
 func isDryRunSilent(s string) bool {
 	for _, line := range strings.Split(s, "\n") {
-		t := strings.Trim(strings.TrimSpace(line), "*_`\"' \t")
-		t = strings.TrimRight(t, ".!?,;:")
-		switch strings.ToLower(strings.TrimSpace(t)) {
-		case "[silent]", "[/silent]", "silent":
+		if isSilentLine(line) {
 			return true
 		}
+	}
+	return false
+}
+
+// isSilentLine reports whether one line is the [SILENT] marker, tolerating the
+// decoration models wrap it in (**[SILENT]**, `[SILENT]`, a trailing full stop).
+//
+// Shared by isDryRunSilent and by dryRunOutput's extraction loop, which must
+// DROP these lines: now that chat takes precedence over the marker, a lone
+// [SILENT] would otherwise survive extraction as ordinary prose and be shown to
+// the user as the agent's output — the literal marker text presented as a
+// result.
+func isSilentLine(line string) bool {
+	t := strings.Trim(strings.TrimSpace(line), "*_`\"' \t")
+	t = strings.TrimRight(t, ".!?,;:")
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "[silent]", "[/silent]", "silent":
+		return true
 	}
 	return false
 }

@@ -917,7 +917,14 @@ func (f *Flow) saveDraft(sess *DesignSession) {
 	if sess.State == StateVerifying {
 		state = "verifying"
 	}
-	_ = f.db.UpsertAgentDraft(&db.AgentDraft{
+	// Checked, not discarded. This is the write that makes a build survive a page
+	// reload or a server restart, and it is the write the "failed build left no
+	// trace" incident turned on — a draft whose updated_at was older than the
+	// build that was supposed to have saved it. A silent failure here reproduces
+	// that with no way to tell it happened. Warn only: the caller's turn has
+	// already succeeded and the in-memory session is still usable, so failing the
+	// turn would be a worse outcome than a stale draft.
+	if err := f.db.UpsertAgentDraft(&db.AgentDraft{
 		WorkspaceID:                sess.WorkspaceID,
 		AgentID:                    sess.AgentID,
 		AgentName:                  sess.AgentName,
@@ -929,7 +936,10 @@ func (f *Flow) saveDraft(sess *DesignSession) {
 		PendingUsedConnectionsJSON: string(usedConnsJSON),
 		PendingUsedMCPServersJSON:  string(usedMCPJSON),
 		ExpiresAt:                  time.Now().Add(draftTTL),
-	})
+	}); err != nil {
+		slog.Warn("agentdesigner: draft save failed",
+			"workspace_id", sess.WorkspaceID, "agent_id", sess.AgentID)
+	}
 }
 
 // deleteDraft removes the user's draft. Called after a successful finalize so the

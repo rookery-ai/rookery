@@ -228,53 +228,6 @@ func (r *Runner) RunByName(ctx context.Context, workspaceID, agentName, masterPw
 	})
 }
 
-// TestRunFromContent executes agentMD content once from a temp directory and
-// returns the joined [CHAT] lines. Used by the agent designer to verify an agent
-// works before committing it to disk/DB. Returns ("", nil) if the agent produces
-// no [CHAT] output; returns ("", err) if the coder subprocess fails.
-func (r *Runner) TestRunFromContent(ctx context.Context, workspaceID, agentMD string, tools map[string]string) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "agent-test-*")
-	if err != nil {
-		return "", fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	if err := os.WriteFile(filepath.Join(tmpDir, "AGENT.md"), []byte(agentMD), 0o640); err != nil {
-		return "", fmt.Errorf("write AGENT.md: %w", err)
-	}
-	if err := agentdesigner.WriteState(filepath.Join(tmpDir, "state.md"), "Test Agent", map[string]any{}); err != nil {
-		return "", fmt.Errorf("write state.md: %w", err)
-	}
-	if len(tools) > 0 {
-		// Reproduce the full nested project tree (helper modules, tests, …).
-		if err := agentdesigner.WriteToolsTree(filepath.Join(tmpDir, "tools"), tools); err != nil {
-			return "", err
-		}
-	}
-
-	testCoder := r.coderForWorkspace(workspaceID)
-	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
-		AgentMD:     agentMD,
-		StateJSON:   "{}",
-		ChatApps:    r.loadChatApps(workspaceID),
-		BackendType: backendTypeOf(testCoder),
-	})
-
-	if testCoder == nil {
-		return "", fmt.Errorf("no coder service configured")
-	}
-	result, err := testCoder.WithDir(tmpDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").Generate(ctx, workspaceID, prompt)
-	if err != nil {
-		return "", err
-	}
-
-	parsed := parseCoderOutput(result.Text)
-	if len(parsed.chatLines) == 0 {
-		return "", nil
-	}
-	return strings.Join(parsed.chatLines, "\n"), nil
-}
-
 // ─── Coder agent execution ────────────────────────────────────────────────────
 
 // coderRunContext tracks mutable state across the turns of one top-level run.
