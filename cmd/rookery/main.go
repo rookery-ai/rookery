@@ -65,6 +65,7 @@ func main() {
 			connectorCmd(),
 			mcpCmd(),
 			kbCmd(),
+			stateCmd(),
 			backupCommand(),
 			upgradeCmd(),
 			uninstallCmd(),
@@ -340,6 +341,22 @@ func serveCmd() *cli.Command {
 			if _, err := kbBridge.Start(ctx); err != nil {
 				return fmt.Errorf("start kb bridge: %w", err)
 			}
+
+			// A state bridge (internal/agentstate.Bridge) is NOT started here.
+			// connBridge/mcpBridge/kbBridge above are wired into every agent run
+			// through a WithXBridge(...) field on agentrunner.Runner, whose Run
+			// method registers a per-run token and injects ROOKERY_*_URL/TOKEN into
+			// the subprocess env (runner.go's extraEnv assembly, ~lines 377-439).
+			// There is no equivalent hook reachable from this file: Runner has no
+			// WithStateBridge, and RunInput carries no per-run agent directory this
+			// file could register against. Wiring the state bridge into real agent
+			// runs therefore needs a small, additive change inside
+			// internal/agentrunner/runner.go (add WithStateBridge, mirroring
+			// WithKBBridge, plus a Register/defer Unregister block in Run) — out of
+			// scope for this change, which is confined to internal/agentstate/ and
+			// this file. See internal/agentstate/bridge.go for the bridge itself and
+			// stateCmd below for the CLI side; both are complete and tested, but the
+			// capability is inert for agent runs until that follow-up lands.
 
 			designFlow := agentdesigner.NewFlow(coderFor, designer).
 				WithDB(database).
@@ -833,6 +850,71 @@ func mcpCmd() *cli.Command {
 					out, _ := io.ReadAll(resp.Body)
 					fmt.Print(string(out))
 					return nil
+				},
+			},
+		},
+	}
+}
+
+// stateCmd is how a CLI coder reads or updates its own state.md without hand-editing
+// the file: it POSTs to the loopback state bridge in the host process, which runs the
+// SAME agentstate.Get/Apply path the API engine's get_state/set_state tools call
+// in-process. Two of four agents on the live server went permanently silent by writing
+// their JSON outside the required fence when editing state.md directly — this gives a
+// CLI coder a door onto the same choke point instead, so switching coder kind cannot
+// change what an agent can do with its own memory.
+//
+// The bridge URL + a run-scoped token are expected in ROOKERY_STATE_URL /
+// ROOKERY_STATE_TOKEN, mirroring ROOKERY_CONNECTOR_URL/TOKEN and
+// ROOKERY_MCP_URL/TOKEN. Nothing sets them yet: internal/agentrunner.Runner has no
+// WithStateBridge and no per-run registration for this bridge, so this command
+// reports "no state bridge available in this run" until that follow-up lands (see
+// the comment beside kbBridge in serveCmd). Usage:
+// rookery state get
+// rookery state set --patch '<json-object>'
+func stateCmd() *cli.Command {
+	post := func(ctx context.Context, endpoint string, payload any) error {
+		base := os.Getenv("ROOKERY_STATE_URL")
+		token := os.Getenv("ROOKERY_STATE_TOKEN")
+		if base == "" || token == "" {
+			return fmt.Errorf("no state bridge available in this run")
+		}
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequestWithContext(ctx, "POST", base+endpoint, bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("state bridge unreachable: %w", err)
+		}
+		defer resp.Body.Close()
+		out, _ := io.ReadAll(resp.Body)
+		fmt.Print(string(out))
+		return nil
+	}
+	return &cli.Command{
+		Name:  "state",
+		Usage: "Read or update this agent's own state.md (used by CLI coders)",
+		Commands: []*cli.Command{
+			{
+				Name:  "get",
+				Usage: "Print this agent's current state as JSON",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					return post(ctx, "/state/get", map[string]any{})
+				},
+			},
+			{
+				Name:  "set",
+				Usage: "Merge a patch into this agent's state: state set --patch '<json-object>'",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "patch", Usage: "JSON object to merge into state (a null value deletes that key)", Value: "{}"},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					var patch map[string]any
+					if err := json.Unmarshal([]byte(cmd.String("patch")), &patch); err != nil {
+						return fmt.Errorf("--patch must be a JSON object: %w", err)
+					}
+					return post(ctx, "/state/set", map[string]any{"patch": patch})
 				},
 			},
 		},
