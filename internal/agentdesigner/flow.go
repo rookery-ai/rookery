@@ -917,7 +917,14 @@ func (f *Flow) saveDraft(sess *DesignSession) {
 	if sess.State == StateVerifying {
 		state = "verifying"
 	}
-	_ = f.db.UpsertAgentDraft(&db.AgentDraft{
+	// Checked, not discarded. This is the write that makes a build survive a page
+	// reload or a server restart, and it is the write the "failed build left no
+	// trace" incident turned on — a draft whose updated_at was older than the
+	// build that was supposed to have saved it. A silent failure here reproduces
+	// that with no way to tell it happened. Warn only: the caller's turn has
+	// already succeeded and the in-memory session is still usable, so failing the
+	// turn would be a worse outcome than a stale draft.
+	if err := f.db.UpsertAgentDraft(&db.AgentDraft{
 		WorkspaceID:                sess.WorkspaceID,
 		AgentID:                    sess.AgentID,
 		AgentName:                  sess.AgentName,
@@ -929,7 +936,16 @@ func (f *Flow) saveDraft(sess *DesignSession) {
 		PendingUsedConnectionsJSON: string(usedConnsJSON),
 		PendingUsedMCPServersJSON:  string(usedMCPJSON),
 		ExpiresAt:                  time.Now().Add(draftTTL),
-	})
+	}); err != nil {
+		// workspace_id alone, deliberately. agent_drafts holds one row per
+		// workspace, so this fully identifies the write that failed; agent_id
+		// added nothing for locating it and is a user-supplied path parameter
+		// on the edit route, which CodeQL flags as log injection
+		// (go/log-injection). Reducing rather than substituting, the same way
+		// buildErrClass reduces an error to a class — the create/edit
+		// discriminator is recoverable from the draft row itself.
+		slog.Warn("agentdesigner: draft save failed", "workspace_id", sess.WorkspaceID)
+	}
 }
 
 // deleteDraft removes the user's draft. Called after a successful finalize so the
@@ -1725,7 +1741,10 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// Secrets are injected below so the real API calls the agent will make at run time are
 	// actually exercised here (the only exception is sending real outbound messages,
 	// enforced by the testing-rules prompt).
-	generationCoder := coderSvc.WithDir(workDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").
+	// WithAgentName so a build that exercises set_state creates state.md with the real
+	// heading. Nothing seeds a state file before this point, and a blank heading written
+	// here would be promoted verbatim into the saved agent by saveAndFinish.
+	generationCoder := coderSvc.WithDir(workDir).WithAgentName(agentNameSnap).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").
 		// Stream the API engine's per-tool-call milestones (🔧 web_search(...), 🔧
 		// run_script(...), 🔧 write_file(...)) to the build SSE + Telegram, the same
 		// way agent runs do (agentrunner wires WithProgress(OnProgress)). Without this,

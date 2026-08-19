@@ -84,6 +84,17 @@ async function sendViaComposer(text: string) {
   fireEvent.keyDown(box, { key: "Enter", code: "Enter" });
 }
 
+// Vitest's per-test budget defaults to 5000ms — the SAME number as the
+// waitFor timeouts below, which is unpassable by construction: one wait can
+// consume the whole test and leave nothing for the rest. That is what failed
+// on CI while passing locally, and raising only the inner timeouts (as an
+// earlier pass did) could not fix it. Set once for the file rather than per
+// test: every test here calls sendViaComposer, which carries a waitFor(5000),
+// and two of them call it twice with a userEvent.type of ~20 characters in
+// between — so they all share the same latent structure and would surface one
+// at a time on loaded runners.
+vi.setConfig({ testTimeout: 30000 });
+
 const inactive = () => jsonResponse({ active: false });
 
 beforeEach(() => {

@@ -27,6 +27,8 @@ import (
 	"github.com/rookery-ai/rookery/internal/sandbox"
 	"github.com/rookery-ai/rookery/internal/vault"
 	"github.com/rookery-ai/rookery/internal/websearch"
+
+	"github.com/rookery-ai/rookery/internal/agentstate"
 )
 
 // maxToolResult is the per-result byte cap injected back into the model context.
@@ -54,6 +56,15 @@ type hostToolSet struct {
 	includeExecTools bool // gates the tools that execute code (run_script, bash); off for chat.
 	// web_fetch/web_search are read-only, cannot carry secrets, and (per netguard) cannot
 	// reach private address space — so they are offered regardless of this flag.
+	// get_state/set_state (statetools.go) are gated on this same flag: they only make sense
+	// where workDir is a real agent's own dir (a run or a build), never in chat.
+
+	// agentName names the state.md header when set_state has to create the file fresh
+	// (agentstate.RenderTemplate). Cosmetic only — for a build or run, state.md already
+	// exists with the real name from the agent's build/edit save path, so an empty value
+	// here (the caller has not wired one through) never surfaces as wrong data, only as a
+	// blank " # State — " heading on the rare first-ever write.
+	agentName string
 
 	// searcher overrides the exact-match Searcher used by search_files. Nil in
 	// production, where it always falls back to h.vlt.NewSearcher() — this
@@ -238,6 +249,21 @@ func (h *hostToolSet) tools() []llm.Tool {
 					"Secrets are available as environment variables (e.g. curl -H \"Authorization: Bearer $MY_TOKEN\" ...), so use this (or run_script) for any call that needs a secret. " +
 					"On failure both stdout and stderr are returned so you can see what went wrong. Do NOT install packages (no internet-backed pip/apt) — use tools that are already present.",
 				Parameters: rawSchema(`{"type":"object","properties":{"command":{"type":"string","description":"the bash command line to run"}},"required":["command"]}`),
+			},
+			llm.Tool{
+				Name: "get_state",
+				Description: "Read your own state.md — your memory between runs — as JSON. Use this instead of reading the file " +
+					"with read_file: it always returns the current understood state, even when the file's on-disk shape is not what you'd expect.",
+				Parameters: rawSchema(`{"type":"object","properties":{}}`),
+			},
+			llm.Tool{
+				Name: "set_state",
+				Description: "Merge `patch` into your state.md — your memory between runs. This is a PATCH, not a replacement: " +
+					"a key you don't mention is left untouched, and a key you set to null is deleted. To replace a key's value, " +
+					"just set it to the new value. Use this instead of writing state.md yourself with write_file/edit_file — " +
+					"a hand-written file that doesn't land inside the state.md json fence is invisible to your next run and you " +
+					"will silently lose your memory.",
+				Parameters: rawSchema(`{"type":"object","properties":{"patch":{"type":"object","description":"keys to merge into the current state; a null value deletes that key"}},"required":["patch"]}`),
 			},
 		)
 	}
@@ -548,8 +574,11 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		Source    string            `json:"source"`
 		DestDir   string            `json:"dest_dir"`
 		Title     string            `json:"title"`
+		Patch     map[string]any    `json:"patch"`
 	}
-	_ = json.Unmarshal(call.Args, &args) // tolerate missing fields
+	// DecodeJSON, not json.Unmarshal: set_state's patch reaches this struct, and a
+	// plain decode rounds any id above 2^53 into a different id.
+	_ = agentstate.DecodeJSON(call.Args, &args) // tolerate missing fields
 
 	switch call.Name {
 	case "read_file":
@@ -618,6 +647,24 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 			return "error: " + err.Error()
 		}
 		return h.spillLargeOutput(out, "bash")
+	case "get_state":
+		if !h.includeExecTools {
+			return "error: get_state is not available"
+		}
+		out, err := h.getState()
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return out
+	case "set_state":
+		if !h.includeExecTools {
+			return "error: set_state is not available"
+		}
+		out, err := h.setState(args.Patch)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return out
 	default:
 		if _, _, ok := h.resolveConnectorTool(call.Name); ok {
 			var cargs map[string]any

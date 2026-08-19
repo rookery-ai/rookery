@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rookery-ai/rookery/internal/agentdesigner"
+	"github.com/rookery-ai/rookery/internal/agentstate"
 	"github.com/rookery-ai/rookery/internal/coder"
 	"github.com/rookery-ai/rookery/internal/connectors"
 	"github.com/rookery-ai/rookery/internal/db"
@@ -32,7 +33,9 @@ import (
 const (
 	maxCallDepth = 3 // maximum agent-to-agent call depth
 	maxTurns     = 5 // maximum coder.Generate calls per top-level run
-	maxStateSize = 65536
+	// One limit, defined in agentstate and re-exported here so the existing
+	// call sites read unchanged. Two constants would drift.
+	maxStateSize = agentstate.MaxStateSize
 )
 
 // SendFunc delivers a message back to the user's chat platform.
@@ -87,6 +90,14 @@ type Runner struct {
 	// vault.ImportFile / Searcher code the API engine's save_to_kb/search_files
 	// tools call in-process). nil for tests that don't wire one.
 	kbBridge *vault.Bridge
+
+	// stateBridge, when set, lets a CLI coder's agent run reach its own state.md
+	// via `rookery state get|set` — the same agentstate.Get/Apply the API engine's
+	// get_state/set_state tools call in-process. Without it a CLI coder's only way
+	// to record memory is hand-editing the file, which is exactly how two live
+	// agents stranded their state outside the json fence and went permanently
+	// silent. nil for tests that don't wire one.
+	stateBridge *agentstate.Bridge
 
 	// MCP: when set, an agent's BOUND servers (agent_mcp_servers) are exposed to
 	// both coder types — the API engine calls mcpClient in-process, a CLI coder
@@ -185,6 +196,14 @@ func (r *Runner) WithVault(v *vault.Vault) *Runner {
 	return r
 }
 
+// WithStateBridge wires the loopback agent-state bridge so a CLI coder's run can
+// reach `rookery state get|set` — parity with the API engine's get_state/set_state
+// host tools, so changing coder kind cannot change what an agent can remember.
+func (r *Runner) WithStateBridge(b *agentstate.Bridge) *Runner {
+	r.stateBridge = b
+	return r
+}
+
 // WithKBBridge wires the loopback KB bridge so a CLI coder's agent run can reach
 // `rookery kb convert|search` (parity with the API engine's built-in
 // save_to_kb/search_files host tools).
@@ -223,53 +242,6 @@ func (r *Runner) RunByName(ctx context.Context, workspaceID, agentName, masterPw
 		MasterPw:    masterPw,
 		SendOutput:  send,
 	})
-}
-
-// TestRunFromContent executes agentMD content once from a temp directory and
-// returns the joined [CHAT] lines. Used by the agent designer to verify an agent
-// works before committing it to disk/DB. Returns ("", nil) if the agent produces
-// no [CHAT] output; returns ("", err) if the coder subprocess fails.
-func (r *Runner) TestRunFromContent(ctx context.Context, workspaceID, agentMD string, tools map[string]string) (string, error) {
-	tmpDir, err := os.MkdirTemp("", "agent-test-*")
-	if err != nil {
-		return "", fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	if err := os.WriteFile(filepath.Join(tmpDir, "AGENT.md"), []byte(agentMD), 0o640); err != nil {
-		return "", fmt.Errorf("write AGENT.md: %w", err)
-	}
-	if err := agentdesigner.WriteState(filepath.Join(tmpDir, "state.md"), "Test Agent", map[string]any{}); err != nil {
-		return "", fmt.Errorf("write state.md: %w", err)
-	}
-	if len(tools) > 0 {
-		// Reproduce the full nested project tree (helper modules, tests, …).
-		if err := agentdesigner.WriteToolsTree(filepath.Join(tmpDir, "tools"), tools); err != nil {
-			return "", err
-		}
-	}
-
-	testCoder := r.coderForWorkspace(workspaceID)
-	prompt := prompts.BuildCoderPrompt(prompts.CoderPromptParams{
-		AgentMD:     agentMD,
-		StateJSON:   "{}",
-		ChatApps:    r.loadChatApps(workspaceID),
-		BackendType: backendTypeOf(testCoder),
-	})
-
-	if testCoder == nil {
-		return "", fmt.Errorf("no coder service configured")
-	}
-	result, err := testCoder.WithDir(tmpDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").Generate(ctx, workspaceID, prompt)
-	if err != nil {
-		return "", err
-	}
-
-	parsed := parseCoderOutput(result.Text)
-	if len(parsed.chatLines) == 0 {
-		return "", nil
-	}
-	return strings.Join(parsed.chatLines, "\n"), nil
 }
 
 // ─── Coder agent execution ────────────────────────────────────────────────────
@@ -414,7 +386,12 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	// agents' files. Pre-approve the tools agents need so the subprocess never
 	// blocks on interactive permission prompts (--setting-sources "" suppresses
 	// all settings).
-	coderSvc := baseCoder.WithDir(agentDir).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").WithProgress(input.OnProgress)
+	// WithAgentName is what stops set_state creating a state.md headed "# State — "
+	// with a blank name. A brand-new agent genuinely has no state file (nothing seeds
+	// one — see agentdesigner/flow.go), so the first set_state call of its first run
+	// creates it from the template, and every later write only splices the fence. A
+	// blank heading written there is permanent.
+	coderSvc := baseCoder.WithDir(agentDir).WithAgentName(agent.Name).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").WithProgress(input.OnProgress)
 
 	// Assemble the subprocess env once (WithExtraEnv replaces rather than merges): user
 	// secrets + the connector-bridge vars. Injected for every coder type.
@@ -478,6 +455,15 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 		defer r.kbBridge.Unregister(kbToken)
 		extraEnv["ROOKERY_KB_URL"] = r.kbBridge.URL()
 		extraEnv["ROOKERY_KB_TOKEN"] = kbToken
+	}
+	// Scoped to THIS agent's directory and name, not to the workspace: state.md is
+	// per-agent, so a token that reached the workspace would let one agent read and
+	// overwrite another's memory.
+	if r.stateBridge != nil && r.stateBridge.Addr() != "" {
+		stateToken := r.stateBridge.Register(agentDir, agent.Name)
+		defer r.stateBridge.Unregister(stateToken)
+		extraEnv["ROOKERY_STATE_URL"] = r.stateBridge.Addr()
+		extraEnv["ROOKERY_STATE_TOKEN"] = stateToken
 	}
 	if len(extraEnv) > 0 {
 		coderSvc = coderSvc.WithExtraEnv(extraEnv)
@@ -1147,15 +1133,12 @@ func extractProseMessage(text string) string {
 
 // ─── State management ─────────────────────────────────────────────────────────
 
-// mergeState shallowly merges update into existing. A null value deletes the key.
+// mergeState delegates to agentstate.Merge so the semantics an agent sees are
+// identical whichever door it used — the [STATE] marker here, the API engine's
+// set_state tool, or the CLI bridge. Two copies of "nil deletes the key" is
+// exactly how those doors would drift apart.
 func mergeState(existing map[string]interface{}, update map[string]interface{}) {
-	for k, v := range update {
-		if v == nil {
-			delete(existing, k)
-		} else {
-			existing[k] = v
-		}
-	}
+	agentstate.Merge(existing, update)
 }
 
 // saveState writes state.md, replacing only the machine-state json fence and
@@ -1171,8 +1154,13 @@ func saveState(agentDir, agentName string, state map[string]interface{}) error {
 	return agentdesigner.WriteState(filepath.Join(agentDir, "state.md"), agentName, state)
 }
 
-// applyAndSaveState merges this turn's [STATE] updates (if any) into
-// currentState and persists it to state.md.
+// applyAndSaveState merges this turn's [STATE] updates (if any) into the state
+// that is actually on disk, and persists the result.
+//
+// "On disk", not `currentState`: the agent may have written state.md during this
+// turn through set_state or `rookery state set`, and currentState is only the
+// run-start snapshot. Which of the two the patch lands on is decided below and
+// is the subtlest thing in this file.
 //
 // When there ARE updates, the write always happens — the long-standing
 // contract that an explicit [STATE] emission always wins is unchanged, even
@@ -1198,13 +1186,84 @@ func saveState(agentDir, agentName string, state map[string]interface{}) error {
 // a no-update turn is a strict no-op when the initial read failed, leaving
 // the malformed file for a human (or a later explicit [STATE]) to fix.
 func applyAndSaveState(agentDir, agentName string, currentState map[string]interface{}, updates []map[string]interface{}, stateReadOK bool) error {
-	for _, update := range updates {
-		mergeState(currentState, update)
-	}
 	if len(updates) == 0 && !stateReadOK {
 		return nil
 	}
-	return saveState(agentDir, agentName, currentState)
+
+	// Combine this turn's updates into ONE patch, then let agentstate.Apply merge
+	// it into whatever the file currently holds.
+	//
+	// This must not write `currentState` back wholesale, and that distinction is
+	// the whole point. currentState was read at RUN START; the agent may since
+	// have called set_state (API engine) or `rookery state set` (CLI bridge),
+	// which write the file directly. Replacing the file with the run-start map
+	// plus this turn's markers would DISCARD those writes — re-creating, through
+	// the new tools, the exact "the agent stored something and the next run saw
+	// nothing" failure this whole change exists to remove.
+	//
+	// The updates are combined with a plain assignment rather than Merge: Merge
+	// treats a nil value as "delete this key", so merging a deletion into an
+	// empty patch would erase it from the patch instead of recording it, and the
+	// key would quietly survive in the file.
+	patch := map[string]interface{}{}
+	for _, update := range updates {
+		for k, v := range update {
+			patch[k] = v
+		}
+	}
+
+	// Which base the patch lands on depends on whether the FILE still makes sense,
+	// and both answers are load-bearing:
+	//
+	//   understood — trust the file. It may hold a set_state / `rookery state set`
+	//   write made during this turn, and the run-start snapshot does not.
+	//
+	//   not understood, or RECOVERED, or gone empty — all while the run started
+	//   with state. Each means the agent mangled the file mid-run (a full-file
+	//   write_file editing "## Notes" drops the fence entirely) without emitting
+	//   [STATE], so the run-start snapshot is the best truth available and
+	//   writing it back is the self-heal that stops a formatting slip costing the
+	//   agent's memory.
+	//
+	// `understood` alone cannot decide this: a file with NO fence is both "a
+	// fresh agent" and "an agent that just deleted its fence". Nor is "the file
+	// went empty" enough — that misses the case a review reproduced: the rewrite
+	// leaves a JSON snippet in its prose (a quoted API error), recovery adopts
+	// the snippet, base is non-empty, and the real state is destroyed. `recovered`
+	// is the missing signal: state found OUTSIDE the fence means the file is
+	// damaged by construction, whatever it happens to contain.
+	//
+	// All three are gated on the run having STARTED with state, so a genuinely
+	// fresh agent still adopts what it wrote, and an hn-watch-shaped file whose
+	// data was always stranded still recovers on its next run.
+	//
+	// The accepted cost, stated rather than hidden: an agent that deliberately
+	// clears its entire state through set_state has that clear undone — whether
+	// or not it emits an unrelated [STATE] in the same turn. Restoring memory a
+	// slip destroyed is the failure worth optimising for; wholesale deliberate
+	// clearing is not a thing agents do.
+	path := agentstate.StateFilePath(agentDir)
+	base, understood, recovered, err := agentstate.GetDetail(path)
+	if err != nil {
+		return err
+	}
+	if !understood || ((len(base) == 0 || recovered) && len(currentState) > 0) {
+		base = map[string]interface{}{}
+		for k, v := range currentState {
+			base[k] = v
+		}
+	}
+	agentstate.Merge(base, patch)
+
+	// Keep the in-run view in step, so a later turn of the SAME run sees what the
+	// file now holds rather than the run-start snapshot.
+	for k := range currentState {
+		delete(currentState, k)
+	}
+	for k, v := range base {
+		currentState[k] = v
+	}
+	return saveState(agentDir, agentName, base)
 }
 
 // ─── Skills loading ───────────────────────────────────────────────────────────

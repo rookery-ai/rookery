@@ -143,8 +143,15 @@ func TestWriteStateDollarSignSafe(t *testing.T) {
 	}
 }
 
-func TestReadStateUnterminatedFenceNoMatch(t *testing.T) {
-	// A fence with no closing backticks must NOT match, so damaged files degrade to empty.
+func TestReadStateUnterminatedFenceRecoversItsContent(t *testing.T) {
+	// This test used to assert the opposite — that a fence with no closing
+	// backticks degrades to empty. That discard is now understood to BE the
+	// bug: the JSON inside a damaged fence is the agent's own memory, written
+	// by an agent that fumbled the format, and throwing it away is what made
+	// two live agents re-baseline on every run and go permanently silent.
+	//
+	// The fence is still not "matched" — findStateFence still reports damage.
+	// Recovery is what picks the content back up.
 	p := filepath.Join(t.TempDir(), "state.md")
 	seed := "# State — X\n\n```json\n{\"stale\": \"data\"}\n\nno close fence\n"
 	if err := os.WriteFile(p, []byte(seed), 0o640); err != nil {
@@ -152,10 +159,10 @@ func TestReadStateUnterminatedFenceNoMatch(t *testing.T) {
 	}
 	got, err := ReadState(p)
 	if err != nil {
-		t.Fatalf("unterminated fence should degrade to empty, not error: %v", err)
+		t.Fatalf("a recoverable file must not error: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("unterminated fence returned stale state: %#v", got)
+	if got["stale"] != "data" {
+		t.Fatalf("the agent's own memory was discarded: %#v", got)
 	}
 }
 
@@ -307,10 +314,17 @@ func TestReadStateOrphanThenLaterFence(t *testing.T) {
 	}
 	got, err := ReadState(p)
 	if err != nil {
-		t.Fatalf("should degrade to empty, not error: %v", err)
+		t.Fatalf("a recoverable file must not error: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("should not return stale or Notes data: %#v", got)
+	// The guarantee this test exists for is UNCHANGED and is the important
+	// half: the Notes fence is never the source of state. What changed is that
+	// the orphaned state fence's own content is now recovered rather than
+	// discarded — it is the agent's memory, and discarding it is the bug.
+	if got["notes_data"] != nil {
+		t.Fatalf("the Notes fence must never be read as state: %#v", got)
+	}
+	if got["stale"] != "orphan" {
+		t.Fatalf("the orphaned state fence's own content was discarded: %#v", got)
 	}
 }
 
@@ -373,9 +387,13 @@ func TestReadStateTrailingTextOnCloserIsNotAClose(t *testing.T) {
 	}
 	got, err := ReadState(p)
 	if err != nil {
-		t.Fatalf("should degrade to empty, not error: %v", err)
+		t.Fatalf("a recoverable file must not error: %v", err)
 	}
-	if len(got) != 0 {
-		t.Fatalf("unterminated fence (trailing text on closer) returned stale state: %#v", got)
+	// "```trailing" is still an OPENER, not a closer — that classification is
+	// what this test guards and it has not changed. The block therefore never
+	// terminates, and the content inside it is now recovered rather than
+	// discarded, for the same reason as the other damaged-fence cases.
+	if got["a"] == nil {
+		t.Fatalf("the agent's own memory was discarded: %#v", got)
 	}
 }

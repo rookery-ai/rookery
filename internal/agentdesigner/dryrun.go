@@ -12,33 +12,6 @@ import (
 	"github.com/rookery-ai/rookery/internal/prompts"
 )
 
-// dryRunSendProhibition is appended to the RUNTIME prompt for a dry run, and it is the
-// half of the safety story the build-phase marker cannot cover.
-//
-// buildphase.EnvVar gates connectors.Execute and mcp.Execute — nothing else. At build time
-// the rest of the restraint is carried by the prompt: testingRulesBlock's "never send real
-// outbound messages on the user's behalf", which reaches only the IMPLEMENTATION prompts.
-// A dry run uses prompts.BuildCoderPrompt — the RUNTIME prompt — whose execution block says
-// the opposite ("DO the task", "RUN that script"). So a TIER 2 agent holding an SMTP or bot
-// token in a secret, with its own tools/send.py, would really send during a rehearsal of an
-// agent the user has not yet approved. Connector- and MCP-mediated sends stay blocked by the
-// marker; this closes the script/Bash path.
-//
-// It lives here rather than in internal/prompts because it is specific to this rehearsal,
-// not to the runtime protocol every real run shares.
-const dryRunSendProhibition = `
-
-[DRY RUN — REHEARSAL ONLY]
-You are being run once as a rehearsal so this agent's owner can see real output before they
-approve it. Nothing you produce here is delivered to anyone.
-
-Read, fetch, compute and inspect freely — that is the point of this run.
-
-Do NOT send, post, publish, message, email, comment on, upload or otherwise transmit
-anything to anyone or to any external service, and do NOT create, change or delete anything
-there. If this agent's job ends in sending something, do all the work up to that point and
-then describe exactly what it WOULD have sent, in your [CHAT] block, instead of sending it.`
-
 // dryRunPrompt builds the prompt a dry run is given: the ordinary runtime prompt the agent
 // will see on every real run, plus the send prohibition above.
 //
@@ -55,7 +28,7 @@ func dryRunPrompt(agentMD, backendType, runtimeContext string, chatApps []prompt
 		BackendType:    backendType,
 		RuntimeContext: runtimeContext,
 		ChatApps:       chatApps,
-	}) + dryRunSendProhibition
+	}) + prompts.DryRunSendProhibition
 }
 
 // dryRun executes a freshly built agent ONCE so the review step can show what it
@@ -191,18 +164,21 @@ func dryRunOutput(raw string) (string, bool) {
 	if s == "" {
 		return "", false
 	}
-	if isDryRunSilent(s) {
-		// A silent run is a CORRECT outcome for an agent built to stay quiet, and the
-		// review must say so — an empty box reads as a broken build.
-		return "(The agent ran and had nothing to report — it would stay silent.)", true
-	}
+	// Chat wins over a later [SILENT], and the order of these two checks is the
+	// whole reason why. agentrunner.parseCoderOutput treats [SILENT] as
+	// suppressing the PROSE FALLBACK, not as cancelling real [CHAT] content —
+	// so a run that reports news and then adds the marker still delivers the
+	// news. Testing the marker first made the dry run disagree with the run it
+	// is a rehearsal of: the review said "nothing to report" about the very
+	// thing the agent had just found.
+	silent := isDryRunSilent(s)
 	s = dryRunStateRE.ReplaceAllString(s, "")
 
 	var out []string
 	for _, line := range strings.Split(s, "\n") {
 		t := strings.TrimSpace(line)
 		switch {
-		case t == "", strings.HasPrefix(t, "[CALL:"):
+		case t == "", strings.HasPrefix(t, "[CALL:"), isSilentLine(t):
 			continue
 		case strings.HasPrefix(t, "[CHAT]"):
 			t = strings.TrimSpace(strings.TrimPrefix(t, "[CHAT]"))
@@ -213,21 +189,42 @@ func dryRunOutput(raw string) (string, bool) {
 		out = append(out, t)
 	}
 	joined := strings.TrimSpace(strings.Join(out, "\n"))
-	if joined == "" {
-		return "", false
+	if joined != "" {
+		return joined, true
 	}
-	return joined, true
+	if silent {
+		// Nothing deliverable AND the marker: a silent run is a CORRECT outcome
+		// for an agent built to stay quiet, and the review must say so — an
+		// empty box reads as a broken build.
+		return "(The agent ran and had nothing to report — it would stay silent.)", true
+	}
+	return "", false
 }
 
 // isDryRunSilent recognises the [SILENT] marker with the decoration models add.
 func isDryRunSilent(s string) bool {
 	for _, line := range strings.Split(s, "\n") {
-		t := strings.Trim(strings.TrimSpace(line), "*_`\"' \t")
-		t = strings.TrimRight(t, ".!?,;:")
-		switch strings.ToLower(strings.TrimSpace(t)) {
-		case "[silent]", "[/silent]", "silent":
+		if isSilentLine(line) {
 			return true
 		}
+	}
+	return false
+}
+
+// isSilentLine reports whether one line is the [SILENT] marker, tolerating the
+// decoration models wrap it in (**[SILENT]**, `[SILENT]`, a trailing full stop).
+//
+// Shared by isDryRunSilent and by dryRunOutput's extraction loop, which must
+// DROP these lines: now that chat takes precedence over the marker, a lone
+// [SILENT] would otherwise survive extraction as ordinary prose and be shown to
+// the user as the agent's output — the literal marker text presented as a
+// result.
+func isSilentLine(line string) bool {
+	t := strings.Trim(strings.TrimSpace(line), "*_`\"' \t")
+	t = strings.TrimRight(t, ".!?,;:")
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "[silent]", "[/silent]", "silent":
+		return true
 	}
 	return false
 }

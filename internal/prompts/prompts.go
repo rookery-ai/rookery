@@ -1927,8 +1927,12 @@ your job is to DO the task, never to (re)construct or verify the agent itself.
   was done and verified when the agent was built.
 - Do NOT re-explore your own directory or re-discover external-service actions to "make sure" —
   the scripts already use the correct, verified calls. Read only what you actually need to act.
-- The ONLY things you write at run time are: state (via [STATE]) and durable notes/memory in the
-  user's knowledge base. Do NOT add or edit anything under tools/.
+- The ONLY things you write at run time are: state and durable notes/memory in the user's
+  knowledge base. Do NOT add or edit anything under tools/.
+- Your state is already in this prompt — you do not need to go and read it. To change it,
+  either call the set_state tool if you have one, or emit a [STATE] block at the end of your
+  run. Both do the same thing: they MERGE a patch, so send only the keys that changed, and
+  send a key with a null value to delete it. Keys you leave out are kept.
 - If a script genuinely fails, report the problem plainly in [CHAT] (or emit [SILENT] if the run
   legitimately has nothing to report). Do NOT try to fix, rebuild, re-verify, or work around it
   here — a real fix is a separate edit-the-agent action, not something a run should attempt.

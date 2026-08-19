@@ -16,6 +16,7 @@ import (
 
 	"github.com/rookery-ai/rookery/internal/agentdesigner"
 	"github.com/rookery-ai/rookery/internal/agentrunner"
+	"github.com/rookery-ai/rookery/internal/agentstate"
 	"github.com/rookery-ai/rookery/internal/approval"
 	"github.com/rookery-ai/rookery/internal/auth"
 	"github.com/rookery-ai/rookery/internal/backup"
@@ -65,6 +66,7 @@ func main() {
 			connectorCmd(),
 			mcpCmd(),
 			kbCmd(),
+			stateCmd(),
 			backupCommand(),
 			upgradeCmd(),
 			uninstallCmd(),
@@ -329,6 +331,16 @@ func serveCmd() *cli.Command {
 				return fmt.Errorf("start MCP bridge: %w", err)
 			}
 
+			// Loopback agent-state bridge so a CLI coder reaches the same
+			// agentstate.Get/Apply the API engine's get_state/set_state tools call
+			// in-process. Parity matters here: without it a CLI coder's only way to
+			// record memory is hand-editing state.md, which is how two live agents
+			// stranded their state outside the json fence and went permanently silent.
+			stateBridge := agentstate.NewBridge()
+			if _, err := stateBridge.Start(ctx); err != nil {
+				return fmt.Errorf("start agent-state bridge: %w", err)
+			}
+
 			// Loopback KB bridge so CLI coders reach conversion + search in-process
 			// (the same vault.ImportFile / Searcher code the API engine calls directly).
 			// Approval gate for irreversible public writes (posts, uploads). Off unless
@@ -378,6 +390,7 @@ func serveCmd() *cli.Command {
 				WithConnectors(connReg, connStore, connBridge).
 				WithApprovalGate(approvalSvc.ParkerFor).
 				WithKBBridge(kbBridge).
+				WithStateBridge(stateBridge).
 				WithMCP(mcpClient, mcpBridge).
 				WithCoderFactory(func(workspaceID string) *coder.Coder {
 					w, err := database.GetWorkspaceByID(workspaceID)
@@ -833,6 +846,70 @@ func mcpCmd() *cli.Command {
 					out, _ := io.ReadAll(resp.Body)
 					fmt.Print(string(out))
 					return nil
+				},
+			},
+		},
+	}
+}
+
+// stateCmd is how a CLI coder reads or updates its own state.md without hand-editing
+// the file: it POSTs to the loopback state bridge in the host process, which runs the
+// SAME agentstate.Get/Apply path the API engine's get_state/set_state tools call
+// in-process. Two of four agents on the live server went permanently silent by writing
+// their JSON outside the required fence when editing state.md directly — this gives a
+// CLI coder a door onto the same choke point instead, so switching coder kind cannot
+// change what an agent can do with its own memory.
+//
+// The bridge URL + a run-scoped token are expected in ROOKERY_STATE_URL /
+// ROOKERY_STATE_TOKEN, mirroring ROOKERY_CONNECTOR_URL/TOKEN and
+// ROOKERY_MCP_URL/TOKEN. agentrunner.Runner registers a token per run and injects
+// both, so outside a run this command correctly reports "no state bridge available
+// in this run" — it is not a user-facing entry point. Usage:
+// rookery state get
+// rookery state set --patch '<json-object>'
+func stateCmd() *cli.Command {
+	post := func(ctx context.Context, endpoint string, payload any) error {
+		base := os.Getenv("ROOKERY_STATE_URL")
+		token := os.Getenv("ROOKERY_STATE_TOKEN")
+		if base == "" || token == "" {
+			return fmt.Errorf("no state bridge available in this run")
+		}
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequestWithContext(ctx, "POST", base+endpoint, bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("state bridge unreachable: %w", err)
+		}
+		defer resp.Body.Close()
+		out, _ := io.ReadAll(resp.Body)
+		fmt.Print(string(out))
+		return nil
+	}
+	return &cli.Command{
+		Name:  "state",
+		Usage: "Read or update this agent's own state.md (used by CLI coders)",
+		Commands: []*cli.Command{
+			{
+				Name:  "get",
+				Usage: "Print this agent's current state as JSON",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					return post(ctx, "/state/get", map[string]any{})
+				},
+			},
+			{
+				Name:  "set",
+				Usage: "Merge a patch into this agent's state: state set --patch '<json-object>'",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "patch", Usage: "JSON object to merge into state (a null value deletes that key)", Value: "{}"},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					var patch map[string]any
+					if err := agentstate.DecodeJSON([]byte(cmd.String("patch")), &patch); err != nil {
+						return fmt.Errorf("--patch must be a JSON object: %w", err)
+					}
+					return post(ctx, "/state/set", map[string]any{"patch": patch})
 				},
 			},
 		},
