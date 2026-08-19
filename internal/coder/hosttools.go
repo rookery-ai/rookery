@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/rookery-ai/rookery/internal/agentstate"
 	"io"
 	"net/http"
 	"net/url"
@@ -574,7 +575,9 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		Title     string            `json:"title"`
 		Patch     map[string]any    `json:"patch"`
 	}
-	_ = json.Unmarshal(call.Args, &args) // tolerate missing fields
+	// DecodeJSON, not json.Unmarshal: set_state's patch reaches this struct, and a
+	// plain decode rounds any id above 2^53 into a different id.
+	_ = agentstate.DecodeJSON(call.Args, &args) // tolerate missing fields
 
 	switch call.Name {
 	case "read_file":

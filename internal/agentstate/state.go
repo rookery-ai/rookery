@@ -84,7 +84,14 @@ func findStateFence(lines []string) fenceLoc {
 	for i := openIdx + 1; i < len(lines); i++ {
 		trimmed := strings.TrimSpace(lines[i])
 		if trimmed == "```" {
-			return fenceLoc{Open: openIdx, Close: i, OK: true}
+			// OrphanOpen: -1 explicitly. Its zero value is a VALID line index, and
+			// read() asks `loc.OrphanOpen < 0` to tell "no fence was written" from
+			// "a fence was written and damaged". Leaving it zero here made a
+			// well-formed but EMPTY fence — the shape saveState writes after any
+			// run that emits no [STATE], i.e. the commonest file on the install —
+			// report understood=false, which disables the runner's self-heal and
+			// makes the state.json migration's verify-read fail forever.
+			return fenceLoc{Open: openIdx, Close: i, OK: true, OrphanOpen: -1}
 		}
 		if strings.HasPrefix(trimmed, "```") {
 			// Another fence opener before this one closed: damaged.
@@ -240,6 +247,25 @@ func Replace(path, agentName string, state map[string]any) (map[string]any, erro
 		return nil, err
 	}
 	return state, writeFence(path, agentName, string(body), "", false)
+}
+
+// DecodeJSON unmarshals with json.Number, and every path that decodes an agent's
+// state MUST use it rather than json.Unmarshal.
+//
+// Plain Unmarshal decodes every JSON number as float64, which silently rounds any
+// integer above 2^53. The commonest thing an agent stores is an id — a 64-bit
+// Discord snowflake, a Hacker News item id — so the corruption lands squarely on
+// the data this file exists to keep: 1400000000000000001 comes back as
+// 1400000000000000000, and the agent then re-reports an item it had already seen,
+// forever. json.Number round-trips the original literal digits.
+//
+// It is exported because the decode sites are in three packages — the API
+// engine's tool args, the bridge's request body, and the CLI subcommand's --patch
+// flag — and three private copies is exactly how one of them ends up plain again.
+func DecodeJSON(data []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	return dec.Decode(v)
 }
 
 // Merge applies a patch in place. A nil value deletes the key — the semantic

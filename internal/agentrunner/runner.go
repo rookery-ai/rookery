@@ -1133,7 +1133,6 @@ func extractProseMessage(text string) string {
 
 // ─── State management ─────────────────────────────────────────────────────────
 
-// mergeState shallowly merges update into existing. A null value deletes the key.
 // mergeState delegates to agentstate.Merge so the semantics an agent sees are
 // identical whichever door it used — the [STATE] marker here, the API engine's
 // set_state tool, or the CLI bridge. Two copies of "nil deletes the key" is
@@ -1182,13 +1181,73 @@ func saveState(agentDir, agentName string, state map[string]interface{}) error {
 // a no-update turn is a strict no-op when the initial read failed, leaving
 // the malformed file for a human (or a later explicit [STATE]) to fix.
 func applyAndSaveState(agentDir, agentName string, currentState map[string]interface{}, updates []map[string]interface{}, stateReadOK bool) error {
-	for _, update := range updates {
-		mergeState(currentState, update)
-	}
 	if len(updates) == 0 && !stateReadOK {
 		return nil
 	}
-	return saveState(agentDir, agentName, currentState)
+
+	// Combine this turn's updates into ONE patch, then let agentstate.Apply merge
+	// it into whatever the file currently holds.
+	//
+	// This must not write `currentState` back wholesale, and that distinction is
+	// the whole point. currentState was read at RUN START; the agent may since
+	// have called set_state (API engine) or `rookery state set` (CLI bridge),
+	// which write the file directly. Replacing the file with the run-start map
+	// plus this turn's markers would DISCARD those writes — re-creating, through
+	// the new tools, the exact "the agent stored something and the next run saw
+	// nothing" failure this whole change exists to remove.
+	//
+	// The updates are combined with a plain assignment rather than Merge: Merge
+	// treats a nil value as "delete this key", so merging a deletion into an
+	// empty patch would erase it from the patch instead of recording it, and the
+	// key would quietly survive in the file.
+	patch := map[string]interface{}{}
+	for _, update := range updates {
+		for k, v := range update {
+			patch[k] = v
+		}
+	}
+
+	// Which base the patch lands on depends on whether the FILE still makes sense,
+	// and both answers are load-bearing:
+	//
+	//   understood — trust the file. It may hold a set_state / `rookery state set`
+	//   write made during this turn, and the run-start snapshot does not.
+	//
+	//   not understood, OR the file has gone EMPTY while the run started with
+	//   state — the agent mangled it mid-run (a full-file write_file editing
+	//   "## Notes" drops the fence entirely) without emitting [STATE]. The
+	//   run-start snapshot is then the best truth available, and writing it back
+	//   is the self-heal that stops a formatting slip costing the agent's memory.
+	//   `understood` alone cannot decide this: a file with NO fence is both "a
+	//   fresh agent" and "an agent that just deleted its fence", so the signal
+	//   that separates them is whether state DISAPPEARED during the run.
+	//
+	// The accepted cost, stated rather than hidden: an agent that deliberately
+	// clears its entire state through set_state and emits no [STATE] has that
+	// clear undone. Restoring memory a slip destroyed is the failure worth
+	// optimising for; wholesale deliberate clearing is not a thing agents do.
+	path := agentstate.StateFilePath(agentDir)
+	base, understood, err := agentstate.Get(path)
+	if err != nil {
+		return err
+	}
+	if !understood || (len(base) == 0 && len(currentState) > 0) {
+		base = map[string]interface{}{}
+		for k, v := range currentState {
+			base[k] = v
+		}
+	}
+	agentstate.Merge(base, patch)
+
+	// Keep the in-run view in step, so a later turn of the SAME run sees what the
+	// file now holds rather than the run-start snapshot.
+	for k := range currentState {
+		delete(currentState, k)
+	}
+	for k, v := range base {
+		currentState[k] = v
+	}
+	return saveState(agentDir, agentName, base)
 }
 
 // ─── Skills loading ───────────────────────────────────────────────────────────

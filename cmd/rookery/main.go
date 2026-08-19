@@ -353,22 +353,6 @@ func serveCmd() *cli.Command {
 				return fmt.Errorf("start kb bridge: %w", err)
 			}
 
-			// A state bridge (internal/agentstate.Bridge) is NOT started here.
-			// connBridge/mcpBridge/kbBridge above are wired into every agent run
-			// through a WithXBridge(...) field on agentrunner.Runner, whose Run
-			// method registers a per-run token and injects ROOKERY_*_URL/TOKEN into
-			// the subprocess env (runner.go's extraEnv assembly, ~lines 377-439).
-			// There is no equivalent hook reachable from this file: Runner has no
-			// WithStateBridge, and RunInput carries no per-run agent directory this
-			// file could register against. Wiring the state bridge into real agent
-			// runs therefore needs a small, additive change inside
-			// internal/agentrunner/runner.go (add WithStateBridge, mirroring
-			// WithKBBridge, plus a Register/defer Unregister block in Run) — out of
-			// scope for this change, which is confined to internal/agentstate/ and
-			// this file. See internal/agentstate/bridge.go for the bridge itself and
-			// stateCmd below for the CLI side; both are complete and tested, but the
-			// capability is inert for agent runs until that follow-up lands.
-
 			designFlow := agentdesigner.NewFlow(coderFor, designer).
 				WithDB(database).
 				WithMemory(memStore).
@@ -878,10 +862,9 @@ func mcpCmd() *cli.Command {
 //
 // The bridge URL + a run-scoped token are expected in ROOKERY_STATE_URL /
 // ROOKERY_STATE_TOKEN, mirroring ROOKERY_CONNECTOR_URL/TOKEN and
-// ROOKERY_MCP_URL/TOKEN. Nothing sets them yet: internal/agentrunner.Runner has no
-// WithStateBridge and no per-run registration for this bridge, so this command
-// reports "no state bridge available in this run" until that follow-up lands (see
-// the comment beside kbBridge in serveCmd). Usage:
+// ROOKERY_MCP_URL/TOKEN. agentrunner.Runner registers a token per run and injects
+// both, so outside a run this command correctly reports "no state bridge available
+// in this run" — it is not a user-facing entry point. Usage:
 // rookery state get
 // rookery state set --patch '<json-object>'
 func stateCmd() *cli.Command {
@@ -923,7 +906,7 @@ func stateCmd() *cli.Command {
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
 					var patch map[string]any
-					if err := json.Unmarshal([]byte(cmd.String("patch")), &patch); err != nil {
+					if err := agentstate.DecodeJSON([]byte(cmd.String("patch")), &patch); err != nil {
 						return fmt.Errorf("--patch must be a JSON object: %w", err)
 					}
 					return post(ctx, "/state/set", map[string]any{"patch": patch})

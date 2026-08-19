@@ -141,7 +141,7 @@ func (b *Bridge) handler() http.Handler {
 		body, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 		var req setRequest
 		if len(strings.TrimSpace(string(body))) > 0 {
-			if err := json.Unmarshal(body, &req); err != nil {
+			if err := DecodeJSON(body, &req); err != nil {
 				writeJSON(w, http.StatusOK, map[string]any{"error": "bad request body"})
 				return
 			}

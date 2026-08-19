@@ -1,6 +1,8 @@
 package agentrunner
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/rookery-ai/rookery/internal/agentstate"
@@ -35,4 +37,30 @@ func TestStateTokensAreScopedPerAgentNotPerWorkspace(t *testing.T) {
 	}
 	b.Unregister(first)
 	b.Unregister(second)
+}
+
+// The env injection is the half that actually shipped inert, and it was still
+// the half nothing asserted: deleting the extraEnv lines left both earlier tests
+// passing. A CLI coder learns the bridge exists ONLY from these two variables,
+// so without them `rookery state` reports "no state bridge available" and the
+// capability silently does not exist — which is exactly how it shipped the first
+// time.
+//
+// Asserted by reading the source rather than by driving a run: Run needs a live
+// coder, a database and a workspace, and the property at issue is simply that
+// these two keys are populated from the bridge next to the other three pairs.
+func TestRunInjectsTheStateBridgeEnvVars(t *testing.T) {
+	src, err := os.ReadFile("runner.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`extraEnv["ROOKERY_STATE_URL"] = r.stateBridge.Addr()`,
+		`extraEnv["ROOKERY_STATE_TOKEN"] = stateToken`,
+		"defer r.stateBridge.Unregister(stateToken)",
+	} {
+		if !strings.Contains(string(src), want) {
+			t.Errorf("runner.go no longer contains %q — a CLI coder cannot reach its own state", want)
+		}
+	}
 }
