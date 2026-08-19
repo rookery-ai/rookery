@@ -1154,8 +1154,13 @@ func saveState(agentDir, agentName string, state map[string]interface{}) error {
 	return agentdesigner.WriteState(filepath.Join(agentDir, "state.md"), agentName, state)
 }
 
-// applyAndSaveState merges this turn's [STATE] updates (if any) into
-// currentState and persists it to state.md.
+// applyAndSaveState merges this turn's [STATE] updates (if any) into the state
+// that is actually on disk, and persists the result.
+//
+// "On disk", not `currentState`: the agent may have written state.md during this
+// turn through set_state or `rookery state set`, and currentState is only the
+// run-start snapshot. Which of the two the patch lands on is decided below and
+// is the subtlest thing in this file.
 //
 // When there ARE updates, the write always happens — the long-standing
 // contract that an explicit [STATE] emission always wins is unchanged, even
@@ -1213,25 +1218,36 @@ func applyAndSaveState(agentDir, agentName string, currentState map[string]inter
 	//   understood — trust the file. It may hold a set_state / `rookery state set`
 	//   write made during this turn, and the run-start snapshot does not.
 	//
-	//   not understood, OR the file has gone EMPTY while the run started with
-	//   state — the agent mangled it mid-run (a full-file write_file editing
-	//   "## Notes" drops the fence entirely) without emitting [STATE]. The
-	//   run-start snapshot is then the best truth available, and writing it back
-	//   is the self-heal that stops a formatting slip costing the agent's memory.
-	//   `understood` alone cannot decide this: a file with NO fence is both "a
-	//   fresh agent" and "an agent that just deleted its fence", so the signal
-	//   that separates them is whether state DISAPPEARED during the run.
+	//   not understood, or RECOVERED, or gone empty — all while the run started
+	//   with state. Each means the agent mangled the file mid-run (a full-file
+	//   write_file editing "## Notes" drops the fence entirely) without emitting
+	//   [STATE], so the run-start snapshot is the best truth available and
+	//   writing it back is the self-heal that stops a formatting slip costing the
+	//   agent's memory.
+	//
+	// `understood` alone cannot decide this: a file with NO fence is both "a
+	// fresh agent" and "an agent that just deleted its fence". Nor is "the file
+	// went empty" enough — that misses the case a review reproduced: the rewrite
+	// leaves a JSON snippet in its prose (a quoted API error), recovery adopts
+	// the snippet, base is non-empty, and the real state is destroyed. `recovered`
+	// is the missing signal: state found OUTSIDE the fence means the file is
+	// damaged by construction, whatever it happens to contain.
+	//
+	// All three are gated on the run having STARTED with state, so a genuinely
+	// fresh agent still adopts what it wrote, and an hn-watch-shaped file whose
+	// data was always stranded still recovers on its next run.
 	//
 	// The accepted cost, stated rather than hidden: an agent that deliberately
-	// clears its entire state through set_state and emits no [STATE] has that
-	// clear undone. Restoring memory a slip destroyed is the failure worth
-	// optimising for; wholesale deliberate clearing is not a thing agents do.
+	// clears its entire state through set_state has that clear undone — whether
+	// or not it emits an unrelated [STATE] in the same turn. Restoring memory a
+	// slip destroyed is the failure worth optimising for; wholesale deliberate
+	// clearing is not a thing agents do.
 	path := agentstate.StateFilePath(agentDir)
-	base, understood, err := agentstate.Get(path)
+	base, understood, recovered, err := agentstate.GetDetail(path)
 	if err != nil {
 		return err
 	}
-	if !understood || (len(base) == 0 && len(currentState) > 0) {
+	if !understood || ((len(base) == 0 || recovered) && len(currentState) > 0) {
 		base = map[string]interface{}{}
 		for k, v := range currentState {
 			base[k] = v

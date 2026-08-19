@@ -117,6 +117,25 @@ func Get(path string) (map[string]any, bool, error) {
 	return r.state, r.understood, nil
 }
 
+// GetDetail is Get plus one more fact: whether the state had to be RECOVERED
+// from outside the json fence.
+//
+// The runner needs that distinction and cannot infer it. A file whose state was
+// recovered is damaged by construction — the fence was empty or gone and the
+// data was found loose in the document — so if the run STARTED with state, the
+// run-start snapshot is the better truth. Without this, an agent that rewrites
+// state.md mid-run and happens to leave a JSON snippet in its prose (a quoted
+// API error, say) has that snippet adopted as its entire memory, and the real
+// state is destroyed: the exact "stored something, next run sees nothing"
+// failure this package exists to remove.
+func GetDetail(path string) (state map[string]any, understood, recovered bool, err error) {
+	r, err := read(path)
+	if err != nil {
+		return nil, false, false, err
+	}
+	return r.state, r.understood, r.recovered, nil
+}
+
 // readResult is Get's full answer. Apply needs two facts Get does not expose:
 // whether the state had to be RECOVERED from outside the fence (in which case
 // the file is re-rendered rather than spliced) and, if so, which prose to carry

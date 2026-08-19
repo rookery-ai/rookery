@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/rookery-ai/rookery/internal/agentstate"
 	"io"
 	"net/http"
 	"net/url"
@@ -28,6 +27,8 @@ import (
 	"github.com/rookery-ai/rookery/internal/sandbox"
 	"github.com/rookery-ai/rookery/internal/vault"
 	"github.com/rookery-ai/rookery/internal/websearch"
+
+	"github.com/rookery-ai/rookery/internal/agentstate"
 )
 
 // maxToolResult is the per-result byte cap injected back into the model context.
