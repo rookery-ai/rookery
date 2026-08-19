@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rookery-ai/rookery/internal/agentdesigner"
+	"github.com/rookery-ai/rookery/internal/agentstate"
 	"github.com/rookery-ai/rookery/internal/coder"
 	"github.com/rookery-ai/rookery/internal/connectors"
 	"github.com/rookery-ai/rookery/internal/db"
@@ -32,7 +33,9 @@ import (
 const (
 	maxCallDepth = 3 // maximum agent-to-agent call depth
 	maxTurns     = 5 // maximum coder.Generate calls per top-level run
-	maxStateSize = 65536
+	// One limit, defined in agentstate and re-exported here so the existing
+	// call sites read unchanged. Two constants would drift.
+	maxStateSize = agentstate.MaxStateSize
 )
 
 // SendFunc delivers a message back to the user's chat platform.
@@ -1148,14 +1151,12 @@ func extractProseMessage(text string) string {
 // ─── State management ─────────────────────────────────────────────────────────
 
 // mergeState shallowly merges update into existing. A null value deletes the key.
+// mergeState delegates to agentstate.Merge so the semantics an agent sees are
+// identical whichever door it used — the [STATE] marker here, the API engine's
+// set_state tool, or the CLI bridge. Two copies of "nil deletes the key" is
+// exactly how those doors would drift apart.
 func mergeState(existing map[string]interface{}, update map[string]interface{}) {
-	for k, v := range update {
-		if v == nil {
-			delete(existing, k)
-		} else {
-			existing[k] = v
-		}
-	}
+	agentstate.Merge(existing, update)
 }
 
 // saveState writes state.md, replacing only the machine-state json fence and
