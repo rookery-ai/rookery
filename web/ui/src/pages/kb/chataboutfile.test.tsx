@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router";
 import { AppShell } from "@/components/shell/AppShell";
 import ChatAboutFileButton, { chatPrompt } from "./ChatAboutFileButton";
+import { installFakeEventSource } from "@/pages/chats/turnTestHarness";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -26,6 +27,12 @@ let sentMessages: string[] = [];
 function mockFetch() {
   created = 0;
   sentMessages = [];
+  // The button auto-sends now, and a turn follows its progress over an
+  // EventSource — which jsdom does not implement. Without the stub the stream
+  // opens AFTER this test's assertions pass and throws asynchronously, so the
+  // suite is green and the run still exits non-zero. autoComplete ends the turn
+  // on its own: this file is about what the button sends, not about progress.
+  installFakeEventSource({ autoComplete: true });
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
