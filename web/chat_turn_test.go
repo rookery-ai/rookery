@@ -1,11 +1,14 @@
 package web
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	codersvc "github.com/rookery-ai/rookery/internal/coder"
 	"github.com/rookery-ai/rookery/internal/db"
 )
 
@@ -142,19 +145,47 @@ func TestFailedChatTurnKeepsTheUserMessage(t *testing.T) {
 	}
 }
 
-// The failure also reaches the live stream, so a watching client sees why the
-// card stopped rather than a spinner that simply ends.
-func TestFailedChatTurnReportsOnTheProgressStream(t *testing.T) {
+// The failure reaches the live stream, so a watching client sees why the card
+// stopped rather than a spinner that simply ends — but as a CLASSIFIED
+// sentence, not the raw error. This string is written into the chat transcript,
+// which is reflected into the vault and can be relayed to a chat platform, so
+// an unrecognised error stays vague on purpose and points at the log.
+func TestFailedChatTurnReportsAClassifiedFailureOnTheStream(t *testing.T) {
 	s, workspaceID, chatID := chatTurnFixture(t)
-	s.testCoderErr = "provider exploded"
+	s.testCoderErr = "provider exploded: token sk-abc123"
 
 	s.startChatTurn(workspaceID, chatID, "hello")
 	waitForTurn(t, s, chatID)
 
 	lines, _, _ := s.chatTurn(chatID).snapshot()
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "provider exploded") {
-		t.Errorf("failure absent from the progress lines: %q", joined)
+	if !strings.Contains(joined, "See the server log") {
+		t.Errorf("no failure notice on the progress lines: %q", joined)
+	}
+	if strings.Contains(joined, "sk-abc123") {
+		t.Errorf("raw error text reached the transcript: %q", joined)
+	}
+}
+
+// A recognised provider failure gets the same account it gets from a scheduled
+// agent run: same failure, same words, so the two surfaces agree.
+func TestChatTurnFailureMessageClassifiesKnownErrors(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{codersvc.ErrRateLimited, "rate-limited"},
+		{codersvc.ErrUsageLimit, "usage limit"},
+		{codersvc.ErrAPIAuth, "authenticate"},
+		{codersvc.ErrTimeout, "took too long"},
+		{errors.New("something unrecognised"), "See the server log"},
+	}
+	for _, tc := range cases {
+		// Wrapped, because that is how it arrives from runChatCoder.
+		got := chatTurnFailureMessage(fmt.Errorf("couldn't reach coder: %w", tc.err))
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("chatTurnFailureMessage(%v) = %q, want it to mention %q", tc.err, got, tc.want)
+		}
 	}
 }
 

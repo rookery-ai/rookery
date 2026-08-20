@@ -335,7 +335,15 @@ func (c *Coder) resolveProvider(ctx context.Context, workspaceID string) (llm.Pr
 		return nil, fmt.Errorf("%w: resolve api key: %v", ErrAPIAuth, err)
 	}
 	if apiKey == "" {
-		return nil, fmt.Errorf("%w: api key secret %q is empty", ErrAPIAuth, c.api.apiKeySecretName)
+		// The secret's NAME is deliberately not interpolated here. This error
+		// travels further than it looks: it reaches the server log, and — now
+		// that a chat turn surfaces its failure to the owner — the chat
+		// transcript, which is reflected into the vault and can be relayed to a
+		// connected chat platform. The name adds nothing the owner cannot see
+		// in their own secrets list, and CodeQL flags the flow as clear-text
+		// logging of sensitive data, which is a fair reading of a value that
+		// arrives from a field called apiKeySecretName.
+		return nil, fmt.Errorf("%w: the configured API key secret is empty", ErrAPIAuth)
 	}
 	return llm.New(llm.Config{
 		Provider: c.api.provider,

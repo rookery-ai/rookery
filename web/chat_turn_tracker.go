@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/rookery-ai/rookery/internal/chat"
+	codersvc "github.com/rookery-ai/rookery/internal/coder"
 	"github.com/rookery-ai/rookery/internal/db"
 )
 
@@ -120,7 +122,14 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 			// durable, removing it would be actively worse — the owner typed it,
 			// and it is the context for their retry.
 			slog.Warn("chat: turn failed", "chat", chatID, "turn", st.id, "error", err)
-			onProgress("⚠️ " + err.Error())
+			// The OWNER gets a classified sentence, not the raw error. This
+			// message is not merely displayed: it lands in the chat transcript,
+			// which is reflected into the vault and can be relayed to a
+			// connected chat platform — so internal wording travels further
+			// here than it does in a log line. The classification also matches
+			// what every other surface says about the same provider failures
+			// (see agentrunner.FriendlyRunError).
+			onProgress("⚠️ " + chatTurnFailureMessage(err))
 		default:
 			// CleanReply never returns "" (a genuinely empty model reply gets its
 			// own placeholder), so a blank bubble cannot be persisted here.
@@ -146,6 +155,28 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 		})
 	}()
 	return st.id, true
+}
+
+// chatTurnFailureMessage turns a failed turn into one actionable sentence.
+//
+// The known provider failures get the same account they get from a scheduled
+// agent run, because they are the same failures and a user who has seen one
+// should recognise the other. Anything unclassified stays deliberately vague
+// and points at the log: an unrecognised error is exactly the case where we do
+// not know what it contains, and this string is written into the transcript.
+func chatTurnFailureMessage(err error) string {
+	switch {
+	case errors.Is(err, codersvc.ErrRateLimited):
+		return "The coder was rate-limited by the provider. Try again in a moment — your quota is fine."
+	case errors.Is(err, codersvc.ErrUsageLimit):
+		return "The coder has hit its usage limit (quota or credits exhausted)."
+	case errors.Is(err, codersvc.ErrAPIAuth):
+		return "The coder could not authenticate with the provider. Check the API key in coder settings."
+	case errors.Is(err, codersvc.ErrTimeout):
+		return "The coder took too long and the turn was stopped. Try a smaller question, or raise the coder timeout."
+	default:
+		return "The chat turn failed. See the server log for details."
+	}
 }
 
 // chatTurn returns the tracked turn for a chat, or nil.
