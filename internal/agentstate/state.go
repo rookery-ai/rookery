@@ -17,11 +17,24 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/rookery-ai/rookery/internal/iolimit"
 )
 
 // MaxStateSize bounds the serialized state object. Kept in sync with (and
 // intended to replace) internal/agentrunner's maxStateSize — one limit, not two.
 const MaxStateSize = 64 * 1024
+
+// MaxStateFileSize bounds the whole state.md DOCUMENT on read, as distinct from
+// MaxStateSize, which bounds the serialized state object on write.
+//
+// They are deliberately different numbers because they govern different things:
+// the document also carries a heading, an intro, and a `## Notes` section the
+// agent may extend with prose that the write cap never counts. Equal caps would
+// reject files whose actual state is comfortably within limits. 1 MiB is 16x the
+// body cap — far above any plausible real file, while still bounding what a
+// per-turn read can pull into memory.
+const MaxStateFileSize = 1024 * 1024
 
 // StateFilePath returns the path to an agent's state.md — its memory between
 // runs, kept as a markdown document so it is readable in the knowledge base.
@@ -148,12 +161,30 @@ type readResult struct {
 }
 
 func read(path string) (readResult, error) {
-	raw, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return readResult{state: map[string]any{}, understood: true}, nil
 	}
 	if err != nil {
 		return readResult{}, err
+	}
+	defer f.Close()
+
+	// Capped, and REJECTING rather than truncating — the same contract as
+	// internal/iolimit, for a sharper reason than usual. This read is on the
+	// runner's per-turn hot path over a file the AGENT itself may grow without
+	// limit through `## Notes`; MaxStateSize bounds the state body being written
+	// and never bounded the file being read. Truncating here would be worse than
+	// failing: a cut-off state.md loses its closing fence, so it would present as
+	// a DAMAGED file and fall into the recovery scan below, quietly turning a size
+	// problem into data loss.
+	//
+	// Failing is safe because an error is already the protective path: ReadState
+	// reports it, and the runner's stateReadOK guard then declines to write back —
+	// so an unreadable file is left intact for a human instead of replaced.
+	raw, err := iolimit.ReadCapped(f, MaxStateFileSize)
+	if err != nil {
+		return readResult{}, fmt.Errorf("read state.md (%s): %w", path, err)
 	}
 	lines := strings.Split(string(raw), "\n")
 	loc := findStateFence(lines)
