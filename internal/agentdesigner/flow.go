@@ -1991,10 +1991,19 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// is not found, which is the same best-effort contract the dry run itself keeps.
 	if decision.presentable && !isEdit && decision.message != "" {
 		notify("🧪 Running it once to show you real output…")
-		if sample, ok := f.dryRun(genCtx, workspaceID, workDir, decision.agentMD,
+		if dr, ok := f.dryRun(genCtx, workspaceID, workDir, decision.agentMD,
 			backendType, implParams.ChatApps, notify); ok {
+			// The rehearsal is a REAL run against the same bound surface, so a
+			// connection or server it invoked is auto-bind evidence of exactly the
+			// kind the build's own ids are — and it was being discarded, because
+			// only res.Text was consumed. MERGED, never substituted: the build's
+			// evidence does not become less true because a rehearsal also ran, and
+			// an explicit `# Connections:` header still overrides both downstream
+			// in AutoBindTargets.
+			usedConns = mergeUsedIDs(usedConns, dr.UsedConnectionIDs)
+			usedMCPIDs = mergeUsedIDs(usedMCPIDs, dr.UsedMCPServerIDs)
 			swapped := strings.Replace(outcome.message, decision.message,
-				reviewMessage(sample, true), 1)
+				reviewMessage(dr.Sample, true), 1)
 			if swapped == outcome.message {
 				// Both advancing branches of reconcileBlockedOutcome embed decision.message
 				// verbatim today, so this cannot fire — but if one ever stops, the rehearsal
