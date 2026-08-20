@@ -2666,7 +2666,11 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 	if cronExpr := parseSuggestedSchedule(agentMD); cronExpr != "" && f.db != nil {
 		parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 		if sched, err := parser.Parse(cronExpr); err == nil {
-			nextRun := sched.Next(time.Now())
+			// The expression the model wrote is in the USER's local time (both the
+			// design and implementation prompts say so), so store the zone that makes
+			// that true instead of leaving it to whatever zone the host runs in.
+			tz, loc := profile.ScheduleZone(f.db, workspaceID)
+			nextRun := sched.Next(time.Now().In(loc))
 			_ = f.db.UpsertAgentSchedule(&db.AgentSchedule{
 				ID:          uuid.New().String(),
 				AgentID:     agentIDSnap,
@@ -2674,6 +2678,7 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 				CronExpr:    cronExpr,
 				NextRunAt:   &nextRun,
 				Enabled:     true,
+				Timezone:    tz,
 			})
 			scheduleMsg = fmt.Sprintf(" Schedule set: %s.", cronExpr)
 		}
@@ -2755,7 +2760,8 @@ func reconcileScheduleOnSave(database dbDesignStore, workspaceID, agentID, agent
 		if err != nil {
 			return ""
 		}
-		nextRun := sched.Next(time.Now())
+		tz, loc := profile.ScheduleZone(database, workspaceID)
+		nextRun := sched.Next(time.Now().In(loc))
 		schedID := uuid.New().String()
 		if existing != nil {
 			schedID = existing.ID
@@ -2767,6 +2773,7 @@ func reconcileScheduleOnSave(database dbDesignStore, workspaceID, agentID, agent
 			CronExpr:    cronExpr,
 			NextRunAt:   &nextRun,
 			Enabled:     true,
+			Timezone:    tz,
 		})
 		return fmt.Sprintf(" Schedule set: %s.", cronExpr)
 	}

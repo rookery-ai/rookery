@@ -667,15 +667,15 @@ func (d *DB) UpsertAgentSchedule(s *AgentSchedule) error {
 		t := s.NextRunAt.UTC().Format("2006-01-02 15:04:05")
 		nextRun = &t
 	}
-	_, err := d.Exec(`INSERT INTO agent_schedules(id,agent_id,workspace_id,cron_expr,next_run_at,enabled,created_at)
-		VALUES(?,?,?,?,?,1,datetime('now'))
-		ON CONFLICT(id) DO UPDATE SET cron_expr=excluded.cron_expr, next_run_at=excluded.next_run_at, enabled=excluded.enabled`,
-		s.ID, s.AgentID, s.WorkspaceID, s.CronExpr, nextRun)
+	_, err := d.Exec(`INSERT INTO agent_schedules(id,agent_id,workspace_id,cron_expr,next_run_at,enabled,timezone,created_at)
+		VALUES(?,?,?,?,?,1,?,datetime('now'))
+		ON CONFLICT(id) DO UPDATE SET cron_expr=excluded.cron_expr, next_run_at=excluded.next_run_at, enabled=excluded.enabled, timezone=excluded.timezone`,
+		s.ID, s.AgentID, s.WorkspaceID, s.CronExpr, nextRun, s.Timezone)
 	return err
 }
 
 func (d *DB) ListDueSchedules(now time.Time) ([]*AgentSchedule, error) {
-	rows, err := d.Query(`SELECT s.id,s.agent_id,s.workspace_id,s.cron_expr,s.next_run_at,s.last_run_at,s.enabled,s.created_at
+	rows, err := d.Query(`SELECT s.id,s.agent_id,s.workspace_id,s.cron_expr,s.next_run_at,s.last_run_at,s.enabled,s.created_at,s.timezone
 		FROM agent_schedules s
 		JOIN agents a ON a.id = s.agent_id AND a.active = 1
 		WHERE s.enabled=1 AND (s.next_run_at IS NULL OR s.next_run_at <= ?)`,
@@ -690,7 +690,7 @@ func (d *DB) ListDueSchedules(now time.Time) ([]*AgentSchedule, error) {
 		var nextRunAt, lastRunAt sql.NullString
 		var createdAt string
 		var enabled int
-		if err := rows.Scan(&s.ID, &s.AgentID, &s.WorkspaceID, &s.CronExpr, &nextRunAt, &lastRunAt, &enabled, &createdAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.AgentID, &s.WorkspaceID, &s.CronExpr, &nextRunAt, &lastRunAt, &enabled, &createdAt, &s.Timezone); err != nil {
 			return nil, err
 		}
 		s.NextRunAt = scanTimePtr(nullToPtr(nextRunAt))

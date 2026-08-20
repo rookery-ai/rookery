@@ -126,7 +126,11 @@ func (s *Scheduler) tick(ctx context.Context) {
 }
 
 func (s *Scheduler) fire(ctx context.Context, sched *db.AgentSchedule, firedAt time.Time) {
-	next, err := s.nextRun(sched.CronExpr, firedAt)
+	// The expression is read in the SCHEDULE's zone, not the host's. An empty
+	// Timezone (every pre-migration row, and every workspace with no profile
+	// timezone) resolves to time.Local, which is exactly what this line did
+	// before — see scheduleLocation.
+	next, err := s.nextRunIn(sched.CronExpr, firedAt, scheduleLocation(sched.Timezone))
 	if err != nil {
 		slog.Error("scheduler: parse cron", "schedule_id", sched.ID, "expr", sched.CronExpr, "err", err)
 		return
@@ -281,9 +285,26 @@ func (s *Scheduler) execute(ctx context.Context, agentID, workspaceID, trigger s
 }
 
 func (s *Scheduler) nextRun(expr string, from time.Time) (time.Time, error) {
+	return s.nextRunIn(expr, from, time.Local)
+}
+
+// nextRunIn computes the next firing instant with the expression read in loc.
+//
+// The zone is applied by converting `from` into it before asking the parsed
+// schedule for its next slot: cron.Schedule.Next derives wall-clock fields from
+// the location of the time it is handed, so passing a UTC instant reads "0 8"
+// as 08:00 UTC no matter what the schedule intended. Converting first is what
+// makes "08:00" mean 08:00 where the OWNER lives.
+//
+// The returned instant is absolute, so callers may store it in UTC as before —
+// only the interpretation of the expression changes, never the representation.
+func (s *Scheduler) nextRunIn(expr string, from time.Time, loc *time.Location) (time.Time, error) {
 	schedule, err := s.parser.Parse(expr)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("parse cron %q: %w", expr, err)
 	}
-	return schedule.Next(from), nil
+	if loc == nil {
+		loc = time.Local
+	}
+	return schedule.Next(from.In(loc)), nil
 }

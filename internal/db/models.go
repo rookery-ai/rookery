@@ -99,6 +99,11 @@ type AgentSchedule struct {
 	LastRunAt   *time.Time
 	Enabled     bool
 	CreatedAt   time.Time
+	// Timezone is the IANA zone the cron expression is read in. EMPTY means the
+	// host's local zone, which is what every expression was evaluated in before
+	// this column existed — so an unset value is not "unknown", it is an
+	// explicit "behave exactly as before". See scheduler.scheduleLocation.
+	Timezone string
 }
 
 type AgentRun struct {
