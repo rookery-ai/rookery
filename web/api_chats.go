@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/rookery-ai/rookery/internal/chat"
 	"github.com/rookery-ai/rookery/internal/db"
 	"github.com/rookery-ai/rookery/internal/profile"
 )
@@ -60,8 +61,22 @@ type apiChatMessage struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// toAPIChatMessage maps a stored turn to the wire shape.
+//
+// Assistant turns are cleaned on the way OUT as well as on the way in, which is
+// what repairs conversations that leaked before the fix shipped — 30 of one
+// install's 192 assistant rows carried a marker. Doing it here rather than as a
+// migration keeps the stored transcript untouched: nothing is rewritten on disk,
+// and a row that somehow needs its raw form is still there.
+//
+// User turns are passed through verbatim. Someone who pasted a marker to ask
+// what it was must still see their own message quoted back correctly.
 func toAPIChatMessage(m db.ChatMessage) apiChatMessage {
-	return apiChatMessage{Role: m.Role, Content: m.Content, CreatedAt: m.CreatedAt}
+	content := m.Content
+	if m.Role == "assistant" {
+		content = chat.CleanReply(content)
+	}
+	return apiChatMessage{Role: m.Role, Content: content, CreatedAt: m.CreatedAt}
 }
 
 type apiCreateChatRequest struct {

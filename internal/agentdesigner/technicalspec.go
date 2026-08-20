@@ -3,6 +3,7 @@ package agentdesigner
 import (
 	"strings"
 
+	"github.com/rookery-ai/rookery/internal/chat"
 	"github.com/rookery-ai/rookery/internal/db"
 )
 
@@ -102,9 +103,18 @@ const (
 // plan IS ready and should point at it, while a genuinely empty reply means
 // nothing was said and must ask again rather than claim progress.
 func UserFacingDesignText(raw string) string {
+	// ORDER IS LOAD-BEARING: stripTechnicalSpec runs FIRST, on the raw text.
+	// chat.CleanReply is line-anchored and would remove a [TECHNICAL SPEC]
+	// delimiter that opens a line, after which stripTechnicalSpec can no longer
+	// find the block and the entire machine-facing spec renders to the user.
+	// Clean only what survives the spec strip.
 	shown := stripTechnicalSpec(raw)
 	if shown != "" {
-		return shown
+		// A designer turn is a conversational reply like any other, and weak
+		// models wrap those in [CHAT] too. History keeps the RAW text (the
+		// generator's brief and the plan-ready signal both read from it), so
+		// this is a display-edge change only.
+		return chat.CleanReply(shown)
 	}
 	if extractTechnicalSpec(raw) != "" {
 		return specOnlyFallback

@@ -23,6 +23,7 @@ import (
 
 	"github.com/rookery-ai/rookery/internal/agentdesigner"
 	"github.com/rookery-ai/rookery/internal/buildphase"
+	"github.com/rookery-ai/rookery/internal/chat"
 	"github.com/rookery-ai/rookery/internal/coder"
 	"github.com/rookery-ai/rookery/internal/db"
 	"github.com/rookery-ai/rookery/internal/profile"
@@ -434,7 +435,15 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 	f.saveDraft(sess)
 	f.mu.Unlock()
 
-	return reply, nil
+	// History keeps the RAW text and the user sees it cleaned, mirroring
+	// agentdesigner.callCoder. A weak model wraps a design turn in [CHAT] just
+	// as readily as it wraps a chat reply, and the marker is meaningless here —
+	// this conversation is displayed, never parsed for protocol.
+	//
+	// The replay path needs no change: web.designHistoryDTO is shared with the
+	// agent designer and already runs agentdesigner.UserFacingDesignText, which
+	// now cleans too — so a live turn and a resumed one cannot disagree.
+	return chat.CleanReply(reply), nil
 }
 
 // ─── Generation (triggered by approval) ──────────────────────────────────────
