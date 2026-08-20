@@ -12,6 +12,7 @@ import (
 	"github.com/robfig/cron/v3"
 	"github.com/rookery-ai/rookery/internal/agentdesigner"
 	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/profile"
 	"github.com/rookery-ai/rookery/internal/secrets"
 	"github.com/rookery-ai/rookery/internal/skilllibrary"
 )
@@ -309,7 +310,11 @@ func (s *Server) apiSaveSchedule(c echo.Context) error {
 		return jsonErr(c, http.StatusBadRequest, "invalid_cron", "invalid cron expression: "+parseErr.Error())
 	}
 
-	nextRun := sched.Next(time.Now())
+	// Store the zone the expression is meant to be read in. An owner typing
+	// "0 8 * * *" means 08:00 where THEY are, not where the server is; an empty
+	// profile timezone yields "" + time.Local, which is the pre-column behaviour.
+	tz, loc := profile.ScheduleZone(s.db, u.ID)
+	nextRun := sched.Next(time.Now().In(loc))
 	// Reuse existing schedule ID so ON CONFLICT(id) updates rather than inserts.
 	existing, _ := s.db.GetScheduleForAgent(agent.ID)
 	schedID := uuid.New().String()
@@ -323,6 +328,7 @@ func (s *Server) apiSaveSchedule(c echo.Context) error {
 		CronExpr:    cronExpr,
 		NextRunAt:   &nextRun,
 		Enabled:     true,
+		Timezone:    tz,
 	}
 	if err := s.db.UpsertAgentSchedule(row); err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", "failed to save schedule: "+err.Error())

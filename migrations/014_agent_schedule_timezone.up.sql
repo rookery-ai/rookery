@@ -1,0 +1,24 @@
+-- Give a schedule its own timezone, so a cron expression stops being evaluated
+-- in whatever zone the host happens to run in.
+--
+-- scheduler.tick passes a bare time.Now() to schedule.Next, and agent_schedules
+-- had no zone of its own, so every expression was read in the HOST's local time.
+-- Meanwhile the design and implementation prompts both instruct the model to
+-- write schedules in the USER's local time, and the model is told the user's
+-- timezone and nothing whatsoever about the host's. The two agree only while
+-- those zones happen to coincide.
+--
+-- The column defaults to the EMPTY STRING, and that is the whole safety of this
+-- change. Empty means "evaluate in the host's local zone" — byte-identical to
+-- today's behaviour — so every existing row keeps firing at exactly the time it
+-- fires now. Only a schedule that is written after this migration, on a
+-- workspace whose profile carries a timezone, gets an explicit zone.
+--
+-- Deliberately NOT backfilled from the workspace profile. A backfill would
+-- re-time every existing agent the moment this migration ran: a workspace whose
+-- profile says Europe/Skopje on a host running UTC would see every schedule
+-- jump two hours, with no error and no log line, on agents that had been
+-- correct for months. That silent shift is the exact failure this column exists
+-- to prevent, so opting in on the next write is slower and cannot surprise
+-- anyone.
+ALTER TABLE agent_schedules ADD COLUMN timezone TEXT NOT NULL DEFAULT '';
