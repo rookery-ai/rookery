@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/rookery-ai/rookery/compare/v0.4.0...v0.4.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **chat:** stop the agent output-protocol markers leaking into chat replies ([#242](https://github.com/rookery-ai/rookery/issues/242)) ([df3c1fd](https://github.com/rookery-ai/rookery/commit/df3c1fd26129b129143460d5718b385fbf628253))
+
 ## [0.4.0](https://github.com/rookery-ai/rookery/compare/v0.3.11...v0.4.0) (2026-08-20)
 
 
