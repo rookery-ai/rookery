@@ -502,7 +502,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/sandbox` | Self-contained Landlock filesystem confinement for coder subprocesses (Linux). `Spec`, `Supported()`, `Wrap()` (re-exec via the hidden `__sandbox-exec` helper), `Exec()` (applies Landlock + rlimits, then `execve`). No external dependency. |
 | `internal/scheduler` | Cron scheduler: polls `agent_schedules`, fires runner, decrypts stored master password for secret injection; `WithSender()` delivers output to users; `WithRecovered()`/`RecoverInterrupted()` retry runs the last shutdown killed mid-flight; runs are capped at `maxConcurrentRuns` — see "Missed runs and the laptop case" below |
 | `internal/reminder` | Creates/lists/fires reminders; background polling goroutine. Reminders live only in the DB and the reminders UI tab — they are NOT reflected to the vault. |
-| `internal/chat` | `Chat` create/list/stop/resume/delete; 30-min idle auto-stop; `BuildUserContext` (shared **identity-only** context builder for one-off chat — profile/memory/agents/MCP; the broader KB is retrieved on demand via tools, not injected here) |
+| `internal/chat` | `Chat` create/list/stop/resume/delete; 30-min idle auto-stop; `BuildUserContext` (shared **identity-only** context builder for one-off chat — profile/memory/agents/MCP; the broader KB is retrieved on demand via tools, not injected here); `CleanReply`/`CleanHistory` strip agent output-protocol markers out of conversational replies — see "Chat must never show the output-protocol markers" below |
 | `internal/prompts` | Central home for all LLM prompt construction: `BuildDesignSystemPrompt` (+ `<knowledge_base>` block + `KBManifest`), `BuildImplementationPrompt`, `BuildEditImplementationPrompt` (diagnose-before-fix), `BuildCoderPrompt` (+ `<skill_instructions>` + `<skill_environment>` blocks), `BuildChatSystemPrompt` (chat read+write KB instruction), `BuildChildAgentFollowUpPrompt`, `BuildSkillMetaPrompt`, `BuildReminderParsePrompt`, skill-creator prompts (`BuildSkillDesignSystemPrompt`, `BuildSkillImplementationPrompt`, `BuildSkillVettingPrompt`, `SkillEnvBlock`). `SkillRef`/`SkillBin` types. No inline prompt text exists outside this package. Shared single-source blocks: `agentPhilosophyBlock` (three-tier), `platformContextBlock`, `coderCapabilitiesBlock` (backend-aware), `agentArchitectureGateBlock`, `testingRulesBlock` (one bounded smoke test + dry run; real secrets at build time, no outbound sends), `shellSafetyBlock`, `scriptRobustnessBlock`, `connectedToolsBlock` (backend-aware native-tools vs `connector exec` guidance). `ChatAppsForPlatforms` + `MapCoderBackend` bridge callers to prompt params. |
 | `internal/memory` | Per-user structured context store. Memory lives as named `.md` files in `memory/` (`USER.md`, `SOUL.md`, `GENERAL.md`, etc.) — editable via the KB browser. `ContextString()` reads all files, skips placeholder-only ones, and returns sectioned markdown for LLM injection. `Append/List/Delete` target GENERAL.md bullet lines (used by Telegram `/memory` command). `MigrateToStructuredFiles()` consolidates legacy UUID-keyed entries at startup. |
 | `internal/vault` | Per-user Obsidian-style knowledge base: `Vault` (paths + `Resolve` safety + file IO), `Reflector` (chats→markdown+sidecar), `LinkIndex` ([[wikilinks]]), `Searcher` (ripgrep), `Guard` (post-run write-scope enforcement), `MigrateLegacyLayout`, `MigrateSessionsToChats`. |
@@ -827,6 +827,21 @@ your first agent"**. Four things are load-bearing:
   you are an AGENT run" and license the output-protocol markers at a human; a test pins that it
   does not. It goes in the system prompt, not per-turn context: identical across turns,
   therefore cacheable, and chat is the highest-frequency coder surface.
+- **Fixing the surface was necessary and was not sufficient — the block wrote the output
+  protocol unconditionally.** So chat still carried `## Output protocol (how agents
+  communicate)`, a standing instruction to wrap replies in `[CHAT]`, and models obliged: on a
+  live install **30 of 192 assistant rows had leaked at least one marker**. It read as model
+  flakiness because compliance with a system instruction varies by model family, by strength
+  and by turn depth — one session answered "what is the purpose of this platform?" cleanly
+  while the turns either side of it were wrapped. Asking chat to be quiet reproduced it on
+  **every** model tested, because `[SILENT]` was described there as the way to say nothing, so
+  a request for silence steered straight into the protocol. Asked about the markers, the model
+  told the owner it could not remove them because they were "part of the platform's protocol" —
+  it was reciting this block. The section is now emitted for `SurfaceAgent` only (extracted to
+  `outputProtocolSection` so the two variants cannot drift); chat is told instead that it is
+  not an agent run and that a request to say nothing wants a short sentence, not a marker.
+  Deleting it from the agent surface would silence every agent on the install, so a test pins
+  both halves.
 - **The opening message is sent by `ChatWindow` AFTER navigation, never by the wizard before
   it.** `handleChatMessage` is a blocking coder call, so sending first would freeze the wizard
   on a dead button for as long as the model takes. Two guards make it once-only: a ref (per
@@ -839,6 +854,44 @@ your first agent"**. Four things are load-bearing:
 **Chat knowledge-base access (on-demand retrieval + editing).** The one-off chat coder runs with `WithDir(vaultRoot).WithAllowedTools("Read,Write,Edit,Glob,Grep")` and a system instruction (`prompts.BuildChatSystemPrompt`) naming the vault root. The LLM retrieves and edits the user's notes **on demand** — only on turns that touch the KB — instead of having the vault injected every prompt. `chat.BuildUserContext` now returns identity-only context (profile/memory/agents/MCP); the old always-on `[Related knowledge base]` keyword-snippet block was removed. The tool set is file-only (no `Bash`/`WebFetch`): the chat can create/edit/read notes but cannot delete, rename, or run shell commands. The same applies to agents (RW over the vault via the sandbox). The detective `Guard` is no longer wired into agent runs — it would revert the KB edits that are now intentional — so agent/chat KB edits persist.
 
 **Chat connector access.** One-off chat (both web `handleChatMessage` and Telegram) also exposes the workspace's **ACTIVE** service connections to the chat coder (`connectors.ActiveBoundConns` — all of them; chat isn't an agent so there's no per-agent binding), wired identically to how the API/CLI split works elsewhere: the **API engine** gets them as native function tools (`coder.WithConnectors`), a **CLI coder** reaches them via the loopback bridge (`bridge.Register` → `ROOKERY_CONNECTOR_URL`/`ROOKERY_CONNECTOR_TOKEN` env → `rookery connector exec`, plus a scoped `Bash(<bin> connector exec:*)` grant since chat is otherwise file-only). Both paths hit the same `connectors.Execute` (mutating allowed — chat is like a run, `buildPhase=false`). `BuildChatSystemPrompt(vaultRoot, backendType, conns, connToolNames, connectorBin)` appends `connectedToolsBlock` so the model knows the tools exist; with no active connections / no bridge, chat behaves exactly as the file-only default.
+
+**Chat must never show the output-protocol markers, and the prompt gate alone does not
+guarantee it.** `[CHAT]`, `[/CHAT]`, `[SILENT]` and `[STATE]` blocks belong to an agent RUN,
+where `agentrunner.parseCoderOutput` consumes them as structure. Chat has no such parser —
+`handleChatMessage` and the chat-platform handler passed `result.Text` straight to the
+response, to `AddChatMessage` and to `MaybeAutoTitle` — so anything a model emitted was read
+verbatim by a human. Removing the instruction (see the `SurfaceChat` gate above) is the cause
+fixed; `chat.CleanReply` is the guarantee, because a prompt steers and does not bind.
+
+**Every rule in it is LINE-ANCHORED, and that is the whole design.** A marker that OPENS a line
+is protocol; a marker inside a sentence or in backticks is the model explaining itself. Both
+shapes occur in real transcripts — `\n\n[STATE]{"last_email_search": …}[/STATE]` is a leak,
+`` - **`[STATE]{"key": "value"}[/STATE]`** — saves data between runs `` is documentation. A
+substring replace cannot tell them apart: it was the first implementation, and on a real reply
+enumerating the four markers it emptied the code span and left a bullet describing something no
+longer named. Verified against all 192 assistant rows of a live install: 30 carried markers, 0
+residual leaks, 0 clean-prose rows rewritten. Do not "simplify" this back to `strings.ReplaceAll`.
+
+**It is deliberately NOT shared with `prompts.StripProtocolMarkers`.** That one serves KB assist,
+where the input is a passage the owner is about to paste over their own writing, so content
+between markers IS the answer and a `[STATE]` body is kept (its own test pins this). Here the
+input is a conversation and a leaked state block is machine memory, so the block goes whole.
+Same tokens, opposite policy, because the inputs differ — merging them is the obvious future
+cleanup and would reintroduce one bug or the other.
+
+**A reply that was nothing but markers gets a placeholder, never the raw text.** Ten live rows
+are a bare `[SILENT]` — the model complying with "don't say anything" using the one marker the
+prompt had given it. Showing raw re-displays the exact leak; an empty bubble reads as being
+ignored, the lesson `UserFacingDesignText` already records. `CleanHistory` is the other half and
+is not cosmetic: history is fed back as prior turns, so a leaked reply is few-shot evidence to
+keep leaking, and one transcript shows the escalation plainly — clean early, wrapped on nearly
+every turn after the first leak. It cleans ASSISTANT turns only (the owner's words are not ours
+to rewrite) and leaves a marker-only turn raw, because that output is for the MODEL while the
+placeholder is a message for a human. `toAPIChatMessage` cleans on the READ path too, which
+repairs conversations that leaked before the fix shipped without touching a single stored row.
+Both designers share the cleaner via `UserFacingDesignText`, where **`stripTechnicalSpec` must
+stay ahead of it** — the cleaner would remove a line-opening `[TECHNICAL SPEC]` delimiter, after
+which the block can no longer be found and the whole machine-facing spec renders to the user.
 
 **Agent designer KB awareness.** The designer is text-only (`WithNoTools`) but its system prompt (`BuildDesignSystemPrompt`, `<knowledge_base>` block) now knows the app has a built-in vault that agents read/write, and is told to prefer it over Notion/external note apps for the user's own knowledge. Each design turn injects a fresh retrieval-backed block via `Flow.WithVault(v)` → `vault.BuildKBContext(v, workspaceID, query)` → `DesignSystemParams.KBManifest` — a folder-shape summary (`Vault.FolderSummary`, one line per folder regardless of how many files it holds — note this bounds bytes PER FOLDER, not in total as folder COUNT grows, which is why `BuildKBContext` gives the summary its own 2 KiB budget with a `…and N more folders` marker; unlike the old exhaustive path list that capped at 60 files/rendered 30) plus the passages most relevant to the conversation so far (via `Indexer().Search`, scored against the session's own recent user turns + the current message — the designer has no search tool of its own, so this is done for it on every turn). When nothing matches, the block says so explicitly and the prompt tells the designer to ask the user rather than invent a path. `skilldesigner.Flow` mirrors this identically (`WithVault`, its own `loadKBManifest`/`retrievalQuery`) — `BuildKBContext` lives in `internal/vault`, not `agentdesigner`, precisely so both designers can reach it without an awkward cross-designer import. `vault.NotePaths`/`Flow.WithKBLister`/the `kbLister` interface are gone — `BuildKBContext` was their only consumer.
 
