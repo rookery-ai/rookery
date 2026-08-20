@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
@@ -40,10 +41,21 @@ func toAPIDashboardRun(r *db.AgentRunWithName) apiDashboardRun {
 			status = "failed"
 		}
 	}
+	// RecentAgentRunsWithNames LEFT JOINs agents and COALESCEs a missing name to
+	// "", so a run whose agent is gone arrives nameless and renders as a blank
+	// line — the reported symptom. Migration 015 sweeps the rows the pre-#214
+	// foreign-key bug stranded, but the join stays a LEFT JOIN (an inner join
+	// would silently HIDE such runs, trading a visible bug for an invisible one)
+	// and a row can still arrive here mid-delete. A label is legible; a blank
+	// line reads as a broken interface.
+	name := r.AgentName
+	if strings.TrimSpace(name) == "" {
+		name = "(deleted agent)"
+	}
 	return apiDashboardRun{
 		ID:         r.ID,
 		AgentID:    r.AgentID,
-		AgentName:  r.AgentName,
+		AgentName:  name,
 		Status:     status,
 		Trigger:    r.Trigger,
 		StartedAt:  r.StartedAt,
