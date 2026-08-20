@@ -6,6 +6,7 @@ import { ToastProvider } from "@/components/shell/Toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import ChatWindow, { turnFailureMessage } from "./ChatWindow";
 import {
+  FakeEventSource,
   installFakeEventSource,
   latestStream,
   turnAcceptedResponse,
@@ -171,6 +172,38 @@ test("the optimistic bubble does not duplicate the persisted message", async () 
 
   expect(await screen.findByText("hi back")).toBeInTheDocument();
   await waitFor(() => expect(screen.getAllByText("hello")).toHaveLength(1));
+});
+
+// One turn, one stream — even though the turn is discovered twice.
+//
+// The re-attach effect keys on in_flight, and in_flight is FALSE in the cache
+// when a turn starts (the send does not refetch). Tab away and back and
+// TanStack refetches on window focus, the server now says in_flight: true, the
+// dep flips, and the effect opens a SECOND stream for the turn sendTurn is
+// already following. Both push into the same line list, so every action shows
+// twice, and both call finishTurn. "Leave the page and come back" is the exact
+// scenario this feature exists for, and every other test here sets the fixture
+// once, which is why nothing else catches it.
+test("re-attaching to a turn already being followed opens no second stream", async () => {
+  renderChat();
+  const box = await screen.findByPlaceholderText("Message…");
+  await userEvent.type(box, "hello");
+  fireEvent.keyDown(box, { key: "Enter", code: "Enter" });
+
+  await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+
+  // The server now reports the turn this client is already streaming.
+  detail = { chat: CHAT, messages: [], in_flight: true, turn_lines: ["🔧 read_file(a.md)"] };
+  fireEvent(window, new Event("focus"));
+
+  // The existing stream keeps working — the guard skips the duplicate, it does
+  // not detach the live one. A milestone still reaches the card, exactly once.
+  latestStream()!.emit("🔧 read_file(a.md)");
+
+  const card = await screen.findByTestId("activity-card");
+  expect(card).toHaveTextContent("read_file(a.md)");
+  expect(FakeEventSource.instances).toHaveLength(1);
+  expect(card.textContent!.match(/read_file\(a\.md\)/g)).toHaveLength(1);
 });
 
 // Closing the stream must not read as a turn failure — a proxy can drop it, and

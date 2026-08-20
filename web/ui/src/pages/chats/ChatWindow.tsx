@@ -160,6 +160,9 @@ export function ChatWindow({
   // The lines as they stood when a turn last failed, so sendTurn can report the
   // reason after finishTurn has cleared the live list.
   const lastFailureRef = useRef<string[]>([]);
+  // Whether a progress stream is already open for this chat, so the re-attach
+  // effect never opens a second one for a turn already being followed.
+  const streamOpenRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const upload = useUploadKBFile();
@@ -277,10 +280,12 @@ export function ChatWindow({
   const openTurnStream = useCallback(
     (onTerminal?: (failed: boolean) => void): (() => void) => {
       const es = new EventSource(chatTurnProgressURL(chatId));
+      streamOpenRef.current = true;
       let settled = false;
       const finish = (failed: boolean) => {
         if (settled) return;
         settled = true;
+        streamOpenRef.current = false;
         es.close();
         finishTurn(failed);
         onTerminal?.(failed);
@@ -300,7 +305,10 @@ export function ChatWindow({
         // Refetch to learn the real outcome, mirroring the designer's SSE.
         finish(false);
       };
-      return () => es.close();
+      return () => {
+        streamOpenRef.current = false;
+        es.close();
+      };
     },
     [chatId, finishTurn],
   );
@@ -311,6 +319,15 @@ export function ChatWindow({
   // conversation with no sign that anything is happening.
   useEffect(() => {
     if (!data?.in_flight) return;
+    // One turn, one stream. in_flight is FALSE in the cache when a turn starts
+    // — the send does not refetch — so a refetch DURING the turn (window focus
+    // is the common one, and TanStack does that by default) flips this dep and
+    // fires the effect for a turn sendTurn is already following. Without this
+    // guard that opens a second stream on the same turn: every milestone lands
+    // twice and finishTurn runs twice. Leaving the page and coming back is
+    // exactly the scenario this feature exists for, so it is also the one that
+    // triggers it.
+    if (streamOpenRef.current) return;
     setBusy(true);
     turnLinesRef.current = data.turn_lines ?? [];
     setTurnLines(turnLinesRef.current);
