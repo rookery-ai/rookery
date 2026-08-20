@@ -497,12 +497,28 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	// an empty "Raw output" section in its own log note — the designer has had
 	// build_id tracing for exactly this reason, and diagnosing a silent run
 	// without it meant reading the database. Cheap, once per run.
-	slog.Info("agentrunner: run finished",
-		"run_id", runID, "agent_id", input.AgentID, "agent", agent.Name,
-		"trigger", input.Trigger, "exit", exitCode,
-		"raw_chunks", len(rctx.rawChunks), "chat_lines", len(rctx.chatLines),
-		"silent", rctx.silentSignaled, "produced_nothing", producedNothing,
-		"warnings", len(rctx.warnings), "total_tokens", rctx.usage.TotalTokens)
+	//
+	// DEFERRED, and that is load-bearing. Two of the warnings this counts are
+	// appended in the delivery phase far below — "no [CHAT] marker emitted" and
+	// "no deliverable prose" — so emitting here inline read len(rctx.warnings)
+	// before either existed and reported warnings=0 for exactly the silent runs
+	// this line was added to explain. (The seven appends inside runCoderTurns are
+	// unaffected: that call has already returned by this point, which is why the
+	// field was right for a [CALL:] warning and wrong for a suppressed delivery.)
+	//
+	// A defer rather than moving the statement down: Run has three exit paths —
+	// coder error, produced-nothing, and success — and only the last reaches the
+	// delivery phase, so a relocated statement would silently stop logging the
+	// other two. rctx is a pointer and exitCode/producedNothing are captured by
+	// reference, so the closure sees final values on every path.
+	defer func() {
+		slog.Info("agentrunner: run finished",
+			"run_id", runID, "agent_id", input.AgentID, "agent", agent.Name,
+			"trigger", input.Trigger, "exit", exitCode,
+			"raw_chunks", len(rctx.rawChunks), "chat_lines", len(rctx.chatLines),
+			"silent", rctx.silentSignaled, "produced_nothing", producedNothing,
+			"warnings", len(rctx.warnings), "total_tokens", rctx.usage.TotalTokens)
+	}()
 
 	if runErr != nil {
 		_ = r.db.FinishAgentRun(runID, -1, strings.Join(rctx.chatLines, "\n"), strings.Join(rctx.warnings, "\n")+"\n"+runErr.Error(), rctx.usage.PromptTokens, rctx.usage.CompletionTokens, rctx.usage.TotalTokens)

@@ -31,6 +31,21 @@ func dryRunPrompt(agentMD, backendType, runtimeContext string, chatApps []prompt
 	}) + prompts.DryRunSendProhibition
 }
 
+// dryRunResult carries what a rehearsal learned. The sample is what the review step
+// shows; the id slices are evidence for auto-bind.
+//
+// The ids matter because auto-bind exists to catch the case a weak model omits the
+// `# Connections:` header, and it binds exactly what the build's tool calls invoked.
+// The dry run is a REAL agent run against the same bound surface, so a connection it
+// exercised is evidence of the same kind — and it was being thrown away, because the
+// caller consumed only res.Text. An agent whose build happened not to touch a
+// connection its first real run needs would ship unbound.
+type dryRunResult struct {
+	Sample            string
+	UsedConnectionIDs []string
+	UsedMCPServerIDs  []string
+}
+
 // dryRun executes a freshly built agent ONCE so the review step can show what it
 // actually does, rather than what the model says it will do.
 //
@@ -52,13 +67,13 @@ func dryRunPrompt(agentMD, backendType, runtimeContext string, chatApps []prompt
 // Cost is real: this is one extra agent run per create build, and a real one measured
 // over 1.5M tokens. That is the price of the review step showing something true, and
 // it is why the caller invokes this for CREATE builds only.
-func (f *Flow) dryRun(ctx context.Context, workspaceID, workDir, agentMD, backendType string, chatApps []prompts.ChatAppInfo, notify func(string)) (string, bool) {
+func (f *Flow) dryRun(ctx context.Context, workspaceID, workDir, agentMD, backendType string, chatApps []prompts.ChatAppInfo, notify func(string)) (dryRunResult, bool) {
 	if f.coderFor == nil {
-		return "", false
+		return dryRunResult{}, false
 	}
 	coderSvc := f.coderFor(workspaceID)
 	if coderSvc == nil {
-		return "", false
+		return dryRunResult{}, false
 	}
 
 	// A rehearsal must not become the saved agent's memory. saveAndFinish promotes the
@@ -124,9 +139,17 @@ func (f *Flow) dryRun(ctx context.Context, workspaceID, workDir, agentMD, backen
 		// nil error with a nil result classes as "", which is itself the useful signal.
 		slog.Warn("agentdesigner: dry run produced no sample",
 			"workspace_id", workspaceID, "err_class", buildErrClass(err))
-		return "", false
+		return dryRunResult{}, false
 	}
-	return dryRunOutput(res.Text)
+	sample, ok := dryRunOutput(res.Text)
+	if !ok {
+		return dryRunResult{}, false
+	}
+	return dryRunResult{
+		Sample:            sample,
+		UsedConnectionIDs: res.UsedConnectionIDs,
+		UsedMCPServerIDs:  res.UsedMCPServerIDs,
+	}, true
 }
 
 // restoreDryRunState snapshots the agent's state.md and returns the function that puts it
