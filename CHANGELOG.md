@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/rookery-ai/rookery/compare/v0.3.11...v0.4.0) (2026-08-20)
+
+
+### Features
+
+* **scheduler:** evaluate cron in the schedule's own timezone ([#241](https://github.com/rookery-ai/rookery/issues/241)) ([3ae05c3](https://github.com/rookery-ai/rookery/commit/3ae05c34ca60c126334cabcecea4263b603682d9))
+
+
+### Bug Fixes
+
+* **llm:** classify a 404 tool rejection, count late run warnings, bound the state read ([#239](https://github.com/rookery-ai/rookery/issues/239)) ([5ba78eb](https://github.com/rookery-ai/rookery/commit/5ba78eb04a2628d9374a4d12420c5892b1e832d8))
+
 ## [0.3.11](https://github.com/rookery-ai/rookery/compare/v0.3.10...v0.3.11) (2026-08-19)
 
 
