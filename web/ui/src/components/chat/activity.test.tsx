@@ -10,6 +10,28 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// The card carries `overflow-hidden` (for its rounded corners), and per CSS
+// Flexbox 4.5 an item whose overflow is not `visible` gets an automatic minimum
+// size of ZERO instead of a content-based one. So as a direct flex child of a
+// full ChatScroll it is the ONE child flex is allowed to compress — measured in
+// Chromium at 77px with room to spare and 2px once the transcript filled the
+// container. Two pixels is the top and bottom border: the owner reported it as
+// "a line and no box with the tool calls at all".
+//
+// Message bubbles are unaffected because their overflow is visible, which is
+// why the reply still arrived normally while the progress card vanished, and
+// why the agent designer never showed this — it wraps the card in a plain div,
+// so that div is the flex item and the card is not.
+//
+// jsdom has no layout engine, so this can only assert the declaration. The
+// behaviour is asserted in scripts/verify-chat-progress-layout.py.
+test("never shrinks: it is a flex child that would otherwise collapse to its border", () => {
+  render(
+    <ActivityCard title="Working" lines={["🔧 read_file(a.md)"]} status="live" startedAt={Date.now()} />,
+  );
+  expect(screen.getByTestId("activity-card").className).toContain("shrink-0");
+});
+
 test("renders title and lines in arrival order", () => {
   render(
     <ActivityCard

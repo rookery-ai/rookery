@@ -62,7 +62,22 @@ export function ActivityCard({
       className={cn(
         // Width is the placing container's job (chat stream bubble vs. run
         // panel) — this card just fills whatever wrapper it's given.
-        "w-full overflow-hidden rounded-xl border",
+        //
+        // shrink-0 is NOT decoration. `overflow-hidden` (which the rounded
+        // corners need) gives a flex item an automatic minimum size of ZERO
+        // rather than a content-based one — CSS Flexbox 4.5 — so as a direct
+        // flex child of a scrolling column this card is the one thing flex is
+        // allowed to compress. Measured in Chromium: 77px with room to spare,
+        // 2px once the transcript filled the container. Two pixels is the top
+        // and bottom border, which is exactly how it was reported: "a line and
+        // no box with the tool calls at all".
+        //
+        // It belongs here rather than at the call site because every caller
+        // wants the same thing — a progress card squashed to its border is
+        // never the desired outcome — and because the two older callers only
+        // escaped it by accident, wrapping the card in a plain div so that the
+        // DIV was the flex item.
+        "w-full shrink-0 overflow-hidden rounded-xl border",
         status === "error" ? "border-danger" : "border-border",
       )}
     >
