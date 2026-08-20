@@ -80,6 +80,62 @@ func TestTableHeaderDetection(t *testing.T) {
 	}
 }
 
+// Both of the following were found by running the real reporting note through
+// this code, AFTER the synthetic fixtures above already passed. They are pinned
+// because each looked correct in isolation.
+
+// A section almost never OPENS with its table — the converted-CSV note begins
+// with an italic "Converted from …" provenance line. Checking only offset 0
+// found headers for none of that note's 191 chunks while every test here
+// passed, because every fixture above starts its table immediately.
+func TestTableHeaderIsFoundAfterLeadingProse(t *testing.T) {
+	body := "*Converted from [card-transactions.csv](uploads/card-transactions.csv).*\n\n" + bigTable(400)
+	chunks := ChunkMarkdown("notes/tx.md", "# Transactions\n\n"+body)
+
+	labelled := 0
+	for _, c := range chunks {
+		if strings.Contains(c.Text, "| Date | Merchant | Amount |") {
+			labelled++
+		}
+	}
+	if labelled < len(chunks)-1 {
+		t.Errorf("only %d of %d chunks carry the header", labelled, len(chunks))
+	}
+}
+
+// A single table ROW can be longer than a whole chunk, so hardSplitWindow — not
+// the accumulator — is what decides that row's size. Cutting there at the full
+// bound and then prepending a header overshot it on 96 of the real note's 191
+// chunks, invisible to a fixture whose rows are short.
+func TestOversizedRowsRespectTheReducedBudget(t *testing.T) {
+	wide := "| " + strings.Repeat("column | ", 18) + "\n|" + strings.Repeat("---|", 19) + "\n"
+	var b strings.Builder
+	b.WriteString(wide)
+	for i := 0; i < 60; i++ {
+		// Each row on its own exceeds targetChunkChars, as the real ones do.
+		fmt.Fprintf(&b, "| %s |\n", strings.Repeat(fmt.Sprintf("value %d ", i), 260))
+	}
+	for _, c := range ChunkMarkdown("notes/wide.md", "# Wide\n\n"+b.String()) {
+		if len(c.Text) > targetChunkChars {
+			t.Errorf("chunk exceeds the hard bound: %d > %d", len(c.Text), targetChunkChars)
+		}
+	}
+}
+
+// Two tables in one section must not have the first one's columns stapled onto
+// the second one's rows: a confidently wrong header reads as authoritative and
+// is worse than none.
+func TestSectionWithTwoTablesGetsNoHeader(t *testing.T) {
+	two := bigTable(150) + "\n| Category | Limit |\n|---|---|\n| Food | 20000 |\n"
+	for _, c := range ChunkMarkdown("notes/two.md", "# Both\n\n"+two) {
+		if strings.Contains(c.Text, "| Category | Limit |") &&
+			strings.Contains(c.Text, "| Date | Merchant | Amount |") &&
+			!strings.Contains(c.Text, "Kaufland") {
+			t.Errorf("a row was labelled with the wrong table's header:\n%s", c.Text)
+		}
+	}
+}
+
 // A header wide enough to starve the budget must degrade to unlabelled rows
 // rather than to one row per chunk, which would be worse on both counts.
 func TestPathologicallyWideHeaderDegradesGracefully(t *testing.T) {

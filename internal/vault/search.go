@@ -7,8 +7,10 @@ import (
 	"io/fs"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // SearchHit is one matching line within a note.
@@ -62,6 +64,24 @@ func (s *ripgrepSearcher) searchRipgrep(ctx context.Context, root, workspaceID, 
 		}
 		return nil, err
 	}
+	// A table hit needs its table's header, which means reading the file. Cached
+	// per path for the life of this one search: ripgrep returns up to 5 matches
+	// per file, so without it a busy note is read five times.
+	fileCache := map[string]string{}
+	contentOf := func(rel string) string {
+		if c, ok := fileCache[rel]; ok {
+			return c
+		}
+		data, err := s.v.ReadNote(workspaceID, rel)
+		if err != nil {
+			// Not fatal: snippetFor falls back to trimming the line alone.
+			fileCache[rel] = ""
+			return ""
+		}
+		fileCache[rel] = string(data)
+		return fileCache[rel]
+	}
+
 	var hits []SearchHit
 	sc := bufio.NewScanner(strings.NewReader(string(out)))
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -85,10 +105,15 @@ func (s *ripgrepSearcher) searchRipgrep(ctx context.Context, root, workspaceID, 
 		if err != nil {
 			continue
 		}
+		snippet := snippetFor(contentOf(rel), ev.Data.LineNumber, ev.Data.Lines.Text)
+		if snippet == "" {
+			// The match was a bare structural wrapper with no text of its own.
+			continue
+		}
 		hits = append(hits, SearchHit{
 			Path:    rel,
 			Line:    ev.Data.LineNumber,
-			Snippet: trimSnippet(ev.Data.Lines.Text),
+			Snippet: snippet,
 		})
 	}
 	return hits, nil
@@ -107,10 +132,16 @@ func (s *ripgrepSearcher) searchGo(workspaceID, query string) ([]SearchHit, erro
 		if err != nil {
 			continue
 		}
+		content := string(data)
 		count := 0
-		for i, line := range strings.Split(string(data), "\n") {
+		for i, line := range strings.Split(content, "\n") {
 			if strings.Contains(strings.ToLower(line), q) {
-				hits = append(hits, SearchHit{Path: rel, Line: i + 1, Snippet: trimSnippet(line)})
+				snippet := snippetFor(content, i+1, line)
+				if snippet == "" {
+					// A bare structural wrapper carries no text of its own.
+					continue
+				}
+				hits = append(hits, SearchHit{Path: rel, Line: i + 1, Snippet: snippet})
 				if count++; count >= 5 {
 					break
 				}
@@ -151,12 +182,115 @@ func (v *Vault) walkNotes(workspaceID string) ([]string, error) {
 	return out, err
 }
 
-func trimSnippet(s string) string {
+const (
+	// snippetMax is the budget for an ordinary prose hit. Deliberately
+	// unchanged: raising it for every hit would spend the shared byte budget
+	// (see kbsearch.go) on fewer results for no gain, since a prose line that
+	// long is rare.
+	snippetMax = 200
+
+	// tableSnippetMax is the budget for a hit INSIDE a markdown table, which
+	// also has to carry the table's header row. A converted-CSV row runs to
+	// ~1774 characters on the note that prompted this, so 200 showed about a
+	// tenth of one cell with no column names. Three labelled rows are worth
+	// more than sixteen unlabelled fragments when the question is about a table.
+	tableSnippetMax = 600
+)
+
+func trimSnippet(s string) string { return trimTo(s, snippetMax) }
+
+// trimTo trims and caps, cutting on a RUNE boundary — this operator's notes are
+// routinely Cyrillic, and a raw byte cut corrupts the final character rather
+// than merely shortening the text.
+func trimTo(s string, max int) string {
 	s = strings.TrimRight(s, "\r\n")
 	s = strings.TrimSpace(s)
-	const max = 200
-	if len(s) > max {
-		s = s[:max] + "…"
+	if len(s) <= max {
+		return s
 	}
-	return s
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }
+
+// snippetFor renders one search hit into the text a model reads.
+//
+// Two things it does beyond trimming, both aimed at the same failure — a hit
+// that is technically correct and tells the reader nothing:
+//
+//   - A hit inside a markdown table carries that table's HEADER, without which
+//     the row is uninterpretable. It uses the table the hit is actually in, not
+//     the note's first: labelling a row with another table's columns is worse
+//     than no header at all, because it reads as authoritative.
+//   - A hit on one of the block constructs the KB editor produces (callout,
+//     toggle, columns, alignment) is unwrapped to its readable text instead of
+//     being returned as raw HTML. Images are dropped entirely, per the request:
+//     an image path is not what someone searching their notes is looking for.
+//
+// content may be empty when the caller has no cheap access to the file; the
+// table lookup is then skipped and the line is trimmed as before.
+func snippetFor(content string, lineNo int, line string) string {
+	line = unwrapConstructs(line)
+	if line == "" {
+		return ""
+	}
+	if header, ok := tableHeaderFor(content, lineNo); ok {
+		// The hit may BE the header or the delimiter row, in which case the
+		// header already contains it and appending would print it twice.
+		if strings.Contains(header, strings.TrimSpace(line)) {
+			return trimTo(header, tableSnippetMax)
+		}
+		return trimTo(header+"\n"+strings.TrimSpace(line), tableSnippetMax)
+	}
+	return trimTo(line, snippetMax)
+}
+
+// tableHeaderFor returns the header of the table containing lineNo, if any. It
+// walks BACK to the start of the contiguous run of pipe-bearing lines and asks
+// tableHeader whether that run opens a real table, so a note with several
+// tables labels each row with its own.
+func tableHeaderFor(content string, lineNo int) (string, bool) {
+	if content == "" || lineNo < 1 {
+		return "", false
+	}
+	lines := strings.Split(content, "\n")
+	if lineNo > len(lines) {
+		return "", false
+	}
+	idx := lineNo - 1
+	if !strings.Contains(lines[idx], "|") {
+		return "", false
+	}
+	start := idx
+	for start > 0 && strings.Contains(lines[start-1], "|") {
+		start--
+	}
+	return tableHeader(strings.Join(lines[start:], "\n"))
+}
+
+// unwrapConstructs turns the KB editor's block constructs into the text a
+// reader would see, and returns "" for a construct that carries no text of its
+// own — a bare wrapper is structure, and returning it as a search result is
+// how "the search found something" and "the search found nothing useful" become
+// indistinguishable.
+func unwrapConstructs(s string) string {
+	s = strings.TrimSpace(s)
+	if divWrapperRE.MatchString(s) || s == "</div>" || s == "<details>" || s == "</details>" {
+		return ""
+	}
+	s = imageRE.ReplaceAllString(s, "")
+	s = summaryRE.ReplaceAllString(s, "$1")
+	s = calloutRE.ReplaceAllString(s, "")
+	return strings.TrimSpace(s)
+}
+
+var (
+	// <div align="center"> and <div data-cols="2"> — the alignment and columns
+	// nodes. Structure, never content.
+	divWrapperRE = regexp.MustCompile(`^<div\s[^>]*>$`)
+	summaryRE    = regexp.MustCompile(`<summary>(.*?)</summary>|</?summary>`)
+	calloutRE    = regexp.MustCompile(`^>\s*\[!\w+\]\s*`)
+	imageRE      = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
+)
