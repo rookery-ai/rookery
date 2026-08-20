@@ -430,6 +430,11 @@ func serveCmd() *cli.Command {
 				root := vlt.Root(workspaceID)
 				cd := coderFor(workspaceID).WithDir(root)
 
+				// Strip protocol markers out of the model's own prior turns before
+				// they become few-shot context, matching the web chat path — a
+				// conversation that leaked once otherwise keeps re-teaching itself.
+				history = chat.CleanHistory(history)
+
 				// Connector + KB bridge wiring: the API engine exposes bound connections
 				// AND save_to_kb as native in-process tools directly. A CLI coder instead
 				// reaches them via loopback bridges (`rookery connector exec <tool>`,
@@ -552,7 +557,10 @@ func serveCmd() *cli.Command {
 					send("Sorry, I ran into an error: " + err.Error())
 					return nil
 				}
-				send(result.Text)
+				// Cleaned once, before delivery. The router's wrappedSend captures
+				// exactly what is sent and persists that, so the stored transcript
+				// and the message the owner read cannot diverge.
+				send(chat.CleanReply(result.Text))
 				return nil
 			}
 

@@ -201,7 +201,12 @@ func dryRunOutput(raw string) (string, bool) {
 	for _, line := range strings.Split(s, "\n") {
 		t := strings.TrimSpace(line)
 		switch {
-		case t == "", strings.HasPrefix(t, "[CALL:"), isSilentLine(t):
+		// A stray [/CHAT] close tag is dropped for the same reason
+		// agentrunner.parseCoderOutput drops it: weak models emit one with no
+		// opener. Without this the rehearsal displayed the tag verbatim while
+		// the real run it rehearses would have stripped it — the review sample
+		// has to look like what the agent will actually deliver.
+		case t == "", strings.HasPrefix(t, "[CALL:"), isSilentLine(t), t == "[/CHAT]":
 			continue
 		case strings.HasPrefix(t, "[CHAT]"):
 			t = strings.TrimSpace(strings.TrimPrefix(t, "[CHAT]"))

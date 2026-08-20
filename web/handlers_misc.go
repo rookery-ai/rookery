@@ -54,7 +54,13 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "empty message"})
 	}
 
-	history, _ := s.db.ListChatMessages(id)
+	// Cleaned, not raw: a previously-leaked reply sitting in the history is
+	// few-shot evidence that protocol markers are how one answers here, and the
+	// model copies it. Without this, a conversation that leaked once keeps
+	// re-teaching itself even after the prompt no longer asks for markers.
+	// Assistant turns only — see chat.CleanHistory.
+	rawHistory, _ := s.db.ListChatMessages(id)
+	history := chat.CleanHistory(rawHistory)
 
 	// System context: a read+write knowledge-base instruction (so the chat can retrieve
 	// and edit notes on demand) + the user's always-on identity context (profile/memory/
@@ -200,13 +206,18 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 		return c.JSON(http.StatusOK, map[string]string{"error": "Couldn't reach " + coder.Name() + ": " + err.Error()})
 	}
 
+	// Cleaned ONCE, here, then used by all three consumers below. Cleaning per
+	// consumer would let the stored transcript, the auto-title and what the
+	// browser renders disagree about the same reply.
+	reply := chat.CleanReply(result.Text)
+
 	_ = s.db.AddChatMessage(id, "user", text)
-	_ = s.db.AddChatMessage(id, "assistant", result.Text)
+	_ = s.db.AddChatMessage(id, "assistant", reply)
 	_ = s.db.TouchChat(id)
 	if ch, err := s.db.GetChat(id); err == nil {
-		chat.MaybeAutoTitle(s.db, s.titleGen, ch, text, result.Text)
+		chat.MaybeAutoTitle(s.db, s.titleGen, ch, text, reply)
 	}
-	return c.JSON(http.StatusOK, map[string]string{"response": result.Text})
+	return c.JSON(http.StatusOK, map[string]string{"response": reply})
 }
 
 // ── Reminders ──────────────────────────────────────────────────────────────

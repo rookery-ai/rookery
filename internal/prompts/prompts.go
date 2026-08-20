@@ -456,6 +456,51 @@ func platformContextBlock(surface Surface, chatApps []ChatAppInfo, vaultRoot str
 	sb.WriteString("\n")
 
 	// ── Output protocol ───────────────────────────────────────────────────────
+	//
+	// AGENT SURFACE ONLY, and the gate is the fix for a real leak. This section
+	// was written unconditionally, so the CHAT prompt carried a standing
+	// instruction to wrap replies in [CHAT] — and models obliged, at a rate that
+	// varied by family, by strength and even by turn depth, which is exactly why
+	// it read as flakiness rather than as a bug. On a live install 30 of 192
+	// assistant messages had leaked at least one marker.
+	//
+	// Asking chat to be quiet reproduced it on every model tested, because
+	// [SILENT] was described here as the way to say nothing — so a request for
+	// silence steered straight into the protocol. The model also defended the
+	// markers when asked, telling the owner it could not remove them because
+	// they were "part of the platform's protocol". It was reciting this block.
+	//
+	// Chat has no parser for these markers (agentrunner.parseCoderOutput is the
+	// agent-run one) so anything emitted here is read verbatim by a human.
+	// internal/chat.CleanReply is the guarantee at the display edge; this gate
+	// is the cause. Both are needed — a prompt steers, it does not bind.
+	if surface != SurfaceChat {
+		sb.WriteString(outputProtocolSection())
+	} else {
+		sb.WriteString("## Output protocol\n")
+		sb.WriteString("The markers agents use to report ([CHAT], [STATE], [CALL], [SILENT]) belong to\n")
+		sb.WriteString("agent RUNS. You are not an agent run: your reply goes straight to the person\n")
+		sb.WriteString("you are talking to, exactly as you write it. Answer in plain prose and never\n")
+		sb.WriteString("emit those markers — including when asked to be brief or to say nothing, where\n")
+		sb.WriteString("the right answer is a short sentence, not a marker.\n\n")
+	}
+
+	// ── Schedule ──────────────────────────────────────────────────────────────
+	sb.WriteString("## Agent schedule\n")
+	sb.WriteString("Agents run on a cron schedule set in AGENT.md line 1.\n")
+	sb.WriteString("  # Suggested schedule: 0 9 * * *    — daily at 9am\n")
+	sb.WriteString("  # Suggested schedule: none          — no automatic schedule; run manually\n")
+	sb.WriteString("\"none\" is a valid and common choice for agents the user triggers manually.\n")
+	sb.WriteString("</platform_context>\n\n")
+
+	return sb.String()
+}
+
+// outputProtocolSection is the agent output protocol, unchanged in wording from
+// when it was inline in platformContextBlock. Extracted so the chat surface can
+// omit it without the two variants drifting apart — see the gate's comment.
+func outputProtocolSection() string {
+	var sb strings.Builder
 	sb.WriteString("## Output protocol (how agents communicate)\n")
 	sb.WriteString("Agents produce output ONLY via these markers — never by calling external APIs:\n\n")
 	sb.WriteString("  [CHAT] Message to send to the user.\n")
@@ -479,14 +524,6 @@ func platformContextBlock(surface Surface, chatApps []ChatAppInfo, vaultRoot str
 	sb.WriteString("notes or state without notifying the user. For such agents, end the run with [SILENT]\n")
 	sb.WriteString("so the system knows not to deliver stray prose. Do NOT force a [CHAT] if AGENT.md\n")
 	sb.WriteString("says the agent should be silent.\n\n")
-
-	// ── Schedule ──────────────────────────────────────────────────────────────
-	sb.WriteString("## Agent schedule\n")
-	sb.WriteString("Agents run on a cron schedule set in AGENT.md line 1.\n")
-	sb.WriteString("  # Suggested schedule: 0 9 * * *    — daily at 9am\n")
-	sb.WriteString("  # Suggested schedule: none          — no automatic schedule; run manually\n")
-	sb.WriteString("\"none\" is a valid and common choice for agents the user triggers manually.\n")
-	sb.WriteString("</platform_context>\n\n")
 
 	return sb.String()
 }
