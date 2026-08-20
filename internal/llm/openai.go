@@ -65,10 +65,23 @@ func (p *openaiProvider) Complete(ctx context.Context, req Request) (*Response, 
 	url := p.baseURL + "/chat/completions"
 	respBody, code, err := doJSON(ctx, p.client, http.MethodPost, url, headers, body)
 	if err != nil {
-		// A 400 mentioning "tool"/"function" usually means the model doesn't support
-		// function-calling — degrade to a no-tool turn rather than failing hard.
-		// Mirrors anthropicProvider.Complete's classification of the same condition.
-		if code == 400 && len(req.Tools) > 0 {
+		// A rejected request mentioning "tool"/"function" usually means the model
+		// doesn't support function-calling — degrade to a no-tool turn rather than
+		// failing hard. Mirrors anthropicProvider.Complete's classification of the
+		// same condition.
+		//
+		// The status set is deliberately wider than 400, because an
+		// OpenAI-compatible gateway does not have to answer 400: OpenRouter answers
+		// 404 ("No endpoints found that support tool use"), and 422 is the other
+		// status these gateways use for a rejected request shape. Gating on 400
+		// alone meant ErrToolsUnsupported never fired there, so api_engine's
+		// degrade-to-a-no-tool-turn was dead and the run failed outright instead.
+		//
+		// The body check is what makes widening safe and must not be dropped: a 404
+		// is ALSO what a wrong model slug returns, and classifying that as
+		// "tools unsupported" would silently retry without tools and hand back a
+		// degraded answer, hiding a configuration error behind it.
+		if (code == 400 || code == 404 || code == 422) && len(req.Tools) > 0 {
 			lower := strings.ToLower(string(respBody))
 			if strings.Contains(lower, "tool") || strings.Contains(lower, "function") {
 				return nil, ErrToolsUnsupported
