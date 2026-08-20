@@ -73,6 +73,23 @@ var (
 // mouth about WHY it said nothing.
 const markerOnlyPlaceholder = "_(no reply)_"
 
+// emptyReplyPlaceholder stands in for a coder call that SUCCEEDED and returned
+// no text whatsoever — a different event from the one above, where the model
+// spoke but only in protocol markers.
+//
+// This case used to return "", which handleChatMessage persisted unguarded, so
+// the owner got a blank bubble. Four such rows exist on the reporting install,
+// one of them the answer to a question about a 155 KB table the model could not
+// read within its tool-result cap. #242 fixed only the marker-only case.
+//
+// The wording differs from markerOnlyPlaceholder because the remedies differ:
+// nothing came back at all here, so retrying is the useful next step, whereas a
+// marker-only reply was a deliberate (if malformed) decision to say nothing. It
+// also matters that this is not silently empty in the stored transcript: a
+// blank assistant turn is few-shot evidence to the NEXT turn that answering
+// with nothing is acceptable here.
+const emptyReplyPlaceholder = "_(no reply — the model returned nothing. Try asking again.)_"
+
 // CleanReply turns one raw coder reply into the text a human reads.
 //
 // Safe to call on text that contains no markers at all: ordinary prose comes
@@ -80,14 +97,14 @@ const markerOnlyPlaceholder = "_(no reply)_"
 // cleaner that rewrites innocent replies would be worse than the leak.
 func CleanReply(raw string) string {
 	if strings.TrimSpace(raw) == "" {
-		return ""
+		return emptyReplyPlaceholder
 	}
 	cleaned := cleanMarkers(raw)
 	if cleaned != "" {
 		return cleaned
 	}
-	// Nothing survived, so the reply WAS the markers. Distinguish that from an
-	// empty input, which was handled above and legitimately stays empty.
+	// Nothing survived, so the reply WAS the markers — a distinct event from the
+	// empty input handled above, and given its own placeholder for that reason.
 	return markerOnlyPlaceholder
 }
 
