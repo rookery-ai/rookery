@@ -246,11 +246,60 @@ func joinTrail(trail []string) string {
 // land mid-word for pathological input. That is the intended trade-off: an
 // oversized chunk breaks the contract the caller depends on, while a mid-word
 // cut merely reads awkwardly.
+// tableHeader returns a markdown table's header and delimiter rows if text
+// begins with one.
+//
+// The DELIMITER row identifies a table, not the pipes: a line of prose
+// containing a pipe is ordinary, while `|---|---|` is not. Getting that
+// backwards would grow a spurious header on every split prose document.
+func tableHeader(text string) (string, bool) {
+	lines := strings.SplitN(strings.TrimLeft(text, "\n"), "\n", 3)
+	if len(lines) < 2 {
+		return "", false
+	}
+	head, delim := lines[0], strings.TrimSpace(lines[1])
+	if !strings.Contains(head, "|") || !strings.Contains(delim, "|") {
+		return "", false
+	}
+	// Every cell of the delimiter row must be dashes, optionally colon-aligned.
+	cells := strings.Split(strings.Trim(delim, "|"), "|")
+	if len(cells) == 0 {
+		return "", false
+	}
+	for _, cell := range cells {
+		c := strings.TrimSpace(cell)
+		if c == "" || strings.Trim(c, ":-") != "" {
+			return "", false
+		}
+	}
+	return head + "\n" + lines[1], true
+}
+
 func splitOversized(text string) []string {
 	if len(text) <= targetChunkChars {
 		return []string{text}
 	}
-	acc := &accumulator{}
+
+	// A split table loses its column names on every fragment but the first, and
+	// a chunk of bare rows is uninterpretable — nothing in it says which column
+	// holds the amount. Repeating the header costs a bounded ~2 lines per chunk
+	// and is what makes a converted CSV retrievable at all.
+	header, isTable := tableHeader(text)
+	budget := targetChunkChars
+	if isTable {
+		// Reserve the header's cost, so a fragment PLUS its repeated header
+		// still respects the bound. targetChunkChars is hard, not aspirational:
+		// the byte-capped tool result depends on it.
+		budget -= len(header) + 1
+		// A pathologically wide header would starve the budget down to a row or
+		// two per chunk, which is worse on both counts than unlabelled rows.
+		if budget < targetChunkChars/4 {
+			isTable = false
+			budget = targetChunkChars
+		}
+	}
+
+	acc := &accumulator{budget: budget}
 	for _, para := range strings.Split(text, "\n\n") {
 		if len(para) > targetChunkChars {
 			for _, line := range strings.Split(para, "\n") {
@@ -276,6 +325,14 @@ func splitOversized(text string) []string {
 		acc.add(para, "\n\n")
 	}
 	acc.flush()
+
+	// The first fragment already opens with the header — it IS the start of the
+	// table — so only the rest need it prepended.
+	if isTable {
+		for i := 1; i < len(acc.out); i++ {
+			acc.out[i] = header + "\n" + acc.out[i]
+		}
+	}
 	return acc.out
 }
 
@@ -284,14 +341,26 @@ func splitOversized(text string) []string {
 // trailing separator would push the running total over target. Budgeting the
 // separator into the overflow check (not just the fragment) means the join
 // character itself can never be what tips a chunk over the bound.
+// budget is the per-chunk bound. It is normally targetChunkChars, and is
+// REDUCED when splitOversized is going to prepend a repeated table header to
+// each fragment — the header has to be paid for out of the bound rather than
+// added on top of it.
 type accumulator struct {
-	cur strings.Builder
-	out []string
+	cur    strings.Builder
+	out    []string
+	budget int
+}
+
+func (a *accumulator) limit() int {
+	if a.budget > 0 {
+		return a.budget
+	}
+	return targetChunkChars
 }
 
 func (a *accumulator) add(fragment, sep string) {
 	need := len(fragment) + len(sep)
-	if a.cur.Len() > 0 && a.cur.Len()+need > targetChunkChars {
+	if a.cur.Len() > 0 && a.cur.Len()+need > a.limit() {
 		a.flush()
 	}
 	a.cur.WriteString(fragment)
