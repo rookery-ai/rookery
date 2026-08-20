@@ -9,6 +9,11 @@ type ActivityCardProps = {
   status: ActivityStatus;
   startedAt: number; // Date.now() at attach
   collapsible?: boolean;
+  // Start collapsed, showing only what is happening RIGHT NOW with the history
+  // a click away. Opt-in because the two surfaces want opposite defaults: an
+  // agent build is a log you read, while a chat turn is a conversation you are
+  // waiting on and a long tool list pushes the reply off screen.
+  defaultCollapsed?: boolean;
 };
 
 function formatElapsed(ms: number): string {
@@ -20,13 +25,20 @@ function formatElapsed(ms: number): string {
 
 // Live build/run progress card fed by SSE milestones (design + run
 // endpoints). Reused for both agent builds and agent runs — spec §7.
-export function ActivityCard({ title, lines, status, startedAt, collapsible }: ActivityCardProps) {
+export function ActivityCard({
+  title,
+  lines,
+  status,
+  startedAt,
+  collapsible,
+  defaultCollapsed,
+}: ActivityCardProps) {
   const [now, setNow] = useState(() => Date.now());
   // Elapsed stops advancing once the card leaves "live" — captured once,
   // the moment status changes away from live, rather than continuing to
   // tick against the wall clock.
   const [frozenElapsed, setFrozenElapsed] = useState<number | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed ?? false);
 
   useEffect(() => {
     if (status !== "live") {

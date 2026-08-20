@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router";
 import { ToastProvider } from "@/components/shell/Toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import ChatWindow from "./ChatWindow";
+import { completeTurn, installFakeEventSource, turnAcceptedResponse } from "./turnTestHarness";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -14,9 +15,15 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 let sendFails = false;
+// Flipped once the turn has been started, so the chat detail endpoint serves
+// the reply from "history" the way the real server does.
+let replied = false;
 
 function mockFetch() {
   sendFails = false;
+  replied = false;
+  // jsdom has no EventSource, and a turn's completion now arrives over one.
+  installFakeEventSource();
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -33,7 +40,12 @@ function mockFetch() {
               created_at: "2026-08-14T07:00:00Z",
               updated_at: "2026-08-14T07:00:00Z",
             },
-            messages: [],
+            messages: replied
+              ? [
+                  { role: "user", content: "rewrite the intro" },
+                  { role: "assistant", content: "Done — I updated the note." },
+                ]
+              : [],
           }),
         );
       }
@@ -43,7 +55,10 @@ function mockFetch() {
             jsonResponse({ error: { code: "internal", message: "boom" } }, 500),
           );
         }
-        return Promise.resolve(jsonResponse({ response: "Done — I updated the note." }));
+        // The turn is detached now: 202 here, and the reply is served from
+        // history once the stream reports done.
+        replied = true;
+        return Promise.resolve(turnAcceptedResponse());
       }
       return Promise.resolve(jsonResponse({}));
     }),
@@ -83,6 +98,9 @@ test("a completed chat turn invalidates the knowledge base queries", async () =>
   renderChat(qc);
 
   await send("rewrite the intro");
+  // The knowledge base is invalidated when the TURN completes, not when the
+  // POST returns — the POST only starts it now.
+  await completeTurn();
   await screen.findByText("Done — I updated the note.");
 
   const keys = spy.mock.calls.map((c) => JSON.stringify(c[0]?.queryKey));

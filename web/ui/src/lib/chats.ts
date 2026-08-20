@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, ApiError } from "./api";
+import { api } from "./api";
 
 export type Chat = {
   id: string;
@@ -19,10 +19,22 @@ export function useChats() {
   });
 }
 
+// in_flight and turn_lines let a client mounting MID-turn re-attach: the turn
+// outlives the request that started it, so the browser has to be able to ask
+// "is one running, and what has it done so far?" rather than infer it. Both are
+// optional so a response from an older server degrades to "no turn running"
+// rather than throwing.
+export type ChatDetail = {
+  chat: Chat;
+  messages: ChatMessage[];
+  in_flight?: boolean;
+  turn_lines?: string[];
+};
+
 export function useChatDetail(id: string | null) {
   return useQuery({
     queryKey: ["chat", id],
-    queryFn: () => api.get<{ chat: Chat; messages: ChatMessage[] }>(`/api/v1/chats/${id}`),
+    queryFn: () => api.get<ChatDetail>(`/api/v1/chats/${id}`),
     enabled: !!id,
   });
 }
@@ -45,21 +57,26 @@ export function useCreateChat() {
   });
 }
 
-// sendChatMessage is the ONLY place that parses the legacy chat-message
-// response shape: POST /api/v1/chats/:id/messages returns HTTP 200 with
-// EITHER {"response": string} OR {"error": string} — a coder failure is a
-// 200 + error FIELD, not a non-2xx status. Normalize that into the same
-// ApiError contract every other failure uses so callers only need one
-// error-handling path.
-export async function sendChatMessage(id: string, message: string): Promise<string> {
-  const body = await api.post<{ response?: string; error?: string }>(
-    `/api/v1/chats/${id}/messages`,
-    { message },
-  );
-  if (body.error) {
-    throw new ApiError(200, "chat_error", body.error);
-  }
-  return body.response ?? "";
+// startChatTurn STARTS a turn; it does not wait for the reply.
+//
+// The endpoint used to run the whole turn inline and answer {"response": …} —
+// which meant the turn was bound to this request. Leaving the page destroyed
+// the only copy of the user's message (it was persisted only after the coder
+// returned) and closing the tab cancelled the coder outright. The turn now runs
+// detached server-side, so this returns 202 with a turn id and the reply
+// arrives by refetching the chat once the progress stream reports done.
+//
+// The legacy 200-plus-error-FIELD shape is gone with it: a refused turn is a
+// real 409, which `api.post` already raises as an ApiError, so callers keep
+// their single error path.
+export async function startChatTurn(id: string, message: string): Promise<{ turn_id: string }> {
+  return api.post<{ turn_id: string }>(`/api/v1/chats/${id}/messages`, { message });
+}
+
+// chatTurnProgressURL is the SSE endpoint carrying one turn's tool-call
+// milestones. Defined beside the starter so the two cannot drift.
+export function chatTurnProgressURL(id: string): string {
+  return `/api/v1/chats/${id}/turn/progress`;
 }
 
 // Renames a chat (edits its title). Optimistically updates the cached list and

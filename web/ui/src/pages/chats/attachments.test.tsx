@@ -5,6 +5,7 @@ import { MemoryRouter, Routes, Route } from "react-router";
 import { AppShell } from "@/components/shell/AppShell";
 import ChatsPage from "./ChatsPage";
 import type { Chat, ChatMessage } from "@/lib/chats";
+import { installFakeEventSource, turnAcceptedResponse } from "./turnTestHarness";
 
 // Mirrors web/api_kb.go's apiUploadKBFile response shape.
 type KBUploadResult = {
@@ -117,7 +118,9 @@ function mockFetch() {
           { role: "user", content: body.message },
           { role: "assistant", content: response },
         ];
-        return Promise.resolve(jsonResponse({ response }));
+        // 202: the turn is detached, and the reply is served from history once
+        // the stream reports done.
+        return Promise.resolve(turnAcceptedResponse());
       }
 
       return Promise.resolve(jsonResponse({}));
@@ -142,6 +145,11 @@ function wrap() {
 
 beforeEach(() => {
   resetFixtures();
+  // jsdom has no EventSource, and a turn now completes over one. These suites
+  // are about what an attachment PRODUCES rather than how a turn progresses,
+  // and a batch sends one confirmation turn per file SERIALLY — so let every
+  // stream end on its own instead of choreographing ten by hand.
+  installFakeEventSource({ autoComplete: true });
 });
 
 test("the attach control is a real, keyboard-reachable button distinct from the drop-only surface", async () => {
