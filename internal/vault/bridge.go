@@ -80,6 +80,8 @@ func (b *Bridge) Start(ctx context.Context) (string, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/convert", b.handleConvert)
 	mux.HandleFunc("/search", b.handleSearch)
+	mux.HandleFunc("/map", b.handleMap)
+	mux.HandleFunc("/table", b.handleTable)
 	b.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -211,6 +213,7 @@ func (b *Bridge) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Query string `json:"query"`
+		Path  string `json:"path"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
@@ -222,8 +225,110 @@ func (b *Bridge) handleSearch(w http.ResponseWriter, r *http.Request) {
 	// passages) implementation search_files (internal/coder/hosttools.go)
 	// uses — see kbsearch.go's doc comment for why this must never again be a
 	// separate, lesser implementation.
-	results := SearchKB(ctx, b.v, nil, sess.workspaceID, req.Query, maxSearchResultBytes)
+	var results string
+	if strings.TrimSpace(req.Path) != "" {
+		results = SearchKBIn(ctx, b.v, nil, sess.workspaceID, req.Query, req.Path, maxSearchResultBytes)
+	} else {
+		results = SearchKB(ctx, b.v, nil, sess.workspaceID, req.Query, maxSearchResultBytes)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+}
+
+// handleMap is kb_file_map for a CLI coder.
+//
+// Without it a CLI-coder workspace gets none of the big-file handling, which
+// would be the drift kbsearch.go's doc comment warns about: one coder kind
+// quietly worse than the other "for no reason a user could see or control".
+// The API engine and this endpoint call the same MapFile.
+func (b *Bridge) handleMap(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST only"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	sess, ok := b.authorize(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	body, err := iolimit.ReadCapped(r.Body, maxSearchBody)
+	if err != nil {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": err.Error()})
+		return
+	}
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+	shape, err := MapFile(b.v, sess.workspaceID, req.Path)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"map": shape.Render(maxSearchResultBytes)})
+}
+
+// handleTable is kb_table_query for a CLI coder — same parameters, same Go
+// aggregation, same default projection that keeps a dominant column out of the
+// result.
+func (b *Bridge) handleTable(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"POST only"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	sess, ok := b.authorize(r)
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+	body, err := iolimit.ReadCapped(r.Body, maxSearchBody)
+	if err != nil {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{"error": err.Error()})
+		return
+	}
+	var req struct {
+		Path    string            `json:"path"`
+		Select  []string          `json:"select"`
+		Where   map[string]string `json:"where"`
+		GroupBy string            `json:"group_by"`
+		Metric  string            `json:"metric"`
+		Op      string            `json:"op"`
+		Order   string            `json:"order"`
+		OrderBy string            `json:"order_by"`
+		Limit   int               `json:"limit"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+	data, err := b.v.ReadNote(sess.workspaceID, req.Path)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	tbl, err := ParseTable(string(data))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	q := TableQuery{
+		Select: req.Select, Where: req.Where, GroupBy: req.GroupBy,
+		Metric: req.Metric, Op: req.Op, Order: req.Order,
+		OrderBy: req.OrderBy, Limit: req.Limit,
+	}
+	if len(q.Select) == 0 && q.Op == "" {
+		q.Select = ModestColumns(tbl)
+	}
+	res, err := tbl.Query(q)
+	if err != nil {
+		// A rejected parameter is the error path, and naming the bad value is
+		// what lets a small model correct itself in one turn.
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"result": RenderQueryResult(res, maxSearchResultBytes)})
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
