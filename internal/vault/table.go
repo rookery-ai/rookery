@@ -274,8 +274,13 @@ func (t Table) aggregate(rows [][]string, q TableQuery) (QueryResult, error) {
 	groups := map[string]*acc{}
 	res := QueryResult{Skipped: 0, Rows: [][]string{}, Notes: []string{}}
 
+	// ungroupedKey buckets every row together when no group_by was given. It is
+	// internal only — the rendered label is set below and says how many rows the
+	// single figure covers.
+	const ungroupedKey = "\x00all"
+
 	for _, row := range rows {
-		key := "all"
+		key := ungroupedKey
 		if groupIdx >= 0 {
 			key = groupKey(row[groupIdx], datePart)
 			if key == "" {
@@ -313,9 +318,14 @@ func (t Table) aggregate(rows [][]string, q TableQuery) (QueryResult, error) {
 			res.Skipped, q.Metric))
 	}
 
+	// An UNGROUPED aggregate is a single number over every matching row, and the
+	// label is the only thing distinguishing it from a grouped one. A bare "all"
+	// is easy to relabel: asked for spend per month, a model returned the grand
+	// total across four months and presented it as "€676.75/month". Saying how
+	// many rows went into it, and that it is not grouped, makes that harder.
 	label := groupCol
 	if label == "" {
-		label = "all"
+		label = fmt.Sprintf("all %d rows (not grouped)", len(rows))
 	}
 	res.Columns = []string{label, q.Op + "(" + t.Columns[metricIdx] + ")"}
 	for _, key := range order {
@@ -335,7 +345,14 @@ func (t Table) aggregate(rows [][]string, q TableQuery) (QueryResult, error) {
 		case "max":
 			v = a.max
 		}
-		res.Rows = append(res.Rows, []string{key, formatNumber(v, q.Op)})
+		shown := key
+		if shown == ungroupedKey {
+			// The sentinel is never rendered; the cell repeats what the column
+			// header says, so a reader seeing only the row still knows this is
+			// one figure over everything rather than one bucket among several.
+			shown = fmt.Sprintf("all %d rows", len(rows))
+		}
+		res.Rows = append(res.Rows, []string{shown, formatNumber(v, q.Op)})
 	}
 	if q.orderColumn() == "group" {
 		// Sorting the KEY, which is a string: an ISO-8601 prefix sorts

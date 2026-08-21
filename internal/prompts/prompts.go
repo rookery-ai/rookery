@@ -208,17 +208,6 @@ safety margin.
 			"  ✓ Find a note by its CONTENT → CALL search_files(query) directly — no script, no\n"+
 				"    read_file walk. Find files by NAME/pattern → CALL glob(pattern) directly. Both\n"+
 				"    are read-only lookups (TIER 1).\n"+
-				// A model that pages a large file from byte 0 exhausts its own
-				// context and then answers nothing — the failure these two tools
-				// exist to prevent. The tool descriptions say this too, but a
-				// model planning a strategy reads its capabilities, so the rule
-				// belongs where it decides.
-				"  ✓ BEFORE reading a file you don't know → CALL kb_file_map(path). It tells you the\n"+
-				"    columns or sections, what reading costs, and which part is too big to pull in.\n"+
-				"    Then fetch what you need: read_file with section, or search_files with path to\n"+
-				"    search INSIDE that one file. Never page a large file from the start.\n"+
-				"  ✓ Totals, averages, counts, biggest/top-N over a table → CALL kb_table_query. Do\n"+
-				"    NOT add numbers up yourself; you will get them wrong and cannot show your work.\n"+
 				"</agent_philosophy>\n",
 			1)
 	}
@@ -571,6 +560,17 @@ text. The available tools are:
 - glob(pattern): find files in the vault by NAME/pattern (supports *, ?, and **) and get their
   vault-relative paths back, one per line. Use it to locate files by name instead of listing
   folders one at a time — e.g. glob with pattern "notes/*-meeting.md". Read-only, no script.
+- kb_file_map(path): describe a file BEFORE you read it — its size and reading cost, its
+  columns and row count if it is a table, its headings if it is a document, and a warning
+  when ONE column or section holds most of the bytes. ALWAYS call this first for a file you
+  have not read. Reading a large file from the start instead will consume this entire
+  conversation and you will end up unable to answer at all.
+- kb_table_query(path, select, where, group_by, metric, op, order, limit): filter, group,
+  aggregate and rank the rows of a markdown table. Use it for totals, averages, counts and
+  top-N — do NOT add numbers up yourself, you will get them wrong. It is also how you read a
+  BIG table's rows without its bulky columns: pass select with just the columns you need and
+  you get those columns for every row, which is usually a fraction of the file. e.g.
+  group_by "date:month" with metric "USDAmount" and op "sum" gives spend per month.
 - web_fetch(url): fetch a PUBLIC URL over HTTP(S) and get its content back as text (HTML is
   reduced to readable text; JSON/text comes back as-is). Use it for a simple read of a public
   endpoint — a weather API, an RSS/JSON feed, a web page. It CANNOT send secrets (you don't

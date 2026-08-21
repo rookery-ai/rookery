@@ -150,14 +150,42 @@ func RenderQueryResult(res QueryResult, maxBytes int) string {
 	for i, row := range res.Rows {
 		line := writeRow(row)
 		if b.Len()+len(line) > maxBytes-budgetTail {
-			fmt.Fprintf(&b, "…and %d more rows — narrow the query with where or limit\n", len(res.Rows)-written)
+			fmt.Fprintf(&b, "…and %d more rows. %s\n", len(res.Rows)-written, truncationAdvice(res.Columns))
 			break
 		}
 		b.WriteString(line)
 		written = i + 1
 	}
-	fmt.Fprintf(&b, "\n%d row(s)", written)
+	fmt.Fprintf(&b, "\n%d of %d row(s)", written, len(res.Rows))
 	return b.String()
+}
+
+// wideResult is the column count past which "you are asking for too many
+// columns" is the likelier reason a result did not fit than "you are asking for
+// too many rows". Six is a judgement: a question about a table rarely needs more
+// than a handful of fields, and a converted CSV routinely has fifteen or more.
+const wideResult = 6
+
+// truncationAdvice names the lever that will actually help.
+//
+// It used to say "narrow the query with where or limit" unconditionally, which
+// is precisely wrong for the commonest agent task: enumerating every row to
+// decide which are new. Told to return fewer rows when it needs all of them, an
+// agent queries again, and again, accumulating results until its context is
+// gone. That is not hypothetical — an agent watching a 98-row table spent
+// 148,574 prompt tokens doing it and then produced nothing.
+//
+// On the file that caused it, the default projection kept 17 of 18 columns and
+// fitted 23 rows. Four columns fit all 98. So the lever was never the row count.
+func truncationAdvice(columns []string) string {
+	if len(columns) > wideResult {
+		return fmt.Sprintf(
+			"This result has %d columns, which is what filled the budget — ask for only the "+
+				"columns you need (select: [...]) and the rows will fit. Use where or limit only "+
+				"if you genuinely want fewer rows.", len(columns))
+	}
+	return "Narrow the query with where or limit, or aggregate with group_by/op instead of " +
+		"listing rows."
 }
 
 // sortedColumnNames is used by tests and by callers that want a stable listing.
