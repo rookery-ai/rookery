@@ -17,6 +17,7 @@ import (
 	"github.com/rookery-ai/rookery/internal/chat"
 	codersvc "github.com/rookery-ai/rookery/internal/coder"
 	"github.com/rookery-ai/rookery/internal/db"
+	"github.com/rookery-ai/rookery/internal/logsafe"
 )
 
 // chatTurnState tracks one in-flight chat turn.
@@ -87,7 +88,7 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 	// Durable before the coder runs. This single line is the fix: leaving the
 	// page can no longer destroy the only copy of what the owner typed.
 	if err := s.db.AddChatMessage(chatID, "user", text); err != nil {
-		slog.Error("chat: persist user message", "chat", chatID, "error", err)
+		slog.Error("chat: persist user message", "chat", logsafe.Value(chatID), "error", err)
 	}
 
 	go func() {
@@ -121,7 +122,7 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 			// while the browser held the bubble in memory; now that the message is
 			// durable, removing it would be actively worse — the owner typed it,
 			// and it is the context for their retry.
-			slog.Warn("chat: turn failed", "chat", chatID, "turn", st.id, "error", err)
+			slog.Warn("chat: turn failed", "chat", logsafe.Value(chatID), "turn", st.id, "error", err)
 			// The OWNER gets a classified sentence, not the raw error. This
 			// message is not merely displayed: it lands in the chat transcript,
 			// which is reflected into the vault and can be relayed to a
@@ -140,13 +141,17 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 			// the whole diagnosis had to come out of the database.
 			// agentrunner gained its "run finished" line for exactly this
 			// reason. `empty` is the field worth grepping for.
+			// chatID reaches here from a path parameter. It has been validated
+			// against the database by now, so nothing arbitrary should get
+			// this far — but the log line should not be the thing depending on
+			// that, and logsafe costs nothing.
 			slog.Info("chat: turn finished",
-				"chat", chatID, "turn", st.id,
+				"chat", logsafe.Value(chatID), "turn", st.id,
 				"milestones", len(st.lines),
 				"reply_bytes", len(cleaned),
 				"empty", strings.TrimSpace(reply) == "")
 			if err := s.db.AddChatMessage(chatID, "assistant", cleaned); err != nil {
-				slog.Error("chat: persist assistant message", "chat", chatID, "error", err)
+				slog.Error("chat: persist assistant message", "chat", logsafe.Value(chatID), "error", err)
 			}
 			_ = s.db.TouchChat(chatID)
 			if ch, gerr := s.db.GetChat(chatID); gerr == nil {

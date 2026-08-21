@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/rookery-ai/rookery/internal/logsafe"
 )
 
 // This file holds the ONE shared implementation of "search the whole
@@ -123,8 +125,11 @@ func SearchKBIn(ctx context.Context, v *Vault, searcher Searcher, workspaceID, q
 		// Same degrade-don't-fail policy as SearchKB, and logged for the same
 		// reason: ranked-only results still answer usefully, but a silent
 		// degrade would hide a broken ripgrep from everyone.
+		// rel arrives from the model, so it goes through logsafe: a path
+		// carrying a newline could otherwise fabricate a log entry, and these
+		// logs are how failures in this package get diagnosed.
 		slog.Warn("vault: scoped kb search: exact match search failed; degrading to ranked-only",
-			"workspace", workspaceID, "path", rel, "error", err)
+			"workspace", workspaceID, "path", logsafe.Value(rel), "error", err)
 		hits = nil
 	}
 	if len(hits) > MaxHitsInFile {
