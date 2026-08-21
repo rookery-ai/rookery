@@ -139,6 +139,43 @@ func (i *Indexer) SearchExcluding(workspaceID, query string, limit int, excludeP
 	return i.search(workspaceID, query, limit, excludePrefixes)
 }
 
+// SearchWithin is the include-path counterpart of SearchExcluding: ranked
+// passages from ONE file.
+//
+// It exists because scoping is otherwise only expressible as exclusion, and
+// SearchKB runs two passes — so a caller that scoped the exact pass and not
+// this one would get a search it believes is about one file, quietly answering
+// from the rest of the vault.
+//
+// It over-fetches and then filters rather than asking the scorer for `limit`
+// directly. BM25 ranks globally, so a file with genuine matches can sit below
+// other files' passages; asking for exactly `limit` would return nothing for a
+// file that plainly matches. The index is in memory, so the extra work is a
+// slice scan.
+func (i *Indexer) SearchWithin(workspaceID, query string, limit int, rel string) []Scored {
+	if limit <= 0 {
+		limit = 10
+	}
+	all := i.search(workspaceID, query, limit*rankedOverfetch, nil)
+	out := make([]Scored, 0, limit)
+	for _, s := range all {
+		if s.Chunk.Path != rel {
+			continue
+		}
+		out = append(out, s)
+		if len(out) == limit {
+			break
+		}
+	}
+	return out
+}
+
+// rankedOverfetch is how much wider SearchWithin casts before filtering to the
+// requested file. Four is a judgement, not a measurement: large enough that a
+// modest note's passages survive competition from the rest of a vault, small
+// enough that the scan stays trivial.
+const rankedOverfetch = 4
+
 func (i *Indexer) search(workspaceID, query string, limit int, excludePrefixes []string) []Scored {
 	terms := tokenize(query)
 	if len(terms) == 0 {

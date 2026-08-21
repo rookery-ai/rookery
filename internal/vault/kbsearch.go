@@ -95,6 +95,52 @@ func SearchKB(ctx context.Context, v *Vault, searcher Searcher, workspaceID, que
 	return RenderSearchResult(query, hits, ranked, maxBytes)
 }
 
+// SearchKBIn is SearchKB restricted to one vault-relative file.
+//
+// BOTH passes are scoped. Scoping only the exact one is the trap this function
+// exists to close: the ranked pass would keep returning passages from the whole
+// vault, so a search the caller believes is about one file quietly answers from
+// others — and the caller has no way to tell, because the output looks the same.
+//
+// The exact pass also uses a much larger per-file cap here (MaxHitsInFile
+// rather than the vault-wide five), because the reason to cap per file
+// disappears once the caller has named the file.
+func SearchKBIn(ctx context.Context, v *Vault, searcher Searcher, workspaceID, query, rel string, maxBytes int) string {
+	query = strings.TrimSpace(query)
+	rel = strings.TrimSpace(rel)
+	if query == "" || rel == "" || v == nil {
+		return fmt.Sprintf("(no matches for %q in %q)", query, rel)
+	}
+	if searcher == nil {
+		searcher = v.NewSearcher()
+	}
+
+	sctx, cancel := context.WithTimeout(ctx, SearchTimeout)
+	defer cancel()
+
+	hits, err := searcher.SearchIn(sctx, workspaceID, query, rel)
+	if err != nil {
+		// Same degrade-don't-fail policy as SearchKB, and logged for the same
+		// reason: ranked-only results still answer usefully, but a silent
+		// degrade would hide a broken ripgrep from everyone.
+		slog.Warn("vault: scoped kb search: exact match search failed; degrading to ranked-only",
+			"workspace", workspaceID, "path", rel, "error", err)
+		hits = nil
+	}
+	if len(hits) > MaxHitsInFile {
+		hits = hits[:MaxHitsInFile]
+	}
+
+	ranked := v.Indexer().SearchWithin(workspaceID, query, MaxRankedChunks, rel)
+
+	if len(hits) == 0 && len(ranked) == 0 {
+		// Non-error, like SearchKB: "nothing here" is a normal outcome, and an
+		// `error:` string would trip the API engine's oscillation guard.
+		return fmt.Sprintf("(no matches for %q in %s)", query, rel)
+	}
+	return RenderSearchResult(query, hits, ranked, maxBytes)
+}
+
 // RenderSearchResult renders already-fetched exact hits and ranked passages
 // into the shared two-pass text view. Exact hits come first because a caller
 // who typed an exact token wants it, but each section is bounded to its OWN

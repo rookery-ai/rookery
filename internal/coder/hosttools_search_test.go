@@ -526,6 +526,12 @@ func (e erroringSearcher) Search(ctx context.Context, workspaceID, query string)
 	return nil, e.err
 }
 
+// The scoped search degrades the same way the vault-wide one does — ranked-only
+// results still answer usefully when the exact pass is broken.
+func (e erroringSearcher) SearchIn(ctx context.Context, workspaceID, query, rel string) ([]vault.SearchHit, error) {
+	return nil, e.err
+}
+
 // TestSearchFilesExactErrorDegradesToRankedOnly: a failing exact-match search
 // must NOT fail the whole tool call (BM25 can still answer usefully), but the
 // failure must be logged, not silently swallowed.
