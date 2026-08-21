@@ -85,7 +85,7 @@ func SearchKB(ctx context.Context, v *Vault, searcher Searcher, workspaceID, que
 		// hide a real regression from every human who might otherwise notice
 		// ripgrep is broken, so it's logged rather than swallowed.
 		slog.Warn("vault: kb search: exact match search failed; degrading to ranked-only results",
-			"workspace", workspaceID, "error", err)
+			"workspace", workspaceID, "error", logsafe.Value(err.Error()))
 		hits = nil
 	}
 	if len(hits) > MaxSearchHits {
@@ -128,8 +128,14 @@ func SearchKBIn(ctx context.Context, v *Vault, searcher Searcher, workspaceID, q
 		// rel arrives from the model, so it goes through logsafe: a path
 		// carrying a newline could otherwise fabricate a log entry, and these
 		// logs are how failures in this package get diagnosed.
+		//
+		// The ERROR needs the same treatment, which is easy to miss and was:
+		// Vault.Resolve returns `fmt.Errorf("%w: %q", ErrEscapes, relPath)`, so
+		// the error text quotes the very path sanitised in the field beside it.
+		// Sanitising one and not the other leaves the value in the log by the
+		// longer route.
 		slog.Warn("vault: scoped kb search: exact match search failed; degrading to ranked-only",
-			"workspace", workspaceID, "path", logsafe.Value(rel), "error", err)
+			"workspace", workspaceID, "path", logsafe.Value(rel), "error", logsafe.Value(err.Error()))
 		hits = nil
 	}
 	if len(hits) > MaxHitsInFile {
