@@ -262,6 +262,12 @@ type coderRunContext struct {
 	// explains either. Three diagnoses of one failing agent were made by
 	// inferring the calls from token counts, and all three were wrong.
 	toolTrace []coder.ToolCallStat
+	// stopReason is the engine's account of WHY the last turn ended: "" (finished
+	// normally), "truncated", "empty", "budget", "unproductive", "hard-ceiling".
+	// Logged because a run that delivers a fallback message looks identical from
+	// the outside whatever produced it — which is how a truncating reasoning model
+	// was diagnosed as a large-file problem four times over.
+	stopReason string
 }
 
 func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunInput) error {
@@ -524,6 +530,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 			"raw_chunks", len(rctx.rawChunks), "chat_lines", len(rctx.chatLines),
 			"silent", rctx.silentSignaled, "produced_nothing", producedNothing,
 			"warnings", len(rctx.warnings), "total_tokens", rctx.usage.TotalTokens,
+			"stop_reason", rctx.stopReason,
 			"tools", coder.SummarizeToolTrace(rctx.toolTrace))
 	}()
 
@@ -698,6 +705,13 @@ func (r *Runner) runCoderTurns(
 		}
 		rctx.usage = addUsage(rctx.usage, result.Usage)
 		rctx.toolTrace = append(rctx.toolTrace, result.ToolTrace...)
+		// Keep the LAST non-empty stop reason. A multi-turn run's final turn is
+		// the one that decided the outcome, and "" is the engine's explicit
+		// statement that a turn finished of its own accord — so an ordinary last
+		// turn must not erase the reason an earlier one was cut short.
+		if result.StopReason != "" {
+			rctx.stopReason = result.StopReason
+		}
 
 		parsed := parseCoderOutput(result.Text)
 		rctx.chatLines = append(rctx.chatLines, parsed.chatLines...)
