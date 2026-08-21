@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/rookery-ai/rookery/compare/v0.4.1...v0.5.0) (2026-08-21)
+
+
+### Features
+
+* **chat:** durable turns with live progress, agent residue sweep, and table-aware KB retrieval ([#245](https://github.com/rookery-ai/rookery/issues/245)) ([21eb41b](https://github.com/rookery-ai/rookery/commit/21eb41b243df52fd1ff3d29d1683360619ff3979))
+
 ## [0.4.1](https://github.com/rookery-ai/rookery/compare/v0.4.0...v0.4.1) (2026-08-20)
 
 
