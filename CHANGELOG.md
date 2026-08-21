@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/rookery-ai/rookery/compare/v0.5.0...v0.6.0) (2026-08-21)
+
+
+### Features
+
+* **kb:** navigate and compute over big knowledge-base files ([#247](https://github.com/rookery-ai/rookery/issues/247)) ([1e23c62](https://github.com/rookery-ai/rookery/commit/1e23c624579ee8405b9beccabfc6fc4fb3bcf73a))
+
 ## [0.5.0](https://github.com/rookery-ai/rookery/compare/v0.4.1...v0.5.0) (2026-08-21)
 
 
