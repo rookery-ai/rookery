@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -25,7 +26,20 @@ type SearchHit struct {
 // can be dropped in without touching callers.
 type Searcher interface {
 	Search(ctx context.Context, workspaceID, query string) ([]SearchHit, error)
+	// SearchIn is Search restricted to one vault-relative file. It exists as a
+	// first-class method rather than a filter over Search's results because the
+	// per-file match cap has to differ — see MaxHitsInFile.
+	SearchIn(ctx context.Context, workspaceID, query, rel string) ([]SearchHit, error)
 }
+
+// MaxHitsInFile is the per-file cap for a SCOPED search.
+//
+// The whole-vault searchers cap at 5 matches per file so that one file cannot
+// swamp a vault-wide result. That reasoning inverts the moment the caller names
+// a single file: five hits from the only file you asked about is not a search.
+// Both exact implementations must honour this, or the answer changes depending
+// on whether ripgrep happened to be reachable on that call.
+const MaxHitsInFile = 50
 
 // ripgrepSearcher shells out to ripgrep (rg) for fast full-text search, falling
 // back to a pure-Go walk when rg is not installed.
@@ -49,6 +63,77 @@ func (s *ripgrepSearcher) Search(ctx context.Context, workspaceID, query string)
 		// fall through to the Go fallback on rg failure
 	}
 	return s.searchGo(workspaceID, query)
+}
+
+// SearchIn is Search scoped to one vault-relative file.
+//
+// It mirrors Search's fallback exactly — try ripgrep, fall through to the Go
+// walk on ANY rg failure — which is precisely why the two scoped
+// implementations must agree: the fallback is per-CALL, not per-host, so a
+// divergence shows up as the same machine giving different answers on
+// consecutive requests. TestScopedSearchAgreesAcrossBothImplementations pins it.
+func (s *ripgrepSearcher) SearchIn(ctx context.Context, workspaceID, query, rel string) ([]SearchHit, error) {
+	query = strings.TrimSpace(query)
+	if query == "" || strings.TrimSpace(rel) == "" {
+		return nil, nil
+	}
+	root := s.v.Root(workspaceID)
+	if _, err := exec.LookPath("rg"); err == nil {
+		if hits, err := s.searchRipgrepIn(ctx, root, workspaceID, query, rel); err == nil {
+			return hits, nil
+		}
+		// fall through to the Go fallback on rg failure
+	}
+	return s.searchGoIn(workspaceID, query, rel)
+}
+
+// searchRipgrepIn is searchRipgrep pointed at one file instead of the vault
+// root, with the scoped match cap. The internal-dir glob is dropped: it exists
+// to keep .kb out of a vault-wide walk, and a caller naming an explicit path
+// has already chosen the file.
+func (s *ripgrepSearcher) searchRipgrepIn(ctx context.Context, root, workspaceID, query, rel string) ([]SearchHit, error) {
+	abs, err := s.v.Resolve(workspaceID, rel)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, "rg", "--json", "-i", "-F",
+		"--max-count", strconv.Itoa(MaxHitsInFile), "--", query, abs)
+	out, err := cmd.Output()
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
+			return nil, nil // no matches is not an error
+		}
+		return nil, err
+	}
+	content, _ := s.v.ReadNote(workspaceID, rel)
+	return parseRipgrepJSON(string(out), func(string) (string, string) {
+		return rel, string(content)
+	}), nil
+}
+
+// searchGoIn is the pure-Go counterpart: one file, same cap, same snippets.
+func (s *ripgrepSearcher) searchGoIn(workspaceID, query, rel string) ([]SearchHit, error) {
+	data, err := s.v.ReadNote(workspaceID, rel)
+	if err != nil {
+		return nil, err
+	}
+	content := string(data)
+	q := strings.ToLower(query)
+	var hits []SearchHit
+	for i, line := range strings.Split(content, "\n") {
+		if !strings.Contains(strings.ToLower(line), q) {
+			continue
+		}
+		snippet := snippetFor(content, i+1, line)
+		if snippet == "" {
+			continue // a bare structural wrapper carries no text of its own
+		}
+		hits = append(hits, SearchHit{Path: rel, Line: i + 1, Snippet: snippet})
+		if len(hits) >= MaxHitsInFile {
+			break
+		}
+	}
+	return hits, nil
 }
 
 func (s *ripgrepSearcher) searchRipgrep(ctx context.Context, root, workspaceID, query string) ([]SearchHit, error) {
@@ -82,8 +167,29 @@ func (s *ripgrepSearcher) searchRipgrep(ctx context.Context, root, workspaceID, 
 		return fileCache[rel]
 	}
 
+	return parseRipgrepJSON(string(out), func(abs string) (string, string) {
+		rel, err := s.v.Rel(workspaceID, abs)
+		if err != nil {
+			return "", ""
+		}
+		return rel, contentOf(rel)
+	}), nil
+}
+
+// parseRipgrepJSON turns rg's --json stream into hits.
+//
+// Shared by the vault-wide and single-file searches so the two cannot drift in
+// how they read rg's output, build snippets, or drop structural-wrapper
+// matches. TestScopedSearchAgreesAcrossBothImplementations compares the scoped
+// ripgrep path against the scoped Go path, and that comparison is only
+// meaningful if the rg side is genuinely one implementation rather than two
+// that happen to look alike.
+//
+// resolve maps rg's absolute path to (vault-relative path, file content);
+// returning an empty path skips the hit.
+func parseRipgrepJSON(out string, resolve func(abs string) (string, string)) []SearchHit {
 	var hits []SearchHit
-	sc := bufio.NewScanner(strings.NewReader(string(out)))
+	sc := bufio.NewScanner(strings.NewReader(out))
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
 		var ev struct {
@@ -101,22 +207,18 @@ func (s *ripgrepSearcher) searchRipgrep(ctx context.Context, root, workspaceID, 
 		if err := json.Unmarshal(sc.Bytes(), &ev); err != nil || ev.Type != "match" {
 			continue
 		}
-		rel, err := s.v.Rel(workspaceID, ev.Data.Path.Text)
-		if err != nil {
+		rel, content := resolve(ev.Data.Path.Text)
+		if rel == "" {
 			continue
 		}
-		snippet := snippetFor(contentOf(rel), ev.Data.LineNumber, ev.Data.Lines.Text)
+		snippet := snippetFor(content, ev.Data.LineNumber, ev.Data.Lines.Text)
 		if snippet == "" {
 			// The match was a bare structural wrapper with no text of its own.
 			continue
 		}
-		hits = append(hits, SearchHit{
-			Path:    rel,
-			Line:    ev.Data.LineNumber,
-			Snippet: snippet,
-		})
+		hits = append(hits, SearchHit{Path: rel, Line: ev.Data.LineNumber, Snippet: snippet})
 	}
-	return hits, nil
+	return hits
 }
 
 // searchGo is the dependency-free fallback used when ripgrep is unavailable.

@@ -978,14 +978,64 @@ func kbCmd() *cli.Command {
 			},
 			{
 				Name:      "search",
-				Usage:     "Search the knowledge base: kb search <query>",
+				Usage:     "Search the knowledge base: kb search <query> [--path notes/x.md]",
 				ArgsUsage: "<query>",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "path", Usage: "search inside ONE file instead of the whole vault"},
+				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
 					q := strings.Join(cmd.Args().Slice(), " ")
 					if strings.TrimSpace(q) == "" {
-						return fmt.Errorf("usage: kb search <query>")
+						return fmt.Errorf("usage: kb search <query> [--path <file>]")
 					}
-					return post(ctx, "/search", map[string]any{"query": q})
+					return post(ctx, "/search", map[string]any{"query": q, "path": cmd.String("path")})
+				},
+			},
+			{
+				Name:      "map",
+				Usage:     "Describe a file before reading it: kb map <path>",
+				ArgsUsage: "<path>",
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					p := cmd.Args().First()
+					if strings.TrimSpace(p) == "" {
+						return fmt.Errorf("usage: kb map <path>")
+					}
+					return post(ctx, "/map", map[string]any{"path": p})
+				},
+			},
+			{
+				// The CLI counterpart of kb_table_query. It exists so a
+				// CLI-coder workspace is not silently worse at big files than
+				// an API-engine one — the drift kbsearch.go's doc comment
+				// warns about, and which this command set has already suffered
+				// once.
+				Name:      "table",
+				Usage:     "Aggregate a markdown table: kb table <path> [--group-by date:month --metric USDAmount --op sum]",
+				ArgsUsage: "<path>",
+				Flags: []cli.Flag{
+					&cli.StringFlag{Name: "group-by", Usage: "a column, or date:month / date:day / date:year"},
+					&cli.StringFlag{Name: "metric", Usage: "column to aggregate"},
+					&cli.StringFlag{Name: "op", Usage: "sum | avg | count | min | max"},
+					&cli.StringFlag{Name: "order", Usage: "asc | desc"},
+					&cli.StringFlag{Name: "order-by", Usage: "metric | group"},
+					&cli.StringSliceFlag{Name: "select", Usage: "columns to return"},
+					&cli.IntFlag{Name: "limit", Usage: "maximum rows"},
+				},
+				Action: func(ctx context.Context, cmd *cli.Command) error {
+					p := cmd.Args().First()
+					if strings.TrimSpace(p) == "" {
+						return fmt.Errorf("usage: kb table <path> [--group-by ... --metric ... --op ...]")
+					}
+					return post(ctx, "/table", map[string]any{
+						"path":     p,
+						"group_by": cmd.String("group-by"),
+						"metric":   cmd.String("metric"),
+						"op":       cmd.String("op"),
+						"order":    cmd.String("order"),
+						"order_by": cmd.String("order-by"),
+						"select":   cmd.StringSlice("select"),
+						"limit":    cmd.Int("limit"),
+					})
 				},
 			},
 		},

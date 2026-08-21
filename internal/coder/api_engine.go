@@ -114,6 +114,7 @@ func (c *Coder) runAPI(ctx context.Context, workspaceID, prompt string) (*Result
 func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostToolSet, req llm.Request, start time.Time) (*Result, error) {
 	var total llm.Usage
 	toolsDisabled := false
+	emptyNudges := 0
 	budget := newTurnBudget(tools.verifyBuild)
 	offered := toolNames(req.Tools)
 	var stopReason string
@@ -158,6 +159,34 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 				)
 				continue
 			}
+			// An empty completion is not an answer. The model stopped calling
+			// tools and said nothing, which used to fall straight through to the
+			// branch below and return Text:"" with StopReason:"" — a turn
+			// recorded as finished and NOT cut short, carrying nothing.
+			//
+			// That is not hypothetical: it is how two chat turns on a 155 KB
+			// table were classified as successes, showing the owner a placeholder
+			// with no trace in the log. The usual cause is a context full of
+			// paged file contents, which is what the file-map and table tools
+			// exist to prevent — but the engine should not report silence as
+			// success regardless of why it happened.
+			//
+			// One nudge, bounded like verifyFinishNudge: a model in this state
+			// has just demonstrated it will not produce text, and another round
+			// costs a turn from the budget that is usually the reason it went
+			// quiet.
+			if strings.TrimSpace(resp.Content) == "" && emptyNudges < maxEmptyNudges {
+				emptyNudges++
+				if c.progress != nil {
+					c.progress("🔁 asking for an answer in words…")
+				}
+				req.Messages = append(req.Messages,
+					llm.Message{Role: "assistant", Content: ""},
+					llm.Message{Role: "user", Content: emptyAnswerNudge},
+				)
+				continue
+			}
+
 			// Final answer.
 			res := &Result{Text: resp.Content, Duration: time.Since(start), Usage: total}
 			res.ScriptVerified = tools.scriptVerified()
@@ -171,6 +200,15 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 			// explicitly rather than left to the zero value: it is the half of the
 			// contract a reader grepping for StopReason needs to find.
 			res.StopReason = ""
+			if strings.TrimSpace(res.Text) == "" {
+				// The nudge above is spent and it still said nothing. Report that
+				// as its own stop reason and substitute a message composed from
+				// run facts — for the same reason exhaustionSummary is composed
+				// rather than requested: the one thing this model has proven is
+				// that it will not write the explanation itself.
+				res.StopReason = "empty"
+				res.Text = emptyAnswerFallback
+			}
 			return res, nil
 		}
 
@@ -596,6 +634,23 @@ func stripKey(env map[string]string, key string) map[string]string {
 // vaultRoot/homeDir drive shortenHostPaths, which strips host filesystem layout
 // out of whichever detail is chosen — see its comment for why that has to apply
 // to the detail string rather than just to the path-shaped arguments.
+// maxEmptyNudges bounds the retry when a model returns no tool calls and no
+// text. One, deliberately: see the use site — a model in that state has just
+// demonstrated it will not produce text, and each further round spends a turn
+// from the budget that is usually the reason it fell silent.
+const maxEmptyNudges = 1
+
+const emptyAnswerNudge = "You returned no text at all. Answer the question in words now, " +
+	"using what you already have. If you could not complete it, say what you did find and " +
+	"what stopped you — do not reply with nothing."
+
+// emptyAnswerFallback is what the owner reads when even the nudge produced
+// nothing. It names the usual cause and gives a next step, because the failure
+// it describes is one the user can actually route around by narrowing the ask.
+const emptyAnswerFallback = "I couldn't produce an answer for that. This usually means the " +
+	"request needed more of a large file than fits in one conversation — try asking about a " +
+	"specific part of it, or narrowing the question."
+
 // uuidPattern matches a canonical 8-4-4-4-12 hexadecimal identifier.
 //
 // Deliberately narrow. Masking anything merely hex-looking would eat content a

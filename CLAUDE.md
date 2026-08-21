@@ -50,7 +50,8 @@ make stop      # stop the running server
 make logs      # tail -f logs/server.log
 make status    # show running server process
 make test      # run the unit tests
-make ci        # run the full PR gate locally (fmt, vet, -race, cross-compile, UI, docs-sync)
+make ci        # the full PR gate — ~15 min. DON'T run this before a PR; the
+               # pipeline runs it anyway. Use the targeted ci-* targets instead.
 make docker-build / docker-run   # slim container image (podman or docker)
 
 # Frontend (web/ui): build the SPA into the binary
@@ -172,17 +173,28 @@ image pushes.**
      shipped unable to open their own database. Run it locally with
      `make ci-package` — it is deliberately excluded from `make ci` because a
      snapshot build takes minutes.
-5. **Run the same checks locally first** with `make ci` — it covers `Go build
+5. **Do NOT run `make ci` locally before opening a PR — the pipeline runs it,
+   and running it twice is pure waste.** `make ci` takes ~15 minutes here
+   (the `web` package alone measures ~343s under `-race`, 13× its non-race
+   time), and every one of those minutes is spent again on the runner. Push the
+   branch and read the result there.
+
+   Run the **targeted** pieces instead, for the code you actually touched:
+   `make ci-fmt` / `ci-vet` / `ci-ui` / `ci-docs` are seconds each, and
+   `go test ./internal/<pkg>/` is the fast inner loop. Those catch the
+   formatting and obvious-breakage class of failure without paying for a
+   full-matrix run.
+
+   For reference, what the full local `make ci` would have covered: `Go build
    and test` and `Cross-compile` in full, and `Frontend` through typecheck/lint/
-   vitest but not the `vite build` step the CI job also runs. It does **not**
-   run four of the seven gates at all: `Conventional commit title` (needs the
-   PR title, not anything runnable locally), `Security scan`, `Container smoke
-   test`, and `Package smoke test` — the last is available separately as
-   `make ci-package`, kept out of `make ci` because a snapshot build takes
-   minutes. `make ci-fmt` / `ci-vet` / `ci-test` / `ci-cross` / `ci-ui` /
-   `ci-docs` run the covered pieces individually. The documentation check
-   (`ci-docs`) runs as a step inside the `Go build and test` job, not as a job
-   of its own, so the gate count stays at seven.
+   vitest but not the `vite build` step the CI job also runs. It never covered
+   four of the seven gates at all — `Conventional commit title` (needs the PR
+   title, not anything runnable locally), `Security scan`, `Container smoke
+   test`, and `Package smoke test` (available separately as `make ci-package`,
+   kept out of `make ci` because a snapshot build takes minutes). So a green
+   local run never meant a green PR anyway. The documentation check (`ci-docs`)
+   runs as a step inside the `Go build and test` job, not as a job of its own,
+   so the gate count stays at seven.
 6. **Squash-merge.** release-please then maintains a release PR on `main`.
 7. **Merging the release PR** tags the repo, which fires
    `.github/workflows/release.yml`: goreleaser publishes binaries, `.deb`/`.rpm`,
@@ -581,13 +593,52 @@ wrapper yields no hit at all. Four details worth keeping:
   it must also carry a header. Raising it for every hit would spend the shared byte budget on
   fewer results.
 
-**What this does not fix, stated because the obvious reading of the above is wrong:** it
-improves table *lookup*, and *"how much have I spent in total"* still cannot be answered. That
-is aggregation over ~1000 rows, and chat has **no compute tool** — `includeExecTools` is
+**Big files: map before you read, and never do the arithmetic yourself.**
+An earlier version of this section claimed the reporting note had "~1000 rows" and that
+*"how much have I spent in total"* could not be answered in chat. **Both were wrong**, and the
+correction is the whole design. That note has **98 rows**; it is 155 KB because ONE column
+(`apiTransaction`, a raw JSON payload per row) holds **88% of the bytes**, while the nine
+columns that answer real questions total **8.3 KB**. The model never needed a big file — it
+needed 8 KB — and it exhausted its 30-turn budget paging a blob at 8 KiB a time before
+returning an empty completion.
+
+The root cause was one thing, not three: `read_file` was a byte window, so ANY file over the
+cap — table, long note, mixed markdown — had to be paged blindly from offset 0. Retrieval
+machinery already existed (`ChunkMarkdown`, the BM25 `Indexer`) and simply was not addressable
+per-file. Four things close it:
+
+- **`kb_file_map(path)`** returns the shape before the content: columns and row count for a
+  table, a heading outline for a document, the reading cost in tokens, and a warning when one
+  column or section exceeds `dominantShare` (40%). On the real note the map is **984 bytes** and
+  says outright that `apiTransaction` is 88% of the file. That sentence is the fix.
+- **`read_file` takes `section:`** and **`search_files` takes `path:`** — fetch a heading, or
+  search inside one file. Scoping had to land in all THREE retrieval paths (ripgrep, the Go
+  fallback, and the ranked BM25 pass, which could previously only EXCLUDE prefixes), with a
+  larger per-file cap (`MaxHitsInFile`) since capping matches per file is pointless once the
+  caller named the file. The rg/Go split is a per-CALL fallback, not per-host — `Search` falls
+  through on any rg error — so divergence would surface as nondeterminism on one machine;
+  `parseRipgrepJSON` is now shared and a test asserts the two agree.
+- **`kb_table_query`** does the arithmetic host-side. The model fills PARAMETERS, never SQL:
+  this platform runs small models, SQL needs valid syntax plus exact column names (one here has
+  a space in it), and each malformed query costs a turn from the budget already at issue. Once
+  the interface is fixed parameters a database earns nothing — it would mean generating SQL from
+  them anyway — so it is plain Go over one vault file, and emphatically **not** `rookery.db`,
+  which holds every stored credential.
+- **An empty completion is no longer a finished answer** (`api_engine.go`). It used to return
+  `Text:""` with `StopReason:""`, so a dead turn was recorded as a success and logged nowhere;
+  chat now also logs a `chat: turn finished` line with an `empty` field.
+
+Two details are what keep the obvious call from reproducing the bug: the default projection
+drops any dominant column (`ModestColumns`), and a date grouping orders by its KEY rather than
+by value — on the real data `order: asc` had produced 08, 06, 05, 07, an ascending sort of the
+wrong column.
+
+**What remains true:** chat still has **no arbitrary compute**. `includeExecTools` is
 `filepath.Clean(workDir) != filepath.Clean(vaultRoot)` and chat sets `WithDir(root)`, so
-`run_script`/`bash` are off there by design (CLI parity; see "Chat knowledge-base access").
-Closing that needs either a host-side aggregate tool or enabling exec tools in chat, and the
-second is a security-posture change, not a bug fix.
+`run_script`/`bash` stay off there by design (CLI parity; see "Chat knowledge-base access").
+Anything `kb_table_query`'s closed operation set cannot express falls back to projection —
+hand back the table with the fat columns dropped and let the model read it. That is why the
+operation set can stay small instead of growing one entry per question.
 
 **Agent access model.** An agent's run CWD is its own vault dir; the coder prompt (`BuildCoderPrompt`, `<knowledge_base>` block) tells it to READ the whole vault and WRITE to both its own dir and the user's knowledge base (notes, memory, user files) — durable knowledge is persisted into the KB across runs. The Landlock sandbox grants RW over the whole vault root (confined to that user's vault + HOME; the DB, config, and other users' vaults stay out of reach). System-managed dirs (`.kb/`, `chats/`, other agents' `agents/<id>/`) are off-limits by prompt, not hard-enforced. The chat uses the same model (see `prompts.BuildChatSystemPrompt`).
 

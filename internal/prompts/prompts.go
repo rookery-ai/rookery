@@ -208,6 +208,17 @@ safety margin.
 			"  ✓ Find a note by its CONTENT → CALL search_files(query) directly — no script, no\n"+
 				"    read_file walk. Find files by NAME/pattern → CALL glob(pattern) directly. Both\n"+
 				"    are read-only lookups (TIER 1).\n"+
+				// A model that pages a large file from byte 0 exhausts its own
+				// context and then answers nothing — the failure these two tools
+				// exist to prevent. The tool descriptions say this too, but a
+				// model planning a strategy reads its capabilities, so the rule
+				// belongs where it decides.
+				"  ✓ BEFORE reading a file you don't know → CALL kb_file_map(path). It tells you the\n"+
+				"    columns or sections, what reading costs, and which part is too big to pull in.\n"+
+				"    Then fetch what you need: read_file with section, or search_files with path to\n"+
+				"    search INSIDE that one file. Never page a large file from the start.\n"+
+				"  ✓ Totals, averages, counts, biggest/top-N over a table → CALL kb_table_query. Do\n"+
+				"    NOT add numbers up yourself; you will get them wrong and cannot show your work.\n"+
 				"</agent_philosophy>\n",
 			1)
 	}

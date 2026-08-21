@@ -269,7 +269,7 @@ func TestSearchFilesReturnsRankedChunks(t *testing.T) {
 	v.WriteNote(ws, "notes/health.md", []byte("# Health\n\n## Appointments\n\nBooked an orthodontist visit for Tuesday.\n"))
 	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws)}
 
-	out, err := h.searchFiles(context.Background(), "dentist appointment")
+	out, err := h.searchFiles(context.Background(), "dentist appointment", "")
 	if err != nil {
 		t.Fatalf("searchFiles: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestSearchFilesKeepsExactMatching(t *testing.T) {
 	v.WriteNote(ws, "notes/ids.md", []byte("# Ids\n\nrun id "+id+" failed\n"))
 	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws)}
 
-	out, err := h.searchFiles(context.Background(), id)
+	out, err := h.searchFiles(context.Background(), id, "")
 	if err != nil {
 		t.Fatalf("searchFiles: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestSearchFilesNoMatchesIsNonError(t *testing.T) {
 	v.EnsureScaffold(ws)
 	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws)}
 
-	out, err := h.searchFiles(context.Background(), "zzz-nothing-matches-this")
+	out, err := h.searchFiles(context.Background(), "zzz-nothing-matches-this", "")
 	if err != nil {
 		t.Fatalf("no matches must not be an error: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestSearchFilesExactBudgetLeavesRoomForRanked(t *testing.T) {
 	writeExactCrowdingFixture(t, v, ws, 40)
 	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws)}
 
-	out, err := h.searchFiles(context.Background(), exactCrowdingQuery)
+	out, err := h.searchFiles(context.Background(), exactCrowdingQuery, "")
 	if err != nil {
 		t.Fatalf("searchFiles: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestSearchFilesEmptySectionGetsFullBudget(t *testing.T) {
 	writeExactCrowdingFixture(t, v, ws, 5) // small n: fits well inside 8 KiB unsplit
 	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws)}
 
-	out, err := h.searchFiles(context.Background(), exactCrowdingQuery)
+	out, err := h.searchFiles(context.Background(), exactCrowdingQuery, "")
 	if err != nil {
 		t.Fatalf("searchFiles: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestSearchFilesRankedGetsTrueRemainderNotFixedShare(t *testing.T) {
 	}
 
 	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws)}
-	out, err := h.searchFiles(context.Background(), query)
+	out, err := h.searchFiles(context.Background(), query, "")
 	if err != nil {
 		t.Fatalf("searchFiles: %v", err)
 	}
@@ -526,6 +526,12 @@ func (e erroringSearcher) Search(ctx context.Context, workspaceID, query string)
 	return nil, e.err
 }
 
+// The scoped search degrades the same way the vault-wide one does — ranked-only
+// results still answer usefully when the exact pass is broken.
+func (e erroringSearcher) SearchIn(ctx context.Context, workspaceID, query, rel string) ([]vault.SearchHit, error) {
+	return nil, e.err
+}
+
 // TestSearchFilesExactErrorDegradesToRankedOnly: a failing exact-match search
 // must NOT fail the whole tool call (BM25 can still answer usefully), but the
 // failure must be logged, not silently swallowed.
@@ -548,7 +554,7 @@ func TestSearchFilesExactErrorDegradesToRankedOnly(t *testing.T) {
 	simulated := fmt.Errorf("simulated ripgrep subprocess failure")
 	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws), searcher: erroringSearcher{err: simulated}}
 
-	out, err := h.searchFiles(context.Background(), "dentist appointment")
+	out, err := h.searchFiles(context.Background(), "dentist appointment", "")
 	if err != nil {
 		t.Fatalf("a broken exact search must degrade, not fail the tool: %v", err)
 	}
@@ -600,7 +606,7 @@ func TestSearchFilesFindsOversizedFileByName(t *testing.T) {
 	}
 	h := &hostToolSet{workspaceID: ws, vlt: v, workDir: v.Root(ws)}
 
-	out, err := h.searchFiles(context.Background(), "annual budget summary")
+	out, err := h.searchFiles(context.Background(), "annual budget summary", "")
 	if err != nil {
 		t.Fatalf("searchFiles: %v", err)
 	}
