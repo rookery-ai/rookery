@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -115,6 +116,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 	var total llm.Usage
 	toolsDisabled := false
 	emptyNudges := 0
+	var toolTrace []ToolCallStat
 	budget := newTurnBudget(tools.verifyBuild)
 	offered := toolNames(req.Tools)
 	var stopReason string
@@ -196,6 +198,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 			res.UsedMCPServerIDs = tools.usedMCPServerIDList()
 			res.UsedMCPServerIDs = tools.usedMCPServerIDList()
 			res.OfferedTools = offered
+			res.ToolTrace = toolTrace
 			// A model that finished of its own accord was not cut short. Stated
 			// explicitly rather than left to the zero value: it is the half of the
 			// contract a reader grepping for StopReason needs to find.
@@ -225,6 +228,15 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 				c.progress(toolMilestone(tc, tools.vaultRootPath(), tools.homeDirPath()))
 			}
 			result := tools.executeOrNudge(ctx, tc)
+			// Record the call and the SIZE it fed back. This is the trace that
+			// explains an expensive run; without it the only evidence is a token
+			// count, which says a run was costly but never why.
+			toolTrace = append(toolTrace, ToolCallStat{
+				Name:  tc.Name,
+				Turn:  budget.turns,
+				Bytes: len(result),
+				Error: strings.HasPrefix(result, "error:"),
+			})
 			req.Messages = append(req.Messages, llm.Message{
 				Role:       "tool",
 				ToolCallID: tc.ID,
@@ -249,6 +261,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 		res.UsedConnectionIDs = tools.usedConnectionIDs()
 		res.UsedMCPServerIDs = tools.usedMCPServerIDList()
 		res.OfferedTools = offered
+		res.ToolTrace = toolTrace
 		// Why the loop ended, reported by the engine rather than inferred from whatever
 		// the model said last. Callers use it to caveat a truncated build; the grace turn
 		// is not a reliable narrator of its own exhaustion (see exhaustionSummary).
@@ -650,6 +663,50 @@ const emptyAnswerNudge = "You returned no text at all. Answer the question in wo
 const emptyAnswerFallback = "I couldn't produce an answer for that. This usually means the " +
 	"request needed more of a large file than fits in one conversation — try asking about a " +
 	"specific part of it, or narrowing the question."
+
+// SummarizeToolTrace renders a tool trace as one compact line: each tool, how
+// many times it was called, and the total bytes it fed back, biggest first.
+//
+// Biggest first because the question it answers is "what filled the context",
+// and that is a question about BYTES, not call counts. A single call returning
+// 40 KB matters more than twenty returning 200 each, and a trace sorted by name
+// or by time buries exactly that.
+func SummarizeToolTrace(trace []ToolCallStat) string {
+	if len(trace) == 0 {
+		return "(no tool calls)"
+	}
+	type agg struct {
+		calls, bytes, errs int
+	}
+	byName := map[string]*agg{}
+	order := []string{}
+	for _, t := range trace {
+		a, ok := byName[t.Name]
+		if !ok {
+			a = &agg{}
+			byName[t.Name] = a
+			order = append(order, t.Name)
+		}
+		a.calls++
+		a.bytes += t.Bytes
+		if t.Error {
+			a.errs++
+		}
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		return byName[order[i]].bytes > byName[order[j]].bytes
+	})
+	parts := make([]string, 0, len(order))
+	for _, name := range order {
+		a := byName[name]
+		p := fmt.Sprintf("%s×%d=%dB", name, a.calls, a.bytes)
+		if a.errs > 0 {
+			p += fmt.Sprintf("(%d err)", a.errs)
+		}
+		parts = append(parts, p)
+	}
+	return strings.Join(parts, " ")
+}
 
 // uuidPattern matches a canonical 8-4-4-4-12 hexadecimal identifier.
 //

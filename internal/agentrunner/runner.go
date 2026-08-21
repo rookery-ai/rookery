@@ -256,6 +256,12 @@ type coderRunContext struct {
 	offeredTools   []string    // tools the most recent turn offered the model (API engine; empty for CLI)
 	silentSignaled bool        // any turn emitted [SILENT] — run is intentionally quiet
 	usage          coder.Usage // accumulated token usage (API coder); zero for CLI coders
+	// toolTrace accumulates what the model actually DID across every turn. A run
+	// that produces nothing records its cost and its outcome; without this it
+	// records nothing about the path it took, which is the only thing that
+	// explains either. Three diagnoses of one failing agent were made by
+	// inferring the calls from token counts, and all three were wrong.
+	toolTrace []coder.ToolCallStat
 }
 
 func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunInput) error {
@@ -517,7 +523,8 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 			"trigger", input.Trigger, "exit", exitCode,
 			"raw_chunks", len(rctx.rawChunks), "chat_lines", len(rctx.chatLines),
 			"silent", rctx.silentSignaled, "produced_nothing", producedNothing,
-			"warnings", len(rctx.warnings), "total_tokens", rctx.usage.TotalTokens)
+			"warnings", len(rctx.warnings), "total_tokens", rctx.usage.TotalTokens,
+			"tools", coder.SummarizeToolTrace(rctx.toolTrace))
 	}()
 
 	if runErr != nil {
@@ -690,6 +697,7 @@ func (r *Runner) runCoderTurns(
 			return fmt.Errorf("coder generate: %w", err)
 		}
 		rctx.usage = addUsage(rctx.usage, result.Usage)
+		rctx.toolTrace = append(rctx.toolTrace, result.ToolTrace...)
 
 		parsed := parseCoderOutput(result.Text)
 		rctx.chatLines = append(rctx.chatLines, parsed.chatLines...)
