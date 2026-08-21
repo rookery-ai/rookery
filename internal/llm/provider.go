@@ -99,10 +99,24 @@ type ToolCall struct {
 
 // Response is one completion result.
 type Response struct {
-	Content      string // assistant text; may be empty when the model only emitted tool calls
-	ToolCalls    []ToolCall
-	Usage        Usage
-	FinishReason string // "stop", "tool_calls"/"tool_use", "length", …
+	Content   string // assistant text; may be empty when the model only emitted tool calls
+	ToolCalls []ToolCall
+	Usage     Usage
+	// FinishReason is "stop", "tool_calls"/"tool_use", "length", … A "length"
+	// carrying empty Content is a TRUNCATION, not an empty answer, and the two
+	// need opposite handling — see the empty-completion branch in
+	// internal/coder/api_engine.go.
+	FinishReason string
+	// Reasoning is a reasoning model's thinking, which providers return OUTSIDE
+	// Content. It is captured for DIAGNOSIS ONLY and must never be delivered to a
+	// user or fed back as an answer: it is mid-thought on a truncated turn, and
+	// this repo has already shipped model internals to a real user twice (see
+	// chat.CleanReply and coder.LooksLikeToolScaffolding).
+	//
+	// Without it, a run whose whole output budget went to reasoning was
+	// indistinguishable from a model that returned nothing at all — which is
+	// exactly how one agent was misdiagnosed as a large-file problem four times.
+	Reasoning string
 }
 
 // Usage is a best-effort token accounting (zero values are fine).

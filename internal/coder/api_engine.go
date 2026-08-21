@@ -115,6 +115,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 	var total llm.Usage
 	toolsDisabled := false
 	emptyNudges := 0
+	truncationRetries := 0
 	budget := newTurnBudget(tools.verifyBuild)
 	offered := toolNames(req.Tools)
 	var stopReason string
@@ -175,6 +176,36 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 			// has just demonstrated it will not produce text, and another round
 			// costs a turn from the budget that is usually the reason it went
 			// quiet.
+			// A "length" finish carrying no text is a TRUNCATION, not an empty
+			// answer, and the two need opposite handling.
+			//
+			// A reasoning model's thinking is billed against the same completion
+			// budget as its answer, so on a hard synthesis it can spend the whole
+			// cap before emitting a single content token. The provider then
+			// returns finish_reason "length" with empty content and the thinking
+			// in a separate `reasoning` field — measured against this install's
+			// own model and key, which reproduces it exactly.
+			//
+			// Nudging here makes it WORSE: the nudge asks for the answer again
+			// under the same cap, so it truncates again, and the extra turn grows
+			// the context making truncation likelier still. Re-issue the SAME
+			// request with a raised cap instead. Nothing is appended to the
+			// history — an empty assistant turn is few-shot evidence that
+			// answering with nothing is acceptable here.
+			if strings.TrimSpace(resp.Content) == "" && resp.FinishReason == "length" &&
+				truncationRetries < maxTruncationRetries {
+				truncationRetries++
+				slog.Warn("coder: completion truncated before any answer",
+					"finish_reason", resp.FinishReason,
+					"reasoning_chars", len(resp.Reasoning),
+					"max_tokens", req.MaxTokens,
+					"retry_max_tokens", truncationRetryMaxTokens)
+				if c.progress != nil {
+					c.progress("🔁 answer was cut off — retrying with more room…")
+				}
+				req.MaxTokens = truncationRetryMaxTokens
+				continue
+			}
 			if strings.TrimSpace(resp.Content) == "" && emptyNudges < maxEmptyNudges {
 				emptyNudges++
 				if c.progress != nil {
@@ -201,13 +232,23 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 			// contract a reader grepping for StopReason needs to find.
 			res.StopReason = ""
 			if strings.TrimSpace(res.Text) == "" {
-				// The nudge above is spent and it still said nothing. Report that
-				// as its own stop reason and substitute a message composed from
-				// run facts — for the same reason exhaustionSummary is composed
-				// rather than requested: the one thing this model has proven is
-				// that it will not write the explanation itself.
+				// The retry/nudge above is spent and it still said nothing. Report
+				// that as its own stop reason and substitute a message composed
+				// from run facts — for the same reason exhaustionSummary is
+				// composed rather than requested: the one thing this model has
+				// proven is that it will not write the explanation itself.
+				//
+				// The two causes are kept apart because they send a reader in
+				// opposite directions, and getting that wrong has a cost already
+				// paid: the old single message blamed a large file, which is what
+				// sent four separate diagnoses of a truncating reasoning model
+				// chasing file size.
 				res.StopReason = "empty"
 				res.Text = emptyAnswerFallback
+				if resp.FinishReason == "length" {
+					res.StopReason = "truncated"
+					res.Text = truncatedAnswerFallback
+				}
 			}
 			return res, nil
 		}
@@ -645,11 +686,37 @@ const emptyAnswerNudge = "You returned no text at all. Answer the question in wo
 	"what stopped you — do not reply with nothing."
 
 // emptyAnswerFallback is what the owner reads when even the nudge produced
-// nothing. It names the usual cause and gives a next step, because the failure
-// it describes is one the user can actually route around by narrowing the ask.
-const emptyAnswerFallback = "I couldn't produce an answer for that. This usually means the " +
-	"request needed more of a large file than fits in one conversation — try asking about a " +
-	"specific part of it, or narrowing the question."
+// nothing.
+//
+// It deliberately names NO cause. The previous wording asserted one — that the
+// request needed more of a large file than fits — and that sentence was wrong
+// for the failure that actually produced it: a reasoning model spending its
+// whole output budget thinking. It appeared in the run log as an authoritative
+// diagnosis and sent four separate investigations after file size. A message
+// that guesses is worse than one that reports, because the guess is what gets
+// believed.
+const emptyAnswerFallback = "I couldn't produce an answer for that. The model returned no " +
+	"text, twice. Try asking again, or narrow the question — and see the run log for what it " +
+	"did before it fell silent."
+
+// truncationRetryMaxTokens is the raised completion cap for the one retry after
+// a truncated answer. A bounded raise, not "make it big": prompt + max_tokens
+// must still fit the model's context window, and this fires on a turn whose
+// context is already the largest of the run.
+const truncationRetryMaxTokens = 16384
+
+// maxTruncationRetries bounds that retry. One: a raised cap either gives the
+// model room to finish or it does not, and a second raise spends the most
+// expensive prompt of the run again to find that out.
+const maxTruncationRetries = 1
+
+// truncatedAnswerFallback is what the owner reads when even the raised cap was
+// not enough. It names the real cause, which is a different failure with a
+// different remedy from emptyAnswerFallback: the model DID work, and the answer
+// was cut off rather than never attempted.
+const truncatedAnswerFallback = "The model ran out of output budget before it finished its " +
+	"answer — it spent the whole allowance thinking. Ask for a narrower result (fewer columns, " +
+	"a shorter summary), or switch this workspace to a model with more room."
 
 // uuidPattern matches a canonical 8-4-4-4-12 hexadecimal identifier.
 //
