@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/rookery-ai/rookery/internal/db"
@@ -126,12 +127,33 @@ func TestCleanReplyKeepsContentAlongsideASilentMarker(t *testing.T) {
 	}
 }
 
-func TestCleanReplyEmptyInputStaysEmpty(t *testing.T) {
-	if got := CleanReply(""); got != "" {
-		t.Errorf("CleanReply(\"\") = %q, want empty", got)
+// A successful coder call that returned no text at all is a real outcome and
+// has to be legible. This previously returned "" and handleChatMessage
+// persisted it unguarded, so the owner got a blank bubble — four such rows
+// exist on the reporting install, including the one produced by the question
+// that prompted this fix. #242 covered only the marker-only case.
+//
+// The old test asserted the empty return, which recorded the bug rather than a
+// decision: nothing downstream wanted "" — every reachable caller either
+// displays the result or stores it for display.
+func TestCleanReplyGivesGenuinelyEmptyOutputAPlaceholder(t *testing.T) {
+	for _, in := range []string{"", "   \n  ", "\t\n\n"} {
+		got := CleanReply(in)
+		if strings.TrimSpace(got) == "" {
+			t.Errorf("CleanReply(%q) = %q — an empty bubble reads as being ignored", in, got)
+		}
+		if got == markerOnlyPlaceholder {
+			t.Errorf("CleanReply(%q) reused the marker-only placeholder; the causes differ "+
+				"and the wording should say which happened", in)
+		}
 	}
-	if got := CleanReply("   \n  "); got != "" {
-		t.Errorf("CleanReply(whitespace) = %q, want empty", got)
+}
+
+// The marker-only case keeps its own distinct placeholder — the two causes stay
+// separable, which is the distinction CleanReply's own comment draws.
+func TestCleanReplyStillPlaceholdersMarkerOnlyReplies(t *testing.T) {
+	if got := CleanReply("[SILENT]"); got != markerOnlyPlaceholder {
+		t.Errorf("CleanReply(\"[SILENT]\") = %q, want %q", got, markerOnlyPlaceholder)
 	}
 }
 

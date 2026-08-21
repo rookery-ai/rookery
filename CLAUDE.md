@@ -547,9 +547,47 @@ Key types in `internal/vault`:
 - **`Vault`** — `Root/AgentsDir/AgentDir/MemoryDir/SkillsDir`; **`Resolve(workspaceID, rel)`** is the security primitive every read/write path uses (rejects `..`/absolute escapes); `WriteNote` (atomic), `Read/Delete/Rename/List/EnsureScaffold`. `List` hides dotfiles.
 - **`Reflector`** — `ReflectChat/ReflectAgentRun`: markdown note + `.kb/db-export/<table>/<id>.json` sidecar. **Reminders and inbox notifications are NOT reflected.** An inbox message is a delivery record, not knowledge: the row lives in `inbox_messages`, the Home inbox renders it, and an agent run's delivered text is already archived in `agents/<id>/logs/run_<ts>.md` under "Output sent to user". The old `inbox/<uuid>.md` projection was a third copy that gave every note a non-distinguishing heading ("⏰ Reminder", "🤖 weather (cron)"), grew one file per notification forever, and — because `inbox` was never added to `kbExcludedDirs` — fed a stream of "🌤 25°C, clear sky" into the agent-/skill-designer retrieval meant to quote the user's own knowledge. `vault.RemoveLegacyInboxNotes` (startup, idempotent) sweeps `inbox/` + `.kb/db-export/inbox_messages/` from installs that had it; deleting rather than archiving is safe because every note's source row is still in the DB. Consequently `inbox`/`reminders` are no longer in `protectedTopDirs`, `kbSystemFolderLabels`, `kbDisplayTitle` or `links.go`'s priority/exclusion lists — the platform does not own those names, so a user folder called `inbox` is an ordinary user folder.
 - **`LinkIndex`** — `[[wikilink]]` parsing/resolution + `RenderHTMLLinks`; `Backlinks`.
-- **`Searcher`** — `ripgrepSearcher` (rg `--json`, pure-Go fallback).
+- **`Searcher`** — `ripgrepSearcher` (rg `--json`, pure-Go fallback). Snippets go through
+  `snippetFor`, not a flat trim — see "Table retrieval" below.
 - **`Guard`** — detective post-run write-scope enforcement (snapshot/revert). No longer wired into agent runs (the policy changed to let agents edit the KB directly — see "Agent access model"); the type + tests remain as a reusable utility.
 - **`MigrateLegacyLayout()`** — idempotent startup migration of pre-vault `agents/`, `memory/` (jsonl→md), `skills/` into vaults.
+
+**Table retrieval: headers travel with the rows, and this does NOT enable aggregation.**
+A converted CSV is one heading followed by the whole table, so `ChunkMarkdown` turned the
+reporting install's 155 KB note into ~190 chunks of bare rows, and `trimSnippet` cut a hit at a
+flat 200 bytes — about a tenth of one 1774-character row, mid-cell. Both are technically correct
+and tell the model nothing: no column names, so it cannot tell an amount from a date. That is
+why referencing table data in that note returned nothing while referencing prose in the same
+vault worked fine.
+
+Both paths now carry the header. `splitOversized` repeats it on every fragment holding table
+rows, and `snippetFor` prepends the header of the table the hit is IN — not the note's first
+table, because labelling a row with another table's columns reads as authoritative and is worse
+than no header. `snippetFor` also unwraps the block constructs the KB editor produces (callout,
+toggle, columns, alignment) rather than returning raw HTML, and drops images; a bare structural
+wrapper yields no hit at all. Four details worth keeping:
+
+- **The repeated header is paid for OUT of the per-chunk budget**, and that budget has to reach
+  `hardSplitWindow`, not just the accumulator: a single row can exceed a whole chunk, so that
+  function decides the row's size. Cutting there at the full bound and then prepending a header
+  put 96 of the real note's 191 chunks over `targetChunkChars`, which is a hard bound the
+  byte-capped tool result depends on.
+- **`sectionTableHeader` SCANS rather than checking offset 0.** A section almost never opens
+  with its table — this note begins with an italic "Converted from …" line — and an offset-0
+  check found headers for none of its chunks while every synthetic fixture passed.
+- **A section with two tables gets no header at all**, deliberately. Picking the first would
+  mislabel the second's rows.
+- **Prose keeps the 200-byte snippet budget**; only a table hit gets the larger one, since only
+  it must also carry a header. Raising it for every hit would spend the shared byte budget on
+  fewer results.
+
+**What this does not fix, stated because the obvious reading of the above is wrong:** it
+improves table *lookup*, and *"how much have I spent in total"* still cannot be answered. That
+is aggregation over ~1000 rows, and chat has **no compute tool** — `includeExecTools` is
+`filepath.Clean(workDir) != filepath.Clean(vaultRoot)` and chat sets `WithDir(root)`, so
+`run_script`/`bash` are off there by design (CLI parity; see "Chat knowledge-base access").
+Closing that needs either a host-side aggregate tool or enabling exec tools in chat, and the
+second is a security-posture change, not a bug fix.
 
 **Agent access model.** An agent's run CWD is its own vault dir; the coder prompt (`BuildCoderPrompt`, `<knowledge_base>` block) tells it to READ the whole vault and WRITE to both its own dir and the user's knowledge base (notes, memory, user files) — durable knowledge is persisted into the KB across runs. The Landlock sandbox grants RW over the whole vault root (confined to that user's vault + HOME; the DB, config, and other users' vaults stay out of reach). System-managed dirs (`.kb/`, `chats/`, other agents' `agents/<id>/`) are off-limits by prompt, not hard-enforced. The chat uses the same model (see `prompts.BuildChatSystemPrompt`).
 
@@ -627,14 +665,22 @@ politeness — this file has a recorded data-loss history around `dirtyRef`, and
 would discard unsaved work to apply a change the user may not have asked for yet. A file changed by
 something outside this browser (an agent run, another tab) is still only picked up on the next load.
 
-**"Edit with AI" auto-sends; "Chat about this file" still parks in the composer.** `ChatWindow`
-already had `autoSend` (built for the setup wizard's closing action, with its per-mount ref and
+**"Edit with AI" and "Chat about this file" BOTH auto-send.** `ChatWindow` already had
+`autoSend` (built for the setup wizard's closing action, with its per-mount ref and
 empty-history guards); `GlobalChatPanel` simply did not forward it. The message had to change too:
 `selectionChatPrompt` ends in a blank line — a citation waiting for an instruction — so sending it
 alone asks the model nothing. `selectionEditPrompt` is its sent counterpart, and its closing
 *"apply the change to the file directly"* is load-bearing: without it the model proposes a rewrite
 in chat and writes nothing, so there is no external change to pick up and the feature reads as
 broken from the other end.
+
+`ChatAboutFileButton` used to park its citation in the composer instead, and the consequence
+showed up one surface away: the chat it created held **zero messages**, so "Open full page"
+navigated to that chat correctly and looked like it had started a *different, new* one — the
+prefill lived in component state and did not survive the remount at `/chats`. Auto-sending makes
+the citation a real persisted turn, which fixes both halves at once. `chatPrompt` had to gain an
+instruction for the same reason `selectionEditPrompt` has one; a test pins that it does not end
+in a dangling separator, which is the property that makes auto-sending safe.
 
 **Block alignment is a `<div align>` WRAPPER, and the obvious spelling is a trap.**
 `nodes/align.ts` (`kbAlign`, `content: block+`) is how text and images centre or right-align.
@@ -892,6 +938,69 @@ repairs conversations that leaked before the fix shipped without touching a sing
 Both designers share the cleaner via `UserFacingDesignText`, where **`stripTechnicalSpec` must
 stay ahead of it** — the cleaner would remove a line-opening `[TECHNICAL SPEC]` delimiter, after
 which the block can no longer be found and the whole machine-facing spec renders to the user.
+
+**A genuinely EMPTY reply gets its own placeholder too, and that is a different case from
+the one above.** `CleanReply` returned `""` when the model produced no text at all, and the
+handler persisted it unguarded — so the owner got a blank bubble. Four such rows exist on the
+reporting install, one of them the answer to a question about a 155 KB table the model could
+not read within its tool-result cap, which is how it read as the model ignoring the question.
+`#242` covered only the marker-only case. `emptyReplyPlaceholder` is deliberately distinct
+from `markerOnlyPlaceholder`: nothing came back at all, so retrying is the useful next step,
+whereas a marker-only reply was a deliberate (if malformed) decision to say nothing. The empty
+return also fed the NEXT turn — a blank assistant row in the stored transcript is few-shot
+evidence that answering with nothing is acceptable here. `UserFacingDesignText` is unaffected
+because it guards `shown != ""` before calling in.
+
+**A chat turn is DURABLE: it outlives the request that started it.** `handleChatMessage` used
+to run the whole turn inline — the coder executed on `c.Request().Context()` and **both**
+messages were persisted only after it returned. So for the entire turn the owner's message
+existed nowhere but the browser's component state, and leaving the page destroyed it; closing
+the tab cancelled the context and killed the turn outright. Navigating *within* the SPA kept
+the fetch alive, so a turn that happened to finish while they were away did land both
+messages — which is why it read as flakiness rather than as a bug.
+
+`web/chat_turn_tracker.go` follows `run_tracker.go`, which already solved this for manual agent
+runs: persist first, run on a detached `context.Background()`, track in memory keyed by chat id,
+stream over SSE. `POST /chats/:id/messages` answers **202 + `turn_id`** (no longer
+`{"response": …}`); `GET /chats/:id/turn/progress` carries the milestones; `GET /chats/:id`
+gains **`in_flight`** and **`turn_lines`**. Six things are load-bearing:
+
+- **History is read BEFORE the message is persisted.** It comes from `ListChatMessages`, so
+  writing first feeds the turn its own text twice — once as a prior turn, once as the message.
+- **A failed turn KEEPS the user's message.** Not persisting on failure was defensible while
+  the browser held the bubble in memory; now that it is durable, deleting it would be worse —
+  they typed it, and it is the retry's context. The reason arrives as the stream's last
+  milestone (`⚠️ …`) and is promoted to the banner, preserving the error visibility the inline
+  path had.
+- **The stream REPLAYS milestones already emitted** before following the live channel, or a
+  client attaching to a busy turn watches an empty card until the next tool call — the same
+  "nothing is happening" impression this change exists to remove.
+- **`sendTurn` still resolves on turn COMPLETION**, not on the POST. `attachFiles` sends one
+  confirmation per file serially and the server refuses a concurrent second turn, so returning
+  early would make a multi-file batch collide with itself and collect its own 409s.
+- **The server's named `error` event means the turn died; `onerror` means the TRANSPORT
+  dropped** — which EventSource also fires during its own transparent reconnect. Conflating
+  them reports healthy turns as failures.
+- **One turn, one stream.** `in_flight` is false in the cache when a turn starts (the send does
+  not refetch), so a refetch *during* the turn — window focus, which TanStack does by default —
+  flips that dep and fires the re-attach effect for a turn `sendTurn` is already following.
+  Without `streamOpenRef` that opens a second stream: every milestone lands twice and
+  `finishTurn` runs twice. Leaving the page and coming back is exactly the scenario this
+  feature exists for, so it is also the one that triggers it.
+
+The progress UI is the **existing `ActivityCard`** — chat simply had no stream to feed it. It
+gained `defaultCollapsed` so a chat shows the current action with the history one click away,
+while an agent build keeps the full log it wants. `toolMilestone` already shortened vault and
+`$HOME` paths; it now also masks canonical UUIDs, before truncation so a 36-character id cannot
+spend the whole 60-character budget — which fixes agent builds and runs at the same time.
+
+**The concurrency guard is web-only, and the chat-platform path is still inline.**
+`cmd/rookery/main.go`'s Telegram/Discord/Slack turn was deliberately left as it was — there is
+no page to leave on a chat platform — but the two paths have now diverged, and the comment in
+`runChatCoder` about keeping them in step refers to the coder WIRING, not the lifecycle. One
+consequence worth knowing: a chat-platform turn and a web turn can still run concurrently on
+the same chat. That was already true before this change, so it is not a regression; the new
+guard simply does not cover it.
 
 **Agent designer KB awareness.** The designer is text-only (`WithNoTools`) but its system prompt (`BuildDesignSystemPrompt`, `<knowledge_base>` block) now knows the app has a built-in vault that agents read/write, and is told to prefer it over Notion/external note apps for the user's own knowledge. Each design turn injects a fresh retrieval-backed block via `Flow.WithVault(v)` → `vault.BuildKBContext(v, workspaceID, query)` → `DesignSystemParams.KBManifest` — a folder-shape summary (`Vault.FolderSummary`, one line per folder regardless of how many files it holds — note this bounds bytes PER FOLDER, not in total as folder COUNT grows, which is why `BuildKBContext` gives the summary its own 2 KiB budget with a `…and N more folders` marker; unlike the old exhaustive path list that capped at 60 files/rendered 30) plus the passages most relevant to the conversation so far (via `Indexer().Search`, scored against the session's own recent user turns + the current message — the designer has no search tool of its own, so this is done for it on every turn). When nothing matches, the block says so explicitly and the prompt tells the designer to ask the user rather than invent a path. `skilldesigner.Flow` mirrors this identically (`WithVault`, its own `loadKBManifest`/`retrievalQuery`) — `BuildKBContext` lives in `internal/vault`, not `agentdesigner`, precisely so both designers can reach it without an awkward cross-designer import. `vault.NotePaths`/`Flow.WithKBLister`/the `kbLister` interface are gone — `BuildKBContext` was their only consumer.
 
@@ -1807,6 +1916,22 @@ The base schema was consolidated into `migrations/001_initial_schema.up.sql` dur
 refactor (the old incremental migrations were collapsed; data was wiped and re-created fresh);
 incremental migrations resume from there — `002_coder_api` adds `workspaces.coder_base_url`, and
 `003_agent_runs_usage` adds `agent_runs.{prompt,completion,total}_tokens` for the API coder; `005_connectors` adds the self-managed-OAuth tables; `006_connection_extra` adds `service_connections.extra` (JSON); `007_draft_used_connections` adds `agent_drafts.pending_used_connections` (persists build-used connections for auto-bind).
+
+**`015_orphaned_agent_rows` is a one-time sweep, not a change to the delete path.** Foreign keys
+were enforced per-CONNECTION until the DSN-pragma fix (#214, 2026-08-17), so `DELETE FROM agents`
+cascaded only when the pool happened to hand it a connection with `foreign_keys` on. On the
+reporting install that left **61 of 92 `agent_runs`** orphaned — rendering as blank rows in Home's
+recent activity, since `RecentAgentRunsWithNames` `LEFT JOIN`s and `COALESCE`s a missing name to
+`""` — plus 13 `agent_skills`, 7 `agent_connections` (bindings granting live credentials to agents
+that no longer exist) and 3 `agent_schedules`. Every orphan predates the fix and
+`TestDeletingAnAgentNowCascades` pins that the cascade fires today. The migration applies the
+policy each table's own foreign key already declares: **CASCADE tables lose the orphan; SET NULL
+tables keep the row and lose only the dangling id.** `inbox_messages` is deliberately in the
+second group — it carries a denormalized `agent_name` whose schema comment reads "survives agent
+delete", it renders correctly, and it is the owner's notification history rather than a projection
+of the agent; but its dangling id made Home deep-link to a deleted agent's page. The down
+migration is empty and says why. The join stays a `LEFT JOIN` (an inner join would silently HIDE
+such runs, trading a visible bug for an invisible one) and the DTO falls back to a legible label.
 Tables: `owner` (single row), `workspaces` (replaces `users`; carries `about` + inlined coder
 config: `coder_kind`/`coder_bin`/`coder_timeout_s`/`coder_backend_type` + the now-active API-coder
 fields `coder_provider`/`coder_model`/`coder_api_key_secret`/`coder_base_url`), `platform_connections`,
@@ -2117,7 +2242,7 @@ duplicating the full list here. Route groups:
 - **secrets** — list/create/delete
 - **connectors** — chat-platform connections (Telegram/Discord/Slack): list/create/delete/test
 - **services** — self-managed-OAuth service connections: list, per-provider creds/connect/apikey, delete
-- **chats** — CRUD, messages, resume/stop
+- **chats** — CRUD, messages (**202 + turn_id**, not the reply), turn-progress SSE, resume/stop
 - **reminders + inbox** — reminders CRUD + poll; inbox list/poll/read/read-all/delete
 - **kb** — tree, note read/write/new/delete/rename, search, raw, resolve, selection assist (AI actions)
 - **settings + setup** — profile/workspace/coder/master-password settings, coder test, setup wizard

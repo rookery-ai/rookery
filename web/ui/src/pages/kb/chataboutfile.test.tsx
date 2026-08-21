@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route } from "react-router";
 import { AppShell } from "@/components/shell/AppShell";
 import ChatAboutFileButton, { chatPrompt } from "./ChatAboutFileButton";
+import { installFakeEventSource } from "@/pages/chats/turnTestHarness";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -19,9 +20,19 @@ const SESSION_FIXTURE = {
 // No ACTIVE chat in the list: "chat about this file" must create one anyway
 // (forceNew), so this fixture also proves the create fires.
 let created = 0;
+// Every message POSTed to a chat, so the test can assert the citation was SENT
+// rather than parked in the composer.
+let sentMessages: string[] = [];
 
 function mockFetch() {
   created = 0;
+  sentMessages = [];
+  // The button auto-sends now, and a turn follows its progress over an
+  // EventSource — which jsdom does not implement. Without the stub the stream
+  // opens AFTER this test's assertions pass and throws asynchronously, so the
+  // suite is green and the run still exits non-zero. autoComplete ends the turn
+  // on its own: this file is about what the button sends, not about progress.
+  installFakeEventSource({ autoComplete: true });
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -37,6 +48,11 @@ function mockFetch() {
             created_at: "2026-07-24T07:00:00Z", updated_at: "2026-07-24T07:00:00Z",
           }),
         );
+      }
+      const send = url.match(/^\/api\/v1\/chats\/([^/]+)\/messages$/);
+      if (send && method === "POST") {
+        sentMessages.push(JSON.parse(String(init?.body ?? "{}")).message);
+        return Promise.resolve(jsonResponse({ response: "Here's a summary." }));
       }
       const detail = url.match(/^\/api\/v1\/chats\/([^/]+)$/);
       if (detail && method === "GET") {
@@ -81,7 +97,16 @@ test("chatPrompt names the path and does not inline content", () => {
   expect(p).toMatch(/`notes\/trip\.md`/);
 });
 
-test("the button opens the chat panel on a NEW chat with the path prefilled", async () => {
+// The property that makes it safe to auto-send. A citation ending in a dangling
+// separator is a sentence waiting to be finished, and sending it alone asks the
+// model nothing — the failure selectionChatPrompt already records.
+test("chatPrompt carries an instruction rather than trailing off", () => {
+  const p = chatPrompt("notes/trip.md").trimEnd();
+  expect(p).not.toMatch(/[—:-]$/);
+  expect(p.length).toBeGreaterThan("notes/trip.md".length + 20);
+});
+
+test("the button opens a NEW chat and SENDS the citation as a message", async () => {
   mockFetch();
   wrap("notes/trip.md");
 
@@ -89,7 +114,15 @@ test("the button opens the chat panel on a NEW chat with the path prefilled", as
 
   // forceNew: even with no active chat to resume, a fresh one is created —
   // and a question about a note never lands mid-thread in an unrelated chat.
+  await vi.waitFor(() => expect(created).toBe(1));
+
+  // Sent, not parked. A composer prefill lives only in component state, so it
+  // was lost on the remount at /chats and left that chat genuinely empty.
+  await vi.waitFor(() => {
+    expect(sentMessages).toEqual([chatPrompt("notes/trip.md")]);
+  });
+
+  // And the composer is NOT holding a copy of it.
   const composer = await screen.findByPlaceholderText("Message…");
-  expect(composer).toHaveValue(chatPrompt("notes/trip.md"));
-  expect(created).toBe(1);
+  expect(composer).toHaveValue("");
 });

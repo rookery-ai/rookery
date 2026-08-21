@@ -25,6 +25,7 @@ func (s *Server) registerChatsAPI(g *echo.Group) {
 	g.GET("/chats/:id", s.apiGetChat)
 	g.PATCH("/chats/:id", s.apiRenameChat)
 	g.POST("/chats/:id/messages", s.handleChatMessage)
+	g.GET("/chats/:id/turn/progress", s.handleChatTurnProgress)
 	g.POST("/chats/:id/resume", s.apiResumeChat)
 	g.POST("/chats/:id/stop", s.apiStopChat)
 	g.DELETE("/chats/:id", s.apiDeleteChat)
@@ -147,7 +148,12 @@ func (s *Server) apiCreateChat(c echo.Context) error {
 }
 
 // apiGetChat ports showChatDetail.
-// GET /api/v1/chats/:id → 200 {"chat":{...},"messages":[...]}
+// GET /api/v1/chats/:id → 200 {"chat":…,"messages":…,"in_flight":…,"turn_lines":…}
+//
+// in_flight and turn_lines are what let a client mounting MID-turn re-attach
+// deterministically rather than infer a running turn from an EventSource
+// reconnect hitting a 404. turn_lines carries the milestones already emitted so
+// the progress card renders complete on first paint.
 func (s *Server) apiGetChat(c echo.Context) error {
 	u := c.Get("workspace").(*db.Workspace)
 	ch, err := s.getOwnedChat(u.ID, c.Param("id"))
@@ -159,7 +165,20 @@ func (s *Server) apiGetChat(c echo.Context) error {
 	for _, m := range msgs {
 		out = append(out, toAPIChatMessage(m))
 	}
-	return c.JSON(http.StatusOK, map[string]any{"chat": toAPIChat(ch), "messages": out})
+	// Initialised non-nil: a Go nil slice marshals to JSON null, and a
+	// TypeScript default parameter substitutes only for undefined — the exact
+	// shape that once unmounted a whole route via requires.length.
+	lines := []string{}
+	if st := s.chatTurn(ch.ID); st != nil {
+		l, _, _ := st.snapshot()
+		lines = append(lines, l...)
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"chat":       toAPIChat(ch),
+		"messages":   out,
+		"in_flight":  s.isChatTurnLive(ch.ID),
+		"turn_lines": lines,
+	})
 }
 
 // apiRenameChat sets a chat's user-facing title.

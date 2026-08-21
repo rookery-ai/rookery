@@ -80,6 +80,21 @@ type Server struct {
 	// context that outlives the originating HTTP request. Keyed by agentID.
 	runs   map[string]*agentRunState
 	runsMu sync.Mutex
+
+	// chatTurns tracks in-flight chat turns for exactly the same reason, keyed
+	// by chatID. A chat turn used to run on the REQUEST context with both
+	// messages persisted only after the coder returned, so leaving the page
+	// destroyed the only copy of what the owner had typed.
+	chatTurns   map[string]*chatTurnState
+	chatTurnsMu sync.Mutex
+
+	// Test-only seams, in the spirit of agentdesigner's *ForTest helpers: a turn
+	// runs in a goroutine, so a test cannot otherwise observe its ORDERING —
+	// and the ordering (persist, then call the coder) is the whole fix.
+	testCoderHook   func()
+	testHistoryHook func(int)
+	testCoderBlock  chan struct{}
+	testCoderErr    string
 }
 
 // NewServer wires up all routes and middleware.
@@ -135,6 +150,7 @@ func NewServer(cfg *config.Config, database *db.DB, gatewayManager *gateway.Gate
 		vault:      vault.New(cfg.Data.Dir),
 		memory:     memStore,
 		runs:       make(map[string]*agentRunState),
+		chatTurns:  make(map[string]*chatTurnState),
 	}
 
 	connReg, err := connectors.LoadBundled()

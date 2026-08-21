@@ -11,6 +11,38 @@ if (typeof globalThis.ResizeObserver === "undefined") {
   };
 }
 
+// jsdom doesn't implement EventSource either, and a chat turn now follows its
+// progress over one — so ANY test that mounts a chat surface and sends a
+// message reaches `new EventSource(...)`.
+//
+// This is an inert default, not a test double. It exists because the failure it
+// prevents is a nasty one: the stream opens asynchronously, AFTER the test's
+// assertions have already passed, so the suite reports every test green and the
+// run still exits non-zero on an unhandled ReferenceError. That is precisely
+// what happened to `chataboutfile.test.tsx` once its button began auto-sending
+// — 1203 passed, exit 1.
+//
+// A test that wants to DRIVE a turn installs the real double over this one
+// (`pages/chats/turnTestHarness.ts`); the rest simply need the constructor not
+// to throw.
+if (typeof globalThis.EventSource === "undefined") {
+  globalThis.EventSource = class EventSource {
+    url: string;
+    readyState = 0;
+    onmessage: ((ev: MessageEvent) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onopen: (() => void) | null = null;
+    constructor(url: string) {
+      this.url = url;
+    }
+    addEventListener() {}
+    removeEventListener() {}
+    close() {
+      this.readyState = 2;
+    }
+  } as unknown as typeof globalThis.EventSource;
+}
+
 // jsdom also doesn't implement scrollIntoView — cmdk calls it when the
 // keyboard-selected item changes.
 if (typeof Element.prototype.scrollIntoView !== "function") {

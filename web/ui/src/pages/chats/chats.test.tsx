@@ -5,6 +5,12 @@ import { MemoryRouter, Routes, Route } from "react-router";
 import { AppShell } from "@/components/shell/AppShell";
 import ChatsPage from "./ChatsPage";
 import type { Chat, ChatMessage } from "@/lib/chats";
+import {
+  completeTurn,
+  latestStream,
+  installFakeEventSource,
+  turnAcceptedResponse,
+} from "./turnTestHarness";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -81,14 +87,18 @@ function mockFetch(onSend?: (id: string, message: string) => { response?: string
         const id = send[1];
         const body = JSON.parse(String(init?.body)) as { message: string };
         const result = onSend ? onSend(id, body.message) : { response: `echo: ${body.message}` };
+        // The server persists the user's message BEFORE running the coder, and
+        // keeps it even when the turn fails — so it lands here either way. Only
+        // the assistant reply depends on success.
+        messages[id] = [...(messages[id] ?? []), { role: "user", content: body.message }];
         if (!result.error) {
           messages[id] = [
-            ...(messages[id] ?? []),
-            { role: "user", content: body.message },
+            ...messages[id],
             { role: "assistant", content: result.response ?? "" },
           ];
         }
-        return Promise.resolve(jsonResponse(result));
+        // 202: the turn is now detached and the reply arrives via the stream.
+        return Promise.resolve(turnAcceptedResponse());
       }
 
       const action = url.match(/^\/api\/v1\/chats\/([^/]+)\/(stop|resume)$/);
@@ -121,6 +131,8 @@ function wrap(initialEntry = "/") {
 
 beforeEach(() => {
   resetFixtures();
+  // jsdom has no EventSource, and a turn's reply now arrives over one.
+  installFakeEventSource();
   vi.setSystemTime(new Date("2026-07-17T07:10:00Z"));
 });
 
@@ -200,7 +212,13 @@ test("send round-trip: optimistic user bubble appears immediately, assistant bub
   await userEvent.type(box, "what's up");
   fireEvent.keyDown(box, { key: "Enter", code: "Enter" });
 
+  // The optimistic bubble is up before the turn finishes — that is the point
+  // of it, and it now also matches a row the server has already persisted.
   expect(await screen.findByText("what's up")).toBeInTheDocument();
+
+  // The reply arrives from the refetch the stream's done event triggers, not
+  // from the POST: the turn outlives the request that started it.
+  await completeTurn();
   expect(await screen.findByText("echo: what's up")).toBeInTheDocument();
 
   // Composer re-enabled once the round trip settles.
@@ -222,7 +240,11 @@ test("send round-trip: optimistic user bubble appears immediately, assistant bub
   });
 });
 
-test("a 200-with-error response shows an inline banner, keeps the user bubble, and re-enables the composer", async () => {
+// A coder failure is no longer a property of the POST — the turn is detached,
+// so it fails mid-stream. The tracker pushes "⚠️ <error>" as its last milestone
+// and closes with a named error event; the window promotes that to the banner.
+// Losing this would leave the owner with a message, no reply, and no reason.
+test("a failed turn shows an inline banner, keeps the user bubble, and re-enables the composer", async () => {
   mockFetch(() => ({ error: "coder is unavailable" }));
   wrap("/?chat=c1");
   await screen.findByText("hi");
@@ -232,9 +254,19 @@ test("a 200-with-error response shows an inline banner, keeps the user bubble, a
   fireEvent.keyDown(box, { key: "Enter", code: "Enter" });
 
   expect(await screen.findByText("ping")).toBeInTheDocument();
+
+  const es = await vi.waitFor(() => {
+    const s = latestStream();
+    if (!s) throw new Error("no stream opened");
+    return s;
+  });
+  es.emit("⚠️ coder is unavailable");
+  es.dispatchNamedEvent("error");
+
   expect(await screen.findByText("coder is unavailable")).toBeInTheDocument();
   await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled());
-  // The failed send must not be treated as a settled round trip.
+  // The owner's message survives the failure — they typed it, and it is the
+  // context for the retry.
   expect(screen.getByText("ping")).toBeInTheDocument();
 });
 
@@ -421,6 +453,10 @@ test("a chat stopped elsewhere mid-mount is not re-resumed", async () => {
   chats = chats.map((c) => (c.id === "c2" ? { ...c, active: false } : c));
 
   await user.type(await screen.findByPlaceholderText("Message…"), "ping{Enter}");
+  // The reply lands on the refetch the finished turn triggers, and that refetch
+  // is what surfaces the externally-stopped chat — which is the condition under
+  // test, so the turn has to actually complete.
+  await completeTurn();
   await screen.findByText("echo: ping");
 
   expect(actionCalls).toEqual(["c2/resume"]);

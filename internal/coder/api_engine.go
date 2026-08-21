@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -334,7 +335,15 @@ func (c *Coder) resolveProvider(ctx context.Context, workspaceID string) (llm.Pr
 		return nil, fmt.Errorf("%w: resolve api key: %v", ErrAPIAuth, err)
 	}
 	if apiKey == "" {
-		return nil, fmt.Errorf("%w: api key secret %q is empty", ErrAPIAuth, c.api.apiKeySecretName)
+		// The secret's NAME is deliberately not interpolated here. This error
+		// travels further than it looks: it reaches the server log, and — now
+		// that a chat turn surfaces its failure to the owner — the chat
+		// transcript, which is reflected into the vault and can be relayed to a
+		// connected chat platform. The name adds nothing the owner cannot see
+		// in their own secrets list, and CodeQL flags the flow as clear-text
+		// logging of sensitive data, which is a fair reading of a value that
+		// arrives from a field called apiKeySecretName.
+		return nil, fmt.Errorf("%w: the configured API key secret is empty", ErrAPIAuth)
 	}
 	return llm.New(llm.Config{
 		Provider: c.api.provider,
@@ -587,6 +596,18 @@ func stripKey(env map[string]string, key string) map[string]string {
 // vaultRoot/homeDir drive shortenHostPaths, which strips host filesystem layout
 // out of whichever detail is chosen — see its comment for why that has to apply
 // to the detail string rather than just to the path-shaped arguments.
+// uuidPattern matches a canonical 8-4-4-4-12 hexadecimal identifier.
+//
+// Deliberately narrow. Masking anything merely hex-looking would eat content a
+// reader wants — a short git SHA, a hash in a filename — and a milestone whose
+// job is to say what happened is worse for over-masking than for under-masking.
+var uuidPattern = regexp.MustCompile(`(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`)
+
+// maskIDs replaces database identifiers with a stable marker. Applied to the
+// rendered detail rather than to individual argument fields, so an id is caught
+// wherever it appears — a path, a query, a shell command.
+func maskIDs(s string) string { return uuidPattern.ReplaceAllString(s, "<id>") }
+
 func toolMilestone(tc llm.ToolCall, vaultRoot, homeDir string) string {
 	var args struct {
 		Path    string `json:"path"`
@@ -606,9 +627,14 @@ func toolMilestone(tc llm.ToolCall, vaultRoot, homeDir string) string {
 		detail = strings.TrimSpace(string(tc.Args))
 	}
 	detail = shortenHostPaths(detail, vaultRoot, homeDir)
-	// Truncate AFTER shortening: a bash command that opens with a long absolute
-	// vault path would otherwise spend the whole 60-char budget on the prefix
-	// and truncate away the part that says what the command actually does.
+	// Mask identifiers for the same audience reason paths are shortened: this
+	// line is read by a human watching their agent work, and a workspace or
+	// agent UUID tells them nothing.
+	detail = maskIDs(detail)
+	// Truncate AFTER shortening and masking: a bash command that opens with a
+	// long absolute vault path — or a path carrying a 36-character id — would
+	// otherwise spend the whole 60-char budget on the prefix and truncate away
+	// the part that says what the command actually does.
 	detail = truncateRunes(detail, 60)
 	if detail == "" {
 		return "🔧 " + tc.Name

@@ -16,8 +16,14 @@ import { GlobalChatPanel } from "@/components/chat/GlobalChatButton";
 //
 // Exported for direct unit testing: the exact wording is the contract between
 // this button and the coder's ability to resolve the path.
+// It ends in an INSTRUCTION, not a dangling "— ". This prompt is auto-sent, and
+// a citation with no question asks the model nothing: exactly the failure
+// selectionChatPrompt records and selectionEditPrompt exists to avoid. Parking
+// it in the composer instead was the old behaviour, and it left the new chat
+// holding zero messages — so "Open full page" opened a genuinely empty
+// conversation and read as though it had started a different one.
 export function chatPrompt(path: string): string {
-  return `About my knowledge base file \`${path}\` — `;
+  return `Give me a short summary of my knowledge base file \`${path}\`, then ask me what I'd like to know about it.`;
 }
 
 // The selection-scoped sibling of chatPrompt. It NAMES the file and QUOTES the
@@ -56,13 +62,21 @@ Help me edit it. Ask me what I want changed if it isn't obvious, then apply the 
 // slide-over the global chat button uses, but always on a FRESH chat
 // (forceNew) so a question about a note never lands mid-thread in an unrelated
 // conversation.
+//
+// autoSend makes the citation a real, persisted turn rather than a composer
+// prefill. That is what fixes both halves of the report: the citation shows up
+// as a message, and "Open full page" lands on a chat that HAS that message
+// instead of an empty one that looks new. A prefill lives only in component
+// state, so it never survived the remount at the full-page route.
 export default function ChatAboutFileButton({ path }: { path: string }) {
   const { open } = useSlideOver();
   return (
     <Button
       variant="ghost"
       size="sm"
-      onClick={() => open(<GlobalChatPanel forceNew initialText={chatPrompt(path)} />, { title: "Chat" })}
+      onClick={() =>
+        open(<GlobalChatPanel forceNew autoSend initialText={chatPrompt(path)} />, { title: "Chat" })
+      }
     >
       <MessageSquareText className="size-4" />
       Chat about this

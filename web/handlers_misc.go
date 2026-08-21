@@ -28,9 +28,21 @@ import (
 
 // ── Chats ───────────────────────────────────────────────────────────────────
 
-// handleChatMessage sends one user message through the coder one-off-chat path,
-// persists both turns, and returns the assistant reply as JSON. Shared by the
-// JSON chats API (mirrors the agent-designer chat flow).
+// handleChatMessage STARTS one chat turn and returns immediately.
+//
+// It used to run the whole turn inline: the coder executed on the REQUEST
+// context and both messages were persisted only after it returned. So for the
+// entire turn — minutes, on a real question — the owner's message existed
+// nowhere but the browser's component state, and leaving the page destroyed it;
+// closing the tab cancelled the request context and killed the turn outright.
+// Navigating WITHIN the SPA kept the fetch alive, which is why a turn that
+// happened to finish while the owner was away did land both messages, and why
+// the whole thing read as flakiness.
+//
+// The turn now runs on a detached context with the user's message persisted
+// first (see startChatTurn), so this handler's job is only to validate and
+// hand off. 202 + turn_id; the reply arrives via the chat query once the
+// progress stream reports done.
 func (s *Server) handleChatMessage(c echo.Context) error {
 	u := c.Get("workspace").(*db.Workspace)
 	id := c.Param("id")
@@ -54,21 +66,56 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "empty message"})
 	}
 
-	// Cleaned, not raw: a previously-leaked reply sitting in the history is
-	// few-shot evidence that protocol markers are how one answers here, and the
-	// model copies it. Without this, a conversation that leaked once keeps
-	// re-teaching itself even after the prompt no longer asks for markers.
-	// Assistant turns only — see chat.CleanHistory.
-	rawHistory, _ := s.db.ListChatMessages(id)
-	history := chat.CleanHistory(rawHistory)
+	turnID, ok := s.startChatTurn(u.ID, id, text)
+	if !ok {
+		return c.JSON(http.StatusConflict, map[string]string{
+			"error":   "turn_in_flight",
+			"message": "This chat is already working on a turn.",
+		})
+	}
+	return c.JSON(http.StatusAccepted, map[string]string{"turn_id": turnID})
+}
+
+// runChatCoder builds the one-off-chat coder and runs a single turn.
+//
+// The construction below is unchanged from when it lived inline in
+// handleChatMessage; only the context source and the progress sink are new. It
+// must stay in step with the Telegram/Discord/Slack chat path in cmd/rookery —
+// divergence would give one surface a capability the other lacks.
+//
+// history is passed IN rather than read here, because the caller must read it
+// BEFORE persisting the new message: history comes from ListChatMessages, so
+// reading it afterwards would feed this turn's own text twice, once as history
+// and once as the message.
+func (s *Server) runChatCoder(
+	ctx context.Context,
+	workspaceID, chatID string,
+	history []db.ChatMessage,
+	text string,
+	onProgress func(string),
+) (string, error) {
+	// Test seams, checked before any coder construction so a unit test needs no
+	// configured coder. They sit here rather than deeper because the property
+	// under test is the ORDERING — that startChatTurn persisted the owner's
+	// message before anything reached this function — and the goroutine gives a
+	// test no other way to observe it.
+	if s.testCoderHook != nil {
+		s.testCoderHook()
+	}
+	if s.testCoderBlock != nil {
+		<-s.testCoderBlock
+	}
+	if s.testCoderErr != "" {
+		return "", errors.New(s.testCoderErr)
+	}
 
 	// System context: a read+write knowledge-base instruction (so the chat can retrieve
 	// and edit notes on demand) + the user's always-on identity context (profile/memory/
 	// agents/MCP). The coder runs with its CWD set to the vault root, which the sandbox
 	// grants read+write access to, and the file toolset Read/Write/Edit/Glob/Grep (for a
 	// CLI coder) or read_file/write_file/edit_file/list_dir tool calls (for an API coder).
-	root := s.vault.Root(u.ID)
-	coder := s.coderForWorkspace(u.ID).WithDir(root)
+	root := s.vault.Root(workspaceID)
+	coder := s.coderForWorkspace(workspaceID).WithDir(root)
 
 	// Connector + KB bridge wiring: the API engine exposes bound connections AND
 	// save_to_kb as native in-process tools directly. A CLI coder instead reaches
@@ -83,7 +130,7 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 	// keyless scraping cascade — the same upgrade agent runs already get. The
 	// key value itself never reaches the model: only the host process reads
 	// subprocessEnv to build the provider before making the request.
-	searchEnv := websearch.ResolveKeyEnv(c.Request().Context(), u.ID, s.secretsLookup)
+	searchEnv := websearch.ResolveKeyEnv(ctx, workspaceID, s.secretsLookup)
 
 	var connRefs []prompts.ConnectionRef
 	var connTools []string
@@ -93,7 +140,7 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 	var mcpBin string
 	if coder.IsAPI() {
 		if s.connStore != nil {
-			if rows, err := s.db.ListServiceConnections(c.Request().Context(), u.ID); err == nil {
+			if rows, err := s.db.ListServiceConnections(ctx, workspaceID); err == nil {
 				bound := connectors.ActiveBoundConns(rows)
 				if len(bound) > 0 {
 					coder = coder.WithConnectors(s.connectors, s.connStore, bound)
@@ -108,7 +155,7 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 		}
 		// Chat has no binding to narrow by, so every ENABLED server is offered —
 		// the same rule connectors.ActiveBoundConns applies just above.
-		if bound, err := mcp.ActiveBoundServers(c.Request().Context(), s.db, s.systemKey, u.ID); err == nil && len(bound) > 0 {
+		if bound, err := mcp.ActiveBoundServers(ctx, s.db, s.systemKey, workspaceID); err == nil && len(bound) > 0 {
 			coder = coder.WithMCP(s.mcpClient, bound)
 			for _, b := range bound {
 				mcpRefs = append(mcpRefs, prompts.MCPServerRef{Name: b.Name})
@@ -139,17 +186,17 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 				kbBin = p
 			}
 			if kbBin != "" {
-				kbTok := s.kbBridge.Register(u.ID, false)
+				kbTok := s.kbBridge.Register(workspaceID, false)
 				defer s.kbBridge.Unregister(kbTok)
 				extraEnv["ROOKERY_KB_URL"] = s.kbBridge.URL()
 				extraEnv["ROOKERY_KB_TOKEN"] = kbTok
 			}
 		}
 		if s.connBridge != nil && s.connBridge.Addr() != "" {
-			if rows, err := s.db.ListServiceConnections(c.Request().Context(), u.ID); err == nil {
+			if rows, err := s.db.ListServiceConnections(ctx, workspaceID); err == nil {
 				bound := connectors.ActiveBoundConns(rows)
 				if len(bound) > 0 {
-					tok := s.connBridge.Register(u.ID, bound, false)
+					tok := s.connBridge.Register(workspaceID, bound, false)
 					defer s.connBridge.Unregister(tok)
 					extraEnv["ROOKERY_CONNECTOR_URL"] = s.connBridge.Addr()
 					extraEnv["ROOKERY_CONNECTOR_TOKEN"] = tok
@@ -166,8 +213,8 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 			}
 		}
 		if s.mcpBridge != nil && s.mcpBridge.Addr() != "" {
-			if bound, err := mcp.ActiveBoundServers(c.Request().Context(), s.db, s.systemKey, u.ID); err == nil && len(bound) > 0 {
-				tok := s.mcpBridge.Register(u.ID, bound, false)
+			if bound, err := mcp.ActiveBoundServers(ctx, s.db, s.systemKey, workspaceID); err == nil && len(bound) > 0 {
+				tok := s.mcpBridge.Register(workspaceID, bound, false)
 				defer s.mcpBridge.Unregister(tok)
 				extraEnv["ROOKERY_MCP_URL"] = s.mcpBridge.Addr()
 				extraEnv["ROOKERY_MCP_TOKEN"] = tok
@@ -190,34 +237,27 @@ func (s *Server) handleChatMessage(c echo.Context) error {
 		// for only those commands — chat stays file-only (no arbitrary shell) otherwise.
 		coder = coder.WithAllowedTools(codersvc.ChatAllowedTools(connBin, kbBin, mcpBin))
 	}
-	sysCtx := prompts.BuildChatSystemPrompt(root, coder.BackendType(), connRefs, connTools, connBin, s.chatAppsFor(u.ID)) +
+	sysCtx := prompts.BuildChatSystemPrompt(root, coder.BackendType(), connRefs, connTools, connBin, s.chatAppsFor(workspaceID)) +
 		prompts.MCPToolsBlock(mcpRefs, mcpTools, coder.BackendType(), mcpBin) +
-		chat.BuildUserContext(s.db, s.memory, u.ID)
+		chat.BuildUserContext(s.db, s.memory, workspaceID)
 
 	// Re-activate the chat if it had been stopped, so history keeps flowing.
-	if !ch.Active {
-		_ = s.db.ResumeChat(id)
+	if ch, err := s.db.GetChat(chatID); err == nil && !ch.Active {
+		_ = s.db.ResumeChat(chatID)
 	}
 
-	result, err := coder.Chat(c.Request().Context(), u.ID, history, sysCtx, text)
+	// Progress reaches the browser from here: the API engine calls this sink
+	// once per host-tool execution. A CLI coder never calls it, so those
+	// workspaces simply see the typing indicator, exactly as before.
+	if onProgress != nil {
+		coder = coder.WithProgress(onProgress)
+	}
+
+	result, err := coder.Chat(ctx, workspaceID, history, sysCtx, text)
 	if err != nil {
-		// Don't persist on failure — the client already shows the user bubble,
-		// and a refresh clears the failed attempt (matches agent-designer behavior).
-		return c.JSON(http.StatusOK, map[string]string{"error": "Couldn't reach " + coder.Name() + ": " + err.Error()})
+		return "", fmt.Errorf("couldn't reach %s: %w", coder.Name(), err)
 	}
-
-	// Cleaned ONCE, here, then used by all three consumers below. Cleaning per
-	// consumer would let the stored transcript, the auto-title and what the
-	// browser renders disagree about the same reply.
-	reply := chat.CleanReply(result.Text)
-
-	_ = s.db.AddChatMessage(id, "user", text)
-	_ = s.db.AddChatMessage(id, "assistant", reply)
-	_ = s.db.TouchChat(id)
-	if ch, err := s.db.GetChat(id); err == nil {
-		chat.MaybeAutoTitle(s.db, s.titleGen, ch, text, reply)
-	}
-	return c.JSON(http.StatusOK, map[string]string{"response": reply})
+	return result.Text, nil
 }
 
 // ── Reminders ──────────────────────────────────────────────────────────────

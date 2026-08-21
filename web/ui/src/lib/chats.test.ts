@@ -1,7 +1,7 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement } from "react";
-import { useChats, sendChatMessage } from "./chats";
+import { useChats, startChatTurn, chatTurnProgressURL } from "./chats";
 import { ApiError } from "./api";
 
 function wrapper() {
@@ -29,35 +29,50 @@ test("useChats fetches the chat list from the right URL", async () => {
   expect(vi.mocked(fetch).mock.calls[0][0]).toBe("/api/v1/chats");
 });
 
-test("sendChatMessage resolves the response string for the legacy success shape", async () => {
+// The endpoint STARTS a turn rather than completing one, so it answers 202 with
+// a turn id. The old {"response": …} / {"error": …} 200-shape is gone, and with
+// it the legacy parsing: a refused turn is now a real status code.
+test("startChatTurn posts the message and returns the turn id", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ response: "hi" }), {
-        status: 200,
+      new Response(JSON.stringify({ turn_id: "t1" }), {
+        status: 202,
         headers: { "Content-Type": "application/json" },
       }),
     ),
   );
-  await expect(sendChatMessage("c1", "hello")).resolves.toBe("hi");
+  await expect(startChatTurn("c1", "hello")).resolves.toEqual({ turn_id: "t1" });
+
+  const [url, init] = vi.mocked(fetch).mock.calls[0];
+  expect(url).toBe("/api/v1/chats/c1/messages");
+  expect(JSON.parse(String(init?.body))).toEqual({ message: "hello" });
 });
 
-test("sendChatMessage rejects with ApiError(200,\"chat_error\",...) for the legacy error shape", async () => {
+// A chat already working on a turn refuses the second, so a double-send cannot
+// point two coders at one conversation. It is a 409, which api.post raises
+// through the same ApiError path every other failure uses.
+test("startChatTurn surfaces a refused turn as an ApiError", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ error: "Couldn't reach X" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+      new Response(
+        JSON.stringify({ error: "turn_in_flight", message: "This chat is already working on a turn." }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
     ),
   );
   let caught: unknown;
   try {
-    await sendChatMessage("c1", "hello");
+    await startChatTurn("c1", "hello");
   } catch (e) {
     caught = e;
   }
   expect(caught).toBeInstanceOf(ApiError);
-  expect(caught).toMatchObject({ status: 200, code: "chat_error", message: "Couldn't reach X" });
+  expect(caught).toMatchObject({ status: 409 });
+});
+
+// The progress URL is defined beside the starter so the two cannot drift.
+test("chatTurnProgressURL points at the turn's SSE endpoint", () => {
+  expect(chatTurnProgressURL("c1")).toBe("/api/v1/chats/c1/turn/progress");
 });

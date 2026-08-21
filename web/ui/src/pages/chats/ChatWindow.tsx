@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -12,10 +12,12 @@ import {
   useChatDetail,
   useChatAction,
   useRenameChat,
-  sendChatMessage,
-  type Chat,
+  startChatTurn,
+  chatTurnProgressURL,
   type ChatMessage,
+  type ChatDetail,
 } from "@/lib/chats";
+import { ActivityCard } from "@/components/chat/ActivityCard";
 import { useUploadKBFile } from "@/lib/kb";
 import { useToast } from "@/components/shell/Toast";
 import { ChatScroll } from "@/components/chat/ChatScroll";
@@ -70,6 +72,19 @@ function attachErrorMessage(err: unknown): string {
 // the two has actually landed server-side yet. Exported for direct unit
 // testing (see reconcile.test.ts) — the scenario it guards is awkward to
 // reproduce end-to-end.
+// turnFailureMessage turns a failed turn's milestone lines into one sentence.
+//
+// The tracker pushes "⚠️ <error>" as its final milestone before closing the
+// stream, so the reason is already on the wire — this only unwraps it. The
+// fallback matters: a turn can fail before emitting anything at all, and
+// "the turn failed" beats an empty banner, which reads as nothing having
+// happened.
+export function turnFailureMessage(lines: string[]): string {
+  const last = lines[lines.length - 1];
+  const cleaned = last?.replace(/^⚠️\s*/, "").trim();
+  return cleaned || "The chat turn failed.";
+}
+
 export function reconcilePending(
   pending: ChatMessage[],
   freshMessages: ChatMessage[],
@@ -132,6 +147,22 @@ export function ChatWindow({
   // resolves after the refetch completes for an active query).
   const [pending, setPending] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
+  // Milestones for the in-flight turn, and when it started. Held here rather
+  // than derived from the query so the live stream and the mount-time replay
+  // feed one list. startedAt is null when no turn is running, which is also
+  // what keeps the elapsed timer from counting an idle chat.
+  const [turnLines, setTurnLines] = useState<string[]>([]);
+  const [turnStartedAt, setTurnStartedAt] = useState<number | null>(null);
+  // The same lines, readable SYNCHRONOUSLY. An awaiting caller needs the
+  // failure reason the moment the turn ends, and the stream's handlers close
+  // over state that may already be stale by then.
+  const turnLinesRef = useRef<string[]>([]);
+  // The lines as they stood when a turn last failed, so sendTurn can report the
+  // reason after finishTurn has cleared the live list.
+  const lastFailureRef = useRef<string[]>([]);
+  // Whether a progress stream is already open for this chat, so the re-attach
+  // effect never opens a second one for a turn already being followed.
+  const streamOpenRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const upload = useUploadKBFile();
@@ -179,69 +210,176 @@ export function ChatWindow({
   // (handleSend below shows it in the shared banner; attachFiles shows a
   // per-file toast instead, precisely because a shared banner is the wrong
   // vehicle when a batch import can have several independent outcomes.)
+  // finishTurn runs once a turn reaches a terminal state, from whichever signal
+  // gets there first — the done event, the error handler, or an in_flight that
+  // has gone false. It is idempotent for that reason.
+  const finishTurn = useCallback((failed = false) => {
+    // A turn that fails server-side still has to SAY so. The old inline path
+    // surfaced a coder failure from the POST's own body; now the turn outlives
+    // the request, so the failure arrives as the stream's last milestone (the
+    // tracker pushes "⚠️ <error>" before closing). Promote it to the banner
+    // rather than letting the card vanish and leave the owner with a message
+    // and no reply and no explanation.
+    //
+    // Read from the ref, not from state: a caller awaiting the turn needs the
+    // reason SYNCHRONOUSLY to decide what to report, and this also runs from an
+    // event handler where the state closure may be stale.
+    if (failed) {
+      lastFailureRef.current = turnLinesRef.current;
+      setError(turnFailureMessage(turnLinesRef.current));
+    }
+    turnLinesRef.current = [];
+    setTurnLines([]);
+    setBusy(false);
+    setTurnStartedAt(null);
+    // Refetch rather than trust a pushed payload: the reply is persisted
+    // server-side, so the history IS the source of truth, and this is also the
+    // path a client that missed the whole turn takes.
+    //
+    // Then dedupe rather than blindly clearing: reconcile the optimistic
+    // bubbles against the freshly-fetched history. This matters more than it
+    // used to — the server now persists the user's message DURING the turn, so
+    // the optimistic copy and a real row coexist, and setPending([]) would
+    // still drop a message that had not landed in the cache yet.
+    void qc.invalidateQueries({ queryKey: ["chat", chatId] }).then(() => {
+      const fresh = qc.getQueryData<ChatDetail>(["chat", chatId]);
+      setPending((p) => reconcilePending(p, fresh?.messages ?? []));
+    });
+    // Also refresh the session list so its updated_at/ordering doesn't go
+    // stale after a send (list is a separate query keyed by ["chats"]).
+    qc.invalidateQueries({ queryKey: ["chats"] });
+    // A chat turn is the one thing in this browser that can WRITE to the
+    // vault: the chat coder holds Read/Write/Edit over it, which is what
+    // makes "Edit with AI" work at all. Nothing used to tell the knowledge
+    // base, so a note open in the editor showed its old text until a manual
+    // reload.
+    //
+    // Invalidating the whole prefix rather than one path is deliberate — the
+    // browser has no idea which file the model touched. React Query refetches
+    // only ACTIVE queries, so in practice this is one request for the note
+    // currently open and nothing else. kb-tree is included because a turn can
+    // CREATE a note, and a tree that doesn't show it is the same bug one
+    // level up.
+    //
+    // This hangs off the turn, not off the panel closing: the user watches
+    // the reply land and expects the note to follow, without closing
+    // anything.
+    qc.invalidateQueries({ queryKey: ["kb-note"] });
+    qc.invalidateQueries({ queryKey: ["kb-tree"] });
+  }, [qc, chatId]);
+
+  // openTurnStream follows a turn's milestones. Closing this stream does NOT
+  // cancel the turn — it runs on a detached context server-side and this only
+  // observes it, which is the property that makes leaving the page survivable.
+  //
+  // onTerminal fires exactly once, whichever way the turn ends, so a caller can
+  // AWAIT completion. That matters beyond tidiness: attachFiles sends one
+  // confirmation turn per file serially, and the server refuses a second turn
+  // while one is in flight — without this it would fire N turns at once and
+  // collect N-1 conflicts.
+  const openTurnStream = useCallback(
+    (onTerminal?: (failed: boolean) => void): (() => void) => {
+      const es = new EventSource(chatTurnProgressURL(chatId));
+      streamOpenRef.current = true;
+      let settled = false;
+      const finish = (failed: boolean) => {
+        if (settled) return;
+        settled = true;
+        streamOpenRef.current = false;
+        es.close();
+        finishTurn(failed);
+        onTerminal?.(failed);
+      };
+      es.onmessage = (e) => {
+        turnLinesRef.current = [...turnLinesRef.current, e.data];
+        setTurnLines(turnLinesRef.current);
+      };
+      es.addEventListener("done", () => finish(false));
+      // The SERVER's named error event: the turn itself failed, and the reason
+      // is already in the milestone lines.
+      es.addEventListener("error", () => finish(true));
+      es.onerror = () => {
+        // The TRANSPORT dropped, which is a different thing and is NOT treated
+        // as a turn failure: a proxy can kill a stream without the turn dying,
+        // and EventSource fires this during its own transparent reconnect.
+        // Refetch to learn the real outcome, mirroring the designer's SSE.
+        finish(false);
+      };
+      return () => {
+        streamOpenRef.current = false;
+        es.close();
+      };
+    },
+    [chatId, finishTurn],
+  );
+
+  // Re-attach to a turn that was already running when this component mounted.
+  // This is the client half of the reported bug's fix: the turn is durable
+  // server-side, so a returning tab must pick it up rather than render an empty
+  // conversation with no sign that anything is happening.
+  useEffect(() => {
+    if (!data?.in_flight) return;
+    // One turn, one stream. in_flight is FALSE in the cache when a turn starts
+    // — the send does not refetch — so a refetch DURING the turn (window focus
+    // is the common one, and TanStack does that by default) flips this dep and
+    // fires the effect for a turn sendTurn is already following. Without this
+    // guard that opens a second stream on the same turn: every milestone lands
+    // twice and finishTurn runs twice. Leaving the page and coming back is
+    // exactly the scenario this feature exists for, so it is also the one that
+    // triggers it.
+    if (streamOpenRef.current) return;
+    setBusy(true);
+    turnLinesRef.current = data.turn_lines ?? [];
+    setTurnLines(turnLinesRef.current);
+    setTurnStartedAt((prev) => prev ?? Date.now());
+    return openTurnStream();
+    // Keyed on in_flight alone: re-running on every `data` identity change
+    // would open a second EventSource on each refetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data?.in_flight]);
+
   async function sendTurn(
     text: string,
   ): Promise<{ ok: true } | { ok: false; message: string }> {
     // Stamped client-side so a just-sent bubble shows its time immediately
     // instead of blank until the refetch lands. reconcilePending keys on
-    // role::content only, so this never disturbs the dedupe.
+    // role::content only, so this never disturbs the dedupe — which matters
+    // more now that the server persists the same message during the turn.
     setPending((p) => [
       ...p,
       { role: "user", content: text, created_at: new Date().toISOString() },
     ]);
     setBusy(true);
+    turnLinesRef.current = [];
+    setTurnLines([]);
+    setTurnStartedAt(Date.now());
     try {
-      const response = await sendChatMessage(chatId, text);
-      setPending((p) => [
-        ...p,
-        {
-          role: "assistant",
-          content: response,
-          created_at: new Date().toISOString(),
-        },
-      ]);
-      await qc.invalidateQueries({ queryKey: ["chat", chatId] });
-      // Also refresh the session list so its updated_at/ordering doesn't go
-      // stale after a send (list is a separate query keyed by ["chats"]).
-      qc.invalidateQueries({ queryKey: ["chats"] });
-      // A chat turn is the one thing in this browser that can WRITE to the
-      // vault: the chat coder holds Read/Write/Edit over it, which is what
-      // makes "Edit with AI" work at all. Nothing used to tell the knowledge
-      // base, so a note open in the editor showed its old text until a manual
-      // reload.
-      //
-      // Invalidating the whole prefix rather than one path is deliberate — the
-      // browser has no idea which file the model touched. React Query refetches
-      // only ACTIVE queries, so in practice this is one request for the note
-      // currently open and nothing else. kb-tree is included because a turn can
-      // CREATE a note, and a tree that doesn't show it is the same bug one
-      // level up.
-      //
-      // This hangs off the turn, not off the panel closing: the user watches
-      // the reply land and expects the note to follow, without closing
-      // anything.
-      qc.invalidateQueries({ queryKey: ["kb-note"] });
-      qc.invalidateQueries({ queryKey: ["kb-tree"] });
-      // Dedupe rather than blindly clear: reconcile against the freshly-
-      // fetched history instead of setPending([]) unconditionally — closes
-      // a transient window where a blind clear could drop a message that
-      // hadn't actually landed in the cache yet.
-      const fresh = qc.getQueryData<{ chat: Chat; messages: ChatMessage[] }>([
-        "chat",
-        chatId,
-      ]);
-      setPending((p) => reconcilePending(p, fresh?.messages ?? []));
-      return { ok: true };
+      await startChatTurn(chatId, text);
     } catch (err) {
-      // The user bubble already pushed above stays visible — the failure
-      // is on the assistant's turn, not the user's message.
+      // The user bubble already pushed above stays visible — the failure is on
+      // STARTING the turn, not on the message itself.
+      setBusy(false);
+      setTurnStartedAt(null);
       return {
         ok: false,
         message: err instanceof ApiError ? err.message : "Something went wrong",
       };
-    } finally {
-      setBusy(false);
     }
+
+    // Resolve when the turn ENDS, not when the POST returns. Callers depend on
+    // this: attachFiles sends one confirmation per file serially and the server
+    // refuses a concurrent second turn, so returning early would make a
+    // multi-file batch collide with itself.
+    const failed = await new Promise<boolean>((resolve) => {
+      openTurnStream(resolve);
+    });
+    if (failed) {
+      // finishTurn already put the reason in the banner; hand the same text
+      // back so a caller with its own reporting (attachFiles' per-file toasts)
+      // does not have to reach into component state for it.
+      return { ok: false, message: turnFailureMessage(lastFailureRef.current) };
+    }
+    return { ok: true };
   }
 
   async function handleSend(text: string) {
@@ -479,7 +617,27 @@ export function ChatWindow({
           />
         ))}
         {attaching && <TypingIndicator label="Attaching…" />}
-        {busy && !attaching && <TypingIndicator />}
+        {/* The progress card replaces the typing indicator as soon as there is
+            something to report. The indicator still covers the gap before the
+            first tool call, and a CLI coder — which never calls the progress
+            sink — keeps it for the whole turn, exactly as before.
+
+            collapsible: the header shows the CURRENT action, and clicking
+            expands the full history. ActivityCard already implements that for
+            agent builds and runs; chat simply had no stream to feed it. */}
+        {busy && !attaching &&
+          (turnLines.length > 0 && turnStartedAt !== null ? (
+            <ActivityCard
+              title="Working"
+              lines={turnLines}
+              status="live"
+              startedAt={turnStartedAt}
+              collapsible
+              defaultCollapsed
+            />
+          ) : (
+            <TypingIndicator />
+          ))}
       </ChatScroll>
 
       {error && (
