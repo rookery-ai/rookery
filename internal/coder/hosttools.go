@@ -202,6 +202,26 @@ func (h *hostToolSet) tools() []llm.Tool {
 			"Covers every file type, including converted csv/pdf/docx content, and matches on file names as well as content. " +
 			"Use this INSTEAD of read_file-ing your way through folders.",
 			Parameters: rawSchema(`{"type":"object","properties":{"query":{"type":"string","description":"what to look for; plain words work better than exact phrases"}},"required":["query"]}`)},
+		{Name: "kb_file_map", Description: "Describe a knowledge-base file BEFORE reading it: its kind, size, " +
+			"reading cost in tokens, and structure — columns and row count for a table, a heading outline for a " +
+			"document — plus a warning when one column or section holds most of the bytes. " +
+			"ALWAYS call this first for a file you have not read. It tells you what to fetch instead of paging " +
+			"through the whole thing, which is how a large file exhausts a conversation.",
+			Parameters: rawSchema(`{"type":"object","properties":{"path":{"type":"string","description":"vault-relative path"}},"required":["path"]}`)},
+		{Name: "kb_table_query", Description: "Filter, group, aggregate and rank the rows of a markdown table in " +
+			"the knowledge base. Use this for totals, averages, counts, and top-N — do NOT add numbers up yourself. " +
+			`e.g. group_by "date:month" with metric "USDAmount" and op "sum" gives spend per month. ` +
+			"Call kb_file_map first to learn the column names. Omit metric/op to get filtered rows back instead.",
+			Parameters: rawSchema(`{"type":"object","properties":{` +
+				`"path":{"type":"string","description":"vault-relative path to a note containing a markdown table"},` +
+				`"select":{"type":"array","items":{"type":"string"},"description":"columns to return; omit for all except oversized ones"},` +
+				`"where":{"type":"object","additionalProperties":{"type":"string"},"description":"column to exact value, case-insensitive"},` +
+				`"group_by":{"type":"string","description":"a column name, or date:month / date:day / date:year"},` +
+				`"metric":{"type":"string","description":"column to aggregate"},` +
+				`"op":{"type":"string","enum":["sum","avg","count","min","max"]},` +
+				`"order":{"type":"string","enum":["asc","desc"]},` +
+				`"order_by":{"type":"string","enum":["metric","group"],"description":"date groupings default to group (chronological)"},` +
+				`"limit":{"type":"integer"}},"required":["path"]}`)},
 		{Name: "glob", Description: "Find files in the vault by name/pattern and return their vault-relative paths (one per line). Supports * (within one folder), ? (one char), and ** (any depth, crosses folders) — " +
 			`e.g. glob with pattern "notes/*-meeting.md" or "**/*.py". Use this to locate files by NAME instead of listing folders one at a time.`,
 			Parameters: rawSchema(`{"type":"object","properties":{"pattern":{"type":"string","description":"glob pattern matching vault-relative paths (supports *, ?, and **)"}},"required":["pattern"]}`)},
@@ -575,6 +595,14 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		DestDir   string            `json:"dest_dir"`
 		Title     string            `json:"title"`
 		Patch     map[string]any    `json:"patch"`
+		Section   string            `json:"section"`
+		Select    []string          `json:"select"`
+		Where     map[string]string `json:"where"`
+		GroupBy   string            `json:"group_by"`
+		Metric    string            `json:"metric"`
+		Op        string            `json:"op"`
+		Order     string            `json:"order"`
+		OrderBy   string            `json:"order_by"`
 	}
 	// DecodeJSON, not json.Unmarshal: set_state's patch reaches this struct, and a
 	// plain decode rounds any id above 2^53 into a different id.
@@ -585,6 +613,15 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		data, err := h.readFile(args.Path)
 		if err != nil {
 			return "error: " + err.Error()
+		}
+		if args.Section != "" {
+			// Fetching by heading rather than byte offset. Byte paging stays
+			// for pathological input; it stops being the ONLY way in.
+			out, err := vault.SectionOf(args.Path, string(data), args.Section)
+			if err != nil {
+				return "error: " + err.Error()
+			}
+			return truncate(out)
 		}
 		return readFileSlice(string(data), args.Offset, args.Limit)
 	case "write_file":
@@ -600,8 +637,32 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 	case "list_dir":
 		return h.listDir(args.Path)
 	case "search_files":
-		out, err := h.searchFiles(ctx, args.Query)
+		out, err := h.searchFiles(ctx, args.Query, args.Path)
 		if err != nil {
+			return "error: " + err.Error()
+		}
+		return out
+	case "kb_file_map":
+		out, err := h.fileMap(args.Path)
+		if err != nil {
+			return "error: " + err.Error()
+		}
+		return out
+	case "kb_table_query":
+		out, err := h.tableQuery(args.Path, vault.TableQuery{
+			Select:  args.Select,
+			Where:   args.Where,
+			GroupBy: args.GroupBy,
+			Metric:  args.Metric,
+			Op:      args.Op,
+			Order:   args.Order,
+			OrderBy: args.OrderBy,
+			Limit:   args.Limit,
+		})
+		if err != nil {
+			// A rejected parameter IS the error path here, and naming the bad
+			// value is what lets a small model correct itself in one turn
+			// rather than guessing.
 			return "error: " + err.Error()
 		}
 		return out
@@ -803,7 +864,12 @@ const maxGlobMatches = 200
 // two doors into KB search can never again drift apart (see kbsearch.go's doc
 // comment). h.searcher lets a test inject a Searcher double to exercise the
 // degrade-on-exact-failure path deterministically; nil in production.
-func (h *hostToolSet) searchFiles(ctx context.Context, query string) (string, error) {
+// searchFiles searches the whole vault, or ONE file when path is given.
+//
+// The scoped form matters for a large file: it is how a model finds the part it
+// needs without paging, and it uses a much larger per-file match cap, because
+// the reason to cap matches per file evaporates once the caller named the file.
+func (h *hostToolSet) searchFiles(ctx context.Context, query, path string) (string, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return "", fmt.Errorf("query is required")
@@ -814,7 +880,56 @@ func (h *hostToolSet) searchFiles(ctx context.Context, query string) (string, er
 	// Defensive final cap: SearchKB already keeps its result under maxToolResult
 	// in every realistic case, but truncate() guarantees the tool result
 	// contract (never over cap) even in a pathological edge case.
+	if strings.TrimSpace(path) != "" {
+		return truncate(vault.SearchKBIn(ctx, h.vlt, h.searcher, h.workspaceID, query, path, maxToolResult)), nil
+	}
 	return truncate(vault.SearchKB(ctx, h.vlt, h.searcher, h.workspaceID, query, maxToolResult)), nil
+}
+
+// fileMap describes a file's shape so the model can plan before it reads.
+func (h *hostToolSet) fileMap(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if h.vlt == nil {
+		return "", fmt.Errorf("kb_file_map unavailable: no vault")
+	}
+	shape, err := vault.MapFile(h.vlt, h.workspaceID, path)
+	if err != nil {
+		return "", err
+	}
+	return truncate(shape.Render(maxToolResult)), nil
+}
+
+// tableQuery runs a parameterised query over a markdown table in the vault.
+//
+// The default projection omits any column the file map would have flagged as
+// dominant. Without that, a bare kb_table_query on the note that motivated this
+// work would pull 131 KB of JSON payloads straight back into the context — the
+// exact failure the tool exists to prevent, reachable by the most obvious call.
+func (h *hostToolSet) tableQuery(path string, q vault.TableQuery) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if h.vlt == nil {
+		return "", fmt.Errorf("kb_table_query unavailable: no vault")
+	}
+	data, err := h.vlt.ReadNote(h.workspaceID, path)
+	if err != nil {
+		return "", err
+	}
+	tbl, err := vault.ParseTable(string(data))
+	if err != nil {
+		return "", err
+	}
+	if len(q.Select) == 0 && q.Op == "" {
+		q.Select = vault.ModestColumns(tbl)
+	}
+	res, err := tbl.Query(q)
+	if err != nil {
+		return "", err
+	}
+	return truncate(vault.RenderQueryResult(res, maxToolResult)), nil
 }
 
 // glob finds files by name/pattern across the whole vault and returns their
