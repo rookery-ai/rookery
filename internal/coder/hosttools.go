@@ -628,7 +628,7 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 		if err := h.writeFile(args.Path, args.Content); err != nil {
 			return "error: " + err.Error()
 		}
-		return "ok: wrote " + args.Path
+		return "ok: wrote " + args.Path + h.misplacedVaultWrite(args.Path)
 	case "edit_file":
 		if err := h.editFile(args.Path, args.OldString, args.NewString); err != nil {
 			return "error: " + err.Error()
@@ -797,6 +797,48 @@ func (h *hostToolSet) writeFile(path, content string) error {
 		return err
 	}
 	return writeFileAtomic(abs, []byte(content), 0o640)
+}
+
+// vaultRootDirs are the folders that belong to the USER's knowledge base rather
+// than to an agent's own working directory.
+var vaultRootDirs = []string{"notes", "memory", "chats", "skills"}
+
+// misplacedVaultWrite reports the warning to append when a RELATIVE path that
+// names a knowledge-base folder has been resolved against an agent's own
+// directory instead of the vault root — returning "" when there is nothing to
+// say.
+//
+// This is a warning and not a redirect on purpose. `agents/<id>/notes/` is a
+// real place an agent legitimately keeps its own notes, so silently rewriting
+// the path would break the correct case to fix the incorrect one, and the tool
+// cannot tell them apart. What it CAN do is say what just happened, which is
+// the part the model had no way to notice.
+//
+// It is worth the code because it is not hypothetical: an agent instructed to
+// write to `notes/spending-alerts/<date>.md` in the knowledge base wrote to
+// `agents/<id>/notes/spending-alerts/<date>.md` instead, and nothing anywhere
+// reported it. The owner saw an agent that ran, exited 0, and produced no note.
+func (h *hostToolSet) misplacedVaultWrite(path string) string {
+	if h.vlt == nil || h.workDir == "" || filepath.IsAbs(path) {
+		return ""
+	}
+	root := h.vlt.Root(h.workspaceID)
+	if filepath.Clean(h.workDir) == filepath.Clean(root) {
+		return "" // the caller already works at the vault root; nothing to confuse
+	}
+	first := path
+	if i := strings.IndexAny(first, `/\`); i >= 0 {
+		first = first[:i]
+	}
+	for _, d := range vaultRootDirs {
+		if strings.EqualFold(first, d) {
+			return fmt.Sprintf(
+				"\nnote: that went to your OWN directory, not the user's knowledge base. "+
+					"If you meant the user's %s/, write to the absolute path %s instead.",
+				d, filepath.Join(root, path))
+		}
+	}
+	return ""
 }
 
 func (h *hostToolSet) editFile(path, oldStr, newStr string) error {
