@@ -134,6 +134,17 @@ func (s *Server) startChatTurn(workspaceID, chatID, text string) (string, bool) 
 			// CleanReply never returns "" (a genuinely empty model reply gets its
 			// own placeholder), so a blank bubble cannot be persisted here.
 			cleaned := chat.CleanReply(reply)
+			// Chat turns logged NOTHING on the happy path, so a turn that
+			// produced no text left no trace anywhere — which is why the server
+			// log was silent about two turns the owner reported as broken, and
+			// the whole diagnosis had to come out of the database.
+			// agentrunner gained its "run finished" line for exactly this
+			// reason. `empty` is the field worth grepping for.
+			slog.Info("chat: turn finished",
+				"chat", chatID, "turn", st.id,
+				"milestones", len(st.lines),
+				"reply_bytes", len(cleaned),
+				"empty", strings.TrimSpace(reply) == "")
 			if err := s.db.AddChatMessage(chatID, "assistant", cleaned); err != nil {
 				slog.Error("chat: persist assistant message", "chat", chatID, "error", err)
 			}
