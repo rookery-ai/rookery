@@ -837,6 +837,17 @@ func FriendlyRunError(err error, coderName string) string {
 	if errors.Is(err, coder.ErrUsageLimit) {
 		return fmt.Sprintf("⚠️ This agent run was skipped — %s hit its usage limit (quota/credits exhausted). It will retry automatically on the next scheduled run.", who)
 	}
+	if errors.Is(err, coder.ErrProviderEmpty) {
+		// The provider answered 2xx with nothing in it, on every retry. Nothing
+		// about the agent or the request is wrong, and nothing partial survives —
+		// so the only useful instruction is to run it again.
+		//
+		// This case used to fall through to the raw err.Error() below, which
+		// showed someone whose run had just spent ten minutes retrying the string
+		// "llm: empty response body (status 200)" — an accurate sentence that
+		// tells them nothing they can act on, and reads like a bug in their agent.
+		return fmt.Sprintf("⚠️ %s got no response from the provider, on every retry — a temporary problem at their end, not with this agent. Nothing ran, so nothing was lost. Try again.", who)
+	}
 	if errors.Is(err, coder.ErrMaxTurns) {
 		// Normally unreachable: the API-coder tool loop (api_engine.go's runToolLoop)
 		// gives the model one final text-only turn to explain itself and stop before

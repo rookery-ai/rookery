@@ -645,6 +645,9 @@ func mapProviderErr(err error) error {
 	if errors.Is(err, llm.ErrAuth) {
 		return fmt.Errorf("%w: %v", ErrAPIAuth, err)
 	}
+	if errors.Is(err, llm.ErrEmptyResponse) {
+		return ErrProviderEmpty
+	}
 	return fmt.Errorf("coder api error: %w", err)
 }
 

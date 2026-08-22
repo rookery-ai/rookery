@@ -435,6 +435,17 @@ var ErrUsageLimit = errors.New("coder usage limit reached")
 // again in a moment" instead of "you're out of quota".
 var ErrRateLimited = errors.New("coder rate-limited by provider")
 
+// ErrProviderEmpty indicates the provider answered 2xx with no body at all, on
+// every attempt of the retry budget. An outage at the provider, not a property
+// of the request: the run reached no model, so it has no tokens, no tool calls
+// and no partial work to salvage.
+//
+// Distinct from ErrRateLimited because the remedy differs in kind — throttling
+// clears on a timer and this may not — and distinct from a generic failure
+// because it is the one transient case that used to reach the user as a raw
+// internal string after burning the full retry budget.
+var ErrProviderEmpty = errors.New("coder got an empty response from the provider")
+
 // Chat sends a conversational message to the coder with optional history. It is
 // used by the text-only design conversations (agent designer, skill designer,
 // skill vetter) — never the agentic tool loop, which uses Generate.
