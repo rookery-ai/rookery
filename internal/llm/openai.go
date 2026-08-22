@@ -190,6 +190,20 @@ type openAIChoiceMessage struct {
 	Role      string           `json:"role"`
 	Content   string           `json:"content"`
 	ToolCalls []openAIToolCall `json:"tool_calls"`
+	// Both spellings are read because both occur against this one schema:
+	// OpenRouter normalizes to `reasoning`, DeepSeek's own API emits
+	// `reasoning_content`, and a `generic` OpenAI-compatible endpoint can be
+	// either. Reading one would leave the other invisible.
+	Reasoning        string `json:"reasoning"`
+	ReasoningContent string `json:"reasoning_content"`
+}
+
+// reasoning returns whichever spelling the provider used.
+func (m openAIChoiceMessage) reasoning() string {
+	if m.Reasoning != "" {
+		return m.Reasoning
+	}
+	return m.ReasoningContent
 }
 
 func parseOpenAIResponse(data []byte) (*Response, error) {
@@ -203,6 +217,7 @@ func parseOpenAIResponse(data []byte) (*Response, error) {
 	ch := r.Choices[0]
 	resp := &Response{
 		Content:      ch.Message.Content,
+		Reasoning:    ch.Message.reasoning(),
 		FinishReason: ch.FinishReason,
 		Usage:        Usage{PromptTokens: r.Usage.PromptTokens, CompletionTokens: r.Usage.CompletionTokens, TotalTokens: r.Usage.TotalTokens},
 	}
