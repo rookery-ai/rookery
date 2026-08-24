@@ -45,14 +45,14 @@ const noStdoutSentinel = "(no stdout; stderr)"
 // paths are relative to the agent working directory, matching the CLI coder's CWD
 // convention so existing AGENT.md instructions work unchanged.
 type hostToolSet struct {
-	workspaceID      string
-	vlt              *vault.Vault
-	workDir          string            // agent dir (runs) or vault root (chat); CWD for run_script
-	subprocessEnv    map[string]string // env for run_script (user secrets, provider key already stripped)
-	sandbox          bool
-	selfExe          string
-	dataDir          string
-	homesDir         string
+	workspaceID   string
+	vlt           *vault.Vault
+	workDir       string            // agent dir (runs) or vault root (chat); CWD for run_script
+	subprocessEnv map[string]string // env for run_script (user secrets, provider key already stripped)
+	sandbox       bool
+	selfExe       string
+	dataDir       string
+	homesDir      string
 	// readOnly withholds the tools that CHANGE state — write_file, edit_file and
 	// save_to_kb — and forces includeExecTools off. It is the design
 	// conversation's profile: look at the knowledge base and the public web,

@@ -522,10 +522,17 @@ func (c *Coder) chatAPI(ctx context.Context, workspaceID string, history []db.Ch
 // WithNoTools, so the chat can retrieve and edit the user's knowledge base on
 // demand. It combines chatAPI's history-threading (real alternating
 // user/assistant turns with the chat system prompt as the system message) with
-// runAPI's tool-calling loop: the model is offered the host file tools
-// (read_file/write_file/edit_file/list_dir — run_script is excluded for chat
-// because the chat workDir is the vault root, matching the chat "no shell"
-// boundary) and can call them to read/write the user's notes before replying.
+// runAPI's tool-calling loop: the model is offered the always-on host tools
+// (read_file/write_file/edit_file/list_dir/search_files/glob/kb_file_map/
+// kb_table_query/save_to_kb/web_fetch/web_search) and can call them to read and
+// write the user's notes before replying. Only the exec-gated tools —
+// run_script/bash/get_state/set_state — are excluded, because the chat workDir
+// is the vault root, matching the chat "no shell" boundary. web_fetch and
+// web_search are NOT exec-gated: they are read-only, cannot carry secrets and
+// cannot reach private address space (netguard.go), and they are available here.
+//
+// A caller using WithReadOnlyTools reaches this same path with the three
+// mutating tools withheld — see hostToolSet.readOnly.
 // The model's final answer (after any tool turns) is returned as the reply.
 func (c *Coder) chatToolsAPI(ctx context.Context, workspaceID string, history []db.ChatMessage, systemContext, userMessage string) (*Result, error) {
 	start := time.Now()
