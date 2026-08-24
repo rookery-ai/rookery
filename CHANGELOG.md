@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.1](https://github.com/rookery-ai/rookery/compare/v0.9.0...v0.9.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **agentdesigner:** show the design conversation's tool calls ([#263](https://github.com/rookery-ai/rookery/issues/263)) ([107acf9](https://github.com/rookery-ai/rookery/commit/107acf90e53a2cddc45f23748ff96be8ae49cb77))
+* **agentdesigner:** stop a build and its dry run writing into the live knowledge base ([#262](https://github.com/rookery-ai/rookery/issues/262)) ([c84d019](https://github.com/rookery-ai/rookery/commit/c84d019e1cd543fca48973653c983ca5adf1a80d))
+
 ## [0.9.0](https://github.com/rookery-ai/rookery/compare/v0.8.1...v0.9.0) (2026-08-24)
 
 
