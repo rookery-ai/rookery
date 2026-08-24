@@ -1367,9 +1367,28 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		KBManifest:         f.loadKBManifest(workspaceID, userMessage),
 	})
 
-	// Use WithNoTools so the design conversation outputs plain text and never
-	// attempts to write files or request permissions.
-	result, err := coderSvc.WithNoTools().Chat(ctx, workspaceID, sess.History, systemPrompt, userMessage)
+	// The design conversation gets the READ-ONLY tool subset: it can open a note,
+	// size a file, search the knowledge base and check a public URL, but it can
+	// change nothing. Every other coder surface — chat, builds, runs — already had
+	// these; this was the only one with none, which is why the designer proposed
+	// plans it had no way to check (most visibly the [TECHNICAL SPEC] Tier, which
+	// is a CEILING on the build and was being chosen without any view of how much
+	// data the agent would face).
+	//
+	// WithDir is required for the CLI engine, whose run directory otherwise
+	// defaults to the per-workspace claude-home — where coder credentials live —
+	// rather than the vault. It is a no-op for the API engine, which already
+	// defaults workDir to the vault root.
+	//
+	// With no vault attached there is nothing for the tools to read, so that case
+	// stays text-only exactly as before.
+	convCoder := coderSvc.WithNoTools()
+	if f.vlt != nil {
+		if root := f.vlt.Root(workspaceID); root != "" {
+			convCoder = coderSvc.WithReadOnlyTools().WithDir(root)
+		}
+	}
+	result, err := convCoder.Chat(ctx, workspaceID, sess.History, systemPrompt, userMessage)
 	if err != nil {
 		if errors.Is(err, coder.ErrUsageLimit) || errors.Is(err, coder.ErrRateLimited) {
 			return fmt.Sprintf("⚠️ %s hit its usage limit. The design session is still active — try again in a while.", coderSvc.Name()), nil
