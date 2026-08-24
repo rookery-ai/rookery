@@ -92,6 +92,37 @@ func (t *transcriptCollector) progressLines() []string {
 	return out
 }
 
+// activityLines renders the WHOLE transcript for the run's knowledge-base note
+// — every kind, not just the tool calls.
+//
+// The note is what the run panel now links to as "the full log", having stopped
+// reprinting the activity inline. That link has to be true: the note used to
+// carry progress milestones only, so a coder turn was visible in the panel and
+// nowhere else, and moving the panel to a link would have made those turns
+// unreachable rather than relocated.
+//
+// A progress line already carries its own 🔧 marker, so it is emitted bare;
+// the other kinds are labelled, because "coder" and "summary" are otherwise
+// indistinguishable from each other in a flat list.
+func (t *transcriptCollector) activityLines() []string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]string, 0, len(t.events))
+	for _, e := range t.events {
+		switch e.Kind {
+		case EventProgress:
+			out = append(out, e.Text)
+		case EventCoder:
+			out = append(out, "**coder:** "+e.Text)
+		case EventSummary:
+			out = append(out, "**summary:** "+e.Text)
+		default:
+			out = append(out, e.Text)
+		}
+	}
+	return out
+}
+
 // encode renders the transcript as JSON, dropping the oldest events if it does
 // not fit the budget.
 //

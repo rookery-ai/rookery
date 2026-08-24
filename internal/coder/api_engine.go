@@ -655,6 +655,11 @@ func addUsage(a, b llm.Usage) llm.Usage {
 	a.PromptTokens += b.PromptTokens
 	a.CompletionTokens += b.CompletionTokens
 	a.TotalTokens += b.TotalTokens
+	a.CachedTokens += b.CachedTokens
+	// ORed, not ANDed: one turn reporting cache statistics is enough to make
+	// the run's number meaningful. Requiring every turn to report would erase
+	// a real measurement whenever a single response omitted the field.
+	a.CacheReported = a.CacheReported || b.CacheReported
 	return a
 }
 

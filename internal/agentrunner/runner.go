@@ -580,6 +580,10 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 			"raw_chunks", len(rctx.rawChunks), "chat_lines", len(rctx.chatLines),
 			"silent", rctx.silentSignaled, "produced_nothing", producedNothing,
 			"warnings", len(rctx.warnings), "total_tokens", rctx.usage.TotalTokens,
+			// "n/a" rather than 0 when the provider reported nothing: a zero
+			// would read as "caching is broken", which is a finding, when the
+			// truth is "we cannot tell", which is not.
+			"cached_tokens", cachedTokensField(rctx.usage),
 			"stop_reason", rctx.stopReason,
 			"tools", coder.SummarizeToolTrace(rctx.toolTrace))
 	}()
@@ -678,9 +682,9 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 
 // reflectRun mirrors the completed run into the user's vault as a markdown note.
 func (r *Runner) reflectRun(input RunInput, agent *db.Agent, runID string, exitCode int, startedAt time.Time, rctx *coderRunContext) {
-	var toolCalls []string
+	var activity []string
 	if rctx.transcript != nil {
-		toolCalls = rctx.transcript.progressLines()
+		activity = rctx.transcript.activityLines()
 	}
 	if err := r.reflector.ReflectAgentRun(input.WorkspaceID, vault.RunNote{
 		RunID:            runID,
@@ -693,7 +697,7 @@ func (r *Runner) reflectRun(input RunInput, agent *db.Agent, runID string, exitC
 		Output:           strings.Join(rctx.rawChunks, "\n\n———\n\n"),
 		ChatLines:        rctx.chatLines,
 		Warnings:         rctx.warnings,
-		ToolCalls:        toolCalls,
+		Activity:         activity,
 		PromptTokens:     rctx.usage.PromptTokens,
 		CompletionTokens: rctx.usage.CompletionTokens,
 		TotalTokens:      rctx.usage.TotalTokens,

@@ -136,6 +136,24 @@ type Usage struct {
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
+	// CachedTokens is the part of PromptTokens the provider served from its
+	// prompt cache, and is the only way to tell a run that re-sent the same
+	// bytes cheaply from one that paid for them in full.
+	//
+	// It matters here more than it would elsewhere: the tool loop is strictly
+	// append-only with the system prompt set once, so every turn resends a
+	// byte-identical prefix — measured at 33 KB of skills, memory and AGENT.md
+	// before the static blocks. Whether that prefix is cached changes the cost
+	// of a run by roughly an order of magnitude, and nothing recorded it.
+	CachedTokens int
+	// CacheReported says the provider actually told us. It is NOT redundant
+	// with CachedTokens > 0: "the provider reports zero cache hits" and "this
+	// provider does not report cache statistics" are opposite diagnoses — the
+	// first says caching is broken and worth fixing, the second says the
+	// measurement is unavailable and the question is still open. Collapsing
+	// them into a bare zero would make an unanswerable case look like a
+	// finding.
+	CacheReported bool
 }
 
 // ─── Registry ────────────────────────────────────────────────────────────────

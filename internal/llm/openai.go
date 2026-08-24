@@ -183,7 +183,27 @@ type openAIResponse struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
+		// A POINTER so an absent object is distinguishable from one reporting
+		// zero — see Usage.CacheReported for why those are opposite findings.
+		PromptTokensDetails *struct {
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
+}
+
+// usage maps the wire accounting onto the domain type, reporting cache
+// statistics only when the provider actually sent them.
+func (r openAIResponse) usage() Usage {
+	u := Usage{
+		PromptTokens:     r.Usage.PromptTokens,
+		CompletionTokens: r.Usage.CompletionTokens,
+		TotalTokens:      r.Usage.TotalTokens,
+	}
+	if d := r.Usage.PromptTokensDetails; d != nil {
+		u.CachedTokens = d.CachedTokens
+		u.CacheReported = true
+	}
+	return u
 }
 
 type openAIChoiceMessage struct {
@@ -212,14 +232,14 @@ func parseOpenAIResponse(data []byte) (*Response, error) {
 		return nil, fmt.Errorf("llm: parse openai response: %w (body: %s)", err, snippet(data))
 	}
 	if len(r.Choices) == 0 {
-		return &Response{Usage: Usage{PromptTokens: r.Usage.PromptTokens, CompletionTokens: r.Usage.CompletionTokens, TotalTokens: r.Usage.TotalTokens}}, nil
+		return &Response{Usage: r.usage()}, nil
 	}
 	ch := r.Choices[0]
 	resp := &Response{
 		Content:      ch.Message.Content,
 		Reasoning:    ch.Message.reasoning(),
 		FinishReason: ch.FinishReason,
-		Usage:        Usage{PromptTokens: r.Usage.PromptTokens, CompletionTokens: r.Usage.CompletionTokens, TotalTokens: r.Usage.TotalTokens},
+		Usage:        r.usage(),
 	}
 	for i, tc := range ch.Message.ToolCalls {
 		args := json.RawMessage(tc.Function.Arguments)
