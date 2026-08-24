@@ -1763,7 +1763,16 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// WithAgentName so a build that exercises set_state creates state.md with the real
 	// heading. Nothing seeds a state file before this point, and a blank heading written
 	// here would be promoted verbatim into the saved agent by saveAndFinish.
-	generationCoder := coderSvc.WithDir(workDir).WithAgentName(agentNameSnap).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").
+	// A build runs the real thing against live services, so it writes into the
+	// user's knowledge base for real. Journal those writes and take them back
+	// out — an agent the user has not approved must leave no trace. The deferred
+	// call is the safety net covering every early return below; the explicit one
+	// before the dry run is what makes the rehearsal start from a clean base.
+	// Revert clears the journal, so the second call is a no-op.
+	buildJournal, revertBuildWrites := f.beginKBRehearsal(workspaceID, "build", buildID)
+	defer revertBuildWrites()
+
+	generationCoder := coderSvc.WithDir(workDir).WithAgentName(agentNameSnap).WithKBJournal(buildJournal).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").
 		// Stream the API engine's per-tool-call milestones (🔧 web_search(...), 🔧
 		// run_script(...), 🔧 write_file(...)) to the build SSE + Telegram, the same
 		// way agent runs do (agentrunner wires WithProgress(OnProgress)). Without this,
@@ -1828,6 +1837,13 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		notify("⏳ That took longer than the configured timeout — trying once more…")
 		result, err = generationCoder.Generate(genCtx, workspaceID, prompt)
 	}
+
+	// The coder is done writing, so undo whatever it put in the user's knowledge
+	// base now rather than at the deferred call — the dry run below is meant to
+	// rehearse against the knowledge base the USER has, not one this build just
+	// edited. Everything the build legitimately produced lives under workDir,
+	// which the journal never records.
+	revertBuildWrites()
 
 	// Ground-truth the build from disk BEFORE branching on the error. decideBuildOutcome is
 	// pure (reads AGENT.md + tools from workDir, no mutation/logging), so computing it up

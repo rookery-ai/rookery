@@ -22,11 +22,24 @@ import (
 // and the caller then labels that prose as executed, reintroducing the bug the dry run was
 // built to remove. runtimeContext is threaded for the same class of reason: an agent with no
 // clock cannot behave correctly on a time-sensitive task.
-func dryRunPrompt(agentMD, backendType, runtimeContext string, chatApps []prompts.ChatAppInfo) string {
+// vaultRoot IS passed, and that reverses a deliberate earlier decision. This
+// function used to withhold it on the grounds that BuildCoderPrompt gates its
+// <agent_workspace> block on the field, so an agent never told where the vault
+// is would not write there. That reasoning was wrong: the host tools resolve any
+// path under the vault root, their own descriptions advertise it ("relative to
+// the vault root, or absolute within the vault"), and a script's Landlock grant
+// covers the whole vault regardless. The omission never contained anything — all
+// it did was make the rehearsal less like the run it exists to predict, which is
+// the one property a rehearsal cannot afford to lose. Containment now comes from
+// vault.WriteJournal, which undoes the writes instead of pretending to prevent
+// them; see dryRun below.
+func dryRunPrompt(agentMD, backendType, runtimeContext, vaultRoot, agentDir string, chatApps []prompts.ChatAppInfo) string {
 	return prompts.BuildCoderPrompt(prompts.CoderPromptParams{
 		AgentMD:        agentMD,
 		BackendType:    backendType,
 		RuntimeContext: runtimeContext,
+		VaultRoot:      vaultRoot,
+		AgentDir:       agentDir,
 		ChatApps:       chatApps,
 	}) + prompts.DryRunSendProhibition
 }
@@ -85,6 +98,15 @@ func (f *Flow) dryRun(ctx context.Context, workspaceID, workDir, agentMD, backen
 	// because that predates the dry run.
 	defer restoreDryRunState(workDir)()
 
+	// state.md is restored above; the user's knowledge base is restored here.
+	// Both are the same idea applied to the two places a rehearsal leaves marks,
+	// and they are separate calls because they want opposite things: state.md
+	// must go back to what the BUILD wrote, while the knowledge base must go back
+	// to what the USER had. Its own journal, not the build's — the build's is
+	// already reverted by the time this runs.
+	dryRunJournal, revertDryRunWrites := f.beginKBRehearsal(workspaceID, "dry-run", "")
+	defer revertDryRunWrites()
+
 	// The build-phase marker is NOT optional here, and it is the single most important
 	// line in this function. It is what makes connectors.Execute refuse mutating actions.
 	// Without it a "dry run" would really post to the user's spreadsheet, really send the
@@ -101,6 +123,7 @@ func (f *Flow) dryRun(ctx context.Context, workspaceID, workDir, agentMD, backen
 
 	run := coderSvc.
 		WithDir(workDir).
+		WithKBJournal(dryRunJournal).
 		WithAllowedTools("Bash,WebFetch,Read,Write,Edit").
 		WithExtraEnv(extraEnv)
 
@@ -121,16 +144,14 @@ func (f *Flow) dryRun(ctx context.Context, workspaceID, workDir, agentMD, backen
 		run = run.WithMCP(f.mcpCaller, boundMCP)
 	}
 
-	// dryRunPrompt deliberately passes NO VaultRoot, and that omission is the only thing
-	// keeping a rehearsal out of the user's live knowledge base: BuildCoderPrompt gates its
-	// <agent_workspace> block on that field, so without it the agent is never told where the
-	// vault is or that it may write there. dryRunSendProhibition covers sending to external
-	// services and says nothing about vault writes. Passing VaultRoot here to "make the
-	// rehearsal match a real run" would silently convert rehearsals of an unapproved agent
-	// into real notes and real memory edits — do not add it without building the containment
-	// that would make it safe.
+	// The rehearsal gets the SAME prompt a real run does, vault and all, and its
+	// knowledge-base writes are undone afterwards by the journal above. The
+	// previous arrangement withheld VaultRoot and claimed that as containment; it
+	// never was one (see dryRunPrompt), and it cost the rehearsal the fidelity
+	// that is its entire purpose.
 	res, err := run.Generate(ctx, workspaceID,
-		dryRunPrompt(agentMD, backendType, f.loadRuntimeContext(workspaceID), chatApps))
+		dryRunPrompt(agentMD, backendType, f.loadRuntimeContext(workspaceID),
+			f.vaultRootFor(workspaceID), workDir, chatApps))
 	if err != nil || res == nil {
 		// One line, and a CLASS rather than the error text: a provider error can echo back
 		// the request that produced it, and that dataflow reaches the workspace's API key

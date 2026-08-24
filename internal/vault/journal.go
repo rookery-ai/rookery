@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -165,11 +166,53 @@ func (j *WriteJournal) AroundExec(fn func() error) error {
 		return fn()
 	}
 	before, _ := j.v.NewGuard().Snapshot(j.workspaceID)
+	// Directories are captured separately because Snapshot records FILES only.
+	// Without this an empty folder the user already had would look new to the
+	// diff and be pruned; with it, only folders the call actually created are.
+	dirsBefore := protectedDirs(j.v, j.workspaceID)
 	err := fn()
 	if before != nil {
-		j.foldSnapshotDiff(before)
+		j.foldSnapshotDiff(before, dirsBefore)
 	}
 	return err
+}
+
+// protectedDirs is the set of directories in the protected region, as absolute
+// paths. Used to tell a folder the caller created from one that was already
+// there but empty.
+func protectedDirs(v *Vault, workspaceID string) map[string]bool {
+	out := map[string]bool{}
+	root := v.Root(workspaceID)
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		rel, relErr := v.Rel(workspaceID, path)
+		if relErr != nil {
+			return nil
+		}
+		if rel != "." && !isProtected(rel) {
+			return filepath.SkipDir
+		}
+		out[path] = true
+		return nil
+	})
+	return out
+}
+
+// newAncestors lists abs's ancestor directories that did not exist before the
+// bracket, deepest first, stopping at the first one that did. Same contract as
+// missingAncestors, but answered from a recorded set rather than from the
+// filesystem — by the time a diff runs, the directories are already there.
+func newAncestors(abs string, dirsBefore map[string]bool, root string) []string {
+	var out []string
+	for dir := filepath.Dir(abs); strings.HasPrefix(dir, root) && dir != root; dir = filepath.Dir(dir) {
+		if dirsBefore[dir] {
+			break
+		}
+		out = append(out, dir)
+	}
+	return out
 }
 
 // foldSnapshotDiff compares the protected region against a snapshot taken
@@ -179,7 +222,7 @@ func (j *WriteJournal) AroundExec(fn func() error) error {
 // DELETED by the call and must be recreated, while a file absent from the
 // snapshot and now present was CREATED and must be removed. A naive walk of
 // what exists now would miss the first case entirely.
-func (j *WriteJournal) foldSnapshotDiff(before *Snapshot) {
+func (j *WriteJournal) foldSnapshotDiff(before *Snapshot, dirsBefore map[string]bool) {
 	root := j.v.Root(j.workspaceID)
 
 	// Paths that existed before: recreate if deleted, restore if modified.
@@ -201,7 +244,7 @@ func (j *WriteJournal) foldSnapshotDiff(before *Snapshot) {
 		if _, had := before.files[rel]; had {
 			return
 		}
-		j.recordKnownPrior(rel, priorState{newDirs: nil})
+		j.recordKnownPrior(rel, priorState{newDirs: newAncestors(abs, dirsBefore, root)})
 	})
 }
 
