@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/rookery-ai/rookery/compare/v0.8.1...v0.9.0) (2026-08-24)
+
+
+### Features
+
+* **designers:** give the design conversation read-only tools ([#259](https://github.com/rookery-ai/rookery/issues/259)) ([8524dee](https://github.com/rookery-ai/rookery/commit/8524dee7f31ebfc0c09ab68fd96836f209564a04))
+
 ## [0.8.1](https://github.com/rookery-ai/rookery/compare/v0.8.0...v0.8.1) (2026-08-24)
 
 
