@@ -50,7 +50,7 @@ func TestGetUnfinishedAgentRun(t *testing.T) {
 		t.Fatalf("expected open run %s, got run=%v err=%v", runID, run, err)
 	}
 
-	if err := database.FinishAgentRun(runID, 0, "ok", "", 120, 80, 200); err != nil {
+	if err := database.FinishAgentRun(runID, db.RunOutcome{Stdout: "ok", PromptTokens: 120, CompletionTokens: 80, TotalTokens: 200}); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	// Token usage persisted by the API coder is read back on list/recent queries.
@@ -78,7 +78,7 @@ func TestReconcileStaleRuns(t *testing.T) {
 			t.Fatalf("create run: %v", err)
 		}
 	}
-	if err := database.FinishAgentRun(doneID, 0, "ok", "", 0, 0, 0); err != nil {
+	if err := database.FinishAgentRun(doneID, db.RunOutcome{Stdout: "ok"}); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 
@@ -139,7 +139,7 @@ func TestReconcileStaleRunsReportsInterruptedCronRuns(t *testing.T) {
 
 	// A cron run that FINISHED is not interrupted and must not be retried.
 	finishedCron := open("cron")
-	if err := database.FinishAgentRun(finishedCron, 0, "ok", "", 0, 0, 0); err != nil {
+	if err := database.FinishAgentRun(finishedCron, db.RunOutcome{Stdout: "ok"}); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 

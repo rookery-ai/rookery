@@ -58,9 +58,23 @@ export function RunPanel({ agentId, agentName, liveRun }: RunPanelProps) {
   function attach(context: "own" | "collision" = "own") {
     if (sseHandleRef.current) return;
     attachContextRef.current = context;
+    // Provisional: the server's `meta` event corrects this before any line
+    // arrives. Without that correction this stamp measures how long THIS TAB
+    // has been watching, which is why the timer used to restart at zero every
+    // time the page was revisited during a run.
     startedAtRef.current = Date.now();
     setSse({ lines: [], status: "live" });
     const handle = openSSE(`/api/v1/agents/${agentId}/run/progress`, {
+      onMeta: ({ elapsed_ms }) => {
+        if (!Number.isFinite(elapsed_ms)) return;
+        startedAtRef.current = Date.now() - elapsed_ms;
+        // The ref alone would not repaint — ActivityCard reads startedAt as a
+        // prop, so the corrected value has to reach it through state.
+        setSse((s) => (s ? { ...s } : s));
+      },
+      // The server replays everything it has retained from the top of the run,
+      // so appending to a list this attach starts empty reproduces the whole
+      // run — not just what happened after the page was reopened.
       onMessage: (line) =>
         setSse((s) => (s ? { ...s, lines: [...s.lines, line] } : s)),
       onDone: () => {

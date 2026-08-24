@@ -67,7 +67,27 @@ test("the page title and its icon are sized for a title bar", () => {
   // the type scale rose it no longer read as the largest thing on the page.
   const { container } = render(<PageTitle icon="agents" title="Agents" />);
   expect(container.querySelector("h1")!.className).toContain("text-2xl");
-  expect(container.querySelector("svg")!.getAttribute("class")).toContain("size-6");
+  expect(container.querySelector("svg")!.getAttribute("class")).toContain("size-7");
+});
+
+test("the page-title icon is the same size as the title text", () => {
+  // The icon was size-6 (24px) while --text-2xl is remapped to 28px, so it read
+  // visibly small beside the title on all eight pages using this component.
+  // Asserted against the TOKEN rather than restating 28px here: index.css is
+  // the one place the scale is defined, and a test carrying its own copy of the
+  // number would agree with itself while the interface drifted.
+  const css = readFileSync(path.join(here, "..", "..", "index.css"), "utf8");
+  const rem = /--text-2xl:\s*([\d.]+)rem/.exec(css)?.[1];
+  expect(rem).toBeDefined();
+
+  const { container } = render(<PageTitle icon="agents" title="Agents" />);
+  const size = /\bsize-(\d+)\b/.exec(
+    container.querySelector("svg")!.getAttribute("class")!,
+  )?.[1];
+  expect(size).toBeDefined();
+
+  // Tailwind's size-N is N * 0.25rem.
+  expect(Number(size) * 0.25).toBeCloseTo(Number(rem), 5);
 });
 
 test("the icon rail is wide enough for its larger targets", () => {

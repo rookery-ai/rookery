@@ -20,7 +20,11 @@ export function FolderSelect({
   const { data: folders = [] } = useKBFolders();
   const blocked = (p: string) =>
     (disabledPaths ?? []).some((d) => p === d || p.startsWith(d + "/"));
-  const options = folders.filter((f) => !blocked(f));
+  // Filtered on `path`, never on `label` — disabledPaths are real vault paths,
+  // and matching a display label against them would silently stop excluding a
+  // folder the moment its label diverged from its path (which is exactly what
+  // an agent folder's label does).
+  const options = folders.filter((f) => !blocked(f.path));
 
   return (
     <select
@@ -30,8 +34,8 @@ export function FolderSelect({
       className="h-9 w-full rounded border border-border bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       {options.map((f) => (
-        <option key={f} value={f}>
-          {f === "" ? "/ (root)" : f}
+        <option key={f.path} value={f.path}>
+          {f.path === "" ? "/ (root)" : f.label || f.path}
         </option>
       ))}
     </select>

@@ -129,7 +129,7 @@ func TestAPIRunAgentAlreadyRunning(t *testing.T) {
 	// Prime the in-flight tracker directly (rather than firing a real run) so
 	// the very next POST hits startManualRun's "already running" branch.
 	s.runsMu.Lock()
-	s.runs[a.ID] = &agentRunState{progressCh: make(chan string, 1)}
+	s.runs[a.ID] = newAgentRunState()
 	s.runsMu.Unlock()
 
 	rec := doJSON(t, s, http.MethodPost, "/api/v1/agents/"+a.ID+"/run", nil, cookies)

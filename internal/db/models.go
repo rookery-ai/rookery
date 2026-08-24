@@ -114,6 +114,14 @@ type AgentRun struct {
 	ExitCode    *int
 	Stdout      string
 	Stderr      string
+	// Transcript is the run's captured tool calls and coder turns, as JSON.
+	// Populated only by GetAgentRun — ListAgentRuns and RecentAgentRuns leave it
+	// empty rather than carry every run's full transcript into a list view.
+	Transcript string
+	// Silent records that the run emitted [SILENT]. Without it a deliberately
+	// quiet run and a broken one are identically shaped here (exit 0, empty
+	// stdout) and the interface can only render the same nothing for both.
+	Silent bool
 	// Token usage, populated by the API coder (direct LLM provider). Zero for
 	// CLI coders (claude-code/opencode/codex/cursor), which don't report it.
 	PromptTokens     int

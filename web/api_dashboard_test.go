@@ -68,7 +68,7 @@ func TestAPIDashboardSeededShape(t *testing.T) {
 	if err := database.CreateAgentRun(&db.AgentRun{ID: runID, AgentID: agentID, WorkspaceID: wsID, Trigger: "manual"}); err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	if err := database.FinishAgentRun(runID, 1, "", "boom", 0, 0, 0); err != nil {
+	if err := database.FinishAgentRun(runID, db.RunOutcome{ExitCode: 1, Stderr: "boom"}); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 

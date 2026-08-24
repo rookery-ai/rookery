@@ -641,6 +641,14 @@ export default function ConnectionsPage() {
                 <b className="text-foreground">Services</b> are the accounts
                 your agents can act on — Gmail, Notion, GitHub…
               </p>
+              {/* Ordered to match the nav above it. MCP servers was the one
+                  section this block never described, which read as though it
+                  were a lesser thing rather than the fourth peer. */}
+              <p className="mt-2">
+                <b className="text-foreground">MCP servers</b> are tool servers
+                you point at by URL — they add capabilities Rookery doesn&rsquo;t
+                ship.
+              </p>
               <p className="mt-2">
                 <b className="text-foreground">Web search</b> lets you add a
                 search API key for more reliable results everywhere search

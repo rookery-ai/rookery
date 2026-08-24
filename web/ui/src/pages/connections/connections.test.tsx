@@ -308,6 +308,25 @@ test("explainer card shows the mockup copy", async () => {
   expect(screen.getByText(/are the accounts your agents can act on/)).toBeInTheDocument();
 });
 
+// The explainer described three of the four sections its own nav lists, so MCP
+// servers read as a lesser thing rather than the fourth peer. Asserted as
+// "every nav section has a paragraph" rather than by quoting the new sentence,
+// so adding a fifth section fails here too instead of silently shipping
+// another undescribed one.
+test("explainer card describes every section the nav lists", async () => {
+  mockFetch();
+  wrap();
+  await screen.findAllByText("Telegram");
+  for (const section of [
+    /^Chat apps$/,
+    /^Services$/,
+    /^MCP servers$/,
+    /^Web search$/,
+  ]) {
+    expect(screen.getByText(section, { selector: "b" })).toBeInTheDocument();
+  }
+});
+
 test("search debounces before filtering, then filters both galleries by name/label", async () => {
   mockFetch();
   const user = userEvent.setup();

@@ -1,0 +1,30 @@
+-- Record what a run actually DID, and whether it chose to stay quiet.
+--
+-- Two facts the runner computed and then discarded.
+--
+-- `transcript` holds the run's tool calls and the coder's own per-turn
+-- responses. Neither reached the database: tool-call milestones went only to
+-- the live SSE sink and were gone the moment the stream closed, and the raw
+-- coder turns were written to the vault run note while FinishAgentRun stored
+-- only the [CHAT] lines as stdout. So run history could replay what the user
+-- had already read and nothing about how the agent got there — the wrong half
+-- for debugging an agent you are about to edit.
+--
+-- `silent` records that the run emitted [SILENT]. The runner knows this
+-- (rctx.silentSignaled) and threw it away, leaving a deliberately-quiet run
+-- and a broken one identically shaped in the database: exit 0, empty stdout.
+-- The interface could only render the same nothing for both.
+--
+-- It is a column rather than a field inside the transcript JSON because the run
+-- LIST needs it: a chip saying a run was silent must not cost a transcript
+-- fetch per row.
+--
+-- Both default empty/0, so every existing row keeps exactly the meaning it has
+-- today. A historical run genuinely has no transcript — nothing captured one —
+-- and reporting `silent = 0` for it is honest: it says "not known to be
+-- silent", which is the truth about a row written before the flag existed.
+-- Backfilling by inference (exit 0 with empty stdout) would relabel failed and
+-- quiet runs alike as deliberate silence, which is the confusion this column is
+-- meant to end.
+ALTER TABLE agent_runs ADD COLUMN transcript TEXT NOT NULL DEFAULT '';
+ALTER TABLE agent_runs ADD COLUMN silent INTEGER NOT NULL DEFAULT 0;

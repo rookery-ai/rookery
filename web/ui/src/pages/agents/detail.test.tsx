@@ -89,6 +89,24 @@ function baseDetail(overrides: Partial<AgentDetail> = {}): AgentDetail {
 }
 
 let detail: AgentDetail;
+
+// A run that emitted [SILENT]: finished cleanly, deliberately said nothing.
+// Shaped exactly like a run that produced nothing because it broke, apart from
+// the flag — which is the whole reason the flag is stored rather than inferred.
+const SILENT_RUN = {
+  id: "r-silent",
+  trigger: "cron",
+  status: "success" as const,
+  silent: true,
+  exit_code: 0,
+  stdout: "",
+  stderr: "",
+  prompt_tokens: null,
+  completion_tokens: null,
+  total_tokens: null,
+  started_at: "2026-07-16T09:00:00Z",
+  finished_at: "2026-07-16T09:00:04Z",
+};
 let runCalled = false;
 let deleteAgentCalled = false;
 
@@ -104,6 +122,22 @@ function mockFetch(handlers: Record<string, (body: unknown) => Response | Promis
 
       if (url === "/api/v1/auth/session") return Promise.resolve(jsonResponse(SESSION_FIXTURE));
       if (url === "/api/v1/agents/a1" && method === "GET") return Promise.resolve(jsonResponse(detail));
+      // The lazy run-detail endpoint behind an expanded row: the agent-detail
+      // response deliberately carries no transcripts.
+      if (url === "/api/v1/agents/a1/runs/r1" && method === "GET") {
+        return Promise.resolve(
+          jsonResponse({
+            ...detail.runs[0],
+            transcript: [
+              { kind: "progress", at: "2026-07-16T08:00:02Z", text: "🔧 read_file(inbox.md)" },
+              { kind: "coder", at: "2026-07-16T08:00:05Z", text: "Three emails matched." },
+            ],
+          }),
+        );
+      }
+      if (url === "/api/v1/agents/a1/runs/r-silent" && method === "GET") {
+        return Promise.resolve(jsonResponse({ ...SILENT_RUN, transcript: [] }));
+      }
       if (url === "/api/v1/agents/a1/run" && method === "POST") {
         runCalled = true;
         detail = { ...detail, running: true, live_run: true };
@@ -429,6 +463,63 @@ test("run history renders status, trigger, and expandable output", async () => {
   expect(await screen.findByText("manual")).toBeInTheDocument();
   expect(screen.getByText("OK")).toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole("button", { name: /show output/i }));
-  expect(screen.getByText("Filed 3 emails.")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /show details/i }));
+  expect(await screen.findByText("Filed 3 emails.")).toBeInTheDocument();
+});
+
+// The reported gap: run history showed only what the user had already been
+// sent, so an agent you were about to edit told you nothing about how it got
+// there. Tool calls and coder turns are fetched lazily when a row is opened.
+test("expanding a run shows its tool calls and coder turns", async () => {
+  mockFetch();
+  wrap();
+
+  await screen.findByText("manual");
+  await userEvent.click(screen.getByRole("button", { name: /show details/i }));
+
+  expect(await screen.findByText("🔧 read_file(inbox.md)")).toBeInTheDocument();
+  expect(screen.getByText("Three emails matched.")).toBeInTheDocument();
+});
+
+// The transcript is NOT part of the agent-detail response — shipping every
+// run's transcript on page load would pay for a panel that is usually never
+// opened.
+test("the transcript is not fetched until a row is expanded", async () => {
+  const calls = mockFetch();
+  wrap();
+
+  await screen.findByText("manual");
+  expect(calls.filter((c) => c.url.includes("/runs/r1"))).toHaveLength(0);
+
+  await userEvent.click(screen.getByRole("button", { name: /show details/i }));
+  await screen.findByText("🔧 read_file(inbox.md)");
+
+  expect(calls.filter((c) => c.url.includes("/runs/r1")).length).toBeGreaterThan(0);
+});
+
+// A [SILENT] run produced no output, so the row used to show nothing at all
+// where the toggle would be — indistinguishable from a run that failed to do
+// its job.
+test("a silent run is labelled and still opens to its transcript", async () => {
+  detail = { ...detail, runs: [SILENT_RUN] };
+  mockFetch();
+  wrap();
+
+  expect(await screen.findByText("Silent")).toBeInTheDocument();
+  // The toggle is offered even with no output — the transcript is the reason
+  // to open exactly this row.
+  await userEvent.click(screen.getByRole("button", { name: /show details/i }));
+  expect(
+    await screen.findByText(/no activity was recorded/i),
+  ).toBeInTheDocument();
+});
+
+// The chip must track the flag, not "this run has no output": inferring it is
+// exactly the confusion the stored flag was added to end.
+test("a run with output is not labelled silent", async () => {
+  mockFetch();
+  wrap();
+
+  await screen.findByText("manual");
+  expect(screen.queryByText("Silent")).not.toBeInTheDocument();
 });

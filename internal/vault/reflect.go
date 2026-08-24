@@ -90,6 +90,11 @@ type RunNote struct {
 	Output     string   // raw coder output
 	ChatLines  []string // user-facing [CHAT] lines
 	Warnings   []string
+	// ToolCalls is what the agent DID: the progress milestones it reported as
+	// it worked. The note recorded the coder's words and never its actions, so
+	// a run log could show an agent concluding nothing had changed without
+	// showing whether it had actually looked.
+	ToolCalls []string
 	// Token usage, reported by the API coder (direct LLM provider). Zero for
 	// CLI coders; omitted from the run log when all zero.
 	PromptTokens     int
@@ -142,6 +147,13 @@ func (r *Reflector) ReflectAgentRun(workspaceID string, n RunNote) error {
 		b.WriteString("## Warnings\n\n")
 		for _, w := range n.Warnings {
 			b.WriteString("- " + w + "\n")
+		}
+		b.WriteString("\n")
+	}
+	if len(n.ToolCalls) > 0 {
+		b.WriteString("## Tool calls\n\n")
+		for _, t := range n.ToolCalls {
+			b.WriteString("- " + t + "\n")
 		}
 		b.WriteString("\n")
 	}

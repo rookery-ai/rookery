@@ -34,6 +34,10 @@ export type AgentRun = {
   id: string;
   trigger: string;
   status: "running" | "success" | "failed";
+  // The run emitted [SILENT] — it chose to say nothing, as distinct from
+  // having nothing to say because it broke. Optional because a run recorded
+  // before the column existed reports nothing here.
+  silent?: boolean;
   exit_code: number | null;
   stdout: string;
   stderr: string;
@@ -43,6 +47,30 @@ export type AgentRun = {
   started_at: string;
   finished_at: string | null;
 };
+
+// One entry in a run's transcript: a tool call the agent made, a turn the coder
+// produced, a closing tool summary, or a marker standing in for events dropped
+// to the size cap.
+export type RunEvent = {
+  kind: "progress" | "coder" | "summary" | "truncated";
+  at: string;
+  text: string;
+};
+
+export type AgentRunDetail = AgentRun & { transcript: RunEvent[] };
+
+// Lazily fetched when a run row is expanded — the agent-detail response lists
+// every recent run, so it deliberately carries no transcripts.
+export function useAgentRunDetail(agentId: string, runId: string | null) {
+  return useQuery({
+    queryKey: ["agent-run", agentId, runId],
+    enabled: !!runId,
+    queryFn: () =>
+      api
+        .get<AgentRunDetail>(`/api/v1/agents/${agentId}/runs/${runId}`)
+        .then((r) => ({ ...r, transcript: r.transcript ?? [] })),
+  });
+}
 
 // Mirrors toAPICoreSkill / toAPISkill.
 export type CoreSkill = { name: string; description: string };

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/robfig/cron/v3"
 	"github.com/rookery-ai/rookery/internal/agentdesigner"
+	"github.com/rookery-ai/rookery/internal/agentrunner"
 	"github.com/rookery-ai/rookery/internal/db"
 	"github.com/rookery-ai/rookery/internal/profile"
 	"github.com/rookery-ai/rookery/internal/secrets"
@@ -43,6 +45,7 @@ func (s *Server) registerAgentsAPI(g *echo.Group) {
 	g.GET("/agents/design/state", s.handleDesignState)
 	g.POST("/agents/:id/edit/start", s.handleStartEditDesign)
 	g.GET("/agents/:id/run/progress", s.handleRunProgress)
+	g.GET("/agents/:id/runs/:runID", s.apiAgentRunDetail)
 }
 
 // ── DTOs ─────────────────────────────────────────────────────────────────────
@@ -103,9 +106,14 @@ func toAPIRun(r *db.AgentRun) map[string]any {
 		}
 	}
 	return map[string]any{
-		"id":                r.ID,
-		"trigger":           r.Trigger,
-		"status":            status,
+		"id":      r.ID,
+		"trigger": r.Trigger,
+		"status":  status,
+		// A run that emitted [SILENT] chose to say nothing. Without this the
+		// list cannot tell it apart from a run that produced nothing because it
+		// broke, and renders the same empty row for both. Carried on the LIST
+		// (not just the detail) so the chip costs no extra request per row.
+		"silent":            r.Silent,
 		"exit_code":         r.ExitCode,
 		"stdout":            r.Stdout,
 		"stderr":            r.Stderr,
@@ -253,6 +261,49 @@ func (s *Server) apiDeleteAgent(c echo.Context) error {
 
 	s.audit.Log(u.ID, "delete_agent", "agent:"+agent.ID, agent.Name, c.RealIP())
 	return c.JSON(http.StatusOK, map[string]any{"ok": true})
+}
+
+// apiAgentRunDetail serves one run's transcript — its interleaved tool calls
+// and coder turns — for the expanded row on the agent page.
+//
+// A separate, lazily-fetched endpoint rather than a field on the agent-detail
+// DTO: that response lists every recent run, so carrying each one's transcript
+// would pay the cost on every page load for a panel that is collapsed by
+// default and usually never opened.
+//
+// GET /api/v1/agents/:id/runs/:runID → 200 {"id","transcript":[…],"silent",…}
+func (s *Server) apiAgentRunDetail(c echo.Context) error {
+	u := c.Get("workspace").(*db.Workspace)
+	// Scoped through the AGENT, not just the run's workspace_id: the run id
+	// comes from the URL, and resolving it without confirming it belongs to
+	// this workspace's agent would let a guessed id read another tenant's run.
+	agent, err := s.getOwnedAgent(u.ID, c.Param("id"))
+	if err != nil {
+		return jsonErr(c, http.StatusNotFound, "not_found", "agent not found")
+	}
+	run, err := s.db.GetAgentRun(c.Param("runID"))
+	if err != nil {
+		return jsonErr(c, http.StatusInternalServerError, "internal", "could not load run: "+err.Error())
+	}
+	if run == nil || run.AgentID != agent.ID || run.WorkspaceID != u.ID {
+		return jsonErr(c, http.StatusNotFound, "not_found", "run not found")
+	}
+
+	// The transcript is stored as a JSON array and forwarded as one, rather than
+	// re-encoded as a string the browser has to parse a second time. An
+	// unparseable or absent transcript yields [] — a slice field must never
+	// marshal to null, since a TypeScript default only substitutes for
+	// undefined.
+	events := []agentrunner.RunEvent{}
+	if run.Transcript != "" {
+		if err := json.Unmarshal([]byte(run.Transcript), &events); err != nil {
+			events = []agentrunner.RunEvent{}
+		}
+	}
+
+	out := toAPIRun(run)
+	out["transcript"] = events
+	return c.JSON(http.StatusOK, out)
 }
 
 func (s *Server) apiRunAgent(c echo.Context) error {

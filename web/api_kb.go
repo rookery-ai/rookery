@@ -343,11 +343,24 @@ func (s *Server) apiSaveKBIcon(c echo.Context) error {
 	return c.JSON(http.StatusOK, apiOKResponse{OK: true})
 }
 
+// apiKBFolder is one selectable destination. Path is the real on-disk relative
+// path and is what every write uses; Label is presentation only.
+//
+// The split exists because agents/<agentID>/… is the one vault path whose
+// segments are not human-readable: the picker offered a bare UUID, which names
+// nothing to the person choosing where to put a file. Label never feeds
+// Resolve, rename guards or isProtectedPath — exactly the property
+// enrichKBDisplayNames' DisplayName has, and for the same reason.
+type apiKBFolder struct {
+	Path  string `json:"path"`
+	Label string `json:"label"`
+}
+
 // apiKBFolders returns every folder path in the vault (root "" included), for
 // the new-note "Location" picker and the bulk-Move picker. Walks the vault dirs
 // only, skipping the hidden .kb internal dir. Ordered depth-first, parents
 // before children.
-// GET /api/v1/kb/folders → 200 {"folders":["","notes","projects",...]}
+// GET /api/v1/kb/folders → 200 {"folders":[{"path":"notes","label":"Notes"},...]}
 func (s *Server) apiKBFolders(c echo.Context) error {
 	u := c.Get("workspace").(*db.Workspace)
 	if s.vault == nil {
@@ -358,16 +371,60 @@ func (s *Server) apiKBFolders(c echo.Context) error {
 	if err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", "could not list folders: "+err.Error())
 	}
+
+	// One query, not one per agent folder: an agent owns several directories
+	// (logs/, tools/, notes/), so a per-folder GetAgent would issue a handful of
+	// lookups per agent on a picker that opens on every new-file click.
+	// Best-effort — a failure here degrades to raw IDs, which is what the
+	// picker showed before this map existed.
+	agentNames := map[string]string{}
+	if agents, err := s.db.ListAgents(u.ID); err == nil {
+		for _, a := range agents {
+			if a.Name != "" {
+				agentNames[a.ID] = a.Name
+			}
+		}
+	}
+
 	// Hidden in the tree, so it must be hidden here too — otherwise the legacy
 	// assets/ folder is only half-hidden and still selectable as a destination.
-	visible := make([]string, 0, len(folders))
+	visible := make([]apiKBFolder, 0, len(folders))
 	for _, f := range folders {
 		if f == legacyAssetsDir {
 			continue
 		}
-		visible = append(visible, f)
+		visible = append(visible, apiKBFolder{Path: f, Label: kbFolderLabel(f, agentNames)})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"folders": orEmpty(visible)})
+}
+
+// kbFolderLabel renders a folder path in the tree's own vocabulary: the
+// platform's top-level directories get their kbSystemFolderLabels label, and an
+// agents/<agentID> segment becomes the agent's name.
+//
+// Deliberately reuses kbSystemFolderLabels rather than defining a second
+// mapping — the picker and the tree naming the same folder differently is the
+// failure this function exists to prevent, and a parallel copy would reintroduce
+// it the first time either list changed.
+//
+// An unknown agent id (deleted agent, foreign row) keeps the raw segment: a
+// path that resolves is worth more here than a prettier one that misidentifies
+// the folder. Two agents sharing a name therefore render identically — the
+// tree already accepts that, and Path keeps the selection unambiguous.
+func kbFolderLabel(rel string, agentNames map[string]string) string {
+	if rel == "" {
+		return ""
+	}
+	parts := strings.Split(rel, "/")
+	if label, ok := kbSystemFolderLabels[parts[0]]; ok {
+		parts[0] = label
+	}
+	if strings.HasPrefix(rel, "agents/") && len(parts) >= 2 {
+		if name, ok := agentNames[parts[1]]; ok {
+			parts[1] = name
+		}
+	}
+	return strings.Join(parts, "/")
 }
 
 // ── Tree ordering ────────────────────────────────────────────────────────────
