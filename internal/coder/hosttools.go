@@ -53,6 +53,12 @@ type hostToolSet struct {
 	selfExe          string
 	dataDir          string
 	homesDir         string
+	// readOnly withholds the tools that CHANGE state — write_file, edit_file and
+	// save_to_kb — and forces includeExecTools off. It is the design
+	// conversation's profile: look at the knowledge base and the public web,
+	// change neither. Enforced in BOTH tools() and the dispatch switch, because
+	// declaring fewer tools does not stop a model calling one by name.
+	readOnly         bool
 	includeExecTools bool // gates the tools that execute code (run_script, bash); off for chat.
 	// web_fetch/web_search are read-only, cannot carry secrets, and (per netguard) cannot
 	// reach private address space — so they are offered regardless of this flag.
@@ -289,7 +295,36 @@ func (h *hostToolSet) tools() []llm.Tool {
 	}
 	tools = append(tools, h.connectorTools()...)
 	tools = append(tools, h.mcpTools()...)
+	if h.readOnly {
+		tools = withoutMutatingTools(tools)
+	}
 	return tools
+}
+
+// mutatingToolNames are the always-on tools that CHANGE the user's vault. They
+// are withheld under the read-only profile and refused by the dispatch switch.
+//
+// Named once so the declaration filter and the dispatch guards cannot drift:
+// a tool removed from one list and not the other is either an advertised tool
+// that errors, or an unadvertised tool that still runs.
+var mutatingToolNames = map[string]bool{
+	"write_file": true,
+	"edit_file":  true,
+	"save_to_kb": true,
+}
+
+// withoutMutatingTools drops the state-changing tools from a declaration list.
+// It copies rather than filtering in place: tools() appends connector and MCP
+// declarations onto a shared backing array, and reusing it would corrupt them.
+func withoutMutatingTools(tools []llm.Tool) []llm.Tool {
+	kept := make([]llm.Tool, 0, len(tools))
+	for _, t := range tools {
+		if mutatingToolNames[t.Name] {
+			continue
+		}
+		kept = append(kept, t)
+	}
+	return kept
 }
 
 func rawSchema(s string) json.RawMessage { return json.RawMessage(s) }
@@ -607,6 +642,15 @@ func (h *hostToolSet) execute(ctx context.Context, call llm.ToolCall) string {
 	// DecodeJSON, not json.Unmarshal: set_state's patch reaches this struct, and a
 	// plain decode rounds any id above 2^53 into a different id.
 	_ = agentstate.DecodeJSON(call.Args, &args) // tolerate missing fields
+
+	// Withholding a tool from tools() is not enough on its own. A model can emit a
+	// call for a name it was never offered — the switch below dispatches BY NAME —
+	// so the read-only profile refuses here as well. Checked before the switch
+	// rather than case by case: a new mutating tool added to mutatingToolNames is
+	// then covered without anyone remembering to add a guard.
+	if h.readOnly && mutatingToolNames[call.Name] {
+		return "error: " + call.Name + " is not available — this is a planning conversation and cannot change anything"
+	}
 
 	switch call.Name {
 	case "read_file":

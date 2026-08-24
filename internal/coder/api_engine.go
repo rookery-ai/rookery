@@ -594,8 +594,13 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 	// agent execution context (workDir is the agent's own dir, not the vault root). That
 	// excludes one-off chat (workDir == vault root), matching the CLI chat's file-only tool
 	// set (Read,Write,Edit,Glob,Grep — no shell/web-fetch) so the two backends stay at parity.
+	// The read-only profile never gets exec tools, whatever the workDir. Today a
+	// design conversation's workDir IS the vault root, so the comparison below
+	// already excludes them — this clause makes "read-only never means shell" true
+	// by construction rather than as a side effect of a path comparison a future
+	// WithDir change could quietly invalidate.
 	includeExecTools := false
-	if !c.noTools && workDir != "" && vaultRoot != "" {
+	if !c.noTools && !c.readOnlyTools && workDir != "" && vaultRoot != "" {
 		includeExecTools = filepath.Clean(workDir) != filepath.Clean(vaultRoot)
 	}
 	return &hostToolSet{
@@ -608,6 +613,7 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 		dataDir:          c.dataDir,
 		homesDir:         c.homesDir,
 		includeExecTools: includeExecTools,
+		readOnly:         c.readOnlyTools,
 		agentName:        c.agentName,
 		// Enforce script self-verification only during an agent BUILD (the caller sets
 		// ROOKERY_BUILD_PHASE=generation). A real run must never block on this — an agent that
