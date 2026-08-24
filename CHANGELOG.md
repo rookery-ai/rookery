@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.1](https://github.com/rookery-ai/rookery/compare/v0.6.0...v0.6.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **kb:** point a truncated table result at the column count, and reinforce the tools at run time ([#251](https://github.com/rookery-ai/rookery/issues/251)) ([691a52b](https://github.com/rookery-ai/rookery/commit/691a52b2b9080c52462ce9cbb8c5f82453b9c330))
+* **vault:** sanitise the error text too, not just the path beside it ([#249](https://github.com/rookery-ai/rookery/issues/249)) ([3784a0b](https://github.com/rookery-ai/rookery/commit/3784a0bf33f28ae27b0e11b91f47a81d9268e82c))
+
 ## [0.6.0](https://github.com/rookery-ai/rookery/compare/v0.5.0...v0.6.0) (2026-08-21)
 
 
