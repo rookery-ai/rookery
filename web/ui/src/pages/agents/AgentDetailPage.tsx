@@ -17,7 +17,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn, timeAgo } from "@/lib/utils";
-import { useAgentActions, useAgentDetail, type AgentRun } from "@/lib/agents";
+import {
+  useAgentActions,
+  useAgentDetail,
+  useAgentRunDetail,
+  type AgentRun,
+  type RunEvent,
+} from "@/lib/agents";
 import { StatusChip } from "./StatusChip";
 import { RunPanel } from "./RunPanel";
 import { AgentMDCard } from "./AgentMDCard";
@@ -58,39 +64,114 @@ function formatDuration(startedAt: string, finishedAt: string): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function RunRow({ run }: { run: AgentRun }) {
+// A run that emitted [SILENT] decided it had nothing to report. Rendered as a
+// label where the output toggle would be, because the row previously showed
+// nothing at all there — indistinguishable from a run that produced no output
+// because it had failed to do its job.
+function SilentChip() {
+  return (
+    <span
+      title="This run finished and decided there was nothing to report."
+      className="shrink-0 rounded-full bg-muted-surface px-2 py-0.5 text-xs font-medium text-muted-2"
+    >
+      Silent
+    </span>
+  );
+}
+
+const EVENT_LABEL: Record<RunEvent["kind"], string> = {
+  progress: "tool",
+  coder: "coder",
+  summary: "summary",
+  truncated: "—",
+};
+
+// The transcript panel. Fetched only once a row is expanded.
+function RunTranscript({ agentId, runId }: { agentId: string; runId: string }) {
+  const { data, isPending, isError } = useAgentRunDetail(agentId, runId);
+
+  if (isPending) return <p className="text-xs text-muted-2">Loading details…</p>;
+  if (isError)
+    return <p className="text-xs text-danger">Could not load this run.</p>;
+
+  const output = [data.stdout, data.stderr].filter(Boolean).join("\n\n");
+  const events = data.transcript;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {output && (
+        <div>
+          <h3 className="mb-1 text-xs font-semibold text-muted-2">Output</h3>
+          <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-chrome p-2 font-mono text-xs">
+            {output}
+          </pre>
+        </div>
+      )}
+      <div>
+        <h3 className="mb-1 text-xs font-semibold text-muted-2">
+          What the agent did
+        </h3>
+        {events.length === 0 ? (
+          // Runs that predate the transcript column have none, and saying so is
+          // better than an empty box that reads as a loading failure.
+          <p className="text-xs text-muted-2">
+            No activity was recorded for this run.
+          </p>
+        ) : (
+          <ol className="flex flex-col gap-1">
+            {events.map((e, i) => (
+              <li
+                key={i}
+                className="flex gap-2 rounded-md bg-chrome px-2 py-1 font-mono text-xs"
+              >
+                <span className="shrink-0 select-none text-muted-2">
+                  {EVENT_LABEL[e.kind] ?? e.kind}
+                </span>
+                <span className="min-w-0 whitespace-pre-wrap break-words">
+                  {e.text}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RunRow({ agentId, run }: { agentId: string; run: AgentRun }) {
   const [expanded, setExpanded] = useState(false);
-  const output = [run.stdout, run.stderr].filter(Boolean).join("\n\n");
   const duration = run.finished_at
     ? formatDuration(run.started_at, run.finished_at)
     : "";
+  // Offered on every FINISHED run, not only on runs with stdout: the transcript
+  // is the reason to open a row whose output is empty, which is exactly the row
+  // that used to have no toggle at all.
+  const canExpand = run.status !== "running";
 
   return (
     <li className="flex flex-col gap-1.5 py-2.5">
       <div className="flex items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <RunStatusChip status={run.status} />
+          {run.silent && <SilentChip />}
           <span className="text-xs text-muted-2">{run.trigger}</span>
           <span className="text-xs text-muted-2">
             {timeAgo(run.started_at)}
           </span>
           {duration && <span className="text-xs text-muted-2">{duration}</span>}
         </div>
-        {output && (
+        {canExpand && (
           <button
             type="button"
             className="shrink-0 text-xs text-muted-2 hover:text-foreground"
             onClick={() => setExpanded((e) => !e)}
           >
-            {expanded ? "Hide output" : "Show output"}
+            {expanded ? "Hide details" : "Show details"}
           </button>
         )}
       </div>
-      {expanded && output && (
-        <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-chrome p-2 font-mono text-xs">
-          {output}
-        </pre>
-      )}
+      {expanded && <RunTranscript agentId={agentId} runId={run.id} />}
     </li>
   );
 }
@@ -180,7 +261,7 @@ export default function AgentDetailPage() {
             ) : (
               <ul className="flex flex-col divide-y divide-border">
                 {runs.map((r) => (
-                  <RunRow key={r.id} run={r} />
+                  <RunRow key={r.id} agentId={id} run={r} />
                 ))}
               </ul>
             )}

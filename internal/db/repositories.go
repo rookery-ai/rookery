@@ -529,14 +529,74 @@ func (d *DB) CreateAgentRun(r *AgentRun) error {
 	return err
 }
 
-func (d *DB) FinishAgentRun(id string, exitCode int, stdout, stderr string, prompt, completion, total int) error {
-	_, err := d.Exec(`UPDATE agent_runs SET exit_code=?, stdout=?, stderr=?, prompt_tokens=?, completion_tokens=?, total_tokens=?, finished_at=datetime('now') WHERE id=?`,
-		exitCode, stdout, stderr, prompt, completion, total, id)
+// RunOutcome is everything recorded about a run when it finishes.
+//
+// A struct rather than more positional parameters: the argument list was
+// already seven long, and `transcript` and `stderr` are both strings whose
+// meanings are easy to swap without the compiler noticing.
+type RunOutcome struct {
+	ExitCode int
+	Stdout   string
+	Stderr   string
+	// Transcript is the run's captured tool calls and coder turns. Empty for a
+	// run recorded before the column existed, and for one that produced none.
+	Transcript string
+	// Silent records that the run emitted [SILENT] — it chose to say nothing,
+	// as distinct from having nothing to say because it broke.
+	Silent           bool
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+}
+
+func (d *DB) FinishAgentRun(id string, out RunOutcome) error {
+	_, err := d.Exec(`UPDATE agent_runs SET exit_code=?, stdout=?, stderr=?, transcript=?, silent=?, prompt_tokens=?, completion_tokens=?, total_tokens=?, finished_at=datetime('now') WHERE id=?`,
+		out.ExitCode, out.Stdout, out.Stderr, out.Transcript, out.Silent,
+		out.PromptTokens, out.CompletionTokens, out.TotalTokens, id)
 	return err
 }
 
+// GetAgentRun returns one run INCLUDING its transcript.
+//
+// Separate from ListAgentRuns, which deliberately omits the transcript: the
+// agent detail page lists every recent run, and shipping each one's full
+// transcript on every page load would pay for a panel that is collapsed by
+// default. This is the lazy read behind expanding a single row.
+func (d *DB) GetAgentRun(runID string) (*AgentRun, error) {
+	row := d.QueryRow(`SELECT id,agent_id,workspace_id,trigger,exit_code,stdout,stderr,transcript,silent,prompt_tokens,completion_tokens,total_tokens,started_at,finished_at
+		FROM agent_runs WHERE id=?`, runID)
+	var r AgentRun
+	var exitCode sql.NullInt64
+	var stdout, stderr, transcript sql.NullString
+	var startedAt string
+	var finishedAt sql.NullString
+	if err := row.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &exitCode, &stdout, &stderr,
+		&transcript, &r.Silent, &r.PromptTokens, &r.CompletionTokens, &r.TotalTokens, &startedAt, &finishedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if exitCode.Valid {
+		v := int(exitCode.Int64)
+		r.ExitCode = &v
+	}
+	r.Stdout = stdout.String
+	r.Stderr = stderr.String
+	r.Transcript = transcript.String
+	r.StartedAt = scanTime(startedAt)
+	if finishedAt.Valid {
+		t := scanTime(finishedAt.String)
+		r.FinishedAt = &t
+	}
+	return &r, nil
+}
+
+// ListAgentRuns omits `transcript` on purpose — see GetAgentRun. `silent` IS
+// selected, because the list renders a chip for it and a per-row transcript
+// fetch just to decide whether to draw a chip would defeat the split.
 func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
-	rows, err := d.Query(`SELECT id,agent_id,workspace_id,trigger,exit_code,stdout,stderr,prompt_tokens,completion_tokens,total_tokens,started_at,finished_at
+	rows, err := d.Query(`SELECT id,agent_id,workspace_id,trigger,exit_code,stdout,stderr,silent,prompt_tokens,completion_tokens,total_tokens,started_at,finished_at
 		FROM agent_runs WHERE agent_id=? ORDER BY started_at DESC LIMIT ?`, agentID, limit)
 	if err != nil {
 		return nil, err
@@ -551,7 +611,7 @@ func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
 		var finishedAt sql.NullString
 		// stdout/stderr are NULL until FinishAgentRun runs; an in-progress (async)
 		// run row is listed on the detail page, so scan through NullString.
-		if err := rows.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &exitCode, &stdout, &stderr, &r.PromptTokens, &r.CompletionTokens, &r.TotalTokens, &startedAt, &finishedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &exitCode, &stdout, &stderr, &r.Silent, &r.PromptTokens, &r.CompletionTokens, &r.TotalTokens, &startedAt, &finishedAt); err != nil {
 			return nil, err
 		}
 		if exitCode.Valid {

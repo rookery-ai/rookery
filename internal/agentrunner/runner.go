@@ -268,6 +268,46 @@ type coderRunContext struct {
 	// the outside whatever produced it — which is how a truncating reasoning model
 	// was diagnosed as a large-file problem four times over.
 	stopReason string
+	// transcript interleaves progress milestones (tool calls, verification
+	// nudges, delivered [CHAT] output) with the coder's own raw turns, in the
+	// order they happened, and is persisted with the run.
+	//
+	// Distinct from toolTrace, which is a per-call SUMMARY (name, turn, bytes,
+	// error) built for one log line and carrying neither arguments nor ordering
+	// against the model's own replies. Both are kept: the summary answers "how
+	// many calls, how big, how many failed", the transcript answers "what did it
+	// do, in what order, and what did it say about it".
+	transcript *transcriptCollector
+}
+
+// outcome assembles what FinishAgentRun records.
+//
+// Centralised because Run has THREE exit paths — coder error, produced-nothing,
+// and success — and each writes its own row. The transcript and the silent flag
+// were added long after those call sites existed, and a path that forgot one
+// would produce a run with no debugging record and no sign that anything was
+// missing, which is the exact failure this whole change set is about.
+func (rctx *coderRunContext) outcome(exitCode int, stdout, stderr string) db.RunOutcome {
+	out := db.RunOutcome{
+		ExitCode:         exitCode,
+		Stdout:           stdout,
+		Stderr:           stderr,
+		Silent:           rctx.silentSignaled,
+		PromptTokens:     rctx.usage.PromptTokens,
+		CompletionTokens: rctx.usage.CompletionTokens,
+		TotalTokens:      rctx.usage.TotalTokens,
+	}
+	if rctx.transcript != nil {
+		// The tool summary is appended as the transcript's LAST event rather
+		// than kept in a column of its own: it is a closing note about the run,
+		// it already has a rendering (SummarizeToolTrace, written for the log
+		// line), and a second column would be a second thing to forget.
+		if s := coder.SummarizeToolTrace(rctx.toolTrace); s != "" {
+			rctx.transcript.add(EventSummary, s)
+		}
+		out.Transcript = rctx.transcript.encode()
+	}
+	return out
 }
 
 func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunInput) error {
@@ -403,7 +443,18 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	// one — see agentdesigner/flow.go), so the first set_state call of its first run
 	// creates it from the template, and every later write only splices the fence. A
 	// blank heading written there is permanent.
-	coderSvc := baseCoder.WithDir(agentDir).WithAgentName(agent.Name).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").WithProgress(input.OnProgress)
+	// Built here rather than just before runCoderTurns because the coder needs
+	// its transcript collector as a progress sink, and the sink has to be in
+	// place before the coder is constructed.
+	//
+	// The transcript is collected at THIS layer, not at the web layer, because
+	// this is the only layer both triggers pass through: the scheduler wires
+	// SendOutput and no OnProgress at all, so a collector attached where the
+	// manual run is started would leave cron runs — the ones nobody watched, and
+	// so the ones most in need of a record — with nothing captured.
+	rctx := &coderRunContext{transcript: &transcriptCollector{}}
+
+	coderSvc := baseCoder.WithDir(agentDir).WithAgentName(agent.Name).WithAllowedTools("Bash,WebFetch,Read,Write,Edit").WithProgress(rctx.transcript.wrap(input.OnProgress))
 
 	// Assemble the subprocess env once (WithExtraEnv replaces rather than merges): user
 	// secrets + the connector-bridge vars. Injected for every coder type.
@@ -490,7 +541,6 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 		return fmt.Errorf("create run record: %w", err)
 	}
 
-	rctx := &coderRunContext{}
 	runErr := r.runCoderTurns(ctx, agent, input, agentDir, stateMap, stateReadOK, prompt, coderSvc, rctx)
 
 	// A coder that returned zero bytes did not run quietly — it did not run. Treat
@@ -535,7 +585,9 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	}()
 
 	if runErr != nil {
-		_ = r.db.FinishAgentRun(runID, -1, strings.Join(rctx.chatLines, "\n"), strings.Join(rctx.warnings, "\n")+"\n"+runErr.Error(), rctx.usage.PromptTokens, rctx.usage.CompletionTokens, rctx.usage.TotalTokens)
+		_ = r.db.FinishAgentRun(runID, rctx.outcome(-1,
+			strings.Join(rctx.chatLines, "\n"),
+			strings.Join(rctx.warnings, "\n")+"\n"+runErr.Error()))
 		friendly := FriendlyRunError(runErr, coderSvc.Name())
 		// A multi-turn run (e.g. one that made a [CALL: agent] to a child agent, or
 		// completed some turns before the final one failed) may have already
@@ -559,8 +611,8 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 		// this is not. Naming the real event is what lets the owner tell a broken
 		// model apart from a working agent with nothing to report.
 		msg := "⚠️ Ran but the model returned no output at all — nothing was checked and no state was saved. See the run log."
-		_ = r.db.FinishAgentRun(runID, -1, "", strings.Join(append(rctx.warnings, "coder returned no output"), "\n"),
-			rctx.usage.PromptTokens, rctx.usage.CompletionTokens, rctx.usage.TotalTokens)
+		_ = r.db.FinishAgentRun(runID, rctx.outcome(-1, "",
+			strings.Join(append(rctx.warnings, "coder returned no output"), "\n")))
 		if input.SendOutput != nil {
 			input.SendOutput(msg)
 		}
@@ -595,7 +647,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 		}
 	}
 
-	_ = r.db.FinishAgentRun(runID, 0, finalOutput, strings.Join(rctx.warnings, "\n"), rctx.usage.PromptTokens, rctx.usage.CompletionTokens, rctx.usage.TotalTokens)
+	_ = r.db.FinishAgentRun(runID, rctx.outcome(0, finalOutput, strings.Join(rctx.warnings, "\n")))
 
 	switch {
 	case finalOutput != "":
@@ -626,6 +678,10 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 
 // reflectRun mirrors the completed run into the user's vault as a markdown note.
 func (r *Runner) reflectRun(input RunInput, agent *db.Agent, runID string, exitCode int, startedAt time.Time, rctx *coderRunContext) {
+	var toolCalls []string
+	if rctx.transcript != nil {
+		toolCalls = rctx.transcript.progressLines()
+	}
 	if err := r.reflector.ReflectAgentRun(input.WorkspaceID, vault.RunNote{
 		RunID:            runID,
 		AgentID:          input.AgentID,
@@ -637,6 +693,7 @@ func (r *Runner) reflectRun(input RunInput, agent *db.Agent, runID string, exitC
 		Output:           strings.Join(rctx.rawChunks, "\n\n———\n\n"),
 		ChatLines:        rctx.chatLines,
 		Warnings:         rctx.warnings,
+		ToolCalls:        toolCalls,
 		PromptTokens:     rctx.usage.PromptTokens,
 		CompletionTokens: rctx.usage.CompletionTokens,
 		TotalTokens:      rctx.usage.TotalTokens,
@@ -741,6 +798,13 @@ func (r *Runner) runCoderTurns(
 		// Accumulate raw output; the run note (markdown, in the vault) is written
 		// once the run finishes — see reflectRun in runCoderAgent.
 		rctx.rawChunks = append(rctx.rawChunks, result.Text)
+		// Recorded here rather than reconstructed from rawChunks at the end, so
+		// the turn lands in the transcript BETWEEN the tool calls that preceded
+		// it and those that follow. Joining two lists by position afterwards
+		// would produce the same thing with a way to get the order wrong.
+		if rctx.transcript != nil {
+			rctx.transcript.add(EventCoder, result.Text)
+		}
 
 		// Handle agent-to-agent calls.
 		if len(parsed.callAgents) == 0 {
