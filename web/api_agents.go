@@ -120,9 +120,17 @@ func toAPIRun(r *db.AgentRun) map[string]any {
 		"stderr":            r.Stderr,
 		"prompt_tokens":     r.PromptTokens,
 		"completion_tokens": r.CompletionTokens,
-		"total_tokens":      r.TotalTokens,
-		"started_at":        r.StartedAt,
-		"finished_at":       r.FinishedAt,
+		// Cost and cache accounting, each with the flag saying whether anyone
+		// actually reported it. The flags are not redundant with a zero value:
+		// a CLI coder reports neither, and a panel rendering "$0.00" for it
+		// would claim the run was free rather than unmeasured.
+		"cached_tokens":  r.CachedTokens,
+		"cache_reported": r.CacheReported,
+		"cost_usd":       r.CostUSD,
+		"cost_reported":  r.CostReported,
+		"total_tokens":   r.TotalTokens,
+		"started_at":     r.StartedAt,
+		"finished_at":    r.FinishedAt,
 	}
 }
 

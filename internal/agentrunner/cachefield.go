@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/rookery-ai/rookery/internal/llm"
+	"github.com/rookery-ai/rookery/internal/vault"
 )
 
 // cachedTokensField renders the run's prompt-cache accounting for the log.
@@ -28,4 +29,20 @@ func cachedTokensField(u llm.Usage) string {
 	}
 	pct := float64(u.CachedTokens) / float64(u.PromptTokens) * 100
 	return fmt.Sprintf("%d (%.0f%% of prompt)", u.CachedTokens, pct)
+}
+
+// costField renders what the run cost, for the log.
+//
+// "n/a" when nobody reported it — every CLI coder (a subprocess has no usage
+// accounting) and every provider that bills separately rather than per
+// response. Rendering those as $0.00 would read as free.
+// Delegates the rendering to vault.FormatCostUSD, which the run note also uses.
+// A second copy would drift into showing one precision in the log and another
+// in the note for the same run — and the whole point of this change is that a
+// number nobody can cross-check is worse than no number.
+func costField(u llm.Usage) string {
+	if !u.CostReported {
+		return "n/a"
+	}
+	return vault.FormatCostUSD(u.Cost)
 }

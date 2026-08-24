@@ -547,12 +547,23 @@ type RunOutcome struct {
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
+	// CachedTokens is the part of PromptTokens the provider served from its
+	// prompt cache; CostUSD is what the provider said the run cost, summed over
+	// its turns. Each carries a *Reported flag rather than using 0 as a
+	// sentinel: a provider reporting zero and a provider reporting nothing are
+	// opposite findings, and a CLI coder reports neither — showing its runs as
+	// "$0.00" would read as free rather than as unmeasured.
+	CachedTokens  int
+	CacheReported bool
+	CostUSD       float64
+	CostReported  bool
 }
 
 func (d *DB) FinishAgentRun(id string, out RunOutcome) error {
-	_, err := d.Exec(`UPDATE agent_runs SET exit_code=?, stdout=?, stderr=?, transcript=?, silent=?, prompt_tokens=?, completion_tokens=?, total_tokens=?, finished_at=datetime('now') WHERE id=?`,
+	_, err := d.Exec(`UPDATE agent_runs SET exit_code=?, stdout=?, stderr=?, transcript=?, silent=?, prompt_tokens=?, completion_tokens=?, total_tokens=?, cached_tokens=?, cache_reported=?, cost_usd=?, cost_reported=?, finished_at=datetime('now') WHERE id=?`,
 		out.ExitCode, out.Stdout, out.Stderr, out.Transcript, out.Silent,
-		out.PromptTokens, out.CompletionTokens, out.TotalTokens, id)
+		out.PromptTokens, out.CompletionTokens, out.TotalTokens,
+		out.CachedTokens, out.CacheReported, out.CostUSD, out.CostReported, id)
 	return err
 }
 
@@ -563,7 +574,7 @@ func (d *DB) FinishAgentRun(id string, out RunOutcome) error {
 // transcript on every page load would pay for a panel that is collapsed by
 // default. This is the lazy read behind expanding a single row.
 func (d *DB) GetAgentRun(runID string) (*AgentRun, error) {
-	row := d.QueryRow(`SELECT id,agent_id,workspace_id,trigger,exit_code,stdout,stderr,transcript,silent,prompt_tokens,completion_tokens,total_tokens,started_at,finished_at
+	row := d.QueryRow(`SELECT id,agent_id,workspace_id,trigger,exit_code,stdout,stderr,transcript,silent,prompt_tokens,completion_tokens,total_tokens,cached_tokens,cache_reported,cost_usd,cost_reported,started_at,finished_at
 		FROM agent_runs WHERE id=?`, runID)
 	var r AgentRun
 	var exitCode sql.NullInt64
@@ -571,7 +582,8 @@ func (d *DB) GetAgentRun(runID string) (*AgentRun, error) {
 	var startedAt string
 	var finishedAt sql.NullString
 	if err := row.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &exitCode, &stdout, &stderr,
-		&transcript, &r.Silent, &r.PromptTokens, &r.CompletionTokens, &r.TotalTokens, &startedAt, &finishedAt); err != nil {
+		&transcript, &r.Silent, &r.PromptTokens, &r.CompletionTokens, &r.TotalTokens,
+		&r.CachedTokens, &r.CacheReported, &r.CostUSD, &r.CostReported, &startedAt, &finishedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -596,7 +608,7 @@ func (d *DB) GetAgentRun(runID string) (*AgentRun, error) {
 // selected, because the list renders a chip for it and a per-row transcript
 // fetch just to decide whether to draw a chip would defeat the split.
 func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
-	rows, err := d.Query(`SELECT id,agent_id,workspace_id,trigger,exit_code,stdout,stderr,silent,prompt_tokens,completion_tokens,total_tokens,started_at,finished_at
+	rows, err := d.Query(`SELECT id,agent_id,workspace_id,trigger,exit_code,stdout,stderr,silent,prompt_tokens,completion_tokens,total_tokens,cached_tokens,cache_reported,cost_usd,cost_reported,started_at,finished_at
 		FROM agent_runs WHERE agent_id=? ORDER BY started_at DESC LIMIT ?`, agentID, limit)
 	if err != nil {
 		return nil, err
@@ -611,7 +623,9 @@ func (d *DB) ListAgentRuns(agentID string, limit int) ([]*AgentRun, error) {
 		var finishedAt sql.NullString
 		// stdout/stderr are NULL until FinishAgentRun runs; an in-progress (async)
 		// run row is listed on the detail page, so scan through NullString.
-		if err := rows.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &exitCode, &stdout, &stderr, &r.Silent, &r.PromptTokens, &r.CompletionTokens, &r.TotalTokens, &startedAt, &finishedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.AgentID, &r.WorkspaceID, &r.Trigger, &exitCode, &stdout, &stderr, &r.Silent,
+			&r.PromptTokens, &r.CompletionTokens, &r.TotalTokens,
+			&r.CachedTokens, &r.CacheReported, &r.CostUSD, &r.CostReported, &startedAt, &finishedAt); err != nil {
 			return nil, err
 		}
 		if exitCode.Valid {

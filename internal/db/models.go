@@ -127,8 +127,16 @@ type AgentRun struct {
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
-	StartedAt        time.Time
-	FinishedAt       *time.Time
+	// CachedTokens is the part of PromptTokens served from the provider's prompt
+	// cache; CostUSD is what the provider said the run cost. The *Reported flags
+	// separate "reported as zero" from "not reported at all" — a CLI coder
+	// reports neither, and showing its runs as "$0.00" would read as free.
+	CachedTokens  int
+	CacheReported bool
+	CostUSD       float64
+	CostReported  bool
+	StartedAt     time.Time
+	FinishedAt    *time.Time
 }
 
 type Secret struct {
