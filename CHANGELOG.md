@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/rookery-ai/rookery/compare/v0.6.1...v0.6.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* **coder:** tell a truncated reasoning answer apart from an empty one ([#252](https://github.com/rookery-ai/rookery/issues/252)) ([96fb73d](https://github.com/rookery-ai/rookery/commit/96fb73d57522f360a61d9d6f092ba226367f4019))
+
 ## [0.6.1](https://github.com/rookery-ai/rookery/compare/v0.6.0...v0.6.1) (2026-08-21)
 
 
