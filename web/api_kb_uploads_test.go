@@ -121,16 +121,23 @@ func TestKBFoldersHidesLegacyAssets(t *testing.T) {
 		t.Fatalf("GET /kb/folders = %d: %s", rec.Code, rec.Body.String())
 	}
 	var body struct {
-		Folders []string `json:"folders"`
+		Folders []struct {
+			Path  string `json:"path"`
+			Label string `json:"label"`
+		} `json:"folders"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if hasString(body.Folders, "assets") {
-		t.Errorf("assets must not be offered as a destination, got %v", body.Folders)
+	paths := make([]string, 0, len(body.Folders))
+	for _, f := range body.Folders {
+		paths = append(paths, f.Path)
 	}
-	if !hasString(body.Folders, "uploads") {
-		t.Errorf("uploads must be offered as a destination, got %v", body.Folders)
+	if hasString(paths, "assets") {
+		t.Errorf("assets must not be offered as a destination, got %v", paths)
+	}
+	if !hasString(paths, "uploads") {
+		t.Errorf("uploads must be offered as a destination, got %v", paths)
 	}
 }
 

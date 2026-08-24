@@ -348,7 +348,7 @@ test("creating a note from the palette flow opens it in the rich text editor", a
         );
       }
       if (url.startsWith("/api/v1/kb/tree")) return Promise.resolve(jsonResponse({ path: "", nodes: [], order: [] }));
-      if (url.startsWith("/api/v1/kb/folders")) return Promise.resolve(jsonResponse({ folders: [""] }));
+      if (url.startsWith("/api/v1/kb/folders")) return Promise.resolve(jsonResponse({ folders: [{ path: "", label: "" }] }));
       return Promise.resolve(jsonResponse({}));
     }),
   );

@@ -159,12 +159,17 @@ export function useSetKBIcon() {
 
 // Flat list of every folder path in the vault (root "" included), for the
 // new-note "Location" picker and the bulk-Move picker.
+// One selectable destination. `path` is the real vault path every write uses;
+// `label` is presentation only and renders an agents/<agentID> segment as the
+// agent's name (the picker used to show the bare UUID).
+export type KBFolder = { path: string; label: string };
+
 export function useKBFolders() {
   return useQuery({
     queryKey: ["kb-folders"],
     queryFn: () =>
       api
-        .get<{ folders: string[] }>("/api/v1/kb/folders")
+        .get<{ folders: KBFolder[] }>("/api/v1/kb/folders")
         .then((r) => r.folders ?? []),
   });
 }
