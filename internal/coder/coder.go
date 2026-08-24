@@ -122,11 +122,18 @@ type Coder struct {
 	sandbox      bool              // when true, confine subprocesses via Landlock (Linux only)
 	extraEnv     map[string]string // additional env vars merged into the subprocess environment
 	noTools      bool              // when true, passes --allowedTools "" to disable all tools
-	workDir      string            // when non-empty, overrides cmd.Dir (default: per-user home)
-	agentName    string            // name for the API engine's state.md tools (cosmetic; see WithAgentName)
-	allowedTools string            // when non-empty, passed as --allowedTools <value>
-	backendType  string            // '' = auto-detect by binary name, 'claude', 'generic', or 'api"
-	cliModel     string            // provider/model for CLI coders that accept -m/--model (opencode, cursor)
+	// readOnlyTools offers the read-only tool subset: the always-on set minus
+	// write_file/edit_file/save_to_kb, and never the exec-gated tools. It is a
+	// SEPARATE flag rather than a third value of noTools so that every existing
+	// noTools call site — the CLI arg switch, the Chat dispatch, Ping, the API
+	// engine's offer sites, the kickoff-message choice and the exec gate — is
+	// byte-identical for every caller that does not set it.
+	readOnlyTools bool
+	workDir       string // when non-empty, overrides cmd.Dir (default: per-user home)
+	agentName     string // name for the API engine's state.md tools (cosmetic; see WithAgentName)
+	allowedTools  string // when non-empty, passed as --allowedTools <value>
+	backendType   string // '' = auto-detect by binary name, 'claude', 'generic', or 'api"
+	cliModel      string // provider/model for CLI coders that accept -m/--model (opencode, cursor)
 
 	// ── API coder (coder_kind == "api") ──────────────────────────────────────
 	// When api is non-nil, Generate/Ping dispatch to the in-process tool-calling
@@ -223,6 +230,36 @@ func (c *Coder) WithNoTools() *Coder {
 	c2 := *c
 	c2.noTools = true
 	return &c2
+}
+
+// WithReadOnlyTools returns a shallow copy of the Coder offering the read-only
+// tool subset. Use it for the design conversations, which need to look at the
+// knowledge base and the public web but must never change either.
+//
+// It deliberately leaves noTools false, so Chat still routes to chatToolsAPI —
+// real alternating history plus a tool loop — rather than the single-completion
+// chatAPI path that WithNoTools selects.
+func (c *Coder) WithReadOnlyTools() *Coder {
+	c2 := *c
+	c2.readOnlyTools = true
+	return &c2
+}
+
+// effectiveAllowedTools is the CLI grant actually passed to the backend.
+//
+// It exists to make one failure impossible by construction. claudeBackend.buildArgs
+// is a switch: noTools emits `--allowedTools ""`, a non-empty allowedTools emits its
+// value, and OTHERWISE no flag is emitted at all — which alongside
+// `--setting-sources ""` hangs the subprocess indefinitely. A read-only caller that
+// forgets WithAllowedTools therefore gets the bare read-only grant rather than a hang.
+//
+// It is a no-op for every other caller: without the read-only profile it returns
+// allowedTools untouched.
+func (c *Coder) effectiveAllowedTools() string {
+	if c.readOnlyTools && c.allowedTools == "" {
+		return DesignAllowedTools("")
+	}
+	return c.allowedTools
 }
 
 // WithDir returns a shallow copy of the Coder that runs the subprocess with dir
@@ -382,7 +419,7 @@ func (c *Coder) Generate(ctx context.Context, workspaceID, prompt string) (*Resu
 
 	start := time.Now()
 
-	args := backend.buildArgs(prompt, c.noTools, c.allowedTools)
+	args := backend.buildArgs(prompt, c.noTools, c.effectiveAllowedTools())
 	env := c.buildEnv(userDir, backend)
 	runDir := userDir
 	if c.workDir != "" {

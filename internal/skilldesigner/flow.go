@@ -407,7 +407,20 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
 	})
 
-	result, err := coderSvc.WithNoTools().Chat(ctx, workspaceID, sess.History, systemPrompt, userMessage)
+	// Read-only tools for the design conversation — see the matching comment in
+	// internal/agentdesigner/flow.go. The two designers share one front end, so
+	// they move together or they drift.
+	//
+	// The VETTING call further down deliberately keeps WithNoTools: it audits
+	// generated skill content for exfiltration, and an auditor holding file and
+	// network tools gives the audited content a way to act.
+	convCoder := coderSvc.WithNoTools()
+	if f.vlt != nil {
+		if root := f.vlt.Root(workspaceID); root != "" {
+			convCoder = coderSvc.WithReadOnlyTools().WithDir(root)
+		}
+	}
+	result, err := convCoder.Chat(ctx, workspaceID, sess.History, systemPrompt, userMessage)
 
 	// Persist the draft on every terminal path so the conversation survives a
 	// page navigation or server restart — even when the coder is rate-limited

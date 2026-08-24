@@ -30,6 +30,19 @@ const maxAPITurns = 30
 // grace turn. It must stay larger than maxAPITurns for that reason.
 const maxBuildAPITurns = 50
 
+// maxDesignAPITurns is the base budget for a DESIGN conversation turn, and is
+// deliberately far tighter than maxAPITurns.
+//
+// A design turn is a BLOCKING POST (/api/v1/agents/design) with no SSE stream and
+// no write timeout — SSE covers generation only. So every extra turn is time the
+// user spends watching a typing indicator with no idea what is happening, which
+// is the opposite of the situation a run is in. The designer's tools are for
+// looking something up before asking a question: a knowledge-base lookup or a
+// feasibility check converges in two or three calls, and eight leaves room to
+// retry. The unproductive-streak guard (maxUnproductiveStreak) stays the backstop
+// rather than the bound.
+const maxDesignAPITurns = 8
+
 // maxHardTurns is runaway protection and is NEVER extended, however productive the
 // loop claims to be.
 //
@@ -118,7 +131,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 	emptyNudges := 0
 	truncationRetries := 0
 	var toolTrace []ToolCallStat
-	budget := newTurnBudget(tools.verifyBuild)
+	budget := newTurnBudget(tools.verifyBuild, tools.readOnly)
 	offered := toolNames(req.Tools)
 	var stopReason string
 	for {
@@ -509,10 +522,17 @@ func (c *Coder) chatAPI(ctx context.Context, workspaceID string, history []db.Ch
 // WithNoTools, so the chat can retrieve and edit the user's knowledge base on
 // demand. It combines chatAPI's history-threading (real alternating
 // user/assistant turns with the chat system prompt as the system message) with
-// runAPI's tool-calling loop: the model is offered the host file tools
-// (read_file/write_file/edit_file/list_dir — run_script is excluded for chat
-// because the chat workDir is the vault root, matching the chat "no shell"
-// boundary) and can call them to read/write the user's notes before replying.
+// runAPI's tool-calling loop: the model is offered the always-on host tools
+// (read_file/write_file/edit_file/list_dir/search_files/glob/kb_file_map/
+// kb_table_query/save_to_kb/web_fetch/web_search) and can call them to read and
+// write the user's notes before replying. Only the exec-gated tools —
+// run_script/bash/get_state/set_state — are excluded, because the chat workDir
+// is the vault root, matching the chat "no shell" boundary. web_fetch and
+// web_search are NOT exec-gated: they are read-only, cannot carry secrets and
+// cannot reach private address space (netguard.go), and they are available here.
+//
+// A caller using WithReadOnlyTools reaches this same path with the three
+// mutating tools withheld — see hostToolSet.readOnly.
 // The model's final answer (after any tool turns) is returned as the reply.
 func (c *Coder) chatToolsAPI(ctx context.Context, workspaceID string, history []db.ChatMessage, systemContext, userMessage string) (*Result, error) {
 	start := time.Now()
@@ -594,8 +614,13 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 	// agent execution context (workDir is the agent's own dir, not the vault root). That
 	// excludes one-off chat (workDir == vault root), matching the CLI chat's file-only tool
 	// set (Read,Write,Edit,Glob,Grep — no shell/web-fetch) so the two backends stay at parity.
+	// The read-only profile never gets exec tools, whatever the workDir. Today a
+	// design conversation's workDir IS the vault root, so the comparison below
+	// already excludes them — this clause makes "read-only never means shell" true
+	// by construction rather than as a side effect of a path comparison a future
+	// WithDir change could quietly invalidate.
 	includeExecTools := false
-	if !c.noTools && workDir != "" && vaultRoot != "" {
+	if !c.noTools && !c.readOnlyTools && workDir != "" && vaultRoot != "" {
 		includeExecTools = filepath.Clean(workDir) != filepath.Clean(vaultRoot)
 	}
 	return &hostToolSet{
@@ -608,6 +633,7 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 		dataDir:          c.dataDir,
 		homesDir:         c.homesDir,
 		includeExecTools: includeExecTools,
+		readOnly:         c.readOnlyTools,
 		agentName:        c.agentName,
 		// Enforce script self-verification only during an agent BUILD (the caller sets
 		// ROOKERY_BUILD_PHASE=generation). A real run must never block on this — an agent that

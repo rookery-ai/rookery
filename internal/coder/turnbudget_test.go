@@ -7,7 +7,7 @@ import "testing"
 // only by turns that achieved nothing, so real work runs on while a model spinning
 // on one failing call still dies quickly.
 func TestTurnBudgetProductiveWorkRunsPastTheBase(t *testing.T) {
-	b := newTurnBudget(false) // run/chat: base 30
+	b := newTurnBudget(false, false) // run/chat: base 30
 	for i := 0; i < 100; i++ {
 		if stop, reason := b.next(true); stop {
 			t.Fatalf("productive turn %d stopped early (%s)", i, reason)
@@ -16,7 +16,7 @@ func TestTurnBudgetProductiveWorkRunsPastTheBase(t *testing.T) {
 }
 
 func TestTurnBudgetStopsOnUnproductiveStreak(t *testing.T) {
-	b := newTurnBudget(false)
+	b := newTurnBudget(false, false)
 
 	// Interleaving keeps the streak broken, so the run continues.
 	for i := 0; i < 20; i++ {
@@ -38,7 +38,7 @@ func TestTurnBudgetStopsOnUnproductiveStreak(t *testing.T) {
 }
 
 func TestTurnBudgetSpendsBaseOnUnproductiveTurnsOnly(t *testing.T) {
-	b := newTurnBudget(false) // base 30
+	b := newTurnBudget(false, false) // base 30
 	spent := 0
 	for spent < 29 {
 		b.next(false)
@@ -54,7 +54,7 @@ func TestTurnBudgetSpendsBaseOnUnproductiveTurnsOnly(t *testing.T) {
 }
 
 func TestTurnBudgetHardCeilingIsNeverExtended(t *testing.T) {
-	b := newTurnBudget(true) // build: base 50
+	b := newTurnBudget(true, false) // build: base 50
 	var stop bool
 	var reason string
 	for i := 0; i < 500 && !stop; i++ {
@@ -72,7 +72,7 @@ func TestTurnBudgetHardCeilingIsNeverExtended(t *testing.T) {
 // tools-unsupported degrade and the verify-finish nudge, both of which `continue`.
 // Without iterate() counting at the top, such a path would spin forever.
 func TestTurnBudgetCeilingBindsWithoutOutcomes(t *testing.T) {
-	b := newTurnBudget(false)
+	b := newTurnBudget(false, false)
 	var stop bool
 	var reason string
 	for i := 0; i < 1000 && !stop; i++ {
@@ -86,7 +86,7 @@ func TestTurnBudgetCeilingBindsWithoutOutcomes(t *testing.T) {
 func TestTurnBudgetBuildBaseExceedsRunBase(t *testing.T) {
 	// A build carries the same work PLUS verify nudges and the grace turn, so its
 	// base must never be the smaller of the two.
-	if newTurnBudget(true).base <= newTurnBudget(false).base {
+	if newTurnBudget(true, false).base <= newTurnBudget(false, false).base {
 		t.Fatal("build base budget must exceed the run base budget")
 	}
 }

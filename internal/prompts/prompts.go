@@ -1118,6 +1118,10 @@ MCP servers: none | <the server names from <available_mcp_servers> this will cal
 `)
 	}
 
+	// What the designer can look at for itself. Sits immediately before the
+	// knowledge-base block, which describes the vault the tools read.
+	sb.WriteString(designToolsBlock())
+
 	// ── Built-in knowledge base (preferred for the user's own knowledge) ─
 	sb.WriteString(`<knowledge_base>
 The built-in knowledge base is the user's OWN personal knowledge graph — an
@@ -2488,6 +2492,10 @@ supplies the real absolute path.
 		sb.WriteString(p.UserMemory)
 		sb.WriteString("\n\n")
 	}
+	// Mirrors BuildDesignSystemPrompt: the skill designer gets the identical
+	// tools, so it is told about them in the identical words.
+	sb.WriteString(designToolsBlock())
+
 	if p.KBManifest != "" {
 		sb.WriteString("<knowledge_base_manifest>\n")
 		sb.WriteString("The block below describes the user's knowledge base: its folder structure, and ")
