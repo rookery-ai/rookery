@@ -14,13 +14,17 @@ class FakeEventSource {
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
-  private listeners: Record<string, Array<() => void>> = {};
+  private listeners: Record<string, Array<(ev: { data: string }) => void>> = {};
   constructor(url: string) {
     this.url = url;
     FakeEventSource.instances.push(this);
   }
-  addEventListener(type: string, listener: () => void) {
+  addEventListener(type: string, listener: (ev: { data: string }) => void) {
     (this.listeners[type] ??= []).push(listener);
+  }
+  // Dispatch a named SSE event (`meta`, `done`) with its data payload.
+  emit(type: string, data = "1") {
+    for (const l of this.listeners[type] ?? []) l({ data });
   }
   close() {
     this.readyState = FakeEventSource.CLOSED;
@@ -137,4 +141,65 @@ test("generic error: shows a fallback message when the response has no error env
 
   expect(await screen.findByText(/internal server error|something went wrong/i)).toBeInTheDocument();
   expect(FakeEventSource.instances).toHaveLength(0);
+});
+
+// ── Returning to a running agent ─────────────────────────────────────────────
+//
+// The reported bug: leaving the agent page mid-run and coming back reset both
+// the elapsed timer and the tool-call list. The server now retains progress and
+// opens the stream with a `meta` event carrying how long the run has already
+// been going.
+
+function wrapLive() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <RunPanel agentId="a1" agentName="Inbox Triager" liveRun />
+    </QueryClientProvider>,
+  );
+}
+
+test("attaching mid-run continues the elapsed clock from the server's value", async () => {
+  mockRun(() => jsonResponse({ status: "started" }, 202));
+  wrapLive();
+
+  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+  // 95s in: the card must show ~1:35, not restart from 0:00.
+  FakeEventSource.instances[0]!.emit("meta", JSON.stringify({ elapsed_ms: 95_000 }));
+
+  await waitFor(() => {
+    const elapsed = screen.getByTestId("activity-elapsed").textContent ?? "";
+    expect(elapsed).toMatch(/1:3[45]/);
+  });
+});
+
+test("replayed lines are all rendered, not just those after re-attaching", async () => {
+  mockRun(() => jsonResponse({ status: "started" }, 202));
+  wrapLive();
+
+  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+  const es = FakeEventSource.instances[0]!;
+  es.emit("meta", JSON.stringify({ elapsed_ms: 12_000 }));
+  // The server replays from the top of the run before streaming anything new.
+  for (const line of ["🔧 read_file(a)", "🔧 web_search(b)", "🔧 write_file(c)"]) {
+    es.onmessage?.({ data: line });
+  }
+
+  expect(await screen.findByText("🔧 read_file(a)")).toBeInTheDocument();
+  expect(screen.getByText("🔧 web_search(b)")).toBeInTheDocument();
+  expect(screen.getByText("🔧 write_file(c)")).toBeInTheDocument();
+});
+
+// A malformed meta payload must not take the card down with it — the progress
+// lines are the point, and an elapsed clock is the smaller loss.
+test("a malformed meta event is ignored rather than breaking the stream", async () => {
+  mockRun(() => jsonResponse({ status: "started" }, 202));
+  wrapLive();
+
+  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+  const es = FakeEventSource.instances[0]!;
+  es.emit("meta", "not json");
+  es.onmessage?.({ data: "🔧 still streaming" });
+
+  expect(await screen.findByText("🔧 still streaming")).toBeInTheDocument();
 });

@@ -3,11 +3,14 @@
 // handleRunProgress). Both stream plain `data: <string>` milestone lines
 // and end the stream when generation/a run completes — but they signal
 // that completion differently: handleRunProgress emits a named
-// `event: done\ndata: 1\n\n` immediately before closing (see
-// run_tracker.go's `rs.progressCh` close branch), while handleDesignProgress
-// just closes the stream with no named event. A 404 JSON response means
-// there's no active stream to attach to (EventSource fires `error` without
-// ever opening in that case).
+// `event: done\ndata: 1\n\n` immediately before closing (see run_tracker.go's
+// done branch), while handleDesignProgress just closes the stream with no named
+// event. A 404 JSON response means there's no active stream to attach to
+// (EventSource fires `error` without ever opening in that case).
+//
+// handleRunProgress additionally opens with a named `meta` event carrying how
+// long the run has already been going, so a viewer attaching mid-run can show a
+// continuous elapsed time instead of restarting the clock.
 export type SSEHandle = { close(): void };
 
 export function openSSE(
@@ -16,6 +19,9 @@ export function openSSE(
     onMessage(line: string): void;
     onDone(): void; // stream closed by server (normal completion)
     onError?(): void; // failed to connect / connection lost (after internal retry ONCE)
+    // First event of a run stream, before any replayed line. Absent on
+    // endpoints that don't emit it.
+    onMeta?(meta: { elapsed_ms: number }): void;
   },
 ): SSEHandle {
   let source: EventSource | null = null;
@@ -41,6 +47,19 @@ export function openSSE(
       everOpened = true;
       opts.onMessage(ev.data);
     };
+
+    es.addEventListener("meta", (ev: MessageEvent) => {
+      if (closed) return;
+      everOpened = true;
+      // Malformed meta must not take the stream down with it — the progress
+      // lines are the point, and an elapsed clock that falls back to "now" is a
+      // far smaller loss than a card that never renders.
+      try {
+        opts.onMeta?.(JSON.parse(ev.data));
+      } catch {
+        /* ignore */
+      }
+    });
 
     // Primary completion signal for endpoints that emit it (currently just
     // handleRunProgress): deterministic, no need to wait on a subsequent
