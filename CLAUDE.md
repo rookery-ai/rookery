@@ -1859,6 +1859,102 @@ Delivery does **not** depend solely on the coder emitting `[CHAT]` — models (e
 
 Delivery reaches both paths: `SendOutput` (durable — web → `gateway.SendToUser`, scheduler → chat platform) and `OnProgress` (live SSE). Parser behavior is covered by `runner_test.go`, `silent_test.go` and `emptyrun_test.go`.
 
+### Run transcript and the silent flag
+
+**Run history could only ever replay what the user had already read.** Tool-call
+milestones (`toolMilestone`) went to the progress sink, which feeds the live SSE
+stream and nothing else, so they were gone the moment the stream closed. The
+coder's raw per-turn responses reached the vault run note but never the database:
+`FinishAgentRun` stores `finalOutput` — the `[CHAT]` lines — as `stdout`. So the
+one view you open before editing a misbehaving agent showed its conclusions and
+nothing about how it reached them, and an agent reporting "no change" looked
+identical whether it had checked and found nothing or never checked at all.
+
+`agent_runs.transcript` (migration 016) holds the fix: an ordered JSON list
+interleaving progress milestones with coder turns. `internal/agentrunner/transcript.go`
+owns the format. Four things are load-bearing:
+
+- **It is collected in the RUNNER, not at the web layer.** That is the only layer
+  both triggers pass through — the scheduler wires `SendOutput` and **no
+  `OnProgress` at all** — so a collector attached where `startManualRun` builds
+  its sink would leave cron runs, the ones nobody watched and therefore the ones
+  most in need of a record, with nothing captured. `transcriptCollector.wrap`
+  returns a non-nil sink even when handed nil for exactly that case, and forwards
+  as well as records so turning the transcript on cannot cost the live view.
+- **One list, not two.** Milestones and coder turns are appended as they happen
+  rather than reunited by timestamp at the end, because the question the record
+  answers is *what did it do, in what order* — and two lists merged afterwards is
+  the same answer with a way to get it wrong.
+- **It is distinct from `toolTrace`.** That is a per-call summary (name, turn,
+  bytes, error) built for one `slog` line, carrying neither arguments nor ordering
+  against the model's own replies. Both are kept, and `SummarizeToolTrace` is
+  appended as the transcript's closing `summary` event rather than given a column
+  of its own.
+- **Capped at `maxTranscriptBytes` (64 KiB), dropping OLDEST with a marker.** Runs
+  are kept indefinitely. The tail is kept because the end of a run is where it
+  went wrong; a single event over the whole budget is clipped rather than dropped,
+  since returning nothing would be the same failure this exists to remove.
+
+**`agent_runs.silent` is a column, not an inference and not a transcript field.**
+`rctx.silentSignaled` was known at the end of every run and discarded, leaving a
+`[SILENT]` run and a broken one identically shaped — exit 0, empty `stdout` — so
+the interface rendered the same empty row for both. Inferring it from
+`exit==0 && stdout=="" && stderr==""` is the tempting zero-migration version and
+reconstructs a fact the code already had, which is the shape of defect this
+codebase keeps recording. It is a column rather than a field inside the JSON
+because the run LIST renders a chip for it, and a per-row transcript fetch just to
+decide whether to draw a chip would defeat the split below. **Not backfilled**: a
+historical run reads `silent = 0`, meaning "not known to be silent", which is the
+truth about a row written before the flag existed.
+
+**`rctx.outcome()` builds the `db.RunOutcome` for all three exit paths** (coder
+error, produced-nothing, success). Centralised because each writes its own row and
+a path that forgot the new fields would produce a run with no record and no sign
+anything was missing. `db.RunOutcome` is a struct rather than more positional
+parameters — the list was already seven long and `transcript`/`stderr` are both
+strings whose meanings swap without the compiler noticing.
+
+**List and detail are deliberately split.** `db.ListAgentRuns` selects `silent` and
+**not** `transcript`; `db.GetAgentRun` selects both and backs
+`GET /api/v1/agents/:id/runs/:runID`, fetched only when a row is expanded. The
+agent-detail response already lists every recent run, so carrying each transcript
+would pay on every page load for a panel that is collapsed by default. The endpoint
+is scoped through the AGENT, not just the run's `workspace_id`: the run id comes
+from the URL, and resolving it without confirming it belongs to this workspace's
+agent would let a guessed id read another tenant's run. `transcript` marshals as
+`[]` and never `null`, asserted on raw bytes — a TypeScript default substitutes
+only for `undefined`.
+
+The vault run note gains a `## Tool calls` section from the same collector
+(`progressLines`), since that note is the durable copy an agent can read.
+
+### Live run progress is retained, not piped
+
+**`agentRunState` holds `lines []string` and readers follow by index.** It used to
+hold a `chan string`, which is consume-once and single-reader: leaving the agent
+page closed the SSE stream and discarded every line already delivered, so
+returning to a running agent showed an empty activity card. Two tabs on one run
+also stole each other's lines. A per-subscriber channel is the obvious fan-out and
+has to either block the run on a slow reader or drop — and dropping is how a live
+view silently disagrees with the record it is supposed to be showing, so readers
+follow `lines` by absolute index and wait on a `notify` channel that is closed and
+replaced on every append (closing IS the broadcast, so a reader that grabbed the
+channel before the append still wakes).
+
+**The stream opens with a named `meta` event carrying `elapsed_ms`.** `RunPanel`
+stamped `startedAt = Date.now()` on attach, which measures how long the TAB has
+been watching — the reason the timer restarted at zero on every revisit. A
+duration rather than a start timestamp, because the browser anchors it against its
+own clock and an absolute time would be wrong by however much the two disagree; on
+a self-hosted LAN install that is potentially minutes.
+
+Retention is capped at `maxRetainedLines` (2000), dropping oldest, with `dropped`
+tracking the absolute offset so a truncated reader fast-forwards rather than
+blocking. The existing 90s eviction still bounds how long a finished run stays
+attachable; after that the transcript is the record. Cron runs remain
+**not** live-streamable — the scheduler has no handle on the web server's tracker
+— which is why the transcript matters for them.
+
 ### Secret injection
 
 Secrets stored encrypted in `secrets` table. Three sources of `MasterPw` at runtime:
@@ -1991,7 +2087,7 @@ SQLite via `modernc.org/sqlite` (CGo-free). WAL mode + foreign keys set on open.
 The base schema was consolidated into `migrations/001_initial_schema.up.sql` during the workspace
 refactor (the old incremental migrations were collapsed; data was wiped and re-created fresh);
 incremental migrations resume from there — `002_coder_api` adds `workspaces.coder_base_url`, and
-`003_agent_runs_usage` adds `agent_runs.{prompt,completion,total}_tokens` for the API coder; `005_connectors` adds the self-managed-OAuth tables; `006_connection_extra` adds `service_connections.extra` (JSON); `007_draft_used_connections` adds `agent_drafts.pending_used_connections` (persists build-used connections for auto-bind).
+`003_agent_runs_usage` adds `agent_runs.{prompt,completion,total}_tokens` for the API coder; `005_connectors` adds the self-managed-OAuth tables; `006_connection_extra` adds `service_connections.extra` (JSON); `007_draft_used_connections` adds `agent_drafts.pending_used_connections` (persists build-used connections for auto-bind); `016_agent_run_transcript` adds `agent_runs.{transcript,silent}` (see "Run transcript and the silent flag" below).
 
 **`015_orphaned_agent_rows` is a one-time sweep, not a change to the delete path.** Foreign keys
 were enforced per-CONNECTION until the DSN-pragma fix (#214, 2026-08-17), so `DELETE FROM agents`
@@ -2313,7 +2409,7 @@ duplicating the full list here. Route groups:
 
 - **auth** — session, login, logout, change-password
 - **workspaces + admin** — list/create/enter/leave/delete workspaces, permissions, admin overview/audit/settings
-- **agents + design** — CRUD, run + run-progress SSE, schedule, agent-md, skills, connections, and the full conversational design FSM (design/cancel/resume/dismiss/progress/state, edit/start)
+- **agents + design** — CRUD, run + run-progress SSE, per-run transcript detail, schedule, agent-md, skills, connections, and the full conversational design FSM (design/cancel/resume/dismiss/progress/state, edit/start)
 - **skills** — CRUD, core-skill read, and the conversational skill-design FSM (design/cancel/resume/dismiss/progress)
 - **secrets** — list/create/delete
 - **connectors** — chat-platform connections (Telegram/Discord/Slack): list/create/delete/test
