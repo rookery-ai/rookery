@@ -154,8 +154,12 @@ test("designing-state Build button posts the literal approval phrase and attache
   await waitFor(() => expect(designCalls()).toHaveLength(2));
   expect(designCalls()[1]!.body).toEqual({ message: "approve and build it" });
 
-  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
-  const es = FakeEventSource.instances[0]!;
+  // Two streams by now, not one. The "describe" turn opens its own progress
+  // stream (the designer's read-only tool calls are streamed too) and closes it
+  // when its reply lands; the build then opens a fresh one. The build's is the
+  // most recent — driving instances[0] would drive the turn's closed stream.
+  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
+  const es = FakeEventSource.instances.at(-1)!;
   es.readyState = FakeEventSource.OPEN;
   es.onopen?.();
   es.onmessage?.({ data: "⚙️ Preparing workspace…" });
@@ -204,8 +208,12 @@ test("SSE completing AFTER the build POST already resolved does not refetch or c
   expect(screen.getByText("approve and build it")).toBeInTheDocument();
 
   // THEN the SSE stream closes.
-  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
-  const es = FakeEventSource.instances[0]!;
+  // Two streams by now, not one. The "describe" turn opens its own progress
+  // stream (the designer's read-only tool calls are streamed too) and closes it
+  // when its reply lands; the build then opens a fresh one. The build's is the
+  // most recent — driving instances[0] would drive the turn's closed stream.
+  await waitFor(() => expect(FakeEventSource.instances).toHaveLength(2));
+  const es = FakeEventSource.instances.at(-1)!;
   es.readyState = FakeEventSource.OPEN;
   es.onopen?.();
   es.readyState = FakeEventSource.CLOSED;
@@ -261,8 +269,12 @@ test("a building:true build refetches /state on SSE done and surfaces the verify
   await screen.findByRole("textbox"); // mount recovery settled (state call 1)
   await sendViaComposer("build it"); // POST returns building:true
 
+  // ONE stream: this turn opened it, and the building:true response upgraded it
+  // IN PLACE rather than opening a second (see ensureSSE). Only a turn that has
+  // already ended closes its stream, which is why the two-message tests above
+  // see two.
   await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
-  const es = FakeEventSource.instances[0]!;
+  const es = FakeEventSource.instances.at(-1)!;
   es.dispatchNamedEvent("done"); // SSE completes → live onDone must refetch
 
   // The refetched verifying result reaches the transcript...
@@ -290,8 +302,12 @@ test("a plain message answered with building:true attaches the SSE, renders Acti
   expect(buildStep).toHaveTextContent("Build");
   expect(buildStep.querySelector("span")).toHaveClass("border-foreground");
 
+  // ONE stream: this turn opened it, and the building:true response upgraded it
+  // IN PLACE rather than opening a second (see ensureSSE). Only a turn that has
+  // already ended closes its stream, which is why the two-message tests above
+  // see two.
   await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
-  const es = FakeEventSource.instances[0]!;
+  const es = FakeEventSource.instances.at(-1)!;
   es.readyState = FakeEventSource.OPEN;
   es.onopen?.();
   es.onmessage?.({ data: "🔧 run_script(...)" });

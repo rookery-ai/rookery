@@ -130,13 +130,27 @@ test("an ordinary conversation turn attaches the progress stream", async () => {
   ).toBe(true);
 });
 
-// The card is shared with the build, whose title is "Building your agent…".
-// Showing that over a turn's knowledge-base reads would be worse than the
-// silence it replaces — it would claim a build that is not happening.
-test("a turn's tool calls are shown as knowledge-base activity, not as a build", async () => {
+// A turn's card belongs to the reply being WORKED ON. It must be visible while
+// the answer is still coming, and gone once the answer is on screen — leaving it
+// up until the next message (which is what the first version of this feature
+// did) reads as if the designer were still busy long after it had finished.
+//
+// The POST is held open deliberately: resolving it is what ends the turn, so a
+// test that let it resolve immediately could never observe the mid-flight state.
+test("a turn's tool calls show while the reply is building, then go when it lands", async () => {
+  let release!: () => void;
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
   mockFetch({
-    "/x/design": () =>
-      jsonResponse({ response: "Found it.", done: false, state: "designing" }),
+    "/x/design": async () => {
+      await held;
+      return jsonResponse({
+        response: "Found it.",
+        done: false,
+        state: "designing",
+      });
+    },
   });
   wrap(
     <DesignerSurface
@@ -154,11 +168,24 @@ test("a turn's tool calls are shown as knowledge-base activity, not as a build",
   )!;
   es.onmessage?.({ data: "🔧 search_files(dentist)" });
 
-  expect(await screen.findByText("🔧 search_files(dentist)")).toBeInTheDocument();
-  await waitFor(() =>
-    expect(screen.getByText(/knowledge base/i)).toBeInTheDocument(),
-  );
+  // While the reply is still being built: the card is up, and it is titled as a
+  // knowledge-base read rather than borrowing the build's "Building your agent…"
+  // wording, which would claim a build that is not happening.
+  expect(
+    await screen.findByText("🔧 search_files(dentist)"),
+  ).toBeInTheDocument();
+  expect(screen.getByText(/Looking through your knowledge base/i)).toBeInTheDocument();
   expect(screen.queryByText(/Building your agent/i)).not.toBeInTheDocument();
+
+  // The reply lands — the card goes with the turn it described.
+  release();
+  expect(await screen.findByText("Found it.")).toBeInTheDocument();
+  await waitFor(() =>
+    expect(screen.queryByTestId("activity-card")).not.toBeInTheDocument(),
+  );
+  expect(
+    screen.queryByText("🔧 search_files(dentist)"),
+  ).not.toBeInTheDocument();
 });
 
 // Most turns read nothing, and the server opens no channel for a text-only

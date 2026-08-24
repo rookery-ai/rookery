@@ -402,6 +402,22 @@ export function DesignerSurface({
     sseHandleRef.current = handle;
   }
 
+  // Tears down a conversation turn's progress stream and removes its card.
+  //
+  // Only ever acts on a "turn" stream. A BUILD's card deliberately survives its
+  // stream closing — it is the record of a multi-minute build sitting above the
+  // review the user is about to act on — and a build that a turn's POST happened
+  // to report is reached through the SAME slot (ensureSSE upgrades in place), so
+  // without this guard finishing an ordinary message would wipe a live build's
+  // progress log.
+  function endTurnStream() {
+    if (attachSourceRef.current !== "turn") return;
+    sseHandleRef.current?.close();
+    sseHandleRef.current = null;
+    attachSourceRef.current = null;
+    setSse(null);
+  }
+
   async function refetchState() {
     if (!endpoints.state) {
       // No state-recovery endpoint (the skill designer) — there's nothing to
@@ -703,6 +719,15 @@ export function DesignerSurface({
       if (!unmountedRef.current) {
         setBusy(false);
         if (!stillBuilding) setGenerating(false);
+        // The turn is over, so its activity card goes with it. Tool calls are
+        // there to show a reply being WORKED ON; once the reply is on screen the
+        // card is describing something finished, and leaving it up until the
+        // next message reads as if the designer were still busy.
+        //
+        // Keyed on the POST resolving rather than on the SSE `done` event: the
+        // two race (both orderings occur — see attachSourceRef's comment), and
+        // the POST returning is what actually means "the answer is here".
+        endTurnStream();
       }
     }
   }
