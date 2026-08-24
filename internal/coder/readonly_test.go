@@ -89,6 +89,32 @@ func TestWithReadOnlyToolsDoesNotMutateTheReceiver(t *testing.T) {
 	}
 }
 
+// TestTurnBudgetBases pins all three bases together. The design base exists
+// because a design turn is a BLOCKING POST with no SSE: thirty completions on
+// one conversational turn is thirty completions the user waits through with no
+// progress output. Build and run are asserted alongside it as a regression guard.
+func TestTurnBudgetBases(t *testing.T) {
+	cases := []struct {
+		name          string
+		build, design bool
+		want          int
+	}{
+		{"run or chat", false, false, maxAPITurns},
+		{"build", true, false, maxBuildAPITurns},
+		{"design", false, true, maxDesignAPITurns},
+		{"build wins over design", true, true, maxBuildAPITurns},
+	}
+	for _, tc := range cases {
+		if got := newTurnBudget(tc.build, tc.design).base; got != tc.want {
+			t.Errorf("%s: base = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+	if maxDesignAPITurns >= maxAPITurns {
+		t.Errorf("maxDesignAPITurns (%d) must be tighter than maxAPITurns (%d)",
+			maxDesignAPITurns, maxAPITurns)
+	}
+}
+
 // readOnlySubset is the exact tool set a design conversation may be offered.
 var readOnlySubset = []string{
 	"read_file", "list_dir", "search_files", "glob",

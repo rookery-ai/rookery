@@ -30,6 +30,19 @@ const maxAPITurns = 30
 // grace turn. It must stay larger than maxAPITurns for that reason.
 const maxBuildAPITurns = 50
 
+// maxDesignAPITurns is the base budget for a DESIGN conversation turn, and is
+// deliberately far tighter than maxAPITurns.
+//
+// A design turn is a BLOCKING POST (/api/v1/agents/design) with no SSE stream and
+// no write timeout — SSE covers generation only. So every extra turn is time the
+// user spends watching a typing indicator with no idea what is happening, which
+// is the opposite of the situation a run is in. The designer's tools are for
+// looking something up before asking a question: a knowledge-base lookup or a
+// feasibility check converges in two or three calls, and eight leaves room to
+// retry. The unproductive-streak guard (maxUnproductiveStreak) stays the backstop
+// rather than the bound.
+const maxDesignAPITurns = 8
+
 // maxHardTurns is runaway protection and is NEVER extended, however productive the
 // loop claims to be.
 //
@@ -118,7 +131,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 	emptyNudges := 0
 	truncationRetries := 0
 	var toolTrace []ToolCallStat
-	budget := newTurnBudget(tools.verifyBuild)
+	budget := newTurnBudget(tools.verifyBuild, tools.readOnly)
 	offered := toolNames(req.Tools)
 	var stopReason string
 	for {
