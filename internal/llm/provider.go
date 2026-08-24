@@ -36,6 +36,18 @@ var (
 	ErrQuotaExhausted   = errors.New("llm: quota/credits exhausted")
 	ErrAuth             = errors.New("llm: authentication failed")
 	ErrToolsUnsupported = errors.New("llm: model does not support tools")
+	// ErrEmptyResponse is a 2xx carrying no body at all, repeated until the
+	// retry budget was spent. An upstream/transport failure at the provider,
+	// NOT anything about the request: the run never reached a model, so it has
+	// no tokens, no tool calls and no partial work.
+	//
+	// Typed because it is the one transient failure that reached the user as a
+	// raw internal string — every other one (rate limit, quota, auth) had a
+	// plain-English message and this fell through to err.Error(). "llm: empty
+	// response body (status 200)" tells someone whose agent just burned ten
+	// minutes nothing they can act on, when the true advice is simply to run it
+	// again.
+	ErrEmptyResponse = errors.New("llm: provider returned an empty response")
 )
 
 // Config is the per-coder provider configuration resolved at run time.
@@ -99,10 +111,24 @@ type ToolCall struct {
 
 // Response is one completion result.
 type Response struct {
-	Content      string // assistant text; may be empty when the model only emitted tool calls
-	ToolCalls    []ToolCall
-	Usage        Usage
-	FinishReason string // "stop", "tool_calls"/"tool_use", "length", …
+	Content   string // assistant text; may be empty when the model only emitted tool calls
+	ToolCalls []ToolCall
+	Usage     Usage
+	// FinishReason is "stop", "tool_calls"/"tool_use", "length", … A "length"
+	// carrying empty Content is a TRUNCATION, not an empty answer, and the two
+	// need opposite handling — see the empty-completion branch in
+	// internal/coder/api_engine.go.
+	FinishReason string
+	// Reasoning is a reasoning model's thinking, which providers return OUTSIDE
+	// Content. It is captured for DIAGNOSIS ONLY and must never be delivered to a
+	// user or fed back as an answer: it is mid-thought on a truncated turn, and
+	// this repo has already shipped model internals to a real user twice (see
+	// chat.CleanReply and coder.LooksLikeToolScaffolding).
+	//
+	// Without it, a run whose whole output budget went to reasoning was
+	// indistinguishable from a model that returned nothing at all — which is
+	// exactly how one agent was misdiagnosed as a large-file problem four times.
+	Reasoning string
 }
 
 // Usage is a best-effort token accounting (zero values are fine).
@@ -271,7 +297,7 @@ func doJSON(ctx context.Context, client *http.Client, method, url string, header
 			// it persists across the attempt budget, surface an explicit "empty response"
 			// error below rather than a parse error.
 			if len(strings.TrimSpace(string(respBody))) == 0 {
-				lastErr = fmt.Errorf("llm: empty response body (status %d)", code)
+				lastErr = fmt.Errorf("%w (status %d)", ErrEmptyResponse, code)
 				continue
 			}
 			return respBody, code, nil
@@ -300,6 +326,14 @@ func doJSON(ctx context.Context, client *http.Client, method, url string, header
 	if errors.Is(lastErr, ErrRateLimit) {
 		slog.Error("llm rate-limited after retries", "url", url, "req_size", len(body), "status", lastCode, "body", snippet(lastBody))
 		return lastBody, lastCode, ErrRateLimit
+	}
+	if errors.Is(lastErr, ErrEmptyResponse) {
+		// Logged at the same level as the rate-limit exhaustion: seven empty
+		// bodies in a row is a provider outage window, and the run it killed
+		// leaves no other trace — no tokens, no tool calls, nothing to read back.
+		slog.Error("llm returned an empty body on every attempt",
+			"url", url, "req_size", len(body), "status", lastCode, "attempts", maxAttempts)
+		return lastBody, lastCode, ErrEmptyResponse
 	}
 	if lastErr == nil {
 		lastErr = errors.New("llm: request failed")

@@ -36,6 +36,16 @@ var knownAuthEnvVars = []string{
 }
 
 // Result holds the output from a coder invocation.
+// ToolCallStat is one tool call and the size of what it returned. Deliberately
+// not the arguments or the payload: this is written to logs and to a run note in
+// the user's vault, and a tool result can carry their data.
+type ToolCallStat struct {
+	Name  string
+	Turn  int
+	Bytes int
+	Error bool // the result began with the engine's "error:" prefix
+}
+
 type Result struct {
 	Text     string
 	Duration time.Duration
@@ -68,6 +78,17 @@ type Result struct {
 	// The runner uses it to recognise the model's own tool-call machinery leaking into
 	// a message, without needing to know any provider's markup dialect.
 	OfferedTools []string
+
+	// ToolTrace records what the model actually DID: one entry per tool call, in
+	// order, with the size of the result fed back.
+	//
+	// It exists because three separate diagnoses of one failing agent were made
+	// by INFERRING the tool calls from token counts, and all three were wrong.
+	// A run that produces nothing records its outcome and its cost, and until
+	// now nothing about the path it took — which is the only part that explains
+	// either. Compact by construction: names and byte counts, never payloads,
+	// so it is safe to log and cheap to keep.
+	ToolTrace []ToolCallStat
 
 	// StopReason is why the tool loop ended: "" for a normal finish, otherwise
 	// "budget", "unproductive" or "hard-ceiling". Non-empty means the run was cut
@@ -413,6 +434,17 @@ var ErrUsageLimit = errors.New("coder usage limit reached")
 // after. Distinct from ErrUsageLimit so the user-facing message can say "try
 // again in a moment" instead of "you're out of quota".
 var ErrRateLimited = errors.New("coder rate-limited by provider")
+
+// ErrProviderEmpty indicates the provider answered 2xx with no body at all, on
+// every attempt of the retry budget. An outage at the provider, not a property
+// of the request: the run reached no model, so it has no tokens, no tool calls
+// and no partial work to salvage.
+//
+// Distinct from ErrRateLimited because the remedy differs in kind — throttling
+// clears on a timer and this may not — and distinct from a generic failure
+// because it is the one transient case that used to reach the user as a raw
+// internal string after burning the full retry budget.
+var ErrProviderEmpty = errors.New("coder got an empty response from the provider")
 
 // Chat sends a conversational message to the coder with optional history. It is
 // used by the text-only design conversations (agent designer, skill designer,

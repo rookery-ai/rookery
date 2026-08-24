@@ -256,6 +256,18 @@ type coderRunContext struct {
 	offeredTools   []string    // tools the most recent turn offered the model (API engine; empty for CLI)
 	silentSignaled bool        // any turn emitted [SILENT] — run is intentionally quiet
 	usage          coder.Usage // accumulated token usage (API coder); zero for CLI coders
+	// toolTrace accumulates what the model actually DID across every turn. A run
+	// that produces nothing records its cost and its outcome; without this it
+	// records nothing about the path it took, which is the only thing that
+	// explains either. Three diagnoses of one failing agent were made by
+	// inferring the calls from token counts, and all three were wrong.
+	toolTrace []coder.ToolCallStat
+	// stopReason is the engine's account of WHY the last turn ended: "" (finished
+	// normally), "truncated", "empty", "budget", "unproductive", "hard-ceiling".
+	// Logged because a run that delivers a fallback message looks identical from
+	// the outside whatever produced it — which is how a truncating reasoning model
+	// was diagnosed as a large-file problem four times over.
+	stopReason string
 }
 
 func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunInput) error {
@@ -517,7 +529,9 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 			"trigger", input.Trigger, "exit", exitCode,
 			"raw_chunks", len(rctx.rawChunks), "chat_lines", len(rctx.chatLines),
 			"silent", rctx.silentSignaled, "produced_nothing", producedNothing,
-			"warnings", len(rctx.warnings), "total_tokens", rctx.usage.TotalTokens)
+			"warnings", len(rctx.warnings), "total_tokens", rctx.usage.TotalTokens,
+			"stop_reason", rctx.stopReason,
+			"tools", coder.SummarizeToolTrace(rctx.toolTrace))
 	}()
 
 	if runErr != nil {
@@ -690,6 +704,14 @@ func (r *Runner) runCoderTurns(
 			return fmt.Errorf("coder generate: %w", err)
 		}
 		rctx.usage = addUsage(rctx.usage, result.Usage)
+		rctx.toolTrace = append(rctx.toolTrace, result.ToolTrace...)
+		// Keep the LAST non-empty stop reason. A multi-turn run's final turn is
+		// the one that decided the outcome, and "" is the engine's explicit
+		// statement that a turn finished of its own accord — so an ordinary last
+		// turn must not erase the reason an earlier one was cut short.
+		if result.StopReason != "" {
+			rctx.stopReason = result.StopReason
+		}
 
 		parsed := parseCoderOutput(result.Text)
 		rctx.chatLines = append(rctx.chatLines, parsed.chatLines...)
@@ -814,6 +836,17 @@ func FriendlyRunError(err error, coderName string) string {
 	}
 	if errors.Is(err, coder.ErrUsageLimit) {
 		return fmt.Sprintf("⚠️ This agent run was skipped — %s hit its usage limit (quota/credits exhausted). It will retry automatically on the next scheduled run.", who)
+	}
+	if errors.Is(err, coder.ErrProviderEmpty) {
+		// The provider answered 2xx with nothing in it, on every retry. Nothing
+		// about the agent or the request is wrong, and nothing partial survives —
+		// so the only useful instruction is to run it again.
+		//
+		// This case used to fall through to the raw err.Error() below, which
+		// showed someone whose run had just spent ten minutes retrying the string
+		// "llm: empty response body (status 200)" — an accurate sentence that
+		// tells them nothing they can act on, and reads like a bug in their agent.
+		return fmt.Sprintf("⚠️ %s got no response from the provider, on every retry — a temporary problem at their end, not with this agent. Nothing ran, so nothing was lost. Try again.", who)
 	}
 	if errors.Is(err, coder.ErrMaxTurns) {
 		// Normally unreachable: the API-coder tool loop (api_engine.go's runToolLoop)

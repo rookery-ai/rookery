@@ -627,6 +627,30 @@ per-file. Four things close it:
 - **An empty completion is no longer a finished answer** (`api_engine.go`). It used to return
   `Text:""` with `StopReason:""`, so a dead turn was recorded as a success and logged nowhere;
   chat now also logs a `chat: turn finished` line with an `empty` field.
+- **A TRUNCATED completion is a different failure from an empty one, and conflating them cost
+  four wrong diagnoses.** A reasoning model bills its thinking against the same completion
+  budget as its answer, so on a hard synthesis it can spend the whole cap before emitting one
+  content token: the provider returns `finish_reason: "length"` with empty `content` and the
+  thinking in a separate field. Three things had to change, and each was independently
+  invisible. `internal/llm` never read that field — **both** spellings are now parsed into
+  `Response.Reasoning` (OpenRouter normalizes to `reasoning`, DeepSeek's own API emits
+  `reasoning_content`, `generic` can be either, and reading one leaves the other invisible).
+  `FinishReason` was parsed and read by **nothing**. And the empty-answer nudge was actively
+  wrong here — it re-asks under the SAME cap, so it truncates again, and the extra turn grows
+  the context making truncation likelier still; a `length` finish now **re-issues the same
+  request with a raised cap** (`truncationRetryMaxTokens`, once) and appends nothing to
+  history, since a blank assistant turn is few-shot evidence that answering with nothing is
+  acceptable. `Reasoning` is captured for DIAGNOSIS ONLY and must never be delivered: it is
+  mid-thought on a truncated turn, and this repo has already shipped model internals to a real
+  user twice (`chat.CleanReply`, `LooksLikeToolScaffolding`).
+
+  **The old fallback message asserted a cause and the cause was wrong** — *"the request needed
+  more of a large file than fits"* — so a truncating reasoning model was investigated as a
+  large-file problem four times, by its own error text. `emptyAnswerFallback` now names no
+  cause; `truncatedAnswerFallback` names the real one. `agentrunner: run finished` carries
+  `stop_reason` (keeping the LAST non-empty one, since `""` is the engine's explicit statement
+  that a turn ended normally and must not erase an earlier cut-short reason), because a run
+  delivering a fallback looks identical from the outside whatever produced it.
 
 Two details are what keep the obvious call from reproducing the bug: the default projection
 drops any dominant column (`ModestColumns`), and a date grouping orders by its KEY rather than
@@ -1909,7 +1933,8 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
   verified gets `thinProof=false`, so the weak-backend gate never fires and
   `parseBlockedOutput` finds no marker in the deterministic summary — leaving the
   confident "Here's what a test run produces…" with no sign the build ran out of turns.
-  `Result.StopReason` ("", `budget`, `unproductive`, `hard-ceiling`) carries that fact
+  `Result.StopReason` ("", `budget`, `unproductive`, `hard-ceiling`, `empty`, `truncated`)
+  carries that fact
   out of the engine, and BOTH designers caveat off it rather than off the model
   remembering to emit `[BLOCKED]` (`agentdesigner.caveatTruncatedBuild`, and its
   two-arg mirror in `skilldesigner` — a skill build sets `buildphase.Generation`, so
