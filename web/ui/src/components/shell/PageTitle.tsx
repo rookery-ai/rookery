@@ -30,10 +30,17 @@ export function PageTitle({
   const Icon = entityIcon(icon);
   return (
     <div className="flex min-w-0 items-start gap-2.5">
-      {/* Nudged down so the glyph sits on the title's optical centre rather
+      {/* size-7 (28px) is not a taste call — it is exactly --text-2xl, which
+          index.css remaps from Tailwind's 24px to 28px. The icon was size-6,
+          so it tracked the DEFAULT scale while the title tracked the remapped
+          one and read visibly small beside it on all eight pages using this
+          component. Any future change to --text-2xl has to be made here too;
+          Tailwind has no utility that reads a font-size token as a length.
+
+          Nudged down so the glyph sits on the title's optical centre rather
           than its ascender line, and stays put when a subtitle makes the
           block taller. */}
-      <Icon className="mt-0.5 size-6 shrink-0 text-muted" />
+      <Icon className="mt-0.5 size-7 shrink-0 text-muted" />
       <div className="min-w-0">
         <h1 className="min-w-0 truncate text-2xl font-bold">{title}</h1>
         {subtitle && <p className="mt-0.5 text-sm text-muted-2">{subtitle}</p>}
