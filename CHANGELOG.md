@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/rookery-ai/rookery/compare/v0.6.2...v0.7.0) (2026-08-24)
+
+
+### Features
+
+* **agents:** make agent runs inspectable, and fix four interface defects ([#254](https://github.com/rookery-ai/rookery/issues/254)) ([728df71](https://github.com/rookery-ai/rookery/commit/728df71f2a61a1f72536074c1a1a3ddfdf8d41ee))
+
 ## [0.6.2](https://github.com/rookery-ai/rookery/compare/v0.6.1...v0.6.2) (2026-08-24)
 
 
