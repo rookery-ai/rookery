@@ -141,6 +141,17 @@ type DesignSession struct {
 	cancelGenerate context.CancelFunc // cancels the in-flight coder.Generate() call
 	progressFunc   func(string)       // Telegram: edits the placeholder message mid-run
 	progressCh     chan string        // Web SSE: buffered milestone channel
+	// generating reports that a BUILD is running. It is a field of its own
+	// because progressCh used to serve as both the transport and this flag, and
+	// the two are not the same question: a design CONVERSATION turn also streams
+	// milestones, so the channel is open then too, while no build is running.
+	// Keeping them fused meant a conversation turn would have answered every
+	// later turn with "still building your agent" and refused it.
+	//
+	// Everything that asks "is a build in flight?" — IsGenerating, the chat
+	// router's concurrency guard, startGeneration's already-building check, and
+	// DesignSnapshot.Generating — reads THIS. Nothing infers it from the channel.
+	generating bool
 	// buildID correlates every log line of one build. Minted in startGeneration
 	// so a single `grep build_id=<id>` reconstructs the whole lifecycle — the
 	// incident that motivated session ownership produced no designer log lines
@@ -733,9 +744,17 @@ func (f *Flow) GetSession(workspaceID string) *DesignSession {
 	return f.sessions[workspaceID]
 }
 
-// IsGenerating reports whether a build is currently running for the user's
-// session. progressCh is non-nil only between runGeneration setting it up and
-// closeProgress niling it, so it is an accurate "generation in progress" signal.
+// IsGenerating reports whether a BUILD is currently running for the user's
+// session — not merely whether the progress channel is open.
+//
+// It reads the explicit `generating` flag, set in startGeneration and cleared in
+// closeProgress. It used to infer the answer from progressCh being non-nil,
+// which was true only while the channel had exactly one user. A design
+// CONVERSATION turn now streams its tool calls over the same channel, so the old
+// test would have reported "building" for an ordinary turn — and since the web
+// layer uses this to REJECT concurrent design POSTs, every following turn would
+// have been refused with "still building your agent".
+//
 // The web layer uses it to reject concurrent design POSTs (a returning tab must
 // not launch a second coder run on the same session) and to tell a reloading
 // page to reconnect to the live build.
@@ -743,7 +762,7 @@ func (f *Flow) IsGenerating(workspaceID string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	sess, ok := f.sessions[workspaceID]
-	return ok && sess.progressCh != nil
+	return ok && sess.generating
 }
 
 // MarkGeneratingForTest makes IsGenerating report true without running a build.
@@ -759,6 +778,7 @@ func (f *Flow) MarkGeneratingForTest(workspaceID string) {
 	defer f.mu.Unlock()
 	if sess, ok := f.sessions[workspaceID]; ok && sess.progressCh == nil {
 		sess.progressCh = make(chan string, 1)
+		sess.generating = true
 	}
 }
 
@@ -799,6 +819,7 @@ func (f *Flow) FinishGeneratingForTest(workspaceID string) {
 	}
 	ch := sess.progressCh
 	sess.progressCh = nil
+	sess.generating = false
 	close(ch)
 }
 
@@ -862,7 +883,7 @@ func (f *Flow) Snapshot(workspaceID string) DesignSnapshot {
 	spec, planReady := planFromHistory(hist)
 	return DesignSnapshot{
 		Active:           true,
-		Generating:       sess.progressCh != nil,
+		Generating:       sess.generating,
 		State:            sess.State.String(),
 		AgentName:        sess.AgentName,
 		AgentID:          sess.AgentID,
@@ -1341,6 +1362,74 @@ func (f *Flow) stepVerifying(ctx context.Context, workspaceID, input string) (st
 
 // ─── Coder conversation ───────────────────────────────────────────────────────
 
+// beginTurnProgress opens the progress channel for ONE conversation turn and
+// returns the milestone sink plus the function that closes it again.
+//
+// The design conversation has had read-only tools since #259 — it searches the
+// knowledge base, sizes a file, checks a URL — and none of that was visible.
+// The user watched a silent spinner for the whole turn with no idea the designer
+// was reading their notes. A build has streamed its tool calls all along; this
+// gives a turn the same treatment over the same channel.
+//
+// Sharing the channel is what makes `generating` a separate flag: an open
+// channel no longer implies a build (see DesignSession.generating).
+//
+// The close is deliberately conditional. A user can send a turn and then press
+// Build, and startGeneration ADOPTS an already-open channel rather than making a
+// second one — so this closes only a channel it opened itself, that is still the
+// session's, and that no build has since taken over. Closing unconditionally
+// would cut the build's own progress stream the moment the turn that preceded it
+// returned.
+func (f *Flow) beginTurnProgress(workspaceID string) (func(string), func()) {
+	f.mu.Lock()
+	sess, ok := f.sessions[workspaceID]
+	if !ok {
+		f.mu.Unlock()
+		return nil, func() {}
+	}
+	opened := false
+	if sess.progressCh == nil {
+		sess.progressCh = make(chan string, 8)
+		opened = true
+	}
+	ch := sess.progressCh
+	progressFunc := sess.progressFunc
+	f.mu.Unlock()
+
+	notify := func(msg string) {
+		f.mu.Lock()
+		if s, ok := f.sessions[workspaceID]; ok {
+			s.lastProgress = msg
+		}
+		f.mu.Unlock()
+		// Non-blocking, exactly like the build's notify: a milestone is worth
+		// less than the turn it describes, so a full buffer drops it rather than
+		// stalling the coder.
+		select {
+		case ch <- msg:
+		default:
+		}
+		if progressFunc != nil {
+			progressFunc(msg)
+		}
+	}
+
+	return notify, func() {
+		if !opened {
+			return
+		}
+		f.mu.Lock()
+		s, sessOK := f.sessions[workspaceID]
+		if !sessOK || s.progressCh != ch || s.generating {
+			f.mu.Unlock()
+			return
+		}
+		s.progressCh = nil
+		f.mu.Unlock()
+		close(ch)
+	}
+}
+
 // callCoder sends a conversational turn to the coder and appends to session history.
 func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (string, error) {
 	f.mu.Lock()
@@ -1386,6 +1475,14 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 	if f.vlt != nil {
 		if root := f.vlt.Root(workspaceID); root != "" {
 			convCoder = coderSvc.WithReadOnlyTools().WithDir(root)
+			// Stream this turn's tool calls (🔧 search_files(...), 🔧 kb_file_map(...))
+			// the way a build streams its own. Only on the branch that HAS tools —
+			// a text-only turn has no milestones to emit, so opening a channel for
+			// it would produce an empty stream and a needless close.
+			if notify, endTurnProgress := f.beginTurnProgress(workspaceID); notify != nil {
+				defer endTurnProgress()
+				convCoder = convCoder.WithProgress(notify)
+			}
 		}
 	}
 	result, err := convCoder.Chat(ctx, workspaceID, sess.History, systemPrompt, userMessage)
@@ -1500,12 +1597,13 @@ func (f *Flow) startGeneration(workspaceID string) (string, bool, string, error)
 		f.mu.Unlock()
 		return "", false, "", fmt.Errorf("no active design session")
 	}
-	if sess.progressCh != nil {
+	if sess.generating {
 		// Already building. Never start a second coder run on one session.
 		f.mu.Unlock()
 		return buildingMessage, false, "", nil
 	}
 	sess.progressCh = make(chan string, 8)
+	sess.generating = true
 	sess.buildID = uuid.New().String()[:8]
 	done := f.onBuildComplete
 	// Snapshot everything the goroutine and the logs need under the SAME lock
@@ -1687,6 +1785,7 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 			f.mu.Lock()
 			if s, ok := f.sessions[workspaceID]; ok {
 				s.progressCh = nil
+				s.generating = false
 			}
 			f.mu.Unlock()
 			close(progressCh)

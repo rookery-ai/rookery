@@ -277,9 +277,13 @@ func TestSnapshot_ExposesLastProgress(t *testing.T) {
 	}
 
 	flow.sessions[workspaceID] = &DesignSession{
-		WorkspaceID:  workspaceID,
-		State:        StateDesigning,
-		progressCh:   make(chan string, 8),
+		WorkspaceID: workspaceID,
+		State:       StateDesigning,
+		progressCh:  make(chan string, 8),
+		// generating is set explicitly: an open progress channel no longer implies
+		// a build, because a design conversation turn streams over the same
+		// channel. Snapshot reports this flag, not the channel.
+		generating:   true,
 		lastProgress: "🔧 run_script(fetch_price.py)",
 	}
 	snap := flow.Snapshot(workspaceID)

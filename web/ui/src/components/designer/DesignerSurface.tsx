@@ -243,6 +243,11 @@ export function DesignerSurface({
   const [sse, setSse] = useState<{
     lines: string[];
     status: ActivityStatus;
+    // What this stream is reporting. The card used to be hardcoded to "Building
+    // your agent…", which was true of the only stream that existed; a
+    // conversation turn now streams too, and labelling its knowledge-base reads
+    // as a build would be worse than the silence it replaces.
+    kind: "build" | "turn";
   } | null>(null);
   const [focusSignal, setFocusSignal] = useState(0);
   const [view, setView] = useState<"transcript" | "spec">("transcript");
@@ -284,7 +289,13 @@ export function DesignerSurface({
   //     locally-optimistic messages (e.g. the "build it" bubble) with a
   //     stale/incomplete server snapshot — so "live" NEVER refetches on
   //     done, it only clears the live-build UI state.
-  const attachSourceRef = useRef<"recovery" | "live" | null>(null);
+  //   - "turn": an ordinary conversation turn, which streams the designer's
+  //     read-only tool calls (search_files, kb_file_map, web_fetch). Like
+  //     "live" it never refetches on done — the turn's own POST carries the
+  //     reply — but it is a distinct value rather than a reuse of "live"
+  //     because "live" is also the value awaitingBuildResultRef is read
+  //     against, and a turn must never satisfy that branch.
+  const attachSourceRef = useRef<"recovery" | "live" | "turn" | null>(null);
   // Set true when a design POST returns building:true — i.e. the build's real
   // outcome (the verifying transition + the generated spec) will arrive via the
   // SSE stream, NOT this POST's return value (a concurrent/detached build the
@@ -319,11 +330,30 @@ export function DesignerSurface({
     setFocusSignal((n) => n + 1);
   }
 
-  function ensureSSE(source: "recovery" | "live", seedLine?: string) {
-    if (sseHandleRef.current) return;
+  function ensureSSE(source: "recovery" | "live" | "turn", seedLine?: string) {
+    if (sseHandleRef.current) {
+      // A turn's stream and a build's stream are the SAME server channel, so a
+      // build that starts while a turn's stream is attached finds this slot
+      // taken. Early-returning outright would leave the stream labelled "turn"
+      // — which never refetches on done — and the build's result would never be
+      // picked up. UPGRADE instead: same connection, stronger source.
+      //
+      // One-way. A "turn" never downgrades a live build's stream, or an ordinary
+      // message sent while a build runs would silently disarm its completion
+      // refetch.
+      if (source !== "turn" && attachSourceRef.current === "turn") {
+        attachSourceRef.current = source;
+        setSse((s) => (s ? { ...s, kind: "build" } : s));
+      }
+      return;
+    }
     attachSourceRef.current = source;
     sseStartedAtRef.current = Date.now();
-    setSse({ lines: seedLine ? [seedLine] : [], status: "live" });
+    setSse({
+      lines: seedLine ? [seedLine] : [],
+      status: "live",
+      kind: source === "turn" ? "turn" : "build",
+    });
     const handle = openSSE(endpoints.progress, {
       onMessage: (line) =>
         setSse((s) => (s ? { ...s, lines: [...s.lines, line] } : s)),
@@ -354,13 +384,38 @@ export function DesignerSurface({
         // spinner with no result. This is the second of three independent
         // completion signals; the others are the server's `done` event and the
         // poll below.
-        if (!doneRef.current && endpoints.state) {
+        // A "turn" attach must NOT recover here. Its stream legitimately 404s
+        // whenever the turn had no tools to report (the server opens no channel
+        // for a text-only turn), and refetching /state would race the turn's own
+        // in-flight POST — the same race "live" avoids, arrived at from the
+        // error side rather than the done side.
+        if (
+          !doneRef.current &&
+          endpoints.state &&
+          attachSourceRef.current !== "turn"
+        ) {
           awaitingBuildResultRef.current = false;
           void refetchState();
         }
       },
     });
     sseHandleRef.current = handle;
+  }
+
+  // Tears down a conversation turn's progress stream and removes its card.
+  //
+  // Only ever acts on a "turn" stream. A BUILD's card deliberately survives its
+  // stream closing — it is the record of a multi-minute build sitting above the
+  // review the user is about to act on — and a build that a turn's POST happened
+  // to report is reached through the SAME slot (ensureSSE upgrades in place), so
+  // without this guard finishing an ordinary message would wipe a live build's
+  // progress log.
+  function endTurnStream() {
+    if (attachSourceRef.current !== "turn") return;
+    sseHandleRef.current?.close();
+    sseHandleRef.current = null;
+    attachSourceRef.current = null;
+    setSse(null);
   }
 
   async function refetchState() {
@@ -578,6 +633,17 @@ export function DesignerSurface({
     ]);
     sessionTouchedRef.current = true;
     setBusy(true);
+    // Stream this turn's tool calls. Since #259 the designer reads the knowledge
+    // base while it answers — searching notes, sizing files, fetching a URL — and
+    // none of it was visible: ensureSSE was only ever called on recovery, on a
+    // build, or when a POST reported one already running, so an ordinary turn
+    // showed a silent spinner while the designer read the user's notes.
+    //
+    // A no-op when a stream is already attached (ensureSSE early-returns), so the
+    // build path below is unaffected. Harmless when the turn turns out to have no
+    // tools: the server opens no channel, the stream 404s, and the "turn" guards
+    // in onError/onDone make that a non-event.
+    ensureSSE("turn");
     // Set when this POST reports the generation is STILL running elsewhere
     // (the "still building" placeholder) — in that case a real build is
     // still in flight and `generating` must stay true until the live SSE
@@ -653,6 +719,15 @@ export function DesignerSurface({
       if (!unmountedRef.current) {
         setBusy(false);
         if (!stillBuilding) setGenerating(false);
+        // The turn is over, so its activity card goes with it. Tool calls are
+        // there to show a reply being WORKED ON; once the reply is on screen the
+        // card is describing something finished, and leaving it up until the
+        // next message reads as if the designer were still busy.
+        //
+        // Keyed on the POST resolving rather than on the SSE `done` event: the
+        // two race (both orderings occur — see attachSourceRef's comment), and
+        // the POST returning is what actually means "the answer is here".
+        endTurnStream();
       }
     }
   }
@@ -954,10 +1029,19 @@ export function DesignerSurface({
             />
           )}
 
-          {sse && (
+          {/* A build always shows its card, even before the first milestone —
+              it runs for minutes and the card is the evidence it is alive. A
+              turn's card appears only once it HAS a milestone: most turns read
+              nothing, and an empty "Looking through…" card on every reply would
+              be noise claiming work that never happened. */}
+          {sse && (sse.kind === "build" || sse.lines.length > 0) && (
             <div className="max-w-[78%] self-start">
               <ActivityCard
-                title={`Building your ${labels.entityName}…`}
+                title={
+                  sse.kind === "turn"
+                    ? "Looking through your knowledge base…"
+                    : `Building your ${labels.entityName}…`
+                }
                 lines={sse.lines}
                 status={sse.status}
                 startedAt={sseStartedAtRef.current}
