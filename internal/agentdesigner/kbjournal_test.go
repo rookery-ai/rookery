@@ -35,8 +35,10 @@ open('../../notes/invented/report.md', 'w').write('should not survive')
 if n == 1:
     with open('AGENT.md', 'w') as f:
         f.write("# Suggested schedule: none\n# Skills: none\nWatches a page.\n")
+    open('state.md', 'w').write('BUILD STATE')
     print("[TEST_OUTPUT]built[/TEST_OUTPUT]")
 else:
+    open('state.md', 'w').write('DRY RUN STATE')
     print("[CHAT] real dry run output")
 `
 
@@ -159,6 +161,53 @@ func TestBuildKeepsWhatItWroteInTheAgentsOwnDirectory(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "Watches a page.") {
 		t.Errorf("AGENT.md lost the build's content: %q", string(data))
+	}
+}
+
+// TestStateFileHasExactlyOneRestorer is the disjointness check between the two
+// best-effort restores dryRun now registers.
+//
+// restoreDryRunState puts state.md back to what the BUILD wrote; the write
+// journal puts the knowledge base back to what the USER had. They run as nested
+// defers over the same workDir, so if both claimed state.md the one running
+// second would silently win and which version shipped would be an accident of
+// registration order.
+//
+// They are disjoint because isProtected excludes agents/, and a create build's
+// workDir is <vault>/<ws>/agents/draft_<slug> — so the journal records nothing
+// under it at all. That is reasoning about two files in two packages, which is
+// exactly the kind of claim that stops being true quietly, so it is asserted
+// here on the file that actually has two candidate owners.
+func TestStateFileHasExactlyOneRestorer(t *testing.T) {
+	fake := newFakeCoder(t, kbClobberingScript)
+	flow, workspaceID, base, _ := newGenFlowWithVault(t, fake)
+
+	flow.sessions[workspaceID] = &DesignSession{
+		WorkspaceID: workspaceID,
+		AgentID:     uuid.New().String(),
+		AgentName:   "watcher",
+		State:       StateDesigning,
+		History: []db.ChatMessage{
+			{Role: "user", Content: "watch a page"},
+			{Role: "assistant", Content: "Approve to build."},
+		},
+	}
+
+	if _, _, _, err := flow.runGeneration(context.Background(), workspaceID); err != nil {
+		t.Fatalf("runGeneration: %v", err)
+	}
+
+	statePath := filepath.Join(DraftAgentDir(base, workspaceID, "watcher"), "state.md")
+	got, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("state.md is gone; something restored it out of existence: %v", err)
+	}
+	if string(got) != "BUILD STATE" {
+		t.Errorf("state.md = %q, want %q.\n"+
+			"The rehearsal's state must not ship as the saved agent's memory (a "+
+			"change-detection agent would open its first real run believing it had "+
+			"seen everything), and the journal must not be restoring this file either.",
+			string(got), "BUILD STATE")
 	}
 }
 
