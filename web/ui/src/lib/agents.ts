@@ -44,6 +44,14 @@ export type AgentRun = {
   prompt_tokens: number | null;
   completion_tokens: number | null;
   total_tokens: number | null;
+  // The *_reported flags are not redundant with a zero value: a CLI coder
+  // reports neither figure, and rendering "$0.00" for it would say the run was
+  // free rather than unmeasured. Optional so a response from an older build
+  // simply omits the panel.
+  cached_tokens?: number;
+  cache_reported?: boolean;
+  cost_usd?: number;
+  cost_reported?: boolean;
   started_at: string;
   finished_at: string | null;
 };
@@ -57,7 +65,14 @@ export type RunEvent = {
   text: string;
 };
 
-export type AgentRunDetail = AgentRun & { transcript: RunEvent[] };
+// log_path is the vault-relative note archiving this run — the full activity
+// list lives there rather than in the panel, which reprinted thirty tool calls
+// above the output the reader actually came for. Optional: reflection is
+// best-effort, so a run without a note simply offers no link.
+export type AgentRunDetail = AgentRun & {
+  transcript: RunEvent[];
+  log_path?: string;
+};
 
 // Lazily fetched when a run row is expanded — the agent-detail response lists
 // every recent run, so it deliberately carries no transcripts.

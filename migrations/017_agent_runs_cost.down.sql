@@ -1,0 +1,5 @@
+-- Deliberately empty.
+--
+-- Dropping these columns would discard the only record of what past runs cost,
+-- and they are additive with safe defaults: a build that predates them simply
+-- never reads them. Reversing the schema is not worth destroying the data.

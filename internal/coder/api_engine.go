@@ -677,12 +677,10 @@ func mapProviderErr(err error) error {
 	return fmt.Errorf("coder api error: %w", err)
 }
 
-func addUsage(a, b llm.Usage) llm.Usage {
-	a.PromptTokens += b.PromptTokens
-	a.CompletionTokens += b.CompletionTokens
-	a.TotalTokens += b.TotalTokens
-	return a
-}
+// addUsage delegates to llm.Usage.Add, which is the single definition. It must
+// NOT enumerate fields of its own: a second copy of this arithmetic is what
+// dropped CachedTokens between the engine and the run log.
+func addUsage(a, b llm.Usage) llm.Usage { return a.Add(b) }
 
 // stripKey returns a copy of env with the named key removed, so the LLM provider
 // key is never exposed to the agent's run_script subprocess (the agent's own

@@ -54,8 +54,13 @@ func TestReflectAgentRunWritesTokenUsage(t *testing.T) {
 		t.Fatalf("run note missing: %v", err)
 	}
 	s := string(note)
-	if !strings.Contains(s, "120 prompt / 80 completion / 200 total") {
-		t.Errorf("run note missing token summary: %q", s)
+	// The summary is a fenced block rather than the old blockquote line: it is a
+	// small table of figures people scan, it now carries cache and cost rows
+	// beside the token counts, and the run panel shows the identical shape.
+	for _, want := range []string{"Total tokens:      200", "prompt:          120", "completion:      80"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("run note missing %q in its token summary: %q", want, s)
+		}
 	}
 	if !strings.Contains(s, "total_tokens: 200") {
 		t.Errorf("run note frontmatter missing total_tokens: %q", s)

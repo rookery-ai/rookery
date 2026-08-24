@@ -90,27 +90,51 @@ type RunNote struct {
 	Output     string   // raw coder output
 	ChatLines  []string // user-facing [CHAT] lines
 	Warnings   []string
-	// ToolCalls is what the agent DID: the progress milestones it reported as
-	// it worked. The note recorded the coder's words and never its actions, so
-	// a run log could show an agent concluding nothing had changed without
-	// showing whether it had actually looked.
-	ToolCalls []string
+	// Activity is what the agent DID: the whole transcript — every tool call it
+	// made and every turn the coder produced. The note recorded the coder's
+	// words and never its actions, so a run log could show an agent concluding
+	// nothing had changed without showing whether it had actually looked.
+	//
+	// This note is where that record LIVES. The run panel links here rather
+	// than reprinting the list, which pushed the run's actual output off the
+	// bottom of the row under thirty lines of `read_file(...)` — so anything
+	// dropped from this field is visible nowhere at all.
+	Activity []string
 	// Token usage, reported by the API coder (direct LLM provider). Zero for
 	// CLI coders; omitted from the run log when all zero.
 	PromptTokens     int
 	CompletionTokens int
 	TotalTokens      int
+	// CachedTokens is the part of PromptTokens served from the provider's cache;
+	// CostUSD is what the provider said the run cost. Each has a *Reported flag
+	// because 0 is a legitimate value and "nobody said" is not the same claim —
+	// a CLI coder reports neither, and "$0.00" would read as free.
+	CachedTokens  int
+	CacheReported bool
+	CostUSD       float64
+	CostReported  bool
 }
 
 // ReflectAgentRun writes a markdown run log into the agent's own logs directory
 // (agents/<agentID>/logs/run_<ts>.md) plus a sidecar. The note lives inside the
 // agent's writable area, linked back to the agent.
+// RunNotePath is the vault-relative path of one run's log note.
+//
+// Exported and used by BOTH the writer here and the API that links a run to it.
+// A second copy of this expression is exactly the kind of duplication that
+// drifts silently: the reader would 404 on a note that exists, or worse, link
+// to a plausible path belonging to a different run, and neither failure is
+// visible in either file alone.
+func RunNotePath(agentID string, startedAt time.Time) string {
+	stamp := startedAt.UTC().Format("20060102_150405")
+	return filepath.Join("agents", safeName(agentID), "logs", "run_"+stamp+".md")
+}
+
 func (r *Reflector) ReflectAgentRun(workspaceID string, n RunNote) error {
 	if r == nil {
 		return nil
 	}
-	stamp := n.StartedAt.UTC().Format("20060102_150405")
-	rel := filepath.Join("agents", safeName(n.AgentID), "logs", "run_"+stamp+".md")
+	rel := RunNotePath(n.AgentID, n.StartedAt)
 	status := "ok"
 	if n.ExitCode != 0 {
 		status = fmt.Sprintf("failed (exit %d)", n.ExitCode)
@@ -129,12 +153,21 @@ func (r *Reflector) ReflectAgentRun(workspaceID string, n RunNote) error {
 		kv["completion_tokens"] = strconv.Itoa(n.CompletionTokens)
 		kv["total_tokens"] = strconv.Itoa(n.TotalTokens)
 	}
+	// Emitted on the REPORTED flag, not on a non-zero value: a provider that
+	// says "nothing was cached" is telling us something, and omitting the key
+	// would make that indistinguishable from a provider that never said.
+	if n.CacheReported {
+		kv["cached_tokens"] = strconv.Itoa(n.CachedTokens)
+	}
+	if n.CostReported {
+		kv["cost_usd"] = strconv.FormatFloat(n.CostUSD, 'f', -1, 64)
+	}
 	fm := frontmatter(kv)
 	var b strings.Builder
 	b.WriteString(fm)
 	b.WriteString(fmt.Sprintf("# Run of [[%s]] — %s\n\n", agentLinkTarget(n.AgentName, n.AgentID), status))
 	if n.TotalTokens > 0 {
-		b.WriteString(fmt.Sprintf("> **Tokens:** %d prompt / %d completion / %d total\n\n", n.PromptTokens, n.CompletionTokens, n.TotalTokens))
+		b.WriteString(usageBlock(n))
 	}
 	if len(n.ChatLines) > 0 {
 		b.WriteString("## Output sent to user\n\n")
@@ -150,12 +183,11 @@ func (r *Reflector) ReflectAgentRun(workspaceID string, n RunNote) error {
 		}
 		b.WriteString("\n")
 	}
-	if len(n.ToolCalls) > 0 {
-		b.WriteString("## Tool calls\n\n")
-		for _, t := range n.ToolCalls {
-			b.WriteString("- " + t + "\n")
+	if len(n.Activity) > 0 {
+		b.WriteString("## Activity\n\n")
+		for _, t := range n.Activity {
+			b.WriteString(activityEntry(t))
 		}
-		b.WriteString("\n")
 	}
 	b.WriteString("## Raw output\n\n```\n")
 	b.WriteString(strings.TrimRight(n.Output, "\n"))

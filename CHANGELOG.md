@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.1](https://github.com/rookery-ai/rookery/compare/v0.8.0...v0.8.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **runs:** carry cache stats through, and report what a run cost ([#258](https://github.com/rookery-ai/rookery/issues/258)) ([4a432a0](https://github.com/rookery-ai/rookery/commit/4a432a0c44291c082b40a0683b1baefcfa18d202))
+
+## [0.8.0](https://github.com/rookery-ai/rookery/compare/v0.7.0...v0.8.0) (2026-08-24)
+
+
+### Features
+
+* **runs:** measure prompt caching, and move the activity list to the run log ([#256](https://github.com/rookery-ai/rookery/issues/256)) ([8f38836](https://github.com/rookery-ai/rookery/commit/8f388363cd9f537c52ab5fa35e8066e0b5bf8e8d))
+
 ## [0.7.0](https://github.com/rookery-ai/rookery/compare/v0.6.2...v0.7.0) (2026-08-24)
 
 

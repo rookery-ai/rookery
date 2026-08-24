@@ -22,7 +22,7 @@ import {
   useAgentDetail,
   useAgentRunDetail,
   type AgentRun,
-  type RunEvent,
+  type AgentRunDetail,
 } from "@/lib/agents";
 import { StatusChip } from "./StatusChip";
 import { RunPanel } from "./RunPanel";
@@ -79,12 +79,52 @@ function SilentChip() {
   );
 }
 
-const EVENT_LABEL: Record<RunEvent["kind"], string> = {
-  progress: "tool",
-  coder: "coder",
-  summary: "summary",
-  truncated: "—",
-};
+// Renders a dollar amount at a precision that does not round a real charge away
+// to nothing. A run here costs on the order of $0.0002, so two decimals would
+// show every run as "$0.00" — a rounding that reads as a claim it was free.
+// Mirrors vault.FormatCostUSD; a test pins that they agree.
+export function formatCostUSD(v: number): string {
+  return v > 0 && v < 0.01 ? `$${v.toFixed(6)}` : `$${v.toFixed(2)}`;
+}
+
+// What the run spent. A code block rather than prose because it is a small
+// table of figures people scan, and it sits BELOW the output so it annotates
+// the result rather than delaying it.
+//
+// Each line is conditional on its reported flag. A CLI coder runs a subprocess
+// and reports no usage at all, so its runs say so explicitly instead of showing
+// zeroes that read as free.
+function UsagePanel({ run }: { run: AgentRunDetail }) {
+  const rows: string[] = [];
+  if (run.total_tokens) {
+    rows.push(`Total tokens:      ${run.total_tokens.toLocaleString()}`);
+    rows.push(`  prompt:          ${(run.prompt_tokens ?? 0).toLocaleString()}`);
+    rows.push(
+      `  completion:      ${(run.completion_tokens ?? 0).toLocaleString()}`,
+    );
+  }
+  if (run.cache_reported) {
+    const cached = run.cached_tokens ?? 0;
+    const prompt = run.prompt_tokens ?? 0;
+    const share = prompt > 0 ? ` (${Math.round((cached / prompt) * 100)}% of prompt)` : "";
+    rows.push(`Cached tokens:     ${cached.toLocaleString()}${share}`);
+  }
+  rows.push(
+    run.cost_reported
+      ? `Cost:              ${formatCostUSD(run.cost_usd ?? 0)}`
+      : "Cost:              not reported by this coder",
+  );
+  if (rows.length === 1 && !run.total_tokens) return null;
+
+  return (
+    <div>
+      <h3 className="mb-1 text-xs font-semibold text-muted-2">Tokens / Cost</h3>
+      <pre className="overflow-auto whitespace-pre rounded-md bg-chrome p-2 font-mono text-xs">
+        {rows.join("\n")}
+      </pre>
+    </div>
+  );
+}
 
 // The transcript panel. Fetched only once a row is expanded.
 function RunTranscript({ agentId, runId }: { agentId: string; runId: string }) {
@@ -107,32 +147,29 @@ function RunTranscript({ agentId, runId }: { agentId: string; runId: string }) {
           </pre>
         </div>
       )}
-      <div>
-        <h3 className="mb-1 text-xs font-semibold text-muted-2">
-          What the agent did
-        </h3>
-        {events.length === 0 ? (
-          // Runs that predate the transcript column have none, and saying so is
-          // better than an empty box that reads as a loading failure.
-          <p className="text-xs text-muted-2">
-            No activity was recorded for this run.
-          </p>
-        ) : (
-          <ol className="flex flex-col gap-1">
-            {events.map((e, i) => (
-              <li
-                key={i}
-                className="flex gap-2 rounded-md bg-chrome px-2 py-1 font-mono text-xs"
-              >
-                <span className="shrink-0 select-none text-muted-2">
-                  {EVENT_LABEL[e.kind] ?? e.kind}
-                </span>
-                <span className="min-w-0 whitespace-pre-wrap break-words">
-                  {e.text}
-                </span>
-              </li>
-            ))}
-          </ol>
+      <UsagePanel run={data} />
+      {/*
+        The full activity list is NOT reprinted here. A run makes tens of tool
+        calls, and rendering every one above the output buried the thing the
+        reader opened the row for under thirty lines of `read_file(...)`. The
+        same list is already archived in the run's knowledge-base note, so this
+        summarises and links there rather than duplicating it.
+      */}
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-2">
+        <span>
+          {events.length === 0
+            ? // Runs predating the transcript column have none, and saying so
+              // beats an empty row that reads as a loading failure.
+              "No activity was recorded for this run."
+            : `${events.length} step${events.length === 1 ? "" : "s"} recorded`}
+        </span>
+        {data.log_path && (
+          <Link
+            to={`/kb?path=${encodeURIComponent(data.log_path)}`}
+            className="font-medium text-foreground underline underline-offset-2"
+          >
+            View full log
+          </Link>
         )}
       </div>
     </div>

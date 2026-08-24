@@ -17,6 +17,7 @@ import (
 	"github.com/rookery-ai/rookery/internal/profile"
 	"github.com/rookery-ai/rookery/internal/secrets"
 	"github.com/rookery-ai/rookery/internal/skilllibrary"
+	"github.com/rookery-ai/rookery/internal/vault"
 )
 
 // registerAgentsAPI registers the JSON CRUD/run/schedule endpoints plus the
@@ -119,9 +120,17 @@ func toAPIRun(r *db.AgentRun) map[string]any {
 		"stderr":            r.Stderr,
 		"prompt_tokens":     r.PromptTokens,
 		"completion_tokens": r.CompletionTokens,
-		"total_tokens":      r.TotalTokens,
-		"started_at":        r.StartedAt,
-		"finished_at":       r.FinishedAt,
+		// Cost and cache accounting, each with the flag saying whether anyone
+		// actually reported it. The flags are not redundant with a zero value:
+		// a CLI coder reports neither, and a panel rendering "$0.00" for it
+		// would claim the run was free rather than unmeasured.
+		"cached_tokens":  r.CachedTokens,
+		"cache_reported": r.CacheReported,
+		"cost_usd":       r.CostUSD,
+		"cost_reported":  r.CostReported,
+		"total_tokens":   r.TotalTokens,
+		"started_at":     r.StartedAt,
+		"finished_at":    r.FinishedAt,
 	}
 }
 
@@ -303,6 +312,17 @@ func (s *Server) apiAgentRunDetail(c echo.Context) error {
 
 	out := toAPIRun(run)
 	out["transcript"] = events
+	// Where the same activity is archived in the knowledge base. The run panel
+	// links here instead of reprinting the whole list, which buried the actual
+	// output under thirty lines of tool calls. Computed with the reflector's own
+	// helper so the link cannot drift from the file it points at.
+	//
+	// Only for runs that HAVE a note: reflection is best-effort and a workspace
+	// with no reflector wired writes none, so a link offered unconditionally
+	// would sometimes lead nowhere.
+	if !run.StartedAt.IsZero() {
+		out["log_path"] = vault.RunNotePath(run.AgentID, run.StartedAt)
+	}
 	return c.JSON(http.StatusOK, out)
 }
 
