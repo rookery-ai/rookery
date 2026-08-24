@@ -57,7 +57,14 @@ export type RunEvent = {
   text: string;
 };
 
-export type AgentRunDetail = AgentRun & { transcript: RunEvent[] };
+// log_path is the vault-relative note archiving this run — the full activity
+// list lives there rather than in the panel, which reprinted thirty tool calls
+// above the output the reader actually came for. Optional: reflection is
+// best-effort, so a run without a note simply offers no link.
+export type AgentRunDetail = AgentRun & {
+  transcript: RunEvent[];
+  log_path?: string;
+};
 
 // Lazily fetched when a run row is expanded — the agent-detail response lists
 // every recent run, so it deliberately carries no transcripts.

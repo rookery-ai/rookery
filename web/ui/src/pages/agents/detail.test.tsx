@@ -110,7 +110,14 @@ const SILENT_RUN = {
 let runCalled = false;
 let deleteAgentCalled = false;
 
-function mockFetch(handlers: Record<string, (body: unknown) => Response | Promise<Response>> = {}) {
+// opts.logPath: null serves a run whose knowledge-base note was never written
+// (reflection is best-effort), which must render without a dead link.
+function mockFetch(
+  handlers: Record<string, (body: unknown) => Response | Promise<Response>> = {},
+  opts: { logPath?: string | null } = {},
+) {
+  const logPath =
+    opts.logPath === undefined ? "agents/a1/logs/run_20260716_080000.md" : opts.logPath;
   const calls: Array<{ url: string; method: string; body: unknown }> = [];
   vi.stubGlobal(
     "fetch",
@@ -128,6 +135,7 @@ function mockFetch(handlers: Record<string, (body: unknown) => Response | Promis
         return Promise.resolve(
           jsonResponse({
             ...detail.runs[0],
+            ...(logPath === null ? {} : { log_path: logPath }),
             transcript: [
               { kind: "progress", at: "2026-07-16T08:00:02Z", text: "🔧 read_file(inbox.md)" },
               { kind: "coder", at: "2026-07-16T08:00:05Z", text: "Three emails matched." },
@@ -467,18 +475,50 @@ test("run history renders status, trigger, and expandable output", async () => {
   expect(await screen.findByText("Filed 3 emails.")).toBeInTheDocument();
 });
 
-// The reported gap: run history showed only what the user had already been
-// sent, so an agent you were about to edit told you nothing about how it got
-// there. Tool calls and coder turns are fetched lazily when a row is opened.
-test("expanding a run shows its tool calls and coder turns", async () => {
+// The panel summarises the activity and links to the full log rather than
+// reprinting it.
+//
+// The original version of this listed every event inline, and on a real run
+// that is tens of `read_file(...)` lines rendered ABOVE the output — so the
+// thing the reader opened the row for was pushed off the bottom by the
+// scaffolding of how it got there. The same list is already archived in the
+// run's knowledge-base note, so this is a duplicate with worse ergonomics.
+test("expanding a run summarises its activity and links to the full log", async () => {
   mockFetch();
   wrap();
 
   await screen.findByText("manual");
   await userEvent.click(screen.getByRole("button", { name: /show details/i }));
 
-  expect(await screen.findByText("🔧 read_file(inbox.md)")).toBeInTheDocument();
-  expect(screen.getByText("Three emails matched.")).toBeInTheDocument();
+  // The output is still shown in full — it is the reason the row opens, and it
+  // is what the activity list used to push off the bottom.
+  expect(await screen.findByText("Filed 3 emails.")).toBeInTheDocument();
+
+  // The activity is counted, not listed. Both kinds stay out of the panel: the
+  // whole transcript is archived in the note the link points at.
+  expect(screen.getByText(/2 steps recorded/i)).toBeInTheDocument();
+  expect(screen.queryByText("🔧 read_file(inbox.md)")).not.toBeInTheDocument();
+  expect(screen.queryByText("Three emails matched.")).not.toBeInTheDocument();
+
+  const link = screen.getByRole("link", { name: /view full log/i });
+  expect(link).toHaveAttribute(
+    "href",
+    "/kb?path=" + encodeURIComponent("agents/a1/logs/run_20260716_080000.md"),
+  );
+});
+
+// A run whose note was never written must not offer a link that leads nowhere:
+// reflection is best-effort, so log_path is optional and its absence is a
+// legitimate state rather than an error.
+test("a run with no archived note offers no link", async () => {
+  mockFetch({}, { logPath: null });
+  wrap();
+
+  await screen.findByText("manual");
+  await userEvent.click(screen.getByRole("button", { name: /show details/i }));
+
+  await screen.findByText(/steps recorded/i);
+  expect(screen.queryByRole("link", { name: /view full log/i })).toBeNull();
 });
 
 // The transcript is NOT part of the agent-detail response — shipping every
@@ -492,7 +532,7 @@ test("the transcript is not fetched until a row is expanded", async () => {
   expect(calls.filter((c) => c.url.includes("/runs/r1"))).toHaveLength(0);
 
   await userEvent.click(screen.getByRole("button", { name: /show details/i }));
-  await screen.findByText("🔧 read_file(inbox.md)");
+  await screen.findByText(/steps recorded/i);
 
   expect(calls.filter((c) => c.url.includes("/runs/r1")).length).toBeGreaterThan(0);
 });

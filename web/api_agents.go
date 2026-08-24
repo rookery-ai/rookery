@@ -17,6 +17,7 @@ import (
 	"github.com/rookery-ai/rookery/internal/profile"
 	"github.com/rookery-ai/rookery/internal/secrets"
 	"github.com/rookery-ai/rookery/internal/skilllibrary"
+	"github.com/rookery-ai/rookery/internal/vault"
 )
 
 // registerAgentsAPI registers the JSON CRUD/run/schedule endpoints plus the
@@ -303,6 +304,17 @@ func (s *Server) apiAgentRunDetail(c echo.Context) error {
 
 	out := toAPIRun(run)
 	out["transcript"] = events
+	// Where the same activity is archived in the knowledge base. The run panel
+	// links here instead of reprinting the whole list, which buried the actual
+	// output under thirty lines of tool calls. Computed with the reflector's own
+	// helper so the link cannot drift from the file it points at.
+	//
+	// Only for runs that HAVE a note: reflection is best-effort and a workspace
+	// with no reflector wired writes none, so a link offered unconditionally
+	// would sometimes lead nowhere.
+	if !run.StartedAt.IsZero() {
+		out["log_path"] = vault.RunNotePath(run.AgentID, run.StartedAt)
+	}
 	return c.JSON(http.StatusOK, out)
 }
 

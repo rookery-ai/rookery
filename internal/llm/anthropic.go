@@ -194,6 +194,14 @@ type anthropicResponse struct {
 	Usage      struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
+		// Anthropic names these differently from the OpenAI schema and reports
+		// them at the top level of usage rather than in a details object. A
+		// POINTER for the same reason as there: absent and zero are opposite
+		// findings. Note that Anthropic caches only what an explicit
+		// cache_control breakpoint marks — which nothing here sets yet — so a
+		// reported zero on this path means "we never asked", not "the provider
+		// declined".
+		CacheReadInputTokens *int `json:"cache_read_input_tokens"`
 	} `json:"usage"`
 }
 
@@ -202,9 +210,18 @@ func parseAnthropicResponse(data []byte) (*Response, error) {
 	if err := json.Unmarshal(data, &r); err != nil {
 		return nil, fmt.Errorf("llm: parse anthropic response: %w (body: %s)", err, snippet(data))
 	}
+	usage := Usage{
+		PromptTokens:     r.Usage.InputTokens,
+		CompletionTokens: r.Usage.OutputTokens,
+		TotalTokens:      r.Usage.InputTokens + r.Usage.OutputTokens,
+	}
+	if c := r.Usage.CacheReadInputTokens; c != nil {
+		usage.CachedTokens = *c
+		usage.CacheReported = true
+	}
 	resp := &Response{
 		FinishReason: r.StopReason,
-		Usage:        Usage{PromptTokens: r.Usage.InputTokens, CompletionTokens: r.Usage.OutputTokens, TotalTokens: r.Usage.InputTokens + r.Usage.OutputTokens},
+		Usage:        usage,
 	}
 	for _, b := range r.Content {
 		switch b.Type {
