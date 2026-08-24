@@ -183,11 +183,16 @@ type openAIResponse struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
-		// A POINTER so an absent object is distinguishable from one reporting
-		// zero — see Usage.CacheReported for why those are opposite findings.
+		// POINTERS so an absent value is distinguishable from one reporting zero
+		// — see Usage.CacheReported / Usage.CostReported for why those are
+		// opposite findings.
 		PromptTokensDetails *struct {
 			CachedTokens int `json:"cached_tokens"`
 		} `json:"prompt_tokens_details"`
+		// OpenRouter reports the call's price here (measured: present on every
+		// response, with and without its `usage: {include: true}` flag).
+		// Plain OpenAI and most compatible gateways omit it.
+		Cost *float64 `json:"cost"`
 	} `json:"usage"`
 }
 
@@ -202,6 +207,10 @@ func (r openAIResponse) usage() Usage {
 	if d := r.Usage.PromptTokensDetails; d != nil {
 		u.CachedTokens = d.CachedTokens
 		u.CacheReported = true
+	}
+	if c := r.Usage.Cost; c != nil {
+		u.Cost = *c
+		u.CostReported = true
 	}
 	return u
 }
