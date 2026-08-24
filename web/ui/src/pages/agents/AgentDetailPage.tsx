@@ -22,6 +22,7 @@ import {
   useAgentDetail,
   useAgentRunDetail,
   type AgentRun,
+  type AgentRunDetail,
 } from "@/lib/agents";
 import { StatusChip } from "./StatusChip";
 import { RunPanel } from "./RunPanel";
@@ -78,6 +79,53 @@ function SilentChip() {
   );
 }
 
+// Renders a dollar amount at a precision that does not round a real charge away
+// to nothing. A run here costs on the order of $0.0002, so two decimals would
+// show every run as "$0.00" — a rounding that reads as a claim it was free.
+// Mirrors vault.FormatCostUSD; a test pins that they agree.
+export function formatCostUSD(v: number): string {
+  return v > 0 && v < 0.01 ? `$${v.toFixed(6)}` : `$${v.toFixed(2)}`;
+}
+
+// What the run spent. A code block rather than prose because it is a small
+// table of figures people scan, and it sits BELOW the output so it annotates
+// the result rather than delaying it.
+//
+// Each line is conditional on its reported flag. A CLI coder runs a subprocess
+// and reports no usage at all, so its runs say so explicitly instead of showing
+// zeroes that read as free.
+function UsagePanel({ run }: { run: AgentRunDetail }) {
+  const rows: string[] = [];
+  if (run.total_tokens) {
+    rows.push(`Total tokens:      ${run.total_tokens.toLocaleString()}`);
+    rows.push(`  prompt:          ${(run.prompt_tokens ?? 0).toLocaleString()}`);
+    rows.push(
+      `  completion:      ${(run.completion_tokens ?? 0).toLocaleString()}`,
+    );
+  }
+  if (run.cache_reported) {
+    const cached = run.cached_tokens ?? 0;
+    const prompt = run.prompt_tokens ?? 0;
+    const share = prompt > 0 ? ` (${Math.round((cached / prompt) * 100)}% of prompt)` : "";
+    rows.push(`Cached tokens:     ${cached.toLocaleString()}${share}`);
+  }
+  rows.push(
+    run.cost_reported
+      ? `Cost:              ${formatCostUSD(run.cost_usd ?? 0)}`
+      : "Cost:              not reported by this coder",
+  );
+  if (rows.length === 1 && !run.total_tokens) return null;
+
+  return (
+    <div>
+      <h3 className="mb-1 text-xs font-semibold text-muted-2">Tokens / Cost</h3>
+      <pre className="overflow-auto whitespace-pre rounded-md bg-chrome p-2 font-mono text-xs">
+        {rows.join("\n")}
+      </pre>
+    </div>
+  );
+}
+
 // The transcript panel. Fetched only once a row is expanded.
 function RunTranscript({ agentId, runId }: { agentId: string; runId: string }) {
   const { data, isPending, isError } = useAgentRunDetail(agentId, runId);
@@ -99,6 +147,7 @@ function RunTranscript({ agentId, runId }: { agentId: string; runId: string }) {
           </pre>
         </div>
       )}
+      <UsagePanel run={data} />
       {/*
         The full activity list is NOT reprinted here. A run makes tens of tool
         calls, and rendering every one above the output buried the thing the

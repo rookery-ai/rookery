@@ -44,6 +44,14 @@ export type AgentRun = {
   prompt_tokens: number | null;
   completion_tokens: number | null;
   total_tokens: number | null;
+  // The *_reported flags are not redundant with a zero value: a CLI coder
+  // reports neither figure, and rendering "$0.00" for it would say the run was
+  // free rather than unmeasured. Optional so a response from an older build
+  // simply omits the panel.
+  cached_tokens?: number;
+  cache_reported?: boolean;
+  cost_usd?: number;
+  cost_reported?: boolean;
   started_at: string;
   finished_at: string | null;
 };

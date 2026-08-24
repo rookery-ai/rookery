@@ -154,6 +154,44 @@ type Usage struct {
 	// them into a bare zero would make an unanswerable case look like a
 	// finding.
 	CacheReported bool
+	// Cost is what the provider says this call cost, in USD. OpenRouter reports
+	// it on every response; providers that bill separately (Anthropic) do not,
+	// and a CLI coder runs a subprocess with no usage accounting at all.
+	//
+	// Taken from the provider rather than computed from a price table, because a
+	// table is a second copy of someone else's pricing and goes stale in
+	// silence — yielding a number that looks authoritative and is wrong.
+	Cost float64
+	// CostReported distinguishes "this cost nothing" from "nobody told us what
+	// it cost", for the same reason CacheReported exists: an unreported cost
+	// rendered as $0.00 reads as free.
+	CostReported bool
+}
+
+// Add sums two accountings.
+//
+// This is the ONE place usage is summed, and it exists because there were two.
+// internal/coder summed the provider's per-call usage; internal/agentrunner
+// summed the per-turn results — and the second enumerated three fields, so it
+// silently discarded everything the first learned about. CachedTokens and
+// CacheReported were parsed correctly, carried correctly out of the engine, and
+// dropped one layer up, so the run log said "n/a" on a provider that reports
+// cache statistics on every single response. Adding Cost the same way would
+// have reproduced it exactly.
+//
+// Counts add; the reported-flags OR, because one call reporting is enough to
+// make a run's number meaningful, and requiring every call to report would
+// erase a real measurement whenever a single response omitted the field.
+func (u Usage) Add(b Usage) Usage {
+	return Usage{
+		PromptTokens:     u.PromptTokens + b.PromptTokens,
+		CompletionTokens: u.CompletionTokens + b.CompletionTokens,
+		TotalTokens:      u.TotalTokens + b.TotalTokens,
+		CachedTokens:     u.CachedTokens + b.CachedTokens,
+		CacheReported:    u.CacheReported || b.CacheReported,
+		Cost:             u.Cost + b.Cost,
+		CostReported:     u.CostReported || b.CostReported,
+	}
 }
 
 // ─── Registry ────────────────────────────────────────────────────────────────

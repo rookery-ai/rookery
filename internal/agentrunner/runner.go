@@ -296,6 +296,10 @@ func (rctx *coderRunContext) outcome(exitCode int, stdout, stderr string) db.Run
 		PromptTokens:     rctx.usage.PromptTokens,
 		CompletionTokens: rctx.usage.CompletionTokens,
 		TotalTokens:      rctx.usage.TotalTokens,
+		CachedTokens:     rctx.usage.CachedTokens,
+		CacheReported:    rctx.usage.CacheReported,
+		CostUSD:          rctx.usage.Cost,
+		CostReported:     rctx.usage.CostReported,
 	}
 	if rctx.transcript != nil {
 		// The tool summary is appended as the transcript's LAST event rather
@@ -584,6 +588,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 			// would read as "caching is broken", which is a finding, when the
 			// truth is "we cannot tell", which is not.
 			"cached_tokens", cachedTokensField(rctx.usage),
+			"cost", costField(rctx.usage),
 			"stop_reason", rctx.stopReason,
 			"tools", coder.SummarizeToolTrace(rctx.toolTrace))
 	}()
@@ -698,6 +703,10 @@ func (r *Runner) reflectRun(input RunInput, agent *db.Agent, runID string, exitC
 		ChatLines:        rctx.chatLines,
 		Warnings:         rctx.warnings,
 		Activity:         activity,
+		CachedTokens:     rctx.usage.CachedTokens,
+		CacheReported:    rctx.usage.CacheReported,
+		CostUSD:          rctx.usage.Cost,
+		CostReported:     rctx.usage.CostReported,
 		PromptTokens:     rctx.usage.PromptTokens,
 		CompletionTokens: rctx.usage.CompletionTokens,
 		TotalTokens:      rctx.usage.TotalTokens,
@@ -1474,12 +1483,14 @@ func backendTypeOf(c *coder.Coder) string {
 
 // addUsage accumulates coder.Usage across turns. CLI coders report zero; the API
 // coder reports provider-reported token counts per turn.
-func addUsage(a, b coder.Usage) coder.Usage {
-	a.PromptTokens += b.PromptTokens
-	a.CompletionTokens += b.CompletionTokens
-	a.TotalTokens += b.TotalTokens
-	return a
-}
+// addUsage delegates to llm.Usage.Add, the single definition.
+//
+// This function used to enumerate three fields, and that is exactly how it
+// broke: the engine parsed CachedTokens and CacheReported correctly and carried
+// them out, and this summing discarded both — so the run log reported "n/a" for
+// a provider that reports cache statistics on every response. Do not reintroduce
+// per-field copying here; a new field would be dropped the same way.
+func addUsage(a, b coder.Usage) coder.Usage { return a.Add(b) }
 
 // connectorBinPath is the absolute path to the running rookery binary, which a CLI
 // coder invokes as `<bin> connector exec …`. Falls back to "" (bare name via PATH) if
