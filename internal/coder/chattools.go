@@ -39,3 +39,31 @@ func ChatAllowedTools(connectorBin, kbBin, mcpBin string) string {
 	}
 	return strings.Join(grants, ",")
 }
+
+// DesignAllowedTools is the CLI-coder tool grant for a DESIGN conversation.
+//
+// It is ChatAllowedTools minus everything that changes state. Two differences
+// are load-bearing rather than cosmetic:
+//
+//   - No Write/Edit. A design conversation is a questioning phase; it must not
+//     alter the user's vault before anything has been approved.
+//   - The kb grants name subcommands INDIVIDUALLY. ChatAllowedTools uses a
+//     blanket `kb:*`, which reaches `kb convert` — and convert WRITES a note
+//     into the vault. Widening this back to `kb:*` silently reintroduces a
+//     write path that the rest of this profile exists to remove.
+//
+// kbBin is the absolute path of the rookery binary, or "" when no KB bridge is
+// wired for this call. The designers wire none today, so they pass "" and get
+// the bare read-only set. Nothing is lost on the API engine, which reaches
+// kb_file_map/kb_table_query as native host tools regardless of any bridge.
+func DesignAllowedTools(kbBin string) string {
+	grants := []string{"Read,Glob,Grep,WebFetch,WebSearch"}
+	if kbBin != "" {
+		grants = append(grants,
+			"Bash("+kbBin+" kb search:*)",
+			"Bash("+kbBin+" kb map:*)",
+			"Bash("+kbBin+" kb table:*)",
+		)
+	}
+	return strings.Join(grants, ",")
+}
