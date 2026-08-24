@@ -129,11 +129,15 @@ type Coder struct {
 	// engine's offer sites, the kickoff-message choice and the exec gate — is
 	// byte-identical for every caller that does not set it.
 	readOnlyTools bool
-	workDir       string // when non-empty, overrides cmd.Dir (default: per-user home)
-	agentName     string // name for the API engine's state.md tools (cosmetic; see WithAgentName)
-	allowedTools  string // when non-empty, passed as --allowedTools <value>
-	backendType   string // '' = auto-detect by binary name, 'claude', 'generic', or 'api"
-	cliModel      string // provider/model for CLI coders that accept -m/--model (opencode, cursor)
+
+	// kbJournal records a rehearsal's knowledge-base writes so its caller can
+	// undo them. Nil for every ordinary surface. See WithKBJournal.
+	kbJournal    *vault.WriteJournal
+	workDir      string // when non-empty, overrides cmd.Dir (default: per-user home)
+	agentName    string // name for the API engine's state.md tools (cosmetic; see WithAgentName)
+	allowedTools string // when non-empty, passed as --allowedTools <value>
+	backendType  string // '' = auto-detect by binary name, 'claude', 'generic', or 'api"
+	cliModel     string // provider/model for CLI coders that accept -m/--model (opencode, cursor)
 
 	// ── API coder (coder_kind == "api") ──────────────────────────────────────
 	// When api is non-nil, Generate/Ping dispatch to the in-process tool-calling
@@ -242,6 +246,29 @@ func (c *Coder) WithNoTools() *Coder {
 func (c *Coder) WithReadOnlyTools() *Coder {
 	c2 := *c
 	c2.readOnlyTools = true
+	return &c2
+}
+
+// WithKBJournal returns a shallow copy of the Coder whose knowledge-base writes
+// are journaled, so the caller can undo them when it finishes.
+//
+// Use it for a REHEARSAL — an agent build or the create-build dry run. Both run
+// the real thing against live services (that is the point: the review step must
+// show what an agent does, not what the model says it will do), and both
+// therefore write into the user's knowledge base for real. Those writes must
+// not survive an agent the user has not approved.
+//
+// Deliberately not confinement. Withholding write access would stop a
+// knowledge-base-writing agent rehearsing the only thing it does. The writes
+// happen and the caller reverts them.
+//
+// The journal reaches the two engines differently because their writes are
+// visible in different places: the API engine journals each host-tool write and
+// brackets each script call, while a CLI coder writes from a subprocess with no
+// host tools at all, so Generate brackets its whole call. See the call sites.
+func (c *Coder) WithKBJournal(j *vault.WriteJournal) *Coder {
+	c2 := *c
+	c2.kbJournal = j
 	return &c2
 }
 
@@ -403,10 +430,33 @@ func (c *Coder) Generate(ctx context.Context, workspaceID, prompt string) (*Resu
 		return nil, c.disabled
 	}
 	// API coder: run the in-process tool-calling loop instead of spawning a CLI.
+	// It journals its own writes precisely (each host-tool write, each script
+	// call), so it must NOT also be bracketed here — a bracket around the whole
+	// rehearsal would attribute a concurrent chat or scheduled run's note to it
+	// and revert that too.
 	if c.api != nil {
 		return c.runAPI(ctx, workspaceID, prompt)
 	}
 
+	// A CLI coder writes from a subprocess with no host tools to instrument, so
+	// a before/after diff around the whole call is the only signal available.
+	// The attribution window is therefore the whole rehearsal rather than one
+	// script call. That is a real limitation of this engine, not an oversight.
+	if c.kbJournal != nil {
+		var res *Result
+		err := c.kbJournal.AroundExec(func() error {
+			var innerErr error
+			res, innerErr = c.generateCLI(ctx, workspaceID, prompt)
+			return innerErr
+		})
+		return res, err
+	}
+	return c.generateCLI(ctx, workspaceID, prompt)
+}
+
+// generateCLI is Generate's CLI-engine body, split out so a rehearsal can
+// bracket the whole subprocess call (see Generate).
+func (c *Coder) generateCLI(ctx context.Context, workspaceID, prompt string) (*Result, error) {
 	backend := c.selectBackend()
 
 	userDir, err := c.ensureUserHome(workspaceID, backend)

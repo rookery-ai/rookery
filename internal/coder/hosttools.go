@@ -72,6 +72,17 @@ type hostToolSet struct {
 	// blank " # State — " heading on the rare first-ever write.
 	agentName string
 
+	// journal records what a REHEARSAL — an agent build or the create-build dry
+	// run — writes into the user's knowledge base, so the designer can undo it
+	// when the rehearsal ends. Nil everywhere else: chat and real agent runs
+	// write the knowledge base on purpose and must never be reverted.
+	//
+	// It is not confinement. A rehearsal genuinely needs to write, or it cannot
+	// rehearse a knowledge-base-writing agent; the writes happen and are undone.
+	// See vault.WriteJournal for why this is a per-write journal rather than a
+	// snapshot diff around the whole run.
+	journal *vault.WriteJournal
+
 	// searcher overrides the exact-match Searcher used by search_files. Nil in
 	// production, where it always falls back to h.vlt.NewSearcher() — this
 	// field exists purely so a test can inject a Searcher that fails on
@@ -837,6 +848,12 @@ func (h *hostToolSet) writeFile(path, content string) error {
 	if err != nil {
 		return err
 	}
+	// Record BEFORE the write, or there is nothing left to record: this is the
+	// last moment the previous bytes exist. No-op outside a rehearsal, and
+	// no-op for a path in the agent's own directory (see WriteJournal.Record).
+	if err := h.journal.Record(abs); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(abs), 0o750); err != nil {
 		return err
 	}
@@ -903,6 +920,9 @@ func (h *hostToolSet) editFile(path, oldStr, newStr string) error {
 	}
 	if count > 1 {
 		return fmt.Errorf("old_string appears %d times in %s; it must be unique", count, path)
+	}
+	if err := h.journal.Record(abs); err != nil {
+		return err
 	}
 	return writeFileAtomic(abs, []byte(strings.Replace(string(data), oldStr, newStr, 1)), 0o640)
 }
@@ -1273,7 +1293,13 @@ func (h *hostToolSet) runScript(ctx context.Context, rel string, scriptArgs []st
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
-	if err := cmd.Run(); err != nil {
+	// A script's individual writes are invisible from here, so during a
+	// rehearsal the call is bracketed and whatever it changed in the user's
+	// knowledge base is diffed in. Bracketing the CALL rather than the whole
+	// rehearsal is what keeps the attribution window to seconds — see
+	// vault.WriteJournal.AroundExec. Outside a rehearsal this is a plain
+	// cmd.Run() through a nil journal.
+	if err := h.journal.AroundExec(cmd.Run); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return "", fmt.Errorf("script timed out")
 		}
@@ -1326,6 +1352,17 @@ func (h *hostToolSet) buildScriptCommand(ctx context.Context, command []string, 
 	if h.sandbox && h.selfExe != "" && sandbox.Supported() {
 		rw := []string{runDir, h.userHomeDir()}
 		if h.dataDir != "" {
+			// The whole vault, READ-WRITE, and that is deliberate — including
+			// during a build or a dry run, where it is the third of the three
+			// channels by which a rehearsal reaches the user's knowledge base.
+			//
+			// Do NOT narrow this to runDir to "contain" a rehearsal. A script
+			// that cannot write the knowledge base cannot rehearse a
+			// knowledge-base-writing agent, which is most of them, and the
+			// review step would go back to describing what an agent would do
+			// instead of showing what it did. Containment is vault.WriteJournal,
+			// which records what a rehearsal writes here and undoes it after —
+			// see the AroundExec bracket around cmd.Run below.
 			rw = append(rw, filepath.Join(h.dataDir, "vaults", h.workspaceID))
 		}
 		ro := sandbox.SystemReadOnlyPaths()
@@ -1690,7 +1727,8 @@ func (h *hostToolSet) runBash(ctx context.Context, command string) (string, erro
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	// Same bracket as run_script: bash writes are opaque from here.
+	if err := h.journal.AroundExec(cmd.Run); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return "", fmt.Errorf("command timed out")
 		}
