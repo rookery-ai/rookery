@@ -1352,6 +1352,17 @@ func (h *hostToolSet) buildScriptCommand(ctx context.Context, command []string, 
 	if h.sandbox && h.selfExe != "" && sandbox.Supported() {
 		rw := []string{runDir, h.userHomeDir()}
 		if h.dataDir != "" {
+			// The whole vault, READ-WRITE, and that is deliberate — including
+			// during a build or a dry run, where it is the third of the three
+			// channels by which a rehearsal reaches the user's knowledge base.
+			//
+			// Do NOT narrow this to runDir to "contain" a rehearsal. A script
+			// that cannot write the knowledge base cannot rehearse a
+			// knowledge-base-writing agent, which is most of them, and the
+			// review step would go back to describing what an agent would do
+			// instead of showing what it did. Containment is vault.WriteJournal,
+			// which records what a rehearsal writes here and undoes it after —
+			// see the AroundExec bracket around cmd.Run below.
 			rw = append(rw, filepath.Join(h.dataDir, "vaults", h.workspaceID))
 		}
 		ro := sandbox.SystemReadOnlyPaths()
