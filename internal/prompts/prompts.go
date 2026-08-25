@@ -94,6 +94,12 @@ type DesignSystemParams struct {
 	UserProfile        string          // "[Current context]" block (date/time/timezone); identity lives in UserMemory
 	UserMemory         string
 	KBManifest         string // vault.BuildKBContext output: folder summary + relevant passages; "" if no vault attached
+	// SiteFeasibility is what a real browser found at the URLs the user just
+	// mentioned: reachable, behind a login, or behind a bot wall. Empty when no
+	// URL was mentioned or no browser is installed. Injected rather than
+	// discovered, because the design conversation has no browser tool of its own
+	// — the same arrangement KBManifest uses for retrieval.
+	SiteFeasibility string
 }
 
 // ConnectionRef describes one connected service account (self-managed OAuth) the agent
@@ -1162,6 +1168,12 @@ runtime rather than assuming these exact paths persist forever.
 		sb.WriteString(`The user's knowledge base is currently empty — an agent can create notes
 there as it runs.
 `)
+	}
+	// After the knowledge base, because a site the user named is more specific
+	// than anything retrieval turned up and a weak model weights later text more
+	// heavily.
+	if p.SiteFeasibility != "" {
+		sb.WriteString(p.SiteFeasibility)
 	}
 	sb.WriteString("</knowledge_base>\n\n")
 

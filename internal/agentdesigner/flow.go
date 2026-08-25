@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
+	"github.com/rookery-ai/rookery/internal/browser"
 	"github.com/rookery-ai/rookery/internal/buildphase"
 	"github.com/rookery-ai/rookery/internal/coder"
 	"github.com/rookery-ai/rookery/internal/connectors"
@@ -58,9 +59,15 @@ func (s DesignState) String() string {
 
 // DesignSession holds all state for one in-progress agent creation or edit.
 type DesignSession struct {
-	WorkspaceID        string
-	AgentID            string
-	AgentName          string
+	WorkspaceID string
+	AgentID     string
+	AgentName   string
+	// feasibility caches site probes for this session so a conversation that
+	// keeps naming the same URL renders it once. Deliberately NOT persisted with
+	// the draft: a resumed conversation days later should look again, since the
+	// site may have changed — and a stale "blocked" would talk the user out of an
+	// agent that would now work.
+	feasibility        *feasibilityCache
 	State              DesignState
 	History            []db.ChatMessage   // full conversation fed to coder on every turn
 	Skills             []prompts.SkillRef // installed skills (name+description), loaded once on Start
@@ -376,14 +383,17 @@ type Flow struct {
 	// onBuildComplete delivers a detached build's outcome. See BuildCompleteFunc.
 	onBuildComplete BuildCompleteFunc
 
-	coderFor      func(workspaceID string) *coder.Coder
-	designer      *AgentDesigner
-	db            dbDesignStore
-	mcpDB         mcpStore
-	mcpCaller     mcp.Caller
-	mcpBoundFor   func(ctx context.Context, workspaceID string) []mcp.BoundServer
-	memStore      memoryStore  // optional; nil = no memory injected
-	vlt           *vault.Vault // optional; nil = no KB context injected
+	coderFor    func(workspaceID string) *coder.Coder
+	designer    *AgentDesigner
+	db          dbDesignStore
+	mcpDB       mcpStore
+	mcpCaller   mcp.Caller
+	mcpBoundFor func(ctx context.Context, workspaceID string) []mcp.BoundServer
+	memStore    memoryStore  // optional; nil = no memory injected
+	vlt         *vault.Vault // optional; nil = no KB context injected
+	// browser lets the design conversation find out what a site ACTUALLY looks
+	// like before a plan is approved. Optional; nil = no feasibility block.
+	browser       browser.Renderer
 	secretsLoader func(ctx context.Context, workspaceID string) (map[string]string, error)
 
 	// Self-managed OAuth connectors: when set, a build exposes the workspace's service
@@ -444,6 +454,16 @@ func (f *Flow) WithMemory(m memoryStore) *Flow {
 // WithVault attaches the vault so the designer's knowledge-base block (folder
 // structure + retrieved passages relevant to the conversation) is injected
 // into each design turn. nil = no KB context.
+// WithBrowser lets the design conversation probe a site the user mentions, so a
+// captcha or a bot wall is found while the plan is still a conversation rather
+// than after a six-minute build. The designer is never handed a browser TOOL —
+// the probe is run for it and injected as a block, mirroring how
+// vault.BuildKBContext supplies retrieval to a designer that has no search tool.
+func (f *Flow) WithBrowser(b browser.Renderer) *Flow {
+	f.browser = b
+	return f
+}
+
 func (f *Flow) WithVault(v *vault.Vault) *Flow {
 	f.vlt = v
 	return f
@@ -1454,6 +1474,11 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		UserProfile:        sess.UserProfile,
 		UserMemory:         sess.UserMemory,
 		KBManifest:         f.loadKBManifest(workspaceID, userMessage),
+		// Appended to the same block the KB manifest uses rather than given a
+		// field of its own: both are "things looked up for the designer this
+		// turn", and a second field would need the prompt builder to know about
+		// browsers.
+		SiteFeasibility: f.loadFeasibility(ctx, sess, userMessage),
 	})
 
 	// The design conversation gets the READ-ONLY tool subset: it can open a note,

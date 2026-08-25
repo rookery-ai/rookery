@@ -1,0 +1,5 @@
+-- Deliberately empty.
+--
+-- The rows named a skill that no longer ships, so recreating them would restore
+-- a reference to something that still does not exist. There is nothing to roll
+-- back to.

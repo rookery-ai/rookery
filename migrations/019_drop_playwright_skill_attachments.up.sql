@@ -1,0 +1,18 @@
+-- Sweep attachments to the removed playwright-browser core skill.
+--
+-- agent_skills is keyed by NAME, not by a foreign key to a skills row (core
+-- skills have no row at all), so deleting the bundled skill leaves any agent
+-- that declared it pointing at nothing. Nothing errors: the runner resolves
+-- declared skills against the core embed plus the workspace's own skills and
+-- silently finds neither, so the agent just quietly loses a capability it
+-- believes it has, and the agent page shows a checkbox for a skill that no
+-- longer exists.
+--
+-- The same shape as DeleteAgentSkillsByName, which already handles a deleted
+-- USER skill. This is the core-skill case, which could not arise before because
+-- no core skill had ever been removed.
+--
+-- Agents that used it are not otherwise touched: the native browser_* tools
+-- replace what the skill taught, and an agent with a browser grant reaches them
+-- without declaring anything.
+DELETE FROM agent_skills WHERE skill_name = 'playwright-browser';

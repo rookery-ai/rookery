@@ -404,7 +404,8 @@ func serveCmd() *cli.Command {
 					svc := secrets.New(database, workspaceID, masterPw, user.SecretsSalt)
 					return svc.GetAll(ctx)
 				}).
-				WithVault(vlt)
+				WithVault(vlt).
+				WithBrowser(browserMgr)
 			skillStore := skillstore.New(database, skillsDir)
 
 			runner := agentrunner.New(database, sysKey, agentsDir, homesDir, cfg.Data.Dir, coderSvc, skillsDir).
