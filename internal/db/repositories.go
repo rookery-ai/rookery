@@ -460,17 +460,17 @@ func (d *DB) CreateAgent(a *Agent) error {
 }
 
 func (d *DB) GetAgent(id string) (*Agent, error) {
-	row := d.QueryRow(`SELECT id,workspace_id,name,description,active,created_at,updated_at FROM agents WHERE id=?`, id)
+	row := d.QueryRow(`SELECT id,workspace_id,name,description,active,created_at,updated_at,browser_acting,browser_irreversible FROM agents WHERE id=?`, id)
 	return scanAgent(row)
 }
 
 func (d *DB) GetAgentByName(workspaceID, name string) (*Agent, error) {
-	row := d.QueryRow(`SELECT id,workspace_id,name,description,active,created_at,updated_at FROM agents WHERE workspace_id=? AND name=?`, workspaceID, name)
+	row := d.QueryRow(`SELECT id,workspace_id,name,description,active,created_at,updated_at,browser_acting,browser_irreversible FROM agents WHERE workspace_id=? AND name=?`, workspaceID, name)
 	return scanAgent(row)
 }
 
 func (d *DB) ListAgents(workspaceID string) ([]*Agent, error) {
-	rows, err := d.Query(`SELECT id,workspace_id,name,description,active,created_at,updated_at FROM agents WHERE workspace_id=? ORDER BY name`, workspaceID)
+	rows, err := d.Query(`SELECT id,workspace_id,name,description,active,created_at,updated_at,browser_acting,browser_irreversible FROM agents WHERE workspace_id=? ORDER BY name`, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -493,6 +493,20 @@ func (d *DB) UpdateAgentDescription(id, description string) error {
 	return err
 }
 
+// SetAgentBrowserGrants records the owner's browser permissions for one agent.
+//
+// Irreversible implies Acting: granting "may pay" while withholding "may click"
+// describes a state the enforcement cannot express, and storing it would leave
+// the interface showing a permission that silently does nothing.
+func (d *DB) SetAgentBrowserGrants(id string, acting, irreversible bool) error {
+	if irreversible {
+		acting = true
+	}
+	_, err := d.Exec(`UPDATE agents SET browser_acting=?, browser_irreversible=?, updated_at=datetime('now') WHERE id=?`,
+		boolToInt(acting), boolToInt(irreversible), id)
+	return err
+}
+
 func (d *DB) SetAgentActive(id string, active bool) error {
 	_, err := d.Exec(`UPDATE agents SET active=?, updated_at=datetime('now') WHERE id=?`, boolToInt(active), id)
 	return err
@@ -506,8 +520,9 @@ func (d *DB) DeleteAgent(id string) error {
 func scanAgent(s scanner) (*Agent, error) {
 	var a Agent
 	var createdAt, updatedAt string
-	var active int
-	err := s.Scan(&a.ID, &a.WorkspaceID, &a.Name, &a.Description, &active, &createdAt, &updatedAt)
+	var active, browserActing, browserIrreversible int
+	err := s.Scan(&a.ID, &a.WorkspaceID, &a.Name, &a.Description, &active, &createdAt, &updatedAt,
+		&browserActing, &browserIrreversible)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -515,6 +530,8 @@ func scanAgent(s scanner) (*Agent, error) {
 		return nil, err
 	}
 	a.Active = active == 1
+	a.BrowserActing = browserActing == 1
+	a.BrowserIrreversible = browserIrreversible == 1
 	a.CreatedAt = scanTime(createdAt)
 	a.UpdatedAt = scanTime(updatedAt)
 	return &a, nil

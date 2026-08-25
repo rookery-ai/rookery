@@ -171,6 +171,8 @@ type renderReq struct {
 	// Elements asks for the interactive-element list. A plain read does not
 	// need it and computing it costs an extra round trip into the page.
 	Elements bool `json:"elements"`
+	// HTML asks for the rendered DOM. Only the search provider sets it.
+	HTML bool `json:"html"`
 }
 
 func (h *browserHost) handleRender(w http.ResponseWriter, r *http.Request) {
@@ -201,10 +203,10 @@ func (h *browserHost) handleRender(w http.ResponseWriter, r *http.Request) {
 		// A wait that times out is NOT fatal: the page may still hold what the
 		// caller needs, and returning nothing would be strictly worse than
 		// returning what rendered. The condition is reported in the note.
-		writeFacts(w, h.collect(sess, resp, req.Elements, "wait condition not met: "+sess.redact(err.Error())))
+		writeFacts(w, h.collect(sess, resp, collectOpts{elements: req.Elements, html: req.HTML, note: "wait condition not met: " + sess.redact(err.Error())}))
 		return
 	}
-	writeFacts(w, h.collect(sess, resp, req.Elements, ""))
+	writeFacts(w, h.collect(sess, resp, collectOpts{elements: req.Elements, html: req.HTML}))
 }
 
 func (h *browserHost) handleClose(w http.ResponseWriter, r *http.Request) {
@@ -280,7 +282,17 @@ func (h *browserHost) reapIdle(ctx context.Context) {
 // page. Note what is gathered and what is not: no screenshot, ever. Redaction
 // cannot touch pixels, so an image taken after a secret was typed would carry
 // that secret into the model's context with nothing able to strip it.
-func (h *browserHost) collect(s *hostSession, resp playwright.Response, wantElements bool, note string) PageFacts {
+// collectOpts says what to gather. A struct rather than positional booleans:
+// there are two of them now and they are both bools, which is exactly the
+// signature where a call site silently swaps them.
+type collectOpts struct {
+	elements bool
+	html     bool
+	note     string
+}
+
+func (h *browserHost) collect(s *hostSession, resp playwright.Response, o collectOpts) PageFacts {
+	wantElements, note := o.elements, o.note
 	f := PageFacts{Note: note}
 	if resp != nil {
 		f.Status = resp.Status()
@@ -312,6 +324,12 @@ func (h *browserHost) collect(s *hostSession, resp playwright.Response, wantElem
 			Mode: playwright.AriaSnapshotModeAi,
 		}); err == nil {
 			f.Elements = ParseAriaSnapshot(snap)
+		}
+	}
+
+	if o.html {
+		if content, err := s.page.Content(); err == nil {
+			f.HTML = content
 		}
 	}
 

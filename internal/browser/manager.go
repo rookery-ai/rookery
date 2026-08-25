@@ -85,9 +85,32 @@ func (m *Manager) renderFacts(ctx context.Context, req Request) (PageFacts, erro
 		WaitFor:   req.WaitFor,
 		TimeoutMS: req.TimeoutMS,
 		Session:   req.Session,
-		Elements:  req.Session != "",
+		// The element list is computed only for a kept session, i.e. a flow
+		// that can act on it. A plain read pays nothing for a listing it has no
+		// tool to use.
+		Elements: req.Session != "",
+		HTML:     req.WantHTML,
 	}
 	return m.post(ctx, "/render", body)
+}
+
+// RenderHTML returns a page's rendered DOM. It exists for the search cascade,
+// which must parse result anchors; nothing hands this to a model.
+//
+// It implements websearch.PageRenderer, declared there as a one-method
+// interface so internal/websearch keeps no dependency on this package.
+func (m *Manager) RenderHTML(ctx context.Context, url string) (string, error) {
+	facts, err := m.renderFacts(ctx, Request{
+		URL: url,
+		// A results page is assembled by script after first paint, so waiting
+		// only for domcontentloaded returns the shell.
+		WaitFor:  "networkidle",
+		WantHTML: true,
+	})
+	if err != nil {
+		return "", err
+	}
+	return facts.HTML, nil
 }
 
 // Act performs one acting verb in an open session.

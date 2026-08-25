@@ -20,6 +20,7 @@ import (
 	"github.com/rookery-ai/rookery/internal/approval"
 	"github.com/rookery-ai/rookery/internal/auth"
 	"github.com/rookery-ai/rookery/internal/backup"
+	"github.com/rookery-ai/rookery/internal/browser"
 	"github.com/rookery-ai/rookery/internal/buildinfo"
 	"github.com/rookery-ai/rookery/internal/chat"
 	"github.com/rookery-ai/rookery/internal/coder"
@@ -355,6 +356,26 @@ func serveCmd() *cli.Command {
 				return fmt.Errorf("start kb bridge: %w", err)
 			}
 
+			// The browser. Constructed unconditionally and started LAZILY: a
+			// server whose host has no browser runtime pays nothing, and
+			// Available() reports the absence to every caller rather than
+			// failing a spawn deep inside a tool call. It follows the server's
+			// sandbox setting for the same reason the coder does — an operator
+			// who turned confinement off did so deliberately.
+			selfExe, _ := os.Executable()
+			browserMgr := browser.NewManager(selfExe, cfg.Sandbox.Enabled, true)
+			defer browserMgr.Stop()
+			if av := browserMgr.Available(); av.OK {
+				slog.Info("browser runtime available")
+			} else {
+				slog.Info("browser runtime not installed; JavaScript-rendered pages will not be readable",
+					"fix", "rookery browser install")
+			}
+			browserBridge := browser.NewBridge(browserMgr, secretResolverFor(database, sysKey))
+			if _, err := browserBridge.Start(ctx); err != nil {
+				return fmt.Errorf("start browser bridge: %w", err)
+			}
+
 			designFlow := agentdesigner.NewFlow(coderFor, designer).
 				WithDB(database).
 				WithMemory(memStore).
@@ -392,6 +413,7 @@ func serveCmd() *cli.Command {
 				WithConnectors(connReg, connStore, connBridge).
 				WithApprovalGate(approvalSvc.ParkerFor).
 				WithKBBridge(kbBridge).
+				WithBrowser(browserMgr, browserBridge).
 				WithStateBridge(stateBridge).
 				WithMCP(mcpClient, mcpBridge).
 				WithCoderFactory(func(workspaceID string) *coder.Coder {
@@ -455,6 +477,26 @@ func serveCmd() *cli.Command {
 				var mcpRefs []prompts.MCPServerRef
 				var mcpTools []string
 				var mcpBin string
+
+				// The browser attaches to BOTH coder kinds, which is the whole
+				// point of the bridge: an install running a CLI coder must not
+				// silently lack a capability an API-engine install has.
+				//
+				// Chat gets READING only. The zero Policy means AllowActing is
+				// false, so browser.CheckAct refuses every click and keystroke —
+				// chat is a human typing in real time with no approval gate, the
+				// same reasoning that keeps run_script out of chat.
+				browserReady := browserMgr.Available().OK
+				var browserBin string
+				if browserReady {
+					cd = cd.WithBrowser(browserMgr, browser.Policy{})
+					if browserBridge != nil && browserBridge.Addr() != "" {
+						if p, err := os.Executable(); err == nil {
+							browserBin = p
+						}
+					}
+				}
+
 				if cd.IsAPI() {
 					if rows, err := database.ListServiceConnections(ctx, workspaceID); err == nil {
 						bound := connectors.ActiveBoundConns(rows)
@@ -542,16 +584,24 @@ func serveCmd() *cli.Command {
 							}
 						}
 					}
+					if browserBin != "" {
+						// Read-only policy, minted server-side. The context key is
+						// derived here too, never taken from the coder.
+						bTok := browserBridge.Register(workspaceID, "chat:"+workspaceID, browser.Policy{})
+						defer browserBridge.Unregister(bTok)
+						extraEnv[browser.EnvBridgeURL] = browserBridge.Addr()
+						extraEnv[browser.EnvBridgeToken] = bTok
+					}
 					if len(extraEnv) > 0 {
 						cd = cd.WithExtraEnv(extraEnv)
 					}
 					// CLI coders reach connectors/kb by running `<bin> connector exec …` /
 					// `<bin> kb …` as shell commands; grant narrowly-scoped Bash permissions
 					// for only those commands (chat stays file-only otherwise).
-					cd = cd.WithAllowedTools(coder.ChatAllowedTools(connBin, kbBin, mcpBin))
+					cd = cd.WithAllowedTools(coder.ChatAllowedTools(connBin, kbBin, mcpBin, browserBin))
 				}
 				sysCtx := prompts.BuildChatSystemPrompt(root, cd.BackendType(), connRefs, connTools, connBin,
-					chatAppsForWorkspace(database, workspaceID)) +
+					chatAppsForWorkspace(database, workspaceID), browserReady) +
 					prompts.MCPToolsBlock(mcpRefs, mcpTools, cd.BackendType(), mcpBin) +
 					chat.BuildUserContext(database, memStore, workspaceID)
 				result, err := cd.Chat(ctx, workspaceID, history, sysCtx, text)
@@ -728,7 +778,7 @@ func serveCmd() *cli.Command {
 			if err != nil {
 				return fmt.Errorf("create server: %w", err)
 			}
-			srv = srv.WithBridge(connBridge).WithKBBridge(kbBridge).WithMCP(mcpClient, mcpBridge).WithTitleGenerator(titleGen).WithApproval(approvalSvc).WithBackupScheduler(backupSched)
+			srv = srv.WithBridge(connBridge).WithKBBridge(kbBridge).WithMCP(mcpClient, mcpBridge).WithBrowser(browserMgr, browserBridge).WithTitleGenerator(titleGen).WithApproval(approvalSvc).WithBackupScheduler(backupSched)
 
 			addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 			slog.Info("listening", "addr", addr)

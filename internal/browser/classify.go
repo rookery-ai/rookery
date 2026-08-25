@@ -26,6 +26,11 @@ type PageFacts struct {
 	// the body rather than as an HTTP status because a navigation failure is
 	// DATA the model should see and react to, not a transport fault.
 	Error string `json:"error,omitempty"`
+	// HTML is the rendered DOM. It is requested only by the search provider,
+	// which must parse result anchors, and is never handed to a model — a page
+	// of markup would exhaust the tool-result budget without conveying anything
+	// the extracted text does not.
+	HTML string `json:"html,omitempty"`
 }
 
 // blockedSignature is one bot-wall detector.

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rookery-ai/rookery/internal/browser"
 	"github.com/rookery-ai/rookery/internal/buildphase"
 	"github.com/rookery-ai/rookery/internal/db"
 	"github.com/rookery-ai/rookery/internal/llm"
@@ -650,6 +651,18 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 		mcpCaller: c.mcpCaller,
 		mcpParker: c.mcpParker,
 		boundMCP:  c.boundMCP,
+
+		browser: c.browser,
+		// The acting grants come from the caller, but the BUILD-PHASE flag is
+		// derived here from the same marker verifyBuild reads. Deriving it
+		// rather than trusting the caller matters: a build must refuse acting
+		// even if whoever assembled the policy forgot, and this is the one place
+		// that already knows a build is in progress.
+		browserPolicy: browser.Policy{
+			BuildPhase:        c.extraEnv[buildphase.EnvVar] != "",
+			AllowActing:       c.browserPolicy.AllowActing,
+			AllowIrreversible: c.browserPolicy.AllowIrreversible,
+		},
 
 		usedConnIDs:      map[string]bool{},
 		usedMCPServerIDs: map[string]bool{},

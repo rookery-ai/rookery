@@ -122,7 +122,7 @@ func (h *browserHost) handleAct(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, fmt.Errorf("%s failed: %s", req.Action, sess.redact(err.Error())))
 		return
 	}
-	writeFacts(w, h.collect(sess, nil, req.Elements, ""))
+	writeFacts(w, h.collect(sess, nil, collectOpts{elements: req.Elements}))
 }
 
 func (h *browserHost) perform(sess *hostSession, req actReq, timeout float64) error {

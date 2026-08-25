@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rookery-ai/rookery/internal/agentdesigner"
 	"github.com/rookery-ai/rookery/internal/agentstate"
+	"github.com/rookery-ai/rookery/internal/browser"
 	"github.com/rookery-ai/rookery/internal/coder"
 	"github.com/rookery-ai/rookery/internal/connectors"
 	"github.com/rookery-ai/rookery/internal/db"
@@ -90,6 +91,11 @@ type Runner struct {
 	// vault.ImportFile / Searcher code the API engine's save_to_kb/search_files
 	// tools call in-process). nil for tests that don't wire one.
 	kbBridge *vault.Bridge
+
+	// browser + browserBridge: see WithBrowser. Nil when the subsystem is not
+	// wired; Available() reports whether the runtime is actually installed.
+	browser       browser.Renderer
+	browserBridge *browser.Bridge
 
 	// stateBridge, when set, lets a CLI coder's agent run reach its own state.md
 	// via `rookery state get|set` — the same agentstate.Get/Apply the API engine's
@@ -201,6 +207,16 @@ func (r *Runner) WithVault(v *vault.Vault) *Runner {
 // host tools, so changing coder kind cannot change what an agent can remember.
 func (r *Runner) WithStateBridge(b *agentstate.Bridge) *Runner {
 	r.stateBridge = b
+	return r
+}
+
+// WithBrowser wires the browser and its CLI bridge into agent runs. Both halves
+// are needed for the same reason the connector wiring takes both: the API engine
+// calls the manager in-process while a CLI coder goes through the bridge, and
+// wiring one without the other makes an agent's capability depend on which coder
+// the workspace happens to use.
+func (r *Runner) WithBrowser(m browser.Renderer, b *browser.Bridge) *Runner {
+	r.browser, r.browserBridge = m, b
 	return r
 }
 
@@ -418,6 +434,13 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 		Connections:     boundRefs,
 		ConnectionTools: connToolNames,
 		ConnectorBin:    connectorBinPath(),
+		// Described only when the runtime is actually present, so an install
+		// without it never promises the model a tool that would then fail. The
+		// acting half follows the agent's own grant: an agent that may only read
+		// should not be told how to click, or it will plan around a capability
+		// it will be refused at the moment it tries to use it.
+		BrowserAvailable: r.browser != nil && r.browser.Available().OK,
+		BrowserActing:    agent.BrowserActing,
 	})
 
 	// MCP tools are described in their own block rather than folded into the
@@ -532,6 +555,33 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 		extraEnv["ROOKERY_STATE_URL"] = r.stateBridge.Addr()
 		extraEnv["ROOKERY_STATE_TOKEN"] = stateToken
 	}
+	// The browser, with THIS agent's grants.
+	//
+	// The policy is read from the agent row rather than passed in by the caller,
+	// so a manual run and a 03:00 cron run are governed identically — a
+	// permission that depended on which surface started the run would be worse
+	// than no permission at all. Reading needs no grant; acting needs one the
+	// owner set deliberately.
+	if r.browser != nil && r.browser.Available().OK {
+		pol := browser.Policy{
+			AllowActing:       agent.BrowserActing,
+			AllowIrreversible: agent.BrowserIrreversible,
+		}
+		coderSvc = coderSvc.WithBrowser(r.browser, pol)
+		if r.browserBridge != nil && r.browserBridge.Addr() != "" {
+			if selfExe, err := os.Executable(); err == nil {
+				// Keyed on the agent, not the workspace: the browser context
+				// accumulates logged-in cookies, so a workspace-scoped key would
+				// let one agent inherit another's authenticated session.
+				bTok := r.browserBridge.Register(input.WorkspaceID, "agent:"+input.AgentID, pol)
+				defer r.browserBridge.Unregister(bTok)
+				extraEnv[browser.EnvBridgeURL] = r.browserBridge.Addr()
+				extraEnv[browser.EnvBridgeToken] = bTok
+				_ = selfExe
+			}
+		}
+	}
+
 	if len(extraEnv) > 0 {
 		coderSvc = coderSvc.WithExtraEnv(extraEnv)
 	}

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rookery-ai/rookery/internal/browser"
 	"github.com/rookery-ai/rookery/internal/connectors"
 	"github.com/rookery-ai/rookery/internal/db"
 	"github.com/rookery-ai/rookery/internal/llm"
@@ -151,6 +152,9 @@ type Coder struct {
 
 	// Self-managed OAuth connectors: when an agent is bound to service connections,
 	// the API engine offers each connection's curated actions as native typed tools.
+	browser       browser.Renderer
+	browserPolicy browser.Policy
+
 	mcpCaller mcp.Caller
 	mcpParker mcp.Parker
 	boundMCP  []mcp.BoundServer
@@ -204,6 +208,20 @@ func (c *Coder) WithMCP(caller mcp.Caller, bound []mcp.BoundServer) *Coder {
 // by (server, tool) — but the semantics are identical, and both must be wired for the
 // same agent or changing which layer a capability comes from would change whether the
 // owner's approval requirement applies.
+// WithBrowser attaches the browser subsystem and the permissions this call runs
+// under.
+//
+// Policy is supplied by the caller because only it knows the situation: a
+// scheduled run of an agent the owner granted acting rights, a chat turn (no
+// acting, ever), or a build. The BUILD-PHASE half of the policy is re-derived
+// inside the engine from the build marker, so a caller that forgets it cannot
+// license a rehearsal to click things.
+func (c *Coder) WithBrowser(b browser.Renderer, pol browser.Policy) *Coder {
+	c2 := *c
+	c2.browser, c2.browserPolicy = b, pol
+	return &c2
+}
+
 func (c *Coder) WithMCPParker(p mcp.Parker) *Coder {
 	c2 := *c
 	c2.mcpParker = p

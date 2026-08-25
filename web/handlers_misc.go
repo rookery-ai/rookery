@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rookery-ai/rookery/internal/browser"
 	"github.com/rookery-ai/rookery/internal/chat"
 	"github.com/rookery-ai/rookery/internal/coder"
 	// Aliased because this file has a local variable named `coder` that shadows
@@ -138,6 +139,20 @@ func (s *Server) runChatCoder(
 	var mcpRefs []prompts.MCPServerRef
 	var mcpTools []string
 	var mcpBin string
+
+	// Attached for BOTH coder kinds, with a read-only policy: chat may look at a
+	// rendered page but never click or type in one.
+	browserReady := s.browserMgr != nil && s.browserMgr.Available().OK
+	var browserBin string
+	if browserReady {
+		coder = coder.WithBrowser(s.browserMgr, browser.Policy{})
+		if s.browserBridge != nil && s.browserBridge.Addr() != "" {
+			if p, err := os.Executable(); err == nil {
+				browserBin = p
+			}
+		}
+	}
+
 	if coder.IsAPI() {
 		if s.connStore != nil {
 			if rows, err := s.db.ListServiceConnections(ctx, workspaceID); err == nil {
@@ -235,9 +250,19 @@ func (s *Server) runChatCoder(
 		// A CLI coder reaches connectors/kb by running `<bin> connector exec …` /
 		// `<bin> kb …` as shell commands, so grant NARROWLY-SCOPED Bash permissions
 		// for only those commands — chat stays file-only (no arbitrary shell) otherwise.
-		coder = coder.WithAllowedTools(codersvc.ChatAllowedTools(connBin, kbBin, mcpBin))
+		if browserBin != "" {
+			// Read-only, and the context key is minted here rather than accepted
+			// from the coder — a caller-supplied key could attach to another
+			// workspace's browser session.
+			tok := s.browserBridge.Register(workspaceID, "chat:"+workspaceID, browser.Policy{})
+			defer s.browserBridge.Unregister(tok)
+			extraEnv[browser.EnvBridgeURL] = s.browserBridge.Addr()
+			extraEnv[browser.EnvBridgeToken] = tok
+			coder = coder.WithExtraEnv(extraEnv)
+		}
+		coder = coder.WithAllowedTools(codersvc.ChatAllowedTools(connBin, kbBin, mcpBin, browserBin))
 	}
-	sysCtx := prompts.BuildChatSystemPrompt(root, coder.BackendType(), connRefs, connTools, connBin, s.chatAppsFor(workspaceID)) +
+	sysCtx := prompts.BuildChatSystemPrompt(root, coder.BackendType(), connRefs, connTools, connBin, s.chatAppsFor(workspaceID), browserReady) +
 		prompts.MCPToolsBlock(mcpRefs, mcpTools, coder.BackendType(), mcpBin) +
 		chat.BuildUserContext(s.db, s.memory, workspaceID)
 

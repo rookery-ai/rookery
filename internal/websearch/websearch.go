@@ -46,6 +46,10 @@ func Label(name string) string {
 		return "Mojeek"
 	case "bing":
 		return "Bing"
+	case "browser-ddg":
+		// Named so the user can tell that the answer required a real browser —
+		// which is also the signal that the plain engines were all blocked.
+		return "DuckDuckGo (browser)"
 	}
 	return name
 }

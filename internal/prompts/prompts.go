@@ -1207,6 +1207,10 @@ type ImplementationParams struct {
 	// steered only by an advisory History note, and a weak model regenerates the same
 	// unverifiable script — the loop this flag exists to break.
 	ForceTier1 bool
+	// BrowserAvailable tells the BUILD coder the browser exists. Without it a weak
+	// model writes a Playwright script by hand — the exact failure the native tool
+	// replaces — or concludes a JavaScript-rendered site cannot be read at all.
+	BrowserAvailable bool
 }
 
 // capabilitySpec renders the authoritative capability blocks shared with the
@@ -1226,6 +1230,13 @@ func (p ImplementationParams) capabilitySpec() string {
 	// Tell the BUILD coder about the native connector tools it has for the workspace's
 	// connected accounts — otherwise a weak model ignores them and hunts for API keys.
 	sb.WriteString(connectedToolsBlock(p.Connections, p.ConnectionTools, p.BackendType, p.ConnectorBin))
+	if p.BrowserAvailable {
+		// Acting is described at build time even though a build may not itself
+		// click: the agent being WRITTEN will act on its scheduled runs, so the
+		// plan has to account for it. The build-phase refusal is enforced in
+		// browser.CheckAct, not by hiding the capability here.
+		sb.WriteString(strings.ReplaceAll(browserToolsBlock(p.BackendType, true), browserBinPlaceholder, p.ConnectorBin))
+	}
 	sb.WriteString(availableSkillsBlock(p.Skills))
 	// LAST, so it is the most recent instruction the model reads — this is an override of
 	// the tier machinery above, and a weak model weights later text more heavily.
@@ -1877,6 +1888,13 @@ type CoderPromptParams struct {
 	// ConnectorBin is the absolute path to the rookery binary a CLI coder invokes as
 	// `<bin> connector exec …`. Empty falls back to bare "rookery" (relies on PATH).
 	ConnectorBin string
+	// BrowserAvailable reports whether this host has the browser runtime, so the
+	// prompt never advertises a tool the model would then fail to call.
+	BrowserAvailable bool
+	// BrowserActing reports whether this agent may click and type, as opposed to
+	// only reading rendered pages. Described separately because the refusals are
+	// worded to be reported to the user rather than retried.
+	BrowserActing bool
 }
 
 // connectedToolsBlock tells the running agent it has native typed tools for its bound
@@ -2082,6 +2100,9 @@ before acting on assumptions about the user. Use your available file capabilitie
 	}
 
 	sb.WriteString(connectedToolsBlock(p.Connections, p.ConnectionTools, p.BackendType, p.ConnectorBin))
+	if p.BrowserAvailable {
+		sb.WriteString(strings.ReplaceAll(browserToolsBlock(p.BackendType, p.BrowserActing), browserBinPlaceholder, p.ConnectorBin))
+	}
 
 	sb.WriteString(`<output_protocol>
 Run your scheduled task now. Use ONLY the markers below to produce output.
@@ -2269,7 +2290,7 @@ User input: %s`, nowStr, timezone, input)
 // write_file/edit_file/list_dir/search_files/glob function calls executed by the host. The
 // tool set is intentionally file-only in both cases — the chat can read, create, and edit
 // notes, but cannot delete, rename, or run shell commands (no web_search/run_script here).
-func BuildChatSystemPrompt(vaultRoot, backendType string, conns []ConnectionRef, connToolNames []string, connectorBin string, chatApps []ChatAppInfo) string {
+func BuildChatSystemPrompt(vaultRoot, backendType string, conns []ConnectionRef, connToolNames []string, connectorBin string, chatApps []ChatAppInfo, browserAvailable bool) string {
 	var sb strings.Builder
 	mappedBackend := MapCoderBackend(backendType)
 	// Chat used to open straight into "you are a helpful assistant" with no
@@ -2386,6 +2407,13 @@ only your final reply, so make sure your reply actually answers the question.`, 
 	if len(conns) > 0 {
 		sb.WriteString("\n")
 		sb.WriteString(connectedToolsBlock(conns, connToolNames, mappedBackend, connectorBin))
+	}
+	// Chat gets READING only: acting is exec-gated, for the same reason chat has
+	// no run_script. A human is typing in real time with no approval gate, so a
+	// chat that could click "Pay" would hold the user against themselves.
+	if browserAvailable {
+		sb.WriteString("\n")
+		sb.WriteString(strings.ReplaceAll(browserToolsBlock(mappedBackend, false), browserBinPlaceholder, connectorBin))
 	}
 	return sb.String()
 }

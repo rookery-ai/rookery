@@ -23,7 +23,10 @@ import "strings"
 // parameters (rather than one shared bin) because each bridge can be
 // available independently of the others — a workspace may have connected services
 // but no MCP server, or the reverse.
-func ChatAllowedTools(connectorBin, kbBin, mcpBin string) string {
+// browserBin is threaded separately from the other bridges for the reason given
+// below: each bridge can be available independently, and the browser is the one
+// most likely to be absent, since it needs a ~500 MB runtime the others do not.
+func ChatAllowedTools(connectorBin, kbBin, mcpBin, browserBin string) string {
 	// WebFetch/WebSearch are safe here for the same reason they sit outside the
 	// API engine's exec gate: read-only, no secrets, and unable to reach private
 	// address space (see netguard.go).
@@ -36,6 +39,13 @@ func ChatAllowedTools(connectorBin, kbBin, mcpBin string) string {
 	}
 	if mcpBin != "" {
 		grants = append(grants, "Bash("+mcpBin+" mcp exec:*)")
+	}
+	if browserBin != "" {
+		// `browser read` ONLY. A blanket `browser:*` would reach `browser act`,
+		// and chat must never be able to click or type — the same reasoning that
+		// keeps DesignAllowedTools off the blanket `kb:*` grant because it
+		// reaches `kb convert`, which writes.
+		grants = append(grants, "Bash("+browserBin+" browser read:*)")
 	}
 	return strings.Join(grants, ",")
 }

@@ -26,6 +26,7 @@
 package browser
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -60,6 +61,9 @@ type Request struct {
 	// later call continues in the same page. Empty means an ephemeral context
 	// that is torn down when the call returns.
 	Session string
+	// WantHTML asks for the rendered DOM alongside the text. Only the search
+	// cascade sets it; a model is never given markup.
+	WantHTML bool
 }
 
 // Result is what a render produced.
@@ -193,4 +197,14 @@ func cacheDir() string {
 		return filepath.Join(home, ".cache")
 	}
 	return ""
+}
+
+// Renderer is the narrow interface consumers depend on, so internal/coder and
+// the designers can be tested without spawning a browser. *Manager implements
+// it. Mirrors mcp.Caller for the same reason.
+type Renderer interface {
+	Available() Availability
+	Render(ctx context.Context, req Request) (Result, error)
+	Act(ctx context.Context, req ActRequest) (Result, error)
+	CloseSession(ctx context.Context, session string)
 }

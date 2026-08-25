@@ -63,7 +63,7 @@ func TestChatSurfaceSaysWhatToDoWhenAskedToBeQuiet(t *testing.T) {
 // platformContextBlock alone would miss a caller that reintroduced the section
 // some other way.
 func TestBuildChatSystemPromptShipsNoProtocolInstruction(t *testing.T) {
-	p := BuildChatSystemPrompt("/vault", "api", nil, nil, "", nil)
+	p := BuildChatSystemPrompt("/vault", "api", nil, nil, "", nil, false)
 	if strings.Contains(p, "Agents produce output ONLY via these markers") {
 		t.Fatal("the chat system prompt instructs the agent output protocol")
 	}

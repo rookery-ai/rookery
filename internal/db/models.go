@@ -66,6 +66,16 @@ type Agent struct {
 	Active      bool
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+
+	// BrowserActing lets this agent click and type in a rendered page, rather
+	// than only reading one. BrowserIrreversible additionally permits actions
+	// whose control name reads as a payment, an order or a deletion.
+	//
+	// Two flags, not one: "log in and read my bill" and "pay it" are separate
+	// decisions, and an owner who wants the first must not be forced to grant
+	// the second. Both default false — reading needs neither.
+	BrowserActing       bool
+	BrowserIrreversible bool
 }
 
 type Skill struct {

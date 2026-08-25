@@ -15,6 +15,7 @@ import (
 	"github.com/rookery-ai/rookery/internal/agentrunner"
 	"github.com/rookery-ai/rookery/internal/audit"
 	"github.com/rookery-ai/rookery/internal/backup"
+	"github.com/rookery-ai/rookery/internal/browser"
 	"github.com/rookery-ai/rookery/internal/chat"
 	"github.com/rookery-ai/rookery/internal/coder"
 	"github.com/rookery-ai/rookery/internal/config"
@@ -60,8 +61,15 @@ type Server struct {
 	connBridge *connectors.Bridge    // loopback bridge so CLI chat coders can reach connectors
 	kbBridge   *vault.Bridge         // loopback bridge so CLI chat coders can reach KB convert/search
 	mcpBridge  *mcp.Bridge           // loopback bridge so CLI chat coders can reach MCP tools
-	mcpClient  *mcp.Client           // pooled MCP sessions, shared with the bridge
-	titleGen   chat.TitleGenerator   // optional; auto-titles a chat from its first exchange
+
+	// browser renders JavaScript-driven pages. Nil when the subsystem is not
+	// wired; its own Available() reports whether the runtime is installed, which
+	// is a different question — the same policy-versus-detection split
+	// ROOKERY_CODER_MODE draws.
+	browserMgr    *browser.Manager
+	browserBridge *browser.Bridge
+	mcpClient     *mcp.Client         // pooled MCP sessions, shared with the bridge
+	titleGen      chat.TitleGenerator // optional; auto-titles a chat from its first exchange
 
 	// searchKeyVerify proves a search API key against the live provider before
 	// it is stored. It is a field rather than a direct call so tests can save a
@@ -202,6 +210,14 @@ func (s *Server) WithBridge(b *connectors.Bridge) *Server { s.connBridge = b; re
 // WithKBBridge attaches the loopback KB bridge so CLI chat coders can reach
 // save_to_kb-equivalent conversion + search (`rookery kb convert|search`).
 func (s *Server) WithKBBridge(b *vault.Bridge) *Server { s.kbBridge = b; return s }
+
+// WithBrowser attaches the browser manager and its CLI bridge. Both are needed:
+// the manager serves the API engine in-process, the bridge serves a CLI coder,
+// and wiring only one would make capability depend on coder kind.
+func (s *Server) WithBrowser(m *browser.Manager, b *browser.Bridge) *Server {
+	s.browserMgr, s.browserBridge = m, b
+	return s
+}
 
 // WithMCP attaches the MCP client and its loopback bridge.
 //
