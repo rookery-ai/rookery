@@ -63,6 +63,8 @@ func main() {
 			onboardCmd(),
 			adminCmd(),
 			sandboxExecCmd(),
+			browserHostCmd(),
+			browserCmd(),
 			connectorCmd(),
 			mcpCmd(),
 			kbCmd(),
