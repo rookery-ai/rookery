@@ -29,6 +29,7 @@ import { RunPanel } from "./RunPanel";
 import { AgentMDCard } from "./AgentMDCard";
 import { ScheduleCard } from "./ScheduleCard";
 import { SkillsCard, ConnectionsCard, MCPServersCard } from "./AttachmentCards";
+import { BrowserCard } from "./BrowserCard";
 
 function RunStatusChip({ status }: { status: AgentRun["status"] }) {
   if (status === "running") {
@@ -235,6 +236,7 @@ export default function AgentDetailPage() {
     all_skills,
     workspace_connections,
     attached_connection_ids,
+    browser,
   } = detail;
 
   async function handleDelete() {
@@ -325,6 +327,10 @@ export default function AgentDetailPage() {
             connections={workspace_connections}
           />
           <MCPServersCard agentId={id} />
+          <BrowserCard
+            agentId={id}
+            grants={browser ?? { available: false, acting: false, irreversible: false }}
+          />
         </div>
       </div>
 

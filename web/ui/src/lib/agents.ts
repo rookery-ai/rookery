@@ -120,6 +120,17 @@ export type AgentDetail = {
   missing_secrets: string[];
   running: boolean;
   live_run: boolean;
+  // Optional because a server that predates this field omits it entirely, and
+  // the normalizer below substitutes a safe default. The default must be
+  // read-only: defaulting a PERMISSION to true would grant, on a version
+  // mismatch, exactly the thing the owner never agreed to.
+  browser?: AgentBrowserGrants;
+};
+
+export type AgentBrowserGrants = {
+  available: boolean;
+  acting: boolean;
+  irreversible: boolean;
 };
 
 export function useAgents() {
@@ -145,6 +156,10 @@ function normalizeAgentDetail(d: AgentDetail): AgentDetail {
     workspace_connections: d.workspace_connections ?? [],
     attached_connection_ids: d.attached_connection_ids ?? [],
     missing_secrets: d.missing_secrets ?? [],
+    // Fail CLOSED on a missing field. `?? {}` with true-ish defaults would, on
+    // a version mismatch between server and SPA, render an agent as though the
+    // owner had granted it permission to click and pay.
+    browser: d.browser ?? { available: false, acting: false, irreversible: false },
   };
 }
 
@@ -203,6 +218,17 @@ export function useAgentActions() {
     onSuccess: (_data, { id }) => invalidateAgent(id),
   });
 
+  // Sends only the switch that changed. The endpoint reads absent fields as
+  // "leave alone", so a partial save can never revoke the other grant.
+  const saveBrowserGrantsMut = useMutation({
+    mutationFn: ({ id, acting, irreversible }: { id: string; acting?: boolean; irreversible?: boolean }) =>
+      api.put<{ ok: boolean; acting: boolean; irreversible: boolean }>(
+        `/api/v1/agents/${id}/browser`,
+        { acting, irreversible },
+      ),
+    onSuccess: (_data, { id }) => invalidateAgent(id),
+  });
+
   return {
     del: (id: string) => delMut.mutateAsync(id),
     run: (id: string) => runMut.mutateAsync(id),
@@ -211,5 +237,7 @@ export function useAgentActions() {
     saveAgentMD: (id: string, content: string) => saveAgentMDMut.mutateAsync({ id, content }),
     saveSkills: (id: string, names: string[]) => saveSkillsMut.mutateAsync({ id, names }),
     saveConnections: (id: string, ids: string[]) => saveConnectionsMut.mutateAsync({ id, ids }),
+    saveBrowserGrants: (id: string, grants: { acting?: boolean; irreversible?: boolean }) =>
+      saveBrowserGrantsMut.mutateAsync({ id, ...grants }),
   };
 }

@@ -36,6 +36,7 @@ func (s *Server) registerAgentsAPI(g *echo.Group) {
 	g.PUT("/agents/:id/skills", s.apiSaveAgentSkills)
 	g.PUT("/agents/:id/connections", s.apiSaveAgentConnections)
 	s.registerApprovalRoutes(g)
+	s.registerBrowserRoutes(g)
 
 	// Design/SSE family: unchanged legacy handlers, unchanged legacy error shapes.
 	g.POST("/agents/design", s.handleDesignChat)
@@ -199,6 +200,16 @@ func (s *Server) toAPIAgentDetail(d *agentDetailData) map[string]any {
 		"missing_secrets":         orEmpty(d.MissingSecrets),
 		"running":                 d.Running,
 		"live_run":                d.LiveRun,
+		// Browser grants, plus whether this host can render at all. The
+		// availability flag travels WITH the grants so the page never offers a
+		// permission switch for a capability the server does not have — an owner
+		// granting something that silently never happens is worse than a
+		// missing control.
+		"browser": map[string]any{
+			"available":    s.browserMgr != nil && s.browserMgr.Available().OK,
+			"acting":       d.Agent.BrowserActing,
+			"irreversible": d.Agent.BrowserIrreversible,
+		},
 	}
 }
 

@@ -88,6 +88,10 @@ func TestAPIParityInventory(t *testing.T) {
 		"PUT /api/v1/settings/master-password",
 		"GET /api/v1/setup", "POST /api/v1/setup",
 		"GET /api/v1/setup/platforms", "POST /api/v1/setup/platforms/:platform/test",
+		// Browser. The grant endpoint is what makes the acting tools reachable at
+		// all; without it every agent is permanently read-only.
+		"GET /api/v1/browser/status",
+		"PUT /api/v1/agents/:id/browser",
 		// Approval gate for public_write connector actions.
 		"PUT /api/v1/agents/:id/connections/:connID/approval",
 		"GET /api/v1/approvals",
