@@ -110,22 +110,31 @@ exfiltration channel for such an agent. The redactor protects against accidental
 echo, not against a deliberately hostile agent — that boundary is the guardrails
 and the sandbox, unchanged.
 
-## Persistent logins
+## Logins: within a run, not across runs
 
-Paying a bill means being logged in, and logging in on every run is both fragile
-and a reliable way to trigger 2FA and fraud heuristics. So a **session** captures
-Playwright's `StorageState` (cookies plus local storage) after a successful login
-and re-seeds it on the next run.
+**What shipped:** a run holds one browser context for its whole duration, keyed
+from the workspace and the agent — minted host-side, never accepted from the
+model, because a caller-supplied key would let one agent attach to another's
+authenticated session. Navigation, cookies and a login therefore persist across
+every `browser_*` call *within* a run, which is what a login-then-act flow
+actually needs. The context is torn down when the run ends.
 
-Stored cookies are bearer tokens. Therefore:
+**What was deliberately deferred:** persisting Playwright's `StorageState` to
+disk so a login survives *between* runs.
 
-- encrypted with `secrets.EncryptWithSystemKey` — the system key, not the master
-  password, because the scheduler runs headless at 03:00;
-- written to `<data_dir>/browser-sessions/<workspaceID>/`, **outside the vault**.
-  This is the important one: the vault is readable by every agent and is included
-  in backups. `claude-homes/` is already excluded from snapshots for exactly this
-  reason, and sessions follow it.
-- scoped per workspace, and bound per agent.
+The design was written and then not built, and the reason is worth recording
+rather than leaving as an omission. Stored cookies are bearer tokens, so this
+would create a new credential store at rest — encrypted under the system key,
+outside the vault (the vault is readable by every agent and is included in
+backups), and needing its own lifecycle, invalidation and backup policy. Against
+that: the capability it buys is an *optimisation*, because an agent can already
+log in at the start of each run using stored secrets and then act.
+
+The cost of not having it is real and is stated plainly: logging in every run is
+more fragile and more likely to trip 2FA and fraud heuristics on sites that
+notice a fresh session each time. Revisit when a real flow demonstrably needs it
+— at which point the requirement will be concrete enough to design the
+invalidation policy against, rather than guessed at now.
 
 ## Consent: a standing grant, never a per-click prompt
 
@@ -142,12 +151,20 @@ as a limitation rather than designed around.
 
 What is built is a two-tier standing grant, both defaulting to off:
 
-1. **`allow_acting`** — this agent may click and type in this session at all.
-   Without it the agent gets `browser_read` and nothing else. An owner turns this
-   on per (agent, session) in the UI, deliberately, once.
-2. **`allow_irreversible`** — additionally permits actions the host classifies as
-   irreversible: an element whose accessible name matches pay / purchase / confirm
-   / submit order / delete / transfer.
+1. **`browser_acting`** — this agent may click and type at all. Without it the
+   agent gets `browser_read` and nothing else. The owner turns it on per agent,
+   deliberately, once, on the agent's page.
+2. **`browser_irreversible`** — additionally permits actions the host classifies
+   as irreversible: an element whose accessible name matches pay / purchase /
+   confirm / submit order / delete / transfer.
+
+Both live on the agent row (migration 018). **Grants are per AGENT, not per
+site** — an agent granted acting may act on whatever page it opens. A domain
+allowlist was considered and left out rather than forgotten: a real flow
+redirects across hosts (an identity provider, a payment processor), so the list
+would either break ordinary logins or be widened until it meant nothing. The
+mitigation is that an agent is built for one task and the grant is made for that
+agent specifically.
 
 The name match is a **heuristic and is treated as one**. It is a second layer, not
 the protection: the protection is that acting is off entirely until the owner
