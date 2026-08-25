@@ -26,6 +26,9 @@ type PageFacts struct {
 	// the body rather than as an HTTP status because a navigation failure is
 	// DATA the model should see and react to, not a transport fault.
 	Error string `json:"error,omitempty"`
+	// Contexts is the helper's live browser-context count, returned by /ping.
+	// Diagnostics only — see Manager.ContextCount.
+	Contexts int `json:"contexts,omitempty"`
 	// HTML is the rendered DOM. It is requested only by the search provider,
 	// which must parse result anchors, and is never handed to a model — a page
 	// of markup would exhaust the tool-result budget without conveying anything
@@ -130,11 +133,20 @@ func Page(text string, offset, limit int) (out string, truncated bool, next int)
 	return string(runes[offset:end]), true, end
 }
 
-// DefaultPageChars bounds one page of extracted text. It sits below
-// coder.maxToolResult (8 KiB) so the rendered text plus the header line and the
-// "more remains" notice still fit inside one tool result — a page that exactly
-// filled the cap would have its own continuation instructions truncated off.
-const DefaultPageChars = 6000
+// DefaultPageChars bounds one page of extracted text, in RUNES.
+//
+// The budget it has to fit inside — coder.maxToolResult — is in BYTES, and the
+// two are not interchangeable: 6000 runes of Cyrillic or Greek is ~12 KB, which
+// the byte cap would then cut. What it cuts is the TAIL, and the tail is where
+// "call again with offset N" lives — so a page in Macedonian would page once and
+// leave the model with no way to continue, which is precisely the failure paging
+// exists to prevent.
+//
+// 2000 keeps the worst case (3 bytes per rune across the whole page) at ~6 KB,
+// leaving room for the header line and the continuation notice inside 8 KiB. For
+// ASCII text this pages more often than strictly necessary; that costs a turn
+// and is the right side to err on, because the alternative loses the offset.
+const DefaultPageChars = 2000
 
 // interactiveRoles are the ARIA roles worth offering as click/fill targets.
 //

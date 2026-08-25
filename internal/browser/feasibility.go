@@ -1,4 +1,4 @@
-package agentdesigner
+package browser
 
 import (
 	"context"
@@ -8,8 +8,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/rookery-ai/rookery/internal/browser"
 )
 
 // urlPattern finds http(s) URLs the user has typed into the design conversation.
@@ -18,9 +16,9 @@ import (
 // stop attached and probing "https://example.com." fails DNS.
 var urlPattern = regexp.MustCompile(`https?://[^\s<>"')\]]+`)
 
-// feasibilityCache remembers probe results for one design session, so a
+// FeasibilityCache remembers probe results for one design session, so a
 // conversation that mentions the same site five times pays for one render.
-type feasibilityCache struct {
+type FeasibilityCache struct {
 	mu   sync.Mutex
 	seen map[string]string
 }
@@ -52,17 +50,18 @@ const probeTimeout = 20 * time.Second
 //
 // Best-effort throughout: no browser, no URL, or any failure yields an empty
 // block and the conversation proceeds exactly as it did before this existed.
-func (f *Flow) loadFeasibility(ctx context.Context, sess *DesignSession, userMessage string) string {
-	if f.browser == nil || !f.browser.Available().OK {
+func Feasibility(ctx context.Context, r Renderer, cache **FeasibilityCache, userMessage string) string {
+	if r == nil || !r.Available().OK {
 		return ""
 	}
 	urls := extractURLs(userMessage)
 	if len(urls) == 0 {
 		return ""
 	}
-	if sess.feasibility == nil {
-		sess.feasibility = &feasibilityCache{seen: map[string]string{}}
+	if *cache == nil {
+		*cache = &FeasibilityCache{seen: map[string]string{}}
 	}
+	c := *cache
 
 	var b strings.Builder
 	probes := 0
@@ -70,22 +69,22 @@ func (f *Flow) loadFeasibility(ctx context.Context, sess *DesignSession, userMes
 		if probes >= maxProbesPerSession {
 			break
 		}
-		sess.feasibility.mu.Lock()
-		cached, ok := sess.feasibility.seen[u]
-		sess.feasibility.mu.Unlock()
+		c.mu.Lock()
+		cached, ok := c.seen[u]
+		c.mu.Unlock()
 		if ok {
 			b.WriteString(cached)
 			continue
 		}
 
-		line := f.probeSite(ctx, u)
+		line := probeSite(ctx, r, u)
 		if line == "" {
 			continue
 		}
 		probes++
-		sess.feasibility.mu.Lock()
-		sess.feasibility.seen[u] = line
-		sess.feasibility.mu.Unlock()
+		c.mu.Lock()
+		c.seen[u] = line
+		c.mu.Unlock()
 		b.WriteString(line)
 	}
 	if b.Len() == 0 {
@@ -101,11 +100,11 @@ func (f *Flow) loadFeasibility(ctx context.Context, sess *DesignSession, userMes
 		"</site_feasibility>\n\n"
 }
 
-func (f *Flow) probeSite(ctx context.Context, rawURL string) string {
+func probeSite(ctx context.Context, r Renderer, rawURL string) string {
 	pctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	res, err := f.browser.Render(pctx, browser.Request{URL: rawURL, WaitFor: "networkidle", Limit: 400})
+	res, err := r.Render(pctx, Request{URL: rawURL, WaitFor: "networkidle", Limit: 400})
 	if err != nil {
 		slog.Debug("designer feasibility probe failed", "url", rawURL, "err", err)
 		return fmt.Sprintf("- %s — could not be opened (%s). It may be down, or unreachable from this server.\n",

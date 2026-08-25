@@ -454,7 +454,8 @@ func serveCmd() *cli.Command {
 					svc := secrets.New(database, workspaceID, masterPw, user.SecretsSalt)
 					return svc.GetAll(ctx)
 				}).
-				WithVault(vlt)
+				WithVault(vlt).
+				WithBrowser(browserMgr)
 
 			vaultSearcher := vlt.NewSearcher()
 

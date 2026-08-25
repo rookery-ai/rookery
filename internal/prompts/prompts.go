@@ -2435,11 +2435,15 @@ only your final reply, so make sure your reply actually answers the question.`, 
 // SkillDesignParams is the dynamic context injected into the skill-creator
 // design conversation system prompt.
 type SkillDesignParams struct {
-	SkillName          string
-	AvailableSkills    []SkillRef // core + user skills, for the designer's awareness
-	UserProfile        string
-	UserMemory         string
-	KBManifest         string // vault.BuildKBContext output: folder summary + relevant passages; "" if no vault attached
+	SkillName       string
+	AvailableSkills []SkillRef // core + user skills, for the designer's awareness
+	UserProfile     string
+	UserMemory      string
+	KBManifest      string // vault.BuildKBContext output: folder summary + relevant passages; "" if no vault attached
+	// SiteFeasibility mirrors the agent designer's field of the same name: what a
+	// real browser found at the URLs the user mentioned. Both designers share one
+	// front end, so a probe present in only one of them is drift.
+	SiteFeasibility    string
 	ConnectedPlatforms []string
 	ChatApps           []ChatAppInfo
 	// BackendType selects the capabilities block in BuildSkillImplementationPrompt
@@ -2546,6 +2550,13 @@ supplies the real absolute path.
 		sb.WriteString("design the skill to create the note itself.\n\n")
 		sb.WriteString(p.KBManifest)
 		sb.WriteString("</knowledge_base_manifest>\n\n")
+	}
+
+	// After the knowledge base, for the same reason as in the agent designer: a
+	// site the user named is more specific than anything retrieval produced, and
+	// a weak model weights later text more heavily.
+	if p.SiteFeasibility != "" {
+		sb.WriteString(p.SiteFeasibility)
 	}
 
 	sb.WriteString(`<your_job>

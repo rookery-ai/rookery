@@ -40,6 +40,15 @@ type Manager struct {
 	// IdleAfter stops the helper when unused. A browser is ~200 MB resident, and
 	// most installs browse rarely, so holding it forever is a poor trade on the
 	// laptops this platform targets.
+	//
+	// It MUST exceed sessionTTL, and that is not tidiness. The manager's timer
+	// and the helper's per-session timer both measure idleness, so the shorter
+	// one always wins — at 5 minutes here against a 10-minute session TTL the
+	// session timer was unreachable, and worse, a logged-in flow that paused for
+	// six minutes (a weak model on a slow provider between "read the page" and
+	// "click the button") had its helper killed underneath it. The login went
+	// with it, and the next call returned "no open page for this run" with no
+	// way to recover, because cross-run persistence is deliberately not built.
 	IdleAfter time.Duration
 
 	mu       sync.Mutex
@@ -51,13 +60,18 @@ type Manager struct {
 	stopIdle context.CancelFunc
 }
 
+// idleAfterDefault is how long the helper survives with no calls at all. It is
+// deliberately longer than sessionTTL (see IdleAfter), so the helper outlives
+// the sessions it holds rather than taking a live login down with it.
+const idleAfterDefault = 15 * time.Minute
+
 // NewManager builds a manager with the project's defaults.
 func NewManager(selfExe string, sandboxed, guard bool) *Manager {
 	return &Manager{
 		SelfExe:   selfExe,
 		Sandboxed: sandboxed,
 		Guard:     guard,
-		IdleAfter: 5 * time.Minute,
+		IdleAfter: idleAfterDefault,
 		client:    &http.Client{Timeout: 3 * time.Minute},
 	}
 }
@@ -147,6 +161,20 @@ type ActRequest struct {
 	// from this session. Set by the caller that resolved the placeholder, since
 	// the helper has no database and cannot recognise a secret on its own.
 	ValueIsSecret bool
+}
+
+// ContextCount reports how many browser contexts the helper currently holds.
+//
+// It exists for the leak test and nothing else. A context that is never closed
+// is invisible from outside the helper: it costs memory and changes no result,
+// so a regression here would pass every behavioural test. Returns 0 when the
+// helper is not running.
+func (m *Manager) ContextCount(ctx context.Context) (int, error) {
+	facts, err := m.post(ctx, "/ping", map[string]string{})
+	if err != nil {
+		return 0, err
+	}
+	return facts.Contexts, nil
 }
 
 // CloseSession tears down a run's browser context.

@@ -1,49 +1,47 @@
-package agentdesigner
+package browser
 
 import (
 	"context"
 	"errors"
 	"strings"
 	"testing"
-
-	"github.com/rookery-ai/rookery/internal/browser"
 )
 
 type stubBrowser struct {
 	available bool
 	calls     int
-	byURL     map[string]browser.Result
+	byURL     map[string]Result
 	err       error
 }
 
-func (s *stubBrowser) Available() browser.Availability {
-	return browser.Availability{OK: s.available}
+func (s *stubBrowser) Available() Availability {
+	return Availability{OK: s.available}
 }
 
-func (s *stubBrowser) Render(_ context.Context, r browser.Request) (browser.Result, error) {
+func (s *stubBrowser) Render(_ context.Context, r Request) (Result, error) {
 	s.calls++
 	if s.err != nil {
-		return browser.Result{}, s.err
+		return Result{}, s.err
 	}
 	return s.byURL[r.URL], nil
 }
 
-func (s *stubBrowser) Act(context.Context, browser.ActRequest) (browser.Result, error) {
-	return browser.Result{}, nil
+func (s *stubBrowser) Act(context.Context, ActRequest) (Result, error) {
+	return Result{}, nil
 }
 func (s *stubBrowser) CloseSession(context.Context, string) {}
 
 func TestFeasibilityIsSilentWithoutAURL(t *testing.T) {
-	f := &Flow{browser: &stubBrowser{available: true}}
-	got := f.loadFeasibility(context.Background(), &DesignSession{}, "watch my electricity bill each month")
+	var cache *FeasibilityCache
+	got := Feasibility(context.Background(), &stubBrowser{available: true}, &cache, "watch my electricity bill each month")
 	if got != "" {
 		t.Fatalf("probed with no URL mentioned: %q", got)
 	}
 }
 
 func TestFeasibilityIsSilentWithoutABrowser(t *testing.T) {
-	f := &Flow{browser: &stubBrowser{available: false}}
-	got := f.loadFeasibility(context.Background(), &DesignSession{}, "check https://example.com daily")
+	var cache *FeasibilityCache
+	got := Feasibility(context.Background(), &stubBrowser{available: false}, &cache, "check https://example.com daily")
 	if got != "" {
 		t.Fatalf("claimed to probe with no runtime: %q", got)
 	}
@@ -53,13 +51,14 @@ func TestFeasibilityIsSilentWithoutABrowser(t *testing.T) {
 // designer must be told it cannot be worked around. Anything softer produces a
 // plan that spends a six-minute build failing.
 func TestFeasibilityReportsABotWallAsUnworkaroundable(t *testing.T) {
-	f := &Flow{browser: &stubBrowser{
+	br := &stubBrowser{
 		available: true,
-		byURL: map[string]browser.Result{
+		byURL: map[string]Result{
 			"https://shop.example.com": {Blocked: "cloudflare", BlockedNote: "the site is behind a Cloudflare browser check"},
 		},
-	}}
-	got := f.loadFeasibility(context.Background(), &DesignSession{}, "track prices on https://shop.example.com")
+	}
+	var cache *FeasibilityCache
+	got := Feasibility(context.Background(), br, &cache, "track prices on https://shop.example.com")
 	if !strings.Contains(got, "BLOCKED") || !strings.Contains(got, "Cloudflare") {
 		t.Fatalf("blocker not reported: %q", got)
 	}
@@ -75,11 +74,12 @@ func TestFeasibilityReportsABotWallAsUnworkaroundable(t *testing.T) {
 // can actually fix by storing credentials, so conflating the two would talk
 // them out of a perfectly buildable agent.
 func TestFeasibilityDistinguishesALoginFromABotWall(t *testing.T) {
-	f := &Flow{browser: &stubBrowser{
+	br := &stubBrowser{
 		available: true,
-		byURL:     map[string]browser.Result{"https://bank.example.com": {Blocked: "login"}},
-	}}
-	got := f.loadFeasibility(context.Background(), &DesignSession{}, "pay my bill at https://bank.example.com")
+		byURL:     map[string]Result{"https://bank.example.com": {Blocked: "login"}},
+	}
+	var cache *FeasibilityCache
+	got := Feasibility(context.Background(), br, &cache, "pay my bill at https://bank.example.com")
 	if strings.Contains(got, "cannot get past") {
 		t.Errorf("a login wall was reported as unworkaroundable: %q", got)
 	}
@@ -89,16 +89,17 @@ func TestFeasibilityDistinguishesALoginFromABotWall(t *testing.T) {
 }
 
 func TestFeasibilityDescribesAWorkableSite(t *testing.T) {
-	f := &Flow{browser: &stubBrowser{
+	br := &stubBrowser{
 		available: true,
-		byURL: map[string]browser.Result{
+		byURL: map[string]Result{
 			"https://ok.example.com": {
 				Title:    "Invoices",
-				Elements: []browser.Element{{Role: "textbox", Name: "Account"}, {Role: "button", Name: "Go"}},
+				Elements: []Element{{Role: "textbox", Name: "Account"}, {Role: "button", Name: "Go"}},
 			},
 		},
-	}}
-	got := f.loadFeasibility(context.Background(), &DesignSession{}, "read https://ok.example.com")
+	}
+	var cache *FeasibilityCache
+	got := Feasibility(context.Background(), br, &cache, "read https://ok.example.com")
 	if !strings.Contains(got, "reachable and readable") {
 		t.Fatalf("workable site not described: %q", got)
 	}
@@ -110,10 +111,10 @@ func TestFeasibilityDescribesAWorkableSite(t *testing.T) {
 // A design turn is a blocking request with no progress stream, so an unbounded
 // probe loop would leave the user watching a spinner.
 func TestFeasibilityBoundsHowManySitesItProbes(t *testing.T) {
-	sb := &stubBrowser{available: true, byURL: map[string]browser.Result{}}
-	f := &Flow{browser: sb}
+	sb := &stubBrowser{available: true, byURL: map[string]Result{}}
+	var cache *FeasibilityCache
 	msg := "check https://a.example.com https://b.example.com https://c.example.com https://d.example.com https://e.example.com"
-	f.loadFeasibility(context.Background(), &DesignSession{}, msg)
+	Feasibility(context.Background(), sb, &cache, msg)
 	if sb.calls > maxProbesPerSession {
 		t.Fatalf("probed %d sites, cap is %d", sb.calls, maxProbesPerSession)
 	}
@@ -121,11 +122,10 @@ func TestFeasibilityBoundsHowManySitesItProbes(t *testing.T) {
 
 // The same site named twice in one conversation must cost one render.
 func TestFeasibilityCachesWithinASession(t *testing.T) {
-	sb := &stubBrowser{available: true, byURL: map[string]browser.Result{"https://x.example.com": {Title: "X"}}}
-	f := &Flow{browser: sb}
-	sess := &DesignSession{}
-	f.loadFeasibility(context.Background(), sess, "look at https://x.example.com")
-	f.loadFeasibility(context.Background(), sess, "and again https://x.example.com")
+	sb := &stubBrowser{available: true, byURL: map[string]Result{"https://x.example.com": {Title: "X"}}}
+	var cache *FeasibilityCache
+	Feasibility(context.Background(), sb, &cache, "look at https://x.example.com")
+	Feasibility(context.Background(), sb, &cache, "and again https://x.example.com")
 	if sb.calls != 1 {
 		t.Fatalf("rendered %d times, want 1", sb.calls)
 	}
@@ -134,8 +134,9 @@ func TestFeasibilityCachesWithinASession(t *testing.T) {
 // A probe failure must not fail the design turn — the conversation is worth
 // more than the hint.
 func TestFeasibilityDegradesWhenTheProbeFails(t *testing.T) {
-	f := &Flow{browser: &stubBrowser{available: true, err: errors.New("net::ERR_NAME_NOT_RESOLVED\nstack line\nanother")}}
-	got := f.loadFeasibility(context.Background(), &DesignSession{}, "read https://nope.example.com")
+	var cache *FeasibilityCache
+	br := &stubBrowser{available: true, err: errors.New("net::ERR_NAME_NOT_RESOLVED\nstack line\nanother")}
+	got := Feasibility(context.Background(), br, &cache, "read https://nope.example.com")
 	if !strings.Contains(got, "could not be opened") {
 		t.Fatalf("failure not reported: %q", got)
 	}

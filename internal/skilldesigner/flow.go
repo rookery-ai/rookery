@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/rookery-ai/rookery/internal/agentdesigner"
+	"github.com/rookery-ai/rookery/internal/browser"
 	"github.com/rookery-ai/rookery/internal/buildphase"
 	"github.com/rookery-ai/rookery/internal/chat"
 	"github.com/rookery-ai/rookery/internal/coder"
@@ -67,6 +68,9 @@ func (s DesignState) String() string {
 type DesignSession struct {
 	WorkspaceID string
 	SkillName   string
+	// feasibility caches site probes for this session. Not persisted with the
+	// draft: a conversation resumed days later should look again.
+	feasibility *browser.FeasibilityCache
 	State       DesignState
 	History     []db.ChatMessage // full conversation fed to the coder on every turn
 
@@ -124,11 +128,14 @@ type Flow struct {
 	mu       sync.Mutex
 	sessions map[string]*DesignSession // keyed by workspaceID
 
-	coderFor      func(workspaceID string) *coder.Coder
-	saver         *SkillSaver
-	db            dbStore
-	memStore      memoryStore
-	vlt           *vault.Vault // optional; nil = no KB context injected
+	coderFor func(workspaceID string) *coder.Coder
+	saver    *SkillSaver
+	db       dbStore
+	memStore memoryStore
+	vlt      *vault.Vault // optional; nil = no KB context injected
+	// browser probes a site the conversation mentions. Optional; nil = no
+	// feasibility block. See WithBrowser.
+	browser       browser.Renderer
 	secretsLoader func(ctx context.Context, workspaceID string) (map[string]string, error)
 }
 
@@ -144,6 +151,13 @@ func NewSkillFlow(coderResolver func(workspaceID string) *coder.Coder, saver *Sk
 func (f *Flow) WithDB(database dbStore) *Flow  { f.db = database; return f }
 func (f *Flow) WithMemory(m memoryStore) *Flow { f.memStore = m; return f }
 func (f *Flow) WithVault(v *vault.Vault) *Flow { f.vlt = v; return f }
+
+// WithBrowser gives the skill design conversation the same site probe the agent
+// designer has. The two designers share one front end, so a capability present
+// in only one of them is the drift class CLAUDE.md already records twice — and a
+// skill that scrapes a site benefits from knowing it is behind a bot wall just
+// as much as an agent does.
+func (f *Flow) WithBrowser(b browser.Renderer) *Flow { f.browser = b; return f }
 func (f *Flow) WithSecretsLoader(fn func(ctx context.Context, workspaceID string) (map[string]string, error)) *Flow {
 	f.secretsLoader = fn
 	return f
@@ -403,6 +417,7 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		UserProfile:        sess.UserProfile,
 		UserMemory:         sess.UserMemory,
 		KBManifest:         f.loadKBManifest(workspaceID, userMessage),
+		SiteFeasibility:    browser.Feasibility(ctx, f.browser, &sess.feasibility, userMessage),
 		ConnectedPlatforms: sess.ConnectedPlatforms,
 		ChatApps:           prompts.ChatAppsForPlatforms(sess.ConnectedPlatforms),
 	})

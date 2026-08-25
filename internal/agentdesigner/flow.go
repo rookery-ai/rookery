@@ -67,7 +67,7 @@ type DesignSession struct {
 	// the draft: a resumed conversation days later should look again, since the
 	// site may have changed — and a stale "blocked" would talk the user out of an
 	// agent that would now work.
-	feasibility        *feasibilityCache
+	feasibility        *browser.FeasibilityCache
 	State              DesignState
 	History            []db.ChatMessage   // full conversation fed to coder on every turn
 	Skills             []prompts.SkillRef // installed skills (name+description), loaded once on Start
@@ -1478,7 +1478,7 @@ func (f *Flow) callCoder(ctx context.Context, workspaceID, userMessage string) (
 		// field of its own: both are "things looked up for the designer this
 		// turn", and a second field would need the prompt builder to know about
 		// browsers.
-		SiteFeasibility: f.loadFeasibility(ctx, sess, userMessage),
+		SiteFeasibility: browser.Feasibility(ctx, f.browser, &sess.feasibility, userMessage),
 	})
 
 	// The design conversation gets the READ-ONLY tool subset: it can open a note,
@@ -1753,6 +1753,11 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 		ConnectionTools:    connToolNames,
 		Skills:             sess.Skills,
 		ForceTier1:         forceTier1,
+		// Without this the build prompt never mentions the browser, so a weak
+		// model either hand-writes a Playwright script — the exact failure the
+		// native tools replace — or concludes a JavaScript-rendered site cannot
+		// be read at all and plans around a limitation that no longer exists.
+		BrowserAvailable: f.browser != nil && f.browser.Available().OK,
 	}
 
 	// Set up a buffered progress channel for SSE and snapshot the Telegram progress func.
@@ -1923,6 +1928,20 @@ func (f *Flow) runGeneration(ctx context.Context, workspaceID string) (string, b
 	// mutating actions like send). Parity with the run path (agentrunner.WithConnectors).
 	if bound := f.buildBoundConns(genCtx, workspaceID); len(bound) > 0 {
 		generationCoder = generationCoder.WithConnectors(f.connReg, f.connStore, bound)
+	}
+	// The browser, for the same reason and with the same shape. Without this a
+	// build has no browser at all, so the rehearsal cannot open the page the
+	// agent is being written to read — and decideBuildOutcome then reports the
+	// "couldn't confirm" outcome the dry run exists to remove, on exactly the
+	// agents this feature was built for.
+	//
+	// A ZERO policy is passed deliberately, not an omission: acting during a
+	// build is refused by browser.CheckAct regardless of what a caller supplies
+	// (api_engine re-derives BuildPhase from the build marker), so this grants
+	// reading and nothing more. A rehearsal that cannot look at the page cannot
+	// rehearse; one that can click is the thing the boundary exists to stop.
+	if f.browser != nil && f.browser.Available().OK {
+		generationCoder = generationCoder.WithBrowser(f.browser, browser.Policy{})
 	}
 	// The same for MCP servers, and for the same reason: without it a build has no MCP
 	// tools at all, which silently disables TWO of the three binding paths — the model

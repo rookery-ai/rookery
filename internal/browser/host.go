@@ -142,7 +142,11 @@ func RunHost(ctx context.Context) error {
 func (h *browserHost) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ping", h.auth(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, map[string]any{"ok": true})
+		// contexts is how the leak test observes what it is testing. A context
+		// that is never closed is invisible from outside the helper — it costs
+		// memory and nothing else — so without a count exposed here the fix
+		// above could regress with every test still passing.
+		writeJSON(w, map[string]any{"ok": true, "contexts": len(h.browser.Contexts())})
 	}))
 	mux.HandleFunc("/render", h.auth(h.handleRender))
 	mux.HandleFunc("/act", h.auth(h.handleAct))
@@ -185,6 +189,14 @@ func (h *browserHost) handleRender(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, err)
 		return
+	}
+	// An ephemeral context (no session key) belongs to this call alone and must
+	// be closed here. It is never stored in h.sess, so reapIdle cannot see it —
+	// without this every browser_read leaks a Chromium context for as long as the
+	// helper lives, which on the always-on read path is every chat turn that
+	// opens a page. The deferred close covers the early returns below too.
+	if req.Session == "" {
+		defer func() { _ = sess.ctx.Close() }()
 	}
 	timeout := float64(req.TimeoutMS)
 	if timeout <= 0 {

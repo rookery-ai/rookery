@@ -121,6 +121,61 @@ func TestBrowserClassifiesAPasswordFormAsALoginWall(t *testing.T) {
 	}
 }
 
+// The leak this pins was invisible: an ephemeral context costs memory and
+// changes no result, so every behavioural test passed while chat leaked one
+// Chromium context per page read for the life of the helper.
+func TestReadingDoesNotLeakBrowserContexts(t *testing.T) {
+	srv := jsPage(t)
+	m := NewManager(buildRookery(t), true, false)
+	defer m.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	if _, err := m.Render(ctx, Request{URL: srv.URL}); err != nil {
+		t.Fatalf("first render: %v", err)
+	}
+	after1, err := m.ContextCount(ctx)
+	if err != nil {
+		t.Fatalf("context count: %v", err)
+	}
+	for i := 0; i < 4; i++ {
+		if _, err := m.Render(ctx, Request{URL: srv.URL}); err != nil {
+			t.Fatalf("render %d: %v", i, err)
+		}
+	}
+	after5, err := m.ContextCount(ctx)
+	if err != nil {
+		t.Fatalf("context count: %v", err)
+	}
+	if after5 > after1 {
+		t.Fatalf("contexts grew from %d to %d over four more reads — ephemeral contexts are leaking", after1, after5)
+	}
+}
+
+// A kept session is the opposite case: it MUST survive between calls, or a
+// login-then-act flow loses its login halfway through.
+func TestASessionSurvivesBetweenCalls(t *testing.T) {
+	srv := jsPage(t)
+	m := NewManager(buildRookery(t), true, false)
+	defer m.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	const key = "persist-test"
+	if _, err := m.Render(ctx, Request{URL: srv.URL, Session: key}); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer m.CloseSession(ctx, key)
+
+	res, err := m.Act(ctx, ActRequest{Session: key, Action: ActionRead})
+	if err != nil {
+		t.Fatalf("re-read a kept session: %v", err)
+	}
+	if !strings.Contains(res.Text, "RENDERED-BY-JAVASCRIPT") {
+		t.Fatalf("kept session lost its page; got %q", res.Text)
+	}
+}
+
 // Acting needs a live session, and the element list is what makes it usable.
 func TestBrowserListsInteractiveElementsInASession(t *testing.T) {
 	srv := jsPage(t)

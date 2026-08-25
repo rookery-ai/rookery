@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/rookery-ai/rookery/internal/browser"
 	"github.com/rookery-ai/rookery/internal/buildphase"
 	"github.com/rookery-ai/rookery/internal/prompts"
 )
@@ -33,7 +34,7 @@ import (
 // the one property a rehearsal cannot afford to lose. Containment now comes from
 // vault.WriteJournal, which undoes the writes instead of pretending to prevent
 // them; see dryRun below.
-func dryRunPrompt(agentMD, backendType, runtimeContext, vaultRoot, agentDir string, chatApps []prompts.ChatAppInfo) string {
+func dryRunPrompt(agentMD, backendType, runtimeContext, vaultRoot, agentDir string, chatApps []prompts.ChatAppInfo, browserAvailable bool) string {
 	return prompts.BuildCoderPrompt(prompts.CoderPromptParams{
 		AgentMD:        agentMD,
 		BackendType:    backendType,
@@ -41,6 +42,10 @@ func dryRunPrompt(agentMD, backendType, runtimeContext, vaultRoot, agentDir stri
 		VaultRoot:      vaultRoot,
 		AgentDir:       agentDir,
 		ChatApps:       chatApps,
+		// Reading only. BrowserActing is deliberately left false: a rehearsal
+		// told how to click would plan around a capability CheckAct refuses it,
+		// and then report a plan it never actually carried out.
+		BrowserAvailable: browserAvailable,
 	}) + prompts.DryRunSendProhibition
 }
 
@@ -134,6 +139,16 @@ func (f *Flow) dryRun(ctx context.Context, workspaceID, workDir, agentMD, backen
 		run = run.WithProgress(notify)
 	}
 
+	// The browser, read-only. A rehearsal of an agent written to read a
+	// JavaScript-rendered page has to be able to open it, or the sample shown at
+	// review describes nothing that happened. Acting stays refused by
+	// browser.CheckAct — the build marker is set in extraEnv above, and
+	// api_engine re-derives BuildPhase from it, so this cannot click "Pay"
+	// during a rehearsal of an agent nobody has approved yet.
+	if f.browser != nil && f.browser.Available().OK {
+		run = run.WithBrowser(f.browser, browser.Policy{})
+	}
+
 	// Without connectors the agent has no tools and the dry run proves nothing — the
 	// whole point is to exercise the same surface a real run gets. The build-time guard
 	// above is what keeps that safe.
@@ -151,7 +166,8 @@ func (f *Flow) dryRun(ctx context.Context, workspaceID, workDir, agentMD, backen
 	// that is its entire purpose.
 	res, err := run.Generate(ctx, workspaceID,
 		dryRunPrompt(agentMD, backendType, f.loadRuntimeContext(workspaceID),
-			f.vaultRootFor(workspaceID), workDir, chatApps))
+			f.vaultRootFor(workspaceID), workDir, chatApps,
+			f.browser != nil && f.browser.Available().OK))
 	if err != nil || res == nil {
 		// One line, and a CLASS rather than the error text: a provider error can echo back
 		// the request that produced it, and that dataflow reaches the workspace's API key
