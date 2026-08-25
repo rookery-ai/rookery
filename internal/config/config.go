@@ -46,6 +46,7 @@ type Config struct {
 	Data     DataConfig     `yaml:"data"`
 	Coder    CoderConfig    `yaml:"coder"`
 	Sandbox  SandboxConfig  `yaml:"sandbox"`
+	Browser  BrowserConfig  `yaml:"browser"`
 	Chat     ChatConfig     `yaml:"chat"`
 
 	// Warnings are resolution problems worth telling the operator about that are
@@ -96,6 +97,24 @@ type SandboxConfig struct {
 	PythonBin       string        `yaml:"python_bin"`
 	DefaultTimeout  time.Duration `yaml:"default_timeout"`
 	DefaultMemoryMB int           `yaml:"default_memory_mb"`
+}
+
+// BrowserConfig controls the headless browser used for JavaScript-rendered
+// pages.
+//
+// AllowPrivate turns OFF the private-address guard, letting the browser reach
+// RFC1918, loopback and Tailscale addresses. It is off by default and should
+// stay off on any install where an agent browses the public web: the browser
+// follows URLs chosen from search results and page content, which is exactly
+// the threat nethttp's guard exists for, and the loopback interface hosts this
+// server's own connector, knowledge-base and MCP bridges along with their
+// per-run bearer tokens.
+//
+// It exists because reading a self-hosted dashboard on the owner's own LAN is a
+// legitimate thing to want, and the alternative — no escape at all — pushes
+// people toward worse workarounds. Set via ROOKERY_BROWSER_ALLOW_PRIVATE.
+type BrowserConfig struct {
+	AllowPrivate bool `yaml:"allow_private"`
 }
 
 type ChatConfig struct {
@@ -274,6 +293,12 @@ func applyEnv(cfg *Config) error {
 	}
 	if v := os.Getenv("ROOKERY_SANDBOX"); v != "" {
 		cfg.Sandbox.Enabled = !(v == "0" || strings.EqualFold(v, "false") || strings.EqualFold(v, "off"))
+	}
+	// Opt-IN, so the parse is the mirror image of ROOKERY_SANDBOX's opt-out: an
+	// unset or unrecognised value must leave the guard ON. Reusing the sandbox
+	// form here would make any non-empty string — including "0" — disable it.
+	if v := os.Getenv("ROOKERY_BROWSER_ALLOW_PRIVATE"); v != "" {
+		cfg.Browser.AllowPrivate = v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "on")
 	}
 	if v := os.Getenv("ROOKERY_CODER_MODE"); v != "" {
 		cfg.Coder.Mode = strings.ToLower(strings.TrimSpace(v))

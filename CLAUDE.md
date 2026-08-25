@@ -390,6 +390,7 @@ longer reach a user.
 | `ROOKERY_SESSION_KEY` | generated, then pinned to `<data_dir>/session.key` | hex 32-byte session key |
 | `ROOKERY_PUBLIC_URL` | — | externally reachable base URL for OAuth callbacks; validated at use (`internal/publicurl.Normalize`) and overridden by the instance URL in owner settings |
 | `ROOKERY_SANDBOX` | `1` | `0`/`false`/`off` disables Landlock confinement |
+| `ROOKERY_BROWSER_ALLOW_PRIVATE` | `0` | `1`/`true`/`on` lets the headless browser reach private/loopback space. Parsed as an opt-IN (the mirror of `ROOKERY_SANDBOX`'s opt-out) so an unrecognised value leaves the guard ON |
 | `ROOKERY_CODER_MODE` | `full` | `slim` removes the local CLI coder kind entirely |
 | `ROOKERY_CODER_BIN` | `claude` | default coder binary for workspaces that have not set `coder_bin` |
 
@@ -505,6 +506,7 @@ Per-workspace chat adapter (Telegram, Discord)
 | `internal/llm` | Thin, reusable transport over provider chat-completion/messages APIs with native function-calling (tool use). **`Usage.Add` is the ONE place usage is summed** — there were two, and the second (in `internal/agentrunner`) enumerated three fields, so `CachedTokens`/`CacheReported` were parsed correctly, carried out of the engine correctly, and discarded one layer up: the run log reported `n/a` for a provider that reports cache statistics on *every* response. A reflection test walks the struct, so a field added later fails until `Add` carries it. `Usage` also carries `Cost`/`CostReported`, read from the provider (OpenRouter reports it on every response) rather than computed from a price table — a table is a second copy of someone else's pricing and goes stale in silence. `Provider` interface + registry (`openai`, `openrouter`, `anthropic`, `generic` OpenAI-compatible, plus ~35 further providers registered against the OpenAI schema — see `coder.APIProviders()`); `Request`/`Response`/`Message`/`Tool`/`ToolCall`/`Usage`; shared HTTP plumbing with rate-limit-aware backoff (`ErrRateLimit` transient 429 → retry across a per-minute window; `ErrQuotaExhausted` 402 → no retry; `ErrAuth`, `ErrToolsUnsupported`). Knows nothing about vaults/sandboxes/protocol — the agentic loop lives in `internal/coder`. |
 | `internal/connectors` | Self-managed-OAuth + API-key connector layer (replaces Composio). Embedded `providers/*.yaml` (auth config) + `connectors/*.yaml` (curated action manifests) for **136 providers** (Google-family incl. Calendar/Tasks/AdSense/GA4/Search Console, YouTube, GitHub, Slack, OpenAI, Notion, Outlook/Teams, Jira, HubSpot, Dropbox, Calendly, Asana, ClickUp, Airtable, Intercom, SendGrid, Monday, Salesforce, Shopify, Mailchimp, Zendesk, Stripe, Twilio, Trello); `Registry` (+ `OAuthProvider` for `auth_parent` aliasing, `ProviderNames()` backing the connections page), `Execute` (typed choke point), `applyAuth` (Bearer/api-key header/query/Basic + templated Basic username + AWS SigV4 request signing), `renderBody`/`renderForm`/`body_arg` body kinds, `ActiveBoundConns`/`ConnectInput`/`token_extra`/`key_extra` per-connection value sources, `OAuthClient`, `DBTokenStore` (+ headless `RunRefreshLoop`), `Bridge` (loopback HTTP so CLI coders reach `Execute` — used by runs AND chat), `ToolDefs`/`ResolveTool` (single-source tool naming for both coder kinds). All tokens `secrets.EncryptWithSystemKey`-encrypted. |
 | `internal/mcp` | Model Context Protocol client layer — a deliberate **peer of `internal/connectors`**, mirroring it shape-for-shape so both coder kinds, the per-agent binding and the approval gate treat an MCP tool and a connector action identically. `Client` (SDK-backed, one pooled session per server + one reconnect-and-retry, since a self-hosted server that slept has dropped its session and the first call after must not read as a failure), `Catalog`/`Sync` (DB-cached `tools/list`, reconciled by upsert so the owner's read_only/approval/enabled columns survive a re-sync; a vanished tool is MARKED missing, never deleted), `ToolDefs`/`ResolveTool` (naming defined once for both paths), `Execute` (+ `Policy{BuildPhase, Parker}`, the single typed choke point), `Bridge` (loopback HTTP so CLI coders reach the same `Execute` via `rookery mcp exec`). **The structural difference from connectors: nothing about an MCP server ships in the binary** — the owner pastes a URL and the server itself supplies the action list. Tokens are `secrets.EncryptWithSystemKey`-encrypted. |
+| `internal/browser` | Headless browser for JavaScript-rendered pages — a deliberate **peer of `internal/connectors` and `internal/mcp`**, mirroring them shape-for-shape (one typed choke point, one availability probe, one loopback `Bridge` so both coder kinds converge). `Probe`/`Available` (side-effect-free: playwright-go's own driver check MkdirAlls, which disqualifies it from `/healthz`), `Manager` (lazy start, idle shutdown, one helper process per server, fresh incognito context per read), `Render`/`Act`, `CheckAct` (the single permission choke point), `Classify` (cloudflare/captcha/login/bot-check, REPORTED never bypassed), `ParseAriaSnapshot` + `FilterInteractive` (element refs for the acting tools), `ResolveSecretValue`, `Bridge`, `Install`. **Chromium runs in a sandboxed helper process** (`__browser-host` under `sandbox.Wrap`), never in the host process — see "The browser" below. |
 | `internal/buildphase` | Tiny package holding `ROOKERY_BUILD_PHASE`/`generation` marker (set during agent/skill builds; the connector `Execute` build-guard refuses mutating actions when present). Its own package so it outlives any one integration. |
 | `internal/connalert` | Delivers the "this connection needs reconnecting" alert to the inbox AND chat when `DBTokenStore` flips a connection to `NEEDS_REAUTH`. Its own package because the alert needs the DB and the gateway and `internal/connectors` deliberately knows about neither — the same shape as `internal/approval`, and it takes the same narrow `SendToUser` interface so tests need no gateway. See "Connection re-auth alerting" below. |
 | `internal/agentdesigner` | `Flow` FSM (Describing→Designing→Verifying→Done); conversational design shared between web and Telegram; auto-schedule; `RunFullGuardrails`/`RunToolGuardrails` (ethics + AST only); `toolstree.go` recursive path-safe `WriteToolsTree`/`ReadToolsTree` for multi-file projects; `isTestArtifact` classifier + `cleanupTestArtifacts` (post-save junk removal); `statefile.go` (`StateFilePath`/`ReadState`/`WriteState`/`RenderStateTemplate`) owns an agent's `state.md` format (see "Agent state" below); `migrate_files.go` (`MigrateAgentFilesToMarkdown`) is the idempotent startup migration off the old `state.json`/`agent.json` pair; `ParseRequiredSecrets` (`flow.go`) parses AGENT.md's `# Required secrets:` header — the only source of an agent's declared secrets now that `agent.json` is gone |
@@ -1796,7 +1798,7 @@ conformance.
 
 Two pools of skills, both surfaced to the agent designer and the runner as `[]prompts.SkillRef`:
 
-- **Core skills** — embedded in the binary (`internal/skilllibrary/skills/*/SKILL.md`, `go:embed`). Always-on for every user: no DB rows, no disk seeding, no admin gate. `LoadBundled()` enumerates metadata; `CoreSkillContent(slug)` returns the full SKILL.md (frontmatter+body) for agent-context injection when an agent declares the skill; `IsCoreSkill(slug)` is the reserved-name guard. `ParseMeta()` reads Anthropic+openclaw YAML frontmatter (name, description, version, license, category, `metadata.openclaw.requires.{bins,anyBins,env}`, `metadata.openclaw.install[]`). 22 bundled skills. File Processing: csv, pdf, docx, pptx, xlsx, markdown, image-ocr. Agent Behaviour: kb-curation, change-detection, notification-writing, agent-collaboration, resilient-runs, time-and-timezones. Web & Research: web-research, playwright-browser. Development: git-and-github, cli-tool-installer. Productivity: email-triage, calendar-scheduling. Integrations: api-integration. Meta: skill-creator, skill-vetter. (web-search + web-scraper merged into web-research, and github-integration became git-and-github, because all three duplicated native tools or the GitHub connector.) **A core skill ships SKILL.md only — never a `scripts/` directory**: CoreSkillContent returns the embedded markdown and nothing else, and nothing materializes the embed to disk, so a shipped script would reference a file that never reaches the agent's working dir. Core skills teach through inline snippets; USER skills, which live on disk in the vault, may ship scripts. Pinned by `skilllibrary.TestCoreSkillsShipNoScripts` and the rest of `catalog_test.go` (frontmatter parses, name == directory, description carries triggers, referenced `scripts/` paths exist). (The Composio-based composio-toolkit + google-workspace skills were removed; connected services are reached via native connector tools.)
+- **Core skills** — embedded in the binary (`internal/skilllibrary/skills/*/SKILL.md`, `go:embed`). Always-on for every user: no DB rows, no disk seeding, no admin gate. `LoadBundled()` enumerates metadata; `CoreSkillContent(slug)` returns the full SKILL.md (frontmatter+body) for agent-context injection when an agent declares the skill; `IsCoreSkill(slug)` is the reserved-name guard. `ParseMeta()` reads Anthropic+openclaw YAML frontmatter (name, description, version, license, category, `metadata.openclaw.requires.{bins,anyBins,env}`, `metadata.openclaw.install[]`). 21 bundled skills. File Processing: csv, pdf, docx, pptx, xlsx, markdown, image-ocr. Agent Behaviour: kb-curation, change-detection, notification-writing, agent-collaboration, resilient-runs, time-and-timezones. Web & Research: web-research. Development: git-and-github, cli-tool-installer. Productivity: email-triage, calendar-scheduling. Integrations: api-integration. Meta: skill-creator, skill-vetter. (web-search + web-scraper merged into web-research, and github-integration became git-and-github, because all three duplicated native tools or the GitHub connector.) **A core skill ships SKILL.md only — never a `scripts/` directory**: CoreSkillContent returns the embedded markdown and nothing else, and nothing materializes the embed to disk, so a shipped script would reference a file that never reaches the agent's working dir. Core skills teach through inline snippets; USER skills, which live on disk in the vault, may ship scripts. Pinned by `skilllibrary.TestCoreSkillsShipNoScripts` and the rest of `catalog_test.go` (frontmatter parses, name == directory, description carries triggers, referenced `scripts/` paths exist). (The Composio-based composio-toolkit + google-workspace skills were removed; connected services are reached via native connector tools.) **`playwright-browser` was removed in 2026-08** when the native `browser_*` tools landed: it taught a model to hand-write Playwright in Python, which is exactly what the weak models this platform runs cannot do, and a skill competing with a tool for the same job makes their choice worse. `skilllibrary.TestRemovedSkillsStayRemoved` pins it (the obvious fix for "the playwright skill is missing" is to write the file back), a sibling test bans any surviving skill from referencing it, and migration 019 sweeps the `agent_skills` rows that named it — that table is keyed by NAME with no foreign key, so a dangling row does not error, it just silently costs the agent a capability it believes it has.
 - **User skills** — created via the skill creator (below) or imported (ZIP/pasted SKILL.md), per-workspace, written to `<vault>/skills/<name>/SKILL.md` (+ `scripts/`), tracked in the `skills` table. Loaded from disk by `skillstore`.
 
 At run time (`agentrunner.runCoderAgent`), the agent's declared skills' content is injected into the coder prompt's `<skill_instructions>` block. Core skill content comes from the embed (`skilllibrary.CoreSkillContent`); user skill content is read from disk. `resolveSkillBins` resolves the absolute path of every CLI tool a declared skill requires (`requires.bins` / `anyBins`: `$HOME/.local/bin/<bin>` then `PATH`) and `prompts.SkillEnvBlock` builds a `<skill_environment>` block telling the agent where each tool lives (or to install it via the cli-tool-installer skill) plus sandbox conventions (invoke by absolute path, use `$TMPDIR` not `/tmp`, secrets are env vars, vault root).
@@ -2087,6 +2089,164 @@ A workspace can run its coder as a **direct LLM provider API** instead of a host
 ### Usage-limit / rate-limit detection
 
 `coder.ErrUsageLimit` — CLI: non-zero exit with empty stdout+stderr; API: provider 402 (credits/quota exhausted, `ErrQuotaExhausted`). `coder.ErrRateLimited` — API transient 429 that didn't clear within the retry budget (distinct so the message says "try again in a moment", not "out of quota"). `coder.ErrAPIAuth` (bad/missing key) is a config error, not a usage limit; `coder.ErrMaxTurns` is now vestigial — budget exhaustion returns a `Result` carrying `exhaustionSummary` rather than an error (see the turn-budget bullet above). `agentrunner.FriendlyRunError` converts each to a user-facing message sent via `input.SendOutput` on every run failure. Also handled softly during generation and design conversation turns. API token usage is accumulated across the loop (`coder.Usage`) and persisted per run.
+
+### The browser (JavaScript-rendered pages, and acting on them)
+
+`web_fetch` is an HTTP client, so a single-page app returns ~400 bytes of markup
+with no words in it, and the keyless search cascade is regularly served a JS
+challenge that is indistinguishable from genuine no-results. `internal/browser`
+closes both, via `github.com/mxschmitt/playwright-go` (note the module path: it
+still declares `mxschmitt`, so requiring it under `playwright-community` fails
+to resolve).
+
+**Availability is optional and degrades with a warning.** The runtime is Node +
+the playwright driver (134 MB on disk) plus Chromium (389 MB, from a 115 MiB
+download), so it is installed by `rookery browser install`, reported as its own
+`/healthz` boolean, and **deliberately not an `onboard.HostTool`** — that type
+probes a binary on `PATH`, this is a cache directory, and the "four host tools"
+count is asserted across four delivery surfaces. A missing runtime yields
+`ErrBrowserUnavailable` naming the fix and the tools are simply not offered:
+advertising a tool the host cannot execute is worse than omitting it, because
+the model spends turns on it and reports a platform fault to the user.
+
+**Chromium runs in a SANDBOXED HELPER PROCESS, and that was verified before it
+was designed around.** `playwright-go` drives the Node driver from whatever
+process calls it, so the naive implementation puts a browser rendering untrusted
+third-party content in the same address space as the database, the system key and
+every decrypted secret — which is precisely why the MCP section defers stdio
+transport. It would also have been a **regression**: the `playwright-browser`
+core skill this replaces already ran Chromium inside the coder's own Landlock
+sandbox. So `__browser-host` is spawned through `sandbox.Wrap`, and Chromium was
+measured launching, running JS and producing an aria snapshot under
+`landlock.V5.BestEffort()` at ABI 8. Its grants are each load-bearing: **RW** on
+the scratch profile dir, `~/.cache/ms-playwright`, `~/.cache/ms-playwright-go`
+and `/dev/shm`; **RO** on `SystemReadOnlyPaths()` **plus the directory of the
+running binary** — without that last one the helper cannot exec itself and dies
+with a bare `permission denied`, which is the first thing a reimplementation
+hits. Process separation alone would buy nothing (same uid, same files); the
+Landlock confinement is what makes the split worth its complexity.
+
+**The address guard is a CONNECT proxy, not URL inspection.** Chromium resolves
+DNS itself, so `net.Dialer.Control` cannot reach it, and inspecting the URL up
+front misses the two cases that matter — a public hostname resolving into
+private space, and a redirect hop. The helper owns a loopback proxy whose dial
+decision **is** `nethttp.DenyPrivateAddr`, so every request, redirect and
+subresource passes one policy with no second copy of the blocklist. Measured: a
+real page returned ~8k characters of body text while a `goto` at a loopback URL
+standing in for the connector bridge was refused at the proxy.
+`--proxy-bypass-list=<-loopback>` is set explicitly **even though it was measured
+to be redundant** (Playwright already routes loopback through the proxy) —
+relying on an undocumented default for a security property is how it regresses,
+so the flag is set and the test asserts the BEHAVIOUR, not the flag.
+`ROOKERY_BROWSER_ALLOW_PRIVATE=1` is the documented escape for reading a
+self-hosted dashboard, and it logs a warning at startup.
+
+**Routing is stated from both ends, because that is what makes a separate tool
+work.** `browser_read`'s description says to try `web_fetch` first; `web_fetch`
+returns a notice naming `browser_read` when an HTML response yields almost no
+words. The prompt half alone is a rule stated thousands of tokens before the
+failure; the result half arrives exactly when the model is stuck. Silent
+escalation inside `web_fetch` was rejected — it would make a fetch cost seconds
+and spawn Chromium invisibly, and the tool's own description would stop being
+true. The threshold counts **words, not bytes**: an SPA shell is often several KB
+of `<script>` tags, so a byte test would call it a full page.
+
+**Search:** `websearch.BrowserProvider` registers LAST in the cascade and only
+when the browser is available. Every engine above it is one HTTP request; this is
+seconds plus a browser, so it runs only once the cheap engines have all returned
+nothing — which for this cascade is exactly the signal that they were served a
+challenge. `Label()` renders it "DuckDuckGo (browser)" so the provenance line
+tells the user a browser was needed.
+
+**Acting is gated by ONE predicate, `browser.CheckAct`,** shared by the API
+engine and the CLI bridge so changing coder kind cannot change what an agent may
+do. Three layers, in order:
+
+- **The build-phase refusal is a real boundary and outranks every owner grant.**
+  `CLAUDE.md` already records that `dryRunSendProhibition` is "a PROMPT, not a
+  boundary" — tolerable for a script that might send an email, not for a tool
+  whose purpose is clicking buttons. This is the third instance of the pattern
+  `connectors.Execute` and `mcp.Execute` already use. Reading stays permitted: a
+  rehearsal that cannot look at the page cannot rehearse.
+- **`agents.browser_acting`** (migration 018) — may click and type at all.
+- **`agents.browser_irreversible`** — additionally permits a control whose
+  accessible name reads as a payment, an order or a deletion. The name match is
+  a **heuristic and is commented as one**; the protection is that both default
+  off, so a heuristic miss costs nothing the first tier was not already gating.
+  `LooksIrreversible` matches on word boundaries, or "Payment history" and
+  "Paypal settings" would force an owner to grant the top tier just to browse.
+
+Grants are **per agent, not per site** — a domain allowlist was considered and
+rejected because a real flow redirects across hosts (an identity provider, a
+payment processor), so the list would either break ordinary logins or be widened
+until it meant nothing.
+
+**Element addressing is Playwright's aria "ai" snapshot**, which carries
+`[ref=e2]` handles its `aria-ref=` selector engine resolves — so the model says
+`click(ref=e7)` instead of composing a CSS selector, which is the single property
+deciding whether a weak model can drive a page at all. The raw snapshot measured
+**53,592 characters for one news homepage** against an 8 KiB result cap, so it is
+filtered to interactive roles and **says how many rows it withheld**; a silent
+truncation reads as "this page has nine controls" and the model concludes the
+button it needs does not exist. The parser is tested against a **real captured
+page** (`testdata/github-login.snapshot`) — a fixture invented to match the
+parser would only prove it agrees with itself.
+
+**A ref is re-resolved against the LIVE page before any mutating call.** The
+irreversibility check is only as good as the name it judges, and a name from the
+model's previous listing may describe a control the page has since re-rendered —
+which is exactly the case where "Next" has become "Pay now". A ref that cannot be
+identified is **refused**, not passed through with an empty name: an empty name
+matches no hint, so continuing would quietly demote an unidentifiable click to
+the lower grant, failing open on the one check that guards payments.
+
+**Secrets are typed, never seen.** The model writes `${SECRET_NAME}` and the host
+substitutes at fill time. `browser.ResolveSecretValue` deliberately does NOT
+reuse `secrets.Service.Proxy` despite sharing the syntax: `Proxy` leaves an
+unresolvable placeholder AS-IS, which here would type the literal string
+`${CARD_NUMBER}` into a payment field, so this **fails closed** and names the
+missing secret (never its value — an error string is the one part of a tool
+result that routinely reaches a log). Four echo channels are redacted on the way
+back: page text, a field's rendered value, the final URL (a GET form puts it in
+the query string) and Playwright's own error messages. **Screenshots are never
+returned to the model** — redaction cannot touch pixels — and that is a permanent
+non-goal, not a deferral.
+
+**Refusals are not shaped like failures.** A refusal returns WITHOUT the `error:`
+prefix, because the API engine's oscillation guard counts that prefix as a
+failing call worth short-circuiting, whereas a refusal is a settled outcome the
+model must report to the user. Same distinction `internal/mcp` draws between a
+tool's own error and a protocol failure.
+
+**Chat gets reading and never acting**, on the always-on side of
+`includeExecTools`. Reading a rendered page carries no more authority than
+`web_fetch`, which is already always-on; acting from chat would mean clicking
+"Pay" with no approval gate at all (`ParkerFor` returns nil when `agentID == ""`),
+holding the user against themselves.
+
+**The designer probes a site before the plan is approved.** Both designers are
+`WithNoTools` and cannot investigate, so — exactly as `vault.BuildKBContext`
+supplies retrieval to a designer with no search tool — `Flow.loadFeasibility`
+renders any URL the user mentions and injects a `<site_feasibility>` block. A
+captcha or Cloudflare wall cannot be worked around, so finding it during the
+conversation replaces a six-minute build that was never going to succeed. A login
+wall is reported as a DIFFERENT answer: that one the owner can fix by storing
+credentials, and conflating the two would talk them out of a buildable agent.
+Bounded to three sites per session and cached per session (a design turn is a
+blocking POST with no SSE, so every probe is spinner time); the cache is
+deliberately **not** persisted with the draft, since a conversation resumed days
+later should look again and a stale "blocked" is worse than no hint.
+
+**Not built, deliberately:** cross-run login persistence. A run holds one browser
+context for its duration, so login-then-act works within a run; persisting
+`StorageState` between runs would create a new credential store at rest (cookies
+are bearer tokens) needing its own encryption, invalidation and backup policy,
+to buy an optimisation. The cost is stated rather than hidden: logging in every
+run is more fragile and likelier to trip 2FA and fraud heuristics. Also not
+built: per-click human approval — `internal/approval`'s "park, plain" semantics
+finish the run, so by the time an owner approves, the browser context and the
+half-filled form are gone; holding a live context across a human wait is the
+feature that would make it possible.
 
 ### Guardrails
 

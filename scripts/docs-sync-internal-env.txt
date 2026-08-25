@@ -23,3 +23,7 @@ ROOKERY_MCP_URL          # loopback MCP bridge address, per run
 ROOKERY_MCP_TOKEN        # per-run bearer token for the MCP bridge
 ROOKERY_STATE_URL        # loopback agent-state bridge address, per run
 ROOKERY_STATE_TOKEN      # per-run bearer token for the agent-state bridge
+ROOKERY_BROWSER_TOKEN       # per-spawn bearer token for the sandboxed browser helper
+ROOKERY_BROWSER_GUARD       # tells the browser helper whether the address guard is on
+ROOKERY_BROWSER_URL         # loopback browser bridge address, per run
+ROOKERY_BROWSER_TOKEN_BRIDGE # per-run bearer token for the browser bridge

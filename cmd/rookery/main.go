@@ -363,10 +363,17 @@ func serveCmd() *cli.Command {
 			// sandbox setting for the same reason the coder does — an operator
 			// who turned confinement off did so deliberately.
 			selfExe, _ := os.Executable()
-			browserMgr := browser.NewManager(selfExe, cfg.Sandbox.Enabled, true)
+			browserMgr := browser.NewManager(selfExe, cfg.Sandbox.Enabled, !cfg.Browser.AllowPrivate)
 			defer browserMgr.Stop()
 			if av := browserMgr.Available(); av.OK {
-				slog.Info("browser runtime available")
+				slog.Info("browser runtime available", "address_guard", !cfg.Browser.AllowPrivate)
+				if cfg.Browser.AllowPrivate {
+					// Loud, because this is the one setting that lets a page the
+					// model chose reach this server's own loopback bridges.
+					slog.Warn("browser private-address guard is DISABLED",
+						"detail", "the browser can reach loopback, RFC1918 and Tailscale addresses",
+						"unset", "ROOKERY_BROWSER_ALLOW_PRIVATE")
+				}
 			} else {
 				slog.Info("browser runtime not installed; JavaScript-rendered pages will not be readable",
 					"fix", "rookery browser install")
