@@ -141,6 +141,51 @@ func stripTechnicalSpec(s string) string {
 // roleNote turns are skipped. They are coder-facing steering recorded after a
 // failed build, never a proposal, and folding them in would let a failure note
 // mask the real last proposal.
+// SpecDeclaresIrreversible reads the `Irreversible actions:` line out of a
+// [TECHNICAL SPEC] block.
+//
+// This is what turns a plan into a CONSENT MOMENT. The designer decides, while
+// the user is present and reading the plan, whether the agent will pay, order,
+// transfer or delete — and the interface can then ask for permission with a
+// button, in the same breath as asking to build. Discovering it later, from a
+// run that stopped halfway, is strictly worse: by then the user has approved
+// something whose shape they were never shown.
+//
+// Reads "no" on anything it does not understand, including a missing line. The
+// asymmetry is deliberate and matches ParseIrreversibleLine: a false positive
+// puts a payment warning in front of someone building a weather agent, which
+// teaches them the warning is noise. A false negative is caught later by the
+// run-time refusal, which is the safety net this consent moment sits on top of.
+func SpecDeclaresIrreversible(spec string) bool {
+	for _, raw := range strings.Split(spec, "\n") {
+		line := strings.TrimSpace(raw)
+		if !strings.HasPrefix(strings.ToLower(line), "irreversible") {
+			continue
+		}
+		i := strings.Index(line, ":")
+		if i < 0 {
+			continue
+		}
+		return declaresYes(line[i+1:])
+	}
+	return false
+}
+
+// declaresYes reads the affirmative forms a model produces on that line. It
+// accepts a bare "yes" and also "yes — deletes the invoice", which is the shape
+// the spec template actually asks for.
+func declaresYes(v string) bool {
+	v = strings.ToLower(strings.TrimSpace(v))
+	v = strings.TrimLeft(v, "`*_ ")
+	switch {
+	case v == "", strings.HasPrefix(v, "no"), strings.HasPrefix(v, "none"):
+		return false
+	case strings.HasPrefix(v, "yes"), strings.HasPrefix(v, "true"):
+		return true
+	}
+	return false
+}
+
 func planFromHistory(history []db.ChatMessage) (spec string, ready bool) {
 	for i := len(history) - 1; i >= 0; i-- {
 		if history[i].Role != "assistant" {

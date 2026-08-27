@@ -116,8 +116,9 @@ func designTurnResponse(response string, snap agentdesigner.DesignSnapshot) map[
 		// path that returns a design body, including the IsGenerating branch
 		// and the edit-start handler: the SPA coerces a missing field to false,
 		// and this codebase has already shipped one bug of exactly that shape.
-		"plan_ready":   snap.PlanReady,
-		"pending_spec": snap.PendingSpec,
+		"plan_ready":       snap.PlanReady,
+		"plan_destructive": snap.PlanDestructive,
+		"pending_spec":     snap.PendingSpec,
 	}
 }
 
@@ -146,6 +147,7 @@ func (s *Server) handleResumeDraft(c echo.Context) error {
 		"generation_failed": snap.GenerationFailed,
 		"can_keep_as_is":    snap.CanKeepAsIs,
 		"plan_ready":        snap.PlanReady,
+		"plan_destructive":  snap.PlanDestructive,
 		"pending_spec":      snap.PendingSpec,
 	}
 	return c.JSON(http.StatusOK, out)
@@ -290,6 +292,7 @@ func (s *Server) handleDesignState(c echo.Context) error {
 		"pending_agent_md":  snap.PendingAgentMD,
 		"pending_tools":     snap.PendingTools,
 		"plan_ready":        snap.PlanReady,
+		"plan_destructive":  snap.PlanDestructive,
 		"pending_spec":      snap.PendingSpec,
 	})
 }

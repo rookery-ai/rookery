@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import {
   AlertTriangle,
+  ShieldAlert,
   Check,
   FileText,
   Hammer,
@@ -145,6 +146,7 @@ type DesignResponse = {
   agent_id?: string;
   skill_id?: string; // forward-compatible: Task 8's completion id field
   plan_ready?: boolean;
+  plan_destructive?: boolean;
   pending_spec?: string;
 };
 
@@ -170,6 +172,7 @@ type StateSnapshot = {
   pending_agent_md?: string;
   pending_tools?: Record<string, string>;
   plan_ready?: boolean;
+  plan_destructive?: boolean;
   pending_spec?: string;
 };
 
@@ -182,6 +185,7 @@ type ResumeResponse = {
   generation_failed?: boolean;
   can_keep_as_is?: boolean;
   plan_ready?: boolean;
+  plan_destructive?: boolean;
   pending_spec?: string;
 };
 
@@ -257,6 +261,10 @@ export function DesignerSurface({
   // its proposal turn (internal/agentdesigner/technicalspec.go). It RETRACTS: a
   // follow-up question carries no block, so the button withdraws.
   const [planReady, setPlanReady] = useState(false);
+  // Whether the settled plan involves an irreversible action. Drives the warning
+  // and the button wording; defaults false so a server that does not send the
+  // field cannot silently turn an ordinary build into a permission grant.
+  const [planDestructive, setPlanDestructive] = useState(false);
   const [pendingSpec, setPendingSpec] = useState("");
   const navigate = useNavigate();
 
@@ -467,6 +475,7 @@ export function DesignerSurface({
         setPendingAgentMD(snap.pending_agent_md ?? "");
         setPendingTools(snap.pending_tools ?? {});
         setPlanReady(!!snap.plan_ready);
+        setPlanDestructive(!!snap.plan_destructive);
         setPendingSpec(snap.pending_spec ?? "");
         if (snap.generating)
           ensureSSE("recovery", snap.last_progress || undefined);
@@ -584,6 +593,7 @@ export function DesignerSurface({
       setGenerationFailed(!!res.generation_failed);
       setCanKeepAsIs(!!res.can_keep_as_is);
       setPlanReady(!!res.plan_ready);
+      setPlanDestructive(!!res.plan_destructive);
       setPendingSpec(res.pending_spec ?? "");
     } catch (err) {
       setError(errMessage(err));
@@ -696,6 +706,7 @@ export function DesignerSurface({
       // [TECHNICAL SPEC] block, so the server reports false and the build
       // button withdraws until the plan settles again.
       setPlanReady(!!res.plan_ready);
+      setPlanDestructive(!!res.plan_destructive);
       setPendingSpec(res.pending_spec ?? "");
       // building:true means the real outcome arrives via the SSE stream, so the
       // live onDone must refetch; a terminal state (verifying/designing) was
@@ -1064,6 +1075,19 @@ export function DesignerSurface({
           data-testid="designer-actions"
           className="flex flex-wrap items-center justify-center gap-2 border-t border-border px-4 py-2.5"
         >
+          {/* A plan that pays, orders or deletes asks for that permission HERE,
+              in the same breath as asking to build — because this is the one
+              moment the user is actually reading what the agent will do. The
+              alternative, which this replaces, was discovering it later from a
+              run that stopped halfway: by then they have approved something
+              whose shape they were never shown. Approving grants the permission;
+              the agent's page lets them withdraw it. */}
+          {!showSaveBar && planDestructive && (
+            <p className="text-warn flex w-full items-center justify-center gap-1.5 text-sm">
+              <ShieldAlert className="size-4 shrink-0" />
+              This agent will do something that cannot be undone. Building it allows that.
+            </p>
+          )}
           {showSaveBar ? (
             <Button size="sm" onClick={() => void handleSend(SAVE_PHRASE)}>
               <Save />
@@ -1072,7 +1096,7 @@ export function DesignerSurface({
           ) : (
             <Button size="sm" onClick={handleBuildClick}>
               <Hammer />
-              {labels.buildButton}
+              {planDestructive ? "Allow and build" : labels.buildButton}
             </Button>
           )}
           {/* The plan and the built agent are both real artifacts worth re-reading,

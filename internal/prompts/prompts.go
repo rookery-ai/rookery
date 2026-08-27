@@ -100,6 +100,13 @@ type DesignSystemParams struct {
 	// discovered, because the design conversation has no browser tool of its own
 	// — the same arrangement KBManifest uses for retrieval.
 	SiteFeasibility string
+	// BrowserAvailable tells the DESIGNER that agents can drive a real browser.
+	// Without it the designer denies the capability outright and refuses to build
+	// — which it did, to a user's face, while suggesting they use Selenium.
+	BrowserAvailable bool
+	// BackendType selects the wording of the browser block (native tools vs the
+	// CLI command form), matching how the other prompts describe it.
+	BackendType string
 }
 
 // ConnectionRef describes one connected service account (self-managed OAuth) the agent
@@ -963,6 +970,22 @@ Two things follow, and both shape what you may promise the user:
 	// coder all see the same description of the platform (KB, secrets, chats, reminders,
 	// connected chat apps + commands, output protocol, schedule).
 	sb.WriteString(platformContextBlock(SurfaceAgent, p.ChatApps, ""))
+	// The designer has to know what an agent can actually DO in a browser, and
+	// this was the one surface it was missing.
+	//
+	// Chat, the build prompt and the runtime prompt all carried this block; the
+	// design conversation did not — so the designer had no idea agents can click
+	// or fill forms, and told a user outright that "this platform's agents can't
+	// click buttons", refused to build, and suggested Selenium instead. It was
+	// confident and wrong, on the FIRST surface anyone meets. A capability the
+	// designer does not know about does not exist as far as users are concerned.
+	//
+	// acting=true because it is describing what the agent it designs will be able
+	// to do; declare=false because the designer writes a plan, not AGENT.md — the
+	// header belongs to the build prompt.
+	if p.BrowserAvailable {
+		sb.WriteString(strings.ReplaceAll(browserToolsBlock(p.BackendType, true, false), browserBinPlaceholder, ""))
+	}
 	if len(p.ConnectedPlatforms) > 0 {
 		sb.WriteString(fmt.Sprintf("<connected_platforms_summary>\nThe user has connected: %s.\n"+
 			"When the user says \"send to Telegram\", \"notify me\", \"post a message\", or similar — they mean: the system will route the agent's output to their connected platform automatically. No bot token, chat ID, or messaging setup is needed or should be mentioned.\n"+
@@ -1118,6 +1141,7 @@ External services: none | <service name and what for>
 Connections: none | <the provider/label accounts from <available_connections> this will use, comma-separated>
 Skills: none | <the skill names from <available_skills> this needs, comma-separated>
 MCP servers: none | <the server names from <available_mcp_servers> this will call, comma-separated>
+Irreversible actions: no | yes — <what exactly cannot be undone: what it pays, orders, transfers or deletes>
 [/TECHNICAL SPEC]
 </your_job>
 

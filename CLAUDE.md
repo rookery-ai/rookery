@@ -2187,6 +2187,25 @@ something that cannot be undone. Two layers still apply in order:
   build refuses the irreversible step even when it is set, because a rehearsal
   happens before the agent has been approved at all.
 
+**Consent is collected during DESIGN, not discovered during a run.** The
+`[TECHNICAL SPEC]` carries an `Irreversible actions:` line, `SpecDeclaresIrreversible`
+reads it, and `DesignSnapshot.PlanDestructive` (derived, like `PlanReady`, from the
+last assistant turn) drives the build bar: the button reads **"Allow and build"**
+above a one-line warning. Approving records `DestructiveApproved` on the session,
+and `persistIrreversible` then turns the permission ON at save, so the agent works
+on its first run instead of stopping halfway for consent already given. The owner
+withdraws it on the agent's page.
+
+That ordering is the point. The first implementation only had the run-time
+refusal, so the owner met a stopped agent and a refusal buried in a run log,
+having already approved something whose shape they were never shown. The consent
+moment belongs where the user is reading the plan.
+
+**A declaration alone never GRANTS.** `persistIrreversible` shows the permission
+when either source says so — the build's `# Irreversible actions:` header or the
+approval — but grants only on the approval, because a header the model wrote
+about itself is not consent.
+
 **`agents.browser_needs_irreversible` is a FINDING, not a permission**, and it is
 what decides whether the owner is shown anything. It is set by the designer's
 `# Irreversible actions:` header at build (`ParseIrreversibleLine`, the same
@@ -2269,6 +2288,15 @@ tool's own error and a protocol failure.
 `web_fetch`, which is already always-on; acting from chat would mean clicking
 "Pay" with no approval gate at all (`ParkerFor` returns nil when `agentID == ""`),
 holding the user against themselves.
+
+**The designer is told the browser exists, and that was missed once with real
+consequences.** `browserToolsBlock` reaches chat, the build prompt and the runtime
+prompt; `BuildDesignSystemPrompt` was the one surface without it. So the designer
+had no idea agents can click, and told a user outright that "this platform's
+agents can't click buttons", refused to build the agent four times across a
+conversation, and recommended Selenium instead — confidently, on the FIRST
+surface anyone meets. A capability the designer does not know about does not
+exist as far as users are concerned, however well it works underneath.
 
 **The designer probes a site before the plan is approved.** Both designers are
 `WithNoTools` and cannot investigate, so — exactly as `vault.BuildKBContext`
