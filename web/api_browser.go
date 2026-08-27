@@ -48,40 +48,26 @@ func (s *Server) apiSetAgentBrowserGrants(c echo.Context) error {
 		return jsonErr(c, http.StatusNotFound, "not_found", "agent not found")
 	}
 
-	// Pointers, so "not sent" is distinguishable from "sent as false". A plain
-	// bool would let a client that knows about only one of these switches turn
-	// the other one off every time it saved — silently revoking a permission the
-	// owner had granted.
+	// A pointer, so "not sent" is distinguishable from "sent as false" — a
+	// client that omits the field must not silently revoke a permission the
+	// owner granted.
 	var req struct {
-		Acting       *bool `json:"acting"`
 		Irreversible *bool `json:"irreversible"`
 	}
 	if err := bindAPI(c, &req); err != nil {
 		return err
 	}
 
-	acting, irreversible := agent.BrowserActing, agent.BrowserIrreversible
-	if req.Acting != nil {
-		acting = *req.Acting
-	}
+	irreversible := agent.BrowserIrreversible
 	if req.Irreversible != nil {
 		irreversible = *req.Irreversible
 	}
 
-	// Withdrawing the acting grant withdraws the irreversible one with it.
-	// Leaving "may pay" set on an agent that may no longer click describes a
-	// state the enforcement cannot produce, and it would come back to life
-	// unannounced the next time acting was re-enabled.
-	if !acting {
-		irreversible = false
-	}
-
-	if err := s.db.SetAgentBrowserGrants(agent.ID, acting, irreversible); err != nil {
+	if err := s.db.SetAgentBrowserGrant(agent.ID, irreversible); err != nil {
 		return jsonErr(c, http.StatusInternalServerError, "internal", err.Error())
 	}
 	return c.JSON(http.StatusOK, map[string]any{
 		"ok":           true,
-		"acting":       acting,
 		"irreversible": irreversible,
 	})
 }

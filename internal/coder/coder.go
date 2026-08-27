@@ -75,6 +75,16 @@ type Result struct {
 	// this call, the sibling of UsedConnectionIDs and consumed by the same auto-bind path.
 	UsedMCPServerIDs []string
 
+	// BrowserWantedIrreversible reports that this call was REFUSED an
+	// irreversible browser action — it tried to pay, order or delete something
+	// and did not have permission.
+	//
+	// It is carried out of the engine for the same reason UsedConnectionIDs is:
+	// the alternative is an owner reading a run log to work out why their agent
+	// stopped. Persisting it is what makes the permission appear on the agent's
+	// page, next to the run that needed it.
+	BrowserWantedIrreversible bool
+
 	// OfferedTools names the tools this run offered the model. Empty for a CLI coder.
 	// The runner uses it to recognise the model's own tool-call machinery leaking into
 	// a message, without needing to know any provider's markup dialect.

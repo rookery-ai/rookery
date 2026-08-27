@@ -2160,23 +2160,69 @@ tells the user a browser was needed.
 
 **Acting is gated by ONE predicate, `browser.CheckAct`,** shared by the API
 engine and the CLI bridge so changing coder kind cannot change what an agent may
-do. Three layers, in order:
+do. There is exactly ONE browser permission, and the reason there is only one is
+a measured finding rather than a simplification.
 
-- **The build-phase refusal is a real boundary and outranks every owner grant.**
-  `CLAUDE.md` already records that `dryRunSendProhibition` is "a PROMPT, not a
-  boundary" — tolerable for a script that might send an email, not for a tool
-  whose purpose is clicking buttons. This is the third instance of the pattern
-  `connectors.Execute` and `mcp.Execute` already use. Reading stays permitted: a
-  rehearsal that cannot look at the page cannot rehearse.
-- **`agents.browser_acting`** (migration 018) — may click and type at all.
-- **`agents.browser_irreversible`** — additionally permits a control whose
-  accessible name reads as a payment, an order or a deletion. The name match is
-  a **heuristic and is commented as one**; the protection is that both default
-  off, so a heuristic miss costs nothing the first tier was not already gating.
-  `LooksIrreversible` matches on word boundaries, or "Payment history" and
-  "Paypal settings" would force an owner to grant the top tier just to browse.
+**The lower tier — a grant for clicking and typing AT ALL — was removed after it
+was shown to gate nothing.** An agent asked to log into a site and report back
+did it with `bash` and `curl`: eleven calls, not one browser tool touched, and
+the same result whether the grant was on or off. The switch withheld one ROUTE to
+an action the agent could already perform another way, so it cost the owner a
+decision about a task they had just described in words and bought no safety. It
+also implied a guarantee that was not there. Note the residual, which is real: an
+agent with `bash` can still POST to a payment endpoint, and no browser permission
+covers that — closing it means withholding outbound-capable secrets or confining
+the network, neither of which is built.
 
-Grants are **per agent, not per site** — a domain allowlist was considered and
+What remains is `agents.browser_irreversible` (migration 020): may this agent do
+something that cannot be undone. Two layers still apply in order:
+
+- **The build-phase rule now PERMITS ordinary interaction and refuses only the
+  irreversible step**, telling the model to describe what it would have done. The
+  earlier rule refused every mutating call at build, which meant a rehearsal
+  could not log in — and a rehearsal that cannot log in proves nothing about the
+  agent anybody doubts. The cost is stated rather than hidden: a rehearsal now
+  genuinely fills forms and clicks through pages.
+- **`browser_irreversible`** is the owner's grant, and it outranks nothing: a
+  build refuses the irreversible step even when it is set, because a rehearsal
+  happens before the agent has been approved at all.
+
+**`agents.browser_needs_irreversible` is a FINDING, not a permission**, and it is
+what decides whether the owner is shown anything. It is set by the designer's
+`# Irreversible actions:` header at build (`ParseIrreversibleLine`, the same
+shape as `# Skills:`) and by any run that is REFUSED such an action
+(`coder.Result.BrowserWantedIrreversible` → `db.MarkAgentNeedsIrreversible`, the
+same shape as connector auto-bind). Either way the permission appears on the
+agent's page, above the schedule, with an explanation — rather than the owner
+meeting a stopped agent and a refusal buried in a run log. It is **additive and
+never cleared automatically**: both sources are fallible, so letting either clear
+it would retract a warning the owner may already have acted on. A missing header
+reads as "no", because defaulting the other way puts a payment warning on every
+agent whose model forgot a line, and a warning that appears everywhere is one
+nobody reads.
+
+**The irreversibility judgement is now the whole guard, which changed what it has
+to do.** As a second layer a miss cost nothing the lower tier was not already
+gating; as the only layer a miss is a real click on a real payment button. So it
+judges the PAGE as well as the control:
+
+- a control name matching `irreversibleHints` — which now carries Macedonian,
+  German, French, Spanish, Italian and Nordic terms, because an English-only list
+  left the guard silently absent on exactly the sites this platform's own owner
+  uses. `matchesHint` splits on `unicode.IsLetter`, not `a-z`; the previous
+  splitter discarded every Cyrillic word, so adding the terms without fixing it
+  would have changed nothing.
+- **any mutating action on a page that reads as checkout/payment/deletion**,
+  whatever the control is called. This closes the two holes a name-only test
+  leaves: a button with no accessible name, and `browser_press("Enter")` on a
+  focused form, which has no control to judge at all and was completely ungated.
+- **Only the URL's PATH is matched, never the host.** Matching the whole URL
+  looks equivalent and is not: a company at `billing-portal.example.com` would
+  have every action on every page treated as a payment. A guard that fires while
+  merely browsing trains the owner to switch it on permanently, which is worse
+  than not having it. Caught by its own test, not in review.
+
+The grant is **per agent, not per site** — a domain allowlist was considered and
 rejected because a real flow redirects across hosts (an identity provider, a
 payment processor), so the list would either break ordinary logins or be widened
 until it meant nothing.

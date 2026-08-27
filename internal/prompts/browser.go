@@ -12,7 +12,10 @@ package prompts
 // connectedToolsBlock was factored out: two copies of a routing rule drift, and
 // the drift shows up as a capability that appears to exist on one coder kind and
 // not the other.
-func browserToolsBlock(backendType string, acting bool) string {
+// declare asks the model to emit the `# Irreversible actions:` header. Only the
+// BUILD prompts set it — a running agent has nothing to declare, and asking it
+// to would put a stray header in the middle of a run's output.
+func browserToolsBlock(backendType string, acting, declare bool) string {
 	if backendType == BackendBasicModel {
 		// A basic model has no tool calls at all, so advertising the browser
 		// would describe something it cannot reach.
@@ -52,15 +55,35 @@ value) — never by writing a CSS selector. Refs change every time the page re-r
 always use one from the most recent listing, and call browser_page after a click to see
 where you ended up. browser_wait is how you let a slow page settle before reading it.
 
+You do NOT need permission to click, type or sign in. Doing the task the user described
+is what you are for.
+
 To type a password, a card number or any other stored credential, pass the SECRET NAME
 in ${...} form — for example ${ELECTRIC_BILL_PASSWORD}. The value is substituted into
 the page for you. You will never see it, and you must never guess one or type a
 placeholder: if the secret does not exist, say so and stop.
 
-You may be refused. A test run may not click anything at all, and the user grants
-permission to act — and separately, permission for anything that looks irreversible like
-paying or deleting — per agent. A refusal is final: report what you were about to do and
-why it needs the user, and do not look for a way around it.
+ONE THING NEEDS PERMISSION: an action that cannot be undone — paying, placing an order,
+transferring money, deleting an account. If you are refused one of those, that is final.
+Say what you were about to do, on which page, and that the user can allow it on this
+agent's page. Do not look for another route to it, and do not try to do it with a script
+or a web request instead.
+
+In a TEST RUN you may do everything except that last step. When you reach it you will be
+told to stop; finish by describing exactly what you would have done in a real run.
+`
+	}
+	if declare {
+		b += `
+DECLARE IT. Put one line in AGENT.md, alongside the schedule and skills lines:
+
+  # Irreversible actions: yes     (this agent pays, orders, transfers or deletes something)
+  # Irreversible actions: no      (it only reads, or only changes things that can be undone)
+
+Answer for what the agent DOES on a normal run, not for what is theoretically
+reachable from a page it visits. Getting this right is what decides whether the user
+is asked to approve anything at all — say "yes" on an agent that only reads and you
+put a payment warning in front of someone who never needed to see one.
 `
 	}
 	return b + `</browser>

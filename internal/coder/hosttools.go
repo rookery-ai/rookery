@@ -201,6 +201,12 @@ type hostToolSet struct {
 	// and the CLI bridge cannot drift apart on what an agent is allowed to do.
 	browser       browser.Renderer
 	browserPolicy browser.Policy
+	// browserWantedIrreversible records that this run was REFUSED an
+	// irreversible browser action. It is surfaced on coder.Result so the agent
+	// row can remember it, which is what makes the permission appear on the
+	// agent's page instead of the owner having to work out why a run stopped.
+	// The same shape as usedConnIDs feeding auto-bind.
+	browserWantedIrreversible bool
 }
 
 // failedCall identifies one failing tool invocation by name+args for the oscillation guard.

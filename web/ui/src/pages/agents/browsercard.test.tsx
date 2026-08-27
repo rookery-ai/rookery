@@ -12,71 +12,70 @@ vi.mock("@/lib/agents", async (orig) => {
 });
 
 describe("BrowserCard", () => {
-  it("tells the operator how to install a missing browser instead of greying a switch", () => {
-    render(
+  // The condition the whole card hangs on. An earlier version put a permissions
+  // card on every agent, including ones that only read a page — which teaches an
+  // owner to tick whatever is in front of them, and makes the warning worthless
+  // on the agent that actually needed it.
+  it("shows nothing for an agent that does nothing irreversible", () => {
+    const { container } = render(
       <BrowserCard
         agentId="a1"
-        grants={{ available: false, acting: false, irreversible: false }}
+        grants={{ available: true, irreversible: false, needs_irreversible: false }}
       />,
     );
-    // Naming the command is the difference between a dead control and a fix.
-    expect(screen.getByText(/rookery browser install/)).toBeInTheDocument();
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
   });
 
-  it("offers acting and irreversible as two separate decisions", () => {
-    render(
+  it("shows nothing when the server has no browser", () => {
+    const { container } = render(
       <BrowserCard
         agentId="a1"
-        grants={{ available: true, acting: false, irreversible: false }}
+        grants={{ available: false, irreversible: false, needs_irreversible: true }}
       />,
     );
-    const boxes = screen.getAllByRole("checkbox");
-    expect(boxes).toHaveLength(2);
-    expect(boxes[0]).not.toBeChecked();
-    expect(boxes[1]).not.toBeChecked();
+    expect(container).toBeEmptyDOMElement();
   });
 
-  // The irreversible switch must be unreachable until acting is granted:
-  // "may pay" without "may click" is a state the server cannot enforce, so
-  // offering it would show a permission that silently does nothing.
-  it("locks the irreversible switch until acting is granted", () => {
+  it("asks, and explains what happens meanwhile, when the agent needs it", () => {
     render(
       <BrowserCard
         agentId="a1"
-        grants={{ available: true, acting: false, irreversible: false }}
+        grants={{ available: true, irreversible: false, needs_irreversible: true }}
       />,
     );
-    expect(screen.getAllByRole("checkbox")[1]).toBeDisabled();
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    // The guidance half: without it the owner meets a stopped agent and a
+    // refusal buried in a run log, and has to deduce that a switch exists.
+    expect(screen.getByText(/stop, and tell you what it would have done/i)).toBeInTheDocument();
   });
 
-  it("unlocks the irreversible switch once acting is granted", () => {
+  it("offers exactly one permission", () => {
     render(
       <BrowserCard
         agentId="a1"
-        grants={{ available: true, acting: true, irreversible: false }}
+        grants={{ available: true, irreversible: false, needs_irreversible: true }}
       />,
     );
-    expect(screen.getAllByRole("checkbox")[1]).toBeEnabled();
+    // There is no separate switch for clicking or signing in — that one gated
+    // nothing, since an agent can do the same with bash and curl.
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
   });
 
-  // The one screen in the product where a mis-set switch spends real money
-  // must say so in words, not just leave a checkbox ticked.
-  it("warns in plain language when the agent can spend money unattended", () => {
+  it("warns in plain language once the agent can spend money unattended", () => {
     render(
       <BrowserCard
         agentId="a1"
-        grants={{ available: true, acting: true, irreversible: true }}
+        grants={{ available: true, irreversible: true, needs_irreversible: true }}
       />,
     );
     expect(screen.getByText(/spend money without asking/i)).toBeInTheDocument();
   });
 
-  it("does not warn about spending when the grant is not given", () => {
+  it("does not warn about spending before the permission is given", () => {
     render(
       <BrowserCard
         agentId="a1"
-        grants={{ available: true, acting: true, irreversible: false }}
+        grants={{ available: true, irreversible: false, needs_irreversible: true }}
       />,
     );
     expect(screen.queryByText(/spend money without asking/i)).not.toBeInTheDocument();

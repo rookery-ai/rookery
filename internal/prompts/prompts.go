@@ -1247,7 +1247,7 @@ func (p ImplementationParams) capabilitySpec() string {
 		// click: the agent being WRITTEN will act on its scheduled runs, so the
 		// plan has to account for it. The build-phase refusal is enforced in
 		// browser.CheckAct, not by hiding the capability here.
-		sb.WriteString(strings.ReplaceAll(browserToolsBlock(p.BackendType, true), browserBinPlaceholder, p.ConnectorBin))
+		sb.WriteString(strings.ReplaceAll(browserToolsBlock(p.BackendType, true, true), browserBinPlaceholder, p.ConnectorBin))
 	}
 	sb.WriteString(availableSkillsBlock(p.Skills))
 	// LAST, so it is the most recent instruction the model reads — this is an override of
@@ -2113,7 +2113,7 @@ before acting on assumptions about the user. Use your available file capabilitie
 
 	sb.WriteString(connectedToolsBlock(p.Connections, p.ConnectionTools, p.BackendType, p.ConnectorBin))
 	if p.BrowserAvailable {
-		sb.WriteString(strings.ReplaceAll(browserToolsBlock(p.BackendType, p.BrowserActing), browserBinPlaceholder, p.ConnectorBin))
+		sb.WriteString(strings.ReplaceAll(browserToolsBlock(p.BackendType, p.BrowserActing, false), browserBinPlaceholder, p.ConnectorBin))
 	}
 
 	sb.WriteString(`<output_protocol>
@@ -2425,7 +2425,7 @@ only your final reply, so make sure your reply actually answers the question.`, 
 	// chat that could click "Pay" would hold the user against themselves.
 	if browserAvailable {
 		sb.WriteString("\n")
-		sb.WriteString(strings.ReplaceAll(browserToolsBlock(mappedBackend, false), browserBinPlaceholder, connectorBin))
+		sb.WriteString(strings.ReplaceAll(browserToolsBlock(mappedBackend, false, false), browserBinPlaceholder, connectorBin))
 	}
 	return sb.String()
 }

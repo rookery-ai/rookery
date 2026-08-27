@@ -129,8 +129,10 @@ export type AgentDetail = {
 
 export type AgentBrowserGrants = {
   available: boolean;
-  acting: boolean;
+  // irreversible is the owner's permission; needs_irreversible is the FINDING
+  // that decides whether the permission is shown at all.
   irreversible: boolean;
+  needs_irreversible: boolean;
 };
 
 export function useAgents() {
@@ -159,7 +161,7 @@ function normalizeAgentDetail(d: AgentDetail): AgentDetail {
     // Fail CLOSED on a missing field. `?? {}` with true-ish defaults would, on
     // a version mismatch between server and SPA, render an agent as though the
     // owner had granted it permission to click and pay.
-    browser: d.browser ?? { available: false, acting: false, irreversible: false },
+    browser: d.browser ?? { available: false, irreversible: false, needs_irreversible: false },
   };
 }
 
@@ -221,10 +223,10 @@ export function useAgentActions() {
   // Sends only the switch that changed. The endpoint reads absent fields as
   // "leave alone", so a partial save can never revoke the other grant.
   const saveBrowserGrantsMut = useMutation({
-    mutationFn: ({ id, acting, irreversible }: { id: string; acting?: boolean; irreversible?: boolean }) =>
-      api.put<{ ok: boolean; acting: boolean; irreversible: boolean }>(
+    mutationFn: ({ id, irreversible }: { id: string; irreversible?: boolean }) =>
+      api.put<{ ok: boolean; irreversible: boolean }>(
         `/api/v1/agents/${id}/browser`,
-        { acting, irreversible },
+        { irreversible },
       ),
     onSuccess: (_data, { id }) => invalidateAgent(id),
   });
@@ -237,7 +239,7 @@ export function useAgentActions() {
     saveAgentMD: (id: string, content: string) => saveAgentMDMut.mutateAsync({ id, content }),
     saveSkills: (id: string, names: string[]) => saveSkillsMut.mutateAsync({ id, names }),
     saveConnections: (id: string, ids: string[]) => saveConnectionsMut.mutateAsync({ id, ids }),
-    saveBrowserGrants: (id: string, grants: { acting?: boolean; irreversible?: boolean }) =>
+    saveBrowserGrants: (id: string, grants: { irreversible?: boolean }) =>
       saveBrowserGrantsMut.mutateAsync({ id, ...grants }),
   };
 }

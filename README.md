@@ -84,7 +84,8 @@ conversational way.
 Agents and chat can also drive a **real headless browser**, so a page that only
 exists after JavaScript runs is readable like any other — and an agent you have
 given permission can sign in, fill forms and click through a flow, using
-passwords you have stored as secrets and never see in a transcript.
+passwords you have stored as secrets and never see in a transcript. Anything
+irreversible — paying, ordering, deleting — asks you first.
 
 Read more —
 [Workspaces](https://rookery.cloud/docs/concepts/workspaces) ·
@@ -145,10 +146,15 @@ loopback interface is where this server's own bridges and their tokens live.
 `ROOKERY_BROWSER_ALLOW_PRIVATE=1` turns that guard off if you specifically want
 an agent to read something on your own network.
 
-Agents read pages with no configuration. **Clicking, typing and signing in are
-off until you turn them on for a specific agent**, on that agent's page, and
-anything that looks irreversible — paying, ordering, deleting — needs a second,
-separate switch.
+Agents read pages and interact with them — clicking, filling forms, signing in
+with passwords you have stored as secrets — with no configuration. **One thing
+needs your permission: an action that cannot be undone**, such as paying,
+ordering or deleting. When an agent's job involves one, its page says so and asks;
+until you allow it, the agent goes up to that step, stops, and tells you what it
+would have done.
+
+Note the limit of that: it guards the browser. An agent can already make web
+requests with a script, and no browser permission covers those.
 
 ## Platform support
 

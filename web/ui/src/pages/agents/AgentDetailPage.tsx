@@ -314,6 +314,14 @@ export default function AgentDetailPage() {
         </div>
 
         <div className="flex flex-col gap-6">
+          {/* Above the schedule on purpose: it is a decision the owner has to
+              make about this agent, not a setting they go looking for. It
+              renders nothing at all unless the agent actually does something
+              irreversible — see BrowserCard. */}
+          <BrowserCard
+            agentId={id}
+            grants={browser ?? { available: false, irreversible: false, needs_irreversible: false }}
+          />
           <ScheduleCard agentId={id} schedule={schedule} />
           <SkillsCard
             agentId={id}
@@ -327,10 +335,6 @@ export default function AgentDetailPage() {
             connections={workspace_connections}
           />
           <MCPServersCard agentId={id} />
-          <BrowserCard
-            agentId={id}
-            grants={browser ?? { available: false, acting: false, irreversible: false }}
-          />
         </div>
       </div>
 

@@ -38,7 +38,12 @@ func (h *hostToolSet) browserTools() []llm.Tool {
 		Parameters: rawSchema(`{"type":"object","properties":{"url":{"type":"string","description":"the http/https URL to open"},"wait_for":{"type":"string","description":"networkidle | selector:<css> | text:<substring>"},"offset":{"type":"integer","description":"character offset to resume reading from"}},"required":["url"]}`),
 	}}
 
-	if !h.includeExecTools || !h.browserPolicy.AllowActing {
+	// Acting tools are offered to every agent build and run. There is no longer
+	// a grant for "may click at all": it gated one route to actions the agent
+	// could already take with bash and curl, so it cost the owner a decision and
+	// bought nothing. What still needs permission is judged per call, on the
+	// action itself — see browser.CheckAct.
+	if !h.includeExecTools {
 		return tools
 	}
 	return append(tools,
@@ -110,11 +115,15 @@ func (h *hostToolSet) execBrowserRead(ctx context.Context, url, waitFor string, 
 	return renderBrowserResult(res, false)
 }
 
-func (h *hostToolSet) execBrowserAct(ctx context.Context, req browser.ActRequest, elementName string) string {
+func (h *hostToolSet) execBrowserAct(ctx context.Context, req browser.ActRequest, elementName string, page browser.PageContext) string {
 	if h.browser == nil {
 		return "error: the browser is not available on this server"
 	}
-	if err := browser.CheckAct(h.browserPolicy, req.Action, elementName); err != nil {
+	if err := browser.CheckAct(h.browserPolicy, req.Action, elementName, page); err != nil {
+		// Record that this agent wanted to do something irreversible, so the
+		// owner is shown the permission it needs instead of having to guess from
+		// a refusal buried in a run log.
+		h.browserWantedIrreversible = true
 		// Deliberately NOT prefixed with "error:". A refusal is a settled
 		// outcome the model must report to the user, not a failing call worth
 		// retrying — and the API engine's oscillation guard counts an "error:"
@@ -205,25 +214,29 @@ func (h *hostToolSet) dispatchBrowserAct(ctx context.Context, name string, a bro
 		return renderBrowserResult(res, true)
 
 	case "browser_page":
-		return h.execBrowserAct(ctx, browser.ActRequest{Action: browser.ActionRead, Offset: a.Offset}, "")
+		return h.execBrowserAct(ctx, browser.ActRequest{Action: browser.ActionRead, Offset: a.Offset}, "", browser.PageContext{})
 
 	case "browser_wait":
 		return h.execBrowserAct(ctx, browser.ActRequest{
 			Action: browser.ActionWait, WaitFor: a.WaitFor, TimeoutMS: a.TimeoutMS,
-		}, "")
+		}, "", browser.PageContext{})
 
 	case "browser_press":
-		return h.execBrowserAct(ctx, browser.ActRequest{Action: browser.ActionPress, Key: a.Key}, "")
+		// A keypress carries no ref, but the PAGE still has to be judged — this
+		// is the call that would otherwise submit a focused payment form with
+		// Enter and never meet a check at all.
+		_, page, _ := h.browserTarget(ctx, session, "")
+		return h.execBrowserAct(ctx, browser.ActRequest{Action: browser.ActionPress, Key: a.Key}, "", page)
 
 	case "browser_click":
-		name, ok := h.browserElementName(ctx, session, a.Ref)
+		name, page, ok := h.browserTarget(ctx, session, a.Ref)
 		if !ok {
 			return "error: ref " + a.Ref + " is not on the page any more — call browser_page and use a ref from the new listing"
 		}
-		return h.execBrowserAct(ctx, browser.ActRequest{Action: browser.ActionClick, Ref: a.Ref}, name)
+		return h.execBrowserAct(ctx, browser.ActRequest{Action: browser.ActionClick, Ref: a.Ref}, name, page)
 
 	case "browser_fill":
-		elName, ok := h.browserElementName(ctx, session, a.Ref)
+		elName, page, ok := h.browserTarget(ctx, session, a.Ref)
 		if !ok {
 			return "error: ref " + a.Ref + " is not on the page any more — call browser_page and use a ref from the new listing"
 		}
@@ -235,29 +248,35 @@ func (h *hostToolSet) dispatchBrowserAct(ctx context.Context, name string, a bro
 		}
 		return h.execBrowserAct(ctx, browser.ActRequest{
 			Action: browser.ActionFill, Ref: a.Ref, Value: value, ValueIsSecret: isSecret,
-		}, elName)
+		}, elName, page)
 	}
 	return "error: unknown browser action " + name
 }
 
-// browserElementName resolves what a ref currently points at, by re-reading the
-// live page. See browser.Bridge.currentElementName for why this must not trust
-// a name from an earlier listing, and why an unidentifiable ref is refused
-// rather than passed through with an empty name.
-func (h *hostToolSet) browserElementName(ctx context.Context, session, ref string) (string, bool) {
-	if strings.TrimSpace(ref) == "" {
-		return "", false
-	}
+// browserTarget resolves what a ref currently points at AND what page it is on,
+// by re-reading the live page.
+//
+// It must not trust a name from an earlier listing: the irreversibility check is
+// only as good as the name it judges, and a page that re-rendered may have
+// turned the "Next" the model saw into a "Pay now". The page identity is read at
+// the same time because a keypress has no control to name — and that is the case
+// most in need of judging.
+func (h *hostToolSet) browserTarget(ctx context.Context, session, ref string) (string, browser.PageContext, bool) {
 	res, err := h.browser.Act(ctx, browser.ActRequest{Session: session, Action: browser.ActionRead})
 	if err != nil {
-		return "", false
+		return "", browser.PageContext{}, false
+	}
+	page := browser.PageContext{Title: res.Title, URL: res.FinalURL}
+	if strings.TrimSpace(ref) == "" {
+		return "", page, true
 	}
 	for _, e := range res.Elements {
 		if e.Ref == ref {
-			return e.Name, true
+			page.NameKnown = e.Name != ""
+			return e.Name, page, true
 		}
 	}
-	return "", false
+	return "", page, false
 }
 
 // browserSecretResolver resolves ${NAME} against the secrets already injected

@@ -440,7 +440,10 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 		// should not be told how to click, or it will plan around a capability
 		// it will be refused at the moment it tries to use it.
 		BrowserAvailable: r.browser != nil && r.browser.Available().OK,
-		BrowserActing:    agent.BrowserActing,
+		// Acting is described to every agent now; what needs permission is
+		// decided per action, not per agent, so there is nothing to withhold
+		// from the prompt.
+		BrowserActing: r.browser != nil && r.browser.Available().OK,
 	})
 
 	// MCP tools are described in their own block rather than folded into the
@@ -563,10 +566,7 @@ func (r *Runner) runCoderAgent(ctx context.Context, agent *db.Agent, input RunIn
 	// than no permission at all. Reading needs no grant; acting needs one the
 	// owner set deliberately.
 	if r.browser != nil && r.browser.Available().OK {
-		pol := browser.Policy{
-			AllowActing:       agent.BrowserActing,
-			AllowIrreversible: agent.BrowserIrreversible,
-		}
+		pol := browser.Policy{AllowIrreversible: agent.BrowserIrreversible}
 		coderSvc = coderSvc.WithBrowser(r.browser, pol)
 		if r.browserBridge != nil && r.browserBridge.Addr() != "" {
 			if selfExe, err := os.Executable(); err == nil {
@@ -825,6 +825,16 @@ func (r *Runner) runCoderTurns(
 		}
 		rctx.usage = addUsage(rctx.usage, result.Usage)
 		rctx.toolTrace = append(rctx.toolTrace, result.ToolTrace...)
+		// This run tried to do something irreversible and was refused. Record it
+		// on the agent so the permission appears on its page: the alternative is
+		// an owner reading a run log to work out why their agent stopped short,
+		// which is exactly the guidance gap this flag exists to close.
+		if result.BrowserWantedIrreversible {
+			if err := r.db.MarkAgentNeedsIrreversible(input.AgentID); err != nil {
+				slog.Warn("agentrunner: could not record that the agent needs browser permission",
+					"agent_id", input.AgentID, "err", err)
+			}
+		}
 		// Keep the LAST non-empty stop reason. A multi-turn run's final turn is
 		// the one that decided the outcome, and "" is the engine's explicit
 		// statement that a turn finished of its own accord — so an ordinary last

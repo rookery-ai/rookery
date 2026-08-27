@@ -67,15 +67,17 @@ type Agent struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 
-	// BrowserActing lets this agent click and type in a rendered page, rather
-	// than only reading one. BrowserIrreversible additionally permits actions
-	// whose control name reads as a payment, an order or a deletion.
+	// BrowserIrreversible is the owner's permission for actions that cannot be
+	// undone — paying, ordering, transferring, deleting. It is the ONLY browser
+	// permission: an agent may read and interact with pages without any grant,
+	// because it can already do the equivalent with bash and curl.
 	//
-	// Two flags, not one: "log in and read my bill" and "pay it" are separate
-	// decisions, and an owner who wants the first must not be forced to grant
-	// the second. Both default false — reading needs neither.
-	BrowserActing       bool
-	BrowserIrreversible bool
+	// BrowserNeedsIrreversible is not a permission but a FINDING: this agent's
+	// work involves such an action. It is what decides whether the permission is
+	// shown on the agent's page at all, so an agent that only reads never
+	// presents its owner with a switch about payments.
+	BrowserIrreversible      bool
+	BrowserNeedsIrreversible bool
 }
 
 type Skill struct {

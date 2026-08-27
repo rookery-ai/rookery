@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
+	"unicode"
 
 	"github.com/mxschmitt/playwright-go"
 )
@@ -37,42 +39,116 @@ func IsMutating(a Action) bool {
 	}
 }
 
-// irreversibleHints are accessible-name fragments that suggest an action cannot
-// be undone.
+// irreversibleHints are control names that mean an action cannot be undone.
 //
-// This is a HEURISTIC and is treated as one. It is the second of two tiers, not
-// the protection: acting is refused outright unless the owner has granted this
-// agent acting rights on this session, and irreversible actions need a second,
-// separate grant on top. A heuristic that misses therefore costs nothing the
-// first tier was not already gating — which is the only reason a word list is
-// acceptable here at all.
+// This list is now the FIRST half of the only browser permission there is (the
+// second half is the page test below), which raises the standard it has to meet.
+// It was written as a second layer, where a miss cost nothing the lower tier was
+// not already gating; that tier is gone, so a miss here is a real click on a
+// real payment button.
+//
+// Non-English entries are not decoration. This platform's own owner is in
+// Skopje, and a checkout button reading "Плати" or "Bezahlen" matched nothing at
+// all in the English-only version — so the guard was silently absent on exactly
+// the sites its owner is most likely to use. The list cannot be exhaustive
+// across every language, which is why pageLooksIrreversible exists: it catches
+// what the name test misses, without needing to know the word.
 var irreversibleHints = []string{
-	"pay", "purchase", "buy", "checkout", "place order", "confirm order",
-	"submit order", "transfer", "send money", "withdraw", "delete",
-	"remove account", "cancel subscription", "unsubscribe", "confirm payment",
+	// English
+	"pay", "pay now", "purchase", "buy", "buy now", "checkout", "check out",
+	"place order", "confirm order", "submit order", "complete order",
+	"confirm payment", "confirm and pay", "transfer", "send money", "withdraw",
+	"delete", "delete account", "remove account", "close account",
+	"cancel subscription", "unsubscribe", "confirm booking", "book now",
+	// Macedonian / Serbian / Bulgarian (Cyrillic)
+	"плати", "плаќање", "купи", "нарачај", "порачај", "потврди", "избриши",
+	"откажи", "испрати",
+	// German
+	"bezahlen", "kaufen", "jetzt kaufen", "bestellen", "löschen", "kündigen",
+	// French
+	"payer", "acheter", "commander", "supprimer", "résilier",
+	// Spanish / Portuguese
+	"pagar", "comprar", "pedido", "realizar pedido", "eliminar", "borrar",
+	// Italian
+	"paga", "acquista", "ordina", "elimina",
+	// Dutch / Nordic
+	"betalen", "kopen", "betal", "kjøp", "köp", "slet", "slett",
 }
 
 // LooksIrreversible reports whether a control's accessible name suggests an
-// irreversible action. Matching is on word boundaries for the short entries:
-// "pay" as a bare substring fires on "Payment history" and "Paypal settings",
-// which are ordinary navigation and would train the owner to grant the
-// irreversible tier just to browse.
+// action that cannot be undone.
+//
+// Matching is on word boundaries for the short entries: "pay" as a bare
+// substring fires on "Payment history" and "Paypal settings", which are ordinary
+// navigation — and a guard that fires on browsing would train an owner to switch
+// it on permanently, which is worse than not having it at all.
 func LooksIrreversible(name string) bool {
-	n := strings.ToLower(strings.TrimSpace(name))
+	return matchesHint(name, irreversibleHints)
+}
+
+// pageHints are page titles and URL fragments that mean "whatever you click
+// here probably spends money or destroys something".
+//
+// The URL half is the more reliable of the two, because a checkout path is a
+// convention every commerce platform follows and is not translated: /checkout,
+// /payment and /billing look the same in Skopje as in Seattle.
+var pageHints = []string{
+	"checkout", "check-out", "payment", "payments", "billing",
+	"place-order", "placeorder", "order-confirm", "confirm-order",
+	"purchase", "subscribe", "cancel-subscription", "close-account",
+	"delete-account", "transfer", "withdraw",
+	"плаќање", "нарачка", "kasse", "bezahlung", "paiement", "pagamento", "pago",
+}
+
+// pageLooksIrreversible judges the PAGE rather than the control.
+//
+// This is what makes the guard work on a button with no accessible name, and on
+// browser_press, which has no control at all — the two ways a name-only test is
+// walked past on a form that is one Enter away from a payment.
+func pageLooksIrreversible(page PageContext) bool {
+	if matchesHint(page.Title, pageHints) {
+		return true
+	}
+	// Only the PATH and query are matched, never the host.
+	//
+	// Matching the whole URL looked equivalent and is not: a company whose
+	// domain is billing-portal.example.com, or a shop hosted at
+	// payments.example.com, would have EVERY action on EVERY page treated as a
+	// payment. That is the failure mode this guard most has to avoid — one that
+	// fires while merely browsing teaches the owner to switch it on permanently,
+	// which is worse than not having it. A checkout PATH is a real signal; a
+	// company's choice of hostname is not.
+	//
+	// Within the path it is a plain substring match rather than a word-boundary
+	// one, because "/store/checkout?step=2" carries the signal inside a token.
+	u, err := url.Parse(page.URL)
+	if err != nil {
+		return false
+	}
+	path := strings.ToLower(u.EscapedPath() + "?" + u.RawQuery)
+	for _, h := range pageHints {
+		if strings.Contains(path, h) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesHint tests a phrase against a hint list on WORD boundaries.
+func matchesHint(s string, hints []string) bool {
+	n := strings.ToLower(strings.TrimSpace(s))
 	if n == "" {
 		return false
 	}
+	// Split on anything that is not a letter or digit in ANY script. The
+	// previous version restricted itself to a-z, which silently discarded every
+	// Cyrillic and accented word — so the non-English entries above would have
+	// been unmatchable even once added.
 	words := strings.FieldsFunc(n, func(r rune) bool {
-		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9')
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	})
 	joined := " " + strings.Join(words, " ") + " "
-	for _, hint := range irreversibleHints {
-		if strings.Contains(hint, " ") {
-			if strings.Contains(joined, " "+hint+" ") {
-				return true
-			}
-			continue
-		}
+	for _, hint := range hints {
 		if strings.Contains(joined, " "+hint+" ") {
 			return true
 		}

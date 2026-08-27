@@ -68,7 +68,7 @@ func TestChatGetsReadingButNeverActing(t *testing.T) {
 	h := &hostToolSet{
 		browser:          &fakeBrowser{available: true},
 		includeExecTools: false, // chat
-		browserPolicy:    browser.Policy{AllowActing: true},
+		browserPolicy:    browser.Policy{AllowIrreversible: true},
 	}
 	names := browserToolNames(h)
 	if !has(names, "browser_read") {
@@ -81,26 +81,15 @@ func TestChatGetsReadingButNeverActing(t *testing.T) {
 	}
 }
 
-// An agent with no acting grant is offered no acting tools, so it plans around
-// reading rather than around a capability it would be refused mid-flow.
-func TestAgentWithoutAGrantGetsNoActingTools(t *testing.T) {
+// Every agent gets the acting tools. There is no longer a grant for clicking:
+// it gated one route to something the agent could already do with bash and curl,
+// so it cost the owner a decision and bought no safety. What needs permission is
+// judged per action, in browser.CheckAct.
+func TestEveryAgentGetsTheActingTools(t *testing.T) {
 	h := &hostToolSet{
 		browser:          &fakeBrowser{available: true},
 		includeExecTools: true,
 		browserPolicy:    browser.Policy{},
-	}
-	for _, n := range browserToolNames(h) {
-		if strings.HasPrefix(n, "browser_") && n != "browser_read" {
-			t.Errorf("ungranted agent was offered %s", n)
-		}
-	}
-}
-
-func TestGrantedAgentGetsTheActingTools(t *testing.T) {
-	h := &hostToolSet{
-		browser:          &fakeBrowser{available: true},
-		includeExecTools: true,
-		browserPolicy:    browser.Policy{AllowActing: true},
 	}
 	names := browserToolNames(h)
 	for _, want := range []string{"browser_read", "browser_open", "browser_click", "browser_fill", "browser_press", "browser_wait", "browser_page"} {
@@ -120,11 +109,11 @@ func TestARefusalIsNotShapedLikeAFailingCall(t *testing.T) {
 		includeExecTools: true,
 		browserPolicy:    browser.Policy{BuildPhase: true},
 	}
-	out := h.execBrowserAct(context.Background(), browser.ActRequest{Action: browser.ActionClick}, "Continue")
+	out := h.execBrowserAct(context.Background(), browser.ActRequest{Action: browser.ActionClick}, "Pay now", browser.PageContext{NameKnown: true})
 	if strings.HasPrefix(out, "error:") {
 		t.Fatalf("refusal shaped as a failing call: %q", out)
 	}
-	if !strings.Contains(strings.ToLower(out), "build") {
+	if !strings.Contains(strings.ToLower(out), "test run") {
 		t.Errorf("refusal does not say why: %q", out)
 	}
 }
@@ -197,5 +186,48 @@ func TestBlockedPageTellsTheModelToStop(t *testing.T) {
 	}
 	if !strings.Contains(low, "report") {
 		t.Error("does not tell the model to report it")
+	}
+}
+
+// A refusal must be REMEMBERED, not just returned. This is the loop that makes
+// the permission appear on the agent's page by itself: without it the owner
+// meets an agent that stopped and a refusal buried in a run log, and has to work
+// out on their own that a switch exists somewhere.
+func TestARefusedIrreversibleActionIsRecorded(t *testing.T) {
+	h := &hostToolSet{
+		browser:          &fakeBrowser{available: true},
+		includeExecTools: true,
+		browserPolicy:    browser.Policy{}, // no permission
+	}
+	if h.browserWantedIrreversible {
+		t.Fatal("flag set before anything happened")
+	}
+	h.execBrowserAct(context.Background(), browser.ActRequest{Action: browser.ActionClick},
+		"Pay now", browser.PageContext{NameKnown: true})
+	if !h.browserWantedIrreversible {
+		t.Error("a refused payment was not recorded, so the owner is never shown the permission")
+	}
+}
+
+// An action that was ALLOWED must not set the flag — otherwise every agent that
+// legitimately pays (with permission) would keep re-announcing a need already
+// met, and an ordinary click would raise a payment warning.
+func TestAnAllowedActionIsNotRecordedAsNeedingPermission(t *testing.T) {
+	h := &hostToolSet{
+		browser:          &fakeBrowser{available: true},
+		includeExecTools: true,
+		browserPolicy:    browser.Policy{AllowIrreversible: true},
+	}
+	h.execBrowserAct(context.Background(), browser.ActRequest{Action: browser.ActionClick},
+		"Pay now", browser.PageContext{NameKnown: true})
+	if h.browserWantedIrreversible {
+		t.Error("an allowed action was recorded as needing permission")
+	}
+
+	h2 := &hostToolSet{browser: &fakeBrowser{available: true}, includeExecTools: true}
+	h2.execBrowserAct(context.Background(), browser.ActRequest{Action: browser.ActionClick},
+		"Next page", browser.PageContext{NameKnown: true, URL: "https://example.com/docs"})
+	if h2.browserWantedIrreversible {
+		t.Error("an ordinary click was recorded as needing payment permission")
 	}
 }

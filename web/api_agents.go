@@ -200,15 +200,15 @@ func (s *Server) toAPIAgentDetail(d *agentDetailData) map[string]any {
 		"missing_secrets":         orEmpty(d.MissingSecrets),
 		"running":                 d.Running,
 		"live_run":                d.LiveRun,
-		// Browser grants, plus whether this host can render at all. The
-		// availability flag travels WITH the grants so the page never offers a
-		// permission switch for a capability the server does not have — an owner
-		// granting something that silently never happens is worse than a
-		// missing control.
+		// `needs_irreversible` is what decides whether the page shows a
+		// permission at all: an agent that only reads pages must never be handed
+		// a switch about payments, or the switch stops meaning anything. The
+		// availability flag travels with it so a host without a browser does not
+		// offer a permission for something that cannot happen.
 		"browser": map[string]any{
-			"available":    s.browserMgr != nil && s.browserMgr.Available().OK,
-			"acting":       d.Agent.BrowserActing,
-			"irreversible": d.Agent.BrowserIrreversible,
+			"available":          s.browserMgr != nil && s.browserMgr.Available().OK,
+			"irreversible":       d.Agent.BrowserIrreversible,
+			"needs_irreversible": d.Agent.BrowserNeedsIrreversible,
 		},
 	}
 }

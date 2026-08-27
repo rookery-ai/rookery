@@ -241,7 +241,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 			res.ScriptRan = tools.authoredScriptRan()
 			res.UsedConnectionIDs = tools.usedConnectionIDs()
 			res.UsedMCPServerIDs = tools.usedMCPServerIDList()
-			res.UsedMCPServerIDs = tools.usedMCPServerIDList()
+			res.BrowserWantedIrreversible = tools.browserWantedIrreversible
 			res.OfferedTools = offered
 			res.ToolTrace = toolTrace
 			// A model that finished of its own accord was not cut short. Stated
@@ -315,6 +315,7 @@ func (c *Coder) runToolLoop(ctx context.Context, prov llm.Provider, tools *hostT
 		res.ScriptRan = tools.authoredScriptRan()
 		res.UsedConnectionIDs = tools.usedConnectionIDs()
 		res.UsedMCPServerIDs = tools.usedMCPServerIDList()
+		res.BrowserWantedIrreversible = tools.browserWantedIrreversible
 		res.OfferedTools = offered
 		res.ToolTrace = toolTrace
 		// Why the loop ended, reported by the engine rather than inferred from whatever
@@ -660,7 +661,6 @@ func (c *Coder) buildHostTools(workspaceID string) *hostToolSet {
 		// that already knows a build is in progress.
 		browserPolicy: browser.Policy{
 			BuildPhase:        c.extraEnv[buildphase.EnvVar] != "",
-			AllowActing:       c.browserPolicy.AllowActing,
 			AllowIrreversible: c.browserPolicy.AllowIrreversible,
 		},
 

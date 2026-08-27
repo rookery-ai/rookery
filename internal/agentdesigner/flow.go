@@ -188,6 +188,10 @@ type dbDesignStore interface {
 	ListServiceConnections(ctx context.Context, workspaceID string) ([]db.ServiceConnection, error)
 	ListAgentConnections(ctx context.Context, agentID string) ([]db.ServiceConnection, error)
 	SetAgentConnections(ctx context.Context, agentID string, connIDs []string) error
+
+	// MarkAgentNeedsIrreversible records that this agent's job involves an
+	// action that cannot be undone, so its page shows the permission for one.
+	MarkAgentNeedsIrreversible(id string) error
 }
 
 // mcpStore is the MCP slice of the database, kept as its own interface so the many
@@ -291,6 +295,24 @@ func (f *Flow) persistConnections(ctx context.Context, workspaceID, agentID, age
 	}
 	if err := f.db.SetAgentConnections(ctx, agentID, ids); err != nil {
 		slog.Warn("agentdesigner: set agent connections", "agent_id", agentID, "err", err)
+	}
+}
+
+// persistIrreversible records the agent's own declaration that its job involves
+// something that cannot be undone.
+//
+// Only ever SETS the flag. A later edit whose model omitted the header must not
+// retract a warning the owner may already have acted on — and since the flag
+// only decides whether a permission is DISPLAYED, leaving it set on an agent
+// that no longer needs it costs a visible switch, while wrongly clearing it
+// costs the owner their warning.
+func (f *Flow) persistIrreversible(agentID, agentMD string) {
+	if f.db == nil || agentID == "" || !ParseIrreversibleLine(agentMD) {
+		return
+	}
+	if err := f.db.MarkAgentNeedsIrreversible(agentID); err != nil {
+		slog.Warn("agentdesigner: mark agent needs irreversible permission",
+			"agent_id", agentID, "err", err)
 	}
 }
 
@@ -2829,6 +2851,7 @@ func (f *Flow) saveAndFinish(ctx context.Context, workspaceID, agentMD string, t
 
 	// Bind declared service connections (agent_connections), mirroring skills.
 	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD, usedConns)
+	f.persistIrreversible(agentIDSnap, agentMD)
 	f.persistMCPServers(ctx, workspaceID, agentIDSnap, agentMD, usedMCP)
 
 	// Remove test artifacts (downloaded files, scratch probes, run outputs) from the live
@@ -2901,6 +2924,7 @@ func (f *Flow) updateAndFinish(ctx context.Context, workspaceID, agentMD string,
 
 	// Bind declared service connections (agent_connections), mirroring skills.
 	f.persistConnections(ctx, workspaceID, agentIDSnap, agentMD, usedConns)
+	f.persistIrreversible(agentIDSnap, agentMD)
 	f.persistMCPServers(ctx, workspaceID, agentIDSnap, agentMD, usedMCP)
 
 	// Remove any test artifacts left in the live agent dir post-save. For edits the

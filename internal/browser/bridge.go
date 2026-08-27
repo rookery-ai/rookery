@@ -153,15 +153,18 @@ func (b *Bridge) handleAct(ctx context.Context, sess *bridgeSession, p map[strin
 	// does not supply it — it supplies a ref. Reading the CURRENT page is what
 	// makes the check meaningful: a name taken from the model's last listing
 	// could describe a control the page has since replaced.
-	name := ""
-	if IsMutating(action) && ref != "" {
-		found, ok := b.currentElementName(ctx, sess.contextKey, ref)
-		if !ok {
+	// The live page is read for EVERY mutating call, not only one carrying a
+	// ref: a keypress has no control to name, and it is exactly the case that
+	// needs the page's own identity to be judged at all.
+	name, page := "", PageContext{}
+	if IsMutating(action) {
+		var ok bool
+		name, page, ok = b.currentTarget(ctx, sess.contextKey, ref)
+		if !ok && ref != "" {
 			return nil, fmt.Errorf("ref %q is not on the page any more — read the page again and use a ref from the new listing", ref)
 		}
-		name = found
 	}
-	if err := CheckAct(sess.policy, action, name); err != nil {
+	if err := CheckAct(sess.policy, action, name, page); err != nil {
 		return nil, err
 	}
 
@@ -195,17 +198,27 @@ func (b *Bridge) handleAct(ctx context.Context, sess *bridgeSession, p map[strin
 // the one check that guards payments. Refusing costs nothing real: a ref the
 // page no longer contains cannot be clicked anyway, so the alternative outcome
 // was a failure with a worse error message.
-func (b *Bridge) currentElementName(ctx context.Context, contextKey, ref string) (string, bool) {
+func (b *Bridge) currentTarget(ctx context.Context, contextKey, ref string) (string, PageContext, bool) {
 	cur, err := b.mgr.Act(ctx, ActRequest{Session: contextKey, Action: ActionRead})
 	if err != nil {
-		return "", false
+		// The page could not be read, so nothing about it is known. Reporting
+		// NameKnown=false is what makes CheckAct treat it as unidentified rather
+		// than as safe.
+		return "", PageContext{}, false
+	}
+	page := PageContext{Title: cur.Title, URL: cur.FinalURL}
+	if ref == "" {
+		// A keypress: no control, but the page is still known and is the whole
+		// basis on which this call gets judged.
+		return "", page, true
 	}
 	for _, e := range cur.Elements {
 		if e.Ref == ref {
-			return e.Name, true
+			page.NameKnown = e.Name != ""
+			return e.Name, page, true
 		}
 	}
-	return "", false
+	return "", page, false
 }
 
 func str(m map[string]any, k string) string {
