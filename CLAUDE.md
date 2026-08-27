@@ -2990,6 +2990,24 @@ cannot be pruned.
 
 ## Known gaps
 
+- **The API engine's exec tools are Linux/macOS only, and nothing says so.**
+  `runBash` shells `bash -c` and `runScript` shells `python3`, both hardcoded
+  with no per-platform resolution — unlike `coder.DetectInstalled`, which was
+  given a `detectHost` precisely because these assumptions break off Linux. On
+  Windows a default install has neither: `bash` exists only with WSL or Git Bash
+  on `PATH`, and `python3` is normally `python.exe` (the bare name resolves only
+  via the Store alias or the launcher). So an agent that writes a helper script
+  or reaches for `curl` — which is what a weak model does by default for an HTTP
+  login, observed on a real run — fails on Windows and works on macOS. The
+  cross-compile gate proves these link, never that they run. Noticed while
+  answering "what will that use on macOS and Windows?", which nothing in the
+  documentation could answer.
+  Worth knowing alongside it: **the browser path IS cross-platform** (Chromium
+  runs on all three), so for web work the native `browser_*` tools are the
+  portable route and a shelled-out `curl` is not. And `/tmp` is not in the
+  sandbox's granted paths — an agent reaching for `/tmp/cookies.txt` is denied
+  and has to be steered to `$TMPDIR`, which cost several wasted tool calls on
+  that same run.
 - **Thin e2e coverage.** CI has two end-to-end gates: the container smoke test (`pr.yml` → `Container smoke test`) starts the real image and asserts `/healthz`, the SPA root and the session endpoint answer, and the package smoke test (`pr.yml` → `Package smoke test`) installs the built deb/rpm and extracts the tar.gz, running `owner bootstrap` + `serve` + `healthcheck` on each. Everything above that — coder subprocess round-trips (real edit → test → approve), agent runs, connector calls — is still exercised manually. Unit tests cover logic boundaries.
 - **Codex, Gemini CLI and Cursor are authored-but-unverified.** All five CLI coders are detected (`knownCoders`) and all five now receive a model, but only `claude` and `opencode` have been exercised end-to-end on a real host. The other three backends were authored from their published flags and have never completed a `Coder.Smoke` round trip; closing this needs a host with the binaries installed and accounts behind them. (The *previous* gap here — no Model field for a local coder, which made `CoderModel` unsettable through the UI and actively wiped it on every save, blocking OpenCode out of the box — was fixed in 2026-08: `#coder_local` has a Model input, both save paths persist it, and `selectBackend` passes it to codex and gemini as well as opencode and cursor.)
 - **Discord adapter** — implemented (DM-only); live WS round-trip is operator-verified. **Slack adapter** — implemented (DM-only, Socket Mode); live loop operator-verified. Note: Slack's Socket Mode inbound loop does not auto-restart after a *fatal* reconnect failure (reconnect exhaustion) — outbound still works, but inbound DMs stop until the connector is re-saved or the server restarts; a per-adapter supervisor is a future framework enhancement. Mattermost/Matrix adapters — not yet implemented (framework ready: adapter registry + `CredSpec` + render subsystem all support a new platform via `init()` registration alone; Mattermost should be a hand-rolled thin REST+WS client, NOT the heavy official SDK; Matrix E2EE needs `-tags goolm` to stay CGo-free). The connectors UI (SPA `/connections` → Chat apps tab, backed by `/api/v1/connectors`) is `CredSpec`-driven — a new platform's connect card is data, not hand-written markup. **Design stance:** all adapters use an **outbound** connection (bot dials out; zero inbound port) — a deliberate security property for self-hosted/home installs (works behind NAT, home firewall can drop-by-default, no forgeable public endpoint). **Webhook-based platforms** (WhatsApp/Viber/LINE/Teams/Messenger/Google Chat) are deferred OUT of the home-install core; if built, they must be tunnel/relay-first (outbound), never a raw open port. Future outbound-only candidates: Zulip (event-queue long-poll), XMPP. See `docs/superpowers/specs/2026-07-15-multi-platform-chat-adapters-design.md`.
